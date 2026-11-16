@@ -21,8 +21,12 @@ import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/
  *  6a80dd95709b43dcba99f0c30e4c7309c311260056c98f2efc12b9b36841d417, so nothing else moved. Then one entry added on
  *  Base, its poolProviders second seat base.rpc.blxrbdn.com, Pocket after it (card first-sign-in-reads-fast-on-live,
  *  measured 2026-11-14 16:06-16:17Z; 6,585 characters before it): the list with that one entry taken out hashes to the
- *  pin before it, 654639cf7943e0a05961477f2ace244a03375ecc9dc96fb244f6392411b9ab1f, so nothing else moved. */
-const BEFORE = "e50afe03bdf2d0f151b32bda6f2a8bf1550ce7dd5a6edc807152dca6d6fdeab7";
+ *  pin before it, 654639cf7943e0a05961477f2ace244a03375ecc9dc96fb244f6392411b9ab1f, so nothing else moved. Then
+ *  rpc-robinhood.globalstake.io left Robinhood's quote list and its in-flight pin (card robinhood-quote-answers-cold: its
+ *  nginx answers a body past 8,192 bytes HTTP 500 with no allow-origin; 6,616 characters before it): the list with the
+ *  two entries put back hashes to the pin before it, e50afe03bdf2d0f151b32bda6f2a8bf1550ce7dd5a6edc807152dca6d6fdeab7,
+ *  so nothing else moved. */
+const BEFORE = "335426e132ba2336276daf62450687750e090d388bab4c0cbcea4e0e15aec395";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
   const all = evmPoolVenues();
@@ -31,7 +35,7 @@ test("the two halves together are the venue list before the split, entry for ent
   assert.deepEqual(Object.keys(evmTestnetVenues()), ["base-sepolia", "robinhood-testnet"]);
   assert.deepEqual({ ...all }, { ...evmMainnetVenues(), ...evmTestnetVenues() });
   const json = JSON.stringify(all);
-  assert.equal(json.length, 6_616);
+  assert.equal(json.length, 6_536);
   assert.equal(createHash("sha256").update(json).digest("hex"), BEFORE);
 });
 

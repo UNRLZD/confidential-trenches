@@ -735,3 +735,67 @@ test("F5's state reads take each reader's batchMax: no batch of more calls than 
   assert.equal(gaps.filter((g) => ids(r.pools).has(evmPoolIdOf(g.key))).length, 25);
   for (const x of [a, b]) assert.ok(x.calls.filter((c) => c[0]?.method === "eth_call").every((c) => c.length <= 10), JSON.stringify(x.calls.map((c) => c.length)));
 });
+
+// Card robinhood-quote-answers-cold: the release's index snapshot (packages/signpage/public/evm-index/<chain>.json,
+// scripts/evm-index-snapshot.mjs). A fresh device's cold Robinhood quote sent 20 to 100+ deep getLogs posts to
+// rpc.mainnet.chain.robinhood.com at its pace of about one a second and ended stale_quote, 6 of 8 coins (box run
+// 2026-11-16 03:24Z); started from a snapshot the device's sync reads only the tail past it.
+type Snap = { fromSnapshot: (x: unknown, want: { chainId: number; poolManager: string; cap: number }) => EvmPoolIndexData | null; snapshotOf: (ix: EvmPoolIndexData) => unknown };
+const snap = (): Snap => {
+  const m = poolIndex as unknown as { evmPoolIndexFromSnapshot?: Snap["fromSnapshot"]; evmPoolIndexSnapshotOf?: Snap["snapshotOf"] };
+  assert.equal(typeof m.evmPoolIndexFromSnapshot, "function", "pool-index.ts has no evmPoolIndexFromSnapshot");
+  assert.equal(typeof m.evmPoolIndexSnapshotOf, "function", "pool-index.ts has no evmPoolIndexSnapshotOf");
+  return { fromSnapshot: m.evmPoolIndexFromSnapshot!, snapshotOf: m.evmPoolIndexSnapshotOf! };
+};
+const WANT = { chainId: 8453, poolManager: PM, cap: 1000 };
+
+test("SNAP1 a snapshot of a synced index reads back as that index, each pool's id its key's, and a sync from it reads only the tail", async () => {
+  const { fromSnapshot, snapshotOf } = snap();
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [] }));
+  const json = JSON.parse(JSON.stringify(snapshotOf(r.index!)));
+  // the compact form names no id: each is the key's own keccak
+  assert.ok(!JSON.stringify(json).includes(evmPoolIdOf(ps[0]!.key)), "the snapshot carries pool ids");
+  const back = fromSnapshot(json, WANT);
+  assert.deepEqual(back, r.index);
+  // the next sync from it, 20,000 blocks on: only those blocks and the margin are asked, of each reader
+  const later = head + 20_000;
+  const fresh = [...ps, { key: key(50), block: head + 10_000 }];
+  const a: Reader = { head: later, pools: fresh, calls: [] };
+  const b: Reader = { head: later, pools: fresh, calls: [] };
+  const s = await evmPoolIndexSync(back, cfgOf(a, b));
+  assert.equal(s.coversThrough, later);
+  assert.ok(ids(s.pools).has(evmPoolIdOf(key(50))));
+  const asked = a.calls.flatMap((cs) => cs.filter((c) => c.method === "eth_getLogs").map((c) => Number((c.params[0] as { fromBlock: string }).fromBlock)));
+  assert.ok(asked.length > 0 && asked.every((f) => f > head - 474 - 10_000), `the tail sync asked from ${Math.min(...asked)}`);
+});
+
+test("SNAP2 a snapshot that is not the chain's whole proven shape is refused (null), never served", async () => {
+  const { fromSnapshot, snapshotOf } = snap();
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [] }));
+  const good = JSON.parse(JSON.stringify(snapshotOf(r.index!))) as { pools: unknown[][]; spans: number[][]; [k: string]: unknown };
+  assert.notEqual(fromSnapshot(good, WANT), null);
+  const bad: [string, (s: typeof good) => unknown][] = [
+    ["not an object", () => "x"],
+    ["another chain", (s) => ({ ...s, chainId: 1 })],
+    ["another PoolManager", (s) => ({ ...s, poolManager: "0x" + "11".repeat(20) })],
+    ["another version", (s) => ({ ...s, v: 2 })],
+    ["through below from", (s) => ({ ...s, through: (s.from as number) - 1 })],
+    ["a head below through", (s) => ({ ...s, head: { number: (s.through as number) - 1, hash: (s.head as { hash: string }).hash } })],
+    ["a head with no hash", (s) => ({ ...s, head: { number: s.through, hash: "0x12" } })],
+    ["spans that overlap", (s) => ({ ...s, spans: [[s.from, (s.from as number) + 10], [(s.from as number) + 5, s.through]] })],
+    ["a span past through", (s) => ({ ...s, spans: [[s.from, (s.through as number) + 1]] })],
+    ["a pool outside every span", (s) => ({ ...s, pools: [...s.pools, ["0x" + "00".repeat(19) + "aa", "0x4200000000000000000000000000000000000006", 3000, 60, "0x" + "00".repeat(20), (s.through as number) + 5]] })],
+    ["currency0 not below currency1", (s) => ({ ...s, pools: [["0x4200000000000000000000000000000000000006", "0x" + "00".repeat(19) + "aa", 3000, 60, "0x" + "00".repeat(20), s.pools[0]![5]]] })],
+    ["a fee past 24 bits", (s) => ({ ...s, pools: [[...s.pools[0]!.slice(0, 2), 0x1000000, ...s.pools[0]!.slice(3)]] })],
+    ["a tick spacing of 0", (s) => ({ ...s, pools: [[...s.pools[0]!.slice(0, 3), 0, ...s.pools[0]!.slice(4)]] })],
+    ["an address not lower hex", (s) => ({ ...s, pools: [["0xZZ" + "00".repeat(19), ...s.pools[0]!.slice(1)]] })],
+    ["a pool twice", (s) => ({ ...s, pools: [...s.pools, s.pools[0]] })],
+    ["a pool row of other fields", (s) => ({ ...s, pools: [[...s.pools[0]!, 1]] })],
+    ["more pools than the cap", (s) => s],
+  ];
+  for (const [why, make] of bad) assert.equal(fromSnapshot(make(good), why === "more pools than the cap" ? { ...WANT, cap: 9 } : WANT), null, why);
+});

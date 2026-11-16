@@ -5508,7 +5508,7 @@ test("RHC1 card robinhood-quote-answers-cold: a cold Robinhood scan request its 
   // (2026-11-16 02:2xZ); rpc.mainnet.chain.robinhood.com answers its 429 with access-control-allow-origin "*,*", which
   // Chrome refuses as CORS (net::ERR_FAILED), so the kit reads no 429 and no Retry-After
   evmPaceReset();
-  const token = "0x00000000000000000000000000000000005c4601";
+  const token = "0x00000000000000000000000000000000005c4c01";
   // the first two deep posts throttled, as a burst's are
   let deepSeen = 0;
   const { rpc, spans } = blindFirst(token, (blocks) => blocks > 100_000 && deepSeen++ < 2);
@@ -5524,7 +5524,7 @@ test("RHC1 card robinhood-quote-answers-cold: a cold Robinhood scan request its 
 
 test("RHC2 card robinhood-quote-answers-cold: a first that answers every post as no connection refuses the cold Robinhood quote rpc_error (a true refusal), never stale_quote, and its deep request is never asked as halves nor handed to a spare", { timeout: 30_000 }, () => onTestClock(async () => {
   evmPaceReset();
-  const token = "0x00000000000000000000000000000000005c4602";
+  const token = "0x00000000000000000000000000000000005c4c02";
   const { rpc, spans } = blindFirst(token, () => true, false);
   const asked: [number, number][] = [];
   const { v } = await pairQuote(token, rpc, scanner(5_000_000, realAt(token, 4_500_000), asked), "robinhood");
@@ -5537,7 +5537,38 @@ test("RHC2 card robinhood-quote-answers-cold: a first that answers every post as
   assert.ok(asked.every(([a, b]) => b - a + 1 <= 2_000 && a > 5_000_000 - 2_000), `the second read ${JSON.stringify(asked.slice(0, 5))} (${asked.length})`);
 }));
 
-test("PACE4 card evm-taps-meet-no-429: a warm scan request whose first provider's pace has no turn free goes to the next at once, never waiting its turn",{ timeout: 30_000 }, () => onTestClock(async () => {
+test("RHC3 card robinhood-quote-answers-cold: a cold Robinhood scan request its first answers HTTP 503 is asked again whole after the backoff, as one with no connection is: two 503s then an answer land the quote, every 503 a true refusal at the fourth, never halves", { timeout: 30_000 }, () => onTestClock(async () => {
+  // SL1 at 79fe2b75d: Robinhood's first two answering 503 handed the third 5,002 getLogs of 2,000 blocks, the first's
+  // 10M-block request halved down to SCAN_ALONE first
+  for (const [n, want] of [[2, "below"], [Infinity, "rpc_error"]] as const) {
+    evmPaceReset();
+    const token = "0x00000000000000000000000000000000005c4c0" + (n === 2 ? "3" : "4");
+    const inner = scanner(5_000_000, realAt(token, 4_500_000));
+    const spans: number[] = [];
+    let deepSeen = 0;
+    const rpc = evmJsonRpc("https://rpc.mainnet.chain.robinhood.com", (async (_u: string, init: RequestInit) => {
+      const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+      const g = calls.find((c) => c.method === "eth_getLogs");
+      if (g !== undefined) {
+        const f = g.params[0] as { fromBlock: string; toBlock: string };
+        const blocks = Number(f.toBlock) - Number(f.fromBlock) + 1;
+        spans.push(blocks);
+        if (blocks > 100_000 && deepSeen++ < n) return new Response("busy", { status: 503 });
+      }
+      return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+    }) as unknown as typeof fetch);
+    const asked: [number, number][] = [];
+    const { v } = await pairQuote(token, rpc, scanner(5_000_000, n === 2 ? [] : realAt(token, 4_500_000), asked), "robinhood");
+    evmPaceReset();
+    if (want === "below") assert.deepEqual(v, below);
+    else assert.equal((v as { code?: string }).code, "rpc_error", JSON.stringify(v));
+    const deep = spans.filter((k) => k > 2_000);
+    assert.ok(deep.length === (n === 2 ? 3 : 4) && deep.every((k) => k === deep[0]), `${n}: the first's getLogs spans: ${spans.join(", ")}`);
+    assert.ok(asked.every(([x, y]) => y - x + 1 <= 2_000 && x > 5_000_000 - 2_000), `${n}: the second read ${asked.length} spans`);
+  }
+}));
+
+test("PACE4 card evm-taps-meet-no-429: a warm scan request whose first provider's pace has no turn free goes to the next at once, never waiting its turn", { timeout: 30_000 }, () => onTestClock(async () => {
   // rpc.mainnet.chain.robinhood.com, the scan's first, paced at 1 post a second, took 2 to 6 of each warm tap's posts and
   // 1 to 4 s of its time (read-only run from the Mac, 2026-11-15 09:03Z)
   evmPaceReset();
@@ -5731,7 +5762,7 @@ const triQuote = async (token: string, scans: EvmRpc[], chainName: "base" | "rob
   return verdict(evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scans));
 };
 
-test("SL1 the first two scan providers down (no connection, or HTTP 503, head reads too): the third carries the scan, on Base and Robinhood", { timeout: 60_000 }, () => onTestClock(async () => {
+test("SL1 the first two scan providers down (no connection, or HTTP 503, head reads too): the third carries the scan on Base, and Robinhood's cold depth is a true refusal", { timeout: 60_000 }, () => onTestClock(async () => {
   let k = 0;
   for (const c of ["base", "robinhood"] as const) {
     for (const down of [refusing, answering503]) {
@@ -5739,9 +5770,10 @@ test("SL1 the first two scan providers down (no connection, or HTTP 503, head re
       const token = "0x00000000000000000000000000000000005c46" + (++k).toString(16).padStart(2, "0");
       const asked: [number, number][] = [];
       const v = await triQuote(token, [down("one.sl1.test"), down("two.sl1.test"), scanner(5_000_000, realAt(token, 4_999_000), asked)], c);
-      // Robinhood's first refusing every connection of its cold depth (10M-block requests, past SCAN_ALONE, which no
-      // spare is handed) refuses the quote: a true refusal (RHC2, card robinhood-quote-answers-cold)
-      if (c === "robinhood" && down === refusing) {
+      // Robinhood's first refusing every connection of its cold depth, or answering each 503 (10M-block requests, past
+      // SCAN_ALONE, which no spare is handed), refuses the quote: a true refusal (RHC2, RHC3, card
+      // robinhood-quote-answers-cold)
+      if (c === "robinhood") {
         assert.equal((v as { code?: string }).code, "rpc_error", `${c} ${down.name}: ${JSON.stringify(v)}`);
         assert.ok(asked.every(([a, b]) => b - a + 1 <= 2_000), `${c} ${down.name}: a span over 2,000 on the third`);
         continue;

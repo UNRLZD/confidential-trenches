@@ -1,0 +1,310 @@
+{
+ "want": {
+  "base": "ecf9f8baea23e0d773b3acccca3cd5839b99d99e8b9b88e20f86bb6747499cc8",
+  "robinhood": "087f3c1017457be2d0b2eab03b1b94b6c6442fa1bae0acf35968a900021b3480"
+ },
+ "good": {
+  "note": "this branch at 04:2xZ 2026-11-16: the committed snapshots read from packages/signpage/public (--site) and the four Robinhood and four Base quote providers each answering a reads.maxBytes batch: PASS",
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "site": "a build folder at SIGN_HOST's name",
+   "at": "2026-11-16T04:07:53.468Z",
+   "snapshots": {
+    "base": {
+     "status": 200,
+     "bytes": 672436,
+     "sha": "ecf9f8baea23e0d773b3acccca3cd5839b99d99e8b9b88e20f86bb6747499cc8",
+     "through": 58051548,
+     "pools": 4320,
+     "head": 58058490
+    },
+    "robinhood": {
+     "status": 200,
+     "bytes": 6047325,
+     "sha": "087f3c1017457be2d0b2eab03b1b94b6c6442fa1bae0acf35968a900021b3480",
+     "through": 115460916,
+     "pools": 38719,
+     "head": 115479861
+    }
+   },
+   "providers": {
+    "base": [
+     {
+      "url": "https://base-rpc.publicnode.com",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://base-mainnet.public.blastapi.io",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "https://confidential.unrealized.trade",
+      "batch": true
+     },
+     {
+      "url": "https://mainnet.base.org",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "https://confidential.unrealized.trade",
+      "batch": true
+     },
+     {
+      "url": "https://base.api.pocket.network",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "https://confidential.unrealized.trade",
+      "batch": true
+     }
+    ],
+    "robinhood": [
+     {
+      "url": "https://robinhood-rpc.publicnode.com",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://robinhood.drpc.org",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://robinhood.rpc.blxrbdn.com",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     }
+    ]
+   }
+  }
+ },
+ "bad": {
+  "note": "the live SIGN_HOST before this card deploys, 2026-11-16 04:2xZ: /evm-index/<chain>.json answered with the page index (382 bytes), no snapshot: FAIL",
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "site": null,
+   "at": "2026-11-16T04:07:31.691Z",
+   "snapshots": {
+    "base": {
+     "status": 200,
+     "bytes": 382,
+     "sha": "9142adeacd66fa1296130c22c2e59ce85b8df5a8debd1a851e832d756ea84355",
+     "head": 58058381
+    },
+    "robinhood": {
+     "status": 200,
+     "bytes": 382,
+     "sha": "9142adeacd66fa1296130c22c2e59ce85b8df5a8debd1a851e832d756ea84355",
+     "head": 115479680
+    }
+   },
+   "providers": {
+    "base": [
+     {
+      "url": "https://base-rpc.publicnode.com",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://base-mainnet.public.blastapi.io",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "https://confidential.unrealized.trade",
+      "batch": true
+     },
+     {
+      "url": "https://mainnet.base.org",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "https://confidential.unrealized.trade",
+      "batch": true
+     },
+     {
+      "url": "https://base.api.pocket.network",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "https://confidential.unrealized.trade",
+      "batch": true
+     }
+    ],
+    "robinhood": [
+     {
+      "url": "https://robinhood-rpc.publicnode.com",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://robinhood.drpc.org",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://robinhood.rpc.blxrbdn.com",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     }
+    ]
+   }
+  }
+ },
+ "badProvider": {
+  "note": "main's Robinhood quote list (Globalstake fifth), the same minute: rpc-robinhood.globalstake.io answered the 199,786-byte batch HTTP 500 with no allow-origin: FAIL",
+  "providers": [
+   {
+    "url": "https://robinhood-rpc.publicnode.com",
+    "bytes": 199786,
+    "status": 200,
+    "allow": "*",
+    "batch": true
+   },
+   {
+    "url": "https://robinhood.drpc.org",
+    "bytes": 199786,
+    "status": 200,
+    "allow": "*",
+    "batch": true
+   },
+   {
+    "url": "https://rpc.mainnet.chain.robinhood.com",
+    "bytes": 199786,
+    "status": 200,
+    "allow": "*",
+    "batch": true
+   },
+   {
+    "url": "https://robinhood.rpc.blxrbdn.com",
+    "bytes": 199786,
+    "status": 200,
+    "allow": "*",
+    "batch": true
+   },
+   {
+    "url": "https://rpc-robinhood.globalstake.io",
+    "bytes": 199786,
+    "status": 500,
+    "allow": null,
+    "batch": false
+   }
+  ],
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "site": "a build folder at SIGN_HOST's name",
+   "at": "2026-11-16T04:08:00.602Z",
+   "snapshots": {
+    "base": {
+     "status": 200,
+     "bytes": 672436,
+     "sha": "ecf9f8baea23e0d773b3acccca3cd5839b99d99e8b9b88e20f86bb6747499cc8",
+     "through": 58051548,
+     "pools": 4320,
+     "head": 58058526
+    },
+    "robinhood": {
+     "status": 200,
+     "bytes": 6047325,
+     "sha": "087f3c1017457be2d0b2eab03b1b94b6c6442fa1bae0acf35968a900021b3480",
+     "through": 115460916,
+     "pools": 38719,
+     "head": 115479937
+    }
+   },
+   "providers": {
+    "base": [
+     {
+      "url": "https://base-rpc.publicnode.com",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://base-mainnet.public.blastapi.io",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "https://confidential.unrealized.trade",
+      "batch": true
+     },
+     {
+      "url": "https://mainnet.base.org",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "https://confidential.unrealized.trade",
+      "batch": true
+     },
+     {
+      "url": "https://base.api.pocket.network",
+      "bytes": 23788,
+      "status": 200,
+      "allow": "https://confidential.unrealized.trade",
+      "batch": true
+     }
+    ],
+    "robinhood": [
+     {
+      "url": "https://robinhood-rpc.publicnode.com",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://robinhood.drpc.org",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://robinhood.rpc.blxrbdn.com",
+      "bytes": 199786,
+      "status": 200,
+      "allow": "*",
+      "batch": true
+     },
+     {
+      "url": "https://rpc-robinhood.globalstake.io",
+      "bytes": 199786,
+      "status": 500,
+      "allow": null,
+      "batch": false
+     }
+    ]
+   }
+  }
+ }
+}

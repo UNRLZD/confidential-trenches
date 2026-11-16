@@ -413,7 +413,18 @@ export function evmMostWithCash(ready: readonly ReadyProof[], fee: bigint, pays:
 
 /** What pool.buy.dry quotes `out` with on Base and Robinhood: the tap's quote path (quoteOf: the page's quote, venues
  *  and index pools) on the pin's network, and the token's decimals as the tap reads them. */
-export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "decimals"> & { network: EvmPoolChain };
+export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "decimals"> & {
+  network: EvmPoolChain;
+  /** The chain's pool index for this quote (pool-testnet.ts evmIndexReady): started where none runs or is served, and
+   *  settled once its sync ends; the quote waits for it at most EVM_DRY_INDEX_WAIT_MS. None: no wait. */
+  indexed?: () => Promise<boolean>;
+};
+/** The longest a dry's quote waits for the chain's index sync it started (card robinhood-quote-answers-cold): the sync
+ *  from the release's snapshot reads only the blocks past it, two to six 500,000-block spans on Robinhood's two index
+ *  readers, where a cold quote with no index sent 20 to 100+ deep getLogs posts to rpc.mainnet.chain.robinhood.com at
+ *  about one a second and ended stale_quote (box run 2026-11-16 03:24Z, 6 of 8 coins). Past it the quote runs as it did
+ *  with no index. */
+export const EVM_DRY_INDEX_WAIT_MS = 20_000;
 
 /** The page's kit quote of a buy (evmBuyHost's and the dry's): the helper's pools of the token from the PoolManager's
  *  first block asked beside it (evm-served.ts), then the kit's evmPoolBuyQuote; `later`, the dry's: a background read,
@@ -423,14 +434,19 @@ const pageQuote = (fetchFn?: typeof fetch, later = false) => (req: EvmPoolBuyQuo
 const pageDecimals = (chain: Chain, rpcs: readonly [EvmRpc, EvmRpc]) => (token: string): Promise<number> => keptTokenDecimals(chain, token, rpcs as readonly [PoolRpc, PoolRpc], { waits: 0 });
 
 /** The dry's quote host on the page: the buy's own quote and decimals (evmBuyHost) on the chain's pinned pool. */
-export function evmDryQuote(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], fetchFn?: typeof fetch): EvmDryQuote {
-  return { network: pin.network, venues: evmPoolVenues(), quote: pageQuote(fetchFn, true), indexPools: evmPoolIndexPools, decimals: pageDecimals(chain, rpcs) };
+export function evmDryQuote(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], fetchFn?: typeof fetch, indexed?: () => Promise<boolean>): EvmDryQuote {
+  return { network: pin.network, venues: evmPoolVenues(), quote: pageQuote(fetchFn, true), indexPools: evmPoolIndexPools, decimals: pageDecimals(chain, rpcs), ...(indexed === undefined ? {} : { indexed }) };
 }
 
 /** pool.buy.dry's `out` on Base and Robinhood: one tap quote (quoteOf, three kit quotes at most, no retry) of `amountIn`
  *  wei, its expected out before slippage in whole units of the token at its decimals as the tap reads them, read beside
  *  the quote. Null when either read fails, or the quote is not of this token, chain and amount, or gives nothing. */
 export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint): Promise<string | null> {
+  if (h.indexed !== undefined) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([h.indexed().catch(() => false), new Promise((r) => (timer = setTimeout(r, EVM_DRY_INDEX_WAIT_MS)))]);
+    clearTimeout(timer);
+  }
   try {
     const [q, decimals] = await Promise.all([quoteOf(h, h.network, token, amountIn, 0), h.decimals(token)]);
     if (q.chain !== h.network || typeof q.token !== "string" || lower(q.token) !== lower(token) || q.amountIn !== amountIn) return null;

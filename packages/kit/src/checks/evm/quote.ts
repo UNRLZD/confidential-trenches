@@ -1737,8 +1737,13 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
           // the provider answered: its halves are asked of it (scanPools `short`), at once, never again whole here (one
           // block, which has no halves, is asked again whole there)
           if (e instanceof BadAnswer) throw new ScanAnswered("rpc_error", `the scan provider answered: ${e.message}`);
-          if (spareNext && /^the provider answered HTTP 5\d\d$/.test(String((e as Error | null)?.message))) throw new ScanRefused("rpc_error", `the scan provider is out: ${(e as Error).message}`);
-          if (e instanceof Unreachable) {
+          const out5xx = /^the provider answered HTTP 5\d\d$/.test(String((e as Error | null)?.message));
+          // a request of more than SCAN_ALONE blocks (below) that a provider answers 5xx is asked again whole as one with
+          // no connection is (card robinhood-quote-answers-cold: as its halves, Robinhood's first two answering 503 handed
+          // the third 5,002 getLogs of 2,000 blocks, SL1; test RHC3)
+          const deepCall = scanBlocksOf(calls) > SCAN_ALONE;
+          if (spareNext && out5xx && !deepCall) throw new ScanRefused("rpc_error", `the scan provider is out: ${(e as Error).message}`);
+          if (e instanceof Unreachable || (out5xx && deepCall)) {
             // held as a throttle is: a browser reads rpc.mainnet.chain.robinhood.com's 429 as no connection (its answer
             // carries access-control-allow-origin "*,*", which CORS refuses: sign live run 43693987836, 14 of them)
             if (spareNext && provider !== undefined) SCAN_HELD.set(provider, performance.now() + EVM_HOLD_MS);
@@ -1748,10 +1753,11 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
             // provider's pace of about one getLogs post a second, so one such answer to a 10M-block request was 64 to
             // 128 posts and every Robinhood dry quote of SIGN_HOST's build ended stale_quote at 30.7 to 38.7 s, 8 of 8
             // coins, 2026-11-16 02:2xZ; test RHC1, RHC2)
-            const deep = scanBlocksOf(calls) > SCAN_ALONE;
-            if (spareNext && !deep) throw new ScanRefused("rpc_error", `the scan provider refused a connection: ${e.message}`);
+            const deep = deepCall;
+            const why = (e as Error).message;
+            if (spareNext && !deep) throw new ScanRefused("rpc_error", `the scan provider refused a connection: ${why}`);
             if (++refused >= SCAN_TRIES) {
-              const m = `the scan provider refused ${refused} connections in a row: ${e.message}`;
+              const m = `the scan provider ${e instanceof Unreachable ? "refused" : "failed"} ${refused} requests in a row: ${why}`;
               throw deep ? new ScanStop("rpc_error", m) : new ScanRefused("rpc_error", m);
             }
             if (deep) throttle(sent, null);
