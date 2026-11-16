@@ -450,3 +450,33 @@ test("card helper-restart-fresh fold: the Trending column's third row as Discove
   const cold = await tok.candles(PUMP, "1m", null, 24);
   assert.equal(cold.status, 200, `a cold chart beside the ahead call: ${cold.body.slice(0, 80)}`);
 });
+
+// card helper-listed-charts-own-reads round 3: no chart answer waits on a vendor while bars are held. The warm live run
+// of 16 Nov 00:33Z answered Solana's listed charts p50 1,528 ms, p95 4,241 ms: a held chart's re-read waited on
+// GeckoTerminal's answer before it was served. The held bars now answer within HELD_WAIT_MS and the read goes on; past
+// GT_SERVE_MS the answer says filling, so the page reads again for the fresh bars (it reads a filling chart every 2 s).
+test("card helper-listed-charts-own-reads: with a call free and GeckoTerminal slow (1.5 s), held bars answer at once and the read goes on; past GT_SERVE_MS the answer says filling and the next read is the fresh one", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const old = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  assert.equal((await old.candles(PUMP, "1m", null, 24)).status, 200);
+  const st = JSON.parse(JSON.stringify(old.state()));
+  const slow = async (url: string) => (await new Promise((go) => setTimeout(go, 1_500)), gt.fetch(url));
+  for (const [late, filling] of [[2 * 60_000, undefined], [16 * 60_000, true]] as const) {
+    t = NOW + late;
+    const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: slow as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+    next.restore(st);
+    const began = performance.now();
+    const a = await next.candles(PUMP, "1m", null, 24);
+    const ms = performance.now() - began;
+    assert.equal(a.status, 200);
+    assert.ok(ms < 500, `held bars ${late / 60_000} min old answered in ${ms.toFixed(0)} ms: waited on the vendor`);
+    assert.deepEqual([a.asOfMs, JSON.parse(a.body).filling], [NOW, filling], "the held bars, dated by their read");
+    assert.ok(JSON.parse(a.body).candles.length > 0);
+    // the read goes on: past the pools' freshness its top pool is read first, then its bars, 1.5 s each
+    await new Promise((go) => setTimeout(go, 3_200));
+    const b = await next.candles(PUMP, "1m", null, 24);
+    assert.deepEqual([b.asOfMs, JSON.parse(b.body).filling], [t, undefined], "the read went on: the next answer is the fresh bars");
+  }
+});
