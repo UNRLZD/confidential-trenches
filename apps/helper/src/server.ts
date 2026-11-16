@@ -693,6 +693,12 @@ export function handler(
         const t = q.getAll("token").length === 1 ? q.get("token")! : "";
         const ix = chain === "base" || chain === "robinhood" ? poolIndexes[chain] : undefined;
         if ([...q.keys()].some((k) => k !== "chain" && k !== "token") || !/^0x[0-9a-fA-F]{40}$/.test(t)) return send(400, { error: { code: "bad_request" } }, cors(req));
+        // a chain whose index is off here (POOL_INDEX_ON) answers as an index with nothing read: not complete, so the
+        // device adds no pool and reads its own, and no page logs a 404 (card market-data-matches-the-page)
+        if (ix === undefined && (chain === "base" || chain === "robinhood")) {
+          const c = POOL_INDEX_CHAINS[chain];
+          return send(200, { chainId: c.chainId, poolManager: c.poolManager, complete: false, through: c.first - 1, pools: [] }, { ...cors(req), "Cache-Control": "no-store" });
+        }
         if (ix === undefined) return send(404, { error: { code: "not_found" } }, cors(req));
         return send(200, ix.pools(t.toLowerCase()), { ...cors(req), "Cache-Control": "no-store" });
       }
@@ -1238,6 +1244,12 @@ export function readyGate(warm: Promise<void>, checked: Promise<void>): { ready:
   return { ready: () => ready, warmed };
 }
 
+/** The push socket's tape readers: every chain whose GET /v1/market/trades this helper serves, the swap reads' chains
+ *  and NEAR's tape (card market-data-matches-the-page: NEAR's push answered 404 while its trades answered). */
+export function pushReaders(swaps: Swaps | undefined, near: NearMarket | undefined): Readonly<Partial<Record<string, Pick<NearMarket["trades"], "trades">>>> {
+  return { ...(swaps ?? {}), ...(near === undefined ? {} : { near: near.trades }) };
+}
+
 export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held, near?: NearMarket, poolIndexes?: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
@@ -1246,7 +1258,7 @@ export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, wa
     handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes),
   );
   // card market-data-push: the push socket, upgraded for APP_HOST's Origin only, in its own window per client
-  attachPush(server, { commit, readers: evmSwaps ?? {}, allowed: (req) => originIn(req, PUSH_ORIGINS) !== null, client: clientOf, take: clientWindow(API_RATE_MAX).take });
+  attachPush(server, { commit, readers: pushReaders(evmSwaps, near), allowed: (req) => originIn(req, PUSH_ORIGINS) !== null, client: clientOf, take: clientWindow(API_RATE_MAX).take });
   server.listen(port);
   // the relayers start once this process holds the senders (sendersFromEnv): a restart resends their open sends and
   // settles before any request
