@@ -10,7 +10,12 @@
 // yet full, within SPAN_MS, as the page reads a filling chart again. Want: each chart answered 200, not filling, with at
 // least FULL_BARS bars (both picks trade every minute; live run 43776130630 read Base DRB, 1.7 years old and 1,648
 // trades a day, as 1 bar, src chain, after 9 reads), and a src made of our own reads or CoinGecko's, GeckoTerminal's only
-// as the history before them: "chain" or "coingecko" among its parts, and no part outside the three.
+// as the history before them: "chain" or "coingecko" among its parts, and no part outside the three. BONK, off the lists,
+// has no bars of ours (apps/helper/src/data/solana/trades.ts candles serves the history source alone), so once held its
+// keyless re-read is GeckoTerminal's alone and its src says so: "geckoterminal" is its full chart too (card
+// held-chart-names-its-bars: live run 43816654565 and the Mac's read at 07:02Z on 16 Nov, 500 bars src geckoterminal,
+// which matched GeckoTerminal's keyless minute bars of its pool 5zpyutJu9ee6jFymDGoK7F6S5Kczqtc9FomP3ueKuyA9 in 499 of
+// 500); Base's listed chart keeps the bar.
 // After: helper
 //   node scripts/live-checks/helper-candles-keyed-gt.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
@@ -20,7 +25,7 @@ import { writeFileSync } from "node:fs";
 const KEY = "helper-candles-keyed-gt";
 export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
-/** BONK: a busy Solana pool off Discover's lists, its chart CoinGecko's bars alone. */
+/** BONK: a busy Solana pool off Discover's lists, its chart one vendor's bars alone (CoinGecko's cold, GeckoTerminal's held). */
 export const BONK = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
 export const KEYED = "coingecko";
 /** The sources a chart's src may name, and the bars a full chart of a coin that trades every minute holds [design: 100
@@ -61,8 +66,11 @@ export const ours = (src) => {
   const parts = typeof src === "string" ? src.split(",") : [];
   return parts.length > 0 && parts.every((p) => SOURCES.includes(p)) && (parts.includes("chain") || parts.includes(KEYED));
 };
-/** Whether one read is a full chart. */
-export const full = (r) => r.status === 200 && r.filling !== true && r.bars >= FULL_BARS && ours(r.src);
+/** Whether a src is a chart off the lists may answer: ours, or one vendor's alone (CoinGecko's cold read, or
+ *  GeckoTerminal's keyless re-read of bars held, KEYED_COLD_ONLY). */
+export const offLists = (src) => ours(src) || src === "geckoterminal";
+/** Whether one read is a full chart; `off`: the chart is the pick off the lists (BONK). */
+export const full = (r, off = false) => r.status === 200 && r.filling !== true && r.bars >= FULL_BARS && (off ? offLists(r.src) : ours(r.src));
 
 /** The first Base token of a lists answer (Trending 1h's first row, else any list's), or null. */
 export function firstListed(body) {
@@ -82,7 +90,7 @@ async function chart(base, chain, token, fetchFn, wait) {
     const a = await ask(base, `/v1/market/candles?chain=${chain}&token=${token}&tf=1m`, fetchFn);
     const s = a.status === 200 ? shapeOf(a.body) : null;
     reads.push({ status: a.status, ms: a.ms, ...(s === null ? { body: a.body.slice(0, 120) } : s.bad !== undefined ? { shape: s.bad } : s), ...(a.error ? { error: a.error } : {}) });
-    if (full(reads.at(-1)) || Date.now() - t0 + READ_EVERY_MS > SPAN_MS) return reads;
+    if (full(reads.at(-1), chain === "solana") || Date.now() - t0 + READ_EVERY_MS > SPAN_MS) return reads;
     await wait(READ_EVERY_MS);
   }
 }
@@ -110,7 +118,8 @@ export function judge(run) {
     if (chain === "solana" && c.address !== BONK) say(false, `solana: ${c.address} read, not BONK`);
     const last = c.reads.at(-1);
     const srcs = [...new Set(c.reads.map((r) => r.src ?? `${r.status}`))].join(" then ");
-    say(full(last), `${chain} ${c.address}: ${last.status === 200 ? `${last.bars} bars${last.filling ? ", filling" : ""}, src ${last.src}` : `${last.status} ${last.body ?? last.shape ?? last.error ?? ""}`.trim()} after ${c.reads.length} read(s) (${srcs}); want ${FULL_BARS} bars or more, not filling, src our own reads or ${KEYED}`);
+    const off = chain === "solana";
+    say(full(last, off), `${chain} ${c.address}: ${last.status === 200 ? `${last.bars} bars${last.filling ? ", filling" : ""}, src ${last.src}` : `${last.status} ${last.body ?? last.shape ?? last.error ?? ""}`.trim()} after ${c.reads.length} read(s) (${srcs}); want ${FULL_BARS} bars or more, not filling, src our own reads or ${KEYED}${off ? ", or geckoterminal off the lists" : ""}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
