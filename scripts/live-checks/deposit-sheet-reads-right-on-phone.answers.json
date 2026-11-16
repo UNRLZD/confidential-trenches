@@ -1,0 +1,73 @@
+{
+  "_note": "Recorded 16 Nov 2026 on the live hosts with a fresh $0 account each width (passkey made by a CDP virtual authenticator), at 400 and 1440. good: this card's build (apps/terminal/dist at card/deposit-sheet-reads-right-on-phone) answering APP_HOST via --app-dir; bad: the build before it (card app-money-sheets-read-right, PR 922 @ 8ebd11463) the same way, the first build whose trade box offers Deposit.",
+  "good": {
+    "at": "2026-11-16T20:17:23.530Z",
+    "browser": "Chrome 157.0.8103.51, sandbox on",
+    "app": "local build",
+    "widths": {
+      "phone": {
+        "width": "phone",
+        "cta": {
+          "text": "Deposit",
+          "disabled": false
+        },
+        "depositOpen": true,
+        "tradeOpen": false,
+        "grabs": 1,
+        "get": {
+          "amount": "",
+          "disabled": true
+        }
+      },
+      "desktop": {
+        "width": "desktop",
+        "cta": {
+          "text": "Deposit",
+          "disabled": false
+        },
+        "depositOpen": true,
+        "tradeOpen": null,
+        "grabs": 0,
+        "get": {
+          "amount": "",
+          "disabled": true
+        }
+      }
+    }
+  },
+  "bad": {
+    "at": "2026-11-16T20:16:55.251Z",
+    "browser": "Chrome 157.0.8103.51, sandbox on",
+    "app": "local build",
+    "widths": {
+      "phone": {
+        "width": "phone",
+        "cta": {
+          "text": "Deposit",
+          "disabled": false
+        },
+        "depositOpen": true,
+        "tradeOpen": true,
+        "grabs": 2,
+        "get": {
+          "amount": "",
+          "disabled": false
+        }
+      },
+      "desktop": {
+        "width": "desktop",
+        "cta": {
+          "text": "Deposit",
+          "disabled": false
+        },
+        "depositOpen": true,
+        "tradeOpen": null,
+        "grabs": 0,
+        "get": {
+          "amount": "",
+          "disabled": false
+        }
+      }
+    }
+  }
+}

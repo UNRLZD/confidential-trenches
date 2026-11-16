@@ -60,6 +60,7 @@ import type { Route } from "./route.ts";
 import { txLink } from "../withdraw/model.ts";
 import { OrderTabs, OrdersSoon } from "./OrderTabs.tsx";
 import type { OrderTab } from "./OrderTabs.tsx";
+import { useLeaveSheet } from "./TradeSheet.tsx";
 import { useTradeSource } from "./source.tsx";
 import type { SetPreview } from "./source.tsx";
 import { WORDS } from "./words.ts";
@@ -529,6 +530,8 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
   const { setOpen: openSignin } = useSigninSheet();
   const [tab, setTab] = useState<OrderTab>("market");
   const depositSheet = useDepositSheet();
+  // on the phone the box is in the trade sheet: Deposit closes it, then opens the deposit sheet (one sheet drawn)
+  const leave = useLeaveSheet();
   const { toDeposit, depositIntent: intent } = t;
   // the page's own symbol: Portfolio's Row names a token by its market read, which the live source has none of yet
   if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} {...(logo ? { logo } : {})} />;
@@ -650,7 +653,7 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
         aria-busy={(!running && coming) || undefined}
         data-testid="trade-cta"
         {...(toDeposit ? intent : {})}
-        onClick={() => (signedOut ? openSignin(true) : toDeposit ? depositSheet.setOpen(true) : amount !== null && buy(amount))}
+        onClick={() => (signedOut ? openSignin(true) : toDeposit ? (leave(), depositSheet.setOpen(true)) : amount !== null && buy(amount))}
       >
         {label}
       </button>

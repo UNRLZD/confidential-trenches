@@ -45,6 +45,14 @@ test("FR-P7: S4.1 until the assets load; S4.2 while quoting; S4.3 with the quote
   for (const s of ["S4.1", "S4.2", "S4.4", "S4.5", "S4.6", "S4.7", "S4.8", "S4.19"] as const) assert.equal(getAddressOn(s, base), false, s);
 });
 
+test("Get address stays off until an amount is typed (card deposit-sheet-reads-right-on-phone: S4.3 drew it on with none, and its tap did nothing)", () => {
+  for (const amount of ["", " ", "0", "0.00", "1."]) {
+    assert.equal(at({ amount, dry: { kind: "idle" } }), "S4.3", `the form with ${JSON.stringify(amount)} is still S4.3`);
+    assert.equal(getAddressOn("S4.3", { ...base, amount }), false, JSON.stringify(amount));
+  }
+  assert.equal(getAddressOn("S4.3", { ...base, amount: "15" }), true);
+});
+
 test("AE-09 S4.4 to S4.8: below min (typed or answered), above the max, not available, busy, paused", () => {
   assert.equal(at({ amount: "1.5" }), "S4.4", "below the asset's minimum before any call");
   assert.equal(at({ dry: { kind: "refused", code: "below_min" } }), "S4.4");

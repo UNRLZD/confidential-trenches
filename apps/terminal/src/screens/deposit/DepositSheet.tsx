@@ -310,7 +310,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
           <W id="backup" />
         </Action>
       );
-    else foot = <Action kind="buy" on={getAddressOn(s, { signedIn, moneyOn: src.moneyOn })} control="deposit-get" onClick={() => void getAddress()}><W id="getAddress" /></Action>;
+    else foot = <Action kind="buy" on={getAddressOn(s, { signedIn, moneyOn: src.moneyOn, amount })} control="deposit-get" onClick={() => void getAddress()}><W id="getAddress" /></Action>;
   }
 
   return (

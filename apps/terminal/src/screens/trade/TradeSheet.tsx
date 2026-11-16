@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useSigninSheet } from "../signin/source.tsx";
 import { escapeCloses, locksPage, SHEET_START, sheetStep } from "./sheet.ts";
@@ -11,6 +11,9 @@ import "./trade.css";
 // on its own. The scrim, the handle and Escape close it. The box is mounted at the first open and only hidden on a close
 // (sheet.ts), so every state the box draws (States.tsx), its route strip and its fill toast survive a close and a
 // reopen; S8.12 keeps the sheet open (R5 token-390.html: "the sheet stays open", owner round 16). No dialog, no confirm.
+// A control in the box that opens another sheet (the $0 account's Deposit) closes this one first, as Portfolio's phone
+// row sheet does (Portfolio.tsx Sheet: close, then act): one sheet and one grab handle on the phone (card
+// deposit-sheet-reads-right-on-phone). The sign-in sheet is the one sheet drawn over it, so a sign-in returns to the box.
 
 /** The phone layout's media query (token.css, shell.css: the phone below 768 px). */
 const PHONE = "(max-width: 767.98px)";
@@ -22,6 +25,11 @@ export function useTradeSheet(): { state: SheetState; open: () => void; close: (
   const close = useCallback(() => setState((s) => sheetStep(s, "close")), []);
   return { state, open, close };
 }
+
+const Leave = createContext<() => void>(() => {});
+/** The sheet's close, for a control inside it that opens another sheet: it closes this one first. Outside a sheet (the
+ *  desktop column) it does nothing. */
+export const useLeaveSheet = () => useContext(Leave);
 
 /** `label` names the dialog (`Buy SYM`); `closeLabel` names the grab handle; `head` is the row above the box. */
 export function TradeSheet({ state, onClose, label, closeLabel, head, children }: { state: SheetState; onClose: () => void; label: string; closeLabel: string; head: ReactNode; children: ReactNode }) {
@@ -65,7 +73,7 @@ export function TradeSheet({ state, onClose, label, closeLabel, head, children }
       <div className="tsh-box" role="dialog" aria-modal="true" aria-label={label}>
         <button type="button" className="tsh-grab" aria-label={closeLabel} onClick={onClose}><i /></button>
         {head}
-        {children}
+        <Leave.Provider value={onClose}>{children}</Leave.Provider>
       </div>
     </div>
   );

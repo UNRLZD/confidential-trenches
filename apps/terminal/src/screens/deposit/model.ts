@@ -332,9 +332,10 @@ export const ADDRESS_STATES: ReadonlySet<SheetState> = new Set(["S4.13", "S4.14"
 /** States whose one action is withdraw.open with the id the money waits under (FR-D3, CH-119). */
 export const HELD_STATES: ReadonlySet<SheetState> = new Set(["held", "held-halted", "held-not-caught-up", "held-vault-blocked"]);
 
-/** Get address is on: the dry quote answered, the amount inside the limits, signed in, the page READY. */
-export function getAddressOn(state: SheetState, i: Pick<SheetInput, "signedIn" | "moneyOn">): boolean {
-  return state === "S4.3" && i.signedIn && i.moneyOn;
+/** Get address is on: an amount typed (the tap asks nothing without one), the dry quote answered, the amount inside the
+ *  limits, signed in, the page READY. S4.3 is also the form with no amount yet, so the state alone never turns it on. */
+export function getAddressOn(state: SheetState, i: Pick<SheetInput, "signedIn" | "moneyOn" | "amount">): boolean {
+  return state === "S4.3" && i.signedIn && i.moneyOn && parseAmount(i.amount) !== null;
 }
 
 /** The counter: whole seconds since the kit first saw the send, never negative. */

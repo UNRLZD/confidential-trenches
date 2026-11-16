@@ -14,7 +14,8 @@
 // amount in the box. ?sheet=1 (card app-phone-trade-sheet) draws the same box in the phone trade sheet with the safety
 // grid under it, from the recorded token read (test/token-source/helper-token-2026-11-03.json), behind an open button, as
 // the token page's phone bar opens it. ?page=1 draws the token page itself (TokenPage, both widths, one trade state) on
-// the recorded read, its candle reads answered by the run. Every set preview asked is counted in window.__previews.
+// the recorded read, its candle reads answered by the run. The sheet page holds the app's deposit sheet state
+// (DepositSheetProvider) with its open drawn in [data-testid=deposit-open] (card deposit-sheet-reads-right-on-phone). Every set preview asked is counted in window.__previews.
 // Test only.
 import type { BuyRoute, SignpageClientSnapshot, SignpageOutcome, SignpageState, Stage } from "@blindfill/kit";
 import { StrictMode } from "react";
@@ -28,6 +29,7 @@ import type { RiskRead } from "../../src/screens/trade/safety.ts";
 import type { MarketRow } from "../../src/screens/discover/fields.ts";
 import READ from "../token-source/helper-token-2026-11-03.json";
 import { TradeSourceProvider } from "../../src/screens/trade/source.tsx";
+import { DepositSheetProvider, useDepositSheet } from "../../src/screens/deposit/source.tsx";
 import { liveRoute } from "../../src/screens/trade/route.ts";
 import type { SetPreviewAnswer, TradeKit, TradeSource } from "../../src/screens/trade/source.tsx";
 import { fontsReady } from "../../src/shell/fonts.ts";
@@ -207,7 +209,21 @@ const src: TradeSource = { snapshot, moneyOn: true, kit, now };
 const ROW = Object.fromEntries(READ.fields.map((k, i) => [k, READ.row[i]])) as unknown as MarketRow;
 const RISK = READ.rest.risk as unknown as RiskRead;
 
+/** The deposit sheet's open, as the app's DepositMount reads it. */
+function DepositProbe() {
+  return <span data-testid="deposit-open" data-open={String(useDepositSheet().open)} hidden />;
+}
+
 function SheetPage() {
+  return (
+    <DepositSheetProvider>
+      <DepositProbe />
+      <SheetBody />
+    </DepositSheetProvider>
+  );
+}
+
+function SheetBody() {
   const sheet = useTradeSheet();
   return (
     <TradeSourceProvider value={src}>
