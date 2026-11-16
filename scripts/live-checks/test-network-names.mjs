@@ -34,3 +34,7 @@ export const TEST_HOSTS = Object.freeze({
   /** Robinhood testnet's own operator */
   robinhood: "https://rpc.testnet.chain.robinhood.com",
 });
+
+/** NEAR testnet's withdrawal relayer and fee recipient (VT-T02's R and F, packages/wallet/src/withdraw/relay.ts
+ *  RELEASE_WITHDRAW_RELAYER.testnet): ids a mainnet SIGN_HOST bundle must not carry (signpage-withdraw-handoff). */
+export const NEAR_TESTNET_RELAYER = Object.freeze({ relayer_account: "r-2b700409.bf-vt-20261102t071444.testnet", fee_recipient: "f-2b700409.bf-vt-20261102t071444.testnet" }); // gitleaks:allow (public account ids)

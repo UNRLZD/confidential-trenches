@@ -579,9 +579,9 @@ export function nearChain(start = 223_500_000, now = () => Date.now()) {
   const t0 = now();
   return { height: () => start + Math.floor((now() - t0) / 600) };
 }
-/** The footer's read (apps/terminal/src/shell/footer.ts: `block` at finality final, id "ct-footer") on either network's
- *  pair: the build's network picks the pair, so both are answered. */
-const FOOTER_ORIGINS = new Set(["https://rpc.mainnet.fastnear.com", "https://near.drpc.org", "https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"]);
+/** The footer's read (apps/terminal/src/shell/footer.ts: `block` at finality final, id "ct-footer") on NEAR mainnet's
+ *  pair, APP_HOST's build's network (card live-checks-read-mainnet-only: a listed check answers no test network). */
+const FOOTER_ORIGINS = new Set(["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"]);
 const footerRead = (body) => {
   try {
     const b = JSON.parse(body ?? "");
