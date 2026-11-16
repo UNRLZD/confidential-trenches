@@ -12,13 +12,17 @@
 // - The token a call names, as the kit's nearSwapCalls writes them (packages/kit/src/trade/near/swap.ts): a buy's
 //   registration is storage_deposit on the token; a buy's swap is USDC's ft_transfer_call into the exchange, its msg's
 //   last action's token_out the token; a sell's swap is the token's own ft_transfer_call into the exchange; a claim is
-//   claim_lostfound on the exchange naming the token.
+//   claim_lostfound on the exchange naming the token. On Rhea DCL (the kit's dclSwapCalls, mainnet): a buy's swap is
+//   USDC's ft_transfer_call into dclv2.ref-labs.near, its msg's Swap.output_token the token and min_output_amount its
+//   floor; a sell's swap is the token's own ft_transfer_call into it; there is no claim.
 // Every input is hostile: bytes out of shape, a second action, trailing bytes, a key or signature that is not ed25519,
 // a bad signature, a sender other than W: the call is refused (null), never guessed.
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base64 } from "@scure/base";
 import { NEP366_PREFIX } from "../../wallet/src/deposit/delegate.ts";
+import { NEAR_DCL } from "../../kit/src/near/dcl.ts";
+import { NEAR_RHEA } from "../../kit/src/near/rhea.ts";
 
 /** The longest relayer transaction read (a delegate carries at most a few KB: the helper's bind body cap is 4 KB). */
 export const NEAR_W_CALL_MAX_BYTES = 8_192;
@@ -114,9 +118,17 @@ export function nearWCallToken(c: NearWCall, usdc: string, exchange: string): { 
     }
     if (c.method !== "ft_transfer_call") return null;
     const a = json(c.args);
-    if (!isObj(a) || a.receiver_id !== exchange || typeof a.msg !== "string") return null;
+    // Rhea DCL (card near-dcl-sell): on mainnet, beside the classic exchange; a DCL Swap's msg names its output token and
+    // minimum (the kit's dclSwapMsg), and DCL has no lost-found to claim
+    const dcl = exchange === NEAR_RHEA.mainnet.exchange ? NEAR_DCL.mainnet.exchange : null;
+    if (!isObj(a) || (a.receiver_id !== exchange && (dcl === null || a.receiver_id !== dcl)) || typeof a.msg !== "string") return null;
     if (c.receiver !== usdc) return { token: c.receiver, sellSwap: true, ...(typeof a.amount === "string" && U128.test(a.amount) ? { amountIn: BigInt(a.amount) } : {}) }; // the token's own transfer: a sell
     const m = JSON.parse(a.msg) as unknown;
+    if (a.receiver_id === dcl) {
+      const s = isObj(m) && isObj(m.Swap) ? m.Swap : null;
+      if (s === null || typeof s.output_token !== "string" || s.output_token === usdc) return null;
+      return { token: s.output_token, sellSwap: false, ...(typeof s.min_output_amount === "string" && U128.test(s.min_output_amount) ? { minOut: BigInt(s.min_output_amount) } : {}) };
+    }
     const acts = isObj(m) && Array.isArray(m.actions) ? m.actions : [];
     const last = acts.at(-1);
     if (!isObj(last) || typeof last.token_out !== "string" || last.token_out === usdc) return null;
