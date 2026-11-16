@@ -286,6 +286,12 @@ function num(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 const usd = (v: unknown): string | null => dec(num(v));
+/** A market value that is 0 is one the source does not know (GeckoTerminal answers an unknown cap "0.0"): null, so a
+ *  priced coin never shows MC $0 (card market-data-matches-the-page). */
+const cap = (v: unknown): string | null => {
+  const n = num(v);
+  return n === undefined || n <= 0 ? null : dec(n);
+};
 function bps(pct: unknown): number | null {
   const p = num(pct);
   if (p === undefined || p < -100 || Math.abs(p) > 1e9) return null;
@@ -349,7 +355,7 @@ export function toRows(chain: EvmChain, answer: unknown, asOfMs: number): { rows
       label: null,
       created_s: createdS, // the pool's; a pad makes the token and its pool in one transaction
       price_usd: usd(at.base_token_price_usd),
-      mc_usd: usd(at.market_cap_usd) ?? usd(at.fdv_usd),
+      mc_usd: cap(at.market_cap_usd) ?? cap(at.fdv_usd),
       vol_24h_usd: usd(vol.h24),
       chg_5m_bps: bps(chg.m5),
       chg_1h_bps: bps(chg.h1),
