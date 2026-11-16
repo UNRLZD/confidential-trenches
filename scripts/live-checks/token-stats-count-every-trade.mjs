@@ -9,6 +9,7 @@
 //   - a settled tape's whole_ms, when present, is a whole ms from 0 to its as_of_ms plus a minute;
 //   - on each chain at least MIN_CLAIMED of the COINS settled tapes claim a reach.
 // After: helper
+// Serial: evm-keyed 200 (its Base and Robinhood tape reads draw the keyed providers)
 //   node scripts/live-checks/token-stats-count-every-trade.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
