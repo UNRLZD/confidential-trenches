@@ -29,7 +29,8 @@ import { pairDown } from "./outage.ts";
 import { holdHosts, hostLane, PASS_BUDGET, PASS_FLOOR_MS, resetHostLanes } from "../../wallet/src/throttle.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { buyReads } from "../src/pool-testnet.ts";
-import type { ReadKind } from "../src/page-rpc.ts";
+import { keptPools, setPagePoolFinders, type ReadKind } from "../src/page-rpc.ts";
+import { solanaPoolAddresses } from "../../kit/src/trade/solana/pool.ts";
 import { liveRuns } from "../src/pool-sell-dry.ts";
 import { readWaits } from "../src/read-waits.ts";
 import { APP_ORIGIN, signedOutState, startApi } from "../src/api.ts";
@@ -1989,6 +1990,35 @@ test("card start-reads-wait-out-a-throttle: a buy's bound is on the device's clo
   assert.deepEqual(waits, [1_000, 2_000, 4_000]);
   assert.ok(t <= 30_000n + 13_500n, `down at ${t} ms`);
   assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
+});
+
+test("card pool-buy-waits-out-a-throttle: a coin no pump read names whose DLMM scan the kit gave up on (its provider held past the kit's 5 s scan bound) waits 1 s, reads again and buys; never quote_check_failed at once", async (t) => {
+  const w = await world();
+  // the first attempt: the pump venues' accounts read as none (a coin only a scanned venue holds) and both scan
+  // providers never answer, so the kit's scan gives up at its own 5 s bound; from the second, the chain as it is and
+  // the scan answers no pairs
+  let attempt = 0;
+  const pump = new Set([...solanaPoolAddresses(fx.pump.mint).curveList, ...solanaPoolAddresses(fx.pump.mint).poolList]);
+  const hide = (rpc: SolanaRpc): SolanaRpc =>
+    (async (m: string, q: readonly unknown[]) => {
+      const keys = q[0] as readonly string[];
+      if (attempt === 1 && m === "getMultipleAccounts" && keys.length > 0 && keys.every((k) => pump.has(k))) return { context: { slot: 1 }, value: keys.map(() => null) };
+      return rpc(m, q);
+    }) as SolanaRpc;
+  const scanSeat = (url: string): SolanaRpc =>
+    Object.assign(async (m: string) => {
+      if (m !== "getProgramAccounts") throw new Error(`unexpected ${m}`);
+      return attempt === 1 ? new Promise(() => {}) : { context: { slot: 1 }, value: [] };
+    }, { url });
+  const rpcs = [hide(w.host.rpcs[0]), hide(w.host.rpcs[1])] as const;
+  const kept = keptPools("dlmmPairs", () => [scanSeat("https://scan-a.example"), scanSeat("https://scan-b.example")], () => rpcs);
+  setPagePoolFinders({ dlmmPairs: (token) => (attempt++, kept(token)) });
+  t.after(() => setPagePoolFinders(null));
+  const sendAt = { waits: -1 };
+  const a = await runPoolBuy({ ...w.host, rpcs, send: async (p, tx) => ((sendAt.waits = w.waits.length), w.host.send(p, tx)) }, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.equal(attempt, 2, "the scan asked again on the second attempt");
+  assert.deepEqual(w.waits.slice(0, sendAt.waits), [1_000]);
 });
 
 test("card pool-sell-legs-side-by-side: blockhashOf, split into its read and its check for the sell, asks the buy's calls in the buy's order and refuses as before", async () => {

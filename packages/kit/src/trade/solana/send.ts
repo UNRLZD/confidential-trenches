@@ -426,8 +426,9 @@ function rpcErrorText(e: { code?: unknown; message?: unknown; data?: unknown } |
   const data = typeof e?.data === "string" && e.data !== "" ? `: ${e.data.slice(0, 200)}` : "";
   return `RPC error ${String(e?.code)}: ${String(e?.message).slice(0, 120)}${data}`;
 }
-/** Retry-After in ms: delta-seconds or an HTTP date (RFC 9110 10.2.3); null when absent or unreadable. */
-function retryAfterMs(h: string | null, now: number): number | null {
+/** Retry-After in ms: delta-seconds or an HTTP date (RFC 9110 10.2.3); null when absent or unreadable. The page's busy
+ *  vendor answers read theirs with it too (signpage pool-exit.ts). */
+export function retryAfterMs(h: string | null, now: number): number | null {
   if (h === null || h.trim() === "") return null;
   const t = h.trim();
   if (/^\d{1,6}$/.test(t)) return Number(t) * 1000;

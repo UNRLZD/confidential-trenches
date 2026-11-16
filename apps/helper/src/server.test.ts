@@ -19,7 +19,7 @@ import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, upstreamBudget } from "./
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
-import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, NEAR_PAIR_HEADER, start, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
+import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
 import { pairNames } from "./token-status/status.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
@@ -1193,4 +1193,15 @@ test("card helper-serves-many-users-at-once: every /v1/rpc answer of a chain, a 
   } finally {
     await L.close();
   }
+});
+
+// card helper-listed-charts-own-reads round 4: live run 43785080982 (job 133030981677), two minutes after a restart, one
+// Base chart read got no answer in 30 s, past the candles route's 5 s bound, and no log line named why: a request waits
+// on the one event loop before any route's bound runs. The minute's line names a hold of LOOP_HELD_MS or more.
+test("the event loop's longest hold a minute is named once it reaches LOOP_HELD_MS, never below it", () => {
+  const h = (maxMs: number, p99Ms: number, count = 3_000) => ({ max: maxMs * 1e6, percentile: (p: number) => (p === 99 ? p99Ms * 1e6 : 0), count });
+  assert.equal(LOOP_HELD_MS, 1_000);
+  assert.equal(loopHeldLine(h(999, 30)), null);
+  assert.equal(loopHeldLine(h(30_001, 2_757)), "event loop held up to 30001 ms this minute (p99 2757 ms, 3000 samples)");
+  assert.equal(loopHeldLine(h(5_000, 1, 0)), null, "no samples, no line");
 });

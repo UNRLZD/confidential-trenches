@@ -40,8 +40,8 @@ export const READ_WAIT_TOTAL_MS = 30_000;
 export type ReadClock = () => number;
 const deviceClock: ReadClock = () => Date.now();
 
-/** The provider's Retry-After as the page client read it (ms), or null. */
-export const afterOf = (e: unknown): number | null => (e instanceof SolanaRpcTransportError ? e.afterMs : null);
+/** The provider's Retry-After as the page client read it (ms), or a busy answer's (ReadBusy), or null. */
+export const afterOf = (e: unknown): number | null => (e instanceof SolanaRpcTransportError || e instanceof ReadBusy ? e.afterMs : null);
 
 export type ReadWaits = {
   /** The next wait after a fault (`e`, for its Retry-After), or null once it would end past the tap's bound. */
@@ -103,10 +103,13 @@ export const waitsOn = (e: unknown): boolean => e instanceof SolanaRpcTransportE
  *  attempt asking again (card pool-buy-waits-out-a-throttle). */
 export class ReadBusy extends Error {
   readonly code: "http_429" | "http_5xx";
-  constructor(status: number) {
+  /** The answer's Retry-After (ms), honoured by readWaits as a transport fault's is (afterOf), or null when it gives none. */
+  readonly afterMs: number | null;
+  constructor(status: number, afterMs: number | null = null) {
     super(`a busy answer (HTTP ${status})`);
     this.name = "ReadBusy";
     this.code = status === 429 ? "http_429" : "http_5xx";
+    this.afterMs = afterMs;
   }
 }
 

@@ -75,7 +75,7 @@
 // opposite signs; counts, ranges and the books are bounded.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { BUCKETS_MAX, change4h, createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
+import { BUCKETS_MAX, change4h, createBook, fixed, joinBars, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
@@ -3081,7 +3081,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (offScale(e, t)) return timed(await noneCandles(t, tf as Tf, to, limit, client));
       const own = e.book.candles(tf as Tf, to, limit);
       const ownFrom = e.book.ownFrom(tf as Tf);
-      let bars: Candle[] = own;
+      // card helper-listed-charts-own-reads round 4: the trades the tape read back before the book's first read
+      // (readBack) are bars of ours too, joined before the book's (../candles.ts joinBars, the Solana read back's rule),
+      // and while that read goes on the answer says filling: a cold coin's first chart is our bars or a true filling,
+      // never an empty chart because the book's first window held no trade (live run 43785080982 job 133030981593:
+      // Robinhood DELTA answered 200 with no bars two minutes after a restart; it charts 1,000 hourly bars)
+      const mine = joinBars(e.back?.tape?.candles(tf as Tf, to, limit) ?? [], own).slice(-limit);
+      let bars: Candle[] = mine;
       let src = "chain";
       // the history before our first bar refused or failed with none held: the answer says filling, so the page reads it
       // again while the queued read fills it (geckoBars), never a short chart drawn as the coin's whole (card
@@ -3089,8 +3095,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // 1m bar, src chain, after 9 reads over 90 s)
       let short = false;
       // a range we do not hold: bars before our first
-      if (own.length < limit) {
+      if (mine.length < limit) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
+        const below = mine.length > 0 ? Math.min(mine[0]![0], before) : before;
         // GeckoTerminal's history is an optional seed (card helper-crowd-429): refused or failed, the answer is our
         // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed),
         // and a quiet pool's bars of ours are its mark (markQuiet). With no bar of ours to serve, a refused read is
@@ -3098,18 +3105,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         // again, never a 200 with no bars for a token that has them (card market-reads-hold-under-load: Base
         // 0xfbb75a59's 1h answered 200 [] at 19:55Z; card evm-chart-opens-without-a-vendor-call: live run 42995547054)
         const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before, false, client);
-        if (own.length === 0 && !Array.isArray(got)) return timed(got);
+        if (mine.length === 0 && !Array.isArray(got)) return timed(got);
         short = !Array.isArray(got);
-        const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
+        const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < below);
         if (old.length > 0) {
-          bars = old.concat(own).slice(-limit);
+          bars = old.concat(mine).slice(-limit);
           src = `chain,${Array.isArray(got) ? srcOf(got) : "geckoterminal"}`;
         }
       }
       const at = e.readAt ?? now();
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
-      if (short && bars.length < limit) body.filling = true;
+      if ((short || backing(e)) && bars.length < limit) body.filling = true;
       body.as_of_ms = at;
       return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at });
     },

@@ -1,31 +1,49 @@
 {
- "_note": "good: this card branch cabadce90 SIGN_HOST build (main with PRs 863 and 870 merged; packages/signpage index.html and public/app.js, build-app.mjs); bad: the base 125a32cc6 build (main with PR 863), whose withdraw waits on nothing and whose pool scan fault reads as no pools",
- "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-uuqRBCUmhBQJAf9F5qmUYPNOTF0DpkXMrwAjzA2oQ5PhXkabtv8QohlIQQ1Sywdh\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-uuqRBCUmhBQJAf9F5qmUYPNOTF0DpkXMrwAjzA2oQ5PhXkabtv8QohlIQQ1Sywdh",
-  "step": true,
-  "faults": true,
-  "wired": {
-   "plan": true,
-   "part": true,
-   "signed": true,
-   "stop": true
+  "_note": "good: this card branch 4a11a44b4 SIGN_HOST build (round 2 of the review; packages/signpage index.html and public/app.js, build-app.mjs); bad: the base 125a32cc6 build (main with PR 863), whose withdraw waits on nothing and whose pool scan fault reads as no pools; bad_round1: the reviewed f64ab0557 build, whose busy answer carries no Retry-After, whose To step asks the exit again on a retry, whose failed free is silent and whose scan given up on reads as no pools",
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-IfwohyCmBYjsWx2g5IvK+ySZPWvnw4ehegVmvjk+SJ8/TIkvtN8XcMyfj2CwpzNz\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-IfwohyCmBYjsWx2g5IvK+ySZPWvnw4ehegVmvjk+SJ8/TIkvtN8XcMyfj2CwpzNz",
+    "step": true,
+    "faults": true,
+    "wired": {
+      "plan": true,
+      "to": true,
+      "part": true,
+      "signed": true,
+      "stop": true,
+      "free": true
+    },
+    "exit": true,
+    "scan": true
   },
-  "exit": true,
-  "scan": true
- },
- "bad": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-2/duTsR/jmCX7sJE2n2QAsZH3KH1vPN0WM0tHBJetbArzj5ykA0dx4WjWL9gv9CQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-2/duTsR/jmCX7sJE2n2QAsZH3KH1vPN0WM0tHBJetbArzj5ykA0dx4WjWL9gv9CQ",
-  "step": false,
-  "faults": false,
-  "wired": {
-   "plan": false,
-   "part": false,
-   "signed": false,
-   "stop": false
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-2/duTsR/jmCX7sJE2n2QAsZH3KH1vPN0WM0tHBJetbArzj5ykA0dx4WjWL9gv9CQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-2/duTsR/jmCX7sJE2n2QAsZH3KH1vPN0WM0tHBJetbArzj5ykA0dx4WjWL9gv9CQ",
+    "step": false,
+    "faults": false,
+    "wired": {
+      "plan": false,
+      "part": false,
+      "signed": false,
+      "stop": false
+    },
+    "exit": false,
+    "scan": false
   },
-  "exit": false,
-  "scan": false
- }
+  "bad_round1": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-uuqRBCUmhBQJAf9F5qmUYPNOTF0DpkXMrwAjzA2oQ5PhXkabtv8QohlIQQ1Sywdh\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-uuqRBCUmhBQJAf9F5qmUYPNOTF0DpkXMrwAjzA2oQ5PhXkabtv8QohlIQQ1Sywdh",
+    "step": false,
+    "faults": false,
+    "wired": {
+      "plan": false,
+      "to": false,
+      "part": false,
+      "signed": false,
+      "stop": false,
+      "free": false
+    },
+    "exit": false,
+    "scan": false
+  }
 }
