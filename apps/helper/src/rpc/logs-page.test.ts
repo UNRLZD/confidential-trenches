@@ -8,7 +8,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as rpcModule from "./rpc.ts";
-import { createRpc, evmRangeCap, RPC_ANSWER_MAX } from "./rpc.ts";
+import { DRPC_IP_PACE } from "../limits/limits.ts";
+import { createRpc, evmRangeCap, PACE_MAX_MS, RPC_ANSWER_MAX } from "./rpc.ts";
 
 // read off the module, so this file loads at a base without them and fails on the behaviour (red runs)
 const { LOGS_PAGES_MAX } = rpcModule as unknown as { LOGS_PAGES_MAX?: number };
@@ -19,7 +20,7 @@ const DR = [1, 2, 3].map((n) => `https://lb.drpc.test/base/plantedBASEdr${n}key1
 /** The deployed Base keyed list (/v1/health 15 Nov 02:30Z: quiknode.pro, drpc.live key1, key2, key3). */
 // the paging and the store at a paid dRPC plan's pace (RPC_PACE_DRPC, rpc.ts keyedPaceOf): the free plan's minute budget,
 // about a call a second, is drpc-ip.test's (card base-reads-never-throttled)
-const PAID_DRPC = "20,4";
+const PAID_DRPC = "20,60";
 const BASE_ENV: Record<string, string> = { BASE_RPC_URL_QUICKNODE: QN, BASE_RPC_URL_DRPC_1: DR[0]!, BASE_RPC_URL_DRPC_2: DR[1]!, BASE_RPC_URL_DRPC_3: DR[2]!, RPC_PACE_DRPC: PAID_DRPC };
 const RH_OWN = "https://robinhood-mainnet.alchemy.test/v2/plantedRHown000key123456789abcd";
 const RH_DR = "https://lb.drpc.test/robinhood/plantedRHdr1key123456789abcd";
@@ -137,6 +138,25 @@ test(`past ${PAGES_MAX} pages a read is refused before any send with a JSON-RPC 
   const ok = await read(r, logsBody(12, FINAL - 50_000, FINAL - 50_000 + max - 1));
   assert.equal(ok.status, 200);
   assert.ok(Array.isArray((JSON.parse(ok.body) as { result?: unknown }).result));
+});
+
+// card base-reads-never-throttled: live 16 Nov 17:33Z, on the free plan's pace (one bucket of 12 for the three keys, 0.8
+// a second), a pool read 16 min of Base past the store paged 13-39 pages, spent the bucket and answered 503
+test("on dRPC's free pace a read is paged only as far as the keys' bucket serves inside a send's pace wait: past it, the range cap before any send", async () => {
+  const p = providers(BASE_SPANS);
+  const { BASE_RPC_URL_QUICKNODE, BASE_RPC_URL_DRPC_1, BASE_RPC_URL_DRPC_2, BASE_RPC_URL_DRPC_3 } = BASE_ENV;
+  const r = createRpc({ BASE_RPC_URL_QUICKNODE, BASE_RPC_URL_DRPC_1, BASE_RPC_URL_DRPC_2, BASE_RPC_URL_DRPC_3 } as Record<string, string>, { fetch: p.fetch as never, log: () => undefined });
+  // the bucket (12) and what refills it inside PACE_MAX_MS (0.8 x 2 s): 13 pages of 100
+  const served = (DRPC_IP_PACE.burst + Math.floor((DRPC_IP_PACE.perS * PACE_MAX_MS) / 1000)) * DR_SPAN;
+  const a = await read(r, logsBody(21, FINAL - 50_000, FINAL - 50_000 + 1_999));
+  assert.equal(a.status, 200, a.body.slice(0, 200));
+  const body = JSON.parse(a.body) as { error?: { code: number; message: string } };
+  assert.equal(body.error?.code, -32602, a.body.slice(0, 200));
+  assert.equal(evmRangeCap(body.error), BigInt(served), "the cap names the pages the bucket serves");
+  assert.equal(p.logs().length, 0, "no page sent: the bucket stays the callers'");
+  const ok = await read(r, logsBody(22, FINAL - 50_000, FINAL - 50_000 + served - 1));
+  assert.equal(ok.status, 200);
+  assert.deepEqual((JSON.parse(ok.body) as { result?: Log[] }).result, logsIn(FINAL - 50_000, FINAL - 50_000 + served - 1), "the cap's own span is answered whole");
 });
 
 test("a page's JSON-RPC error is the read's answer, with the caller's id; a page no provider answers fails the read", async () => {

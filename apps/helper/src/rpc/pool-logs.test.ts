@@ -20,7 +20,7 @@ const QN = "https://name-two.base-mainnet.quiknode.test/plantedBASEqn00key123456
 const DR = [1, 2, 3].map((n) => `https://lb.drpc.test/base/plantedBASEdr${n}key123456789abcd`);
 // the paging and the store at a paid dRPC plan's pace (RPC_PACE_DRPC, rpc.ts keyedPaceOf): the free plan's minute budget,
 // about a call a second, is drpc-ip.test's (card base-reads-never-throttled)
-const PAID_DRPC = "20,4";
+const PAID_DRPC = "20,60";
 const BASE_ENV: Record<string, string> = { BASE_RPC_URL_QUICKNODE: QN, BASE_RPC_URL_DRPC_1: DR[0]!, BASE_RPC_URL_DRPC_2: DR[1]!, BASE_RPC_URL_DRPC_3: DR[2]!, RPC_PACE_DRPC: PAID_DRPC };
 const SPANS: Record<string, number> = { [QN]: 5, ...Object.fromEntries(DR.map((u) => [u, 100])) };
 /** Base's pool as the kit pins it and its deploy block (packages/wallet/src/pool/evm.ts EVM_POOLS). */
