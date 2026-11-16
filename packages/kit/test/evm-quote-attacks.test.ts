@@ -1791,14 +1791,18 @@ test("card rh-cold-quote: one HTTP 503 from the first on a cold getLogs is asked
   assert.ok(c.spareAsked.every(([a, b]) => b - a + 1 <= 1_000_000), JSON.stringify(c.spareAsked));
 });
 
-test("card rh-cold-quote: a first that answers HTTP 503 to every request over 100,000 blocks holding the real pool's block is asked its halves down to 100,000: the spare reads none", async () => {
+// card robinhood-quote-answers-cold: a request over SCAN_ALONE answered 5xx is asked again whole after the gate's
+// backoff, as one with no connection is, never as its halves (RHC3; SL1 handed the spare 5,002 getLogs): a first that
+// answers 503 to every such request refuses the quote at the fourth in a row, the spare reading none of the depth
+test("card rh-cold-quote: a first that answers HTTP 503 to every request over 100,000 blocks holding the real pool's block is asked it again whole, a true refusal (rpc_error) at the fourth: the spare reads none", async () => {
   const at = RC_HEAD - 500_000;
   const c = rcFirst("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f14", (inner) => async (calls, s) => {
     const f = calls.find((x) => x.method === "eth_getLogs")?.params[0] as { fromBlock: string; toBlock: string } | undefined;
     if (f !== undefined && Number(f.fromBlock) <= at && Number(f.toBlock) >= at && Number(f.toBlock) - Number(f.fromBlock) + 1 > 100_000) throw new Error("the provider answered HTTP 503");
     return inner(calls, s);
   });
-  assert.deepEqual(await c.run(), { accepted: false, code: "below_reference" });
+  const v = (await c.run()) as { code?: string };
+  assert.equal(v.code, "rpc_error", JSON.stringify(v));
   assert.equal(c.spared(), 0);
 });
 
@@ -4707,7 +4711,7 @@ test("B1r a scan provider that refuses every getLogs connection after its head: 
   const { rpc, st } = faultScan([], () => "unreach");
   const r = await coldQuote(rpc, 0x3f70);
   assert.equal(r.code, "rpc_error", r.message);
-  assert.match(r.message, /refused 4 connections in a row/);
+  assert.match(r.message, /refused 4 requests in a row/);
   // each span asked at 0, 0.5, 1.5 and 3.5 s, refused at the fourth (59a69e2: 3,062 ms; b282ce0: 60,023 ms, 1,100
   // getLogs, the backoff doubling to 8 s with no count)
   assert.ok(r.ms >= 3_400 && r.ms < 5_000, `refused after ${Math.round(r.ms)} ms and ${st.logs} getLogs`);
@@ -4730,7 +4734,7 @@ test("B5 30% of the scan's connections refused: each of four cold quotes has its
     const { rpc, st } = faultScan([], () => (draw() < 0.3 ? "unreach" : "ok"));
     const r = await coldQuote(rpc, 0x3f80 + q);
     // b282ce0: p50 31.5 s, each request's backoff doubling to 8 s with no count
-    assert.ok(r.code !== "rpc_error" || /refused 4 connections in a row/.test(r.message), `quote ${q}: ${r.message}`);
+    assert.ok(r.code !== "rpc_error" || /refused 4 requests in a row/.test(r.message), `quote ${q}: ${r.message}`);
     assert.ok(r.ms < 5_000, `quote ${q}: ${r.code} after ${Math.round(r.ms)} ms and ${st.logs} getLogs`);
     assert.equal(st.halves, 0, `quote ${q}: ${st.halves} halves`);
     rows.push(`${r.code} ${Math.round(r.ms)} ms ${st.logs} getLogs`);
