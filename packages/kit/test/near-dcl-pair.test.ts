@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { dclQuote, rheaQuote, RheaQuoteRefused } from "@blindfill/kit";
-import { isDclQuote, readNearSwapPair } from "../src/trade/near/wallet.ts";
+import { isDclQuote, nearQuote, readNearSwapPair } from "../src/trade/near/wallet.ts";
 
 const FAST = "https://rpc.mainnet.fastnear.com";
 const DRPC = "https://near.drpc.org";
@@ -125,4 +125,39 @@ test("V4 with no DCL pools the pair is classic alone, as before: one quote, no D
   assert.ok(!asked.includes("dclv2.ref-labs.near"));
   // DCL's quote alone at this block is what V1 took
   assert.equal((await dclQuote({ network: "mainnet", rpcs, side: "sell", token: HOODL, amountIn: BigInt(SELL.amountIn), pools: SELL.pools })).amountOut, DCL_OUT);
+});
+
+test("V5 nearQuote, the quote with no W (a buy's dry, its creation body, a fee read; card near-dcl-route): the pair's own pick and refusals", async () => {
+  const q = (rpcs: ReturnType<typeof chain>, pools = [7]) => nearQuote({ network: "mainnet", rpcs, side: "sell", token: HOODL, amountIn: BigInt(SELL.amountIn), pools, dclPools: SELL.pools });
+  // DCL pays more: DCL's quote, as the pair read takes it
+  const d = await q(chain(20_000n));
+  assert.ok(isDclQuote(d));
+  assert.equal(d.amountOut, DCL_OUT);
+  assert.deepEqual([d.height, d.blockHash], [H, HASH]);
+  // classic pays more: the classic quote, exactly
+  const rpcs = chain(100_000n);
+  const c = await q(rpcs);
+  assert.ok(!isDclQuote(c));
+  assert.equal(c.amountOut, (await rheaQuote({ network: "mainnet", rpcs, side: "sell", token: HOODL, amountIn: BigInt(SELL.amountIn), pools: [7] })).amountOut);
+  // a DCL-only coin (no classic candidates): DCL alone
+  assert.ok(isDclQuote(await q(chain(20_000n), [])));
+  // both venues with no pool: the coin's own refusal (no-pool), which a dry reads as no out
+  const none = chain(100_000n, (_u, p, v) => (p.method_name === "get_pool" ? null : p.method_name === "get_pool_by_ids" ? [{ ...classicRow(1n), token_account_ids: ["a.near", "b.near"] }] : v));
+  await assert.rejects(q(none), (e: unknown) => e instanceof RheaQuoteRefused && e.code === "no-pool");
+  // DCL's providers apart: the providers' fault (disagree), which a dry reads as down, never the classic quote instead
+  const apart = chain(20_000n, (u, p, v) => (u === DRPC && p.method_name === "quote" ? { amount: "15452", tag: null } : v));
+  await assert.rejects(q(apart), (e: unknown) => e instanceof RheaQuoteRefused && e.code === "disagree");
+});
+
+test("V6 a venue's own chain state skips it (card near-dcl-route): DCL not Running or the token frozen on DCL, classic serves; classic not Running, DCL serves; a provider's fault still refuses", async () => {
+  const dclPaused = chain(20_000n, (_u, p, v) => (String(p.account_id) === "dclv2.ref-labs.near" && p.method_name === "get_metadata" ? { ...(v as object), state: "Paused" } : v));
+  const a = await readNearSwapPair(ask(dclPaused));
+  assert.equal(a.quote.exchange, EX, "DCL paused: classic, though DCL would pay more");
+  const dclFrozen = chain(20_000n, (_u, p, v) => (String(p.account_id) === "dclv2.ref-labs.near" && p.method_name === "get_frozenlist_tokens" ? [HOODL] : v));
+  assert.equal((await nearQuote({ network: "mainnet", rpcs: dclFrozen, side: "sell", token: HOODL, amountIn: BigInt(SELL.amountIn), pools: [7], dclPools: SELL.pools })).exchange, EX);
+  const classicPaused = chain(100_000n, (_u, p, v) => (String(p.account_id) === EX && p.method_name === "metadata" ? { state: "Paused" } : v));
+  assert.ok(isDclQuote((await readNearSwapPair(ask(classicPaused))).quote), "classic paused: DCL, though classic would pay more");
+  // both venues paused: the classic refusal, the coin's own
+  const both = chain(20_000n, (_u, p, v) => (p.method_name === "metadata" ? { state: "Paused" } : String(p.account_id) === "dclv2.ref-labs.near" && p.method_name === "get_metadata" ? { ...(v as object), state: "Paused" } : v));
+  await assert.rejects(readNearSwapPair(ask(both)), (e: unknown) => e instanceof RheaQuoteRefused && e.code === "paused" && e.message.includes(EX));
 });

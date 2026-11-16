@@ -146,12 +146,9 @@ export async function dclQuote(args: DclQuoteArgs): Promise<DclQuote> {
     if (out === null) throw new RheaQuoteRefused("rpc", `${what}: not {amount, tag}`);
     return out;
   };
-  // A buy's amount into DCL is known now (no fee comes off on the way in), so its paths' quote views go out with the
-  // reads below, one round trip fewer; each answer is used only for a path whose pools then read quotable.
-  const early = new Map<string, Promise<{ v: bigint } | { e: unknown }>>();
-  if (side === "buy" && token !== wrap)
-    for (const p of pathsOf(ids.map((id) => ({ id, tokens: [dclPoolOf(id)!.x, dclPoolOf(id)!.y] as const })), true))
-      early.set(p.join(","), quoteOf(p, amountIn).then((v) => ({ v }), (e: unknown) => ({ e })));
+  // Each path's quote view goes out only once its pools read quotable (card near-dcl-route): a buy's views sent ahead
+  // with the pool reads saved one round trip, but on the device's 8 candidates that is up to 16 views of paths with no
+  // pool on each provider, on every quote, past the paced seat's share; a path is quoted only when it exists.
 
   const feeView = nearTokenFeeView(token);
   const [meta, frozen, poolAnswers, account, feeAnswer] = await Promise.all([
@@ -202,15 +199,7 @@ export async function dclQuote(args: DclQuoteArgs): Promise<DclQuote> {
   const paths = pathsOf(pools, token !== wrap && !frozenList.includes(wrap));
   if (paths.length === 0) throw new RheaQuoteRefused("no-pool", `no Running DCL pool among ${JSON.stringify(ids)} joins ${tokenIn} to ${tokenOut}, directly or through ${wrap}`);
 
-  const outs = await Promise.all(
-    paths.map(async (path) => {
-      const sent = early.get(path.join(","));
-      if (sent === undefined || venueIn !== amountIn) return quoteOf(path, venueIn);
-      const r = await sent;
-      if ("e" in r) throw r.e;
-      return r.v;
-    }),
-  );
+  const outs = await Promise.all(paths.map((path) => quoteOf(path, venueIn)));
   let best = -1;
   outs.forEach((o, k) => {
     if (o > 0n && (best < 0 || o > (outs[best] as bigint))) best = k;

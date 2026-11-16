@@ -11,6 +11,7 @@ import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
 import type { NearSwapCall } from "../../kit/src/trade/near/swap.ts";
 import type { SignedNearSwapDelegate } from "../../wallet/src/near/swap-delegate.ts";
 import { nearReads } from "../src/near-buy.ts";
+import { dclPoolsKept } from "../src/near-pools.ts";
 import { runNearBuy, type NearBuyDeps, type NearBuyStep } from "../src/near-trade.ts";
 import { AMOUNT, chain, TOKEN, USDC } from "./near-chain-fake.ts";
 
@@ -34,7 +35,8 @@ test("one buy's reads of each provider, step by step: 69 before this card, now a
     },
   });
   const pair = [rpc(FAST), rpc(DRPC)] as const;
-  const page = { network: "mainnet" as const, rpcs: () => pair, pools: async () => [9, 4512] };
+  // as the page binds them (src/main.ts): the session's DCL read of the token's own pools (card near-dcl-route)
+  const page = { network: "mainnet" as const, rpcs: () => pair, pools: async () => [9, 4512], dclKept: dclPoolsKept("mainnet", () => pair) };
   const deps: NearBuyDeps = {
     network: "mainnet",
     ...nearReads(page),
@@ -76,7 +78,50 @@ test("one buy's reads of each provider, step by step: 69 before this card, now a
     const total = Object.values(per).reduce((x, y) => x + y, 0);
     // create: W read (absent: its six asked at once) and the quote for the helper's body; register: W's light read,
     // the round's pair, two light reads back; swap: the pair and its baseline; receive: two light reads
-    assert.deepEqual(per, { payout: 0, create: 11, register: 19, swap: 11, receive: 6 }, `${n}: ${JSON.stringify(per)}`);
-    assert.equal(total, 47, n);
+    // card near-dcl-route: the creation's quote first reads the token's own four DCL pools once a session (src/near-pools.ts
+    // dclPoolsKept): none here, so no quote asks DCL anything, and every later read is pinned to Rhea classic
+    assert.deepEqual(per, { payout: 0, create: 15, register: 19, swap: 11, receive: 6 }, `${n}: ${JSON.stringify(per)}`);
+    assert.equal(total, 51, n);
   }
+});
+
+test("card near-dcl-route: the page's pair passes the flow's DCL candidates on, narrowed to the session's DCL read; pinned to classic it asks DCL nothing, pinned to DCL it asks Rhea classic nothing", async () => {
+  const k = chain();
+  k.c.exists = true;
+  const seen: string[] = [];
+  const rpc = (name: string): NearRpc => ({
+    name,
+    async query(params) {
+      if (name === FAST && "finality" in params) k.tick();
+      if (params.request_type === "call_function") seen.push(`${String(params.account_id)} ${String(params.method_name)}`);
+      return k.answer(params);
+    },
+  });
+  const pair = [rpc(FAST), rpc(DRPC)] as const;
+  const all = [100, 400, 2000, 10000].map((f) => `${TOKEN}|wrap.near|${f}`).concat([100, 400, 2000, 10000].map((f) => `${USDC}|wrap.near|${f}`));
+  const keptAsked: string[] = [];
+  const reads = (kept: string[]) => nearReads({ network: "mainnet" as const, rpcs: () => pair, pools: async () => [9, 4512], dclKept: async (t) => (keptAsked.push(t), kept) });
+  const ask = { side: "buy" as const, token: TOKEN, amountIn: AMOUNT, wallet: W, dclPools: all };
+  const dclAsked = () => seen.filter((x) => x.startsWith("dclv2.ref-labs.near ")).length;
+  const classicAsked = () => seen.filter((x) => x === "v2.ref-finance.near get_pool_by_ids").length;
+  // the session read finds no DCL pool of the token: the pair asks DCL nothing, classic's quote
+  let q = await reads([]).pair!(ask);
+  assert.equal(q.quote.exchange, "v2.ref-finance.near");
+  assert.equal(dclAsked(), 0);
+  assert.deepEqual(keptAsked, [TOKEN]);
+  // some kept: DCL asked beside classic (this chain has no DCL pool: DCL skipped for no pool, classic's quote)
+  seen.length = 0;
+  q = await reads([all[0]!, ...all.slice(4)]).pair!(ask);
+  assert.equal(q.quote.exchange, "v2.ref-finance.near");
+  assert.ok(dclAsked() > 0 && classicAsked() > 0);
+  assert.equal(seen.filter((x) => x === "dclv2.ref-labs.near get_pool").length, 2 * 5, "the 5 kept ids, on both providers");
+  // pinned to classic: DCL asked nothing
+  seen.length = 0;
+  await reads(all).pair!({ ...ask, venue: "classic" });
+  assert.equal(dclAsked(), 0);
+  // pinned to DCL: classic asked nothing (and this chain's DCL has no pool: refused, nothing to sign)
+  seen.length = 0;
+  await assert.rejects(reads(all).pair!({ ...ask, venue: "dcl" }));
+  assert.equal(classicAsked(), 0);
+  assert.ok(dclAsked() > 0);
 });

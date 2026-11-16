@@ -14,6 +14,7 @@ import type { NearSwapCall } from "../../kit/src/trade/near/swap.ts";
 import type { SignedNearSwapDelegate } from "../../wallet/src/near/swap-delegate.ts";
 import type * as Pace from "../../wallet/src/pace.ts";
 import { nearReads } from "../src/near-buy.ts";
+import { dclPoolsKept } from "../src/near-pools.ts";
 import { runNearBuy, type NearBuyDeps, type NearBuyStep } from "../src/near-trade.ts";
 import { AMOUNT, chain, TOKEN, USDC } from "./near-chain-fake.ts";
 
@@ -165,7 +166,8 @@ async function buy(mode: Seat | "share", poolPages = 0, drpcBusy?: readonly [num
   }) as typeof fetch;
   const P = await fresh();
   const pair = [P.nearSeatRpc("mainnet", fetchFn), P.pacedNearRpc(NET.drpc, fetchFn)] as readonly [NearRpc, NearRpc];
-  const page = { network: "mainnet" as const, rpcs: () => pair, pools: async () => [9, 4512] };
+  // as the page binds them (src/main.ts): the session's DCL read of the token's own pools (card near-dcl-route)
+  const page = { network: "mainnet" as const, rpcs: () => pair, pools: async () => [9, 4512], dclKept: dclPoolsKept("mainnet", () => pair) };
   const log: string[] = [];
   const deps: NearBuyDeps = {
     network: "mainnet",
@@ -214,7 +216,12 @@ test("a session's first NEAR buy with the seat up at the helper's per-caller sha
   const r = await buy("share", 6);
   console.log("share:", r.ms, "ms", "refused", r.refused, "most in 10 s", r.most, JSON.stringify(r.asked));
   assert.ok("result" in r.a && r.a.result.stage === "filled", JSON.stringify(r.a));
-  assert.ok(r.refused <= 1, `the helper refused ${r.refused} of ${r.asked.seat}`);
+  // card near-dcl-route: the buy's first quote also reads the token's own DCL pools once a session (src/near-pools.ts
+  // dclPoolsKept, 4 reads; a token not on DCL asks DCL nothing more): its busiest 10 s meets the share's 429 4 times, not
+  // once, each waited out on the seat, and the buy takes 15.8 s on this clock, not 14.4 s (a5fb2af73: 51 seat reads, 1
+  // refused, 14.4 s). The bounds hold both: a change that adds reads past them fails here.
+  assert.ok(r.refused <= 4, `the helper refused ${r.refused} of ${r.asked.seat}`);
+  assert.ok(r.ms <= 15_800, `the buy took ${r.ms} ms`);
   assert.equal(r.asked.keyless, 0, "a share's 429 waited out, the seat never taken for down");
 }));
 

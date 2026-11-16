@@ -257,7 +257,8 @@ function dclInputs(p: Parsed): { request: NearSwapRequest; quote: DclQuote } {
   const quote = {
     venue: "dcl",
     network: t.network,
-    exchange: NEAR_DCL.mainnet.exchange,
+    // parseBody takes DCL hops only on a network DCL is on (t.network in NEAR_DCL)
+    exchange: NEAR_DCL[t.network as keyof typeof NEAR_DCL].exchange,
     side: t.side,
     token: t.token,
     tokenIn,

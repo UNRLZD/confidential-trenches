@@ -48,7 +48,7 @@
 import { HELPER_BIND_DEPOSIT_CAP, HELPER_BIND_DEPOSIT_CODES, HELPER_BIND_TRADE_CODES, type HelperBindTradeRequest, type HelperNearTrade } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../kit/src/near/networks.ts";
 import type { RheaQuote } from "../../kit/src/near/rhea.ts";
-import { dclSwapCalls, NEAR_DCL, type DclQuote } from "../../kit/src/near/dcl.ts";
+import { dclSwapCalls, type DclQuote } from "../../kit/src/near/dcl.ts";
 import { nearSellAmount } from "../../kit/src/near/token-fee.ts";
 import { NEAR_SWAP_SLIPPAGE_MAX_BPS, nearSwapCalls, nearSwapFloor, NearSwapRefused, type NearSwapCall, type NearSwapRequest } from "../../kit/src/trade/near/swap.ts";
 import { isDclQuote, type NearSwapWalletArgs, type NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
@@ -61,20 +61,20 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/note
 import { refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { landNote } from "../../wallet/src/notes/restore.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
-import { NEAR_BUY_READ_TRIES, NEAR_BUY_READ_WAIT_MS, type NearHeldState, type NearHelperAnswer, type NearPair, type NearPairAsk } from "./near-trade.ts";
+import { NEAR_BUY_READ_TRIES, NEAR_BUY_READ_WAIT_MS, nearTradeHops, type NearHeldState, type NearHelperAnswer, type NearPair, type NearPairAsk } from "./near-trade.ts";
 import { legCause } from "./pool-sell.ts";
 import { dclCandidates } from "./near-pools.ts";
 
 export type NearSellAsk = { token: string; slippageBps: number };
 /** W and the quote at one block (the kit's readNearSwapPair): the quote Rhea classic's, or Rhea DCL's when the pair is
  *  read with DCL's candidates and DCL pays more (card near-dcl-sell). */
-export type NearSellPair = { state: NearSwapWalletState; quote: RheaQuote | DclQuote; baseline?: bigint };
+export type NearSellPair = NearPair;
 /** What a sell's pair read asks: the trade's, and Rhea DCL's candidate pool ids made on the device (near-pools.ts
  *  dclCandidates, never a server's list) for the pair to quote beside Rhea classic. `venue`: the pair read on that venue
  *  alone ("dcl": DCL's candidates and no classic pools; "classic": no DCL candidates), so a re-quote and the swap's pair
  *  stay on the sale's first quote's venue: a token's fee is scoped per venue (token-fee.ts nearTokenFeeApplies), and the
  *  amount sold (nearSellAmount) is cut for that venue's fee alone. */
-export type NearSellPairAsk = NearPairAsk & { dclPools?: readonly string[]; venue?: "classic" | "dcl" };
+export type NearSellPairAsk = NearPairAsk;
 export type NearSellStep = "read" | "quote" | "register" | "swap" | "receive" | "note" | "move" | "done";
 /** One of the sale's notes as the store holds it: its id, its state, and the amount of the last call written for it (null: none). */
 export type NearReturnNote = { id: string; state: string; amount: bigint | null };
@@ -326,14 +326,6 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
       const venue = isDclQuote(q) ? "dcl" : "classic";
       if (amount !== held) ({ s: seen, q } = await fresh("quote", amount, undefined, undefined, venue));
       const request: NearSwapRequest = { network: deps.network, side: "sell", token: ask.token, amountIn: amount, wallet: wallet.id, slippageBps: ask.slippageBps };
-      // the wire's hops: a classic quote's own; a DCL quote's pool ids in the Swap's order, each hop naming its own tokens
-      // (the token to wNEAR, then wNEAR to USDC, on two pools)
-      const hopsOf = (x: RheaQuote | DclQuote): HelperNearTrade["hops"] => {
-        if (!isDclQuote(x)) return x.hops.map((h) => ({ pool: h.pool, token_in: h.tokenIn, token_out: h.tokenOut }));
-        const wrap = NEAR_DCL[deps.network as "mainnet"].wrap;
-        const ends = x.poolIds.length === 1 ? [x.tokenIn, x.tokenOut] : [x.tokenIn, wrap, x.tokenOut];
-        return x.poolIds.map((pool, i) => ({ pool, token_in: ends[i]!, token_out: ends[i + 1]! }));
-      };
       const tradeOf = (x: RheaQuote | DclQuote): HelperNearTrade => ({
         network: deps.network,
         side: "sell",
@@ -342,7 +334,8 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
         amount_in: amount.toString(),
         slippage_bps: ask.slippageBps,
         venue_out: x.venueOut.toString(),
-        hops: hopsOf(x),
+        // the wire's hops: a classic quote's own, or a DCL quote's pool ids each with its own tokens (near-trade.ts)
+        hops: nearTradeHops(deps.network, x),
       });
       const send = async (step: NearSellStep, body: HelperBindTradeRequest, count: number): Promise<void> => {
         let a: NearHelperAnswer;

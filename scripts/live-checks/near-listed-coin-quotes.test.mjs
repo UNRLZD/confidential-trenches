@@ -26,10 +26,10 @@ test("good: the branch's lists, every NEAR coin with a route a buy quotes: PASS"
   assert.ok(A.good.run.coins.length > 0 && !A.good.run.coins.includes(HOODL));
 });
 
-test("bad: the deployed helper before this card lists hoodl with no Rhea classic pool: FAIL, naming it", () => {
+test("bad: the deployed helper before this card lists hoodl with no Rhea classic pool (nor, then, DCL read): FAIL, naming it", () => {
   const j = judge(A.bad.run);
   assert.equal(j.verdict, "FAIL");
-  assert.ok(j.lines.some((l) => l.startsWith("BAD") && l.includes(HOODL) && l.includes("no Rhea classic pool")), j.lines.join("\n"));
+  assert.ok(j.lines.some((l) => l.startsWith("BAD") && l.includes(HOODL) && l.includes("no Rhea classic pool or DCL pool")), j.lines.join("\n"));
   assert.equal(j.lines.filter((l) => l.startsWith("BAD")).length, 40);
 });
 
