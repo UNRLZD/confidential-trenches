@@ -48,8 +48,8 @@ test("planted from the good answer: a key held (a state only, read again), a rea
   Object.assign(refused.reads[1], { status: 429, result: undefined, noAnswer: "HTTP 429", kept: { "retry-after": "1", "server-timing": null } });
   assert.equal(judge(refused).verdict, "FAIL");
   const waited = clone(A.good);
-  waited.reads[3].kept["server-timing"] = 'rpc-wait;dur=1004, rpc;dur=90;desc="ROBINHOOD_RPC_URL"';
-  assert.ok(judge(waited).lines.some((l) => /^BAD \[robinhood keyed\] eth_getLogs the helper's wait before its send 1004 ms/.test(l)));
+  waited.reads[3].kept["server-timing"] = 'rpc-wait;dur=2004, rpc;dur=90;desc="ROBINHOOD_RPC_URL"';
+  assert.ok(judge(waited).lines.some((l) => /^BAD \[robinhood keyed\] eth_getLogs the helper's wait before its send 2004 ms/.test(l)));
   const slow = clone(A.good);
   slow.reads[0].ms = 3_400;
   assert.equal(judge(slow).verdict, "FAIL");
@@ -113,4 +113,22 @@ test("run() reads again while only a key's state fails, then stops at RETRY_MS",
   const r = await check.run("https://ct-api.unrealized.trade", replay, () => t, async (ms) => void (t += ms));
   assert.equal(r.verdict, "FAIL");
   assert.equal(healthReads, check.RETRY_MS / check.RETRY_EVERY_MS);
+});
+
+// live run 43930146683 (16 Nov 18:48Z, helper e44158fd4 on dRPC's free pace, 0.8 a second): a keyed Base eth_getLogs
+// waited 840 ms for the pace's refill, one turn, and the check's 500 ms (written at 20 a second, a 50 ms turn) failed it.
+// A caller waits at most one refill of the slowest keyed pace the route draws (apps/helper/src/limits/limits.ts
+// CALLER_ROOM's design: 1/perS behind any crowd): 1,250 ms on dRPC's. Made from the good answer with the live wait.
+test("a keyed read's wait of one pace turn (the live 840 ms, made from the good answer) PASSes; past one turn of the slowest keyed pace FAILs", () => {
+  assert.equal(check.WAIT_MAX_MS, 1_250);
+  const at = (ms) => {
+    const r = clone(A.good);
+    r.reads[1].kept["server-timing"] = `rpc-wait;dur=${ms}, rpc;dur=90;desc="BASE_RPC_URL_DRPC_1"`;
+    return judge(r);
+  };
+  const turn = at(840);
+  assert.equal(turn.verdict, "PASS", turn.lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  const past = at(1_300);
+  assert.equal(past.verdict, "FAIL");
+  assert.ok(past.lines.some((l) => /^BAD \[base keyed\] eth_getLogs the helper's wait before its send 1300 ms, at most 1250/.test(l)), past.lines.join("\n"));
 });
