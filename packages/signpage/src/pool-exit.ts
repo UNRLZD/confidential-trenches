@@ -20,6 +20,7 @@ import { checkOneClickExitQuote, oneClickExitRequest, type ExitAsk, type ExitCha
 import type { PoolChain, PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { POOL_DEPOSIT_NETWORK, askDepositQuoteAgain } from "../../wallet/src/deposit/quote.ts";
 import { usdOf } from "./pool-deposit-address.ts";
+import { ReadBusy } from "./read-waits.ts";
 import { DEPOSIT_ANSWERED, DEPOSIT_QUOTE_PATH } from "./rules/deposit-dry.ts";
 import { EVM_ADDRESS } from "./rules/pool.ts";
 import { EXIT_CHAINS, type PoolReady } from "./withdraw/pool-form.ts";
@@ -69,6 +70,8 @@ export function poolExit(deps: PoolExitDeps, ready: PoolReady): ((refundTo: stri
     const ask: ExitAsk = { from: ready.chain, to: dest, recipient: ready.to, payout: ready.amount, refundTo };
     const request = oneClickExitRequest(ask, now());
     const reply = await askDepositQuoteAgain(request, deps.fetch, undefined, undefined, deps.stop?.());
+    // the helper's or 1Click's busy answer: the withdraw asks again after its wait (card pool-buy-waits-out-a-throttle)
+    if (reply.status === 429 || (reply.status >= 500 && reply.status <= 599)) throw new ReadBusy(reply.status);
     if (!DEPOSIT_ANSWERED.includes(reply.status)) throw new PoolExitRefused(`status ${reply.status}`);
     // the prices as they are at the check, both coins' (USDC on NEAR at 1)
     const pin = deps.price(ready.chain);

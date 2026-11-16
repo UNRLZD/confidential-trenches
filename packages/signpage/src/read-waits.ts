@@ -98,6 +98,17 @@ export const clockOf = (h: { now?: () => bigint | number }): ReadClock => () => 
 
 /** Whether a fault waits (see the header): the page client's transport fault; any other error answers at once. */
 export const waitsOn = (e: unknown): boolean => e instanceof SolanaRpcTransportError;
+/** A vendor's answer through the helper that is busy, HTTP 429 or a 5xx (the withdraw's 1Click deposit address,
+ *  pool-exit.ts): nothing was asked of it but a quote, so the withdraw waits on it as on a transport fault, its next
+ *  attempt asking again (card pool-buy-waits-out-a-throttle). */
+export class ReadBusy extends Error {
+  readonly code: "http_429" | "http_5xx";
+  constructor(status: number) {
+    super(`a busy answer (HTTP ${status})`);
+    this.name = "ReadBusy";
+    this.code = status === 429 ? "http_429" : "http_5xx";
+  }
+}
 
 /** A kind stopped by a sign out while it waited, or before it ran: it answers failed, nothing signed. */
 export class ReadStopped extends Error {
