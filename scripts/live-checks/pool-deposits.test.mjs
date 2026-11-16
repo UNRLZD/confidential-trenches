@@ -1,5 +1,8 @@
 // node --test scripts/live-checks/pool-deposits.test.mjs: the live check replays recorded answers
-// (pool-deposits.answers.json). good: the slice 2 devnet deposit (pool-deposits.run.json, built and priced by the kit)
+// (pool-deposits.answers.json). The live check reads SIGN_HOST only (card live-checks-read-mainnet-only): good_live,
+// SIGN_HOST read on 16 Nov (a real run, --record), the mainnet build with no testnet pin and the EVM deposit: PASS;
+// bad.evm (real, release-72) FAILs it; a bundle carrying a testnet pin (made) FAILs it. The slice 2 devnet run's
+// recordings replay through signpage-pool-notes's check, as the live check read them before. good: the slice 2 devnet deposit (pool-deposits.run.json, built and priced by the kit)
 // read on two devnet RPCs, and SIGN_HOST's /app.js with no testnet pin: PASS. bad: the same reads with another
 // precommitment in the run's place, whose mark does not exist: FAIL. Planted on the good one: the deposit tx failed, the
 // mark's value another, a state leaf another, U not emptied (the cost priced above what the program took): FAIL.
@@ -13,7 +16,8 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EVM_MARKS, ROUTED_FROM, RUN, check, routedReleases } from "./pool-deposits.mjs";
+import { EVM_MARKS, ROUTED_FROM, RUN, check, judgeEvm, routedReleases } from "./pool-deposits.mjs";
+import { check as notesCheck } from "./signpage-pool-notes.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-deposits.answers.json", import.meta.url), "utf8"));
 const R = JSON.parse(readFileSync(RUN, "utf8"));
@@ -31,7 +35,24 @@ function replay(answers, plant = (a) => a.json) {
     return { ok: a.status === 200, status: a.status, json: async () => json };
   };
 }
-const run = (rec, plant, sign = rec.sign, evm = rec.evm) => check({ run: R, precommitment: rec.precommitment, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {}, sign, evm });
+/** A devnet recording judged as the check judged it before it read mainnet only: the run's reads (signpage-pool-notes's
+ *  check, SIGN_HOST's line with them) and the EVM lines. */
+const run = async (rec, plant, sign = rec.sign, evm = rec.evm) => {
+  const r = await notesCheck({ run: R, precommitment: rec.precommitment, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {}, sign });
+  const lines = [...r.lines, ...judgeEvm(evm)];
+  return { lines, ok: !lines.some((l) => l.startsWith("BAD")) };
+};
+
+test("the live check reads SIGN_HOST only: good_live PASSes; release-72's page (bad.evm), a testnet pin in the bundle (made): FAIL", () => {
+  const g = check(A.good_live);
+  assert.equal(g.ok, true, g.lines.join("\n"));
+  assert.equal(g.lines.length, 1 + 2 + Object.keys(EVM_MARKS).length);
+  assert.ok(!g.lines.some((l) => /devnet/.test(l)));
+  assert.equal(check({ sign: A.good_live.sign, evm: A.bad.evm }).ok, false);
+  const pinned = check({ sign: { ...A.good_live.sign, found: [A.good.deployment.program_id] }, evm: A.good_live.evm });
+  assert.ok(pinned.lines.some((l) => l.startsWith("BAD  SIGN_HOST's /app.js is the mainnet build")), pinned.lines.join("\n"));
+  assert.equal(check({}).ok, false, "nothing read");
+});
 const bad = (r, start) => {
   assert.equal(r.ok, false);
   assert.ok(r.lines.some((l) => l.startsWith(`BAD  ${start}`)), r.lines.join("\n"));
@@ -111,8 +132,8 @@ test("the pin is today's: the good recording names today's pool; a run on the ol
   assert.equal(R.program, now.program);
   assert.equal(R.pool, now.pool);
   // the same reads for a run on the pool before the re-pin: refused on the run line, whatever the answers say
-  const old = await check({ run: { ...R, program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" }, precommitment: A.good.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign, ...(A.good.evm ? { evm: A.good.evm } : {}) }).catch((e) => ({ ok: false, lines: [`BAD  ${e.message}`] }));
+  const old = await notesCheck({ run: { ...R, program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" }, precommitment: A.good.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign, ...(A.good.evm ? { evm: A.good.evm } : {}) }).catch((e) => ({ ok: false, lines: [`BAD  ${e.message}`] }));
   bad(old, "the run is on the pinned devnet pool 92YuYhb4");
   // a replay may not hand the check its recording's deploy record: the check reads today's alone
-  await assert.rejects(check({ run: R, deployment: A.good.deployment, precommitment: A.good.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign }), /today's devnet pin only/);
+  await assert.rejects(notesCheck({ run: R, deployment: A.good.deployment, precommitment: A.good.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign }), /today's devnet pin only/);
 });

@@ -3,7 +3,7 @@
 // pays the relay fee in the same receipt as the recipient's amount (review A-01: one payout receipt, all or none), so a
 // fee account the token refuses would fail every relayed payout whole. The helper holds such a send (503 relayer_low,
 // apps/helper/src/withdraw/send.ts check 7b); this check reads the same thing on what is deployed, after each deploy.
-// For each network (mainnet USDC, the testnet token) it reads GET /v1/withdraw/fee with Origin APP_HOST:
+// On NEAR mainnet (mainnet USDC; card live-checks-read-mainnet-only: a listed check reads no test network) it reads GET /v1/withdraw/fee with Origin APP_HOST:
 //   - 200: the answer's fee_recipient, then on that network's two NEAR RPCs of two operators, at one final block both
 //     hold (finals at most 30 blocks apart, one hash), the token's storage_balance_of(fee_recipient) and
 //     is_blocklisted(fee_recipient), each answered at that block with the same bytes on both. It passes when the
@@ -12,7 +12,7 @@
 //     account to check: listed as "na", never a pass on its own (relayer-withdraw-fee is the check that the release's
 //     relayer is quoted).
 //   - anything else: FAIL.
-// At least one network must be quoted. Every RPC read that fails or disagrees is a FAIL.
+// At least one network must be quoted: mainnet, the one read. Every RPC read that fails or disagrees is a FAIL.
 // After: helper
 //   node scripts/live-checks/vault-review-fixes-1.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
@@ -22,8 +22,8 @@ import { writeFileSync } from "node:fs";
 const KEY = "vault-review-fixes-1";
 export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
-export const TOKENS = { mainnet: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", testnet: "bf-usdc-20261101t022248.testnet" }; // gitleaks:allow (public account ids)
-export const PAIRS = { mainnet: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"], testnet: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"] };
+export const TOKENS = { mainnet: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1" }; // gitleaks:allow (a public account id)
+export const PAIRS = { mainnet: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"] };
 const SPREAD = 30;
 const ACCOUNT = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 const DEC = /^(0|[1-9][0-9]{0,38})$/;
@@ -68,16 +68,17 @@ async function quoted(fetchFn, base, token) {
   return { status: r.status, body, text };
 }
 
-/** The check: { ok, lines }. `fetchFn` takes both the helper's GETs and the RPCs' POSTs (a recorded run replays both). */
-export async function check({ base = BASE, fetchFn = fetch } = {}) {
+/** The check: { ok, lines }. `fetchFn` takes both the helper's GETs and the RPCs' POSTs (a recorded run replays both);
+ *  `tokens` and `pairs` name the networks read, each network's token and its two RPCs (mainnet's, live). */
+export async function check({ base = BASE, fetchFn = fetch, tokens = TOKENS, pairs = PAIRS } = {}) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   let checked = 0;
-  for (const network of ["mainnet", "testnet"]) {
+  for (const network of Object.keys(tokens)) {
     const tag = `[${network}]`;
     let q;
     try {
-      q = await quoted(fetchFn, base, TOKENS[network]);
+      q = await quoted(fetchFn, base, tokens[network]);
     } catch (e) {
       say(false, `${tag} GET /v1/withdraw/fee: ${e.message.slice(0, 200)}`);
       continue;
@@ -93,16 +94,16 @@ export async function check({ base = BASE, fetchFn = fetch } = {}) {
     const fee = q.body.fee_recipient;
     checked++;
     try {
-      const b = await agreed(fetchFn, PAIRS[network]);
+      const b = await agreed(fetchFn, pairs[network]);
       const [bal, listed] = await Promise.all([
-        viewBoth(fetchFn, PAIRS[network], b, TOKENS[network], "storage_balance_of", { account_id: fee }),
-        viewBoth(fetchFn, PAIRS[network], b, TOKENS[network], "is_blocklisted", { account_id: fee }),
+        viewBoth(fetchFn, pairs[network], b, tokens[network], "storage_balance_of", { account_id: fee }),
+        viewBoth(fetchFn, pairs[network], b, tokens[network], "is_blocklisted", { account_id: fee }),
       ]);
       const registered = bal !== null && typeof bal === "object" && DEC.test(bal.total ?? "");
-      say(registered, `${tag} storage_balance_of(${fee}) on ${TOKENS[network]} at block ${b.height}: ${JSON.stringify(bal)} on both RPCs${registered ? "" : ": not registered, the token refuses its fee"}`);
+      say(registered, `${tag} storage_balance_of(${fee}) on ${tokens[network]} at block ${b.height}: ${JSON.stringify(bal)} on both RPCs${registered ? "" : ": not registered, the token refuses its fee"}`);
       say(listed === false, `${tag} is_blocklisted(${fee}) at block ${b.height}: ${JSON.stringify(listed)} on both RPCs${listed === false ? "" : ": the token refuses its fee"}`);
     } catch (e) {
-      say(false, `${tag} ${fee} on ${TOKENS[network]}: ${e.message.slice(0, 200)}`);
+      say(false, `${tag} ${fee} on ${tokens[network]}: ${e.message.slice(0, 200)}`);
     }
   }
   if (checked === 0) say(false, "no network quoted a relayer: no fee account read");

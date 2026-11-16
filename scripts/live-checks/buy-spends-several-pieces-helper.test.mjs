@@ -1,5 +1,8 @@
 // node --test scripts/live-checks/buy-spends-several-pieces-helper.test.mjs: the live check replays recorded runs
-// (buy-spends-several-pieces-helper.answers.json). good: this card's helper (dab79323) run on a Mac with no provider
+// (buy-spends-several-pieces-helper.answers.json). The live check reads the helper's Solana mainnet route only (card
+// live-checks-read-mainnet-only). good_live: the deployed HELPER_HOST (0a7b35d7), 16 Nov, a real run (--record): the
+// mainnet route answers the header read and refuses the full read: PASS; bad_before's mainnet route (real): FAIL. The
+// runs below read the devnet route too and replay under TWO_ROUTES, the routes they were read on. good: this card's helper (dab79323) run on a Mac with no provider
 // key (the public mainnet endpoint, SOLANA_DEVNET_RPC_URL the public devnet one), 13 Nov: both routes answer the header
 // read 200 with a block height and refuse the full read 400: PASS. bad_before: the deployed HELPER_HOST at 4f673c93
 // (main before this card), 13 Nov: both routes refuse the header read 400 method_not_allowed: FAIL. bad_full_forwarded,
@@ -43,17 +46,32 @@ const replay = (rec, sent = [], over = () => undefined) => async (url, init) => 
   const headers = { ...(r.commit ? { "x-helper-commit": r.commit } : {}), ...(r.acao ? { "access-control-allow-origin": r.acao } : {}) };
   return new Response(bodyOf(r.answer), { status: r.status, headers });
 };
-const run = async (rec, over) => judge(await read(BASE, replay(rec, [], over)));
+/** The routes the older recordings were read on: the mainnet route and the devnet one the check read before. */
+const TWO_ROUTES = [...ROUTES, "solana-devnet"];
+const run = async (rec, over) => judge(await read(BASE, replay(rec, [], over), TWO_ROUTES), TWO_ROUTES);
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD")).map((l) => l.slice(0, l.indexOf(" ", l.indexOf("]") + 2)));
 const edit = (route, k, f) => ({ ...A.good, reads: A.good.reads.map((x) => (x.route === route && x.read === k ? f(structuredClone(x)) : x)) });
 
+test("the live check reads the mainnet route only: good_live PASSes, replayed through read() too; bad_before's mainnet route FAILs", async () => {
+  assert.deepEqual(ROUTES, ["solana"]);
+  const g = judge(A.good_live);
+  assert.equal(g.verdict, "PASS", g.lines.join("\n"));
+  assert.equal(g.lines.length, 5);
+  const sent = [];
+  assert.equal(judge(await read(BASE, replay(A.good_live, sent))).verdict, "PASS");
+  assert.deepEqual([...new Set(sent.map((x) => x.route))], ["solana"]);
+  const b = judge(await read(BASE, replay(A.bad_before)));
+  assert.deepEqual(bad(b), ["BAD [solana] header"]);
+  assert.equal(judge({ reads: [] }).verdict, "FAIL");
+});
+
 test("recorded good run: this card's helper answers the header read and refuses the full read on both routes: PASS", async () => {
   const sent = [];
-  const r = judge(await read(BASE, replay(A.good, sent)));
+  const r = judge(await read(BASE, replay(A.good, sent), TWO_ROUTES), TWO_ROUTES);
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
-  assert.equal(r.lines.length, ROUTES.length * 5);
+  assert.equal(r.lines.length, TWO_ROUTES.length * 5);
   // the header read is the page's own params: [the slot read, the kit's object], the full read differs only in transactionDetails
-  for (const route of ROUTES) {
+  for (const route of TWO_ROUTES) {
     const [s, h, f] = sent.filter((x) => x.route === route);
     assert.deepEqual([s.method, s.params], ["getSlot", [{ commitment: "finalized" }]]);
     const slot = A.good.reads.find((x) => x.route === route && x.read === "slot").answer.result;
@@ -61,7 +79,7 @@ test("recorded good run: this card's helper answers the header read and refuses 
     assert.deepEqual([f.method, f.params], ["getBlock", [slot, { ...HELPER_SOLANA_BLOCK_HEADER, transactionDetails: "full" }]]);
   }
   // a replayed run reads as the recorded one
-  assert.deepEqual((await read(BASE, replay(A.good))).reads.map(({ ms, ...x }) => x), A.good.reads.map(({ ms, ...x }) => x));
+  assert.deepEqual((await read(BASE, replay(A.good), TWO_ROUTES)).reads.map(({ ms, ...x }) => x), A.good.reads.map(({ ms, ...x }) => x));
 });
 
 test("recorded bad run: the deployed helper before this card refuses the header read on both routes: FAIL", async () => {
@@ -85,8 +103,8 @@ test("made from the good run: rewards in the header answer, an error, a * origin
   assert.deepEqual(bad(await run(star)), ["BAD [solana] allow-origin:"]);
   const half = edit("solana-devnet", "slot", (x) => ((x.answer.result = 1.5), x));
   assert.deepEqual(bad(await run(half)), ["BAD [solana-devnet] finalized"]);
-  assert.deepEqual(bad(judge({ reads: A.good.reads.filter((x) => !(x.route === "solana" && x.read === "full")) })), ["BAD [solana] full"]);
-  assert.equal(judge({ reads: [] }).verdict, "FAIL");
+  assert.deepEqual(bad(judge({ reads: A.good.reads.filter((x) => !(x.route === "solana" && x.read === "full")) }, TWO_ROUTES)), ["BAD [solana] full"]);
+  assert.equal(judge({ reads: [] }, TWO_ROUTES).verdict, "FAIL");
 });
 
 test("a 429 or a 502 on a read, twice: INCONCLUSIVE, never PASS or FAIL; once: read again and judged", async () => {

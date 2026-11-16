@@ -9,14 +9,15 @@
 //     run's one stub (apps/terminal/test/e2e/buy/market-token.json): its top level, its row and its risk keys. The run
 //     answers that read itself for the devnet mint, so a field the helper adds or drops makes the stub a shape the
 //     deployed helper no longer gives, and this check fails before the run tests a token page no user sees;
-//   - /v1/rpc/solana-devnet, asked from SIGN_HOST's origin: getLatestBlockhash answers 200 with CORS for SIGN_HOST and a
-//     blockhash (the signing page's devnet reads and the run's second RPC).
+//   - /v1/rpc/solana, asked from SIGN_HOST's origin: getLatestBlockhash answers 200 with CORS for SIGN_HOST and a
+//     blockhash (the mainnet signing page's second Solana provider). It reads Solana mainnet only (card
+//     live-checks-read-mainnet-only: a listed check reads no test network; the helper's devnet route is not read).
 // After: app helper
-// Bundle: out the helper's market and devnet RPC answers, and the response headers APP_HOST adds
+// Bundle: out the helper's market and Solana RPC answers, and the response headers APP_HOST adds
 // Serial: jupiter-budget 90
 //   node scripts/live-checks/app-a2-e2e.mjs [--as <origin>] [--record <file>]
 //     --as asks the helper's reads from another origin (the recorded bad answer: an origin the helper does not serve)
-//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper's devnet RPC gave no answer: a 429, a
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper's Solana RPC gave no answer: a 429, a
 //     failed fetch, a body that is no JSON-RPC answer; provider-answer.mjs rpcAnswer, read again once). The record holds statuses, headers, mark counts and field names, never the values.
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -51,8 +52,8 @@ export function shapeOf(answer) {
 }
 export const STUB_SHAPE = shapeOf(JSON.parse(readFileSync(STUB, "utf8")));
 
-/** The verdict on a record: { ok, verdict, lines }: PASS, FAIL on any wrong answer, INCONCLUSIVE when the helper's devnet
- *  RPC gave no answer and nothing else is wrong. */
+/** The verdict on a record: { ok, verdict, lines }: PASS, FAIL on any wrong answer, INCONCLUSIVE when the helper's
+ *  Solana RPC gave no answer and nothing else is wrong. */
 export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
@@ -76,13 +77,13 @@ export function judge(rec) {
     const diff = Array.isArray(live) ? [...live.filter((x) => !want.includes(x)).map((x) => `+${x}`), ...want.filter((x) => !live.includes(x)).map((x) => `-${x}`)].join(" ") : "none";
     say(same, `market token ${k} fields as the run's stub${same ? "" : `: ${diff}`}`);
   }
-  const r = rec?.devnet ?? {};
+  const r = rec?.rpc ?? {};
   const quiet = typeof r.noAnswer === "string";
-  if (quiet) lines.push(`--  devnet RPC: ${r.noAnswer}`);
+  if (quiet) lines.push(`--  Solana RPC: ${r.noAnswer}`);
   else {
-    say(r.status === 200, `devnet RPC answered ${r.status ?? "nothing"}`);
-    say(r.cors === SIGN_ORIGIN, `devnet RPC CORS for SIGN_HOST: ${r.cors ?? "none"}`);
-    say(r.blockhash === true, `devnet RPC gave a blockhash: ${r.blockhash === true}`);
+    say(r.status === 200, `Solana RPC answered ${r.status ?? "nothing"}`);
+    say(r.cors === SIGN_ORIGIN, `Solana RPC CORS for SIGN_HOST: ${r.cors ?? "none"}`);
+    say(r.blockhash === true, `Solana RPC gave a blockhash: ${r.blockhash === true}`);
   }
   const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
   return { ok: verdict === "PASS", verdict, lines };
@@ -104,8 +105,8 @@ export async function collect({ as = null } = {}) {
     const mj = mr.ok ? await mr.json() : null;
     rec.market = { status: mr.status, cors: mr.headers.get("access-control-allow-origin"), shape: mj ? shapeOf(mj) : null };
     // asked as SIGN_HOST's page asks (its Origin), so the answer carries its status and CORS header
-    const ra = await rpcAnswer(`${HELPER}/v1/rpc/solana-devnet`, "getLatestBlockhash", [{ commitment: "confirmed" }], { headers: { origin: as ?? SIGN_ORIGIN } });
-    rec.devnet = { status: ra.status ?? null, cors: ra.acao ?? null, blockhash: typeof ra.result?.value?.blockhash === "string", ...(ra.noAnswer === undefined ? {} : { noAnswer: ra.noAnswer }) };
+    const ra = await rpcAnswer(`${HELPER}/v1/rpc/solana`, "getLatestBlockhash", [{ commitment: "confirmed" }], { headers: { origin: as ?? SIGN_ORIGIN } });
+    rec.rpc = { status: ra.status ?? null, cors: ra.acao ?? null, blockhash: typeof ra.result?.value?.blockhash === "string", ...(ra.noAnswer === undefined ? {} : { noAnswer: ra.noAnswer }) };
   } catch (e) {
     rec.error = String(e?.message ?? e).slice(0, 200);
   }

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Live check of card relayer-withdraw-fee: HELPER_HOST quotes an absolute relay fee the device can take (markets paper
 // LD5, M:96; H3.3, M:1068-1082; the route row, M:3361; the kit's HelperWithdrawFeeAnswer, packages/kit/src/helper/v1.ts).
-// It reads GET /v1/withdraw/fee for mainnet USDC, for the testnet token, and for another token, with Origin APP_HOST;
-// then, as the device does, its own fee_max for each network from its own reads (wallet src/withdraw/feemax.ts): the
+// It reads GET /v1/withdraw/fee for mainnet USDC and for another token, with Origin APP_HOST (NEAR mainnet only: card
+// live-checks-read-mainnet-only, a listed check reads no test network); then, as the device does, its own fee_max from
+// its own reads (wallet src/withdraw/feemax.ts): the
 // gas_price of one final block both of the network's release RPCs hold (finals at most 30 blocks apart, one hash, one
 // price), Ref pool 4512 on mainnet at one such block, byte-equal on both, its USDC side at 250,000 USDC or more, and the
 // token's storage_balance_bounds().min (the register_deposit a fresh A pays). It passes only when, for each network:
@@ -17,8 +18,8 @@
 //     window, a request's whole life since card near-cash-pays-any-amount; 100 before);
 // and another token answers 404 not_found, every answer under 1 KB with a full-sha X-Helper-Commit and APP_HOST echoed.
 // After: helper
-//   node scripts/live-checks/relayer-withdraw-fee.mjs [--base <url>] [--fastnear-mainnet <url>] [--fastnear-testnet <url>]
-//     [--record <file>] [--answer <file>]
+//   node scripts/live-checks/relayer-withdraw-fee.mjs [--base <url>] [--fastnear-mainnet <url>] [--record <file>]
+//     [--answer <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -27,11 +28,11 @@ import { loadWithdrawPins } from "./wallet-mainnet-relayer-pins.mjs";
 const KEY = "relayer-withdraw-fee";
 export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
-export const TOKENS = { mainnet: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", testnet: "bf-usdc-20261101t022248.testnet" }; // gitleaks:allow (public account ids)
+export const TOKENS = { mainnet: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1" }; // gitleaks:allow (a public account id)
 export const OTHER = "usdt.tether-token.near";
-export const PAIRS = { mainnet: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"], testnet: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"] };
+export const PAIRS = { mainnet: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"] };
 /** The device's FastNEAR side may be either of FastNEAR's URLs (wallet deposit/account.ts NEAR_NETWORKS): --fastnear picks one. */
-export const FASTNEAR = { mainnet: ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org"], testnet: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"] }; // near-rpc-operators: one operator (FastNEAR's alternatives; --fastnear picks one, paired with dRPC)
+export const FASTNEAR = { mainnet: ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org"] }; // near-rpc-operators: one operator (FastNEAR's alternatives; --fastnear picks one, paired with dRPC)
 /** The release's withdrawal relayer on each network: relay.ts's RELEASE_WITHDRAW_RELAYER, the one source. */
 export const RELEASE_RELAYER = Object.freeze(loadWithdrawPins());
 const FIELDS = ["relayer_account", "fee_recipient", "relay_fee", "gp", "px", "g_w", "valid_until_block"];
@@ -68,15 +69,16 @@ const json = (t) => {
 };
 
 /**
- * The check on one recorded run: { reads: [{ asked, status, headers, body }], device: { mainnet, testnet } }, each
- * device entry { height, gasPrice, poolToken, poolNear, registerDeposit } as decimal strings or an { error }.
+ * The check on one recorded run: { reads: [{ asked, status, headers, body }], device: { mainnet } }, each device entry
+ * { height, gasPrice, poolToken, poolNear, registerDeposit } as decimal strings or an { error }. `tokens` names the
+ * networks judged and each one's token (mainnet, live).
  */
-export function judge(run, relayer) {
+export function judge(run, relayer, tokens = TOKENS) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
-  for (const network of ["mainnet", "testnet"]) {
+  for (const network of Object.keys(tokens)) {
     const tag = `[${network}]`;
-    const r = run.reads.find((x) => x.asked === TOKENS[network]);
+    const r = run.reads.find((x) => x.asked === tokens[network]);
     const rel = relayer?.[network];
     if (!r) {
       say(false, `${tag} no read`);
@@ -143,8 +145,8 @@ async function viewBoth(urls, b, account, method, args, fetchFn) {
 
 export async function deviceReads(network, fetchFn = fetch) {
   try {
-    const [b, price] = await Promise.all([agreed(PAIRS[network], fetchFn), network === "mainnet" ? null : agreed(PAIRS.mainnet, fetchFn)]);
-    const pool = await viewBoth(PAIRS.mainnet, price ?? b, "v2.ref-finance.near", "get_pool", { pool_id: 4512 }, fetchFn);
+    const b = await agreed(PAIRS[network], fetchFn);
+    const pool = await viewBoth(PAIRS.mainnet, b, "v2.ref-finance.near", "get_pool", { pool_id: 4512 }, fetchFn);
     if (pool.pool_kind !== "SIMPLE_POOL" || pool.token_account_ids?.[0] !== TOKENS.mainnet || pool.token_account_ids?.[1] !== "wrap.near") throw new Error("not the USDC / wNEAR pool");
     if (!DEC.test(pool.amounts?.[0] ?? "") || !DEC.test(pool.amounts?.[1] ?? "") || BigInt(pool.amounts[0]) < POOL_MIN) throw new Error("the pool's amounts are not two decimals over its floor");
     const bounds = await viewBoth(PAIRS[network], b, TOKENS[network], "storage_balance_bounds", {}, fetchFn);
@@ -157,21 +159,21 @@ export async function deviceReads(network, fetchFn = fetch) {
 
 export async function read(base = BASE, fetchFn = fetch) {
   const reads = [];
-  for (const token of [TOKENS.mainnet, TOKENS.testnet, OTHER]) {
+  for (const token of [...Object.values(TOKENS), OTHER]) {
     const readAt = new Date().toISOString();
     const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/withdraw/fee?token=${encodeURIComponent(token)}`, { method: "GET", redirect: "manual", headers: { origin: APP, "cache-control": "no-cache" } });
     const headers = {};
     for (const [k, v] of r.headers) headers[k.toLowerCase()] = v;
     reads.push({ asked: token, readAt, status: r.status, headers, body: await r.text() });
   }
-  const device = { mainnet: await deviceReads("mainnet", fetchFn), testnet: await deviceReads("testnet", fetchFn) };
+  const device = { mainnet: await deviceReads("mainnet", fetchFn) };
   return { base, reads, device };
 }
 
 if (import.meta.main) {
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
-  for (const n of ["mainnet", "testnet"]) {
+  for (const n of Object.keys(FASTNEAR)) {
     const u = opt(`--fastnear-${n}`);
     if (u === undefined) continue;
     if (!FASTNEAR[n].includes(u)) {

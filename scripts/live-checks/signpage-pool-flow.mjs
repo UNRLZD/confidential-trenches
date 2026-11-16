@@ -22,8 +22,7 @@
 // - Card signpage-pool-flow-answers: a read that answers null names the provider's own answer (its HTTP status, the null
 //   and its context slot), a JSON-RPC error its code and message; a 429 is read again after its Retry-After; a null at
 //   a slot behind the other provider's value is read again within the walk's bound (onTwoOperators), the same slot never.
-// After: sign
-// Bundle: out devnet RPC reads
+// Runs: once, it reads the testnet build's devnet pool and run 7 on devnet RPCs, a record no deploy changes (card live-checks-read-mainnet-only: a listed check reads no test network); SIGN_HOST's mainnet build carrying none of TESTNET_ONLY is pool-deposits's check, after every sign deploy
 //   node scripts/live-checks/signpage-pool-flow.mjs [--program <id>] [--table <id>] [--record <file>]
 // --program or --table reads another account in the pin's place (the recorded bad answers). PASS exit 0, FAIL exit 1,
 // error exit 2.

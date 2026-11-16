@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/relayer-withdraw-send.test.mjs: the live check replays recorded runs
-// (relayer-withdraw-send.answers.json). good: apps/helper at card/vault-mainnet-record with mainnet carried for the v1
+// (relayer-withdraw-send.answers.json). The check asks mainnet USDC only now (card live-checks-read-mainnet-only): a
+// recorded run's testnet ask is no ask of the check's, so it is not judged. good: apps/helper at card/vault-mainnet-record with mainnet carried for the v1
 // vault, the mainnet proof's context for another vault refused bad_proof at check 2: PASS; good_testnet_carried: this
-// card's commit with the testnet network carried, bad_proof there: PASS; good_uncarried: no network carried, bad_shape:
+// card's commit with the testnet network carried, mainnet's ask bad_shape: PASS; good_uncarried: no network carried, bad_shape:
 // PASS. bad_old_ask_mainnet_carried: the mainnet ask as it was (the fixture made for the v1 vault's name) on a helper
 // carrying mainnet, past check 2 to bad_fee_recipient: FAIL on that line alone. bad_unmounted: main before this card,
 // /v1/withdraw not served (404): FAIL. Made from the good run: a send
@@ -21,7 +22,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "relayer-withdraw-send.answers.json"), "utf8"));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const edit = (run, name, f) => ({ ...run, reads: run.reads.map((x) => (x.asked === name ? f(x) : x)) });
-const TESTNET = "a real proof for another vault, the testnet token";
 
 test("recorded good runs: mainnet carried, the testnet network carried (bad_proof at check 2) and none carried (bad_shape): PASS", () => {
   const g = judge(A.good);
@@ -29,10 +29,11 @@ test("recorded good runs: mainnet carried, the testnet network carried (bad_proo
   assert.ok(g.lines.includes(`ok  ${MAINNET}: 400 bad_proof (want 400 bad_proof or 400 bad_shape)`), g.lines.join("\n"));
   const t = judge(A.good_testnet_carried);
   assert.equal(t.ok, true, t.lines.join("\n"));
-  assert.ok(t.lines.includes(`ok  ${TESTNET}: 400 bad_proof (want 400 bad_proof or 400 bad_shape)`), t.lines.join("\n"));
+  assert.ok(!t.lines.some((l) => /testnet/.test(l)), "no line judges a testnet ask");
   const u = judge(A.good_uncarried);
   assert.equal(u.ok, true, u.lines.join("\n"));
-  assert.equal(A.good.reads.length, asks().length);
+  assert.equal(A.good.reads.length, asks().length + 1, "the recording read the testnet token too");
+  assert.ok(asks().every((a) => !/testnet/.test(a.name) && !/\.testnet"/.test(a.body ?? "")), "no ask names a testnet token");
 });
 
 test("recorded bad run: the old mainnet ask on a helper carrying mainnet passes check 2 (bad_fee_recipient): FAIL on that line alone", () => {
@@ -50,14 +51,14 @@ test("recorded bad run: main before this card, the route not served: FAIL", () =
 
 test("made from the good run: a send, a 5xx, no commit, another origin, an unasked refusal, a missing read: each FAIL", () => {
   const g = A.good;
-  const sent = edit(g, TESTNET, (x) => ({ ...x, status: 200, body: JSON.stringify({ tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL", state: "submitted" }) }));
+  const sent = edit(g, MAINNET, (x) => ({ ...x, status: 200, body: JSON.stringify({ tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL", state: "submitted" }) }));
   assert.equal(judge(sent).ok, false);
-  assert.equal(judge(edit(g, TESTNET, (x) => ({ ...x, status: 503, body: JSON.stringify({ error: { code: "upstream" } }) }))).ok, false);
+  assert.equal(judge(edit(g, MAINNET, (x) => ({ ...x, status: 503, body: JSON.stringify({ error: { code: "upstream" } }) }))).ok, false);
   assert.equal(judge(edit(g, "not JSON", (x) => ({ ...x, headers: { ...x.headers, "x-helper-commit": "main" } }))).ok, false);
   assert.equal(judge(edit(g, "not JSON", (x) => ({ ...x, headers: { ...x.headers, "access-control-allow-origin": "*" } }))).ok, false);
   assert.equal(judge(edit(g, "over 8 KB", (x) => ({ ...x, status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) }))).ok, false);
   assert.equal(judge(edit(g, "GET", (x) => ({ ...x, headers: { ...x.headers, allow: "GET, POST" } }))).ok, false);
-  assert.equal(judge({ ...g, reads: g.reads.filter((x) => x.asked !== TESTNET) }).ok, false);
+  assert.equal(judge({ ...g, reads: g.reads.filter((x) => x.asked !== MAINNET) }).ok, false);
 });
 
 test("every ask the check sends is refused before a chain read or at check 2: none can be carried", () => {
