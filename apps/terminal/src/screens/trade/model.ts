@@ -494,7 +494,35 @@ export function feeCents(cost: string | undefined, price: PoolPrice | null): Cen
 }
 
 export function coinTapAgainMs(code: string): number | null {
-  return code === "busy" ? 1_000 : code === "down" ? 3_000 : null;
+  return code === "busy" ? 1_000 : code === "down" ? 3_000 : code === DRY_GAVE_UP ? 0 : null;
+}
+
+/** The kit client's own end of a request it posted (client.ts SIGNPAGE_CLIENT_CODES.timeout): its 10 s for a dry passed
+ *  while the page may still be pricing it, and the page's answer after that is dropped. A dry is a read that moves
+ *  nothing, so the box asks again at once (card buy-box-quotes-before-funds: a Solana buy with no pool note priced the
+ *  move from Cash past the 10 s, and You receive stayed a dash though the page answered an out). */
+const DRY_GAVE_UP = "client_timeout";
+
+/** How many times a dry is asked again after a down or a client timeout before the box stops on it (a busy page is
+ *  asked again for as long as it is busy). */
+export const DRY_TRIES = 3;
+
+/** The dry asked again after `code`, as the box's asks count them: busy always; a down or a client timeout while
+ *  `tries` (those asked again so far) is under DRY_TRIES; null for an answer that is no. */
+export function dryAgainMs(code: string, tries: number): number | null {
+  const again = coinTapAgainMs(code);
+  return again === null || (code !== "busy" && tries >= DRY_TRIES) ? null : again;
+}
+
+/** The tag of a dry for a coin (its key) and the amount in the box: the box's ask in flight carries it; null where no
+ *  amount is asked. */
+export const dryTag = (key: string | null, amount: Cents | null): string | null => (key === null || amount === null || amount <= 0n ? null : `${key}|${amount}`);
+
+/** You receive says Quoting (card buy-box-quotes-before-funds: a page that takes seconds to price a buy with no pool
+ *  note): no out to draw (receiveShown) and the dry for this coin and amount asked and not ended (`asking`, its dryTag;
+ *  null with none in flight). */
+export function quotingShown(read: FeeRead | null, coinKey: string | null, amount: Cents | null, asking: string | null): boolean {
+  return receiveShown(read, coinKey, amount) === null && asking !== null && asking === dryTag(coinKey, amount);
 }
 
 export type PoolBuyAsk =
