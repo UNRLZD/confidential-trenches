@@ -802,7 +802,8 @@ export function evmHelperKeyedRpc(origin: string, chain: "base" | "robinhood"): 
       return stop?.aborted ? Promise.reject(stop.reason) : bare(method, params);
     }, EVM_POOL_PAGES_LIMIT);
     const pool = EVM_POOLS[chain]?.pool.toLowerCase();
-    r = Object.assign((method: string, params: readonly unknown[]) => (evmPoolPage(pool, method, params) ? pages : route.rpc)(method, params), { url, operator: "helper" }) as SolanaRpc;
+    // `wide`: the pool sync's walk asks it first for the pool's whole range (evm.ts EvmWideSource)
+    r = Object.assign((method: string, params: readonly unknown[]) => (evmPoolPage(pool, method, params) ? pages : route.rpc)(method, params), { url, operator: "helper", wide: true }) as SolanaRpc;
     keyedRoutes.set(url, r);
   }
   return r;

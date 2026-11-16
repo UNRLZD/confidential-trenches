@@ -1709,6 +1709,13 @@ export const EVM_HOLD_WRITE_SECONDS = 86_400n;
  *  (EVM_LOG_PAGE_BLOCKS, one page on every pool provider), so a place written mid-walk is never taken past a page its
  *  read ended in; what the hold held there is read as the logs past it, judged by the round's trees as any. */
 export const EVM_HOLD_REREAD_BLOCKS = EVM_LOG_PAGE_BLOCKS;
+/** A wide source is a history source marked `wide: true` that serves a pool's logs over a whole range in one call (card
+ *  evm-restore-walk-one-wide-read: the helper's keyed route, which keeps each finalized page it answered,
+ *  apps/helper/src/rpc/rpc.ts finalLogsOf): a walk asks it first for every block past what is held up to the finalized
+ *  anchor, the industry's cached-events read (Tornado's cached events, the Privacy Pools data service) held to the
+ *  pool's own root at the head. Each one's span cap, as a refusal named it: a walk wider than it pages as before, with
+ *  no call. */
+const WIDE_CAPS = new WeakMap<EvmRpc, bigint>();
 
 /**
  * The pool's tree sync on two RPCs. Every leaf event read at an EVM_POOL_TAG anchor on both RPCs, the same on both and
@@ -1751,6 +1758,10 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     // nor one that pages no logs (evmPair's `logs: false`): asked a page it answers a throttle, which pauses its host
     if (!SEATS.has(r) && op !== null && (r as { logs?: unknown }).logs !== false && !sources.some((s) => s.op === op)) sources.push({ rpc: r, op });
   }
+  // card evm-restore-walk-one-wide-read: the history source that serves the pool's logs over its whole range in one call
+  // (EvmWideSource), asked first on a walk; off for this sync once one of its answers is refused or not the pool's
+  const wide = (a.history ?? []).find((r) => typeof r === "function" && (r as { wide?: unknown }).wide === true && evmSourceOperator(r) !== null && !SEATS.has(r));
+  let wideOff = false;
   // each source's logs from a round's first block up to its finalized anchor, by operator: a later round's read of that
   // source starts past them
   const kept = new Map<string, { from: bigint; to: bigint; logs: Ev[] }>();
@@ -2082,6 +2093,66 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         : null;
       return { events, stateTree, labelTree, wrong };
     };
+    // card evm-restore-walk-one-wide-read: the pool's logs past `b` up to the finalized anchor in one call of the wide
+    // source (EvmWideSource), the tail past it on the seats as any round's; taken only when the trees from them are the
+    // pool's at the anchor on the two seats (its root binds every leaf and its order: a leaf dropped, added, changed or
+    // moved is refused) and each run of its logs within one page's span (EVM_LOG_PAGE_BLOCKS) is the very bytes both
+    // seats page there (the fields no root binds, a release's nullifier, W, value and token, never one operator's word:
+    // evmTreeSync's comment). Null for any refusal, any log out of its shape or order, any mismatch: the round pages
+    // as before, from the same place. The comment's rule holds: a leaf's every field is two operators' word (the wide
+    // source's and a seat's same bytes) and the pool's root's.
+    const wideOf = async (b: { events: Ev[]; to: bigint }): Promise<ReturnType<typeof build> | null> => {
+      const from = b.to + 1n;
+      const to = fin.number;
+      const cap = WIDE_CAPS.get(wide!);
+      if (cap !== undefined && to - from + 1n > cap) return null;
+      let raw: unknown;
+      try {
+        raw = await wide!("eth_getLogs", [{ ...poolFilter, fromBlock: tag(from), toBlock: tag(to) }]);
+      } catch (e) {
+        signal?.throwIfAborted();
+        const named = capSpanOf(String((e as Error)?.message ?? e));
+        if (named !== null) WIDE_CAPS.set(wide!, named);
+        return null;
+      }
+      signal?.throwIfAborted();
+      if (!Array.isArray(raw)) return null;
+      const logs: Ev[] = [];
+      try {
+        for (const [i, x] of raw.entries()) logs.push(poolDecode(x, from, to, `the wide read's log ${i}`));
+      } catch {
+        return null;
+      }
+      for (let i = 1; i < logs.length; i++) {
+        const p = logs[i - 1]!, q = logs[i]!;
+        if (q.block < p.block || (q.block === p.block && q.logIndex <= p.logIndex)) return null;
+      }
+      if (logs.some((e) => e.block === fin.number && e.blockHash !== fin.hash)) return null;
+      const tail = anchor.number > to ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, to + 1n, { fin: Promise.resolve(fin), anchor }, pager, b.events.length + logs.length, signal, sleep) : [];
+      const got = build([...logs, ...tail]);
+      if (got.wrong !== null) return null;
+      const runs: [bigint, bigint][] = [];
+      for (const e of logs) {
+        const r = runs.at(-1);
+        if (r !== undefined && e.block - r[0] < EVM_LOG_PAGE_BLOCKS) r[1] = e.block;
+        else runs.push([e.block, e.block]);
+      }
+      let next = 0;
+      let same = true;
+      const reader = async (): Promise<void> => {
+        while (same && next < runs.length) {
+          const [f, t] = runs[next++]!;
+          const mine = logs.filter((e) => e.block >= f && e.block <= t);
+          // a seat that refuses the run or answers it otherwise (a pruned one's empty page) is passed over: one seat's
+          // same bytes are a second operator's
+          const pair = await both(rpcs, (rpc, k, sig) => readLogs(rpc, k, poolFilter, poolDecode, f, t, pager, sig, sleep).then((s) => s.length === mine.length && s.every((e, j) => e.bytes === mine[j]!.bytes), () => false), signal);
+          signal?.throwIfAborted();
+          if (!pair.some((x) => x)) same = false;
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(EVM_POOL_LOG_PAGES_IN_FLIGHT, runs.length) }, reader));
+      return same ? got : null;
+    };
     // the blocks past what is held from each source alone, all at once (evmTreeSync's comment): the first logs two
     // operators give byte for byte whose trees are the pool's at the anchor, else a lag (a reorg, a source behind) or
     // refused with the seats' own refusal (`why`) first
@@ -2222,6 +2293,19 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       // card evm-restore-walk-keeps-its-place: the place the seats agree on, written as it rises (a two-operator base
       // only: a proof's one-source leaves never reach the hold)
       const b = base;
+      // card evm-restore-walk-one-wide-read: a walk asks the wide source first; a lag stays a lag, any other end of it
+      // is the paging below
+      if (wide !== undefined && !wideOff && pages === null && walking && fin.number > b.to) {
+        let w: ReturnType<typeof build> | null;
+        try {
+          w = await wideOf(b);
+        } catch (e) {
+          if (e instanceof EvmLagError || signal?.aborted) throw e;
+          w = null;
+        }
+        if (w !== null) return { got: w, why: "" };
+        wideOff = true;
+      }
       const at = (to: bigint, logs: Ev[]): void => {
         if (signal?.aborted) return;
         partial = { from: b.to + 1n, to, events: [...b.events, ...logs] };

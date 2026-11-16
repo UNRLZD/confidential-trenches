@@ -3015,6 +3015,76 @@ test("card evm-pool-leaves-any-source: a held tree resumes from its last block: 
   assert.ok(froms.length > 0 && froms.every((f) => f > c.finalized - Number(EVM_HOLD_REREAD_BLOCKS)), `froms ${froms}`);
 });
 
+// card evm-restore-walk-one-wide-read: a walk asks the helper's cached route (`wide: true`) for the pool's logs from what
+// is held to the finalized anchor in one call, takes them only as the trees from them are the pool's at the head on the
+// two seats and each run of them within one page is a seat's very bytes, and on any refusal or lie pages as before
+const wideSrc = (c: Chain, log: string[], o: Over = {}) => Object.assign(rpc(c, { url: "https://helper.example", log, ...o }), { wide: true });
+const getLogs = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => [Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)), Number(BigInt(x.match(/"toBlock":"(0x[0-9a-f]+)"/)![1]!))] as const);
+test("card evm-restore-walk-one-wide-read: the wide read answers: one call from the deploy block to the finalized anchor, the seats read only its runs and the tail; on Base and Robinhood", async () => {
+  for (const [network, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
+    const pin: EvmPoolPin = { ...PIN, network };
+    const c = anyChain();
+    const wl: string[] = [];
+    const sl: string[] = [];
+    const seats: [EvmRpc, EvmRpc] = [rpc(c, { url: "https://publicnode.example", chainId, cap: 50_000, log: sl }), rpc(c, { url: "https://pocket.example", chainId, cap: 10_000, logs: pocketPruned })];
+    const r = await evmTreeSync({ rpcs: seats, pin, history: [wideSrc(c, wl, { chainId })], ...noWait }).events();
+    assert.deepEqual(r.events.map((e) => e.bytes), await truth(c), network);
+    assert.deepEqual(getLogs(wl), [[Number(PIN.fromBlock), c.finalized]], `${network}: one wide call`);
+    // a run a leaf (10, 1,100,000, 1,200,000, 1,990,000) and the tail past the finalized anchor, each one page
+    const s = getLogs(sl);
+    assert.ok(s.length <= 5 && s.every(([f, t]) => t - f < Number(EVM_HOLD_REREAD_BLOCKS)), `${network}: seats ${JSON.stringify(s)}`);
+  }
+});
+
+test("card evm-restore-walk-one-wide-read: a wide read that drops a leaf, swaps a leaf, changes a release's nullifier or refuses is passed over and the walk pages as before, the pool's own leaves back", async () => {
+  const swap = (l: Record<string, unknown>[]) => {
+    const i = l.findIndex((x) => blockOf(x) === 10), j = l.findIndex((x) => blockOf(x) === 1_200_000);
+    return l.map((x, k) => (k === i ? { ...x, data: l[j]!.data } : k === j ? { ...x, data: l[i]!.data } : x));
+  };
+  const cases: [string, Over][] = [
+    ["a dropped leaf", { logs: (l) => l.filter((x) => blockOf(x) !== 1_200_000) }],
+    ["a swapped leaf", { logs: swap }],
+    ["a changed nullifier", { logs: forgedRelease }],
+    ["a refusal", { cap: 10_000 }],
+  ];
+  for (const [name, lie] of cases) {
+    const c = anyChain();
+    const wl: string[] = [];
+    const sl: string[] = [];
+    const r = await evmTreeSync({ rpcs: anySeats(c, sl), pin: PIN, history: [wideSrc(c, wl, lie), helperSrc(c, undefined, "https://quicknode.example")], ...noWait }).events();
+    assert.deepEqual(r.events.map((e) => e.bytes), await truth(c), name);
+    assert.deepEqual(getLogs(wl)[0], [Number(PIN.fromBlock), c.finalized], `${name}: the wide read asked first`);
+    // the seats paged the pool from its deploy block as before
+    assert.ok(getLogs(sl).some(([f, t]) => f === Number(PIN.fromBlock) && t - f + 1 > 10_000), `${name}: paged as before`);
+  }
+});
+
+test("card evm-restore-walk-one-wide-read: a walk done in one wide read is held; a reload's wide read that refuses pages from the hold's place, never the deploy block", async () => {
+  const c = anyChain();
+  const hold = evmMemoryHold();
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [wideSrc(c, [])], held: hold, ...noWait }).events();
+  assert.equal((await hold.read())?.to, BigInt(c.finalized));
+  const wl: string[] = [];
+  const sl: string[] = [];
+  const r = await evmTreeSync({ rpcs: anySeats(c, sl), pin: PIN, history: [wideSrc(c, wl, { getLogs: () => { throw new Error("RPC error -32000: internal error"); } }), helperSrc(c, undefined, "https://quicknode.example")], held: hold, ...noWait }).events();
+  assert.deepEqual(r.events.map((e) => e.bytes), await truth(c));
+  const cut = c.finalized - Number(EVM_HOLD_REREAD_BLOCKS);
+  assert.deepEqual(getLogs(wl)[0], [cut + 1, c.finalized], "the wide read asked from the hold's place");
+  const froms = getLogs(sl).map(([f]) => f);
+  assert.ok(froms.length > 0 && froms.every((f) => f > cut), `seats from the hold's place: ${froms}`);
+});
+
+test("card evm-restore-walk-one-wide-read: a wide source's named cap is kept: a later sync wider than it asks it no wide call", async () => {
+  const c = anyChain();
+  const wl: string[] = [];
+  const w = wideSrc(c, wl, { cap: 10_000 });
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [w, helperSrc(c, undefined, "https://quicknode.example")], ...noWait }).events();
+  const asked = getLogs(wl).filter(([f, t]) => f === Number(PIN.fromBlock) && t === c.finalized).length;
+  assert.equal(asked, 1);
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [w, helperSrc(c, undefined, "https://quicknode.example")], ...noWait }).events();
+  assert.equal(getLogs(wl).filter(([f, t]) => f === Number(PIN.fromBlock) && t === c.finalized).length, 1, "no second wide call");
+});
+
 // review of 0b379bf4, P1-1: two URLs, or a relay of one, are one operator's word; the helper counts only in its keyed-only
 // mode (evmSourceOperator "helper"), never through a relay that names no operator
 const forgedRelease = (l: Record<string, unknown>[]) => l.map((x) => (blockOf(x) === 1_100_000 ? word(x, 3, 31337n) : x));
