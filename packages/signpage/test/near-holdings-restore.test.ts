@@ -826,6 +826,14 @@ test("a token that takes a fee on what the exchange sends: the floor is what rea
   assert.deepEqual((await records(v.w))[0]!.swap, { floor: "950", before: "0" });
 });
 
+test("card near-dcl-route: a fee scoped to Rhea DCL alone (a coin a buy may take on DCL): the floor is what reaches W on DCL, so the coin under the signed minimum still counts", async () => {
+  const at = { ...buySwap(), args: { ...buySwap().args, msg: JSON.stringify({ force: 0, actions: [{ pool_id: 9, token_in: USDC, token_out: TOKEN, min_amount_out: "1000" }], skip_degen_price_sync: true, skip_unwrap_near: true }) } };
+  const { v, W, reads } = await bought({}, (n) => [{ tx: relayed(n, register()) }, { tx: relayed(n, at) }]);
+  const page = pageOf(v, [], { tokenFee: async () => ({ buyBps: 500, sellBps: 500, senderPays: false, scope: ["dclv2.ref-labs.near"], exempt: [], unknown: false }) });
+  assert.deepEqual((await nearHoldingsPass(page, { ...reads, seat: seatOf({ [TOKEN]: { [W]: 960n } }) })).written, [W]);
+  assert.deepEqual((await records(v.w))[0]!.swap, { floor: "950", before: "0" });
+});
+
 test("a token fee read as not known (code not pinned) is taken at the widest fee the device reads: W is never left unread for good; its USDC comes home and its coin shows", async () => {
   const unknown = async () => ({ buyBps: 0, sellBps: 0, senderPays: false, scope: [] as string[], exempt: [] as string[], unknown: true });
   // W's buy swap failed: 2.5 USDC on W and none of the coin, three passes

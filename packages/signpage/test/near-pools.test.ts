@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
 import { RHEA_QUOTE_POOLS_MAX } from "../../kit/src/near/rhea.ts";
-import { dclCandidates, NEAR_POOLS_BRIDGE, NEAR_POOLS_PAGE, readRheaPools, rheaCandidates, rheaCandidatesOf, rheaPoolsKept } from "../src/near-pools.ts";
+import { dclCandidates, dclPoolsKept, NEAR_POOLS_BRIDGE, NEAR_POOLS_PAGE, readRheaPools, rheaCandidates, rheaCandidatesOf, rheaPoolsKept } from "../src/near-pools.ts";
 import { DCL_QUOTE_POOLS_MAX, dclPoolOf } from "../../kit/src/near/dcl.ts";
 
 const USDC = NEAR_NETWORKS.mainnet.usdc;
@@ -154,4 +154,54 @@ test("the DCL candidates: the token with wNEAR and USDC with wNEAR, each at fees
   assert.deepEqual(dclCandidates("mainnet", WRAP), c.slice(4));
   assert.deepEqual(dclCandidates("testnet", HOODL), []);
   assert.deepEqual(dclCandidates("mainnet", USDC), []);
+});
+
+// card near-dcl-route: the session's read of the token's own DCL pools (dclPoolsKept)
+/** A provider whose DCL get_pool answers each id in `has` with its row, every other null; `down` throws; `asked` counts. */
+const dclRpc = (name: string, has: string[], o: { down?: boolean; asked?: string[]; junk?: boolean } = {}): NearRpc => ({
+  name,
+  async query(p) {
+    const { pool_id } = JSON.parse(atob(p.args_base64 as string)) as { pool_id: string };
+    o.asked?.push(`${p.account_id} ${p.method_name} ${pool_id}`);
+    if (o.down) throw new Error(`${name}: 503`);
+    if (o.junk) return enc({ pool_id: "another|pool|100" });
+    return enc(has.includes(pool_id) ? { pool_id, token_x: "x", token_y: "y", fee: 100, state: "Running" } : null);
+  },
+});
+const ownIds = [100, 400, 2000, 10000].map((f) => `${TOKEN}|${WRAP}|${f}`);
+const usdcIds = [100, 400, 2000, 10000].map((f) => `${USDC}|${WRAP}|${f}`);
+
+test("card near-dcl-route: a token with no DCL pool of its own asks DCL nothing; the read is the token's own 4 ids at final on each provider, once a session", async () => {
+  const asked: string[] = [];
+  const pair = [dclRpc("a", [], { asked }), dclRpc("b", [], { asked })] as const;
+  const kept = dclPoolsKept("mainnet", () => pair);
+  assert.deepEqual(await kept(TOKEN), []);
+  assert.deepEqual(await kept(TOKEN), []);
+  assert.equal(asked.length, 8, "4 ids on each provider, then kept");
+  assert.ok(asked.every((x) => x.startsWith("dclv2.ref-labs.near get_pool ")) && ownIds.every((id) => asked.includes(`dclv2.ref-labs.near get_pool ${id}`)));
+  // testnet and USDC: none, nothing read
+  assert.deepEqual(await dclPoolsKept("testnet", () => pair)(TOKEN), []);
+  assert.deepEqual(await kept(USDC), []);
+  assert.equal(asked.length, 8);
+});
+
+test("card near-dcl-route: a pool either provider reads is kept with USDC's 4 (a provider hiding it is outvoted); wrapped NEAR asks USDC's 4 alone", async () => {
+  const pair = [dclRpc("a", []), dclRpc("b", [ownIds[3]!])] as const;
+  assert.deepEqual(await dclPoolsKept("mainnet", () => pair)(TOKEN), [ownIds[3], ...usdcIds]);
+  assert.deepEqual(await dclPoolsKept("mainnet", () => pair)(WRAP), usdcIds);
+});
+
+test("card near-dcl-route: a provider that fails is read again next time, the other's answer used meanwhile; both failing gives every candidate (a failed read never takes DCL out); a row that is not the id's is a failed read", async () => {
+  const asked: string[] = [];
+  const down = { down: true, asked };
+  const pair = [dclRpc("a", [ownIds[0]!], down), dclRpc("b", [ownIds[0]!], { asked })] as const;
+  const kept = dclPoolsKept("mainnet", () => pair);
+  assert.deepEqual(await kept(TOKEN), [ownIds[0], ...usdcIds]);
+  down.down = false;
+  await kept(TOKEN);
+  assert.equal(asked.filter((x) => x.endsWith(` ${ownIds[0]!}`)).length, 3, "a again, b kept");
+  const both = [dclRpc("a", [], { down: true }), dclRpc("b", [], { down: true })] as const;
+  assert.deepEqual(await dclPoolsKept("mainnet", () => both)(TOKEN), dclCandidates("mainnet", TOKEN));
+  const junk = [dclRpc("a", [], { junk: true }), dclRpc("b", [])] as const;
+  assert.deepEqual(await dclPoolsKept("mainnet", () => junk)(TOKEN), [], "the junk provider failed; the other read none");
 });

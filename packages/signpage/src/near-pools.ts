@@ -135,6 +135,53 @@ export function dclCandidates(network: NearNetwork, token: string): string[] {
   return [...(token === wrap ? [] : ids(token, wrap)), ...ids(usdc, wrap)];
 }
 
+/**
+ * The DCL candidates worth quoting for `token`, kept a session (card near-dcl-route). The token's own four ids with
+ * wrapped NEAR are read once with get_pool at final on each of the two providers; an id that either reads as its pool is
+ * kept. That is a hint only: dclQuote reads every id again at the quote's block on both providers and leaves out one
+ * with no pool, so a provider that invents a pool costs reads, and one that hides a pool is outvoted by the other.
+ * None of the token's own: the token is not on DCL, and its quotes ask DCL nothing (11 reads of each provider a quote
+ * fewer, on the paced seat: a session's first NEAR buy at the seat's share took a second 429 and 7 s longer without
+ * this). Some: those and USDC's four with wrapped NEAR (`dclCandidates`'s, read at the quote's block). A provider whose
+ * read failed is read again on the next quote, the other's answer used meanwhile; both failed: every candidate, so a
+ * read that failed never takes DCL out of a quote. A DCL pool made later in the session is seen on the next load.
+ */
+export function dclPoolsKept(network: NearNetwork, rpcs: () => readonly [NearRpc, NearRpc]): (token: string, signal?: AbortSignal) => Promise<string[]> {
+  const kept = new Map<string, (Promise<string[]> | null)[]>();
+  return async (token, signal) => {
+    const all = dclCandidates(network, token);
+    if (all.length === 0 || !(network in NEAR_DCL)) return [];
+    if (token === NEAR_DCL[network as keyof typeof NEAR_DCL].wrap) return all;
+    const own = all.filter((id) => id.split("|").slice(0, 2).includes(token));
+    const exchange = NEAR_DCL[network as keyof typeof NEAR_DCL].exchange;
+    const slots = kept.get(token) ?? [null, null];
+    kept.set(token, slots);
+    const pair = rpcs();
+    const read = await Promise.allSettled(
+      [0, 1].map((i) =>
+        (slots[i] ??= Promise.all(
+          own.map(async (id) => {
+            const row = await nearView(pair[i]!, exchange, "get_pool", { pool_id: id }, signal);
+            if (row === null) return null;
+            if (isObj(row) && row.pool_id === id) return id;
+            throw new Error(`${pair[i]!.name}: get_pool ${id}: not that pool's row`);
+          }),
+        )
+          .then((ids) => ids.filter((x): x is string => x !== null))
+          .catch((e: unknown) => {
+            slots[i] = null;
+            throw e;
+          })),
+      ),
+    );
+    const lists = read.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    if (lists.length === 0) return all;
+    const found = new Set(lists.flat());
+    if (found.size === 0) return [];
+    return [...own.filter((id) => found.has(id)), ...all.filter((id) => !own.includes(id))];
+  };
+}
+
 /** The session's candidates per network: the pools read once on each of the two providers (a provider's read again
  *  only after its read failed); the candidates from every list read, refused only when neither was. */
 export function rheaPoolsKept(network: NearNetwork, rpcs: () => readonly [NearRpc, NearRpc]): (token: string, signal?: AbortSignal) => Promise<number[]> {

@@ -3,10 +3,12 @@
 // readNearSwapPair, readNearHeld and readNearSwapWallet ask, at the final height or at a block_id. Nothing real.
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
 import { NEAR_RHEA } from "../../kit/src/near/rhea.ts";
+import { NEAR_DCL } from "../../kit/src/near/dcl.ts";
 
 export const USDC = NEAR_NETWORKS.mainnet.usdc;
 export const WRAP = NEAR_RHEA.mainnet.wrap;
 export const EX = NEAR_RHEA.mainnet.exchange;
+export const DCL = NEAR_DCL.mainnet.exchange;
 export const TOKEN = "token.rhealab.near";
 export const AMOUNT = 5_000_000n;
 const bytes = (v: unknown) => [...new TextEncoder().encode(JSON.stringify(v))];
@@ -45,6 +47,10 @@ export function chain() {
     const args = JSON.parse(atob(String(params.args_base64)));
     let v: unknown;
     if (contract === EX && method === "metadata") v = { version: "1.9.21", state: "Running", wnear_id: WRAP };
+    // Rhea DCL (card near-dcl-route): Running, nothing frozen, and no pool of this world's token (every id reads null)
+    else if (contract === DCL && method === "get_metadata") v = { version: "2.4.2", state: "Running", pool_count: "6665" };
+    else if (contract === DCL && method === "get_frozenlist_tokens") v = [];
+    else if (contract === DCL && method === "get_pool") v = null;
     else if (contract === EX && method === "get_frozenlist_tokens") v = [];
     else if (contract === EX && method === "get_pool_by_ids") v = (args.pool_ids as number[]).map((i) => pools[i]);
     else if (contract === EX && method === "get_lostfound_token") v = "0";

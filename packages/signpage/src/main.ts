@@ -111,7 +111,7 @@ import { archivalRpc, heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src
 import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
 import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
 import { nearBuyDry, nearBuyKind, nearHoldingsPass, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
-import { rheaPoolsKept } from "./near-pools.ts";
+import { dclPoolsKept, rheaPoolsKept } from "./near-pools.ts";
 import { nearSeatRpc, pacedNearRpc, seatsUp } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm, type GivenPoolWithdraw } from "./withdraw/pool-form.ts";
@@ -1346,6 +1346,7 @@ function nearBuyPage(): NearBuyPage | null {
     rpcs: () => pair,
     signal: () => withdrawWait.signal,
     pools: rheaPoolsKept(PAGE_NETWORK, () => pair),
+    dclKept: dclPoolsKept(PAGE_NETWORK, () => pair),
     log: (line) => console.info(line),
   });
 }

@@ -267,7 +267,11 @@ test("the happy path: all W holds sold on the device's quote, signed by W bound 
   // the swap's delegate kept on the sell's record before it is sent
   assert.deepEqual(ev[8], ["traded", { nonce: 41n, mbh: 1_105n }]);
   assert.deepEqual(ev[1]![1], { wallet: W, side: "sell", token: TOKEN });
-  for (const e of ev.filter((x) => x[0] === "quote")) assert.deepEqual(e[1], { side: "sell", token: TOKEN, amountIn: HELD });
+  // the sale's first quote asked with the device's DCL candidates beside Rhea classic; once it is classic's, each later
+  // read is pinned to classic and asks no DCL pool (src/near-buy.ts pairOf; cards near-dcl-sell, near-dcl-route)
+  const quoteAsks = ev.filter((x) => x[0] === "quote").map((e) => e[1]);
+  assert.deepEqual(quoteAsks[0], { side: "sell", token: TOKEN, amountIn: HELD, dclPools: [100, 400, 2000, 10000].map((f) => `${TOKEN}|wrap.near|${f}`).concat([100, 400, 2000, 10000].map((f) => `${USDC}|wrap.near|${f}`)) });
+  for (const e of quoteAsks.slice(1)) assert.deepEqual(e, { side: "sell", token: TOKEN, amountIn: HELD });
   const [sign] = signs(ev);
   assert.equal(sign![1], L);
   assert.equal(sign![2], J);
