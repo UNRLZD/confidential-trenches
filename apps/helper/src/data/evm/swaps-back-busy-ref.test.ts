@@ -10,6 +10,9 @@
 // helper-robinhood-capacity and helper-robinhood-search-ahead, run 43891883180, 46,267 ms).
 // Here the recorded coin's swaps are spread one step apart, and the ETH price's pool logs a swap every 15th block of
 // two 100-block spans in three, as busy as live; the chain's own RPC logs no time, as it does.
+// With the chain's own untimed answers no longer waited for, a read that failed inside daybreak's 10 s hold failed fast,
+// and three of them settled 0x75d87437's tape at 18 trades (the helper's container, 16 Nov 16:0xZ): the second test holds
+// daybreak in the middle of the read back.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeChain, MAG, open, REC } from "../../../test/evm-swaps/robinhood.ts";
@@ -44,7 +47,9 @@ for (let b = FIRST - 10_000; b < REC.firstHead; b++) {
 REC.logs.ref.push(...busy);
 REC.logs.ref.sort((a, b) => a.b - b.b || a.i - b.i);
 
-function rig() {
+/** `refuseRef`: daybreak answers its nth ETH price read of a step back (blocks a step below the newest swaps) 429 -32005
+ *  "rate limited", Retry-After 10, as it did live in the middle of a read back. */
+function rig(refuseRef?: number) {
   const chain = fakeChain();
   chain.st.head = HEAD;
   chain.st.faults.set(OWN, { zeroTime: true, span: 1_000_000 });
@@ -53,8 +58,13 @@ function rig() {
   chain.st.faults.set("https://robinhood.daybreak-rpc.network", { span: 2_000 });
   let headers = 0;
   let ownRef = 0;
+  let dayRef = 0;
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     await new Promise((go) => setTimeout(go, LATENCY[url] ?? 200));
+    const old = [JSON.parse(String(init.body))].flat().some((r: { params?: { fromBlock?: string; topics?: unknown[] }[] }) => r.params?.[0]?.topics?.[1] === REF && Number(r.params[0].fromBlock) < LAST - 9_000);
+    if (url === DAYBREAK && old && ++dayRef === refuseRef) {
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32005, message: "rate limited" } }), { status: 429, headers: { "retry-after": "10", "content-type": "application/json" } });
+    }
     if (url === OWN && String(init.body).includes(REF)) ownRef++;
     if (url === OWN && String(init.body).includes("eth_getBlockByNumber") && !String(init.body).includes('"latest"')) headers++;
     return chain.fetch(url, init);
@@ -63,9 +73,9 @@ function rig() {
   return { s, headers: () => headers, ownRef: () => ownRef };
 }
 
-test("card robinhood-trades-finish-filling: an ETH-quoted coin's tape reads back step after step past a busy ETH price pool, full and done inside 45 s", async () => {
+async function fill(refuseRef?: number) {
   const { value } = await onVirtualTime(1_000_000_000, async () => {
-    const { s, headers, ownRef } = rig();
+    const { s, headers, ownRef } = rig(refuseRef);
     try {
       let last = JSON.parse((await s.trades(MAG, 50)).body);
       let reads = 1;
@@ -80,9 +90,21 @@ test("card robinhood-trades-finish-filling: an ETH-quoted coin's tape reads back
     }
   });
   console.log(`${value.last.trades.length} trades, filling ${value.last.filling}, after ${value.reads} reads 1.5 s apart; the chain's own header posts ${value.headers}, its ETH price reads ${value.ownRef}`);
+  return value;
+}
+
+test("card robinhood-trades-finish-filling: an ETH-quoted coin's tape reads back step after step past a busy ETH price pool, full and done inside 45 s", async () => {
+  const value = await fill();
   assert.equal(value.last.src, "chain");
   assert.equal(value.last.trades.length, Math.min(TRADES_MAX, 50), `its last ${TRADES_MAX} trades, from six steps back (${value.last.trades.length})`);
   assert.equal(value.last.filling, undefined, "done reading back");
   // the page's reads 1.5 s apart (TRADES_POLL_MS): full within the live checks' 45 s is 30 of them at most
+  assert.ok(value.reads <= 30, `full within the live checks' 45 s: ${value.reads} reads 1.5 s apart`);
+});
+
+test("card robinhood-trades-finish-filling: daybreak's 10 s hold in the middle of a read back is waited out, never settled as a short tape", async () => {
+  const value = await fill(10);
+  assert.equal(value.last.trades.length, Math.min(TRADES_MAX, 50), `its last ${TRADES_MAX} trades, never what it held at the hold (${value.last.trades.length})`);
+  assert.equal(value.last.filling, undefined, "done reading back");
   assert.ok(value.reads <= 30, `full within the live checks' 45 s: ${value.reads} reads 1.5 s apart`);
 });

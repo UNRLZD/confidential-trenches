@@ -1436,7 +1436,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     fs.forEach((f, i) => {
       const [from, to] = at(f);
       const g = groups.at(-1);
-      if (g !== undefined && from >= 0 && to >= from && rest(g.f) === rest(f) && from === g.to + 1 && to - g.from + 1 <= (f.address === undefined ? Math.min(max, INDEX_JOIN_MAX) : max)) (g.to = to), g.of.push(i);
+      // a run of the same filter is joined over the spans between too (those another pair already agreed), its answer
+      // split back by each one's own blocks: the spans a busy filter still lacks after a first pair lie apart (card
+      // robinhood-trades-finish-filling: live 16 Nov 16:0xZ a step's ETH price, 583 logs, went to daybreak as a post per
+      // 100-block run, and daybreak answered -32005 "rate limited", held 10 s)
+      if (g !== undefined && from >= 0 && to >= from && rest(g.f) === rest(f) && from > g.to && to - g.from + 1 <= (f.address === undefined ? Math.min(max, INDEX_JOIN_MAX) : max)) (g.to = to), g.of.push(i);
       else groups.push({ f, from, to, of: [i] });
     });
     const r = await batchTo(u, groups.map((g) => ({ method: "eth_getLogs", params: [g.of.length === 1 ? g.f : { ...g.f, fromBlock: `0x${g.from.toString(16)}`, toBlock: `0x${g.to.toString(16)}` }] })), patient);
@@ -1980,7 +1984,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** `marks`: the blocks below `lo` that hold a swap of the pool, newest first, as the one wide read of the day (locate)
    *  named them: each step reads from the newest of them, and none left is the read back done (card
    *  robinhood-trades-finish-filling). */
-  type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number; located?: true; marks?: readonly number[] };
+  type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number; located?: true; marks?: readonly number[]; until?: number };
   const books = new Map<string, Entry>();
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
@@ -2177,6 +2181,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return;
     }
     const back = e.back ?? { lo: e.from, logs: [], tape: null, done: false };
+    if (back.until !== undefined && now() < back.until) return;
     const end = Math.max(0, e.from - V.tapeBack);
     const held = e.book.tape(TRADES_MAX).length + (back.tape?.tape(TRADES_MAX).length ?? 0);
     if (held >= TRADES_MAX || back.lo <= end) {
@@ -2227,6 +2232,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           ]);
     const logs = swaps == null || extra.some((x) => x == null) ? null : swaps.concat(...(extra as Log[][])).sort((a, b) => a.block - b.block || a.index - b.index);
     if (logs == null) {
+      // a read that failed while a provider that serves old blocks was held is read again once the first hold ends, and
+      // is no fail: the fails count providers that answer and do not agree, never a hold's seconds (card
+      // robinhood-trades-finish-filling: with the chain's own RPC's untimed answers no longer waited for, three reads
+      // inside daybreak's 10 s hold settled a tape of 0x75d87437 at 18 trades, live 16 Nov 16:0xZ)
+      const held = backRpcs.map((u) => holds.heldMs(u)).filter((ms) => ms > 0);
+      if (held.length > 0) {
+        e.back = { ...back, until: now() + Math.min(...held) };
+        return;
+      }
       // read again at a later tick, BACK_FAILS_MAX times in a row at most: the tape is then what it holds, not filling
       const fails = (back.fails ?? 0) + 1;
       e.back = { ...back, fails, done: fails >= BACK_FAILS_MAX };
