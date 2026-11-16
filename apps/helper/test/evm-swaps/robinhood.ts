@@ -36,8 +36,10 @@ export const URLS = ["https://a.test", "https://b.test", "https://c.test"];
  *  this many blocks, older ones refused -32011, as api.blockvectra.com's public endpoint (about 850, 2026-11-04 14:38Z);
  *  `span`: the widest `eth_getLogs` it takes (100 unless set: the wide providers of swaps.ts WIDE_SPAN take 1,000);
  *  `addressOnly`: refuses an `eth_getLogs` with no address (-32602), as pocket and blockvectra do;
- *  `refuse`: a refusal it answers instead, when it returns one (a 429, a throttle). */
-type Fault = { zeroTime?: boolean; skewTime?: boolean; backTime?: boolean; down?: boolean; window?: number; span?: number; addressOnly?: boolean; refuse?: () => Response | null };
+ *  `refuse`: a refusal it answers instead, when it returns one (a 429, a throttle); `oneValue`: past 100,000 blocks it
+ *  refuses a filter with several values in one topic position, as rpc.mainnet.chain.robinhood.com does (-32602 "query
+ *  spans 864000 blocks ..., but only 100000 are allowed for this request", read in the helper's container 16 Nov 19:5xZ). */
+type Fault = { oneValue?: boolean; zeroTime?: boolean; skewTime?: boolean; backTime?: boolean; down?: boolean; window?: number; span?: number; addressOnly?: boolean; refuse?: () => Response | null };
 export function fakeChain() {
   // `own`: eth_getLogs of one address's swap events (a token's own read), `ownFrom` each one's first block; `wide`: of
   // no address (the index's); `seq`: the ETH price's reads ("ref") and each sender lookup ("tx <hash>") in the order asked
@@ -75,6 +77,7 @@ export function fakeChain() {
         const [from, to] = [parseInt(q.fromBlock, 16), parseInt(q.toBlock, 16)];
         st.spans.push(to - from + 1);
         if (to > st.head || to - from + 1 > (f.span ?? 100)) return { jsonrpc: "2.0", id: r.id, error: { code: -32602, message: "eth_getLogs block range exceeds 100 blocks" } };
+        if (f.oneValue && to - from + 1 > 100_000 && (q.topics ?? []).some((t) => Array.isArray(t) && t.length > 1)) return { jsonrpc: "2.0", id: r.id, error: { code: -32602, message: `query spans ${to - from + 1} blocks (${from} to ${to}), but only 100000 are allowed for this request` } };
         if (f.window !== undefined && from < st.head - f.window) return { jsonrpc: "2.0", id: r.id, error: { code: -32011, message: "block reference is outside the public history window" } };
         if (q.topics[0] === TOPIC.transfer) return ok([]);
         // a filter with no address (the chain's swap index, index.ts): every source's logs of its topics, as
@@ -89,7 +92,7 @@ export function fakeChain() {
         st.own++;
         st.ownFrom.push(from);
         if (q.topics[1] === ROBINHOOD_REF_POOL_ID) st.seq.push("ref");
-        const src = sources.find((s) => s.addr === q.address && (s.t1 === null || s.t1 === q.topics[1]));
+        const src = sources.find((s) => s.addr === q.address && (s.t1 === null || s.t1 === q.topics[1] || (Array.isArray(q.topics[1]) && q.topics[1].includes(s.t1))));
         if (src === undefined) return ok([]);
         return ok(src.logs.filter((l) => l.b >= from && l.b <= to && (Array.isArray(q.topics[0]) ? q.topics[0].includes(l.t[0]!) : q.topics[0] === l.t[0])).map((l) => wire(l, f)));
       }

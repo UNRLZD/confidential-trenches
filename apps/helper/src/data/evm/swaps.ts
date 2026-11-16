@@ -397,6 +397,9 @@ const WIDE_SPAN: Readonly<Record<string, number>> = {
 /** The providers that answer a pool's swaps over a whole tapeBack in one read (readBack's locate), in order: the chain's
  *  own, 747 logs over the day in 571 ms (read above). */
 const BACK_LOCATE: readonly string[] = ["https://rpc.mainnet.chain.robinhood.com"];
+/** The most single-value filters one locate sends (one per value of each topic position, their product). [design: 16, a
+ *  hooked v4 pool's four first topics (its Swap and POOL_CALLS) times its pool and three siblings; one batch.] */
+const LOCATE_FILTERS_MAX = 16;
 const BACK_SPAN: Readonly<Record<string, number>> = {
   "https://robinhood.api.pocket.network": 10_000,
   "https://robinhood.daybreak-rpc.network": 2_000,
@@ -2293,10 +2296,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const u = BACK_LOCATE.find((x) => rpcs.includes(x) && usable([x]).length > 0);
     if (u === undefined) return "held";
     // one value per topic position: the chain's own RPC takes 100,000 blocks at most for a filter with several in one
-    // ("send one value per position", read from the helper 2026-11-15 23:4xZ), so each event its own filter, one batch
+    // ("send one value per position", read from the helper 2026-11-15 23:4xZ), so each value of every position its own
+    // filter, one batch (card robinhood-trades-finish-filling: a hooked v4 pool's second position holds the pool and its
+    // siblings, and live 16 Nov 19:5xZ every such day read was refused "query spans 864000 blocks ..., but only 100000
+    // are allowed for this request", asked again, then walked in steps). Past LOCATE_FILTERS_MAX filters: no such read,
+    // the steps read the day ("held")
     const topics = (main.topics ?? []) as (string | string[] | null)[];
-    const firsts = [topics[0]].flat().filter((x): x is string => typeof x === "string");
-    const r = await batchTo(u, (firsts.length > 0 ? firsts : [null]).map((t0) => ({ method: "eth_getLogs", params: [{ ...main, ...(t0 === null ? {} : { topics: [t0, ...topics.slice(1)] }), fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }] })));
+    let each: (string | null)[][] = [[]];
+    for (const t of topics) each = each.flatMap((pre) => (Array.isArray(t) ? t : [t]).map((v) => [...pre, v]));
+    if (each.length > LOCATE_FILTERS_MAX) return "held";
+    const r = await batchTo(u, each.map((ts) => ({ method: "eth_getLogs", params: [{ ...main, ...(topics.length === 0 ? {} : { topics: ts }), fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }] })));
     const got = (r ?? []).map((x) => (x?.ok ? parseLogs((x as { result: unknown }).result) : null));
     if (r === null || got.length === 0 || got.some((x) => x === null)) return undefined;
     const logs = (got as Log[][]).flat();
