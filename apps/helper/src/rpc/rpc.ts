@@ -1337,6 +1337,14 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
 
     const methods = ((Array.isArray(out) ? out : [out]) as { method: string }[]).map((r) => r.method);
+    // card base-reads-never-throttled: a keyed read of the chain's id alone is answered from its constant (the one the
+    // keyed URLs are checked against, KEYED_ID), never sent: dRPC's free plan refused Base's keyed eth_chainId 22 times
+    // in 9 min on 16 Nov 15:1xZ, each read a call of the one dRPC bucket the pool reads need
+    const chainId = KEYED_ID[c];
+    if (keyedOnly && chainId !== undefined && methods.every((m) => m === "eth_chainId")) {
+      const one = (r: unknown) => `{"jsonrpc":"2.0","id":${JSON.stringify((r as { id: unknown }).id)},"result":"${chainId}"}`;
+      return { status: 200, body: Array.isArray(out) ? `[${out.map(one).join(",")}]` : one(out) };
+    }
     // card base-reads-never-starve-max: an EVM read's shape (rpcShape) and its mode, for its hold and refusal log lines
     const trace = traces.getStore();
     if (trace !== undefined && EVM_CHAINS.has(c)) trace.shape = `${keyedOnly ? "keyed " : ""}${rpcShape(out)}`;
@@ -2004,9 +2012,11 @@ export const KEYED_RETRY_MS = 60_000;
  *  scripts/deploy/set-rpc-keys.sh checks a URL against before it writes it (Base 0x2105 = 8453, Robinhood 0x1237 =
  *  4663, NEAR's status chain_id "mainnet"). */
 const SOLANA_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+/** Each keyed EVM chain's id, as eth_chainId answers it. */
+const KEYED_ID: Partial<Record<RpcChain, string>> = { base: "0x2105", robinhood: "0x1237" };
 const KEYED_IDENTITY: Readonly<Record<KeyedChain, { body: string; ok: (a: unknown) => boolean }>> = {
-  base: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }), ok: (a) => (a as { result?: unknown } | null)?.result === "0x2105" },
-  robinhood: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }), ok: (a) => (a as { result?: unknown } | null)?.result === "0x1237" },
+  base: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }), ok: (a) => (a as { result?: unknown } | null)?.result === KEYED_ID.base },
+  robinhood: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }), ok: (a) => (a as { result?: unknown } | null)?.result === KEYED_ID.robinhood },
   solana: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getGenesisHash" }), ok: (a) => (a as { result?: unknown } | null)?.result === SOLANA_GENESIS },
   near: { body: JSON.stringify({ jsonrpc: "2.0", id: "1", method: "status", params: [] }), ok: (a) => (a as { result?: { chain_id?: unknown } } | null)?.result?.chain_id === "mainnet" },
 };
