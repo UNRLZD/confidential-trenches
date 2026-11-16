@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createHash } from "node:crypto";
-import { bundle, bundleModuleProblems, check, copyServed, EVM_INDEX_CHAINS, EVM_INDEX_PINS, outputFiles, outsideTsconfigs, SERVED, sha384, walkSourceProblems } from "./build-app.mjs";
+import { bundle, bundleModuleProblems, check, copyServed, EVM_INDEX_CHAINS, EVM_INDEX_PINS, outputFiles, outsideTsconfigs, page, SERVED, sha384, walkSourceProblems } from "./build-app.mjs";
 import { SIGN_BUILD_OUTPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
@@ -29,6 +29,19 @@ test("index.html runs one script, /app.js, with its sha384, and nothing inline",
   assert.equal(tags[0][2], "");
   assert.equal(/\sintegrity="([^"]+)"/.exec(tags[0][1])[1], sha384(readFileSync(join(PKG, "public/app.js"))));
   assert.doesNotMatch(html, /<style|\sstyle=|\son[a-z]+=/i);
+});
+
+// card signpage-tab-title-and-origin (QA walk item 9): SIGN_HOST is the top window, so its index.html's <title> is the
+// browser tab's name on every page; the framed app's own title never reaches the tab. It is the app's, word for word.
+test("index.html's head holds one <title>, the framed app's own (apps/terminal/index.html), so the tab reads the app's name", () => {
+  const titles = (html) => [...html.matchAll(/<title>([^<]*)<\/title>/g)].map((m) => m[1]);
+  const app = titles(readFileSync(join(PKG, "../../apps/terminal/index.html"), "utf8"));
+  assert.deepEqual(app, ["Confidential Trenches"], "the framed app's index.html names the app once");
+  for (const html of [readFileSync(join(PKG, "index.html"), "utf8"), page("sha384-x")]) {
+    assert.deepEqual(titles(html), app);
+    const head = /<head>([\s\S]*)<\/head>/.exec(html)[1];
+    assert.deepEqual(titles(head), app, "the title is in the head");
+  }
 });
 
 test("a hand-edited bundle or a stale integrity is caught", async () => {

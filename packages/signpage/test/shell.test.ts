@@ -101,7 +101,10 @@ type FakeEl = {
 function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
   const loc = new URL(href);
   const calls = { replace: [] as string[], reload: 0, assign: 0 };
-  const posted: { msg: unknown; to: string; win: unknown }[] = [];
+  // blank: posted while the frame's window still held its first about:blank document, before its first load: that
+  // document is on SIGN_HOST's own origin (it inherits its creator's), so a post with targetOrigin APP_HOST is dropped
+  // with the browser's "target origin does not match" warning, or lands in the APP_HOST document that comes after
+  const posted: { msg: unknown; to: string; win: unknown; blank: boolean }[] = [];
   const listeners: ((e: IncomingMessage) => void)[] = [];
   const keys: ((e: unknown) => void)[] = [];
   const blurs: (() => void)[] = [];
@@ -111,13 +114,17 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
   const createElement = (tag: string): FakeEl => {
     const attrs = new Map<string, string>();
     const on = new Map<string, (e?: unknown) => void>();
+    let loaded = false;
     const e: FakeEl = {
       tagName: tag, id: "", hidden: false, style: {}, src: "", contentWindow: null,
       setAttribute: (k, v) => void attrs.set(k, String(v)),
       getAttribute: (k) => attrs.get(k) ?? null,
       attributes: () => [...attrs.keys()].sort(),
       addEventListener: (t, fn) => void on.set(t, fn),
-      fire: (t, ev) => on.get(t)?.(ev),
+      fire: (t, ev) => {
+        if (t === "load") loaded = true;
+        on.get(t)?.(ev);
+      },
       dataset: {},
       append: () => {},
       focus: () => void focused.push(e),
@@ -125,7 +132,7 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
     };
     made.push(e);
     if (tag === "iframe") {
-      const win = { postMessage: (msg: unknown, to: string) => void posted.push({ msg, to, win }) };
+      const win = { postMessage: (msg: unknown, to: string) => void posted.push({ msg, to, win, blank: !loaded }) };
       e.contentWindow = win;
     }
     return e;
@@ -233,10 +240,67 @@ test("open(typed) takes the frame out of the document and nothing reaches the ol
   assert.equal((d.frames()[0] as unknown as { inert?: boolean }).inert, false, "the new frame is live again, PROTECT_MS after the close");
 });
 
+// card signpage-tab-title-and-origin (QA walk item 18): after sign-in the console read "postMessage target origin
+// 'https://ct-app.unrealized.trade' does not match 'https://confidential.unrealized.trade'". The words screen took the
+// frame out; its close put a new one in, whose window holds its first about:blank (SIGN_HOST's origin) until APP_HOST's
+// document commits, and the signed-in state change (watch) and the old document's late answer were posted to it then.
+test("a frame made at a typed screen's close is posted nothing before its own load: no state change, no late answer to the document that left; its load posts ready, and it is answered after", async () => {
+  const d = fakeDom();
+  let state = signedOutState();
+  let change: () => void = () => {};
+  let finish: () => void = () => {};
+  const late = new Promise<void>((ok) => (finish = ok));
+  const sh = mountShell(d.doc, {
+    state: () => state,
+    watch: (fn) => (change = fn),
+    kinds: { "signin.open": () => ({ after: late, answer: () => ({ result: { pending: true } }) }) },
+  });
+  const old = d.frames()[0]!;
+  old.fire("load");
+  const q0 = ask();
+  d.send(q0, old.contentWindow);
+  await answerTo(d, q0.id);
+  // the old document asks to sign in; its answer waits (an open kind waits out a store read)
+  const open = { v: 1, id: crypto.randomUUID(), type: "signin.open", return_key: "signin", way: "passkey" };
+  d.send(open, old.contentWindow);
+  await quiet();
+  sh.open(true);
+  sh.close();
+  const [f] = d.frames();
+  assert.ok(f && f !== old);
+  const before = d.posted.length;
+  // signed in while the new frame is on its way, and the old document's answer comes
+  state = { ...signedOutState(), signed_in: true, way: "words", code_saved: true } as ReturnType<typeof signedOutState>;
+  change();
+  finish();
+  await quiet();
+  assert.deepEqual(d.posted.slice(before).filter((p) => p.win === f.contentWindow).map((p) => p.msg), [], "nothing to the new frame's about:blank");
+  assert.deepEqual(d.posted.filter((p) => p.blank).map((p) => p.msg), [], "no post to any frame before its load");
+  f.fire("load");
+  const q = ask();
+  d.send(q, f.contentWindow);
+  await answerTo(d, q.id);
+  const after = d.posted.slice(before);
+  assert.deepEqual(after.map((p) => p.msg), [READY, { v: 1, id: q.id, ok: true, result: state }]);
+  assert.ok(after.every((p) => p.win === f.contentWindow && p.to === APP_ORIGIN && !p.blank));
+});
+
+test("the first frame is posted nothing before its first load, though the state changes before it", async () => {
+  const d = fakeDom();
+  let change: () => void = () => {};
+  mountShell(d.doc, { state: () => signedOutState(), watch: (fn) => (change = fn) });
+  change();
+  await quiet();
+  assert.equal(d.posted.length, 0);
+  d.frames()[0]!.fire("load");
+  assert.deepEqual(d.posted.map((p) => [p.msg, p.blank]), [[READY, false]]);
+});
+
 test("nav: the top window's address becomes APP_HOST's path and query, by replaceState only; another origin, // and an over-long path are refused", async () => {
   const d = fakeDom();
   mountShell(d.doc, { state: () => signedOutState() });
   const win = d.frames()[0]!.contentWindow;
+  d.frames()[0]!.fire("load"); // the APP_HOST document is in the frame: it is the peer from its load on
   const nav = (path: unknown) => ({ v: 1, id: crypto.randomUUID(), type: "nav", path });
   const ok = nav("/token/base/0xabc?tab=holders");
   d.send(ok, win);
@@ -507,6 +571,7 @@ test("reload: answered first, then the top window reloads", async () => {
   const d = fakeDom();
   mountShell(d.doc, { state: () => signedOutState() });
   const win = d.frames()[0]!.contentWindow;
+  d.frames()[0]!.fire("load"); // the APP_HOST document is in the frame: it is the peer from its load on
   const m = { v: 1, id: crypto.randomUUID(), type: "reload" };
   let atReload = -1;
   const view = d.doc.defaultView as unknown as { location: { reload(): void } };
@@ -526,6 +591,7 @@ test("reload waits for a running trade to settle (the review's reload finding): 
   const running = new Promise<void>((r) => (settle = r));
   mountShell(d.doc, { state: () => signedOutState(), settle: () => running });
   const win = d.frames()[0]!.contentWindow;
+  d.frames()[0]!.fire("load"); // the APP_HOST document is in the frame: it is the peer from its load on
   const m = { v: 1, id: crypto.randomUUID(), type: "reload" };
   d.send(m, win);
   assert.deepEqual(await answerTo(d, m.id), { v: 1, id: m.id, ok: true, result: {} });
@@ -574,6 +640,7 @@ test("a kind the host answers (signin.open): its answer goes to the frame before
     kinds: { "signin.open": (p) => (p.way === "wallet" ? null : { result: { pending: true }, then: () => (order.push(`open after ${d.posted.length} posts`), sh!.open(true)) }) },
   });
   const win = d.frames()[0]!.contentWindow;
+  d.frames()[0]!.fire("load"); // the APP_HOST document is in the frame: it is the peer from its load on
   const m = { v: 1, id: crypto.randomUUID(), type: "signin.open", return_key: "deposit", way: "words" };
   d.send(m, win);
   assert.deepEqual(await answerTo(d, m.id), { v: 1, id: m.id, ok: true, result: { pending: true } });
@@ -583,6 +650,7 @@ test("a kind the host answers (signin.open): its answer goes to the frame before
   // backup.open has no handler: refused, and so is a signin.open the handler refuses (a new frame first)
   sh.close();
   const w2 = d.frames()[0]!.contentWindow;
+  d.frames()[0]!.fire("load");
   for (const r of [{ type: "backup.open", return_key: "settings" }, { type: "signin.open", return_key: "deposit", way: "wallet" }]) {
     const q = { v: 1, id: crypto.randomUUID(), ...r };
     d.send(q, w2);
@@ -598,6 +666,7 @@ test("the waits hold on a loaded runner: every answer read when the shell's SHA-
   const d = fakeDom();
   mountShell(d.doc, { state: () => signedOutState() });
   const win = d.frames()[0]!.contentWindow;
+  d.frames()[0]!.fire("load"); // the APP_HOST document is in the frame: it is the peer from its load on
   const nav = { v: 1, id: crypto.randomUUID(), type: "nav", path: "/portfolio" };
   d.send(nav, win);
   assert.deepEqual(await answerTo(d, nav.id), { v: 1, id: nav.id, ok: true, result: {} });
@@ -618,6 +687,7 @@ test("nav's own check: a nav the frame sent before the sheet opened, read after,
   const d = fakeDom();
   const sh = mountShell(d.doc, { state: () => signedOutState() });
   const f = d.frames()[0]!;
+  f.fire("load"); // the APP_HOST document is in the frame: it is the peer from its load on
   const m = { v: 1, id: crypto.randomUUID(), type: "nav", path: "/portfolio" };
   d.send(m, f.contentWindow);
   sh.open();
@@ -630,6 +700,7 @@ test("reload's own check: a reload the frame sent before the sheet opened, read 
   const d = fakeDom();
   const sh = mountShell(d.doc, { state: () => signedOutState() });
   const f = d.frames()[0]!;
+  f.fire("load"); // the APP_HOST document is in the frame: it is the peer from its load on
   const m = { v: 1, id: crypto.randomUUID(), type: "reload" };
   d.send(m, f.contentWindow);
   sh.open();
@@ -645,6 +716,7 @@ test("a reload answered before the sheet opened does not fire under it; with no 
     let settle = () => {};
     const sh = mountShell(d.doc, { state: () => signedOutState(), settle: () => new Promise<void>((ok) => (settle = ok)) });
     const f = d.frames()[0]!;
+    f.fire("load"); // the APP_HOST document is in the frame: it is the peer from its load on
     const m = { v: 1, id: crypto.randomUUID(), type: "reload" };
     d.send(m, f.contentWindow);
     assert.equal((await answerTo(d, m.id) as { ok?: boolean }).ok, true);
