@@ -11,7 +11,7 @@
 // The walk (./restore.ts walkSteps) is the only user, and every index it finds and its last one are checked again with
 // poseidon-lite (noteSecrets), so a drift between the two stops the restore instead of losing a note.
 import { C2, C3, M2, M3 } from "./poseidon-constants.ts";
-import { fieldWasm, type FieldWasm } from "./field-wasm.ts";
+import { fieldWasm, type FieldOp, type FieldWasm } from "./field-wasm.ts";
 
 const P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const FULL_HALF = 4;
@@ -180,15 +180,8 @@ function fullW(f: FieldWasm, q: SparseSlots, constants: readonly number[]): void
     f.pow5(q.s[y]!, q.s[y]!);
   }
   for (let y = 0; y < t; y++) f.copy(q.x[y]!, q.s[y]!);
-  for (let i = 0; i < t; i++) {
-    const row = q.M[i]!;
-    f.mul(q.acc, row[0]!, q.x[0]!);
-    for (let j = 1; j < t; j++) {
-      f.mul(q.tmp, row[j]!, q.x[j]!);
-      f.add(q.acc, q.acc, q.tmp);
-    }
-    f.copy(q.s[i]!, q.acc);
-  }
+  // each row of M times x in one reduction (FieldWasm.dot)
+  for (let i = 0; i < t; i++) f.dot(q.s[i]!, q.M[i]!.flatMap((m, j) => [m, q.x[j]!]));
 }
 
 // `hash` above on the slots: the inputs are slots, the hash goes to slot `out`
@@ -207,11 +200,7 @@ function hashW(f: FieldWasm, q: SparseSlots, inputs: readonly number[], out: num
     f.pow5(a, a);
     const w = q.w[r]!;
     const z = q.z[r]!;
-    f.mul(na, q.m00, a);
-    for (let j = 0; j < n; j++) {
-      f.mul(q.tmp, w[j]!, q.s[j + 1]!);
-      f.add(na, na, q.tmp);
-    }
+    f.dot(na, [q.m00, a, ...w.flatMap((x, j) => [x, q.s[j + 1]!])]);
     for (let j = 0; j < n; j++) {
       f.mul(q.tmp, a, z[j]!);
       f.add(q.s[j + 1]!, q.s[j + 1]!, q.tmp);
@@ -220,15 +209,7 @@ function hashW(f: FieldWasm, q: SparseSlots, inputs: readonly number[], out: num
   }
   // v = end u
   for (let j = 0; j < n; j++) f.copy(q.x[j]!, q.s[j + 1]!);
-  for (let i = 0; i < n; i++) {
-    const row = q.end[i]!;
-    f.mul(q.acc, row[0]!, q.x[0]!);
-    for (let j = 1; j < n; j++) {
-      f.mul(q.tmp, row[j]!, q.x[j]!);
-      f.add(q.acc, q.acc, q.tmp);
-    }
-    f.copy(q.s[i + 1]!, q.acc);
-  }
+  for (let i = 0; i < n; i++) f.dot(q.s[i + 1]!, q.end[i]!.flatMap((m, j) => [m, q.x[j]!]));
   fullW(f, q, q.after);
   for (let x = FULL_HALF + o.nP + 1; x < 2 * FULL_HALF + o.nP; x++) fullW(f, q, q.C.slice(x * t, x * t + t));
   f.copy(out, q.s[0]!);
@@ -266,17 +247,75 @@ export function poseidonWasm(): { poseidon2(inputs: readonly [bigint, bigint]): 
   return { poseidon2: (xs) => run(q.two, xs), poseidon3: (xs) => run(q.three, xs) };
 }
 
+/** hashW's steps as a program (FieldWasm.program) rather than made: `hash` on `rec` records each one. A zero written is
+ *  a copy of `zero`, a slot never written (all zero words: 0 in Montgomery form). */
+function recorder(zero: number): { rec: FieldWasm; ops: FieldOp[] } {
+  const ops: FieldOp[] = [];
+  const no = (): never => {
+    throw new Error("poseidon-walk: a step a program does not make");
+  };
+  const rec: FieldWasm = {
+    slot: no,
+    write: no,
+    writeSmall: (at, n) => (n === 0 ? void ops.push(["copy", at, zero]) : no()),
+    read: no,
+    copy: (to, from) => void ops.push(["copy", to, from]),
+    save: no,
+    load: no,
+    mul: (r, a, b) => void ops.push(["mul", r, a, b]),
+    add: (r, a, b) => void ops.push(["add", r, a, b]),
+    pow5: (r, a) => void ops.push(["pow5", r, a]),
+    dot: (r, pairs) => void ops.push(pairs.length === 2 ? ["mul", r, pairs[0]!, pairs[1]!] : ["dot", r, ...pairs]),
+    program: no,
+  };
+  return { rec, ops };
+}
+
+// the index's three hashes as one program, compiled once a thread (card first-sign-in-fast-from-any-region): from the
+// slots `mn`, `ms`, `sc` and `at` (the masters, the scope, the index) to `out`; null where it does not compile, and
+// the walk makes the same steps one call at a time
+let indexRun: { run: () => void; mn: number; ms: number; sc: number; at: number } | null | undefined;
+const indexRunOnce = (f: FieldWasm, q: NonNullable<typeof slots>): typeof indexRun => {
+  if (indexRun !== undefined) return indexRun;
+  indexRun = null;
+  try {
+    const [mn, sc, at] = q.ins as [number, number, number];
+    const ms = f.slot();
+    const { rec, ops } = recorder(f.slot());
+    hashW(rec, q.three, [mn, sc, at], q.nh);
+    hashW(rec, q.three, [ms, sc, at], q.sh);
+    hashW(rec, q.two, [q.nh, q.sh], q.out);
+    indexRun = { run: f.program(ops), mn, ms, sc, at };
+  } catch {
+    indexRun = null;
+  }
+  return indexRun;
+};
+
 /**
  * The walk's precommitment of deposit index i under the masters and scope: poseidon2(poseidon3(nullifier, scope, i),
  * poseidon3(secret, scope, i)), as ../derive/notes.ts derives a deposit note's. On the WebAssembly field where it
  * compiles, on BigInt otherwise; equal either way. The masters and scope are put in the module once a walk and into
- * the shared input slots each index, so walks taking turns on one thread never read each other's.
+ * the shared input slots each index, so walks taking turns on one thread never read each other's. On the field, an
+ * index is one call into WebAssembly (indexRunOnce), its three hashes made inside it.
  */
 export function precommitmentWalker(m: { nullifier: bigint; secret: bigint }, scope: bigint): (i: number) => bigint {
   const f = fieldWasm();
   if (f === null) return (i) => poseidon2Walk([poseidon3Walk([m.nullifier, scope, BigInt(i)]), poseidon3Walk([m.secret, scope, BigInt(i)])]);
   const q = slotsOnce(f);
   const [mn, ms, sc] = [m.nullifier, m.secret, scope].map((x) => (f.write(q.out, x), f.save(q.out))) as [Uint32Array, Uint32Array, Uint32Array];
+  const p = indexRunOnce(f, q);
+  if (p) {
+    return (i) => {
+      if (!Number.isInteger(i) || i < 0 || i > 0xffffffff) throw new Error("an index is a u32");
+      f.writeSmall(p.at, i);
+      f.load(p.mn, mn);
+      f.load(p.ms, ms);
+      f.load(p.sc, sc);
+      p.run();
+      return f.read(q.out);
+    };
+  }
   const [a, b, at] = q.ins as [number, number, number];
   return (i) => {
     if (!Number.isInteger(i) || i < 0 || i > 0xffffffff) throw new Error("an index is a u32");
