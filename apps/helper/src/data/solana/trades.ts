@@ -876,6 +876,10 @@ export function createSolanaTrades(deps: {
       const ownFrom = e.book === null ? null : e.book.ownFrom(tf as Tf);
       let bars = own;
       let src = "chain";
+      // the history before our first bar refused, failed or itself still filling: the answer says filling, so the page
+      // reads it again while that read goes on, never a short chart drawn as the coin's whole (one rule with swaps.ts
+      // candles, card helper-listed-charts-own-reads)
+      let short = false;
       if (own.length < limit && tf !== "1s" && deps.history !== undefined) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
         // with no bars of ours the history's newest range is asked as such (`to` null: one cache key, not one per second)
@@ -884,7 +888,9 @@ export function createSolanaTrades(deps: {
         // while its fill is owed (card evm-chart-opens-without-a-vendor-call: live run 42995547054 read an empty 200
         // for sUSDai's 1h at 09:29:51Z, 101 bars at 09:50Z; one rule with the EVM chains' candles, swaps.ts)
         if (own.length === 0 && h.status !== 200 && h.status !== 404) return h;
-        const old = h.status === 200 ? ((JSON.parse(h.body) as { candles?: Candle[] }).candles ?? []).filter((c) => c[0] < before) : [];
+        const hb = h.status === 200 ? (JSON.parse(h.body) as { candles?: Candle[]; filling?: boolean }) : null;
+        short = (h.status !== 200 && h.status !== 404) || hb?.filling === true;
+        const old = (hb?.candles ?? []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);
           src = `chain,${h!.src ?? "geckoterminal"}`;
@@ -893,6 +899,7 @@ export function createSolanaTrades(deps: {
       const at = e.readAt ?? now();
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
+      if (short && bars.length < limit) body.filling = true;
       body.as_of_ms = at;
       return { status: 200, body: JSON.stringify(body), src, asOfMs: at };
     },

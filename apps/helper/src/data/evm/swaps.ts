@@ -3056,6 +3056,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const ownFrom = e.book.ownFrom(tf as Tf);
       let bars: Candle[] = own;
       let src = "chain";
+      // the history before our first bar refused or failed with none held: the answer says filling, so the page reads it
+      // again while the queued read fills it (geckoBars), never a short chart drawn as the coin's whole (card
+      // helper-listed-charts-own-reads: live run 43776130630 read Base DRB, 1,648 trades a day and 1.7 years old, as 1
+      // 1m bar, src chain, after 9 reads over 90 s)
+      let short = false;
       // a range we do not hold: bars before our first
       if (own.length < limit) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
@@ -3067,6 +3072,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         // 0xfbb75a59's 1h answered 200 [] at 19:55Z; card evm-chart-opens-without-a-vendor-call: live run 42995547054)
         const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before, false, client);
         if (own.length === 0 && !Array.isArray(got)) return timed(got);
+        short = !Array.isArray(got);
         const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);
@@ -3076,6 +3082,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const at = e.readAt ?? now();
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
+      if (short && bars.length < limit) body.filling = true;
       body.as_of_ms = at;
       return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at });
     },

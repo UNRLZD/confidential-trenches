@@ -163,3 +163,38 @@ test("a cold read behind a queue that holds another's is tried in its turn, neve
   assert.equal(JSON.parse(b.body).candles.length, 2, "GeckoTerminal's pool, then its bars, read for this page now");
   assert.match(gt[0]!, /\/tokens\/0x3434[0-9a-f]+\/pools\?/);
 });
+
+test("card helper-listed-charts-own-reads: bars of ours with the history before them refused (the window full) say filling, never a short chart as the coin's whole; the queued read then serves the full chart, not filling (live run 43776130630: Base DRB 1 bar, src chain, after 9 reads)", async () => {
+  const B = await import("../../../test/evm-swaps/base.ts");
+  const chain = fakeChain();
+  const head = B.REC.firstHead + 200;
+  // the clock at the head's own time, so the bars before our first are in the past
+  const T1 = B.timeMsOf(head) + 5_000;
+  const clock = { t: T1 };
+  const gt: string[] = [];
+  // 300 1m bars before whatever time the read asks before
+  const fetch = (async (url: string, init: RequestInit) => {
+    if (!url.includes("geckoterminal")) return chain.fetch(url, init);
+    gt.push(url);
+    const before = Number(/before_timestamp=(\d+)/.exec(url)?.[1] ?? Math.floor(clock.t / 1000));
+    const list = Array.from({ length: 300 }, (_, i) => [before - 60 * (i + 1), 1, 1, 1, 1, 10]);
+    return new Response(JSON.stringify({ data: { attributes: { ohlcv_list: list } } }), { status: 200 });
+  }) as typeof chain.fetch;
+  const budget = geckoBudget(() => clock.t);
+  budget.seed(Array.from({ length: GT_LIMIT_PER_MIN }, () => clock.t - 1_000));
+  const tm = timers(clock);
+  const s = open(chain, clock, { fetch, gecko: budget, sleep: async () => undefined, later: tm.later });
+  chain.st.head = head;
+  const a = JSON.parse((await s.candles(ICNT, "1m", null, 500)).body);
+  assert.ok(a.own_from_s !== undefined && a.candles.length > 0 && a.candles.length < 50, `bars of ours alone: ${a.candles.length}`);
+  assert.equal(a.src, "chain");
+  assert.equal(a.filling, true, "short: its history refused, so filling");
+  assert.deepEqual(gt, [], "no call while the window is full");
+  await tm.run(T1 + WINDOW_MS);
+  assert.equal(gt.length, 1, "the queued history read made its call");
+  const b = JSON.parse((await s.candles(ICNT, "1m", null, 500)).body);
+  s.stop();
+  assert.equal(b.src, "chain,geckoterminal");
+  assert.ok(b.candles.length >= 300, `${b.candles.length} bars`);
+  assert.equal(b.filling, undefined, "full: not filling");
+});
