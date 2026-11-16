@@ -179,11 +179,11 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
 
 /** One sync of the chain's pool index from `prev` (none: cold) on the venue's two index readers through `fetchFn`, and a
  *  whole one served to the kit's quote (evmPoolIndexUse). `served` is false where the sync ended partial or the chain
- *  has no index. */
+ *  has no index. Its reads are a background read's (pace.ts `later`): a tap's posts go before them. */
 export async function evmPoolIndexRefresh(chain: EvmPoolChain, prev: EvmPoolIndexData | null, fetchFn: typeof fetch = fetch): Promise<{ readonly sync: EvmPoolIndexSync | null; readonly served: boolean }> {
   const v = evmPoolVenues()[chain];
   const ix = v?.index;
   if (v === undefined || ix === undefined || v.poolManager === undefined || v.scan === undefined) return { sync: null, served: false };
-  const sync = await evmPoolIndexSync(prev, { chainId: v.chainId, poolManager: v.poolManager, readers: [evmJsonRpc(ix.readers[0], fetchFn, 64 << 20), evmJsonRpc(ix.readers[1], fetchFn, 64 << 20)], depth: v.scan.depth, span: ix.span, margin: ix.margin, cap: ix.cap, perBatch: ix.perBatch, parallel: ix.parallel, ...(ix.batchMax !== undefined ? { batchMax: ix.batchMax } : {}) });
+  const sync = await evmPoolIndexSync(prev, { chainId: v.chainId, poolManager: v.poolManager, readers: [evmJsonRpc(ix.readers[0], fetchFn, 64 << 20, undefined, true), evmJsonRpc(ix.readers[1], fetchFn, 64 << 20, undefined, true)], depth: v.scan.depth, span: ix.span, margin: ix.margin, cap: ix.cap, perBatch: ix.perBatch, parallel: ix.parallel, ...(ix.batchMax !== undefined ? { batchMax: ix.batchMax } : {}) });
   return { sync, served: sync.index !== null && sync.coversThrough !== null && evmPoolIndexUse(chain, sync) };
 }

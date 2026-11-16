@@ -3865,9 +3865,9 @@ test("V8 the first two providers both stuck (failing after 6 s): the spares are 
 
 test("V9 the pinned quote asks the kit's providers in their measured order: the venue's first, failing its reads, is asked last by the next quote", () => onTestClock(async () => {
   const p = builder.evmPoolVenues().base.providers!;
-  const TS = "0x" + (Math.floor(Date.now() / 1000) - 2).toString(16);
-  // the tests before this one held some of these providers (the offline quote above)
+  // the tests before this one held some of these providers (the offline quote above), and spent their paces
   quoteMod.evmSpeedReset();
+  evmPaceReset();
   const token = freshToken();
   const x = xAt(0x3e00);
   const { pools, logs } = warmCase(token, x);
@@ -3883,7 +3883,9 @@ test("V9 the pinned quote asks the kit's providers in their measured order: the 
     const asked = calls.map((c) => ({ method: c.method, params: c.params }));
     const out = calls.some((c) => c.method === "eth_getLogs" || c.method === "eth_blockNumber") ? await scan(asked) : await model(asked);
     // the pinned quote reads the device's own clock (and the chain's head watch keeps the clock it was made with): the
-    // model's blocks are dated 2 s before this test began
+    // model's blocks are dated 2 s before each answer (a cold scan on base-rpc.publicnode.com takes its pace's time,
+    // pace.ts, and the block is picked once its logs are in)
+    const TS = "0x" + (Math.floor(Date.now() / 1000) - 2).toString(16);
     const dated = out.map((a) => {
       const r = (a as { result?: { timestamp?: string } }).result;
       return r !== null && typeof r === "object" && typeof r.timestamp === "string" ? { ...(a as object), result: { ...r, timestamp: TS } } : a;
@@ -3899,6 +3901,7 @@ test("V9 the pinned quote asks the kit's providers in their measured order: the 
     assert.equal(reads, 0, "the held provider is not asked while the others agree");
   } finally {
     net.mock.restore();
+    evmPaceReset();
   }
 }));
 
@@ -5530,6 +5533,50 @@ test("PACE5 card robinhood-quote-inside-the-bound-under-the-pace: rpc.mainnet.ch
   await new Promise((r) => setTimeout(r, 2_500));
   assert.deepEqual(by, [2, 2, 3, 3, 4], `getLogs posts sent by ${marks.join(", ")} ms`);
   evmPaceReset();
+}));
+
+test("PACE6 card evm-warm-tap-ends-inside-two-seconds: a page dry's cold scan and a tap at once on base-rpc.publicnode.com draw from one budget: the scan never past the provider's measured bucket, the tap's posts never behind it", { timeout: 60_000 }, () => onTestClock(async () => {
+  // SIGN_HOST's walk at release 159 (2026-11-16 00:20Z): the dry's cold scan of a coin no list held sent the provider
+  // 119 posts of two 10,000-block getLogs, 20 at once, and 41 were answered 429; the probe from the Mac (00:57-01:04Z)
+  // read 137 such posts answered in 5 s, then 429, and about 2 a second back (pace.ts)
+  evmPaceReset();
+  const url = "https://base-rpc.publicnode.com";
+  let dryOut = 0;
+  let tapOut = 0;
+  // each post answered 300 ms on (the probe's p50 was 251 to 295 ms)
+  const f = (tap: boolean) =>
+    (async (_u: string, init: RequestInit) => {
+      if (tap) tapOut++;
+      else dryOut++;
+      const calls = JSON.parse(init.body as string) as { id: number }[];
+      await new Promise((r) => setTimeout(r, 300));
+      return new Response(JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, result: [] }))));
+    }) as unknown as typeof fetch;
+  // judged on the test clock's own timers, never by reading a clock: a mark set at each time reads how many had left
+  const dryBy: number[] = [];
+  const tapBy: number[] = [];
+  for (const m of [1_000, 5_000]) setTimeout(() => dryBy.push(dryOut), m);
+  setTimeout(() => tapBy.push(tapOut), 3_001);
+  // the dry's scan (a background read's provider, evmJsonRpc `later`), 160 posts (a cold token and one X, 157 in V9's
+  // pinned quote), 20 at once as the scan's gate sends them
+  const dry = evmJsonRpc(url, f(false), undefined, undefined, true);
+  const scan = [{ method: "eth_getLogs", params: [] }, { method: "eth_getLogs", params: [] }, { method: "eth_getBlockByNumber", params: [] }];
+  let left = 160;
+  for (let i = 0; i < 20; i++) void (async () => { while (left-- > 0) await dry(scan); })().catch(() => {});
+  // a tap 3 s in, the scan's posts by then waiting their turn: its first round, 10 posts of 3 eth_call (Base's 6 reads
+  // a call), at once
+  await new Promise((r) => setTimeout(r, 3_000));
+  const tap = evmJsonRpc(url, f(true));
+  const call = [{ method: "eth_call", params: [] }, { method: "eth_call", params: [] }, { method: "eth_call", params: [] }];
+  await Promise.all(Array.from({ length: 10 }, () => tap(call)));
+  await new Promise((r) => setTimeout(r, 2_000));
+  left = 0;
+  // the scan's posts still waiting their turn are forgotten with the lanes (their waits hold no timer)
+  evmPaceReset();
+  // never past the bucket the provider was read to hold: 137 answered in the probe's first 5 s, then 429
+  assert.ok(dryBy[0]! <= 128 && dryBy[1]! < 137, `the dry's scan sent ${dryBy[0]} posts by 1 s and ${dryBy[1]} by 5 s, past what the provider holds`);
+  // every post of the tap left as it asked, none behind the dry's
+  assert.deepEqual(tapBy, [10], "the tap's posts sent 1 ms after it asked");
 }));
 
 test("SP5 a first scan provider that answers a warm scan with no logs: the request goes to the second whole, never asked of the first as halves", { timeout: 30_000 }, async () => {

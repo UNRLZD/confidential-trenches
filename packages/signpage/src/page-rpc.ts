@@ -25,6 +25,7 @@ import { SOLANA_POOL_BUY_VENUES } from "../../kit/src/trade/solana/pool-buy.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { HostPaused, gateSignal, hostLane } from "../../wallet/src/throttle.ts";
+import { evmPaceTake } from "../../kit/src/checks/evm/pace.ts";
 
 /** Whose read it is: a trade's own (first on its host) or a background pass's (on its host's budget). */
 export type ReadKind = "trade" | "pass";
@@ -51,8 +52,12 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   // every outcome reported to the lane: the gate's pause, and the probe's settle when this read was it
   // `stop`: the caller's signal and the page's gate (gateSignal), so an ask after the gate closed during the call is never
   // sent (card sign-out-stops-the-pages-reads); its waits for a turn also end at a sign out's tap (HostLane.turn)
+  // and its turn at the provider's pace, the one every EVM read of the device takes (kit pace.ts: the kit's quotes,
+  // scans and index readers too), a pass's as a background read's; an unpaced host's is no wait
   const ask = async (end: number, stop: AbortSignal, method: string, params: readonly unknown[]): Promise<unknown> => {
     stop.throwIfAborted();
+    const turn = evmPaceTake(href, [{ method }], stop, kind === "pass");
+    const give = typeof turn === "function" ? turn : await turn;
     const sentIn = lane.gate.epoch();
     try {
       const r = await once(Math.max(1, Math.floor(end - performance.now())), method, params);
@@ -62,6 +67,8 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
       if (e instanceof SolanaRpcTransportError && throttles(e)) lane.throttled(sentIn, e.afterMs);
       else lane.failed(sentIn);
       throw e;
+    } finally {
+      give();
     }
   };
   // asked again once: after the host's pause (a throttle) or the retry's backoff (any other fault), a background read
