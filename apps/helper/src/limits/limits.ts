@@ -152,6 +152,9 @@ export type ProviderHolds = {
   reserve(url: string): void;
   room(url: string): number;
   paceOf(url: string): Pace | undefined;
+  /** A shared rate's units a second now (card base-reads-never-throttled: halved at a refusal, climbing back), for the
+   *  hold's log line; undefined for a URL on no shared rate. */
+  paceNow?(url: string): number | undefined;
 };
 
 /** A provider's pace: `perS` units a second, at most `burst` at once; a unit is a post (one HTTP request, a batch or
@@ -219,17 +222,42 @@ export const HOST_PACE_MS: Readonly<Record<string, number>> = { "api.unrealized.
  * page named "120,000 CUs per minute per IP"). Paced per key at 8 a second and 8 at once (up to 48 in one second from the
  * three, and 30 more keyless), dRPC answered the helper 429 607 times on callers' reads and 96 on the pool fill's, 16 Nov
  * 03:59-04:33Z (helper.sh docker logs, `rpc hold base drpc.live`); a key's 16 in a second at most is under 25, so the
- * limit those 429s hit is the keys' together, not one key's. The keyless robinhood.drpc.org keeps its own pace
- * (PROVIDER_PACE): no read shows dRPC counting a keyless public node with the keys, and the pool senders' withdraw reads
- * on it are timed at that pace (pool/evm.test.ts review M-3). [design: 20 calls a second, 4 at once: at most 24 in any
- * second, one under the 25.]
+ * limit those 429s hit is the keys' together, not one key's. Every other URL the helper sends dRPC from that IP draws it
+ * too (card base-reads-never-throttled): the keyless robinhood.drpc.org (PROVIDER_PACE) and a dRPC URL set under an
+ * existing name (rpc.ts keyedPaces: NEAR's second, drpc.live on /v1/health), which were paced apart (15 and 10 a second)
+ * and could send dRPC 25 a second more. [design: 20 calls a second, 4 at once: at most 24 in any second, one under the
+ * 25; under a refusal the rate's own pace (RATE_STEP_MS).]
  */
 export const DRPC_IP_PACE = { perS: 20, burst: 4, unit: "call", rate: "drpc-ip" } as const satisfies Pace;
+/**
+ * A shared rate (Pace rate, dRPC's per IP) is one limit at the provider, so its refusal is the whole rate's (card
+ * base-reads-never-throttled). Live 16 Nov 10:17-10:21Z (helper.sh docker logs at 841265f75) Base's three dRPC keys were
+ * each refused once a second for runs of 7 to 15 s: a 429 held only the URL it came from, 1 s, while the other keys kept
+ * sending into the same refusing IP, and each key sent again the moment its second ended. dRPC's own error table says
+ * for its code 31 (HTTP 429): "Retry after 1-2 seconds with exponential backoff", "If still failing, space out
+ * subsequent requests" (github.com/drpcorg/drpc-agent-skills skills/drpc-rpc/errors.md, read 2026-11-16 10:1xZ), and its
+ * free tier's rate is dynamic: "a limit of 25 RPS" "under normal conditions" (drpc.org/docs/howitworks/ratelimiting, read
+ * 2026-11-16 10:19Z), "a dynamic rate limitation of approximately 2,100 computational units per second ... during peak
+ * periods" (drpc.org/blog/upcoming-changes-to-drpcs-free-plan-effective-june-1-2025, read 10:19Z). So a refusal of any URL
+ * on a rate holds every URL on it, for the wait named or 2^(k-1) s, k its refusals in a row (RATE_BACK_MAX_S at most;
+ * a refusal RATE_CALM_MS or more after the last one's hold ended starts again at 1), and halves the rate's pace
+ * (RATE_FLOOR_PER_S at least), which climbs back one a second each RATE_STEP_MS from the hold's end, to the Pace's own:
+ * the pace follows what the provider serves, measured by its own answers. Each hold line names the pace it left
+ * (rpc.ts refusalOf), so the helper's log reads the rate dRPC served. A refusal inside the rate's hold is of a send that left before it: it neither
+ * counts nor halves again. [design: TCP's rule (RFC 5681): one decrease per loss event, a linear climb.]
+ */
+export const RATE_BACK_MAX_S = 16;
+export const RATE_CALM_MS = 30_000;
+export const RATE_FLOOR_PER_S = 2;
+export const RATE_STEP_MS = 10_000;
 export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
   "https://rpc-robinhood.blockmachine.io": { perS: 0.5, burst: 25, unit: "call" },
   "https://robinhood.api.pocket.network": { perS: 15, burst: 200, unit: "call" },
-  "https://robinhood.drpc.org": { perS: 15, burst: 15, unit: "call" },
+  // dRPC's keyless endpoint, sent from the helper's one IP as its keys are: on their one rate (card
+  // base-reads-never-throttled; it answered the helper 429 at 10:17:01Z on 16 Nov, between the keys' refusals at 10:16:13Z
+  // and 10:17:26Z)
+  "https://robinhood.drpc.org": { ...DRPC_IP_PACE },
   "https://rpc.mainnet.chain.robinhood.com": { perS: 1, burst: 2, unit: "post" },
   "https://base-rpc.publicnode.com": { perS: 3, burst: 6, unit: "call" },
   "https://base.gateway.tenderly.co": { perS: 2, burst: 3, unit: "call" },
@@ -403,11 +431,21 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
   // a company's URLs share one bucket and one caller wait (Pace group, card rpc-keyed-lists), or the company's rate's
   // (Pace rate: dRPC's per IP, card helper-base-keyed-holds-under-load)
   const rateOf = (url: string, p: Pace): string => p.rate ?? p.group ?? url;
+  /** Per shared rate (Pace rate): its refusals in a row, when the last one's hold ends and the pace it set (RATE_STEP_MS). */
+  const refusals = new Map<string, { k: number; at: number; perS: number }>();
+  /** A pace's units a second now: a shared rate's as its last refusal set it, one more each RATE_STEP_MS since its hold
+   *  ended. */
+  const perSOf = (p: Pace, t: number): number => {
+    const r = p.rate === undefined ? undefined : refusals.get(p.rate);
+    return r === undefined ? p.perS : Math.min(p.perS, r.perS + Math.max(0, Math.floor((t - r.at) / RATE_STEP_MS)));
+  };
+  /** The hold's key: a shared rate's, else the URL's own. */
+  const holdKeyOf = (url: string): string => pace[url]?.rate ?? url;
   const fill = (url: string, p: Pace) => {
     const t = now();
     const k = rateOf(url, p);
     const b = buckets.get(k) ?? { tokens: p.burst, at: t };
-    b.tokens = Math.min(p.burst, b.tokens + ((t - b.at) * p.perS) / 1000);
+    b.tokens = Math.min(p.burst, b.tokens + ((t - b.at) * perSOf(p, t)) / 1000);
     b.at = t;
     buckets.set(k, b);
     return b;
@@ -449,7 +487,7 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
         if (!background && !page) shortWaits.delete(rk);
         return 0;
       }
-      const w = Math.max(1, Math.ceil(((units + floor - b.tokens) * 1000) / p.perS));
+      const w = Math.max(1, Math.ceil(((units + floor - b.tokens) * 1000) / perSOf(p, t)));
       if (!background) keep(Math.max(w, CALLER_HOLD_MS));
       if (!background && !page) shortWaits.set(rk, Math.max(shortWaits.get(rk) ?? 0, t + w));
       return w;
@@ -471,17 +509,32 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
     paceOf(url) {
       return pace[url];
     },
+    paceNow(url) {
+      const p = pace[url];
+      return p?.rate === undefined ? undefined : perSOf(p, now());
+    },
     heldFor(url) {
-      const u = until.get(url) ?? 0;
+      const u = until.get(holdKeyOf(url)) ?? 0;
       if (u <= now()) return 0;
       return secondsUntil(u, now());
     },
     heldMs(url) {
-      return Math.max((until.get(url) ?? 0) - now(), 0);
+      return Math.max((until.get(holdKeyOf(url)) ?? 0) - now(), 0);
     },
     hold(url, seconds) {
       const t = now();
-      until.set(url, Math.max(until.get(url) ?? 0, t + Math.min(Math.max(seconds, 0), RETRY_AFTER_MAX_S) * 1000));
+      const key = holdKeyOf(url);
+      const p = pace[url];
+      let s = seconds;
+      // a shared rate's refusal (RATE_BACK_MAX_S): every URL on it held, longer at each refusal in a row, its pace halved;
+      // one inside the hold left before it, so it only keeps the wait it names
+      if (p?.rate !== undefined && (until.get(key) ?? 0) <= t) {
+        const r = refusals.get(p.rate);
+        const k = r === undefined || t - r.at >= RATE_CALM_MS ? 1 : r.k + 1;
+        s = Math.max(seconds, Math.min(2 ** (k - 1), RATE_BACK_MAX_S));
+        refusals.set(p.rate, { k, at: t + Math.min(s, RETRY_AFTER_MAX_S) * 1000, perS: Math.max(RATE_FLOOR_PER_S, Math.floor(perSOf(p, t) / 2)) });
+      }
+      until.set(key, Math.max(until.get(key) ?? 0, t + Math.min(Math.max(s, 0), RETRY_AFTER_MAX_S) * 1000));
     },
   };
 }

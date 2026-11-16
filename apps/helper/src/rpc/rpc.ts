@@ -61,7 +61,7 @@ import {
   solanaCpmmPoolScan,
   solanaDlmmPairScan,
 } from "@blindfill/kit";
-import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_CLIENTS, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
+import { budgetFromEnv, DRPC_IP_PACE, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_CLIENTS, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 import { companyOf, isKeyless, keyTag, operatorOf, providerName } from "./operator.ts";
@@ -278,6 +278,35 @@ const planSpent = (answer: unknown): boolean =>
     const e = (a as { error?: { message?: unknown; code?: unknown } } | null)?.error;
     return CREDITS.test(String(e?.message ?? "")) || (typeof e?.code === "number" && DRPC_PLAN_CODES.has(e.code));
   });
+/** The most of a provider's 429 body read for its hold line (refusalOf). [design: 512 bytes: dRPC's refusal is about 80.] */
+const REFUSAL_READ_MAX = 512;
+/**
+ * A provider's 429 as its hold line names it (card base-reads-never-throttled): " code <n>", its JSON-RPC error's code
+ * (dRPC's 31 is its rate, its table's other codes a plan or a key's limit: DRPC_PLAN_CODES' source), a whole number of at
+ * most 6 digits; else "". At most REFUSAL_READ_MAX bytes are read and the rest cancelled; no word of the body is kept, so
+ * a hostile one never reaches the log. And on a shared rate, " pace <n>/s", the pace the refusal left it at.
+ */
+async function refusalOf(r: Response, holds: ProviderHolds, url: string): Promise<string> {
+  let text = "";
+  try {
+    const reader = r.body?.getReader();
+    let n = 0;
+    const chunks: Uint8Array[] = [];
+    while (reader !== undefined && n < REFUSAL_READ_MAX) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      n += value.byteLength;
+    }
+    await reader?.cancel();
+    text = Buffer.concat(chunks).subarray(0, REFUSAL_READ_MAX).toString("utf8");
+  } catch {
+    text = "";
+  }
+  const code = /"code"\s*:\s*(-?\d{1,6})\b/.exec(text)?.[1];
+  const pace = holds.paceNow?.(url);
+  return `${code === undefined ? "" : ` code ${code}`}${pace === undefined ? "" : ` pace ${pace}/s`}`;
+}
 /** Past a hold's end, the wait's margin: Node's timers and Date.now() round to whole ms, so a wait of exactly the
  *  hold's length can wake 1 ms inside it (seen on the box: every caller of a crowd woke inside a 1 s hold). */
 const HOLD_MARGIN_MS = 5;
@@ -561,6 +590,8 @@ export function keyedAccountOf(name: string): string | undefined {
 export function keyedSpares(env: Record<string, string | undefined>, chain: RpcChain): string[] {
   return readUpstreams(env)[chain].keyed.filter((k) => KEYED_PROVIDER[k.env] !== undefined).map((k) => k.url);
 }
+/** dRPC as operatorOf names it, its keyed lb.drpc.live and keyless *.drpc.org alike. */
+const DRPC_COMPANY = "drpc.org";
 /** Each new keyed URL set and its company's pace, for the helper's one providerHolds (server.ts): with its company's
  *  daily budget (limits.ts KEYED_DAY, or RPC_DAY_<COMPANY>) and the units one call on its chain spends (KEYED_COST). */
 export function keyedPaces(env: Record<string, string | undefined>): Record<string, Pace> {
@@ -570,6 +601,9 @@ export function keyedPaces(env: Record<string, string | undefined>): Record<stri
     for (const k of readUpstreams(env)[chain].keyed) {
       const co = KEYED_PROVIDER[k.env];
       if (co !== undefined) out[k.url] = { ...KEYED_PACE[co], group: keyedAccountOf(k.env), day: keyedDayOf(env, co), cost: KEYED_COST[co][family] };
+      // a dRPC URL set under an existing name (NEAR_RPC_URL_B on the host: /v1/health's near "drpc.live"), sent from the
+      // helper's IP as the keys are: on their one rate (card base-reads-never-throttled); its account is not known, so no day
+      else if (operatorOf(k.url) === DRPC_COMPANY) out[k.url] = { ...DRPC_IP_PACE };
     }
   }
   return out;
@@ -1122,13 +1156,13 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    *  ms (the provider held, out of room, or the chain's total spent); null when it did not serve the page. */
   const fillBacks = new Map<string, { until: number; k: number }>();
   /** A provider's refusal of a fill page (POOL_BACK_MAX): the fill's own wait on it, in ms, and its hold line. */
-  const fillBack = (c: RpcChain, url: string, s: number): number => {
+  const fillBack = (c: RpcChain, url: string, s: number, why = ""): number => {
     const b = fillBacks.get(url) ?? { until: 0, k: 0 };
     b.k = Math.min(b.k + 1, POOL_BACK_MAX);
     const wait = Math.max(s, 2 ** b.k);
     b.until = now() + wait * 1000;
     fillBacks.set(url, b);
-    log(`rpc hold ${c} ${companyOf(new URL(url).host)} background ${wait} s pool-logs`);
+    log(`rpc hold ${c} ${companyOf(new URL(url).host)} background ${wait} s pool-logs${why}`);
     return wait * 1000;
   };
   const fillSend = async (c: RpcChain, url: string, pool: string, a: bigint, b: bigint): Promise<PoolLog[] | number | null> => {
@@ -1147,8 +1181,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     try {
       r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
       if (r.status === 429) {
-        await r.body?.cancel();
-        return fillBack(c, url, upstreamRetryAfterS(r.headers, now()));
+        const s = upstreamRetryAfterS(r.headers, now());
+        holdsAll.hold(url, s);
+        return fillBack(c, url, s, await refusalOf(r, holdsAll, url));
       }
       text = await readAnswer(r);
     } catch {
@@ -1164,7 +1199,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
     if (planSpent(answer)) return null;
     const limited = evmLimited(c, answer);
-    if (limited > 0) return fillBack(c, url, limited);
+    // card base-reads-never-throttled: the provider's refusal is its limit's, whoever drew it, so it holds the provider
+    // (on a shared rate, every URL of it, limits.ts RATE_BACK_MAX_S) for every path: a caller's read goes to the next
+    // provider in that time instead of into the same refusal
+    if (limited > 0) return holdsAll.hold(url, limited), fillBack(c, url, limited);
     const page = isPlain(answer) && !Object.hasOwn(answer, "error") ? poolPage(answer.result, pool, a, b) : null;
     const fb = fillBacks.get(url);
     if (page !== null && fb !== undefined && fb.k > 0) fb.k--;
@@ -1632,11 +1670,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         try {
           r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(sendMs(by - now())) });
           if (r.status === 429) {
-            await r.body?.cancel();
             sentTo(url, from);
             const s = upstreamRetryAfterS(r.headers, now());
             holds.hold(url, s);
-            log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${s} s${shapeTail()}`);
+            const why = await refusalOf(r, holds, url);
+            log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${Math.max(s, Math.ceil(holds.heldMs(url) / 1000))} s${shapeTail()}${why}`);
             soonestMs = Math.min(soonestMs, holds.heldMs(url));
             continue;
           }
@@ -1668,7 +1706,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         const limited = evmLimited(c, answer);
         if (limited > 0) {
           holds.hold(url, limited);
-          log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${limited} s${shapeTail()}`);
+          log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${Math.max(limited, Math.ceil(holds.heldMs(url) / 1000))} s${shapeTail()}`);
           soonestMs = Math.min(soonestMs, holds.heldMs(url));
           continue;
         }
