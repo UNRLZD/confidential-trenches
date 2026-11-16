@@ -1,0 +1,666 @@
+{
+ "_about": {
+  "bad_deployed": "the deployed helper before the card (main f78dfae3b code), read 2026-11-16T21:29:56.325Z with --record: Base SNDKc 0xb2000000...9a10c5 and 0xb2000000...92883d answered code 3 by GoPlus, a result naming their taxes, and their pages served tax src none",
+  "good": "MADE from bad_deployed: each cell GoPlus named served src goplus, as the card's helper reads a partial answer (goplus.ts contractRisk); re-record it after the helper deploy with --record"
+ },
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-16T21:29:56.325Z",
+  "chains": {
+   "base": {
+    "lists_status": 200,
+    "coins": [
+     {
+      "address": "0xb200000000000000000000397293cb8cda9a10c5",
+      "goplus": {
+       "status": 200,
+       "code": 3,
+       "has_result": true,
+       "named": [
+        "tax"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "goplus",
+         "honeypot": "none"
+        }
+       }
+      ]
+     },
+     {
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "goplus": {
+       "status": 200,
+       "code": 3,
+       "has_result": true,
+       "named": [
+        "tax"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "goplus",
+         "honeypot": "none"
+        }
+       }
+      ]
+     },
+     {
+      "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "goplus": {
+       "status": 200,
+       "code": 1,
+       "has_result": true,
+       "named": [
+        "mint_auth",
+        "freeze_auth",
+        "dev_bps",
+        "tax",
+        "honeypot"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "goplus",
+         "freeze_auth": "goplus",
+         "dev_bps": "goplus",
+         "tax": "goplus",
+         "honeypot": "goplus"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "robinhood": {
+    "lists_status": 200,
+    "coins": [
+     {
+      "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "goplus": {
+       "status": 200,
+       "code": 1,
+       "has_result": true,
+       "named": [
+        "mint_auth",
+        "freeze_auth",
+        "dev_bps",
+        "tax",
+        "honeypot"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "goplus",
+         "freeze_auth": "goplus",
+         "dev_bps": "goplus",
+         "tax": "goplus",
+         "honeypot": "goplus"
+        }
+       }
+      ]
+     },
+     {
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "goplus": {
+       "status": 200,
+       "code": 1,
+       "has_result": true,
+       "named": [
+        "mint_auth",
+        "freeze_auth",
+        "dev_bps",
+        "tax",
+        "honeypot"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "goplus",
+         "freeze_auth": "goplus",
+         "dev_bps": "goplus",
+         "tax": "goplus",
+         "honeypot": "goplus"
+        }
+       }
+      ]
+     },
+     {
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "goplus": {
+       "status": 200,
+       "code": 1,
+       "has_result": true,
+       "named": [
+        "mint_auth",
+        "freeze_auth",
+        "dev_bps",
+        "tax",
+        "honeypot"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "goplus",
+         "freeze_auth": "goplus",
+         "dev_bps": "goplus",
+         "tax": "goplus",
+         "honeypot": "goplus"
+        }
+       }
+      ]
+     }
+    ]
+   }
+  }
+ },
+ "bad_deployed": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-16T21:29:56.325Z",
+  "chains": {
+   "base": {
+    "lists_status": 200,
+    "coins": [
+     {
+      "address": "0xb200000000000000000000397293cb8cda9a10c5",
+      "goplus": {
+       "status": 200,
+       "code": 3,
+       "has_result": true,
+       "named": [
+        "tax"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       }
+      ]
+     },
+     {
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "goplus": {
+       "status": 200,
+       "code": 3,
+       "has_result": true,
+       "named": [
+        "tax"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       },
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "none",
+         "freeze_auth": "none",
+         "dev_bps": "none",
+         "tax": "none",
+         "honeypot": "none"
+        }
+       }
+      ]
+     },
+     {
+      "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "goplus": {
+       "status": 200,
+       "code": 1,
+       "has_result": true,
+       "named": [
+        "mint_auth",
+        "freeze_auth",
+        "dev_bps",
+        "tax",
+        "honeypot"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "goplus",
+         "freeze_auth": "goplus",
+         "dev_bps": "goplus",
+         "tax": "goplus",
+         "honeypot": "goplus"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "robinhood": {
+    "lists_status": 200,
+    "coins": [
+     {
+      "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "goplus": {
+       "status": 200,
+       "code": 1,
+       "has_result": true,
+       "named": [
+        "mint_auth",
+        "freeze_auth",
+        "dev_bps",
+        "tax",
+        "honeypot"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "goplus",
+         "freeze_auth": "goplus",
+         "dev_bps": "goplus",
+         "tax": "goplus",
+         "honeypot": "goplus"
+        }
+       }
+      ]
+     },
+     {
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "goplus": {
+       "status": 200,
+       "code": 1,
+       "has_result": true,
+       "named": [
+        "mint_auth",
+        "freeze_auth",
+        "dev_bps",
+        "tax",
+        "honeypot"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "goplus",
+         "freeze_auth": "goplus",
+         "dev_bps": "goplus",
+         "tax": "goplus",
+         "honeypot": "goplus"
+        }
+       }
+      ]
+     },
+     {
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "goplus": {
+       "status": 200,
+       "code": 1,
+       "has_result": true,
+       "named": [
+        "mint_auth",
+        "freeze_auth",
+        "dev_bps",
+        "tax",
+        "honeypot"
+       ]
+      },
+      "pages": [
+       {
+        "status": 200,
+        "cells": {
+         "mint_auth": "goplus",
+         "freeze_auth": "goplus",
+         "dev_bps": "goplus",
+         "tax": "goplus",
+         "honeypot": "goplus"
+        }
+       }
+      ]
+     }
+    ]
+   }
+  }
+ }
+}

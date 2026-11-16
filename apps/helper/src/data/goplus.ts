@@ -11,6 +11,14 @@
 // contract flags change rarely, and a page opened again within it asks nothing. A page waits for a first read at most
 // RISK_WAIT_MS; past it the page answers without these cells and the read lands for the next page read.
 //
+// Partial answers (card risk-cells-show-what-goplus-gives): GoPlus's status codes (docs.gopluslabs.io/reference/
+// api-status-code, read 2026-11-16 21:2xZ) are 1 "Complete data prepared" and 2 "Partial data obtained. The complete data
+// can be requested again in about 15 seconds."; the page lists no code 3, yet Base's SNDKc 0xb2000000...9a10c5 answered
+// code 3, message "OK", with a result for the token naming its taxes, holders and owner and no honeypot or mint flag (read
+// 2026-11-16 21:1xZ and 21:2xZ; USDC and two other Base tokens answered code 1). Any answer with a result for the token
+// is read, each cell null only where it names no value, never inferred from a field it leaves out; one whose code is not
+// 1 is held PARTIAL_MS, not RISK_MS, so the complete answer is asked for again soon.
+//
 // Display only: nothing here feeds a signature (a buy's own route and quote are the device's reads). Every answer is
 // hostile input: size bounded, the token's own key only, every flag exactly "0" or "1", every share a number in 0..1.
 import { pacedFetch, type Fetch } from "./near/views.ts";
@@ -19,8 +27,11 @@ export const GOPLUS = "https://api.gopluslabs.io/api/v1/token_security";
 /** GoPlus's chain ids for the EVM chains the helper serves. */
 export const GOPLUS_CHAIN: Readonly<Record<string, number>> = { base: 8453, robinhood: 4663 };
 export const SRC = "goplus";
-/** A token's answer is held this long. */
+/** A token's complete answer (code 1) is held this long. */
 export const RISK_MS = 10 * 60_000;
+/** A partial answer (any other code with a result for the token) is held this long [GoPlus: "The complete data can be
+ *  requested again in about 15 seconds"]. */
+export const PARTIAL_MS = 15_000;
 /** A page waits at most this long for a token's first read [design: GoPlus answered in 0.4-0.8 s; the app reads an EVM
  *  token's page once (terminal token/source.ts following), so a first read that lands later shows on the next open]. */
 export const RISK_WAIT_MS = 1_500;
@@ -37,6 +48,8 @@ export type ContractRisk = {
   dev_bps: number | null;
   holders: number | null;
   top10_bps: number | null;
+  /** GoPlus said its data is complete (code 1); a partial answer's cells are what it named. */
+  complete: boolean;
   as_of_ms: number;
 };
 
@@ -50,10 +63,10 @@ function frac(v: unknown): number | null {
   return Number.isFinite(n) && n >= 0 && n <= 1 ? Math.round(n * 10_000) : null;
 }
 
-/** GoPlus's answer for `token` (lowercase 0x address) as the grid's cells, or null when it names no such token. */
+/** GoPlus's answer for `token` (lowercase 0x address) as the grid's cells, or null when it names no such token. A
+ *  partial answer (a code other than 1, see the header) is read the same: each cell is what it names. */
 export function contractRisk(answer: unknown, token: string, asOfMs: number): ContractRisk | null {
   const a = obj(answer);
-  if (a.code !== 1) return null;
   const r = obj(obj(a.result)[token]);
   if (Object.keys(r).length === 0) return null;
   const buy = frac(r.buy_tax);
@@ -71,6 +84,7 @@ export function contractRisk(answer: unknown, token: string, asOfMs: number): Co
     dev_bps: frac(r.creator_percent),
     holders,
     top10_bps: top.length > 0 && top.every((b) => b !== null) ? Math.min(10_000, top.reduce((s, b) => s! + b!, 0)!) : null,
+    complete: a.code === 1,
     as_of_ms: asOfMs,
   };
 }
@@ -103,7 +117,7 @@ export function createGoPlus(deps: GoPlusDeps = {}) {
       if (!Object.hasOwn(GOPLUS_CHAIN, chain) || !/^0x[0-9a-f]{40}$/.test(token)) return null;
       const key = `${chain}:${token}`;
       const had = held.get(key);
-      if (had !== undefined && now() - had.at <= RISK_MS) return had.risk;
+      if (had !== undefined && now() - had.at <= (had.risk === null || had.risk.complete ? RISK_MS : PARTIAL_MS)) return had.risk;
       let p = reading.get(key);
       if (p === undefined) {
         p = read(chain, token, key)
