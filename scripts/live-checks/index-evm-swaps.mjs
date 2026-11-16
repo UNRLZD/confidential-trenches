@@ -13,7 +13,7 @@
 //     first bar);
 //   - candles hold exactly the frozen fields tf, candles, src, own_from_s, as_of_ms; bars [t_s, o, h, l, c, vol_usd] on
 //     the 1m grid, oldest first, USD decimal strings, high >= open, close >= low, bars from our own reads start at
-//     own_from_s; the trades hold exactly trades, src, as_of_ms, each {t_ms, side, usd, amt, trader, tx}, newest first;
+//     own_from_s; the trades hold exactly the tape's fields (tape-read.mjs tapeFieldsFault), each {t_ms, side, usd, amt, trader, tx}, newest first;
 //   - the newest trades are on chain (RPC: SWAP_RPCS, two providers that agree on every answer): each receipt succeeded,
 //     sits in the block whose Base clock time is the trade's, was sent by the trade's trader (for a bundle sent to an
 //     ERC-4337 EntryPoint, the account of the user operation whose run holds the trade's swap, read from the receipt
@@ -48,6 +48,7 @@
 //   2 s apart: the providers named). --record writes the run (every answer read).
 import "../net-window.mjs";
 import { candlesReader, waitsText } from "./candles-read.mjs";
+import { tapeFieldsFault } from "./tape-read.mjs";
 import { writeFileSync } from "node:fs";
 import { BLOCK_CLOCK, blockAt } from "../../apps/helper/src/data/evm/lists.ts";
 import { HEADER_TIMED, SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
@@ -150,8 +151,8 @@ export function candlesFault(c) {
 /** The first thing wrong with a Trades answer, or null. */
 export function tradesFault(t) {
   // `filling` true: a tape whose older trades the helper still reads (card token-page-data-complete-and-fast); never false
-  const keys = isObj(t) && t.filling === true ? ["trades", "filling", "src", "as_of_ms"] : ["trades", "src", "as_of_ms"];
-  if (!isObj(t) || !same(Object.keys(t), keys)) return `keys ${show(isObj(t) ? Object.keys(t) : t)}`;
+  // its own fields, whole_ms among them (tape-read.mjs tapeFieldsFault)
+  if (!isObj(t) || tapeFieldsFault(t) !== null) return isObj(t) ? tapeFieldsFault(t) : `keys ${show(t)}`;
   if (t.src !== "chain" || !Number.isSafeInteger(t.as_of_ms)) return `src ${show(t.src)}`;
   if (!Array.isArray(t.trades) || t.trades.length === 0 || t.trades.length > 50) return `trades ${Array.isArray(t.trades) ? t.trades.length : "not a list"}`;
   for (const [i, r] of t.trades.entries()) {
@@ -527,8 +528,10 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     }
     candidates = [...new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r?.token)).filter((t) => typeof t === "string"))];
   }
-  // the first listed token with trades to check (a listed token with no pool our reads find answers an empty 200); else
-  // the first that answered, whose empty tape the check then fails, never a pass
+  // the first listed token with trades from our own reads to check (a listed token with no pool our reads find answers
+  // an empty 200, or its top pool's trades from a vendor, X-Helper-Source not "chain": swaps.ts noneTrades, card
+  // solana-trades-show-on-every-token; live run 43977576335 judged such a Base token, 0x8f6ad36c, src coingecko); else
+  // the first that answered, whose empty or vendor tape the check then fails, never a pass
   let reads;
   let quiet;
   for (const t of candidates.slice(0, 12)) {
@@ -543,7 +546,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     try {
       n = r.trades.status === 200 ? JSON.parse(r.trades.body).trades.length : 0;
     } catch {}
-    if (n > 0) {
+    if (n > 0 && r.trades.headers["x-helper-source"] === "chain") {
       reads = r;
       break;
     }
