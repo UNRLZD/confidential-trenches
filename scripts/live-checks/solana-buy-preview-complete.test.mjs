@@ -49,6 +49,11 @@ const INDEX = (js) => `<script type="module" src="/app.js" integrity="${facts(""
 
 test("the minified lines this card's build spells: PASS; each one changed so its rule no longer holds: FAIL, that mark named", () => {
   assert.deepEqual(judge(facts(INDEX(JS), JS)).lines, []);
+  // card solana-quote-reads-found-pools-once's build: the same quote, on the page's finders' early pools for the dry
+  const EARLY = JS.replace("dV(o,{side:`buy`,token:s,amount:a})", "dV(o,{side:`buy`,token:s,amount:a},void 0,{early:e.early===!0})");
+  assert.notEqual(EARLY, JS);
+  assert.deepEqual(judge(facts(INDEX(EARLY), EARLY)).lines, []);
+  assert.equal(facts(INDEX(EARLY), EARLY.replace(".catch(()=>null)", "")).quote, false);
   const cuts = [
     // the quote read after the proofs (it would add its wait to theirs)
     ["quote", JS.replace(",l=await e.ready();", ";await 0;let l=await e.ready();")],
