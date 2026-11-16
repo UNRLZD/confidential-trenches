@@ -1,0 +1,17 @@
+{
+ "_note": "bad: SIGN_HOST read 2026-11-16 18:24Z, release-166 (its / sha256 22a82533...79a12): no <title>, and the shell frame code sets the peer at the frame insertion (,l=r after the throw). good: this tree build (packages/signpage index.html and public/app.js, --site) at card signpage-tab-title-and-origin, which the deploy serves once released; re-recorded from SIGN_HOST once deployed.",
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-0fe2B9NWk4hJGiOJZUcS593JTfF2IunM84+D0x8FRTwnjEBxCGkqIY4YfNw8eQIi\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-0fe2B9NWk4hJGiOJZUcS593JTfF2IunM84+D0x8FRTwnjEBxCGkqIY4YfNw8eQIi",
+   "frame": "createElement(`iframe`);t.id=`app`,t.setAttribute(`sandbox`,npe),t.setAttribute(`referrerpolicy`,`no-referrer`),Object.assign(t.style,{position:`fixed`,inset:`0`,width:`100%`,height:`100%`,border:`0`,display:`block`}),t.src=rpe(i.location),t.addEventListener(`load`,()=>{c===t&&u()}),e.body.insertBefore(t,o);let r=t.contentWindow;if(!r)throw Error(`the APP_HOST frame has no window`);c=t,l=r}"
+  }
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-1xdJXfheuOeK+3kAFe+HS4CSyDI3ZBYQio5LmokQ+LQ/Se8fqE+PsXiZQGXHJiCg\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-1xdJXfheuOeK+3kAFe+HS4CSyDI3ZBYQio5LmokQ+LQ/Se8fqE+PsXiZQGXHJiCg",
+   "frame": "createElement(`iframe`);t.id=`app`,t.setAttribute(`sandbox`,npe),t.setAttribute(`referrerpolicy`,`no-referrer`),Object.assign(t.style,{position:`fixed`,inset:`0`,width:`100%`,height:`100%`,border:`0`,display:`block`}),t.src=rpe(i.location);let r=null;if(t.addEventListener(`load`,()=>{c===t&&r&&(l=r,u())}),e.body.insertBefore(t,o),r=t.contentWindow,!r)throw Error(`the APP_HOST frame has no window`);c=t}"
+  }
+ }
+}

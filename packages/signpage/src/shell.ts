@@ -9,7 +9,8 @@
 //   is the frame's contentWindow and its origin is APP_HOST; every post goes to that window with targetOrigin APP_HOST.
 //   Same messages and answers as the framed page's. `ready` goes out once on each load of the frame, since each APP_HOST
 //   document needs its own, and never at start: one posted before the frame holds its document can still reach it (the
-//   target origin is checked on delivery; Firefox delivered it), a second ready for one load.
+//   target origin is checked on delivery; Firefox delivered it), a second ready for one load. Nothing at all is posted to
+//   a frame before its first load: its window holds its first about:blank, on SIGN_HOST's origin, until then.
 // - The frame is sandboxed to scripts, its own origin and popups that escape the sandbox (links to explorers), with no
 //   `allow` (the app copies nothing). SIGN_HOST's CSP frame-src names APP_HOST only, so the frame cannot be sent
 //   anywhere else; its frame-ancestors 'none' keeps any page from framing the shell.
@@ -250,16 +251,21 @@ export function mountShell(
     Object.assign(f.style, { position: "fixed", inset: "0", width: "100%", height: "100%", border: "0", display: "block" });
     // the src before the frame is in the document: it never loads about:blank first, so its one load is APP_HOST's
     f.src = appSrc(view.location);
+    // contentWindow exists once the frame is in the document, and stays the same object across its loads; until the
+    // frame's first load it holds its first about:blank, on this page's own origin, so it is the peer only from that
+    // load on: a post before it (a state change, a late answer to a document that left) would go to that about:blank,
+    // the browser's "target origin does not match" warning, or reach the APP_HOST document that comes after (card
+    // signpage-tab-title-and-origin, QA walk item 18). That document gets the ready, then asks the state itself.
+    let win: Window | null = null;
     f.addEventListener("load", () => {
-      if (frame !== f) return;
+      if (frame !== f || !win) return;
+      peer = win;
       onLoad();
     });
     doc.body.insertBefore(f, layer);
-    // contentWindow exists once the frame is in the document, and stays the same object across its loads
-    const win = f.contentWindow;
+    win = f.contentWindow;
     if (!win) throw new Error("the APP_HOST frame has no window");
     frame = f;
-    peer = win;
   };
 
   // the painted of the frame made at a typed screen's close: from that frame's window and APP_HOST only, exactly the kit's
