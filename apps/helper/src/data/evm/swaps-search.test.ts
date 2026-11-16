@@ -119,11 +119,14 @@ test("card helper-robinhood-search-ahead: 12 cold tokens whose pool only the dis
     const before = [...r.reads.values()].reduce((a, b) => a + b, 0);
     const t0 = Date.now();
     // each read as the page reads it: a tape still filling past the open's bound (card token-page-data-complete-and-fast)
-    // is read again 3 s on (the page's TRADES_POLL_MS), and timed at the answer that holds the tape
+    // is read again 3 s on (the page's TRADES_POLL_MS), and timed at the answer that holds the tape: its SWAPS trades,
+    // still filling while its read back reads the day (card robinhood-trades-finish-filling: a short tape is never
+    // settled while a read could not be made, here the chain's own RPC's day read)
     const filled = async (token: string) => {
       for (;;) {
         const a = await s.trades(token, 50);
-        if (a.status !== 200 || (JSON.parse(a.body) as { filling?: boolean }).filling !== true) return a;
+        const j = a.status === 200 ? (JSON.parse(a.body) as { trades: unknown[]; filling?: boolean }) : null;
+        if (j === null || j.filling !== true || j.trades.length >= SWAPS) return a;
         await new Promise((go) => setTimeout(go, 3_000));
       }
     };
