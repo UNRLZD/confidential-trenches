@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createRpc, keyedPaces } from "./rpc.ts";
+import { DRPC_IP_PACE } from "../limits/limits.ts";
 
 const QN = "https://name-two.base-mainnet.quiknode.test/plantedBASEqn00key123456789abcd/";
 const DR = [1, 2, 3].map((n) => `https://lb.drpc.test/base/plantedBASEdr${n}key123456789abcd`);
@@ -92,4 +93,12 @@ test("callers on Base's keyed route under dRPC's minute budget, with the pool fi
   assert.deepEqual(bad.slice(0, 12).map((g) => `${g.what}: ${g.status} ${g.why ?? ""} ${g.body.slice(0, 120)}`), [], `${bad.length} of ${got.length} reads not answered`);
   assert.ok(w.fills.length > 0, `the fill moved meanwhile (${w.fills.length} pages)`);
   assert.ok(!w.lines.some((l) => l.includes("planted")), "no key in a log line");
+});
+
+test("a paid dRPC plan's pace is RPC_PACE_DRPC, \"<calls a second>,<at once>\"; empty is the free plan's; any other value stops the start, naming it", () => {
+  const drpc = (env: Record<string, string>) => Object.entries(keyedPaces({ ...ENV, ...env })).filter(([u]) => DR.includes(u)).map(([, p]) => [p.perS, p.burst, p.rate]);
+  assert.deepEqual(drpc({}), DR.map(() => [DRPC_IP_PACE.perS, DRPC_IP_PACE.burst, "drpc-ip"]));
+  assert.deepEqual(drpc({ RPC_PACE_DRPC: "" }), DR.map(() => [DRPC_IP_PACE.perS, DRPC_IP_PACE.burst, "drpc-ip"]));
+  assert.deepEqual(drpc({ RPC_PACE_DRPC: "90.5,20" }), DR.map(() => [90.5, 20, "drpc-ip"]), "still the one bucket for the IP");
+  for (const bad of ["fast", "0,4", "20", "20,0", "-1,4", "20,4,1"]) assert.throws(() => keyedPaces({ ...ENV, RPC_PACE_DRPC: bad }), /RPC_PACE_DRPC/, bad);
 });

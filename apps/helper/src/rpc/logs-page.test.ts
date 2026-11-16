@@ -17,7 +17,10 @@ const PAGES_MAX = LOGS_PAGES_MAX ?? 100;
 const QN = "https://name-two.base-mainnet.quiknode.test/plantedBASEqn00key123456789abcd/";
 const DR = [1, 2, 3].map((n) => `https://lb.drpc.test/base/plantedBASEdr${n}key123456789abcd`);
 /** The deployed Base keyed list (/v1/health 15 Nov 02:30Z: quiknode.pro, drpc.live key1, key2, key3). */
-const BASE_ENV: Record<string, string> = { BASE_RPC_URL_QUICKNODE: QN, BASE_RPC_URL_DRPC_1: DR[0]!, BASE_RPC_URL_DRPC_2: DR[1]!, BASE_RPC_URL_DRPC_3: DR[2]! };
+// the paging and the store at a paid dRPC plan's pace (RPC_PACE_DRPC, rpc.ts keyedPaceOf): the free plan's minute budget,
+// about a call a second, is drpc-ip.test's (card base-reads-never-throttled)
+const PAID_DRPC = "20,4";
+const BASE_ENV: Record<string, string> = { BASE_RPC_URL_QUICKNODE: QN, BASE_RPC_URL_DRPC_1: DR[0]!, BASE_RPC_URL_DRPC_2: DR[1]!, BASE_RPC_URL_DRPC_3: DR[2]!, RPC_PACE_DRPC: PAID_DRPC };
 const RH_OWN = "https://robinhood-mainnet.alchemy.test/v2/plantedRHown000key123456789abcd";
 const RH_DR = "https://lb.drpc.test/robinhood/plantedRHdr1key123456789abcd";
 const POOL = "0xaa080e74ec99cf5c684548c77ca145edfcf899cf";
@@ -193,7 +196,7 @@ test("a finalized paged read is kept whole: asked again, it is answered with no 
 });
 
 test("Robinhood: its first keyed URL, of no known span (Alchemy's Pay As You Go), answers a wide read whole; down, the read is paged on dRPC", async () => {
-  const env = { ROBINHOOD_RPC_URL: RH_OWN, ROBINHOOD_RPC_URL_DRPC_1: RH_DR };
+  const env = { ROBINHOOD_RPC_URL: RH_OWN, ROBINHOOD_RPC_URL_DRPC_1: RH_DR, RPC_PACE_DRPC: PAID_DRPC };
   const from = FINAL - 30_000;
   const p = providers({ [RH_DR]: DR_SPAN });
   const r = createRpc(env, { fetch: p.fetch as never, log: () => undefined });
