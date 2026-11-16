@@ -563,7 +563,7 @@ test("the helper is never ready before every pool's start check: with the warm-u
   // 1. the Solana pool's rent reads fail: the check never settles, and the helper is not ready until a read is good
   let down = true;
   let reads = 0;
-  const pool = solanaPoolSender({ cluster: "devnet", program, feePayerSecret, fee }, { providers: [(async () => null) as never, (async () => null) as never], log: () => {}, readRent: async () => { reads++; if (down) throw new Error("HTTP 503"); return RENT; } });
+  const pool = solanaPoolSender({ cluster: "mainnet", program, feePayerSecret, fee }, { providers: [(async () => null) as never, (async () => null) as never], log: () => {}, readRent: async () => { reads++; if (down) throw new Error("HTTP 503"); return RENT; } });
   const refused: string[] = [];
   const a = gateOf(new Map([["s", pool]]), new Map(), refused);
   const readyOf = await health(a.g.ready);
@@ -579,14 +579,14 @@ test("the helper is never ready before every pool's start check: with the warm-u
   assert.equal(await readyOf(), true, "ready once the rent check passed");
   assert.deepEqual(refused, []);
   // 2. a fee off the kit's for the rent: refused, never ready
-  const off = solanaPoolSender({ cluster: "devnet", program, feePayerSecret, fee: "1400000" }, { providers: [(async () => null) as never, (async () => null) as never], log: () => {}, readRent: async () => RENT });
+  const off = solanaPoolSender({ cluster: "mainnet", program, feePayerSecret, fee: "1400000" }, { providers: [(async () => null) as never, (async () => null) as never], log: () => {}, readRent: async () => RENT });
   const refused2: string[] = [];
   const b = gateOf(new Map([["s", off]]), new Map(), refused2);
   const readyOf2 = await health(b.g.ready);
   await b.warm;
   await tick(30);
   assert.deepEqual([await readyOf2(), b.settled(), refused2.length], [false, "rejected", 1]);
-  assert.match(refused2[0]!, /the devnet pool fee must be the kit's fee for this rent, 1300000 lamports/);
+  assert.match(refused2[0]!, /the mainnet pool fee must be the kit's fee for this rent, 1300000 lamports/);
   // 3. an EVM pool's check refused, the same way
   const refused3: string[] = [];
   const c = gateOf(new Map(), new Map([["e", { ready: () => Promise.reject(new Error("POOL_EVM_RPCS_BASE_SEPOLIA: 127.0.0.1:1: no answer")) }]]), refused3);
@@ -648,7 +648,7 @@ test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently sto
         const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(g + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
         const answer = (out: object) => r.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id, ...out }));
         if (method === "eth_getBlockByNumber") return answer({ result: block(params[0] === "latest" ? latest : BigInt(params[0] as string)) });
-        if (method === "eth_chainId") return answer({ result: "0x14a34" }); // Base Sepolia, the kit's pin
+        if (method === "eth_chainId") return answer({ result: "0x2105" }); // Base, the kit's pin (card helper-ready-never-waits-on-a-testnet-pool: a test network's refusal no longer stops the start)
         if (method !== "eth_call") return answer({ error: { code: -32601, message: "no" } });
         const out = { result: `0x${"0".repeat(63)}${word}` };
         if (word === 2) return answer(out);
@@ -661,9 +661,9 @@ test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently sto
   await Promise.all(nodes.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
   const urls = nodes.map((s, i) => `http://${i === 0 ? "[::1]" : "127.0.0.1"}:${(s.address() as AddressInfo).port}`);
   const key = `0x${createHashOf("helper-pool-senders/test-key/EVM_SENDER")}`; // pool/evm.test.ts's test key
-  const r = await startOnce({ POOL_EVM_ADDRESS_BASE_SEPOLIA: evmPoolVenues()["base-sepolia"].pool!, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: key, POOL_EVM_RPCS_BASE_SEPOLIA: urls.join(",") }, 15_000, seen);
+  const r = await startOnce({ POOL_EVM_ADDRESS_BASE: evmPoolVenues().base.pool!, POOL_EVM_SENDER_KEY_BASE: key, POOL_EVM_RPCS_BASE: urls.join(",") }, 15_000, seen);
   assert.equal(r.code, 2, `exit ${r.code}; stderr: ${r.err}`);
-  const m = /helper: POOL_EVM_RPCS_BASE_SEPOLIA: the fee's state at block \d+, (\d+) s old \(a proof's fee is read up to 600 s back\), 1 try over (\d+) s: 0x[0-9a-f]{8} at 0x[0-9a-f]{40}: \[::1\]:\d+ answers 0x0{63}2, 127\.0\.0\.1:\d+ 0x0{63}3/.exec(r.err);
+  const m = /helper: POOL_EVM_RPCS_BASE: the fee's state at block \d+, (\d+) s old \(a proof's fee is read up to 600 s back\), 1 try over (\d+) s: 0x[0-9a-f]{8} at 0x[0-9a-f]{40}: \[::1\]:\d+ answers 0x0{63}2, 127\.0\.0\.1:\d+ 0x0{63}3/.exec(r.err);
   assert.ok(m !== null, r.err);
   // the age is the helper's real clock against the nodes' block times, read at the refusal: the first block at most
   // 600 s back when the search ran (blocks 2 s apart, a second's rounding), aged by the try since (its "over" seconds)
@@ -701,9 +701,9 @@ test("MEDIUM-1 a Solana pool whose configured fee is not the kit's stops the sta
   t.after(() => stubs.forEach((s) => (s.closeAllConnections(), s.close())));
   await Promise.all(stubs.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
   const urls = stubs.map((s) => `http://127.0.0.1:${(s.address() as AddressInfo).port}`).join(",");
-  const r = await startOnce({ POOL_SOLANA_PROGRAM_DEVNET: program, POOL_SOLANA_FEE_PAYER_KEY_DEVNET: feePayer, POOL_SOLANA_FEE_DEVNET: "1400000", POOL_SOLANA_RPCS_DEVNET: urls }, 15_000, seen);
+  const r = await startOnce({ POOL_SOLANA_PROGRAM_MAINNET: program, POOL_SOLANA_FEE_PAYER_KEY_MAINNET: feePayer, POOL_SOLANA_FEE_MAINNET: "1400000", POOL_SOLANA_RPCS_MAINNET: urls }, 15_000, seen); // mainnet: a test network's refusal no longer stops the start (card helper-ready-never-waits-on-a-testnet-pool)
   assert.equal(r.code, 2, `exit ${r.code} after ${reads} rent reads; stderr: ${r.err}`);
-  assert.match(r.err, /helper: the devnet pool fee must be the kit's fee for this rent, 1300000 lamports/);
+  assert.match(r.err, /helper: the mainnet pool fee must be the kit's fee for this rent, 1300000 lamports/);
   assert.ok(r.readies.length > 0, "the helper answered its health while the check waited");
   assert.ok(r.readies.every((x) => x === false), `never ready before the exit: ${JSON.stringify(r.readies)}`);
 });

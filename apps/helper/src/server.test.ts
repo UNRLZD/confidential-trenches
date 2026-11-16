@@ -746,7 +746,8 @@ test("GET /v1/pool/fee for an EVM epoch with no block yet is 503 index_behind wi
   assert.deepEqual([other.status, JSON.parse(other.body)], [404, { error: { code: "not_found" } }]);
 });
 
-// M362 (3): the helper's own main, as the host runs it, with one devnet Solana pool whose two RPCs are local stubs.
+// M362 (3): the helper's own main, as the host runs it, with one mainnet Solana pool whose two RPCs are local stubs
+// (a test network's refusal no longer stops the start, card helper-ready-never-waits-on-a-testnet-pool).
 // A failed rent read takes down only that pool (503 upstream) and the rest answers; a configured fee that is not the
 // kit's for the rent read makes the process exit 2. Test keys only: sha256 of a label.
 test("M362 (3): a pool's failed rent read leaves the helper up with that pool 503; a mismatched configured fee exits 2", async (t) => {
@@ -780,7 +781,7 @@ test("M362 (3): a pool's failed rent read leaves the helper up with that pool 50
   await new Promise((ok) => free.close(ok));
   const run = (fee: string) =>
     spawn(process.execPath, [join(import.meta.dirname, "server.ts")], {
-      env: { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: String(hp), ...TEST_VENDOR_KEYS, POOL_SOLANA_PROGRAM_DEVNET: program, POOL_SOLANA_FEE_PAYER_KEY_DEVNET: feePayer, POOL_SOLANA_FEE_DEVNET: fee, POOL_SOLANA_RPCS_DEVNET: urls },
+      env: { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: String(hp), ...TEST_VENDOR_KEYS, POOL_SOLANA_PROGRAM_MAINNET: program, POOL_SOLANA_FEE_PAYER_KEY_MAINNET: feePayer, POOL_SOLANA_FEE_MAINNET: fee, POOL_SOLANA_RPCS_MAINNET: urls },
       stdio: ["ignore", "pipe", "pipe"],
     });
   const exited = (c: ReturnType<typeof run>) => new Promise<number | null>((ok) => c.on("exit", ok));

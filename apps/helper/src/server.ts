@@ -60,6 +60,7 @@ import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
 import { POOL_SOLANA_PIECES_BODY_MAX } from "./pool/solana-pieces.ts";
+import { isMainnetEvm, isMainnetSolana } from "./pool/mainnet-only.ts";
 import { poolSendLine, type PoolSendNote } from "./pool/send-log.ts";
 import { evmFeeWarm, evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
 import { clientOf, clientWindow, PROVIDER_PACE, providerHolds, refusalLog, throttled, throttleOf, upstreamBudget, type ProviderHolds } from "./limits/limits.ts";
@@ -1202,18 +1203,30 @@ export async function warmUntilReady(p: Ready, everyMs = READY_EVERY_MS): Promis
 /**
  * Every pool's start check (card evm-buy-hookdata-fee, review fold 4 MEDIUM-1): each Solana pool's configured fee at its
  * first good rent read (pool/solana.ts ready; a failed read is asked again every `everyMs` until one is good) and each
- * EVM pool's state reads a proof's life back (pool/evm.ts ready). Resolves once all have passed; the first refusal calls
- * `refuse` (main: exit 2) and rejects, so the helper's ready never turns true over a refused start.
+ * EVM pool's state reads a proof's life back (pool/evm.ts ready). Resolves once every mainnet pool's has passed; the
+ * first refusal of one calls `refuse` (main: exit 2) and rejects, so the helper's ready never turns true over a refused
+ * start. Card helper-ready-never-waits-on-a-testnet-pool: a pool that names a test network (pool/mainnet-only.ts) runs
+ * its check beside ready and never holds it; its refusal is one `log` line, and that pool alone stays down (its routes
+ * answer 503 until a start whose check passes). A pool that names no network (a test's stub) is held as a mainnet one.
  */
-export function poolsChecked(pools: ReadonlyMap<string, Pick<SolanaPoolSender, "ready">>, evmPools: ReadonlyMap<string, Pick<EvmPoolSender, "ready">>, refuse: (e: Error) => void, everyMs = READY_EVERY_MS): Promise<void> {
+export function poolsChecked(pools: ReadonlyMap<string, Pick<SolanaPoolSender, "ready"> & { readonly cluster?: string }>, evmPools: ReadonlyMap<string, Pick<EvmPoolSender, "ready"> & { readonly network?: string }>, refuse: (e: Error) => void, everyMs = READY_EVERY_MS, log: (line: string) => void = (l) => console.error(`helper: ${l}`)): Promise<void> {
   const sol = [...pools.values()].map((p) => {
     const again = setInterval(() => void p.ready, everyMs);
     again.unref();
-    return p.ready.finally(() => clearInterval(again));
+    return { test: p.cluster !== undefined && !isMainnetSolana(p.cluster), name: `solana ${p.cluster}`, check: p.ready.finally(() => clearInterval(again)) };
   });
-  const checks = [...sol, ...[...evmPools.values()].map((p) => p.ready())];
-  for (const c of checks) c.catch(refuse);
-  return Promise.all(checks).then(() => undefined);
+  const evm = [...evmPools.values()].map((p) => ({ test: p.network !== undefined && !isMainnetEvm(p.network), name: `evm ${p.network}`, check: p.ready() }));
+  const checks = [...sol, ...evm];
+  for (const c of checks) c.check.catch(c.test ? (e: Error) => log(`test network pool down (${c.name}), ready never waits on it: ${e.message}`) : refuse);
+  return Promise.all(checks.filter((c) => !c.test).map((c) => c.check)).then(() => undefined);
+}
+
+/**
+ * The pool senders the helper's start loads from `env`, every network's (each reader's refusal of a value stops the
+ * start, exit 2); which of them ready waits for is poolsChecked's (card helper-ready-never-waits-on-a-testnet-pool).
+ */
+export function poolsFromEnv(env: Record<string, string | undefined>, holds?: ProviderHolds): { pools: Map<string, SolanaPoolSender>; evmPools: Map<string, EvmPoolSender> } {
+  return { pools: solanaPoolSendersFromEnv(env), evmPools: evmPoolSendersFromEnv(env, undefined, holds) };
 }
 
 /**
@@ -1358,16 +1371,16 @@ if (import.meta.main) {
     const bind = bindSenderFromEnv(process.env, watches);
     // a Solana pool whose configured fee is not the kit's for the rent both providers read stops the helper (at the
     // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
-    const pools = solanaPoolSendersFromEnv(process.env);
     // card helper-ready-without-gt: every part read from the environment is read here, at the start, so a value the
     // helper refuses stops it at once (exit 2, naming the variable). Left to handler()'s defaults they were read only at
     // listen(), which a peer runs once warm, inside a promise: an unhandled rejection, exit 1 with no line of ours, and
     // a restart loop until redeploy.sh's bound (18:55-18:58Z: a partial POOL_EVM_*_BASE_SEPOLIA set)
     // card robinhood-mainnet-rpcs: the senders' reads draw on the one pace per provider the swap, maker and /v1/rpc reads do
-    const evmPools = evmPoolSendersFromEnv(process.env, undefined, holds);
+    const { pools, evmPools } = poolsFromEnv(process.env, holds);
     const release = releaseOf(process.env);
     // card evm-buy-hookdata-fee: an EVM pool RPC that cannot answer the fee's state reads 10 min back stops the start;
-    // both pool kinds' start checks run from here, and ready (below) waits for them
+    // both pool kinds' start checks run from here, and ready (below) waits for the mainnet pools' (card
+    // helper-ready-never-waits-on-a-testnet-pool: a test network's runs beside it, its refusal one line and that pool down)
     const checked = poolsChecked(pools, evmPools, (e) => (console.error(`helper: ${e.message}`), process.exit(2)));
     // card helper-evm-fee-at-epoch-start: each pool's fee read at its period's start, while every provider still holds
     // the period's first block's state; a request answers it from memory
@@ -1412,7 +1425,7 @@ if (import.meta.main) {
     // ready (health.ts): once the lists, a token page and its holders answer 200. A helper that replaces a running one
     // (peer) listens only then, so the proxy, which tries each helper of the service in turn, never reaches it cold
     // (deploy/redeploy.sh waits for it, bounded, before it stops the old one); one that starts alone listens at once.
-    // Every pool's start check is part of it, so a start that refuses (exit 2) is never ready and the old one stays. A
+    // Every mainnet pool's start check is part of it, so a start that refuses (exit 2) is never ready and the old one stays. A
     // Solana pool's check waits for its first good rent read, so a deploy beside a running helper is not ready while
     // that cluster's rent reads fail (each failure logged, pool/solana.ts), and redeploy.sh keeps the old one serving.
     const { ready, warmed } = readyGate(warmUntilReady({ lists, evmLists, token }), checked);
