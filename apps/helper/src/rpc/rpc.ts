@@ -217,12 +217,14 @@ const BLOCK_NUMBER = /^0x(0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
 export const POOL_LOGS_CLIENT = "pool-logs";
 /**
  * The pool store's fill (card helper-keyed-logs-serve-a-whole-pool-range, pool-logs.ts): the pages it sends a second on a
- * chain, all its providers together, one at a time. Each page is a background read: it draws on the chain's total as the
- * helper's own reads do (callers keep userRoomOf, half), and on its provider's pace and day under CALLER_ROOM (limits.ts
- * take), never a caller's share; a provider's 429 or throttle holds that provider for every path, as any read's does.
- * [design: 6: under Base's background room on its summed total (155 a 10 s, half of it 7.7 a second), and 2 a second on
- * each of the three dRPC keys, a quarter of their 8 (limits.ts KEYED_PACE), so the market-data reads on the same keys
- * keep the rest. Base's pool from its deploy block (54,325,671) to the finalized head of 16 Nov (about 57,973,600) is
+ * chain, all its providers together, one at a time. A page draws nothing of the route's total (the chain's /v1/rpc
+ * budget, keyedBudget and summedTotal: KEYED_ROUTE_SHARE of each key's pace, which is the callers'), so a fill never
+ * costs a caller a 429: on 16 Nov 01:14-01:53Z (release with PR 865) its 6 a second were 60 of Base's 155 a 10 s, and
+ * callers had 95 left. It draws only its provider's pace and day as a background read (limits.ts take): under
+ * CALLER_ROOM of the bucket, and none for CALLER_HOLD_MS after a caller's draw there, so it takes only the room callers
+ * leave, from the keys' other half (KEYED_ROUTE_SHARE); a provider's 429 or throttle holds that provider for every path,
+ * as any read's does. [design: 6: 2 a second on each of the three dRPC keys, a quarter of their 8 (limits.ts
+ * KEYED_PACE), so the market-data reads on that other half keep the rest. Base's pool from its deploy block (54,325,671) to the finalized head of 16 Nov (about 57,973,600) is
  * 36,480 pages of dRPC's 100 blocks: about 101 min and 729,600 CU (20 a call, KEYED_COST) once, of the three keys'
  * 21,000,000 a day; then 4,320 pages a day as the chain grows (a block every 200 ms, read 16 Nov 00:1xZ on
  * base-rpc.publicnode.com: 100,000 blocks in 20,000 s), 12 min of fill and 86,400 CU. With HELPER_STORE_DIR set the
@@ -1093,10 +1095,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (holdsAll.dayOut(url, 1)) return null;
     const held = holdsAll.heldMs(url);
     if (held > 0) return held;
+    // the provider's pace only, as a background read: never the route's total (/v1/rpc's callers'), see POOL_FILL_PER_S
     const room = holdsAll.take(url, 1, true);
     if (room > 0) return room;
-    const wait = budget.takeEach([[c, 1]], undefined);
-    if (wait > 0) return wait * 1000;
     const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: pool, fromBlock: hexOf(a), toBlock: hexOf(b) }] });
     let r: Response;
     let text: string | undefined;
