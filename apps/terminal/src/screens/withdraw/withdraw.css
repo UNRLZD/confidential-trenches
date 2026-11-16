@@ -29,6 +29,7 @@
 .wmax .num { color: var(--text-2); }
 .wmax:hover:not(:disabled), .wmax.on { color: var(--text-1); }
 .wmax.on .num { color: var(--text-1); }
+.wmax[data-zero] .num { color: inherit; }
 .waddr { border-radius: 12px; border: 1px solid var(--border-panel); background: var(--bg-drawer); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .waddr.bad, .wform .damt.bad { border-color: var(--sell); }
 .waddr .lb { font: 500 13px var(--font-ui); color: var(--text-3); height: 18px; display: flex; align-items: center; }

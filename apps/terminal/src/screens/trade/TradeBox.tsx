@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Chain, PoolChain } from "@blindfill/kit";
 import { fillOf, fillStore } from "../portfolio/fills.ts";
-import { heldOf, soldOutRow } from "../portfolio/model.ts";
+import { heldOf, holdsNothing, soldOutRow } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
 import { useCashPart, useHeld, useOffPool } from "../portfolio/source.tsx";
+import { useDepositIntent, useDepositSheet } from "../deposit/source.tsx";
 import { SellBox } from "../positions/SellBox.tsx";
 import { useSell } from "../positions/source.tsx";
 import { headerModel } from "../signin/model.ts";
@@ -30,6 +31,7 @@ import {
   cashMovesTo,
   fmtUsd,
   nearBuyAsk,
+  offersDeposit,
   outcome,
   parseUsd,
   poolBuyAsk,
@@ -482,7 +484,16 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     buy(p);
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown: feeKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, receive, quoting, sell, side, setSide: pickSide, held, heldNow, onSell };
+  // a $0 account that typed an amount: the main button is Deposit, its one way on (card app-money-sheets-read-right, QA
+  // walk item 7). Shown, it asks the deposit sheet's asset list as a Deposit control's intent does (deposit/source.tsx
+  // useDepositIntent), so the sheet it opens mostly opens on the list; once for the page's one trade state
+  const depositIntent = useDepositIntent();
+  const toDeposit = !onSell && offersDeposit({ signedIn: !signedOut && account !== "loading", running: running || hasRunLabel(phase), coming, amount, empty: holdsNothing(snapshot.state) });
+  const warm = depositIntent.onFocus;
+  useEffect(() => {
+    if (toDeposit) warm();
+  }, [toDeposit, warm]);
+  return { toDeposit, depositIntent, chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown: feeKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, receive, quoting, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */
@@ -517,6 +528,8 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
   const [tab, setTab] = useState<OrderTab>("market");
+  const depositSheet = useDepositSheet();
+  const { toDeposit, depositIntent: intent } = t;
   // the page's own symbol: Portfolio's Row names a token by its market read, which the live source has none of yet
   if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} {...(logo ? { logo } : {})} />;
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
@@ -534,6 +547,7 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
   if (signedOut) label = <W id="signInToTrade" />;
   else if (account === "loading") label = "\u00a0"; // the header's skeleton state: no word until the first `state` says which
   else if (hasRunLabel(phase)) label = <RunLabel phase={phase} now={now} final={phase.k === "filled" && !phase.provisional} />;
+  else if (toDeposit) label = <W id="deposit" />;
   else
     label = (
       <span className="trb-ctaLbl" title={`${WORDS.buy.text} ${symbol}`}>
@@ -629,12 +643,14 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
         type="button"
         className="trb-cta"
         data-tone="buy"
-        data-kind={signedOut ? "setup" : running || coming ? "live" : "trade"}
-        disabled={!signedOut && !canBuy && !running && !coming}
+        data-kind={signedOut || toDeposit ? "setup" : running || coming ? "live" : "trade"}
+        data-offer={toDeposit ? "deposit" : undefined}
+        disabled={!signedOut && !toDeposit && !canBuy && !running && !coming}
         aria-disabled={running || coming || undefined}
         aria-busy={(!running && coming) || undefined}
         data-testid="trade-cta"
-        onClick={() => (signedOut ? openSignin(true) : amount !== null && buy(amount))}
+        {...(toDeposit ? intent : {})}
+        onClick={() => (signedOut ? openSignin(true) : toDeposit ? depositSheet.setOpen(true) : amount !== null && buy(amount))}
       >
         {label}
       </button>

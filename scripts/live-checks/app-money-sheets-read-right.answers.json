@@ -1,0 +1,113 @@
+{
+  "_note": "Recorded 16 Nov 2026 on the live hosts with a fresh $0 account each width (passkey made by a CDP virtual authenticator). good: this card's build at f6abf1c98 (apps/terminal/dist at card/app-money-sheets-read-right) answering APP_HOST via --app-dir; bad: APP_HOST as deployed (main 6df1ca4e2), where the sheet was opened from the header cold.",
+  "good": {
+    "at": "2026-11-16T19:39:52.691Z",
+    "browser": "Chrome 157.0.8103.51, sandbox on",
+    "app": "local build",
+    "widths": {
+      "phone": {
+        "width": "phone",
+        "balance": "$0 available",
+        "cta": {
+          "text": "Deposit",
+          "disabled": false
+        },
+        "askedBeforeTap": 3052,
+        "opened": true,
+        "fillMs": 70,
+        "min": {
+          "shown": "1.02",
+          "real": "1.015576",
+          "symbol": "USDC"
+        },
+        "withdraw": {
+          "fromLabel": "From",
+          "notice": false,
+          "max": {
+            "text": "Max 0 USDC",
+            "lifted": false
+          }
+        }
+      },
+      "desktop": {
+        "width": "desktop",
+        "balance": "$0 available",
+        "cta": {
+          "text": "Deposit",
+          "disabled": false
+        },
+        "askedBeforeTap": 3047,
+        "opened": true,
+        "fillMs": 65,
+        "min": {
+          "shown": "1.02",
+          "real": "1.015576",
+          "symbol": "USDC"
+        },
+        "withdraw": {
+          "fromLabel": "From",
+          "notice": false,
+          "max": {
+            "text": "Max 0 USDC",
+            "lifted": false
+          }
+        }
+      }
+    }
+  },
+  "bad": {
+    "at": "2026-11-16T18:33:40.716Z",
+    "browser": "Chrome 157.0.8103.51, sandbox on",
+    "app": "APP_HOST",
+    "widths": {
+      "phone": {
+        "width": "phone",
+        "balance": "$0 available",
+        "cta": {
+          "text": "Buy ETF",
+          "disabled": true
+        },
+        "via": "header",
+        "headerOpened": true,
+        "fillMs": 3931,
+        "min": {
+          "shown": "1.015576",
+          "real": null,
+          "symbol": "USDC"
+        },
+        "withdraw": {
+          "fromLabel": null,
+          "notice": true,
+          "max": {
+            "text": "Max 0 USDC",
+            "lifted": true
+          }
+        }
+      },
+      "desktop": {
+        "width": "desktop",
+        "balance": "$0 available",
+        "cta": {
+          "text": "Buy ETF",
+          "disabled": true
+        },
+        "via": "header",
+        "headerOpened": true,
+        "fillMs": 3969,
+        "min": {
+          "shown": "1.015576",
+          "real": null,
+          "symbol": "USDC"
+        },
+        "withdraw": {
+          "fromLabel": null,
+          "notice": true,
+          "max": {
+            "text": "Max 0 USDC",
+            "lifted": true
+          }
+        }
+      }
+    }
+  }
+}

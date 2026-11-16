@@ -27,7 +27,8 @@ import "./withdraw.css";
 
 export const SHEET_ID = "withdraw";
 
-function W({ id }: { id: WordId }) {
+/** The withdraw screens' one word helper (the progress and the form, card app-money-sheets-read-right). */
+export function W({ id }: { id: WordId }) {
   const w = WORDS[id];
   return w.draft ? <span data-draft-copy={id}>{w.text}</span> : <>{w.text}</>;
 }

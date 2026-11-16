@@ -75,6 +75,15 @@ export function amountOk(amount: Cents | null, max: Cents | null, balance: Cents
   return amount !== null && amount > 0n && max !== null && balance !== null && amount <= max && amount <= balance;
 }
 
+/**
+ * The main button offers Deposit (card app-money-sheets-read-right, QA walk item 7: a $0 account that typed an amount met
+ * a red box and an off Buy, with no way on): signed in with the account read, the account holding nothing anywhere
+ * (holdsNothing), an amount typed, and no tap running or money on its way to the chain.
+ */
+export function offersDeposit(i: { signedIn: boolean; running: boolean; coming: boolean; amount: Cents | null; empty: boolean }): boolean {
+  return i.signedIn && !i.running && !i.coming && i.empty && i.amount !== null && i.amount > 0n;
+}
+
 /** One slice of the kit's set: a ready wallet and the USD it spends (a decimal string, as every kit amount). */
 export interface Slice {
   wallet: string;

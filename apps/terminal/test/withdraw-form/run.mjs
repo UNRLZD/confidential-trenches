@@ -4,6 +4,8 @@
 // it, the one withdraw form:
 //   - the places row names every place with money (NEAR, Solana, Base, Robinhood) with Robinhood picked; To names every
 //     chain the pool pays out on (NEAR, Solana, Base, Robinhood) with Robinhood picked; both rows the deposit's tiles;
+//   - the places row is labelled From and no deposit risk line is drawn on Withdraw; an account that holds nothing
+//     draws Max 0 USDC with the 0 in the line's own tone (card app-money-sheets-read-right, QA walk item 12);
 //   - To Solana, an amount, and Robinhood's own kind of address (0x): the address field's red edge, Withdraw off;
 //   - a Solana address: Withdraw on; its tap asks the shell for exactly pool.withdraw {chain robinhood, to, amount,
 //     dest solana}, the message test/e2e/signing-sheet/run.mjs posts to reach SIGN_HOST's Confirm (poolwithdrawdest);
@@ -79,6 +81,16 @@ const read = (page) =>
       to: all("[data-to]", "to"),
       toOn: on("[data-to]"),
       labels: [...f.querySelectorAll(".lb")].map((l) => l.textContent),
+      // the places row's own label (card app-money-sheets-read-right, QA walk item 12), by the group's labelledby
+      fromLabel: document.getElementById(f.querySelector("[data-places]")?.getAttribute("aria-labelledby") ?? "")?.textContent ?? null,
+      // the deposit's risk line, which speaks of depositing: none on Withdraw (QA walk item 12)
+      notice: document.querySelector('.dep [data-control="deposit-notice"]') !== null,
+      // the Max line: its number's colour against its words' (QA walk item 12: "Max 0 USDC" drew the zero lifted)
+      max: (() => {
+        const b = document.querySelector('[data-control="withdraw-max"]');
+        const n = b?.querySelector(".num");
+        return b && n ? { text: b.textContent.replace(/\s+/g, " ").trim(), lifted: getComputedStyle(n).color !== getComputedStyle(b).color } : null;
+      })(),
       dest: f.dataset.dest,
       ready: f.dataset.ready,
       addressBad: f.querySelector(".waddr").classList.contains("bad"),
@@ -116,7 +128,9 @@ try {
     let r = await read(page);
     check(r?.from === ALL && r.fromOn.join() === "robinhood", tag(`From: every place with money, Robinhood picked (${r?.from} / ${r?.fromOn})`));
     check(r?.to === ALL && r.toOn.join() === "robinhood", tag(`To: every chain the pool pays out on, Robinhood picked (${r?.to} / ${r?.toOn})`));
-    check(r?.labels.join("|") === "To|Amount|Address", tag(`the labels ${r?.labels.join("|")}`));
+    check(r?.labels.join("|") === "From|To|Amount|Address", tag(`the labels ${r?.labels.join("|")}`));
+    check(r?.fromLabel === "From", tag(`the places row is labelled ${JSON.stringify(r?.fromLabel)}, want From`));
+    check(r?.notice === false, tag("no deposit risk line on Withdraw"));
     check(r?.inside === true, tag("the form inside the sheet's body, above its foot"));
     await bar("open");
 
@@ -149,6 +163,16 @@ try {
     r = await read(page);
     check(r?.to === "near" && r.dest === "near" && r.addressBad && r.go === false, tag(`From NEAR: To NEAR alone, a Solana address refused (${JSON.stringify(r)})`));
     await bar("cash");
+
+    // an account that holds nothing (card app-money-sheets-read-right, QA walk item 12): Cash's 0, the Max line's
+    // number in its words' own tone, not lifted
+    await page.goto(`${BASE}/?empty`);
+    await page.waitForSelector('[data-form="withdraw"]');
+    await page.waitForTimeout(300);
+    r = await read(page);
+    check(r?.from === "near" && r.max?.text === "Max 0 USDC" && r.max.lifted === false, tag(`nothing held: ${JSON.stringify(r?.max)}, want Max 0 USDC with the 0 in the line's tone`));
+    check(r?.notice === false && r?.fromLabel === "From", tag("nothing held: From, and no deposit risk line"));
+    await bar("empty");
     check(external.length === 0, tag(`no external request ${external.join(" ")}`));
     await ctx.close();
   }

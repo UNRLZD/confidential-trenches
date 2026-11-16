@@ -89,14 +89,17 @@ const BUYS = [
   ["base-other", "pool=base-ready&amt=3", "pool", false, "$83.68 available", "Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: ethOf(300), slippage_bps: 1000 } }],
   ["base-over", "pool=base-ready&amt=3.51", "pool", false, "$83.68 available", "Max $3.50", false, null],
   ["base-making", "pool=base-making&amt=3.50", "pool", true, "$83.68 available", "", false, null],
-  // a fresh account with $0 (card buy-box-quotes-before-funds): Max $0, so the grey Buy has its reason
-  ["sol-fresh", "pool=sol-fresh&amt=5&cash=0", "pool", false, "$0 available", "Max $0", false, null],
-  ["base-fresh", "pool=base-fresh&amt=5&cash=0", "pool", false, "$0 available", "Max $0", false, null],
+  // a fresh account with $0 (card buy-box-quotes-before-funds): Max $0; the main button is Deposit, on, its tap opens the
+  // deposit sheet and sends nothing (card app-money-sheets-read-right, QA walk item 7: DEPOSIT)
+  ["sol-fresh", "pool=sol-fresh&amt=5&cash=0", "pool", false, "$0 available", "Max $0", true, null],
+  ["base-fresh", "pool=base-fresh&amt=5&cash=0", "pool", false, "$0 available", "Max $0", true, null],
   // all Cash, no pool note: Max the page's with_cash, 0.5 SOL at $93.01 ($46.50) and 0.013 ETH at $3,500.12 ($45.50)
   ["sol-cash", "pool=sol-cash&amt=5", "pool", false, "$73.18 available", "Max $46.50", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.053757381", slippage_bps: 1000 } }],
   ["base-cash", "pool=base-cash&amt=5", "pool", false, "$73.18 available", "Max $45.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: ethOf(500), slippage_bps: 1000 } }],
   ["vault", "amt=25", "vault", false, "$73.18 available", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
 ];
+// the rows whose main button offers Deposit (a $0 account with an amount typed): the setup look, the word Deposit
+const DEPOSIT = new Set(["sol-fresh", "base-fresh"]);
 // the Fee row: on a Solana pool buy whose Max the box reads for the coin (coinTapKey), the typed amount's cost; none else
 // and on Base (card you-receive-on-every-chain), the tap's own ask's cost: 0.000021 ETH at $3,500.12 is $0.0735, $0.08;
 // a dash where the tap asks nothing (over Max)
@@ -239,6 +242,7 @@ try {
         // the busy look of a tap in flight while the money is being made spendable; the button's own label, no new word
         const look = await cta.evaluate((b) => ({ kind: b.getAttribute("data-kind"), busy: b.getAttribute("aria-busy"), aria: b.getAttribute("aria-disabled"), native: b.disabled, label: b.textContent.trim() }));
         if (busyWant) check(look.kind === "live" && look.busy === "true" && look.aria === "true" && !look.native && look.label === "Buy TORCH", `${tag}: Buy ${JSON.stringify(look)}, want the busy look (live, aria-busy, aria-disabled, "Buy TORCH")`);
+        else if (DEPOSIT.has(name)) check(look.kind === "setup" && look.busy === null && !look.native && look.label === "Deposit", `${tag}: the button ${JSON.stringify(look)}, want Deposit, on, the setup look`);
         else check(look.kind === "trade" && look.busy === null, `${tag}: Buy ${JSON.stringify(look)}, want no busy look`);
         // the label's pulse (the app's skeleton pulse, opacity 1 to 0.55): on the busy Buy alone, and off under reduced motion
         const pulse = async (motion) => {
@@ -293,7 +297,7 @@ try {
           const filled = await settle(async () => norm(await cta.innerText()), "Filled 1.1s Final");
           check(filled === "Filled 1.1s Final", `${tag}: after the tap "${filled}", want "Filled 1.1s Final"`);
           if (SHOTS && name === "sol-ready") (await page.screenshot({ path: path.join(SHOTS, `${name}-filled-${w.name}-${scheme}.png`) }), shots++);
-        } else check(calls.length === 0, `${tag}: a tap on an off button sent ${JSON.stringify(calls)}`);
+        } else check(calls.length === 0, `${tag}: a tap on ${DEPOSIT.has(name) ? "Deposit" : "an off button"} sent ${JSON.stringify(calls)}`);
         // a preset over Max on Base (or while no proof is ready) is off: its tap sends nothing and leaves the typed amount
         if (name === "base-over" || name === "base-making") {
           const typed = await page.locator(".trb-input").inputValue();

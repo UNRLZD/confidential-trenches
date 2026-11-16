@@ -8,7 +8,7 @@ import { Icon } from "../signin/Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
 import { CHAINS } from "../market/pads.ts";
 import { usd as usdCents } from "../signin/model.ts";
-import { addressHeading, ADDRESS_STATES, chainsOf, countdown, destAsset, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, ownCoin, parseAmount, formHeld, pickAsset, poolAskAgainIn, poolQuote, poolBalance, quoteFits, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
+import { addressHeading, ADDRESS_STATES, chainsOf, countdown, destAsset, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, minShown, ownCoin, parseAmount, formHeld, pickAsset, poolAskAgainIn, poolQuote, poolBalance, quoteFits, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
 import type { Answer, Asset, Dest, DryQuote, PoolOpen, QuoteRefusal, RecentRow, SheetState } from "./model.ts";
 import { qrOf } from "./qr.ts";
 import { useDepositSheet, useDepositSource, useNow } from "./source.tsx";
@@ -334,14 +334,17 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
           {withdrawing ? <WithdrawBody f={wf} locked={src.locked !== null} /> : body}
         </div>
         <div className="dfoot">
-          {/* the risk line (words.ts notice) over every state's action: drawn in one place for the sheet's life, so a
-              state change never moves the body (BAR-11) */}
-          <p className="dnote" data-control="deposit-notice">
-            <span>
-              <W id="notice" />{" "}
-              <a href={REPO_ISSUES_URL} target="_blank" rel="noopener noreferrer"><W id="feedback" /></a>
-            </span>
-          </p>
+          {/* the risk line (words.ts notice) over every deposit state's action: drawn in one place for the segment's
+              life, so a state change never moves the body (BAR-11); the Withdraw segment has none, the line speaks of
+              depositing (card app-money-sheets-read-right, QA walk item 12) */}
+          {!withdrawing && (
+            <p className="dnote" data-control="deposit-notice">
+              <span>
+                <W id="notice" />{" "}
+                <a href={REPO_ISSUES_URL} target="_blank" rel="noopener noreferrer"><W id="feedback" /></a>
+              </span>
+            </p>
+          )}
           {withdrawing ? <WithdrawGo f={wf} /> : foot}
         </div>
       </aside>
@@ -409,7 +412,7 @@ function Form({ s, held, lines, amount, setAmount, dry, asset, assets, pick, ret
         </span>
       </label>
       <div className="lim">
-        <span className={s === "S4.4" ? "loss" : ""}><W id="min" /> <span className="num">{asset?.min ?? "—"}</span> {asset?.symbol}</span>
+        <span className={s === "S4.4" ? "loss" : ""}><W id="min" /> <span className="num" data-min={asset?.min}>{asset ? minShown(asset.min, asset.symbol) : "—"}</span> {asset?.symbol}</span>
         {asset?.max_usd != null && <span className={s === "S4.5" ? "loss" : ""}><W id="max" /> <span className="num">{usd(asset.max_usd).replace(/\.00$/, "")}</span></span>}
       </div>
       {quote}

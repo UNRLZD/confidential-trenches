@@ -88,6 +88,9 @@ export const WORDS = {
   // You receive while the page prices the amount (card buy-box-quotes-before-funds): the deposit sheet's approved word for
   // its own quote in flight, not a new one
   quoting: DW.quoting,
+  // the main button of a $0 account that typed an amount (card app-money-sheets-read-right, QA walk item 7): the deposit
+  // sheet's own approved word, which the button opens
+  deposit: DW.deposit,
   poolBare: ok("Pool", "owner 8 Nov 07:55Z, kept; drafted on card app-buy-route-strip: the pool step's label before an event names the venue (words-pending)"),
 } as const satisfies Record<string, Word>;
 

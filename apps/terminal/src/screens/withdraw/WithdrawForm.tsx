@@ -8,6 +8,7 @@ import type { WithdrawPlace } from "./target.ts";
 import { arrivals, checkWithdraw, withdrawHop } from "./withdraw-form.ts";
 import type { Arrival, FormCheck } from "./withdraw-form.ts";
 import { WORDS } from "./words.ts";
+import { W } from "./WithdrawProgress.tsx";
 
 // The deposit sheet's Withdraw segment (card withdraw-address-in-the-app, owner 14 Nov 12:22Z picked A): in the same
 // sheet as Deposit, switched in place. The places that hold money as tiles (each its chain's mark and name), the Amount
@@ -18,7 +19,7 @@ import { WORDS } from "./words.ts";
 // Card withdraw-in-app-to-any-chain: the deposit's To row built twice, the places that hold money over To (where it
 // arrives: a pool's on every chain, Cash's on NEAR), the To tile picked by default the place's own chain; the address is
 // checked on the To chain and the tap's pool.withdraw carries it as dest. This is the app's only withdraw form. The
-// places' row has no label: no picked word yet (the card's hand-back proposes "From").
+// places' row is labelled From (card app-money-sheets-read-right, QA walk item 12: the app's From, a draft, beside To).
 
 /** The Withdraw button's control: locked from its tap until the signing page answers, its HopLine under the form. */
 export const WITHDRAW_GO = "withdraw-go";
@@ -115,6 +116,10 @@ export function useWithdrawForm(d: WithdrawFormDeps): WithdrawFormView {
   };
 }
 
+/** A balance of nothing ("0", "0.00"): its Max line's number is drawn in the line's own tone, never lifted (QA walk item
+ *  12: "Max 0 USDC" drew the zero brighter than its words). */
+const nothing = (balance: string) => !/[1-9]/.test(balance);
+
 /** One chain tile, the deposit's To tile (deposit.css .dtiles): its chain's mark over its name. */
 function Tile({ chain, on, locked, data, pick }: { chain: string; on: boolean; locked: boolean; data: Record<string, string>; pick(): void }) {
   const m = chainOf(chain);
@@ -130,10 +135,13 @@ function Tile({ chain, on, locked, data, pick }: { chain: string; on: boolean; l
 export function WithdrawBody({ f, locked }: { f: WithdrawFormView; locked: boolean }) {
   return (
     <div className="wform" data-form="withdraw" data-place={f.place.chain} data-dest={f.dest} data-ready={f.check.ready ? "yes" : "no"}>
-      <div className="dtiles" role="group" aria-label={WORDS.withdraw.text} data-places={f.places.map((p) => p.chain).join(" ")}>
-        {f.places.map((p) => (
-          <Tile key={p.chain} chain={p.chain} on={p.chain === f.place.chain} locked={locked} data={{ "data-from": p.chain }} pick={() => f.pick(p.chain)} />
-        ))}
+      <div className="ddest">
+        <div className="lb" id="wd-from"><W id="from" /></div>
+        <div className="dtiles" role="group" aria-labelledby="wd-from" data-places={f.places.map((p) => p.chain).join(" ")}>
+          {f.places.map((p) => (
+            <Tile key={p.chain} chain={p.chain} on={p.chain === f.place.chain} locked={locked} data={{ "data-from": p.chain }} pick={() => f.pick(p.chain)} />
+          ))}
+        </div>
       </div>
       <div className="ddest">
         <div className="lb" id="wd-to">{WORDS.to.text}</div>
@@ -151,7 +159,7 @@ export function WithdrawBody({ f, locked }: { f: WithdrawFormView; locked: boole
         </span>
       </label>
       <div className="lim">
-        <button type="button" className={f.max ? "wmax on" : "wmax"} disabled={locked} data-control="withdraw-max" onClick={f.tapMax}>
+        <button type="button" className={f.max ? "wmax on" : "wmax"} disabled={locked} data-control="withdraw-max" data-zero={nothing(f.place.balance) || undefined} onClick={f.tapMax}>
           {WORDS.max.text} <span className="num">{f.place.balance}</span> {f.place.symbol}
         </button>
       </div>
