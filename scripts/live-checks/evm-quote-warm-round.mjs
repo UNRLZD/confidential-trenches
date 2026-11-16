@@ -21,7 +21,8 @@
 // Reads only: no key, no transaction, no money moves.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { EvmQuoteError, evmPoolBuyQuote, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { EvmQuoteError, evmPoolBuyQuote } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 
 export const P95_MS = 1000;
 export const APP_ORIGIN = "https://ct-app.unrealized.trade";
@@ -50,7 +51,7 @@ const pct = (xs, p) => {
 
 /** The verdict on a run ({ cases: { [name]: { quotes: [{ ms, code }] } }, preflight: { [url]: { status, allow, headers } } })
  *  and the kit's venue list. */
-export function check(run, venues = evmPoolVenues()) {
+export function check(run, venues = mainnetVenues()) {
   const lines = [];
   let ok = true;
   const say = (pass, text) => {
@@ -84,7 +85,7 @@ export function check(run, venues = evmPoolVenues()) {
 
 /** Each listed provider's answer to the browser's preflight of a JSON POST from APP_ORIGIN, and the POST's own
  *  allow-origin. */
-export async function preflight(venues = evmPoolVenues()) {
+export async function preflight(venues = mainnetVenues()) {
   const out = {};
   for (const chain of ["base", "robinhood"]) {
     for (const u of venues[chain]?.providers ?? []) {

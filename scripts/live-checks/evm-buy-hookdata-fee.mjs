@@ -26,7 +26,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolChainFeeReads, evmPoolGas, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmPoolChainFeeReads, evmPoolGas } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "evm-buy-hookdata-fee";
@@ -78,7 +79,7 @@ const WORD = /^0x[0-9a-fA-F]{64}/;
 
 /** The chains and fee pairs the kit pins, with each chain's reads; `over` replaces a chain's pair (the bad run). */
 export function pinned(over = {}) {
-  return Object.entries(evmPoolVenues()).map(([chain, v]) => {
+  return Object.entries(mainnetVenues()).map(([chain, v]) => {
     const reads = [...evmPoolChainFeeReads(chain, evmPoolGas(0)), ...(v.pool ? [{ to: v.pool, data: TREE_DEPTH }] : [])];
     return { chain, providers: over[chain] ?? v.feeProviders, reads };
   });
@@ -158,7 +159,7 @@ async function main(argv) {
   for (const l of r.lines) console.log(`${r.verdict} ${l}`);
   if (record) {
     const bad = recorder();
-    const rh = evmPoolVenues().robinhood.feeProviders;
+    const rh = mainnetVenues().robinhood.feeProviders;
     const b = await check(bad.transport, pinned({ robinhood: [rh[0], QUOTE_ONLY_RH] }).filter((c) => c.chain === "robinhood"));
     for (const l of b.lines) console.log(`(bad run) ${b.ok ? "PASS" : "FAIL"} ${l}`);
     writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: rec.log, bad: bad.log }, null, 1)}\n`);

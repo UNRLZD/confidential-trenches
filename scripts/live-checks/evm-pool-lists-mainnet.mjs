@@ -34,7 +34,8 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "../../packages/kit/src/index.ts";
+import { evmPoolProvidersOf, evmRpcOperator } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { EXIT, verdictOf } from "./provider-answer.mjs";
 import { POOL_TOPICS, SWAP4, askOf, recorder, replayer, verdictOfError } from "./robinhood-mainnet-rpcs.mjs";
 import { connectSrc, read } from "./page-evm-rpc-csp.mjs";
@@ -53,7 +54,7 @@ export const CHAINS = Object.freeze({
 
 /** The kit's mainnet pool list of `chain`, and the addresses its reads filter on. */
 export function kitList(chain) {
-  const v = evmPoolVenues()[chain];
+  const v = mainnetVenues()[chain];
   return { list: [...(evmPoolProvidersOf(v) ?? [])], pool: v.pool.toLowerCase(), poolManager: v.poolManager.toLowerCase() };
 }
 

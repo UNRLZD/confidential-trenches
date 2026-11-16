@@ -23,7 +23,8 @@
 // (rh-cold-quote.answers.json). Reads only: no key, no transaction, no money moves.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { EvmQuoteError, evmPoolBuyQuote, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { EvmQuoteError, evmPoolBuyQuote } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { traced } from "./evm-quote-warm-round.mjs";
 
 export const BOUND_MS = 30_000;
@@ -39,7 +40,7 @@ const TORCH = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111"; // evm-quote-lag-hel
 export const REQ = { chain: "robinhood", token: TORCH, amountIn: 10n ** 15n, slippageBps: 300, route: { venue: "uniswap-v4", currencyIn: ZERO, hops: [{ currency: TORCH, fee: 3000, tickSpacing: 60, hooks: ZERO, hookData: "0x" }] } };
 
 /** The chain's first scan provider's host: the one a cold scan asks for logs over the depth. */
-export const SCAN_HOST = new URL(evmPoolVenues().robinhood.scan.url).host;
+export const SCAN_HOST = new URL(mainnetVenues().robinhood.scan.url).host;
 
 /** The verdict on a run ({ cold: { ms, code, message?, hosts }, warm: [{ ms, code, message? }], shape?: { pools } }). */
 export function check(run) {
@@ -87,7 +88,7 @@ const once = async (f) => {
 
 /** TORCH's pools with currencies other than the native asset or WETH, from its Initialize logs over the scan's depth on
  *  the chain's first scan provider (both topic positions, one request each); a throttle is waited out, 5 tries. */
-export async function shapeOf(venue = evmPoolVenues().robinhood) {
+export async function shapeOf(venue = mainnetVenues().robinhood) {
   const s = venue.scan;
   const w = (a) => "0x" + a.slice(2).toLowerCase().padStart(64, "0");
   const post = async (body) => {

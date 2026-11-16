@@ -24,7 +24,7 @@
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "base-reads-never-throttled";
@@ -58,7 +58,7 @@ export const RETRY_MS = 180_000;
 export const RETRY_EVERY_MS = 30_000;
 export const TIMEOUT_MS = 15_000;
 /** Each chain's pool, the kit's pin (its eth_getLogs is what a sign-in's pool sync reads). */
-export const POOLS = Object.fromEntries(CHAINS.map((c) => [c, evmPoolVenues()[c].pool]));
+export const POOLS = Object.fromEntries(CHAINS.map((c) => [c, mainnetVenues()[c].pool]));
 const DRPC = /^drpc\.live( key[1-9])?( keyless)? (answers|wrong chain|held|down|unread)$/;
 const HEX = /^0x[0-9a-f]{1,16}$/i;
 const STATE_LINE = /^BAD health [a-z]+: drpc\.live( key[1-9])? (wrong chain|held|down|unread)$/;

@@ -51,7 +51,8 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolFee, evmPoolGas, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmPoolFee, evmPoolGas } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 import { childArgs } from "./device-evm-fee-read-walks-operators.mjs";
 import { HELPER_AT, READER } from "./evm-deposit-route-mainnet.mjs";
@@ -220,7 +221,7 @@ export function checkChain(run) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   let quiet = false;
-  const venues = evmPoolVenues();
+  const venues = mainnetVenues();
   for (const [net, pin] of Object.entries(PINS)) {
     const got = { chainId: [], code: [], scope: [] };
     for (const rpc of MAINNETS[net].rpcs) {

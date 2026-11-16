@@ -28,7 +28,8 @@ import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "../../packages/kit/src/index.ts";
+import { evmPoolProvidersOf, evmRpcOperator } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 const KEY = "robinhood-mainnet-rpcs";
@@ -47,7 +48,7 @@ const TRIES = 3;
 
 /** The kit's Robinhood mainnet pool list, and the address its filter reads. */
 export function kitList() {
-  const v = evmPoolVenues().robinhood;
+  const v = mainnetVenues().robinhood;
   return { list: [...(evmPoolProvidersOf(v) ?? [])], address: (v.pool ?? v.poolManager).toLowerCase(), poolManager: v.poolManager.toLowerCase() };
 }
 

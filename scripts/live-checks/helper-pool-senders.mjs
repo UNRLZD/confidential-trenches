@@ -51,7 +51,8 @@ import "../net-window.mjs";
 import { createHmac, createPublicKey, generateKeyPairSync, pbkdf2Sync, randomBytes, sign } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { evmPoolVenues, SOLANA_JITO_TIP_ACCOUNTS, SOLANA_JITO_TIP_MIN, solanaPoolFee, solanaPoolPriorityBudget, solanaRentOf } from "../../packages/kit/src/index.ts";
+import { SOLANA_JITO_TIP_ACCOUNTS, SOLANA_JITO_TIP_MIN, solanaPoolFee, solanaPoolPriorityBudget, solanaRentOf } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { FIELDS as EVM_FIELDS } from "./helper-evm-sender.mjs";
 // the verdict and its exit codes, as provider-answer.mjs has them; that module is not imported here, since this check
@@ -483,7 +484,7 @@ function codeProblem(code, urls) {
 }
 
 /** The check on one recorded EVM run: { pool, code: [{ url, status, body }] x2, reads: [{ asked, origin, status, headers, body }] }. */
-export function judgeEvm(run, { venues = evmPoolVenues() } = {}) {
+export function judgeEvm(run, { venues = mainnetVenues() } = {}) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   let quiet = false;
@@ -537,7 +538,7 @@ export function judgeEvm(run, { venues = evmPoolVenues() } = {}) {
 }
 
 /** An EVM pool's run: the two fee reads, the two code reads of anvil's account 0, then the four plants. */
-export async function readEvm(base, pool, fetchFn = fetch, { venues = evmPoolVenues(), nowMs = () => Date.now() } = {}) {
+export async function readEvm(base, pool, fetchFn = fetch, { venues = mainnetVenues(), nowMs = () => Date.now() } = {}) {
   const reads = [];
   const get = async (asked, origin, url, init = {}) => {
     const r = await fetchFn(url, { ...init, redirect: "error", headers: { ...(origin ? { origin: APP } : {}), ...(init.headers ?? {}) }, signal: AbortSignal.timeout(15_000) });

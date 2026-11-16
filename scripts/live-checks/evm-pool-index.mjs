@@ -33,7 +33,7 @@
 import "../net-window.mjs";
 import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 
 export const KEY = "evm-pool-index";
 export const APP_ORIGIN = "https://ct-app.unrealized.trade";
@@ -221,7 +221,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const args = process.argv.slice(2);
   const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
   try {
-    const run = await read(evmPoolVenues());
+    const run = await read(mainnetVenues());
     if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify(run) + "\n");
     const v = judge(run);
     for (const l of v.lines) console.log(l);

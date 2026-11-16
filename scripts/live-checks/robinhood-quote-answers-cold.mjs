@@ -19,7 +19,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 export const SIGN = "https://confidential.unrealized.trade";
@@ -49,7 +49,7 @@ export function check(run, want = committed()) {
 }
 
 /** One run: each chain's snapshot (from SIGN_HOST, or `site`'s folder) and head (the first quote provider that names it). */
-export async function read(sign = SIGN, site = null, venues = evmPoolVenues()) {
+export async function read(sign = SIGN, site = null, venues = mainnetVenues()) {
   const run = { sign, site: site === null ? null : "a build folder at SIGN_HOST's name", at: new Date().toISOString(), snapshots: {} };
   for (const chain of CHAINS) {
     const v = venues[chain];

@@ -20,7 +20,7 @@ import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { EXIT, verdictOf } from "./provider-answer.mjs";
 
@@ -30,7 +30,7 @@ const SHA = /^[0-9a-f]{40}$/;
 const TIMEOUT_MS = 15_000;
 
 /** The mainnet pools the helper serves, each with its chain and network, from the deploy records and the kit's pins. */
-export function mainnetPools(root = ROOT, venues = evmPoolVenues()) {
+export function mainnetPools(root = ROOT, venues = mainnetVenues()) {
   const sol = JSON.parse(readFileSync(path.join(root, "contracts/pool-solana/deployments/mainnet.json"), "utf8"));
   return [
     { chain: "solana", network: "mainnet", pool: String(sol.pool) },

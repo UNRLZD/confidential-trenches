@@ -115,7 +115,7 @@ export async function read(base, fetchFn = fetch) {
  *  every call (the sell's checks up to the deadline read none). Each answer's X-Helper-Commit is this tree's HEAD. */
 export async function readLocal() {
   const { evmPoolSender } = await import("../../apps/helper/src/pool/evm.ts");
-  const { evmPoolVenues } = await import("../../packages/kit/src/index.ts");
+  const { mainnetVenues } = await import("./mainnet-venues.mjs");
   const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   // throwaway keys: the checks up to the deadline sign nothing with them
   const [senderKey, sellKey] = [randomKey(), randomKey()];
@@ -124,7 +124,7 @@ export async function readLocal() {
   };
   const pools = [];
   for (const [network, pool] of Object.entries(evmPoolRecords())) {
-    const feeCollector = evmPoolVenues()[network]?.feeCollector?.toLowerCase();
+    const feeCollector = mainnetVenues()[network]?.feeCollector?.toLowerCase();
     const s = evmPoolSender({ network, pool, senderKey, sellKey, feeCollector }, [none, none]);
     const reads = [{ asked: "fee", readAt: new Date().toISOString(), status: 200, headers: { "x-helper-commit": head }, body: JSON.stringify({ fee_collector: feeCollector }) }];
     const ps = plants({ network, pool, feeRecipient: feeCollector });

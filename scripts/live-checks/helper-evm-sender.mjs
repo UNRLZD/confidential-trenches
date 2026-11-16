@@ -41,7 +41,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolSignSellAuthorization, evmPoolVenues, evmSellRouteOf } from "../../packages/kit/src/index.ts";
+import { evmPoolSignSellAuthorization, evmSellRouteOf } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { check as runCheck, RPCS as RUN_RPCS } from "./pool-evm-testnet-run.mjs";
 import { EXIT, verdictOf } from "./provider-answer.mjs";
@@ -119,7 +120,7 @@ export const collectorRecord = (network, dir = HERE) => (NETWORKS.includes(netwo
  * counted paid by the Paid log of the collector the helper is set with, so the checks hold the fee answer's collector
  * to the pin, and the pin to the deployed collector's record.
  */
-export function feeCollectors({ networks = NETWORKS, venues = evmPoolVenues(), dir = HERE } = {}) {
+export function feeCollectors({ networks = NETWORKS, venues = mainnetVenues(), dir = HERE } = {}) {
   const lower = (v) => (typeof v === "string" ? v.toLowerCase() : null);
   return Object.fromEntries(networks.map((n) => {
     const v = Object.hasOwn(venues, n) ? venues[n] : undefined;
@@ -132,7 +133,7 @@ export function feeCollectors({ networks = NETWORKS, venues = evmPoolVenues(), d
 }
 
 /** The check on one recorded run: { base, pools: [{ network, pool, reads: [{ asked, status, headers, body }] }] }. */
-export function judge(run, { records = evmPoolRecords(), venues = evmPoolVenues() } = {}) {
+export function judge(run, { records = evmPoolRecords(), venues = mainnetVenues() } = {}) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   let quiet = false;
@@ -240,7 +241,7 @@ const V4_NATIVE_PATH = v4PathThrough(ZERO);
  * unless given; `wKey` is returned for the test only. `data`: the swap's data (the hookless hop by default).
  */
 export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey = randomKey(), otherKey = randomKey(), data = V4_NATIVE_PATH }) {
-  const v = evmPoolVenues()[network];
+  const v = mainnetVenues()[network];
   if (!v?.sellDelegate || !v.poolManager) throw new Error(`the kit pins no sell delegate or PoolManager for ${network}`);
   if (typeof feeRecipient !== "string" || !ADDRESS.test(feeRecipient)) throw new Error(`the fee recipient ${show(feeRecipient)} is no address`);
   const chainId = BigInt(v.chainId);

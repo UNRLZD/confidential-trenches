@@ -36,7 +36,8 @@
 import "../net-window.mjs";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { evmPoolGas, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmPoolGas } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { evmPools } from "../ci/helper-live-checks.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 import { epochOf, evmPoolFeeAsk, feeUrl, noBlockYet, POOL_EPOCH_MS, POOL_LIFE_MAX_MS } from "./evm-pool-fee-epoch.mjs";
@@ -49,7 +50,7 @@ const DEC = /^[0-9]{1,40}$/;
 
 /** The providers a pool's block is read on: the network's fee providers, then its other quote providers */
 export const providersOf = (network) => {
-  const v = evmPoolVenues()[network];
+  const v = mainnetVenues()[network];
   return [...new Set([...(v?.feeProviders ?? []), ...(v?.providers ?? [])])];
 };
 
