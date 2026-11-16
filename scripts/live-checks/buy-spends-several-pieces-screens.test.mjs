@@ -124,3 +124,27 @@ test("the dry's cost read and the NEAR path's ask (card you-receive-on-every-cha
     assert.deepEqual(carriesOf(APP_MARKS, js), ["ask"], js.slice(0, 80));
   }
 });
+
+// card buy-box-quotes-before-funds: the box keeps the answer through the model's feeReadOf (an answer with out and no
+// cost is kept too), as its build spells it; the inline lines above still read
+const FEE_READ = "function Wh(e,t,n){return t.cost===void 0&&t.out===void 0?null:{key:e,...t.cost===void 0?{}:{cost:t.cost},...t.out===void 0?{}:{out:t.out},...n===null?{}:{amount:n}}}";
+const APP_JS3 = APP_JS2.replace(
+  "outcome.then(e=>{if(!e)return;if(e.ok)return void(e.result.cost!==void 0&&s({key:a,cost:e.result.cost}))})",
+  "outcome.then(e=>{if(!i)return;if(e.ok){let t=Wh(ge,e.result,M);t!==null&&ve(t);return}let t=Jh(e.error.code)})",
+) + ";" + FEE_READ;
+
+test("the answer kept through feeReadOf (card buy-box-quotes-before-funds): PASS; no amount asked, the cost not kept, another function, or the result not handed to it: FAIL, ask named", () => {
+  assert.notEqual(APP_JS3, APP_JS2 + ";" + FEE_READ);
+  assert.deepEqual(carriesOf(APP_MARKS, APP_JS3), []);
+  for (const js of [
+    APP_JS3.replace(",amount:t}", "}"),
+    APP_JS3.replace("...t.cost===void 0?{}:{cost:t.cost},", ""),
+    APP_JS3.replace("let t=Wh(ge,e.result,M)", "let t=Xh(ge,e.result,M)"),
+    APP_JS3.replace("let t=Wh(ge,e.result,M)", "let t=Wh(ge,null,M)"),
+    APP_JS3.replace("t!==null&&ve(t);", ""),
+    APP_JS3.replace(FEE_READ, ""),
+  ]) {
+    assert.notEqual(js, APP_JS3);
+    assert.deepEqual(carriesOf(APP_MARKS, js), ["ask"], js.slice(0, 80));
+  }
+});

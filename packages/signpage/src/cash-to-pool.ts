@@ -99,6 +99,18 @@ export function withCash(tapMax: string, coming: bigint, notes: readonly CashNot
   return f ? `${t.slice(0, -9)}.${f}` : t.slice(0, -9);
 }
 
+/** Cash's fee read kept as a value (withdraw/form.ts fee), so a plan can tell a failed read from a fee. */
+export type CashFeeRead = { fee: bigint } | { error: unknown };
+export const cashFeeRead = (p: Promise<bigint>): Promise<CashFeeRead> => p.then((fee) => ({ fee }), (error: unknown) => ({ error }));
+/** The vault payout's fee a plan over Cash's `notes` is made at: the fee read, or with no Cash note 0n (card
+ *  buy-quote-before-any-note): a plan over no note pays no fee, and the fee read asks a quote sized by Cash's largest
+ *  note, which a user with none has not, so it refuses. A failed read with a note: thrown, as before. */
+export function cashPlanFee(notes: readonly CashNote[], read: CashFeeRead): bigint {
+  if ("fee" in read) return read.fee;
+  if (notes.length === 0) return 0n;
+  throw read.error;
+}
+
 /** Each pool's coin: its decimals and the least rung its deposit ladder splits into (what a 1-2-5 split may leave at
  *  U_X under it): SOL on Solana, ETH on Base and Robinhood. */
 const POOL_DECIMALS: Readonly<Record<PoolChain, number>> = { solana: 9, base: 18, robinhood: 18 };

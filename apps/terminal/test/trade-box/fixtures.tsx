@@ -71,6 +71,9 @@ const POOLS: Record<string, { chain: "solana" | "base"; pools: Pool[] }> = {
   // of "0" and no ready or tap_max (no note has landed, so no proof queue runs)
   "sol-fresh": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0" }] },
   "base-fresh": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0" }] },
+  // the same pool for an account whose money is all Cash (the fixture's $73.18): no pool note, so no queue
+  "sol-cash": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0" }] },
+  "base-cash": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0" }] },
 };
 const POOL = poolMode ? POOLS[poolMode] : undefined;
 if (POOL) STATE.pools = POOL.pools;
@@ -130,6 +133,16 @@ const kit: TradeKit = {
       // on Base and Robinhood (card you-receive-on-every-chain) the tap's own ask's answer: one whole 0.001 ETH note's
       // relay fee, 0.000021 ETH, and 10,600 tokens out
       const evm = (params as { chain?: string }).chain !== "solana";
+      // no pool note and no queue (card buy-box-quotes-before-funds; the page as card buy-quote-before-any-note answers
+      // it): tap_max "0" and with_cash, the most one tap buys with Cash moved first (0.5 SOL, 0.013 ETH; "0" with no
+      // Cash); with an amount, out of the whole ask, and its cost only when there is Cash to price the move
+      const noNote = POOL !== undefined && POOL.pools.every((x) => x.balance === "0" && x.ready === undefined && x.tap_max === undefined);
+      if (noNote) {
+        const cash = STATE.vault_balance !== "0";
+        const fromCash = { tap_max: "0", with_cash: cash ? (evm ? "0.013" : "0.5") : "0" };
+        const result = !withAmount ? fromCash : { ...fromCash, out: evm ? "10600" : "35294.263662", ...(cash ? { cost: evm ? "0.000021" : "0.0014" } : {}) };
+        return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: true, result }) };
+      }
       const dry = evm ? { tap_max: "0.001", cost: "0.000021", out: "10600" } : { tap_max: "0.00172", cost: "0.0014", out: "35294.263662" };
       if (withAmount && q.get("fee") !== "down") return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: true, result: dry }) };
       return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: false, error: { code: "quote_check_failed" } }) };

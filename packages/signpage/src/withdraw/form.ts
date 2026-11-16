@@ -109,8 +109,9 @@ export interface WithdrawFormDeps {
   /** The largest UNSPENT note of the vault's scope (./checks.ts withdrawable): what one withdrawal carries. The form
    *  reads `cash`; this is the one-note read a single hand-off's caller sizes by. */
   available: () => Promise<bigint>;
-  /** The device's own bound on the relay fee, in base units; a rejection leaves it unread. */
-  fee: () => Promise<bigint>;
+  /** The device's own bound on the relay fee, in base units; a rejection leaves it unread. `amount`: the fee of a
+   *  withdrawal of it, not of Cash's largest note (a preview with no Cash note: card buy-quote-before-any-note). */
+  fee: (amount?: bigint) => Promise<bigint>;
   /** The wallet's withdraw path, one withdrawal per part in order (./handoff.ts cashWithdrawRun), given the fee the
    *  form drew and the step report; absent where the release names no vault or relayer. Its answer, when it gives one,
    *  is drawn as data-outcome, except { kind: "fee", fee }: the relayer's fee is now above the drawn one, so the form

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import type { HostRefusal, KindContext, Running } from "../src/api.ts";
-import { provingOn, withCash, evmCashWei, cashFirst, cashLamportsFor, cashUsdcFor, moveCostOf, evmMoveCostOf, evmMoveOf, cashMover, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
+import { cashFeeRead, cashPlanFee, provingOn, withCash, evmCashWei, cashFirst, cashLamportsFor, cashUsdcFor, moveCostOf, evmMoveCostOf, evmMoveOf, cashMover, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
 
 const TOKEN = "So11111111111111111111111111111111111111112";
 const ADDRESS = "a".repeat(64);
@@ -291,4 +291,17 @@ test("provingOn: a note landing, being proved or HELD with no ready proof is on 
   assert.equal(provingOn([n("a", "HELD")], sol, [{ noteId: "a" }]), false, "its proof is ready: counted in one tap");
   assert.equal(provingOn([n("a", "UNSPENT"), n("b", "SPENT")], sol, []), false);
   assert.equal(provingOn([n("a", "INCOMING", 9n), n("b", "HELD", 9n)], sol, []), false, "another chain's pool");
+});
+
+// Card buy-quote-before-any-note: Cash's fee read sizes its quote by Cash's largest note (withdraw/handoff.ts fee), so a
+// user with no Cash note has it refused; a plan over no note pays no fee. Red before: main.ts read the fee beside the
+// notes and a refusal failed the whole dry (Base and Robinhood: down; Solana: no with_cash).
+test("card buy-quote-before-any-note: a plan over no Cash note is made at fee 0, a failed read over a note still throws", async () => {
+  const refused = await cashFeeRead(Promise.reject(new Error("amount: not a bigint above 0")));
+  assert.equal(cashPlanFee([], refused), 0n);
+  assert.throws(() => cashPlanFee([{ id: "n", value: 5_000_000n }], refused), /amount/);
+  assert.equal(cashPlanFee([{ id: "n", value: 5_000_000n }], await cashFeeRead(Promise.resolve(50_000n))), 50_000n);
+  assert.equal(cashPlanFee([], await cashFeeRead(Promise.resolve(50_000n))), 50_000n);
+  // over no note with no price read: with_cash is tap_max alone, "0" for a pool with no note
+  assert.equal(withCash("0", 0n, [], cashPlanFee([], refused), null), "0");
 });

@@ -120,8 +120,9 @@ test("refused: a chain other than Solana, signed out, a trade running, no Solana
   assert.deepEqual(await ask(poolBuyDryKind(deps({ pools: [BASE] })), { chain: "solana", token: fx.pump.mint }), { error: "not_allowed" });
   assert.deepEqual(await ask(poolBuyDryKind(deps({ ready: async () => null })), { chain: "solana", token: fx.pump.mint }), { error: "not_funded" });
   assert.deepEqual(await ask(poolBuyDryKind(deps({ trading: () => true })), { chain: "solana", token: fx.pump.mint }), { error: "busy" });
-  // no queue open: no ready, so no Max of the coin's either
-  assert.deepEqual(await ask(poolBuyDryKind(deps({ ready: async () => ({ notes: [held] }) })), { chain: "solana", token: fx.pump.mint }), { error: "not_funded" });
+  // no queue open (card buy-quote-before-any-note): one tap spends nothing of the pool now, so Max of the coin's is 0,
+  // never a refusal that hides the Cash buy
+  assert.deepEqual(await ask(poolBuyDryKind(deps({ ready: async () => ({ notes: [held] }) })), { chain: "solana", token: fx.pump.mint }), { result: { tap_max: "0" } });
 });
 
 test("a coin's venue is read once on the page: the next ask makes no read", async () => {
@@ -377,11 +378,49 @@ test("card you-receive-on-every-chain: above tap_max with Cash to move, out from
   // cashFirst's own size is the same (main.ts cashDeps.short: the kind's short on the same reads)
   assert.equal(await kind.short(fx.pump.mint, 20_000_000n), short);
   assert.equal(await kind.short(fx.pump.mint, 1_000_000n), null, "one tap pays it now: no move");
-  // a move the page cannot price (no Cash, no price): tap_max alone, never a Fee that reads under
+  // a move the page cannot price (no Cash, no price): no Fee, never one that reads under; You receive still (card
+  // buy-quote-before-any-note), the same quote of the whole ask
   const none = poolBuyDryKind(deps({ tip: TIP, ready: OWN, moved: async () => null }));
-  assert.deepEqual(Object.keys(((await ask(none, { chain: "solana", token: fx.pump.mint, amount: "0.02" })) as { result: object }).result), ["tap_max"]);
+  assert.deepEqual(((await ask(none, { chain: "solana", token: fx.pump.mint, amount: "0.02" })) as { result: object }).result, { tap_max: tap, out: await quoteOut("pump", "0.02") });
   // at or under tap_max the move is never asked
   const before = shorts.length;
   assert.equal((await at("0.001")).pieces, 1);
   assert.equal(shorts.length, before);
+});
+
+// Card buy-quote-before-any-note: a fresh account, or one whose money is all Cash, has no pool note, so no proof queue
+// is open (it opens at a pool note's landing) and poolBalances gives no tap_max. Red before: the dry answered
+// not_funded, so no You receive and no Max for a buy cashFirst runs from Cash, and cashFirst's own size (`short`) was
+// null, so the tap moved the bare gap, short of the move's own Ws' costs.
+test("card buy-quote-before-any-note: no pool note and no queue: tap_max 0, out the quote of the whole ask, cost the move's and the moved notes' own; cashFirst sizes the same", async () => {
+  const TIP = 100_000n;
+  const MOVE = 7_777n;
+  for (const [name, fresh] of [["a fresh account", async () => ({ notes: [] })], ["a closed queue over a pool note", async () => ({ notes: [held] })]] as const) {
+    const shorts: bigint[] = [];
+    const kind = poolBuyDryKind(deps({ tip: TIP, ready: fresh as PoolBuyDryDeps["ready"], moved: async (short) => (shorts.push(short), MOVE) }));
+    const r = ((await ask(kind, { chain: "solana", token: fx.pump.mint, amount: "0.02" })) as { result: Record<string, unknown> }).result;
+    assert.equal(r.tap_max, "0", name);
+    assert.equal(r.out, await quoteOut("pump", "0.02"), `${name}: You receive is the buy's own quote of the whole ask`);
+    assert.equal("pieces" in r, false, name);
+    // sized as cashFirst sizes it over no proof: the least move whose notes, each its own W, pay the ask and their costs
+    const venue = await readCoinVenue(pair("pump"), fx.pump.mint);
+    const short = shorts.at(-1)!;
+    assert.ok(short > 20_000_000n, `${name}: more than the bare ask (${short})`);
+    const none = () => undefined;
+    const legs = solanaBuyCost(solanaMovedPieces(short, RENT), none, venue as never, RENT, () => TIP, 20_000_000n)!;
+    assert.notEqual(legs, null, name);
+    assert.equal(solanaBuyCost(solanaMovedPieces(short - 1n, RENT), none, venue as never, RENT, () => TIP, 20_000_000n), null, name);
+    const lamports = (s: string): bigint => BigInt(s.replace(".", "").replace(/^0+/, "") || "0") * 10n ** BigInt(9 - (s.split(".")[1]?.length ?? 0));
+    assert.equal(lamports(r.cost as string), MOVE + legs.cost, `${name}: the Fee, the move's and each moved W's relay fee and tip`);
+    assert.ok(SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](r), name);
+    // cashFirst's size is the dry's (main.ts cashDeps.short)
+    assert.equal(await kind.short(fx.pump.mint, 20_000_000n), short, name);
+    // no amount: Max 0 from the pool (main.ts adds Cash's with_cash to it)
+    assert.deepEqual(await ask(kind, { chain: "solana", token: fx.pump.mint }), { result: { tap_max: "0" } }, name);
+  }
+  // $0 Cash (the move is not priced): You receive still, as the same Cash buy; no Fee
+  const broke = poolBuyDryKind(deps({ tip: TIP, ready: async () => ({ notes: [] }), moved: async () => null }));
+  assert.deepEqual(await ask(broke, { chain: "solana", token: fx.pump.mint, amount: "0.02" }), { result: { tap_max: "0", out: await quoteOut("pump", "0.02") } });
+  // signed out is still not_funded
+  assert.deepEqual(await ask(poolBuyDryKind(deps({ ready: async () => null })), { chain: "solana", token: fx.pump.mint, amount: "0.02" }), { error: "not_funded" });
 });

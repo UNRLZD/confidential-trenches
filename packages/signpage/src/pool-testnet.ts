@@ -1958,23 +1958,28 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     await settleEvmOpen().catch(() => {});
     const st = await page.store();
     const all = await readNotes(st);
+    // the notes that hold money or may (card evm-tree-reads-only-when-needed): a PLANNED deposit note is an address the
+    // page named (src/deposit-name.ts plans one in every pool's scope at a sign-in, money or none) and a TAKEN one never
+    // holds any, so neither opens a chain's pool steps nor its index (release 157: a fresh account's PLANNED notes
+    // synced both chains' index, 1,946 Base eth_getLogs in 264 s, publicnode 429 on 11 of 13 screens)
+    const held = all.filter((n) => n.state !== "PLANNED" && n.state !== "TAKEN");
     // the chains a buy record (pending or held) or an open sale names
     const recorded = new Set<string>();
     for (const key of [EVM_POSITION_COSTS_KEY, EVM_OPEN_SELLS_KEY]) {
       const v = await st.get("meta", key).catch(() => undefined);
       if (v !== null && typeof v === "object") for (const r of Object.values(v as Record<string, unknown>)) if (r !== null && typeof r === "object" && typeof (r as { chain?: unknown }).chain === "string") recorded.add((r as { chain: string }).chain);
     }
-    // the pool steps only on a chain whose pool holds a note of the device (any state; a deposit's INCOMING one, a
+    // the pool steps only on a chain whose pool holds a note of the device (`held`: a deposit's INCOMING one, a
     // restore's, a spent one a buy or a sale left) or that a buy or sale record names: each follows a note, a record or
     // a W a note paid (rebuildEvmHoldings returns early with no SPENT or RESERVED note), so a chain with none has
     // nothing of the user's to read (card robinhood-note-spendable: a fresh account's every load, focus and show read
     // Robinhood's own provider, whose throttled answers the page cannot read, release 132's live run 43540749124)
-    const chains = (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null && (recorded.has(c) || all.some((n) => n.scope === evmPool(c)!.scope)));
+    const chains = (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null && (recorded.has(c) || held.some((n) => n.scope === evmPool(c)!.scope)));
     // each chain's pool index (the kit's quote reads it; this is its only sync) on a device that holds money anywhere:
-    // any note of any scope in any state (Cash is the vault scope's notes in this same store, ./withdraw/checks.ts
-    // cashNotes) or a buy or sale record, so a buy on a chain the money is not on yet (one balance buys on every chain)
-    // quotes a launchpad hook's pool there; a fresh account with nothing syncs no index
-    const indexed = all.length > 0 || recorded.size > 0 ? (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null) : [];
+    // any `held` note of any scope (Cash is the vault scope's notes in this same store, ./withdraw/checks.ts cashNotes)
+    // or a buy or sale record, so a buy on a chain the money is not on yet (one balance buys on every chain) quotes a
+    // launchpad hook's pool there; a fresh account with nothing but its named addresses syncs no index
+    const indexed = held.length > 0 || recorded.size > 0 ? (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null) : [];
     if (chains.length === 0) {
       if (!stop.aborted) for (const chain of indexed) evmIndexOf(chain);
       return;

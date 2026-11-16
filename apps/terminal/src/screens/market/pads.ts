@@ -48,6 +48,10 @@ export const PADS: Readonly<Record<string, Pad>> = {
   // tkn.near's factory (the engine's "tkn.farm"; tkn.farm no longer resolves): tkn.homes is its site, its code names
   // tkn.near ("TKN") and tknx.near ("TKN Plus") as its factories (read 14 Nov 10:44Z)
   tkn: { name: "TKN", logo: at("tkn.png"), src: "https://tkn.homes/apple-touch-icon.png (180 px, cut to 64; fetched 2026-11-14)" },
+  // Shore's factory is launch.shoremarkets.near (its tokens are <id>.launch.shoremarkets.near, read on two RPCs 16 Nov
+  // 00:29Z); shore.markets is its site ("Launch your token on Shore") and the engine's registry names it. The UNRLZD
+  // registry's shore.svg is Shore's older mark: this is the one its site serves now.
+  shore: { name: "Shore", logo: at("shore.svg"), src: "https://shore.markets/favicon.svg (fetched 2026-11-16)" },
 };
 
 /** Pads the lists name whose own brand files could not be found or cited: they draw no badge until they can. GayPad
@@ -109,6 +113,7 @@ export const PAD_RING: Readonly<Record<string, RingColor | "neutral">> = {
   memecooking: { l: 0.58, c: 0.18, h: 139 }, // 0.56 0.17 140
   nearpaid: { l: 0.88, c: 0.1, h: 211 }, // 0.88 0.10 211
   tkn: { l: 0.56, c: 0.1, h: 270 }, // 0.45 0.10 270 (sampled from tkn.png, lifted to the 0.56 floor)
+  shore: { l: 0.75, c: 0.14, h: 299 }, // 0.73 0.14 277 (the chroma-weighted 30° peak of shore.svg's ring; 0.024 from zora, moved by the least OKLab step that clears every rule)
   "bags.fun": "neutral", // white on black
   bags: "neutral", // white on black
   doppler: "neutral", // white on black

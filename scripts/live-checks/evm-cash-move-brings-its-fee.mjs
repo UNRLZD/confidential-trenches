@@ -63,12 +63,14 @@ const moverUses = (plan) => new RegExp(`typeof (${N})==\`bigint\`\\?${esc(plan)}
 /** pool.buy.dry above tap_max: the sized plan's cost plus the move's, only with a fee read and a priced move. */
 const DRY = [new RegExp(`${N}>${N}&&(${N})\\.fee!==void 0&&\\1\\.moved!==void 0`), new RegExp(`\\{plan:(${N})\\.plan,cost:${N}\\(\\1\\.plan\\)\\+${N}\\}`)];
 /** main.ts gives the dry the pool's own epoch fee read, and the rungs and price of the move from one plan of Cash's
- *  notes (card cash-buys-spend-every-note-evm). */
-const DRY_DEPS = new RegExp(`fee:\\(\\)=>${N}\\?\\.evmFeeNow\\((${N})\\)\\?\\?Promise\\.resolve\\(null\\),rungs:async\\(\\)=>\\(await (${N})\\(\\1\\)\\)\\?\\.rungs\\?\\?null,moved:async (${N})=>\\(await \\2\\(\\1\\)\\)\\?\\.cost\\(\\3\\)\\?\\?null`);
+ *  notes (card cash-buys-spend-every-note-evm); no rungs when Cash holds nothing a move can use (plan.top 0: card
+ *  buy-quote-before-any-note), so the dry sizes no move and waits on no fee. */
+const DRY_DEPS = new RegExp(`fee:\\(\\)=>${N}\\?\\.evmFeeNow\\((${N})\\)\\?\\?Promise\\.resolve\\(null\\),rungs:async\\(\\)=>\\((${N})=>\\2===null\\|\\|\\2\\.top===0n\\?null:\\2\\.rungs\\)\\(await (${N})\\(\\1\\)\\),moved:async (${N})=>\\(await \\3\\(\\1\\)\\)\\?\\.cost\\(\\4\\)\\?\\?null`);
 
 /** main.ts's with_cash on Base and Robinhood: at the epoch's fee read, a move's size paid when Cash's notes make it (card
- *  cash-buys-spend-every-note-evm: the plan's parts), sized on the rungs they land, searched under the plan's top. */
-const MAX = new RegExp(`evmFeeNow\\((${N})\\)\\.catch\\(\\(\\)=>null\\)\\?\\?null\\]\\),(${N})=${N}\\(${N},${N}\\.ETH\\);if\\((${N})===null\\|\\|${N}===null\\|\\|\\2===null\\)return null;let ${N}=${N}\\(${N},${N},(${N})=>\\3\\.parts\\(\\4\\)!==null,\\2\\+\\3\\.top,\\3\\.rungs\\)`);
+ *  cash-buys-spend-every-note-evm: the plan's parts), sized on the rungs they land, searched under the plan's top; with
+ *  no Cash a move can use (the plan's top 0: card buy-quote-before-any-note), tap_max itself, waiting on no fee. */
+const MAX = new RegExp(`evmFeeNow\\((${N})\\)\\.catch\\(\\(\\)=>null\\)\\?\\?Promise\\.resolve\\(null\\),(${N})=await ${N}\\(\\1\\),(${N})=${N}\\(${N},${N}\\.ETH\\);if\\(\\2===null\\|\\|\\3===null\\)return null;if\\(\\2\\.top===0n\\)return ${N}\\(\\3,${N}\\.ETH\\);let (${N})=await ${N};if\\(\\4===null\\)return null;let ${N}=${N}\\(${N},\\4,(${N})=>\\2\\.parts\\(\\5\\)!==null,\\3\\+\\2\\.top,\\2\\.rungs\\)`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
