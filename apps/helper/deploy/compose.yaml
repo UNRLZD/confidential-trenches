@@ -64,6 +64,11 @@ services:
       RPC_DAY_QUICKNODE: ${RPC_DAY_QUICKNODE:-}
       RPC_DAY_DRPC: ${RPC_DAY_DRPC:-}
       RPC_DAY_FASTNEAR: ${RPC_DAY_FASTNEAR:-}
+      # a keyed company's pace on a paid plan, "<calls a second>,<at once>" (src/rpc/rpc.ts keyedPaceOf), not a secret;
+      # empty: its free plan's (src/limits/limits.ts KEYED_PACE: dRPC 0.8 a second, measured 16 Nov)
+      RPC_PACE_QUICKNODE: ${RPC_PACE_QUICKNODE:-}
+      RPC_PACE_DRPC: ${RPC_PACE_DRPC:-}
+      RPC_PACE_FASTNEAR: ${RPC_PACE_FASTNEAR:-}
       # each chain's RPC budget per 10 s, "<total>,<per client>" (src/rpc/rpc.ts; empty: the public provider's limit)
       RPC_BUDGET_SOLANA: ${RPC_BUDGET_SOLANA:-}
       RPC_BUDGET_BASE: ${RPC_BUDGET_BASE:-}

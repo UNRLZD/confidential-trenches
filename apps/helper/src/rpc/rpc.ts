@@ -484,14 +484,14 @@ const SUMMED: ReadonlySet<RpcChain> = new Set(["solana", "base", "robinhood"]);
  *  default, when an existing name such as SOLANA_RPC_URL is set; none when only company keys are) plus
  *  KEYED_ROUTE_SHARE of each company key's 10 s pace; never under the share and the reserve (a one-key route whose
  *  key's pace is smaller still sends no more than that pace: callList takes each send from its bucket). */
-export function summedTotal(chain: RpcChain, keyed: readonly { env: string }[], own: number, share: number): number {
+export function summedTotal(chain: RpcChain, keyed: readonly { env: string }[], own: number, share: number, env: Record<string, string | undefined> = {}): number {
   const companies = keyed.filter((k) => KEYED_PROVIDER[k.env] !== undefined);
   if (!SUMMED.has(chain) || companies.length === 0) return own;
   const plan = keyed.some((k) => KEYED_PROVIDER[k.env] === undefined) ? own : 0;
   // each bucket once: keys on one rate (dRPC's three on its per-IP bucket, limits.ts DRPC_IP_PACE) are one pace
   const buckets = new Map<string, number>();
   for (const k of companies) {
-    const p: Pace = KEYED_PACE[KEYED_PROVIDER[k.env]!];
+    const p: Pace = keyedPaceOf(env, KEYED_PROVIDER[k.env]!);
     buckets.set(p.rate ?? keyedAccountOf(k.env)!, p.perS);
   }
   const room = [...buckets.values()].reduce((n, perS) => n + Math.floor(perS * (LIMIT_WINDOW_MS / 1000) * KEYED_ROUTE_SHARE), 0);
@@ -579,10 +579,21 @@ export function keyedPaces(env: Record<string, string | undefined>): Record<stri
     const family = chain === "near" ? "near" : EVM_CHAINS.has(chain) ? "evm" : "solana";
     for (const k of readUpstreams(env)[chain].keyed) {
       const co = KEYED_PROVIDER[k.env];
-      if (co !== undefined) out[k.url] = { ...KEYED_PACE[co], group: keyedAccountOf(k.env), day: keyedDayOf(env, co), cost: KEYED_COST[co][family] };
+      if (co !== undefined) out[k.url] = { ...keyedPaceOf(env, co), group: keyedAccountOf(k.env), day: keyedDayOf(env, co), cost: KEYED_COST[co][family] };
     }
   }
   return out;
+}
+/** A company's pace (card base-reads-never-throttled): RPC_PACE_<COMPANY> when set, "<calls a second>,<at once>" (a
+ *  paid plan's rate: dRPC's free plan answers about a call a second from the helper's IP, its paid plans far more,
+ *  limits.ts DRPC_IP_PACE; the start stops on any other value, naming the variable), else its plan's (KEYED_PACE). */
+export function keyedPaceOf(env: Record<string, string | undefined>, co: KeyedProvider): Pace {
+  const name = `RPC_PACE_${co.toUpperCase()}`;
+  const v = env[name];
+  if (v === undefined || v === "") return KEYED_PACE[co];
+  const m = /^([0-9]{1,4}(?:\.[0-9]{1,3})?),([1-9][0-9]{0,3})$/.exec(v);
+  if (m === null || Number(m[1]) <= 0) throw new Error(`${name} must be "<calls a second>,<at once>", such as 20,4`);
+  return { ...KEYED_PACE[co], perS: Number(m[1]), burst: Number(m[2]) };
 }
 /** A company's daily budget: RPC_DAY_<COMPANY> when set (a whole number of its units, 1 to 13 digits; the start stops
  *  on any other, naming the variable), else its plan's (KEYED_DAY). */
@@ -919,7 +930,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       const b = budgetFromEnv(env, rpcBudgetEnv(ch), upstreams[ch].keyed.length > 0 ? keyedBudget(ch) : RPC_BUDGETS[ch], { minShare: rpcLeastShare(ch), perMethod: true, reserve: RPC_RESERVE[ch] });
       plans[ch] = b.total;
       // the route's total: the first key's plan and its share of each company key it holds (summedTotal)
-      const total = summedTotal(ch, upstreams[ch].keyed, b.total, b.perClient);
+      const total = summedTotal(ch, upstreams[ch].keyed, b.total, b.perClient, env);
       return [ch, { ...b, total, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(total) }];
     }),
   ) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
@@ -1338,6 +1349,14 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
 
     const methods = ((Array.isArray(out) ? out : [out]) as { method: string }[]).map((r) => r.method);
+    // card base-reads-never-throttled: a keyed read of the chain's id alone is answered from its constant (the one the
+    // keyed URLs are checked against, KEYED_ID), never sent: dRPC's free plan refused Base's keyed eth_chainId 22 times
+    // in 9 min on 16 Nov 15:1xZ, each read a call of the one dRPC bucket the pool reads need
+    const chainId = KEYED_ID[c];
+    if (keyedOnly && chainId !== undefined && methods.every((m) => m === "eth_chainId")) {
+      const one = (r: unknown) => `{"jsonrpc":"2.0","id":${JSON.stringify((r as { id: unknown }).id)},"result":"${chainId}"}`;
+      return { status: 200, body: Array.isArray(out) ? `[${out.map(one).join(",")}]` : one(out) };
+    }
     // card base-reads-never-starve-max: an EVM read's shape (rpcShape) and its mode, for its hold and refusal log lines
     const trace = traces.getStore();
     if (trace !== undefined && EVM_CHAINS.has(c)) trace.shape = `${keyedOnly ? "keyed " : ""}${rpcShape(out)}`;
@@ -2005,9 +2024,11 @@ export const KEYED_RETRY_MS = 60_000;
  *  scripts/deploy/set-rpc-keys.sh checks a URL against before it writes it (Base 0x2105 = 8453, Robinhood 0x1237 =
  *  4663, NEAR's status chain_id "mainnet"). */
 const SOLANA_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+/** Each keyed EVM chain's id, as eth_chainId answers it. */
+const KEYED_ID: Partial<Record<RpcChain, string>> = { base: "0x2105", robinhood: "0x1237" };
 const KEYED_IDENTITY: Readonly<Record<KeyedChain, { body: string; ok: (a: unknown) => boolean }>> = {
-  base: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }), ok: (a) => (a as { result?: unknown } | null)?.result === "0x2105" },
-  robinhood: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }), ok: (a) => (a as { result?: unknown } | null)?.result === "0x1237" },
+  base: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }), ok: (a) => (a as { result?: unknown } | null)?.result === KEYED_ID.base },
+  robinhood: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }), ok: (a) => (a as { result?: unknown } | null)?.result === KEYED_ID.robinhood },
   solana: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getGenesisHash" }), ok: (a) => (a as { result?: unknown } | null)?.result === SOLANA_GENESIS },
   near: { body: JSON.stringify({ jsonrpc: "2.0", id: "1", method: "status", params: [] }), ok: (a) => (a as { result?: { chain_id?: unknown } } | null)?.result?.chain_id === "mainnet" },
 };
