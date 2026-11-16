@@ -27,8 +27,9 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
 const ID = "[\\w$]+";
 const PICKER = new RegExp(`${ID}\\.dataset\\.input=\`dest\``);
 const REQUEST = new RegExp(`amount:(${ID})\\.payout\\.toString\\(\\),refundTo:\\1\\.refundTo,refundType:\`ORIGIN_CHAIN\`,recipient:\\1\\.recipient,recipientType:\`DESTINATION_CHAIN\``);
-// each run: exit asked with its first W, the answer its To, then the To refusal over that To
-const RUN = new RegExp(`(${ID})\\.exit&&\\((${ID})=await \\1\\.exit\\((${ID})\\[0\\](?:\\.w)?\\)\\),${ID}\\(\\2,\\1\\.pin,`, "g");
+// each run: exit asked with its first W, the answer its To (on Solana kept for the To step's retries, card
+// pool-buy-waits-out-a-throttle: `to = asked.to ??= await exit(ws[0])`), then the To refusal over that To
+const RUN = new RegExp(`(${ID})\\.exit&&\\((${ID})=(?:${ID}\\.to\\?\\?=)?await \\1\\.exit\\((${ID})\\[0\\](?:\\.w)?\\)\\),${ID}\\(\\2,\\1\\.pin,`, "g");
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
