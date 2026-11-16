@@ -1,5 +1,8 @@
 // node --test scripts/live-checks/helper-usdc-event-watch.test.mjs: the live check replays recorded runs
-// (helper-usdc-event-watch.answers.json). good: apps/helper at card/vault-mainnet-record run locally with mainnet (the
+// (helper-usdc-event-watch.answers.json). The live check reads NEAR mainnet only (card live-checks-read-mainnet-only):
+// each recording's mainnet half (real) is judged as it judges: good PASS, bad_mainnet_not_carried, bad_provider_mismatch
+// and bad_history_mismatch FAIL. The whole recordings, read with testnet and the probe too, replay under WITH_TESTNET,
+// the networks and the probe they were read with. good: apps/helper at card/vault-mainnet-record run locally with mainnet (the
 // v1 record's vault) and testnet carried, and mainnet USDC and the testnet token on FastNEAR and dRPC, the indexer and
 // the archival provider, and the probe's halted-then-open run on FastNEAR's testnet archive, read 2026-11-07: PASS.
 // bad_mainnet_not_carried: the deployed helper before the v1 release, its env naming no mainnet vault: FAIL on mainnet's
@@ -14,10 +17,51 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { haltOf, HISTORY_ACCOUNT, judge, NETS, PROBE, read, viewOutcome } from "./helper-usdc-event-watch.mjs";
+import { haltOf, HISTORY_ACCOUNT, judge as judgeMainnet, NETS, read as readMainnet, viewOutcome } from "./helper-usdc-event-watch.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-usdc-event-watch.answers.json"), "utf8"));
+/** The probe the check read before it read mainnet only: its token and holder, the four transactions, the Pause's and
+ *  the Unpause's blocks, on FastNEAR's testnet archive (contracts/vault/deployments/testnet-usdc-probe.json). */
+const PROBE = {
+  network: "testnet",
+  token: "bf-usdc-20261102t164926.testnet", // gitleaks:allow (contracts/vault/deployments/testnet-usdc-probe.json)
+  holder: "holder.bf-usdc-20261102t164926.testnet", // gitleaks:allow
+  archive: "https://archival-rpc.testnet.fastnear.com",
+  txs: [
+    { hash: "GfFB4jfhviTTj4xQd3tLPLBKRSCbGZjwaLGsdRTeL8fK", signer: "pauser.bf-usdc-20261102t164926.testnet", what: "Pause: create and approve request 3" }, // gitleaks:allow
+    { hash: "3GXgvpDwGpf8v9j5NerAGUWdbYFqxatvueR7X86ZgPth", signer: "pauser2.bf-usdc-20261102t164926.testnet", what: "Pause: approve and execute request 3" }, // gitleaks:allow
+    { hash: "2eUSm5iLg8k8DRkSW444jWCWk7ebHsNue8D4Uyi3XmwZ", signer: "pauser.bf-usdc-20261102t164926.testnet", what: "Unpause: create and approve request 4" }, // gitleaks:allow
+    { hash: "DoQYjLCp6rwwxyHt4hiJXDy2pupUDETeg1zpDA9Tfmni", signer: "pauser2.bf-usdc-20261102t164926.testnet", what: "Unpause: approve and execute request 4" }, // gitleaks:allow
+  ],
+  paused: 275929377,
+  open: 275929392,
+};
+/** The networks, carried list and probe the recordings were read with, before the check read mainnet only. */
+const WITH_TESTNET = {
+  nets: { ...NETS, testnet: { token: "bf-usdc-20261101t022248.testnet", pair: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"], watched: "vault.bf-vt-20261102t071444.testnet" } }, // gitleaks:allow (contracts/vault/deployments/testnet-usdc.json, testnet-v1.json)
+  carried: ["testnet", "mainnet"],
+  probe: PROBE,
+};
+const judge = (run) => judgeMainnet(run, WITH_TESTNET);
+const read = (f, sleep, base) => readMainnet(f, sleep, base, WITH_TESTNET);
+/** A recording's mainnet half: what the live check reads now. */
+const mainnetHalf = (run) => {
+  const { probe, ...rest } = run;
+  return { ...rest, helper: { mainnet: run.helper.mainnet }, nets: { mainnet: run.nets.mainnet } };
+};
+
+test("the live check reads NEAR mainnet only: good's mainnet half PASSes; the bad runs' mainnet halves FAIL on their mainnet lines", () => {
+  assert.deepEqual(Object.keys(NETS), ["mainnet"]);
+  const g = judgeMainnet(mainnetHalf(A.good));
+  assert.equal(g.ok, true, g.lines.join("\n"));
+  assert.ok(!g.lines.some((l) => l.includes("testnet")));
+  assert.deepEqual(bad(judgeMainnet(mainnetHalf(A.bad_mainnet_not_carried))).map((l) => l.slice(0, 40)), ["BAD [mainnet] helper: caught_up false, h"]);
+  assert.deepEqual(bad(judgeMainnet(mainnetHalf(A.bad_provider_mismatch))), [`BAD [mainnet] ${NETS.mainnet.pair[1]} is_blocklisted(${NETS.mainnet.watched}) at the same block: "true"`]);
+  assert.equal(bad(judgeMainnet(mainnetHalf(A.bad_history_mismatch))).length, 1);
+  assert.equal(judgeMainnet(A.good).ok, true, "a run with testnet in it is judged on mainnet only");
+  assert.equal(judgeMainnet({ ...mainnetHalf(A.good), nets: {} }).ok, false, "mainnet not read");
+});
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const copy = (o) => JSON.parse(JSON.stringify(o));
 const DRPC = NETS.mainnet.pair[1];
@@ -179,7 +223,7 @@ test("read() through a stub provider: it records each read's outcome, and a wasm
   const r = judge(run);
   assert.deepEqual(
     bad(r).map((l) => l.replace(/ view_code of .*/, " view_code").replace(/ the wasm exports .*/, " exports")),
-    ["mainnet", "testnet"].flatMap((n) => [...NETS[n].pair.flatMap((u) => [`BAD [${n}] ${u} view_code`, `BAD [${n}] ${u} exports`])]),
+    ["mainnet", "testnet"].flatMap((n) => [...WITH_TESTNET.nets[n].pair.flatMap((u) => [`BAD [${n}] ${u} view_code`, `BAD [${n}] ${u} exports`])]),
   );
   assert.equal(asked.filter((u) => u.startsWith("https://api.nearblocks.io/")).length, 2);
 });
