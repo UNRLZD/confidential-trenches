@@ -192,10 +192,12 @@ export function checkOriginRefund(originAsset: unknown, refund: OriginRefund): v
   if (!/^0x[0-9a-fA-F]{40}$/.test(to) || toChecksum(to) !== to) throw new Error("origin refund: not an EIP-55 address");
 }
 
-/** The helper's answer as data: its HTTP status and its JSON body, neither checked here. */
+/** The helper's answer as data: its HTTP status, its JSON body and its Retry-After header when it sent one (a busy
+ *  answer's wait), none of them checked here. */
 export interface DepositQuoteReply {
   status: number;
   body: unknown;
+  retryAfter?: string;
 }
 
 /**
@@ -347,7 +349,8 @@ async function askOnce(request: OneClickRequest, fetchFn: typeof fetch, timeoutM
   } catch {
     throw new DepositAnswerNotJson(res.status);
   }
-  return { status: res.status, body };
+  const retryAfter = res.headers.get("retry-after");
+  return retryAfter === null ? { status: res.status, body } : { status: res.status, body, retryAfter };
 }
 
 /** An answer that is not JSON. */

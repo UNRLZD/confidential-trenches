@@ -969,7 +969,10 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
   } finally {
     seed?.fill(0);
     key?.fill(0);
-    // held by this run and never sent: freed, so the proof queue proves it again
-    if (attempt !== null && !reserved) await notes.move(p.noteId, "HELD", "UNSPENT", { attempt }).catch(() => {});
+    // held by this run and never sent: freed, so the proof queue proves it again. A free that fails leaves the note
+    // HELD by this attempt: the part ends here naming it ("free"), never made again (its next attempt would only wait
+    // WITHDRAW_FREE_MS for the note this run holds, then stop "note"); past its deadline any tab frees it (notes/store.ts
+    // HELD -> UNSPENT), as any held note
+    if (attempt !== null && !reserved && !(await notes.move(p.noteId, "HELD", "UNSPENT", { attempt }).then(() => true, () => false))) stop("free");
   }
 }
