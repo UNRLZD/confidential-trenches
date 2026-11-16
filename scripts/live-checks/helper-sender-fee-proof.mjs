@@ -15,7 +15,9 @@
 // and, for each network's collector, on its chain's two RPCs of two operators, evm-fee-collector.mjs check() holds: its
 // code is the FeeCollector build pinned to its address with the sink in its one immutable, the sink is the kit's sell
 // sender pin, it has no admin and no owner, and its deploy transaction made it.
-// After: helper
+// Runs: once, no check after a helper deploy since card helper-mainnet-pools-only (it reads the testnet pools' fee
+//   answers, and the helper serves no test pool); on mainnet the fee answer's fee_collector and sell_sender held to the
+//   kit's pins are helper-evm-mainnet-pools' (After: helper), and the collectors' code and sink evm-mainnet-senders'
 //   node scripts/live-checks/helper-sender-fee-proof.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper has no block in the epoch or the one before: the
 //   fee is read through evm-pool-fee-epoch.mjs). --record writes the fee answers and every RPC answer read, the shape

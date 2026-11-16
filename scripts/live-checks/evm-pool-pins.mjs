@@ -13,7 +13,9 @@
 //   node scripts/live-checks/evm-pool-pins.mjs [--record <file>]   PASS exit 0, FAIL 1, error 2, INCONCLUSIVE 3
 // --record writes the answers of a good run (PINS) and a bad run (BEFORE: the 3 Nov pools of pool-evm-deploy.md, which
 // no helper serves) to <file>, for the test's replay (evm-pool-pins.answers.json).
-// After: helper
+// Runs: once, no check after a helper deploy since card helper-mainnet-pools-only (the helper serves no test pool, and this
+//   reads the Base Sepolia and Robinhood testnet pins): a module the mainnet checks share (checkPin, recorder, replayer,
+//   PINS); the mainnet pins served by the helper are evm-pools-on-mainnet's (--part helper) and helper-evm-mainnet-pools'
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
