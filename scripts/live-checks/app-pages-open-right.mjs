@@ -165,7 +165,8 @@ async function readNowhere(ctx, at, shots, w) {
     await page.screenshot({ path: path.join(shots, `${w.name}${at.replaceAll("/", "-")}.png`) });
     if (out.home) {
       await vis(f, "main a[data-testid='not-found-home']").click({ timeout: 3_000 }).catch(() => {});
-      await f.waitForFunction(() => location.pathname === "/", null, { timeout: 5_000 }).catch(() => {});
+      // the address moves first and the route draws after it (a router transition): wait for both, as a person sees it
+      await f.waitForFunction(() => location.pathname === "/" && document.querySelector("main[data-route]")?.dataset.route === "token", null, { timeout: 5_000 }).catch(() => {});
       const l = await routeOf(f);
       out.landed = l.at;
       out.landedRoute = l.route;
