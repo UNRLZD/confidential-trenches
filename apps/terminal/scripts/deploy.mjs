@@ -6,9 +6,17 @@
 // HEAD's lockfile (`pnpm install --frozen-lockfile` first). An uncommitted change anywhere in the tree (the build
 // bundles the kit and the wallet too), no HEAD, a failed install, a failed build or a gate refusal stops here, before
 // a token is read or a byte is uploaded. The gate (check-deploy.ts) runs on the build's own
-// _headers. --dry-run stops after the gate and keeps the build folder, so it can be served; it builds a work in
-// progress too, and says a deploy would refuse it. A testnet build is VITE_NEAR_NETWORK=testnet in the environment
-// (build/network.mjs). The upload is wrangler's `pages deploy`, at an exact version, run from an empty directory so no
+// _headers. Then the newest committed release list (packages/signpage/releases, newest by N, read from this checkout,
+// which a deploy holds clean) must name the build: every file APP_HOST would serve, by path, sha256, sha384 and headers,
+// and the _headers file, held to the list's APP_HOST part by release-list.mjs unreleasedProblems, the sign deploy's own
+// comparer, run as its command (`--unreleased <dir> --host app`: a file outside packages/ imports nothing of it,
+// .dependency-cruiser.cjs; card app-deploy-refuses-an-unlisted-build). No list, a list it cannot read, a list edited after it was
+// written or one with no APP_HOST part refuses too, each REFUSED line naming the list, the first one the first file that
+// differs, before a token is read or a byte is uploaded: a change merged after a release was cut that moves the app's
+// bundle lands on APP_HOST only with the next release. --dry-run stops after these and keeps the build folder, so it can
+// be served; it builds a work in progress too, and says a deploy would refuse it, with the lines. A testnet build is
+// VITE_NEAR_NETWORK=testnet in the environment (build/network.mjs); a list is cut from the mainnet build, so a deploy
+// refuses a testnet build. The upload is wrangler's `pages deploy`, at an exact version, run from an empty directory so no
 // functions/ folder can ride along (Pages applies no _headers rule to a Function's response). It needs
 // CLOUDFLARE_API_TOKEN (a Pages-only token) and CLOUDFLARE_ACCOUNT_ID in the environment; neither is printed. A wrangler
 // exit 0 is not done: APP_HOST must then serve this build's / and main bundle (scripts/pages-readback.mjs, card
@@ -60,8 +68,23 @@ export function build(env = process.env, run = spawnSync, repo = REPO) {
   return { dir, problems: [`the build failed (vite exit ${r.status ?? r.signal})${tail(r) ? `: ${tail(r)}` : ""}`] };
 }
 
-/** The deploy: { code, out, err }. `net` is the read-back's fetch and sleep (scripts/pages-readback.mjs), a test's stand-ins. */
-export async function deploy(argv, env = process.env, run = spawnSync, make = () => build(env), net = {}) {
+export const RELEASE_LIST = join(REPO, "packages/signpage/scripts/release-list.mjs");
+
+/** Why the newest committed release list does not name the build folder `dir` as APP_HOST's (empty = it names it):
+ *  release-list.mjs --unreleased, its lines; `released` ({ dir, ledger }: a releases folder and a ledger JSON file) a
+ *  test's stand-ins. A run that answers neither yes nor no is a refusal too. */
+export function unlisted(dir, released = {}) {
+  const extra = released.dir ? ["--releases", released.dir, "--ledger", released.ledger] : [];
+  const r = spawnSync(process.execPath, [RELEASE_LIST, "--unreleased", dir, "--host", "app", ...extra], { cwd: REPO, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (r.status === 0) return [];
+  const lines = `${r.stderr ?? ""}`.split("\n").filter(Boolean).map((l) => l.replace(/^release-list: /, ""));
+  if (r.status === 1 && lines.length) return lines;
+  return [`release-list.mjs --unreleased did not answer (exit ${r.status ?? r.signal ?? r.error?.code})${lines.length ? `: ${lines.slice(-5).join(" | ")}` : ""}`];
+}
+
+/** The deploy: { code, out, err }. `net` is the read-back's fetch and sleep (scripts/pages-readback.mjs), and `released`
+ *  the release lists and their ledger file ({ dir, ledger }; the committed ones by default), a test's stand-ins. */
+export async function deploy(argv, env = process.env, run = spawnSync, make = () => build(env), net = {}, released = {}) {
   const dryRun = argv.includes("--dry-run");
   const rest = argv.filter((a) => a !== "--dry-run");
   if (rest.length) return { code: 2, err: ["usage: node apps/terminal/scripts/deploy.mjs [--dry-run] (it takes no build folder: it builds HEAD itself)"] };
@@ -80,8 +103,13 @@ export async function deploy(argv, env = process.env, run = spawnSync, make = ()
   try {
     const problems = made.problems.length ? made.problems : checkDir(dir);
     if (problems.length) return { code: 1, err: [...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
+    // the newest committed list must name this build, file for file and header for header
+    const notListed = unlisted(dir, released).map((p) => `REFUSED ${p}`);
     keep = dryRun;
-    if (dryRun) return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded${dirty ? "; the tree has uncommitted changes: a deploy would refuse it" : ""}`] };
+    if (dryRun) {
+      return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded${dirty ? "; the tree has uncommitted changes: a deploy would refuse it" : ""}${notListed.length ? `; a deploy would refuse it: ${notListed.join("; ")}` : ""}`] };
+    }
+    if (notListed.length) return { code: 1, err: [...notListed, "nothing was uploaded"] };
     const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);
     if (missing.length) return { code: 2, err: [`gate ok; ${missing.join(" and ")} not set, nothing was uploaded`] };
     const args = ["dlx", WRANGLER, "pages", "deploy", dir, "--project-name", PROJECT, "--branch", BRANCH, "--commit-hash", sha, "--commit-dirty=false"];

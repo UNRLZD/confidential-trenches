@@ -9,9 +9,15 @@
 //   node packages/signpage/scripts/release-list.mjs <release-N>        writes packages/signpage/releases/<release-N>.json
 //   node packages/signpage/scripts/release-list.mjs --check (release-<N> | --list <file>)
 //     exit 1 when a fresh build of the hosts the list holds differs from it
-//   node packages/signpage/scripts/release-list.mjs --print [--host sign|app]
+//   node packages/signpage/scripts/release-list.mjs --print [--host sign|app [--build <dir>]]
 //     this checkout's own build's list (named build-<sha>), for both hosts or the one asked, to stdout: what a deploy
-//     from this commit serves, which the live check after a deploy reads that host against
+//     from this commit serves, which the live check after a deploy reads that host against; with --build, the list of
+//     that build folder as the host's, built by nothing here
+//   node packages/signpage/scripts/release-list.mjs --unreleased <dir> --host sign|app [--releases <dir> --ledger <file>]
+//     exit 1, one line each, when the newest committed list (or the newest in --releases, against the ledger in --ledger,
+//     a JSON file) does not name the build folder <dir> as that host's (unreleasedProblems), 0 when it does: what the
+//     terminal deploy runs (apps/terminal/scripts/deploy.mjs, card app-deploy-refuses-an-unlisted-build), as a command,
+//     since a file outside packages/ imports nothing of it (.dependency-cruiser.cjs)
 // Writing refuses a release that is already written (a release is never written again, card signpage-withdraw-form)
 // and a tree with uncommitted changes outside releases/, since the list names the tree it was built from: `tree` (git
 // rev-parse HEAD^{tree}) beside `commit`. On the remote test machine (its job runner sets HEAVY_JOB) the checkout's commit is made
@@ -364,17 +370,29 @@ export function ledgerProblems(dir = RELEASES, ledger = RELEASED) {
 }
 
 /**
- * Problems with serving the SIGN_HOST build folder `built` (deploy.mjs build()) as a release (empty = none): the
- * ledger's, and every way the newest list's SIGN_HOST part is not that build. What the sign deploy is held to.
+ * Problems with serving the build folder `built` on `host` as a release (empty = none): the ledger's, a newest list that
+ * cannot be read, and every way the newest list's `host` part is not that build (every file, every header, the _headers
+ * file). What the sign deploy (SIGN_HOST, deploy.mjs build()) and the terminal deploy (APP_HOST, apps/terminal/scripts/
+ * deploy.mjs build(), card app-deploy-refuses-an-unlisted-build) are held to.
  */
-export function unreleasedProblems(built, dir = RELEASES, ledger = RELEASED) {
+export function unreleasedProblems(built, dir = RELEASES, ledger = RELEASED, host = "SIGN_HOST") {
   const p = ledgerProblems(dir, ledger);
   const newest = newestRelease(dir);
   if (!newest) return p;
   const next = `release-${Number(newest.slice(8)) + 1}`;
-  const listed = JSON.parse(readFileSync(join(dir, `${newest}.json`), "utf8"));
-  for (const l of diffLists(makeList(newest, { SIGN_HOST: built }, null), listed))
-    p.push(`${newest}, the newest release, is not this SIGN_HOST build (${l}): cut ${next} on a branch from origin/main's head (node packages/signpage/scripts/release-list.mjs ${next}, its row in RELEASED), push and merge it, then deploy main at that merge`);
+  const cut = `cut ${next} on a branch from origin/main's head (node packages/signpage/scripts/release-list.mjs ${next}, its row in RELEASED), push and merge it, then deploy main at that merge`;
+  if (!Object.hasOwn(HOSTS, host)) throw new Error(`${host}: no such host (${Object.keys(HOSTS).join(", ")})`);
+  const fresh = makeList(newest, { [host]: built }, null);
+  let diff;
+  try {
+    // a list that is no JSON, or JSON with no hosts object, is one the deploy cannot read: refused, never a throw past it
+    const listed = JSON.parse(readFileSync(join(dir, `${newest}.json`), "utf8"));
+    if (listed === null || typeof listed !== "object" || listed.hosts === null || typeof listed.hosts !== "object") throw new Error("no hosts in it");
+    diff = diffLists(fresh, listed);
+  } catch (e) {
+    return [...p, `${newest} cannot be read (${`${e?.message ?? e}`.split("\n")[0]}): ${cut}`];
+  }
+  for (const l of diff) p.push(`${newest}, the newest release, is not this ${host} build (${l}): ${cut}`);
   return p;
 }
 
@@ -443,7 +461,8 @@ export function headList(names = Object.keys(HOSTS)) {
 const USAGE = [
   "usage: node packages/signpage/scripts/release-list.mjs release-<N>                     write the list",
   "       node packages/signpage/scripts/release-list.mjs --check (release-<N> | --list <file>)",
-  "       node packages/signpage/scripts/release-list.mjs --print [--host sign|app]       this checkout's build's list, to stdout",
+  "       node packages/signpage/scripts/release-list.mjs --print [--host sign|app [--build <dir>]]   a build's list, to stdout",
+  "       node packages/signpage/scripts/release-list.mjs --unreleased <dir> --host sign|app [--releases <dir> --ledger <file>]",
 ].join("\n");
 
 /** The command line: { code, out, err } (no process.exit inside, so every build is removed before the process ends). */
@@ -451,9 +470,33 @@ export function main(a, releases = RELEASES) {
   const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : undefined);
   const usage = { code: 2, err: [USAGE] };
   if (a[0] === "--print") {
-    const host = opt("--host");
-    if (a.length !== (host === undefined ? 1 : 3) || (host !== undefined && !HOST_ARGS[host])) return usage;
+    const [host, build] = [opt("--host"), opt("--build")];
+    if (a.length !== 1 + (host === undefined ? 0 : 2) + (build === undefined ? 0 : 2) || (host !== undefined && !HOST_ARGS[host]) || (build !== undefined && host === undefined)) return usage;
+    if (build !== undefined) {
+      const commit = git("rev-parse", "HEAD");
+      return { code: 0, out: [JSON.stringify(makeList(`build-${commit.slice(0, 12)}`, { [HOST_ARGS[host]]: build }, commit), null, 1)] };
+    }
     return { code: 0, out: [JSON.stringify(headList(host ? [HOST_ARGS[host]] : undefined), null, 1)] };
+  }
+  if (a[0] === "--unreleased") {
+    const [built, host, dir, ledgerFile] = [a[1], opt("--host"), opt("--releases"), opt("--ledger")];
+    const flags = ["--host", "--releases", "--ledger"];
+    if (!built || built.startsWith("--") || !HOST_ARGS[host] || (dir === undefined) !== (ledgerFile === undefined)) return usage;
+    if (a.length !== (dir === undefined ? 4 : 8) || a.slice(2).some((x, i) => (i % 2 === 0) !== flags.includes(x))) return usage;
+    let ledger;
+    try {
+      ledger = ledgerFile === undefined ? RELEASED : JSON.parse(readFileSync(ledgerFile, "utf8"));
+    } catch (e) {
+      return { code: 2, err: [`--ledger ${ledgerFile} cannot be read: ${e.message}`] };
+    }
+    let p;
+    try {
+      p = unreleasedProblems(built, dir ?? releases, ledger, HOST_ARGS[host]);
+    } catch (e) {
+      // the build folder could not be listed (missing, or a Pages file the list does not model): no answer, never a pass
+      return { code: 2, err: [`${built} could not be read against the newest release: ${`${e?.message ?? e}`.split("\n")[0]}`] };
+    }
+    return p.length ? { code: 1, err: p } : { code: 0, out: [`${newestRelease(dir ?? releases)}, the newest release, names this ${HOST_ARGS[host]} build`] };
   }
   if (a[0] === "--check") {
     const file = opt("--list");

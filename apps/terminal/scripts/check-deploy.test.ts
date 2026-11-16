@@ -183,6 +183,27 @@ const steps = ({ head = "abc123", status = "", from = BUILD, problems = [] as st
 };
 const ENV = { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" };
 
+// card app-deploy-refuses-an-unlisted-build: the release lists a deploy is held to, a test's stand-ins ({ dir, ledger }:
+// a releases folder and a ledger JSON file, as release-list.mjs --unreleased reads them): release-1 lists `from` as
+// `host`'s part (the build the deploy makes from BUILD, unless a test says otherwise), written by release-list.mjs
+// --print --build (run, not imported: this file is outside packages/), its row in the ledger as written. `text`
+// replaces the list's bytes (an unreadable list), `ledger` the ledger.
+const RELEASE_LIST = join(HERE, "..", "..", "..", "packages/signpage/scripts/release-list.mjs");
+const lists = ({ from = BUILD, text = null as string | null, host = "app", ledger = null as Record<string, string> | null } = {}) => {
+  const dir = mkdtempSync(join(tmpdir(), "deploy-releases-"));
+  let body = text;
+  if (body === null) {
+    const r = spawnSync(process.execPath, [RELEASE_LIST, "--print", "--host", host, "--build", from], { encoding: "utf8", maxBuffer: 64 << 20 });
+    assert.equal(r.status, 0, r.stderr);
+    body = `${JSON.stringify({ ...JSON.parse(r.stdout), release: "release-1" }, null, 1)}\n`;
+  }
+  writeFileSync(join(dir, "release-1.json"), body);
+  const file = join(dir, "ledger.json");
+  writeFileSync(file, JSON.stringify(ledger ?? { "release-1": createHash("sha256").update(body).digest("hex") }));
+  return { dir, ledger: file };
+};
+const LISTED = lists();
+
 test("deploy.mjs takes no build folder: it builds HEAD itself, so a folder built from another commit can never be uploaded", async () => {
   const { deploy } = await import("./deploy.mjs");
   const s = steps();
@@ -223,7 +244,7 @@ test("an uncommitted tree or no HEAD is refused before the token: the upload is 
 test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile at the repository root) after the tree reads and before the build", async () => {
   const { deploy } = await import("./deploy.mjs");
   const s = steps();
-  assert.equal((await deploy([], ENV, s.run, s.make, appHost(s).net)).code, 0);
+  assert.equal((await deploy([], ENV, s.run, s.make, appHost(s).net, LISTED)).code, 0);
   assert.deepEqual(s.named().slice(0, 5), ["git -C " + s.calls[0]!.args[1] + " rev-parse", "git -C " + s.calls[0]!.args[1] + " status", "pnpm install --frozen-lockfile", "build", "pnpm dlx wrangler@4.151.1"]);
   const repo = s.calls[0]!.args[1]!;
   assert.equal(s.installs()[0]!.cwd, repo);
@@ -259,9 +280,9 @@ test("deploy.mjs runs the gate first: a refused build reaches no upload; a passi
   assert.equal(b.uploads().length, 0);
   const s = steps();
   assert.equal((await deploy(["--dry-run"], ENV, s.run, s.make)).code, 0);
-  assert.equal((await deploy([], {}, s.run, s.make)).code, 2);
+  assert.equal((await deploy([], {}, s.run, s.make, {}, LISTED)).code, 2);
   assert.equal(s.uploads().length, 0);
-  const r2 = await deploy([], ENV, s.run, s.make, appHost(s).net);
+  const r2 = await deploy([], ENV, s.run, s.make, appHost(s).net, LISTED);
   assert.equal(r2.code, 0, r2.err?.join("\n"));
   const up = s.uploads()[0]!;
   const dir = s.made.at(-1)!;
@@ -287,7 +308,7 @@ test("a fresh build at HEAD, by the terminal's own vite build, passes --dry-run"
 test("deploy.mjs's live runs name every live check that reads APP_HOST, and its success line is the command that runs them on GitHub's runners", async () => {
   const { deploy, LIVE_CHECKS: CHECKS, liveRuns } = await import("./deploy.mjs");
   const s = steps();
-  const done = (await deploy([], ENV, s.run, s.make, appHost(s).net)).out!;
+  const done = (await deploy([], ENV, s.run, s.make, appHost(s).net, LISTED)).out!;
   assert.ok(done.includes("next: gh workflow run live.yml -f host=app -f commit=abc123"), done.join("\n"));
   assert.ok(done.includes("then: gh run watch --exit-status"), done.join("\n"));
   const out = CHECKS.flatMap((k: string) => liveRuns(k)).join("\n");
@@ -391,7 +412,7 @@ test("a deploy wrangler calls done while APP_HOST still serves the old bundle ex
   const s = steps();
   const OLD = "console.log('release-57')\n";
   const h = appHost(s, { "/assets/index-a1.js": OLD });
-  const r = await deploy([], ENV, s.run, s.make, h.net);
+  const r = await deploy([], ENV, s.run, s.make, h.net, LISTED);
   assert.equal(r.code, 1, r.out?.join("\n"));
   const said = [...(r.out ?? []), ...(r.err ?? [])].join("\n");
   assert.doesNotMatch(said, /next:/);
@@ -409,9 +430,94 @@ test("a deploy whose APP_HOST serves exactly the build it uploaded (/ and its ma
   const { deploy } = await import("./deploy.mjs");
   const s = steps();
   const h = appHost(s);
-  const r = await deploy([], ENV, s.run, s.make, h.net);
+  const r = await deploy([], ENV, s.run, s.make, h.net, LISTED);
   assert.equal(r.code, 0, r.err?.join("\n"));
   assert.ok(r.out.includes("next: gh workflow run live.yml -f host=app -f commit=abc123"), r.out.join("\n"));
   assert.deepEqual([...new Set(h.asked.map((a) => new URL(a).pathname))].sort(), ["/", "/assets/index-a1.js"]);
   assert.ok(h.asked.every((a) => new URL(a).search), "every read carries a cache-buster");
+});
+
+// Card app-deploy-refuses-an-unlisted-build: APP_HOST is never deployed with a build the newest release list does not
+// name. On 16 Nov a kit change merged after release-164 was cut moved the app's bundle (/ and /assets/index-*.js), and
+// the deploy, which built main's head, would have uploaded it; only the signpage-release live check, after the upload,
+// would have seen it. The deploy now holds its build to the newest list's APP_HOST part, file for file and header for
+// header, with the _headers file, before any token is read or a byte uploaded (release-list.mjs unreleasedProblems,
+// the sign deploy's own comparer).
+const unlisted = async (opts: { edit?: (dir: string) => void; released?: { dir: string; ledger: string } | {}; env?: Record<string, string>; argv?: string[] } = {}) => {
+  const { deploy } = await import("./deploy.mjs");
+  const from = mkdtempSync(join(tmpdir(), "deploy-unlisted-"));
+  cpSync(BUILD, from, { recursive: true });
+  opts.edit?.(from);
+  const s = steps({ from });
+  const r = await deploy(opts.argv ?? [], opts.env ?? ENV, s.run, s.make, appHost(s).net, opts.released ?? LISTED);
+  return { r, s, said: [...(r.out ?? []), ...(r.err ?? [])].join("\n") };
+};
+
+test("planted: a build with one file the newest list does not name (a new kit export in the bundle) is refused, naming the file and the list; nothing uploaded", async () => {
+  // a kit export the bundle picks up: one more chunk, loaded with its integrity, and the page that loads it changed
+  const { r, s, said } = await unlisted({
+    edit: (d) => {
+      const extra = "export const dcl = 1;\n";
+      writeFileSync(join(d, "assets/dcl-d4.js"), extra);
+      writeFileSync(join(d, "index.html"), PAGE.replace("</title>", `</title>\n    <link rel="modulepreload" crossorigin href="/assets/dcl-d4.js" integrity="${sha384(extra)}">`));
+    },
+  });
+  assert.equal(r.code, 1, said);
+  assert.match(r.err[0], /^REFUSED release-1, the newest release, is not this APP_HOST build \(APP_HOST \/: the build's [0-9a-f]{64} is not the list's [0-9a-f]{64}, or its headers differ\): cut release-2 /);
+  assert.ok(r.err.some((l: string) => /^REFUSED release-1, the newest release, is not this APP_HOST build \(APP_HOST \/assets\/dcl-d4\.js: built, not in the list\)/.test(l)), said);
+  assert.equal(r.err.at(-1), "nothing was uploaded");
+  assert.equal(s.uploads().length, 0);
+  assert.equal(existsSync(s.made.at(-1)!), false, "the refused build is removed");
+});
+
+test("planted: one byte, one header or the _headers file unlike the list's, or a listed file not built, is refused before the token is read", async () => {
+  const cases: [string, (d: string) => void, RegExp][] = [
+    ["a byte", (d) => writeFileSync(join(d, "assets/f.woff2"), "fonT"), /APP_HOST \/assets\/f\.woff2: the build's [0-9a-f]{64} is not the list's/],
+    ["the _headers file", (d) => writeFileSync(join(d, "_headers"), `${FILE}/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n`), /APP_HOST _headers: the build's is not the list's/],
+    ["a listed file gone", (d) => rmSync(join(d, "assets/f.woff2")), /APP_HOST \/assets\/f\.woff2: in the list, not built/],
+  ];
+  for (const [what, edit, re] of cases) {
+    const { r, s, said } = await unlisted({ edit, env: {} });
+    assert.equal(r.code, 1, `${what}: ${said}`);
+    assert.ok(r.err.some((l: string) => l.startsWith("REFUSED release-1, the newest release, is not this APP_HOST build") && re.test(l)), `${what}: ${said}`);
+    assert.doesNotMatch(said, /CLOUDFLARE_API_TOKEN/, `${what}: refused before the env check`);
+    assert.equal(s.uploads().length, 0, what);
+  }
+  // the _headers change above also changes a file's headers: that file's line names it
+  const { r } = await unlisted({ edit: (d) => writeFileSync(join(d, "_headers"), `${FILE}/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n`) });
+  assert.ok(r.err.some((l: string) => /APP_HOST \/assets\/f\.woff2: .*or its headers differ/.test(l)), r.err.join("\n"));
+});
+
+test("planted: no release list, a list it cannot read, a list with no APP_HOST part, or one edited after it was written refuses the deploy", async () => {
+  const none = { dir: mkdtempSync(join(tmpdir(), "deploy-releases-")), ledger: "" };
+  none.ledger = join(none.dir, "..", `${none.dir.split("/").at(-1)}-ledger.json`);
+  writeFileSync(none.ledger, "{}");
+  const cases: [string, object, RegExp][] = [
+    ["no list", none, /^REFUSED no release list$/],
+    ["an unreadable list", lists({ text: "{ not json\n" }), /^REFUSED release-1 cannot be read \(.+\): /],
+    ["a list with no APP_HOST part", lists({ host: "sign" }), /^REFUSED release-1, the newest release, is not this APP_HOST build \(APP_HOST: not in the list\)/],
+    ["an edited list", lists({ ledger: { "release-1": "0".repeat(64) } }), /^REFUSED release-1 was edited after it was written/],
+  ];
+  for (const [what, released, re] of cases) {
+    const { r, s, said } = await unlisted({ released });
+    assert.equal(r.code, 1, `${what}: ${said}`);
+    assert.ok(r.err.some((l: string) => re.test(l)), `${what}: ${said}`);
+    assert.equal(s.uploads().length, 0, what);
+  }
+});
+
+test("the committed release lists hold the deploy: a build the newest committed list does not name is refused; --dry-run says a deploy would refuse it", async () => {
+  // BUILD is a planted build no committed release names
+  const { r, s, said } = await unlisted({ released: {} });
+  assert.equal(r.code, 1, said);
+  assert.match(r.err[0], /^REFUSED release-\d+, the newest release, is not this APP_HOST build \(APP_HOST /);
+  assert.equal(s.uploads().length, 0);
+  const d = await unlisted({ released: {}, argv: ["--dry-run"] });
+  assert.equal(d.r.code, 0, d.said);
+  assert.match(d.said, /gate ok on \S+; --dry-run: nothing was uploaded; a deploy would refuse it: REFUSED release-\d+, the newest release, is not this APP_HOST build/);
+  rmSync(d.s.made.at(-1)!, { recursive: true, force: true });
+  // the build the list names goes up
+  const ok = await unlisted();
+  assert.equal(ok.r.code, 0, ok.said);
+  assert.equal(ok.s.uploads().length, 1);
 });
