@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { OneClickRequest } from "../../kit/src/checks/oneclick.ts";
 import { COLLECTOR, NEAR_USDC, NOW, SOL_USDC, mockKey, signAnswer, type Answer } from "./oneclick-mock.ts";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 // after the mock, so the check loads the mock's keys
 const { ONECLICK_USDC_ASSETS } = await import("../../kit/src/checks/oneclick.ts");
 const { SIGNPAGE_RESULT_SCHEMAS } = await import("../../kit/src/signpage/schema.ts");
@@ -156,7 +157,8 @@ test("deposit.assets asks the token list and every probe at once: each probe goe
 
 test("deposit.assets never waits on a pool's floor: with every floor still out (no timer runs), the USDC rows are the answer", { timeout: 5_000 }, async (t) => {
   // setTimeout mocked and never ticked: a wait for the floors on a timer never ends, and the hang bound fails it
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const got = await depositAssetsKind({ ...opts, fetch: helper().fetch, poolFloor: () => new Promise<bigint>(() => {}) });
   assert.ok(got.ok, JSON.stringify(got));
   assert.deepEqual(got.result.assets.map((r) => `${r.symbol} ${r.chain}`), ["USDC near", "USDC solana", "USDC base"]);
