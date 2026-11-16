@@ -84,13 +84,16 @@ test("a handed-over info state that fails any check restores nothing: a read tim
 });
 
 /** A Base helper's swap reads with GeckoTerminal answering a token our reads find no pool of. */
-function swapsPart(clock: { t: number }, spent = false) {
+function swapsPart(clock: { t: number }, spent = false, slow = false) {
   const { readFileSync: read } = { readFileSync };
   const BARS = JSON.parse(read(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8")).gt_ohlcv;
   const chain = fakeChain();
   const NOPOOL = `0x${"34".repeat(20)}`;
   let calls = 0;
+  // `slow`: the chain's providers answer 1.5 s on; `answered` counts their answers that came
+  let answered = 0;
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    if (slow && !url.startsWith(GT_BASE)) await new Promise((go) => setTimeout(go, 1_500)), answered++;
     if (url.startsWith(GT_BASE)) {
       calls++;
       if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: `0x${"ab".repeat(32)}` } }] }), { status: 200 });
@@ -103,7 +106,7 @@ function swapsPart(clock: { t: number }, spent = false) {
   const gecko = geckoBudget(() => clock.t);
   if (spent) gecko.seed(Array.from({ length: GT_LIMIT_PER_MIN }, () => clock.t - 1_000));
   const s = open(chain, clock, { fetch: fetch as never, gecko, listed: async (t) => t === NOPOOL, pools: new Map(), sleep: async () => undefined });
-  return { s, NOPOOL, calls: () => calls };
+  return { s, NOPOOL, calls: () => calls, answered: () => answered };
 }
 
 test("a chart the old helper read from GeckoTerminal is served by the next one on a spent budget, dated by the old read; past GT_SERVE_MS still served, dated, never an empty chart (card helper-candles-never-refuse-a-listed-coin, was the 429)", async () => {
@@ -175,4 +178,26 @@ test("the warm file carries the EVM market state and gives each chain its own ba
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// card helper-listed-charts-own-reads round 3: a chart's first read waits on no chain read while bars are held (the warm
+// live run of 16 Nov 00:33Z: Base's listed charts p95 4,997 ms, Robinhood's 3,042 ms, the book's open the wait). One
+// rule with the Solana charts (../solana/trades.ts candles).
+test("card helper-listed-charts-own-reads: a deploy's first chart read whose book is still opening (the chain 1.5 s slow) answers the bars handed over at once, filling, and the open goes on", async () => {
+  const clock = { t: Date.parse("2026-11-02T13:53:00Z") };
+  const old = swapsPart(clock);
+  const first = await old.s.candles(old.NOPOOL, "1m", null, 60);
+  old.s.stop();
+  assert.ok(JSON.parse(first.body).candles.length > 0);
+  const handed = JSON.parse(JSON.stringify(old.s.state()));
+  clock.t += 120_000;
+  const next = swapsPart(clock, true, true);
+  assert.equal(next.s.restore(handed), true);
+  const c = await next.s.candles(next.NOPOOL, "1m", null, 60);
+  assert.equal(next.answered(), 0, "the answer waited on the chain's");
+  assert.equal(c.status, 200, c.body);
+  assert.deepEqual(JSON.parse(c.body).candles, JSON.parse(first.body).candles);
+  assert.equal(JSON.parse(c.body).filling, true, "the book still opening: filling, so the page reads again");
+  await new Promise((go) => setTimeout(go, 4_000));
+  next.s.stop();
 });

@@ -108,3 +108,13 @@ test("a listed token's candles 429 that clears inside the span passes; one still
   const empty = edit((rec) => body(rec.chains.solana.candles[t], (b) => (b.candles = [])));
   assert.ok(bad(await judge(empty)).some((l) => l.includes("answers 200, the kit takes 0 hourly bars")));
 });
+
+// live run 43785080982 (job 133030981593): Robinhood DELTA "answers 200, the kit takes 0 hourly bars" named nothing of
+// the answer, so which path of the helper answered it could not be read back
+test("a listed token's candles 200 the kit takes no bars from names what the answer held", async () => {
+  const t = Object.keys(A.good.run.chains.solana.candles)[0];
+  const lineOf = async (fn) => bad(await judge(edit((rec) => body(rec.chains.solana.candles[t], fn)))).find((l) => l.includes(t)) ?? "";
+  assert.match(await lineOf((b) => ((b.candles = []), (b.src = "chain"), delete b.filling)), /the kit takes 0 hourly bars \(the answer holds 0 bars, filling none, src "chain", tf "1h"\)$/);
+  assert.match(await lineOf((b) => ((b.candles = [[1, "x", "x", "x", "not a price", "1"]]), (b.filling = true))), /\(the answer holds 1 bars, filling true, src "[^"]+", tf "1h"\)$/);
+  assert.match(await lineOf((b) => (b.tf = "1m")), /\(the answer holds \d+ bars, filling none, src "[^"]+", tf "1m"\)$/);
+});
