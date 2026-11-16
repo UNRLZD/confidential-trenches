@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { check as collectorCheck, recordFile } from "./evm-fee-collector.mjs";
 import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
-import { BASE, evmPoolRecords, NETWORKS } from "./helper-evm-sender.mjs";
+import { BASE, evmPoolRecords, FIRST_SET, TESTNETS } from "./helper-evm-sender.mjs";
 import { recorder } from "./pool-evm-deploy.mjs";
 import { EXIT, verdictOf } from "./provider-answer.mjs";
 
@@ -47,7 +47,7 @@ const json = (t) => {
 };
 
 /** Each network's FeeCollector deploy record (evm-fee-collector.<network>.json), or null where there is none. */
-export function collectorRecords(networks = NETWORKS) {
+export function collectorRecords(networks = TESTNETS) {
   return Object.fromEntries(networks.map((n) => [n, existsSync(recordFile(n)) ? JSON.parse(readFileSync(recordFile(n), "utf8")) : null]));
 }
 
@@ -74,7 +74,7 @@ export function replayed(answers) {
  * The check on one recorded run: { base, pools: [{ network, pool, fee: { status, headers, body } }], rpc: { network:
  * answers } }, against the commit the helper must run, the pool records, the collector records and the kit's venues.
  */
-export async function judge(run, { commit, records = evmPoolRecords(), collectors = collectorRecords(), venues = evmPoolVenues() } = {}) {
+export async function judge(run, { commit, records = evmPoolRecords(undefined, FIRST_SET), collectors = collectorRecords(), venues = evmPoolVenues() } = {}) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   let quiet = false;
@@ -118,7 +118,7 @@ export async function judge(run, { commit, records = evmPoolRecords(), collector
 }
 
 /** One read of HELPER_HOST and each collector's chain: the fee answers and every RPC answer, for judge(). */
-export async function read(base = BASE, fetchFn = fetch, { records = evmPoolRecords(), collectors = collectorRecords(), rpcFetch = fetch } = {}) {
+export async function read(base = BASE, fetchFn = fetch, { records = evmPoolRecords(undefined, FIRST_SET), collectors = collectorRecords(), rpcFetch = fetch } = {}) {
   const pools = [];
   for (const [network, pool] of Object.entries(records)) {
     // the epoch's fee and, when the helper has no block in it yet, the one before's (evm-pool-fee-epoch.mjs): the first
