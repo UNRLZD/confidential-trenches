@@ -355,7 +355,8 @@ export type SolanaRestoreArgs = {
   /** tests only: RESTORE_GAP unless given */
   gap?: number;
   /** The 8 lanes already walked (walkLaneYielding, by the async restore below); walked here with walkLane when not given.
-   *  Each index a lane names is checked against noteSecrets, so a walk handed in that is wrong stops the restore. */
+   *  Each lane is held to checkedWalk, and one that fails it is walked again once on BigInt (checkedLane); a second
+   *  failure stops the restore. */
   lanes?: readonly LaneWalk[];
 };
 
