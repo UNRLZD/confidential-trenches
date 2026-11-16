@@ -243,18 +243,32 @@ export function keptPools(kind: PoolFinderKind, scan: () => readonly [SolanaRpc,
     if (k !== undefined && now() - k.at < POOLS_KEEP_MS) return k;
     if (kept.size >= POOLS_KEPT) kept.clear();
     // the same scan, each provider's answers seen as they come: the first provider whose two scans (the coin first and
-    // second) both answered a list, at most SOLANA_DLMM_MAX_PAIRS long, names the early list (past that, the union's
-    // ranking by depth is needed, so early waits for the union); no second scan is ever sent
+    // second) both answered a list names the early list, as the kit makes the list from both (its union, and past
+    // SOLANA_DLMM_MAX_PAIRS each read provider's deepest half): the kit's own finder over that provider's two answers
+    // replayed, so its ranking reads the pools' depths on `read` as the union's does; no scan is ever sent twice
     let half: (pools: readonly string[]) => void = () => {};
     const halfIn = new Promise<readonly string[]>((ok) => (half = ok));
-    const lists: string[][][] = [[], []];
+    const answers = [new Map<string, unknown>(), new Map<string, unknown>()];
+    const halfOf = (i: number) => {
+      const all = [...new Set([...answers[i]!.values()].flatMap((a) => scannedList(a) ?? []))].sort();
+      if (all.length <= SOLANA_DLMM_MAX_PAIRS) return half(all);
+      const replay = (n: number): SolanaRpc =>
+        Object.assign(
+          async (method: string, params: readonly unknown[]) => {
+            const a = method === "getProgramAccounts" ? answers[i]!.get(JSON.stringify(params)) : undefined;
+            if (a === undefined) throw new Error("not a scan this provider answered");
+            return a;
+          },
+          { url: `https://replay.invalid/${i}/${n}` },
+        );
+      find([replay(0), replay(1)], read(), token).then(half, () => {});
+    };
     const pair = scan().map((rpc, i) =>
       solanaWrappedRpc(rpc, async (method, params) => {
         const answer = await rpc(method, params);
-        const list = method === "getProgramAccounts" ? scannedList(answer) : null;
-        if (list !== null && (lists[i]!.push(list), lists[i]!.length === 2)) {
-          const all = [...new Set(lists[i]!.flat())].sort();
-          if (all.length <= SOLANA_DLMM_MAX_PAIRS) half(all);
+        if (method === "getProgramAccounts" && scannedList(answer) !== null) {
+          answers[i]!.set(JSON.stringify(params), answer);
+          if (answers[i]!.size === 2) halfOf(i);
         }
         return answer;
       }),

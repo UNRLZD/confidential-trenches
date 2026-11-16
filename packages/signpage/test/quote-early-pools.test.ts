@@ -4,6 +4,7 @@
 // provider's whole half of the same scan; the finder itself (a tap's reference) still waits for both providers' union.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { base58, base64 } from "@scure/base";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { keptPools, pageReference, type PoolFinders } from "../src/page-rpc.ts";
@@ -83,4 +84,42 @@ test("a dry's reference reads each kind's early pools; a tap's waits for the fin
   await flush();
   assert.equal(dry, null, "the dry's reference waited for the slower scan");
   assert.equal(tap, "waiting");
+});
+
+test("a coin with more pools than a reference reads (13 DLMM pairs, past 8): the early list is the faster provider's half ranked by depth, as the kit ranks the union", async (t) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
+  const pools = Array.from({ length: 13 }, (_, i) => base58.encode(new Uint8Array(32).fill(i + 1)));
+  const named = (url: string, ms: number): SolanaRpc =>
+    Object.assign(
+      (_m: string, params: readonly unknown[]) =>
+        new Promise((ok) => {
+          const filters = (params[1] as { filters?: { memcmp?: { bytes?: string } }[] }).filters ?? [];
+          const first = filters.find((f) => f.memcmp)?.memcmp?.bytes;
+          setTimeout(() => ok({ context: { slot: 1 }, value: first === COIN ? pools.map((pubkey) => ({ pubkey })) : [] }), ms);
+        }),
+      { url },
+    );
+  // each pair's SOL reserve as a token account holding k + 1 lamports, read at once
+  const depth = (url: string): SolanaRpc =>
+    Object.assign(
+      async (_m: string, params: readonly unknown[]) => ({
+        context: { slot: 1 },
+        value: (params[0] as string[]).map((_, k) => {
+          const b = new Uint8Array(8);
+          new DataView(b.buffer).setBigUint64(0, BigInt(k + 1), true);
+          return { owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", data: [base64.encode(b), "base64"] };
+        }),
+      }),
+      { url },
+    );
+  const find = keptPools("dlmmPairs", () => [named("https://slow.example", SLOW_MS), named("https://fast.example", FAST_MS)] as const, () => [depth("https://a.example"), depth("https://b.example")] as const);
+  let early: readonly string[] | undefined;
+  void find.early!(COIN).then((x) => void (early = x));
+  await flush();
+  t.mock.timers.tick(FAST_MS);
+  await flush();
+  assert.ok(early !== undefined, `no early list at ${FAST_MS} ms, the faster provider's half`);
+  assert.ok(early.length > 0 && early.length <= 8, `early names ${early.length} pairs, at most 8`);
+  assert.ok(early.every((p) => pools.includes(p)));
 });
