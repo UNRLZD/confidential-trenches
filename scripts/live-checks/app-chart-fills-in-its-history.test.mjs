@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/app-chart-fills-in-its-history.test.mjs: the live check's verdict replays recorded runs
 // (app-chart-fills-in-its-history.answers.json), each read on 16 Nov by app-chart-fills-in-its-history.mjs collect() in
-// headless Chromium on the PC box, HELPER_HOST live:
+// a headless Chromium, HELPER_HOST live, and kept as trim() keeps a record:
 //   good: this card's build served at APP_HOST's name inside the stand-in shell (--build): a cold coin's chart first
 //         drawn with bars and filling was read in full again AWAY_MS on and filled, with no reload: PASS;
 //   bad:  APP_HOST's deployed build before this card: the chart first drawn filling was read in full again only
@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { AWAY_MS, EXIT, FULL, judge, loadVerdict, RESYNC_MS, SLACK_MS } from "./app-chart-fills-in-its-history.mjs";
+import { AWAY_MS, EXIT, FULL, judge, loadVerdict, RESYNC_MS, SLACK_MS, trim } from "./app-chart-fills-in-its-history.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-chart-fills-in-its-history.answers.json"), "utf8"));
@@ -130,4 +130,13 @@ test("planted: the helper still filling at the end of the watch, the page's read
     for (const a of l.answers) if (a.limit === FULL && a.status === 200) a.filling = true;
   });
   assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+});
+
+test("the recorded answers are as trim() keeps a record: no coin names, no address, no live read that answered", () => {
+  for (const k of ["good", "bad"]) {
+    assert.deepEqual(trim(ANSWERS[k]), ANSWERS[k], k);
+    assert.equal(typeof ANSWERS[k].candidates, "number");
+    for (const p of ANSWERS[k].picks) assert.deepEqual(Object.keys(p).sort(), ["chain", "loads", "token"]);
+  }
+  assert.doesNotMatch(JSON.stringify(ANSWERS), /0x[0-9a-fA-F]{40}/);
 });

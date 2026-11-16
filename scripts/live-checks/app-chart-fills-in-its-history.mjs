@@ -28,7 +28,9 @@
 //   node scripts/live-checks/app-chart-fills-in-its-history.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the
-// helper still answered live; --record writes what the run read, so the check's test can replay it through judge().
+// helper still answered live; --record writes what the run read (trim: the count of candidates, and per pick its chain,
+// the token as <token>, and per load the full reads and every failed read), so the check's test can replay it through
+// judge().
 // Record: what the run read; a live run that fails keeps it beside its log
 import "../net-window.mjs";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
@@ -121,11 +123,12 @@ export function judge(rec) {
   const lines = [];
   const say = (good, text) => lines.push(`${good ? "ok " : "BAD"} ${text}`);
   const picks = rec.picks ?? [];
-  say((rec.candidates ?? []).length > 0 && picks.length > 0, `${(rec.candidates ?? []).length} listed candidates on ${CHAINS.join(", ")}; ${picks.length} picks`);
+  const cands = typeof rec.candidates === "number" ? rec.candidates : (rec.candidates ?? []).length;
+  say(cands > 0 && picks.length > 0, `${cands} listed candidates on ${CHAINS.join(", ")}; ${picks.length} picks`);
   let filled = 0;
   for (const [n, p] of picks.entries()) {
     for (const [i, l] of (p.loads ?? []).entries()) {
-      const tag = `pick ${n + 1} ${p.chain}/<token> (${p.symbol}) ${LOADS[i]?.name ?? l.width}`;
+      const tag = `pick ${n + 1} ${p.chain}/<token> ${LOADS[i]?.name ?? l.width}`;
       if (p.token && l.opened !== `${APP_HOST}/token/${p.chain}/${p.token}`) say(false, `${tag}: opened ${l.opened}`);
       const v = loadVerdict(l);
       if (v.kind === "warm") {
@@ -140,6 +143,28 @@ export function judge(rec) {
   if (!bad && filled === 0) lines.push(`INCONCLUSIVE no load in ${picks.length} picks was first drawn filling and then filled within the watch`);
   const verdict = bad ? "FAIL" : filled > 0 ? "PASS" : "INCONCLUSIVE";
   return { verdict, ok: verdict === "PASS", lines };
+}
+
+/** A run as its record keeps it: what judge() reads and nothing more. The candidates are a count and a pick has no
+ *  symbol (a coin's name is any text its launcher chose), each picked token is <token> (a 40-hex address reads as a key
+ *  to the secret scan, as in app-chart-live's records), and a load keeps its full reads and its failed reads of any
+ *  size, not the live reads that answered. */
+export function trim(rec) {
+  const keep = (l) => ({
+    ...l,
+    sends: (l.sends ?? []).filter((x) => x.limit === FULL),
+    answers: (l.answers ?? []).filter((x) => x.limit === FULL || x.status !== 200),
+  });
+  const out = {
+    source: rec.source,
+    at: rec.at,
+    browser: rec.browser,
+    candidates: typeof rec.candidates === "number" ? rec.candidates : (rec.candidates ?? []).length,
+    picks: (rec.picks ?? []).map((p) => ({ chain: p.chain, token: "<token>", loads: (p.loads ?? []).map(keep) })),
+  };
+  let text = JSON.stringify(out);
+  for (const p of rec.picks ?? []) if (p.token && p.token !== "<token>") text = text.replaceAll(p.token, "<token>");
+  return JSON.parse(text);
 }
 
 // ------------------------------------------------------------------------------------------------ the live read
@@ -270,11 +295,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     const rec = await collect({ build: opt("--build", null), shots: opt("--shots", undefined) });
     const file = opt("--record", null);
-    // the record leaves out where this machine kept the shots, and writes each picked token as <token> (a 40-hex address
-    // reads as a key to the secret scan; app-chart-live's records do the same)
-    let text = JSON.stringify({ ...rec, shots: undefined }, null, 1);
-    for (const p of rec.picks) text = text.replaceAll(p.token, "<token>");
-    if (file) writeFileSync(file, `${text}\n`);
+    // the record leaves out where this machine kept the shots (trim)
+    if (file) writeFileSync(file, `${JSON.stringify(trim(rec), null, 1)}\n`);
     const { verdict, lines } = judge(rec);
     for (const x of lines) console.log(x);
     console.log(`screenshots: ${rec.shots}`);
