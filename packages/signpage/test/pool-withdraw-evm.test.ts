@@ -1348,3 +1348,117 @@ test("card evm-trees-from-one-verified-source: with one log-serving operator lef
   const v = await evmReleaseOf({ rpcs, pin: BASE_PIN } as never, pendingOf(BIG_CAP), W, stops);
   assert.deepEqual(v, { end: "mine", tx: REL, block: 0xf0n });
 });
+
+// card evm-withdraw-waits-out-a-throttle: a Base or Robinhood withdraw that meets one provider's throttle before any
+// signature is only slower. Its plan and each part up to W's signature are made again from their first read after the
+// page's one wait (pool-withdraw.ts stepWaited: from 1 s, doubling, at most 10 s, 30 s a step), on the EVM reads' own
+// faults (EvmUnansweredError, EvmLagError) and the exit's busy answer (ReadBusy); a fault once W signed is never made
+// again; a sign out ends the wait. Waits run on mocked timers (./mock-timers.ts), the world's clock moved by each.
+const { EvmLagError, EvmUnansweredError } = await import("../../wallet/src/pool/evm.ts");
+const { ReadBusy } = await import("../src/read-waits.ts");
+/** Mocked timers, the run's waits on them (each one's ms kept and the world's clock moved), the run driven to its end. */
+function waitsOn(t: import("node:test").TestContext, w: Awaited<ReturnType<typeof runWorld>>) {
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
+  const waits: number[] = [];
+  w.h.wait = (ms) => (waits.push(ms), (w.clock.ms += BigInt(ms)), new Promise<void>((ok) => setTimeout(ok, ms)));
+  const drive = async <T>(p: Promise<T>): Promise<{ v: T; ms: number }> => {
+    let done = false;
+    let v!: T;
+    void p.then((x) => void ((done = true), (v = x)));
+    let ms = 0;
+    for (; ms <= 120_000; ms += 250) {
+      for (let i = 0; i < 40; i++) await new Promise((ok) => setImmediate(ok));
+      if (done) break;
+      t.mock.timers.tick(250);
+    }
+    assert.ok(done, "the run never ended");
+    return { v, ms };
+  };
+  return { waits, drive };
+}
+/** The world's pair with `fault(k, method)` thrown in place of an answer when it names one. */
+const faultyRpcs = (h: EvmWithdrawHost, fault: (k: 0 | 1, method: string) => Error | null): EvmWithdrawHost["rpcs"] =>
+  h.rpcs.map((rpc, k) => (async (method: string, params?: readonly unknown[]) => {
+    const e = fault(k as 0 | 1, method);
+    if (e) throw e;
+    return rpc(method, params as unknown[]);
+  })) as unknown as EvmWithdrawHost["rpcs"];
+const unanswered = (): Error => new EvmUnansweredError("no answer in time", new Error("HTTP 429"));
+
+test("(card evm-withdraw-waits-out-a-throttle) the plan's gas read unanswered once: the run waits, reads its plan again and sends", async (t) => {
+  const w = await runWorld();
+  const c = waitsOn(t, w);
+  let n = 0;
+  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 0 && m === "eth_estimateGas" && n++ === 0 ? unanswered() : null));
+  const { v: got } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
+  assert.equal(got.stage, "sent", got.cause);
+  assert.equal(w.chain.sends, 1);
+  assert.deepEqual(c.waits, [1_000]);
+});
+
+test("(card evm-withdraw-waits-out-a-throttle) a part's head read lagging once before W signs: the part is bound and proved again, one send, the note never left held", async (t) => {
+  const w = await runWorld();
+  const c = waitsOn(t, w);
+  let n = 0;
+  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 1 && m === "eth_blockNumber" && w.chain.bound.length > 0 && n++ === 0 ? new EvmLagError("the heads are apart") : null));
+  const { v: got } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
+  assert.equal(got.stage, "sent", got.cause);
+  assert.equal(w.chain.binds.length, 2, "the part made again from its first read: bound again");
+  assert.equal(w.chain.sends, 1);
+  assert.deepEqual(c.waits, [1_000]);
+  assert.equal((await w.notes.list()).filter((x) => x.state === "HELD").length, 0);
+});
+
+test("(card evm-withdraw-waits-out-a-throttle) the exit's deposit address busy once (ReadBusy): asked again after the wait, the run sends", async (t) => {
+  const w = await runWorld();
+  const c = waitsOn(t, w);
+  let asked = 0;
+  w.h.exit = async () => {
+    if (asked++ === 0) throw new ReadBusy(429);
+    return TO;
+  };
+  const { v: got } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
+  assert.equal(got.stage, "sent", got.cause);
+  assert.equal(asked, 2);
+  assert.equal(w.chain.sends, 1);
+});
+
+test("(card evm-withdraw-waits-out-a-throttle) unanswered for good: the waits double to their 30 s bound, then the run stops with nothing bound or sent", async (t) => {
+  const w = await runWorld();
+  const c = waitsOn(t, w);
+  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 0 && m === "eth_estimateGas" ? unanswered() : null));
+  const { v: got } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
+  assert.equal(got.stage, "stopped");
+  assert.match(got.cause ?? "", /^EvmUnansweredError unanswered/);
+  assert.deepEqual(c.waits, [1_000, 2_000, 4_000, 8_000, 10_000]);
+  assert.equal(w.chain.binds.length, 0);
+  assert.equal(w.chain.sends, 0);
+});
+
+test("(card evm-withdraw-waits-out-a-throttle) a fault once W signed is never made again: the claim unanswered, stopped, one bind, nothing sent", async (t) => {
+  const w = await runWorld();
+  const c = waitsOn(t, w);
+  w.h.claim = async () => {
+    throw unanswered();
+  };
+  const { v: got } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
+  assert.equal(got.stage, "stopped");
+  assert.equal(w.chain.binds.length, 1, "the signed part was made again");
+  assert.equal(w.chain.sends, 0);
+  assert.deepEqual(c.waits, []);
+  assert.equal((await w.notes.get(w.noteId))?.state, "UNSPENT", "the note back, nothing left held");
+});
+
+test("(card evm-withdraw-waits-out-a-throttle) a sign out during the wait ends it: stopped, nothing bound, before the wait's end", async (t) => {
+  const w = await runWorld();
+  const c = waitsOn(t, w);
+  const out = new AbortController();
+  w.h.stop = out.signal;
+  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 0 && m === "eth_estimateGas" ? (setTimeout(() => out.abort(), 250), unanswered()) : null));
+  const { v: got, ms } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
+  assert.equal(got.stage, "stopped");
+  assert.match(got.cause ?? "", /^ReadStopped/);
+  assert.equal(w.chain.binds.length, 0);
+  assert.ok(ms < 1_000, `the wait outlived the sign out (${ms} ms)`);
+});

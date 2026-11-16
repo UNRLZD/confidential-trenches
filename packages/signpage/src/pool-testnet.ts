@@ -3366,6 +3366,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       owedNotes,
       ...(over.now ? { now: over.now } : {}),
       ...(over.wait ? { wait: over.wait } : {}),
+      // the session's sign out ends a withdraw step's wait after a provider's throttle (card evm-withdraw-waits-out-a-throttle)
+      stop: evmStop.signal,
     };
   };
   const evmQueueOf = async (chain: "base" | "robinhood"): Promise<ProofQueue<EvmPoolRequest> | null> => {

@@ -61,14 +61,14 @@ import { evmAddress, freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import type { PieceRule } from "../../wallet/src/pool/pieces.ts";
-import { EVM_CHAIN_IDS, EVM_SEND_MARGIN_MS, evmAgreedBlock, evmRetryLag, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_SEND_MARGIN_MS, evmAgreedBlock, EvmLagError, evmRetryLag, EvmUnansweredError, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { checkBinding, PoolNoLeafError, type Pool, type PoolTrees } from "../../wallet/src/pool/pool.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "./pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyVerdict, evmHeadNumber, evmReleaseRead, evmWithdrawCalldata, type EvmReleaseRead } from "./evm-send.ts";
 import { legCause } from "./pool-sell.ts";
 import { within } from "./trade.ts";
-import { planPoolWithdraw, withdrawSources, type Arrivals, type PendingOnward, type WithdrawPart } from "./pool-withdraw.ts";
+import { planPoolWithdraw, stepWaited, stepWaitsOn, withdrawSources, type Arrivals, type PendingOnward, type WithdrawPart } from "./pool-withdraw.ts";
 import {
   checkEvmOnwardSend, checkEvmWithdraw, EVM_ONWARD_GAS, EVM_ONWARD_GAS_MAX, EVM_PRECOMPILE_TOP, evmOnwardCodeGas, PoolRuleRefused, signEvmOnwardSend, signEvmWithdraw,
   type EvmOnwardSend, type PoolAsk, type WithdrawCosts,
@@ -149,7 +149,15 @@ export type EvmWithdrawHost = {
   exit?(refundTo: string): Promise<string>;
   /** A Move's claim, as the Solana run's (src/pool-withdraw.ts PoolWithdrawHost claim). */
   claim?(): Promise<void>;
+  /** The session's sign out (aborted at its tap): it ends a step's wait after a provider's throttle (stepWaited). */
+  stop?: AbortSignal;
 };
+
+/** An EVM step's faults that wait (card evm-withdraw-waits-out-a-throttle): the Solana withdraw's (the page client's
+ *  transport fault, the exit's busy deposit address) and the EVM reads' own: no answer from a provider in time
+ *  (EvmUnansweredError) and two providers whose newest blocks are too far apart (EvmLagError), as the EVM deposit's and
+ *  sale's waits read them. Any other error ends the run at once. */
+const evmStepWaitsOn = (e: unknown): boolean => stepWaitsOn(e) || e instanceof EvmUnansweredError || e instanceof EvmLagError;
 
 /** `cause`: why a run or one of its parts ended on a throw, in public words only (pool-sell.ts legCause), for the op's
  *  record and the page's console, never a screen (the Solana run's PoolWithdrawAnswer cause). */
@@ -516,6 +524,55 @@ export async function onwardReceipt(rpcs: readonly [EvmRpc, EvmRpc], hash: strin
   return safe.every((n) => typeof n === "string" && /^0x[0-9a-fA-F]{1,16}$/.test(n) && BigInt(n) >= block) ? end : null;
 }
 
+/** An EVM withdraw's plan step: the notes, the plan at a plain send's cost, To (the exit's deposit address for another
+ *  chain) read on both RPCs and the plan again at its cost, the Max fee's check. Nothing in it is signed, so a provider's
+ *  throttle makes it again from its first read (stepWaited). */
+async function evmPlanStep(h: EvmWithdrawHost, to: string, amount: bigint, maxFee: bigint) {
+  const notes = await h.notes();
+  const owed = (await h.owedNotes?.()) ?? new Set<string>();
+  // UNSPENT and HELD notes (a HELD one any tab's proof queue holds lets go: free()), less the owed and kept-out ones
+  const list = await notes.list();
+  const sources = withdrawSources(list, h.pool.scope).filter((n) => !owed.has(n.id));
+  // the notes under the epoch root first, but never in more parts than the plan over every note: the screen drew its
+  // Max fee on that one (withdraw/pool-form.ts over withdrawSources), so the rested preference never costs more
+  const rested = await evmRestedNotes(h.pool, list);
+  const planOf = (c: WithdrawCosts): WithdrawPart[] | null => {
+    const all = planPoolWithdraw(sources, amount, c);
+    const quiet = rested === null ? null : planPoolWithdraw(sources.filter((n) => rested.has(n.id)), amount, c);
+    return quiet !== null && all !== null && quiet.length <= all.length ? quiet : all;
+  };
+  // the first plan at a plain send's cost names the notes, and so the first W the To check runs from
+  const first = await evmWithdrawCosts(h);
+  const plan0 = planOf(first);
+  if (plan0 === null) stop("plan");
+  const wsOf = (ps: readonly WithdrawPart[]): Promise<string[]> => seedUse(h, async (seed) => {
+    const out: string[] = [];
+    for (const p of ps) out.push(spendOf(seed, (await notes.get(p.noteId))!).w);
+    return out;
+  });
+  const ws = await wsOf(plan0!);
+  // another chain (card pool-withdraws-to-any-chain): To is the checked quote's deposit address on this chain, its
+  // refund the first W, which must stay the run's first W (no re-plan below)
+  if (h.exit) to = await h.exit(ws[0]!);
+  if (evmToRefused(to, h.pin, ws)) stop("to");
+  // To read on both RPCs before any note moves: a To with code is run from the first part's W, or refused
+  const costs = await evmWithdrawCosts(h, { to, from: ws[0]!, value: plan0![0]!.part }, first.fee);
+  const plan = costs.wFee === first.wFee && costs.fee === first.fee ? plan0! : planOf(costs);
+  if (plan === null) stop("plan");
+  // a re-plan (W's send priced higher to a To with code) spends other notes: their Ws are checked against To, and a To
+  // with code is run again from the first W and part of the plan that runs; a send that needs more gas from there than
+  // the plan was priced at stops before any note moves (review of cb287f4f5 P3-2)
+  if (plan !== plan0) {
+    if (h.exit) stop("plan");
+    const ws1 = await wsOf(plan!);
+    if (evmToRefused(to, h.pin, ws1)) stop("to");
+    if (costs.toHasCode && (await evmWithdrawCosts(h, { to, from: ws1[0]!, value: plan![0]!.part }, first.fee)).gas > costs.gas) stop("gas");
+  }
+  if (BigInt(plan!.length) * (costs.fee + costs.wFee) > maxFee) stop("max_fee");
+  const wCap = maxFee / BigInt(plan!.length) - costs.fee;
+  return { notes, plan: plan!, costs, wCap, dest: to };
+}
+
 /** One withdraw of `amount` (wei arriving at `to`), `maxFee` the Max fee the screen drew. */
 export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: string, amount: bigint, maxFee: bigint): Promise<EvmWithdrawAnswer> {
   const txs: TxRef[] = [];
@@ -531,54 +588,16 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     const network = h.testnet ? (h.chain === "base" ? "base-sepolia" : "robinhood-testnet") : h.chain;
     if (h.pin.network !== network) stop("pin");
     if (typeof maxFee !== "bigint" || maxFee < 0n) stop("max_fee");
-    const notes = await h.notes();
-    const owed = (await h.owedNotes?.()) ?? new Set<string>();
-    // UNSPENT and HELD notes (a HELD one any tab's proof queue holds lets go: free()), less the owed and kept-out ones
-    const list = await notes.list();
-    const sources = withdrawSources(list, h.pool.scope).filter((n) => !owed.has(n.id));
-    // the notes under the epoch root first, but never in more parts than the plan over every note: the screen drew its
-    // Max fee on that one (withdraw/pool-form.ts over withdrawSources), so the rested preference never costs more
-    const rested = await evmRestedNotes(h.pool, list);
-    const planOf = (c: WithdrawCosts): WithdrawPart[] | null => {
-      const all = planPoolWithdraw(sources, amount, c);
-      const quiet = rested === null ? null : planPoolWithdraw(sources.filter((n) => rested.has(n.id)), amount, c);
-      return quiet !== null && all !== null && quiet.length <= all.length ? quiet : all;
-    };
-    // the first plan at a plain send's cost names the notes, and so the first W the To check runs from
-    const first = await evmWithdrawCosts(h);
-    const plan0 = planOf(first);
-    if (plan0 === null) stop("plan");
-    const wsOf = (ps: readonly WithdrawPart[]): Promise<string[]> => seedUse(h, async (seed) => {
-      const out: string[] = [];
-      for (const p of ps) out.push(spendOf(seed, (await notes.get(p.noteId))!).w);
-      return out;
-    });
-    const ws = await wsOf(plan0!);
-    // another chain (card pool-withdraws-to-any-chain): To is the checked quote's deposit address on this chain, its
-    // refund the first W, which must stay the run's first W (no re-plan below)
-    if (h.exit) to = await h.exit(ws[0]!);
-    if (evmToRefused(to, h.pin, ws)) stop("to");
-    // To read on both RPCs before any note moves: a To with code is run from the first part's W, or refused
-    const costs = await evmWithdrawCosts(h, { to, from: ws[0]!, value: plan0![0]!.part }, first.fee);
-    const plan = costs.wFee === first.wFee && costs.fee === first.fee ? plan0! : planOf(costs);
-    if (plan === null) stop("plan");
-    // a re-plan (W's send priced higher to a To with code) spends other notes: their Ws are checked against To, and a To
-    // with code is run again from the first W and part of the plan that runs; a send that needs more gas from there than
-    // the plan was priced at stops before any note moves (review of cb287f4f5 P3-2)
-    if (plan !== plan0) {
-      if (h.exit) stop("plan");
-      const ws1 = await wsOf(plan!);
-      if (evmToRefused(to, h.pin, ws1)) stop("to");
-      if (costs.toHasCode && (await evmWithdrawCosts(h, { to, from: ws1[0]!, value: plan![0]!.part }, first.fee)).gas > costs.gas) stop("gas");
-    }
-    if (BigInt(plan!.length) * (costs.fee + costs.wFee) > maxFee) stop("max_fee");
-    const wCap = maxFee / BigInt(plan!.length) - costs.fee;
+    // the plan, its costs and To, read again from the first read after a provider's throttle (stepWaited)
+    const { notes, plan, costs, wCap, dest } = await stepWaited(h, () => evmPlanStep(h, to, amount, maxFee), evmStepWaitsOn);
+    to = dest;
     // from here to the run's end no proof queue (any tab's) takes a planned note; each part moves the deadline on
     const keepOut = async (): Promise<void> => h.keepOut?.(plan!.map((x) => x.noteId), evmKeepSpan(h.pool));
     await keepOut();
     for (const [i, p] of plan!.entries()) {
       say("proving");
-      const got = await onePart(h, ask, notes, p, costs, { to, last: i === plan!.length - 1, feeCap: wCap.toString() }, (o) => void (pending = o), keepOut);
+      // the part made again from its first read after a provider's throttle while nothing of it is signed (stepWaited)
+      const got = await stepWaited(h, (at) => onePart(h, ask, notes, p, costs, { to, last: i === plan.length - 1, feeCap: wCap.toString() }, (o) => void (pending = o), keepOut, at), evmStepWaitsOn);
       if (got.tx !== "") txs.push({ chain: h.chain, hash: got.tx });
       if (got.end === "stopped") {
         pending = null;
@@ -644,7 +663,7 @@ async function evmRestedNotes(P: Pool<EvmPoolRequest>, list: readonly NoteRecord
 /** One part's release to W: hold the note, bind and prove part + fee + W's fee to W, check, sign as W, RESERVED, the
  *  owed send written, then the helper's send and the read-back on both RPCs. "stopped": nothing left the device, or
  *  the chain says it never lands; "sent": no end in the tap's bound (owed, for the state reads). */
-async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, c: EvmWithdrawCosts, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (o: EvmPendingOnward) => void, keepOut: () => Promise<void>): Promise<{ end: "mine" | "stopped" | "sent"; tx: string; l: bigint; j: number; cause?: string }> {
+async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, c: EvmWithdrawCosts, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (o: EvmPendingOnward) => void, keepOut: () => Promise<void>, at?: { signed: boolean }): Promise<{ end: "mine" | "stopped" | "sent"; tx: string; l: bigint; j: number; cause?: string }> {
   const P = h.pool;
   let attempt: string | null = null;
   let reserved = false;
@@ -747,6 +766,8 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
       const signer = freshWallet(seed, "evm", leaf.label, j);
       key = signer.secretKey;
       if (lower(signer.address) !== lower(keys.w.address) || lower(relay.recipient) !== lower(signer.address)) stop("wallet");
+      // signed from here: a fault past this is never made again (stepWaited)
+      if (at) at.signed = true;
       const s = signEvmWithdraw(key, ctx, ask, h.pin.pool, proof, h.testnet);
       key.fill(0);
       key = null;
@@ -812,6 +833,8 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
     return { end: "sent", tx: "", l: leaf.label, j };
   } catch (e) {
     if (reserved) throw e;
+    // a fault that waits, before W signs: thrown to the run's step (stepWaited), the note freed below first
+    if (at !== undefined && !at.signed && evmStepWaitsOn(e)) throw e;
     return { end: "stopped", tx: "", l: 0n, j: 0, cause: legCause(e) };
   } finally {
     (key as Uint8Array | null)?.fill(0);
