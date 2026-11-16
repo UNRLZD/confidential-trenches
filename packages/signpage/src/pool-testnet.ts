@@ -3521,6 +3521,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             },
             ...((exit) => (exit ? { exit } : {}))(poolExit(exitDeps, ready)),
             ...(claim ? { claim } : {}),
+            // the session's sign out ends a wait after a provider's throttle (card pool-buy-waits-out-a-throttle)
+            stop: solanaStop.signal,
           },
           { ...ask },
           ready.to,

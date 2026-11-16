@@ -193,14 +193,23 @@ export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: 
   // them (PoolsOf.early), never waiting for the slower provider's half; a tap's own read waits for both (the finder)
   const kinds = FINDER_KINDS.filter((k) => req[k] === undefined && finders?.[k]);
   if (kinds.length > 0) {
-    const found = Promise.all(kinds.map((k) => ((o.early ? finders![k]!.early : undefined) ?? finders![k]!)(req.token).catch(() => [] as readonly string[])));
+    // a scan a provider failed past the page's own retry is that fault, never "no pools" (card
+    // pool-buy-waits-out-a-throttle): a reference that then names no pool throws it, as a read's own fault, so a buy of
+    // a coin whose pools are all on a scanned venue waits it out instead of answering quote_check_failed
+    let scanFault: SolanaRpcTransportError | null = null;
+    const found = Promise.all(kinds.map((k) => ((o.early ? finders![k]!.early : undefined) ?? finders![k]!)(req.token).catch((e: unknown) => (e instanceof SolanaRpcTransportError && (scanFault ??= e), [] as readonly string[]))));
     const pump = readReference(rpcs, req);
+    const unfound = async (read: Promise<SolanaReference | null>): Promise<SolanaReference | null> => {
+      const ref = await read;
+      if (ref === null && scanFault !== null) throw scanFault;
+      return ref;
+    };
     const lists = await found;
-    if (lists.every((l) => l.length === 0)) return pump;
+    if (lists.every((l) => l.length === 0)) return unfound(pump);
     pump.catch(() => {});
     const more: { -readonly [K in PoolFinderKind]?: string[] } = {};
     kinds.forEach((k, i) => void (lists[i]!.length > 0 && (more[k] = [...lists[i]!])));
-    return readReference(rpcs, { ...req, ...more });
+    return unfound(readReference(rpcs, { ...req, ...more }));
   }
   return readReference(rpcs, req);
 }

@@ -68,6 +68,7 @@ export { solanaWithdrawMinPart, withdrawNoteFloor, type WithdrawCosts } from "./
 import { spendOwner, type HistoryPlaces } from "./pool-spend.ts";
 import { legCause, type PoolRide } from "./pool-sell.ts";
 import { within } from "./trade.ts";
+import { clockOf, ReadBusy, readWaits, ReadStopped, waitsOn, waitUnless } from "./read-waits.ts";
 // moved to pool-spend.ts (card signpage-buy-own-spend: pool-buy.ts reads them too, with no import cycle); named here still
 export { HISTORY_PAGE, HISTORY_PASS, spendOwner, type HistoryPlaces } from "./pool-spend.ts";
 
@@ -287,6 +288,8 @@ export type PoolWithdrawHost = Pick<PoolBuyHost, "send" | "now" | "reads" | "wai
   /** A Move's claim (src/pool-to-cash.ts, card move-sends-or-says-why): awaited right before a release is taken to leave
    *  the device, before its note is RESERVED; a throw ends the run stopped with nothing sent. */
   claim?(): Promise<void>;
+  /** The session's sign out (aborted at its tap): it ends a step's wait after a provider's throttle (stepWaited). */
+  stop?: AbortSignal;
 };
 
 /** A part's onward send still owed: its note (W is the note's own W_{sol, label, j}, derived on the device; the op
@@ -407,6 +410,77 @@ const spendKeysOf = (seed: Uint8Array, n: NoteRecord): { w: string; nullifierHas
 const toRefused = (to: string, pin: SolanaPoolPin, pool: string, ws: readonly string[]): boolean =>
   [pool, pin.program, pin.feePayer, ...SOLANA_RESERVED_KEYS, ...ws].includes(to);
 
+/** A step's faults that wait: the page client's transport fault (read-waits.ts waitsOn: a 429, a 5xx, a JSON-RPC
+ *  throttle, no answer in time) and the exit's busy deposit address (ReadBusy). Any other error ends the run at once. */
+const stepWaitsOn = (e: unknown): boolean => waitsOn(e) || e instanceof ReadBusy;
+/** One step of a withdraw, its plan (planStep) or one part up to its signature (onePart), made again from its first
+ *  read after a fault that waits, on the page's one rule (read-waits.ts readWaits: from 1 s, doubling, at most 10 s, a
+ *  Retry-After honoured to 10 s), each step its own bound (no wait that would end past 30 s from the step's start; then
+ *  the fault ends the run, nothing of the step signed). A fault once the step's transaction is signed (`at.signed`) is
+ *  never made again: what is signed may land. A sign out ends the wait, ReadStopped (card
+ *  pool-buy-waits-out-a-throttle: a Solana withdraw ended stopped on one provider's 429 before any signature). */
+async function stepWaited<T>(h: Pick<PoolWithdrawHost, "wait" | "now" | "stop">, f: (at: { signed: boolean }) => Promise<T>): Promise<T> {
+  const waits = readWaits(clockOf(h));
+  for (;;) {
+    const at = { signed: false };
+    try {
+      return await f(at);
+    } catch (e) {
+      if (at.signed || h.stop?.aborted || !stepWaitsOn(e)) throw e;
+      const ms = waits.next(e);
+      if (ms === null) throw e;
+      await waitUnless(h.wait, ms, h.stop);
+      if (h.stop?.aborted) throw new ReadStopped();
+    }
+  }
+}
+
+/** A withdraw's plan step: its costs read on both RPCs, the plan over the notes, the Max fee's check, then To (the exit's
+ *  deposit address for another chain) checked before any note moves. Nothing in it is signed, so a provider's throttle
+ *  makes it again from its first read (stepWaited). */
+async function planStep(h: PoolWithdrawHost, to: string, amount: bigint, maxFee: bigint) {
+  const { scope } = solanaPoolOf(h.pin.program);
+  const pool = solanaPoolAccount(h.pin.program);
+  const rent = await readSolanaRent(h.rpcs);
+  const fee = solanaPoolFee(rent);
+  const wFee = await solanaOnwardFee(h.rpcs, h.pin);
+  // the pool's own piece rule (the wallet's solanaPool: SOL_PIECES), the one the screen's funds plan with
+  const costs: WithdrawCosts = { fee, wFee, minPart: solanaWithdrawMinPart(rent, fee, wFee), ...(h.pool.pieces !== undefined ? { pieces: h.pool.pieces } : {}) };
+  const notes = await h.notes();
+  // a note an op still owes a send for stays out of the plan: its W is this spend's W too (review #232b MEDIUM 1)
+  const owedNotes = (await h.owedNotes?.()) ?? new Set<string>();
+  const list = await notes.list();
+  const sources = withdrawSources(list, scope).filter((n) => !owedNotes.has(n.id));
+  // the notes under the epoch root first, but never in more parts than the plan over every note: the screen drew its
+  // Max fee on that one (withdraw/pool-form.ts over withdrawSources), so the rested preference never costs more
+  const rested = await restedNotes(h.pool, list);
+  const all = planPoolWithdraw(sources, amount, costs);
+  const quiet = rested === null ? null : planPoolWithdraw(sources.filter((n) => rested.has(n.id)), amount, costs);
+  const plan = quiet !== null && all !== null && quiet.length <= all.length ? quiet : all;
+  if (plan === null) return stop("plan");
+  // review #232 MEDIUM 1: never more than the Max fee the screen showed
+  if (BigInt(plan.length) * (fee + wFee) > maxFee) stop("max_fee");
+  // review #232b LOW 4: the Max fee is a ceiling: each part's onward pays at most its share of it less the relay fee
+  // (at least the planned wFee), so To never gets less than the amount less the Max fee drawn
+  const wCap = maxFee / BigInt(plan.length) - fee;
+  // To checked before any note moves, so no release is made for a send that could never land: never the pool's own
+  // keys, a read-only key or one of the plan's own Ws, and on both RPCs never executable nor the pool program's
+  const spends = await seedUse(h)(async (seed) => {
+    const out: { w: string; nullifierHash: bigint }[] = [];
+    for (const p of plan) {
+      const n = await notes.get(p.noteId);
+      if (n?.leaf === undefined) stop("note");
+      out.push(spendKeysOf(seed, n!));
+    }
+    return out;
+  });
+  // another chain: To is the checked quote's deposit address on this chain, its refund the first W
+  if (h.exit) to = await h.exit(spends[0]!.w);
+  if (toRefused(to, h.pin, pool, spends.map((x) => x.w))) stop("to");
+  await checkTo(h, to);
+  return { pool, fee, wFee, notes, plan, wCap, dest: to };
+}
+
 /** One withdraw of `amount` (base units arriving at `to`), `to` the address typed on this page and checked there, and
  *  `maxFee` the Max fee the screen drew: a plan that would cost more stops before its first part. */
 export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: string, amount: bigint, maxFee: bigint): Promise<PoolWithdrawAnswer> {
@@ -419,53 +493,18 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
   try {
     if (ask.kind !== "pool.withdraw" || ask.chain !== "solana") stop("kind");
     if (typeof maxFee !== "bigint" || maxFee < 0n) stop("max_fee");
-    const { scope } = solanaPoolOf(h.pin.program);
-    const pool = solanaPoolAccount(h.pin.program);
-    const rent = await readSolanaRent(h.rpcs);
-    const fee = solanaPoolFee(rent);
-    const wFee = await solanaOnwardFee(h.rpcs, h.pin);
-    // the pool's own piece rule (the wallet's solanaPool: SOL_PIECES), the one the screen's funds plan with
-    const costs: WithdrawCosts = { fee, wFee, minPart: solanaWithdrawMinPart(rent, fee, wFee), ...(h.pool.pieces !== undefined ? { pieces: h.pool.pieces } : {}) };
-    const notes = await h.notes();
-    // a note an op still owes a send for stays out of the plan: its W is this spend's W too (review #232b MEDIUM 1)
-    const owedNotes = (await h.owedNotes?.()) ?? new Set<string>();
-    const list = await notes.list();
-    const sources = withdrawSources(list, scope).filter((n) => !owedNotes.has(n.id));
-    // the notes under the epoch root first, but never in more parts than the plan over every note: the screen drew its
-    // Max fee on that one (withdraw/pool-form.ts over withdrawSources), so the rested preference never costs more
-    const rested = await restedNotes(h.pool, list);
-    const all = planPoolWithdraw(sources, amount, costs);
-    const quiet = rested === null ? null : planPoolWithdraw(sources.filter((n) => rested.has(n.id)), amount, costs);
-    const plan = quiet !== null && all !== null && quiet.length <= all.length ? quiet : all;
-    if (plan === null) stop("plan");
-    // review #232 MEDIUM 1: never more than the Max fee the screen showed
-    if (BigInt(plan!.length) * (fee + wFee) > maxFee) stop("max_fee");
-    // review #232b LOW 4: the Max fee is a ceiling: each part's onward pays at most its share of it less the relay fee
-    // (at least the planned wFee), so To never gets less than the amount less the Max fee drawn
-    const wCap = maxFee / BigInt(plan!.length) - fee;
-    // To checked before any note moves, so no release is made for a send that could never land: never the pool's own
-    // keys, a read-only key or one of the plan's own Ws, and on both RPCs never executable nor the pool program's
-    const spends = await seedUse(h)(async (seed) => {
-      const out: { w: string; nullifierHash: bigint }[] = [];
-      for (const p of plan!) {
-        const n = await notes.get(p.noteId);
-        if (n?.leaf === undefined) stop("note");
-        out.push(spendKeysOf(seed, n!));
-      }
-      return out;
-    });
-    // another chain: To is the checked quote's deposit address on this chain, its refund the first W
-    if (h.exit) to = await h.exit(spends[0]!.w);
-    if (toRefused(to, h.pin, pool, spends.map((x) => x.w))) stop("to");
-    await checkTo(h, to);
+    // the plan, its costs and To, read again from the first read after a provider's throttle (stepWaited)
+    const { pool, fee, wFee, notes, plan, wCap, dest } = await stepWaited(h, () => planStep(h, to, amount, maxFee));
+    to = dest;
     // from here to the run's end no queue in any tab takes a planned note (each part refreshes the record's deadline)
-    if (h.keepOut) await h.keepOut(plan!.map((x) => x.noteId), keepSpan(h.pool));
-    for (const [i, p] of plan!.entries()) {
+    if (h.keepOut) await h.keepOut(plan.map((x) => x.noteId), keepSpan(h.pool));
+    for (const [i, p] of plan.entries()) {
       say("proving");
       // the release's take writes the note RESERVED, then the pending (with the attempt): from then on a crash leaves
       // it owed
-      const keep = (): Promise<void> => h.keepOut?.(plan!.map((x) => x.noteId), keepSpan(h.pool)) ?? Promise.resolve();
-      const got = await onePart(h, ask, notes, p, fee, wFee, pool, { to, last: i === plan!.length - 1, feeCap: wCap.toString() }, (owed) => void (pending = owed), keep);
+      const keep = (): Promise<void> => h.keepOut?.(plan.map((x) => x.noteId), keepSpan(h.pool)) ?? Promise.resolve();
+      // the part made again from its first read after a provider's throttle while nothing of it is signed (stepWaited)
+      const got = await stepWaited(h, (at) => onePart(h, ask, notes, p, fee, wFee, pool, { to, last: i === plan.length - 1, feeCap: wCap.toString() }, (owed) => void (pending = owed), keep, undefined, at));
       // the release's signature only as both RPCs read it as this release (card signpage-sent-read-back): a helper's
       // word not read back is never in the op's txs
       if (got.signature !== "") txs.push({ chain: "solana", hash: got.signature });
@@ -493,7 +532,7 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
       // empty: another tab's finish sent it already (its signature in its own write of the op); never the run's end
       else if (on.state !== "empty") return end("in_transit");
       pending = null;
-      if (i < plan!.length - 1) say("submitted");
+      if (i < plan.length - 1) say("submitted");
     }
     return end("sent");
   } catch (e) {
@@ -734,7 +773,7 @@ async function restedNotes(P: PoolWithdrawHost["pool"], list: readonly NoteRecor
 /** One part's release to W: hold the note, prove part + fees to W, build, check, sign, RESERVED, then the send and
  *  its settle. The release is alone in its transaction (review #232 HIGH 1). W is the note's own, or `to` (a sale's
  *  ride, runPoolRide: W_{sol, to.l, to.j}, its change and refund still the note's own, as the queue's tier 2). */
-async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, fee: bigint, wFee: bigint, pool: string, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (owed: PendingOnward) => void, keep: () => Promise<void> = async () => {}, to?: { l: bigint; j: number }): Promise<{ stage: string; signature: string; l: bigint; j: number; releaseAccounts: string[] }> {
+async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: WithdrawPart, fee: bigint, wFee: bigint, pool: string, base: Pick<PendingOnward, "to" | "last" | "feeCap">, owing: (owed: PendingOnward) => void, keep: () => Promise<void> = async () => {}, to?: { l: bigint; j: number }, at?: { signed: boolean }): Promise<{ stage: string; signature: string; l: bigint; j: number; releaseAccounts: string[] }> {
   const P = h.pool;
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
@@ -870,6 +909,8 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     seed.fill(0);
     seed = null;
     if (signer.address !== w.address) stop("wallet");
+    // signed from here: a fault past this is never made again (stepWaited)
+    if (at) at.signed = true;
     const sig = signSolana(key, wire);
     key.fill(0);
     key = null;
