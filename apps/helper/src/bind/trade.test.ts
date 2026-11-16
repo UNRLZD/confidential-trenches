@@ -15,14 +15,17 @@ import {
   HELPER_BIND_TRADE_STORAGE_MAX,
   HELPER_CODE_STATUS,
   NEAR_SWAP_STORAGE_MAX,
+  dclQuote,
+  dclSwapCalls,
   nearSwapCalls,
   rheaQuote,
+  type DclQuote,
   type NearSwapCall,
   type RheaQuote,
 } from "../../../../packages/kit/src/index.ts";
 import { BIND_MAX_BYTES, decodeSignedDelegate, NEP366_PREFIX, type KeyRead } from "./checks.ts";
-import { RELAYER_FLOOR_YOCTO, type Relayer, type RelayerAction, type TxOutcome, type TxRef } from "./send.ts";
-import { carryTrade, createTradeStore, TRADE_COST_MAX, TRADE_GAS_PRICE, TRADE_STORAGE_MAX, TRADE_SWAP_FAILS_MAX, type AccountState, type TradeAnswer, type TradeDeps, type TradeReads, type TradeRecord, type TradeStore } from "./trade.ts";
+import { RELAYER_FLOOR_YOCTO, type Rpc, type Relayer, type RelayerAction, type TxOutcome, type TxRef } from "./send.ts";
+import { carryTrade, createTradeReads, createTradeStore, TRADE_COST_MAX, TRADE_GAS_PRICE, TRADE_STORAGE_MAX, TRADE_SWAP_FAILS_MAX, type AccountState, type TradeAnswer, type TradeDeps, type TradeReads, type TradeRecord, type TradeStore } from "./trade.ts";
 import { CREATE_YOCTO } from "./create.ts";
 
 const FAST = "https://rpc.mainnet.fastnear.com";
@@ -842,4 +845,143 @@ test("R28 an honest W counted at what its calls burnt once final: a registration
   // counted: 0.00894 + (0.00031 + 0.0125) + 5 x 0.00164 + 0.0003 N = 0.03025 N and the calls' yocto deposits
   const rec = deps.store.get(k.id)!;
   assert.equal(rec.carried.reduce((a, x) => a + BigInt(x.cost), 0n), 310_000_000_000_000_000_000n + HELPER_BIND_TRADE_STORAGE_MAX + 5n * 1_640_000_000_000_000_000_000n + 300_000_000_000_000_000_000n + 6n);
+});
+
+// ---- Rhea DCL (card near-dcl-helper-relay) ----
+// The quotes are the kit's dclQuote replayed on recorded mainnet answers of both providers (fixtures/near-dcl-quotes.json,
+// copied from the kit's, 2026-11-16); the calls are the kit's dclSwapCalls, signed here as delegates.
+const DCL = "dclv2.ref-labs.near";
+const HOODL = "hoodl-95275b.launchpad.justhoot.near";
+const dclRuns = JSON.parse(readFileSync(new URL("./fixtures/near-dcl-quotes.json", import.meta.url), "utf8")).runs as { side: "buy" | "sell"; token: string; amountIn: string; pools: string[]; log: { url: string; params: unknown; answer: unknown }[] }[];
+async function dclOf(side: "buy" | "sell"): Promise<DclQuote> {
+  const r = dclRuns.find((x) => x.side === side && x.token === HOODL)!;
+  const rpcs = [FAST, DRPC].map((url) => ({
+    name: url,
+    async query(params: Record<string, unknown>) {
+      const hit = r.log.find((l) => l.url === url && JSON.stringify(l.params) === JSON.stringify(params));
+      if (!hit) throw new Error("not recorded");
+      return hit.answer;
+    },
+  })) as unknown as Parameters<typeof dclQuote>[0]["rpcs"];
+  return dclQuote({ network: "mainnet", rpcs, side: r.side, token: r.token, amountIn: BigInt(r.amountIn), pools: r.pools });
+}
+const WRAP = "wrap.near";
+/** The wire's DCL hops: the Swap's pools in order, each hop its own tokens (USDC to wNEAR to the token on a buy). */
+const dclHops = (q: DclQuote) => q.poolIds.map((pool, i) => ({ pool, token_in: i === 0 ? q.tokenIn : WRAP, token_out: i === q.poolIds.length - 1 ? q.tokenOut : WRAP }));
+const dclTradeOf = (q: DclQuote, w: string, slippage = 100) => ({ network: "mainnet" as const, side: q.side, token: q.token, wallet: w, amount_in: q.amountIn.toString(), slippage_bps: slippage, venue_out: q.venueOut.toString(), hops: dclHops(q) });
+const dclCallsOf = (q: DclQuote, w: string, registered = true) =>
+  dclSwapCalls({ quote: q, wallet: w, slippageBps: 100, registered, storageMin: MIN }, { network: "mainnet", side: q.side, token: q.token, amountIn: q.amountIn, wallet: w, slippageBps: 100 });
+
+test("D1 a DCL buy: W's registration on the token alone, then the one Swap into dclv2 carried as signed", async () => {
+  const k = newKey();
+  const q = await dclOf("buy");
+  assert.deepEqual(dclHops(q).map((h) => h.pool), [`${USDC}|wrap.near|100`, `${HOODL}|wrap.near|10000`]);
+  const { deps, sent, state } = world(k.id, { registered: fresh });
+  assert.deepEqual(await carryTrade({ trade: dclTradeOf(q, k.id), signed_delegates: [] }, deps), { status: 200, body: { tx_hashes: ["tx0"] } });
+  const reg = signAll(dclCallsOf(q, k.id, false), k, state.keyNonce);
+  assert.deepEqual(await carryTrade({ trade: dclTradeOf(q, k.id), signed_delegates: reg }, deps), { status: 200, body: { tx_hashes: ["tx1"] } });
+  state.keyNonce += 1n;
+  state.registered = () => true;
+  const swap = dclCallsOf(q, k.id);
+  assert.deepEqual([swap.length, swap[0]!.receiver_id, swap[0]!.actions[0].FunctionCall.args.receiver_id], [1, USDC, DCL]);
+  const signed = signAll(swap, k, state.keyNonce);
+  assert.deepEqual(await carryTrade({ trade: dclTradeOf(q, k.id), signed_delegates: signed }, deps), { status: 200, body: { tx_hashes: ["tx2"] } });
+  assert.deepEqual(sent.slice(1).map((x) => x.action.kind === "delegate" && Buffer.from(x.action.signed).toString("base64")), [...reg, ...signed]);
+});
+
+test("D2 a DCL sell: the token's Swap into dclv2 alone, carried", async () => {
+  const k = newKey();
+  const q = await dclOf("sell");
+  const { deps, state } = world(k.id, { exists: true });
+  assert.deepEqual(await carryTrade({ trade: dclTradeOf(q, k.id), signed_delegates: signAll(dclCallsOf(q, k.id), k, state.keyNonce) }, deps), { status: 200, body: { tx_hashes: ["tx0"] } });
+});
+
+test("D3 a DCL Swap the kit's dclSwapCheck refuses is refused by its name, nothing sent; a classic swap on DCL hops is refused too", async () => {
+  const k = newKey();
+  const q = await dclOf("buy");
+  const msgOf = (c: NearSwapCall[]) => c[0]!.actions[0].FunctionCall.args.msg as string;
+  const cases: [string, (c: NearSwapCall[]) => void][] = [
+    ["swap_n4", (c) => void (c[0]!.actions[0].FunctionCall.args.msg = msgOf(c).replace('"skip_unwrap_near":true', '"skip_unwrap_near":true,"referral_id":"evil.near"'))],
+    ["swap_n4", (c) => void (c[0]!.actions[0].FunctionCall.args.msg = msgOf(c).replace(`${HOODL}|wrap.near|10000`, `${HOODL}|wrap.near|2000`))],
+    ["swap_n4", (c) => void (c[0]!.actions[0].FunctionCall.args.msg = msgOf(c).replace(/"min_output_amount":"\d+"/, '"min_output_amount":"1"'))],
+    ["swap_n2", (c) => void (c[0]!.actions[0].FunctionCall.args.receiver_id = EX)],
+    ["swap_n7", (c) => void (c[0]!.actions[0].FunctionCall.gas = 300e12)],
+    ["swap_n1", (c) => void (c[0]!.actions[0].FunctionCall.args.amount = "1000001")],
+  ];
+  for (const [want, change] of cases) {
+    const { deps, sent, state } = world(k.id, { exists: true });
+    const calls = clone(dclCallsOf(q, k.id));
+    change(calls);
+    assert.equal(code(await carryTrade({ trade: dclTradeOf(q, k.id), signed_delegates: signAll(calls, k, state.keyNonce) }, deps)), want, want);
+    assert.equal(sent.length, 0, want);
+  }
+  // a classic swap's calls sent with DCL hops: the trade is DCL's, so dclSwapCheck holds them
+  const rq = await quoteOf("buy RHEA through wNEAR");
+  const { deps, sent, state } = world(k.id, { exists: true });
+  const classic = callsOf(rq, k.id);
+  assert.notEqual(code(await carryTrade({ trade: { ...dclTradeOf(q, k.id), token: RHEA }, signed_delegates: signAll(classic, k, state.keyNonce) }, deps)), "ok");
+  assert.equal(sent.length, 0);
+});
+
+test("D4 the wire: DCL hops are DCL pool ids, one exchange a trade; a mix, a malformed id, or DCL on testnet is bad_shape; a hop DCL does not hold is token_untrusted", async () => {
+  const k = newKey();
+  const q = await dclOf("buy");
+  const signed = (st: { keyNonce: bigint }) => signAll(dclCallsOf(q, k.id), k, st.keyNonce);
+  const go = async (trade: Record<string, unknown>, o: World = {}) => {
+    const { deps, sent, state } = world(k.id, { exists: true, ...o });
+    const a = code(await carryTrade({ trade, signed_delegates: signed(state) }, deps));
+    assert.equal(sent.length, 0);
+    return a;
+  };
+  const t = dclTradeOf(q, k.id);
+  assert.equal(await go({ ...t, hops: [{ ...t.hops[0]!, pool: 4512 }, t.hops[1]!] }), "bad_shape");
+  assert.equal(await go({ ...t, hops: [t.hops[0]!, { ...t.hops[1]!, pool: 7 }] }), "bad_shape");
+  for (const bad of [`wrap.near|${HOODL}|10000`, `${HOODL}|wrap.near`, `${HOODL}|wrap.near|0`, `${HOODL}|wrap.near|10000|x`, ""]) assert.equal(await go({ ...t, hops: [t.hops[0]!, { ...t.hops[1]!, pool: bad }] }), "bad_shape", bad);
+  assert.equal(await go({ ...t, network: "testnet" }), "bad_shape");
+  assert.equal(await go(t, { hopsReal: false }), "token_untrusted");
+  // the hops the trade names are the Swap's: other pools than the msg's are refused by dclSwapCheck
+  assert.equal(await go({ ...t, hops: [{ ...t.hops[0]!, pool: `${USDC}|wrap.near|2000` }, t.hops[1]!] }), "swap_n4");
+});
+
+test("D5 hopsReal reads DCL's get_pool at one block on both providers: the id's own tokens and fee, Running, no whitelist, no tax, and the hop's tokens", async () => {
+  const H = 224_792_742;
+  const HASH = "Cdz3mBCRDCNYwQoKRcFSJN9u1NkAk33Pr6uqogW6w6Xu";
+  const NOW = 1_794_000_000_000;
+  const row = (id: string, o: Record<string, unknown> = {}) => {
+    const [x, y, f] = id.split("|");
+    return { pool_id: id, token_x: x, token_y: y, fee: Number(f), state: "Running", whitelist: null, tax: null, ...o };
+  };
+  const make = (pools: Record<string, unknown>, asked: string[]): readonly [Rpc, Rpc] => {
+    const one: Rpc = async (method, params) => {
+      if (method === "block") return { header: { height: H, hash: HASH, gas_price: "100000000", timestamp_nanosec: String(BigInt(NOW) * 1_000_000n) } };
+      const p = params as { account_id: string; method_name: string; args_base64: string; block_id: number };
+      const args = JSON.parse(Buffer.from(p.args_base64, "base64").toString());
+      asked.push(`${p.account_id} ${p.method_name} ${p.block_id}`);
+      const v = p.method_name === "get_pool" ? (pools[args.pool_id] ?? null) : null;
+      return { block_height: H, block_hash: HASH, result: [...Buffer.from(JSON.stringify(v))] };
+    };
+    return [one, one];
+  };
+  const A = `${USDC}|wrap.near|100`;
+  const B = `${HOODL}|wrap.near|10000`;
+  const hops = [{ pool: A, tokenIn: USDC, tokenOut: WRAP }, { pool: B, tokenIn: WRAP, tokenOut: HOODL }];
+  const real = async (pools: Record<string, unknown>, h: { pool: number | string; tokenIn: string; tokenOut: string }[] = hops) => {
+    const asked: string[] = [];
+    const ok = await createTradeReads(make(pools, asked), "vault.near", USDC, () => NOW).hopsReal(h);
+    return { ok, asked };
+  };
+  const good = await real({ [A]: row(A), [B]: row(B) });
+  assert.equal(good.ok, true);
+  assert.deepEqual(good.asked, [`${DCL} get_pool ${H}`, `${DCL} get_pool ${H}`, `${DCL} get_pool ${H}`, `${DCL} get_pool ${H}`]);
+  for (const [why, pools] of [
+    ["no pool", { [A]: row(A) }],
+    ["paused", { [A]: row(A), [B]: row(B, { state: "Paused" }) }],
+    ["whitelisted", { [A]: row(A), [B]: row(B, { whitelist: ["intents.near"] }) }],
+    ["taxed", { [A]: row(A), [B]: row(B, { tax: { tax_rate: 5 } }) }],
+    ["another fee", { [A]: row(A), [B]: row(B, { fee: 400 }) }],
+    ["another token", { [A]: row(A), [B]: row(B, { token_x: "evil.near" }) }],
+  ] as const)
+    assert.equal((await real(pools)).ok, false, why);
+  assert.equal((await real({ [A]: row(A), [B]: row(B) }, [hops[0]!, { ...hops[1]!, tokenOut: "evil.near" }])).ok, false, "a hop token the pool does not hold");
+  assert.equal((await real({ [A]: row(A) }, [{ pool: A, tokenIn: USDC, tokenOut: WRAP }, { pool: 7, tokenIn: WRAP, tokenOut: HOODL }])).ok, false, "a mix");
 });
