@@ -4,6 +4,7 @@
 // robinhood-testnet's dRPC refusing eth_getBlockByNumber turned live run 43908276087 red. The mainnets are the helper's
 // (apps/helper/src/pool/mainnet-only.ts MAINNET_POOL_NETWORKS), so a network added there is read here too.
 // scripts/ci/live-mainnet-only.mjs refuses evmPoolVenues in a listed check.
+// Runs: once, no check: a module the listed checks share for the mainnets' venues
 import { MAINNET_POOL_NETWORKS } from "../../apps/helper/src/pool/mainnet-only.ts";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 

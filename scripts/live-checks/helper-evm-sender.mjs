@@ -31,7 +31,8 @@
 //   - every plant answers its own status and code (PLANTS), so none was sent;
 //   - every answer carries a full-sha X-Helper-Commit.
 // The testnet sell runs (helper-evm-sender.run.<network>.json, testnet-run.mjs --sell-helper) are no longer read live:
-// they are testnet transactions. checkSells stays exported for evm-testnet-delegate-review3, which reads them.
+// they are testnet transactions. checkSells, which reads them back, is helper-evm-sender-sells.mjs's (Runs: once), for
+// evm-testnet-delegate-review3 and this check's replay.
 // After: helper
 //   node scripts/live-checks/helper-evm-sender.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper has no block in the epoch or the one before: the
@@ -44,20 +45,20 @@ import { fileURLToPath } from "node:url";
 import { evmPoolSignSellAuthorization, evmSellRouteOf } from "../../packages/kit/src/index.ts";
 import { mainnetVenues } from "./mainnet-venues.mjs";
 import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
-import { check as runCheck, RPCS as RUN_RPCS } from "./pool-evm-testnet-run.mjs";
 import { EXIT, verdictOf } from "./provider-answer.mjs";
+import { TEST_EVM } from "./test-network-names.mjs";
 
 // @noble from the helper's own dependencies (apps/ is outside Blindfill), for W's keys, its signatures and the digests
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
-const { secp256k1 } = req("@noble/curves/secp256k1.js");
-const { keccak_256 } = req("@noble/hashes/sha3.js");
+export const { secp256k1 } = req("@noble/curves/secp256k1.js");
+export const { keccak_256 } = req("@noble/hashes/sha3.js");
 
 export const BASE = "https://ct-api.unrealized.trade";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The EVM mainnets the helper serves a pool on, each with its deploy record. */
 export const NETWORKS = ["base", "robinhood"];
 /** The testnets the recordings of 6 Nov and the sell runs were made on (FIRST_SET, checkSells): replayed, never read live. */
-export const TESTNETS = ["base-sepolia", "robinhood-testnet"];
+export const TESTNETS = TEST_EVM;
 const DEPLOYMENTS = path.join(HERE, "../../contracts/pool-evm/deployments");
 /** The record naming a mainnet's pool, relative to `dir`: contracts/pool-evm/deployments/<network>.json. */
 export const poolRecord = (network, dir = HERE) => path.relative(dir, path.join(DEPLOYMENTS, `${network}.json`));
@@ -83,7 +84,7 @@ const ADDRESS = /^0x[0-9a-f]{40}$/;
 const SHA = /^[0-9a-f]{40}$/;
 const DEC = /^(0|[1-9][0-9]{0,77})$/;
 const QUANTITY = /^0x(0|[1-9a-f][0-9a-f]*)$/;
-const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
+export const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
 const json = (t) => {
   try {
     return JSON.parse(t);
@@ -182,12 +183,12 @@ export function judge(run, { records = evmPoolRecords(), venues = mainnetVenues(
 
 // ---- The planted sells ----
 
-const hex = (b) => Buffer.from(b).toString("hex");
-const unhex = (s) => new Uint8Array(Buffer.from(s.replace(/^0x/, ""), "hex"));
-const w32 = (n) => n.toString(16).padStart(64, "0");
+export const hex = (b) => Buffer.from(b).toString("hex");
+export const unhex = (s) => new Uint8Array(Buffer.from(s.replace(/^0x/, ""), "hex"));
+export const w32 = (n) => n.toString(16).padStart(64, "0");
 const a32 = (a) => a.slice(2).toLowerCase().padStart(64, "0");
 const utf8 = (s) => new TextEncoder().encode(s);
-const cat = (...p) => Uint8Array.from(p.flatMap((x) => [...x]));
+export const cat = (...p) => Uint8Array.from(p.flatMap((x) => [...x]));
 const k = (t) => keccak_256(utf8(t));
 const SELL_SELECTOR = hex(k("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)").subarray(0, 4));
 
@@ -214,8 +215,8 @@ function sellData(s, fee, sig) {
   const tuple = `${a32(s.token)}${w32(s.amount)}${a32(s.target)}${w32(0x160n)}${w32(s.minOut)}${a32(s.pool)}${w32(s.precommitment)}${w32(s.feeCap)}${a32(s.feeRecipient)}${w32(s.deadline)}${w32(s.nonce)}${w32(BigInt(d.length))}${pad(d)}`;
   return `0x${SELL_SELECTOR}${w32(0x60n)}${w32(fee)}${w32(BigInt(0x60 + tuple.length / 2))}${tuple}${w32(65n)}${pad(sig)}`;
 }
-const int = (n) => (n === 0n ? new Uint8Array() : unhex(n.toString(16).padStart(Math.ceil(n.toString(16).length / 2) * 2, "0")));
-const rlpShort = (items) => {
+export const int = (n) => (n === 0n ? new Uint8Array() : unhex(n.toString(16).padStart(Math.ceil(n.toString(16).length / 2) * 2, "0")));
+export const rlpShort = (items) => {
   const body = cat(...items.map((x) => (x.length === 1 && x[0] < 0x80 ? x : cat(Uint8Array.of(0x80 + x.length), x))));
   return cat(Uint8Array.of(0xc0 + body.length), body);
 };
@@ -240,8 +241,8 @@ const V4_NATIVE_PATH = v4PathThrough(ZERO);
  * and each plant made from it, as POST /v1/pool/evm/sell bodies. W and the other signer are throwaway keys made here
  * unless given; `wKey` is returned for the test only. `data`: the swap's data (the hookless hop by default).
  */
-export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey = randomKey(), otherKey = randomKey(), data = V4_NATIVE_PATH }) {
-  const v = mainnetVenues()[network];
+export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey = randomKey(), otherKey = randomKey(), data = V4_NATIVE_PATH, venues = mainnetVenues() }) {
+  const v = venues[network];
   if (!v?.sellDelegate || !v.poolManager) throw new Error(`the kit pins no sell delegate or PoolManager for ${network}`);
   if (typeof feeRecipient !== "string" || !ADDRESS.test(feeRecipient)) throw new Error(`the fee recipient ${show(feeRecipient)} is no address`);
   const chainId = BigInt(v.chainId);
@@ -282,73 +283,8 @@ export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey
   return { base, plants, wKey };
 }
 
-// ---- The sells the helper sent (a run of contracts/pool-evm/script/testnet-run.mjs --sell-helper) ----
-
-/** Each testnet's run through the helper: helper-evm-sender.run.<network>.json, testnet-run.mjs --out (checkSells only) */
-export const sellRunFile = (network, dir = HERE) => path.join(dir, `helper-evm-sender.run.${network}.json`);
 /** The gas limit the helper signs every sale with, the kit's EVM_POOL_SELL_GAS */
 export const SELL_GAS = 1_000_000n;
-
-/**
- * The runs' sells through the helper, each read back on both RPCs of its chain: pool-evm-testnet-run's check of the
- * whole run (every transaction landed on both, each sell a type-4 transaction to W whose one authorization names the
- * chain's pinned SellDelegate with the chain's id, W's Deposited into the pool), and for each sell the helper sent:
- * the sender is the helper's sell sender (`senders[network]`, its fee answer's sell_sender), the gas limit exactly
- * 1,000,000, the authorization's signer W, and the fee it took (the call's fee word: the SellDelegate these runs used paid
- * it to its caller, pool-review-3's pays it to the Sell's feeRecipient) at least the sale's cost (gasUsed x
- * effectiveGasPrice, plus the receipt's L1 fee on Base); and every testnet has one such sell.
- */
-export async function checkSells(runs, transportOf, senders) {
-  const lines = [];
-  const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
-  // the networks with a sell the helper sent whose run and own reads were all ok on both RPCs (a record lists only the
-  // rows that landed, testnet-run.mjs, so its rows carry no landed field: landing is what these reads show)
-  const readBack = new Set();
-  for (const run of runs) {
-    const rec = run.record;
-    const n = rec.chain;
-    const transport = transportOf(run);
-    const urls = run.urls ?? RUN_RPCS[n];
-    const r = await runCheck(rec, transport, urls);
-    for (const l of r.lines) say(r.ok, `[${n} run] ${l}`);
-    if (!r.ok) continue;
-    for (const t of rec.txs.filter((x) => x.kind === "sell" && x.via === "helper")) {
-      const before = lines.length;
-      // the fields read here, equal on both RPCs (one Robinhood RPC adds blockTimestamp to a transaction, the other not)
-      const both = async (method, params, fields) => {
-        const rs = await Promise.all(urls.map((u) => transport(u, method, params)));
-        if (rs.some((x) => "error" in x || x.result == null)) throw new Error(`${method} ${t.hash}: ${show(rs.map((x) => x.error ?? null))}`);
-        const [a, b] = rs.map((x) => JSON.stringify(fields.map((f) => x.result[f] ?? null)));
-        if (a !== b) throw new Error(`${method} ${t.hash}: the two RPCs answer ${a} and ${b}`);
-        return rs[0].result;
-      };
-      try {
-        const tx = await both("eth_getTransactionByHash", [t.hash], ["hash", "blockHash", "type", "from", "to", "gas", "input", "authorizationList"]);
-        const rc = await both("eth_getTransactionReceipt", [t.hash], ["transactionHash", "blockHash", "status", "gasUsed", "effectiveGasPrice", "l1Fee"]);
-        const from = String(tx.from).toLowerCase();
-        say(senders[n] != null && from === senders[n], `[${n} sell ${t.hash}] sent by ${from}, the helper's sell sender ${show(senders[n])}`);
-        say(BigInt(tx.gas) === SELL_GAS, `[${n} sell ${t.hash}] gas limit ${BigInt(tx.gas)}, want ${SELL_GAS}`);
-        const a = (tx.authorizationList ?? [])[0];
-        const items = cat(rlpShort([int(BigInt(a.chainId)), unhex(a.address), int(BigInt(a.nonce))]));
-        const digest = keccak_256(cat(Uint8Array.of(5), items));
-        const sig = Uint8Array.from([Number(BigInt(a.yParity ?? a.v)), ...unhex(w32(BigInt(a.r))), ...unhex(w32(BigInt(a.s)))]);
-        const pub = secp256k1.Point.fromBytes(secp256k1.recoverPublicKey(sig, digest, { prehash: false })).toBytes(false);
-        const signer = `0x${hex(keccak_256(pub.subarray(1)).subarray(12))}`;
-        say(signer === String(t.w).toLowerCase(), `[${n} sell ${t.hash}] the authorization is signed by ${signer}, W ${t.w}`);
-        const fee = BigInt(`0x${String(tx.input).slice(10 + 64, 10 + 128)}`);
-        const cost = BigInt(rc.gasUsed) * BigInt(rc.effectiveGasPrice) + (rc.l1Fee ? BigInt(rc.l1Fee) : 0n);
-        say(fee >= cost, `[${n} sell ${t.hash}] the fee ${fee} covers the cost ${cost}, by ${fee - cost}`);
-      } catch (e) {
-        say(false, `[${n} sell ${t.hash}] ${e.message}`);
-      }
-      if (lines.slice(before).every((l) => l.startsWith("ok "))) readBack.add(n);
-    }
-  }
-  for (const n of TESTNETS) {
-    say(readBack.has(n), `[${n}] a sell the helper sent, read back (${path.basename(sellRunFile(n))})`);
-  }
-  return { ok: lines.every((l) => l.startsWith("ok ")), lines };
-}
 
 // ---- The reads ----
 
@@ -377,7 +313,7 @@ export function sendersOf(run) {
   return out;
 }
 
-export async function read(base, fetchFn = fetch, records = evmPoolRecords()) {
+export async function read(base, fetchFn = fetch, records = evmPoolRecords(), venues = mainnetVenues()) {
   const pools = [];
   for (const [network, pool] of Object.entries(records)) {
     const reads = [];
@@ -398,7 +334,7 @@ export async function read(base, fetchFn = fetch, records = evmPoolRecords()) {
     }
     // the plants are built just before they are sent, so the deadlines are measured from now; each pays the fee
     // collector the fee answer names (none named: another address, so the judge fails on the fee answer)
-    const { plants } = plantsOf({ network, pool, feeRecipient: feeCollectorOf(fee.answer.body) ?? OTHER_ADDRESS });
+    const { plants } = plantsOf({ network, pool, feeRecipient: feeCollectorOf(fee.answer.body) ?? OTHER_ADDRESS, venues });
     for (const [asked] of PLANTS) await get(asked, `${base}/v1/pool/evm/sell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(plants[asked]) });
     pools.push({ network, pool, reads });
   }

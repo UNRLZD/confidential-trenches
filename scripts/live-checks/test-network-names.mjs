@@ -3,6 +3,7 @@
 // test network's provider, pool or record in its own code), so the names it must find absent come from here, and
 // nothing here is ever read over the network by a listed check: each is a string to look for in a bundle, a CSP or an
 // answer.
+// Runs: once, no check: a module of the test networks' names the listed checks look for and never read
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +13,11 @@ import { MAINNETS } from "./mainnet-venues.mjs";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 /** The kit's EVM venues on the test networks (Base Sepolia, Robinhood testnet): evmPoolVenues() less the mainnets. */
-export const testVenues = () => Object.freeze(Object.fromEntries(Object.entries(evmPoolVenues()).filter(([c]) => !MAINNETS.includes(c))));
+export const testVenues = () => Object.freeze(Object.fromEntries(TEST_EVM.map((c) => [c, evmPoolVenues()[c]])));
+
+/** The EVM test networks' names (base-sepolia, robinhood-testnet), in the kit's order: the recordings made there are
+ *  replayed, never read live. */
+export const TEST_EVM = Object.freeze(Object.keys(evmPoolVenues()).filter((c) => !MAINNETS.includes(c)));
 
 /** The Solana devnet pool before its re-pin (card pool-senders-next-page-helper's move, DEVNET_MOVE at fd2f2a6e1). */
 export const DEVNET_BEFORE = "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr";

@@ -8,13 +8,14 @@
 //     mainnetVenues() (scripts/live-checks/mainnet-venues.mjs);
 //   - the Solana devnet pool, its providers and the helper's devnet route;
 //   - a URL whose host names a test network, a test network's deployment record or module;
-//   - a test network's name as a chain to read, or a NEAR testnet account.
+//   - a test network's name as a chain to read, or a NEAR testnet account;
+//   - a test network in an After line's arguments (its run's arguments are header text, not code).
 // A check that makes sure a build or a page names no test network takes those names from
 // scripts/live-checks/test-network-names.mjs, which no deploy runs, so its own code names none.
 //   node scripts/ci/live-mainnet-only.mjs        exit 0 when no listed check reads a test network, 1 otherwise
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterOf, readChecks } from "./live-after.mjs";
+import { afterOf, headerLines, readChecks } from "./live-after.mjs";
 
 /** [pattern, why], each a way a check reached a test network. */
 export const RULES = Object.freeze([
@@ -28,6 +29,9 @@ export const RULES = Object.freeze([
   [/["'`](?:base-sepolia|robinhood-testnet|robinhood-sepolia|testnet|devnet)["'`]/, "names a test network as a chain to read"],
   [/["'`][\w.-]+\.testnet["'`]/, "names a NEAR testnet account"],
 ]);
+
+/** A test network named in an After line's arguments. */
+const AFTER_TEST = /devnet|testnet|sepolia/i;
 
 /** A check's code with its comments blanked (lines kept, so a problem names its line). Strings and template literals
  *  are kept whole, so a URL's "//" is never read as a comment. */
@@ -67,6 +71,10 @@ export function problemsOf(key, text) {
   if (!Object.keys(afterOf(text).runs).length) return [];
   const lines = codeOf(text).split("\n");
   const out = [];
+  for (const value of headerLines(text, "After")) {
+    const m = AFTER_TEST.exec(value);
+    if (m) out.push(`${key}.mjs: "After: ${value}" runs on a test network (${m[0]})`);
+  }
   lines.forEach((line, n) => {
     for (const [re, why] of RULES) {
       const m = re.exec(line);

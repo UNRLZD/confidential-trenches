@@ -13,6 +13,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { evmPoolSender, evmReadSell } from "../../apps/helper/src/pool/evm.ts";
+import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { evmPoolRecords as currentRecords, feeCollectors as collectorsOf, FIRST_SET, NETWORKS, randomKey, TESTNETS } from "./helper-evm-sender.mjs";
 import { judge as judgeLive, OTHER, read as readLive, SELLS, sellsOf } from "./helper-sell-fee-recipient.mjs";
 
@@ -23,9 +24,10 @@ const A = JSON.parse(readFileSync(path.join(HERE, "helper-sell-fee-recipient.ans
 // The live check reads the mainnet pools (card helper-mainnet-pools-only; mainnet_good is its run on them): the testnet
 // recordings are judged on the testnets' records and collectors.
 const evmPoolRecords = () => currentRecords(undefined, FIRST_SET);
-const feeCollectors = () => collectorsOf({ networks: TESTNETS });
+const feeCollectors = () => collectorsOf({ networks: TESTNETS, venues: evmPoolVenues() });
 const judge = (run, records = evmPoolRecords(), collectors = feeCollectors()) => judgeLive(run, records, collectors);
-const read = (base, fetchFn, records = evmPoolRecords()) => readLive(base, fetchFn, records);
+// the testnet recordings' plants are signed for the kit's testnet pins (the live check signs for the mainnets')
+const read = (base, fetchFn, records = evmPoolRecords()) => readLive(base, fetchFn, records, evmPoolVenues());
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const edit = (run, asked, f, network) => ({ ...run, pools: run.pools.map((p) => (network && p.network !== network ? p : { ...p, reads: p.reads.map((x) => (x.asked === asked ? f(x) : x)) })) });
 const body = (x, f) => ({ ...x, body: JSON.stringify(f(JSON.parse(x.body))) });
@@ -136,7 +138,7 @@ test("sellsOf() builds what the helper reads: the 11-field Sell, each paying its
     const sellKey = randomKey();
     const s = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), sellKey, feeRecipient: FEE_TO, feeCollector: COLLECTOR }, [recording(calls), recording(calls)], () => NOW);
     const seller = s([]).sellSender;
-    const sells = sellsOf({ network, pool, feeCollector: COLLECTOR, feeRecipient: FEE_TO, sellSender: seller, nowMs: NOW });
+    const sells = sellsOf({ network, pool, feeCollector: COLLECTOR, feeRecipient: FEE_TO, sellSender: seller, nowMs: NOW, venues: evmPoolVenues() });
     assert.deepEqual(Object.keys(sells), SELLS.map(([a]) => a));
     const pays = Object.fromEntries(Object.entries(sells).map(([k, b]) => [k, evmReadSell(new Uint8Array(Buffer.from(b.data.slice(2), "hex"))).feeRecipient]));
     assert.deepEqual(pays, { pays_collector: COLLECTOR, pays_fee_recipient: FEE_TO, pays_other: OTHER, pays_sell_sender: seller });

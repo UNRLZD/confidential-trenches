@@ -14,7 +14,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { evmPoolSender, evmReadSell } from "../../apps/helper/src/pool/evm.ts";
 import { evmPoolSignSellAuthorization, evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { checkSells, evmPoolRecords as currentRecords, FIELDS, FIRST_SET, judge as judgeLive, NETWORKS as MAINNETS, PLANTS, plantsOf, randomKey, read as readLive, SELL_GAS, SENDER_FIELD, sendersOf, TESTNETS } from "./helper-evm-sender.mjs";
+import { checkSells } from "./helper-evm-sender-sells.mjs";
+import { evmPoolRecords as currentRecords, FIELDS, FIRST_SET, judge as judgeLive, NETWORKS as MAINNETS, PLANTS, plantsOf, randomKey, read as readLive, SELL_GAS, SENDER_FIELD, sendersOf, TESTNETS } from "./helper-evm-sender.mjs";
 import { replayer } from "./notes-per-pool-evm.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -26,7 +27,8 @@ const A = JSON.parse(readFileSync(path.join(HERE, "helper-evm-sender.answers.jso
 const NETWORKS = TESTNETS;
 const evmPoolRecords = () => currentRecords(undefined, FIRST_SET);
 const judge = (run, o = {}) => judgeLive(run, { records: evmPoolRecords(), ...o });
-const read = (base, fetchFn) => readLive(base, fetchFn, evmPoolRecords());
+// the recordings are the testnets': their plants are signed for the kit's testnet pins (the live check pins the mainnets)
+const read = (base, fetchFn) => readLive(base, fetchFn, evmPoolRecords(), evmPoolVenues());
 test("the recordings name the first set's pools; the live check reads each mainnet's pool, from its deploy record, and no testnet's", () => {
   assert.deepEqual(Object.fromEntries(A.good.pools.map((p) => [p.network, p.pool])), evmPoolRecords());
   assert.deepEqual(MAINNETS, ["base", "robinhood"]);
@@ -73,13 +75,13 @@ test("recorded good run: both testnet pools' fee answers name a sell sender, eve
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.deepEqual(A.good.pools.map((p) => p.network), Object.keys(evmPoolRecords()), "a pool for each deploy record");
   // against the kit's own pins (the helper box's sell keys), the local helper's throwaway senders fail each testnet
-  const kit = judge(A.good);
+  const kit = judge(A.good, { venues: evmPoolVenues() });
   assert.equal(kit.ok, false);
   for (const n of NETWORKS) assert.ok(bad(kit).some((l) => l.startsWith(`BAD [${n} fee] sell_sender`) && l.includes(`the kit's pin ${evmPoolVenues()[n].sellSender}`)), bad(kit).join("\n"));
 });
 
 test("recorded bad run: HELPER_HOST with no EVM pool (404 on the fee and on every plant): FAIL", () => {
-  const r = judge(A.bad_deployed);
+  const r = judge(A.bad_deployed, { venues: evmPoolVenues() });
   assert.equal(r.ok, false);
   assert.ok(bad(r).includes("BAD [base-sepolia fee] GET /v1/pool/fee answers 404"), bad(r).join("\n"));
 });
@@ -188,7 +190,7 @@ test("plantsOf() builds what the helper's sell checks read: each plant its own s
   const records = evmPoolRecords();
   assert.deepEqual(Object.keys(records), ["base-sepolia", "robinhood-testnet"]);
   for (const [network, pool] of Object.entries(records)) {
-    const p = plantsOf({ network, pool, feeRecipient: FEE_TO, nowMs: NOW });
+    const p = plantsOf({ network, pool, feeRecipient: FEE_TO, nowMs: NOW, venues: evmPoolVenues() });
     // the plants pay FEE_TO, so it is the collector here; the release's fee recipient is the sender's own address, since
     // the collector is never the fee recipient (card helper-sender-fee-proof, review L2)
     const sender = (calls) => evmPoolSender({ network, pool, senderKey: randomKey(), sellKey: randomKey(), feeCollector: FEE_TO, floor: 10n ** 13n }, [recording(calls), recording(calls)], () => NOW);
@@ -225,7 +227,7 @@ test("each plant differs from the base sell in its one field (and the signature 
     route_other_target: ["sell.target", "sell.signature"],
   };
   for (const [network, pool] of Object.entries(evmPoolRecords())) {
-    const p = plantsOf({ network, pool, feeRecipient: FEE_TO, nowMs: NOW });
+    const p = plantsOf({ network, pool, feeRecipient: FEE_TO, nowMs: NOW, venues: evmPoolVenues() });
     const base = read2(p.base);
     assert.equal(base["sell.feeRecipient"], FEE_TO, "every plant pays the fee answer's fee collector");
     const v = evmPoolVenues()[network];
@@ -250,7 +252,7 @@ test("each plant differs from the base sell in its one field (and the signature 
     assert.ok(BigInt(p.base.authorization.nonce) > 0n && BigInt(p.base.authorization.nonce) < 2n ** 64n - 1n);
   }
   // a fresh W key each build
-  const [a, b] = [plantsOf({ network: "base-sepolia", pool: evmPoolRecords()["base-sepolia"], feeRecipient: FEE_TO, nowMs: NOW }), plantsOf({ network: "base-sepolia", pool: evmPoolRecords()["base-sepolia"], feeRecipient: FEE_TO, nowMs: NOW })];
+  const [a, b] = [plantsOf({ network: "base-sepolia", pool: evmPoolRecords()["base-sepolia"], feeRecipient: FEE_TO, nowMs: NOW, venues: evmPoolVenues() }), plantsOf({ network: "base-sepolia", pool: evmPoolRecords()["base-sepolia"], feeRecipient: FEE_TO, nowMs: NOW, venues: evmPoolVenues() })];
   assert.notEqual(a.base.w, b.base.w);
 });
 

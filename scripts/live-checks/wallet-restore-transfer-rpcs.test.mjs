@@ -16,6 +16,28 @@ import path from "node:path";
 import { CHECK, JOBS, USDC, W, check, replayer, spoil } from "./wallet-restore-transfer-rpcs.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./wallet-restore-transfer-rpcs.answers.json", import.meta.url), "utf8"));
+// card live-checks-read-mainnet-only: a deploy reads Base and Robinhood alone (JOBS); the 6 Nov run read the two testnets
+// too, so its replays here read them as it did (ALL), and the testnet bad run is the Base Sepolia W's logs taken out
+const ALL = Object.freeze([
+  { network: "base-sepolia", w: W, from: "54553944", want: USDC },
+  ...JOBS,
+  // evm-buy-hookdata-fee.robinhood-testnet.json's first W
+  { network: "robinhood-testnet", w: "0x764c5ac2e39fec9d25af6d3eaf9400f91d82a531", back: "10000" },
+]);
+const spoilTestnet = (log) => log.map((e) => (e.network === "base-sepolia" && e.method === "eth_getLogs" && Array.isArray(e.result) ? { ...e, result: [] } : e));
+
+test("as a deploy runs it, the check reads Base and Robinhood on the helper's route alone: the recorded run's answers PASS; made from them, Base's pages refused (spoil) FAIL", async () => {
+  assert.deepEqual(JOBS.map((j) => j.network), ["base", "robinhood"]);
+  assert.ok(JOBS.every((j) => j.helper === "https://ct-api.unrealized.trade"));
+  const r = await timed(() => check(replayer(A.good), { wait: false }));
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.deepEqual(r.lines.map((l) => l.split(":")[0]), ["base", "robinhood"]);
+  const b = await timed(() => check(replayer(spoil(A.good)), { wait: false }));
+  assert.equal(b.ok, false);
+  assert.match(b.lines[0], /^base: /);
+  assert.doesNotMatch(b.lines[0], /read W/);
+  assert.match(b.lines[1], /^robinhood: the helper's route /);
+});
 // a replay reaches no provider, so it waits for none: each run ends in seconds, the helper route's 50,000 blocks of Base
 // included (about 80 pages, which the live run paces at the holdings readers' limit). The bound is 30 s: a paced replay
 // took 163 s, and an unpaced one took up to 11 s on a loaded Mac, so it fails the first and never the second
@@ -34,10 +56,10 @@ test("the recorded good run passes: each testnet's pair reads its W alike, Base'
   const mainnet = A.good.filter((e) => e.network === "base" || e.network === "robinhood");
   assert.ok(mainnet.length > 0 && mainnet.every((e) => e.url === `https://ct-api.unrealized.trade/v1/rpc/${e.network}`), [...new Set(mainnet.map((e) => e.url))].join(", "));
   assert.ok(mainnet.some((e) => e.network === "base") && mainnet.some((e) => e.network === "robinhood"));
-  const r = await timed(() => check(replayer(A.good), { wait: false }));
+  const r = await timed(() => check(replayer(A.good), { wait: false, jobs: ALL }));
   assert.ok(r.ms < REPLAY_MS, `the good replay took ${Math.round(r.ms)} ms`);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, JOBS.length);
+  assert.equal(r.lines.length, ALL.length);
   assert.match(r.lines[0], new RegExp(`^base-sepolia: base-sepolia\\.gateway\\.tenderly\\.co and base-testnet\\.api\\.pocket\\.network read W 0x809286a1bf1585b1eeeefcc7a7f3508158fd078e from block 54553944 to \\d+ alike: .*${USDC}`));
   // each network read over at least the review's span: Base 50,000 blocks, Robinhood 100,000, Robinhood testnet 10,000
   for (const [i, [n, span]] of [["base", 50_000], ["robinhood", 100_000], ["robinhood-testnet", 10_000]].entries()) {
@@ -49,10 +71,10 @@ test("the recorded good run passes: each testnet's pair reads its W alike, Base'
 });
 
 test("the recorded bad run (the Base Sepolia W's Transfer logs taken out) fails, its USDC not listed, and is the good run but that", async () => {
-  assert.deepEqual(A.bad, spoil(A.good));
+  assert.deepEqual(A.bad, spoilTestnet(A.good));
   const changed = A.bad.filter((e, i) => JSON.stringify(e) !== JSON.stringify(A.good[i]));
   assert.ok(changed.length >= 1 && changed.every((e) => e.network === "base-sepolia" && e.method === "eth_getLogs" && e.result.length === 0));
-  const r = await timed(() => check(replayer(A.bad), { wait: false }));
+  const r = await timed(() => check(replayer(A.bad), { wait: false, jobs: ALL }));
   assert.ok(r.ms < REPLAY_MS, `the bad replay took ${Math.round(r.ms)} ms`);
   assert.equal(r.ok, false);
   assert.match(r.lines[0], new RegExp(`^base-sepolia: W 0x809286a1bf1585b1eeeefcc7a7f3508158fd078e lists no token, not ${USDC}$`));
@@ -60,7 +82,7 @@ test("the recorded bad run (the Base Sepolia W's Transfer logs taken out) fails,
 
 test("a replay whose Base Sepolia pair refuses every page, one block too (dRPC's code 19 there), fails: never a pass on a W unread", async () => {
   const refusing = A.good.map((e) => (e.network === "base-sepolia" && e.method === "eth_getLogs" ? { network: e.network, url: e.url, method: e.method, params: e.params, error: "RPC error 19: Temporary internal error. Please retry" } : e));
-  const r = await check(replayer(refusing), { wait: false });
+  const r = await check(replayer(refusing), { wait: false, jobs: ALL });
   assert.equal(r.ok, false);
   assert.match(r.lines[0], /^base-sepolia: /);
   assert.doesNotMatch(r.lines[0], /alike/);
@@ -74,7 +96,7 @@ test("a replay whose Base Sepolia seat is out for hours (thirdweb's HTTP 429, Re
   const replay = replayer(planted);
   // the Base Sepolia job alone, with real waits: a wait begun would show in its time; the helper's mainnet jobs pace at
   // the holdings readers' limit when waiting, and are the good run's above
-  const r = await timed(() => check((network, url, method, params) => (url === OUT && outAsked++, replay(network, url, method, params)), { wait: true, jobs: JOBS.filter((j) => j.network === "base-sepolia") }));
+  const r = await timed(() => check((network, url, method, params) => (url === OUT && outAsked++, replay(network, url, method, params)), { wait: true, jobs: ALL.filter((j) => j.network === "base-sepolia") }));
   assert.ok(r.ms < REPLAY_MS, `the replay took ${Math.round(r.ms)} ms`);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.match(r.lines[0], new RegExp(`^base-sepolia: base-sepolia\\.gateway\\.tenderly\\.co and 84532\\.rpc\\.thirdweb\\.com read W .* alike: .*${USDC}.*; swapped out base-testnet\\.api\\.pocket\\.network$`));

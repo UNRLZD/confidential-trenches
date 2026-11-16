@@ -15,15 +15,21 @@ RETRY.ms = 0;
 
 const A = JSON.parse(readFileSync(new URL("./evm-buy-hookdata-fee.answers.json", import.meta.url), "utf8"));
 
+// card live-checks-read-mainnet-only: the check reads the mainnets alone; the good run, recorded on all four chains,
+// still answers both mainnets' reads
+test("the check reads the mainnets alone, never a test network's fee pair", () => {
+  assert.deepEqual(pinned().map((c) => c.chain), ["base", "robinhood"]);
+});
+
 test("the recorded good run passes: every pinned provider of every chain answers the fee's reads 600 s back", async () => {
   const r = await check(replayer(A.good));
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, 4);
+  assert.equal(r.lines.length, 2);
   for (const l of r.lines) {
     const age = Number(/, (\d+) s older than the newest/.exec(l)?.[1]);
     assert.ok(age >= AGE_S && age < AGE_S + 5, l);
   }
-  assert.match(r.lines.find((l) => l.startsWith("robinhood-testnet:")), /rpc\.testnet\.chain\.robinhood\.com and robinhood-testnet\.drpc\.org each answered its 2 fee reads \(0xf5d6ded7, 0x4a2b75c8\)/);
+  assert.match(r.lines.find((l) => l.startsWith("robinhood:")), /each answered its \d+ fee reads \(/);
   // every eth_call of the run is at the block found, by hash
   const calls = A.good.filter((e) => e.method === "eth_call");
   assert.ok(calls.length >= 16 && calls.every((e) => /^0x[0-9a-f]{64}$/.test(e.params[1].blockHash) && typeof e.result === "string"));
@@ -116,7 +122,7 @@ test("planted: an empty body, a 429, each rate-limit wording or a 403 rate limit
     const r = await plantedRun(status, body);
     assert.equal(r.verdict, "INCONCLUSIVE", `${name}: ${r.lines.join("\n")}`);
     assert.ok(r.lines.some((l) => l.startsWith(`INCONCLUSIVE robinhood: robinhood.drpc.org: eth_call: no answer: robinhood.drpc.org HTTP ${status}: `)), `${name}: ${r.lines.join("\n")}`);
-    assert.equal(r.lines.filter((l) => !l.startsWith("INCONCLUSIVE")).length, 3, `${name}: the other three chains judged`);
+    assert.equal(r.lines.filter((l) => !l.startsWith("INCONCLUSIVE")).length, 1, `${name}: the other chain judged`);
   }
 });
 
