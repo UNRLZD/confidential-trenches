@@ -996,11 +996,15 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null }) {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
+  /** Keyed URLs among `rpcs` asked only after every public one (card robinhood-trades-finish-filling): a tape is
+   *  display data, and the keys' bucket (dRPC's 62 calls a minute for every key, limits.ts DRPC_IP_PACE) is the keyed
+   *  callers' (/v1/rpc ?keyed=only), whom a tape's reads there left waiting or refused. */
+  const spares = new Set(deps.spares ?? []);
   /** The providers a read back is asked of (VENUES backOnly), and whether a tape reads back at all: two of them at least. */
   const backRpcs = rpcs.filter((u) => BACK_SPAN[u] !== undefined);
   const canBack = VENUES[chain].tapeBack > 0 && (!VENUES[chain].backOnly || backRpcs.length >= 2);
@@ -1279,7 +1283,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a read of a block range is `calls` reads of V.span blocks: a wide provider joins them up to its span (logsOf)
       const span = wideFirst ? Math.max(WIDE_SPAN[u] ?? V.span, V.span) : V.span;
       return [
-        wideFirst && span > V.span ? 1 : 0,
+        // a keyed spare (deps.spares) after every public provider, wide or not: its bucket is the keyed callers'
+        (spares.has(u) ? 0 : 2) + (wideFirst && span > V.span ? 1 : 0),
         -Math.round(waitOf(u, Math.ceil(calls / Math.floor(span / V.span)), wideFirst && headerTimed.has(u)) / WAIT_GRAIN_MS),
         Math.round(free(u)),
         -((i - (t % n) + n) % n),
@@ -1680,6 +1685,27 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    * its minutes-old 7-swap v4 pool while its hooked v4 pool carried 44 swaps in the same 1,000 blocks, and the tape
    * served the minor pool's 17 rows).
    */
+  /**
+   * A v4 pool the PositionManager holds no key for (a launchpad's hooked pool), from its own swaps (card
+   * robinhood-trades-finish-filling): its Swap logs over the chain's tapeBack in one read (BACK_LOCATE), the receipts of
+   * its newest V4_TXS transactions, and the key worked out from them (v4Key: the swap's fee, the addresses its
+   * transaction logged), which must hash to the id. Live 16 Nov: XOXO's 0xb1bbab6c (native ETH, fee 0, tick spacing 60,
+   * hooks 0x0af57f62, 28 swaps a day) was dropped as a hint for want of the PositionManager's key, its cold window held
+   * no PoolManager transaction of the coin, and it was served GeckoTerminal's trades. Null on a chain with no such
+   * provider, or none answering, or no swap in the window.
+   */
+  async function v4FromSwaps(token: string, id: string, headN: number): Promise<Pool | null> {
+    const u = BACK_LOCATE.find((x) => rpcs.includes(x) && usable([x]).length > 0);
+    if (u === undefined || V.tapeBack <= 0) return null;
+    const lo = Math.max(0, headN - V.tapeBack + 1);
+    const r = await batchTo(u, [{ method: "eth_getLogs", params: [{ address: V.poolManager, topics: [TOPIC.swap4, id], fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${headN.toString(16)}` }] }]);
+    const logs = r?.[0]?.ok ? parseLogs((r[0] as { result: unknown }).result) : null;
+    if (logs == null) return null;
+    const txs = [...new Set(logs.filter((l) => l.address === V.poolManager && l.topics[0] === TOPIC.swap4 && l.topics[1] === id && l.block >= lo && l.block <= headN).map((l) => l.tx))];
+    if (txs.length === 0) return null;
+    const e = (await v4Seen(txs.slice(-V4_TXS), { any: false })).get(id);
+    return e === undefined ? null : v4Pool(token, id, (await v4KeySliced(id, token, e.fee, [...e.around], chain)) ?? undefined);
+  }
   async function fromHint(token: string, hint: string): Promise<Found | null> {
     const head = await agreedHead();
     if (head === null) throw new Error("no agreed head");
@@ -1691,6 +1717,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const decimals = decimalsOf(got[0]);
     if (decimals === null) throw new Error("decimals not agreed");
     let pool = id ? v4Pool(token, hint, got[1]) : (curvePools(token, got.slice(1)).find((c) => c.id === hint) ?? null);
+    if (pool === null && id) pool = await v4FromSwaps(token, hint, head.n);
     if (pool === null && !id) {
       const [f, t0, t1] = await callsAgreed(head.n, [SEL.factory, SEL.token0, SEL.token1].map((data) => ({ to: hint, data })));
       const kind = V.getPool[wordAddr(f) ?? ""];
