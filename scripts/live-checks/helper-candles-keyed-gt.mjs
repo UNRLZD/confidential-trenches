@@ -1,15 +1,16 @@
 #!/usr/bin/env node
-// Live check of card helper-candles-keyed-gt: with the owner's CoinGecko key on the helper (COINGECKO_API_KEY, written by
-// the owner's key step), every chart read asks CoinGecko's keyed on-chain API first (apps/helper/src/data/coingecko.ts)
-// and the answer's src names it: "coingecko" for a chart that is CoinGecko's bars alone (a Solana token off Discover's
-// lists, data/solana/token.ts), "chain,coingecko" for our own bars after CoinGecko's history (a listed EVM or Solana
-// token, data/evm/swaps.ts, data/solana/trades.ts). The keyless GeckoTerminal path answers "geckoterminal".
+// Live check of card helper-candles-keyed-gt: a chart the key serves is full. Since card helper-listed-charts-own-reads
+// (KEYED_COLD_ONLY, apps/helper/src/data/solana/token.ts) CoinGecko's key (COINGECKO_API_KEY) reads only what nothing
+// holds, and every re-read of what is held goes keyless, so a chart's src is our own bars ("chain"), CoinGecko's for a
+// cold read ("coingecko"), and GeckoTerminal's history before ours ("geckoterminal") once re-read. Before that card the
+// check wanted every chart's src to name "coingecko": the key on every read, which spent its 3,225-call day in hours
+// (15 Nov 21:20Z) and left listed charts empty.
 // From this runner, with Origin APP_HOST, it reads two charts at tf 1m, the newest range: BONK on Solana (a busy pool off
-// the lists) and the first row of Base's Discover lists (a Base pool, our book's bars after the history). Each is read
-// again every READ_EVERY_MS while its answer is not yet keyed, within SPAN_MS: bars a deploy's old helper read keyless
-// are handed to the new one and served, named geckoterminal, until their re-read (the newest range 60 s, solana/token.ts
-// CANDLES_FRESH_MS; the history before a book's first 1m bar is a new range for each helper's book). Want: each chart
-// answered 200 with bars and a src whose parts include "coingecko" inside the span.
+// the lists) and the first row of Base's Discover lists. Each is read again every READ_EVERY_MS while its answer is not
+// yet full, within SPAN_MS, as the page reads a filling chart again. Want: each chart answered 200, not filling, with at
+// least FULL_BARS bars (both picks trade every minute; live run 43776130630 read Base DRB, 1.7 years old and 1,648
+// trades a day, as 1 bar, src chain, after 9 reads), and a src made of our own reads or CoinGecko's, GeckoTerminal's only
+// as the history before them: "chain" or "coingecko" among its parts, and no part outside the three.
 // After: helper
 //   node scripts/live-checks/helper-candles-keyed-gt.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
@@ -22,6 +23,10 @@ export const APP = "https://ct-app.unrealized.trade";
 /** BONK: a busy Solana pool off Discover's lists, its chart CoinGecko's bars alone. */
 export const BONK = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
 export const KEYED = "coingecko";
+/** The sources a chart's src may name, and the bars a full chart of a coin that trades every minute holds [design: 100
+ *  of the newest range's 500: more than an hour and a half of 1m bars]. */
+export const SOURCES = ["chain", "coingecko", "geckoterminal"];
+export const FULL_BARS = 100;
 /** How long a chart is read for a keyed answer [design: a held newest range's 60 s and a page read's wait]. */
 export const SPAN_MS = 90_000;
 export const READ_EVERY_MS = 10_000;
@@ -51,6 +56,13 @@ export function shapeOf(body) {
 }
 /** Whether an answer's src names the keyed source among its parts ("coingecko", "chain,coingecko"). */
 export const keyed = (src) => typeof src === "string" && src.split(",").includes(KEYED);
+/** Whether a src is our own reads or CoinGecko's, GeckoTerminal's only as the history before them. */
+export const ours = (src) => {
+  const parts = typeof src === "string" ? src.split(",") : [];
+  return parts.length > 0 && parts.every((p) => SOURCES.includes(p)) && (parts.includes("chain") || parts.includes(KEYED));
+};
+/** Whether one read is a full chart. */
+export const full = (r) => r.status === 200 && r.filling !== true && r.bars >= FULL_BARS && ours(r.src);
 
 /** The first Base token of a lists answer (Trending 1h's first row, else any list's), or null. */
 export function firstListed(body) {
@@ -70,7 +82,7 @@ async function chart(base, chain, token, fetchFn, wait) {
     const a = await ask(base, `/v1/market/candles?chain=${chain}&token=${token}&tf=1m`, fetchFn);
     const s = a.status === 200 ? shapeOf(a.body) : null;
     reads.push({ status: a.status, ms: a.ms, ...(s === null ? { body: a.body.slice(0, 120) } : s.bad !== undefined ? { shape: s.bad } : s), ...(a.error ? { error: a.error } : {}) });
-    if ((a.status === 200 && s?.bars > 0 && keyed(s.src)) || Date.now() - t0 + READ_EVERY_MS > SPAN_MS) return reads;
+    if (full(reads.at(-1)) || Date.now() - t0 + READ_EVERY_MS > SPAN_MS) return reads;
     await wait(READ_EVERY_MS);
   }
 }
@@ -98,7 +110,7 @@ export function judge(run) {
     if (chain === "solana" && c.address !== BONK) say(false, `solana: ${c.address} read, not BONK`);
     const last = c.reads.at(-1);
     const srcs = [...new Set(c.reads.map((r) => r.src ?? `${r.status}`))].join(" then ");
-    say(last.status === 200 && last.bars > 0 && keyed(last.src), `${chain} ${c.address}: ${last.status === 200 ? `${last.bars} bars, src ${last.src}` : `${last.status} ${last.body ?? last.shape ?? last.error ?? ""}`.trim()} after ${c.reads.length} read(s) (${srcs}); want bars and src naming ${KEYED}`);
+    say(full(last), `${chain} ${c.address}: ${last.status === 200 ? `${last.bars} bars${last.filling ? ", filling" : ""}, src ${last.src}` : `${last.status} ${last.body ?? last.shape ?? last.error ?? ""}`.trim()} after ${c.reads.length} read(s) (${srcs}); want ${FULL_BARS} bars or more, not filling, src our own reads or ${KEYED}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
