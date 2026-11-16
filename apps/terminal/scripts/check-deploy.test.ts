@@ -188,7 +188,7 @@ const ENV = { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" };
 // `host`'s part (the build the deploy makes from BUILD, unless a test says otherwise), written by release-list.mjs
 // --print --build (run, not imported: this file is outside packages/), its row in the ledger as written. `text`
 // replaces the list's bytes (an unreadable list), `ledger` the ledger.
-const RELEASE_LIST = join(HERE, "..", "..", "..", "packages", "signpage", "scripts", "release-list.mjs");
+const RELEASE_LIST = join(HERE, "..", "..", "..", "packages/signpage/scripts/release-list.mjs");
 const lists = ({ from = BUILD, text = null as string | null, host = "app", ledger = null as Record<string, string> | null } = {}) => {
   const dir = mkdtempSync(join(tmpdir(), "deploy-releases-"));
   let body = text;

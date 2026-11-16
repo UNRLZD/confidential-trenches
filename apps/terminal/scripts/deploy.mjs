@@ -68,7 +68,7 @@ export function build(env = process.env, run = spawnSync, repo = REPO) {
   return { dir, problems: [`the build failed (vite exit ${r.status ?? r.signal})${tail(r) ? `: ${tail(r)}` : ""}`] };
 }
 
-export const RELEASE_LIST = join(REPO, "packages", "signpage", "scripts", "release-list.mjs");
+export const RELEASE_LIST = join(REPO, "packages/signpage/scripts/release-list.mjs");
 
 /** Why the newest committed release list does not name the build folder `dir` as APP_HOST's (empty = it names it):
  *  release-list.mjs --unreleased, its lines; `released` ({ dir, ledger }: a releases folder and a ledger JSON file) a
