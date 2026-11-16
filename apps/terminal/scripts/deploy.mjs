@@ -6,15 +6,16 @@
 // HEAD's lockfile (`pnpm install --frozen-lockfile` first). An uncommitted change anywhere in the tree (the build
 // bundles the kit and the wallet too), no HEAD, a failed install, a failed build or a gate refusal stops here, before
 // a token is read or a byte is uploaded. The gate (check-deploy.ts) runs on the build's own
-// _headers. Then the newest committed release list (packages/signpage/releases, newest by N, read from this clean
-// checkout) must name the build: every file APP_HOST would serve, by path, sha256, sha384 and headers, and the _headers
-// file, held to the list's APP_HOST part by release-list.mjs unreleasedProblems, the sign deploy's own comparer (card
-// app-deploy-refuses-an-unlisted-build). No list, a list it cannot read, a list edited after it was written or one with
-// no APP_HOST part refuses too, each REFUSED line naming the list and the first one the first file that differs, before
-// a token is read or a byte is uploaded: a change merged after a release was cut that moves the app's bundle lands on
-// APP_HOST only with the next release. --dry-run stops after these and keeps the build folder, so it can be served; it
-// builds a work in progress too, and says a deploy would refuse it, with the lines. A testnet build is VITE_NEAR_NETWORK=testnet in the environment
-// (build/network.mjs). The upload is wrangler's `pages deploy`, at an exact version, run from an empty directory so no
+// _headers. Then the newest committed release list (packages/signpage/releases, newest by N, read from this checkout,
+// which a deploy holds clean) must name the build: every file APP_HOST would serve, by path, sha256, sha384 and headers,
+// and the _headers file, held to the list's APP_HOST part by release-list.mjs unreleasedProblems, the sign deploy's own
+// comparer (card app-deploy-refuses-an-unlisted-build). No list, a list it cannot read, a list edited after it was
+// written or one with no APP_HOST part refuses too, each REFUSED line naming the list, the first one the first file that
+// differs, before a token is read or a byte is uploaded: a change merged after a release was cut that moves the app's
+// bundle lands on APP_HOST only with the next release. --dry-run stops after these and keeps the build folder, so it can
+// be served; it builds a work in progress too, and says a deploy would refuse it, with the lines. A testnet build is
+// VITE_NEAR_NETWORK=testnet in the environment (build/network.mjs); a list is cut from the mainnet build, so a deploy
+// refuses a testnet build. The upload is wrangler's `pages deploy`, at an exact version, run from an empty directory so no
 // functions/ folder can ride along (Pages applies no _headers rule to a Function's response). It needs
 // CLOUDFLARE_API_TOKEN (a Pages-only token) and CLOUDFLARE_ACCOUNT_ID in the environment; neither is printed. A wrangler
 // exit 0 is not done: APP_HOST must then serve this build's / and main bundle (scripts/pages-readback.mjs, card
