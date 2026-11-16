@@ -1,0 +1,414 @@
+{
+ "note": "good: this card's helper RPC in process (branch card/base-reads-capacity), recorded 2026-11-16 12:4xZ by running the check's own read() with a fetch that answers /v1/health as {ok, rpc: createRpc(env).keyed()} after three probe() rounds 400 ms apart, and POST /v1/rpc/<chain>[?keyed=only] as createRpc(env).handle(chain, \"application/json\", body, client, false, keyedOnly) with its Server-Timing (timing joined, as server.ts sends it) and Access-Control-Allow-Origin SIGN_HOST; env: made-up QuickNode (Base, Robinhood), Alchemy (Robinhood), FastNEAR and NEAR dRPC, and three dRPC keys' URLs (lb.drpc.live) whose providers answer eth_chainId 0x2105 / 0x1237, NEAR status mainnet, eth_blockNumber, a finalized block and eth_getLogs []; Base's head 2,500 blocks past the pool's deploy block, and the store filled by one whole-range read 4 s before the run. bad_deploy: the deployed helper at aaf64aa02 (release 167, PR 905's shared dRPC hold), recorded with --record on 2026-11-16 12:40Z: Base dRPC key2 and key3 held, Robinhood's three keys and NEAR's dRPC unread, every keyed Base eth_getLogs 429 (Retry-After 12, 8, 3); its store was filling (57,711,870 then 57,718,570 in 30 s, 489,286 behind the finalized head).",
+ "good": {
+  "base": "http://in-process.test",
+  "health": {
+   "status": 200,
+   "body": "{\"ok\":true,\"rpc\":{\"solana\":[],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]}}"
+  },
+  "reads": [
+   {
+    "chain": "base",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 0,
+    "result": "0x33cfb6b",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"BASE_RPC_URL_QUICKNODE\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 0,
+    "result": [],
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"BASE_RPC_URL_DRPC_1\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 0,
+    "result": "0x6e55a85",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 0,
+    "result": [],
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 0,
+    "result": "0x33cfb6b",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"BASE_RPC_URL_QUICKNODE\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 0,
+    "result": [],
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-cache;desc=\"hit\", rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 0,
+    "result": "0x6e55a85",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 0,
+    "result": [],
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 0,
+    "result": "0x33cfb6b",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"BASE_RPC_URL_QUICKNODE\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 0,
+    "result": [],
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-cache;desc=\"hit\", rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 0,
+    "result": "0x6e55a85",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 0,
+    "result": [],
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   }
+  ],
+  "store": [
+   {
+    "chain": "base",
+    "method": "eth_getBlockByNumber",
+    "keyed": false,
+    "ms": 1,
+    "result": {
+     "number": "0x33cfb57"
+    },
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"BASE_RPC_URL_QUICKNODE\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 0,
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-cache;desc=\"hit\", rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "logs": 0
+   }
+  ]
+ },
+ "bad_deploy": {
+  "base": "https://ct-api.unrealized.trade",
+  "health": {
+   "status": 200,
+   "body": "{\"ok\":true,\"commit\":\"aaf64aa02a703a3e1e31b35283b05285b3ae5944\",\"release\":167,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 held\",\"drpc.live key3 held\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 unread\",\"drpc.live key2 unread\",\"drpc.live key3 unread\"],\"near\":[\"fastnear.com answers\",\"drpc.live unread\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+  },
+  "reads": [
+   {
+    "chain": "base",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 439,
+    "result": "0x3783f4a",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=98;desc=\"public\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 1781,
+    "noAnswer": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests",
+    "kept": {
+     "retry-after": "12",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 205,
+    "result": "0x6e67a48",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=11;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 211,
+    "result": [],
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=17;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 326,
+    "result": "0x3783f60",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=58;desc=\"public\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 1432,
+    "noAnswer": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests",
+    "kept": {
+     "retry-after": "8",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 213,
+    "result": "0x6e67a71",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=17;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 207,
+    "result": [],
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=13;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 340,
+    "result": "0x3783f75",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=72;desc=\"public\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 1432,
+    "noAnswer": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests",
+    "kept": {
+     "retry-after": "3",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_blockNumber",
+    "keyed": false,
+    "ms": 205,
+    "result": "0x6e67a9a",
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=12;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "robinhood",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 209,
+    "result": [],
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=15;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   }
+  ],
+  "store": [
+   {
+    "chain": "base",
+    "method": "eth_getBlockByNumber",
+    "keyed": false,
+    "ms": 252,
+    "result": {
+     "number": "0x3782e70"
+    },
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=21;desc=\"public\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 194,
+    "error": {
+     "code": -32602,
+     "message": "eth_getLogs range too wide, maximum block range: 10000",
+     "data": "pool logs kept to block 57711870"
+    },
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   {
+    "chain": "base",
+    "method": "eth_getLogs",
+    "keyed": true,
+    "ms": 1852,
+    "error": {
+     "code": -32602,
+     "message": "eth_getLogs range too wide, maximum block range: 10000",
+     "data": "pool logs kept to block 57718570"
+    },
+    "kept": {
+     "retry-after": null,
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade"
+   }
+  ]
+ }
+}

@@ -242,6 +242,16 @@ export const POOL_FILL_FAILS = 20;
 /** How often a running fill writes its store to HELPER_STORE_DIR (and once when it ends). [design: a minute: 360 pages
  *  at most are read again after a crash.] */
 export const POOL_WRITE_MS = 60_000;
+/** At the head the fill follows it, reading the finalized head again this often (card base-reads-never-throttled): a
+ *  fill that ended at the head left the store behind by Base's 5 blocks a second, so after about 15 min a device's
+ *  whole-range read had a tail past the store (that lag plus the 5,362 unfinalized blocks read 16 Nov 12:55Z on
+ *  mainnet.base.org) wider than the route's 10,000 and was answered "maximum block range: 10000", paging 10,000 at a
+ *  time to the head (the wallet's restore, 16 Nov 11:59-12:06Z). [design: a minute: 300 of Base's blocks behind at
+ *  most, so a tail stays near 5,700; 1,440 head reads and as many pages a day, a chain.] */
+export const POOL_FOLLOW_EVERY_MS = 60_000;
+/** The follow ends after this long with no pool read through the route, and the next read starts the fill again.
+ *  [design: 6 h: a quiet night costs no reads past it; the read that ends one is answered the route's cap once.] */
+export const POOL_FOLLOW_IDLE_MS = 6 * 60 * 60_000;
 /** A provider's refusal of a fill page (its 429 or rate error) holds that provider for the fill alone, never for a
  *  caller: the wait it names or 2^k s, whichever is longer, k its refusals of the fill in a row less its pages served
  *  since, at most this many. [design: live 16 Nov 02:50-03:17Z the fill's 429s held dRPC's keys for every caller, about
@@ -1070,8 +1080,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   };
   /** The chain's own pool, as the kit pins it (lowercase), for POOL_LOGS_CLIENT; undefined off the EVM chains. */
   const poolOf = (c: RpcChain): string | undefined => (EVM_CHAINS.has(c) ? (evmPoolVenues() as Readonly<Record<string, { pool?: string } | undefined>>)[c]?.pool?.toLowerCase() : undefined);
-  // each EVM chain's finalized head as the helper last read it (0n: none yet), when, and the read in flight
-  const finalHeads = new Map<RpcChain, { n: bigint; at: number; reading?: Promise<void> }>();
+  // each EVM chain's finalized head as the helper last read it (0n: none yet), when, the read in flight, and whether
+  // the last read failed (no head named), which the fill waits out instead of ending (card base-reads-never-throttled)
+  const finalHeads = new Map<RpcChain, { n: bigint; at: number; reading?: Promise<void>; failed?: boolean }>();
   /** Whether block `to` is finalized on `c`, by the helper's own read of the head on `providers` (the chain's keyed
    *  URLs): read again only when `to` is past the head held and FINAL_HEAD_MS has passed since the last read, one read at
    *  a time, outside the caller's trace and share (the chain's total, as the helper's own reads). A head only rises. */
@@ -1084,11 +1095,14 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       head.at = now();
       // the helper's own head read, no caller's: its hold lines name it so (card base-reads-never-starve-max)
       const forward = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["finalized", false] });
+      head.failed = true;
       head.reading = traces.run({ waitMs: 0, shape: `helper ${rpcShape(JSON.parse(forward))}` }, async () => {
         const a = await callList(c, providers, forward, ["eth_getBlockByNumber"], undefined, false, now() + WALK_MS);
         if (a.status !== 200) return;
         const n = (JSON.parse(a.body) as { result?: { number?: unknown } | null }).result?.number;
-        if (typeof n === "string" && BLOCK_NUMBER.test(n) && BigInt(n) > head.n) head.n = BigInt(n);
+        if (typeof n !== "string" || !BLOCK_NUMBER.test(n)) return;
+        head.failed = false;
+        if (BigInt(n) > head.n) head.n = BigInt(n);
       })
         .catch(() => undefined)
         .finally(() => (head.reading = undefined));
@@ -1102,6 +1116,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const storeDir = env.HELPER_STORE_DIR ?? "";
   const stores = new Map<RpcChain, PoolStore & { started: boolean }>();
   const fills = new Map<RpcChain, Promise<void>>();
+  // when a pool read last came through the keyed route on each chain: the fill follows the head while they come
+  const poolReadAt = new Map<RpcChain, number>();
   /** The chain's pool store: only the kit's pinned pool with a deploy block named (POOL_LOGS_FROM); else undefined. */
   const storeOf = (c: RpcChain): (PoolStore & { started: boolean }) | undefined => {
     const pool = poolOf(c);
@@ -1182,7 +1198,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const fillLast = { at: -Infinity };
   const fillPool = (c: RpcChain, own: readonly string[]): void => {
     const s = storeOf(c);
-    if (s === undefined || fills.has(c)) return;
+    if (s === undefined) return;
+    poolReadAt.set(c, now());
+    if (fills.has(c)) return;
     s.started = true;
     const file = poolFile(storeDir, c);
     const save = (): void => {
@@ -1202,11 +1220,25 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       let waits = 0;
       let soonest = Infinity;
       let wrote = now();
-      const covered0 = s.covered;
+      let saved = s.covered;
+      let named = -1n;
       for (;;) {
         await finalized(c, s.covered + 1n, own);
-        const head = finalHeads.get(c)?.n ?? 0n;
-        if (s.covered >= head) break;
+        const h = finalHeads.get(c);
+        const head = h?.n ?? 0n;
+        if (s.covered >= head) {
+          // card base-reads-never-throttled: at the head the store stays there. The fill names it once, writes it, and
+          // follows the head (POOL_FOLLOW_EVERY_MS) while pool reads come (POOL_FOLLOW_IDLE_MS). A head read that
+          // failed (every provider held or refusing, as dRPC's code 15 on 16 Nov) is read again at its next turn
+          // (FINAL_HEAD_MS), so the store never stands still waiting for a device's read past it
+          if (now() - (poolReadAt.get(c) ?? -Infinity) >= POOL_FOLLOW_IDLE_MS) break;
+          if (h?.failed !== true && named !== s.covered) {
+            if (s.covered > saved) (save(), (saved = s.covered), (wrote = now()));
+            log(`rpc pool-logs ${c} covered to ${(named = s.covered)}`);
+          }
+          await fillSleep(h?.failed === true ? FINAL_HEAD_MS : POOL_FOLLOW_EVERY_MS);
+          continue;
+        }
         const list = wide ? whole : paged;
         if (list.length === 0) break;
         const a = s.covered + 1n;
@@ -1237,10 +1269,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           log(`rpc pool-logs ${c} store full at block ${a}`);
           break;
         }
-        if (now() - wrote >= POOL_WRITE_MS) (save(), (wrote = now()));
+        if (now() - wrote >= POOL_WRITE_MS) (save(), (saved = s.covered), (wrote = now()));
       }
-      if (s.covered > covered0) save();
-      log(`rpc pool-logs ${c} covered to ${s.covered}`);
+      if (s.covered > saved) save();
+      if (named !== s.covered) log(`rpc pool-logs ${c} covered to ${s.covered}`);
     })()
       .catch(() => undefined)
       .finally(() => fills.delete(c));
@@ -1358,6 +1390,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         const topics = logs.pool && Object.keys(filter).every((k) => k === "address" || k === "topics" || k === "fromBlock" || k === "toBlock") ? topicsOf(filter.topics) : null;
         const s = topics === null ? undefined : storeOf(c);
         if (s !== undefined && topics !== null && logs.from >= s.from) {
+          poolReadAt.set(c, now());
           if (s.started && logs.to > s.covered) fillPool(c, own);
           if (logs.from <= s.covered) {
             const kept = storeLogs(s, logs.from, logs.to < s.covered ? logs.to : s.covered, topics);
