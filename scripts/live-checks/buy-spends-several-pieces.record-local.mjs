@@ -1,5 +1,5 @@
 // The recorded answers of buy-spends-several-pieces.answers.json: the live check's own read() of each pool it reads
-// (poolsToRead: each cluster's record pool and both pools of the devnet move) against a tree's helper senders in process
+// (RECORDED_ON: both pools of the devnet move) against a tree's helper senders in process
 // (apps/helper/src/pool/solana.ts solanaPoolSender, one per program; its carryPieces for /v1/pool/solana/pieces), a
 // throwaway fee payer made here, the fee 1,300,000, and RPCs that answer a simulation as a public RPC does for a
 // blockhash it never made ("BlockhashNotFound"). Nothing is sent: the sender's send throws. Each answer carries the
@@ -10,7 +10,7 @@
 import { createPublicKey, generateKeyPairSync } from "node:crypto";
 import { solanaPoolSender } from "../../apps/helper/src/pool/solana.ts";
 import { b58encode } from "./helper-pool-senders.mjs";
-import { poolsToRead } from "./pool-senders-next-page-helper.mjs";
+import { RECORDED_ON } from "./pool-senders-next-page-helper.mjs";
 import { read } from "./buy-spends-several-pieces.mjs";
 
 const commit = process.argv[2];
@@ -28,7 +28,7 @@ const rpc = (i) =>
 const k = generateKeyPairSync("ed25519");
 const seed = k.privateKey.export({ format: "der", type: "pkcs8" }).subarray(-32);
 const pub = createPublicKey(k.privateKey).export({ format: "der", type: "spki" }).subarray(-32);
-const want = poolsToRead();
+const want = RECORDED_ON.map((m) => ({ cluster: "devnet", ...m }));
 const senders = new Map();
 for (const w of want) {
   const s = solanaPoolSender(

@@ -1,5 +1,5 @@
 // The good answer of pool-senders-next-page-helper.answers.json: the live check's own read() of each pool it reads
-// (poolsToRead: both pools of the devnet move, DEVNET_MOVE) against this tree's helper senders in process
+// (RECORDED_ON: both pools of the devnet move) against this tree's helper senders in process
 // (apps/helper/src/pool/solana.ts solanaPoolSender, one per program, as solanaPoolSendersFromEnv makes them), devnet, a
 // throwaway fee payer made here, the
 // Rent sysvar at mainnet's 5,080 a byte (the fee 1,300,000, as the devnet helper publishes it), and RPCs that answer a
@@ -13,13 +13,13 @@ import { generateKeyPairSync, createPublicKey } from "node:crypto";
 import { solanaPoolSender } from "../../apps/helper/src/pool/solana.ts";
 import { solanaPoolAccount } from "../../packages/kit/src/index.ts";
 import { b58encode } from "./helper-pool-senders.mjs";
-import { poolsToRead, read } from "./pool-senders-next-page-helper.mjs";
+import { read, RECORDED_ON } from "./pool-senders-next-page-helper.mjs";
 
 const commit = process.argv[2];
 if (!/^[0-9a-f]{40}$/.test(commit ?? "")) throw new Error("usage: record-local.mjs <40-hex commit>");
 const only = process.argv.includes("--only") ? process.argv[process.argv.indexOf("--only") + 1] : undefined;
-// each devnet program the move serves (pool-senders-next-page-helper.mjs DEVNET_MOVE), or only the one --only names
-const want = poolsToRead().filter((w) => w.cluster === "devnet" && w.program);
+// each devnet program the move serves (pool-senders-next-page-helper.mjs RECORDED_ON), or only the one --only names
+const want = RECORDED_ON.map((m) => ({ cluster: "devnet", ...m }));
 const programs = want.map((w) => w.program).filter((p) => only === undefined || p === only);
 if (programs.length === 0) throw new Error("no devnet program to serve");
 for (const w of want) if (solanaPoolAccount(w.program) !== w.pool) throw new Error(`${w.pool} is not ${w.program}'s pool`);

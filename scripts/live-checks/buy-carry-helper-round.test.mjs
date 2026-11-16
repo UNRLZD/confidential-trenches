@@ -40,11 +40,11 @@ test("made from the good answer: a round refused on its shape, a round answered 
   assert.equal(judgeAll([]).ok, false);
 });
 
-test("the pools: the mainnet deploy record's pool first, then poolsToRead's; the recorded runs read each", () => {
+test("the pools: the mainnet deploy record's pool, once (poolsToRead names the same pool); the recorded runs read it", () => {
   const want = poolsHere();
-  assert.equal(want[0].cluster, "mainnet");
-  assert.equal(want[0].pool, loadRecord().pool, "the pool helper-sol-fee-payer-mainnet reads from the mainnet deploy record");
-  assert.deepEqual(A.good.map((r) => `${r.cluster} ${r.pool}`), want.map((w) => `${w.cluster} ${w.pool}`));
+  assert.deepEqual(want.map((w) => `${w.cluster} ${w.pool}`), [`mainnet ${loadRecord().pool}`], "the mainnet pool alone: the helper serves no test network's pool (card helper-mainnet-pools-only)");
+  // the recordings (11 Nov) also read the devnet move's two pools, then served; the mainnet run comes first
+  assert.deepEqual(A.good.map((r) => `${r.cluster} ${r.pool}`).slice(0, 1), want.map((w) => `${w.cluster} ${w.pool}`));
 });
 
 test("the plants: every one tag 2s only; one W signs both of round, two Ws two_wallets, one nullifier twice in nullifier_twice", () => {

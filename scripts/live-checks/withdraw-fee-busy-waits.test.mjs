@@ -1,5 +1,7 @@
 // node --test scripts/live-checks/withdraw-fee-busy-waits.test.mjs: the live check replays recorded answers
-// (withdraw-fee-busy-waits.answers.json). good: the deployed helper, both fee routes 200 with Retry-After exposed: PASS.
+// (withdraw-fee-busy-waits.answers.json). good: the deployed helper, both fee routes 200 with Retry-After exposed, the pool
+// fee the mainnet pool's (re-recorded 16 Nov for card helper-mainnet-pools-only, the helper serving no devnet pool): PASS.
+// good_busy and bad_pre_card were recorded on the devnet pool, and each is replayed on the pool it was recorded on (atOf).
 // good_busy: this card's helper with its providers down, both routes 503 upstream with Retry-After 2: PASS.
 // bad_pre_card: origin/main's helper the same way, 503 upstream with no Retry-After: FAIL. Planted from them: a 500, a
 // busy answer with another code, a Retry-After of 0 or past 75, Retry-After not exposed, another origin: FAIL; a route
@@ -12,7 +14,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { asks, commitPin, DEVNET_POOL, judge, judgeSign, MAINNET_USDC, read, readSign, SIGN } from "./withdraw-fee-busy-waits.mjs";
+import { asks, commitPin, judge, judgeSign, MAINNET_POOL, MAINNET_USDC, read, readSign, SIGN } from "./withdraw-fee-busy-waits.mjs";
 import { TOKENS } from "./relayer-withdraw-fee.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -27,11 +29,21 @@ const replay = (run) => async (url, init) => {
   if (r.noAnswer !== undefined) throw new TypeError("fetch failed");
   return new Response(r.body, { status: r.status, headers: r.headers });
 };
+/** The { cluster, pool } a recorded run asked the pool fee of: a replay judges each run on the pool it was recorded on. */
+const atOf = (run) => {
+  const u = new URL(run.reads.find((r) => r.route === "pool-fee").asked, "https://h.test");
+  return { cluster: u.searchParams.get("cluster"), pool: u.searchParams.get("pool") };
+};
 const edit = (run, route, f) => ({ ...run, reads: run.reads.map((r) => (r.route === route ? f(structuredClone(r)) : r)) });
 
-test("the check asks the device's two fee routes: mainnet USDC (relayer-withdraw-fee's) and the devnet pool of its deploy record", () => {
+test("the check asks the device's two fee routes: mainnet USDC (relayer-withdraw-fee's) and the mainnet pool of its deploy record", () => {
   assert.equal(MAINNET_USDC, TOKENS.mainnet);
-  assert.deepEqual(asks().map((a) => a.path), [`/v1/withdraw/fee?token=${MAINNET_USDC}`, `/v1/pool/fee?cluster=devnet&pool=${DEVNET_POOL}`]);
+  const rec = JSON.parse(readFileSync(path.join(HERE, "../../contracts/pool-solana/deployments/mainnet.json"), "utf8"));
+  assert.deepEqual(MAINNET_POOL, { cluster: "mainnet", pool: rec.pool });
+  assert.deepEqual(asks().map((a) => a.path), [`/v1/withdraw/fee?token=${MAINNET_USDC}`, `/v1/pool/fee?cluster=mainnet&pool=${rec.pool}`]);
+  assert.deepEqual(atOf(A.good), MAINNET_POOL, "the good answer is the mainnet pool's");
+  // planted: the good answer judged as if the helper were asked for a devnet pool: the pool fee read is not the one asked
+  assert.equal(judge(A.good, { cluster: "devnet", pool: atOf(A.good_busy).pool }).verdict, "FAIL");
 });
 
 test("recorded good answer (the deployed helper, both routes 200, Retry-After exposed): PASS", async () => {
@@ -40,12 +52,12 @@ test("recorded good answer (the deployed helper, both routes 200, Retry-After ex
 });
 
 test("recorded good busy answer (this card's helper, its providers down: 503 upstream, Retry-After 2): PASS", async () => {
-  const r = judge(await read(A.good_busy.base, replay(A.good_busy)));
+  const r = judge(await read(A.good_busy.base, replay(A.good_busy), atOf(A.good_busy)), atOf(A.good_busy));
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
 });
 
 test("recorded bad answer (origin/main's helper, its providers down: 503 upstream naming no wait): FAIL", async () => {
-  const r = judge(await read(A.bad_pre_card.base, replay(A.bad_pre_card)));
+  const r = judge(await read(A.bad_pre_card.base, replay(A.bad_pre_card), atOf(A.bad_pre_card)), atOf(A.bad_pre_card));
   assert.equal(r.verdict, "FAIL");
   assert.ok(r.lines.some((l) => /^BAD \[withdraw-fee\] 503 names its wait: Retry-After none/.test(l)), r.lines.join("\n"));
 });
@@ -64,6 +76,7 @@ test("planted: a 500, a busy status with another code, a Retry-After of 0 or pas
     ["another origin", edit(A.good, "pool-fee", (r) => ((r.headers["access-control-allow-origin"] = "*"), r))],
     ["a 200 that is not the fee", edit(A.good, "withdraw-fee", (r) => ({ ...r, body: '{"relay_fee":"1"}' }))],
     ["a 200 for another pool", edit(A.good, "pool-fee", (r) => ({ ...r, body: JSON.stringify({ ...JSON.parse(r.body), pool: "x" }) }))],
+    ["a 200 naming another cluster", edit(A.good, "pool-fee", (r) => ({ ...r, body: JSON.stringify({ ...JSON.parse(r.body), cluster: "devnet" }) }))],
     ["a route missing", { ...A.good, reads: A.good.reads.slice(0, 1) }],
   ]) assert.equal(judge(run).verdict, "FAIL", what);
   const quiet = judge(edit(A.good, "pool-fee", (r) => ({ route: r.route, asked: r.asked, noAnswer: "127.0.0.1: no answer (ECONNREFUSED)" })));
