@@ -1,0 +1,219 @@
+{
+ "read": "2026-11-16T07:58:54.032Z",
+ "rpc": "https://rpc.mainnet.fastnear.com",
+ "height": 224789002,
+ "number_of_pools": 9021,
+ "note": "every SIMPLE_POOL of Rhea classic (v2.ref-finance.near get_pools) holding a cut token, and the wNEAR/USDC pool holding the most wNEAR, at one final block",
+ "pools": [
+  {
+   "id": 8812,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "wrap.near",
+    "hoot-8ecf65.launchpad.justhoot.near"
+   ],
+   "amounts": [
+    "41521731399684656694786870",
+    "119536051367652819817825"
+   ],
+   "total_fee": 2000,
+   "shares_total_supply": "332740252868750909487412",
+   "amp": 0
+  },
+  {
+   "id": 8813,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "wrap.near",
+    "hoot-8ecf65.launchpad.justhoot.near"
+   ],
+   "amounts": [
+    "0",
+    "0"
+   ],
+   "total_fee": 2000,
+   "shares_total_supply": "0",
+   "amp": 0
+  },
+  {
+   "id": 8814,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "wrap.near",
+    "hoot-8ecf65.launchpad.justhoot.near"
+   ],
+   "amounts": [
+    "0",
+    "0"
+   ],
+   "total_fee": 2000,
+   "shares_total_supply": "0",
+   "amp": 0
+  },
+  {
+   "id": 8815,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "wrap.near",
+    "hoot-8ecf65.launchpad.justhoot.near"
+   ],
+   "amounts": [
+    "1360631564351846392937768",
+    "3938604466701683845103"
+   ],
+   "total_fee": 500,
+   "shares_total_supply": "132010951769581708698019",
+   "amp": 0
+  },
+  {
+   "id": 8816,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "wrap.near",
+    "hoot-8ecf65.launchpad.justhoot.near"
+   ],
+   "amounts": [
+    "0",
+    "0"
+   ],
+   "total_fee": 500,
+   "shares_total_supply": "0",
+   "amp": 0
+  },
+  {
+   "id": 8817,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "wrap.near",
+    "hoot-8ecf65.launchpad.justhoot.near"
+   ],
+   "amounts": [
+    "0",
+    "0"
+   ],
+   "total_fee": 500,
+   "shares_total_supply": "0",
+   "amp": 0
+  },
+  {
+   "id": 8818,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "wrap.near",
+    "hoot-8ecf65.launchpad.justhoot.near"
+   ],
+   "amounts": [
+    "0",
+    "0"
+   ],
+   "total_fee": 500,
+   "shares_total_supply": "0",
+   "amp": 0
+  },
+  {
+   "id": 8825,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "hoot-8ecf65.launchpad.justhoot.near",
+    "wrap.near"
+   ],
+   "amounts": [
+    "0",
+    "0"
+   ],
+   "total_fee": 60,
+   "shares_total_supply": "0",
+   "amp": 0
+  },
+  {
+   "id": 8915,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "wth-0b2227.launchpad.justhoot.near",
+    "wrap.near"
+   ],
+   "amounts": [
+    "32956842301434385579562",
+    "175951681695962949648750"
+   ],
+   "total_fee": 1000,
+   "shares_total_supply": "12331868619479746590840",
+   "amp": 0
+  },
+  {
+   "id": 8943,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "nene-2250.meme-cooking.near",
+    "wrap.near"
+   ],
+   "amounts": [
+    "169596468813326072204108329",
+    "293016517872527700713790069"
+   ],
+   "total_fee": 10,
+   "shares_total_supply": "1001930872122154044997301",
+   "amp": 0
+  },
+  {
+   "id": 9004,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "pmoney-4.nearlytrade.near",
+    "wrap.near"
+   ],
+   "amounts": [
+    "98550461545035245413",
+    "1103232751055373829855"
+   ],
+   "total_fee": 1000,
+   "shares_total_supply": "215943441669784648145",
+   "amp": 0
+  },
+  {
+   "id": 9010,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "prl.omft.near",
+    "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"
+   ],
+   "amounts": [
+    "93948057674",
+    "1540368497"
+   ],
+   "total_fee": 30,
+   "shares_total_supply": "38298399875721616676137836",
+   "amp": 0
+  },
+  {
+   "id": 9020,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "hoot-8ecf65.launchpad.justhoot.near",
+    "lumos.lumoscore.near"
+   ],
+   "amounts": [
+    "581674904060000000000",
+    "1501015560030000000000"
+   ],
+   "total_fee": 30,
+   "shares_total_supply": "1000000000000000000000000",
+   "amp": 0
+  },
+  {
+   "id": 4512,
+   "pool_kind": "SIMPLE_POOL",
+   "token_account_ids": [
+    "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "wrap.near"
+   ],
+   "amounts": [
+    "904268186136",
+    "283294047776940368192457855923"
+   ],
+   "total_fee": 30,
+   "shares_total_supply": "93906238172907371644846823764",
+   "amp": 0
+  }
+ ]
+}

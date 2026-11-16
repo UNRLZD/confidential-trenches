@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { ROW_FIELDS } from "../../../../terminal/src/screens/discover/fields.ts";
 import { PAGE_FIELDS, RISK_FIELDS } from "../solana/token.ts";
 import { createEngineNear, engineFirst, engineRisk, engineRow, ENGINE, LISTS_MS, STALE_MS } from "./engine.ts";
+import { mainsOf, parsePools, routesOf, type Pool, type Scan } from "./lists.ts";
 import type { NearMarket } from "./token.ts";
 import type { Fetch } from "./views.ts";
 
@@ -39,10 +40,16 @@ function engine(opts: { down?: boolean; asked?: string[]; clock?: { t: number } 
   return createEngineNear({ fetch, now: () => clock.t });
 }
 
-/** Rhea's reads as the fallback: each answer names itself, so a test sees which source served it. */
-const rhea = (asked: string[]): NearMarket =>
+/** A Rhea pool read that routes every token named (each at 10^30, past any floor), and no main pool. */
+const routing = (tokens: readonly string[]): Scan => ({ height: 1, t_ms: AT, mains: new Map(), nearUsd: null, routes: new Map(tokens.map((t) => [t, 10n ** 30n])) });
+/** Every coin of the 2026-11-14 lists routed: what these tests read before card near-listed-coin-quotes. */
+const ROUTED_11_14 = routing(["whatsnow.v2-launchpad.justhoot.near", "xoe.token.primitives.near", "token.ctoads.near", T, "yuvi-6c041e37.qlyphs.near", "qtc.omft.near", "d9c2d319cd7e6177336b0a9c93c21cb48d84fb54.factory.bridge.near", "prl.omft.near", "token.rhealab.near", "token.publicailab.near"]);
+
+/** Rhea's reads as the fallback: each answer names itself, so a test sees which source served it. `scan`: its latest
+ *  pool read (lists.ts scan), whose routes the engine's lists keep. */
+const rhea = (asked: string[], scan: Scan | null = ROUTED_11_14): NearMarket =>
   ({
-    lists: { get: async () => (asked.push("rhea lists"), { status: 200, body: '{"rhea":true}' }), scan: () => null },
+    lists: { get: async () => (asked.push("rhea lists"), { status: 200, body: '{"rhea":true}' }), scan: () => scan },
     token: { page: async () => (asked.push("rhea page"), { status: 200, body: '{"rhea":"page"}' }), holders: async () => (asked.push("rhea holders"), { status: 200, body: '{"rhea":"holders"}' }) },
     trades: { trades: async () => (asked.push("rhea trades"), { status: 200, body: '{"rhea":"trades"}' }), candles: async () => (asked.push("rhea candles"), { status: 200, body: '{"rhea":"candles"}' }) },
   }) as unknown as NearMarket;
@@ -95,6 +102,42 @@ test("lists: the engine down, or its answer past STALE_MS, serves Rhea's snapsho
   clock.t += STALE_MS + 1;
   assert.equal(e.lists(), null);
   assert.ok(LISTS_MS < STALE_MS, "a running helper reads the lists several times inside STALE_MS");
+});
+
+// card near-listed-coin-quotes: release 164's sign run 43824122771 asked a NEAR buy quote of
+// hoodl-95275b.launchpad.justhoot.near off these lists and got no You receive. Rhea classic holds no pool of it (all 9,021
+// get_pools rows read 2026-11-16 07:52Z); it trades only on Rhea DCL (dclv2.ref-labs.near pool
+// hoodl-95275b.launchpad.justhoot.near|wrap.near|10000, tx BU6Jy6p55mi22kT64noFGN2xfm269JzhfwXz92wJcpNw), which the
+// device's quote (the kit's rheaQuote) does not read. Replayed from the engine's New and Graduating lists of 2026-11-16
+// 07:58Z cut to eight coins (fixtures/engine-2026-11-16) and Rhea classic's pools of them read at one final block.
+const fx16 = (name: string) => readFileSync(new URL(`./fixtures/engine-2026-11-16/${name}.json`, import.meta.url), "utf8");
+const ROUTES_16: Record<string, string> = {
+  "/discover?column=new&limit=50": fx16("discover-new"),
+  "/discover?column=graduating&limit=50": fx16("discover-graduating"),
+  "/trending?window=5m&limit=50": '{"upsert":[],"remove":[],"order":[],"next":null}',
+  "/trending?window=1h&limit=50": '{"upsert":[],"remove":[],"order":[],"next":null}',
+};
+const engine16 = () => createEngineNear({ fetch: async (url) => new Response(ROUTES_16[url.slice(ENGINE.length)] ?? "{}", { status: ROUTES_16[url.slice(ENGINE.length)] ? 200 : 404 }), now: () => AT });
+/** Rhea's pool read of 2026-11-16 as the lists build it (lists.ts refresh). */
+function scan16(): Scan {
+  const read = JSON.parse(fx16("rhea-pools")) as { height: number; pools: ({ id: number } & Record<string, unknown>)[] };
+  const pools: Pool[] = read.pools.flatMap((p) => parsePools([p], p.id) ?? []);
+  const { mains, nearUsd } = mainsOf(pools);
+  return { height: read.height, t_ms: AT, mains, nearUsd, routes: routesOf(pools, nearUsd) };
+}
+
+test("lists: only coins a NEAR buy quotes: a coin with no Rhea classic pool (DCL only, as hoodl) or only a pool of a few dollars is not listed", async () => {
+  const snap = JSON.parse((await engineFirst(rhea([], scan16()), engine16()).lists.get()).body) as { lists: Record<string, { token: string }[]> };
+  // the engine listed all eight; Rhea classic routes two past LIQ_MIN_USD
+  assert.deepEqual(snap.lists.new!.map((r) => r.token), ["prl.omft.near"], "imeme-2 and hoodl trade on DCL only; hoot-8ecf65's classic pools hold 41 NEAR");
+  assert.deepEqual(snap.lists.graduating!.map((r) => r.token), ["nene-2250.meme-cooking.near"], "wth-0b2227 and pmoney-4 hold dust on classic");
+  for (const rows of Object.values(snap.lists)) assert.ok(!rows.some((r) => r.token === "hoodl-95275b.launchpad.justhoot.near"));
+});
+
+test("lists: before Rhea's first pool read no route is known, so the engine's lists are not served: Rhea's are", async () => {
+  const asked: string[] = [];
+  assert.equal((await engineFirst(rhea(asked, null), engine16()).lists.get()).body, '{"rhea":true}');
+  assert.deepEqual(asked, ["rhea lists"]);
 });
 
 test("token page: the risk grid's cells from the engine: top 10, dev, snipers, holders, insiders, bundlers, fresh, tax, both authorities, honeypot", async () => {
