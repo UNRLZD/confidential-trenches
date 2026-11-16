@@ -2707,7 +2707,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // card helper-listed-charts-own-reads round 3: bars held answer within HELD_WAIT_MS and the read goes on, so no
     // answer waits on GeckoTerminal while they serve (the warm live run of 16 Nov 00:33Z: Base's listed charts p95
     // 4,997 ms, Robinhood's 3,042 ms); one rule with the Solana charts (../solana/token.ts candles)
-    const got = nothing ? await reading : await Promise.race([reading, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
+    // only bars still served as fresh race the read: the newest range held past GT_SERVE_MS, served alone as the chart,
+    // waits for it (round 5, one rule with ../solana/token.ts candles); history before a time is closed bars at any age
+    const got = nothing || old ? await reading : await Promise.race([reading, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
     if (got === null) {
       void reading.then((g) => g === "throttled" && old && wantBars(e.pool.id, e.pool.token, tf, before, k, false, now())).catch(() => undefined);
       return fallback(UPSTREAM);
@@ -3049,15 +3051,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const began = performance.now();
       const opening = openWithin(t, lane, client);
       // card helper-listed-charts-own-reads round 3: a book still opening and bars held for the token's pool answer now,
-      // filling, and the open goes on; the page reads a filling chart again 2 s on (warm live run of 16 Nov 00:33Z:
-      // Base's listed charts p95 4,997 ms, Robinhood's 3,042 ms). One rule with the Solana charts (../solana/trades.ts).
+      // and the open goes on (warm live run of 16 Nov 00:33Z: Base's listed charts p95 4,997 ms, Robinhood's 3,042 ms).
+      // Only bars still served as fresh (read within GT_SERVE_MS) answer so, as they are, dated by their read; older ones
+      // wait for the open, never drawn as the chart with an old read time (round 5: helper live run 43794383970 served a
+      // Solana chart read 93 minutes before, two minutes after a swap). One rule with ../solana/token.ts candles.
       const early = await Promise.race([opening, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
       if (early === null) {
         const h = await heldChart(t, tf as Tf, to, limit);
-        if (h !== null) {
+        if (h !== null && h.asOfMs !== undefined && now() - h.asOfMs <= GT_SERVE_MS) {
           void opening.catch(() => undefined);
-          const body = JSON.parse(h.body) as Record<string, unknown>;
-          return withTiming({ ...h, body: JSON.stringify({ ...body, filling: true }) }, laneTiming(lane, performance.now() - began));
+          return withTiming(h, laneTiming(lane, performance.now() - began));
         }
       }
       const e = early ?? (await opening);

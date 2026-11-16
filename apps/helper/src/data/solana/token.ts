@@ -1475,15 +1475,19 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const reading = bars.get(`${mint}:${tf}:${to ?? ""}`, client).then(settle);
       // card helper-listed-charts-own-reads round 3: bars held answer within HELD_WAIT_MS and the read goes on, so no
       // answer waits on a vendor while they serve (the warm live run of 16 Nov 00:33Z: Solana's listed charts p95
-      // 4,241 ms). Bars past GT_SERVE_MS, or not reaching `to`, say filling, so the page reads again for the fresh ones.
+      // 4,241 ms). Only bars still served as fresh race the read: bars past GT_SERVE_MS, or not reaching `to`, wait for it
+      // and serve only when it is refused or fails (below), never as the chart dated by an old read (round 5: helper live
+      // run 43794383970, job 133059871935, two minutes after a swap, served PUMP's bars read 93 minutes before, X-Fetched-At
+      // theirs, with `filling` beside them, which the page draws as the chart: candles.ts loadCandles reads again only a
+      // filling chart with no bars)
       const ahead = kept.get(k);
-      const cut0 = ahead === undefined ? [] : ahead.bars.filter((c) => to === null || c[0] < to);
+      const fresh = ahead !== undefined && (to === null ? now() - ahead.at <= GT_SERVE_MS : ahead.at >= to * 1000);
+      const cut0 = !fresh ? [] : ahead.bars.filter((c) => to === null || c[0] < to);
       const got = cut0.length === 0 ? await reading : await Promise.race([reading, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
       if (got === null) {
         reading.catch(() => undefined);
         const src = ahead!.src ?? "geckoterminal";
-        const stale = to === null ? now() - ahead!.at > GT_SERVE_MS : ahead!.at < to * 1000;
-        const body: Candles = { tf: tf as Tf, candles: cut0.slice(-limit), src, ...(stale ? { filling: true } : {}), as_of_ms: ahead!.at };
+        const body: Candles = { tf: tf as Tf, candles: cut0.slice(-limit), src, as_of_ms: ahead!.at };
         return { status: 200, body: JSON.stringify(body), src, asOfMs: ahead!.at };
       }
       let a = got;
