@@ -67,9 +67,15 @@ const FINAL = FROM + 2_000_000;
 const hex = (n: number): string => `0x${n.toString(16)}`;
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-test("under a dRPC that serves 8 a second from the helper's IP (under the pace's 20), the helper settles under it: dRPC refuses at most a few sends a minute past the first, every caller is answered, the fill moves", async () => {
-  /** dRPC's rate today, as the doc's dynamic limit lets it be: 8 calls in any second, every URL together. */
-  const SERVED = 8;
+/**
+ * Three minutes of Base load on a dRPC that serves `served` calls in any second from the helper's IP, every URL together
+ * (and with `penalty`, refuses anything for a second after it refused: live, each key was refused once a second for 7 to
+ * 15 s while the others sent on): 4 callers' reads a second from a dozen addresses (a block, a call, a balance, a chain
+ * id), `pagedAtOnce` 2,000-block keyed-only log reads each `pagedEvery` s (20 pages each, dRPC's alone: QuickNode's
+ * trial spans 5, a sign-in's pool sync), and the pool fill. What it counts after.
+ */
+async function load(o: { served: number; penalty: boolean; pagedEvery: number; pagedAtOnce: number }) {
+  const SECONDS = 180;
   let clock = 1_800_000_000_000;
   const timers: { at: number; ok: () => void }[] = [];
   const drpcAt: number[] = [];
@@ -80,7 +86,7 @@ test("under a dRPC that serves 8 a second from the helper's IP (under the pace's
     if (DR.includes(url)) {
       const inSecond = drpcAt.filter((t) => t > clock - 1000).length;
       drpcAt.push(clock);
-      if (inSecond >= SERVED) return refused.push(clock), json({ jsonrpc: "2.0", id: req.id, error: { code: 429, message: "Too many request, try again later" } }, 429);
+      if (inSecond >= o.served || (o.penalty && refused.some((t) => t > clock - 1000))) return refused.push(clock), json({ jsonrpc: "2.0", id: req.id, error: { code: 429, message: "Too many request, try again later" } }, 429);
     }
     if (req.method === "eth_getBlockByNumber") return json({ jsonrpc: "2.0", id: req.id, result: { number: hex(FINAL), hash: `0x${"ab".repeat(32)}` } });
     if (req.method !== "eth_getLogs") return json({ jsonrpc: "2.0", id: req.id, result: "0x1" });
@@ -99,18 +105,13 @@ test("under a dRPC that serves 8 a second from the helper's IP (under the pace's
   const lines: string[] = [];
   const r = createRpc(ENV, { fetch: fetch as never, now: () => clock, sleep, log: (l) => void lines.push(l) });
   // the fill starts on a whole-range pool read
-  const cold = r.handle("base", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: POOL, topics: [["0x" + "a1".repeat(32)]], fromBlock: hex(FROM), toBlock: hex(FINAL) }] }), "203.0.113.9", false, true);
+  void r.handle("base", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: POOL, topics: [["0x" + "a1".repeat(32)]], fromBlock: hex(FROM), toBlock: hex(FINAL) }] }), "203.0.113.9", false, true);
   for (let i = 0; i < 20 && fills.length === 0; i++) await step(50);
-  void cold;
   assert.ok(fills.length > 0, "the fill started");
   const other = "0x1111111111111111111111111111111111111111";
   const answers: { what: string; a: Promise<{ status: number; body: string; why?: string }> }[] = [];
-  const SECONDS = 180;
   for (let s = 0; s < SECONDS; s++) {
-    // each 15 s a check's 2,000-block read of another address: 20 pages, dRPC's alone (QuickNode's trial spans 5), which
-    // at 8 a second fit the read's 12 s beside the fill
-    if (s % 15 === 0) answers.push({ what: `paged ${s}`, a: r.handle("base", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 500 + s, method: "eth_getLogs", params: [{ address: other, topics: [["0x" + "a1".repeat(32)]], fromBlock: hex(FINAL - 1_999), toBlock: hex(FINAL) }] }), `203.0.113.${100 + (s % 50)}`, false, true) });
-    // 4 callers' reads a second from a dozen addresses: a block, a call, a balance, a chain id
+    if (s % o.pagedEvery === 0) for (let d = 0; d < o.pagedAtOnce; d++) answers.push({ what: `paged ${s}.${d}`, a: r.handle("base", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 500 + s * 10 + d, method: "eth_getLogs", params: [{ address: other, topics: [["0x" + "a1".repeat(32)]], fromBlock: hex(FINAL - 1_999), toBlock: hex(FINAL) }] }), `203.0.113.${100 + ((s + d) % 50)}`, false, true) });
     for (let k = 0; k < 4; k++) {
       const id = s * 100 + k;
       const method = ["eth_blockNumber", "eth_call", "eth_getBalance", "eth_chainId"][k]!;
@@ -121,17 +122,39 @@ test("under a dRPC that serves 8 a second from the helper's IP (under the pace's
   }
   for (let i = 0; i < 300; i++) await step(10);
   const got = await Promise.all(answers.map(async (x) => ({ what: x.what, ...(await x.a) })));
-  // the first refusal is how the helper learns dRPC's rate today: a read inside the hold it starts may find every provider
-  // held once; from the first 30 s on, every caller is answered
-  const bad = got.filter((g) => g.status !== 200 || /"error"/.test(g.body));
-  const settled = bad.filter((g) => Number(/ (\d+)/.exec(g.what)![1]) >= 30);
-  assert.ok(bad.length - settled.length <= 1, `${bad.length - settled.length} callers not answered while the rate was learnt`);
-  assert.deepEqual(settled.slice(0, 8).map((g) => `${g.what}: ${g.status} ${g.why ?? ""} ${g.body.slice(0, 100)}`), [], `${settled.length} of ${got.length} callers not answered past the first 30 s`);
   const t0 = drpcAt[0]!;
-  const late = refused.filter((t) => t >= t0 + 60_000).length;
-  const minutes = (SECONDS - 60) / 60;
-  assert.ok(late <= 3 * minutes, `dRPC refused ${late} sends in the last ${minutes} min (${refused.length} of ${drpcAt.length} in all): the helper must settle under what dRPC serves`);
-  const lateFills = fills.filter((t) => t >= t0 + 60_000).length;
-  assert.ok(lateFills >= 60, `the fill moved ${lateFills} pages in the last ${minutes} min`);
+  const bad = got.filter((g) => g.status !== 200 || /"error"/.test(g.body));
   assert.ok(!lines.some((l) => l.includes("planted")), "no key in a log line");
+  return {
+    minutes: (SECONDS - 60) / 60,
+    sends: drpcAt.length,
+    refused: refused.length,
+    /** dRPC's refusals past the first minute, the rate learnt */
+    late: refused.filter((t) => t >= t0 + 60_000).length,
+    lateFills: fills.filter((t) => t >= t0 + 60_000).length,
+    callerHolds: lines.filter((l) => / caller /.test(l)).length,
+    /** the reads not answered: plain callers, and those past the first 30 s */
+    bad,
+    settled: bad.filter((g) => Number(/ (\d+)/.exec(g.what)![1]) >= 30),
+  };
+}
+
+test("under a dRPC that serves 8 a second from the helper's IP (under the pace's 20), the helper settles under it: dRPC refuses at most a few sends a minute past the first, every caller is answered, the fill moves", async () => {
+  const x = await load({ served: 8, penalty: false, pagedEvery: 15, pagedAtOnce: 1 });
+  // the first refusal is how the helper learns dRPC's rate today: a read inside the hold it starts may find every provider
+  // held once; from the first 30 s on, every caller is answered, the 20-page reads too (8 a second fit their 12 s)
+  assert.ok(x.bad.length - x.settled.length <= 1, `${x.bad.length - x.settled.length} reads not answered while the rate was learnt`);
+  assert.deepEqual(x.settled.slice(0, 8).map((g) => `${g.what}: ${g.status} ${g.why ?? ""} ${g.body.slice(0, 100)}`), [], `${x.settled.length} reads not answered past the first 30 s`);
+  assert.ok(x.late <= 3 * x.minutes, `dRPC refused ${x.late} sends in the last ${x.minutes} min (${x.refused} of ${x.sends} in all)`);
+  assert.ok(x.lateFills >= 60, `the fill moved ${x.lateFills} pages in the last ${x.minutes} min`);
+});
+
+test("under a dRPC that refuses a second after each refusal, at 5 a second, with three sign-ins' log reads every 5 s (the live 16 Nov 10:17-10:21Z shape: each key refused every second), the helper stops feeding the refusal: a few refusals a minute, the plain callers all answered, the fill still moving", async () => {
+  const x = await load({ served: 5, penalty: true, pagedEvery: 5, pagedAtOnce: 3 });
+  // at 841265f75: dRPC refused 1,078 sends in the last 2 min (1,381 of 1,566), 1,348 caller hold lines, the fill 5 pages
+  assert.ok(x.late <= 3 * x.minutes, `dRPC refused ${x.late} sends in the last ${x.minutes} min (${x.refused} of ${x.sends} in all): the helper must stop sending into a refusal`);
+  assert.ok(x.callerHolds <= 4 * (x.minutes + 1), `${x.callerHolds} caller hold lines in 3 min`);
+  const plain = x.bad.filter((g) => g.what.startsWith("caller"));
+  assert.deepEqual(plain.slice(0, 8).map((g) => `${g.what}: ${g.status} ${g.why ?? ""} ${g.body.slice(0, 100)}`), [], `${plain.length} plain callers not answered`);
+  assert.ok(x.lateFills >= 10, `the fill moved ${x.lateFills} pages in the last ${x.minutes} min`);
 });
