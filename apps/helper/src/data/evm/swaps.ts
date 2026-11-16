@@ -155,7 +155,11 @@ export const REF_POOL_ID = "0x96d4b53a38337a5733179751781178a2613306063c511b78cd
  * uint256 fee, uint256 tax), quoteIn the quote the buyer spent with the fees in it, or CurveSell(address indexed seller,
  * address indexed recipient, uint256 tokensIn, uint256 quoteOut, uint256 fee, uint256 tax), quoteOut what the seller
  * got after them; both topics are the ones the chain's curves log (75 and 69 of 175 curve logs over 5,000 blocks,
- * 2026-11-03 19:2xZ). A graduated token trades on its v4 pool, found as any v4 pool is.
+ * 2026-11-03 19:2xZ). A graduated token trades on its v4 pool, and the record names that too: its phase (word 10) is
+ * PoolCreated (2) once the pool exists, and _poolIdFor keys it by the token and pairToken sorted, the record's poolFee
+ * (word 6) and tickSpacing (word 7), and the factory's memeHook (ponsHooks). Read 16 Nov 22:4xZ on
+ * rpc.mainnet.chain.robinhood.com: memeHook() 0xe5e70264...e044; ZOLVA's record (phase 2, fee 0, spacing 200, native
+ * ETH) keys 0x417e1f53..., and VETO's 0x443aaab5..., the pools DexScreener lists for them.
  */
 export const ROBINHOOD_VENUES = {
   poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
@@ -164,6 +168,7 @@ export const ROBINHOOD_VENUES = {
   usdg: "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
   weth: "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
   ponsV2: "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e",
+  ponsV2Hook: "0xe5e702641ea86f4ae6cc3cdaed2b886f976be044",
   // a Slipstream-kind CL factory (card helper-robinhood-capacity fold 7): its bytecode holds getPool(address,address,int24)
   // 0x28af8d0b and createPool(address,address,int24,uint160) 0x232aa5ac, not Uniswap's getPool(...,uint24); read
   // 2026-11-05 04:2xZ on rpc-robinhood.blockmachine.io: getPool(0x39dbed3a..., USDG, 50) = 0xf2a0be59..., the pool
@@ -194,6 +199,8 @@ export type Venues = {
   weth: string;
   refPoolId: string;
   pons: readonly string[];
+  /** Each Pons factory's memeHook, the hooks of the v4 pools its tokens graduate into. */
+  ponsHooks: Readonly<Record<string, string>>;
   /** The most blocks one `eth_getLogs` asks (the smallest the chain's providers take). */
   span: number;
   /** The blocks a token's first read and its discovery may go back (about five minutes of the chain's blocks). */
@@ -233,6 +240,7 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     weth: BASE_VENUES.weth,
     refPoolId: REF_POOL_ID,
     pons: [],
+    ponsHooks: {},
     span: 1_000,
     // one block every 200 ms from block 53556127 (lists.ts BLOCK_CLOCK). The window is Robinhood's five minutes, one
     // step, 1,500 blocks, two calls a filter (at 2 s it was 20 minutes, 600 blocks, one call; at 200 ms 20 minutes is
@@ -272,6 +280,7 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     weth: ROBINHOOD_VENUES.weth,
     refPoolId: ROBINHOOD_REF_POOL_ID,
     pons: [ROBINHOOD_VENUES.ponsV2],
+    ponsHooks: { [ROBINHOOD_VENUES.ponsV2]: ROBINHOOD_VENUES.ponsV2Hook },
     span: 100,
     // one step, not 20 minutes (card helper-robinhood-swaps): 20 minutes of 102 ms blocks is 118 spans of 100 blocks a
     // filter a provider, and under it every keyless provider answered 429, -32005, code 30 or a timeout and the swaps
@@ -1617,7 +1626,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** `hint`: taken on the list's word (fromHint), the chain's confirmation that it is the token's, not yet the
    *  discovery's that it is the main pool. */
-  type Found = { pool: Pool; decimals: number; seed?: { from: number; to: number; headN: number; logs: Log[] }; hint?: string };
+  /** `swaps`: the discovery's count of its pool's swaps over the blocks it read (findPool), none for a list's pool. */
+  type Found = { pool: Pool; decimals: number; seed?: { from: number; to: number; headN: number; logs: Log[] }; hint?: string; swaps?: number };
   // a token's main pool, kept; `hint` set while it is the list's pool the discovery has not yet decided on (verify)
   const pools = new Map<string, { found: { pool: Pool; decimals: number } | null; at: number; hint?: string }>();
   // pools known from the start (a test's): kept as if just found
@@ -1681,10 +1691,23 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return quote === null ? null : { venue: "v4", id, token, tokenIs0, quote, ...(hook === undefined ? {} : { hook }) };
   }
   /** The Pons curves the factories' records of the token name (a record of another token, or not live, names none). */
-  const curvePools = (token: string, recs: readonly (string | undefined)[]): Pool[] =>
-    recs.flatMap((r) => {
+  // a graduated token's pool, not the curve it left (card evm-pool-search-stable: ZOLVA's and VETO's curves were their
+  // only candidates whenever five minutes passed with no transfer of the token, and their tapes answered no trades, 2 of
+  // 3 loads, 16 Nov); a record not yet PoolCreated (trading on its curve, swept, rescued) names the curve
+  const ponsPools = (token: string, recs: readonly (string | undefined)[]): Pool[] =>
+    recs.flatMap((r, i) => {
       if (r === undefined || !/^0x[0-9a-f]{960}$/.test(r) || wordAddr(r, 0) !== token || BigInt(`0x${r.slice(2 + 64 * 14)}`) !== 1n) return [];
       const [curve, pair] = [wordAddr(r, 1)!, wordAddr(r, 4)!];
+      const word = (n: number): bigint => BigInt(`0x${r.slice(2 + 64 * n, 2 + 64 * (n + 1))}`);
+      const hook = V.ponsHooks[V.pons[i]!];
+      if (word(10) === 2n && hook !== undefined) {
+        const [fee, spacing] = [word(6), word(7)];
+        if (fee > 0xffffffn || spacing < 1n || spacing > 32767n) return [];
+        const [c0, c1] = token < pair ? [token, pair] : [pair, token];
+        const k = `0x${c0.slice(2).padStart(64, "0")}${c1.slice(2).padStart(64, "0")}${fee.toString(16).padStart(64, "0")}${spacing.toString(16).padStart(64, "0")}${hook.slice(2).padStart(64, "0")}`;
+        const p = v4Pool(token, keccakHex(k), k);
+        return p === null ? [] : [p];
+      }
       const quote = quoteOf(pair, true);
       return curve !== ZERO && quote !== null ? [{ venue: "curve" as const, id: curve, token, tokenIs0: false, quote }] : [];
     });
@@ -1736,7 +1759,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const got = await callsAgreed(head.n, [{ to: token, data: SEL.decimals }, ...first]);
     const decimals = decimalsOf(got[0]);
     if (decimals === null) throw new Error("decimals not agreed");
-    let pool = id ? v4Pool(token, hint, got[1]) : (curvePools(token, got.slice(1)).find((c) => c.id === hint) ?? null);
+    let pool = id ? v4Pool(token, hint, got[1]) : (ponsPools(token, got.slice(1)).find((c) => c.id === hint) ?? null);
     if (pool === null && id) pool = await v4FromSwaps(token, hint, head.n);
     if (pool === null && !id) {
       const [f, t0, t1] = await callsAgreed(head.n, [SEL.factory, SEL.token0, SEL.token1].map((data) => ({ to: hint, data })));
@@ -1851,8 +1874,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const c = k !== undefined && /^0x[0-9a-f]{320}$/.test(k) && keccakHex(k) === id ? v4Pool(token, id, k) : v4Pool(token, id, (await v4KeySliced(id, token, e.fee, [...e.around], chain)) ?? undefined);
       if (c !== null) cands.push(c);
     }
-    // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
-    cands.push(...curvePools(token, recs));
+    // a Pons token: the factory's own record of it names its curve and its quote (zero: native ETH), or once it has
+    // graduated its v4 pool (ponsPools), a candidate whatever the window's transfers show (found there too: once)
+    for (const c of ponsPools(token, recs)) if (!cands.some((x) => x.id === c.id)) cands.push(c);
     if (cands.length === 0) {
       if (missed.any) throw new Error("pools not read");
       return null;
@@ -1898,7 +1922,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const ref = best.c.quote.kind === "eth" ? await readRef(head.with, head.n, from) : true;
     const decimals = decimalsOf(d);
     if (decimals === null) throw new Error("decimals not agreed");
-    return { pool: best.c, decimals, seed: (refOk && ref) || best.c.quote.kind !== "eth" ? { from, to: head.n, headN: head.n, logs } : undefined };
+    return { pool: best.c, decimals, swaps: n, seed: (refOk && ref) || best.c.quote.kind !== "eth" ? { from, to: head.n, headN: head.n, logs } : undefined };
   }
 
   /** A listed token's main pool, null when our reads find none (served as an empty chart), "unlisted" when no lists
@@ -1956,8 +1980,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     resolving.set(token, p);
     resolvingLane.set(token, lane);
     const found = await p;
-    // kept anew meanwhile (its keep ran out and an open read it again): that read stands
-    if (found === null || pools.get(token) !== kept) return;
+    // kept anew meanwhile (its keep ran out and an open read it again): that read stands. A pool found with no swap in
+    // the blocks read is no evidence against the list's pool, which the chain confirmed (card evm-pool-search-stable: a
+    // coin quiet for five minutes had only its Pons curve found, and ZOLVA's DexScreener pool gave way to it, its tape
+    // then empty): the list's pool stands, decided again at the lists' next load
+    if (found === null || (found.swaps ?? 0) <= 0 || pools.get(token) !== kept) return;
     pools.set(token, { found: found.pool.id === was ? kept.found : { pool: found.pool, decimals: found.decimals }, at: now() });
     if (found.pool.id !== was) {
       log(`${chain} pool ${token}: the list's pool ${was} is not the main pool; ${found.pool.id} is`);
