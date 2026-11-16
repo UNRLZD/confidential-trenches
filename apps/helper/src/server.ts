@@ -22,6 +22,7 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import { withChange4h } from "./data/candles.ts";
 import { address as solanaAddress, createSolanaLists } from "./data/solana/lists.ts";
@@ -1117,6 +1118,18 @@ export function warmWriter(storeDir: string, held: Promise<unknown>, state: () =
   };
 }
 
+/** The event loop held at least this long in a minute is named in the log (loopHeldLine). [design: one second, the
+ *  quote bar; a read the loop holds that long misses it, as one held 30 s did in live run 43785080982, job 133030981677,
+ *  two minutes after a restart, whose cause no log named.] */
+export const LOOP_HELD_MS = 1_000;
+/** The minute's line for the event loop's delay (perf_hooks monitorEventLoopDelay, in ns), or null when it never held
+ *  LOOP_HELD_MS: every request waits on the one loop before any route's own bound runs (CANDLES_ANSWER_MS included). */
+export function loopHeldLine(h: { max: number; percentile(p: number): number; count: number }): string | null {
+  const max = Math.round(h.max / 1e6);
+  if (h.count === 0 || max < LOOP_HELD_MS) return null;
+  return `event loop held up to ${max} ms this minute (p99 ${Math.round(h.percentile(99) / 1e6)} ms, ${h.count} samples)`;
+}
+
 /** A token page read is part of being ready: one of the Solana list's tokens. */
 type Ready = { lists: Pick<Lists, "get">; evmLists: Record<string, Pick<ReturnType<typeof createEvmLists>, "get">>; token: Pick<Token, "page" | "holders"> };
 /** How often the warm-up asks again while not ready. */
@@ -1384,6 +1397,15 @@ if (import.meta.main) {
     setInterval(() => void token.ahead().catch(() => undefined), AHEAD_TICK_MS).unref();
     // card helper-crowd-429: GeckoTerminal's calls a minute by lane and read, so a refused chart is named from the log
     setInterval(() => void ((l) => l !== null && console.log(`helper: ${l}`))(gecko.minute()), 60_000).unref();
+    // card helper-listed-charts-own-reads round 4: the event loop's longest hold each minute, named when it reaches
+    // LOOP_HELD_MS, so a stall a request meets before its route's bound is on record with its minute
+    const loop = monitorEventLoopDelay({ resolution: 20 });
+    loop.enable();
+    setInterval(() => {
+      const l = loopHeldLine(loop);
+      loop.reset();
+      if (l !== null) console.log(`helper: ${l}`);
+    }, 60_000).unref();
     // card helper-candles-keyed-gt: CoinGecko's keyed reads a minute by outcome (served, refused by its minute or day, its
     // own answers), counts only: the key is never in a log line
     if (keyed !== null) setInterval(() => void ((l) => l !== null && console.log(`helper: ${l}`))(keyed.minute()), 60_000).unref();
