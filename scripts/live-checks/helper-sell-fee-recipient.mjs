@@ -3,7 +3,8 @@
 // feeCap, contracts/pool-evm/src/SellDelegate.sol at pool review round 3) and sends a sale only when its fee goes to the
 // network's fee collector its fee answer names (card helper-sender-fee-proof: fee_collector, the FeeCollector whose Paid
 // log proves the fee; apps/helper/src/pool/evm.ts sellHeld, 422 fee_recipient), without sending anything or moving
-// money. For each testnet pool its deploy record names (helper-evm-sender.mjs evmPoolRecords) it reads
+// money. For each mainnet pool its deploy record names (helper-evm-sender.mjs evmPoolRecords: Base and Robinhood,
+// contracts/pool-evm/deployments/<network>.json; card helper-mainnet-pools-only, no testnet pool) it reads
 // GET /v1/pool/fee?pool=<pool>, then POSTs four sells made by helper-evm-sender.mjs plantsOf (a throwaway W key made at
 // run time, W's authorization nonce 2^62, which no fresh W holds):
 //   - "pays_collector": the sell paying the fee answer's fee_collector. It passes every static check, the 11-field
@@ -15,8 +16,9 @@
 //     fee_recipient.
 // It passes only when the fee answer is 200 with fee_collector, fee_recipient and sell_sender three different addresses
 // (a network with no collector set refuses every sell, and fails here until its collector is set), fee_collector is the
-// collector the kit pins for the network (evmPoolVenues() feeCollector) and that pin is the FeeCollector card
-// evm-fee-collector deployed (evm-fee-collector.<network>.json, read back on two RPCs by its check; card
+// collector the kit pins for the network (evmPoolVenues() feeCollector) and that pin is the FeeCollector
+// the network's deploy record names (helper-evm-sender.mjs collectorRecord: contracts/pool-evm/deployments/<network>.json,
+// read back on two RPCs by evm-mainnet-senders; card
 // helper-sender-fee-proof, review M1: a sale is counted paid by the Paid log of the helper's collector, so any other
 // address would let every sale read as paid), every sell answers its own status and code with no hash, and every answer
 // carries a full-sha X-Helper-Commit.
@@ -73,7 +75,7 @@ export function judge(run, records = evmPoolRecords(), collectors = feeCollector
     } else {
       say(f?.status === 200 && three.every((a) => a !== null && ADDRESS.test(a)) && new Set(three).size === 3, `[${n} fee] ${f?.status}: fee_collector ${show(b?.fee_collector)}, fee_recipient ${show(b?.fee_recipient)}, sell_sender ${show(b?.sell_sender)}, three addresses`);
       const c = Object.hasOwn(collectors, n) ? collectors[n] : undefined;
-      say(coll !== null && c?.pin != null && coll === c.pin && c.pin === c.recorded, `[${n} fee] fee_collector ${show(coll)} is the kit's pin ${show(c?.pin ?? null)}, which is evm-fee-collector.${n}.json's FeeCollector ${show(c?.recorded ?? null)}`);
+      say(coll !== null && c?.pin != null && coll === c.pin && c.pin === c.recorded, `[${n} fee] fee_collector ${show(coll)} is the kit's pin ${show(c?.pin ?? null)}, which is the deploy record's FeeCollector ${show(c?.recorded ?? null)}`);
       for (const [asked, status, code] of SELLS) {
         const r = p.reads.find((x) => x.asked === asked);
         const e = json(r?.body ?? "");

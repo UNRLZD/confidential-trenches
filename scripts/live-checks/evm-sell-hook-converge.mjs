@@ -7,7 +7,9 @@
 // packages/wallet/src/pool/evm-sell-bans.ts; the kit's attack tests HC1-HC6, RV1-RV11 and RVX hold that). What is deployed and
 // read here is the one part on a server: the sender's read-back of a signed Sell (the kit's evmSellRouteOf, the one
 // definition, apps/helper/src/pool/evm.ts sellHeld) takes such a route, where before the card it refused it bad_route.
-// For each testnet pool pool-evm-deploy's records name, it reads GET /v1/pool/fee?pool=<pool> (the fee collector the
+// For each mainnet pool its deploy record names (helper-evm-sender.mjs evmPoolRecords: Base and Robinhood,
+// contracts/pool-evm/deployments/<network>.json; card helper-mainnet-pools-only, no testnet pool; the hooked hop's pool
+// need not exist on the chain, as both plants stop at the deadline before any read), it reads GET /v1/pool/fee?pool=<pool> (the fee collector the
 // Sell must pay), then POSTs two sells built by helper-evm-sender.mjs's plantsOf with a throwaway W key, each good but
 // for a deadline 59 s away (the helper sends only 60 s or more before it), so neither is ever sent:
 //   - "listed_deadline_near": one hookless v4 hop: 422 deadline_near (the control: the plant reaches the deadline check);

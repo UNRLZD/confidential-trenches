@@ -3,7 +3,8 @@
   "good: a local helper (apps/helper/src/server.ts start(), --base http://127.0.0.1:57041) at commit 02275347ff0b7e4826cc43a169f490104083c62b, read 2026-11-06T13:52:33.091Z (card helper-sender-fee-proof), both EVM testnet pools set in its own process: each withdraw and sell sender key sha256 of a label (a throwaway, never written), the kit's venues with each sell sender pin set to the throwaway sell key, the deployed fee answers' fee recipients (base-sepolia 0x6c830ac1b22d96baf692af4dd17d822ba61c32ec, robinhood-testnet 0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7), POOL_EVM_FEE_COLLECTOR_<NETWORK> the kit's pin, the deployed FeeCollector (base-sepolia 0x9cc4788af51677aaa7770d78277c41fb864b35e1, robinhood-testnet 0xb174f0e859f00a7b593baca38394327e3d6bf638; card evm-fee-collector), POOL_EVM_RPCS_<NETWORK> unset, so the kit's fee providers (feeProviders). The sell paying the fee collector passes every static check and stops at W's nonce read on both RPCs (auth_nonce); a sell paying the withdraw's fee recipient, 0x...beef or the helper's own sell sender is refused fee_recipient; nothing is sent. Re-recorded on HELPER_HOST once this card's merge is redeployed with both collectors set.",
   "bad_fee_recipient: card helper-sell-fee-recipient's own good run (a local helper at feb84e3a8061b193e9df5b11455050171003bc8c, read 2026-11-06 09:21Z): its fee answers name no fee_collector, and the sell paying the withdraw's fee recipient goes through to W's nonce read (auth_nonce) where it must be refused fee_recipient.",
   "bad_deployed: HELPER_HOST (https://ct-api.unrealized.trade) at ff8eec24c016884875ee8a577f9a15b6b7bf70c9, read 2026-11-06 09:19Z: its sell route reads the 10-field Sell, so each 11-field sell answers 400 bad_shape.",
-  "Each sell is built at run time with a throwaway W key; no key is recorded."
+  "Each sell is built at run time with a throwaway W key; no key is recorded.",
+  "mainnet_good: a real run of this check (--record) against the deployed helper https://ct-api.unrealized.trade on 2026-11-16 15:2xZ, X-Helper-Commit fd2f2a6e12a37459d2f975325128d6bca7d25397, on the mainnet pools of contracts/pool-evm/deployments/<network>.json (card helper-mainnet-pools-only: the helper serves no testnet pool); every plant refused before any send, nothing sent, no key of ours. The answers above it were recorded on the testnets' first pool set and are replayed on those pools."
  ],
  "good": {
   "base": "http://127.0.0.1:57041",
@@ -493,6 +494,193 @@
        "x-helper-commit": "ff8eec24c016884875ee8a577f9a15b6b7bf70c9"
       },
       "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not sell's calldata\"}}"
+     }
+    ]
+   }
+  ]
+ },
+ "mainnet_good": {
+  "base": "https://ct-api.unrealized.trade",
+  "pools": [
+   {
+    "network": "base",
+    "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-16T15:22:35.105Z",
+      "status": 200,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "380",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:22:34 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794842520000,\"block\":\"0x378fcf2\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "pays_collector",
+      "readAt": "2026-11-16T15:22:36.010Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "109",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:22:35 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"auth_nonce\",\"detail\":\"W's pending nonce 0 and 0, the authorization's 4611686018427387904\"}}"
+     },
+     {
+      "asked": "pays_fee_recipient",
+      "readAt": "2026-11-16T15:22:36.242Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "168",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:22:36 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"fee_recipient\",\"detail\":\"the Sell pays 0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d, not the fee collector 0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\"}}"
+     },
+     {
+      "asked": "pays_other",
+      "readAt": "2026-11-16T15:22:36.652Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "168",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:22:36 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"fee_recipient\",\"detail\":\"the Sell pays 0x000000000000000000000000000000000000beef, not the fee collector 0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\"}}"
+     },
+     {
+      "asked": "pays_sell_sender",
+      "readAt": "2026-11-16T15:22:36.882Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "168",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:22:36 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"fee_recipient\",\"detail\":\"the Sell pays 0x2139756ab61ad861b4e25a009f092683e7454ee9, not the fee collector 0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\"}}"
+     }
+    ]
+   },
+   {
+    "network": "robinhood",
+    "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-16T15:22:37.105Z",
+      "status": 200,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "385",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:22:37 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794842520000,\"block\":\"0x6e7eba5\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "pays_collector",
+      "readAt": "2026-11-16T15:22:41.886Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "109",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:22:41 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"auth_nonce\",\"detail\":\"W's pending nonce 0 and 0, the authorization's 4611686018427387904\"}}"
+     },
+     {
+      "asked": "pays_fee_recipient",
+      "readAt": "2026-11-16T15:22:42.565Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "168",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:22:42 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"fee_recipient\",\"detail\":\"the Sell pays 0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d, not the fee collector 0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\"}}"
+     },
+     {
+      "asked": "pays_other",
+      "readAt": "2026-11-16T15:22:42.800Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "168",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:22:42 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"fee_recipient\",\"detail\":\"the Sell pays 0x000000000000000000000000000000000000beef, not the fee collector 0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\"}}"
+     },
+     {
+      "asked": "pays_sell_sender",
+      "readAt": "2026-11-16T15:22:43.035Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "168",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:22:42 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"fee_recipient\",\"detail\":\"the Sell pays 0x92874bbc2638f644872d911d8b72d734978e24ae, not the fee collector 0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\"}}"
      }
     ]
    }
