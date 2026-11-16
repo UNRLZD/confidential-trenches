@@ -8,6 +8,7 @@ import type { WithdrawPlace } from "./target.ts";
 import { arrivals, checkWithdraw, withdrawHop } from "./withdraw-form.ts";
 import type { Arrival, FormCheck } from "./withdraw-form.ts";
 import { WORDS } from "./words.ts";
+import { W } from "./WithdrawProgress.tsx";
 
 // The deposit sheet's Withdraw segment (card withdraw-address-in-the-app, owner 14 Nov 12:22Z picked A): in the same
 // sheet as Deposit, switched in place. The places that hold money as tiles (each its chain's mark and name), the Amount
@@ -135,7 +136,7 @@ export function WithdrawBody({ f, locked }: { f: WithdrawFormView; locked: boole
   return (
     <div className="wform" data-form="withdraw" data-place={f.place.chain} data-dest={f.dest} data-ready={f.check.ready ? "yes" : "no"}>
       <div className="ddest">
-        <div className="lb" id="wd-from" data-draft-copy={WORDS.from.draft ? "from" : undefined}>{WORDS.from.text}</div>
+        <div className="lb" id="wd-from"><W id="from" /></div>
         <div className="dtiles" role="group" aria-labelledby="wd-from" data-places={f.places.map((p) => p.chain).join(" ")}>
           {f.places.map((p) => (
             <Tile key={p.chain} chain={p.chain} on={p.chain === f.place.chain} locked={locked} data={{ "data-from": p.chain }} pick={() => f.pick(p.chain)} />

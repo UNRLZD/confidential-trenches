@@ -635,6 +635,15 @@ export function heldOf(rows: readonly Row[], chain: Chain, token: string): Row |
 /** The one balance the app draws: Portfolio's Cash (totals(); design-lock-r5 S10.3 shows Cash in the header), for the
  *  header, the deposit and withdraw screens and the restore screen alike, so no two of them ever differ; null before the
  *  first state. */
+/**
+ * The account holds no money anywhere (card app-money-sheets-read-right: the trade box's Deposit offer), read from the signing page's own amounts (never from prices, which may not be
+ * read yet): nothing in the vault, in any chain's pool or at any deposit wallet. Null (no state yet) is not empty.
+ */
+export function holdsNothing(state: { vault_balance?: string; pools?: readonly { balance: string }[]; deposit_wallets?: readonly { amount: string }[] } | null | undefined): boolean {
+  const none = (v: string | undefined) => !/[1-9]/.test(v ?? "0");
+  return !!state && none(state.vault_balance) && (state.pools ?? []).every((p) => none(p.balance)) && (state.deposit_wallets ?? []).every((w) => none(w.amount));
+}
+
 export const balanceOf = (snap: SignpageClientSnapshot, d: PortfolioData, now: number): bigint | null => portfolio(snap, d, now).totals?.cash ?? null;
 
 // ------------------------------------------------------------------------------------- wallets with no position

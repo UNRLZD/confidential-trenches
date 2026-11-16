@@ -7,7 +7,8 @@
 // 1440 x 900 (dpr 1; the right column), the terminal's dark scheme:
 //   - ready: Bal is Cash ($40), the path is NEAR's, no Max line and no proof label, $10 and $25 on, $50 and $100 off
 //     (over Cash), the button "Buy RHEA" on;
-//   - no Cash: $0 available, every preset and the button off, a tap sends nothing;
+//   - no Cash: $0 available, every preset off; 10 typed, the button is Deposit, on (card app-money-sheets-read-right,
+//     QA walk item 7), and its tap sends no trade;
 //   - sending: a $10 preset sends exactly pool.buy { chain near, token, amount "10.00", slippage_bps 1000 }, never the
 //     vault's buy kind, and the box draws Sending (S8.9), then Slow past 5 s (S8.11), the amount locked;
 //   - refused: Failed with Retry (not_allowed), and "Price check failed" for quote_check_failed (S8.20);
@@ -196,7 +197,7 @@ try {
       await shot(page, "ready", w);
       await ctx.close();
     }
-    // no Cash: every preset and the button off; nothing is sent
+    // no Cash: every preset off; with 10 typed the button is Deposit, on (QA walk item 7); nothing is sent
     {
       const tag = `${w.name} no Cash`;
       const { ctx, page, f, errors, dialogs } = await open(browser, routes.noCash, w, AT);
@@ -205,7 +206,8 @@ try {
       check((await text(box, '[data-testid="trade-balance"]')) === "$0 available", `${tag}: the balance reads ${await text(box, '[data-testid="trade-balance"]')}, not "$0 available"`);
       check((await presetsOn(box)).every((p) => p.endsWith(":off")), `${tag}: a preset is on with no Cash: ${JSON.stringify(await presetsOn(box))}`);
       await box.locator(".trb-input").fill("10");
-      check(!(await box.locator('[data-testid="trade-cta"]').isEnabled()), `${tag}: the button is on with no Cash`);
+      const cta = await box.locator('[data-testid="trade-cta"]').evaluate((b) => ({ on: !b.disabled, label: b.textContent.trim() }));
+      check(cta.on && cta.label === "Deposit", `${tag}: the button ${JSON.stringify(cta)}, want Deposit, on`);
       await box.locator('[data-testid="trade-cta"]').click({ force: true }).catch(() => {});
       check((await asked(page)).length === 0, `${tag}: a trade was sent with no Cash: ${JSON.stringify(await asked(page))}`);
       await rules(tag, f, w, errors, dialogs);

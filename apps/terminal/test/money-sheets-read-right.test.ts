@@ -7,9 +7,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { lessThan, minShown } from "../src/screens/deposit/model.ts";
+import { holdsNothing } from "../src/screens/portfolio/model.ts";
 import { offersDeposit } from "../src/screens/trade/model.ts";
 
-const zero = { signedIn: true, running: false, coming: false, amount: 500n, total: 0n };
+const zero = { signedIn: true, running: false, coming: false, amount: 500n, empty: true };
 
 test("item 7: a $0 account that typed an amount is offered Deposit", () => {
   assert.equal(offersDeposit(zero), true);
@@ -17,12 +18,22 @@ test("item 7: a $0 account that typed an amount is offered Deposit", () => {
 
 test("item 7: no Deposit offer signed out, before the balance is read, with money, with no amount, mid-tap or with money coming", () => {
   assert.equal(offersDeposit({ ...zero, signedIn: false }), false);
-  assert.equal(offersDeposit({ ...zero, total: null }), false, "the balance not read yet");
-  assert.equal(offersDeposit({ ...zero, total: 1n }), false, "a cent anywhere in the account: Buy and its Max speak");
+  assert.equal(offersDeposit({ ...zero, empty: false }), false, "money anywhere in the account: Buy and its Max speak");
   assert.equal(offersDeposit({ ...zero, amount: null }), false);
   assert.equal(offersDeposit({ ...zero, amount: 0n }), false);
   assert.equal(offersDeposit({ ...zero, running: true }), false);
   assert.equal(offersDeposit({ ...zero, coming: true }), false, "a fresh deposit on its way: Buy's busy look stands");
+});
+
+test("item 7: an account holds nothing only when the vault, every pool and every deposit wallet read zero, from the page's own amounts", () => {
+  const fresh = { vault_balance: "0", pools: [{ balance: "0" }, { balance: "0.000" }], deposit_wallets: [] };
+  assert.equal(holdsNothing(fresh), true);
+  assert.equal(holdsNothing({ vault_balance: "0" }), true, "no pools listed");
+  assert.equal(holdsNothing(null), false, "no state yet");
+  assert.equal(holdsNothing(undefined), false);
+  assert.equal(holdsNothing({ ...fresh, vault_balance: "0.01" }), false);
+  assert.equal(holdsNothing({ ...fresh, pools: [{ balance: "0.01" }] }), false, "a pool's SOL with no price read yet is still money (QA: sol-nocash)");
+  assert.equal(holdsNothing({ ...fresh, deposit_wallets: [{ amount: "0.002" }] }), false, "money still at a deposit wallet");
 });
 
 test("item 13: USDC's Min at most 2 decimals, rounded up", () => {

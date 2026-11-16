@@ -122,11 +122,13 @@ test("the tx link: the last tx, on its chain's explorer (scripts/perf-table.mjs:
   assert.equal(txLink([{ chain: "near", hash: "a/b?c" }]), "https://nearblocks.io/txns/a%2Fb%3Fc", "a hash is one path segment");
 });
 
-test("words: each with its source; no draft is left (owner 2 Nov 06:08Z, all approved)", () => {
+test("words: each with its source; no draft is left (owner 2 Nov 06:08Z, all approved) but the form's From", () => {
   for (const [id, w] of Object.entries(WORDS)) {
     assert.ok(w.text.length > 0 && w.source.length > 0, id);
     assert.ok(!/[.!?]$/.test(w.text), `${id}: a label, not a sentence`);
   }
-  assert.deepEqual([...DRAFTS], []);
+  // the Withdraw form's From (card app-money-sheets-read-right, QA walk item 12): Portfolio's own draft, on the owner's
+  // next picks page
+  assert.deepEqual([...DRAFTS], ["from"]);
   for (const k of ["withdraw", "deposit", "close", "processing"] as const) assert.equal(WORDS[k].draft, false, k);
 });
