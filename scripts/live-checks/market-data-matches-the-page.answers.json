@@ -1,0 +1,1551 @@
+{
+ "_about": {
+  "bad_deployed": "the deployed helper before the card, read 2026-11-16T20:22:26.889Z with --record (main 0e9f11dc8's code): the NEAR push 404, Base pools 404, Solana New coins' bonding curves among their holders, Ref's v2 pool among BLACKDRAGON's, Robinhood UNIWALL MC 0 (GeckoTerminal total supply and FDV 0.0)",
+  "good": "MADE from bad_deployed: the same read passed through the card's code (listedHolders, NEAR_POOL_ACCOUNTS; a cap of 0 is null, as UNIWALL has no FDV), with the push upgrade (101, as Solana's answers) and Base's 200 complete:false; re-record it after the helper deploy with --record"
+ },
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-16T20:22:26.889Z",
+  "push": 101,
+  "pools": {
+   "status": 200,
+   "chainId": 8453,
+   "complete": false
+  },
+  "solana": [
+   {
+    "coin": "BwKzgdYkM9esYvL2ttsmqXFPdGPjFckhHYwRhWqSpump",
+    "status": 200,
+    "holders": [
+     {
+      "addr": "5YLiPkNAGcFwGfjDMc7yYwd9uMNFVmDzabfiCZ5QAsNs",
+      "bps": 682
+     },
+     {
+      "addr": "Hb326FNxnCnaX1sKSjzxmr7svfR4XuB2fmhXwcEwapuv",
+      "bps": 659
+     },
+     {
+      "addr": "7BUhuAfaqUUnGZtT3hxtz2xKorNyb3Si3ouT6We8ujfD",
+      "bps": 251
+     },
+     {
+      "addr": "9ZZo1F4M7PMsEENZojuNUDn5MmWub2R3mBHLbzfJERks",
+      "bps": 181
+     },
+     {
+      "addr": "HLMZJHbYNYsBtu6U7ZvYprLUvZEdxJZGpXmPgpgszMjv",
+      "bps": 180
+     },
+     {
+      "addr": "EvrMSocWo5K11WJSnLZLvN7ZuxNFm3pMg9JRxmY21Z3g",
+      "bps": 160
+     },
+     {
+      "addr": "8CTLT1RTGVHM4GNhroSv2wVhmVqrYBsBPCzPjBENhexw",
+      "bps": 152
+     },
+     {
+      "addr": "Av3uwZ8jn43DcbDkTJRXnXk5FwtLii7RbJdk4MPSQkK8",
+      "bps": 141
+     },
+     {
+      "addr": "Enp8Saro1EaxT8ysXR39nwdpRFEfxihuZu27QeQNTn9T",
+      "bps": 135
+     },
+     {
+      "addr": "4rJ7EvxNJSLdndWQeYyGs55MxGr4fK4FvBWj7DECdqqi",
+      "bps": 112
+     },
+     {
+      "addr": "3Vi1kT6Hyj2FzzsvHusAHaDmDLHAge21D3sSn49qmC8g",
+      "bps": 107
+     },
+     {
+      "addr": "SADWY55TzkbdnMAtQdcZWFtmCsjLrrLdZ5Sd7mkoPDd",
+      "bps": 96
+     },
+     {
+      "addr": "EDXC94LZK8GomcNxQgWWZhfLWihSJ8U9tRQTWGT6UFU8",
+      "bps": 65
+     },
+     {
+      "addr": "Gmzp2dt6md7HPAa3y3y3CcN5bnqMBjYkg4F7tLCYoEMp",
+      "bps": 65
+     },
+     {
+      "addr": "2ynWrKhUhgaNch1JqwyudaQTipKGLuNP5nHxw3ALijhp",
+      "bps": 27
+     },
+     {
+      "addr": "EyzYkJf9CSgJfvrqMejvX7Ux66HjFXkeHmMwww9mCMzR",
+      "bps": 9
+     },
+     {
+      "addr": "4EtDKPg3gNY8ZaWcYuenJJRH4in2oM8NRSgAGMdayt9z",
+      "bps": 9
+     },
+     {
+      "addr": "3X493EQtPE5NkZPd454H39ZkQqRwPSyQppfk99KeDh5N",
+      "bps": 9
+     },
+     {
+      "addr": "DDApZJsFqfNHGZvZ4kvdrA5RDtF5DZYGnxWSbjhxsviE",
+      "bps": 0
+     }
+    ]
+   },
+   {
+    "coin": "ExXehwc4YciSAGLDJHEnbZXFd9UfYiuueHVhgeSzpump",
+    "status": 200,
+    "holders": [
+     {
+      "addr": "TAB16RxXmazWzCTpJbnKiREWUybdEoskuyidaV291u3",
+      "bps": 352
+     },
+     {
+      "addr": "AMDEmVocLtN5ji2gBY7BrmSHEyM5vt6TGszBbg4crMXg",
+      "bps": 276
+     },
+     {
+      "addr": "1krnKHh9AqrLsA9jRusuD1AUJhzTu3cmD7TvwtroKAJ",
+      "bps": 223
+     },
+     {
+      "addr": "DLGSw9uZjJiJBfLCHzq5WAawgFP5meHNShWMuLxDPNAY",
+      "bps": 5
+     },
+     {
+      "addr": "23gMxd9oGiTvSfJcqSGZJsBp5SxcXR8zHA1owTuvVvUR",
+      "bps": 0
+     },
+     {
+      "addr": "3zNWpeRBZY7c5eS5fYboheQP5juPqD525qixxbjiVhEQ",
+      "bps": 0
+     },
+     {
+      "addr": "FF9PekJ4TtnVSnuDiJqiBwy5HrMU1jEmA4rAiWJpwtoD",
+      "bps": 0
+     }
+    ]
+   },
+   {
+    "coin": "DuNZsS9WFgQr7PjYADZcxSM3qGfx4AkyFbhJn5zrpump",
+    "status": 200,
+    "holders": [
+     {
+      "addr": "5g2nLTPm4x2UDCYMnPpUPYeAVZWR82Xg4GHBawomhtSf",
+      "bps": 2229
+     },
+     {
+      "addr": "GKd5EMzRhbprZXZfsbJczo4SrfF99XZWQA82bazaQr14",
+      "bps": 0
+     }
+    ]
+   }
+  ],
+  "near": {
+   "status": 200,
+   "addrs": [
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "454557328166de5b9bf9269c40cc01d5973219274187ae2c6f8f265dc1332fea",
+    "meme-farming_011.ref-labs.near",
+    "intents.near",
+    "seriousfarmer.near",
+    "drews.near",
+    "ba890f40977b4f59fa0482cee10350dca116459c632930a0d792ec2e793e4617",
+    "3763cef9965ec0cf9efd257b5e6348df16569d751a47e82cb30c830beef99292",
+    "nycboy.near",
+    "advancestudio.near",
+    "firstnft_tokens.near",
+    "0dec00cdd8d18da5cef7b41b9e6d2d6bd317c1c00257fcf9ddf1534facdd72d8",
+    "endgamewombat.near",
+    "fd0e157c08efe1b7214d84fe12a07800d4cf7112975a9df57609eb17b7914703",
+    "rhymetaylor.near",
+    "rosequeen127.near",
+    "fineward1705.near",
+    "lele.near",
+    "americas.near",
+    "chokedi969.near",
+    "profwoland.near",
+    "6cde8307d6d5d49c5c0968eb63a6463c41a4d500a32af936a9e9939300490e86",
+    "laplp2.near",
+    "clavicular.near",
+    "061d3a6cb4f6deeee1519225064150d3d8fe90a2969dede3e7989ab822ffdbb3",
+    "fb1d7ebcb304ebeb0ab5dd1d16d2fe349db7a94c19c25bbb91002fbd9f78ffe2",
+    "wisebread.near",
+    "e9e7f5f7657e417530ae87fcf9afc233e8386ed46fe6510de798a0df755ed817",
+    "cbd947fd97d5effe8d268543594652b0e200b2c7852a728d5dad6fd288d8ecc5",
+    "kolbasa79.near",
+    "ce2f26f116a9e448473d91ea6dfd39a71377679589ed10b362d4d19c48a2eada",
+    "littledata.near",
+    "realkingdom9695.near",
+    "pastlink6004.near",
+    "51d83e676c7d08fad523671be980de64cc6fce1e997b87559a9b172cfeab3845",
+    "tattothetoo.tg",
+    "sorryapp7344.near",
+    "jswags.near",
+    "25e4b23e664b2e4d2ceebf05d455dd37c784514f3d2c951ee5a173e83ac56ffb",
+    "androgen.near",
+    "baniasadijadid.near",
+    "6efcd98233db7d83a815bcdd19f79ee4b9e7094d30692406f7f76a119c66e757",
+    "congminh94.near",
+    "snowfa11.near",
+    "robgrey.near",
+    "neartothemoon8386.near",
+    "782be26394646286414b89d887070e76dc7f607c9e9a6e5163932f4ebf6635ea",
+    "sellyass.near",
+    "slowbank4678.near",
+    "livestreet5504.near",
+    "krapule.near",
+    "bahutae.near",
+    "420069.near",
+    "sinsomniac.near",
+    "wapzp.near",
+    "dragon67.near",
+    "dragon76.near",
+    "9de2b7b435677fe3613ac4a6d33a39779f93cd94e72df5f7b7b290c67ffc111b",
+    "camchis1.near",
+    "mrotter.near",
+    "my6bom.tg",
+    "e443ae2f642a49a225aa758cf565f2d52f2fd9f7319a6c282aa94639176a268b",
+    "pedram_zamani.near",
+    "grid.deltatrade.near",
+    "frostfire.near",
+    "788c8ec56ac7736065c02f9f09428fff44fea62ae407e89d15acb5e1f4361530",
+    "wap909.near",
+    "0233ab83f8052928ad78492cdb478c973485c86a356a109d8405a473e02674ca",
+    "sneering_yeti.near",
+    "kolczek2.near",
+    "shit.0xshitzu.near",
+    "unusualeponym.near",
+    "shitzu.sputnik-dao.near",
+    "herm.near",
+    "6a4c0ac4c8f5f0ad1c36f8421ec4bb545ee10f8d9895e16020ac4451a9fefc5b",
+    "df517cf37454d441ae8f15336846c0ee263dc5cf034249804c649981486784e7",
+    "camchis.near",
+    "d2add15c7dd50edd41a29864f4a2b8b73067bb747958cbb6bca887916654187e",
+    "thaimanhtai.near",
+    "nongyanxia1212.near",
+    "vaas_anth.near",
+    "6637996e087a962268aa3e6e194390025a5dde617417354f4666f639b6b82f21",
+    "branzaam.near",
+    "sleet.near",
+    "hsblackdragon.near",
+    "ark-it-solutions.near",
+    "6a34414587d219e2cc2fe5f344645714f1a53a04195103a6c10a6d57072d1a04",
+    "nguoixaynha.near",
+    "henvaibta-hot.tg",
+    "18cf79b26fbcd3e163440af5a79f0ffdeae1966a2d1e8999e446f21d2d0ee6c0",
+    "f5b50ea8abf0713a936757f8e30dd693e9b0bc11a92c6747a5d8049312ce22ee",
+    "9fab58bb2a7ac830d28a7afd435a0185a230b670f7a3281ad5ef3898f553ecbb",
+    "tinytea2440.near",
+    "0xefb526702162c321189446c3aa3f0420ed5d04fd",
+    "mlodyy78.tg",
+    "e912d4a79b30bd6f750a71b1798974ddf1a4698b16050e1224605b877daf16f2",
+    "manh89.near",
+    "albityma.near",
+    "919fc3040a5e1220029356508e74c6fdc0f5f3797911005ca3ab617f3e13b64f"
+   ]
+  },
+  "caps": {
+   "base": {
+    "status": 200,
+    "priced": [
+     {
+      "address": "0xbd956ddba48c143b8007be5e380360615ca8dad9",
+      "mc_usd": "8250.1005216"
+     },
+     {
+      "address": "0xb2000000000000000000009ed6dcf1dde6e55f63",
+      "mc_usd": "4047.418654"
+     },
+     {
+      "address": "0x22a5e95727d4e1e9c8a95c18e6827fdc495f97d6",
+      "mc_usd": "1449.618484"
+     },
+     {
+      "address": "0x62a8d1663fb14de490dfce0b86b1f5381d67adbc",
+      "mc_usd": "31511.8290842"
+     },
+     {
+      "address": "0xa827e1defe3a4fd7ede138e102f0182237ccee01",
+      "mc_usd": "4664.358545"
+     },
+     {
+      "address": "0x81f0a889ee20021122f3333d10ec8c874a8ab864",
+      "mc_usd": "7312.138232"
+     },
+     {
+      "address": "0x34462816cc2b9a2bd53ffa42cebf1f5314e34ba3",
+      "mc_usd": "10164.68854"
+     },
+     {
+      "address": "0xbef867446e2e7c2cc7647f16c10ea6c39dd18080",
+      "mc_usd": "13992.19694"
+     },
+     {
+      "address": "0x3c573bdd88008c94f025e5023212f28e5f39744c",
+      "mc_usd": "12266.36826"
+     },
+     {
+      "address": "0xa4ccdeaeb02e574aaf89eb39bca73169327dcccc",
+      "mc_usd": "167163.0628"
+     },
+     {
+      "address": "0xd2788687fefcbc2d621228aafe35cf847dfafdd5",
+      "mc_usd": "1448.163929"
+     },
+     {
+      "address": "0xb200000000000000000000963a70fd33eb000877",
+      "mc_usd": "4854.85482"
+     },
+     {
+      "address": "0xb200000000000000000000eab0a86cc2b78984b7",
+      "mc_usd": "192.829951331"
+     },
+     {
+      "address": "0x5ead5930cce337493197fd5377310c24038a5aa9",
+      "mc_usd": "96906.40448"
+     },
+     {
+      "address": "0xa6237f5c88a40fe622a4329198e0666f5f615ace",
+      "mc_usd": "0.00007035476571"
+     },
+     {
+      "address": "0xb200000000000000000000dea2d7b6237112a16c",
+      "mc_usd": "695.2573562"
+     },
+     {
+      "address": "0x6e23e3606aa32b8587e5ea2a483f6bd45908c902",
+      "mc_usd": "1443.029273"
+     },
+     {
+      "address": "0x280cda28e2fa2c474816d0c613753e011a2c7f1b",
+      "mc_usd": "547326.4031"
+     },
+     {
+      "address": "0x683453d53f0dc797f9813b2aaba4cd97a4824080",
+      "mc_usd": "18521.86068"
+     },
+     {
+      "address": "0x1563e4e35cd3365ba5efc328fcdaae0e82b14da4",
+      "mc_usd": "39170072.38"
+     },
+     {
+      "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "mc_usd": "16560271.92"
+     },
+     {
+      "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+      "mc_usd": "8196833.61008"
+     },
+     {
+      "address": "0xb200000000000000000000397293cb8cda9a10c5",
+      "mc_usd": "2472725.91358"
+     },
+     {
+      "address": "0xb2000000000000000000007b9fcbd005511acbd5",
+      "mc_usd": "3831587.73926"
+     },
+     {
+      "address": "0xb200000000000000000000fd2f87532b90095211",
+      "mc_usd": "1142002.54468"
+     },
+     {
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "mc_usd": "2192825.18855"
+     },
+     {
+      "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+      "mc_usd": "317226980.332"
+     },
+     {
+      "address": "0x311935cd80b76769bf2ecc9d8ab7635b2139cf82",
+      "mc_usd": "3425248.47914"
+     },
+     {
+      "address": "0xb2000000000000000000002d0ba3164cc74f58b7",
+      "mc_usd": "10030474.6711"
+     },
+     {
+      "address": "0xb200000000000000000000d9192b6b456483c2e8",
+      "mc_usd": "2224231.31523"
+     },
+     {
+      "address": "0xb2000000000000000000001e800a7f5189430cd0",
+      "mc_usd": "2389374.61591"
+     },
+     {
+      "address": "0x9b5e262cf9bb04869ab40b19af91d2dc85761722",
+      "mc_usd": "30652848.4633"
+     },
+     {
+      "address": "0xe0cd4cacddcbf4f36e845407ce53e87717b6601d",
+      "mc_usd": "57072776.4927"
+     },
+     {
+      "address": "0xb2000000000000000000008bc8786b856e61707c",
+      "mc_usd": "5292830.76733"
+     },
+     {
+      "address": "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf",
+      "mc_usd": "996907304.785"
+     },
+     {
+      "address": "0x853a7c99227499dba9db8c3a02aa691afdebf841",
+      "mc_usd": "2858410.36082"
+     },
+     {
+      "address": "0x6985884c4392d348587b19cb9eaaf157f13271cd",
+      "mc_usd": "570969021.027"
+     },
+     {
+      "address": "0x9b5e262cf9bb04869ab40b19af91d2dc85761722",
+      "mc_usd": "30446467.9525"
+     },
+     {
+      "address": "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf",
+      "mc_usd": "997080874.095"
+     },
+     {
+      "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "mc_usd": "16664389.49"
+     },
+     {
+      "address": "0x15d0e0c55a3e7ee67152ad7e89acf164253ff68d",
+      "mc_usd": "55924348.8791"
+     },
+     {
+      "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+      "mc_usd": "317351814.9"
+     },
+     {
+      "address": "0xb2000000000000000000008bc8786b856e61707c",
+      "mc_usd": "5327510.26498"
+     },
+     {
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "mc_usd": "2187570.4208"
+     },
+     {
+      "address": "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
+      "mc_usd": "119310573.652"
+     },
+     {
+      "address": "0xb200000000000000000000397293cb8cda9a10c5",
+      "mc_usd": "2470565.12122"
+     },
+     {
+      "address": "0x11030f79109269d796fd0fb956d6244e502757f7",
+      "mc_usd": "22045941.345"
+     },
+     {
+      "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+      "mc_usd": "8194400.27759"
+     },
+     {
+      "address": "0xb200000000000000000000fd2f87532b90095211",
+      "mc_usd": "1144040.93008"
+     },
+     {
+      "address": "0x9d0e8f5b25384c7310cb8c6ae32c8fbeb645d083",
+      "mc_usd": "302387466.977"
+     },
+     {
+      "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "mc_usd": "16560271.92"
+     },
+     {
+      "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+      "mc_usd": "8196833.61008"
+     },
+     {
+      "address": "0xb200000000000000000000397293cb8cda9a10c5",
+      "mc_usd": "2472725.91358"
+     },
+     {
+      "address": "0xb2000000000000000000007b9fcbd005511acbd5",
+      "mc_usd": "3831587.73926"
+     },
+     {
+      "address": "0xb200000000000000000000fd2f87532b90095211",
+      "mc_usd": "1142002.54468"
+     },
+     {
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "mc_usd": "2192825.18855"
+     },
+     {
+      "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+      "mc_usd": "317226980.332"
+     },
+     {
+      "address": "0x311935cd80b76769bf2ecc9d8ab7635b2139cf82",
+      "mc_usd": "3425248.47914"
+     },
+     {
+      "address": "0xb2000000000000000000002d0ba3164cc74f58b7",
+      "mc_usd": "10030474.6711"
+     },
+     {
+      "address": "0xb200000000000000000000d9192b6b456483c2e8",
+      "mc_usd": "2224231.31523"
+     },
+     {
+      "address": "0xb2000000000000000000001e800a7f5189430cd0",
+      "mc_usd": "2389374.61591"
+     },
+     {
+      "address": "0x9b5e262cf9bb04869ab40b19af91d2dc85761722",
+      "mc_usd": "30652848.4633"
+     },
+     {
+      "address": "0xe0cd4cacddcbf4f36e845407ce53e87717b6601d",
+      "mc_usd": "57072776.4927"
+     },
+     {
+      "address": "0xb2000000000000000000008bc8786b856e61707c",
+      "mc_usd": "5292830.76733"
+     },
+     {
+      "address": "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf",
+      "mc_usd": "996907304.785"
+     },
+     {
+      "address": "0x853a7c99227499dba9db8c3a02aa691afdebf841",
+      "mc_usd": "2858410.36082"
+     },
+     {
+      "address": "0x6985884c4392d348587b19cb9eaaf157f13271cd",
+      "mc_usd": "570969021.027"
+     }
+    ]
+   },
+   "robinhood": {
+    "status": 200,
+    "priced": [
+     {
+      "address": "0x76b74d43f214aef01d3baa6ddc1f45e0eddb738d",
+      "mc_usd": "8522.96372"
+     },
+     {
+      "address": "0xf3fd1029637b6ff92d2745d873aa3f3e37fcdce9",
+      "mc_usd": "9613.685921"
+     },
+     {
+      "address": "0x76985940eb683dc9e53a20de66e6297fc40c1f77",
+      "mc_usd": "5339.220561"
+     },
+     {
+      "address": "0x94256bd5d13494d5f07f9897c78d3c9de5e63bec",
+      "mc_usd": "60374.36861"
+     },
+     {
+      "address": "0x1d2335235c00d638c58f82bc7ebb00b130c9d055",
+      "mc_usd": "4541.397984"
+     },
+     {
+      "address": "0xd221cd98c3020f5444ab73b5ae0828f0e12abf7f",
+      "mc_usd": "9199.437958"
+     },
+     {
+      "address": "0x5c866ed7073b828fcb1640cb78bdadb07eebd09e",
+      "mc_usd": "1834.69624"
+     },
+     {
+      "address": "0xbeaec2e10d8f7614d08d7321a02527cb2926cccc",
+      "mc_usd": "3992.990231"
+     },
+     {
+      "address": "0x7321630d001a6788a5ddce1849d738f80ff57777",
+      "mc_usd": "136091.7214"
+     },
+     {
+      "address": "0x1aed94b178f2593b48be4b5a2b451afd2894bce7",
+      "mc_usd": "186024.6779"
+     },
+     {
+      "address": "0xf49bb6e88d807ef11bda69aa59404280febda263",
+      "mc_usd": "11136.50926"
+     },
+     {
+      "address": "0x3aef28ac69a43b4f65695e1a6adc4c0faf70cc0d",
+      "mc_usd": "3065.968154"
+     },
+     {
+      "address": "0x37a4dc00dcd9e2a9ee04b59815e8b1257863eeda",
+      "mc_usd": "11262.75084"
+     },
+     {
+      "address": "0x2ff4457c794af7d454e4729fc29657040a848aa3",
+      "mc_usd": "2991.01575"
+     },
+     {
+      "address": "0xc5814b96e5497830b5d50ccc44ec2f96d756d09e",
+      "mc_usd": "4250.47675"
+     },
+     {
+      "address": "0x362ebad4e06fb1f1328da7738623fb0d4c8a9d8d",
+      "mc_usd": "4303.170613"
+     },
+     {
+      "address": "0xb1b9875ee27f17f1edac1d5609dffbc106598e49",
+      "mc_usd": "3048.045652"
+     },
+     {
+      "address": "0x63c6136f9857991b97b327e40d086909605422e3",
+      "mc_usd": "3090.464837"
+     },
+     {
+      "address": "0xdac532905ba90d275bdffc6d73a1f1210995245d",
+      "mc_usd": "3075.259972"
+     },
+     {
+      "address": "0x9c4b431edc76b39ce48151d4da1b0afc0ff41e18",
+      "mc_usd": "20178.89036"
+     },
+     {
+      "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "mc_usd": "647134.3541"
+     },
+     {
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "mc_usd": "48680592.0906"
+     },
+     {
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "mc_usd": "80565542.2735"
+     },
+     {
+      "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+      "mc_usd": "10053747.38"
+     },
+     {
+      "address": "0x1c1daef0300551adbfbe403e7d567b6c5aff566f",
+      "mc_usd": "39748.42098"
+     },
+     {
+      "address": "0xcec185eb182c47d1ba1efc84e6959e18cd620be4",
+      "mc_usd": "6871032022.97"
+     },
+     {
+      "address": "0x9f0692785990bcb7f8c36d979a86fe5fcf31c7c3",
+      "mc_usd": "26642.43711"
+     },
+     {
+      "address": "0xfce34d21a92069100e3226638140706cf03a266e",
+      "mc_usd": "2004260.1186"
+     },
+     {
+      "address": "0x6245e67affa44a23077f0ea7f981a8dc743a0c47",
+      "mc_usd": "3019123.626"
+     },
+     {
+      "address": "0xd5f1afea47b1a9eab414d2ee740cf1d6d039e725",
+      "mc_usd": "3045788.18633"
+     },
+     {
+      "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+      "mc_usd": "24590308.9905"
+     },
+     {
+      "address": "0x51e128edf76063858bf1cc34791ef067e7f0e4b5",
+      "mc_usd": "255116.8383"
+     },
+     {
+      "address": "0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f",
+      "mc_usd": "9167527.245"
+     },
+     {
+      "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "mc_usd": "640811.3907"
+     },
+     {
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "mc_usd": "48689553.313"
+     },
+     {
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "mc_usd": "80565542.2735"
+     },
+     {
+      "address": "0x6245e67affa44a23077f0ea7f981a8dc743a0c47",
+      "mc_usd": "3019123.626"
+     },
+     {
+      "address": "0x94256bd5d13494d5f07f9897c78d3c9de5e63bec",
+      "mc_usd": "60482.63685"
+     },
+     {
+      "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+      "mc_usd": "9995575.752"
+     },
+     {
+      "address": "0xe8ffd7e24187f72afb08d75b1bb13088a989a791",
+      "mc_usd": "3436768.5192"
+     },
+     {
+      "address": "0xacfce4c3db4e4adffc67ca1b46787e0e3fee3e4c",
+      "mc_usd": "89474.80939"
+     },
+     {
+      "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+      "mc_usd": "24693323.6919"
+     },
+     {
+      "address": "0xca9c78dd337a67f6e0077f65f5e9218719d30edf",
+      "mc_usd": "730895.245305"
+     },
+     {
+      "address": "0xcaeed5281bd1eeb26d5f8bd550bf5c3727ba6514",
+      "mc_usd": "43708.39655"
+     },
+     {
+      "address": "0x5173b8ea6923c2d40267890d45c46a3480954773",
+      "mc_usd": "1026688.807"
+     },
+     {
+      "address": "0xedbf91223639800bcd5756815caf908df3b890be",
+      "mc_usd": "5729398.15338"
+     },
+     {
+      "address": "0x255979302fd6a5e2ff6dce0d8b018f51e06e243a",
+      "mc_usd": null
+     },
+     {
+      "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "mc_usd": "647134.3541"
+     },
+     {
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "mc_usd": "48680592.0906"
+     },
+     {
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "mc_usd": "80565542.2735"
+     },
+     {
+      "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+      "mc_usd": "10053747.38"
+     },
+     {
+      "address": "0x1c1daef0300551adbfbe403e7d567b6c5aff566f",
+      "mc_usd": "39748.42098"
+     },
+     {
+      "address": "0xcec185eb182c47d1ba1efc84e6959e18cd620be4",
+      "mc_usd": "6871032022.97"
+     },
+     {
+      "address": "0x9f0692785990bcb7f8c36d979a86fe5fcf31c7c3",
+      "mc_usd": "26642.43711"
+     },
+     {
+      "address": "0xfce34d21a92069100e3226638140706cf03a266e",
+      "mc_usd": "2004260.1186"
+     },
+     {
+      "address": "0x6245e67affa44a23077f0ea7f981a8dc743a0c47",
+      "mc_usd": "3019123.626"
+     },
+     {
+      "address": "0xd5f1afea47b1a9eab414d2ee740cf1d6d039e725",
+      "mc_usd": "3045788.18633"
+     },
+     {
+      "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+      "mc_usd": "24590308.9905"
+     },
+     {
+      "address": "0x51e128edf76063858bf1cc34791ef067e7f0e4b5",
+      "mc_usd": "255116.8383"
+     },
+     {
+      "address": "0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f",
+      "mc_usd": "9167527.245"
+     }
+    ]
+   }
+  }
+ },
+ "bad_deployed": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-16T20:22:26.889Z",
+  "push": 404,
+  "pools": {
+   "status": 404,
+   "chainId": null,
+   "complete": null
+  },
+  "solana": [
+   {
+    "coin": "BwKzgdYkM9esYvL2ttsmqXFPdGPjFckhHYwRhWqSpump",
+    "status": 200,
+    "holders": [
+     {
+      "addr": "9VXLeFMXECksaDztjF2mNxeKDfBWwwv24fjZ44x5bfGb",
+      "bps": 6949
+     },
+     {
+      "addr": "5YLiPkNAGcFwGfjDMc7yYwd9uMNFVmDzabfiCZ5QAsNs",
+      "bps": 682
+     },
+     {
+      "addr": "Hb326FNxnCnaX1sKSjzxmr7svfR4XuB2fmhXwcEwapuv",
+      "bps": 659
+     },
+     {
+      "addr": "7BUhuAfaqUUnGZtT3hxtz2xKorNyb3Si3ouT6We8ujfD",
+      "bps": 251
+     },
+     {
+      "addr": "9ZZo1F4M7PMsEENZojuNUDn5MmWub2R3mBHLbzfJERks",
+      "bps": 181
+     },
+     {
+      "addr": "HLMZJHbYNYsBtu6U7ZvYprLUvZEdxJZGpXmPgpgszMjv",
+      "bps": 180
+     },
+     {
+      "addr": "EvrMSocWo5K11WJSnLZLvN7ZuxNFm3pMg9JRxmY21Z3g",
+      "bps": 160
+     },
+     {
+      "addr": "8CTLT1RTGVHM4GNhroSv2wVhmVqrYBsBPCzPjBENhexw",
+      "bps": 152
+     },
+     {
+      "addr": "Av3uwZ8jn43DcbDkTJRXnXk5FwtLii7RbJdk4MPSQkK8",
+      "bps": 141
+     },
+     {
+      "addr": "Enp8Saro1EaxT8ysXR39nwdpRFEfxihuZu27QeQNTn9T",
+      "bps": 135
+     },
+     {
+      "addr": "4rJ7EvxNJSLdndWQeYyGs55MxGr4fK4FvBWj7DECdqqi",
+      "bps": 112
+     },
+     {
+      "addr": "3Vi1kT6Hyj2FzzsvHusAHaDmDLHAge21D3sSn49qmC8g",
+      "bps": 107
+     },
+     {
+      "addr": "SADWY55TzkbdnMAtQdcZWFtmCsjLrrLdZ5Sd7mkoPDd",
+      "bps": 96
+     },
+     {
+      "addr": "EDXC94LZK8GomcNxQgWWZhfLWihSJ8U9tRQTWGT6UFU8",
+      "bps": 65
+     },
+     {
+      "addr": "Gmzp2dt6md7HPAa3y3y3CcN5bnqMBjYkg4F7tLCYoEMp",
+      "bps": 65
+     },
+     {
+      "addr": "2ynWrKhUhgaNch1JqwyudaQTipKGLuNP5nHxw3ALijhp",
+      "bps": 27
+     },
+     {
+      "addr": "EyzYkJf9CSgJfvrqMejvX7Ux66HjFXkeHmMwww9mCMzR",
+      "bps": 9
+     },
+     {
+      "addr": "4EtDKPg3gNY8ZaWcYuenJJRH4in2oM8NRSgAGMdayt9z",
+      "bps": 9
+     },
+     {
+      "addr": "3X493EQtPE5NkZPd454H39ZkQqRwPSyQppfk99KeDh5N",
+      "bps": 9
+     },
+     {
+      "addr": "DDApZJsFqfNHGZvZ4kvdrA5RDtF5DZYGnxWSbjhxsviE",
+      "bps": 0
+     }
+    ]
+   },
+   {
+    "coin": "ExXehwc4YciSAGLDJHEnbZXFd9UfYiuueHVhgeSzpump",
+    "status": 200,
+    "holders": [
+     {
+      "addr": "D3fYgUHu5e66NietH3uLgJ5WxHFGr6cB4QUWdnSBKULk",
+      "bps": 9142
+     },
+     {
+      "addr": "TAB16RxXmazWzCTpJbnKiREWUybdEoskuyidaV291u3",
+      "bps": 352
+     },
+     {
+      "addr": "AMDEmVocLtN5ji2gBY7BrmSHEyM5vt6TGszBbg4crMXg",
+      "bps": 276
+     },
+     {
+      "addr": "1krnKHh9AqrLsA9jRusuD1AUJhzTu3cmD7TvwtroKAJ",
+      "bps": 223
+     },
+     {
+      "addr": "DLGSw9uZjJiJBfLCHzq5WAawgFP5meHNShWMuLxDPNAY",
+      "bps": 5
+     },
+     {
+      "addr": "23gMxd9oGiTvSfJcqSGZJsBp5SxcXR8zHA1owTuvVvUR",
+      "bps": 0
+     },
+     {
+      "addr": "3zNWpeRBZY7c5eS5fYboheQP5juPqD525qixxbjiVhEQ",
+      "bps": 0
+     },
+     {
+      "addr": "FF9PekJ4TtnVSnuDiJqiBwy5HrMU1jEmA4rAiWJpwtoD",
+      "bps": 0
+     }
+    ]
+   },
+   {
+    "coin": "DuNZsS9WFgQr7PjYADZcxSM3qGfx4AkyFbhJn5zrpump",
+    "status": 200,
+    "holders": [
+     {
+      "addr": "8g2UcS5ztwjyjQ9bH7g1P3GXM1UK5CKaY2QPZXmih4S9",
+      "bps": 7770
+     },
+     {
+      "addr": "5g2nLTPm4x2UDCYMnPpUPYeAVZWR82Xg4GHBawomhtSf",
+      "bps": 2229
+     },
+     {
+      "addr": "GKd5EMzRhbprZXZfsbJczo4SrfF99XZWQA82bazaQr14",
+      "bps": 0
+     }
+    ]
+   }
+  ],
+  "near": {
+   "status": 200,
+   "addrs": [
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "454557328166de5b9bf9269c40cc01d5973219274187ae2c6f8f265dc1332fea",
+    "v2.ref-finance.near",
+    "meme-farming_011.ref-labs.near",
+    "intents.near",
+    "seriousfarmer.near",
+    "drews.near",
+    "ba890f40977b4f59fa0482cee10350dca116459c632930a0d792ec2e793e4617",
+    "3763cef9965ec0cf9efd257b5e6348df16569d751a47e82cb30c830beef99292",
+    "nycboy.near",
+    "advancestudio.near",
+    "firstnft_tokens.near",
+    "0dec00cdd8d18da5cef7b41b9e6d2d6bd317c1c00257fcf9ddf1534facdd72d8",
+    "endgamewombat.near",
+    "fd0e157c08efe1b7214d84fe12a07800d4cf7112975a9df57609eb17b7914703",
+    "rhymetaylor.near",
+    "rosequeen127.near",
+    "fineward1705.near",
+    "lele.near",
+    "americas.near",
+    "chokedi969.near",
+    "profwoland.near",
+    "6cde8307d6d5d49c5c0968eb63a6463c41a4d500a32af936a9e9939300490e86",
+    "laplp2.near",
+    "clavicular.near",
+    "061d3a6cb4f6deeee1519225064150d3d8fe90a2969dede3e7989ab822ffdbb3",
+    "fb1d7ebcb304ebeb0ab5dd1d16d2fe349db7a94c19c25bbb91002fbd9f78ffe2",
+    "wisebread.near",
+    "e9e7f5f7657e417530ae87fcf9afc233e8386ed46fe6510de798a0df755ed817",
+    "cbd947fd97d5effe8d268543594652b0e200b2c7852a728d5dad6fd288d8ecc5",
+    "kolbasa79.near",
+    "ce2f26f116a9e448473d91ea6dfd39a71377679589ed10b362d4d19c48a2eada",
+    "littledata.near",
+    "realkingdom9695.near",
+    "pastlink6004.near",
+    "51d83e676c7d08fad523671be980de64cc6fce1e997b87559a9b172cfeab3845",
+    "tattothetoo.tg",
+    "sorryapp7344.near",
+    "jswags.near",
+    "25e4b23e664b2e4d2ceebf05d455dd37c784514f3d2c951ee5a173e83ac56ffb",
+    "androgen.near",
+    "baniasadijadid.near",
+    "6efcd98233db7d83a815bcdd19f79ee4b9e7094d30692406f7f76a119c66e757",
+    "congminh94.near",
+    "snowfa11.near",
+    "robgrey.near",
+    "neartothemoon8386.near",
+    "782be26394646286414b89d887070e76dc7f607c9e9a6e5163932f4ebf6635ea",
+    "sellyass.near",
+    "slowbank4678.near",
+    "livestreet5504.near",
+    "krapule.near",
+    "bahutae.near",
+    "420069.near",
+    "sinsomniac.near",
+    "wapzp.near",
+    "dragon67.near",
+    "dragon76.near",
+    "9de2b7b435677fe3613ac4a6d33a39779f93cd94e72df5f7b7b290c67ffc111b",
+    "camchis1.near",
+    "mrotter.near",
+    "my6bom.tg",
+    "e443ae2f642a49a225aa758cf565f2d52f2fd9f7319a6c282aa94639176a268b",
+    "pedram_zamani.near",
+    "grid.deltatrade.near",
+    "frostfire.near",
+    "788c8ec56ac7736065c02f9f09428fff44fea62ae407e89d15acb5e1f4361530",
+    "wap909.near",
+    "0233ab83f8052928ad78492cdb478c973485c86a356a109d8405a473e02674ca",
+    "sneering_yeti.near",
+    "kolczek2.near",
+    "shit.0xshitzu.near",
+    "unusualeponym.near",
+    "shitzu.sputnik-dao.near",
+    "herm.near",
+    "6a4c0ac4c8f5f0ad1c36f8421ec4bb545ee10f8d9895e16020ac4451a9fefc5b",
+    "df517cf37454d441ae8f15336846c0ee263dc5cf034249804c649981486784e7",
+    "camchis.near",
+    "d2add15c7dd50edd41a29864f4a2b8b73067bb747958cbb6bca887916654187e",
+    "thaimanhtai.near",
+    "nongyanxia1212.near",
+    "vaas_anth.near",
+    "6637996e087a962268aa3e6e194390025a5dde617417354f4666f639b6b82f21",
+    "branzaam.near",
+    "sleet.near",
+    "hsblackdragon.near",
+    "ark-it-solutions.near",
+    "6a34414587d219e2cc2fe5f344645714f1a53a04195103a6c10a6d57072d1a04",
+    "nguoixaynha.near",
+    "henvaibta-hot.tg",
+    "18cf79b26fbcd3e163440af5a79f0ffdeae1966a2d1e8999e446f21d2d0ee6c0",
+    "f5b50ea8abf0713a936757f8e30dd693e9b0bc11a92c6747a5d8049312ce22ee",
+    "9fab58bb2a7ac830d28a7afd435a0185a230b670f7a3281ad5ef3898f553ecbb",
+    "tinytea2440.near",
+    "0xefb526702162c321189446c3aa3f0420ed5d04fd",
+    "mlodyy78.tg",
+    "e912d4a79b30bd6f750a71b1798974ddf1a4698b16050e1224605b877daf16f2",
+    "manh89.near",
+    "albityma.near",
+    "919fc3040a5e1220029356508e74c6fdc0f5f3797911005ca3ab617f3e13b64f"
+   ]
+  },
+  "caps": {
+   "base": {
+    "status": 200,
+    "priced": [
+     {
+      "address": "0xbd956ddba48c143b8007be5e380360615ca8dad9",
+      "mc_usd": "8250.1005216"
+     },
+     {
+      "address": "0xb2000000000000000000009ed6dcf1dde6e55f63",
+      "mc_usd": "4047.418654"
+     },
+     {
+      "address": "0x22a5e95727d4e1e9c8a95c18e6827fdc495f97d6",
+      "mc_usd": "1449.618484"
+     },
+     {
+      "address": "0x62a8d1663fb14de490dfce0b86b1f5381d67adbc",
+      "mc_usd": "31511.8290842"
+     },
+     {
+      "address": "0xa827e1defe3a4fd7ede138e102f0182237ccee01",
+      "mc_usd": "4664.358545"
+     },
+     {
+      "address": "0x81f0a889ee20021122f3333d10ec8c874a8ab864",
+      "mc_usd": "7312.138232"
+     },
+     {
+      "address": "0x34462816cc2b9a2bd53ffa42cebf1f5314e34ba3",
+      "mc_usd": "10164.68854"
+     },
+     {
+      "address": "0xbef867446e2e7c2cc7647f16c10ea6c39dd18080",
+      "mc_usd": "13992.19694"
+     },
+     {
+      "address": "0x3c573bdd88008c94f025e5023212f28e5f39744c",
+      "mc_usd": "12266.36826"
+     },
+     {
+      "address": "0xa4ccdeaeb02e574aaf89eb39bca73169327dcccc",
+      "mc_usd": "167163.0628"
+     },
+     {
+      "address": "0xd2788687fefcbc2d621228aafe35cf847dfafdd5",
+      "mc_usd": "1448.163929"
+     },
+     {
+      "address": "0xb200000000000000000000963a70fd33eb000877",
+      "mc_usd": "4854.85482"
+     },
+     {
+      "address": "0xb200000000000000000000eab0a86cc2b78984b7",
+      "mc_usd": "192.829951331"
+     },
+     {
+      "address": "0x5ead5930cce337493197fd5377310c24038a5aa9",
+      "mc_usd": "96906.40448"
+     },
+     {
+      "address": "0xa6237f5c88a40fe622a4329198e0666f5f615ace",
+      "mc_usd": "0.00007035476571"
+     },
+     {
+      "address": "0xb200000000000000000000dea2d7b6237112a16c",
+      "mc_usd": "695.2573562"
+     },
+     {
+      "address": "0x6e23e3606aa32b8587e5ea2a483f6bd45908c902",
+      "mc_usd": "1443.029273"
+     },
+     {
+      "address": "0x280cda28e2fa2c474816d0c613753e011a2c7f1b",
+      "mc_usd": "547326.4031"
+     },
+     {
+      "address": "0x683453d53f0dc797f9813b2aaba4cd97a4824080",
+      "mc_usd": "18521.86068"
+     },
+     {
+      "address": "0x1563e4e35cd3365ba5efc328fcdaae0e82b14da4",
+      "mc_usd": "39170072.38"
+     },
+     {
+      "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "mc_usd": "16560271.92"
+     },
+     {
+      "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+      "mc_usd": "8196833.61008"
+     },
+     {
+      "address": "0xb200000000000000000000397293cb8cda9a10c5",
+      "mc_usd": "2472725.91358"
+     },
+     {
+      "address": "0xb2000000000000000000007b9fcbd005511acbd5",
+      "mc_usd": "3831587.73926"
+     },
+     {
+      "address": "0xb200000000000000000000fd2f87532b90095211",
+      "mc_usd": "1142002.54468"
+     },
+     {
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "mc_usd": "2192825.18855"
+     },
+     {
+      "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+      "mc_usd": "317226980.332"
+     },
+     {
+      "address": "0x311935cd80b76769bf2ecc9d8ab7635b2139cf82",
+      "mc_usd": "3425248.47914"
+     },
+     {
+      "address": "0xb2000000000000000000002d0ba3164cc74f58b7",
+      "mc_usd": "10030474.6711"
+     },
+     {
+      "address": "0xb200000000000000000000d9192b6b456483c2e8",
+      "mc_usd": "2224231.31523"
+     },
+     {
+      "address": "0xb2000000000000000000001e800a7f5189430cd0",
+      "mc_usd": "2389374.61591"
+     },
+     {
+      "address": "0x9b5e262cf9bb04869ab40b19af91d2dc85761722",
+      "mc_usd": "30652848.4633"
+     },
+     {
+      "address": "0xe0cd4cacddcbf4f36e845407ce53e87717b6601d",
+      "mc_usd": "57072776.4927"
+     },
+     {
+      "address": "0xb2000000000000000000008bc8786b856e61707c",
+      "mc_usd": "5292830.76733"
+     },
+     {
+      "address": "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf",
+      "mc_usd": "996907304.785"
+     },
+     {
+      "address": "0x853a7c99227499dba9db8c3a02aa691afdebf841",
+      "mc_usd": "2858410.36082"
+     },
+     {
+      "address": "0x6985884c4392d348587b19cb9eaaf157f13271cd",
+      "mc_usd": "570969021.027"
+     },
+     {
+      "address": "0x9b5e262cf9bb04869ab40b19af91d2dc85761722",
+      "mc_usd": "30446467.9525"
+     },
+     {
+      "address": "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf",
+      "mc_usd": "997080874.095"
+     },
+     {
+      "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "mc_usd": "16664389.49"
+     },
+     {
+      "address": "0x15d0e0c55a3e7ee67152ad7e89acf164253ff68d",
+      "mc_usd": "55924348.8791"
+     },
+     {
+      "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+      "mc_usd": "317351814.9"
+     },
+     {
+      "address": "0xb2000000000000000000008bc8786b856e61707c",
+      "mc_usd": "5327510.26498"
+     },
+     {
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "mc_usd": "2187570.4208"
+     },
+     {
+      "address": "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
+      "mc_usd": "119310573.652"
+     },
+     {
+      "address": "0xb200000000000000000000397293cb8cda9a10c5",
+      "mc_usd": "2470565.12122"
+     },
+     {
+      "address": "0x11030f79109269d796fd0fb956d6244e502757f7",
+      "mc_usd": "22045941.345"
+     },
+     {
+      "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+      "mc_usd": "8194400.27759"
+     },
+     {
+      "address": "0xb200000000000000000000fd2f87532b90095211",
+      "mc_usd": "1144040.93008"
+     },
+     {
+      "address": "0x9d0e8f5b25384c7310cb8c6ae32c8fbeb645d083",
+      "mc_usd": "302387466.977"
+     },
+     {
+      "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "mc_usd": "16560271.92"
+     },
+     {
+      "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+      "mc_usd": "8196833.61008"
+     },
+     {
+      "address": "0xb200000000000000000000397293cb8cda9a10c5",
+      "mc_usd": "2472725.91358"
+     },
+     {
+      "address": "0xb2000000000000000000007b9fcbd005511acbd5",
+      "mc_usd": "3831587.73926"
+     },
+     {
+      "address": "0xb200000000000000000000fd2f87532b90095211",
+      "mc_usd": "1142002.54468"
+     },
+     {
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "mc_usd": "2192825.18855"
+     },
+     {
+      "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+      "mc_usd": "317226980.332"
+     },
+     {
+      "address": "0x311935cd80b76769bf2ecc9d8ab7635b2139cf82",
+      "mc_usd": "3425248.47914"
+     },
+     {
+      "address": "0xb2000000000000000000002d0ba3164cc74f58b7",
+      "mc_usd": "10030474.6711"
+     },
+     {
+      "address": "0xb200000000000000000000d9192b6b456483c2e8",
+      "mc_usd": "2224231.31523"
+     },
+     {
+      "address": "0xb2000000000000000000001e800a7f5189430cd0",
+      "mc_usd": "2389374.61591"
+     },
+     {
+      "address": "0x9b5e262cf9bb04869ab40b19af91d2dc85761722",
+      "mc_usd": "30652848.4633"
+     },
+     {
+      "address": "0xe0cd4cacddcbf4f36e845407ce53e87717b6601d",
+      "mc_usd": "57072776.4927"
+     },
+     {
+      "address": "0xb2000000000000000000008bc8786b856e61707c",
+      "mc_usd": "5292830.76733"
+     },
+     {
+      "address": "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf",
+      "mc_usd": "996907304.785"
+     },
+     {
+      "address": "0x853a7c99227499dba9db8c3a02aa691afdebf841",
+      "mc_usd": "2858410.36082"
+     },
+     {
+      "address": "0x6985884c4392d348587b19cb9eaaf157f13271cd",
+      "mc_usd": "570969021.027"
+     }
+    ]
+   },
+   "robinhood": {
+    "status": 200,
+    "priced": [
+     {
+      "address": "0x76b74d43f214aef01d3baa6ddc1f45e0eddb738d",
+      "mc_usd": "8522.96372"
+     },
+     {
+      "address": "0xf3fd1029637b6ff92d2745d873aa3f3e37fcdce9",
+      "mc_usd": "9613.685921"
+     },
+     {
+      "address": "0x76985940eb683dc9e53a20de66e6297fc40c1f77",
+      "mc_usd": "5339.220561"
+     },
+     {
+      "address": "0x94256bd5d13494d5f07f9897c78d3c9de5e63bec",
+      "mc_usd": "60374.36861"
+     },
+     {
+      "address": "0x1d2335235c00d638c58f82bc7ebb00b130c9d055",
+      "mc_usd": "4541.397984"
+     },
+     {
+      "address": "0xd221cd98c3020f5444ab73b5ae0828f0e12abf7f",
+      "mc_usd": "9199.437958"
+     },
+     {
+      "address": "0x5c866ed7073b828fcb1640cb78bdadb07eebd09e",
+      "mc_usd": "1834.69624"
+     },
+     {
+      "address": "0xbeaec2e10d8f7614d08d7321a02527cb2926cccc",
+      "mc_usd": "3992.990231"
+     },
+     {
+      "address": "0x7321630d001a6788a5ddce1849d738f80ff57777",
+      "mc_usd": "136091.7214"
+     },
+     {
+      "address": "0x1aed94b178f2593b48be4b5a2b451afd2894bce7",
+      "mc_usd": "186024.6779"
+     },
+     {
+      "address": "0xf49bb6e88d807ef11bda69aa59404280febda263",
+      "mc_usd": "11136.50926"
+     },
+     {
+      "address": "0x3aef28ac69a43b4f65695e1a6adc4c0faf70cc0d",
+      "mc_usd": "3065.968154"
+     },
+     {
+      "address": "0x37a4dc00dcd9e2a9ee04b59815e8b1257863eeda",
+      "mc_usd": "11262.75084"
+     },
+     {
+      "address": "0x2ff4457c794af7d454e4729fc29657040a848aa3",
+      "mc_usd": "2991.01575"
+     },
+     {
+      "address": "0xc5814b96e5497830b5d50ccc44ec2f96d756d09e",
+      "mc_usd": "4250.47675"
+     },
+     {
+      "address": "0x362ebad4e06fb1f1328da7738623fb0d4c8a9d8d",
+      "mc_usd": "4303.170613"
+     },
+     {
+      "address": "0xb1b9875ee27f17f1edac1d5609dffbc106598e49",
+      "mc_usd": "3048.045652"
+     },
+     {
+      "address": "0x63c6136f9857991b97b327e40d086909605422e3",
+      "mc_usd": "3090.464837"
+     },
+     {
+      "address": "0xdac532905ba90d275bdffc6d73a1f1210995245d",
+      "mc_usd": "3075.259972"
+     },
+     {
+      "address": "0x9c4b431edc76b39ce48151d4da1b0afc0ff41e18",
+      "mc_usd": "20178.89036"
+     },
+     {
+      "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "mc_usd": "647134.3541"
+     },
+     {
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "mc_usd": "48680592.0906"
+     },
+     {
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "mc_usd": "80565542.2735"
+     },
+     {
+      "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+      "mc_usd": "10053747.38"
+     },
+     {
+      "address": "0x1c1daef0300551adbfbe403e7d567b6c5aff566f",
+      "mc_usd": "39748.42098"
+     },
+     {
+      "address": "0xcec185eb182c47d1ba1efc84e6959e18cd620be4",
+      "mc_usd": "6871032022.97"
+     },
+     {
+      "address": "0x9f0692785990bcb7f8c36d979a86fe5fcf31c7c3",
+      "mc_usd": "26642.43711"
+     },
+     {
+      "address": "0xfce34d21a92069100e3226638140706cf03a266e",
+      "mc_usd": "2004260.1186"
+     },
+     {
+      "address": "0x6245e67affa44a23077f0ea7f981a8dc743a0c47",
+      "mc_usd": "3019123.626"
+     },
+     {
+      "address": "0xd5f1afea47b1a9eab414d2ee740cf1d6d039e725",
+      "mc_usd": "3045788.18633"
+     },
+     {
+      "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+      "mc_usd": "24590308.9905"
+     },
+     {
+      "address": "0x51e128edf76063858bf1cc34791ef067e7f0e4b5",
+      "mc_usd": "255116.8383"
+     },
+     {
+      "address": "0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f",
+      "mc_usd": "9167527.245"
+     },
+     {
+      "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "mc_usd": "640811.3907"
+     },
+     {
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "mc_usd": "48689553.313"
+     },
+     {
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "mc_usd": "80565542.2735"
+     },
+     {
+      "address": "0x6245e67affa44a23077f0ea7f981a8dc743a0c47",
+      "mc_usd": "3019123.626"
+     },
+     {
+      "address": "0x94256bd5d13494d5f07f9897c78d3c9de5e63bec",
+      "mc_usd": "60482.63685"
+     },
+     {
+      "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+      "mc_usd": "9995575.752"
+     },
+     {
+      "address": "0xe8ffd7e24187f72afb08d75b1bb13088a989a791",
+      "mc_usd": "3436768.5192"
+     },
+     {
+      "address": "0xacfce4c3db4e4adffc67ca1b46787e0e3fee3e4c",
+      "mc_usd": "89474.80939"
+     },
+     {
+      "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+      "mc_usd": "24693323.6919"
+     },
+     {
+      "address": "0xca9c78dd337a67f6e0077f65f5e9218719d30edf",
+      "mc_usd": "730895.245305"
+     },
+     {
+      "address": "0xcaeed5281bd1eeb26d5f8bd550bf5c3727ba6514",
+      "mc_usd": "43708.39655"
+     },
+     {
+      "address": "0x5173b8ea6923c2d40267890d45c46a3480954773",
+      "mc_usd": "1026688.807"
+     },
+     {
+      "address": "0xedbf91223639800bcd5756815caf908df3b890be",
+      "mc_usd": "5729398.15338"
+     },
+     {
+      "address": "0x255979302fd6a5e2ff6dce0d8b018f51e06e243a",
+      "mc_usd": "0"
+     },
+     {
+      "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "mc_usd": "647134.3541"
+     },
+     {
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "mc_usd": "48680592.0906"
+     },
+     {
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "mc_usd": "80565542.2735"
+     },
+     {
+      "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+      "mc_usd": "10053747.38"
+     },
+     {
+      "address": "0x1c1daef0300551adbfbe403e7d567b6c5aff566f",
+      "mc_usd": "39748.42098"
+     },
+     {
+      "address": "0xcec185eb182c47d1ba1efc84e6959e18cd620be4",
+      "mc_usd": "6871032022.97"
+     },
+     {
+      "address": "0x9f0692785990bcb7f8c36d979a86fe5fcf31c7c3",
+      "mc_usd": "26642.43711"
+     },
+     {
+      "address": "0xfce34d21a92069100e3226638140706cf03a266e",
+      "mc_usd": "2004260.1186"
+     },
+     {
+      "address": "0x6245e67affa44a23077f0ea7f981a8dc743a0c47",
+      "mc_usd": "3019123.626"
+     },
+     {
+      "address": "0xd5f1afea47b1a9eab414d2ee740cf1d6d039e725",
+      "mc_usd": "3045788.18633"
+     },
+     {
+      "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+      "mc_usd": "24590308.9905"
+     },
+     {
+      "address": "0x51e128edf76063858bf1cc34791ef067e7f0e4b5",
+      "mc_usd": "255116.8383"
+     },
+     {
+      "address": "0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f",
+      "mc_usd": "9167527.245"
+     }
+    ]
+   }
+  }
+ }
+}

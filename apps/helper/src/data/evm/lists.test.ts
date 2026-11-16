@@ -677,3 +677,21 @@ test("card robinhood-listed-tape-opens: the tokens served are bounded at SERVED_
   assert.equal(s.has("t0"), true);
   assert.equal(s.has("new"), true);
 });
+
+// card market-data-matches-the-page: GeckoTerminal answers a market cap it does not know as "0.0" beside a real FDV (live
+// 16 Nov 20:1xZ: Base FLOWER 0x3e12b9d6... market_cap_usd "0.0", fdv_usd "2605877.44952697", price 0.1216; Robinhood
+// TIBBIR 0x4db7374e... "0.0", "146122757.466898"), and the row said MC $0 for a priced coin. A cap of 0 is unknown: the
+// FDV stands in, as for a missing cap; with neither, none.
+test("a priced coin's market cap of 0 is unknown: the FDV stands in, never MC 0", () => {
+  const T = "0x3e12b9d6a4d12cd9b4a6d613872d0eb32f68b380";
+  const answer = (attrs: Record<string, unknown>) => ({
+    data: [{ type: "pool", attributes: { pool_created_at: "2025-05-08T03:09:45Z", base_token_price_usd: "0.121205366619", ...attrs }, relationships: { base_token: { data: { id: `base_${T}`, type: "token" } } } }],
+    included: [{ type: "token", id: `base_${T}`, attributes: { address: T, symbol: "FLOWER", name: "Flower" } }],
+  });
+  const mc = (attrs: Record<string, unknown>) => toRows("base", answer(attrs), NOW)!.rows[0]!.mc_usd;
+  assert.equal(mc({ market_cap_usd: "0.0", fdv_usd: "2605877.44952697" }), "2605877.44953", "the FDV, in the row's 12 digits");
+  assert.equal(mc({ market_cap_usd: "0", fdv_usd: "2605877.44952697" }), "2605877.44953");
+  assert.equal(mc({ market_cap_usd: "0.0", fdv_usd: "0.0" }), null);
+  assert.equal(mc({ market_cap_usd: null, fdv_usd: null }), null);
+  assert.equal(mc({ market_cap_usd: "1500000.5", fdv_usd: "2605877.44952697" }), "1500000.5", "a known cap is the cap");
+});

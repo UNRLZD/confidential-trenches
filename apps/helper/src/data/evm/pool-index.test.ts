@@ -225,7 +225,7 @@ test("the file's size per 100,000 pools, with both currency indexes (printed for
   }
 });
 
-test("GET /v1/market/pools: one chain the helper indexes and one token address, else 400 or 404; the answer is the index's, complete or not", async () => {
+test("GET /v1/market/pools: one chain the helper indexes and one token address, else 400 or 404; the answer is the index's, complete or not, and a chain whose index is off answers nothing read", async () => {
   const { createServer, request } = await import("node:http");
   const { handler } = await import("../../server.ts");
   const { createProxy } = await import("../../proxy/proxy.ts");
@@ -254,7 +254,15 @@ test("GET /v1/market/pools: one chain the helper indexes and one token address, 
     assert.deepEqual(JSON.parse(ok.text), answer(T.toLowerCase()));
     assert.deepEqual(asked, [T.toLowerCase()]);
     for (const bad of [`?chain=robinhood`, `?chain=robinhood&token=0x12`, `?chain=robinhood&token=${T}&token=${T}`, `?chain=robinhood&token=${T}&x=1`]) assert.equal((await get(`/v1/market/pools${bad}`)).status, 400, bad);
-    for (const none of [`?chain=base&token=${T}`, `?chain=solana&token=${T}`]) assert.equal((await get(`/v1/market/pools${none}`)).status, 404, none);
+    // card market-data-matches-the-page: a chain the helper could index but keeps no index of (Base, POOL_INDEX_ON) is
+    // answered as an index with nothing read, never 404 (live 16 Nov 20:2xZ: every Base token page's signing page logged
+    // GET /v1/market/pools?chain=base 404 as a failed load); the kit adds no pool from an answer that is not complete
+    const base = await get(`/v1/market/pools?chain=base&token=${T}`);
+    assert.equal(base.status, 200);
+    const { POOL_INDEX_CHAINS } = await import("../../server.ts");
+    assert.deepEqual(JSON.parse(base.text), { chainId: 8453, poolManager: POOL_INDEX_CHAINS.base.poolManager, complete: false, through: POOL_INDEX_CHAINS.base.first - 1, pools: [] });
+    assert.equal((await get(`/v1/market/pools?chain=solana&token=${T}`)).status, 404, "a chain no index is for");
+    assert.equal((await get(`/v1/market/pools?chain=base&token=0x12`)).status, 400, "the same refusals before the answer");
     assert.equal(asked.length, 1, "a refused ask reads nothing");
   } finally {
     await new Promise((r) => h.close(r));

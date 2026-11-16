@@ -39,6 +39,11 @@ export type Named = { row: Row; pool: string | null };
 
 const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const usd = (v: unknown): string | null => dec(typeof v === "number" ? v : typeof v === "string" && PRICE.test(v) ? Number(v) : undefined);
+/** A market value of 0 is unknown (lists.ts cap, card market-data-matches-the-page): null. */
+const cap = (v: unknown): string | null => {
+  const u = usd(v);
+  return u === null || Number(u) <= 0 ? null : u;
+};
 const count = (v: unknown): number | null => (Number.isSafeInteger(v) && (v as number) >= 0 ? (v as number) : null);
 function bps(pct: unknown): number | null {
   if (typeof pct !== "number" || !Number.isFinite(pct) || pct < -100 || Math.abs(pct) > 1e9) return null;
@@ -81,7 +86,7 @@ export function toNamed(chain: EvmChain, token: string, answer: unknown, asOfMs:
     label: null,
     created_s: created, // the pair's, as a list row's is its pool's
     price_usd: usd(p.priceUsd),
-    mc_usd: usd(p.marketCap) ?? usd(p.fdv),
+    mc_usd: cap(p.marketCap) ?? cap(p.fdv),
     vol_24h_usd: usd(vol.h24),
     chg_5m_bps: bps(chg.m5),
     chg_1h_bps: bps(chg.h1),
