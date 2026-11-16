@@ -1369,5 +1369,17 @@
     "join": 0
    }
   }
+ },
+ "mainnet_good": {
+  "readAt": "2026-11-16T17:14:19.181Z",
+  "page": {
+   "pin": "sha384-0fe2B9NWk4hJGiOJZUcS593JTfF2IunM84+D0x8FRTwnjEBxCGkqIY4YfNw8eQIi",
+   "sha384": "sha384-0fe2B9NWk4hJGiOJZUcS593JTfF2IunM84+D0x8FRTwnjEBxCGkqIY4YfNw8eQIi",
+   "marks": {
+    "pass": 1,
+    "join": 1
+   }
+  },
+  "_from": "a real read of SIGN_HOST by signpage-positions-evm.mjs --record (card live-checks-read-mainnet-only)"
  }
 }

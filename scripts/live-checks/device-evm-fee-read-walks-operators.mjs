@@ -96,8 +96,8 @@ export function judge(run) {
 
 /** The run: the kit's lists and the wallet's bind functions, read now. */
 export async function read(fetchFn = fetch) {
-  const { evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, evmPoolChainFeeReads, evmPoolGas } = await import("../../packages/kit/src/index.ts");
-  const v = evmPoolVenues();
+  const { evmReadProvidersOf, evmRpcOperator, evmTwoOperators, evmPoolChainFeeReads, evmPoolGas } = await import("../../packages/kit/src/index.ts");
+  const v = (await import("./mainnet-venues.mjs")).mainnetVenues();
   // the bind's own reads run in the wallet's child (CHILD), both chains at once beside the reads below
   const child = new Promise((res, no) => execFile(process.execPath, childArgs(), { cwd: REPO, timeout: 300_000, maxBuffer: 1 << 20 }, (e, stdout, stderr) => (e ? no(new Error(`${KEY}: the bind child failed: ${String(stderr).slice(-300)}`)) : res(stdout))));
   const chains = {};

@@ -18,7 +18,8 @@
 import "../net-window.mjs";
 import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
+import { testVenues } from "./test-network-names.mjs";
 
 const KEY = "page-evm-rpc-csp";
 export const PAGES = Object.freeze({ app: "https://ct-app.unrealized.trade/", sign: "https://confidential.unrealized.trade/" });
@@ -32,11 +33,15 @@ function urlsIn(v, out = []) {
 }
 
 /** Our helper's origin: every page's connect-src names it as the page's own server, apart from the providers. */
+/** Every venue the kit names, the test networks' too: this check reads only the pages' CSP, never a provider, and APP_HOST
+ *  names each one (card live-checks-read-mainnet-only: the test half from test-network-names.mjs). */
+const kitVenues = () => ({ ...mainnetVenues(), ...testVenues() });
+
 export const HELPER_ORIGIN = "https://ct-api.unrealized.trade";
 
 /** The origins of every provider in the kit's EVM venues, in the list's order, each once; the helper's keyed route, which
  *  Robinhood's index reads second (card signpage-evm-reads-draw-no-refusal), is HELPER_ORIGIN, named apart. */
-export function evmOrigins(venues = evmPoolVenues()) {
+export function evmOrigins(venues = kitVenues()) {
   const seen = [];
   for (const chain of Object.keys(venues)) for (const u of urlsIn(venues[chain])) {
     const o = new URL(u).origin;
@@ -58,7 +63,7 @@ export function connectSrc(csp) {
  *  it): its connect-src names their providers, and none that only a testnet venue names. APP_HOST reads every chain. */
 export const SIGN_CHAINS = Object.freeze(["base", "robinhood"]);
 /** The venues of `chains` alone, in the list's order. */
-export const venuesOf = (chains, venues = evmPoolVenues()) => Object.fromEntries(Object.keys(venues).filter((c) => chains.includes(c)).map((c) => [c, venues[c]]));
+export const venuesOf = (chains, venues = kitVenues()) => Object.fromEntries(Object.keys(venues).filter((c) => chains.includes(c)).map((c) => [c, venues[c]]));
 
 /** The check on one run's answers: { app, sign }, each { url, status, csp }, for the pages in `hosts`. `origins` is
  *  APP_HOST's list (every venue), `signOrigins` SIGN_HOST's (SIGN_CHAINS' venues); a sign answer naming any of

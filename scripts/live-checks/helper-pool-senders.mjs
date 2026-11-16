@@ -51,7 +51,8 @@ import "../net-window.mjs";
 import { createHmac, createPublicKey, generateKeyPairSync, pbkdf2Sync, randomBytes, sign } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { evmPoolVenues, SOLANA_JITO_TIP_ACCOUNTS, SOLANA_JITO_TIP_MIN, solanaPoolFee, solanaPoolPriorityBudget, solanaRentOf } from "../../packages/kit/src/index.ts";
+import { SOLANA_JITO_TIP_ACCOUNTS, SOLANA_JITO_TIP_MIN, solanaPoolFee, solanaPoolPriorityBudget, solanaRentOf } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { FIELDS as EVM_FIELDS } from "./helper-evm-sender.mjs";
 // the verdict and its exit codes, as provider-answer.mjs has them; that module is not imported here, since this check
@@ -67,11 +68,12 @@ const { keccak_256 } = req("@noble/hashes/sha3.js");
 export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
 const FIELDS = ["chain", "cluster", "program", "pool", "fee_payer", "epoch_ms", "epoch_start_ms", "fee", "step"];
-/** Two keyless RPCs per cluster the Rent sysvar is read on (both answered 2026-11-03 02:22Z). */
-export const RENT_RPCS = {
-  mainnet: ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"],
-  devnet: ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"],
-};
+/** Two keyless RPCs per cluster the Rent sysvar is read on (both answered 2026-11-03 02:22Z): mainnet's alone (card
+ *  live-checks-read-mainnet-only), so a fee answer naming any other cluster has no rent read and fails. A replay of a
+ *  devnet recording passes its own pair (`rentRpcs`). */
+export const RENT_RPCS = Object.freeze({
+  mainnet: Object.freeze(["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"]),
+});
 const RENT_SYSVAR = "SysvarRent111111111111111111111111111111111";
 /** Each planted transaction and the refusal it must get. */
 export const PLANTS = [
@@ -114,8 +116,8 @@ function rentOf(r) {
 }
 
 /** The kit's fee for the rent both recorded RPC reads give, or null when they are not two agreeing reads of the cluster's pair. */
-export function kitFee(run, cluster) {
-  const urls = RENT_RPCS[cluster];
+export function kitFee(run, cluster, rentRpcs = RENT_RPCS) {
+  const urls = Object.hasOwn(rentRpcs, cluster ?? "") ? rentRpcs[cluster] : undefined;
   const reads = run.rent ?? [];
   if (!urls || reads.length !== 2 || reads[0].url !== urls[0] || reads[1].url !== urls[1]) return null;
   const [a, b] = reads.map(rentOf);
@@ -125,14 +127,14 @@ export function kitFee(run, cluster) {
 }
 
 /** The check on one recorded run: { pool, rent: [{ url, status, body }] x2, reads: [{ asked, origin, status, headers, body }] }. */
-export function judge(run) {
-  if (EVM_POOL.test(run.pool ?? "")) return judgeEvm(run);
+export function judge(run, { rentRpcs = RENT_RPCS, venues } = {}) {
+  if (EVM_POOL.test(run.pool ?? "")) return judgeEvm(run, venues ? { venues } : {});
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const fees = run.reads.filter((r) => r.asked === "fee");
   const cluster = json(fees[0]?.body ?? "")?.cluster;
-  const kit = kitFee(run, cluster);
-  say(kit !== null, `the Rent sysvar on ${show(RENT_RPCS[cluster])} (cluster ${show(cluster)}): ${kit ? `${kit.rent.lamportsPerByte} a byte, factor ${kit.rent.factor}, the kit's fee ${kit.fee}` : "not two agreeing reads"}`);
+  const kit = kitFee(run, cluster, rentRpcs);
+  say(kit !== null, `the Rent sysvar on ${show(rentRpcs[cluster])} (cluster ${show(cluster)}): ${kit ? `${kit.rent.lamportsPerByte} a byte, factor ${kit.rent.factor}, the kit's fee ${kit.fee}` : "not two agreeing reads"}`);
   say(fees.length === 2, `two fee reads (${fees.length})`);
   const values = [];
   for (const r of fees) {
@@ -266,7 +268,7 @@ export function plant({ program, pool, feePayer, relayFee, budget = 0n, kind = "
 
 // ---- The reads ----
 
-export async function read(base, pool, fetchFn = fetch) {
+export async function read(base, pool, fetchFn = fetch, { rentRpcs = RENT_RPCS } = {}) {
   if (EVM_POOL.test(pool)) return readEvm(base, pool, fetchFn);
   const reads = [];
   const get = async (asked, origin, url, init = {}) => {
@@ -280,7 +282,7 @@ export async function read(base, pool, fetchFn = fetch) {
   await get("fee", false, feeUrl);
   // the Rent sysvar on the cluster's two RPCs, as the device reads it, for the kit's fee and priority budget
   const rent = [];
-  for (const url of RENT_RPCS[f?.cluster] ?? []) {
+  for (const url of (Object.hasOwn(rentRpcs, f?.cluster ?? "") ? rentRpcs[f.cluster] : [])) {
     const r = await fetchFn(url, {
       method: "POST",
       redirect: "error",
@@ -290,7 +292,7 @@ export async function read(base, pool, fetchFn = fetch) {
     });
     rent.push({ url, readAt: new Date().toISOString(), status: r.status, body: (await r.text()).slice(0, 2_000) });
   }
-  const kit = kitFee({ rent }, f?.cluster);
+  const kit = kitFee({ rent }, f?.cluster, rentRpcs);
   if (kit && typeof f?.fee === "string" && DEC.test(f.fee) && B58.test(f.program ?? "") && B58.test(f.fee_payer ?? "")) {
     const cfg = { program: f.program, pool, feePayer: f.fee_payer, budget: kit.budget };
     const post = (asked, wire) =>
@@ -483,7 +485,7 @@ function codeProblem(code, urls) {
 }
 
 /** The check on one recorded EVM run: { pool, code: [{ url, status, body }] x2, reads: [{ asked, origin, status, headers, body }] }. */
-export function judgeEvm(run, { venues = evmPoolVenues() } = {}) {
+export function judgeEvm(run, { venues = mainnetVenues() } = {}) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   let quiet = false;
@@ -537,7 +539,7 @@ export function judgeEvm(run, { venues = evmPoolVenues() } = {}) {
 }
 
 /** An EVM pool's run: the two fee reads, the two code reads of anvil's account 0, then the four plants. */
-export async function readEvm(base, pool, fetchFn = fetch, { venues = evmPoolVenues(), nowMs = () => Date.now() } = {}) {
+export async function readEvm(base, pool, fetchFn = fetch, { venues = mainnetVenues(), nowMs = () => Date.now() } = {}) {
   const reads = [];
   const get = async (asked, origin, url, init = {}) => {
     const r = await fetchFn(url, { ...init, redirect: "error", headers: { ...(origin ? { origin: APP } : {}), ...(init.headers ?? {}) }, signal: AbortSignal.timeout(15_000) });

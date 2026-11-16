@@ -46,7 +46,8 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolProvidersOf, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmPoolProvidersOf } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { EXIT, NOT_YET, rpcAnswer, STATELESS } from "./provider-answer.mjs";
 
 const KEY = "evm-deposit-note-stays-incoming";
@@ -107,7 +108,7 @@ const HASH = /^0x[0-9a-fA-F]{64}$/;
 /** Each chain's pool pair as the page seats it, and the public address read in U's place. */
 export function pagePairs() {
   return Object.keys(CHAINS).map((chain) => {
-    const v = evmPoolVenues()[chain];
+    const v = mainnetVenues()[chain];
     return { chain, seats: [...(evmPoolProvidersOf(v) ?? [])].slice(0, 2), address: (v.pool ?? v.poolManager).toLowerCase() };
   });
 }

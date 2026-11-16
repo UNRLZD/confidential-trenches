@@ -146,8 +146,8 @@ export async function read(fetchFn = fetch, over = overOf, sleep = (ms) => new P
     }
     return { answer, lagging: true };
   };
-  const { evmPoolVenues, evmReadProvidersOf } = await import("../../packages/kit/src/index.ts");
-  const v = evmPoolVenues().robinhood;
+  const { evmReadProvidersOf } = await import("../../packages/kit/src/index.ts");
+  const v = (await import("./mainnet-venues.mjs")).mainnetVenues().robinhood;
   const trace = [...(v.traceProviders ?? [])];
   // the kit's read list, walked for two operators that run the replay (card device-evm-fee-read-walks-operators)
   const quote = [...evmReadProvidersOf(v)];

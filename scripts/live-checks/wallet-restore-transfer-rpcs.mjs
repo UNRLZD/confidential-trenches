@@ -8,15 +8,17 @@
 // unread: base-sepolia.drpc.org answered code 19 "Temporary internal error" at 10 to 101 blocks and code 35 above
 // (read 5 Nov 12:20Z), and the pager halved only on cap words it knew. This check runs a W's read through the wallet's
 // own code (packages/wallet/scripts/transfer-rpcs-check.ts, a child process, so Blindfill's code stays behind the kit's
-// entry for this file and no check here is a second implementation of the wallet's) on each network's list:
-//   - Base Sepolia: that run's v3 buy's W 0x809286a1…078e from its buy's block 54553944 to the newest agreed block,
+// entry for this file and no check here is a second implementation of the wallet's) on each network's list. After a
+// deploy it reads Base and Robinhood alone (card live-checks-read-mainnet-only); the two testnets' reads are its 6 Nov
+// run's, replayed by its test:
+//   - Base Sepolia (replayed): that run's v3 buy's W 0x809286a1…078e from its buy's block 54553944 to the newest agreed block,
 //     which must list the USDC it bought (0x036cbd53…3dcf7e), read on both providers alike;
 //   - Base and Robinhood: a W's Transfer read over the newest 50,000 and 100,000 blocks on the helper's route, which
 //     must answer (its provider's cap met by the pager). On 5 Nov 18:47-18:58Z the helper's Base provider answered a
 //     Transfer filter with no address for one block only (-32701 "Please specify an address" at 2 to 10,000 blocks,
 //     [] at 1), so a W's span never ended; since card evm-rpc-spare-list's helper deploy (3ed8cb1d) it answers 1,000
 //     blocks (21:28Z: [] at 1 and 1,000 blocks, -32602 "maximum 1000 blocks" at 10,000);
-//   - Robinhood testnet: a W's Transfer read over the newest 10,000 blocks, which must answer on both providers alike
+//   - Robinhood testnet (replayed): a W's Transfer read over the newest 10,000 blocks, which must answer on both providers alike
 //     (its dRPC caps at 101).
 // Every call goes through the device's own client: on a list the signing page's pageRpc (the kit's solanaJsonRpc with
 // SOLANA_RPC_RETRY), on the helper's route the helper client's (solanaJsonRpc with HELPER_FETCH_INIT, no retry), so a
@@ -30,8 +32,8 @@
 // After: helper
 //   node scripts/live-checks/wallet-restore-transfer-rpcs.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
-// --record writes every answer read, as the good run of wallet-restore-transfer-rpcs.answers.json, and its bad run: the
-// same answers with every Transfer log of the Base Sepolia W taken out on both providers (a read that finds no USDC).
+// --record writes every answer read, as the good run of wallet-restore-transfer-rpcs.answers.json, and its bad run made
+// from it (spoil): every Transfer page of Base's W on the helper's route refused, so the W is never read.
 import "../net-window.mjs";
 import { HELPER_FETCH_INIT, solanaJsonRpc, SOLANA_RPC_RETRY } from "../../packages/kit/src/index.ts";
 import { spawn } from "node:child_process";
@@ -52,12 +54,11 @@ export const HELPER = "https://ct-api.unrealized.trade";
  * and 3.2 min on GitHub's runner (run 42152968842); this is 2.8 times the Mac's read, and with the networks read at once
  * the job (its setup about 15 s) stays under 10 min. */
 export const NETWORK_DEADLINE_MS = 360_000;
+/** The reads a deploy runs: Base's and Robinhood's on the helper's route (card live-checks-read-mainnet-only: the
+ *  testnets' Transfer lists are read only in this check's replay of its 6 Nov run, wallet-restore-transfer-rpcs.test.mjs). */
 export const JOBS = Object.freeze([
-  { network: "base-sepolia", w: W, from: "54553944", want: USDC },
   { network: "base", w: W, back: "50000", helper: HELPER },
   { network: "robinhood", w: W, back: "100000", helper: HELPER },
-  // evm-buy-hookdata-fee.robinhood-testnet.json's first W
-  { network: "robinhood-testnet", w: "0x764c5ac2e39fec9d25af6d3eaf9400f91d82a531", back: "10000" },
 ]);
 
 const clients = new Map();
@@ -226,9 +227,10 @@ export async function check(transport, { wait = true, jobs = JOBS, onLine = () =
   return { ok: ends.every((e) => e.ok), lines: ends.map((e) => e.line), reports: ends.map((e) => e.report) };
 }
 
-/** The bad run kept beside a good one: every Transfer log of the Base Sepolia W taken out of both providers' answers. */
+/** The bad run kept beside a good one (made from it): every Transfer page of Base's W on the helper's route refused, one
+ *  block too, so the W is never read. */
 export function spoil(log) {
-  return log.map((e) => (e.network === "base-sepolia" && e.method === "eth_getLogs" && Array.isArray(e.result) ? { ...e, result: [] } : e));
+  return log.map((e) => (e.network === "base" && e.method === "eth_getLogs" ? { network: e.network, url: e.url, method: e.method, params: e.params, error: "RPC error -32602: maximum 1000 blocks" } : e));
 }
 
 async function main(argv) {

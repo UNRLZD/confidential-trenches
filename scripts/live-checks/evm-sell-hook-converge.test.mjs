@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { HOOK, judge, plants, read } from "./evm-sell-hook-converge.mjs";
 import { evmPoolRecords } from "./helper-evm-sender.mjs";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-sell-hook-converge.answers.json", import.meta.url), "utf8"));
 
@@ -52,7 +53,8 @@ test("each rule fails alone on the good answer with one thing changed", () => {
 });
 
 test("the hooked plant routes through HOOK and the listed one through no hook, each with its deadline 59 s away", () => {
-  const p = plants({ network: "base-sepolia", pool: A.good.pools[0].pool, feeRecipient: "0x9cc4788af51677aaa7770d78277c41fb864b35e1", nowMs: 1_794_023_395_000 });
+  // on Base (card live-checks-read-mainnet-only: the check pins the mainnets alone), its pool and FeeCollector
+  const p = plants({ network: "base", pool: A.mainnet_good.pools[0].pool, feeRecipient: mainnetVenues().base.feeCollector, nowMs: 1_794_023_395_000 });
   const hookWord = HOOK.slice(2).padStart(64, "0");
   // the Sell's data holds the swap's bytes: the hook's word only in the hooked plant
   assert.ok(p.hooked_deadline_near.data.includes(hookWord));

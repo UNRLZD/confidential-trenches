@@ -12,8 +12,7 @@
 //     - the onward send: one signer, that same W, its fee payer; exactly one instruction, a System transfer from W to
 //       To of the part; no lookup table; To's balance up by exactly the part, and W left with nothing.
 // The fee payer, To and the run's parts are written out here, not read from the repo.
-// After: sign
-// Bundle: out devnet RPC reads of the run
+// Runs: once, it reads the testnet flow's withdraw run on devnet RPCs, a record no deploy changes (card live-checks-read-mainnet-only: a listed check reads no test network); SIGN_HOST serving the /app.js its index.html pins is signpage-withdraw-handoff's and pool-deposits's check, after every sign deploy
 //   node scripts/live-checks/signpage-pool-withdraw-form.mjs [--tx <release>:<onward>:<part>] [--record <file>] [--answer <file>]
 // --tx reads other transactions in the run's place (the recorded bad answer). PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

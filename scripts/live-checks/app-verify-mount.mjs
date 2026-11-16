@@ -27,9 +27,9 @@
 //     the deployed hosts: APP_HOST/verify as it is served; --network is the network its build names (the deploy passes
 //     it, read from the build's _headers; mainnet when not given)
 //   node scripts/live-checks/app-verify-mount.mjs --harness [--build <dir>] [--network testnet|mainnet] ...
-//     a local build (VITE_NEAR_NETWORK=testnet pnpm --filter terminal build) on the hosts' real names, answered by
+//     a local build (pnpm --filter terminal build: mainnet) on the hosts' real names, answered by
 //     Playwright's route from local files with the stand-in shell of app-in-shell.mjs; the release's two NEAR RPCs are
-//     the real ones, reached over the network (route.continue), so the reads are live (testnet when not given)
+//     the real ones, reached over the network (route.continue), so the reads are live (mainnet when not given)
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge().
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -422,7 +422,8 @@ async function main() {
   };
   const shots = opt("--shots") ?? path.join(tmpdir(), `${KEY}-${Date.now()}`);
   const harness = args.includes("--harness");
-  const network = opt("--network") ?? (harness ? "testnet" : "mainnet");
+  // mainnet when not given, the harness too (card live-checks-read-mainnet-only: no test network unless named)
+  const network = opt("--network") ?? "mainnet";
   const { VERIFY_RELEASES } = await import("../../apps/terminal/src/screens/verify/release.ts");
   const release = VERIFY_RELEASES[network];
   if (!release) throw new Error(`--network takes ${Object.keys(VERIFY_RELEASES).join(", ")}`);

@@ -605,9 +605,14 @@ test("a deploy's live runs name every live check that reads SIGN_HOST, and its s
   assert.ok(r.out.some((l) => /^next: gh workflow run live\.yml -f host=sign -f commit=\S+$/.test(l)), r.out.join("\n"));
   assert.ok(r.out.includes("then: gh run watch --exit-status"), r.out.join("\n"));
   const out = LIVE_CHECKS.flatMap((k) => liveRuns(k)).join("\n");
-  // every signpage-* live check is named, and every named check exists and holds SIGN_HOST's own name
+  // every signpage-* live check is named, and every named check exists and holds SIGN_HOST's own name; a check that runs
+  // once (its "// Runs: once, <why>" line, held by scripts/ci/live-listed.mjs) is in no host's list, such as a testnet
+  // record no deploy changes (card live-checks-read-mainnet-only)
   const dir = join(PKG, "..", "..", "scripts", "live-checks");
-  const own = readdirSync(dir).filter((f) => /^signpage-[\w-]+\.mjs$/.test(f) && !f.endsWith(".test.mjs")).map((f) => f.replace(/\.mjs$/, ""));
+  const own = readdirSync(dir)
+    .filter((f) => /^signpage-[\w-]+\.mjs$/.test(f) && !f.endsWith(".test.mjs"))
+    .filter((f) => !/^\/\/ Runs: once, /m.test(readFileSync(join(dir, f), "utf8")))
+    .map((f) => f.replace(/\.mjs$/, ""));
   assert.ok(own.length >= 3, own.join(" "));
   for (const k of own) assert.ok(LIVE_CHECKS.includes(k), `LIVE_CHECKS does not name ${k}`);
   for (const k of LIVE_CHECKS) assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /confidential\.unrealized\.trade/, `${k} does not read SIGN_HOST`);

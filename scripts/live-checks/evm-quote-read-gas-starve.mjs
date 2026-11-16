@@ -36,7 +36,8 @@
 // Bundle: out EVM RPC quotes
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { EVM_READ_CALL_GAS, EVM_READ_GAS_CODE, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { EVM_READ_CALL_GAS, EVM_READ_GAS_CODE } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 export { EXIT };
@@ -129,7 +130,7 @@ export async function collect(own = false) {
   const out = [];
   const state = { ...Object.fromEntries(Object.entries(PLANTED).map(([a, code]) => [a, { code }])), ...(own ? {} : { [MULTICALL3]: { code: EVM_READ_GAS_CODE } }) };
   const gas = "0x" + EVM_READ_CALL_GAS.toString(16);
-  for (const [chain, v] of Object.entries(evmPoolVenues())) {
+  for (const [chain, v] of Object.entries(mainnetVenues())) {
     if (!["base", "robinhood"].includes(chain)) continue;
     // Every provider of a chain is read at one block, the lowest of their latest, as the kit reads the two it agrees on
     // at one block hash (readBoth). A read's gas used is the same on every provider only at one block: on Robinhood, an

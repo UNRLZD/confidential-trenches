@@ -11,7 +11,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { CHECKS, poolsOf } from "./helper-evm-sender-2.mjs";
-import { judge } from "./helper-pool-senders.mjs";
+import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { judge as judgeLive } from "./helper-pool-senders.mjs";
+
+// the recordings are the testnet pools': replays judge them on the kit's every venue; the live check judges on the
+// mainnets alone (card live-checks-read-mainnet-only), where a testnet recording fails
+const judge = (run) => judgeLive(run, { venues: evmPoolVenues() });
 
 const A = JSON.parse(readFileSync(new URL("./helper-evm-sender-2.answers.json", import.meta.url), "utf8"));
 const P = JSON.parse(readFileSync(new URL("./helper-pool-senders.answers.json", import.meta.url), "utf8"));
@@ -41,6 +46,7 @@ test("the good answer (this card's helper) passes on both testnet pools: every p
   for (const run of A.good) {
     const r = judge(run);
     assert.equal(r.ok, true, `${run.pool}:\n${r.lines.join("\n")}`);
+    assert.equal(judgeLive(run).ok, false, `${run.pool}: a testnet recording passes the live check's mainnet venues`);
   }
 });
 

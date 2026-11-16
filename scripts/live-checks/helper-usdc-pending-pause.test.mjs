@@ -1,5 +1,7 @@
 // node --test scripts/live-checks/helper-usdc-pending-pause.test.mjs: the live check replays recorded runs
-// (helper-usdc-pending-pause.answers.json), both recorded by the check's own read(). good: mainnet N 218 with no
+// (helper-usdc-pending-pause.answers.json), both recorded by the check's own read() when it read NEAR testnet too. The
+// live check now reads mainnet only (card live-checks-read-mainnet-only); the two-network recordings replay here under
+// WITH_TESTNET, the networks they were read on, and good's mainnet half is judged as the live check judges. good: mainnet N 218 with no
 // request in 202-217 and the carry token_not_accepted; testnet N 4 with request 3 stored on both, kind tag 3 (not a
 // Pause) from view_state on both, the carry bad_signature: PASS. bad_pending: the same reads with each request's
 // view_state bytes given tag 6, so testnet request 3 is a Pause while the carry runs its checks: FAIL. Made from them:
@@ -17,16 +19,20 @@ const A = JSON.parse(readFileSync(path.join(HERE, "helper-usdc-pending-pause.ans
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const net = (run, name) => run.nets.find((x) => x.network === name);
+/** The networks the recordings were read on: NETS and the testnet token the check read before it read mainnet only. */
+const WITH_TESTNET = { ...NETS, testnet: { token: "bf-usdc-20261101t022248.testnet", rpcs: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"], archive: "https://archival-rpc.testnet.fastnear.com" } }; // gitleaks:allow (a public account id)
+/** A recorded run's mainnet half, as the live check reads it now. */
+const mainnetOf = (run) => ({ ...run, nets: [net(run, "mainnet")] });
 
 /** A fetch that answers every call read() makes from a recorded run: finals, N, request views, view_state, archive, the carry. */
 const replay = (run) => async (url, init) => {
   const body = JSON.parse(init.body);
   if (url.endsWith("/v1/bind")) {
     assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
-    const r = run.nets.find((x) => probeDelegate(NETS[x.network].token) === body.signed_delegate);
+    const r = run.nets.find((x) => probeDelegate(WITH_TESTNET[x.network].token) === body.signed_delegate);
     return new Response(r.carry.body, { status: r.carry.status });
   }
-  const [name, n] = Object.entries(NETS).find(([, v]) => v.rpcs.includes(url) || v.archive === url);
+  const [name, n] = Object.entries(WITH_TESTNET).find(([, v]) => v.rpcs.includes(url) || v.archive === url);
   const r = net(run, name);
   if (url === n.archive) {
     if (body.method === "block") {
@@ -49,27 +55,56 @@ const replay = (run) => async (url, init) => {
   return new Response(c.stored.find((x) => x.id === request_id).body);
 };
 
-test("recorded good run: mainnet no request in the window, testnet request 3 a role request: no Pause pending on either, PASS", async () => {
-  const r = judge(A.good);
+test("the live check reads NEAR mainnet only: recorded good's mainnet half PASSes; a run with testnet in it, or no network, FAILs", async () => {
+  assert.deepEqual(Object.keys(NETS), ["mainnet"]);
+  const r = judge(mainnetOf(A.good));
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.ok(r.lines.includes("ok  [mainnet] no Pause pending: no request in 202-217 may be pending"));
+  assert.equal(judge(await read("https://api.example", replay(A.good))).ok, true, "read() over the replay reads mainnet only and judges the same");
+  assert.equal(judge(A.good).ok, false, "a run that read testnet too is not this check's run");
+  assert.equal(judge({ nets: [] }).ok, false, "no network read");
+});
+
+test("made from good's mainnet half: request 217 stored, a Pause on both, while the carry runs its checks: FAIL", () => {
+  const run = clone(mainnetOf(A.good));
+  const m = net(run, "mainnet");
+  const t = net(A.bad_pending, "testnet");
+  for (const [i, c] of m.chain.entries()) {
+    const st = JSON.parse(t.chain[i].stored.find((x) => x.id === 3).body);
+    st.result.block_height = m.h;
+    c.stored.find((x) => x.id === 217).body = JSON.stringify(st);
+    const vs = JSON.parse(t.chain[i].state[0].body);
+    vs.result.block_height = m.h;
+    vs.result.values[0].key = requestKey(217);
+    c.state = [{ id: 217, body: JSON.stringify(vs) }];
+  }
+  m.carry = { status: 400, body: JSON.stringify({ error: { code: "bad_signature" } }) };
+  const r = judge(run);
+  assert.equal(r.ok, false, r.lines.join("\n"));
+  assert.deepEqual(bad(r), ['BAD [mainnet] a request that may be pending is stored, so the deposit carry sends nothing: "bad_signature"']);
+});
+
+test("recorded good run (two networks): mainnet no request in the window, testnet request 3 a role request: no Pause pending on either, PASS", async () => {
+  const r = judge(A.good, WITH_TESTNET);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.deepEqual(r.pending, [false, false]);
   assert.ok(r.lines.some((l) => /\[testnet\] {3}request 3: kind tag 3 on both, not a Pause/.test(l)));
   assert.ok(r.lines.includes('ok  [mainnet] POST /v1/bind (a delegate that moves nothing) answers 400 "token_not_accepted"'));
-  assert.equal(judge(await read("https://api.example", replay(A.good))).ok, true, "read() over the replay judges the same");
+  assert.equal(judge(await read("https://api.example", replay(A.good), WITH_TESTNET), WITH_TESTNET).ok, true, "read() over the replay judges the same");
 });
 
-test("recorded bad run: testnet request 3 a Pause on both while the carry runs its checks: FAIL", async () => {
-  const r = judge(A.bad_pending);
+test("recorded bad run (two networks): testnet request 3 a Pause on both while the carry runs its checks: FAIL", async () => {
+  const r = judge(A.bad_pending, WITH_TESTNET);
   assert.equal(r.ok, false);
   assert.deepEqual(bad(r), ['BAD [testnet] a request that may be pending is stored, so the deposit carry sends nothing: "bad_signature"']);
-  assert.equal(judge(await read("https://api.example", replay(A.bad_pending))).ok, false, "read() over the replay judges the same");
+  assert.equal(judge(await read("https://api.example", replay(A.bad_pending), WITH_TESTNET), WITH_TESTNET).ok, false, "read() over the replay judges the same");
 });
 
 test("a Pause while the carry sends nothing (token_halted, token_not_accepted, relayer_low): PASS", () => {
   for (const code of ["token_halted", "token_not_accepted", "relayer_low"]) {
     const run = clone(A.bad_pending);
     net(run, "testnet").carry = { status: 503, body: JSON.stringify({ error: { code } }) };
-    assert.equal(judge(run).ok, true, code);
+    assert.equal(judge(run, WITH_TESTNET).ok, true, code);
   }
 });
 
@@ -78,7 +113,7 @@ test("the kind unread on a provider, or the two disagreeing: the archive decides
     const run = clone(A.good);
     const c = net(run, "testnet").chain[1];
     c.state[0].body = what === "refused" ? JSON.stringify({ error: { name: "HANDLER_ERROR", cause: { name: "TOO_LARGE_CONTRACT_STATE" } } }) : clone(A.bad_pending).nets[1].chain[1].state[0].body.replace(/"block_height":\d+/, `"block_height":${net(run, "testnet").h}`);
-    const r = judge(run);
+    const r = judge(run, WITH_TESTNET);
     assert.equal(r.ok, false, what);
     assert.ok(r.lines.some((l) => l.includes("request 3: not proven expired")), what);
   }
@@ -87,16 +122,16 @@ test("the kind unread on a provider, or the two disagreeing: the archive decides
 test("made from the good run: N unread or disagreeing, a request answer unread, the wrong networks: FAIL; N far above any pin: judged on its window", () => {
   const unread = clone(A.good);
   net(unread, "mainnet").chain[0].next = "";
-  assert.equal(judge(unread).ok, false, "N unread");
+  assert.equal(judge(unread, WITH_TESTNET).ok, false, "N unread");
   const differ = clone(A.good);
   const j = JSON.parse(net(differ, "mainnet").chain[1].next);
   j.result.result = [...Buffer.from("219")];
   net(differ, "mainnet").chain[1].next = JSON.stringify(j);
-  assert.equal(judge(differ).ok, false, "N differs");
+  assert.equal(judge(differ, WITH_TESTNET).ok, false, "N differs");
   const answer = clone(A.good);
   net(answer, "mainnet").chain[0].stored[3].body = "";
-  assert.equal(judge(answer).ok, false, "a request answer unread");
-  assert.equal(judge({ nets: [net(A.good, "mainnet")] }).ok, false, "testnet not read");
+  assert.equal(judge(answer, WITH_TESTNET).ok, false, "a request answer unread");
+  assert.equal(judge({ nets: [net(A.good, "mainnet")] }, WITH_TESTNET).ok, false, "testnet not read where it was");
   // N 300: the window is 284-299, read from the live N, never a pin
   assert.deepEqual(windowOf(300), Array.from({ length: 16 }, (_, i) => 284 + i));
   assert.deepEqual(windowOf(4), [0, 1, 2, 3]);
@@ -108,7 +143,7 @@ test("made from the good run: N unread or disagreeing, a request answer unread, 
     c.next = JSON.stringify(k);
     c.stored = windowOf(300).map((id, i) => ({ id, body: c.stored[i].body }));
   }
-  const r = judge(far);
+  const r = judge(far, WITH_TESTNET);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(r.lines.includes("ok  [mainnet] no Pause pending: no request in 284-299 may be pending"));
 });

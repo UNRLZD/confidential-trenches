@@ -16,31 +16,17 @@
 //   node scripts/live-checks/helper-mainnet-pools-only.mjs --commit <sha> [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
-import { readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { writeFileSync } from "node:fs";
 import { evmPoolFeeAsk } from "./evm-pool-fee-epoch.mjs";
 import { EXIT, verdictOf } from "./provider-answer.mjs";
+import { testPools } from "./test-network-names.mjs";
+
+// the test pools are test-network-names.mjs's (card live-checks-read-mainnet-only): this check only asks the helper for them
+export { DEVNET_BEFORE, testPools } from "./test-network-names.mjs";
 
 export const BASE = "https://ct-api.unrealized.trade";
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA = /^[0-9a-f]{40}$/;
 const TIMEOUT_MS = 15_000;
-/** The mainnets the helper serves (apps/helper/src/pool/mainnet-only.ts MAINNET_POOL_NETWORKS.evm). */
-const EVM_MAINNETS = new Set(["base", "robinhood"]);
-/** The Solana devnet pool before its re-pin (card pool-senders-next-page-helper's move, DEVNET_MOVE at fd2f2a6e1),
- *  which 6194790b7 still served on 16 Nov 15:0xZ beside devnet.json's. */
-export const DEVNET_BEFORE = "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr";
-
-/** The test pools the helper must not carry: each EVM test network's kit pin, and the Solana devnet pools. */
-export function testPools(root = ROOT, venues = evmPoolVenues()) {
-  const dev = JSON.parse(readFileSync(path.join(root, "contracts/pool-solana/deployments/devnet.json"), "utf8"));
-  const evm = Object.entries(venues)
-    .filter(([n, v]) => !EVM_MAINNETS.has(n) && typeof v?.pool === "string")
-    .map(([n, v]) => ({ chain: "evm", network: n, pool: v.pool.toLowerCase() }));
-  return [...evm, ...[...new Set([String(dev.pool), DEVNET_BEFORE])].map((pool) => ({ chain: "solana", network: "devnet", pool }))];
-}
 
 /** One run: the helper's health and each test pool's fee answer. Never throws: a failed read is recorded. */
 export async function read(base = BASE, fetchFn = fetch, pools = testPools()) {

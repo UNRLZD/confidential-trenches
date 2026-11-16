@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// Verify mounted, in the app (card app-verify-mount): the terminal built for testnet (VITE_NEAR_NETWORK=testnet) opened
+// Verify mounted, in the app (card app-verify-mount): the terminal built for mainnet (VITE_NEAR_NETWORK=mainnet) opened
 // at /verify inside the stand-in shell of the live check's harness (scripts/live-checks/app-verify-mount.mjs), at 390 and
 // 1440. The page's NEAR reads are answered by a test double: Playwright's route answers each from the recording
-// (answers.json, made by record.ts), so nothing recorded is in the build. Three runs:
+// (answers-mainnet.json, made by record.ts mainnet: the mainnet vault's real reads), so nothing recorded is in the build.
+// Mainnet only (card live-checks-read-mainnet-only): the harness routes no test network's origin (app-in-shell.mjs
+// FOOTER_ORIGINS), so a testnet build's footer read fell to its last line, net::ERR_NAME_NOT_RESOLVED. Three runs:
 //   recorded: the panel draws the read: both rows and every check ok, the pair named, the block read, and the footer
 //             pill's second open starts from loading and reads again (the live check's own verdict, judge());
 //   re-open:  the first open answered from the recording, then both RPCs hold every answer 2 s and refuse: the pill's
@@ -12,7 +14,7 @@
 //             amber, and no word the panel did not already have.
 // The unit test (test/verify-mount.test.ts) holds the refused pair and the other network's pair to the same view.
 //   node apps/terminal/test/verify-mount/run.mjs [--build <dir>] [--shots <dir>]     PASS exit 0, FAIL exit 1
-// --build: a build to test (default: this tree built for testnet into a temp dir), e.g. a build of main for the red run.
+// --build: a build to test (default: this tree built for mainnet into a temp dir), e.g. a build of main for the red run.
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -26,13 +28,13 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TERMINAL = path.resolve(HERE, "../..");
 const args = process.argv.slice(2);
 const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
-const REC = JSON.parse(readFileSync(path.join(HERE, "answers.json"), "utf8"));
-const RPCS = VERIFY_RELEASES.testnet.rpcs;
+const REC = JSON.parse(readFileSync(path.join(HERE, "answers-mainnet.json"), "utf8"));
+const RPCS = VERIFY_RELEASES.mainnet.rpcs;
 
 async function build() {
   const { build } = await import("vite");
   const out = mkdtempSync(path.join(tmpdir(), "ct-verify-mount-"));
-  process.env.VITE_NEAR_NETWORK = "testnet";
+  process.env.VITE_NEAR_NETWORK = "mainnet";
   await build({ root: TERMINAL, logLevel: "error", build: { outDir: out, emptyOutDir: true } });
   return out;
 }
@@ -73,13 +75,13 @@ function unverified(p) {
   return { ok, text: `panel ${p?.state ?? "none"}, code ${p?.code}, funds ${p?.funds}; ${n} x ${WORDS.unverified.text}${extra.length ? `; words the panel lacks: ${extra.join(", ")}` : ""}` };
 }
 try {
-  const good = await collect({ shots: shots && path.join(shots, "recorded"), route: await harnessRoute(dir, RPCS, recorded), network: "testnet", source: "recorded reads" });
+  const good = await collect({ shots: shots && path.join(shots, "recorded"), route: await harnessRoute(dir, RPCS, recorded), network: "mainnet", source: "recorded reads" });
   const g = judge(good);
   for (const l of g.lines) console.log(`recorded: ${l}`);
   if (!g.ok) fails.push("recorded: the panel did not draw the recorded read");
 
   let mode = recorded;
-  const again = await collect({ shots: shots && path.join(shots, "reopen"), route: await harnessRoute(dir, RPCS, (r) => mode(r)), network: "testnet", source: "recorded, then held and refused", beforeReopen: () => (mode = held), duringReopen: sample });
+  const again = await collect({ shots: shots && path.join(shots, "reopen"), route: await harnessRoute(dir, RPCS, (r) => mode(r)), network: "mainnet", source: "recorded, then held and refused", beforeReopen: () => (mode = held), duringReopen: sample });
   const d = again.runs.find((r) => r.width === "desktop");
   const first = d?.panel?.state === "read";
   const u = unverified(d?.footer?.panel);
@@ -90,7 +92,7 @@ try {
   console.log(`${ok ? "ok " : "BAD"} re-open: first open ${d?.panel?.state ?? "none"}; the pill's open starts ${d?.footer?.firstState ?? "nowhere"}, through the ${HOLD_MS} ms hold reads ${samples.join(" ") || "nothing"}, leaves loading at ${after ?? "never"} ms and draws ${u.text}`);
   if (!ok) fails.push("re-open: the second open did not read afresh");
 
-  const bad = await collect({ shots: shots && path.join(shots, "failed"), route: await harnessRoute(dir, RPCS, refused), network: "testnet", source: "refused reads" });
+  const bad = await collect({ shots: shots && path.join(shots, "failed"), route: await harnessRoute(dir, RPCS, refused), network: "mainnet", source: "refused reads" });
   for (const r of bad.runs) {
     const v = unverified(r.panel);
     console.log(`${v.ok ? "ok " : "BAD"} failed: ${r.width}: ${v.text}`);

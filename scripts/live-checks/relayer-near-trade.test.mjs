@@ -1,5 +1,8 @@
 // node --test scripts/live-checks/relayer-near-trade.test.mjs: the live check replays recorded runs
-// (relayer-near-trade.answers.json). good: apps/helper at this card's branch (37472793) run with node src/server.ts,
+// (relayer-near-trade.answers.json). The live check probes NEAR mainnet only (card live-checks-read-mainnet-only).
+// Mainnet: bad_deployed's mainnet half is a real recording (FAIL); no mainnet good run is recorded yet (its carry probes
+// POST a signed delegate, so it is not re-recorded here): good_mainnet_made is MADE from good, its testnet probes
+// renamed mainnet, and PASSes. The recordings below replay under WITH_TESTNET, the networks they were read on. good: apps/helper at this card's branch (37472793) run with node src/server.ts,
 // testnet carried with a fresh unfunded gas key, its two testnet providers the real ones (test.rpc.fastnear.com,
 // near-testnet.drpc.org) behind a forwarder that answered only the throwaway gas account's own key and balance reads
 // (it has no account on chain); the trade probe for a fresh W read W absent and no vault payout on both real
@@ -22,10 +25,29 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "relayer-near-trade.answers.json"), "utf8"));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const carry = (run, kind, status, body) => ({ ...run, carries: { testnet: { ...run.carries.testnet, [kind]: { ...run.carries.testnet[kind], status, body: JSON.stringify(body) } } } });
+/** The trades the recordings were read with: mainnet's and the testnet one the check probed before it read mainnet only. */
+const WITH_TESTNET = { ...PROBE_TRADES, testnet: { side: "buy", token: "wrap.testnet", amount_in: "1000000", slippage_bps: 100, venue_out: "1", hops: [{ pool: 0, token_in: "bf-usdc-20261101t022248.testnet", token_out: "wrap.testnet" }] } }; // gitleaks:allow (a public account id)
+/** MADE, not recorded: the good run with its testnet probes and carries renamed mainnet (no mainnet good run is recorded). */
+const goodMainnetMade = { ...A.good, probes: { mainnet: A.good.probes.testnet }, carries: { mainnet: A.good.carries.testnet } };
+const mainnetHalf = (run) => ({ ...run, probes: { mainnet: run.probes.mainnet }, carries: { mainnet: run.carries.mainnet } });
+
+test("the live check probes NEAR mainnet only: good_mainnet_made (MADE) PASSes; bad_deployed's recorded mainnet half FAILs; a run that probed testnet FAILs", () => {
+  assert.deepEqual(Object.keys(PROBE_TRADES), ["mainnet"]);
+  const g = judge(goodMainnetMade);
+  assert.equal(g.ok, true, g.lines.join("\n"));
+  const d = judge(mainnetHalf(A.bad_deployed));
+  assert.deepEqual(bad(d), [
+    "BAD mainnet: a trade for a W the vault never paid: 400 bad_shape (want 409 no_payout, no transaction)",
+    "BAD mainnet: a delegate W signed, W with no account: 400 bad_shape (want 400 no_account, no transaction)",
+    "BAD mainnet: the same delegate with a flipped signature: 400 bad_shape (want 400 bad_signature, no transaction)",
+  ]);
+  assert.equal(judge(A.good).ok, false, "a testnet probe is not this check's");
+  assert.equal(judge({ ...goodMainnetMade, probes: {} }).ok, false, "mainnet not carried: nothing probed");
+});
 const probe = (run, net, status, body) => ({ ...run, probes: { ...run.probes, [net]: { status, body: JSON.stringify(body) } } });
 
-test("recorded good run: this card's helper refuses a trade for a W the vault never paid with 409 no_payout, nothing sent: PASS", () => {
-  const g = judge(A.good);
+test("recorded good run (testnet): this card's helper refuses a trade for a W the vault never paid with 409 no_payout, nothing sent: PASS", () => {
+  const g = judge(A.good, WITH_TESTNET);
   assert.equal(g.ok, true, g.lines.join("\n"));
   assert.deepEqual(Object.keys(A.good.probes), ["testnet"]);
   // the code and its status are the kit's
@@ -34,7 +56,7 @@ test("recorded good run: this card's helper refuses a trade for a W the vault ne
 });
 
 test("recorded bad run: the deployed helper before this card reads the trade as a deposit, 400 bad_shape: FAIL", () => {
-  const d = judge(A.bad_deployed);
+  const d = judge(A.bad_deployed, WITH_TESTNET);
   assert.equal(d.ok, false);
   assert.deepEqual(bad(d), [
     "BAD mainnet: a trade for a W the vault never paid: 400 bad_shape (want 409 no_payout, no transaction)",
@@ -65,12 +87,12 @@ test("made from the good run: a send, another refusal, a transaction, another co
     "a flipped signature taken": carry(g, "flipped", 400, { error: { code: "no_account" } }),
     "a carry answered upstream": carry(g, "flipped", 503, { error: { code: "upstream" } }),
   };
-  for (const [name, run] of Object.entries(fails)) assert.equal(judge(run).ok, false, name);
+  for (const [name, run] of Object.entries(fails)) assert.equal(judge(run, WITH_TESTNET).ok, false, name);
 });
 
 test("the probe body is a trade the helper parses, with no delegate: only the creation path's reads run", () => {
-  for (const n of Object.keys(PROBE_TRADES)) {
-    const b = JSON.parse(probeBody(n, "a".repeat(64)));
+  for (const n of Object.keys(WITH_TESTNET)) {
+    const b = JSON.parse(probeBody(n, "a".repeat(64), WITH_TESTNET));
     assert.deepEqual(Object.keys(b), ["trade", "signed_delegates"]);
     assert.deepEqual(b.signed_delegates, []);
     assert.deepEqual(Object.keys(b.trade).sort(), ["amount_in", "hops", "network", "side", "slippage_bps", "token", "venue_out", "wallet"]);

@@ -47,7 +47,8 @@
 // Reads only: no key, no transaction, no money moves.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { EvmQuoteError, evmPoolBuyQuote, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { EvmQuoteError, evmPoolBuyQuote } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 
 export const APP_ORIGIN = "https://ct-app.unrealized.trade";
 export const HELPER = "https://ct-api.unrealized.trade";
@@ -240,7 +241,7 @@ async function rpcCall(url, method, params, headers = {}, fetchFn = fetch) {
   }
 }
 /** The PoolManager's logs over 100 blocks HISTORY_BACK blocks behind `head`, as eth_getLogs params. */
-const historyParams = (chain, head) => [{ address: evmPoolVenues()[chain].poolManager, fromBlock: "0x" + (head - HISTORY_BACK - 99n).toString(16), toBlock: "0x" + (head - HISTORY_BACK).toString(16) }];
+const historyParams = (chain, head) => [{ address: mainnetVenues()[chain].poolManager, fromBlock: "0x" + (head - HISTORY_BACK - 99n).toString(16), toBlock: "0x" + (head - HISTORY_BACK).toString(16) }];
 /** The deployed helper's read HISTORY_BACK blocks back. */
 async function historyRead(chain, base) {
   const head = await headOf(chain === "base" ? "https://base.gateway.tenderly.co" : "https://robinhood.drpc.org");
@@ -395,7 +396,7 @@ async function helperRead(chain, mode) {
   const rpc = createRpc({}, { holds: providerHolds(), pinned: SWAP_RPCS, log: () => {}, fetch: async (u, init) => ((answeredBy = String(u)), inner(u, init)) });
   const head = await fetch(list[2], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }), signal: AbortSignal.timeout(10_000) }).then((r) => r.json());
   const to = BigInt(head.result) - 5n;
-  const pm = evmPoolVenues()[chain].poolManager;
+  const pm = mainnetVenues()[chain].poolManager;
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + (to - 99n).toString(16), toBlock: "0x" + to.toString(16) }] });
   const a = await rpc.handle(chain, "application/json", body, "203.0.113.7");
   let results = null;
@@ -406,7 +407,7 @@ async function helperRead(chain, mode) {
   return { list, row: { mode, status: a.status, results, answeredBy, heldAsked: n.heldAsked } };
 }
 
-export async function measure(venues = evmPoolVenues(), base = HELPER) {
+export async function measure(venues = mainnetVenues(), base = HELPER) {
   const scans = {};
   for (const c of ["base", "robinhood"]) {
     const s = venues[c]?.scan;
@@ -468,7 +469,7 @@ export async function measure(venues = evmPoolVenues(), base = HELPER) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const b = process.argv.indexOf("--base");
-    const run = await measure(evmPoolVenues(), b > 0 ? process.argv[b + 1].replace(/\/$/, "") : HELPER);
+    const run = await measure(mainnetVenues(), b > 0 ? process.argv[b + 1].replace(/\/$/, "") : HELPER);
     const at = process.argv.indexOf("--record");
     if (at > 0) writeFileSync(process.argv[at + 1], JSON.stringify(run, null, 1) + "\n");
     const r = check(run);

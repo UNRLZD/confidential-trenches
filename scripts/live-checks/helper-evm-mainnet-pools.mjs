@@ -20,7 +20,7 @@
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { evmPoolFeeAsk, feeUrl, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
@@ -34,7 +34,7 @@ const HELPER_TRIES = 3;
 const HELPER_PAUSE_MS = 2_000;
 
 /** The kit's pins per mainnet: pool, fee collector, sell sender, sell delegate and the two fee providers. */
-export function pinsOf(venues = evmPoolVenues()) {
+export function pinsOf(venues = mainnetVenues()) {
   return Object.fromEntries(
     MAINNETS.map((chain) => {
       const v = venues[chain];

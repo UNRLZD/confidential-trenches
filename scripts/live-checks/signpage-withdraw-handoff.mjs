@@ -5,19 +5,16 @@
 //     the mainnet build cannot read a testnet RPC;
 //   - SIGN_HOST's /app.js is the one its index.html pins (its sha384) and carries this card's code (the withdraw fee
 //     path and the form's refusal where its network names no relayer, "names no withdrawal relayer on"), and none of the
-//     testnet relayer's ids: the testnet relayer is the testnet build's only (RELEASE_WITHDRAW_RELAYER folds it);
-//   - the withdraw form's fee read, run with the page's own code (askWithdrawFee, readTokenStorageMin,
-//     readWithdrawFeeMax, in packages/wallet/scripts/withdraw-fee-check.ts as a child process) on the testnet release pair, mainnet's pair for the price, and the deployed helper: the
-//     helper's GET /v1/withdraw/fee for the testnet token names exactly the release's relayer and fee recipient, and
-//     its relay_fee is a u128 at or below the device's own fee_max at the token's storage minimum. A helper that quotes
-//     above the device's cap, or names another relayer, fails it: the form would show the fee unread and hand off nothing.
-// The testnet withdrawal itself (the hand-off from the testnet build's form to settled) is a money run, not this check.
+//     testnet relayer's ids: the testnet relayer is the testnet build's only (RELEASE_WITHDRAW_RELAYER folds it).
+// It reads SIGN_HOST only, never a test network (card live-checks-read-mainnet-only): the testnet names it must find
+// absent come from test-network-names.mjs. The fee read it once ran on the testnet release (withdraw-fee-check.ts) is
+// gone; mainnet's fee (the helper's quote names the release's relayer and is at most the device's own fee_max) is
+// relayer-withdraw-fee's, which runs after every helper deploy.
 // After: sign
-// Bundle: out the page's CSP header, and the testnet fee read on the release helper and RPCs
+// Bundle: out the page's CSP header
 //   node scripts/live-checks/signpage-withdraw-handoff.mjs [--record <file>]
 //   node scripts/live-checks/signpage-withdraw-handoff.mjs --local [--record <file>]
-//     the same with this tree's committed build (index.html, public/app.js, public/_headers) in place of SIGN_HOST's;
-//     the helper and the RPCs are still read live
+//     the same with this tree's committed build (index.html, public/app.js, public/_headers) in place of SIGN_HOST's
 //   node scripts/live-checks/signpage-withdraw-handoff.mjs --answer <file>     judge a recorded answer, no network
 // --record writes the answer judge() reads, so the test can replay it. PASS exit 0, FAIL exit 1, error exit 2; the last
 // line is "PASS signpage-withdraw-handoff" or "FAIL signpage-withdraw-handoff", each failure a "BAD ..." line.
@@ -28,24 +25,23 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { signBuilt } from "../signpage-built.mjs";
+import { NEAR_TESTNET_RELAYER, TEST_HOSTS } from "./test-network-names.mjs";
 
 const KEY = "signpage-withdraw-handoff";
 export const SIGN_URL = "https://confidential.unrealized.trade/";
-/** The release values the check judges by: the wallet's own (packages/wallet/scripts/withdraw-fee-check.ts --consts
- *  prints them, and the test holds these equal to them). */
-export const RELAYER = { relayer_account: "r-2b700409.bf-vt-20261102t071444.testnet", fee_recipient: "f-2b700409.bf-vt-20261102t071444.testnet" }; // gitleaks:allow (public account ids)
-export const TESTNET_HOSTS = ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org", "https://near-testnet.drpc.org"];
+/** The testnet values a mainnet build must not carry: the wallet's own (packages/wallet/scripts/withdraw-fee-check.ts
+ *  --consts prints them with no network read, and the test holds these equal to them). */
+export const RELAYER = NEAR_TESTNET_RELAYER;
+export const TESTNET_HOSTS = TEST_HOSTS.near;
 export const MAINNET_PAIR = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CHILD = path.join(REPO, "packages/wallet/scripts/withdraw-fee-check.ts");
-/** The child's one JSON line for `args`. */
+/** The child's one JSON line for `args` (the test's --consts only: the check runs no child). */
 export function child(args = []) {
   const r = spawnSync(process.execPath, [CHILD, ...args], { encoding: "utf8", timeout: 120_000 });
   if (r.status !== 0) throw new Error(`withdraw-fee-check exit ${r.status ?? r.signal}: ${(r.stderr ?? "").trim().split("\n").slice(-3).join(" | ")}`);
   return JSON.parse(r.stdout.trim().split("\n").at(-1));
 }
-const DEC = /^(0|[1-9][0-9]{0,38})$/;
-const U128 = 1n << 128n;
 
 /** The verdict on one answer: { ok, lines } with a BAD line per failure. */
 export function judge(a) {
@@ -62,18 +58,6 @@ export function judge(a) {
   if (!a?.app?.noRelayer) bad("SIGN_HOST's /app.js carries no withdraw form fee read: the build is before this card");
   if (a?.app?.testnetRelayer !== false) bad("SIGN_HOST's /app.js carries the testnet withdrawal relayer's ids: the mainnet build is not folded");
   if (!a?.app?.feePath) bad("SIGN_HOST's /app.js carries no withdraw fee path");
-  const f = a?.fee;
-  if (f === null || typeof f !== "object") bad("the helper gave no fee answer for the testnet token");
-  else {
-    if (f.relayer_account !== RELAYER.relayer_account || f.fee_recipient !== RELAYER.fee_recipient)
-      bad(`the helper's testnet fee answer names ${f.relayer_account} / ${f.fee_recipient}, not the release's ${RELAYER.relayer_account} / ${RELAYER.fee_recipient}`);
-    const fee = typeof f.relay_fee === "string" && DEC.test(f.relay_fee) && BigInt(f.relay_fee) < U128 ? BigInt(f.relay_fee) : null;
-    const cap = typeof a?.feeMax === "string" && DEC.test(a.feeMax) ? BigInt(a.feeMax) : null;
-    if (fee === null) bad(`the helper's relay_fee ${JSON.stringify(f.relay_fee)} is not a u128 decimal`);
-    if (cap === null) bad("the device's fee_max was not read");
-    if (fee !== null && cap !== null && fee > cap) bad(`the helper's relay_fee ${fee} is above the device's fee_max ${cap}: the form refuses it`);
-  }
-  if (a?.feeError) bad(`the form's fee read stopped: ${a.feeError}`);
   return { ok: lines.length === 0, lines };
 }
 
@@ -85,7 +69,7 @@ function localBuild() {
   return { html: readFileSync(path.join(signBuilt(), "index.html"), "utf8"), csp, js: readFileSync(path.join(signBuilt(), "public/app.js")) };
 }
 
-/** The live answer: SIGN_HOST's policy and bundle (or this tree's, `local`), and the form's fee read on the testnet release. */
+/** The live answer: SIGN_HOST's policy and bundle (or this tree's, `local`). */
 export async function read(local = false) {
   let html, csp, js;
   if (local) ({ html, csp, js } = localBuild());
@@ -102,9 +86,7 @@ export async function read(local = false) {
     testnetRelayer: text.includes(RELAYER.relayer_account) || text.includes(RELAYER.fee_recipient),
     feePath: text.includes("/v1/withdraw/fee"),
   };
-  // the form's fee read, the page's own code, in a child process (see CHILD)
-  const { fee, feeMax, feeError } = child();
-  return { at: new Date().toISOString(), csp, html, appSha384, app, fee, feeMax, feeError };
+  return { at: new Date().toISOString(), csp, html, appSha384, app };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card helper-usdc-pending-pause: no deposit is carried while a Pause multisig request on USDC may be
-// pending (check 10, M:1388-1404; V:303, the M1 row V:1091). USDC exports no view of a request, so on each network
-// (mainnet USDC, and the testnet token, which runs USDC's code) it reads what HELPER_HOST's token watch reads
+// pending (check 10, M:1388-1404; V:303, the M1 row V:1091). USDC exports no view of a request, so on NEAR mainnet
+// (mainnet USDC; card live-checks-read-mainnet-only: a listed check reads no test network) it reads what HELPER_HOST's token watch reads
 // (apps/helper/src/token-status/status.ts), on two providers of two operators at one final block H, the lower final:
 //   - get_next_multisig_request_id: N on both, equal, at H (the live N: no pinned id, so N may grow without bound);
 //   - for the last ids below N, at most 16, approve_multisig_request run as a view: ProhibitedInView
@@ -29,8 +29,7 @@ const KEY = "helper-usdc-pending-pause";
 export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
 export const NETS = {
-  mainnet: { token: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", rpcs: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"], archive: "https://archival-rpc.mainnet.fastnear.com" },
-  testnet: { token: "bf-usdc-20261101t022248.testnet", rpcs: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"], archive: "https://archival-rpc.testnet.fastnear.com" }, // gitleaks:allow (a public account id)
+  mainnet: { token: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", rpcs: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"], archive: "https://archival-rpc.mainnet.fastnear.com" }, // gitleaks:allow (a public account id)
 };
 export const VALIDITY_NS = 432_000_000_000_000n;
 export const WINDOW = 16;
@@ -138,13 +137,13 @@ function judgeNet(r, say, info) {
   return pending;
 }
 
-/** The check on one recorded run: { nets: [judgeNet's input, one per network] }. */
-export function judge(run) {
+/** The check on one recorded run: { nets: [judgeNet's input, one per network] }, the networks `nets` names read. */
+export function judge(run, nets_ = NETS) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const info = (text) => lines.push(text);
   const nets = run.nets ?? [];
-  say(JSON.stringify(nets.map((x) => x.network)) === JSON.stringify(Object.keys(NETS)), `networks read: ${show(nets.map((x) => x.network))}`);
+  say(JSON.stringify(nets.map((x) => x.network)) === JSON.stringify(Object.keys(nets_)), `networks read: ${show(nets.map((x) => x.network))}`);
   const pending = nets.map((r) => judgeNet(r, say, info));
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines, pending };
 }
@@ -192,9 +191,9 @@ async function archiveOf(net, fetchFn, h, token) {
   return archive;
 }
 
-export async function read(base = BASE, fetchFn = fetch) {
+export async function read(base = BASE, fetchFn = fetch, nets_ = NETS) {
   const nets = [];
-  for (const [network, net] of Object.entries(NETS)) {
+  for (const [network, net] of Object.entries(nets_)) {
     const finals = await Promise.all(net.rpcs.map(async (u) => json((await rpc(u, fetchFn, { finality: "final" }, "block")) || "{}")?.result?.header?.height));
     const h = finals.every((x) => Number.isSafeInteger(x)) ? Math.min(...finals) : null;
     const chain = await Promise.all(

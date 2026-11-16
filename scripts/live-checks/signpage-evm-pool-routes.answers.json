@@ -1,0 +1,91 @@
+{
+ "_note": "good: a real run of signpage-evm-pool-routes.mjs --record against HELPER_HOST (Base and Robinhood mainnet pools, from SIGN_HOST's origin), each malformed buy and sale refused bad_shape. bad: a real run of the same asks, the same minute, for the two EVM test pools the helper no longer carries (card helper-mainnet-pools-only): 404 not_found, judged against those pools (bad.pools). No body carried a signature.",
+ "good": {
+  "readAt": "2026-11-16T17:15:52.251Z",
+  "base": "https://ct-api.unrealized.trade",
+  "asks": [
+   {
+    "network": "base",
+    "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    "route": "send",
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "0a7b35d7d14c12d2e2368dfba5b98a408df6b90b",
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   {
+    "network": "base",
+    "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    "route": "sell",
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "0a7b35d7d14c12d2e2368dfba5b98a408df6b90b",
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   {
+    "network": "robinhood",
+    "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+    "route": "send",
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "0a7b35d7d14c12d2e2368dfba5b98a408df6b90b",
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   {
+    "network": "robinhood",
+    "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+    "route": "sell",
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "0a7b35d7d14c12d2e2368dfba5b98a408df6b90b",
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   }
+  ]
+ },
+ "bad": {
+  "pools": {
+   "base-sepolia": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+   "robinhood-testnet": "0xed9fac860e6bc5e932455232eedca8b71c44da4d"
+  },
+  "readAt": "2026-11-16T17:16:04.700Z",
+  "base": "https://ct-api.unrealized.trade",
+  "asks": [
+   {
+    "network": "base-sepolia",
+    "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+    "route": "send",
+    "status": 404,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "0a7b35d7d14c12d2e2368dfba5b98a408df6b90b",
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   },
+   {
+    "network": "base-sepolia",
+    "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+    "route": "sell",
+    "status": 404,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "0a7b35d7d14c12d2e2368dfba5b98a408df6b90b",
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+    "route": "send",
+    "status": 404,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "0a7b35d7d14c12d2e2368dfba5b98a408df6b90b",
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+    "route": "sell",
+    "status": 404,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "0a7b35d7d14c12d2e2368dfba5b98a408df6b90b",
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   }
+  ]
+ }
+}

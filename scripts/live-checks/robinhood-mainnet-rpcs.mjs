@@ -28,7 +28,9 @@ import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "../../packages/kit/src/index.ts";
+import { evmPoolProvidersOf, evmRpcOperator } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
+import { TEST_HOSTS } from "./test-network-names.mjs";
 import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 const KEY = "robinhood-mainnet-rpcs";
@@ -47,7 +49,7 @@ const TRIES = 3;
 
 /** The kit's Robinhood mainnet pool list, and the address its filter reads. */
 export function kitList() {
-  const v = evmPoolVenues().robinhood;
+  const v = mainnetVenues().robinhood;
   return { list: [...(evmPoolProvidersOf(v) ?? [])], address: (v.pool ?? v.poolManager).toLowerCase(), poolManager: v.poolManager.toLowerCase() };
 }
 
@@ -157,8 +159,9 @@ export async function check(transport, { list, address, poolManager } = kitList(
 
 /** The pair the device had before: the quote list's first, PublicNode, beside Robinhood's own. */
 export const BEFORE = Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com"]);
-/** A list of one operator twice. */
-export const ONE_OPERATOR = Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://rpc.testnet.chain.robinhood.com"]);
+/** A list of one operator twice, for the recorded bad run only (its answers are the mainnet run's; the testnet URL is
+ *  never read). */
+export const ONE_OPERATOR = Object.freeze(["https://rpc.mainnet.chain.robinhood.com", TEST_HOSTS.robinhood]);
 
 async function main(argv) {
   const at = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : undefined);

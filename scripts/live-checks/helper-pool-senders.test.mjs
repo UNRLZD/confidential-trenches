@@ -16,7 +16,15 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkSolanaPoolTx } from "../../apps/helper/src/pool/solana.ts";
 import { evmPoolVenues, solanaDecodeTransaction, solanaPoolPriorityBudget } from "../../packages/kit/src/index.ts";
-import { b58decode, b58encode, EVM, EVM_PLANTS, judge, kitFee, MAINNET_PLANTS, plant, PLANTS, plantsFor, read, readEvm, RENT_RPCS } from "./helper-pool-senders.mjs";
+import { b58decode, b58encode, EVM, EVM_PLANTS, judge as judgeLive, kitFee as kitFeeLive, MAINNET_PLANTS, plant, PLANTS, plantsFor, read as readLive, readEvm as readEvmLive, RENT_RPCS } from "./helper-pool-senders.mjs";
+
+// card live-checks-read-mainnet-only: the live check reads mainnet alone (RENT_RPCS, the kit's mainnet venues); the
+// recordings here were made on the devnet pool and the EVM testnet pools, so their replays pass those networks' pairs
+const RPCS = { ...RENT_RPCS, devnet: ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"] };
+const judge = (run) => judgeLive(run, { rentRpcs: RPCS, venues: evmPoolVenues() });
+const kitFee = (run, cluster) => kitFeeLive(run, cluster, RPCS);
+const read = (base, pool, fetchFn) => readLive(base, pool, fetchFn, { rentRpcs: RPCS });
+const readEvm = (base, pool, fetchFn, o = {}) => readEvmLive(base, pool, fetchFn, { venues: evmPoolVenues(), ...o });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-pool-senders.answers.json"), "utf8"));
@@ -121,7 +129,7 @@ test("read() asks the fee twice and plants two transactions for the pool (replay
   };
   const run = await read("http://h.invalid", A.good.pool, fetchFn);
   const cluster = JSON.parse(A.good.reads[0].body).cluster;
-  assert.deepEqual(asked, ["GET /v1/pool/fee", "GET /v1/pool/fee", ...RENT_RPCS[cluster].map((u) => `rent ${u}`), ...PLANTS.map(() => "POST /v1/pool/solana/send")]);
+  assert.deepEqual(asked, ["GET /v1/pool/fee", "GET /v1/pool/fee", ...RPCS[cluster].map((u) => `rent ${u}`), ...PLANTS.map(() => "POST /v1/pool/solana/send")]);
   assert.deepEqual(run.reads.map((x) => x.asked), ["fee", "fee", ...PLANTS.map(([a]) => a)]);
   assert.equal(run.rent.length, 2);
 });
@@ -423,4 +431,15 @@ test("EVM: 404 not_found on the epoch and the one before fails: the pool is not 
   const { r } = await evmPlanted(NOT_FOUND, NOT_FOUND);
   assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
   assert.ok(bad(r).some((l) => /^BAD \[fee APP_HOST\] GET \/v1\/pool\/fee answers 404/.test(l)), bad(r).join("\n"));
+});
+
+// card live-checks-read-mainnet-only: as a deploy runs it, the check reads mainnet's rent pair and the mainnets' EVM
+// venues alone, so the devnet recording and the testnet ones fail there
+test("the live check reads mainnet alone: the devnet and EVM testnet recordings, judged as a deploy judges them, FAIL", () => {
+  assert.deepEqual(Object.keys(RENT_RPCS), ["mainnet"]);
+  assert.equal(judgeLive(A.good).ok, false);
+  for (const run of A.evm_good) {
+    assert.equal(judge(run).ok, true, "on its own network's pins");
+    assert.equal(judgeLive(run).ok, false, "on the mainnets' alone");
+  }
 });

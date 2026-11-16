@@ -383,11 +383,11 @@ test("the retries back off 5, 10, 20 s, then 20 s each; a pass under the floor b
   assert.deepEqual(((await cache.read()) ?? []).map((p) => p.amount), ["5"]);
 });
 
-test("the live check's Deposited topic and pool RPCs are the page's own (scripts/live-checks/signpage-positions-evm.mjs reaches no package code)", async () => {
+test("the live check's Deposited topic and pool RPCs are the page's own (scripts/live-checks/signpage-positions-evm-testnet.mjs reaches no package code)", async () => {
   const { keccak_256 } = await import("@noble/hashes/sha3.js");
   const { EVM_POOL_EVENTS } = await import("../../wallet/src/pool/evm.ts");
   const { TESTNET_RPCS } = await import("../src/pool-testnet.ts");
-  const live = (await import(new URL("../../../scripts/live-checks/signpage-positions-evm.mjs", import.meta.url).href)) as { DEPOSITED: string };
+  const live = (await import(new URL("../../../scripts/live-checks/signpage-positions-evm-testnet.mjs", import.meta.url).href)) as { DEPOSITED: string };
   const buy = (await import(new URL("../../../scripts/live-checks/signpage-evm-pool-buy.mjs", import.meta.url).href)) as { RPCS: Record<string, readonly string[]> };
   assert.equal(live.DEPOSITED, `0x${Buffer.from(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Deposited))).toString("hex")}`);
   assert.deepEqual([...buy.RPCS["base-sepolia"]!], [...TESTNET_RPCS.base], "the pair the page reads Base Sepolia positions on");

@@ -1,4 +1,55 @@
 {
+ "good_live": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-16T17:15:23.962Z",
+  "reads": [
+   {
+    "route": "solana",
+    "read": "slot",
+    "ms": 854,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "0a7b35d7d14c12d2e2368dfba5b98a408df6b90b",
+    "answer": {
+     "result": 470211835
+    }
+   },
+   {
+    "route": "solana",
+    "read": "header",
+    "ms": 906,
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "0a7b35d7d14c12d2e2368dfba5b98a408df6b90b",
+    "answer": {
+     "result": {
+      "keys": [
+       "blockHeight",
+       "blockTime",
+       "blockhash",
+       "parentSlot",
+       "previousBlockhash"
+      ],
+      "blockHeight": 448226711
+     }
+    }
+   },
+   {
+    "route": "solana",
+    "read": "full",
+    "ms": 285,
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade",
+    "commit": "0a7b35d7d14c12d2e2368dfba5b98a408df6b90b",
+    "answer": {
+     "error": {
+      "code": "method_not_allowed",
+      "message": ""
+     }
+    }
+   }
+  ]
+ },
  "good": {
   "base": "http://127.0.0.1:18931",
   "at": "2026-11-12T18:11:59.818Z",

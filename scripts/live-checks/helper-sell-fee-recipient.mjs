@@ -90,12 +90,14 @@ export function judge(run, records = evmPoolRecords(), collectors = feeCollector
 
 /** The four sells for `pool`, each paying a payee of its own: the fee answer's fee_collector, its fee_recipient,
  *  another, the sell sender. */
-export function sellsOf({ network, pool, feeCollector, feeRecipient, sellSender, nowMs = Date.now() }) {
+export function sellsOf({ network, pool, feeCollector, feeRecipient, sellSender, nowMs = Date.now(), venues }) {
   const pays = { pays_collector: feeCollector, pays_fee_recipient: feeRecipient, pays_other: OTHER, pays_sell_sender: sellSender };
-  return Object.fromEntries(SELLS.map(([asked]) => [asked, plantsOf({ network, pool, feeRecipient: pays[asked], nowMs }).base]));
+  return Object.fromEntries(SELLS.map(([asked]) => [asked, plantsOf({ network, pool, feeRecipient: pays[asked], nowMs, ...(venues ? { venues } : {}) }).base]));
 }
 
-export async function read(base, fetchFn = fetch, records = evmPoolRecords()) {
+/** `venues`: the kit's pins to sign for, the mainnets' by default (plantsOf); a replay of the testnet recordings passes the
+ *  whole list. */
+export async function read(base, fetchFn = fetch, records = evmPoolRecords(), venues) {
   const pools = [];
   for (const [network, pool] of Object.entries(records)) {
     const reads = [];
@@ -118,7 +120,7 @@ export async function read(base, fetchFn = fetch, records = evmPoolRecords()) {
     const addr = (v) => (typeof v === "string" && ADDRESS.test(v.toLowerCase()) ? v.toLowerCase() : OTHER);
     // built just before they are sent, so the deadlines are measured from now; a payee the answer does not name is
     // OTHER, so the judge fails on the fee answer
-    const sells = sellsOf({ network, pool, feeCollector: addr(b?.fee_collector), feeRecipient: feeRecipientOf(fee.answer.body) ?? OTHER, sellSender: addr(b?.sell_sender) });
+    const sells = sellsOf({ network, pool, feeCollector: addr(b?.fee_collector), feeRecipient: feeRecipientOf(fee.answer.body) ?? OTHER, sellSender: addr(b?.sell_sender), venues });
     for (const [asked] of SELLS) await get(asked, `${base}/v1/pool/evm/sell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(sells[asked]) });
     pools.push({ network, pool, reads });
   }

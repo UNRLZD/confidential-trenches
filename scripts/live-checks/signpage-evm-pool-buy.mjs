@@ -16,8 +16,7 @@
 // RPCS, CHAIN_IDS, BOUGHT and BUY_SELECTOR are this file's own (it reaches no package code: check:imports holds it);
 // packages/signpage/test/pool-buy-evm.test.ts holds each equal to the page's own (TESTNET_RPCS, EVM_CHAIN_IDS,
 // keccak256 of EVM_POOL_EVENTS.Bought, evm-send.ts EVM_BUY_SIGNATURE).
-// After: sign
-// Bundle: out a run record's buys on two testnet RPCs each and the helper's send route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.buy on Base and Robinhood not_allowed)
+// Runs: once, the card's testnet run (its buys on Base Sepolia and Robinhood testnet) and the helper's route for the test pools, which it no longer carries (card live-checks-read-mainnet-only); on mainnet the route is signpage-evm-pool-routes's, the bundle evm-buy-and-sell-on-mainnet's
 //   node scripts/live-checks/signpage-evm-pool-buy.mjs [--record <file>] [--txs <md>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (a pool RPC gave no answer, provider-answer.mjs: never a
 //   pass). --record writes what the run read, so the check's test can replay it.

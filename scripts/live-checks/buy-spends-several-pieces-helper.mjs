@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Live check of card buy-spends-several-pieces, the helper's part: HELPER_HOST's Solana routes (POST /v1/rpc/solana,
-// the mainnet page's second provider, and /v1/rpc/solana-devnet, the testnet page's) forward getBlock as the found W's
-// header read and only as that (apps/helper/src/rpc/rpc.ts blockHeaderAllowed). On each route, with Origin SIGN_HOST:
+// Live check of card buy-spends-several-pieces, the helper's part: HELPER_HOST's Solana mainnet route (POST
+// /v1/rpc/solana, the mainnet page's second provider; card live-checks-read-mainnet-only: the devnet route is not read)
+// forwards getBlock as the found W's header read and only as that (apps/helper/src/rpc/rpc.ts blockHeaderAllowed). On
+// each route in ROUTES, with Origin SIGN_HOST:
 //   - getSlot at finalized answers a whole slot;
 //   - getBlock [that slot, the kit's HELPER_SOLANA_BLOCK_HEADER], the very params the page sends (packages/signpage/
 //     src/pool-sell.ts foundQuiet), answers 200 with a result that holds a whole blockHeight and no transactions,
@@ -23,7 +24,7 @@ import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 const KEY = "buy-spends-several-pieces-helper";
 export const BASE = "https://ct-api.unrealized.trade";
 export const SIGN = "https://confidential.unrealized.trade";
-export const ROUTES = ["solana", "solana-devnet"];
+export const ROUTES = ["solana"];
 const SHA = /^[0-9a-f]{40}$/;
 /** The three reads on a route, in order: the finalized slot, the page's header read of it, the full read of it. */
 export const READS = {
@@ -41,8 +42,8 @@ export function shrink(a) {
   return { result: v !== null && typeof v === "object" && !Array.isArray(v) ? { keys: Object.keys(v).sort(), blockHeight: v.blockHeight } : v };
 }
 
-/** The check on one recorded run: { reads: [{ route, read, status, acao, commit, answer }] }. */
-export function judge({ reads }) {
+/** The check on one recorded run: { reads: [{ route, read, status, acao, commit, answer }] }, on `routes`. */
+export function judge({ reads }, routes = ROUTES) {
   const lines = [];
   let bad = false;
   let quiet = false;
@@ -54,7 +55,7 @@ export function judge({ reads }) {
     lines.push(`--  ${text}`);
     quiet = true;
   };
-  for (const route of ROUTES) {
+  for (const route of routes) {
     const tag = `[${route}]`;
     const at = (k) => reads.find((x) => x.route === route && x.read === k);
     const s = at("slot");
@@ -88,9 +89,9 @@ export function judge({ reads }) {
   return { ok: verdict === "PASS", verdict, lines };
 }
 
-export async function read(base = BASE, fetchFn = fetch) {
+export async function read(base = BASE, fetchFn = fetch, routes = ROUTES) {
   const reads = [];
-  for (const route of ROUTES) {
+  for (const route of routes) {
     const url = `${base.replace(/\/$/, "")}/v1/rpc/${route}`;
     let slot;
     for (const k of ["slot", "header", "full"]) {

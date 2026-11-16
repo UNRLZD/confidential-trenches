@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { collect, judge } from "./evm-buy-gas-depth.mjs";
 import { EXIT, RETRY } from "./provider-answer.mjs";
 import { JUDGED_403, NO_ANSWERS, plantedFetch } from "./provider-answer.plants.mjs";
@@ -51,7 +51,9 @@ test("planted: no pool, a fee answer that is not 200, two providers on different
 
 const HASH = `0x${"a".repeat(64)}`;
 const DEPTH = `0x${"0".repeat(63)}7`;
-const ONE_POOL = { base: null, "base-sepolia": POOLS[0] };
+// card live-checks-read-mainnet-only: the planted runs read Base's providers, the check reading the mainnets alone
+const BASE_POOL = mainnetVenues().base.pool;
+const ONE_POOL = { robinhood: null, base: BASE_POOL };
 // card evm-fee-quiet-epoch: the time now and the chain's head on every provider (a second before it), and the helper's
 // answer for the epoch it is asked
 const NOW = 1_800_000_030_000;
@@ -67,7 +69,7 @@ const headsHonest = (f) => async (url, init) => {
 };
 const at = () => NOW;
 // the fee providers, then the other quote providers (the check's providersOf)
-const HOSTS = [...new Set([...evmPoolVenues()["base-sepolia"].feeProviders, ...evmPoolVenues()["base-sepolia"].providers].map((u) => new URL(u).host))];
+const HOSTS = [...new Set([...mainnetVenues().base.feeProviders, ...mainnetVenues().base.providers].map((u) => new URL(u).host))];
 
 test("collect reads the block on the fee providers then the quote providers and the depth at its hash, and skips a network with no pool", async () => {
   const calls = [];
@@ -81,10 +83,10 @@ test("collect reads the block on the fee providers then the quote providers and 
   // the head on the first two providers, then the block and the depth on each
   assert.deepEqual(calls.slice(0, 2).map((c) => [c[0], c[1], c[2][0]]), HOSTS.slice(0, 2).map((h) => [h, "eth_getBlockByNumber", "latest"]));
   assert.deepEqual(calls.slice(2).map((c) => c[1]), HOSTS.flatMap(() => ["eth_getBlockByNumber", "eth_call"]));
-  assert.deepEqual(calls[3][2], [{ to: POOLS[0], data: "0x4a2b75c8" }, { blockHash: HASH }]);
+  assert.deepEqual(calls[3][2], [{ to: BASE_POOL, data: "0x4a2b75c8" }, { blockHash: HASH }]);
   assert.equal(runs[0].epochMs, EPOCH, "the epoch both heads are in");
   assert.deepEqual([...new Set(calls.map((c) => c[0]))], HOSTS);
-  assert.deepEqual(HOSTS.slice(0, 2), ["sepolia.base.org", "base-sepolia-rpc.publicnode.com"], "the fee providers first");
+  assert.deepEqual(HOSTS.slice(0, 2), ["mainnet.base.org", "base-rpc.publicnode.com"], "the fee providers first");
   assert.ok(HOSTS.length >= 3, "a third provider to judge on when one does not answer");
   assert.equal(judge(runs).verdict, "PASS", judge(runs).lines.join("\n"));
 });
@@ -100,7 +102,7 @@ test("planted: each kind of no-answer from one provider is named and left out; t
       };
       const r = judge(await collect(feeOf, headsHonest(fetchFn), ONE_POOL, at));
       assert.equal(r.verdict, "PASS", `${name} on ${read}: ${r.lines.join("\n")}`);
-      assert.ok(r.lines.some((l) => l.startsWith(`--- base-sepolia ${POOLS[0]} ${HOSTS[0]}: no answer: ${HOSTS[0]} HTTP ${plant[0]}`)), `${name} on ${read}: ${r.lines.join("\n")}`);
+      assert.ok(r.lines.some((l) => l.startsWith(`--- base ${BASE_POOL} ${HOSTS[0]}: no answer: ${HOSTS[0]} HTTP ${plant[0]}`)), `${name} on ${read}: ${r.lines.join("\n")}`);
     }
   }
   // a null block (a provider a block behind) is one too
@@ -162,7 +164,7 @@ test("planted: every provider that answered holds no such block: BAD, the helper
   };
   const r = judge(await collect(feeOf, headsHonest(none), ONE_POOL, at));
   assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
-  assert.ok(r.lines.some((l) => l.startsWith(`BAD base-sepolia ${POOLS[0]}: no provider holds block 0x10 (`)), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith(`BAD base ${BASE_POOL}: no provider holds block 0x10 (`)), r.lines.join("\n"));
   // one null and the rest rate-limited: one provider lagging at an epoch's turn, INCONCLUSIVE (delta review P3-a); two
   // nulls and one rate-limited: FAIL
   const nulls = (k) => async (url, init) => {
@@ -172,7 +174,7 @@ test("planted: every provider that answered holds no such block: BAD, the helper
   };
   assert.equal(judge(await collect(feeOf, headsHonest(nulls(1)), ONE_POOL, at)).verdict, "INCONCLUSIVE");
   assert.equal(judge(await collect(feeOf, headsHonest(nulls(2)), ONE_POOL, at)).verdict, "FAIL");
-  assert.equal(HOSTS.length, 3);
+  assert.equal(HOSTS.length, 4, "Base's four providers: two nulls beside two rate-limited");
   // one null beside two that hold it: that provider lags, the pool is judged on the two
   const lag = async (url, init) => {
     const { method } = JSON.parse(init.body);
@@ -207,7 +209,7 @@ test("the epoch now with no block yet on the helper (503 index_behind, or 404 fr
     assert.deepEqual(asked, [EPOCH, EPOCH - 60_000], `${first.status}: the epoch the heads name, then the one before`);
     const r = judge(runs);
     assert.equal(r.verdict, "PASS", r.lines.join("\n"));
-    assert.ok(r.lines.some((l) => l.startsWith(`--- base-sepolia ${POOLS[0]}: the helper answered ${first.status} `) && l.includes("judged the epoch before")), r.lines.join("\n"));
+    assert.ok(r.lines.some((l) => l.startsWith(`--- base ${BASE_POOL}: the helper answered ${first.status} `) && l.includes("judged the epoch before")), r.lines.join("\n"));
   }
 });
 
@@ -215,7 +217,7 @@ test("a pool the helper does not carry (404 to both epochs) FAILs; no block in t
   for (const [first, then] of [[NOT_FOUND, NOT_FOUND], [INDEX_BEHIND, INDEX_BEHIND], [INDEX_BEHIND, NOT_FOUND]]) {
     const r = judge(await collect(feeSeq(first, then, []), honestFetch, ONE_POOL, at));
     assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
-    assert.ok(r.lines.some((l) => l.startsWith(`BAD base-sepolia ${POOLS[0]}: the fee answer for epoch ${new Date(EPOCH - 60_000).toISOString()} {"status":${then.status}`)), r.lines.join("\n"));
+    assert.ok(r.lines.some((l) => l.startsWith(`BAD base ${BASE_POOL}: the fee answer for epoch ${new Date(EPOCH - 60_000).toISOString()} {"status":${then.status}`)), r.lines.join("\n"));
   }
 });
 
