@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Running } from "../src/api.ts";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { cashFeeRead, cashPlanReads, dryBesideCash, evmDryCashReads, NO_CASH_EVM_PLAN } from "../src/cash-to-pool.ts";
 
 const SLOW_MS = 300;
@@ -23,7 +24,8 @@ const flush = async () => {
 };
 
 test("a no-note Solana dry with slow reads answers at the slowest read, not their sum", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   // Cash's reads as main.ts makes them, each SLOW_MS on the test's clock: the notes, then (with a note) the fee, floor
   // and least
   const cash = cashPlanReads(
@@ -58,7 +60,7 @@ test("with no Cash note, the fee, floor and least are neither read nor waited on
 });
 
 test("with a Cash note, the fee, floor and least are read side by side and the plan waits for them", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
   const plan = cashPlanReads(
     async () => [{ id: "n", value: 5_000_000n }],
     () => [cashFeeRead(later(SLOW_MS, 7n)), later(SLOW_MS, 12n), later(SLOW_MS, 3n)] as const,
@@ -72,7 +74,7 @@ test("with a Cash note, the fee, floor and least are read side by side and the p
   t.mock.timers.tick(1);
   await flush();
   assert.deepEqual(got, { notes: [{ id: "n", value: 5_000_000n }], fee: 7n, floor: 12n, leastIn: 3n });
-  t.mock.timers.reset();
+  resetTimers(t.mock.timers);
   // a failed fee read with a note is thrown, as cashPlanFee
   await assert.rejects(
     cashPlanReads(
@@ -94,7 +96,8 @@ test("a dry that is refused, or Cash's reads that fail, give no with_cash", asyn
 });
 
 test("a Base or Robinhood dry with Cash reads the epoch fee beside the plan's slow floor: the slower of the two, never their sum", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   let notesRead = 0;
   let feesRead = 0;
   const cash = evmDryCashReads(
