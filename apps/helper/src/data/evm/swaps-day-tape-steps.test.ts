@@ -59,7 +59,6 @@ test("card robinhood-trades-finish-filling: a coin's swaps apart over the day ar
   const { value } = await onVirtualTime(1_000_000_000, async () => {
     const { s, located } = rig();
     try {
-      const t0 = Date.now();
       let last = JSON.parse((await s.trades(MAG, 50)).body);
       let reads = 1;
       for (; reads < 60 && (last.filling === true || last.trades.length === 0); reads++) {
@@ -67,15 +66,16 @@ test("card robinhood-trades-finish-filling: a coin's swaps apart over the day ar
         await s.tick();
         last = JSON.parse((await s.trades(MAG, 50)).body);
       }
-      return { last, reads, ms: Date.now() - t0, located };
+      return { last, reads, located };
     } finally {
       s.stop();
     }
   });
-  console.log(`${value.last.trades.length} trades, filling ${value.last.filling}, after ${value.reads} reads (${value.ms} ms); whole-range reads of the day: ${value.located.join(", ")}`);
+  console.log(`${value.last.trades.length} trades, filling ${value.last.filling}, after ${value.reads} reads 1.5 s apart; whole-range reads of the day: ${value.located.join(", ")}`);
   assert.equal(value.last.src, "chain");
   assert.equal(value.last.trades.length, Math.min(TRADES_MAX, 50), `its last ${TRADES_MAX} trades, from three steps apart (${value.last.trades.length})`);
   assert.equal(value.last.filling, undefined, "done reading back");
   assert.equal(value.located.length, 1, `one wide read of the day, never one before each step (${value.located.join(", ")})`);
-  assert.ok(value.ms <= 45_000, `full within the live checks' 45 s (${value.ms} ms)`);
+  // the page's reads 1.5 s apart (TRADES_POLL_MS): full within the live checks' 45 s is 30 of them at most
+  assert.ok(value.reads <= 30, `full within the live checks' 45 s: ${value.reads} reads 1.5 s apart`);
 });
