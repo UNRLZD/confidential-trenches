@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import type { KLineData } from "klinecharts";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { parseTokenRoute } from "../../routes/routes.ts";
 import type { MarketChain } from "../discover/fields.ts";
 import { DASH } from "../discover/format.ts";
@@ -786,6 +786,7 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
       <section className="tkp tkp-msg" data-token-page={data.status} data-pushed={pushed || undefined}>
         {data.status === "error" ? <W id="offline" /> : <W id="noToken" />}
         {data.status === "error" && <button type="button" className="tkp-retry" onClick={onRetry}>{WORDS.retry.text}</button>}
+        {pushed && <HomeLink />}
       </section>
     );
   const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true, data.links) : null;
@@ -796,6 +797,24 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
     <section className="tkp" data-token-page={data.status} data-pushed={pushed || undefined} data-token={v?.token} data-filling={v?.filling} aria-busy={v === null || v.filling} aria-label={v === null ? WORDS.loading.text : undefined}>
       <Desktop v={v} r={ready} c={c} t={trade} tape={tape} />
       <Phone v={v} r={ready} c={c} t={trade} tape={tape} />
+    </section>
+  );
+}
+
+/** The way back from a page with nothing to draw: Trenches ("/"), the tab and top-bar link of the same name. A pushed
+ *  token page has no tab bar on the phone (shell/TabBar.tsx), so without it a bad token's page was a dead end. */
+const HomeLink = () => (
+  <Link to="/" className="tkp-home" data-testid="not-found-home">
+    <W id="phoneTrenches" />
+  </Link>
+);
+
+/** A path no route names (shell/Shell.tsx's catch-all): Not found and the way back, at the address the visitor opened. */
+export function NotFound() {
+  return (
+    <section className="tkp tkp-msg" data-not-found>
+      <W id="notFound" />
+      <HomeLink />
     </section>
   );
 }

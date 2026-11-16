@@ -10,8 +10,8 @@
 //   - the row is a real link (an anchor at /token/solana/<mint>) and a Control-click and a middle-click open it in a new
 //     tab, which lands on the shell at that path and draws the token, while the first tab stays on Discover;
 //   - a deep link (SIGN_HOST and APP_HOST at /token/solana/<mint>) draws the token inside the shell, and so does a reload;
-//   - an unknown id and a chain the terminal does not draw draw the page's not-found state ("No token"), a bad chain
-//     with no read of the helper; a token read that fails draws the error state;
+//   - an unknown id and a chain the terminal does not draw draw the page's not-found state ("No token") with its link
+//     back to Trenches ("/", card app-pages-open-right), a bad chain with no read of the helper; a token read that fails draws the error state;
 //   - hover fills the desktop row and a keyboard focus draws the 2 px blue ring; no page error, no CSP violation.
 //   node apps/terminal/test/token-route/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -98,7 +98,7 @@ async function readToken(f) {
     const page = document.querySelector("[data-token-page]");
     const sym = [...document.querySelectorAll(".tkp-sym")].find(vis);
     const ca = [...document.querySelectorAll(".tkp-ca")].find(vis);
-    return { state: page?.getAttribute("data-token-page") ?? null, token: page?.getAttribute("data-token") ?? null, route: document.querySelector("main")?.getAttribute("data-route") ?? null, symbol: sym?.textContent ?? null, id: ca?.textContent ?? null, text: page?.textContent?.trim() ?? "", violations: window.__ctViolations ?? [] };
+    return { state: page?.getAttribute("data-token-page") ?? null, token: page?.getAttribute("data-token") ?? null, route: document.querySelector("main")?.getAttribute("data-route") ?? null, symbol: sym?.textContent ?? null, id: ca?.textContent ?? null, text: page ? [...page.childNodes].filter((n) => !(n instanceof Element && n.matches("[data-testid=not-found-home]"))).map((n) => n.textContent).join("").trim() : "", home: page?.querySelector("[data-testid=not-found-home]")?.getAttribute("href") ?? null, violations: window.__ctViolations ?? [] };
   });
 }
 
@@ -300,6 +300,7 @@ try {
         const { page, t } = await open(`${SIGN_HOST}/token/solana/NoSuchMint1111111111111111111111111111111`, "empty", "unknown id");
         if (t) {
           check(t.text === "No token", `${tag} unknown id: reads "${t.text}"`);
+          check(t.home === "/", `${tag} unknown id: the way back to Trenches is ${t.home ?? "not drawn"}`);
           check(reads.length === 1, `${tag} unknown id: token reads ${JSON.stringify(reads)}`);
           check((await page.frames().find((x) => x !== page.mainFrame()).locator(".tkp-retry").count()) === 0, `${tag} unknown id: Retry shown`);
         }
@@ -310,6 +311,7 @@ try {
         const { page, t } = await open(`${SIGN_HOST}/token/dogecoin/${mint}`, "empty", "bad chain");
         if (t) {
           check(t.text === "No token", `${tag} bad chain: reads "${t.text}"`);
+          check(t.home === "/", `${tag} bad chain: the way back to Trenches is ${t.home ?? "not drawn"}`);
           check(reads.length === 0, `${tag} bad chain: token reads ${JSON.stringify(reads)}, want none`);
         }
         await page.close();

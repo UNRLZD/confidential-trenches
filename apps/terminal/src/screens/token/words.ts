@@ -31,6 +31,7 @@ export const WORDS = {
   loading: ok("Loading", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S7.1 skeleton: the page's accessible name only (never drawn); as Discover's"),
   offline: ok("Offline", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S5.5 [draft copy: Offline], as Discover's error state"),
   noToken: ok("No token", "owner 1 Nov 16:45Z, keep; drafted from card app-token-page: the empty state (no token to draw)"),
+  notFound: { text: "Not found", source: "draft, card app-pages-open-right: the state of a path no route names, beside its link to Trenches (phoneTrenches)", draft: true },
   // the chart (card app-token-chart): R5's legend (token.js U.legend: `SYM · 15 · UNRLZD O … H … L … C … change`, then
   // `Vol …`), CoinGecko's fixed label (CN-110), and the chart's empty state
   lgO: ok("O", "R5 token.js U.legend cp-lgKv"),

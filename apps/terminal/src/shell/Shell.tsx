@@ -1,7 +1,7 @@
 import type { SignpageClient } from "@blindfill/kit";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import type { ComponentType } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router";
+import { Route, Routes, useLocation, useNavigationType } from "react-router";
 import { ROUTES } from "../routes/routes.ts";
 import type { RouteId } from "../routes/routes.ts";
 import { Screen } from "../routes/Screen.tsx";
@@ -24,6 +24,7 @@ import { Welcome } from "./Welcome.tsx";
 // its shell; the one sign-in sheet (S2.1, S19) and the one deposit sheet with the withdraw progress (DepositMount.tsx)
 // sit outside both header forms, so CSS hiding either never hides them. The welcome (Welcome.tsx) opens over all of it on
 // a first visit.
+// A path no route names draws the not-found state (routes/Screen.tsx), at the address the visitor opened.
 // `screen` draws each route (the browser tests pass a probe screen; the app passes none). ShellAddress tells SIGN_HOST's
 // shell the app's path and query on every move and whenever the client is READY again, so the top window's address
 // follows the app.
@@ -35,6 +36,7 @@ export function Shell({ client, screen: S = Screen }: { client: SignpageClient; 
           <DepositSheetProvider>
             <WithdrawPickProvider>
             <ShellAddress />
+            <PageTop />
             <div className="shell">
               <Header />
               <PhoneHeader />
@@ -42,7 +44,7 @@ export function Shell({ client, screen: S = Screen }: { client: SignpageClient; 
                 {ROUTES.map((r) => (
                   <Route key={r.path} path={r.path} element={<S id={r.id} />} />
                 ))}
-                <Route path="*" element={<Navigate to="/" replace />} />
+                <Route path="*" element={<S id="notfound" />} />
               </Routes>
               <Footer />
               <TabBar />
@@ -65,5 +67,18 @@ function ShellAddress() {
   useEffect(() => {
     if (client && ready) void tellShell(client, { pathname, search });
   }, [client, ready, pathname, search]);
+  return null;
+}
+
+/** A move to another page opens it at its top: the window kept the last page's scroll, so a phone token page opened
+ *  wherever Discover was scrolled (QA walk 16 Nov, item 4). Back and Forward (POP) leave the scroll to the browser and to
+ *  the page (PhoneTrenches puts the list back where it was); a change of the query alone moves nothing. */
+function PageTop() {
+  const { pathname } = useLocation();
+  const how = useNavigationType();
+  useLayoutEffect(() => {
+    if (how !== "POP") window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    // biome-ignore lint/correctness/useExhaustiveDependencies: on a new path only
+  }, [pathname]);
   return null;
 }

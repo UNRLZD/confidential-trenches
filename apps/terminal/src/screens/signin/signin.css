@@ -29,7 +29,9 @@
 .amenu { position: absolute; top: calc(100% + 8px); right: 0; width: 360px; z-index: 70; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 14px; padding: 6px; box-shadow: 0 16px 40px rgba(0,0,0,.6); display: flex; flex-direction: column; }
 .amenu .mwho { height: 44px; padding: 0 12px; display: flex; align-items: center; gap: 10px; color: var(--text-2); font: 500 14px var(--font-ui); border-bottom: 1px solid var(--border-panel); margin-bottom: 4px; }
 .amenu .mrow { height: 44px; padding: 0 12px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; font: 500 15px var(--font-ui); color: var(--text-1); text-align: left; }
-.amenu .mrow:hover:not(:disabled) { background: var(--bg-raised); }
+/* hover fills a row only where there is a pointer that hovers: on a touch screen the tap point kept :hover, so a row drew
+   pre-highlighted (QA walk 16 Nov, item 18: the phone Account tab's Sign out); as discover.css and positions.css */
+@media (hover: hover) and (pointer: fine) { .amenu .mrow:hover:not(:disabled) { background: var(--bg-raised); } }
 .amenu .mrow:disabled { color: var(--text-3); }
 .amenu .mdot { width: 8px; height: 8px; border-radius: 50%; background: var(--blue); }
 .amenu .mrule { height: 1px; background: var(--border-panel); margin: 4px 6px; }

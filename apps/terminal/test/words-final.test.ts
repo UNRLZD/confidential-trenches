@@ -42,8 +42,9 @@ const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "
 // next picks page). The deposit sheet's three send rules (card pool-balance-counts-the-remainder, placeholders for the
 // owner's copy pass). Its risk line and feedback link (owner ask 14 Nov ~06:00Z, on the words page
 // https://claude.ai/artifact/WZMM7eSuntvTFEqr6aAwAw). The Withdraw form's From, over the places the money leaves (card
-// app-money-sheets-read-right, QA walk item 12): Portfolio's own draft From, on the owner's next picks page.
-const STILL_DRAFT: Record<string, string[]> = { deposit: ["sendOnlyBase", "sendOnlyRobinhood", "sendOnlySolana"], discover: [], portfolio: ["from", "intents", "more"], signin: [], token: ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "net5m", "sells5m", "vol5m"], verify: ["authority", "blockscout", "hoodscan", "owner", "pools", "proxy", "solanaExplorer"], withdraw: ["from"] };
+// app-money-sheets-read-right, QA walk item 12): Portfolio's own draft From, on the owner's next picks page. The not-found
+// state's Not found (card app-pages-open-right, on the owner's next picks page).
+const STILL_DRAFT: Record<string, string[]> = { deposit: ["sendOnlyBase", "sendOnlyRobinhood", "sendOnlySolana"], discover: [], portfolio: ["from", "intents", "more"], signin: [], token: ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "net5m", "notFound", "sells5m", "vol5m"], verify: ["authority", "blockscout", "hoodscan", "owner", "pools", "proxy", "solanaExplorer"], withdraw: ["from"] };
 
 test("the list: 104 words on these screens, each once, each with a pick", () => {
   assert.equal(ROWS.length, 104);
