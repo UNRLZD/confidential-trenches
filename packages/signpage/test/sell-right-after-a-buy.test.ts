@@ -273,6 +273,7 @@ test("the holding ends when the finalized finder lists W's token: the finder's a
   const tp = page(w, f, pair([OUT_UNITS, OUT_UNITS]), { buy: b.kind });
   await until(async () => (await tp.positions()) !== null);
   tapBuy(tp);
+  await until(() => b.run.told, "the run told its amount");
   await until(async () => (await rowOf(tp)) !== undefined);
   f.st.listed = 3_500_000_000_000n; // a share sold meanwhile: the chain's word, not the record's
   b.run.end("filled");
@@ -288,13 +289,16 @@ test("a buy that did not stay: a not_landed end (both RPCs' verdict) drops W's r
     const tp = page(w, f, pair([OUT_UNITS, OUT_UNITS]), { buy: b.kind });
     await until(async () => (await tp.positions()) !== null);
     tapBuy(tp);
+    // the run tells its read-back (W's decimals and amount) before it ends, as poolBuyKind does
+    await until(() => b.run.told, "the run told its amount");
     await until(async () => (await rowOf(tp)) !== undefined);
     b.run.end(end);
     await tick(60);
     await until(async () => ((await w.get("ops", "pb1")) !== undefined) === (end === "not_landed"), `${end}: its ops record`);
-    const recW = ((await w.get("meta", POSITION_COSTS_KEY)) as Record<string, unknown> | undefined)?.[W];
+    const recOf = async () => ((await w.get("meta", POSITION_COSTS_KEY)) as Record<string, unknown> | undefined)?.[W];
+    const recW = await recOf();
     if (end === "not_landed") {
-      assert.equal(recW, undefined, "not_landed: W's record dropped");
+      await until(async () => (await recOf()) === undefined, "not_landed: W's record dropped");
       await until(async () => (await rowOf(tp)) === undefined, "and its row gone");
     } else {
       assert.deepEqual(recW, { mint: MINT, received: OUT, decimals: 6, cost_usd: "1.5" }, "sent: the record stays");
@@ -310,6 +314,7 @@ test("a W whose note went back UNSPENT (never landed) is no row; a finder that f
   const tp = page(w, f, pair([OUT_UNITS, OUT_UNITS]), { buy: b.kind });
   await until(async () => (await tp.positions()) !== null);
   tapBuy(tp);
+  await until(() => b.run.told, "the run told its amount");
   await until(async () => (await rowOf(tp)) !== undefined);
   // the pass itself, on the page's reads: each case from the record and W's buy mint
   const st = { costs: (await w.get("meta", POSITION_COSTS_KEY)) as Record<string, never>, bought: { [W]: { mint: MINT, program: SOLANA_TOKEN_PROGRAM } } };
