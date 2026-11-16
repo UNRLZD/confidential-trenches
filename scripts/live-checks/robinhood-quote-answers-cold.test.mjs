@@ -31,5 +31,5 @@ test("a snapshot past the head, or with no head read, fails", () => {
 });
 
 test("the committed snapshots are what the good run read", () => {
-  assert.deepEqual(committed(), A.want, "the committed snapshots changed: record the good run again (--site packages/signpage/public --record)");
+  assert.deepEqual(committed(), A.want, "the committed snapshots changed: record the good run again (--site <the build folder of deploy.mjs --build> --record)");
 });

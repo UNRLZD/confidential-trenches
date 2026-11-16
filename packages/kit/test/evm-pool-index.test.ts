@@ -736,7 +736,7 @@ test("F5's state reads take each reader's batchMax: no batch of more calls than 
   for (const x of [a, b]) assert.ok(x.calls.filter((c) => c[0]?.method === "eth_call").every((c) => c.length <= 10), JSON.stringify(x.calls.map((c) => c.length)));
 });
 
-// Card robinhood-quote-answers-cold: the release's index snapshot (packages/signpage/public/evm-index/<chain>.json,
+// Card robinhood-quote-answers-cold: the release's index snapshot (packages/signpage/data/evm-index/<chain>.json,
 // scripts/evm-index-snapshot.mjs). A fresh device's cold Robinhood quote sent 20 to 100+ deep getLogs posts to
 // rpc.mainnet.chain.robinhood.com at its pace of about one a second and ended stale_quote, 6 of 8 coins (box run
 // 2026-11-16 03:24Z); started from a snapshot the device's sync reads only the tail past it.

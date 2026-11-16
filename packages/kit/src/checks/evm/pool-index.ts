@@ -487,7 +487,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   return done({ index, coversThrough: whole ? n : null, pools: whole ? [...(old?.pools ?? []), ...fresh] : null, error });
 }
 
-/** The index as the sign release ships it (card robinhood-quote-answers-cold: packages/signpage/public/evm-index/
+/** The index as the sign release ships it (card robinhood-quote-answers-cold: packages/signpage/data/evm-index/
  *  <chain>.json, made by scripts/evm-index-snapshot.mjs with this same sync on the venue's two readers): the stored
  *  index with each pool as [currency0, currency1, fee, tickSpacing, hooks, block], its id left out (the key's keccak,
  *  computed again on load). Robinhood's 38,732 pools are 6.05 MB so, 1.15 MB gzipped, where the stored form with ids is

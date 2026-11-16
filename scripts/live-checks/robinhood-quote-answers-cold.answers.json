@@ -4,11 +4,11 @@
   "robinhood": "087f3c1017457be2d0b2eab03b1b94b6c6442fa1bae0acf35968a900021b3480"
  },
  "good": {
-  "note": "this branch, 2026-11-16 04:1xZ: the committed snapshots read from packages/signpage/public (--site): PASS",
+  "note": "this branch, 2026-11-16 05:0xZ: the snapshots read from deploy.mjs --build's folder (--site), byte for byte the committed data/evm-index files: PASS",
   "run": {
    "sign": "https://confidential.unrealized.trade",
    "site": "a build folder at SIGN_HOST's name",
-   "at": "2026-11-16T04:07:53.468Z",
+   "at": "2026-11-16T04:59:37.208Z",
    "snapshots": {
     "base": {
      "status": 200,
@@ -16,7 +16,7 @@
      "sha": "ecf9f8baea23e0d773b3acccca3cd5839b99d99e8b9b88e20f86bb6747499cc8",
      "through": 58051548,
      "pools": 4320,
-     "head": 58058490
+     "head": 58074009
     },
     "robinhood": {
      "status": 200,
@@ -24,7 +24,7 @@
      "sha": "087f3c1017457be2d0b2eab03b1b94b6c6442fa1bae0acf35968a900021b3480",
      "through": 115460916,
      "pools": 38719,
-     "head": 115479861
+     "head": 115508224
     }
    }
   }

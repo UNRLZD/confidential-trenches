@@ -1696,7 +1696,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const evmIndexed = new Set<"base" | "robinhood">();
   const evmIndexing = new Map<"base" | "robinhood", Promise<void>>();
   // the release's snapshot of the chain's index (card robinhood-quote-answers-cold: scripts/evm-index-snapshot.mjs,
-  // public/evm-index/<chain>.json): a device with no kept index syncs from it, so it reads only the blocks past it. A
+  // data/evm-index/<chain>.json, served at /evm-index/): a device with no kept index syncs from it, so it reads only the blocks past it. A
   // fresh device's cold Robinhood quote with no index sent 20 to 100+ deep getLogs posts to Robinhood's own at about one
   // a second and ended stale_quote, 6 of 8 coins (box run 2026-11-16 03:24Z). Same origin and release list as this code;
   // read through the kit's shape check, at most EVM_INDEX_SNAPSHOT_MAX bytes, any failure no snapshot (a cold sync)

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // The sign release's pool index snapshots (card robinhood-quote-answers-cold): one cold sync of each EVM chain's pool
 // index on the venue's two index readers, the same sync the device runs (kit trade/evm/buy-tap.ts evmPoolIndexRefresh,
-// checks/evm/pool-index.ts: every span proven on both readers), written to public/evm-index/<chain>.json in the
+// checks/evm/pool-index.ts: every span proven on both readers), written to data/evm-index/<chain>.json in the
 // snapshot's compact form (evmPoolIndexSnapshotOf) and read back through the page's own check (evmPoolIndexFromSnapshot)
-// before it is written. The page serves them as any public/ file, so the release list pins their bytes; a device with
-// no kept index starts its sync from the snapshot at its first EVM coin quote and reads only the blocks past it.
+// before it is written. The build copies them to /evm-index/<chain>.json (build-app.mjs SERVED), so the release list pins
+// their bytes; a device with no kept index starts its sync from the snapshot at its first EVM coin quote and reads only
+// the blocks past it.
 // Read-only: nothing is signed or sent. Run it at each release cut, then commit the files.
 //   node packages/signpage/scripts/evm-index-snapshot.mjs [--chain base|robinhood ...]   exit 0 written, 1 a sync failed
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -14,7 +15,7 @@ import { evmPoolIndexRefresh } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolIndexFromSnapshot, evmPoolIndexSnapshotOf } from "../../kit/src/checks/evm/pool-index.ts";
 
-const OUT = join(dirname(dirname(fileURLToPath(import.meta.url))), "public", "evm-index");
+const OUT = join(dirname(dirname(fileURLToPath(import.meta.url))), "data", "evm-index");
 const asked = process.argv.flatMap((a, i, all) => (all[i - 1] === "--chain" ? [a] : []));
 const chains = asked.length > 0 ? asked : ["base", "robinhood"];
 let failed = 0;

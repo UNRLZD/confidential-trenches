@@ -28,7 +28,7 @@ const READ_MS = 30_000;
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha = (text) => createHash("sha256").update(text).digest("hex");
 /** Each chain's committed snapshot's sha-256 (the bytes this commit ships). */
-export const committed = () => Object.fromEntries(CHAINS.map((c) => [c, sha(readFileSync(path.join(REPO, "packages/signpage/public/evm-index", `${c}.json`), "utf8"))]));
+export const committed = () => Object.fromEntries(CHAINS.map((c) => [c, sha(readFileSync(path.join(REPO, "packages/signpage/data/evm-index", `${c}.json`), "utf8"))]));
 
 /** The run's verdict ({ sign, snapshots: { chain: { status, bytes, sha?, through?, pools?, head } } }) against `want`,
  *  each chain's committed sha-256: { ok, lines }. */

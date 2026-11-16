@@ -66,6 +66,9 @@ export const SERVED = Object.freeze([
   Object.freeze({ from: join(KIT, "zk", "LICENSE-LGPL-3.0.txt"), to: "licenses/LGPL-3.0.txt" }),
   Object.freeze({ from: join(dirname(dirname(PKG)), "LICENSE"), to: "licenses/Apache-2.0.txt" }),
   Object.freeze({ from: join(KIT, "zk", "NOTICE"), to: "licenses/zk-NOTICE.txt" }),
+  // each EVM chain's pool index snapshot (card robinhood-quote-answers-cold; scripts/evm-index-snapshot.mjs writes it
+  // at the release cut): served at /evm-index/<chain>.json, read by the page at its first EVM quote, never bundled
+  ...["base", "robinhood"].map((c) => Object.freeze({ from: join(PKG, "data", "evm-index", `${c}.json`), to: `evm-index/${c}.json` })),
 ]);
 // every file SERVED copies is one of the build's inputs, the paths the verify gate compares a release list's tree on
 const REPO = dirname(dirname(PKG));

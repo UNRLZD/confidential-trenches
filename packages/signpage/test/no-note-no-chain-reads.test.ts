@@ -191,7 +191,7 @@ test("signed in with a Solana note alone (or Cash, the vault scope's notes in th
 });
 
 // Card robinhood-quote-answers-cold: a fresh account (its named addresses only) syncs no index at its load, and its
-// first EVM coin quote starts one from the release's snapshot (public/evm-index/<chain>.json): the sync is handed the
+// first EVM coin quote starts one from the release's snapshot (data/evm-index/<chain>.json, served at /evm-index/): the sync is handed the
 // snapshot as the index it reads on from, so it reads only the blocks past it, and the quote is told once it is served.
 // On release 159 and main every cold Robinhood dry quote of such an account ended stale_quote (box run 03:24Z).
 test("a fresh account's first Robinhood coin quote starts the chain's index from the release's snapshot; its load starts none", async () => {
