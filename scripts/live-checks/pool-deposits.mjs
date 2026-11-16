@@ -1,17 +1,13 @@
 #!/usr/bin/env node
-// Live check of card pool-deposits: the signing page's same-chain Solana deposit, built, priced and its mark read by the
-// kit (packages/kit/src/trade/solana/pool-deposit.ts) since slice 2, landed a note on the devnet pool its testnet build
-// pins, and SIGN_HOST (https://confidential.unrealized.trade) still serves the mainnet build, which carries no testnet pin. The run is pool-deposits.run.json,
-// written from packages/signpage/scripts/pool-deposit-devnet.mjs (runPoolDeposit, src/pool-deposit.ts, at this card's
-// code, a seed made in that run). The reads are signpage-pool-notes's, on each of two devnet RPCs of two operators at
-// finalized: the deposit tx with no error, paid and signed by the run's U, calling the pinned program; the mark at the
-// run's value and nonce, the program's; the label leaf keccak256(scope, nonce) mod p and the state leaf the note's
-// commitment, both worked out here; U at 0 lamports (the kit's cost was exactly what the program took).
+// Live check of card pool-deposits: SIGN_HOST (https://confidential.unrealized.trade) serves the mainnet build, which
+// carries none of the testnet build's pins or providers (test-network-names.mjs SIGN_TESTNET_ONLY), and its EVM
+// same-chain deposit (below). It reads SIGN_HOST only (card live-checks-read-mainnet-only: a listed check reads no test
+// network). The Solana deposit's slice 2 run on the testnet build's devnet pool (pool-deposits.run.json, written from
+// packages/signpage/scripts/pool-deposit-devnet.mjs) is a record no deploy changes: the check's test replays its
+// recorded devnet reads (signpage-pool-notes's check), and the money gate reads its transactions back.
 // After: sign
-// Bundle: out devnet RPC reads of the run
-//   node scripts/live-checks/pool-deposits.mjs [--precommitment <hex>] [--record <file>]
-// --precommitment reads another precommitment in the run's place (the recorded bad answer). PASS exit 0, FAIL exit 1,
-// error exit 2.
+// Bundle: out the served index.html and /app.js against the release lists
+//   node scripts/live-checks/pool-deposits.mjs [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2.
 // Slice 3 (the EVM same-chain deposit, release-83): SIGN_HOST's index.html pins the /app.js it serves (its sha384), and
 // that bundle carries the EVM deposit, as minified: U^evm's HKDF label (derive/keys.ts depositIdEvm), the rule's own
 // refusals (rules/pool.ts checkEvmDeposit) and the runner's reads (src/pool-deposit-evm.ts). What each does is held by
@@ -26,13 +22,23 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEVNET_PROVIDERS, devnetPin, recorder } from "./pool-sol-deploy.mjs";
-import { check as checkRun, readSignFlow } from "./signpage-pool-notes.mjs";
+import { SIGN_TESTNET_ONLY } from "./test-network-names.mjs";
 
 const KEY = "pool-deposits";
 export const RUN = new URL("./pool-deposits.run.json", import.meta.url);
 
 const SIGN_HOST = "https://confidential.unrealized.trade";
+/** SIGN_HOST's /app.js: its status, size and which of SIGN_TESTNET_ONLY it carries. */
+export async function readSignFlow(fetchFn = fetch) {
+  const r = await fetchFn(`${SIGN_HOST}/app.js`, { redirect: "error" });
+  const text = await r.text();
+  return { status: r.status, bytes: text.length, found: SIGN_TESTNET_ONLY.filter((s) => text.includes(s)) };
+}
+/** The mainnet build line on SIGN_HOST's read `sign`. */
+export function judgeSign(sign) {
+  const ok = sign?.status === 200 && sign.bytes > 0 && Array.isArray(sign.found) && sign.found.length === 0;
+  return [`${ok ? "ok  " : "BAD "} SIGN_HOST's /app.js is the mainnet build, with no testnet pin or provider: ${sign ? `${sign.status}, ${sign.bytes} chars, carries [${sign.found.join(", ")}]` : "not read"}`];
+}
 /** The EVM deposit's marks in SIGN_HOST's bundle, each a string the minifier keeps. */
 export const EVM_MARKS = Object.freeze({
   // derive/keys.ts depositIdEvm: U^evm's HKDF label
@@ -82,12 +88,10 @@ export function judgeEvm(e, routed = routedReleases()) {
   return lines;
 }
 
-/** The verdict for this card's run (with `precommitment` in its place when given), read through `fetchFn`, SIGN_HOST's
- *  read `sign`, and SIGN_HOST's EVM facts `evm`, on today's devnet pin (signpage-pool-notes's check, which takes no deploy record). */
-export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), evm, ...rest } = {}) {
-  const r = await checkRun({ run, ...rest });
-  const lines = [...r.lines, ...judgeEvm(evm)];
-  return { ...r, lines, ok: r.ok && !lines.some((l) => l.startsWith("BAD")) };
+/** The verdict on SIGN_HOST's read `sign` and its EVM facts `evm`. */
+export function check({ sign, evm } = {}) {
+  const lines = [...judgeSign(sign), ...judgeEvm(evm)];
+  return { lines, ok: !lines.some((l) => l.startsWith("BAD")) };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -96,13 +100,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     return i > 0 ? process.argv[i + 1] : undefined;
   };
   try {
-    const run = JSON.parse(readFileSync(RUN, "utf8"));
-    const rec = recorder();
     const sign = await readSignFlow();
-    const precommitment = opt("--precommitment") ?? run.precommitment;
     const evm = await readSignEvm();
-    const r = await check({ run, precommitment, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign, evm });
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ deployment: devnetPin().record, precommitment, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, evm, answers: rec.answers })}\n`);
+    const r = check({ sign, evm });
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ at: new Date().toISOString(), sign, evm })}\n`);
     for (const l of r.lines) console.log(l);
     console.log(`${r.ok ? "PASS" : "FAIL"} ${KEY}`);
     process.exit(r.ok ? 0 : 1);
