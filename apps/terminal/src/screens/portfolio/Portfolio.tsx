@@ -235,6 +235,7 @@ interface HeadProps {
 }
 
 function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now, mv }: HeadProps) {
+  const intent = useDepositIntent();
   const pts = line(src.data.series, ui.range, now);
   const change = t && pts.length ? t.total - pts[0]![1] : null;
   const v = (c: bigint | null, sign: bigint | null, plus = true): ReactNode => (loading ? <Sk w={80} h={16} /> : c === null || !t ? DASH : <span className={sgn(sign)}>{usd(c, plus)}</span>);
@@ -265,6 +266,8 @@ function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now, mv }: H
           <div className="ctl">
             <RangeSeg ui={ui} setUi={setUi} />
             <span className="grow" />
+            {/* Deposit beside Withdraw, as the phone's pair (card app-pages-open-right; QA walk 16 Nov, item 17) */}
+            <button type="button" className="btn2 pf-dep" data-control="deposit" {...intent} onClick={() => src.act({ kind: "deposit" })}><Ic name="arrowDown" size={12} /><W id="deposit" /></button>
             <button type="button" className="btn2" data-control="withdraw" onClick={() => src.act({ kind: "withdraw" })}><Ic name="arrowUp" size={12} /><W id="withdraw" /></button>
           </div>
           <div className="chart">{loading ? <Sk w={440} h={214} /> : pts.length < 2 ? <Plate /> : <LineChart pts={pts} />}</div>

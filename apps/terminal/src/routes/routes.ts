@@ -2,7 +2,8 @@
 // screen's <main data-route> carries, so a check can tell a route that rendered from the fallback.
 import type { MarketChain } from "../screens/discover/fields.ts";
 
-export type RouteId = "token" | "discover" | "portfolio" | "orders" | "profile" | "verify" | "privacy" | "terms";
+/** `notfound` is the shell's catch-all: a path no route names (shell/Shell.tsx). */
+export type RouteId = "token" | "discover" | "portfolio" | "orders" | "profile" | "verify" | "privacy" | "terms" | "notfound";
 
 /** A token's own page: /token/<chain>/<id>. Public and permanent (a shared link, the shell's address): the chain is the
  *  helper's own chain id (06b), the id the token's id in that chain's form. "/" draws OPEN_TOKEN on All, a chain pick's top Trending token on a pick. */

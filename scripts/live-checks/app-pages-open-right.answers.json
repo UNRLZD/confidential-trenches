@@ -1,0 +1,264 @@
+{
+ "good": {
+  "check": "app-pages-open-right",
+  "at": "2026-11-16T19:29:53.925Z",
+  "source": "harness, terminal build this card's tree (dist), the stand-in shell signed in",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "viewport": {
+     "width": 400,
+     "height": 520
+    },
+    "framed": true,
+    "nowhere": [
+     {
+      "path": "/nope/not-a-route",
+      "at": "/nope/not-a-route",
+      "route": "notfound",
+      "state": "not found",
+      "text": "Not found",
+      "home": "/",
+      "landed": "/",
+      "landedRoute": "token"
+     },
+     {
+      "path": "/token/eth/abc",
+      "at": "/token/eth/abc",
+      "route": "token",
+      "state": "token empty",
+      "text": "No token",
+      "home": "/",
+      "landed": "/",
+      "landedRoute": "token"
+     },
+     {
+      "path": "/token/solana/notarealmint",
+      "at": "/token/solana/notarealmint",
+      "route": "token",
+      "state": "token empty",
+      "text": "No token",
+      "home": "/",
+      "landed": "/",
+      "landedRoute": "token"
+     }
+    ],
+    "toToken": {
+     "before": 296,
+     "row": "solana:4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+     "route": "token",
+     "page": "ready",
+     "after": 0,
+     "back": 296
+    },
+    "toPortfolio": {
+     "before": 298,
+     "route": "portfolio",
+     "after": 0
+    },
+    "account": {
+     "hover": "off",
+     "rows": [
+      {
+       "control": "acct-backup",
+       "fill": "rgba(0, 0, 0, 0)"
+      },
+      {
+       "control": "acct-withdraw",
+       "fill": "rgba(0, 0, 0, 0)"
+      },
+      {
+       "control": "acct-sync",
+       "fill": "rgba(0, 0, 0, 0)"
+      },
+      {
+       "control": "/privacy",
+       "fill": "rgba(0, 0, 0, 0)"
+      },
+      {
+       "control": "acct-signout",
+       "fill": "rgba(0, 0, 0, 0)"
+      }
+     ]
+    }
+   },
+   {
+    "width": "desktop",
+    "viewport": {
+     "width": 1440,
+     "height": 900
+    },
+    "framed": true,
+    "nowhere": [
+     {
+      "path": "/nope/not-a-route",
+      "at": "/nope/not-a-route",
+      "route": "notfound",
+      "state": "not found",
+      "text": "Not found",
+      "home": "/",
+      "landed": "/",
+      "landedRoute": "token"
+     },
+     {
+      "path": "/token/eth/abc",
+      "at": "/token/eth/abc",
+      "route": "token",
+      "state": "token empty",
+      "text": "No token",
+      "home": "/",
+      "landed": "/",
+      "landedRoute": "token"
+     },
+     {
+      "path": "/token/solana/notarealmint",
+      "at": "/token/solana/notarealmint",
+      "route": "token",
+      "state": "token empty",
+      "text": "No token",
+      "home": "/",
+      "landed": "/",
+      "landedRoute": "token"
+     }
+    ],
+    "deposit": {
+     "drawn": true,
+     "besideWithdraw": true,
+     "sheet": "deposit"
+    }
+   }
+  ]
+ },
+ "bad": {
+  "check": "app-pages-open-right",
+  "at": "2026-11-16T19:12:10.283Z",
+  "source": "harness, terminal build main at 6df1ca4e2 (dist), the stand-in shell signed in",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "viewport": {
+     "width": 400,
+     "height": 520
+    },
+    "framed": true,
+    "nowhere": [
+     {
+      "path": "/nope/not-a-route",
+      "at": "/",
+      "route": "token",
+      "state": null,
+      "text": null,
+      "home": null,
+      "landed": null,
+      "landedRoute": null
+     },
+     {
+      "path": "/token/eth/abc",
+      "at": "/token/eth/abc",
+      "route": "token",
+      "state": "token empty",
+      "text": "No token",
+      "home": null,
+      "landed": null,
+      "landedRoute": null
+     },
+     {
+      "path": "/token/solana/notarealmint",
+      "at": "/token/solana/notarealmint",
+      "route": "token",
+      "state": "token empty",
+      "text": "No token",
+      "home": null,
+      "landed": null,
+      "landedRoute": null
+     }
+    ],
+    "toToken": {
+     "before": 296,
+     "row": "solana:4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+     "route": "token",
+     "page": "ready",
+     "after": 296,
+     "back": 296
+    },
+    "toPortfolio": {
+     "before": 298,
+     "route": "portfolio",
+     "after": 298
+    },
+    "account": {
+     "hover": "off",
+     "rows": [
+      {
+       "control": "acct-backup",
+       "fill": "rgba(0, 0, 0, 0)"
+      },
+      {
+       "control": "acct-withdraw",
+       "fill": "rgba(0, 0, 0, 0)"
+      },
+      {
+       "control": "acct-sync",
+       "fill": "rgba(0, 0, 0, 0)"
+      },
+      {
+       "control": "/privacy",
+       "fill": "rgba(0, 0, 0, 0)"
+      },
+      {
+       "control": "acct-signout",
+       "fill": "rgb(24, 24, 24)"
+      }
+     ]
+    }
+   },
+   {
+    "width": "desktop",
+    "viewport": {
+     "width": 1440,
+     "height": 900
+    },
+    "framed": true,
+    "nowhere": [
+     {
+      "path": "/nope/not-a-route",
+      "at": "/",
+      "route": "token",
+      "state": null,
+      "text": null,
+      "home": null,
+      "landed": null,
+      "landedRoute": null
+     },
+     {
+      "path": "/token/eth/abc",
+      "at": "/token/eth/abc",
+      "route": "token",
+      "state": "token empty",
+      "text": "No token",
+      "home": null,
+      "landed": null,
+      "landedRoute": null
+     },
+     {
+      "path": "/token/solana/notarealmint",
+      "at": "/token/solana/notarealmint",
+      "route": "token",
+      "state": "token empty",
+      "text": "No token",
+      "home": null,
+      "landed": null,
+      "landedRoute": null
+     }
+    ],
+    "deposit": {
+     "drawn": false,
+     "besideWithdraw": false,
+     "sheet": null
+    }
+   }
+  ]
+ }
+}

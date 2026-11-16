@@ -54,7 +54,9 @@
 .srch-menu { position: absolute; top: calc(100% + 8px); right: 0; min-width: 200px; z-index: 70; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 14px; padding: 6px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; }
 .srch-mrow { height: 44px; padding: 0 12px; border-radius: 10px; display: flex; align-items: center; gap: 10px; font: 500 15px var(--font-ui); color: var(--text-1); text-align: left; }
 .srch-mrow .ic { color: var(--text-3); }
-.srch-mrow:hover, .srch-mrow[aria-checked="true"] { background: var(--bg-raised); }
+.srch-mrow[aria-checked="true"] { background: var(--bg-raised); }
+/* as the account menu's rows (signin.css): no hover fill on a touch screen, where the tap point keeps :hover */
+@media (hover: hover) and (pointer: fine) { .srch-mrow:hover { background: var(--bg-raised); } }
 
 /* the narrow top bar's search button (R5 .tb-searchBtn, .bell): from 768 to 1024 px the field and the chip give way to it */
 .tb .tb-searchBtn { display: none; }

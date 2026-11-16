@@ -6,7 +6,7 @@ import { headerModel } from "../screens/signin/model.ts";
 import { useSigninSheet, useSigninSource } from "../screens/signin/source.tsx";
 import { W } from "../screens/signin/Word.tsx";
 import type { WordId } from "../screens/signin/words.ts";
-import { TokenRoute } from "../screens/token/TokenPage.tsx";
+import { NotFound, TokenRoute } from "../screens/token/TokenPage.tsx";
 import { VerifyRoute } from "../screens/verify/VerifyRoute.tsx";
 import { PortfolioMount } from "./PortfolioMount.tsx";
 import type { RouteId } from "./routes.ts";
@@ -61,6 +61,8 @@ const SCREENS: Partial<Record<RouteId, ComponentType>> = {
   portfolio: needsAccount(PortfolioMount, "portfolioSignedOut"),
   // orders are out of the plan for now: Coming soon, signed in or out (card app-orders-coming-soon)
   orders: OrdersRoute,
+  // a path no route names: Not found with the way back to Trenches, at the address opened (card app-pages-open-right)
+  notfound: NotFound,
 };
 
 export function Screen({ id }: { id: RouteId }) {
