@@ -117,8 +117,10 @@ import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import type { PoolChain, RestoreStage } from "../../kit/src/signpage/messages.ts";
-import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
-import { NEAR_NETWORKS, type NearRpc } from "../../wallet/src/deposit/account.ts";
+import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { NEAR_NETWORKS, type NearRpc, type RpcHttpError } from "../../wallet/src/deposit/account.ts";
+import { throttleWaitMs, type ThrottleBounds } from "../../kit/src/throttle.ts";
+import { ReadBusy } from "./read-waits.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { POOL_DEPOSIT_NETWORK } from "../../wallet/src/deposit/quote.ts";
 import { readConfig, RESTORE_GAP, RESTORE_LANES, restorePagesSteps, slices, walkEnd, withSeed, writeRestored, type LaneWalk, type PagesRestored, type RestoredNote, type SeedUse } from "../../wallet/src/notes/restore.ts";
@@ -157,6 +159,70 @@ export const RESTORE_IDS_LOCK = "ct-pool/restore-ids";
 
 /** The gap between two "reading" progress events: within the 10 s the kit's client names. */
 export const RESTORE_BEAT_MS = 5_000;
+
+/**
+ * A pool's walk that ends on a busy provider is walked again after a wait, never named stalled after one try (card
+ * sign-in-restore-rides-out-a-held-server). Release 167 on 16 Nov 22:33Z: a sign-in's restore on an empty store ended
+ * "solana: HTTP 503 (http_5xx, 1 try at ct-api.unrealized.trade)", the helper's mark list answering 503 while its
+ * providers were held: the page client asks a read again once, inside its 3.5 s or 12 s bound (page-rpc.ts), and every
+ * helper route shares one host lane, so a pause another read drew (up to 10 s) left no room for that one ask.
+ * - Busy is the provider's own "not now" on any chain's restore read: HTTP 429 or 5xx, or a JSON-RPC throttle, from the
+ *   page client (Solana and EVM reads, kit send.ts SolanaRpcTransportError), a vendor's busy answer (ReadBusy), or a
+ *   NEAR read's HTTP status (kit networks.ts RpcHttpError), on the error or its cause. Any other error (a refusal, two
+ *   providers apart, a lying answer) still names the pool stalled at once: waiting cannot change it.
+ * - The wait is the throttle rule's (kit throttle.ts throttleWaitMs): from 1 s, doubling to 10 s, the provider's
+ *   Retry-After when it names a longer one (held to 10 s, the helper's longest hold, RETRY_AFTER_MAX_S). The walk asks
+ *   again from its start; what it read before stays read (the Solana marks cache, the EVM pool's hold), so a second walk
+ *   reads only what the first did not.
+ * - Bounded: no wait starts that would take the pool's waits past RESTORE_BUSY_TOTAL_MS (six of the helper's longest
+ *   holds, inside the two minutes a first sign-in's restore is held to), so a provider down for good still ends the
+ *   run stalled, with the app's Retry and the next load's walk. A sign out ends a wait at once (the run's signal).
+ */
+export const RESTORE_BUSY: ThrottleBounds = /* @__PURE__ */ Object.freeze({ firstMs: 1_000, maxMs: 10_000, afterMaxMs: 10_000 });
+export const RESTORE_BUSY_TOTAL_MS = 60_000;
+/** A busy provider's answer in `e` or its causes, with its Retry-After (ms, or null); null when `e` is no busy answer. */
+export function busyOf(e: unknown): { afterMs: number | null } | null {
+  for (let x = e, k = 0; x !== null && x !== undefined && k < 5; x = (x as { cause?: unknown }).cause, k++) {
+    if (x instanceof SolanaRpcTransportError) {
+      if (x.fault === "http_429" || x.fault === "http_5xx" || x.fault === "rpc_throttled") return { afterMs: x.afterMs };
+      continue;
+    }
+    if (x instanceof ReadBusy) return { afterMs: x.afterMs };
+    const s = (x as Partial<RpcHttpError>).status;
+    if (x instanceof Error && typeof s === "number" && (s === 429 || (s >= 500 && s <= 599))) {
+      const a = (x as Partial<RpcHttpError>).retryAfterMs;
+      return { afterMs: typeof a === "number" && Number.isFinite(a) ? a : null };
+    }
+  }
+  return null;
+}
+/** `walk` asked again after each busy end, on the rule above; `wait` is the timer (a test's own), ended by `signal`. */
+export async function busyWaited<T>(walk: () => Promise<T>, signal: AbortSignal, wait: (ms: number, signal: AbortSignal) => Promise<void> = sleepFor): Promise<T> {
+  let pause = 0;
+  let waited = 0;
+  for (;;) {
+    try {
+      return await walk();
+    } catch (e) {
+      const b = busyOf(e);
+      if (b === null || signal.aborted) throw e;
+      const p = throttleWaitMs(pause, b.afterMs, RESTORE_BUSY);
+      if (waited + p > RESTORE_BUSY_TOTAL_MS) throw e;
+      pause = p;
+      waited += p;
+      await wait(p, signal);
+      signal.throwIfAborted();
+    }
+  }
+}
+const sleepFor = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise<void>((ok) => {
+    const done = (): void => (clearTimeout(t), signal.removeEventListener("abort", done), ok());
+    const t = setTimeout(done, ms);
+    // a wait holds no process open on its own (Node's tests of the page; a browser has no unref)
+    (t as { unref?: () => void }).unref?.();
+    signal.addEventListener("abort", done, { once: true });
+  });
 
 /** One pinned pool to restore, with its scope (its deposit ids') and its reads (null when this page has none for it: the
  *  run ends stalled); a Solana pool's `lister` names its marks for the pair to read (the pair's first RPC when none), and
@@ -657,6 +723,8 @@ export type PoolRestoreHost = {
   firstPassMaxMs?: number;
   now?: () => number;
   pausesMs?: readonly number[];
+  /** Tests only: the wait before a pool's walk is asked again after a busy provider (busyWaited; a timer otherwise). */
+  busyWait?: (ms: number, signal: AbortSignal) => Promise<void>;
   solana?: typeof solanaRestoreNotes;
   evm?: typeof evmRestoreNotes;
   /** The NEAR vault's walk (nearVaultRestoreNotes unless given: a test's own gap). */
@@ -850,7 +918,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           floors = r;
           return r;
         };
-        const reads = pools.map(async (p): Promise<RestoredNote[]> => {
+        // each pool's walk asked again after a busy provider's wait (busyWaited above), never stalled on one try
+        const reads = pools.map((p) => busyWaited(async (): Promise<RestoredNote[]> => {
           if (p.rpcs === null) throw new Error("no reads on this page");
           if (p.chain === "near") {
             const notes = (await letGo(vaultWalk({ network: p.network, rpcs: p.rpcs(), seed64: seed, signal, turn, ...walkers }), signal)).notes;
@@ -885,7 +954,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (POOL_TESTNET && buys.length > 0 && chain !== "solana") evmHoldingsOwed.push({ chain, pin: p.pin, list: p.rpcs(), buys });
           if (chain !== "solana" && r.spends.some((x) => x.token !== null)) evmTradesOwed.push({ chain, list: p.rpcs(), spends: r.spends, returns: r.returns ?? [] });
           return r.notes;
-        });
+        }, signal, h.busyWait));
         const walked: Walked[] = [];
         // the NEAR vault's notes, walked and written with the pools' (each by `floor` as its walk ends), with no step 5
         // read. On a restored device nothing on the page reads a vault deposit id the lost device left money on; that

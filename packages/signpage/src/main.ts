@@ -1512,7 +1512,23 @@ function storeMoved(e: WalletEvent): void {
   else return;
   // another tab signed out: every read of the account stops now, the proof queue and its seed copy go
   if (e.kind === "signout") signedOutElsewhere();
+  else if (busy) movedInStep = true;
+  else if (CEREMONY_ENDS.has(root.dataset.signin ?? "")) void landStored();
   void resync();
+}
+// A ceremony that ended with no account on screen while another tab stored a seed (card
+// sign-in-restore-rides-out-a-held-server): two tabs that press Create at once, Chrome refuses one tab's sheet
+// NotAllowedError while the other's lands (wallet-passkey-prf's race, 4 runs of 4 since 13 Nov, again on release 167), and
+// that tab showed "Cancelled" beside the account stored, its sheet still up, so resync (layer hidden only) never read the
+// store. The seed stored is the account, landed here too, whether it was stored during this tab's step (heard while busy,
+// landed once the step ends) or after it. Only on a ceremony's end: a typed screen is never taken from under the user.
+const CEREMONY_ENDS: ReadonlySet<string> = new Set(["cancelled", "no-prf", "error"]);
+let movedInStep = false;
+function landStored(): Promise<void> {
+  return run(async () => {
+    const s = await readSeedSettled();
+    if (s) return landed({ screen: "signed-in", seed: s });
+  }, false);
 }
 // Another tab's sign out, heard on the shell's channel (storeMoved) or the store's own (open's onEvent), whichever comes
 // first, each a task of its own: every read of the account stops in the one task that hears it (card
@@ -1862,6 +1878,11 @@ async function run(step: () => Promise<void>, again = true): Promise<void> {
     show("error");
   } finally {
     busy = false;
+  }
+  // another tab's seed write heard during the step, which ended with no account on screen: that seed is landed on
+  if (movedInStep) {
+    movedInStep = false;
+    if (CEREMONY_ENDS.has(root.dataset.signin ?? "")) return void landStored();
   }
   // a step that failed with the layer hidden (an open kind's read) leaves no page on screen: read the store again
   if (again && root.dataset.signin === "error" && shell?.layer.hidden) void resync();

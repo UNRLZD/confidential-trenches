@@ -122,7 +122,9 @@ const realDigest = crypto.subtle.digest.bind(crypto.subtle);
   return r;
 };
 // no RPC in these steps answers: every fetch is refused
-g.fetch = async () => new Response("{}", { status: 503 });
+// (a 404, a refusal: a 503 is a busy answer the restore waits out and asks again, card
+// sign-in-restore-rides-out-a-held-server, which would hold these steps' process for its waits)
+g.fetch = async () => new Response("{}", { status: 404 });
 // the passkey sheet: Create answers a public-key credential whose PRF is not enabled
 g.PublicKeyCredential = class {};
 // on Node's own navigator, whose Web Locks the seed's write takes

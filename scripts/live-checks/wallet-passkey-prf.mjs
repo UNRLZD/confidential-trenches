@@ -101,6 +101,14 @@ export const HELPER_SOLANA_429 = `console: Failed to load resource: the server r
  *  app-console-429's to judge (a crowd of reads from one machine, held under the window, must all answer 200). */
 export const HELPER_MARKET = Object.freeze(["https://ct-api.unrealized.trade/v1/market/candles", "https://ct-api.unrealized.trade/v1/market/lists"]);
 export const marketLine = (u) => `console: Failed to load resource: the server responded with a status of 429 () (${u})`;
+/** The helper's mark list (/v1/rpc/solana-marks), which a signed-in page's restore reads (card
+ *  sign-in-restore-rides-out-a-held-server): the helper answers it 503 upstream when every provider of the route fails
+ *  and 429 while they are held (apps/helper/src/rpc/rpc.ts), and the page waits it out and asks again
+ *  (packages/signpage/src/pool-restore.ts busyWaited), so a busy answer there is the helper's, never this page's error. Each
+ *  one matched by the response the page read (rec.marketRefused, with its status) is a WARN line with its count; the
+ *  restore riding it out is pool-restore-wired's to judge. A console line with no such response under it still fails. */
+export const HELPER_MARKS = "https://ct-api.unrealized.trade/v1/rpc/solana-marks";
+export const marksLine = (status) => `console: Failed to load resource: the server responded with a status of ${status} () (${HELPER_MARKS})`;
 /** The signed-in page's price and display reads on that route (card sign-live-checks-read-a-pinned-page; the sign live
  *  run 42882854987 opens the page in 78 jobs at once, each polling them, and the route's budget is every caller's):
  *  Pyth's SOL/USD account (packages/kit/src/price/pool-usd.ts POOL_USD_FEEDS.solana), the Rent sysvar (the pool's
@@ -326,8 +334,13 @@ export function judge(rec, era = SIGN_OUT_NOW) {
   // (as signpage-signin-kinds reads it, HARNESS_UNRESOLVED; since release 126's page reads those hosts as it signs in);
   // any other line, and the same line on the live host, still is
   let unresolved = 0;
+  // the helper's mark list answered busy (429, 503), each matched by a response the page read
+  const marks = new Map([429, 503].map((st) => [st, (Array.isArray(rec.marketRefused) ? rec.marketRefused : []).filter((x) => x?.url === HELPER_MARKS && x?.status === st).length]));
+  let marksBusy = 0;
   const errs = (rec.errors ?? []).filter((e) => {
     if (rec.mode === "harness" && HARNESS_UNRESOLVED.test(e)) return (unresolved++, false);
+    const st = [429, 503].find((x) => e === marksLine(x));
+    if (st !== undefined && marks.get(st) > 0) return (marks.set(st, marks.get(st) - 1), marksBusy++, false);
     if (e === HELPER_SOLANA_429 && room > 0 && room-- > 0) return false;
     const u = HELPER_MARKET.find((m) => e === marketLine(m));
     if (u === undefined || market.get(u) <= 0) return true;
@@ -335,9 +348,10 @@ export function judge(rec, era = SIGN_OUT_NOW) {
     marketLoad.set(u, (marketLoad.get(u) ?? 0) + 1);
     return false;
   });
-  const load = (rec.errors ?? []).length - errs.length - unresolved - [...marketLoad.values()].reduce((a, b) => a + b, 0);
+  const load = (rec.errors ?? []).length - errs.length - unresolved - marksBusy - [...marketLoad.values()].reduce((a, b) => a + b, 0);
   say(errs.length === 0, `no page error or CSP violation (${errs.length})${errs.length ? `: ${errs.join("; ")}` : ""}`);
   if (load) lines.push(`WARN the helper's Solana route refused ${load} price or display read${load === 1 ? "" : "s"} for its shared budget (429), the run's load`);
+  if (marksBusy) lines.push(`WARN the helper's mark list answered busy ${marksBusy} time${marksBusy === 1 ? "" : "s"} (429 or 503), a restore read the page waits out; the helper's, not the page's error`);
   if (marketLoad.size) lines.push(`INCONCLUSIVE the helper refused the terminal's market reads 429 (${[...marketLoad].map(([u, n]) => `${new URL(u).pathname} ${n}`).join(", ")}): its window for this run's own pages, not the page's error`);
   const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : lines.some((l) => l.startsWith("INCONCLUSIVE")) ? "INCONCLUSIVE" : "PASS";
   return { verdict, pass: verdict === "PASS", lines };
@@ -524,6 +538,7 @@ async function click(page, action) {
 export function watch(page, errors, refused = null, marketRefused = null) {
   // a 429 from the helper's Solana route, with what it read (judge: a price or display read is the run's load)
   if (refused) page.on("response", (r) => {
+    if (marketRefused && (r.status() === 429 || r.status() === 503) && r.url().split("?")[0] === HELPER_MARKS) marketRefused.push({ url: HELPER_MARKS, status: r.status() });
     if (r.status() !== 429) return;
     let u;
     try {

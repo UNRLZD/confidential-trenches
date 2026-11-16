@@ -573,5 +573,286 @@
    }
   ],
   "errors": []
- }
+ },
+ "live167": {
+  "source": "live https://confidential.unrealized.trade",
+  "at": "2026-11-16T23:07:09.041Z",
+  "browser": "Chrome 157.0.8103.51, sandbox on",
+  "steps": {
+   "signedOut": {
+    "answer": {
+     "v": 1,
+     "id": "f5873738-83df-4070-b7ef-8c58562512f5",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    }
+   },
+   "signedIn": {
+    "signed_in": true,
+    "way": "words"
+   },
+   "auto": {
+    "state": {
+     "ops": [
+      {
+       "id": "0ec0f18b-5c11-41d7-90f7-2417c3a000e6",
+       "kind": "restore",
+       "stage": "stalled",
+       "txs": [],
+       "created_ms": 1794870432548
+      }
+     ]
+    },
+    "ms": 13008
+   },
+   "balance": {
+    "chain": "near",
+    "ms": 3258
+   },
+   "asked": {
+    "answer": {
+     "v": 1,
+     "id": "9686ed4e-9bc8-434d-bd6c-0453aac544df",
+     "ok": true,
+     "result": {
+      "stage": "started"
+     }
+    },
+    "stages": [
+     "reading",
+     "stalled"
+    ]
+   }
+  },
+  "connect": [
+   "ct-api.unrealized.trade",
+   "1click.chaindefuser.com",
+   "rpc.mainnet.fastnear.com",
+   "rpc.mainnet.near.org",
+   "near.drpc.org",
+   "archival-rpc.mainnet.near.org",
+   "archival-rpc.mainnet.fastnear.com",
+   "solana-rpc.publicnode.com",
+   "solana.api.pocket.network",
+   "public.rpc.solanavibestation.com",
+   "sender.helius-rpc.com",
+   "mainnet.block-engine.jito.wtf",
+   "api.mainnet-beta.solana.com",
+   "base-rpc.publicnode.com",
+   "base-mainnet.public.blastapi.io",
+   "mainnet.base.org",
+   "base.api.pocket.network",
+   "base.gateway.tenderly.co",
+   "base.rpc.blxrbdn.com",
+   "rpc.sentio.xyz",
+   "robinhood-rpc.publicnode.com",
+   "robinhood.drpc.org",
+   "rpc.mainnet.chain.robinhood.com",
+   "robinhood.rpc.blxrbdn.com",
+   "rpc-robinhood.globalstake.io",
+   "robinhood.api.pocket.network",
+   "robinhood.daybreak-rpc.network"
+  ],
+  "hosts": {
+   "confidential.unrealized.trade": 26,
+   "ct-app.unrealized.trade": 2,
+   "ct-api.unrealized.trade": 27,
+   "rpc.mainnet.fastnear.com": 8,
+   "near.drpc.org": 8,
+   "base.rpc.blxrbdn.com": 23,
+   "base-rpc.publicnode.com": 27,
+   "rpc.mainnet.chain.robinhood.com": 21,
+   "solana-rpc.publicnode.com": 4,
+   "base.gateway.tenderly.co": 2,
+   "robinhood.api.pocket.network": 1
+  },
+  "afterDone": {
+   "rpc.mainnet.fastnear.com": 0,
+   "near.drpc.org": 0
+  },
+  "stray": [],
+  "console": [
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Access to fetch at 'https://rpc.mainnet.chain.robinhood.com/' from origin 'https://confidential.unrealized.trade' has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header contains multiple values '*,*', but only one is allowed. Have the server send the header with a valid value.",
+   "error: Failed to load resource: net::ERR_FAILED",
+   "warning: restore stalled: solana: HTTP 503 (http_5xx, 1 try at ct-api.unrealized.trade)"
+  ],
+  "walked": [
+   {
+    "chain": "near",
+    "t": 1794870435739
+   },
+   {
+    "chain": "base",
+    "t": 1794870436613
+   },
+   {
+    "chain": "robinhood",
+    "t": 1794870445343
+   }
+  ],
+  "busy": {
+   "503 /v1/rpc/solana-marks": 2
+  },
+  "errors": []
+ },
+ "net167Branch": {
+  "source": "local: this checkout's committed packages/signpage build, the pinned hosts on the network",
+  "at": "2026-11-16T23:07:26.201Z",
+  "browser": "Chrome 157.0.8103.51, sandbox on",
+  "steps": {
+   "signedOut": {
+    "answer": {
+     "v": 1,
+     "id": "ef1eca55-b5a9-4e85-9f97-1c6c69901d50",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    }
+   },
+   "signedIn": {
+    "signed_in": true,
+    "way": "words"
+   },
+   "auto": {
+    "state": {
+     "ops": [
+      {
+       "id": "8330e880-fe43-49a6-8a63-7ebd2efce6eb",
+       "kind": "restore",
+       "stage": "reading",
+       "txs": [],
+       "created_ms": 1794870449783
+      }
+     ]
+    },
+    "ms": null
+   },
+   "balance": {
+    "chain": "near",
+    "ms": 2786
+   },
+   "asked": {
+    "answer": {
+     "v": 1,
+     "id": "14585a8b-98e5-4949-ac3e-1568939ed983",
+     "ok": true,
+     "result": {
+      "stage": "started"
+     }
+    },
+    "stages": [
+     "reading",
+     "reading",
+     "reading",
+     "reading",
+     "reading",
+     "reading",
+     "reading",
+     "stalled"
+    ]
+   }
+  },
+  "connect": [
+   "ct-api.unrealized.trade",
+   "1click.chaindefuser.com",
+   "rpc.mainnet.fastnear.com",
+   "rpc.mainnet.near.org",
+   "near.drpc.org",
+   "archival-rpc.mainnet.near.org",
+   "archival-rpc.mainnet.fastnear.com",
+   "solana-rpc.publicnode.com",
+   "solana.api.pocket.network",
+   "public.rpc.solanavibestation.com",
+   "sender.helius-rpc.com",
+   "mainnet.block-engine.jito.wtf",
+   "api.mainnet-beta.solana.com",
+   "base-rpc.publicnode.com",
+   "base-mainnet.public.blastapi.io",
+   "mainnet.base.org",
+   "base.api.pocket.network",
+   "base.gateway.tenderly.co",
+   "base.rpc.blxrbdn.com",
+   "rpc.sentio.xyz",
+   "robinhood-rpc.publicnode.com",
+   "robinhood.drpc.org",
+   "rpc.mainnet.chain.robinhood.com",
+   "robinhood.rpc.blxrbdn.com",
+   "rpc-robinhood.globalstake.io",
+   "robinhood.api.pocket.network",
+   "robinhood.daybreak-rpc.network"
+  ],
+  "hosts": {
+   "confidential.unrealized.trade": 26,
+   "ct-app.unrealized.trade": 2,
+   "ct-api.unrealized.trade": 97,
+   "rpc.mainnet.fastnear.com": 8,
+   "near.drpc.org": 8,
+   "base.rpc.blxrbdn.com": 107,
+   "base-rpc.publicnode.com": 109,
+   "rpc.mainnet.chain.robinhood.com": 65,
+   "solana-rpc.publicnode.com": 14,
+   "base.gateway.tenderly.co": 2,
+   "robinhood.api.pocket.network": 1
+  },
+  "afterDone": {
+   "rpc.mainnet.fastnear.com": 0,
+   "near.drpc.org": 0
+  },
+  "stray": [],
+  "console": [
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Access to fetch at 'https://rpc.mainnet.chain.robinhood.com/' from origin 'https://confidential.unrealized.trade' has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header contains multiple values '*,*', but only one is allowed. Have the server send the header with a valid value.",
+   "error: Failed to load resource: net::ERR_FAILED",
+   "error: Access to fetch at 'https://rpc.mainnet.chain.robinhood.com/' from origin 'https://confidential.unrealized.trade' has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header contains multiple values '*,*', but only one is allowed. Have the server send the header with a valid value.",
+   "error: Failed to load resource: net::ERR_FAILED",
+   "error: Access to fetch at 'https://rpc.mainnet.chain.robinhood.com/' from origin 'https://confidential.unrealized.trade' has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header contains multiple values '*,*', but only one is allowed. Have the server send the header with a valid value.",
+   "error: Failed to load resource: net::ERR_FAILED",
+   "error: Access to fetch at 'https://rpc.mainnet.chain.robinhood.com/' from origin 'https://confidential.unrealized.trade' has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header contains multiple values '*,*', but only one is allowed. Have the server send the header with a valid value.",
+   "error: Failed to load resource: net::ERR_FAILED",
+   "error: Access to fetch at 'https://rpc.mainnet.chain.robinhood.com/' from origin 'https://confidential.unrealized.trade' has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header contains multiple values '*,*', but only one is allowed. Have the server send the header with a valid value.",
+   "error: Failed to load resource: net::ERR_FAILED",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "error: Failed to load resource: the server responded with a status of 503 ()",
+   "warning: restore stalled: solana: HTTP 503 (http_5xx, 1 try at ct-api.unrealized.trade)"
+  ],
+  "walked": [
+   {
+    "chain": "near",
+    "t": 1794870452515
+   },
+   {
+    "chain": "base",
+    "t": 1794870453156
+   },
+   {
+    "chain": "robinhood",
+    "t": 1794870462198
+   }
+  ],
+  "busy": {
+   "503 /v1/rpc/solana-marks": 18
+  },
+  "errors": []
+ },
+ "note167": "Card sign-in-restore-rides-out-a-held-server (16 Nov 23:07Z, on a Mac, Chrome 157): live167 is the live page on release 167 (helper e2c8c2aa7) with the helper recording each busy answer by route (busy): the helper answered /v1/rpc/solana-marks 503 twice and the sign-in restore ended stalled on one try (restore stalled: solana: HTTP 503 (http_5xx, 1 try at ct-api.unrealized.trade)): FAIL. net167Branch is this card's build (--local --net, the pinned hosts live) against the same helper: the page waited and asked the mark list again 18 times, each 503 (every provider of the route down, the helper's), and ended stalled at its bound: FAIL, the bound shown; a run that rides out a helper busy answer to done is planted on live135 in the tests (busy 503 and 429 on the mark list, done: PASS)."
 }

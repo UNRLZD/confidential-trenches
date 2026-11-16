@@ -424,8 +424,12 @@ export const pageSolanaRpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, S
     ? [solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, kind)), solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[1], SOLANA_RPC_RETRY, kind))]
     : [solanaPacedRpc(seatRpc(SOLANA_PUBLIC_SEAT, kind)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, kind))];
 /** The page's mark lister (the wallet's solanaMarksListed): MAINNET_MARKS_ROUTE, paced, on mainnet; none in the testnet
- *  build, where the wallet lists on the pair's first devnet RPC. It only names addresses: the pair reads each. */
-export const pageSolanaLister = (kind: ReadKind = "trade"): SolanaRpc | undefined => (POOL_TESTNET ? undefined : solanaPacedRpc(testnetRpc(MAINNET_MARKS_ROUTE, SOLANA_RPC_RETRY, kind)));
+ *  build, where the wallet lists on the pair's first devnet RPC. It only names addresses: the pair reads each. Only a
+ *  settle and the restore list marks, reads with no quote to age, so it waits a window out as the helper's seat of
+ *  pageSolanaSettleRpcs does (SOLANA_RPC_WINDOW_RETRY): on the 3.5 s bound a helper's Retry-After past it (its holds name
+ *  up to 10 s, on the one host lane every helper route shares) left the list no ask again, and release 167's sign-in
+ *  restore ended stalled on its first 503 (card sign-in-restore-rides-out-a-held-server). */
+export const pageSolanaLister = (kind: ReadKind = "trade"): SolanaRpc | undefined => (POOL_TESTNET ? undefined : solanaPacedRpc(testnetRpc(MAINNET_MARKS_ROUTE, SOLANA_RPC_WINDOW_RETRY, kind)));
 /** The pair every Solana pool settle and the restore read the marks and pages on (review P2-1 of e3489b3b): pageSolanaRpcs'
  *  two providers, in their same paced queues, the helper's seat with SOLANA_RPC_WINDOW_RETRY. The helper answers a
  *  caller's 17th call in a 10 s window with 429 and a Retry-After of up to 10 s (apps/helper/src/rpc/rpc.ts
