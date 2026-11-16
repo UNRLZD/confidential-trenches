@@ -69,6 +69,9 @@ const TOKEN_PROGRAMS = ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQd
 
 /** A first read's successful signatures (the bars before them are the history source's), and the transactions read at once. */
 export const COLD_SIGS = 30;
+/** The longest wait between a failed cold walk and the next (first): 1 s, doubling. [design: 30 s, the industry's capped
+ *  exponential backoff; a token's page reads a filling tape again every few seconds meanwhile] */
+export const COLD_RETRY_MAX_MS = 30_000;
 /** A first read's second signature page, past a first page that held fewer than COLD_SIGS successful: Solana's largest
  *  (getSignaturesForAddress `limit` at most 1000). A bot-flooded token's newest signatures are failed transactions:
  *  CjRGc8wH...pump at 2026-11-15T07:27:09Z, 0 successful in its newest 30, 29 in its newest 1000 (4,562 of 4,992 failed in
@@ -756,6 +759,8 @@ export function createSolanaTrades(deps: {
   });
 
   let timer: ReturnType<typeof setInterval> | null = null;
+  /** Set by stop(): a cold walk failing is not walked again. */
+  let stopped = false;
   function tick(): void {
     const t = now();
     if (t - refAt >= REF_MS) void readRef().catch(() => undefined);
@@ -842,19 +847,19 @@ export function createSolanaTrades(deps: {
     const traded = (): void => {
       if (e.book !== null && e.book.tape(1).length > 0) firstRound();
     };
+    // a walk that fails is walked again while the token is open, after a wait that doubles to COLD_RETRY_MAX_MS: the
+    // tape stays cold (filling) until its newest COLD_SIGS are read, never settled short on a read that failed (card
+    // robinhood-trades-finish-filling: three fails ended the walk and the tape said done with what the stream had sent)
     const cold = (async () => {
-      for (let attempt = 0; ; attempt++) {
+      for (let attempt = 0; !stopped && entries.get(mint) === e; attempt++) {
         try {
           await walk(e, null, traded);
+          if (e.state === "cold") e.state = "live";
           break;
         } catch {
-          if (attempt === 2 || !entries.has(mint)) break; // the stream's trades still serve; the cold window stays short
-          await new Promise((r) => setTimeout(r, 1_000));
+          await new Promise((r) => setTimeout(r, Math.min(1_000 * 2 ** attempt, COLD_RETRY_MAX_MS)).unref?.());
         }
       }
-      if (e.state === "cold") e.state = "live";
-      // a first walk that never ended: the stream's trades alone, every one since the subscription held
-      e.whole ??= Math.floor((e.readAt ?? now()) / 1_000) * 1_000 + 1_000;
       fold(e);
     })();
     // the first answer waits for the walk's first round that holds a trade (its newest trades), the whole walk, or
@@ -1010,6 +1015,7 @@ export function createSolanaTrades(deps: {
   return {
     tick,
     stop(): void {
+      stopped = true;
       if (timer !== null) clearInterval(timer);
       timer = null;
       source.close();

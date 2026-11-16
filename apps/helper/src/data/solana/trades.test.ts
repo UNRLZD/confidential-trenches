@@ -690,6 +690,32 @@ test("card solana-tape-rows-at-first-answer, guard: a token whose newest COLD_SI
 // {"trades":[],"src":"chain"} on the deployed helper (main 204ee6b8a, 14 Nov 17:21Z): the chain tape decodes the pump.fun
 // curve and PumpSwap only, and the helper's log read "no trade of a venue read" for every such token open
 const NK = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-pool-trades-nearkat.json"), "utf8")) as { mint: string; signature: string; tx: { slot: number } };
+// card robinhood-trades-finish-filling: a tape says filling false only once it holds every trade back to its floor (here
+// the cold walk's newest COLD_SIGS); a walk that fails is walked again, never settled short on a read that failed
+test("a cold walk whose signature reads fail three times is walked again: the tape says filling until it is read, then holds its trades (red at d3ae40db4: done after three fails, 0 rows, not filling)", async () => {
+  const sigs = Array.from({ length: 4 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
+  const base = rpcFetch({ sigs: () => sigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse(), txs: Object.fromEntries(sigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  let failing = 3;
+  const flaky = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string };
+    if (req.method === "getSignaturesForAddress" && failing > 0) return failing--, new Response("unavailable", { status: 503 });
+    return base(url, init);
+  };
+  const t = createSolanaTrades({ fetch: flaky, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => settle() });
+  const read = async () => JSON.parse((await t.trades(MINT, 50)).body) as { trades: unknown[]; filling?: boolean };
+  const seen: { n: number; filling?: boolean }[] = [];
+  for (let i = 0; i < 40; i++) {
+    const j = await read();
+    seen.push({ n: j.trades.length, filling: j.filling });
+    if (j.filling !== true) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  t.stop();
+  for (const a of seen) assert.ok(a.filling === true || a.n === sigs.length, `settled short: ${JSON.stringify(seen)}`);
+  assert.equal(seen.at(-1)!.n, sigs.length, `its trades read: ${JSON.stringify(seen)}`);
+  assert.equal(failing, 0);
+});
+
 const POOL_ROWS = [
   { t_ms: Date.parse("2026-11-14T17:22:05Z"), side: "s", usd: "427.037807197591623106", amt: "648306.777831", trader: "EiSEokSBEa9iHSN3gEUKbyCriKMkzqUfr5nLazkkHZki", tx: NK.signature },
 ];

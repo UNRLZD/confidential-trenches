@@ -522,9 +522,14 @@ const TRADERS_MAX = 5_000;
 /** Agreed eth_call results kept (callsAgreed), oldest out first. */
 const CALLED_MAX = 5_000;
 export const TRADES_MAX = 50;
-/** Failed steps in a row that end a tape's read back (readBack). [design: 3, three ticks: a provider pair that cannot
- *  answer a step three times running is down for the forward reads too; the tape is then what it holds.] */
+/** Failed reads in a row after which a tape's read back waits before its next (readBack), BACK_RETRY_MS doubling with
+ *  each further fail to BACK_RETRY_MAX_MS; it never ends on a fail, so a short tape stays filling. [design: 3, three
+ *  ticks: a provider pair that cannot answer a step three times running is down for the forward reads too.] */
 export const BACK_FAILS_MAX = 3;
+/** [design: 5 s, a tick; at most a minute, so a pair back up is read again within one; the industry's capped
+ *  exponential backoff.] */
+export const BACK_RETRY_MS = 5_000;
+export const BACK_RETRY_MAX_MS = 60_000;
 /** The most swap blocks a read back keeps from its one wide read of the day (locate). [design: 10,000, 80 KB a book; a
  *  pool busier than that fills its tape in its first step, and past it the steps read every block, as before.] */
 export const MARKS_MAX = 10_000;
@@ -2235,20 +2240,22 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // only, untimed: none, and the tape is done in one post; else the agreed steps start at the newest swap it names,
     // never at the blocks with none between. A read it gets wrong costs a step read, never a trade the tape shows: every
     // trade shown is still the agreed steps'.
-    // A locate that cannot be made (its provider held, or unanswered BACK_FAILS_MAX times) settles a tape that holds
-    // trades as what it holds, as before, and reads an empty one back in the agreed steps from the top: never an empty
-    // tape settled as done (live run 00:33Z on 16 Nov: MOW 0 trades, src chain, not filling, after 45 s, with 745 trades
-    // over the day). Only an empty tape steps: a day of steps for each book a burst opens would take the other
-    // providers' pace from every first read (swaps-search.test.ts, 12 cold tokens with the chain's own RPC held).
+    // A tape is done only at its floor (TRADES_MAX trades, the pool's birth, or tapeBack blocks back), never because a
+    // read could not be made: while it is short it says filling and reads on (card robinhood-trades-finish-filling: 8
+    // cold tapes at once in the helper's container 16 Nov, 0xcec185eb's locate went unanswered three times and its tape
+    // settled at 17 trades, not filling, with more over the day). A locate whose provider is held is asked again when
+    // the hold ends; one held or unanswered BACK_FAILS_MAX times in a row, or that cannot be made ("steps"), reads the day
+    // in the agreed steps from the top, in the read back's own background lane at the providers' paces.
     if (V.backOnly && back.located !== true) {
       const at = await locate(e, end, back.lo - 1);
-      const unlocated: Back = { ...back, located: true, fails: 0, done: held > 0 };
-      if (at === undefined) {
+      const steps: Back = { ...back, located: true, fails: 0 };
+      if (at === undefined || at === "held") {
         const fails = (back.fails ?? 0) + 1;
-        e.back = fails >= BACK_FAILS_MAX ? unlocated : { ...back, fails };
+        const wait = at === "held" ? { until: now() + Math.max(1, ...BACK_LOCATE.map((u) => holds.heldMs(u))) } : {};
+        e.back = fails >= BACK_FAILS_MAX ? steps : { ...back, fails, ...wait };
         return;
       }
-      e.back = at === "held" ? unlocated : at.length === 0 ? { ...back, located: true, fails: 0, done: true } : { ...back, located: true, fails: 0, lo: at[0]! + 1, ...(at.length > MARKS_MAX ? {} : { marks: at }) };
+      e.back = at === "steps" ? steps : at.length === 0 ? { ...back, located: true, fails: 0, done: true } : { ...back, located: true, fails: 0, lo: at[0]! + 1, ...(at.length > MARKS_MAX ? {} : { marks: at }) };
       return;
     }
     const hi = back.lo - 1;
@@ -2284,9 +2291,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         e.back = { ...back, until: now() + Math.min(...held) };
         return;
       }
-      // read again at a later tick, BACK_FAILS_MAX times in a row at most: the tape is then what it holds, not filling
+      // read again at a later tick; past BACK_FAILS_MAX in a row, after a wait that doubles with each fail to
+      // BACK_RETRY_MAX_MS: the tape stays filling, never settled short on a read that failed
       const fails = (back.fails ?? 0) + 1;
-      e.back = { ...back, fails, done: fails >= BACK_FAILS_MAX };
+      e.back = { ...back, fails, ...(fails >= BACK_FAILS_MAX ? { until: now() + Math.min(BACK_RETRY_MS * 2 ** (fails - BACK_FAILS_MAX), BACK_RETRY_MAX_MS) } : {}) };
       return;
     }
     const all = logs.concat(back.logs);
@@ -2300,24 +2308,26 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     e.back = { lo: next, logs: all, tape: backBook(e, all), done: lo <= end || born || marks?.length === 0, ...(marks === undefined ? {} : { located: true as const, marks }), ...(born ? { born: true as const } : {}) };
   }
   /** The blocks in `lo` to `hi` that hold a swap of `e`'s pool, newest first (none: an empty list), as BACK_LOCATE answers one read of the whole
-   *  range: "held" when no such provider is free, undefined when it did not answer. Past MARKS_MAX blocks readBack keeps
+   *  range: "held" when no such provider is free, "steps" when no such read can be made, undefined when it did not answer. Past MARKS_MAX blocks readBack keeps
    *  the newest alone, and the steps read every block below it, as before (card robinhood-trades-finish-filling). */
-  async function locate(e: Entry, lo: number, hi: number): Promise<number[] | "held" | undefined> {
+  async function locate(e: Entry, lo: number, hi: number): Promise<number[] | "held" | "steps" | undefined> {
     if (lo > hi) return [];
     const [main] = poolFilters(e.pool, lo, hi, chain);
     if (main === undefined) return [];
-    const u = BACK_LOCATE.find((x) => rpcs.includes(x) && usable([x]).length > 0);
+    const ours = BACK_LOCATE.filter((x) => rpcs.includes(x));
+    if (ours.length === 0) return "steps";
+    const u = ours.find((x) => usable([x]).length > 0);
     if (u === undefined) return "held";
     // one value per topic position: the chain's own RPC takes 100,000 blocks at most for a filter with several in one
     // ("send one value per position", read from the helper 2026-11-15 23:4xZ), so each value of every position its own
     // filter, one batch (card robinhood-trades-finish-filling: a hooked v4 pool's second position holds the pool and its
     // siblings, and live 16 Nov 19:5xZ every such day read was refused "query spans 864000 blocks ..., but only 100000
     // are allowed for this request", asked again, then walked in steps). Past LOCATE_FILTERS_MAX filters: no such read,
-    // the steps read the day ("held")
+    // the steps read the day ("steps")
     const topics = (main.topics ?? []) as (string | string[] | null)[];
     let each: (string | null)[][] = [[]];
     for (const t of topics) each = each.flatMap((pre) => (Array.isArray(t) ? t : [t]).map((v) => [...pre, v]));
-    if (each.length > LOCATE_FILTERS_MAX) return "held";
+    if (each.length > LOCATE_FILTERS_MAX) return "steps";
     const r = await batchTo(u, each.map((ts) => ({ method: "eth_getLogs", params: [{ ...main, ...(topics.length === 0 ? {} : { topics: ts }), fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }] })));
     const got = (r ?? []).map((x) => (x?.ok ? parseLogs((x as { result: unknown }).result) : null));
     if (r === null || got.length === 0 || got.some((x) => x === null)) return undefined;

@@ -30,7 +30,7 @@ const TAPE_BACK = (VENUES.base as unknown as Record<string, number>).tapeBack ??
 
 /** The fake chain at `head`, the pool's confirming calls planted, its one recorded swap moved to block `at`; `asked`
  *  collects each pool logs read's first block. */
-function rig(p: Fx & { fee?: number }, getPool: string, head: number, at: number, failBefore?: number, born?: number) {
+function rig(p: Fx & { fee?: number }, getPool: string, head: number, at: number, failBefore?: number, born?: number, clock?: { t: number }) {
   const chain = B.fakeChain();
   chain.st.head = head;
   const calls = new Map<string, string>([
@@ -72,7 +72,7 @@ function rig(p: Fx & { fee?: number }, getPool: string, head: number, at: number
     const out = reqs.map((r, i) => (mine[i] !== undefined ? { jsonrpc: "2.0", id: r.id, ...mine[i] } : fwd.find((x) => x.id === r.id)));
     return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
   };
-  const s = B.open(chain, undefined, { fetch: fetch as never, pools: new Map(), hint: async () => p.pool });
+  const s = B.open(chain, clock, { fetch: fetch as never, pools: new Map(), hint: async () => p.pool });
   return { s, asked, reads };
 }
 /** Ticks, each followed by the read back it starts settling (its own background read, never the tick's wait). */
@@ -143,22 +143,27 @@ test("guard: a trade read back with no ETH price before it in what was read is n
   s.stop();
 });
 
-test("guard: a read back whose steps fail BACK_FAILS_MAX times in a row ends: the tape is what it holds and no longer filling", async () => {
+test("guard: a read back whose steps fail BACK_FAILS_MAX times in a row stays filling, never settled short on a failed read: it waits BACK_RETRY_MS, doubling to BACK_RETRY_MAX_MS, then asks the step again (card robinhood-trades-finish-filling; red at d3ae40db4: settled, not filling, after three fails)", async () => {
   const head = B.REC.firstHead + 200;
   const first = head - VENUES.base.cold + 1;
-  const { s, asked } = rig(PCS, `${PCS.factory} ${sel("getPool(address,address,uint24)")}${w(PCS.asset0)}${w(PCS.asset1)}${w(word(BigInt(PCS.fee!)))}`, head, head - VENUES.base.cold - 300, first);
+  const clock = { t: 1_000_000 };
+  const { s, asked } = rig(PCS, `${PCS.factory} ${sel("getPool(address,address,uint24)")}${w(PCS.asset0)}${w(PCS.asset1)}${w(word(BigInt(PCS.fee!)))}`, head, head - VENUES.base.cold - 300, first, undefined, clock);
   assert.equal(await filling(s, PCS.asset0), true);
   assert.equal(await reach(s, PCS.asset0), undefined, "no reach while it fills");
-  const max = (S as unknown as Record<string, number>).BACK_FAILS_MAX ?? 3;
-  await ticks(s, max + 2);
-  assert.equal(await filling(s, PCS.asset0), false);
+  await ticks(s, S.BACK_FAILS_MAX + 2);
+  assert.equal(await filling(s, PCS.asset0), true, "still filling after its fails");
   assert.deepEqual(await rows(s, PCS.asset0), []);
-  // nothing read back: the reach is the book's own first block, never the hour it failed to read
-  assert.equal(await reach(s, PCS.asset0), S.blockSecondMs("base", first)! + 1_000);
-  // one step a tick while failing, then none: each failed step asked its spans of both providers, max times
+  // still short: no reach claimed (whole_ms) while it fills, never the book's own first block on a read that failed
+  assert.equal(await reach(s, PCS.asset0), undefined, "no reach while it fills after its fails");
+  // past the fails, none asked within the wait: each failed step asked its spans of both providers, max times
   const n = asked.filter((b) => b < first).length;
   await ticks(s, 2);
-  assert.equal(asked.filter((b) => b < first).length, n);
+  assert.equal(asked.filter((b) => b < first).length, n, "asked again within the wait");
+  // the wait passed: the step is asked again, and the tape still says filling
+  clock.t += S.BACK_RETRY_MAX_MS;
+  await ticks(s, 1);
+  assert.ok(asked.filter((b) => b < first).length > n, "asked again after the wait");
+  assert.equal(await filling(s, PCS.asset0), true);
   s.stop();
 });
 
