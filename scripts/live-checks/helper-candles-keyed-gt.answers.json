@@ -1,8 +1,12 @@
 {
- "_note": "good: the branch helper (card/helper-candles-keyed-gt, this card's working tree) on the Mac at http://127.0.0.1:8797 with planted vendor keys and a planted CoinGecko key (none real), CoinGecko's on-chain paths answered by GeckoTerminal's keyless v2 (the same data; a preload rewrote https://pro-api.coingecko.com/api/v3/onchain to https://api.geckoterminal.com/api/v2 and dropped the key header, since the planted key cannot read CoinGecko), read by helper-candles-keyed-gt.mjs --base http://127.0.0.1:8797 --record at 2026-11-13T10:52:42.991Z: BONK src coingecko, Base 0xb200..108c src chain,coingecko, 500 bars each; the helper log held no trace of the key. bad: the deployed helper (main b1b679c42, no key) at https://ct-api.unrealized.trade, same read at 2026-11-13T10:50:57.056Z: both charts src chain,geckoterminal after 9 reads. A run on the deployed helper with the owner's real key is recorded after the owner's key step and the deploy.",
+ "_note": {
+  "good": "The deployed helper (de80994dc, card helper-listed-charts-own-reads round 1 with KEYED_COLD_ONLY) read by this check at 2026-11-16T00:25:43.899Z: BONK 500 bars src chain,coingecko, Base DRB 0x3ec2...6ea2 500 bars src chain,coingecko.",
+  "bad": "The deployed helper read by this check in live run 43776130630 (15 Nov 23:56Z). The run keeps no record, so this is its two verdict lines as printed, each chart's nine reads with their src as printed and the bars of the last read only: BONK 500 bars src chain,geckoterminal (a full chart: it passes under the re-cut bar), Base DRB 3 bars, src chain, after 9 reads (a short chart: it fails).",
+  "old_bar_bad": "The previous bad answer (main b1b679c42, no key, 13 Nov 10:50Z): both charts 500 bars, src chain,geckoterminal. It failed the old bar (src naming coingecko) and passes the re-cut one: full charts of our own reads with GeckoTerminal's history before them."
+ },
  "good": {
-  "base": "http://127.0.0.1:8797",
-  "at": "2026-11-13T10:52:42.991Z",
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-16T00:25:43.899Z",
   "lists": {
    "base": 200
   },
@@ -13,27 +17,20 @@
     "reads": [
      {
       "status": 200,
-      "ms": 5004,
-      "bars": 0,
-      "src": "chain",
-      "filling": true
-     },
-     {
-      "status": 200,
-      "ms": 461,
+      "ms": 1091,
       "bars": 500,
-      "src": "coingecko",
+      "src": "chain,coingecko",
       "filling": false
      }
     ]
    },
    {
     "chain": "base",
-    "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+    "address": "0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2",
     "reads": [
      {
       "status": 200,
-      "ms": 1326,
+      "ms": 1770,
       "bars": 500,
       "src": "chain,coingecko",
       "filling": false
@@ -43,6 +40,103 @@
   ]
  },
  "bad": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-15T23:56Z",
+  "lists": {
+   "base": 200
+  },
+  "charts": [
+   {
+    "chain": "solana",
+    "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "reads": [
+     {
+      "status": 200,
+      "src": "chain,geckoterminal"
+     },
+     {
+      "status": 200,
+      "src": "chain,geckoterminal"
+     },
+     {
+      "status": 200,
+      "src": "chain,geckoterminal"
+     },
+     {
+      "status": 200,
+      "src": "chain,geckoterminal"
+     },
+     {
+      "status": 200,
+      "src": "chain,geckoterminal"
+     },
+     {
+      "status": 200,
+      "src": "chain,geckoterminal"
+     },
+     {
+      "status": 200,
+      "src": "chain,geckoterminal"
+     },
+     {
+      "status": 200,
+      "src": "chain,geckoterminal"
+     },
+     {
+      "status": 200,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     }
+    ]
+   },
+   {
+    "chain": "base",
+    "address": "0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2",
+    "reads": [
+     {
+      "status": 200,
+      "src": "chain"
+     },
+     {
+      "status": 200,
+      "src": "chain"
+     },
+     {
+      "status": 200,
+      "src": "chain"
+     },
+     {
+      "status": 200,
+      "src": "chain"
+     },
+     {
+      "status": 200,
+      "src": "chain"
+     },
+     {
+      "status": 200,
+      "src": "chain"
+     },
+     {
+      "status": 200,
+      "src": "chain"
+     },
+     {
+      "status": 200,
+      "src": "chain"
+     },
+     {
+      "status": 200,
+      "bars": 3,
+      "src": "chain",
+      "filling": false
+     }
+    ]
+   }
+  ]
+ },
+ "old_bar_bad": {
   "base": "https://ct-api.unrealized.trade",
   "at": "2026-11-13T10:50:57.056Z",
   "lists": {

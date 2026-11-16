@@ -2154,14 +2154,20 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // only, untimed: none, and the tape is done in one post; else the agreed steps start at the newest swap it names,
     // never at the blocks with none between. A read it gets wrong costs a step read, never a trade the tape shows: every
     // trade shown is still the agreed steps'.
+    // A locate that cannot be made (its provider held, or unanswered BACK_FAILS_MAX times) settles a tape that holds
+    // trades as what it holds, as before, and reads an empty one back in the agreed steps from the top: never an empty
+    // tape settled as done (live run 00:33Z on 16 Nov: MOW 0 trades, src chain, not filling, after 45 s, with 745 trades
+    // over the day). Only an empty tape steps: a day of steps for each book a burst opens would take the other
+    // providers' pace from every first read (swaps-search.test.ts, 12 cold tokens with the chain's own RPC held).
     if (V.backOnly && back.located !== true) {
       const at = await locate(e, end, back.lo - 1);
+      const unlocated: Back = { ...back, located: true, fails: 0, done: held > 0 };
       if (at === undefined) {
         const fails = (back.fails ?? 0) + 1;
-        e.back = { ...back, fails, done: fails >= BACK_FAILS_MAX };
+        e.back = fails >= BACK_FAILS_MAX ? unlocated : { ...back, fails };
         return;
       }
-      e.back = at === null ? { ...back, located: true, fails: 0, done: true } : { ...back, located: true, fails: 0, lo: at + 1 };
+      e.back = at === "held" ? unlocated : at === null ? { ...back, located: true, fails: 0, done: true } : { ...back, located: true, fails: 0, lo: at + 1 };
       return;
     }
     const hi = back.lo - 1;
@@ -2198,13 +2204,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     e.back = { lo, logs: all, tape: backBook(e, all), done: lo <= end || born };
   }
   /** The newest block in `lo` to `hi` that holds a swap of `e`'s pool, as BACK_LOCATE answers one read of the whole
-   *  range: null when none or no such provider is free (held: the tape is then what it holds, read back again at its
-   *  next open, never filling while the provider is held), undefined when it did not answer. */
-  async function locate(e: Entry, lo: number, hi: number): Promise<number | null | undefined> {
+   *  range: null when none, "held" when no such provider is free, undefined when it did not answer. */
+  async function locate(e: Entry, lo: number, hi: number): Promise<number | null | "held" | undefined> {
     if (lo > hi) return null;
     const [main] = poolFilters(e.pool, lo, hi, chain);
+    if (main === undefined) return null;
     const u = BACK_LOCATE.find((x) => rpcs.includes(x) && usable([x]).length > 0);
-    if (u === undefined || main === undefined) return null;
+    if (u === undefined) return "held";
     // one value per topic position: the chain's own RPC takes 100,000 blocks at most for a filter with several in one
     // ("send one value per position", read from the helper 2026-11-15 23:4xZ), so each event its own filter, one batch
     const topics = (main.topics ?? []) as (string | string[] | null)[];
@@ -3056,6 +3062,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const ownFrom = e.book.ownFrom(tf as Tf);
       let bars: Candle[] = own;
       let src = "chain";
+      // the history before our first bar refused or failed with none held: the answer says filling, so the page reads it
+      // again while the queued read fills it (geckoBars), never a short chart drawn as the coin's whole (card
+      // helper-listed-charts-own-reads: live run 43776130630 read Base DRB, 1,648 trades a day and 1.7 years old, as 1
+      // 1m bar, src chain, after 9 reads over 90 s)
+      let short = false;
       // a range we do not hold: bars before our first
       if (own.length < limit) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
@@ -3067,6 +3078,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         // 0xfbb75a59's 1h answered 200 [] at 19:55Z; card evm-chart-opens-without-a-vendor-call: live run 42995547054)
         const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before, false, client);
         if (own.length === 0 && !Array.isArray(got)) return timed(got);
+        short = !Array.isArray(got);
         const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);
@@ -3076,6 +3088,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const at = e.readAt ?? now();
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
+      if (short && bars.length < limit) body.filling = true;
       body.as_of_ms = at;
       return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at });
     },

@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { THROTTLE_SPAN_S } from "../../apps/terminal/src/screens/token/candles.ts";
 import { coinsOf, judge, LIMIT, read, shapeOf, TAPE_WAIT_MS, TAPES, tapeOf, TF, WAVE, WAVE_GAP_MS } from "./helper-candles-never-refuse-a-listed-coin.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -107,6 +108,32 @@ test("the reads: every listed coin once at the page's tf and limit, in waves und
   assert.equal(asked.filter((u) => u.includes("/candles")).length, WAVE + 5);
   assert.ok(asked.every((u) => u.includes("tf=15m&limit=500")));
   assert.equal(run.tapes.length, TAPES.length);
-  assert.deepEqual(waits, [WAVE_GAP_MS], "two waves, one gap");
+  assert.deepEqual(waits, [WAVE_GAP_MS, WAVE_GAP_MS], "two waves, one gap, then a gap before the tapes");
   assert.equal(judge(run).ok, true);
+});
+
+test("a chart read as the page reads it: filling or 429 read again in later waves until bars, for THROTTLE_SPAN_S at most; one still filling then, or short and filling, fails by name", async () => {
+  const B58 = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const S = (i) => `${"1".repeat(42)}${B58[i]}${B58[i]}`;
+  const n = new Map();
+  const fetchFn = async (url) => {
+    if (url.includes("/lists")) return new Response(JSON.stringify({ lists: { trending: [{ token: S(0) }, { token: S(1) }, { token: S(2) }, { token: S(3) }] } }), { status: 200 });
+    if (url.includes("/trades")) return new Response('{"trades":[{}],"src":"chain"}', { status: 200 });
+    const k = /token=(\w+)/.exec(url)[1];
+    n.set(k, (n.get(k) ?? 0) + 1);
+    const i = n.get(k);
+    const bars = (c) => JSON.stringify({ tf: "15m", candles: Array.from({ length: c }, (_, j) => [j, "1", "1", "1", "1", "0"]), src: "chain", as_of_ms: 1 });
+    if (k === S(0)) return i < 3 ? new Response(JSON.stringify({ tf: "15m", candles: [], filling: true, src: "chain", as_of_ms: 1 }), { status: 200 }) : new Response(bars(500), { status: 200 });
+    if (k === S(1)) return i < 2 ? new Response('{"error":{"code":"rate_limited"}}', { status: 429 }) : new Response(bars(500), { status: 200 });
+    if (k === S(2)) return new Response(JSON.stringify({ tf: "15m", candles: [], filling: true, src: "chain", as_of_ms: 1 }), { status: 200 });
+    return new Response(JSON.stringify({ tf: "15m", candles: [[1, "1", "1", "1", "1", "0"]], filling: true, src: "chain", as_of_ms: 1 }), { status: 200 });
+  };
+  const run = await read("https://helper.test", ["solana"], fetchFn, async () => undefined);
+  const by = Object.fromEntries(run.reads.map((r) => [r.address, r]));
+  assert.deepEqual([by[S(0)].reads, by[S(0)].bars, by[S(0)].filling], [3, 500, false], "filling twice, then the chart");
+  assert.deepEqual([by[S(1)].reads, by[S(1)].bars], [2, 500], "a 429, then the chart");
+  assert.ok(by[S(2)].waited_ms <= THROTTLE_SPAN_S * 1000 && by[S(2)].waited_ms + WAVE_GAP_MS > THROTTLE_SPAN_S * 1000, `read for the span: ${by[S(2)].waited_ms}`);
+  const r = judge(run);
+  assert.deepEqual(bad(r).slice(0, 2).map((l) => l.replace(/ after [\d.]+ s$/, "")), [`BAD solana ${S(2)}: 0 bars, filling`, `BAD solana ${S(3)}: 1 bars, filling`]);
+  assert.match(r.lines.find((l) => l.includes("solana: ")), /2 charted, 0 with no pool, 2 refused/);
 });

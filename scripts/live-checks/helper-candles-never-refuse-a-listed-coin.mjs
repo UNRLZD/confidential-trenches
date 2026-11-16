@@ -11,7 +11,9 @@
 // It reads each chain's Discover lists (solana, base, robinhood), then every listed coin's chart at the tf the token page
 // asks first (apps/terminal/src/screens/token/candles.ts DEFAULT_TF, 15m) with the page's limit (CANDLES_LIMIT, 500), WAVE at once each
 // WAVE_GAP_MS (under the helper's per-client API_RATE_MAX of 120 a 10 s window, apps/helper/src/server.ts, so the check
-// never meets the abuse bound that holds one client back). Want, for every coin: 200 with bars. A coin with no pool to
+// never meets the abuse bound that holds one client back), each read again as the page reads it while it answers filling
+// or 429, for the page's THROTTLE_SPAN_S. Want, for every coin: 200 with bars, not filling (a chart still filling at the
+// span's end is the page's error state, or a short chart drawn as the coin's whole). A coin with no pool to
 // chart is told apart and not judged: a 404, or a 200 with no bars and no `filling` for a Solana coin (GeckoTerminal names
 // no pool); a Base or Robinhood coin the lists name a pool for has one, so its empty chart is BAD. A 200 with no bars
 // and `filling` true is the refusal's form (server.ts fillingOf) and is BAD, as is any other status.
@@ -24,7 +26,7 @@
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { CANDLES_LIMIT, DEFAULT_TF, TF_API } from "../../apps/terminal/src/screens/token/candles.ts";
+import { CANDLES_LIMIT, DEFAULT_TF, FILL_WAIT_MS, TF_API, THROTTLE_SPAN_S } from "../../apps/terminal/src/screens/token/candles.ts";
 import { TRADES_POLL_MS } from "../../apps/terminal/src/screens/token/trades.ts";
 
 const KEY = "helper-candles-never-refuse-a-listed-coin";
@@ -104,25 +106,43 @@ export async function read(base = BASE, chains = CHAINS, fetchFn = fetch, wait =
     lists[chain] = { status: a.status, coins: c === null ? null : c.length };
     for (const x of c ?? []) coins.push({ chain, ...x });
   }
-  const reads = [];
-  for (let i = 0; i < coins.length; i += WAVE) {
-    if (i > 0) await wait(WAVE_GAP_MS);
-    const wave = coins.slice(i, i + WAVE);
-    reads.push(
-      ...(await Promise.all(
-        wave.map(async (c) => {
-          const a = await ask(base, `/v1/market/candles?chain=${c.chain}&token=${c.address}&tf=${TF}&limit=${LIMIT}`, fetchFn);
-          const s = a.status === 200 ? shapeOf(a.body) : null;
-          return { ...c, status: a.status, ms: a.ms, ...(s === null ? { body: a.body.slice(0, 120) } : s.bad !== undefined ? { shape: s.bad } : s), ...(a.error ? { error: a.error } : {}) };
-        }),
-      )),
+  // each coin read as the page reads it (apps/terminal/src/screens/token/candles.ts loadCandles): an answer that is
+  // filling, or a 429, is read again until THROTTLE_SPAN_S after its first read, in later waves (never more than WAVE
+  // in WAVE_GAP_MS, under the per-client window); the page's FILL_WAIT_MS is shorter than a wave's gap, so the check
+  // waits longer between reads than a page, never shorter
+  const done = [];
+  let queue = coins.map((c) => ({ c, first: null, n: 0 }));
+  let clock = 0;
+  for (let w = 0; queue.length > 0; w++) {
+    if (w > 0) {
+      await wait(WAVE_GAP_MS);
+      clock += WAVE_GAP_MS;
+    }
+    const wave = queue.slice(0, WAVE);
+    queue = queue.slice(WAVE);
+    const got = await Promise.all(
+      wave.map(async (q) => {
+        const a = await ask(base, `/v1/market/candles?chain=${q.c.chain}&token=${q.c.address}&tf=${TF}&limit=${LIMIT}`, fetchFn);
+        const s = a.status === 200 ? shapeOf(a.body) : null;
+        const first = q.first ?? clock;
+        const r = { ...q.c, status: a.status, ms: a.ms, reads: q.n + 1, waited_ms: clock - first, ...(s === null ? { body: a.body.slice(0, 120) } : s.bad !== undefined ? { shape: s.bad } : s), ...(a.error ? { error: a.error } : {}) };
+        const again = (a.status === 429 || r.filling === true) && clock + WAVE_GAP_MS - first <= THROTTLE_SPAN_S * 1000;
+        return { q: { ...q, first, n: q.n + 1 }, r, again };
+      }),
     );
+    for (const g of got) (g.again ? queue.push(g.q) : done.push(g.r));
   }
+  const reads = done;
+  // the tapes after a wave's gap, so the last wave's reads have left the per-client window (a page never reads a
+  // hundred charts in ten seconds; 00:16Z on 16 Nov the check's own burst drew DEGEN's tape a 429)
+  await wait(WAVE_GAP_MS);
   const tapes = await Promise.all(TAPES.map((t) => tapeOf(base, t, fetchFn, wait)));
   return { base, at, tf: TF, chains, lists, reads, tapes };
 }
 
-/** One coin's tape as the page reads it: again every TRADES_POLL_MS while it says filling, TAPE_WAIT_MS at most. */
+/** One coin's tape as the page reads it, every TRADES_POLL_MS (apps/terminal/src/screens/token/trades.ts) until it
+ *  holds trades of our own reads, TAPE_WAIT_MS at most: a first answer while the coin's pool is being found is the
+ *  vendor's tape (src coingecko or geckoterminal) or filling, and the page goes on reading it. */
 export async function tapeOf(base, t, fetchFn = fetch, wait = sleep) {
   let waited = 0;
   for (;;) {
@@ -133,7 +153,7 @@ export async function tapeOf(base, t, fetchFn = fetch, wait = sleep) {
     } catch {}
     const ok = Array.isArray(j?.trades);
     const r = { ...t, status: a.status, ms: a.ms, waited_ms: waited, ...(ok ? { trades: j.trades.length, src: j.src, filling: j.filling === true } : { body: a.body.slice(0, 120) }) };
-    if (!ok || !r.filling || waited >= TAPE_WAIT_MS) return r;
+    if (!ok || (r.trades > 0 && r.src === "chain") || waited >= TAPE_WAIT_MS) return r;
     await wait(TRADES_POLL_MS);
     waited += TRADES_POLL_MS;
   }
@@ -154,12 +174,12 @@ export function judge(run) {
   for (const r of run.reads ?? []) {
     const c = (counts[r.chain] ??= { charted: 0, noPool: 0, bad: 0 });
     const noPool = r.status === 404 || (r.status === 200 && r.bars === 0 && r.filling !== true && r.chain === "solana");
-    const good = r.status === 200 && r.bars > 0;
+    const good = r.status === 200 && r.bars > 0 && r.filling !== true;
     if (good) c.charted++;
     else if (noPool) c.noPool++;
     else {
       c.bad++;
-      const what = r.status === 200 ? (r.shape ?? `${r.bars} bars${r.filling ? ", filling" : ""}${r.pool ? ", the lists name its pool" : ""}`) : `${r.status} ${r.body ?? r.error ?? ""}`.trim();
+      const what = `${r.status === 200 ? (r.shape ?? `${r.bars} bars${r.filling ? ", filling" : ""}${r.pool ? ", the lists name its pool" : ""}`) : `${r.status} ${r.body ?? r.error ?? ""}`.trim()}${r.waited_ms > 0 ? ` after ${r.waited_ms / 1000} s` : ""}`;
       say(false, `${r.chain} ${r.address}: ${what}`);
     }
   }

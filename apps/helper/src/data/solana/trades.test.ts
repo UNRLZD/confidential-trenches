@@ -852,3 +852,34 @@ test("card helper-listed-charts-own-reads: a Raydium LaunchLab coin's buy reache
   assert.equal(forged.bars.length, 0);
 });
 const RAY_LAUNCHLAB_ID = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj";
+
+test("card helper-listed-charts-own-reads: bars of ours with the history before them refused, failed or still filling say filling, never a short chart as the coin's whole; with the history in, not filling (one rule with the EVM chains: live run 43776130630 read Base DRB as 1 bar, src chain)", async () => {
+  let hist: { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number } = { status: 429, body: '{"error":{"code":"rate_limited"}}', retryAfterS: 30 };
+  let on: SourceEvents | null = null;
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 }),
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async () => hist,
+    tickMs: 0,
+  });
+  assert.equal((await t.trades(MINT, 50)).status, 200);
+  await settle();
+  on!.note(MINT, { sig: BUY.signature, slot: 465_000_000, err: false, logs: BUY.result.meta.logMessages });
+  await settle();
+  t.tick();
+  const refused = JSON.parse((await t.candles(MINT, "1m", null, 500)).body);
+  assert.equal(refused.candles.length, 1, "our one bar");
+  assert.deepEqual([refused.src, refused.filling], ["chain", true], "short: its history refused");
+  hist = { status: 503, body: '{"error":{"code":"upstream"}}' };
+  assert.equal(JSON.parse((await t.candles(MINT, "1m", null, 500)).body).filling, true, "failed: filling");
+  hist = { status: 200, body: JSON.stringify({ tf: "1m", candles: [], filling: true, src: "geckoterminal", as_of_ms: 1 }), src: "geckoterminal", asOfMs: 1 };
+  assert.equal(JSON.parse((await t.candles(MINT, "1m", null, 500)).body).filling, true, "the history's own fill: filling");
+  const first = refused.candles[0][0] as number;
+  hist = { status: 200, body: JSON.stringify({ tf: "1m", candles: [[first - 120, "1", "1", "1", "1", "5"], [first - 60, "1", "1", "1", "1", "5"]], src: "geckoterminal", as_of_ms: TS * 1000 }), src: "geckoterminal", asOfMs: TS * 1000 };
+  const full = JSON.parse((await t.candles(MINT, "1m", null, 500)).body);
+  t.stop();
+  assert.deepEqual([full.candles.length, full.src, full.filling], [3, "chain,geckoterminal", undefined]);
+});
