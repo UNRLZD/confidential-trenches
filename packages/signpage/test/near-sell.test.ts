@@ -114,6 +114,10 @@ type World = {
   trade?: NearTradeSigned | "throw";
   /** each quote is Rhea DCL's (the pair's venue that pays more) */
   dcl?: boolean;
+  /** the venue each pair read with no venue pinned picks (the one paying more then), in turn; past the list, `dcl`'s */
+  better?: ("dcl" | "classic")[];
+  /** a pair binding that does not honour a pinned venue */
+  ignorePin?: boolean;
 };
 
 function world(o: World = {}) {
@@ -122,6 +126,10 @@ function world(o: World = {}) {
   const stops: [string, string, string | undefined][] = [];
   // the DCL candidates each pair read was asked with
   const asks: (readonly string[] | undefined)[] = [];
+  // the venue each pair read was pinned to, and the venue the next quote is on (a pinned read's, else the better one)
+  const pins: (string | undefined)[] = [];
+  let venueNow: "dcl" | "classic" = o.dcl ? "dcl" : "classic";
+  let free = 0;
   const chain = { registered: o.registered ?? true, nonce: 40n, usdc: o.usdc ?? 0n, token: o.token ?? HELD, lostfound: o.lostfound ?? 0n };
   // the note store: the sale's notes by k; a note lands with its amount
   // (a note given at the start whose call is written was sent before: W's USDC already left for it)
@@ -172,9 +180,14 @@ function world(o: World = {}) {
       ev.push(["quote", { ...a }]);
       const at = [o.quoteAmountOff ? a.amountIn! + 1n : a.amountIn!, o.venueOut ?? 3_000_000n, q++, o.fee] as const;
       // the fake pair hands the flow whichever venue's quote the world names
-      return o.dcl ? (dclQuoteOf(...at) as unknown as RheaQuote) : quoteOf(...at);
+      return venueNow === "dcl" ? (dclQuoteOf(...at) as unknown as RheaQuote) : quoteOf(...at);
     },
-    pair: (a) => (asks.push(a.dclPools), fakePair(() => deps)(a)),
+    pair: (a) => {
+      asks.push(a.dclPools);
+      pins.push(a.venue);
+      venueNow = (o.ignorePin ? undefined : a.venue) ?? o.better?.[free++] ?? (o.dcl ? "dcl" : "classic");
+      return fakePair(() => deps)(a);
+    },
     sign: (l, j, given, request, quote, state, bound) => {
       const read = { account: state.account, nonce: state.nonce, height: state.height };
       ev.push(["sign", l, j, structuredClone([...given]), { ...request }, { storageMin: state.storageMin, registered: state.registered, venueOut: quote.venueOut }, read, bound]);
@@ -229,7 +242,7 @@ function world(o: World = {}) {
     traded: (t) => void ev.push(["traded", (kept = { ...t })]),
   };
   let kept: NearTradeSigned | null = o.trade === "throw" ? null : (o.trade ?? null);
-  return { deps, ev, log, chain, notes, stops, asks };
+  return { deps, ev, log, chain, notes, stops, asks, pins };
 }
 
 const run = async (deps: NearSellDeps, ask = { token: TOKEN, slippageBps: SLIPPAGE }): Promise<NearSellAnswer | null> => {
@@ -328,6 +341,30 @@ test("a Rhea DCL quote with W not registered on USDC: the registration alone, th
   assert.deepEqual((reg![3] as NearSwapCall[]).map((c) => [c.receiver_id, c.actions[0].FunctionCall.method_name, c.actions[0].FunctionCall.deposit]), [[USDC, "storage_deposit", STORAGE_MIN.toString()]]);
   assert.deepEqual((swap![3] as NearSwapCall[]).map((c) => [c.receiver_id, c.actions[0].FunctionCall.method_name, (c.actions[0].FunctionCall.args as { receiver_id: string }).receiver_id]), [[TOKEN, "ft_transfer_call", DCL]]);
   assert.deepEqual(helperBodies(ev).map((b) => b.trade.hops.map((h) => h.pool)), [DCL_POOLS, DCL_POOLS]);
+});
+
+test("a fee scoped to one venue: the re-quote at the fee's amount and the swap's pair stay on the first quote's venue, though the other would pay more then; W signs on that venue at nearSellAmount for it", async () => {
+  for (const [venue, other, exchange] of [["dcl", "classic", DCL], ["classic", "dcl", EXCHANGE]] as const) {
+    const fee: NearTokenFee = { buyBps: 200, sellBps: 200, senderPays: true, scope: [exchange], exempt: [], unknown: false };
+    const { deps, ev, pins, asks } = world({ fee, dcl: venue === "dcl", better: [venue, other, other] });
+    const answer = await run(deps);
+    assert.ok(answer !== null && "result" in answer, venue);
+    const want = (HELD * 10_000n) / 10_200n;
+    assert.deepEqual(ev.filter((e) => e[0] === "quote").map((e) => (e[1] as { amountIn: bigint }).amountIn), [HELD, want, want], venue);
+    const [sign] = signs(ev);
+    const call = (sign![3] as NearSwapCall[])[0]!;
+    assert.deepEqual([(call.actions[0].FunctionCall.args as { receiver_id: string }).receiver_id, (call.actions[0].FunctionCall.args as { amount: string }).amount], [exchange, want.toString()], venue);
+    // the first read free, the re-quote and the swap's pair pinned to its venue (DCL's alone: no classic pools asked)
+    assert.deepEqual(pins, [undefined, venue, venue], venue);
+    assert.deepEqual(asks.map((x) => x !== undefined), [true, venue === "dcl", venue === "dcl"], venue);
+  }
+});
+
+test("a re-quote pinned to the first venue that answers on the other: quote_check_failed, nothing signed", async () => {
+  const fee: NearTokenFee = { buyBps: 200, sellBps: 200, senderPays: true, scope: [DCL], exempt: [], unknown: false };
+  const { deps, ev } = world({ fee, dcl: true, better: ["dcl", "classic"], ignorePin: true });
+  assert.deepEqual(await run(deps), { error: "quote_check_failed" });
+  assert.equal(signs(ev).length, 0);
 });
 
 test("a quote refused for a lag between the two providers is read again, bounded, never the end of the sale", async () => {

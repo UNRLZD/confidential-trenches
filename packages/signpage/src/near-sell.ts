@@ -70,8 +70,11 @@ export type NearSellAsk = { token: string; slippageBps: number };
  *  read with DCL's candidates and DCL pays more (card near-dcl-sell). */
 export type NearSellPair = { state: NearSwapWalletState; quote: RheaQuote | DclQuote; baseline?: bigint };
 /** What a sell's pair read asks: the trade's, and Rhea DCL's candidate pool ids made on the device (near-pools.ts
- *  dclCandidates, never a server's list) for the pair to quote beside Rhea classic. */
-export type NearSellPairAsk = NearPairAsk & { dclPools?: readonly string[] };
+ *  dclCandidates, never a server's list) for the pair to quote beside Rhea classic. `venue`: the pair read on that venue
+ *  alone ("dcl": DCL's candidates and no classic pools; "classic": no DCL candidates), so a re-quote and the swap's pair
+ *  stay on the sale's first quote's venue: a token's fee is scoped per venue (token-fee.ts nearTokenFeeApplies), and the
+ *  amount sold (nearSellAmount) is cut for that venue's fee alone. */
+export type NearSellPairAsk = NearPairAsk & { dclPools?: readonly string[]; venue?: "classic" | "dcl" };
 export type NearSellStep = "read" | "quote" | "register" | "swap" | "receive" | "note" | "move" | "done";
 /** One of the sale's notes as the store holds it: its id, its state, and the amount of the last call written for it (null: none). */
 export type NearReturnNote = { id: string; state: string; amount: bigint | null };
@@ -271,18 +274,21 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
       // 2. the quote of the amount W sells (all it holds, less a fee the seller pays on top), with W read at the same block
       // (deps.pair): what a round signs from is never older than what it signs against. Asked again, bounded, as the
       // buy's fresh pair is, when a read throws (a provider lagging or busy); `want`: W read again until it holds
-      const fresh = async (step: NearSellStep, amountIn: bigint, want: (x: NearSwapWalletState) => boolean = () => true, baseline?: string): Promise<{ s: NearSwapWalletState; q: RheaQuote | DclQuote; base?: bigint }> => {
+      // `venue`: the pair read on that venue alone (NearSellPairAsk); absent, the venue that pays more
+      const fresh = async (step: NearSellStep, amountIn: bigint, want: (x: NearSwapWalletState) => boolean = () => true, baseline?: string, venue?: "classic" | "dcl"): Promise<{ s: NearSwapWalletState; q: RheaQuote | DclQuote; base?: bigint }> => {
         for (let i = 0; i < NEAR_BUY_READ_TRIES; i++) {
           if (i > 0) await deps.wait(NEAR_BUY_READ_WAIT_MS);
           let r: NearPair | NearSellPair;
           try {
-            r = await deps.pair({ side: "sell", token: ask.token, amountIn, wallet: wallet.id, dclPools, ...(baseline === undefined ? {} : { baseline }) });
+            r = await deps.pair({ side: "sell", token: ask.token, amountIn, wallet: wallet.id, ...(venue === "classic" ? {} : { dclPools }), ...(venue === undefined ? {} : { venue }), ...(baseline === undefined ? {} : { baseline }) });
           } catch {
             continue;
           }
           const { state: x, quote: q } = r;
           if (x.account !== wallet.id) return fail(step, "read_failed");
           if (q.network !== deps.network || q.side !== "sell" || q.token !== ask.token || q.amountIn !== amountIn) return fail("quote", "quote_check_failed");
+          // a pair read pinned to a venue answered on the other: not the sale's quote
+          if (venue !== undefined && (isDclQuote(q) ? "dcl" : "classic") !== venue) return fail("quote", "quote_check_failed");
           if (baseline !== undefined && typeof r.baseline !== "bigint") return fail(step, "read_failed");
           // proceeds the vault would refuse are never sold for: nothing is signed (the token stays in W)
           // a floor of 0 at this slippage (a coin that sells for about nothing; the slippage is checked before the run) is
@@ -316,7 +322,9 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
         return fail("quote", "quote_check_failed");
       }
       if (amount <= 0n) fail("quote", "quote_check_failed");
-      if (amount !== held) ({ s: seen, q } = await fresh("quote", amount));
+      // the sale stays on the first quote's venue: its fee is what the amount was cut for
+      const venue = isDclQuote(q) ? "dcl" : "classic";
+      if (amount !== held) ({ s: seen, q } = await fresh("quote", amount, undefined, undefined, venue));
       const request: NearSwapRequest = { network: deps.network, side: "sell", token: ask.token, amountIn: amount, wallet: wallet.id, slippageBps: ask.slippageBps };
       // the wire's hops: a classic quote's own; a DCL quote's pool ids in the Swap's order, each hop naming its own tokens
       // (the token to wNEAR, then wNEAR to USDC, on two pools)
@@ -402,7 +410,7 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
 
       // 4. the swap on a fresh pair, W read at the quote's block, its nonce past the registration (read again until it
       // reads registered); the USDC W holds at that block is the baseline of what the swap pays
-      const swapPair = await fresh("swap", amount, (x) => x.registered, NEAR_NETWORKS[deps.network].usdc);
+      const swapPair = await fresh("swap", amount, (x) => x.registered, NEAR_NETWORKS[deps.network].usdc, venue);
       if (swapPair.s.held < amount) fail("swap", "not_funded");
       const before = swapPair.base!;
       s = swapPair.s;
