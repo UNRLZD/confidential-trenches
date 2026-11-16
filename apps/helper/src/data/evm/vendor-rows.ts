@@ -15,6 +15,17 @@
 // operation's run), a sell's sent more than it got. The vendor counts a v4 hook's own swaps as trades of the sender
 // (Base tx 0x2bd3a576: its sender sold 12,887,788.33, and the hook's contract 0x9982538f bought 18,198.82 with its cut
 // and put it back as liquidity; GeckoTerminal served both rows under the sender), and our own tape counts none of them.
+//
+// A row the vendor printed from a v4 Swap log's leg is the pool's amount, which a hook's cut makes differ from what the
+// trader settled (card trades-checks-pass-on-177: Base tx 0xe47f536a, GeckoTerminal's 4484.67211176021 is Swap log 19's
+// leg; the pool's hook 0x5e320ea6 had 5.929... of it minted as claims to 0x5dd237d1, and the PoolManager sent the swap's
+// sender 0xc3ace431 the 4,478.743022219595877949 that reached the transaction's sender; helper-v4-hook-liquidity on live
+// run 43977576335). So such a row serves what the chain tape serves for it (swaps.ts hookTakes, the swap's own sender):
+// the token the swap's sender settled with the PoolManager, as a Transfer or as claims, when it made that one swap in the
+// transaction; or, the transaction's only swap and its sender settling none, what the one other address that moved the
+// token with the PoolManager settled, no ModifyLiquidity or Donate sender (a take sent straight to its recipient). A buy
+// gets at most the pool's amount and a sell pays at least it; with no such settlement read the pool's amount stands, as
+// it does on the chain tape for a pool with no hook.
 
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { traderAt, txTraders, type Traders } from "./index.ts";
@@ -23,11 +34,23 @@ const topic = (sig: string): string => `0x${Buffer.from(keccak_256(new TextEncod
 const TRANSFER = topic("Transfer(address,address,uint256)");
 const SWAP4 = topic("Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)");
 const CLAIMS = topic("Transfer(address,address,address,uint256,uint256)");
+const MODIFY_LIQUIDITY = topic("ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)");
+const DONATE = topic("Donate(bytes32,address,uint256,uint256)");
+const ZERO = `0x${"0".repeat(40)}`;
 const low = (v: unknown): string | null => (typeof v === "string" ? v.toLowerCase() : null);
 
 /** What a receipt says about one token: the transaction's traders and each move of the token with its log index
- *  (`tier` 1 a Transfer of the token, 2 a v4 Swap leg or an ERC-6909 claim of it), the raw value as decimal text. */
-export type Facts = { traders: Traders; moves: { index: number; raw: string; tier: 1 | 2; from?: string; to?: string }[] };
+ *  (`tier` 1 a Transfer of the token, 2 a v4 Swap leg (`swap`) or an ERC-6909 claim of it), the raw value as decimal
+ *  text; and the v4 PoolManager's side of it: each Swap log's sender (`swaps`), the token each address got from the
+ *  PoolManager less what it paid in, as Transfers and claims (`net`, raw signed decimal text), and the senders of its
+ *  ModifyLiquidity and Donate logs (`callers`). */
+export type Facts = {
+  traders: Traders;
+  moves: { index: number; raw: string; tier: 1 | 2; from?: string; to?: string; swap?: true }[];
+  swaps?: { index: number; sender: string }[];
+  net?: [string, string][];
+  callers?: string[];
+};
 
 /** The facts of `token` in a receipt (eth_getTransactionReceipt's answer, hostile), or null for a malformed one, one of
  *  another transaction, or a reverted one. `poolManager`: the chain's v4 PoolManager. */
@@ -39,6 +62,10 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
   if (traders === null) return null;
   const tokenWord = `0x${token.slice(2).padStart(64, "0")}`;
   const moves: Facts["moves"] = [];
+  const swaps: { index: number; sender: string }[] = [];
+  const net = new Map<string, bigint>();
+  const callers = new Set<string>();
+  const credit = (a: string, v: bigint) => net.set(a, (net.get(a) ?? 0n) + v);
   for (const raw of r.logs as unknown[]) {
     const l = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
     const index = typeof l.logIndex === "string" && /^0x[0-9a-f]{1,8}$/i.test(l.logIndex) ? parseInt(l.logIndex, 16) : null;
@@ -53,18 +80,30 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
       const [from, to] = [holder(topics[1]), holder(topics[2])];
       if (from === null || to === null) return null;
       moves.push({ index, raw: word(0).toString(), tier: 1, from, to });
+      if (from === poolManager && to !== poolManager) credit(to, word(0));
+      else if (to === poolManager && from !== poolManager) credit(from, -word(0));
     }
     else if (address === poolManager && topics[0] === SWAP4 && topics.length === 3 && words === 6) {
+      const sender = holder(topics[2]);
+      if (sender === null) return null;
+      swaps.push({ index, sender });
       // the swap's two legs, int128 each: either may be the token's
       for (const w of [word(0), word(1)]) {
         const v = BigInt.asIntN(128, w);
-        if (v !== 0n) moves.push({ index, raw: (v < 0n ? -v : v).toString(), tier: 2 });
+        if (v !== 0n) moves.push({ index, raw: (v < 0n ? -v : v).toString(), tier: 2, swap: true });
       }
     } else if (address === poolManager && topics[0] === CLAIMS && topics.length === 4 && topics[3] === tokenWord && words === 2) {
       if (word(1) !== 0n) moves.push({ index, raw: word(1).toString(), tier: 2 });
+      // a claim minted is the token its holder took from the PoolManager, one burnt what it paid in
+      const [from, to] = [holder(topics[1]), holder(topics[2])];
+      if (from === ZERO && to !== null && to !== ZERO) credit(to, word(1));
+      else if (to === ZERO && from !== null && from !== ZERO) credit(from, -word(1));
+    } else if (address === poolManager && (topics[0] === MODIFY_LIQUIDITY || topics[0] === DONATE) && topics.length === 3) {
+      const sender = holder(topics[2]);
+      if (sender !== null) callers.add(sender);
     }
   }
-  return { traders, moves };
+  return { traders, moves, swaps, net: [...net].map(([a, v]) => [a, v.toString()]), callers: [...callers] };
 }
 
 /** A vendor's decimal amount in the token's smallest units (its digits past `decimals` dropped), or null when it is no
@@ -94,6 +133,10 @@ export function exactRow(side: "b" | "s", amt: string, decimals: number, f: Fact
     const values = new Set(hits.map((m) => m.raw));
     if (values.size > 1) return null;
     if (values.size === 1) {
+      // a Swap log's leg is the pool's amount: the trader's is what the swap's sender settled (settledLeg), one value
+      const legs = hits.every((m) => m.swap) ? new Set(hits.map((m) => settledLeg(f, m.index, side, BigInt(m.raw)))) : new Set<bigint | null>();
+      const leg = legs.size === 1 ? [...legs][0]! : null;
+      const raw = leg ?? BigInt(hits[0]!.raw);
       // the trader of the moves that carry it: the one they name (a bundle's validation logs name none); two different
       // ones (two user operations moving the same amount) name no one, never a guess
       const named = [...new Set(hits.map((m) => traderAt(f.traders, m.index)).filter((t): t is string => t !== null))];
@@ -105,10 +148,30 @@ export function exactRow(side: "b" | "s", amt: string, decimals: number, f: Fact
           if (m.tier === 1 && traderAt(f.traders, m.index) === trader) net += (m.to === trader ? BigInt(m.raw) : 0n) - (m.from === trader ? BigInt(m.raw) : 0n);
         if (side === "b" ? net <= 0n : net >= 0n) return null;
       }
-      return { amt: fixed(BigInt(hits[0]!.raw), decimals), trader };
+      return { amt: fixed(raw, decimals), trader };
     }
   }
   return null;
+}
+
+/** What the sender of the v4 Swap logged at `index` settled of the token for a swap of `side` whose pool's amount is
+ *  `gross`, as swaps.ts hookTakes reads it from the chain tape's logs: its own net with the PoolManager when it made that
+ *  one swap in the transaction; or, the transaction's only swap and its sender settling none, the net of the one other
+ *  address that moved the token with the PoolManager and sent no swap, ModifyLiquidity or Donate. Null when none is read,
+ *  or when it is no cut of the pool's amount (a buy's more than it, a sell's less). */
+function settledLeg(f: Facts, index: number, side: "b" | "s", gross: bigint): bigint | null {
+  const swaps = f.swaps ?? [];
+  const s = swaps.find((x) => x.index === index);
+  if (s === undefined || swaps.filter((x) => x.sender === s.sender).length !== 1) return null;
+  const net = new Map((f.net ?? []).map(([a, v]) => [a, BigInt(v)]));
+  let n = net.get(s.sender) ?? 0n;
+  if (n === 0n && swaps.length === 1) {
+    const callers = new Set(f.callers ?? []);
+    const to = [...net].filter(([a, v]) => v !== 0n && a !== s.sender && !callers.has(a));
+    if (to.length === 1) n = to[0]![1];
+  }
+  const leg = side === "b" ? n : -n;
+  return leg <= 0n || (side === "b" ? leg > gross : leg < gross) ? null : leg;
 }
 
 /** Whether `raw` is the value a float printed as `want` came from: within 1e-12 of it. */
