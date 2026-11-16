@@ -1,7 +1,7 @@
 // node --test apps/helper/src/rpc/drpc-rate.test.ts (card base-reads-never-throttled): dRPC limits the helper's one IP,
-// every key and keyless URL of it together, at a rate it changes ("a limit of 25 RPS" "under normal conditions",
+// every key of it together, at a rate it changes ("a limit of 25 RPS" "under normal conditions",
 // drpc.org/docs/howitworks/ratelimiting, read 2026-11-16 10:19Z). Live 16 Nov 10:17-10:21Z, Base's three keys were each
-// refused once a second for runs of 7 to 15 s: a 429 held the one URL 1 s while the others sent on. Here: every dRPC URL
+// refused once a second for runs of 7 to 15 s: a 429 held the one URL 1 s while the others sent on. Here: every dRPC key
 // draws one rate, a refusal of any of them holds them all and halves the pace, and under a dRPC that serves fewer than
 // the pace, the helper settles under what it serves: callers answered, the fill moving. Fake clock and timers; the URLs
 // are made up, the keys planted strings.
@@ -16,19 +16,21 @@ const NEAR_DR = "https://lb.drpc.live/near/plantedNEARdr1key123456789abcd";
 const RH_KEYLESS = "https://robinhood.drpc.org";
 const ENV: Record<string, string> = { BASE_RPC_URL_QUICKNODE: QN, BASE_RPC_URL_DRPC_1: DR[0]!, BASE_RPC_URL_DRPC_2: DR[1]!, BASE_RPC_URL_DRPC_3: DR[2]!, NEAR_RPC_URL_B: NEAR_DR };
 
-test("every URL the helper sends dRPC from its IP draws dRPC's one rate: Base's keys, NEAR's dRPC URL under an existing name, the keyless robinhood.drpc.org", () => {
+test("every dRPC key the helper sends from its IP draws dRPC's one rate: Base's keys and NEAR's dRPC URL under an existing name; the keyless robinhood.drpc.org keeps the pace the withdraw reads are timed at", () => {
   const paces = { ...PROVIDER_PACE, ...keyedPaces(ENV) };
-  for (const u of [...DR, NEAR_DR, RH_KEYLESS]) assert.equal(paces[u]?.rate, DRPC_IP_PACE.rate, `${u.replace(/planted\w+/, "<key>")} on dRPC's rate`);
+  for (const u of [...DR, NEAR_DR]) assert.equal(paces[u]?.rate, DRPC_IP_PACE.rate, `${u.replace(/planted\w+/, "<key>")} on dRPC's rate`);
   assert.equal(paces[QN]?.rate, undefined, "QuickNode keeps its own");
+  assert.equal(paces[RH_KEYLESS]?.rate, undefined, "the keyless endpoint keeps its own (pool/evm.test.ts review M-3)");
 });
 
 test("a refusal of one dRPC URL holds every URL on the rate, longer at each refusal in a row; one inside the hold counts no more; the pace halves and climbs back one a second each RATE_STEP_MS", () => {
   let clock = 1_800_000_000_000;
   const h = providerHolds(() => clock, { ...PROVIDER_PACE, ...keyedPaces(ENV) });
-  const all = [...DR, NEAR_DR, RH_KEYLESS];
+  const all = [...DR, NEAR_DR];
   h.hold(DR[0]!, 1);
   for (const u of all) assert.ok(h.heldMs(u) > 0, `${u.replace(/planted\w+/, "<key>")} held with key 1`);
   assert.equal(h.heldMs(QN), 0, "QuickNode not held");
+  assert.equal(h.heldMs(RH_KEYLESS), 0, "the keyless endpoint not held");
   // a refusal of a send that left before the hold: the same hold
   h.hold(DR[1]!, 1);
   assert.equal(h.heldMs(DR[2]!), 1000);

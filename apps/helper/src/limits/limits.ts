@@ -222,11 +222,14 @@ export const HOST_PACE_MS: Readonly<Record<string, number>> = { "api.unrealized.
  * page named "120,000 CUs per minute per IP"). Paced per key at 8 a second and 8 at once (up to 48 in one second from the
  * three, and 30 more keyless), dRPC answered the helper 429 607 times on callers' reads and 96 on the pool fill's, 16 Nov
  * 03:59-04:33Z (helper.sh docker logs, `rpc hold base drpc.live`); a key's 16 in a second at most is under 25, so the
- * limit those 429s hit is the keys' together, not one key's. Every other URL the helper sends dRPC from that IP draws it
- * too (card base-reads-never-throttled): the keyless robinhood.drpc.org (PROVIDER_PACE) and a dRPC URL set under an
- * existing name (rpc.ts keyedPaces: NEAR's second, drpc.live on /v1/health), which were paced apart (15 and 10 a second)
- * and could send dRPC 25 a second more. [design: 20 calls a second, 4 at once: at most 24 in any second, one under the
- * 25; under a refusal the rate's own pace (RATE_STEP_MS).]
+ * limit those 429s hit is the keys' together, not one key's. A dRPC key set under an existing name draws it too (card
+ * base-reads-never-throttled: rpc.ts keyedPaces, NEAR's second, drpc.live on /v1/health), which was paced apart on NEAR's
+ * 10 a second. The keyless robinhood.drpc.org keeps its own pace (PROVIDER_PACE): one read shows dRPC refusing it near the
+ * keys' refusals (16 Nov 10:17:01Z, between the keys' at 10:16:13Z and 10:17:26Z), none that dRPC counts it with them, and
+ * the pool senders' withdraw reads on it are timed at that pace (pool/evm.test.ts review M-3: on the keys' bucket a fee
+ * and withdraw waited 7.3 s of their 6). Each hold line names dRPC's code and the pace (rpc.ts refusalOf), so the log
+ * shows it if dRPC does. [design: 20 calls a second, 4 at once: at most 24 in any second, one under the 25; under a
+ * refusal the rate's own pace (RATE_STEP_MS).]
  */
 export const DRPC_IP_PACE = { perS: 20, burst: 4, unit: "call", rate: "drpc-ip" } as const satisfies Pace;
 /**
@@ -254,10 +257,7 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
   "https://rpc-robinhood.blockmachine.io": { perS: 0.5, burst: 25, unit: "call" },
   "https://robinhood.api.pocket.network": { perS: 15, burst: 200, unit: "call" },
-  // dRPC's keyless endpoint, sent from the helper's one IP as its keys are: on their one rate (card
-  // base-reads-never-throttled; it answered the helper 429 at 10:17:01Z on 16 Nov, between the keys' refusals at 10:16:13Z
-  // and 10:17:26Z)
-  "https://robinhood.drpc.org": { ...DRPC_IP_PACE },
+  "https://robinhood.drpc.org": { perS: 15, burst: 15, unit: "call" },
   "https://rpc.mainnet.chain.robinhood.com": { perS: 1, burst: 2, unit: "post" },
   "https://base-rpc.publicnode.com": { perS: 3, burst: 6, unit: "call" },
   "https://base.gateway.tenderly.co": { perS: 2, burst: 3, unit: "call" },

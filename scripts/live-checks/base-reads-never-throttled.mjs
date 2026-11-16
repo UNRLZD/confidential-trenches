@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card base-reads-never-throttled: no Base or Robinhood read through the helper waits on a throttle the
-// helper's own work caused. dRPC limits the helper's one IP, every key and keyless URL of it together, at a rate it
-// changes; the helper draws every dRPC URL from one rate, and a refusal of any of them holds them all and halves the pace
+// helper's own work caused. dRPC limits the helper's one IP, its keys together, at a rate it
+// changes; the helper draws every dRPC key from one rate, and a refusal of any of them holds them all and halves the pace
 // (apps/helper/src/limits/limits.ts RATE_BACK_MAX_S), so a caller's read goes to the next provider instead of into the
 // same refusal. After a helper deploy it reads:
 //   - GET /v1/health: every dRPC key on Base's and Robinhood's lists ("drpc.live key<n>") answers its chain, none held;
