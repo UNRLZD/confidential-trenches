@@ -17,13 +17,14 @@ const SOLANA = ["pump.fun", "stonkfun", "raydium-launchlab", "Raydium", "met-dbc
 /** The factory table's pads (apps/helper/src/data/evm/lists.ts FACTORIES, card market-data-evm-lists at 8d6e279; torch from card pad-torch-robinhood). */
 const EVM = ["zora", "clanker", "doppler", "flaunch", "virtuals", "pons", "bags", "torch"];
 /** The engine's NEAR pad ids the helper served on 14 Nov 06:19Z (test/pads/lists-near-2026-11-14.json) with a cited logo;
- *  GayPad and token0, also served, have none (NO_LOGO). tkn: served from 14 Nov 10:35Z (app live run 43585050672). */
-const NEAR = ["hoot", "nearlytrade", "qlyphs", "memecooking", "nearpaid", "tkn"];
+ *  GayPad and token0, also served, have none (NO_LOGO). tkn: served from 14 Nov 10:35Z (app live run 43585050672); shore:
+ *  served on 16 Nov 00:17Z (app live run 43779504700, test/pads/lists-near-2026-11-16.json). */
+const NEAR = ["hoot", "nearlytrade", "qlyphs", "memecooking", "nearpaid", "tkn", "shore"];
 const NAMES: Record<string, string> = {
   "pump.fun": "pump.fun", stonkfun: "StonkFun", "raydium-launchlab": "LaunchLab", Raydium: "Raydium", "met-dbc": "Meteora", "letsbonk.fun": "bonk.fun",
   metadao: "MetaDAO", "jup-studio": "Jupiter Studio", "bags.fun": "Bags", grainpad: "grainpad", zora: "Zora", clanker: "Clanker", doppler: "Doppler",
   flaunch: "Flaunch", virtuals: "Virtuals", pons: "Pons", bags: "Bags", torch: "Torch",
-  hoot: "Hoot", nearlytrade: "Nearly.trade", qlyphs: "Qlyphs", memecooking: "meme.cooking", nearpaid: "NearPaid", tkn: "TKN",
+  hoot: "Hoot", nearlytrade: "Nearly.trade", qlyphs: "Qlyphs", memecooking: "meme.cooking", nearpaid: "NearPaid", tkn: "TKN", shore: "Shore",
 };
 
 /** A logo the table names: a file in src/screens/market/logos, a real PNG of 64 px or less or an SVG with no script. */
@@ -105,6 +106,18 @@ test("the live NEAR lists recorded 2026-11-14 06:19Z: every launchpad id they se
   assert.deepEqual(missingPads(lists), []);
 });
 
+// Card app-launchpad-shore-row: app live run 43779504700 (release 159, 16 Nov 00:17Z) found "shore" on a New row with no
+// row in the table; this is the NEAR lists answer read minutes later, which still served it.
+test("the live NEAR lists recorded 2026-11-16 00:28Z: shore and every other launchpad id they serve has a row or is NO_LOGO", () => {
+  const rec = JSON.parse(readFileSync(path.join(HERE, "pads/lists-near-2026-11-16.json"), "utf8")) as { fields: string[]; lists: Record<string, [string, string, string | null][]> };
+  assert.deepEqual(rec.fields, ["token", "chain", "launchpad"]);
+  const lists = Object.fromEntries(Object.entries(rec.lists).map(([k, rs]) => [k, rs.map(([id, chain, launchpad]) => ({ id, chain, launchpad }))]));
+  const rows = Object.values(lists).flat();
+  assert.ok(rows.length > 90 && rows.every((r) => r.chain === "near"));
+  assert.ok(lists.new!.some((r) => r.id === "shore-4lzt.launch.shoremarkets.near" && r.launchpad === "shore"));
+  assert.deepEqual(missingPads(lists), []);
+});
+
 // once card market-data-evm-lists is on this tree, every pad its factory table can tag must have a row (or be NO_LOGO)
 const EVM_SRC = path.resolve(HERE, "../../helper/src/data/evm/lists.ts");
 test("the EVM factory table's pads all have rows", { skip: !existsSync(EVM_SRC) && "apps/helper/src/data/evm/lists.ts is not on this tree yet (card market-data-evm-lists)" }, () => {
@@ -122,7 +135,7 @@ test("the EVM factory table's pads all have rows", { skip: !existsSync(EVM_SRC) 
  *  shrinks: a pad that gets its row or NO_LOGO entry must leave it. */
 const NEAR_OWED = [
   "shardsmarket", "nearpad", "umbrafun", "nearrr", "nearafun", "intear", "wholemarket", "portalpad", "onetokenhub", "nucleusbroker", "shardpad",
-  "terminalpad", "rheameme", "chipfi", "npad", "dragonpad", "tknx", "tknprimitives", "runeshot", "jumplab", "shore", "nearbased", "nearfun",
+  "terminalpad", "rheameme", "chipfi", "npad", "dragonpad", "tknx", "tknprimitives", "runeshot", "jumplab", "nearbased", "nearfun",
   "revshare", "patata", "nira", "vista", "nearmemefun", "kelytra",
 ];
 
