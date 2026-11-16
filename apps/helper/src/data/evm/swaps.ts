@@ -2154,14 +2154,17 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // only, untimed: none, and the tape is done in one post; else the agreed steps start at the newest swap it names,
     // never at the blocks with none between. A read it gets wrong costs a step read, never a trade the tape shows: every
     // trade shown is still the agreed steps'.
+    // A locate that cannot be made (its provider held, or unanswered BACK_FAILS_MAX times) goes on to the agreed steps
+    // from the top, never a tape settled as done with what it held (live run 00:33Z on 16 Nov: MOW 0 trades, src chain,
+    // not filling, for 45 s, with 745 trades over the day)
     if (V.backOnly && back.located !== true) {
       const at = await locate(e, end, back.lo - 1);
       if (at === undefined) {
         const fails = (back.fails ?? 0) + 1;
-        e.back = { ...back, fails, done: fails >= BACK_FAILS_MAX };
+        e.back = fails >= BACK_FAILS_MAX ? { ...back, located: true, fails: 0 } : { ...back, fails };
         return;
       }
-      e.back = at === null ? { ...back, located: true, fails: 0, done: true } : { ...back, located: true, fails: 0, lo: at + 1 };
+      e.back = at === "held" ? { ...back, located: true, fails: 0 } : at === null ? { ...back, located: true, fails: 0, done: true } : { ...back, located: true, fails: 0, lo: at + 1 };
       return;
     }
     const hi = back.lo - 1;
@@ -2198,13 +2201,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     e.back = { lo, logs: all, tape: backBook(e, all), done: lo <= end || born };
   }
   /** The newest block in `lo` to `hi` that holds a swap of `e`'s pool, as BACK_LOCATE answers one read of the whole
-   *  range: null when none or no such provider is free (held: the tape is then what it holds, read back again at its
-   *  next open, never filling while the provider is held), undefined when it did not answer. */
-  async function locate(e: Entry, lo: number, hi: number): Promise<number | null | undefined> {
+   *  range: null when none, "held" when no such provider is free (the agreed steps read back instead), undefined when it
+   *  did not answer. */
+  async function locate(e: Entry, lo: number, hi: number): Promise<number | null | "held" | undefined> {
     if (lo > hi) return null;
     const [main] = poolFilters(e.pool, lo, hi, chain);
+    if (main === undefined) return null;
     const u = BACK_LOCATE.find((x) => rpcs.includes(x) && usable([x]).length > 0);
-    if (u === undefined || main === undefined) return null;
+    if (u === undefined) return "held";
     // one value per topic position: the chain's own RPC takes 100,000 blocks at most for a filter with several in one
     // ("send one value per position", read from the helper 2026-11-15 23:4xZ), so each event its own filter, one batch
     const topics = (main.topics ?? []) as (string | string[] | null)[];

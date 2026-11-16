@@ -17,10 +17,10 @@ const POCKET = "https://robinhood.api.pocket.network";
 const LAST = Math.max(...REC.logs.v4.map((l) => l.b));
 const HEAD = LAST + 7_200;
 
-function rig() {
+function rig(own: { down?: boolean } = {}) {
   const chain = fakeChain();
   chain.st.head = HEAD;
-  chain.st.faults.set(OWN, { zeroTime: true, span: 1_000_000 });
+  chain.st.faults.set(OWN, { zeroTime: true, span: 1_000_000, ...own });
   chain.st.faults.set(POCKET, { span: 10_000, addressOnly: true });
   chain.st.faults.set("https://rpc-robinhood.blockmachine.io", { span: 1_000, window: 5_000 });
   chain.st.faults.set("https://robinhood.daybreak-rpc.network", { span: 2_000 });
@@ -32,9 +32,9 @@ function rig() {
   return { s, chain };
 }
 
-test("card helper-listed-charts-own-reads: a Robinhood v4 coin quiet for 12 minutes answers its last trades from our own reads, in a few wide reads", async () => {
-  const { value } = await onVirtualTime(1_000_000_000, async () => {
-    const { s, chain } = rig();
+async function readTape(own: { down?: boolean } = {}) {
+  return onVirtualTime(1_000_000_000, async () => {
+    const { s, chain } = rig(own);
     try {
       const first = JSON.parse((await s.trades(MAG, 50)).body);
       let last = first;
@@ -51,6 +51,10 @@ test("card helper-listed-charts-own-reads: a Robinhood v4 coin quiet for 12 minu
       s.stop();
     }
   });
+}
+
+test("card helper-listed-charts-own-reads: a Robinhood v4 coin quiet for 12 minutes answers its last trades from our own reads, in a few wide reads", async () => {
+  const { value } = await readTape();
   console.log(`first ${value.first.trades.length} trades filling ${value.first.filling}; then ${value.last.trades.length}, filling ${value.last.filling}; ${value.wide} reads over 3,000 blocks, ${value.own} own log reads`);
   assert.equal(value.last.src, "chain");
   assert.equal(value.last.trades.length, Math.min(TRADES_MAX, 50), "its last trades, not none");
@@ -58,4 +62,16 @@ test("card helper-listed-charts-own-reads: a Robinhood v4 coin quiet for 12 minu
   const newest = REC.logs.v4.reduce((a, l) => (l.b > a.b || (l.b === a.b && l.i > a.i) ? l : a));
   assert.equal(value.last.trades[0].tx, newest.tx, "newest first: the pool's last recorded swap");
   assert.ok(value.own <= 40, `${value.own} own log reads: a few wide ones, not a day in 100-block reads`);
+});
+
+// Live run of 00:33Z on 16 Nov (the deployed helper de80994dc): MOW's tape read 0 trades, src chain, not filling, for
+// 45 s, with 745 trades over the day. The one wide read that finds the newest swap (BACK_LOCATE, the chain's own RPC)
+// unanswered or held settled the tape as done with what it held, none; the agreed steps never ran.
+test("card helper-listed-charts-own-reads: with the chain's own RPC down, the coin's last trades are read back in the agreed steps, never an empty tape settled as done", async () => {
+  const { value } = await readTape({ down: true });
+  console.log(`own RPC down: first ${value.first.trades.length} trades filling ${value.first.filling}; then ${value.last.trades.length}, filling ${value.last.filling}`);
+  assert.equal(value.last.src, "chain");
+  assert.ok(value.last.trades.length > 0, "its last trades, not none");
+  const newest = REC.logs.v4.reduce((a, l) => (l.b > a.b || (l.b === a.b && l.i > a.i) ? l : a));
+  assert.equal(value.last.trades[0].tx, newest.tx, "newest first: the pool's last recorded swap");
 });
