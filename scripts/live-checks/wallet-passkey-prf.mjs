@@ -14,7 +14,8 @@
 //     in the second; the page framed by APP_HOST (a parent served at APP_HOST's address by this check; SIGN_HOST's
 //     frame-ancestors 'none' lifted for that frame alone, card signpage-shell) shows no sign-in
 //     or sign-out control; each signed-in step says code_saved false (data-code-saved, the Backup dot).
-//   race run: two tabs, each with its own passkey, press Create at once; both end on one account, the one stored.
+//   race run: two tabs, each with its own passkey, press Create at once; both end on one account, the one stored
+//     (each read once it shows signed in, within WAIT_MS: a tab whose sheet the browser refused first shows Cancelled).
 //   Sign out's activation guard (Chromium's InputEventActivationProtector, 500 ms): after a reload, a mouse press (the
 //     pointer moved onto Sign out and pressed) and Tab then Enter, each within 500 ms of Sign out being drawn on the
 //     shown page, do nothing; a press after that signs out.
@@ -825,8 +826,18 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
         await settled(t);
       }
       const [ra, rb] = await Promise.all([click(a, "create"), click(b, "create")]);
+      // where each tab ends (card sign-in-restore-rides-out-a-held-server): Chrome refuses one tab's sheet
+      // (NotAllowedError) while the other's is up, so that tab first shows Cancelled, before the other's seed is
+      // stored; it must then land on that seed. Each tab is read once it shows signed in, within WAIT_MS (one that
+      // never does is read as it stands), and its first state is kept beside it
+      const ended = async (t, r) => {
+        if (r.state === "signed-in") return r;
+        await t.waitForFunction(() => document.getElementById("signin")?.dataset.signin === "signed-in", null, { timeout: WAIT_MS }).catch(() => {});
+        return { ...(await settled(t)), first: r.state };
+      };
+      const [ea, eb] = await Promise.all([ended(a, ra), ended(b, rb)]);
       await a.reload();
-      record.prf.race = { a: ra, b: rb, reload: await settled(a) };
+      record.prf.race = { a: ea, b: eb, reload: await settled(a) };
     } finally {
       await h.close();
     }

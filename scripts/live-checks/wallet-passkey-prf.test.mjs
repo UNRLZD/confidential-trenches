@@ -391,7 +391,7 @@ test("live547 (the sign live run 42499353181's early Backup press at 547 ms, the
 
 test("the good answer's verdict is PASS, and every recorded bad answer's is FAIL", () => {
   assert.equal(judge(answers.good).verdict, "PASS");
-  for (const k of Object.keys(answers).filter((x) => x !== "note" && x !== "good" && x !== "live547")) assert.equal(judge(answers[k]).verdict, "FAIL", k);
+  for (const k of Object.keys(answers).filter((x) => x !== "note" && x !== "good" && x !== "live547" && x !== "raceCard")) assert.equal(judge(answers[k]).verdict, "FAIL", k);
 });
 
 // each in-window press, by where its record is and what its window reads: [name, step, timing at the edge, an act]
@@ -645,4 +645,14 @@ test("recorded bad answer: release 167's live run fails on the two-tab race and 
   assert.ok(b.includes("BAD prf: two tabs that create at once end on one account, the one stored"), b.join("\n"));
   assert.ok(b.some((l) => l.startsWith("BAD no page error or CSP violation")), b.join("\n"));
   assert.deepEqual([answers.live167.prf.race.a.state, answers.live167.prf.race.b.state], ["cancelled", "signed-in"]);
+});
+// raceMain / raceCard: the harness run of main 6df1ca4e2's page and of this card's, each read by this card's check: the
+// tab whose sheet Chrome refused stays Cancelled on main (FAIL), and on the card's page lands on the other tab's seed
+test("recorded race runs: main's page leaves tab a Cancelled (FAIL); this card's page lands it on the stored account (PASS)", () => {
+  assert.deepEqual(BAD(answers.raceMain), ["BAD prf: two tabs that create at once end on one account, the one stored"]);
+  assert.equal(answers.raceMain.prf.race.a.state, "cancelled");
+  const r = judge(answers.raceCard);
+  assert.equal(r.pass, true, r.lines.join("\n"));
+  assert.deepEqual([answers.raceCard.prf.race.a.first, answers.raceCard.prf.race.a.state], ["cancelled", "signed-in"]);
+  assert.equal(answers.raceCard.prf.race.a.account, answers.raceCard.prf.race.b.account);
 });

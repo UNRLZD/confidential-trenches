@@ -1,5 +1,5 @@
 {
- "note": "Card sign-out-checks-read-the-store-after-the-reload (13 Nov, on a Mac, --harness, Chrome 157): goodMain126 is main 6430cba10 (release 126), its Sign out and still tap each read after the page's reload: every object store empty but meta's k_wrap and lane, nothing in localStorage, a block sealed under the K_wrap before the press refused by the one after; its one BAD is the race step, which fails on the harness on main itself (main's own check too, 4 runs of 4: tab A's create refused NotAllowedError while tab B's lands), a fault apart from the sign out. badKeepsStore is a scratch copy of 6430cba10 whose store sign out skips deleteDatabase: both sign-out lines fail (still signed in, the seed, notes, counters and the K_wrap before kept). good and every record before this card hold no store read and are judged at their own reading (the database gone, SIGN_OUT_BEFORE_RELOAD). Before that card: Recorded 2026-11-01T06:08Z on a Mac, all on the browser harness (--harness: SIGN_HOST's and APP_HOST's real names mapped to a local https server, SIGN_HOST under the shipped public/_headers). good: SIGN_HOST's own build at this commit (re-recorded 2026-11-01T07:59Z in round 5 on Linux x86_64, with the guard, trigger, burst, repeated Enter and phone steps). bad: a planted copy of src/main.ts whose no-PRF branch stores a random seed and signs in without notice (the brief's bad answer). badC6a2fbe: the page as committed at c6a2fbe. badNoGuard: a planted copy without the 'seed already stored' guard. badC46a6fc: the page as committed at c46a6fc (round 3's reds: Sign out armed with no real input, and drawn for a seed whose 12 words are the only copy). bad23f373f (2026-11-01T06:38Z): the page as committed at 23f373f (round 4's reds: Sign out armed by a pointer move, so a moving press, Tab then Enter and a finger's tap with drift sign out within 500 ms of the page shown, and a still tap never does). badNoListeners (2026-11-01T07:02Z): a planted copy of src/main.ts without the guard's pageshow, focus and visibilitychange listeners. Records before round 4 hold no prf.protect or phone steps; records before badNoListeners hold no prf.triggers. Each planted page is built the same way (Vite, sha384 in index.html). Public values only: states, the throwaway accounts' T_0 ids, rp ids, the stored seed's AES-GCM iv; no PRF output, entropy, words or key. bad265ad22 (2026-11-01T08:00Z, on Linux x86_64): the page as committed at 265ad22 (round 5 reds: a burst's second click 560 ms after the draw and 260 ms after the first, and a repeated Enter on a focused Sign out, sign out; its guard had only the 500 ms after drawn, shown or focused). Records before bad265ad22 hold no prf.burst or prf.repeat. Card wallet-typed-words (2026-11-01T09:41Z, on Linux x86_64): good re-recorded at the card's page, with the no-PRF run's backup, early Saved press, Saved and typed-words steps; bad18cd57a (2026-11-01T09:41Z): the page as committed at 18cd57a, whose no-PRF Create stores nothing and opens no backup and which has no typed words; bad3fd742b (2026-11-01T09:42Z): the card's page as committed at 3fd742b, whose Saved had no activation guard. Records before bad18cd57a hold no noPrf.savedEarly, noPrf.saved, noPrf.invalid or noPrf.typed. Review round (2026-11-01T10:32Z, Linux x86_64): good re-recorded with the early and late Copy and Backup presses; bada50f04a (2026-11-01T10:32Z): the page as committed at a50f04a, whose Backup and Copy had no activation guard. Records before bada50f04a hold no noPrf.copyEarly, copyLate, backupEarly or backupLate. Card app-in-shell-tab (2026-11-02): good re-recorded on the harness on the shell page with the layer held as the shell open() shows it; badShellTab, the same harness run with the old hold (the layer over a live APP_HOST frame); liveShellTab, the one live record here: the deploy run of the old check on SIGN_HOST e0b1cd69 and APP_HOST 48008988. Card live-press-window-retry (2026-11-08): live547, the sign live run 42499353181 (job 128788604007, main a17e7a2e, 16:21Z) whose one red line was the early Backup press at 547 ms that drew no words, signed-in: the good record with noPrf.backupEarly set to that line (pressOn backup, 547 ms, signed-in, 0 words), since the live run keeps no record; the press missed the 500 ms window, so the guard was not tested and it reads INCONCLUSIVE, never PASS or FAIL. Card sign-in-restore-rides-out-a-held-server (16 Nov 22:50Z, on a Mac, Chrome 157): live167 is the live page on release 167 (helper e2c8c2aa7), recorded before the check read the mark list's responses: tab a Cancelled while tab b signed in (the race this card fixes), and two console 503s on /v1/rpc/solana-marks with no response under them.",
+ "note": "Card sign-out-checks-read-the-store-after-the-reload (13 Nov, on a Mac, --harness, Chrome 157): goodMain126 is main 6430cba10 (release 126), its Sign out and still tap each read after the page's reload: every object store empty but meta's k_wrap and lane, nothing in localStorage, a block sealed under the K_wrap before the press refused by the one after; its one BAD is the race step, which fails on the harness on main itself (main's own check too, 4 runs of 4: tab A's create refused NotAllowedError while tab B's lands), a fault apart from the sign out. badKeepsStore is a scratch copy of 6430cba10 whose store sign out skips deleteDatabase: both sign-out lines fail (still signed in, the seed, notes, counters and the K_wrap before kept). good and every record before this card hold no store read and are judged at their own reading (the database gone, SIGN_OUT_BEFORE_RELOAD). Before that card: Recorded 2026-11-01T06:08Z on a Mac, all on the browser harness (--harness: SIGN_HOST's and APP_HOST's real names mapped to a local https server, SIGN_HOST under the shipped public/_headers). good: SIGN_HOST's own build at this commit (re-recorded 2026-11-01T07:59Z in round 5 on Linux x86_64, with the guard, trigger, burst, repeated Enter and phone steps). bad: a planted copy of src/main.ts whose no-PRF branch stores a random seed and signs in without notice (the brief's bad answer). badC6a2fbe: the page as committed at c6a2fbe. badNoGuard: a planted copy without the 'seed already stored' guard. badC46a6fc: the page as committed at c46a6fc (round 3's reds: Sign out armed with no real input, and drawn for a seed whose 12 words are the only copy). bad23f373f (2026-11-01T06:38Z): the page as committed at 23f373f (round 4's reds: Sign out armed by a pointer move, so a moving press, Tab then Enter and a finger's tap with drift sign out within 500 ms of the page shown, and a still tap never does). badNoListeners (2026-11-01T07:02Z): a planted copy of src/main.ts without the guard's pageshow, focus and visibilitychange listeners. Records before round 4 hold no prf.protect or phone steps; records before badNoListeners hold no prf.triggers. Each planted page is built the same way (Vite, sha384 in index.html). Public values only: states, the throwaway accounts' T_0 ids, rp ids, the stored seed's AES-GCM iv; no PRF output, entropy, words or key. bad265ad22 (2026-11-01T08:00Z, on Linux x86_64): the page as committed at 265ad22 (round 5 reds: a burst's second click 560 ms after the draw and 260 ms after the first, and a repeated Enter on a focused Sign out, sign out; its guard had only the 500 ms after drawn, shown or focused). Records before bad265ad22 hold no prf.burst or prf.repeat. Card wallet-typed-words (2026-11-01T09:41Z, on Linux x86_64): good re-recorded at the card's page, with the no-PRF run's backup, early Saved press, Saved and typed-words steps; bad18cd57a (2026-11-01T09:41Z): the page as committed at 18cd57a, whose no-PRF Create stores nothing and opens no backup and which has no typed words; bad3fd742b (2026-11-01T09:42Z): the card's page as committed at 3fd742b, whose Saved had no activation guard. Records before bad18cd57a hold no noPrf.savedEarly, noPrf.saved, noPrf.invalid or noPrf.typed. Review round (2026-11-01T10:32Z, Linux x86_64): good re-recorded with the early and late Copy and Backup presses; bada50f04a (2026-11-01T10:32Z): the page as committed at a50f04a, whose Backup and Copy had no activation guard. Records before bada50f04a hold no noPrf.copyEarly, copyLate, backupEarly or backupLate. Card app-in-shell-tab (2026-11-02): good re-recorded on the harness on the shell page with the layer held as the shell open() shows it; badShellTab, the same harness run with the old hold (the layer over a live APP_HOST frame); liveShellTab, the one live record here: the deploy run of the old check on SIGN_HOST e0b1cd69 and APP_HOST 48008988. Card live-press-window-retry (2026-11-08): live547, the sign live run 42499353181 (job 128788604007, main a17e7a2e, 16:21Z) whose one red line was the early Backup press at 547 ms that drew no words, signed-in: the good record with noPrf.backupEarly set to that line (pressOn backup, 547 ms, signed-in, 0 words), since the live run keeps no record; the press missed the 500 ms window, so the guard was not tested and it reads INCONCLUSIVE, never PASS or FAIL. Card sign-in-restore-rides-out-a-held-server (16 Nov 22:50Z, on a Mac, Chrome 157): live167 is the live page on release 167 (helper e2c8c2aa7), recorded before the check read the mark list's responses: tab a Cancelled while tab b signed in (the race this card fixes), and two console 503s on /v1/rpc/solana-marks with no response under them. raceMain and raceCard (16 Nov 23:4xZ, on a Mac, --harness, Chrome 157), each read by this card's check (a race tab read once it shows signed in, within WAIT_MS, its first state kept): raceMain serves main 6df1ca4e2's page (--site): tab a Cancelled and still Cancelled 15 s on, tab b signed in: FAIL; raceCard serves this card's page: tab a first Cancelled, then signed in on tab b's account, the one stored: PASS.",
  "good": {
   "key": "wallet-passkey-prf",
   "url": "https://confidential.unrealized.trade/",
@@ -8886,6 +8886,1482 @@
   "errors": [
    "console: Failed to load resource: the server responded with a status of 503 () (https://ct-api.unrealized.trade/v1/rpc/solana-marks)",
    "console: Failed to load resource: the server responded with a status of 503 () (https://ct-api.unrealized.trade/v1/rpc/solana-marks)"
+  ],
+  "refused": [],
+  "marketRefused": [],
+  "browser": "Chrome 157.0.8103.51, sandbox on"
+ },
+ "raceMain": {
+  "key": "wallet-passkey-prf",
+  "url": "https://confidential.unrealized.trade/",
+  "mode": "harness",
+  "at": "2026-11-16T23:49:04.805Z",
+  "prf": {
+   "guard": {
+    "open": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0
+    },
+    "ivBefore": "f5b47b1f5031f2cc7cba38a4",
+    "after": {
+     "state": "signed-in",
+     "account": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "f5b47b1f5031f2cc7cba38a4",
+     "localStorage": 0
+    },
+    "ivAfter": "f5b47b1f5031f2cc7cba38a4",
+    "credentials": 0
+   },
+   "protect": {
+    "mouse": {
+     "pressed": true,
+     "withinMs": 98.89999997615814,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "f5b47b1f5031f2cc7cba38a4",
+      "localStorage": 0
+     },
+     "missed": []
+    },
+    "enter": {
+     "pressed": true,
+     "withinMs": 25.899999976158142,
+     "pressOn": "signout",
+     "tabTo": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "f5b47b1f5031f2cc7cba38a4",
+      "localStorage": 0
+     },
+     "missed": []
+    }
+   },
+   "triggers": {
+    "visibilitychange": {
+     "pressed": true,
+     "kind": "dispatched, visibilityState visible",
+     "withinMs": 1.399999976158142,
+     "sinceDrawMs": 1033.3999999761581,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "f5b47b1f5031f2cc7cba38a4",
+      "localStorage": 0
+     },
+     "missed": []
+    },
+    "pageshow": {
+     "pressed": true,
+     "kind": "dispatched",
+     "withinMs": 1.2999999523162842,
+     "sinceDrawMs": 2041.7999999523163,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "f5b47b1f5031f2cc7cba38a4",
+      "localStorage": 0
+     },
+     "missed": []
+    },
+    "focus": {
+     "pressed": true,
+     "kind": "dispatched",
+     "withinMs": 1.100000023841858,
+     "sinceDrawMs": 3089.5999999046326,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "f5b47b1f5031f2cc7cba38a4",
+      "localStorage": 0
+     },
+     "missed": []
+    }
+   },
+   "burst": {
+    "pressed": true,
+    "presses": 2,
+    "firstMs": 303.89999997615814,
+    "secondMs": 563,
+    "gapMs": 259.10000002384186,
+    "pressOn": "signout",
+    "after": {
+     "state": "signed-in",
+     "account": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "f5b47b1f5031f2cc7cba38a4",
+     "localStorage": 0
+    },
+    "missed": []
+   },
+   "repeat": {
+    "pressed": true,
+    "presses": 1,
+    "repeat": true,
+    "sinceDrawMs": 612.3999999761581,
+    "sincePrevMs": null,
+    "pressOn": "signout",
+    "after": {
+     "state": "signed-in",
+     "account": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "f5b47b1f5031f2cc7cba38a4",
+     "localStorage": 0
+    }
+   },
+   "crossTab": {
+    "state": "signed-out",
+    "account": null
+   },
+   "steps": {
+    "open": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0
+    },
+    "create": {
+     "state": "signed-in",
+     "account": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "f5b47b1f5031f2cc7cba38a4",
+     "localStorage": 0
+    },
+    "reload": {
+     "state": "signed-in",
+     "account": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "f5b47b1f5031f2cc7cba38a4",
+     "localStorage": 0
+    },
+    "signout": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0,
+     "store": {
+      "reloaded": true,
+      "db": true,
+      "stores": {
+       "counters": 0,
+       "meta": 2,
+       "notes": 0,
+       "ops": 0,
+       "orders": 0,
+       "quotes": 0,
+       "wallets": 0
+      },
+      "metaKeys": [
+       "k_wrap",
+       "lane"
+      ],
+      "localStorage": 0,
+      "oldKey": "refused"
+     }
+    },
+    "signin": {
+     "state": "signed-in",
+     "account": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "95d16ead68be7c472c459193",
+     "localStorage": 0
+    }
+   },
+   "framed": {
+    "framed": "true",
+    "state": "framed",
+    "buttons": 0,
+    "actions": 0
+   },
+   "credentials": [
+    {
+     "rpId": "confidential.unrealized.trade"
+    }
+   ],
+   "prfOk": true,
+   "expected": "eef420971deaebbd02cce97f6efc112bd3266bf5e9d08012c6cc4b6d1d5098a7",
+   "race": {
+    "a": {
+     "state": "cancelled",
+     "account": null,
+     "codeSaved": null,
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "4207055e868dd7ebaa1773a1",
+     "localStorage": 0,
+     "first": "cancelled"
+    },
+    "b": {
+     "state": "signed-in",
+     "account": "8b345973c4f447198e9ea66f49b9730b8b68dd2c73ac2f4c706c130394666300",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "4207055e868dd7ebaa1773a1",
+     "localStorage": 0
+    },
+    "reload": {
+     "state": "signed-in",
+     "account": "8b345973c4f447198e9ea66f49b9730b8b68dd2c73ac2f4c706c130394666300",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "4207055e868dd7ebaa1773a1",
+     "localStorage": 0
+    }
+   }
+  },
+  "phone": {
+   "create": {
+    "state": "signed-in",
+    "account": "60eee16639bd2e16b1dbfe1557f04c59e1ab57186f225497a29f5d578da85376",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "db3bad048a2022e88b1feb0a",
+    "localStorage": 0
+   },
+   "reload": {
+    "state": "signed-in",
+    "account": "60eee16639bd2e16b1dbfe1557f04c59e1ab57186f225497a29f5d578da85376",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "db3bad048a2022e88b1feb0a",
+    "localStorage": 0
+   },
+   "tap": {
+    "pressed": true,
+    "withinMs": 82.79999995231628,
+    "pressOn": "signout",
+    "after": {
+     "state": "signed-in",
+     "account": "60eee16639bd2e16b1dbfe1557f04c59e1ab57186f225497a29f5d578da85376",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "db3bad048a2022e88b1feb0a",
+     "localStorage": 0
+    },
+    "missed": []
+   },
+   "still": {
+    "pressed": true,
+    "withinMs": 823.2999999523163,
+    "pressOn": "signout",
+    "after": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0,
+     "store": {
+      "reloaded": true,
+      "db": true,
+      "stores": {
+       "counters": 0,
+       "meta": 2,
+       "notes": 0,
+       "ops": 0,
+       "orders": 0,
+       "quotes": 0,
+       "wallets": 0
+      },
+      "metaKeys": [
+       "k_wrap",
+       "lane"
+      ],
+      "localStorage": 0,
+      "oldKey": "refused"
+     }
+    }
+   }
+  },
+  "noPrf": {
+   "open": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "db": true,
+    "seed": false,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": null,
+    "seedIv": null,
+    "localStorage": 0
+   },
+   "create": {
+    "state": "backup",
+    "account": "70c83cb9f889a5d2cded1e50097d2c1227170b1289938ebe021a5faf4199b140",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "591ee1248b9b25c9f600f27c",
+    "localStorage": 0,
+    "words": 12
+   },
+   "copyEarly": {
+    "pressed": true,
+    "pressOn": "copy",
+    "withinMs": 47.60000002384186,
+    "after": {
+     "state": "backup",
+     "account": "70c83cb9f889a5d2cded1e50097d2c1227170b1289938ebe021a5faf4199b140",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "591ee1248b9b25c9f600f27c",
+     "localStorage": 0,
+     "words": 12,
+     "copies": 0
+    },
+    "missed": []
+   },
+   "savedEarly": {
+    "pressed": true,
+    "pressOn": "saved",
+    "withinMs": 28.100000023841858,
+    "after": {
+     "state": "backup",
+     "account": "70c83cb9f889a5d2cded1e50097d2c1227170b1289938ebe021a5faf4199b140",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "591ee1248b9b25c9f600f27c",
+     "localStorage": 0,
+     "words": 12,
+     "copies": 0
+    },
+    "missed": []
+   },
+   "copyLate": {
+    "pressed": true,
+    "copies": 1,
+    "state": "backup"
+   },
+   "saved": {
+    "state": "signed-in",
+    "account": "70c83cb9f889a5d2cded1e50097d2c1227170b1289938ebe021a5faf4199b140",
+    "codeSaved": "true",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "0a687a0990d26860983f4dd7",
+    "localStorage": 0,
+    "signoutButtons": 1,
+    "words": 0
+   },
+   "backupGate": {
+    "state": "signed-in",
+    "account": "370f5c6c4aeff3c17e3f76988240995e136ad74712dfddf9e9cc81d1ff8afa31",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "6bf76ef97f52d7c950157b4b",
+    "localStorage": 0,
+    "signoutButtons": 0
+   },
+   "backupEarly": {
+    "pressed": true,
+    "pressOn": "backup",
+    "withinMs": 42.5,
+    "after": {
+     "state": "signed-in",
+     "account": "370f5c6c4aeff3c17e3f76988240995e136ad74712dfddf9e9cc81d1ff8afa31",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "6bf76ef97f52d7c950157b4b",
+     "localStorage": 0,
+     "words": 0,
+     "copies": 0
+    },
+    "missed": []
+   },
+   "backupLate": {
+    "state": "backup",
+    "account": "370f5c6c4aeff3c17e3f76988240995e136ad74712dfddf9e9cc81d1ff8afa31",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "6bf76ef97f52d7c950157b4b",
+    "localStorage": 0,
+    "words": 12
+   },
+   "invalid": {
+    "state": "invalid-code",
+    "account": null,
+    "codeSaved": null,
+    "db": true,
+    "seed": false,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": null,
+    "seedIv": null,
+    "localStorage": 0
+   },
+   "typed": {
+    "state": "signed-in",
+    "account": "3bef95c040a66b8c675fad34c26dc958c0aa63f4ca027ada3e6946ac61e5c65d",
+    "codeSaved": "true",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "eef7b9d087451420d5d3fce7",
+    "localStorage": 0,
+    "expected": "3bef95c040a66b8c675fad34c26dc958c0aa63f4ca027ada3e6946ac61e5c65d"
+   }
+  },
+  "errors": [
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana-marks)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://rpc.mainnet.fastnear.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://near.drpc.org/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://base.rpc.blxrbdn.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://base-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/robinhood)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://rpc.mainnet.chain.robinhood.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana-marks)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://base.rpc.blxrbdn.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://base-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://rpc.mainnet.chain.robinhood.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://base.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://mainnet.base.org/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://robinhood.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://base.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://mainnet.base.org/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://robinhood.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/base)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://rpc-robinhood.globalstake.io/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://rpc-robinhood.globalstake.io/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)"
+  ],
+  "refused": [],
+  "marketRefused": [],
+  "browser": "Chrome 157.0.8103.51, sandbox on"
+ },
+ "raceCard": {
+  "key": "wallet-passkey-prf",
+  "url": "https://confidential.unrealized.trade/",
+  "mode": "harness",
+  "at": "2026-11-16T23:49:44.894Z",
+  "prf": {
+   "guard": {
+    "open": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0
+    },
+    "ivBefore": "78c1ae6a8273cc0a7a340073",
+    "after": {
+     "state": "signed-in",
+     "account": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "78c1ae6a8273cc0a7a340073",
+     "localStorage": 0
+    },
+    "ivAfter": "78c1ae6a8273cc0a7a340073",
+    "credentials": 0
+   },
+   "protect": {
+    "mouse": {
+     "pressed": true,
+     "withinMs": 101,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "78c1ae6a8273cc0a7a340073",
+      "localStorage": 0
+     },
+     "missed": []
+    },
+    "enter": {
+     "pressed": true,
+     "withinMs": 20.799999952316284,
+     "pressOn": "signout",
+     "tabTo": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "78c1ae6a8273cc0a7a340073",
+      "localStorage": 0
+     },
+     "missed": []
+    }
+   },
+   "triggers": {
+    "visibilitychange": {
+     "pressed": true,
+     "kind": "dispatched, visibilityState visible",
+     "withinMs": 1.2000000476837158,
+     "sinceDrawMs": 1026.6999999284744,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "78c1ae6a8273cc0a7a340073",
+      "localStorage": 0
+     },
+     "missed": []
+    },
+    "pageshow": {
+     "pressed": true,
+     "kind": "dispatched",
+     "withinMs": 1.2000000476837158,
+     "sinceDrawMs": 2035.2999999523163,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "78c1ae6a8273cc0a7a340073",
+      "localStorage": 0
+     },
+     "missed": []
+    },
+    "focus": {
+     "pressed": true,
+     "kind": "dispatched",
+     "withinMs": 1.5,
+     "sinceDrawMs": 3073.6999999284744,
+     "pressOn": "signout",
+     "after": {
+      "state": "signed-in",
+      "account": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+      "codeSaved": "false",
+      "db": true,
+      "seed": true,
+      "kWrap": {
+       "cryptoKey": true,
+       "extractable": false,
+       "alg": "AES-GCM"
+      },
+      "seedWrapped": true,
+      "seedIv": "78c1ae6a8273cc0a7a340073",
+      "localStorage": 0
+     },
+     "missed": []
+    }
+   },
+   "burst": {
+    "pressed": true,
+    "presses": 2,
+    "firstMs": 306.39999997615814,
+    "secondMs": 563.7000000476837,
+    "gapMs": 257.3000000715256,
+    "pressOn": "signout",
+    "after": {
+     "state": "signed-in",
+     "account": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "78c1ae6a8273cc0a7a340073",
+     "localStorage": 0
+    },
+    "missed": []
+   },
+   "repeat": {
+    "pressed": true,
+    "presses": 1,
+    "repeat": true,
+    "sinceDrawMs": 616.5999999046326,
+    "sincePrevMs": null,
+    "pressOn": "signout",
+    "after": {
+     "state": "signed-in",
+     "account": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "78c1ae6a8273cc0a7a340073",
+     "localStorage": 0
+    }
+   },
+   "crossTab": {
+    "state": "signed-out",
+    "account": null
+   },
+   "steps": {
+    "open": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0
+    },
+    "create": {
+     "state": "signed-in",
+     "account": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "78c1ae6a8273cc0a7a340073",
+     "localStorage": 0
+    },
+    "reload": {
+     "state": "signed-in",
+     "account": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "78c1ae6a8273cc0a7a340073",
+     "localStorage": 0
+    },
+    "signout": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0,
+     "store": {
+      "reloaded": true,
+      "db": true,
+      "stores": {
+       "counters": 0,
+       "meta": 2,
+       "notes": 0,
+       "ops": 0,
+       "orders": 0,
+       "quotes": 0,
+       "wallets": 0
+      },
+      "metaKeys": [
+       "k_wrap",
+       "lane"
+      ],
+      "localStorage": 0,
+      "oldKey": "refused"
+     }
+    },
+    "signin": {
+     "state": "signed-in",
+     "account": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "6b1f052111d66909d2ab99b3",
+     "localStorage": 0
+    }
+   },
+   "framed": {
+    "framed": "true",
+    "state": "framed",
+    "buttons": 0,
+    "actions": 0
+   },
+   "credentials": [
+    {
+     "rpId": "confidential.unrealized.trade"
+    }
+   ],
+   "prfOk": true,
+   "expected": "fca9bfd71c745bf13ea06d8909788b1d2d6341381ce66f02864648c24e9564c8",
+   "race": {
+    "a": {
+     "state": "signed-in",
+     "account": "30682d4a6fa3a8a173f7d9057e88477b4ed5ca708e2bd1fb986bef26dc0e5ffd",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "479c0215f48884e4e03682bf",
+     "localStorage": 0,
+     "first": "cancelled"
+    },
+    "b": {
+     "state": "signed-in",
+     "account": "30682d4a6fa3a8a173f7d9057e88477b4ed5ca708e2bd1fb986bef26dc0e5ffd",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "479c0215f48884e4e03682bf",
+     "localStorage": 0
+    },
+    "reload": {
+     "state": "signed-in",
+     "account": "30682d4a6fa3a8a173f7d9057e88477b4ed5ca708e2bd1fb986bef26dc0e5ffd",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "479c0215f48884e4e03682bf",
+     "localStorage": 0
+    }
+   }
+  },
+  "phone": {
+   "create": {
+    "state": "signed-in",
+    "account": "206fdd68119f4a899f128f22c987ce558676a473f24fde453ac481585b8dd40d",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "a7edfc29af3bd3b91e762099",
+    "localStorage": 0
+   },
+   "reload": {
+    "state": "signed-in",
+    "account": "206fdd68119f4a899f128f22c987ce558676a473f24fde453ac481585b8dd40d",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "a7edfc29af3bd3b91e762099",
+    "localStorage": 0
+   },
+   "tap": {
+    "pressed": true,
+    "withinMs": 75.39999997615814,
+    "pressOn": "signout",
+    "after": {
+     "state": "signed-in",
+     "account": "206fdd68119f4a899f128f22c987ce558676a473f24fde453ac481585b8dd40d",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "a7edfc29af3bd3b91e762099",
+     "localStorage": 0
+    },
+    "missed": []
+   },
+   "still": {
+    "pressed": true,
+    "withinMs": 821.6000000238419,
+    "pressOn": "signout",
+    "after": {
+     "state": "signed-out",
+     "account": null,
+     "codeSaved": null,
+     "db": true,
+     "seed": false,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": null,
+     "seedIv": null,
+     "localStorage": 0,
+     "store": {
+      "reloaded": true,
+      "db": true,
+      "stores": {
+       "counters": 0,
+       "meta": 2,
+       "notes": 0,
+       "ops": 0,
+       "orders": 0,
+       "quotes": 0,
+       "wallets": 0
+      },
+      "metaKeys": [
+       "k_wrap",
+       "lane"
+      ],
+      "localStorage": 0,
+      "oldKey": "refused"
+     }
+    }
+   }
+  },
+  "noPrf": {
+   "open": {
+    "state": "signed-out",
+    "account": null,
+    "codeSaved": null,
+    "db": true,
+    "seed": false,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": null,
+    "seedIv": null,
+    "localStorage": 0
+   },
+   "create": {
+    "state": "backup",
+    "account": "8ace35532eeb4d3a68b9b62fc6f4bd159726aa0980927a11795d3cab914e60dd",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "85116065f375647d54576906",
+    "localStorage": 0,
+    "words": 12
+   },
+   "copyEarly": {
+    "pressed": true,
+    "pressOn": "copy",
+    "withinMs": 44.300000071525574,
+    "after": {
+     "state": "backup",
+     "account": "8ace35532eeb4d3a68b9b62fc6f4bd159726aa0980927a11795d3cab914e60dd",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "85116065f375647d54576906",
+     "localStorage": 0,
+     "words": 12,
+     "copies": 0
+    },
+    "missed": []
+   },
+   "savedEarly": {
+    "pressed": true,
+    "pressOn": "saved",
+    "withinMs": 28.700000047683716,
+    "after": {
+     "state": "backup",
+     "account": "8ace35532eeb4d3a68b9b62fc6f4bd159726aa0980927a11795d3cab914e60dd",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "85116065f375647d54576906",
+     "localStorage": 0,
+     "words": 12,
+     "copies": 0
+    },
+    "missed": []
+   },
+   "copyLate": {
+    "pressed": true,
+    "copies": 1,
+    "state": "backup"
+   },
+   "saved": {
+    "state": "signed-in",
+    "account": "8ace35532eeb4d3a68b9b62fc6f4bd159726aa0980927a11795d3cab914e60dd",
+    "codeSaved": "true",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "071a09ffa97dcc53461dc3f3",
+    "localStorage": 0,
+    "signoutButtons": 1,
+    "words": 0
+   },
+   "backupGate": {
+    "state": "signed-in",
+    "account": "b63534c2ad1878dd2ef0c604e3cb9609a973d2cff6cab37df214fa43956ba82b",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "e7652b574f82362adcdb0efd",
+    "localStorage": 0,
+    "signoutButtons": 0
+   },
+   "backupEarly": {
+    "pressed": true,
+    "pressOn": "backup",
+    "withinMs": 36.699999928474426,
+    "after": {
+     "state": "signed-in",
+     "account": "b63534c2ad1878dd2ef0c604e3cb9609a973d2cff6cab37df214fa43956ba82b",
+     "codeSaved": "false",
+     "db": true,
+     "seed": true,
+     "kWrap": {
+      "cryptoKey": true,
+      "extractable": false,
+      "alg": "AES-GCM"
+     },
+     "seedWrapped": true,
+     "seedIv": "e7652b574f82362adcdb0efd",
+     "localStorage": 0,
+     "words": 0,
+     "copies": 0
+    },
+    "missed": []
+   },
+   "backupLate": {
+    "state": "backup",
+    "account": "b63534c2ad1878dd2ef0c604e3cb9609a973d2cff6cab37df214fa43956ba82b",
+    "codeSaved": "false",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "e7652b574f82362adcdb0efd",
+    "localStorage": 0,
+    "words": 12
+   },
+   "invalid": {
+    "state": "invalid-code",
+    "account": null,
+    "codeSaved": null,
+    "db": true,
+    "seed": false,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": null,
+    "seedIv": null,
+    "localStorage": 0
+   },
+   "typed": {
+    "state": "signed-in",
+    "account": "3bef95c040a66b8c675fad34c26dc958c0aa63f4ca027ada3e6946ac61e5c65d",
+    "codeSaved": "true",
+    "db": true,
+    "seed": true,
+    "kWrap": {
+     "cryptoKey": true,
+     "extractable": false,
+     "alg": "AES-GCM"
+    },
+    "seedWrapped": true,
+    "seedIv": "b738ba6caafcac33c47bfa59",
+    "localStorage": 0,
+    "expected": "3bef95c040a66b8c675fad34c26dc958c0aa63f4ca027ada3e6946ac61e5c65d"
+   }
+  },
+  "errors": [
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana-marks)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://rpc.mainnet.fastnear.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://near.drpc.org/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://base.rpc.blxrbdn.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://base-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/robinhood)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://rpc.mainnet.chain.robinhood.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana-marks)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://base.rpc.blxrbdn.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://base-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://rpc.mainnet.chain.robinhood.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://base.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://mainnet.base.org/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://robinhood.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana-rpc.publicnode.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://solana.api.pocket.network/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/rpc/solana)",
+   "console: Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://public.rpc.solanavibestation.com/)"
   ],
   "refused": [],
   "marketRefused": [],
