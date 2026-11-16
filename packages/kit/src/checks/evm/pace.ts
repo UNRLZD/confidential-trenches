@@ -7,12 +7,19 @@
 // came from a provider several readers share, each pacing itself alone: rpc.mainnet.chain.robinhood.com (the scan's
 // first, the index's first reader and the quote's last) and robinhood.drpc.org, and mainnet.base.org at 28 calls in a
 // second (its error names 25 a second).
+// A trade's posts first (card evm-warm-tap-ends-inside-two-seconds): a post is a trade's, or a background read's (`later`:
+// the page's pool.buy.dry quote, its index sync, its passes), and one lane serves both. A background post never leaves
+// while a trade's waits its turn, and leaves the provider's `keep` units in its bucket, so a tap asked while the page's
+// own reads run is never queued behind them and finds its turns there. The read that asked for it: SIGN_HOST's walk of a
+// fresh account at release 159 (2026-11-16 00:20Z) drew 41 answers of 429 in 235 posts from base-rpc.publicnode.com, all
+// of them the page dry's cold scan of a coin no list held (119 posts of two 10,000-block eth_getLogs, 20 at once), the
+// provider unpaced on the device.
 
 /** A provider's pace: `perS` units a second, at most `burst` at once; a unit is a post (one HTTP request, a batch or
  *  not) or a call (each request of a batch); `inflight`, the posts it takes at once. The helper's Pace shape, and
  *  `logs`: where the provider's one limit weighs an eth_getLogs above its other calls, the units a post that carries
- *  one takes (else as any other post). */
-export type EvmPace = { readonly perS: number; readonly burst: number; readonly unit: "post" | "call"; readonly inflight?: number; readonly logs?: number };
+ *  one takes (else as any other post); `keep`: the units a background post leaves in the bucket for a trade's (below). */
+export type EvmPace = { readonly perS: number; readonly burst: number; readonly unit: "post" | "call"; readonly inflight?: number; readonly logs?: number; readonly keep?: number };
 /** A post's calls, as the pace reads them: their count, and whether one is an eth_getLogs. */
 export type EvmPaceCalls = readonly { readonly method: string }[];
 /** The units a post of `calls` takes of `p`'s bucket, never more than its burst. */
@@ -47,9 +54,17 @@ const needOf = (p: EvmPace, calls: EvmPaceCalls): number =>
  *  3 to 22 calls a second while 50 calls a second passed: no rate of ours sets them, and they come in a run once one
  *  comes (20 in the 30 s after the first with no hold; 1 in a whole run with it, 09:03Z). Paced at 8 posts a second
  *  it held the recorded USDG quote (test/evm-quote-calls.test.ts) to 15.2 s of its clock, past its 8 s bound.
- *  Not paced: base-rpc.publicnode.com. The helper's 3 a second was its single 1,000-block getLogs (2026-11-05); the
- *  quote's and the index's reads from the Mac took 315 calls in 10 s with no 429 (08:05Z). Read again before it is set. */
+ *  - base-rpc.publicnode.com: one limit that weighs an eth_getLogs far above an eth_call. Read-only from the Mac,
+ *    2026-11-16 00:57-01:04Z, posts of the scan's own shape (two 10,000-block getLogs of the PoolManager's Initialize
+ *    logs and the block): 20 at once, 137 answered in 5 s, then 429 (-32005 "Rate limit exceeded"); 3 and 6 a second
+ *    for 30 s none refused; 10 a second refused from the 156th post, 15.5 s in (113 of 300). As a bucket: about 128
+ *    such posts, about 1.7 a second back (the helper's 3 single getLogs a second none refused, 5 refused, 2026-11-05).
+ *    The same burst 16 s and then 34 s after one that met 429 answered 36 and 74 (01:16Z): about 2 a second back.
+ *    eth_call alone: 36 calls a second for 25 s, 900 calls, none refused. So 36 calls a second and a getLogs post at
+ *    20 (1.8 a second), 2,500 at once (125 scan posts: a cold scan of 1M blocks is 100); a background read leaves 120
+ *    (3 s of calls: a tap's first rounds). Unpaced, SIGN_HOST's walk drew its 41 answers of 429 (above). */
 export const EVM_PACE: Readonly<Record<string, EvmPace>> = Object.freeze({
+  "https://base-rpc.publicnode.com": Object.freeze({ perS: 36, burst: 2_500, unit: "call", logs: 20, keep: 120 }),
   "https://rpc.mainnet.chain.robinhood.com": Object.freeze({ perS: 6, burst: 18, unit: "call", logs: 8 }),
   "https://robinhood.daybreak-rpc.network": Object.freeze({ perS: 7, burst: 7, unit: "post", inflight: 3 }),
   "https://robinhood.api.pocket.network": Object.freeze({ perS: 15, burst: 200, unit: "call" }),
@@ -73,13 +88,17 @@ export const evmProviderKey = (url: string): string => {
 };
 
 type Ask = { readonly need: number; readonly go: () => void };
-type Lane = { tokens: number; at: number; out: number; queue: Ask[]; heldUntil: number; timer: ReturnType<typeof setTimeout> | null };
+// `queue` the trades' posts, `later` the background reads'; each first come first served
+type Lane = { tokens: number; at: number; out: number; queue: Ask[]; later: Ask[]; heldUntil: number; timer: ReturnType<typeof setTimeout> | null };
 const LANES = new Map<string, Lane>();
 const laneOf = (key: string): Lane => {
   let l = LANES.get(key);
-  if (l === undefined) LANES.set(key, (l = { tokens: EVM_PACE[key]?.burst ?? 0, at: performance.now(), out: 0, queue: [], heldUntil: 0, timer: null }));
+  if (l === undefined) LANES.set(key, (l = { tokens: EVM_PACE[key]?.burst ?? 0, at: performance.now(), out: 0, queue: [], later: [], heldUntil: 0, timer: null }));
   return l;
 };
+/** The units in the bucket a background post of `need` waits for: its own and the provider's `keep`, never past the
+ *  burst (a post of the whole burst waits for a full bucket, as a trade's does). */
+const laterNeed = (p: EvmPace, need: number): number => Math.min(p.burst, need + (p.keep ?? 0));
 
 /** For the tests: forgets every provider's pace and hold (not in the kit's index). */
 export const evmPaceReset = (): void => {
@@ -97,58 +116,67 @@ export const evmProviderHeldMs = (url: string, now: number = performance.now()):
 /** Whether `url`'s provider is held now. */
 export const evmProviderHeld = (url: string, now: number = performance.now()): boolean => evmProviderHeldMs(url, now) > 0;
 
-/** Sends every waiting post its turn has come for, in the order they asked, and sets the wake for the next. */
+/** Sends every waiting post its turn has come for, the trades' first, each kind in the order they asked, and sets the
+ *  wake for the next. */
 function pump(l: Lane, p: EvmPace): void {
   const now = performance.now();
   l.tokens = Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS);
   l.at = now;
+  const room = () => p.inflight === undefined || l.out < p.inflight;
   for (;;) {
     const a = l.queue[0];
-    if (a === undefined || (p.inflight !== undefined && l.out >= p.inflight) || l.tokens < a.need) break;
-    l.queue.shift();
-    l.tokens -= a.need;
+    // a trade's post waiting its turn: nothing leaves before it
+    const b = a === undefined ? l.later[0] : undefined;
+    if (!room() || (a !== undefined && l.tokens < a.need) || (a === undefined && (b === undefined || l.tokens < laterNeed(p, b.need)))) break;
+    const go = a !== undefined ? l.queue.shift()! : l.later.shift()!;
+    l.tokens -= go.need;
     l.out++;
-    a.go();
+    go.go();
   }
   if (l.timer !== null) clearTimeout(l.timer);
   l.timer = null;
   const a = l.queue[0];
+  const want = a !== undefined ? a.need : l.later[0] !== undefined ? laterNeed(p, l.later[0].need) : undefined;
   // no place free: the next post given back pumps again; else the time its units take to come in
-  if (a === undefined || (p.inflight !== undefined && l.out >= p.inflight)) return;
+  if (want === undefined || !room()) return;
   // a post waiting its turn is work under way: its wake holds a Node process open as its fetch would (never unref'd)
-  l.timer = setTimeout(() => ((l.timer = null), pump(l, p)), Math.max(1, Math.ceil(((a.need - l.tokens) / p.perS) * 1000)));
+  l.timer = setTimeout(() => ((l.timer = null), pump(l, p)), Math.max(1, Math.ceil(((want - l.tokens) / p.perS) * 1000)));
 }
 
-/** Whether a post of `calls` to `url` would leave now, with no wait for its turn (an unpaced provider: always). */
-export function evmPaceReady(url: string, calls: EvmPaceCalls, now: number = performance.now()): boolean {
+/** Whether a post of `calls` to `url` would leave now, with no wait for its turn (an unpaced provider: always); `later`:
+ *  as a background read's. */
+export function evmPaceReady(url: string, calls: EvmPaceCalls, now: number = performance.now(), later = false): boolean {
   const key = evmProviderKey(url);
   const p = EVM_PACE[key];
   if (p === undefined) return true;
   const l = LANES.get(key);
   if (l === undefined) return true;
   const tokens = Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS);
-  return l.queue.length === 0 && (p.inflight === undefined || l.out < p.inflight) && tokens >= needOf(p, calls);
+  const need = needOf(p, calls);
+  return l.queue.length === 0 && (!later || l.later.length === 0) && (p.inflight === undefined || l.out < p.inflight) && tokens >= (later ? laterNeed(p, need) : need);
 }
 
 /** Waits for `url`'s turn for a post of `calls` at its pace (an unpaced provider: at once), first come first
- *  served; the answer gives the post's place back once it settles. A post of more units than the burst waits for a full
- *  bucket and spends it. `signal` ends the wait with its reason. */
-export function evmPaceTake(url: string, calls: EvmPaceCalls, signal?: AbortSignal): (() => void) | Promise<() => void> {
+ *  served among its kind, a trade's before any background read's (`later`); the answer gives the post's place back
+ *  once it settles. A post of more units than the burst waits for a full bucket and spends it. `signal` ends the wait
+ *  with its reason. */
+export function evmPaceTake(url: string, calls: EvmPaceCalls, signal?: AbortSignal, later = false): (() => void) | Promise<() => void> {
   const key = evmProviderKey(url);
   const p = EVM_PACE[key];
   // an unpaced provider is sent at once, in the same turn (no wait at all)
   if (p === undefined) return NONE;
-  return paced(key, p, calls, signal);
+  return paced(key, p, calls, signal, later);
 }
 const NONE = (): void => {};
-async function paced(key: string, p: EvmPace, calls: EvmPaceCalls, signal?: AbortSignal): Promise<() => void> {
+async function paced(key: string, p: EvmPace, calls: EvmPaceCalls, signal: AbortSignal | undefined, later: boolean): Promise<() => void> {
   signal?.throwIfAborted();
   const l = laneOf(key);
   const need = needOf(p, calls);
+  const queue = later ? l.later : l.queue;
   await new Promise<void>((resolve, reject) => {
     const stop = () => {
-      const i = l.queue.indexOf(ask);
-      if (i >= 0) l.queue.splice(i, 1);
+      const i = queue.indexOf(ask);
+      if (i >= 0) queue.splice(i, 1);
       reject(signal!.reason);
       pump(l, p);
     };
@@ -160,7 +188,7 @@ async function paced(key: string, p: EvmPace, calls: EvmPaceCalls, signal?: Abor
       },
     };
     signal?.addEventListener("abort", stop, { once: true });
-    l.queue.push(ask);
+    queue.push(ask);
     pump(l, p);
   });
   let given = false;
