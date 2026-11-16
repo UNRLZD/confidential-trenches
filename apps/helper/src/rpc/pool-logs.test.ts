@@ -223,3 +223,41 @@ test("the cold fill, named: Base's pool on 16 Nov is 36,480 pages of 100 blocks,
   assert.equal(Math.round(pages / POOL_FILL_PER_S! / 60), 101);
   assert.ok(pages * 20 < 0.04 * 3 * 7_000_000);
 });
+
+test("the fill never costs a caller a 429: callers at 140 reads a 10 s on Base's keyed route (its total 155) from six addresses, each under its share, while the store fills, are all answered; the fill draws none of the route's total and still moves", async () => {
+  FINAL = FROM + 29_999;
+  // a fake clock whose timers fire only as the test moves it (the fill and the callers wait on the same clock)
+  let clock = 1_800_000_000_000;
+  const timers: { at: number; ok: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((ok) => void timers.push({ at: clock + Math.max(0, ms), ok }));
+  const w = world();
+  const r = createRpc(BASE_ENV, { ...w.deps, now: () => clock, sleep });
+  const turns = async (n: number) => {
+    for (let i = 0; i < n; i++) await new Promise((ok) => setImmediate(ok));
+  };
+  const step = async (ms: number) => {
+    clock += ms;
+    for (const t of timers.filter((x) => x.at <= clock)) timers.splice(timers.indexOf(t), 1), t.ok();
+    await turns(3);
+  };
+  const cold = read(r, wideBody(1, FROM, FINAL));
+  for (let i = 0; i < 50 && !w.fills().length; i++) await step(10);
+  assert.equal(resultOf(await cold).error?.code, -32602);
+  assert.ok(w.fills().length > 0, "the fill started");
+  const pages0 = w.fills().length;
+  const answers: Promise<{ status: number; body: string }>[] = [];
+  const clients = ["203.0.113.21", "203.0.113.22", "203.0.113.23", "203.0.113.24", "203.0.113.25", "203.0.113.26"];
+  for (let s = 0; s < 30; s++) {
+    // 14 reads in each second, spread over it, each client 14 / 6 a second (about 23 a 10 s, under its share of 30)
+    for (let k = 0; k < 14; k++) {
+      answers.push(r.handle("base", "application/json", JSON.stringify({ jsonrpc: "2.0", id: s * 100 + k, method: "eth_blockNumber", params: [] }), clients[(s * 14 + k) % clients.length], false, true));
+      await step(70);
+    }
+    await step(20);
+  }
+  for (let i = 0; i < 400; i++) await step(10);
+  const got = await Promise.all(answers);
+  const refused = got.map((a, i) => [i, a.status, a.body] as const).filter(([, s]) => s !== 200);
+  assert.deepEqual(refused.slice(0, 5), [], `${refused.length} of ${got.length} caller reads refused`);
+  assert.ok(w.fills().length - pages0 >= 100, `the fill moved on meanwhile (${w.fills().length - pages0} pages in 30 s)`);
+});
