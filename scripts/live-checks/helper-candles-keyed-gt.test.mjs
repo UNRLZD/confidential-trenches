@@ -30,6 +30,21 @@ test("the recorded bad answer (live run 43776130630) fails on the short chart al
   assert.match(bad(r)[0], /^BAD base 0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2: 3 bars, src chain after 9 read\(s\)/);
 });
 
+test("card held-chart-names-its-bars: the recorded held BONK (live 07:02Z, as run 43816654565) passes: off the lists its chart is GeckoTerminal's alone once held (KEYED_COLD_ONLY), 500 bars named geckoterminal; a listed chart named geckoterminal alone still fails", () => {
+  const r = judge(A.held_bonk);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.deepEqual(A.held_bonk.charts.map((c) => [c.chain, c.reads.at(-1).src, c.reads.at(-1).bars]), [["solana", "geckoterminal", 500], ["base", "chain,coingecko", 500]]);
+  const run = structuredClone(A.held_bonk);
+  run.charts[1].reads.at(-1).src = "geckoterminal";
+  assert.match(bad(judge(run))[0] ?? "", /^BAD base \S+: 500 bars, src geckoterminal/);
+  // off the lists, still only the three sources, and still full
+  for (const f of [{ src: "dexscreener" }, { src: "geckoterminal,dexscreener" }, { bars: FULL_BARS - 1 }, { filling: true }]) {
+    const o = structuredClone(A.held_bonk);
+    Object.assign(o.charts[0].reads.at(-1), f);
+    assert.deepEqual(bad(judge(o)).map((l) => l.split(":")[0]), [`BAD solana ${BONK}`], JSON.stringify(f));
+  }
+});
+
 test("the bar re-cut, not loosened: the old bar's bad answer (no key, both 500 bars of our reads and GeckoTerminal's history) is a full chart now; an empty, short, filling or vendor-only chart still fails", () => {
   assert.equal(judge(A.old_bar_bad).ok, true, judge(A.old_bar_bad).lines.join("\n"));
   const last = (f) => edit((run) => Object.assign(run.charts[1].reads[run.charts[1].reads.length - 1], f));
@@ -45,9 +60,12 @@ test("the bar re-cut, not loosened: the old bar's bad answer (no key, both 500 b
   assert.equal(ours(""), false);
 });
 
-test("planted on the good answer: GeckoTerminal's alone, no bars, a 503, no Base chart and a chart other than BONK each fail by name", () => {
-  let r = edit((run) => (run.charts[0].reads.at(-1).src = "geckoterminal"));
-  assert.deepEqual(bad(r).map((l) => l.split(":")[0]), [`BAD solana ${BONK}`]);
+test("planted on the good answer: GeckoTerminal's alone on the listed chart, no bars, a 503, no Base chart and a chart other than BONK each fail by name", () => {
+  let r = edit((run) => (run.charts[1].reads.at(-1).src = "geckoterminal"));
+  assert.deepEqual(bad(r).map((l) => l.split(" ").slice(0, 2).join(" ")), ["BAD base"]);
+  // card held-chart-names-its-bars: BONK off the lists, held, is GeckoTerminal's alone, and passes
+  r = edit((run) => (run.charts[0].reads.at(-1).src = "geckoterminal"));
+  assert.equal(bad(r).length, 0, r.lines.join("\n"));
   r = edit((run) => (run.charts[1].reads.at(-1).src = "chain,geckoterminal"));
   assert.equal(bad(r).length, 0, "our bars with GeckoTerminal's history before them: full");
   r = edit((run) => (run.charts[1].reads.at(-1).bars = 0));
