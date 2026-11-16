@@ -1,4 +1,5 @@
-// POST /v1/bind's trade kind (card relayer-near-trade): a fresh NEAR wallet W buys or sells a token on Rhea classic,
+// POST /v1/bind's trade kind (card relayer-near-trade): a fresh NEAR wallet W buys or sells a token on Rhea classic or,
+// since card near-dcl-helper-relay, on Rhea DCL (dclv2.ref-labs.near),
 // and the helper's gas account pays every NEAR it needs. W is a 64-hex implicit id whose key exists only on the device;
 // the helper never builds or alters a call: it creates W with one plain Transfer, then carries W's signed bytes, or
 // refuses. The rule (card near-private-trading, 11 Nov), in order:
@@ -20,9 +21,13 @@
 //      max_block_height ahead of the final height by at least K and at most 600 blocks, one FunctionCall whose args are
 //      the JSON the device wrote. W's registrations on both of the trade's tokens are read at one block on two
 //      providers: a registration is carried only while W reads unregistered, a swap only once W reads registered on
-//      the output token (and on a sell the input token). Every hop is a Rhea pool holding its two tokens, read at one
-//      block on two providers. Then the calls go through the kit's own nearSwapCheck against the trade's request and
-//      quote with the storage minimum and the registration the helper read itself; a refusal answers swap_<its code>.
+//      the output token (and on a sell the input token). Every hop is a pool holding its two tokens, read at one
+//      block on two providers: a Rhea classic pool by its number, or a Rhea DCL pool by its id "<lower>|<higher>|<fee>"
+//      (DCL's get_pool: that id's own tokens and fee, Running, no whitelist, no tax), one exchange a trade, a mix
+//      refused bad_shape. Then the calls go through the kit's own nearSwapCheck (classic) or dclSwapCheck (DCL: the
+//      registration alone or the one Swap, its msg the exact bytes for the hops and the floor) against the trade's
+//      request and quote with the storage minimum and the registration the helper read itself; a refusal answers
+//      swap_<its code>.
 //      Then: a vault payout to W landed, W holds amount_in of the input token, the token watch is open, and the gas
 //      account holds the calls' deposits above its floor. Each delegate goes out in its own transaction (a Delegate
 //      action, receiver W), each only after the one before it read final with every receipt ok on both providers, and
@@ -40,7 +45,14 @@
 //      claim about 0.0003 N, a registration about 0.00031 N plus its deposit. The most an honest W carries under the
 //      side rules (a registration at the cap, three swaps and a claim a side): 0.00894 + 0.01281 + 2 x (3 x 0.00164 +
 //      0.0003) = 0.03219 N, and at most 0.05545 N counted while its last swap and claim are in flight at their worst.
-//      A W the vault never paid gets nothing. The same signed bytes are never sent twice (only
+//      A W the vault never paid gets nothing.
+//      W is never registered on Rhea DCL (card near-dcl-helper-relay): DCL's storage minimum is 0.5 N
+//      (storage_balance_bounds, read on dRPC at block 224795084 and near.org at 224795090), which the relayer would
+//      attach as W's delegate's deposit, and DCL pays it back to W (storage_withdraw, storage_unregister), whose key is
+//      the device's, so anyone with a vault payout could collect 0.5 N a W from the gas account, past this rule's 0.09 N.
+//      What is left without it is the classic path's own: a payout that fails to reach W is lost to W (on DCL it is held
+//      for DCL's owner), and the swap is carried only once W reads registered on its output token on both providers,
+//      so only a token that refuses a transfer to a holder registered with it can lose one. The same signed bytes are never sent twice (only
 //      a transaction of ours that never applied goes again): a request whose delegates were carried answers their
 //      transactions again, with nothing sent.
 //
@@ -55,10 +67,14 @@ import {
   HELPER_BIND_TRADE_DELEGATES_MAX,
   HELPER_BIND_TRADE_STORAGE_MAX,
   HELPER_CODE_STATUS,
+  dclPoolOf,
+  dclSwapCheck,
+  NEAR_DCL,
   NEAR_RHEA,
   NEAR_SWAP_STORAGE_MAX,
   nearSwapCheck,
   NearSwapRefused,
+  type DclQuote,
   type HelperNearTrade,
   type NearSwapCall,
   type NearSwapRequest,
@@ -116,8 +132,9 @@ export type TradeReads = {
   registered(tokens: readonly string[], account: string): Promise<boolean[]>;
   /** A vault payout to `wallet` reads as landed: a spends row whose recipient it is, paid or settled with refund_value 0. */
   payoutLanded(wallet: string): Promise<boolean>;
-  /** Every hop is a pool of the network's Rhea exchange holding its two tokens, read at one block on both providers. */
-  hopsReal(hops: readonly { pool: number; tokenIn: string; tokenOut: string }[]): Promise<boolean>;
+  /** Every hop is a pool holding its two tokens, read at one block on both providers: a Rhea classic pool by its number,
+   *  or a Rhea DCL pool by its id, that id's own tokens and fee, Running, with no whitelist and no tax. */
+  hopsReal(hops: readonly { pool: number | string; tokenIn: string; tokenOut: string }[]): Promise<boolean>;
 };
 
 /** POST /v1/bind/record's read (bind/record.ts): payoutLanded for each wallet, with the spends list read once. */
@@ -179,7 +196,7 @@ const IMPLICIT = /^[0-9a-f]{64}$/;
 /** A body of the trade kind: it has `trade` (env.ts routes it here). */
 export const isTradeBody = (body: unknown): boolean => isObj(body) && Object.hasOwn(body, "trade");
 
-type Parsed = { trade: HelperNearTrade; amountIn: bigint; venueOut: bigint; raws: Uint8Array[]; tradeId: string };
+type Parsed = { trade: HelperNearTrade; amountIn: bigint; venueOut: bigint; raws: Uint8Array[]; tradeId: string; dcl: boolean };
 
 function parseBody(body: unknown): Parsed | null {
   if (!isObj(body) || !sameKeys(body, ["trade", "signed_delegates"])) return null;
@@ -195,7 +212,11 @@ function parseBody(body: unknown): Parsed | null {
   if (typeof t.slippage_bps !== "number" || !Number.isSafeInteger(t.slippage_bps)) return null;
   const hops = t.hops;
   if (!Array.isArray(hops) || hops.length < 1 || hops.length > 2) return null;
-  for (const h of hops) if (!isObj(h) || !sameKeys(h, ["pool", "token_in", "token_out"]) || !Number.isSafeInteger(h.pool) || (h.pool as number) < 0 || !isAccountId(h.token_in) || !isAccountId(h.token_out)) return null;
+  // one exchange a trade: every pool a Rhea classic number, or every pool a Rhea DCL id (on a network with DCL)
+  const dcl = isObj(hops[0]) && typeof hops[0].pool === "string";
+  if (dcl && !(t.network in NEAR_DCL)) return null;
+  const poolOk = (x: unknown) => (dcl ? dclPoolOf(x) !== null : Number.isSafeInteger(x) && (x as number) >= 0);
+  for (const h of hops) if (!isObj(h) || !sameKeys(h, ["pool", "token_in", "token_out"]) || !poolOk(h.pool) || !isAccountId(h.token_in) || !isAccountId(h.token_out)) return null;
   if (!Array.isArray(list) || list.length > HELPER_BIND_TRADE_DELEGATES_MAX) return null;
   const raws: Uint8Array[] = [];
   for (const b64 of list) {
@@ -207,7 +228,7 @@ function parseBody(body: unknown): Parsed | null {
   const trade = t as unknown as HelperNearTrade;
   // the trade's identity: its fields as sent, so a delegate carried for one trade is never counted for another
   const tradeId = createHash("sha256").update(JSON.stringify([trade.network, trade.side, trade.token, trade.wallet, trade.amount_in, trade.slippage_bps, trade.venue_out, trade.hops.map((h) => [h.pool, h.token_in, h.token_out])])).digest("hex");
-  return { trade, amountIn, venueOut, raws, tradeId };
+  return { trade, amountIn, venueOut, raws, tradeId, dcl };
 }
 
 const STATUS: Record<string, number> = HELPER_CODE_STATUS;
@@ -225,6 +246,27 @@ function tokensOf(t: HelperNearTrade): { tokenIn: string; tokenOut: string } {
   // config() to it, bind/env.ts)
   const usdc = WATCHED[t.network].token;
   return t.side === "buy" ? { tokenIn: usdc, tokenOut: t.token } : { tokenIn: t.token, tokenOut: usdc };
+}
+
+/** The request and the quote dclSwapCheck holds a DCL trade's calls to: the device's own, as sent. */
+function dclInputs(p: Parsed): { request: NearSwapRequest; quote: DclQuote } {
+  const t = p.trade;
+  const { tokenIn, tokenOut } = tokensOf(t);
+  const request: NearSwapRequest = { network: t.network, side: t.side, token: t.token, amountIn: p.amountIn, wallet: t.wallet, slippageBps: t.slippage_bps };
+  // only the fields dclSwapCheck reads come from the device; the rest are never read by it
+  const quote = {
+    venue: "dcl",
+    network: t.network,
+    exchange: NEAR_DCL.mainnet.exchange,
+    side: t.side,
+    token: t.token,
+    tokenIn,
+    tokenOut,
+    amountIn: p.amountIn,
+    venueOut: p.venueOut,
+    poolIds: t.hops.map((h) => h.pool as string),
+  } as unknown as DclQuote;
+  return { request, quote };
 }
 
 /** The request and the quote nearSwapCheck holds the calls to: the device's own, as sent. */
@@ -399,14 +441,19 @@ async function checkCalls(p: Parsed, deps: TradeDeps, carried = 0): Promise<{ ok
   const [outReg, inReg] = await reads.registered([tokenOut, tokenIn], w);
   if (registers && outReg) return bad("already_registered");
   if (methods.includes("ft_transfer_call") && (!outReg || (p.trade.side === "sell" && !inReg))) return bad("not_registered");
-  // the token is one the exchange trades: every hop a Rhea pool holding its two tokens
+  // the token is one the exchange trades: every hop a Rhea classic or DCL pool holding its two tokens
   if (!(await reads.hopsReal(p.trade.hops.map((h) => ({ pool: h.pool, tokenIn: h.token_in, tokenOut: h.token_out }))))) return bad("token_untrusted");
   const storageMin = registers ? await reads.storageMin(tokenOut) : 0n;
   if (storageMin > TRADE_STORAGE_MAX) return bad("storage_above_cap");
-  const { request, quote } = swapInputs(p);
   try {
     // W's registration on the output token as the helper read it, never inferred from the calls
-    nearSwapCheck(calls, request, { quote, storageMin, registered: outReg === true });
+    if (p.dcl) {
+      const { request, quote } = dclInputs(p);
+      dclSwapCheck(calls, request, { quote, storageMin, registered: outReg === true });
+    } else {
+      const { request, quote } = swapInputs(p);
+      nearSwapCheck(calls, request, { quote, storageMin, registered: outReg === true });
+    }
   } catch (e) {
     if (e instanceof NearSwapRefused) return bad(`swap_${e.code.toLowerCase()}` as TradeCode);
     throw e;
@@ -600,7 +647,7 @@ const SPENDS_PAGE = 100;
  * recipient as read; a row counts once it reads paid, or settled with refund_value 0 (withdraw/send.ts: a bounced
  * payout is refund_pending, then settled with its amount as refund_value), which never changes after.
  */
-export function createTradeReads(rpcs: readonly [Rpc, Rpc], vault: string, usdc: string, now: () => number = Date.now, exchange: string = NEAR_RHEA.mainnet.exchange): TradeReads & RecordReads {
+export function createTradeReads(rpcs: readonly [Rpc, Rpc], vault: string, usdc: string, now: () => number = Date.now, exchange: string = NEAR_RHEA.mainnet.exchange, dclExchange: string = NEAR_DCL.mainnet.exchange): TradeReads & RecordReads {
   const send = createSendReads(rpcs, { vault, token: usdc });
   const at = () => agreedBlock(rpcs, now);
   const byRecipient = new Map<string, number[]>();
@@ -652,11 +699,24 @@ export function createTradeReads(rpcs: readonly [Rpc, Rpc], vault: string, usdc:
     },
     async hopsReal(hops) {
       const b = await at();
+      if (hops.every((h) => typeof h.pool === "string")) {
+        for (const h of hops) {
+          const want = dclPoolOf(h.pool);
+          if (want === null) return false;
+          // a DCL id with no pool reads null
+          const p = await viewAt(rpcs, b, dclExchange, "get_pool", { pool_id: h.pool });
+          if (!isObj(p) || p.pool_id !== h.pool || p.token_x !== want.x || p.token_y !== want.y || p.fee !== want.fee) return false;
+          if (p.state !== "Running" || p.whitelist !== null || p.tax !== null) return false;
+          if (![want.x, want.y].includes(h.tokenIn) || ![want.x, want.y].includes(h.tokenOut) || h.tokenIn === h.tokenOut) return false;
+        }
+        return true;
+      }
+      if (!hops.every((h) => typeof h.pool === "number")) return false;
       // a pool id past the exchange's count is none (get_pool panics there, which is no answer)
       const count = await viewAt(rpcs, b, exchange, "get_number_of_pools", {});
       if (typeof count !== "number" || !Number.isSafeInteger(count)) throw new Error("get_number_of_pools: not a count");
       for (const h of hops) {
-        if (h.pool >= count) return false;
+        if ((h.pool as number) >= count) return false;
         const pool = await viewAt(rpcs, b, exchange, "get_pool", { pool_id: h.pool });
         const ids = isObj(pool) && Array.isArray(pool.token_account_ids) ? pool.token_account_ids : null;
         if (ids === null || !ids.includes(h.tokenIn) || !ids.includes(h.tokenOut) || h.tokenIn === h.tokenOut) return false;
