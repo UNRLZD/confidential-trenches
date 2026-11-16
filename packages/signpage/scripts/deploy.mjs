@@ -398,12 +398,17 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
     done();
     throw e;
   }
-  let keep = false; // the build holds 24 MB of setup files: --dry-run and --build keep it, named, only once it passed its gate
+  // the build holds 24 MB of setup files: --dry-run and --build keep it only on the return that names it, after its gate
+  // passed; every other end (a refusal, a throw, the upload done) removes it (card signpage-build-folder-removed-after-use)
+  let keep = false;
+  let cwd = null; // wrangler's own empty folder, removed with the build
   try {
     const problems = checkDir(dir);
     if (problems.length) return { code: 1, err: [...would.map((p) => `REFUSED ${p}`), ...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
-    keep = dryRun || buildOnly;
-    if (buildOnly) return { code: 0, out: [`gate ok on ${dir}; --build: the build's gate only, nothing read of main, CI or the releases; nothing was uploaded`] };
+    if (buildOnly) {
+      keep = true;
+      return { code: 0, out: [`gate ok on ${dir}; --build: the build's gate only, nothing read of main, CI or the releases; nothing was uploaded`] };
+    }
     // loaded here, not at the top: release-list.mjs imports this file and the terminal's deploy, which --live-runs needs not
     // the release lists and their ledger are the clean checkout's at the sha (review of 31f81cbd, P3), or a test's stand-ins
     const lists = released.dir ? "./release-list.mjs" : pathToFileURL(join(clean.root, relative(REPO, PKG), "scripts", "release-list.mjs")).href;
@@ -411,6 +416,7 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
     would.push(...unreleasedProblems(dir, ...(released.dir ? [released.dir, released.ledger] : [])));
     would.push(...releaseTreeProblems(released.dir ?? undefined, head || "HEAD"));
     if (dryRun) {
+      keep = true;
       if (would.length) return { code: 1, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded; a deploy would refuse it:`], err: [...would.map((p) => `REFUSED ${p}`)] };
       return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded; a deploy would go ahead`] };
     }
@@ -420,8 +426,9 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
     const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);
     if (missing.length) return { code: 2, err: [`gate ok; ${missing.join(" and ")} not set, nothing was uploaded`] };
     const args = ["dlx", WRANGLER, "pages", "deploy", dir, "--project-name", PROJECT, "--branch", BRANCH, "--commit-hash", head, "--commit-dirty=false"];
+    cwd = mkdtempSync(join(tmpdir(), "ct-deploy-"));
     const r = run("pnpm", args, {
-      cwd: mkdtempSync(join(tmpdir(), "ct-deploy-")),
+      cwd,
       env: { ...env, WRANGLER_SEND_METRICS: "false" },
       stdio: "inherit",
     });
@@ -431,7 +438,9 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
     if (!back.ok) return { code: 1, err: [`uploaded HEAD ${head} to ${PROJECT} on ${BRANCH}, but`, ...back.lines] };
     return { code: 0, out: [`deployed HEAD ${head} to ${PROJECT} on ${BRANCH}`, ...back.lines, ...liveCommands(head)] };
   } finally {
+    // after the upload and its read-back, which read the build
     if (!keep) rmSync(dir, { recursive: true, force: true });
+    if (cwd) rmSync(cwd, { recursive: true, force: true });
     done();
   }
 }

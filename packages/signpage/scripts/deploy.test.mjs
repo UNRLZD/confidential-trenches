@@ -17,6 +17,14 @@ import { bundle } from "./build-app.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 import { signBuilt } from "../../../scripts/signpage-built.mjs";
 
+// The whole run's temp folder is its own (card signpage-build-folder-removed-after-use): os.tmpdir() reads TMPDIR at each
+// call and the build's child processes inherit it, so a folder a test keeps never reaches the Mac's temp folder, and the
+// file's last test reads it for every folder the deploy made and left (ownLeft).
+const OWN_TMP = mkdtempSync(join(tmpdir(), "ct-signpage-test-run-"));
+process.env.TMPDIR = OWN_TMP;
+after(() => rmSync(OWN_TMP, { recursive: true, force: true }));
+/** The deploy's own folders in `dir`: its builds (ct-signpage-, -app-, -head-) and wrangler's (ct-deploy-). */
+const deployFolders = (dir) => readdirSync(dir).filter((f) => /^ct-(signpage(-app|-head)?|deploy)-[A-Za-z0-9]{6}$/.test(f));
 const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const REAL = readFileSync(join(PKG, "public", "_headers"), "utf8");
 const ENV = { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" };
@@ -361,13 +369,17 @@ test("planted: a deploy whose fresh build of the sources the newest release list
     for (const [argv, env, code] of [[["--dry-run"], {}, 1], [[], ENV, 1]]) {
       const rec = recorder();
       const r = await deploy(argv, env, rec.run, undefined, signHost(rec).net, stale);
+      const kept = /gate ok on (\S+);/.exec(r.out?.[0] ?? "")?.[1];
+      if (kept) rmSync(kept, { recursive: true, force: true });
       assert.equal(r.code, code, `${argv}: ${(r.err ?? []).join("\n")}`);
       assert.ok(r.err.some((l) => l.includes("is not this SIGN_HOST build") && l.includes("/app.js")), `${argv}: ${r.err.join("\n")}`);
       assert.equal(rec.uploads().length, 0, `${argv}`);
     }
     // and the list of this tree's own fresh build lets the same deploy through
     const rec = recorder();
-    assert.equal((await deploy(["--dry-run"], {}, rec.run, undefined, {}, RELEASED_TREE())).code, 0);
+    const ok = await deploy(["--dry-run"], {}, rec.run, undefined, {}, RELEASED_TREE());
+    rmSync(/gate ok on (\S+);/.exec(ok.out?.[0] ?? "")?.[1] ?? join(OWN_TMP, "none"), { recursive: true, force: true });
+    assert.equal(ok.code, 0, (ok.err ?? []).join("\n"));
   } finally {
     rmSync(other, { recursive: true, force: true });
     rmSync(stale.dir, { recursive: true, force: true });
@@ -812,7 +824,7 @@ async function keptIn(run) {
   process.env.TMPDIR = mine;
   try {
     await run();
-    return readdirSync(mine).filter((f) => f.startsWith("ct-signpage-") && !f.startsWith("ct-signpage-test-") && !f.startsWith("ct-signpage-released-"));
+    return readdirSync(mine).filter((f) => (f.startsWith("ct-signpage-") || f.startsWith("ct-deploy-")) && !f.startsWith("ct-signpage-test-") && !f.startsWith("ct-signpage-released-"));
   } finally {
     if (was === undefined) delete process.env.TMPDIR;
     else process.env.TMPDIR = was;
@@ -1023,4 +1035,46 @@ test("a gate check that throws other than on a missing module is named as it is,
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// Card signpage-build-folder-removed-after-use: every end of a deploy removes its build and wrangler's folder, the upload
+// gets the whole build and the read-back reads it (so it is removed only after both), and a --dry-run or --build keeps
+// its build only on the return that names it
+test("planted: the upload gets the whole build; landed, wrangler failed or read-back failed, no build or wrangler folder is left", async () => {
+  const walk = (d) => readdirSync(d, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name).slice(d.length + 1));
+  for (const [name, upload, served, code] of [["landed", 0, true, 0], ["wrangler failed", 1, true, 1], ["read-back failed", 0, false, 1]]) {
+    const left = await keptIn(async () => {
+      const rec = recorder();
+      const seen = [];
+      const run = (cmd, args, opts) => {
+        if (cmd === "pnpm" && args[0] === "dlx") {
+          seen.push({ files: walk(args[4]), cwd: existsSync(opts.cwd) });
+          rec.run(cmd, args, opts);
+          return { status: upload, stdout: "", stderr: "" };
+        }
+        return rec.run(cmd, args, opts);
+      };
+      const net = served ? signHost(rec).net : { fetch: async () => new Response("gone", { status: 404 }), sleep: async () => {} };
+      const r = await deploy([], ENV, run, undefined, net, RELEASED_TREE());
+      assert.equal(r.code, code, `${name}: ${[...(r.out ?? []), ...(r.err ?? [])].join("\n")}`);
+      assert.equal(seen.length, 1, name);
+      const files = seen[0].files;
+      for (const f of ["index.html", "app.js", "_headers", "prover-worker.js", "prover-thread.js", "walk-worker.js", "licenses/GPL-3.0.txt"]) assert.ok(files.includes(f), `${name}: the upload lacks ${f}`);
+      assert.equal(files.filter((f) => f.startsWith("assets/zk/")).length, Object.keys(ZK_SETUP_FILES).length, `${name}: ${files.join(" ")}`);
+      assert.ok(seen[0].cwd, `${name}: wrangler's folder was there`);
+    });
+    assert.deepEqual(left, [], name);
+  }
+});
+
+test("planted: a --dry-run whose release read throws after its gate passed keeps no build", async () => {
+  const left = await keptIn(async () => {
+    const r = deploy(["--dry-run"], {}, recorder().run, undefined, {}, { dir: join(OWN_TMP, "no-such-releases"), ledger: {} });
+    await assert.rejects(r, /ENOENT|no such file/i);
+  });
+  assert.deepEqual(left, []);
+});
+
+test("the run left none of the deploy's folders in its temp folder", () => {
+  assert.deepEqual(deployFolders(OWN_TMP), []);
 });
