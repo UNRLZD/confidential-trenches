@@ -37,8 +37,9 @@ const esc = (v) => v.replace(/\$/g, "\\$");
 
 /** The quote started before the proofs' read (groups: the quote, the amount). */
 // (card you-receive-on-every-chain: the proofs, the venue and the rent read by one shared read, `await read(pair, token,
-// pools)`, its refusal returned as is, so the dry and cashFirst's sizing read them the same way)
-const QUOTE = new RegExp(`(${N})=(${N})!==null&&\\2>0n\\?${N}\\(${N},\\{side:\`buy\`,token:${N},amount:\\2\\}\\)\\.catch\\(\\(\\)=>null\\):null,(?:${N}=await ${N}\\.ready\\(\\)|(${N})=await ${N}\\(${N},${N},${N}\\);if\\(\`error\`in \\3\\)return \\3;)`);
+// pools)`, its refusal returned as is, so the dry and cashFirst's sizing read them the same way; card
+// solana-quote-reads-found-pools-once: the page's finders, with the dry's early pools when the page asks for them)
+const QUOTE = new RegExp(`(${N})=(${N})!==null&&\\2>0n\\?${N}\\(${N},\\{side:\`buy\`,token:${N},amount:\\2\\}(?:,void 0,\\{early:${N}\\.early===!0\\})?\\)\\.catch\\(\\(\\)=>null\\):null,(?:${N}=await ${N}\\.ready\\(\\)|(${N})=await ${N}\\(${N},${N},${N}\\);if\\(\`error\`in \\3\\)return \\3;)`);
 /** The best venue's pick (bestVenuePool): the quote's pools on a venue list, sorted by expected out, the first
  *  (groups: the function, the venue list). */
 const BEST = new RegExp(`(${N})=(${N})=>\\2\\?\\.pools\\.filter\\((${N})=>(${N})\\.includes\\(\\3\\.venue\\)\\)\\.sort\\(\\((${N}),(${N})\\)=>\\5\\.expectedOut>\\6\\.expectedOut\\?-1:1\\)\\[0\\]`, "g");

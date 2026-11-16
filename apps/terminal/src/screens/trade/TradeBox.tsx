@@ -17,7 +17,8 @@ import {
   buysAskAmount,
   buysCents,
   centsToDecimal,
-  coinTapAgainMs,
+  dryAgainMs,
+  dryTag,
   coinTapKey,
   feeAskAmount,
   feeReadOf,
@@ -34,6 +35,7 @@ import {
   poolBuyAsk,
   poolMax,
   poolView,
+  quotingShown,
   receiveShown,
   tradeBal,
   presetOn,
@@ -206,7 +208,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     if (coinKey === null || !ask) return;
     let live = true;
     let t: ReturnType<typeof setTimeout> | undefined;
-    let downs = 0;
+    let tries = 0;
     // asked again while the page says not now: busy until the trade ends, down three times at most (a provider that
     // keeps failing is not asked on), until the coin or its proofs change or the box goes
     const once = (): void => {
@@ -215,8 +217,10 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
           (o) => {
             if (!live) return;
             if (o.ok) return void setCoinTap({ key: coinKey, tap_max: o.result.tap_max, with_cash: o.result.with_cash ?? null, cash: cashAt });
-            const again = coinTapAgainMs(o.error.code);
-            if (again !== null && (o.error.code !== "down" || downs++ < 3)) t = setTimeout(once, again);
+            const again = dryAgainMs(o.error.code, tries);
+            if (again === null) return;
+            if (o.error.code !== "busy") tries++;
+            t = setTimeout(once, again);
           },
           () => {},
         );
@@ -251,14 +255,23 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const buysKey = onPool && (chain === "base" || chain === "robinhood") ? coinKey : null;
   const feeKey = chain === "solana" ? coinKey : path === "near" && on && !signedOut ? `near:${token}` : buysKey;
   const [feeRead, setFeeRead] = useState<FeeRead | null>(null);
+  // the dry in flight for the coin and amount in the box (dryTag), from the amount's ask until its answer, a refusal
+  // asked no more or the box moving on: You receive says Quoting meanwhile (card buy-box-quotes-before-funds)
+  const [asking, setAsking] = useState<string | null>(null);
+  const asked = (tag: string | null) => setAsking((a) => (a === tag ? null : a));
   useEffect(() => {
     const ask = request.current;
     const feeAmount = feeKey === null ? null : chain === "solana" ? feeAskAmount(amount, priceNow.current) : chain === "near" && amount !== null && amount > 0n ? centsToDecimal(amount) : null;
     if (feeKey === null || feeAmount === null || !ask) return;
     let live = true;
     let t: ReturnType<typeof setTimeout> | undefined;
-    let downs = 0;
+    let tries = 0;
+    const tag = dryTag(feeKey, amount);
+    setAsking(tag);
+    // asked again (a busy page, a down, the kit client's timeout): still quoting
+    let more = false;
     const once = (): void => {
+      more = false;
       try {
         ask("pool.buy.dry", { chain: chain === "near" ? "near" : "solana", token, amount: feeAmount }).outcome.then(
           (o) => {
@@ -269,13 +282,17 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
               const r = feeReadOf(feeKey, o.result, amount);
               return void (r !== null && setFeeRead(r));
             }
-            const again = coinTapAgainMs(o.error.code);
-            if (again !== null && (o.error.code !== "down" || downs++ < 3)) t = setTimeout(once, again);
+            const again = dryAgainMs(o.error.code, tries);
+            if (again === null) return;
+            if (o.error.code !== "busy") tries++;
+            more = true;
+            t = setTimeout(once, again);
           },
           () => {},
-        );
+        ).then(() => void (live && !more && asked(tag)));
       } catch {
         // no client to ask: the dash stays
+        asked(tag);
       }
     };
     // typing settles before the page is asked: one ask per amount the box rests on
@@ -283,6 +300,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     return () => {
       live = false;
       clearTimeout(t);
+      asked(tag);
     };
   }, [feeKey, amount, kit.request !== null]);
   // what a Base or Robinhood tap really spends (card buy-any-amount-on-every-chain): it plans whole notes, and an amount
@@ -295,43 +313,54 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   useEffect(() => {
     const ask = request.current;
     const p = priceNow.current;
-    const asked = buysKey !== null && amount !== null ? buysAsk.current(amount) : null;
-    if (buysKey === null || amount === null || asked === null || !ask) return;
+    const buysAmount = buysKey !== null && amount !== null ? buysAsk.current(amount) : null;
+    if (buysKey === null || amount === null || buysAmount === null || !ask) return;
     let live = true;
     let t: ReturnType<typeof setTimeout> | undefined;
-    let downs = 0;
+    let tries = 0;
+    const tag = dryTag(buysKey, amount);
+    setAsking(tag);
+    let more = false;
     const once = (): void => {
+      more = false;
       try {
-        ask("pool.buy.dry", { chain: chain as PoolChain, token, amount: asked }).outcome.then(
+        ask("pool.buy.dry", { chain: chain as PoolChain, token, amount: buysAmount }).outcome.then(
           (o) => {
             if (!live) return;
             if (o.ok) {
               // the page's answer is hostile: buysCents takes only an amount above 0 and below the ask
-              const c = buysCents(o.result.buys, asked, p);
+              const c = buysCents(o.result.buys, buysAmount, p);
               if (c !== null && c < amount) return void (!busy(phaseRef.current) && setText(amountText(c)));
               const r = feeReadOf(buysKey, o.result, amount);
               if (r !== null) setFeeRead(r);
               return;
             }
-            const again = coinTapAgainMs(o.error.code);
-            if (again !== null && (o.error.code !== "down" || downs++ < 3)) t = setTimeout(once, again);
+            const again = dryAgainMs(o.error.code, tries);
+            if (again === null) return;
+            if (o.error.code !== "busy") tries++;
+            more = true;
+            t = setTimeout(once, again);
           },
           () => {},
-        );
+        ).then(() => void (live && !more && asked(tag)));
       } catch {
         // no client to ask: the box keeps what was typed
+        asked(tag);
       }
     };
     t = setTimeout(once, FEE_ASK_SETTLE_MS);
     return () => {
       live = false;
       clearTimeout(t);
+      asked(tag);
     };
   }, [buysKey, amount, kit.request !== null]);
   const fee = onPool ? feeShown(feeRead, feeKey, amount, price) : path === "near" ? feeShown(feeRead, feeKey, amount, USDC) : null;
   // You receive on the pool path and on NEAR: the same answer's out (the live source has no set preview, card
   // solana-buy-preview-complete)
   const receive = onPool || path === "near" ? receiveShown(feeRead, feeKey, amount) : null;
+  // and Quoting in its place while the page prices this amount (card buy-box-quotes-before-funds)
+  const quoting = (onPool || path === "near") && quotingShown(feeRead, feeKey, amount, asking);
   // Bal: the vault path's money (Cash less the SOL and ETH pools, useOffPool) on a chain with no pool, the pool's on a
   // chain with one, with Cash's NEAR part where a buy moves from it (Solana, card one-balance-buys-on-every-chain); on
   // NEAR, Cash's NEAR part, the money a NEAR buy spends. One number for the amount gate. Signed out there is none to
@@ -453,7 +482,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     buy(p);
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown: feeKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, receive, sell, side, setSide: pickSide, held, heldNow, onSell };
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown: feeKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, receive, quoting, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */
@@ -492,10 +521,11 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
   if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} {...(logo ? { logo } : {})} />;
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
   const last = preview?.p ?? null;
-  // the pool path's You receive is the page's own dry answer (t.receive) once it has one; else the set preview's
+  // the pool path's You receive is the page's own dry answer (t.receive) once it has one; else the set preview's; else
+  // Quoting while the page prices the amount (t.quoting), the deposit sheet's word for its own quote in flight
   const recv = t.receive;
   const pending = recv !== null ? recv.pending : shown === null && last !== null;
-  const est = recv !== null ? `≈ ${fmtOut(recv.out)} ${symbol}` : (shown ?? last) ? `≈ ${fmtOut((shown ?? last)!.out)} ${symbol}` : "—";
+  const est = recv !== null ? `≈ ${fmtOut(recv.out)} ${symbol}` : (shown ?? last) ? `≈ ${fmtOut((shown ?? last)!.out)} ${symbol}` : t.quoting ? WORDS.quoting.text : "—";
   const now = src.now();
   const state = signedOut ? "S8.1" : (stateId(phase, now, "buy") ?? "S8.3");
   const canBuy = ready && !running && !unavailable(phase) && amountOk(amount, max, balance) && askable(amount);

@@ -7,6 +7,8 @@
 //     Robinhood's page answered no quote (INCONCLUSIVE alone).
 //   timeout30: the same app with that 10 s raised to 30 s (an experiment): Solana draws the quote; INCONCLUSIVE, Base and
 //     Robinhood unanswered by the page in that run.
+//   askAgain: the app that asks a dry again after the kit client's 10 s (client_timeout), SIGN_HOST live at release 159:
+//     PASS on every chain; Solana's and Robinhood's first answers came past 10 s and the box drew the next ones.
 // Planted on thisBuild's quoted coins: each fact taken away FAILs; Solana and Robinhood planted from quoted coins PASS.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -40,6 +42,16 @@ test("recorded thisBuild: Base and NEAR quoted with Max $0; FAIL on Solana alone
   // the late answers: every Solana quote the page priced came after 10 s
   const late = ANSWERS.thisBuild.chains.solana.coins.flatMap((c) => c.dry).filter((d) => d.amount !== undefined && d.ok);
   assert.ok(late.length > 0 && late.every((d) => d.ms > 10_000), JSON.stringify(late.map((d) => d.ms)));
+});
+
+test("recorded askAgain (a dry the client ended at 10 s asked again): PASS on every chain, Solana's quote from the second ask", () => {
+  const v = judge(ANSWERS.askAgain);
+  assert.equal(v.verdict, "PASS", v.lines.join("\n"));
+  for (const chain of CHAINS) assert.ok(v.lines.some((l) => l.startsWith(`ok ${chain} `)), chain);
+  // the Solana coin judged: its first amount ask answered past 10 s (the client had ended it), the next one inside it
+  const sol = ANSWERS.askAgain.chains.solana.coins.find((c) => quoted(c.box.receive));
+  const asks = sol.dry.filter((d) => d.amount !== undefined);
+  assert.ok(asks.length >= 2 && asks[0].ms > 10_000 && asks.at(-1).ms < 10_000, JSON.stringify(asks.map((d) => d.ms)));
 });
 
 test("recorded timeout30 (experiment): the box draws Solana's quote once the answer is let in; INCONCLUSIVE", () => {
