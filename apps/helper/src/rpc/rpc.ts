@@ -744,8 +744,9 @@ function parse(text: string): unknown {
 const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
 
 /** The pool programs each Solana route may scan with getProgramAccounts: the helper's own pinned pool programs for that
- *  cluster (apps/helper/src/pool/solana.ts POOL_SOLANA_ENV; devnet's a list, comma apart, solanaPoolPrograms, which
- *  refuses a bad one at start), none when unset. */
+ *  cluster (mainnet's: apps/helper/src/pool/solana.ts POOL_SOLANA_ENV, which refuses a bad one at start; devnet's a list,
+ *  comma apart, read here alone, since the helper serves no devnet pool, card helper-mainnet-pools-only), none when
+ *  unset. */
 export const RPC_SCAN_PROGRAM_ENV: Readonly<Partial<Record<RpcChain, string>>> = { solana: "POOL_SOLANA_PROGRAM_MAINNET", "solana-devnet": "POOL_SOLANA_PROGRAM_DEVNET", "solana-marks": "POOL_SOLANA_PROGRAM_MAINNET" };
 /** The note restore's mark list (packages/wallet/src/pool/solana-restore.ts solanaMarksListed, the lister's bucket
  *  read; the settle's solanaSettleSpent lists through the same call): each mark size (13 a spent mark, 17 a pre-mark) and the memcmp at 9,

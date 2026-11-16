@@ -106,7 +106,7 @@ case "$1 $2" in
     case "$*" in *"test -S /config/caddy-admin.sock"*) [ "\${STUB_CADDY:-socket}" = socket ]; exit $? ;; esac
     cat > "${dir}/reload.in"
     [ "\${STUB_RELOAD:-1}" = 1 ] || { echo "Error: dial unix /config/caddy-admin.sock: connect: no such file or directory" >&2; exit 1; } ;;
-  "compose run") [ "\${STUB_ENV:-0}" = 0 ] || { echo "helper env: POOL_EVM_ADDRESS_BASE_SEPOLIA must be an address" >&2; exit 2; } ;;
+  "compose run") [ "\${STUB_ENV:-0}" = 0 ] || { echo "helper env: POOL_EVM_ADDRESS_BASE must be an address" >&2; exit 2; } ;;
   "compose up")
     want=$(echo "$*" | sed -n 's/.*--scale helper=\\([0-9]*\\).*/\\1/p')
     if [ -n "$want" ]; then
@@ -119,7 +119,7 @@ case "$1 $2" in
     [ "\${STUB_READY:-1}" = 0 ] && exit 1
     ;;
   "inspect -f") awk -v id="$4" '$1 == id { print $3 }' "$S" ;;
-  "logs --tail") echo "helper: POOL_EVM_ADDRESS_BASE_SEPOLIA must be an address ($4)" >&2 ;;
+  "logs --tail") echo "helper: POOL_EVM_ADDRESS_BASE must be an address ($4)" >&2 ;;
   "rm -f") drop "$3" ;;
   "stop -t") mark "$4" exited ;;
   "rm "*) drop "$2" ;;
@@ -569,7 +569,7 @@ test("a new helper that never gets ready: the deploy fails naming the bound, the
     assert.ok(calls.includes("rm -f new-1"), "the new container was removed");
     // card helper-ready-without-gt: its last lines first, so the deploy names why (18:55-18:58Z: removed with its logs)
     assert.ok(calls.indexOf("logs --tail 30 new-1") !== -1 && calls.indexOf("logs --tail 30 new-1") < calls.indexOf("rm -f new-1"), calls.join("\n"));
-    assert.match(r.out, /redeploy: new-1's last lines:\n {2}helper: POOL_EVM_ADDRESS_BASE_SEPOLIA must be an address \(new-1\)/);
+    assert.match(r.out, /redeploy: new-1's last lines:\n {2}helper: POOL_EVM_ADDRESS_BASE must be an address \(new-1\)/);
     assert.ok(!calls.some((c) => /^(stop|rm)\b.*\bold-1\b/.test(c)), `the old one was touched:\n${calls.join("\n")}`);
     assert.deepEqual(s.running(), ["old-1"], "the old one still runs, the new one is gone");
   } finally {

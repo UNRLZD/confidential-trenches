@@ -322,32 +322,28 @@ test("(4) /v1/health's ready stays false while any pool has no fee for the perio
 
 // card helper-ready-never-waits-on-a-testnet-pool: on 16 Nov 13:4xZ Robinhood testnet's providers refused every state
 // read (dRPC eth_call -32601, PublicNode 403), and a redeploy's new helper was never ready, its robinhood-testnet pool's
-// check holding ready (server.ts poolsChecked) and each mainnet pool's check waiting on that pool's fee (untilFeesHeld)
-test("(4c) a test network's providers refuse every call: ready turns true on the mainnet pool's check alone, the test pool's refusal is one line and never a refusal of the start, and the mainnet pool's check never waits on its fee", async (t) => {
+// check holding ready (server.ts poolsChecked) and each mainnet pool's check waiting on that pool's fee (untilFeesHeld).
+// Card helper-mainnet-pools-only: the helper loads no test pool at all, so its lines left beside a mainnet pool's load
+// nothing and no test network's provider is asked
+test("(4c) a test network's pool lines beside a mainnet pool load nothing: ready turns true on the mainnet pool's check, nothing is refused or logged, and no test network's provider is asked", async (t) => {
   const S = await import("../server.ts");
   const at = { T: E + 30_000 };
   const REFUSED = { status: 400, body: { code: -32601, message: "the method eth_call does not exist/is not available" } };
   const calls = chain(t, (host) => (/testnet|sepolia/.test(host) ? REFUSED : null), at);
   const TEST_POOL = evmPoolVenues()["robinhood-testnet"].pool!.toLowerCase();
   const senders = sendersOf({ ...ENV_RH, POOL_EVM_ADDRESS_ROBINHOOD_TESTNET: TEST_POOL, POOL_EVM_SENDER_KEY_ROBINHOOD_TESTNET: KEY }, []);
-  assert.deepEqual([...senders.keys()].sort(), [RH, TEST_POOL].sort(), "both pools load: the live checks still read the test one");
+  assert.deepEqual([...senders.keys()], [RH], "the mainnet pool alone loads");
   const pending: { ms: number; go: () => void }[] = [];
   const held = (ms: number) => new Promise<void>((go) => pending.push({ ms, go }));
-  // the test pool's waits pass on the next turn, the clock unmoved: its check reaches its bound in its own time
-  const quick = () => new Promise<void>((go) => setImmediate(go));
   const done: string[] = [];
-  const pools = new Map([...senders].map(([k, s]) => [k, { network: s.network, ready: () => s.ready(s.network === "robinhood" ? held : quick).then(() => void done.push(s.network)) }]));
+  const pools = new Map([...senders].map(([k, s]) => [k, { network: s.network, ready: () => s.ready(held).then(() => void done.push(s.network)) }]));
   const refused: string[] = [];
   const lines: string[] = [];
   const gate = S.readyGate(Promise.resolve(), S.poolsChecked(new Map(), pools, (e: Error) => void refused.push(e.message), undefined, (l: string) => void lines.push(l)));
-  for (let i = 0; i < 20_000 && !(gate.ready() && lines.length > 0); i++) await new Promise((r) => setImmediate(r));
-  assert.equal(gate.ready(), true, `ready held by the test pool (waiting: ${pending.map((p) => p.ms).join(", ")})`);
-  assert.deepEqual([done, refused, pending.length], [["robinhood"], [], 0]);
-  assert.equal(lines.length, 1, lines.join("\n"));
-  assert.match(lines[0]!, /^test network pool down \(evm robinhood-testnet\), ready never waits on it: POOL_EVM_RPCS_ROBINHOOD_TESTNET: the fee's state/);
-  assert.ok(calls.some((c) => /testnet/.test(c.host)), "the test pool's check ran");
-  // the test pool stays down: its routes answer the coded 503, the mainnet pool's serve
-  assert.deepEqual((await senders.get(TEST_POOL)!.carry({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
+  for (let i = 0; i < 20_000 && !gate.ready(); i++) await new Promise((r) => setImmediate(r));
+  assert.equal(gate.ready(), true, `ready (waiting: ${pending.map((p) => p.ms).join(", ")})`);
+  assert.deepEqual([done, refused, lines, pending.length], [["robinhood"], [], [], 0]);
+  assert.ok(!calls.some((c) => /testnet|sepolia/.test(c.host)), "a test network's provider was asked");
   assert.equal((await senders.get(RH)!.fee(at.T))?.fee, feeOf("robinhood").toString());
 });
 

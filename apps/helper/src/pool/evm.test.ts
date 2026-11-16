@@ -16,8 +16,9 @@ import { EVM_FEE_STEP, EVM_GAS_MAX, evmAddressOf, evmFirstBlockAtOrAfter, evmRea
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const POOL = "0x00000000000000000000000000000000b1f1f001";
-// the pool a sender built from the environment must be: the kit's Base Sepolia pin (evmPoolSendersFromEnv, card helper-evm-mainnet-pools)
-const PIN = evmPoolVenues()["base-sepolia"].pool!;
+// the pool a sender built from the environment must be: the kit's Base pin (evmPoolSendersFromEnv, card helper-evm-mainnet-pools;
+// card helper-mainnet-pools-only: the environment loads mainnet pools only)
+const PIN = evmPoolVenues().base.pool!;
 const FEE_TO = "0x000000000000000000000000000000000000fee1";
 const REQ = {
   recipient: W, // W signs every release it is paid by (M354): the test W key's address
@@ -424,14 +425,14 @@ test("a provider that writes hex in upper case: drpc's 0xB626 reads as 46630, an
 test("the EVM pool sell sender's address is the kit's pinned sell sender for its chain, or the helper does not start; a chain with no pin starts with sales off; its key is its own", async () => {
   const SELL_KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SELL_SENDER").digest());
   const env = {
-    POOL_EVM_ADDRESS_BASE_SEPOLIA: PIN,
-    POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"),
-    POOL_EVM_SELL_KEY_BASE_SEPOLIA: "0x" + Buffer.from(SELL_KEY).toString("hex"),
-    POOL_EVM_FEE_BASE_SEPOLIA: EVM_POOL_FEE_FLOOR.toString(),
-    POOL_EVM_RPCS_BASE_SEPOLIA: "https://sepolia.base.org,https://base-sepolia-rpc.publicnode.com",
+    POOL_EVM_ADDRESS_BASE: PIN,
+    POOL_EVM_SENDER_KEY_BASE: "0x" + Buffer.from(KEY).toString("hex"),
+    POOL_EVM_SELL_KEY_BASE: "0x" + Buffer.from(SELL_KEY).toString("hex"),
+    POOL_EVM_FEE_BASE: EVM_POOL_FEE_FLOOR.toString(),
+    POOL_EVM_RPCS_BASE: "https://mainnet.base.org,https://base-rpc.publicnode.com",
   };
   const kit = evmPoolVenues();
-  const pinned = (sellSender: string) => ({ ...kit, "base-sepolia": { ...kit["base-sepolia"], sellSender } });
+  const pinned = (sellSender: string) => ({ ...kit, base: { ...kit.base, sellSender } });
   // the pin is the sell key's own address: it starts, in either case of hex
   const own = evmAddressOf(SELL_KEY);
   assert.equal(evmPoolSendersFromEnv(env, pinned(own)).get(PIN)!.sellSender, own);
@@ -439,37 +440,37 @@ test("the EVM pool sell sender's address is the kit's pinned sell sender for its
   assert.equal(evmPoolSendersFromEnv(env, pinned(own)).get(PIN)!.sender, evmAddressOf(KEY), "the withdraw sender keeps its own key");
   // the withdraw sender's address pinned, or another: refused at start, naming the name and the pin, never a key
   for (const other of [evmAddressOf(KEY), "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"]) {
-    assert.throws(() => evmPoolSendersFromEnv(env, pinned(other)), (e: Error) => e.message.includes("POOL_EVM_SELL_KEY_BASE_SEPOLIA") && e.message.includes(other) && !e.message.includes(Buffer.from(KEY).toString("hex")) && !e.message.includes(Buffer.from(SELL_KEY).toString("hex")));
+    assert.throws(() => evmPoolSendersFromEnv(env, pinned(other)), (e: Error) => e.message.includes("POOL_EVM_SELL_KEY_BASE") && e.message.includes(other) && !e.message.includes(Buffer.from(KEY).toString("hex")) && !e.message.includes(Buffer.from(SELL_KEY).toString("hex")));
   }
   // the sell key equal to the withdraw key, not a key, or set on a network whose pool is not: refused at start
-  assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_SELL_KEY_BASE_SEPOLIA: env.POOL_EVM_SENDER_KEY_BASE_SEPOLIA }), /POOL_EVM_SELL_KEY_BASE_SEPOLIA must not be POOL_EVM_SENDER_KEY_BASE_SEPOLIA/);
-  assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_SELL_KEY_BASE_SEPOLIA: "0x1234" }), /POOL_EVM_SELL_KEY_BASE_SEPOLIA must be 0x and 64 lowercase hex/);
-  assert.throws(() => evmPoolSendersFromEnv({ POOL_EVM_SELL_KEY_BASE: env.POOL_EVM_SELL_KEY_BASE_SEPOLIA }), /POOL_EVM_SELL_KEY_BASE is set but base's pool is not/);
+  assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_SELL_KEY_BASE: env.POOL_EVM_SENDER_KEY_BASE }), /POOL_EVM_SELL_KEY_BASE must not be POOL_EVM_SENDER_KEY_BASE/);
+  assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_SELL_KEY_BASE: "0x1234" }), /POOL_EVM_SELL_KEY_BASE must be 0x and 64 lowercase hex/);
+  assert.throws(() => evmPoolSendersFromEnv({ POOL_EVM_SELL_KEY_BASE: env.POOL_EVM_SELL_KEY_BASE }), /POOL_EVM_SELL_KEY_BASE is set but base's pool is not/);
   // card helper-sender-fee-proof: the fee collector a Sell must pay (POOL_EVM_FEE_COLLECTOR_<NETWORK>), named in the fee
   // answer; unset, every sell is refused; not an address, the pool's or a sender's, or set on a network whose pool is
   // not: refused at start
   // the kit's pin (review M1: the env value is held to it, as the sell key is to its sender pin)
-  const C = kit["base-sepolia"]!.feeCollector!;
-  assert.equal(C, "0x9cc4788af51677aaa7770d78277c41fb864b35e1", "the deployed Base Sepolia FeeCollector");
-  const withC = evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA: C }, pinned(own)).get(PIN)!;
+  const C = kit.base!.feeCollector!;
+  assert.equal(C, "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047", "the deployed Base FeeCollector");
+  const withC = evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE: C }, pinned(own)).get(PIN)!;
   assert.equal(((await withC.sell({ nonsense: 1 })).body as { error: { code: string } }).error.code, "bad_shape", "a collector set: sells are read");
   assert.equal(((await evmPoolSendersFromEnv(env, pinned(own)).get(PIN)!.sell({ nonsense: 1 })).body as { error: { code: string } }).error.code, "not_configured");
-  assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA: "0x1234" }, pinned(own)), /POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA must be an address/);
-  for (const bad of [PIN, own, evmAddressOf(KEY)]) assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA: bad }, pinned(own)), /fee collector/, bad);
+  assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE: "0x1234" }, pinned(own)), /POOL_EVM_FEE_COLLECTOR_BASE must be an address/);
+  for (const bad of [PIN, own, evmAddressOf(KEY)]) assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE: bad }, pinned(own)), /fee collector/, bad);
   assert.throws(() => evmPoolSendersFromEnv({ POOL_EVM_FEE_COLLECTOR_BASE: C }), /POOL_EVM_FEE_COLLECTOR_BASE is set but base's pool is not/);
   // review M1: a collector that is not the kit's pin (another address, a stand-in, the other testnet's collector) is
   // refused at start, naming the variable and the pin; the pin in upper case starts; a chain whose venue pins no
   // collector (the mainnets until theirs deploy) takes none
-  assert.equal(evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA: C.toUpperCase().replace("0X", "0x") }, pinned(own)).get(PIN)!.pool, PIN);
-  for (const other of ["0x00000000000000000000000000000000c011ec70", kit["robinhood-testnet"]!.feeCollector!, "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"]) {
-    assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA: other }, pinned(own)), (e: Error) => e.message.includes("POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA is not the kit's pinned fee collector") && e.message.includes(C), other);
+  assert.equal(evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE: C.toUpperCase().replace("0X", "0x") }, pinned(own)).get(PIN)!.pool, PIN);
+  for (const other of ["0x00000000000000000000000000000000c011ec70", kit.robinhood!.feeCollector!, "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"]) {
+    assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE: other }, pinned(own)), (e: Error) => e.message.includes("POOL_EVM_FEE_COLLECTOR_BASE is not the kit's pinned fee collector") && e.message.includes(C), other);
   }
-  const noCollector = { ...pinned(own), "base-sepolia": Object.fromEntries(Object.entries(pinned(own)["base-sepolia"]).filter(([k]) => k !== "feeCollector")) } as typeof kit;
-  assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA: C }, noCollector), /POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA is not the kit's pinned fee collector for base-sepolia \(none pinned\)/);
+  const noCollector = { ...pinned(own), base: Object.fromEntries(Object.entries(pinned(own).base).filter(([k]) => k !== "feeCollector")) } as typeof kit;
+  assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_COLLECTOR_BASE: C }, noCollector), /POOL_EVM_FEE_COLLECTOR_BASE is not the kit's pinned fee collector for base \(none pinned\)/);
   assert.equal(((await evmPoolSendersFromEnv(env, noCollector).get(PIN)!.sell({ nonsense: 1 })).body as { error: { code: string } }).error.code, "not_configured", "no pin, no collector: sells off");
   // no sell key: the network starts (withdraws go) and its sells are refused not_configured
   const noSell: Record<string, string> = { ...env };
-  delete noSell.POOL_EVM_SELL_KEY_BASE_SEPOLIA;
+  delete noSell.POOL_EVM_SELL_KEY_BASE;
   assert.equal(evmPoolSendersFromEnv(noSell, pinned(own)).get(PIN)!.sellSender, null);
   // the kit's own list pins each network's sell sender (the helper box's keys; the mainnets' since card
   // evm-mainnet-senders): a test key on Base Sepolia is refused at start against the kit's own pin; a chain with no pin
@@ -479,8 +480,8 @@ test("the EVM pool sell sender's address is the kit's pinned sell sender for its
   assert.equal(kit["robinhood-testnet"].sellSender, "0xd12d83097671d731df2db731e973ad9a07673607");
   assert.equal(kit.base.sellSender, "0x2139756ab61ad861b4e25a009f092683e7454ee9");
   assert.equal(kit.robinhood.sellSender, "0x92874bbc2638f644872d911d8b72d734978e24ae");
-  assert.throws(() => evmPoolSendersFromEnv(env), (e: Error) => e.message.includes("POOL_EVM_SELL_KEY_BASE_SEPOLIA") && e.message.includes(kit["base-sepolia"].sellSender!));
-  const unpinned = { ...kit, "base-sepolia": Object.fromEntries(Object.entries(kit["base-sepolia"]).filter(([k]) => k !== "sellSender")) as typeof kit["base-sepolia"] };
+  assert.throws(() => evmPoolSendersFromEnv(env), (e: Error) => e.message.includes("POOL_EVM_SELL_KEY_BASE") && e.message.includes(kit.base.sellSender!));
+  const unpinned = { ...kit, base: Object.fromEntries(Object.entries(kit.base).filter(([k]) => k !== "sellSender")) as typeof kit["base"] };
   const off = evmPoolSendersFromEnv(env, unpinned).get(PIN)!;
   assert.equal(off.sellSender, null, "no pin: no sell sender");
   assert.equal(off.sender, evmAddressOf(KEY), "the withdraws still go");
@@ -566,14 +567,14 @@ test("the withdraw's deadline again after the queue's wait: a carry whose deadli
 // card evm-buy-hookdata-fee, review fold 2 LOW-A: one floor, the kit's; the env may only repeat it
 test("LOW-A the helper refuses an env floor other than the kit's EVM_POOL_FEE_FLOOR, and an unset one is the kit's", () => {
   const env = {
-    POOL_EVM_ADDRESS_BASE_SEPOLIA: PIN,
-    POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"),
-    POOL_EVM_RPCS_BASE_SEPOLIA: "https://sepolia.base.org,https://base-sepolia-rpc.publicnode.com",
+    POOL_EVM_ADDRESS_BASE: PIN,
+    POOL_EVM_SENDER_KEY_BASE: "0x" + Buffer.from(KEY).toString("hex"),
+    POOL_EVM_RPCS_BASE: "https://mainnet.base.org,https://base-rpc.publicnode.com",
   };
   assert.ok(evmPoolSendersFromEnv(env).get(PIN));
-  assert.ok(evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_BASE_SEPOLIA: "10000000000000" }).get(PIN));
+  assert.ok(evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_BASE: "10000000000000" }).get(PIN));
   for (const fee of ["1000", "20000000000000", "9999999999999", "1e13", "010000000000000", " 10000000000000"])
-    assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_BASE_SEPOLIA: fee }), /POOL_EVM_FEE_BASE_SEPOLIA must be unset or the kit's floor, 10000000000000 wei/, fee);
+    assert.throws(() => evmPoolSendersFromEnv({ ...env, POOL_EVM_FEE_BASE: fee }), /POOL_EVM_FEE_BASE must be unset or the kit's floor, 10000000000000 wei/, fee);
 });
 
 // card evm-buy-hookdata-fee, review fold 2 MEDIUM-A: the fee reads state at the epoch's first block up to a proof's
@@ -597,7 +598,7 @@ async function nodes(keepFrom: bigint, http429 = 0): Promise<{ urls: [string, st
         const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(T0 + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
         let out: object;
         if (method === "eth_getBlockByNumber") out = { result: block(params[0] === "latest" ? 600n : BigInt(params[0] as string)) };
-        else if (method === "eth_chainId") out = { result: "0x14a34" }; // Base Sepolia, the kit's pin
+        else if (method === "eth_chainId") out = { result: "0x2105" }; // Base, the kit's pin (card helper-mainnet-pools-only: the helper serves no test pool)
         else if (method === "eth_call") {
           const at = BigInt((params[1] as { blockHash: string }).blockHash);
           out = at < keep ? { error: { code: -32000, message: `historical state ${"ab".repeat(32)} is not available` } } : { result: `0x${"0".repeat(63)}2` };
@@ -615,17 +616,17 @@ async function nodes(keepFrom: bigint, http429 = 0): Promise<{ urls: [string, st
 /** ready()'s waits, as evm.ts sets them (EVM_READY_WAIT_MS doubling to EVM_READY_WAIT_MAX_MS, EVM_READY_MISS_MS of
  *  them at most; literals here, so this file links at a base without them): a try every operator fails, every time. */
 const READY_WAITS = [1_000, 2_000, 4_000, ...Array(10).fill(8_000)];
-/** The kit's venues with no quote providers for Base Sepolia: the seat list is the pair alone (two loopback nodes). */
-const PAIR_ONLY = { ...evmPoolVenues(), "base-sepolia": { ...evmPoolVenues()["base-sepolia"], providers: [] as readonly string[] } };
+/** The kit's venues with no quote providers for Base: the seat list is the pair alone (two loopback nodes). */
+const PAIR_ONLY = { ...evmPoolVenues(), base: { ...evmPoolVenues().base, providers: [] as readonly string[] } };
 
 test("MEDIUM-A the start reads the fee's state at the block POOL_LIFE_MAX_MS old on two operators; one that cannot answer it is asked again for the bound, then refused naming the variable and the host", async (t) => {
   const realNow = Date.now;
   t.after(() => void (Date.now = realNow));
   Date.now = () => Number(T0 + 1_200n) * 1000; // block 600's time, the newest
   const envOf = (urls: [string, string]) => ({
-    POOL_EVM_ADDRESS_BASE_SEPOLIA: PIN,
-    POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"),
-    POOL_EVM_RPCS_BASE_SEPOLIA: urls.join(","),
+    POOL_EVM_ADDRESS_BASE: PIN,
+    POOL_EVM_SENDER_KEY_BASE: "0x" + Buffer.from(KEY).toString("hex"),
+    POOL_EVM_RPCS_BASE: urls.join(","),
   });
   const at300 = `0x${(300n).toString(16).padStart(64, "0")}`;
   // both keep every block: ready, the depth and the two chain fee reads at block 300 (600 s old) on both, then the
@@ -648,7 +649,7 @@ test("MEDIUM-A the start reads the fee's state at the block POOL_LIFE_MAX_MS old
     const keyed = pruned.urls.map((u) => `${u}/v2/s3cr3tKEY?apikey=s3cr3tKEY`) as [string, string];
     const waits: number[] = [];
     await assert.rejects(evmPoolSendersFromEnv(envOf(keyed), PAIR_ONLY).get(PIN)!.ready(async (ms) => void waits.push(ms)), (e: Error) => {
-      assert.match(e.message, /^POOL_EVM_RPCS_BASE_SEPOLIA: the fee's state at block 300, 600 s old \(a proof's fee is read up to 600 s back\), 14 tries over 87 s: .*historical state/);
+      assert.match(e.message, /^POOL_EVM_RPCS_BASE: the fee's state at block 300, 600 s old \(a proof's fee is read up to 600 s back\), 14 tries over 87 s: .*historical state/);
       assert.ok(e.message.includes(new URL(pruned.urls[1]).host) && !e.message.includes(`${new URL(pruned.urls[0]).host}:`), e.message);
       assert.ok(!e.message.includes("s3cr3tKEY") && !e.message.includes("/v2/"), e.message);
       return true;
@@ -692,7 +693,7 @@ test("the pool sender's reads draw on the helper's pace per provider, from the s
   Date.now = () => Number(T0 + 1_200n) * 1000; // block 600's time, the newest
   const n = await nodes(0n, 1);
   try {
-    const env = { POOL_EVM_ADDRESS_BASE_SEPOLIA: PIN, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"), POOL_EVM_RPCS_BASE_SEPOLIA: n.urls.join(",") };
+    const env = { POOL_EVM_ADDRESS_BASE: PIN, POOL_EVM_SENDER_KEY_BASE: "0x" + Buffer.from(KEY).toString("hex"), POOL_EVM_RPCS_BASE: n.urls.join(",") };
     // the clock: a sleeper wakes at its own time, the earliest first, so one wait never adds to another's beside it
     let now = 1_000_000;
     const timers: { at: number; go: () => void }[] = [];
@@ -867,12 +868,12 @@ test("LOW-2 ready(): two chains, a chain not the kit's pin, two values for one r
 // kit's fee pair (feeProviders, each holding state 600 s back), never the quote's providers
 test("fold 8 a sender with no POOL_EVM_RPCS_* reads the kit's feeProviders for its network first, the quote's providers only past them, and with neither set it does not start", async () => {
   const env = {
-    POOL_EVM_ADDRESS_BASE_SEPOLIA: PIN,
-    POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"),
+    POOL_EVM_ADDRESS_BASE: PIN,
+    POOL_EVM_SENDER_KEY_BASE: "0x" + Buffer.from(KEY).toString("hex"),
   };
   const kit = evmPoolVenues();
   const fee = ["https://fee.fold8-a.test", "https://fee.fold8-b.test"] as const; // two operators (fold B)
-  const venues = { ...kit, "base-sepolia": { ...kit["base-sepolia"], providers: ["https://quote-a.fold8.test", "https://quote-b.fold8.test", "https://quote-c.fold8.test"], feeProviders: fee } };
+  const venues = { ...kit, base: { ...kit.base, providers: ["https://quote-a.fold8.test", "https://quote-b.fold8.test", "https://quote-c.fold8.test"], feeProviders: fee } };
   const asked: string[] = [];
   const real = globalThis.fetch;
   globalThis.fetch = (async (u: string | URL) => {
@@ -889,8 +890,8 @@ test("fold 8 a sender with no POOL_EVM_RPCS_* reads the kit's feeProviders for i
   // try's first read on the fee pair's first; the quote's providers answer only for a fee provider that did not
   assert.equal(asked[0], fee[0], asked.join(", "));
   assert.ok(asked.includes(fee[1]) && asked.indexOf(fee[0]) < asked.indexOf("https://quote-a.fold8.test"), asked.join(", "));
-  const { feeProviders: _, ...none } = kit["base-sepolia"];
-  assert.throws(() => evmPoolSendersFromEnv(env, { ...kit, "base-sepolia": none }), /POOL_EVM_RPCS_BASE_SEPOLIA must be set: the kit lists no fee providers for base-sepolia/);
+  const { feeProviders: _, ...none } = kit.base;
+  assert.throws(() => evmPoolSendersFromEnv(env, { ...kit, base: none }), /POOL_EVM_RPCS_BASE must be set: the kit lists no fee providers for base/);
 });
 
 // review M-3: the epoch's first block is found by the chain's block time, never a second as a block, and the sender's

@@ -172,8 +172,12 @@ test("every environment name the helper's code reads when it runs is passed by c
   const without = passedNames(read("deploy/compose.yaml").replace(/^ {6}WITHDRAW_RELAYER_KEYS_TESTNET:.*\n/m, ""), read("Dockerfile"));
   assert.deepEqual([...atRun].filter((n) => !without.has(n)), ["WITHDRAW_RELAYER_KEYS_TESTNET"]);
   // the pool senders' names (pool/solana.ts), read when nothing is set: a compose without one is caught
-  const pool = ["POOL_SOLANA_PROGRAM_DEVNET", "POOL_SOLANA_FEE_PAYER_KEY_DEVNET", "POOL_SOLANA_FEE_DEVNET", "POOL_SOLANA_RPCS_DEVNET", "POOL_SOLANA_FEE_PAYER_KEY_MAINNET", "POOL_EVM_SENDER_KEY_BASE", "POOL_EVM_RPCS_BASE_SEPOLIA", "POOL_EVM_SELL_KEY_BASE", "POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA", "POOL_EVM_SELL_KEY_ROBINHOOD", "POOL_EVM_SELL_KEY_BASE_SEPOLIA", "POOL_EVM_SELL_KEY_ROBINHOOD_TESTNET"];
+  // (card helper-mainnet-pools-only: the mainnets' alone; POOL_SOLANA_PROGRAM_DEVNET is the solana-devnet RPC scan's)
+  const pool = ["POOL_SOLANA_PROGRAM_MAINNET", "POOL_SOLANA_FEE_PAYER_KEY_MAINNET", "POOL_SOLANA_RPCS_MAINNET", "POOL_SOLANA_PROGRAM_DEVNET", "POOL_EVM_SENDER_KEY_BASE", "POOL_EVM_RPCS_ROBINHOOD", "POOL_EVM_SELL_KEY_BASE", "POOL_EVM_FEE_COLLECTOR_BASE", "POOL_EVM_SELL_KEY_ROBINHOOD", "POOL_EVM_FEE_COLLECTOR_ROBINHOOD"];
   assert.ok(pool.every((n) => atRun.has(n)), `the run read ${[...atRun].join(", ")}`);
+  // no test pool's line is read at run but the scan's, so none is passed (a test pool's lines in the host's .env reach nothing)
+  assert.deepEqual([...atRun].filter((n) => /^POOL_.*(SEPOLIA|TESTNET|DEVNET)/.test(n)), ["POOL_SOLANA_PROGRAM_DEVNET"]);
+  assert.deepEqual([...passedNames(read("deploy/compose.yaml"), read("Dockerfile"))].filter((n) => /^POOL_.*(SEPOLIA|TESTNET|DEVNET)/.test(n)), ["POOL_SOLANA_PROGRAM_DEVNET"]);
   for (const n of pool) {
     const missing = passedNames(read("deploy/compose.yaml").replace(new RegExp(`^ {6}${n}:.*\\n`, "m"), ""), read("Dockerfile"));
     assert.deepEqual([...atRun].filter((x) => !missing.has(x)), [n]);

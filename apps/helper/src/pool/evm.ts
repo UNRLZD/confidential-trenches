@@ -1973,12 +1973,12 @@ export const EVM_READY_WAIT_MAX_MS = 8_000;
 export const EVM_READY_MISS_MS = 90_000;
 
 /** Per network: the pool, the sender's key (0x + 64 hex, gas only), the fee's floor (unset, or the kit's
- *  EVM_POOL_FEE_FLOOR), its recipient, two RPC URLs. */
+ *  EVM_POOL_FEE_FLOOR), its recipient, two RPC URLs. The mainnets only (card helper-mainnet-pools-only; owner, 12 Nov:
+ *  no test networks; pool/mainnet-only.test.ts holds these three tables to MAINNET_POOL_NETWORKS.evm): a test pool's
+ *  lines left in the host's environment are read by nothing, so they load no sender and refuse no start. */
 export const POOL_EVM_ENV = {
   base: ["POOL_EVM_ADDRESS_BASE", "POOL_EVM_SENDER_KEY_BASE", "POOL_EVM_FEE_BASE", "POOL_EVM_FEE_RECIPIENT_BASE", "POOL_EVM_RPCS_BASE"],
   robinhood: ["POOL_EVM_ADDRESS_ROBINHOOD", "POOL_EVM_SENDER_KEY_ROBINHOOD", "POOL_EVM_FEE_ROBINHOOD", "POOL_EVM_FEE_RECIPIENT_ROBINHOOD", "POOL_EVM_RPCS_ROBINHOOD"],
-  "base-sepolia": ["POOL_EVM_ADDRESS_BASE_SEPOLIA", "POOL_EVM_SENDER_KEY_BASE_SEPOLIA", "POOL_EVM_FEE_BASE_SEPOLIA", "POOL_EVM_FEE_RECIPIENT_BASE_SEPOLIA", "POOL_EVM_RPCS_BASE_SEPOLIA"],
-  "robinhood-testnet": ["POOL_EVM_ADDRESS_ROBINHOOD_TESTNET", "POOL_EVM_SENDER_KEY_ROBINHOOD_TESTNET", "POOL_EVM_FEE_ROBINHOOD_TESTNET", "POOL_EVM_FEE_RECIPIENT_ROBINHOOD_TESTNET", "POOL_EVM_RPCS_ROBINHOOD_TESTNET"],
 } as const;
 
 /**
@@ -1988,8 +1988,6 @@ export const POOL_EVM_ENV = {
 export const POOL_EVM_SELL_ENV = {
   base: "POOL_EVM_SELL_KEY_BASE",
   robinhood: "POOL_EVM_SELL_KEY_ROBINHOOD",
-  "base-sepolia": "POOL_EVM_SELL_KEY_BASE_SEPOLIA",
-  "robinhood-testnet": "POOL_EVM_SELL_KEY_ROBINHOOD_TESTNET",
 } as const;
 
 /**
@@ -1999,8 +1997,6 @@ export const POOL_EVM_SELL_ENV = {
 export const POOL_EVM_COLLECTOR_ENV = {
   base: "POOL_EVM_FEE_COLLECTOR_BASE",
   robinhood: "POOL_EVM_FEE_COLLECTOR_ROBINHOOD",
-  "base-sepolia": "POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA",
-  "robinhood-testnet": "POOL_EVM_FEE_COLLECTOR_ROBINHOOD_TESTNET",
 } as const;
 
 /**

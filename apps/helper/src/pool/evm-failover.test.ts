@@ -241,16 +241,15 @@ function chainStub(t: TestContext, plant: (host: string, method: string, params:
     if (method === "eth_getBlockByNumber") return answer(200, { result: block(params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string))) });
     if (method === "eth_call") {
       const [{ to, data }] = params as [{ to: string; data: string }];
-      return answer(200, { result: word(to.toLowerCase() === PIN || to.toLowerCase() === BASE_PIN || to.toLowerCase() === SEPOLIA_PIN ? (data === DEPTH ? 2n : 0n) : data === ARB_L1 ? 3n : 0n) });
+      return answer(200, { result: word(to.toLowerCase() === PIN || to.toLowerCase() === BASE_PIN ? (data === DEPTH ? 2n : 0n) : data === ARB_L1 ? 3n : 0n) });
     }
-    // each chain's id, the kit's pin: Base Sepolia 84532, Base 8453, Robinhood 4663
-    if (method === "eth_chainId") return answer(200, { result: /sepolia|testnet/.test(String(u)) ? "0x14a34" : /base/.test(String(u)) ? "0x2105" : "0x1237" });
+    // each chain's id, the kit's pin: Base 8453, Robinhood 4663
+    if (method === "eth_chainId") return answer(200, { result: /base/.test(String(u)) ? "0x2105" : "0x1237" });
     return answer(200, { error: { code: -32601, message: "no" } });
   }) as typeof fetch;
   return calls;
 }
 const BASE_PIN = evmPoolVenues().base.pool!.toLowerCase();
-const SEPOLIA_PIN = evmPoolVenues()["base-sepolia"].pool!.toLowerCase();
 const DRPC_HOSTS = new Set(["robinhood.drpc.org", "lb.drpc.live"]);
 const ENV3 = { ...ENV, ROBINHOOD_RPC_URL_DRPC_2: `https://lb.drpc.live/robinhood/${FAKE}2`, ROBINHOOD_RPC_URL_DRPC_3: `https://lb.drpc.live/robinhood/${FAKE}3` };
 const opFee = (network: string) => evmPoolFee({ gas: evmPoolGas(2), gasPrice: GWEI, chainFee: evmPoolChainFee(network, EVM_POOL_TX_BYTES, evmPoolChainFeeReads(network, evmPoolGas(2)).map((r) => (r.data === ARB_L1 ? 3n : 0n))) });
@@ -319,15 +318,6 @@ test("Base: a provider's -32000 'historical state … is not available' is that 
   assert.equal(f?.fee, opFee("base").toString());
   assert.ok(stateReads(calls, "lb.drpc.live") > 0, "another operator answered the state reads");
   assert.ok(lines.length > 0 && lines.every((l) => /failed at base-rpc\.publicnode\.com: RPC error -32000: historical state [0-9a-f]+ is not available.* answered$/.test(l)), lines.join("\n"));
-});
-
-test("a test network reads past its pair too: Base Sepolia's first provider refusing the state, the fee is answered by publicnode and Pocket", async (t) => {
-  const calls = chainStub(t, (host, method) => (host === "sepolia.base.org" && method === "eth_call" ? UNKNOWN_STATE : null));
-  const lines: string[] = [];
-  const env = { POOL_EVM_ADDRESS_BASE_SEPOLIA: evmPoolVenues()["base-sepolia"].pool!, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: KEY };
-  const f = await sendersOf(env, lines).get(SEPOLIA_PIN)!.fee(EPOCH + 1);
-  assert.equal(f?.fee, opFee("base-sepolia").toString());
-  assert.ok(stateReads(calls, "base-sepolia-rpc.publicnode.com") > 0 && stateReads(calls, "base-testnet.api.pocket.network") > 0, "publicnode and Pocket answered");
 });
 
 test("a read each side fails, one side on a throttle: the answer stays a throttle (429 with its wait), never the other side's 503", async (t) => {
