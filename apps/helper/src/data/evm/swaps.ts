@@ -2318,8 +2318,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
       // held (the provider refused our rate): asked again when the hold ends, no fail, as a paced one; held past
       // LOCATE_HELD_MAX_MS since its first, the steps read the day (card robinhood-trades-finish-filling: each 429
-      // counted toward BACK_FAILS_MAX, and with the read back going on at each hold's end three refusals in 3 s sent a
-      // tape to the steps). A locate the provider did not answer is a fail, BACK_FAILS_MAX in a row the steps.
+      // counted toward BACK_FAILS_MAX, and the chain's own RPC refusing 20 s sent a lone tape to read the day in steps,
+      // swaps-back-resume.test.ts). A locate the provider did not answer is a fail, BACK_FAILS_MAX in a row the steps.
       if (at === "held") {
         const since = back.heldSince ?? now();
         e.back = now() - since >= LOCATE_HELD_MAX_MS ? steps : { ...back, heldSince: since, until: now() + Math.max(1, ...BACK_LOCATE.map((u) => holds.heldMs(u))) };
