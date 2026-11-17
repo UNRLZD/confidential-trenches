@@ -81,6 +81,38 @@ const KEY = "wallet-passkey-prf";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const SIGN_HOST = "confidential.unrealized.trade";
 export const APP_HOST = "ct-app.unrealized.trade"; // the one parent SIGN_HOST's frame-ancestors allows
+/** The signing page's shared NEAR pace records (packages/wallet/src/pace.ts PACE_DB "ct-pace", store "paces"): whether
+ *  the database exists, and its keys ("ct-pace:<provider URL>"); read in the page, nothing written. */
+export const PACE_RECORDS = async () => {
+  if (!(await indexedDB.databases()).some((d) => d.name === "ct-pace")) return { db: false, keys: [] };
+  const db = await new Promise((res, rej) => {
+    const r = indexedDB.open("ct-pace");
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  try {
+    if (!db.objectStoreNames.contains("paces")) return { db: true, keys: [] };
+    const keys = await new Promise((res, rej) => {
+      const q = db.transaction("paces").objectStore("paces").getAllKeys();
+      q.onsuccess = () => res(q.result);
+      q.onerror = () => rej(q.error);
+    });
+    return { db: true, keys: keys.map(String) };
+  } finally {
+    db.close();
+  }
+};
+/** How long the prf run waits for the page's first paced NEAR read to write its ct-pace record. */
+const PACE_WAIT_MS = 30_000;
+/** PACE_RECORDS in `page`, read again each second until it holds a record or PACE_WAIT_MS has passed. */
+async function paceRecords(page) {
+  const end = Date.now() + PACE_WAIT_MS;
+  for (;;) {
+    const r = await page.evaluate(PACE_RECORDS).catch((e) => ({ db: false, keys: [], error: String(e).slice(0, 120) }));
+    if ((r.db && r.keys.length > 0) || Date.now() >= end) return r;
+    await page.waitForTimeout(1_000);
+  }
+}
 const FRAME_PARENT = `<!doctype html><iframe src="https://${SIGN_HOST}/"></iframe>`;
 /** The harness's APP_HOST page inside the shell: the terminal's first controls, a link and a button. */
 export const APP_STAND_IN = `<!doctype html><title>APP_HOST</title><a href="/">Trenches</a> <button type="button">Sign in</button>`;
@@ -261,6 +293,13 @@ export function judge(rec, era = SIGN_OUT_NOW) {
   const r = p.race ?? {};
   say(r.a?.state === "signed-in" && r.b?.state === "signed-in" && HEX64.test(r.a?.account ?? "") && r.a?.account === r.b?.account && r.reload?.account === r.a?.account,
     `prf: two tabs that create at once end on one account, the one stored (${r.a?.account && r.a?.account === r.b?.account ? "one" : "two"})`);
+  // card signpage-near-pace-shared-across-tabs: a record cut before it carries no pace read; one that does must show the
+  // page's NEAR paces kept in its own database for every tab (a build with each tab on its own pace has no ct-pace)
+  if (p.pace !== undefined) {
+    const keys = Array.isArray(p.pace?.keys) ? p.pace.keys : [];
+    say(p.pace?.db === true && keys.some((k) => /^ct-pace:https:\/\/\S+$/.test(k)),
+      `prf: the page's NEAR paces are one for every tab, kept in its own database (ct-pace ${p.pace?.db === true ? `holds ${keys.length} provider(s)` : "absent"})`);
+  }
   const rps = p.credentials ?? [];
   say(rps.length === 1 && rps[0].rpId === SIGN_HOST, `prf: one passkey, rp.id ${rps.map((c) => c.rpId).join(", ") || "none"}`);
   say(p.prfOk === true && HEX64.test(p.expected ?? "") && p.expected === A, `prf: the account is T_0 of the passkey's PRF output, derived apart from the kit (${p.expected === A ? "equal" : "differs"})`);
@@ -807,6 +846,10 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
         prfHex = out;
         record.prf.expected = accountOfPrf(Buffer.from(out, "hex"), await wordlist(fetchFn));
       }
+      // the page's NEAR paces, one for every tab of the origin (card signpage-near-pace-shared-across-tabs): once a tab's
+      // restore reads NEAR (its vault scope's ids, on FastNEAR and dRPC), the page's own database ct-pace holds a record
+      // per provider URL it paced; read last in the run, waited up to PACE_WAIT_MS for the restore to reach NEAR
+      record.prf.pace = await paceRecords(page);
     } finally {
       await h.close();
     }
