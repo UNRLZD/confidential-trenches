@@ -17,6 +17,7 @@
 //  10. route fee: `return stable ? ONECLICK_FEE_BPS[path] : ONECLICK_PAIR_FEE_BPS[path]` -> `return ONECLICK_PAIR_FEE_BPS[path]`
 //  11. own-key path: `!Object.hasOwn(ONECLICK_FEE_BPS, path) || !Object.hasOwn(ONECLICK_PAIR_FEE_BPS, path)` -> `false`
 //  12. path type: `typeof path !== "string" || ` -> `` (a toString that answers "partner" twice, then "nopath")
+//  13. no entry at the table's fee: `v.length === 0) return fee;` -> `v.length === 0) return 0;`
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
@@ -185,7 +186,6 @@ for (const [name, fixture, req, opts] of [["live", fx.live, LIVE_REQ, LIVE_OPTS]
     ["another collector", [{ recipient: "ab".repeat(32), fee: name === "live" ? 20 : 1 }]],
     ["a higher fee", [{ recipient: "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd", fee: 50 }]],
     ["a second entry", [{ recipient: "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd", fee: name === "live" ? 20 : 1 }, { recipient: "ab".repeat(32), fee: 1 }]],
-    ["no entry", []],
     ["no appFees at all", undefined],
   ] as const) {
     test(`${name}: an unsigned appFees with ${what} is refused`, () => {
@@ -314,14 +314,12 @@ test("a floor whose fees take the whole amount is refused before MIN_DEPOSIT rai
 });
 
 // Same-asset quotes answer appFees [] (D52; the keyless dry fixture "same"), with no fee in the floor.
-test("a real same-asset dry quote with appFees [] passes; a fee entry on it, or [] on another pair, is refused", () => {
+test("a real same-asset dry quote with appFees [] passes; a fee entry on it is refused", () => {
   const opts = { ...DRY_OPTS, now: at(fx.same.answer) };
   const r = checkOneClickQuote(fx.same.request, clone(fx.same.answer), opts);
   assert.equal(r.amountOut, 1_994_400n); // amountIn − withdrawFee 5,600, nothing more (floor 1,991,400 with F 0)
   const a = clone(fx.same.answer); a.quoteRequest.appFees = [{ recipient: "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd", fee: 1 }];
   refused("app-fees", () => checkOneClickQuote(fx.same.request, a, opts));
-  const b = clone(fx.dry.answer); b.quoteRequest.appFees = [];
-  refused("app-fees", () => checkOneClickQuote(DRY_REQ, b, DRY_OPTS));
 });
 
 // A real answer that 1Click signed with a customRecipientMsg: the signature verifies, the echo refuses it.
@@ -472,5 +470,24 @@ test("each mode takes only its own collector: the public collector on a confiden
 test("a request asks confidentiality \"advanced\" or nothing", () => {
   for (const c of ["basic", "public", "", "ADVANCED", 1, null]) {
     refused("request", () => checkOneClickQuote({ ...cfx.request, confidentiality: c } as unknown as OneClickRequest, clone(cfx.answer), C_OPTS));
+  }
+});
+
+// Card oneclick-answer-names-no-fee-entry: since 17 Nov 2026 (between 05:20Z and 22:37Z) 1Click answers every quote with
+// appFees [], keyed and keyless, public and advanced (read 22:39Z). appFees is unsigned, so the recorded answers with
+// [] in it are those answers. [] is taken at the route's fee from the device's own table: the checked amounts and floors
+// are the ones the pinned entry gives, and a wrong entry is still refused.
+test("an answer that names no fee entry passes at the table's fee, on every path and mode, with the floors the pinned entry gives", () => {
+  for (const [req, answer, opts] of [
+    [DRY_REQ, fx.dry.answer, { ...DRY_OPTS, path: "partner" as const }],
+    [DRY_REQ, fx.dry.answer, { ...DRY_OPTS, path: "keyless" as const }],
+    [LIVE_REQ, fx.live.answer, { ...LIVE_OPTS, path: "keyless" as const }],
+    [cfx.request, cfx.answer, C_OPTS],
+  ] as const) {
+    const pinned = checkOneClickQuote(req, clone(answer), opts);
+    const a = clone(answer); a.quoteRequest.appFees = [];
+    assert.deepEqual(checkOneClickQuote(req, a, opts), pinned);
+    const w = clone(answer); w.quoteRequest.appFees = [{ recipient: "ab".repeat(32), fee: 1 }];
+    refused("app-fees", () => checkOneClickQuote(req, w, opts));
   }
 });

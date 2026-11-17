@@ -166,7 +166,10 @@ export function judge(rec) {
     const fee = oneClickFeeBps("partner", o, d);
     const fees = body?.quoteRequest?.appFees;
     const e = Array.isArray(fees) && fees.length === 1 ? fees[0] : null;
-    if (!e || e.recipient !== COLLECTOR[mode] || e.fee !== fee) { bad(`${name}: appFees ${show(fees)}, the kit's rule wants [{ ${mode} collector, fee ${fee} }]`); continue; }
+    // [] is 1Click's answer since 17 Nov 2026 (card oneclick-answer-names-no-fee-entry: no fee entry on any quote, keyed
+    // or keyless); the kit takes it at its own fee, which the public answer's whole check below holds to the floors
+    const none = Array.isArray(fees) && fees.length === 0;
+    if (!none && (!e || e.recipient !== COLLECTOR[mode] || e.fee !== fee)) { bad(`${name}: appFees ${show(fees)}, the kit's rule wants [{ ${mode} collector, fee ${fee} }] or none`); continue; }
     if (mode === "public") {
       try {
         checkOneClickQuote(a.request, body, { path: "partner", pricing: { in: ["1", "1"], out: ["1", "1"] }, decimalsIn: COIN[o].decimals, decimalsOut: COIN[d].decimals, intoVault: false, now: a.at });

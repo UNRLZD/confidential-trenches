@@ -319,13 +319,20 @@ export function oneClickFeeBps(path: OneClickPath, originAsset: string, destinat
 }
 
 // The pinned fee entry: [] on a same-asset quote, else exactly one entry, the collector and the route's fee as read,
-// nothing else set. Returns F.
+// nothing else set, or none at all. Returns F.
+// None at all (card oneclick-answer-names-no-fee-entry): since 17 Nov 2026, between 05:20Z and 22:37Z, 1Click names no
+// fee entry on any quote: every dry quote read 22:39Z answered appFees [], keyed through the helper and keyless, public
+// and advanced (ETH to Base ETH: amountOut 3,998,632,041,603,919 of 4,000,000,000,000,000 on both paths). [] is taken at
+// the route's F from the device's own table, which the floors below keep: appFees is unsigned (D4) and never set them, so
+// a quote that pays less than the table's fee allows is refused "floor" as before. The mode stays held by the echo and
+// the signing page's own keyless ask (pool-deposit-address.ts oneClickHidden); the collector was never signed either.
 function checkAppFees(v: unknown, path: OneClickPath, originAsset: string, destinationAsset: string, collector: string): number {
   const fee = oneClickFeeBps(path, originAsset, destinationAsset);
   if (originAsset === destinationAsset) {
     if (!(Array.isArray(v) && v.length === 0)) fail("app-fees", `appFees ${show(JSON.stringify(v))} on a same-asset quote is not []`);
     return 0;
   }
+  if (Array.isArray(v) && v.length === 0) return fee;
   const e = Array.isArray(v) && v.length === 1 ? v[0] : undefined;
   const ok = isObj(e) && e.recipient === collector && e.fee === fee &&
     Object.keys(e).every((k) => k === "recipient" || k === "fee" || e[k] === null || e[k] === undefined);
