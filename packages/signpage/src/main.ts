@@ -112,7 +112,7 @@ import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
 import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
 import { nearBuyDry, nearBuyKind, nearHoldingsPass, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
 import { dclPoolsKept, rheaPoolsKept } from "./near-pools.ts";
-import { nearSeatRpc, pacedNearRpc, seatsUp } from "../../wallet/src/pace.ts";
+import { nearSeatRpc, paceDb, pacedNearRpc, seatsUp, sharePaces } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm, type GivenPoolWithdraw } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
@@ -164,6 +164,12 @@ const framed = window.top !== window;
 // sign out (reloadSignedOut), so every loop, timer and closure of the old account ends with it, and the next load
 // starts signed out with the gate open.
 globalThis.fetch = gatedFetch(globalThis.fetch.bind(globalThis), location.origin);
+// one NEAR pace for every tab of this origin (card signpage-near-pace-shared-across-tabs; ../../wallet/src/pace.ts
+// sharePaces): two tabs ask from one address, so each URL's pace is one record in this origin's IndexedDB (paceDb, a
+// database of its own) under its Web Lock. The page is only ever top-level (public/_headers: frame-ancestors 'none'), so
+// its storage and locks are its origin's own, never a partition another site's frame splits. With no Web Locks or no
+// IndexedDB the tab keeps its own.
+if (navigator.locks && typeof indexedDB !== "undefined") sharePaces({ locks: navigator.locks, storage: paceDb(), origin: performance.timeOrigin });
 // from a sign out's tap to its end (or its refusal): no new run of any kind starts on this page; a money run that
 // already holds the seed lock finishes, its reads open, before the store's sign out can take the lock
 let leaving = false;
