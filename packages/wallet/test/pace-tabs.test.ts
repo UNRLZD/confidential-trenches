@@ -154,8 +154,9 @@ test("across two tabs, queued waits ended in any order keep the pace, free their
     all.push(fb(FAST).catch(() => {}));
     await Promise.all(all);
     assert.equal(sends.length, 11);
-    const after = sends.filter((t) => t - t0 > 10);
-    assert.ok(after.every((t) => t >= end), `sent at ${after.map((t) => Math.round(t - t0)).join(", ")} ms, inside the hold that ends at ${end - t0} ms`);
+    // the burst's 8 went at 0 ms, before the hold; every later send waits it out, in either tab
+    const after = sends.slice(8);
+    assert.ok(after.length === 3 && after.every((t) => t >= end), `sent at ${after.join(", ")} ms, inside the hold that ends at ${end} ms`);
   }
 }));
 
@@ -180,30 +181,25 @@ test("a tab whose shared storage throws, never answers or holds garbage keeps it
   for (const v of ["{", "null", '{"tat":"x","floor":1e400}', '{"tat":-1,"floor":[]}', '{"tat":1e13,"floor":0}']) {
     junk.map.set(`ct-pace:${FAST}`, v);
     const Q = await tab({ locks: locks(), storage: junk, origin: 0 });
-    const t = performance.now();
+    const asked = performance.now();
     let at = -1;
     await Q.pacedFetch(FAST, async () => ((at = performance.now()), answer()))(FAST);
-    assert.ok(at - t < 1, `${v}: the first read waited ${at - t} ms`);
+    assert.equal(at, asked, `${v}: the first read waited (the test clock moves only by a wait set)`);
   }
 }));
 
-// on the real clock: fake-indexeddb answers on the event loop, which a virtual clock may skip past to SHARE_STORAGE_MS
-// (it jumps to the next timer whenever only timers are left); dRPC's pace (10 a second, 20 at once) keeps it short
-test("paceDb: the shared records in an IndexedDB database of their own, ct-pace, read by every tab's instance; two tabs on it keep one pace", { timeout: 60_000 }, async () => {
-  const DRPC = NEAR_NETWORKS.mainnet.drpc;
+// paceDb itself, apart from any clock (fake-indexeddb answers on the event loop, which the test clock may skip past to
+// SHARE_STORAGE_MS): a record one tab's instance writes is the one another tab's reads, in a database of its own
+test("paceDb: the shared records live in an IndexedDB database of their own, ct-pace, one string per URL, read by every tab's instance", async () => {
   const idb = new IDBFactory();
-  const l = locks();
   const [a, b] = [await tab(null), await tab(null)];
-  for (const P of [a, b]) (P as unknown as { sharePaces(s: Share): void }).sharePaces({ locks: l, storage: P.paceDb(idb), origin: 0 });
-  const sends: number[] = [];
-  const fs = [a, b].map((P) => P.pacedFetch(DRPC, async () => (sends.push(performance.now()), answer())));
-  await Promise.all(fs.flatMap((f) => Array.from({ length: 15 }, () => f(DRPC))));
-  // on the real clock a send leaves a few ms after its slot (the record's write): 20 ms of slack on each, none on the burst
-  const r = read(sends, a, "drpc", 20);
-  assert.equal(sends.length, 30);
-  assert.ok(r.in50 <= 20 && r.past === null, `${r.in50} in 50 ms, a send past the pace at ${r.past}`);
-  assert.ok(sends.at(-1)! - sends[0]! >= 9 * 100 - 5, `30 sends in ${sends.at(-1)! - sends[0]!} ms: one pace, not two`);
+  const [da, db] = [a.paceDb(idb), b.paceDb(idb)];
+  assert.equal(await db.get(`ct-pace:${FAST}`), null);
+  await da.set(`ct-pace:${FAST}`, '{"tat":1,"floor":0}');
+  assert.equal(await db.get(`ct-pace:${FAST}`), '{"tat":1,"floor":0}');
+  await db.set(`ct-pace:${FAST}`, '{"tat":2,"floor":0}');
+  assert.equal(await da.get(`ct-pace:${FAST}`), '{"tat":2,"floor":0}');
+  assert.equal(await da.get(`ct-pace:${NEAR_NETWORKS.mainnet.drpc}`), null);
   assert.deepEqual((await idb.databases()).map((d) => d.name), [a.PACE_DB]);
-  const kept = JSON.parse((await a.paceDb(idb).get(`ct-pace:${DRPC}`))!) as { tat: number; floor: number };
-  assert.ok(kept.tat > 0 && Number.isFinite(kept.floor), JSON.stringify(kept));
+  assert.equal(a.PACE_DB, "ct-pace");
 });
