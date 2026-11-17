@@ -2651,12 +2651,23 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const natives = ownFits && v.nativeFirst && wethStart ? priced.filter((c) => startsNative(c.route)) : [];
   const exits = ownFits && unlisted.length > 0 ? priced.filter((r) => evmSellExits(chain, token, r.route)) : [];
   const all = () => true;
+  const near = (x: bigint, r: bigint) => x * 10000n >= r * BigInt(10000 - slippageBps);
+  // A refusal names a route its caller can buy (card evm-buy-never-below-a-hidden-market): where R is a market the
+  // device can read but not trade through, the best route that fits through no hook the venue does not list within the
+  // slippage of R, which a re-quote of it takes (underHooked); R itself only where none is (ZZ9: Robinhood's USDG,
+  // whose gated native pool sits within 0.02% above its open one and froze every coin bought through it)
+  const heldRoutes = new Set(filled.filter((c) => c.held).map((c) => JSON.stringify(c.route)));
+  const named = async (r: Filled | null): Promise<Filled | null> => {
+    if (r === null || !heldRoutes.has(JSON.stringify(r.route))) return r;
+    const open = filled.filter((c) => !hookedRoute(chain, c.route) && near(c.amountOut, r.amountOut));
+    return open.length === 0 ? r : (await bestFits([{ l: open, band: all }]))[0] ?? r;
+  };
   // a route that quotes nothing: R is the best of every route that fits, as for a route that does not fit, held to
   // the same rule a named R is (ranOut), and named on its no_quote; none is named where none fits
   if (noMain !== null) {
     const r = (await bestFits([{ l: priced, band: all }]))[0] ?? null;
     if (r !== null) ranOut(r, "the best route that fits");
-    return refuse(noMainCode, noMain, r);
+    return refuse(noMainCode, noMain, await named(r));
   }
   const fitted = await bestFits([
     { l: [{ route, amountOut: value }], band: all },
@@ -2669,7 +2680,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const nativeBest = fitted[2] ?? null;
   const listed = fitted[3] ?? null;
   if (own === null) {
-    return refuse("over_gas_floor", `the route's swap does not run in ${FIT_TEXT}${reference === null ? ", and no route does" : ""}`, reference);
+    return refuse("over_gas_floor", `the route's swap does not run in ${FIT_TEXT}${reference === null ? ", and no route does" : ""}`, await named(reference));
   }
   if (reference === null && filled.length > 0) return refuse("over_gas_floor", `no standard pool's route runs its swap in ${FIT_TEXT}`, null);
 
@@ -2692,12 +2703,11 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // a route through such a hook is taken only where no route through listed pools is within the slippage of it, and
   // where its real buy reverts the caller bans its pools (`hooked`, evmBuyRevertedPools) and the next quote leaves it
   // out (card evm-buy-hook-converge, the sale's take-and-ban)
-  const near = (x: bigint, r: bigint) => x * 10000n >= r * BigInt(10000 - slippageBps);
   const hookedRef = hookedRoute(chain, reference.route);
   const underHooked = value < reference.amountOut && hookedRef && unlisted.length === 0 && near(value, reference.amountOut);
   if (value < reference.amountOut) ranOut(reference, "the best route that fits");
   if (value < reference.amountOut && !underHooked) {
-    return refuse("below_reference", `the route quotes ${value}, below the standard pool's ${reference.amountOut}`, reference);
+    return refuse("below_reference", `the route quotes ${value}, below the standard pool's ${reference.amountOut}`, await named(reference));
   }
   if (unlisted.length > 0) {
     if (listed !== null && near(listed.amountOut, value)) ranOut(listed, "the best route through listed pools within the slippage");
@@ -2733,7 +2743,8 @@ function subsetsOf<T>(xs: readonly T[]): T[][] {
   return all.sort((a, b) => a.length - b.length);
 }
 
-type Filled = { route: EvmRoute; amountOut: bigint };
+/** `held`: a route the device can read but not trade through (heldOf), in R for refusal and never named as one to buy. */
+type Filled = { route: EvmRoute; amountOut: bigint; held?: true };
 const best = (xs: readonly Filled[]) => xs.reduce<Filled | null>((m, c) => (m === null || c.amountOut > m.amountOut ? c : m), null);
 const bestOf = (xs: readonly Filled[]) => {
   const b = best(xs);
@@ -3317,10 +3328,12 @@ async function routeSetOf(a: {
   // where its spot price after its fee can beat the route (ubOf), so the attacker locks real liquidity in the pool, the
   // coin's own for the whole amount of every buy it freezes, priced past the slippage above the coin's market (1% at the
   // tap's default: about 1.01 ETH of the coin to freeze a 1 ETH buy), for as long as the freeze lasts; dust or none
-  // freezes nothing (ZZ3b, ZZ5), and a buy within the slippage of it is taken at its own minOut
+  // freezes nothing (ZZ3b, ZZ5), and a buy within the slippage of it is taken at its own minOut. A route that fills as it is but whose
+  // read with a proper set of its hooks replaced reverts or answers 0 still counts for nothing (valueOf; review of
+  // a2d82dc6, F2; review of da11bbb6, L2): a hostile hook upstream of an honest cap, never a market
   const heldOf = (c: Quote): bigint | null => {
     const x = valueOf(c);
-    if (x !== null || c.real === undefined || !fills(c)) return x;
+    if (x !== null || c.real === undefined || !fills(c) || fills(c.real)) return x;
     let m = out(c.at)!;
     for (const i of [c.real.at, ...(c.alone ?? [])]) {
       const y = out(i);
@@ -3627,7 +3640,7 @@ async function routeSetOf(a: {
   for (const f of held) {
     for (const c of f.quotes) {
       const x = heldOf(c);
-      if (x !== null) filled.push({ route: c.route, amountOut: x });
+      if (x !== null) filled.push(valueOf(c) === null ? { route: c.route, amountOut: x, held: true } : { route: c.route, amountOut: x });
     }
   }
   if (bought !== null) {

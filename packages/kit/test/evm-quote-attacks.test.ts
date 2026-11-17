@@ -9672,3 +9672,31 @@ test("ZZ7c (sell) X's only market is one the quoter cannot run (its real sale re
   const s = await sellVerdict(sellOn([xGated, xy, yMarket, p], token, scanner(5_000_000, logs), seededRoute(token), 100, DELEGATED, signSim));
   assert.ok(s.accepted && s.amountOut === AMOUNT / 2n, show(s));
 });
+
+test("ZZ9 the tap on a token whose only pool is with X, X's market the quoter cannot run within the slippage above X's market that fills (Robinhood's USDG, live 17 Nov): a refusal names the route through the market that fills, and the tap buys through it at its own minOut", async () => {
+  const token = "0x" + (0xfa019).toString(16).padStart(40, "0");
+  const x = xAt(0xd19);
+  const xTrade: ModelPool = { key: keyOf(x, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const p: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const hidden: ModelPool = { key: keyOf(x, NATIVE, 2500, 50, UNPINNED), give: (a) => (a * 1005n) / 1000n, state: pricedAt(2n), lie: () => null, exec: () => null };
+  const viaTrade = v4Route([{ currency: x, fee: 500, tickSpacing: 10, hooks: NATIVE }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE }]);
+  const logs = [{ key: p.key, at: 4_500_000 }, { key: hidden.key, at: 4_500_001 }];
+  const t = await zzTap([xTrade, p, hidden], token, logs);
+  assert.ok(!("code" in t) && t.amountOut === AMOUNT && t.minOut === (AMOUNT * 9900n) / 10000n, show(t));
+  assert.deepEqual(t.route, viaTrade);
+  // the token's own pool alone, never quoted: the refusal names the route through X's market that fills
+  const q = await hbQuote([xTrade, p, hidden], token, logs, zzOne(token, keyOf(token, NATIVE, 3000, 60, NATIVE)));
+  assert.ok("code" in q && q.code === "no_quote", show(q));
+  assert.deepEqual(q.reference, { amountOut: AMOUNT, route: viaTrade });
+  // a pool of the token seeded at a tenth, and one whose swap does not run: each refusal names the same route
+  const seed: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 10n };
+  const b = await hbQuote([xTrade, p, hidden, seed], token, logs, zzOne(token, seed.key));
+  assert.ok("code" in b && b.code === "below_reference", show(b));
+  assert.deepEqual(b.reference, { amountOut: AMOUNT, route: viaTrade });
+  const heavy: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 2n, exec: () => null };
+  const g = await hbQuote([xTrade, p, hidden, heavy], token, logs, zzOne(token, heavy.key));
+  assert.ok("code" in g && g.code === "over_gas_floor", show(g));
+  assert.deepEqual(g.reference, { amountOut: AMOUNT, route: viaTrade });
+  const tb = await zzTap([xTrade, p, hidden, seed], token, logs);
+  assert.ok(!("code" in tb) && tb.amountOut === AMOUNT, show(tb));
+});

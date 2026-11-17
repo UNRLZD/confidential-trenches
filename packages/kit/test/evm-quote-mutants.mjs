@@ -1080,9 +1080,10 @@ export const MUTANTS = [
   // card evm-buy-never-below-a-hidden-market: a buy's route that fills with its hooks replaced but not as it is counts in
   // R at the lowest of its reads that answer, X's best market ranked the same, only where its read with its hooks
   // replaced fills; R's swap read through a hook the venue does not list with those hooks replaced, the route's own as it is
-  [QUOTE, "    if (x !== null || c.real === undefined || !fills(c)) return x;", "    return x;", R, "ZZ1 "],
-  [QUOTE, "    if (x !== null || c.real === undefined || !fills(c)) return x;", "    if (x !== null || a.sell || c.real === undefined || !fills(c)) return x;", R, "ZZ7 "],
-  [QUOTE, " || c.real === undefined || !fills(c)) return x;", " || c.real === undefined) return x;", R, "ZZ5 "],
+  [QUOTE, "    if (x !== null || c.real === undefined || !fills(c) || fills(c.real)) return x;", "    return x;", R, "ZZ1 "],
+  [QUOTE, "    if (x !== null || c.real === undefined || !fills(c) || fills(c.real)) return x;", "    if (x !== null || a.sell || c.real === undefined || !fills(c) || fills(c.real)) return x;", R, "ZZ7 "],
+  [QUOTE, " || c.real === undefined || !fills(c) || fills(c.real)) return x;", " || c.real === undefined || fills(c.real)) return x;", R, "ZZ5 "],
+  [QUOTE, " || c.real === undefined || !fills(c) || fills(c.real)) return x;", " || c.real === undefined || !fills(c)) return x;", R, "review of a2d82dc6, F2 "],
   [QUOTE, "      if (y !== null && y > 0n && y < m) m = y;", "      if (false as boolean) m = y;", R, "ZZ6 "],
   [QUOTE, "    const h = bestBy(c, heldOf);", "    const h = bestBy(c, valueOf);", R, "ZZ2 "],
   [QUOTE, "    return { mks: h === null ? [] : t === null || t === h ? [h] : [h, t], trades: t !== null };", "    return { mks: h === null ? [] : [h], trades: t !== null };", R, "ZZ7b "],
@@ -1090,6 +1091,14 @@ export const MUTANTS = [
   [QUOTE, "      const x = heldOf(c);\n      if (x !== null) filled.push", "      const x = valueOf(c);\n      if (x !== null) filled.push", R, "ZZ1 "],
   [QUOTE, "      fitReads.set(r, f === null || hs.length === 0 ? f : { ...f, override: { ...f.override, ...noopOf(hs) } });", "      fitReads.set(r, f);", R, "ZZ1c "],
   [QUOTE, "      const hs = r === route || r.venue", "      const hs = r.venue", R, "ZZ1c "],
+  // a refusal whose R the device can read but not trade through names the best open route within the slippage of R
+  [QUOTE, "    if (r === null || !heldRoutes.has(JSON.stringify(r.route))) return r;", "    return r;", R, "ZZ9 "],
+  [QUOTE, "!hookedRoute(chain, c.route) && near(c.amountOut, r.amountOut)", "near(c.amountOut, r.amountOut)", R, "ZZ9 "],
+  [QUOTE, "!hookedRoute(chain, c.route) && near(c.amountOut, r.amountOut)", "!hookedRoute(chain, c.route)", R, "ZZ8 "],
+  [QUOTE, "    return refuse(noMainCode, noMain, await named(r));", "    return refuse(noMainCode, noMain, r);", R, "ZZ9 "],
+  [QUOTE, "below the standard pool's ${reference.amountOut}`, await named(reference));", "below the standard pool's ${reference.amountOut}`, reference);", R, "ZZ9 "],
+  [QUOTE, '", and no route does" : ""}`, await named(reference));', '", and no route does" : ""}`, reference);', R, "ZZ9 "],
+  [QUOTE, "valueOf(c) === null ? { route: c.route, amountOut: x, held: true } : ", "", R, "ZZ9 "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
