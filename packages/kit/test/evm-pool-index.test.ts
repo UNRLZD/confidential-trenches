@@ -77,6 +77,11 @@ type Reader = {
   receiptError?: boolean;
   /** pools this reader's receipts read, where they are not its logs' (default: `pools`) */
   receipts?: Pool[];
+  /** the state of only the newest this many blocks: a state read by the hash of an older block is answered -32000
+   *  "historical state ... is not available" (Pocket and publicnode on Robinhood, 2026-11-10) */
+  keeps?: number;
+  /** blocks the head moves on once, after this reader's first getLogs answer (the chain going on during a sync) */
+  moves?: number;
   calls: EvmRpcCall[][];
 };
 function reader(r: Reader): EvmRpc {
@@ -114,7 +119,9 @@ function reader(r: Reader): EvmRpc {
           r.limitedInBody--;
           return { error: { code: -32005, message: "25/second request limit reached" } };
         }
-        return { result: [...r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf), ...(r.extraLogs ?? [])] };
+        const out = { result: [...r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf), ...(r.extraLogs ?? [])] };
+        if (r.moves !== undefined) (r.head += r.moves), (r.moves = undefined);
+        return out;
       }
       if (c.method === "eth_getTransactionReceipt") {
         if (r.receiptError) return { error: { code: -32000, message: "header not found" } };
@@ -123,6 +130,12 @@ function reader(r: Reader): EvmRpc {
       }
       if (c.method === "eth_call") {
         if (r.stateError) return { error: { code: -32000, message: "missing trie node" } };
+        const at = (c.params[1] as { blockHash?: string } | undefined)?.blockHash;
+        if (r.keeps !== undefined && at !== undefined) {
+          let n = r.head;
+          while (n > r.head - 10_000 && h(n) !== at) n--;
+          if (r.head - n >= r.keeps) return { error: { code: -32000, message: `historical state ${at.slice(2)} is not available` } };
+        }
         const data = (c.params[0] as { data: string }).data;
         const held = r.state ?? new Set(r.pools.map((p) => evmPoolIdOf(p.key)));
         const hit = [...held].some((id) => "0x1e2eaeaf" + slotOf(id).slice(2) === data);
@@ -723,6 +736,32 @@ test("the Robinhood venue's cold index asks its device-direct reader few calls a
 // Card signpage-evm-reads-draw-no-refusal: a reader that takes at most `batchMax` calls a batch (the helper's
 // HELPER_RPC_BATCH_MAX, 10: a batch past it is its 413) gets the state reads (F5) in batches of at most that many; with
 // 500 a batch, 25 one-reader pools went in one batch of 25 the helper refuses, each pool unread and the sync partial.
+test("F5's state read needs no old block: a reader keeping only the newest blocks' state, the pin 24 s old by then, still covers (card evm-quote-reads-need-no-old-state)", async () => {
+  const head = 1_000_000;
+  // Base's 2 s blocks: the chain moves 12 blocks (24 s) while the spans are read; reader a keeps 10 blocks' state and
+  // answers -32000 "historical state ... is not available" past them (Pocket and publicnode on Robinhood, 2026-11-10)
+  const a: Reader = { head, pools: [real, deep], state: both2, calls: [], keeps: 10, moves: 12 };
+  const b: Reader = { head, pools: [deep], receipts: [real, deep], state: both2, calls: [], moves: 12 };
+  const r = await evmPoolIndexSync(null, cfgOf(a, b));
+  assert.equal(r.error?.message ?? null, null);
+  assert.equal(r.coversThrough, head);
+  assert.ok(ids(r.pools).has(evmPoolIdOf(real.key)), "the one-reader pool the state holds is served");
+  // the state read went to the newest block both readers agree on, past the pin
+  for (const x of [a, b]) {
+    const call = x.calls.flat().filter((c) => c.method === "eth_call");
+    assert.equal(call.length, 1);
+    assert.deepEqual(call[0]!.params[1], { blockHash: blockHash(head + 12) });
+  }
+  // nothing is loosened: a pool one reader logs whose state is 0 there on both is still no pool, and one reader alone
+  // holding it still refuses
+  const none = new Set([evmPoolIdOf(deep.key)]);
+  const zero = await evmPoolIndexSync(null, cfgOf({ head, pools: [real, deep], state: none, calls: [], keeps: 10, moves: 12 }, { head, pools: [deep], receipts: [real, deep], state: none, calls: [], moves: 12 }));
+  assert.equal(zero.coversThrough, head);
+  assert.ok(!ids(zero.pools).has(evmPoolIdOf(real.key)));
+  const half = await evmPoolIndexSync(null, cfgOf({ head, pools: [real, deep], state: both2, calls: [], keeps: 10, moves: 12 }, { head, pools: [deep], receipts: [real, deep], state: none, calls: [], moves: 12 })).catch((e: unknown) => e);
+  assert.ok(half instanceof EvmQuoteError && half.code === "rpc_disagree", String(half));
+});
+
 test("F5's state reads take each reader's batchMax: no batch of more calls than it takes", async () => {
   const head = 1_000_000;
   const gaps = Array.from({ length: 25 }, (_, i) => ({ key: key(200 + i), block: 940_000 + i * 100 }));
