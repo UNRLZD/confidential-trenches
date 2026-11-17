@@ -545,6 +545,14 @@ export const TRADES_MAX = 50;
  *  each further fail to BACK_RETRY_MAX_MS; it never ends on a fail, so a short tape stays filling. [design: 3, three
  *  ticks: a provider pair that cannot answer a step three times running is down for the forward reads too.] */
 export const BACK_FAILS_MAX = 3;
+/** The spans of a provider's BACK_SPAN one round of a located read back reads (readBack): its named blocks in them, with
+ *  their other filters and ETH price spans. [design: 2, as Base's window rounds (card base-tape-fills-inside-45s): a
+ *  tape holds no more of daybreak's 3 in-flight places than a step did, and a dozen fill side by side, newest first] */
+export const BACK_ROUND_SPANS = 2;
+/** How long a tape's locate may wait out its provider's holds before the steps read the day (readBack). [design: 30 s:
+ *  a dozen tapes' locates refused for our own rate are each sent within a few holds, and a provider refusing longer
+ *  leaves the tape to the steps inside the live checks' 45 s] */
+export const LOCATE_HELD_MAX_MS = 30_000;
 /** [design: 5 s, a tick; at most a minute, so a pair back up is read again within one; the industry's capped
  *  exponential backoff.] */
 export const BACK_RETRY_MS = 5_000;
@@ -1134,7 +1142,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // did not (card helper-chart-fresh, 2026-11-04 14:49Z)
   // (`calls`: the calls out or queued to it, by which free counts its budget; `queue`: each queued post's calls, by
   // which waitOf counts the units it will take)
-  const inflight = new Map<string, { n: number; calls: number; queue: { go: () => void; calls: number; fg: boolean }[] }>();
+  const inflight = new Map<string, { n: number; calls: number; queue: { go: () => void; calls: number; fg: boolean; lane?: Lane }[] }>();
   // a post queued past `maxWaitMs` is another provider's, as a read past its pace's wait is (one): GAVE_UP, counted in
   // `paced` so agreed's patient round may ask it again (fold 4: at c780282 a cold dozen's reads waited 68.7 s in all in
   // daybreak's queue, and the slowest tape took 16.7 s)
@@ -1147,7 +1155,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const fg = fgNow();
       const queuedAt = performance.now();
       const sent = await new Promise<boolean>((go) => {
-        const entry = { go: () => go(true), calls, fg };
+        const entry = { go: () => go(true), calls, fg, lane: lanes.getStore() };
         // a foreground post goes ahead of every background one queued (card helper-deploy-reads-fast), behind the
         // foreground ones before it
         const at = fg ? q.queue.findIndex((x) => !x.fg) : -1;
@@ -1169,7 +1177,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return await run();
     } finally {
       q.calls -= calls;
-      const next = q.queue.shift();
+      // the first foreground post queued, a background one a caller joined while it waited (join) among them, else the
+      // first queued
+      const lifted = q.queue.findIndex((x) => x.fg || x.lane?.fg === true);
+      const next = lifted < 0 ? q.queue.shift() : q.queue.splice(lifted, 1)[0];
       if (next !== undefined) next.go();
       else q.n--;
     }
@@ -1196,9 +1207,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  foreground read (a caller's, card helper-deploy-reads-fast) also draws the CALLER_ROOM background leaves. */
   async function paceFor(url: string, calls: number, patient: boolean): Promise<boolean> {
     if (holds.heldFor(url) > 0) return false;
-    const bg = !fgNow();
+    // the lane's priority read at each wait: a background read a caller joins meanwhile (join) draws as the caller's
     let slept = 0;
-    for (let w = holds.take(url, calls, bg); w > 0; w = holds.take(url, calls, bg)) {
+    for (let w = holds.take(url, calls, !fgNow()); w > 0; w = holds.take(url, calls, !fgNow())) {
       if (slept + w > (patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS)) return (waited(slept), paced.set(url, (paced.get(url) ?? 0) + 1), false);
       await new Promise((go) => setTimeout(go, w));
       slept += w;
@@ -2079,7 +2090,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** `born`: the step that held the pool's birth was read, so no swap of the pool lies before the tape (wholeOf). */
   /** `got`: a located read back's agreed answers not yet the tape's, by read (a block's swaps, its other filters, a span
    *  of the ETH price), kept while the newer blocks' reads are still to agree. */
-  type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number; located?: true; marks?: readonly number[]; until?: number; born?: true; got?: Map<string, Log[]> };
+  type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number; located?: true; marks?: readonly number[]; until?: number; born?: true; got?: Map<string, Log[]>; heldSince?: number };
   const books = new Map<string, Entry>();
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
@@ -2295,7 +2306,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // in the agreed steps from the top, in the read back's own background lane at the providers' paces.
     if (V.backOnly && back.located !== true) {
       const at = await locate(e, end, back.lo - 1);
-      const steps: Back = { ...back, located: true, fails: 0 };
+      const { heldSince: _, ...unheld } = back;
+      const steps: Back = { ...unheld, located: true, fails: 0 };
       // a locate our own load kept from being sent (the provider's pace of a post a second, shared by every tape that
       // opens at once) is no fail: it is asked again at its turn, a second on (card trades-checks-pass-on-177: counted
       // as one, three in a row sent a burst's short tapes to walk the day in 87 steps, still filling at 46 s, live run
@@ -2304,13 +2316,21 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         e.back = { ...back, until: now() + Math.ceil(1_000 / Math.max(holds.paceOf(BACK_LOCATE[0]!)?.perS ?? 1, 0.001)) };
         return;
       }
-      if (at === undefined || at === "held") {
-        const fails = (back.fails ?? 0) + 1;
-        const wait = at === "held" ? { until: now() + Math.max(1, ...BACK_LOCATE.map((u) => holds.heldMs(u))) } : {};
-        e.back = fails >= BACK_FAILS_MAX ? steps : { ...back, fails, ...wait };
+      // held (the provider refused our rate): asked again when the hold ends, no fail, as a paced one; held past
+      // LOCATE_HELD_MAX_MS since its first, the steps read the day (card robinhood-trades-finish-filling: each 429
+      // counted toward BACK_FAILS_MAX, and with the read back going on at each hold's end three refusals in 3 s sent a
+      // tape to the steps). A locate the provider did not answer is a fail, BACK_FAILS_MAX in a row the steps.
+      if (at === "held") {
+        const since = back.heldSince ?? now();
+        e.back = now() - since >= LOCATE_HELD_MAX_MS ? steps : { ...back, heldSince: since, until: now() + Math.max(1, ...BACK_LOCATE.map((u) => holds.heldMs(u))) };
         return;
       }
-      e.back = at === "steps" ? steps : at.length === 0 ? { ...back, located: true, fails: 0, done: true } : { ...back, located: true, fails: 0, lo: at[0]! + 1, ...(at.length > MARKS_MAX ? {} : { marks: at }) };
+      if (at === undefined) {
+        const fails = (back.fails ?? 0) + 1;
+        e.back = fails >= BACK_FAILS_MAX ? steps : { ...back, fails };
+        return;
+      }
+      e.back = at === "steps" ? steps : at.length === 0 ? { ...unheld, located: true, fails: 0, done: true } : { ...unheld, located: true, fails: 0, lo: at[0]! + 1, ...(at.length > MARKS_MAX ? {} : { marks: at }) };
       return;
     }
     const eth = e.pool.quote.kind === "eth";
@@ -2343,6 +2363,33 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (back.marks !== undefined && back.marks.length > 0) {
       const take = back.marks.slice(0, Math.max(1, TRADES_MAX - held));
       const got = back.got ?? new Map<string, Log[]>();
+      // the locate's provider (BACK_LOCATE, one post a second) is left to the locates while two others are free: as
+      // the third ask of every read daybreak's pace left unanswered, its posts kept the locates of the tapes opened
+      // with them from being sent (swaps-back-located.test.ts: 2 of 12 tapes with no trade at 45 s, the chain's own
+      // RPC asked 19 of their reads beside the 24 of the locates); a held provider leaves it to agree with the one left.
+      // A read the two left wholly unagreed asks it again as the third, the tie-break (agreedLogs' `third`), so two
+      // that disagree never stall the tape (swaps-own-third.test.ts: pocket's times a second late)
+      const free = backRpcs.filter((u) => usable([u]).length > 0);
+      const two = free.filter((u) => !BACK_LOCATE.includes(u));
+      const urls = two.length >= 2 && (back.fails ?? 0) === 0 ? two : free;
+      const wide = Math.min(...urls.map((u) => BACK_SPAN[u] ?? V.span));
+      // a round reads the named blocks of the newest BACK_ROUND_SPANS spans of `wide` blocks, the next round the next
+      // (card robinhood-trades-finish-filling, as readWindow on Base): a coin whose newest 50 trades lie 16 hours apart
+      // asked its 49 spans at once, daybreak one call a post, and with 12 coins at once 220 posts queued in its 3 places
+      // at 7 a second gave up their waits before they were sent: swaps-back-resume.test.ts, rounds of 14 to 20 s that
+      // agreed none. A busy coin's newest 50 lie in one or two spans: one round, as before.
+      let spans = 0;
+      let first = -1;
+      let cut = take.length;
+      for (let i = 0; i < take.length; i++) {
+        if (first >= 0 && first - take[i]! + 1 <= wide) continue;
+        if (++spans > BACK_ROUND_SPANS) {
+          cut = i;
+          break;
+        }
+        first = take[i]!;
+      }
+      const round = take.slice(0, cut);
       const [main, ...others] = poolFilters(e.pool, 0, 0, chain);
       const at = (f: Record<string, unknown>, a: number, b: number) => ({ ...f, fromBlock: `0x${a.toString(16)}`, toBlock: `0x${b.toString(16)}` });
       // each block's reads: its swaps (and the pool's birth), its other filters, and the ETH price's V.span spans of the
@@ -2350,29 +2397,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const grid = (x: number) => x - (x % V.span);
       const refOf = (b: number) => (eth ? Array.from({ length: (grid(b) - grid(Math.max(0, b - V.refBack))) / V.span + 1 }, (_, k) => grid(Math.max(0, b - V.refBack)) + k * V.span) : []);
       const unitsOf = (b: number) => [`s ${b}`, ...others.map((_, k) => `o${k} ${b}`), ...refOf(b).map((g) => `r ${g}`)];
-      const want = new Set(take.flatMap(unitsOf).filter((k) => !got.has(k)));
+      const want = new Set(round.flatMap(unitsOf).filter((k) => !got.has(k)));
       // each kind's reads in block order, one kind after another, so a provider joins them (logsOf)
       const asks: { key: string; lo: number; hi: number; f: Record<string, unknown> }[] = [];
       const add = (key: string, lo: number, hi: number, f: Record<string, unknown>) => want.has(key) && asks.push({ key, lo, hi, f });
-      const up = [...take].reverse();
+      const up = [...round].reverse();
       for (const b of up) add(`s ${b}`, b, b, bornFilter(e.pool, at(main!, b, b)));
       others.forEach((o, k) => up.forEach((b) => add(`o${k} ${b}`, b, b, at(o, b, b))));
       for (const g of [...new Set(up.flatMap(refOf))].sort((x, y) => x - y)) add(`r ${g}`, g, g + V.span - 1, refFilter(g, g + V.span - 1, chain));
       if (asks.length > 0) {
-        // the locate's provider (BACK_LOCATE, one post a second) is left to the locates while two others are free: as
-        // the third ask of every read daybreak's pace left unanswered, its posts kept the locates of the tapes opened
-        // with them from being sent (swaps-back-located.test.ts: 2 of 12 tapes with no trade at 45 s, the chain's own
-        // RPC asked 19 of their reads beside the 24 of the locates); a held provider leaves it to agree with the one left.
-        // A read the two left wholly unagreed asks it again as the third, the tie-break (agreedLogs' `third`), so two
-        // that disagree never stall the tape (swaps-own-third.test.ts: pocket's times a second late)
-        const free = backRpcs.filter((u) => usable([u]).length > 0);
-        const two = free.filter((u) => !BACK_LOCATE.includes(u));
-        const urls = two.length >= 2 && (back.fails ?? 0) === 0 ? two : free;
         // one agreed read for each run of a kind's reads that every provider asked takes as one (the narrowest BACK_SPAN
         // of them: daybreak's 2,000), all at once: a provider answers each run on its own, so one its pace leaves
         // unanswered costs that run, never the others (batchTo answers no part when one part's pace wait runs out; the
         // same test, one agreed read a tape: every read of 7 of 12 tapes unagreed, daybreak having answered 7 of its 17)
-        const wide = Math.min(...urls.map((u) => BACK_SPAN[u] ?? V.span));
         const runs: (typeof asks)[] = [];
         for (const x of asks) {
           const r = runs.at(-1);
@@ -2455,23 +2492,89 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // and the pool's own birth (isBirth), one filter of one value a position: the located read back reads only the
     // blocks named, so the block that holds the birth is named too, and the read back ends there (born)
     const birth = e.pool.venue === "v4" ? [{ address: V.poolManager, topics: [TOPIC.initialize, e.pool.id], ...range }] : e.pool.venue === "v3" ? [{ address: e.pool.id, topics: [INITIALIZE3], ...range }] : [];
-    const unsent = { paced: false };
-    const r = await batchTo(u, [...each.map((ts) => ({ ...main, ...(topics.length === 0 ? {} : { topics: ts }), ...range })), ...birth].map((f) => ({ method: "eth_getLogs", params: [f] })), false, unsent);
-    if (r === null && unsent.paced) return "paced";
+    const { r, paced } = await locatePost(u, e.pool.id, [...each.map((ts) => ({ ...main, ...(topics.length === 0 ? {} : { topics: ts }), ...range })), ...birth].map((f) => ({ method: "eth_getLogs", params: [f] })));
+    if (r === null && paced) return "paced";
+    // refused for our rate (a 429 or a throttle, which holds it): one held locate, counted once, never a fail for the
+    // refusal and another for the hold that follows it (card robinhood-trades-finish-filling: one 429 counted two of
+    // BACK_FAILS_MAX, and 12 tapes opened at once walked the day in steps, two still filling at 110 s; read from the
+    // Mac on d59370557, 17 Nov 05:1xZ)
+    if (r === null && holds.heldFor(u) > 0) return "held";
     const got = (r ?? []).map((x) => (x?.ok ? parseLogs((x as { result: unknown }).result) : null));
     if (r === null || got.length === 0 || got.some((x) => x === null)) return undefined;
     const logs = (got as Log[][]).flat();
     const blocks = logs.filter((l) => l.block >= lo && l.block <= hi && (decodeSwap(e.pool, l, chain) !== null || isBirth(e.pool, l, chain))).map((l) => l.block);
     return [...new Set(blocks)].sort((a, b) => b - a);
   }
-  /** A short tape's read back, step after step, while its book is open and each step reads (a failed one is read again
-   *  at a later tick). */
-  async function backAll(e: Entry, urls: readonly string[]): Promise<void> {
-    while (books.get(e.pool.token) === e && e.back?.done !== true) {
-      const lo = e.back?.lo;
-      await readBack(e, urls).catch(() => undefined);
-      if (e.back === undefined || (e.back.lo === lo && !e.back.done)) return;
+  /**
+   * One locate's calls on BACK_LOCATE's provider, in a post it shares with every other locate waiting then: the
+   * provider's pace is a post a second, and a dozen tapes opened at once each waited for a post of its own (card
+   * robinhood-trades-finish-filling: the last of 12 located at 20 to 22 s on swaps-back-resume.test.ts's rig, at 34 to
+   * 86 s from the Mac on d59370557, 17 Nov 05:1xZ). The chain's own RPC served 12 day-wide filters a post, one post every
+   * 2 s, in 1.0 to 1.6 s (from the Mac, 17 Nov 05:2xZ). One post at a time; the locates queued while it is out go in the
+   * next, as many as a post carries (batchOf), each locate whole. A shared post that fails as a whole (no answer, not
+   * paced or held: a provider's error, an answer past ANSWER_MAX) answers each of its locates "paced", to be asked again
+   * in a post of its own, so one locate's size never costs another its read.
+   */
+  type LocateAsk = { key: string; calls: Call[]; alone: boolean; done: (a: { r: Reply[] | null; paced: boolean }) => void };
+  const locateQueue: LocateAsk[] = [];
+  /** The pools whose locate is asked again in a post of its own, a shared one having failed whole (a tape at most each). */
+  const locateAlone = new Set<string>();
+  let locateOut = false;
+  function locatePost(u: string, key: string, calls: Call[]): Promise<{ r: Reply[] | null; paced: boolean }> {
+    return new Promise((done) => {
+      locateQueue.push({ key, calls, alone: locateAlone.delete(key), done });
+      if (!locateOut) void locatePump(u);
+    });
+  }
+  async function locatePump(u: string): Promise<void> {
+    locateOut = true;
+    try {
+      while (locateQueue.length > 0) {
+        const max = batchOf(u);
+        const take: LocateAsk[] = [locateQueue.shift()!];
+        let n = take[0]!.calls.length;
+        while (!take[0]!.alone && locateQueue.length > 0 && !locateQueue[0]!.alone && n + locateQueue[0]!.calls.length <= max) {
+          const next = locateQueue.shift()!;
+          take.push(next);
+          n += next.calls.length;
+        }
+        const unsent = { paced: false };
+        const r = await batchTo(u, take.flatMap((a) => a.calls), false, unsent).catch(() => null);
+        const lost = r === null && !unsent.paced && holds.heldFor(u) === 0 && take.length > 1;
+        let k = 0;
+        for (const a of take) {
+          if (lost && locateAlone.size < OPEN_MAX) locateAlone.add(a.key);
+          a.done({ r: r === null ? null : r.slice(k, k + a.calls.length), paced: unsent.paced || lost });
+          k += a.calls.length;
+        }
+      }
+    } finally {
+      locateOut = false;
     }
+  }
+  /** A short tape's read back, step after step, while its book is open: a step that reads no new block (a locate
+   *  paced to its turn, a read held or failed, a read answered in part) is read again at its own wait (Back.until: the
+   *  pace's turn, the hold's end, the fails' backoff), or at once when it names none; a step that changes nothing is
+   *  left to a later tick. */
+  async function backAll(e: Entry, urls: readonly string[]): Promise<void> {
+    // (card robinhood-trades-finish-filling: a step that read no new block left the read back to the next tick, and with
+    // 12 books a tick took 5.0 to 13.1 s, so a locate paced to its turn a second on waited a tick; the slowest of the
+    // 12 capacity coins filled at 95 s, read from the Mac on d59370557, 17 Nov 05:1xZ)
+    while (books.get(e.pool.token) === e && e.back?.done !== true) {
+      const before = e.back;
+      await readBack(e, urls).catch(() => undefined);
+      if (e.back === undefined || e.back === before) return;
+      const wait = (e.back.until ?? 0) - now();
+      if (wait > 0) await new Promise((go) => (setTimeout(go, wait) as { unref?: () => void }).unref?.());
+    }
+  }
+  /** A seeded book's read back (open: the discovery's read is its first), at the agreed head a first read reads at,
+   *  in a background lane, so the open's caller never waits on it. */
+  function seededBack(e: Entry): void {
+    void lanes.run(newLane(false), async () => {
+      const head = await agreedHead();
+      if (head !== null) backFrom(e, head.with);
+    }).catch(() => undefined);
   }
   /** A read book's read back started, once (backAll): its own background read, never a caller's or the tick's wait. */
   function backFrom(e: Entry, urls: readonly string[]): void {
@@ -2628,6 +2731,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           if (apply(e, found.seed.from, found.seed.to, found.seed.headN, found.seed.logs)) e.from = found.seed.from;
         }
         books.set(token, e);
+        // a short tape it seeded reads back at once, as a first read's does (firstRead), not at the tick after
+        // (card robinhood-trades-finish-filling: with 12 books opened at once the first tick took 13.1 s, and the read
+        // backs of tapes seeded at 10 s began at 23 s; read from the Mac on d59370557, 17 Nov 05:1xZ)
+        if (e.readAt !== null) seededBack(e);
       }
     }
     e.touched = now();
@@ -3061,7 +3168,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  read at once, and a share whose read fails asked of the others in turn; a tx whose read fails everywhere stays null
    *  this time and is asked again the next. */
   /** The lookups out now, by transaction: a tape asks a hash in flight once (card helper-robinhood-capacity fold 8). */
-  const looking = new Map<string, Promise<void>>();
+  const looking = new Map<string, { p: Promise<void>; lane: Lane }>();
   /** Each transaction's lookups a provider answered and that still gave it no trader (lookTraders), bounded as the
    *  traders are: TRADER_TRIES of them and it can never be read (card evm-tape-trader-never-null). */
   const tries = new Map<string, number>();
@@ -3083,13 +3190,23 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Each transaction's sender into `traders`, one lookup per hash however many callers ask it at once. */
   async function tradersOf(txs: string[]): Promise<void> {
     const ask = [...new Set(txs)].filter((t) => !traders.has(t));
-    const waits = ask.flatMap((t) => (looking.has(t) ? [looking.get(t)!] : []));
+    // a lookup a read back started ahead (tradersAhead, background) that a caller now waits on is the caller's: it
+    // joins the lookup's lane, so its posts still waiting go first (card robinhood-trades-finish-filling: 12 tapes read
+    // back by 38 s on swaps-back-resume.test.ts's rig, 4 still filling at 45 s, their rows' traders queued behind the
+    // read backs' own reads)
+    const waits = ask.flatMap((t) => {
+      const l = looking.get(t);
+      if (l === undefined) return [];
+      join(l.lane);
+      return [l.p];
+    });
     const need = ask.filter((t) => !looking.has(t));
     if (need.length > 0) {
-      const p = lookTraders(need).finally(() => {
-        for (const t of need) if (looking.get(t) === p) looking.delete(t);
+      const lane = sharedLane();
+      const p = lanes.run(lane, () => lookTraders(need)).finally(() => {
+        for (const t of need) if (looking.get(t)?.p === p) looking.delete(t);
       });
-      for (const t of need) looking.set(t, p);
+      for (const t of need) looking.set(t, { p, lane });
       waits.push(p);
     }
     await Promise.all(new Set(waits));
