@@ -7,7 +7,7 @@ import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
 import { ROUTES } from "../src/routes/routes.ts";
 import { VERIFY_RELEASES } from "../src/screens/verify/release.ts";
-import { FOOTER_LINKS, FOOTER_WORDS, fmtBlock, fmtUsd, footerRpcs, footerTicks, nextConn, readFinalBlock, type Conn } from "../src/shell/footer.ts";
+import { BLOCK_EVERY_MS, FOOTER_LINKS, FOOTER_WORDS, fmtBlock, fmtUsd, footerRpcs, footerTicks, nextConn, readFinalBlock, type Conn } from "../src/shell/footer.ts";
 
 const A = "https://rpc.mainnet.fastnear.com";
 const B = "https://near.drpc.org";
@@ -26,11 +26,6 @@ function rpc(by: Record<string, unknown | number | Error>, log: { url: string; b
   }) as typeof fetch;
 }
 
-test("the pair read is the release's: the mainnet pair on a mainnet build, the testnet pair on a testnet build", () => {
-  assert.deepEqual(footerRpcs("mainnet"), VERIFY_RELEASES.mainnet.rpcs);
-  assert.deepEqual(footerRpcs("testnet"), VERIFY_RELEASES.testnet.rpcs);
-});
-
 test("the read: NEAR's final block from the first RPC, with its round trip", async () => {
   const log: { url: string; body: unknown }[] = [];
   let t = 1000;
@@ -48,6 +43,63 @@ test("the read: the second RPC when the first fails, refuses or answers no heigh
     assert.deepEqual(log.map((l) => l.url), [`${A}/?ct=footer`, `${B}/?ct=footer`]);
   }
   assert.equal(await readFinalBlock([A, B], rpc({ [A]: 500, [B]: new TypeError("fetch failed") }), () => 0), null);
+});
+
+// Card signpage-footer-reads-inside-fastnear-limit: FastNEAR's keyless URL holds about 0.39 requests a second from one
+// address (packages/wallet/src/pace.ts PACE, read 9 Nov) and answers past it 429 with no Retry-After (read 17 Nov
+// 00:04Z: body code -429, "Rate limits exceeded"), while the signing page's money reads share that address's budget.
+// Asked first every 3 s, the footer alone took 0.33 a second of it (the 34 footer 429s of release 167's prf run).
+/** Each tick of the footer's cadence over `ms` on a test clock: what the footer draws and every URL it asked. */
+async function ticks(ms: number, answer: (url: string, at: number) => unknown | number | Error) {
+  const held = new Map<string, number>();
+  const log: { url: string; at: number }[] = [];
+  let now = 0;
+  let c: Conn = { kind: "wait" };
+  const seen: Conn["kind"][] = [];
+  const fetchFn = (async (input: string | URL | Request) => {
+    const url = String(input).replace("/?ct=footer", "");
+    log.push({ url, at: now });
+    const a = answer(url, now);
+    if (a instanceof Error) throw a;
+    if (typeof a === "number") return new Response("{}", { status: a });
+    return new Response(JSON.stringify(a), { status: 200 });
+  }) as typeof fetch;
+  for (; now < ms; now += BLOCK_EVERY_MS) {
+    c = nextConn(c, await readFinalBlock(footerRpcs("mainnet"), fetchFn, () => now, held));
+    seen.push(c.kind);
+  }
+  return { log, seen, at: (url: string) => log.filter((l) => l.url === url).map((l) => l.at) };
+}
+
+test("the footer's order is its own: dRPC first, FastNEAR its fallback, on either network; Verify's pair is untouched", () => {
+  assert.deepEqual(footerRpcs("mainnet"), [B, A]);
+  assert.deepEqual(footerRpcs("testnet"), ["https://near-testnet.drpc.org", "https://test.rpc.fastnear.com"]);
+  assert.deepEqual(VERIFY_RELEASES.mainnet.rpcs, [A, B]);
+  assert.deepEqual([...footerRpcs("mainnet")].sort(), [...VERIFY_RELEASES.mainnet.rpcs].sort());
+  assert.deepEqual([...footerRpcs("testnet")].sort(), [...VERIFY_RELEASES.testnet.rpcs].sort());
+});
+
+test("over 60 s at the footer's 3 s cadence with dRPC answering, FastNEAR is asked 0 times (20 before) and the footer shows Stable", async () => {
+  const r = await ticks(60_000, (url) => (url === B ? blockAnswer(223_500_000) : blockAnswer(223_500_001)));
+  assert.equal(r.at(A).length, 0, `FastNEAR asked ${r.at(A).length} times in 60 s`);
+  assert.equal(r.at(B).length, 20);
+  assert.ok(r.seen.every((k) => k === "on"));
+});
+
+test("an RPC that answers 429 is not asked again for 60 s; the other one answers meanwhile, and none asked draws Offline", async () => {
+  // dRPC down: FastNEAR answers 429 at 0 s, then would answer; it is asked again only at 60 s, and then shows Stable
+  const down = await ticks(66_000, (url, at) => (url === B ? new TypeError("fetch failed") : at === 0 ? 429 : blockAnswer(223_500_002)));
+  assert.deepEqual(down.at(A), [0, 60_000, 63_000], `FastNEAR asked at ${down.at(A).join(", ")}`);
+  assert.equal(down.seen.filter((k) => k === "off").length, 20);
+  assert.deepEqual(down.seen.slice(20), ["on", "on"]);
+  // dRPC answers 429 at 0 s: FastNEAR answers that tick and every tick of dRPC's hold, Stable throughout; dRPC again at 60 s
+  const busy = await ticks(63_000, (url, at) => (url === B ? (at === 0 ? 429 : blockAnswer(223_500_003)) : blockAnswer(223_500_004)));
+  assert.deepEqual(busy.at(B), [0, 60_000]);
+  assert.equal(busy.at(A).length, 20);
+  assert.ok(busy.seen.every((k) => k === "on"));
+  // a 503 or a failed fetch holds nothing: the next tick asks the same RPC first again
+  const flaky = await ticks(6_000, (url, at) => (url === B ? (at === 0 ? 503 : blockAnswer(223_500_005)) : blockAnswer(223_500_006)));
+  assert.deepEqual(flaky.at(B), [0, 3_000]);
 });
 
 test("the connection: waiting until the first read, Stable on an answer, Offline on none; the block never goes back", () => {
