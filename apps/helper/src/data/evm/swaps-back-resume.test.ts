@@ -215,3 +215,26 @@ test("card robinhood-trades-finish-filling: a coin whose locate the chain's own 
   assert.notEqual(g!.ms, null, `not filled (n${g!.n})`);
   assert.equal(steps, 0, `the day read in ${steps} steps of 10,000 blocks`);
 });
+
+/** Each coin opened alone, at 909222c27 (#943, the located read back before this card) on this rig: its time to its
+ *  newest 50 trades, its posts and its pool log reads. */
+const SOLO_909 = [
+  { what: "busy", n: 8, ms: 11_800, posts: 56, reads: 30 },
+  { what: "medium", n: 6, ms: 12_000, posts: 68, reads: 40 },
+  { what: "medium", n: 2, ms: 14_800, posts: 83, reads: 54 },
+  { what: "quiet", n: 7, ms: 17_800, posts: 152, reads: 122 },
+];
+
+test("card robinhood-trades-finish-filling: a coin opened alone, busy (its newest 50 trades in 6 spans), medium (13 and 18 spans: a few steps past the newest) or quiet (50 spans), fills no later than at 909222c27 and reads no more pool logs; the busy coin sends no more posts (at 909222c27: busy 11.8 s 56 posts 30 reads, medium 12.0 s 68/40 and 14.8 s 83/54, quiet 17.8 s 152/122; now 5.8 s 54/28, 8.8 s 69/40 and 8.8 s 87/54, 15.2 s 169/120: rounds of BACK_ROUND_SPANS cost a medium coin up to 4 posts more, a quiet one 17)", async () => {
+  for (const b of SOLO_909) {
+    const r = rig({});
+    const [g] = await fillTimes(r, [b.n], 120_000);
+    const posts = [...r.posts.values()].reduce((x, y) => x + y, 0);
+    const reads = [...r.reads.values()].reduce((x, y) => x + y, 0);
+    const line = `${b.what} ${SPANS_OF(b.n)} spans: ${g!.ms === null ? "not filled" : `${(g!.ms / 1000).toFixed(1)} s`}, ${posts} posts, ${reads} pool reads (909222c27: ${(b.ms / 1000).toFixed(1)} s, ${b.posts}, ${b.reads})`;
+    console.log(line);
+    assert.ok(g!.ms !== null && g!.ms <= b.ms, `slower than at 909222c27: ${line}`);
+    assert.ok(reads <= b.reads, `more pool reads than at 909222c27: ${line}`);
+    if (b.what === "busy") assert.ok(posts <= b.posts, `a busy coin sent more posts than at 909222c27: ${line}`);
+  }
+});

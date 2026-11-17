@@ -2564,7 +2564,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const before = e.back;
       await readBack(e, urls).catch(() => undefined);
       if (e.back === undefined || e.back === before) return;
+      // a wait under BACK_RETRY_MS (a pace's turn, a short hold) is waited here; a fails' backoff, or a hold as long,
+      // is left to the tick after it, so a read back that cannot be made holds no place of its own meanwhile
       const wait = (e.back.until ?? 0) - now();
+      if (wait >= BACK_RETRY_MS) return;
       if (wait > 0) await new Promise((go) => (setTimeout(go, wait) as { unref?: () => void }).unref?.());
     }
   }
