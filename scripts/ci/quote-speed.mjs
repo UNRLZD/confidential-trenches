@@ -25,7 +25,11 @@
 //
 // On a pull request ci.yml runs this file and CHECK as main has them (the base's scripts/ tree in $RUNNER_TEMP/base, as
 // verify-gate runs), so a pull request cannot loosen the KPI, the cases or the rerun; the quote it measures is the
-// checkout's: ROOT/packages is made a link to the checkout's packages/ when ROOT is not the checkout.
+// checkout's: ROOT/packages is made a link to the checkout's packages/ when ROOT is not the checkout. CHECK's one import
+// past scripts/ and packages/, the helper's mainnets (apps/helper/src/pool/mainnet-only.ts, read by
+// scripts/live-checks/mainnet-venues.mjs), is in ci.yml's archive of the base too, so a pull request cannot shrink the
+// networks it is measured on; quote-speed.test.mjs builds a root from that archive line and fails on any import of
+// CHECK's left outside it (pull request 944, CI run 44007000761: Cannot find module .../mainnet-only.ts).
 //
 // The Solana quote (packages/kit/src/trade/solana/) has no warm-round check of the kit alone: solana-quote-under-1s
 // quotes through the deployed helper and is pending (its Runs line), so it is not run here.
