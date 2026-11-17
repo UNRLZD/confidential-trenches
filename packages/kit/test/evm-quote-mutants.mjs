@@ -148,7 +148,7 @@ export const MUTANTS = [
   [QUOTE, "  const zf = (f: Found) => f.other === f.key.currency0;", "  const zf = (f: Found) => f.other !== f.key.currency0;", R, "RK3 "],
   [QUOTE, "    return u === null || u >= floor;", "    return u !== null && u >= floor;", R, "PROBE C "],
   [QUOTE, "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(", "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn / 1000n)) f.quotes.push(", R, "PROBE D "],
-  [QUOTE, "      if (!can(p, xa)) continue;\n      p.quotes.push(quoteOf(fourth,", "      if (!can(p, xa / 1000n)) continue;\n      p.quotes.push(quoteOf(fourth,", R, "PROBE A "],
+  [QUOTE, "      if (mk === top && !can(p, xa)) continue;\n      p.quotes.push(quoteOf(fourth,", "      if (mk === top && !can(p, xa / 1000n)) continue;\n      p.quotes.push(quoteOf(fourth,", R, "PROBE A "],
   [QUOTE, "        if (marketQuote.has(mk) || !needs(c, ubOf(mk, amountIn))) continue;", "        if (marketQuote.has(mk) || !needs(c, ubOf(mk, amountIn / 1000n))) continue;", R, "PROBE A2 "],
   [QUOTE, "    (xPools.get(c) ?? []).some((p) => can(p, x)) ||", "    false ||", R, "PROBE A2 "],
   [QUOTE, "    [...vias].some(([x2, fs]) => fs.some((via) => via.other === c && (xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x)))));", "    false;", R, "RK7 "],
@@ -661,9 +661,9 @@ export const MUTANTS = [
   [QUOTE, "if ((priceOf || hs.some((mk) => a.own?.has(mk.id) === true)) && !a.sell", "if (priceOf && !a.sell", R, "XL7 "],
   [QUOTE, "}, noMain !== null || keys.some((k) => banned.has(\"0x\" + poolId(k))) ? 1n : out(main)!),", "}, noMain !== null ? 1n : out(main)!),", R, "XL8 "],
   [QUOTE, "    if (x < value) value = x;\n", "", R, "N1B (buy"],
-  [QUOTE, "const lows = subsetsOf(unlisted).map(", "const lows = subsetsOf(unlisted).filter((hs) => hs.length === unlisted.length).map(", R, "N1B (buy"],
+  [QUOTE, "const subsets = subsetsOf(unlisted);", "const subsets = subsetsOf(unlisted).filter((hs) => hs.length === unlisted.length);", R, "N1B (buy"],
   // review of 72e28658, M1: every set of the unlisted hooks, never only each alone and all together
-  [QUOTE, "const lows = subsetsOf(unlisted).map(", "const lows = subsetsOf(unlisted).filter((hs) => hs.length === 1 || hs.length === unlisted.length).map(", R, "review of 72e28658, M1 (buy)"],
+  [QUOTE, "const subsets = subsetsOf(unlisted);", "const subsets = subsetsOf(unlisted).filter((hs) => hs.length === 1 || hs.length === unlisted.length);", R, "review of 72e28658, M1 (buy)"],
   [QUOTE, "c.alone = subsetsOf(hs).filter((s) => s.length < hs.length).map(", "c.alone = subsetsOf(hs).filter((s) => s.length === 1).map(", R, "review of 72e28658, M1 (sell)"],
   // review of a2d82dc6, F2: every read of the route with a set of its unlisted hooks replaced must answer above 0, or the
   // route is refused (the buy's own) or counts for nothing (routeSet's); never only the read with every hook replaced
