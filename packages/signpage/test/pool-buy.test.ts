@@ -1461,6 +1461,29 @@ test("the not_landed verdict's settle is held to the slots of the read that saw 
   assert.deepEqual(n.settleSlots, [null, null, null]);
 });
 
+// Card sol-settle-fix-review-p3s (review of sol-settle-failed-is-not-unspent at 5253be08, P3-1, mutant B23): this very
+// transaction failed on chain on both RPCs and the settle throws. It spent nothing and can never land, and a thrown
+// settle says nothing of another's spend: refused, never not_landed.
+test("this very transaction failed on both RPCs and the settle throws: refused, never not_landed (review P3-1, mutant B23)", async () => {
+  const w = await world({ readBack: "failed", settleThrows: () => true });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "refused", txs: [{ chain: "solana", hash: SIG }] });
+  assert.ok(w.log.includes("settle:note-1"), "the settle was asked");
+  assert.equal(w.state(), "RESERVED");
+});
+
+// Card sol-settle-fix-review-p3s (review P3-2, mutant B4): an RPC's finalized slot that is no whole number at or above
+// 0 makes the past read not known, so no slot of it ever reaches the settle and no not_landed rests on it; the buy that
+// never lands then ends "sent" (its note RESERVED for the page's pass).
+for (const junk of [1.5, -1, "500", 2 ** 53, Number.NaN] as const) {
+  test(`an RPC answering its finalized slot as ${String(junk)}: never handed to the settle, never not_landed (review P3-2, mutant B4)`, async () => {
+    for (const p of [0, 1] as const) {
+      const w = await world({ helper: "502", landsAtSettle: "never", finalHeight: () => 1_000, finalSlot: (q) => (q === p ? (junk as unknown as number) : 500) });
+      assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "sent", txs: [] }, `rpc ${p}`);
+      assert.ok(w.settleSlots.length > 0 && w.settleSlots.every((x) => x === null), `rpc ${p}: ${JSON.stringify(w.settleSlots)}`);
+    }
+  });
+}
+
 // How long each ending takes on the page's clock (it moves with each wait the run asks for), at the production read
 // count: a real not-landed buy still ends not_landed at its first read past the blockhash; a settle that keeps failing
 // ends "sent" at the read-back's bound.

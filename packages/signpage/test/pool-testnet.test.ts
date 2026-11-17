@@ -791,6 +791,14 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   for (const c of calls) assert.match(c, /, rpcs: settleRpcs\((?:"pass"|kind)?\), lister: lister\((?:"pass"|kind)?\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
   assert.deepEqual(calls.filter((c) => c.includes("(kind)")), calls.filter((c) => c.includes("minSlots, rpcs: settleRpcs(kind), lister: lister(kind),")), "a kind only where the pair and the lister both take it");
   assert.equal(calls.filter((c) => c.includes("settleRpcs(kind)")).length, 2, "the buy's alone: its settle and its set settle");
+  // card sol-settle-fix-review-p3s (review P3-2 of 5253be08, mutants P3 and P4): the not_landed verdict's slots reach the
+  // wallet's settle as the run handed them, each RPC its own, in every host that takes them (the buy's settle and set
+  // settle, the sale's ride, the withdraw): passed straight, never swapped, lowered or dropped (the wallet's own test of
+  // a low slot: ../../wallet/test/pool-solana.test.ts W1)
+  assert.equal([...src.matchAll(/settle: async \(noteId, minSlots\) => \{/g)].length, 3, "the buy's, the ride's and the withdraw's settle take the slots");
+  assert.equal([...src.matchAll(/settleSet: async \(noteIds, minSlots\) => \{/g)].length, 1, "the buy's set settle takes them");
+  assert.equal(calls.filter((c) => c.includes(", minSlots, rpcs: settleRpcs(")).length, 4, "each hands them on as it got them");
+  assert.equal([...src.matchAll(/\bminSlots\b/g)].length, 9, "and nowhere else: the four params, the four hand-offs and the one comment");
   // each site's signal is the stop's when the call began: four takes, and the stop read elsewhere only where a trade's
   // reads wait before a signature (card start-reads-wait-out-a-throttle): the buy's and the sell's host, each taken when
   // the host is made, and a pool kind's request (outSignal), each ending its waits at the next sign out. The sell host's
@@ -816,8 +824,10 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   // the exit's quote ask (card pool-withdraws-to-any-chain, src/pool-exit.ts): the stop as the ask leaves, read then
   assert.equal([...src.matchAll(/ stop: \(\) => solanaStop\.signal,\n {2}\};/g)].length, 1);
   // every read of the stop: the six takes, the buy host's, its carry proof's, outSignal, the deposit host's stop, the
-  // withdraw host's stop, the state pass's and the exit's
-  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 13);
+  // withdraw host's stop, the state pass's and the exit's, and the late buys' follow (card sol-settle-fix-review-p3s),
+  // taken before its first pass
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 14);
+  assert.equal([...src.matchAll(/const stop = solanaStop\.signal;\n {4}if \(!locks\) return;\n {4}if \(lateFollowing === stop\) \{/g)].length, 1);
   // the settle pair: the page's two seats, the helper's with the window-long retry
   assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
   assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
@@ -1974,6 +1984,199 @@ test("card pool-buy-record-never-stays-sent: the page's buy host writes the take
   assert.deepEqual(posts, ["not_landed"]);
   await t.stateRead();
   assert.deepEqual(posts, ["not_landed"], "posted once");
+  await t.signedOut();
+});
+
+// Card sol-settle-fix-review-p3s (review P3-3 of 5253be08): a buy whose run ended "sent" because the settle could not
+// answer (the lister down or throttled for the whole run) is settled again by the page's own passes, with no state read
+// from the app: a pass that leaves its end unknown is run again after a wait that doubles (LATE_BUY_WAIT_MS, 2 s to
+// 60 s), until its end is posted; a sign out ends them
+test("card sol-settle-fix-review-p3s: a buy that ended sent is settled again by the page's own passes at a doubling wait until its end is posted, with no state read; a sign out ends them", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  type Host = ReturnType<Parameters<typeof import("../src/pool-buy.ts").poolBuyKind>[0]>;
+  let hostOf: (() => Host) | null = null;
+  const buy = ((h: () => Host) => ((hostOf = h), () => ({ error: "not_allowed" }))) as unknown as typeof import("../src/pool-buy.ts").poolBuyKind;
+  // the page's wait, each one held until the test lets it go
+  let following = false;
+  const waits: number[] = [];
+  const go: (() => void)[] = [];
+  const wait = (ms: number): Promise<void> => (following ? (waits.push(ms), new Promise<void>((r) => go.push(r))) : Promise.resolve());
+  const until = async (f: () => boolean, what: string): Promise<void> => {
+    for (let i = 0; i < 400 && !f(); i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(f(), what);
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], tradeKinds: { buy }, wait });
+  await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs();
+  const r = (await t.readyWith(async () => null)).ready![0]!;
+  const h = hostOf!() as Host & { follow(post: (s: "filled" | "not_landed") => void): void };
+  await h.take(r.noteId, r.attempt, undefined, 151n);
+  const posts: string[] = [];
+  following = true;
+  h.follow((s) => void posts.push(s));
+  // the first pass reads nothing (its RPCs down): the end not known, the next pass after 2 s, then 4 s
+  await until(() => waits.length === 1, "a pass is waited for");
+  assert.deepEqual([posts, waits], [[], [2_000]]);
+  go.shift()!();
+  await until(() => waits.length === 2, "and again");
+  assert.deepEqual([posts, waits], [[], [2_000, 4_000]]);
+  // the chain answers by the next pass (here: the note freed, both RPCs past its last height): not_landed, posted once,
+  // and no pass after it
+  await ns.move(r.noteId, "RESERVED", "UNSPENT", { finalHeight: 152n });
+  go.shift()!();
+  await until(() => posts.length === 1, "the end posted");
+  assert.deepEqual(posts, ["not_landed"]);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual([posts, waits.length], [["not_landed"], 2], "no pass after the end");
+  // another buy left sent, then a sign out while its pass waits: no pass after it, nothing posted
+  await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs();
+  const r2 = (await t.readyWith(async () => null)).ready!.find((x) => x.noteId !== r.noteId)!;
+  const h2 = hostOf!() as Host & { follow(post: (s: "filled" | "not_landed") => void): void };
+  await h2.take(r2.noteId, r2.attempt, undefined, 151n);
+  h2.follow((s) => void posts.push(s));
+  await until(() => waits.length === 3, "its pass waited for");
+  await t.signedOut();
+  go.shift()!();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual([posts, waits.length], [["not_landed"], 3], "a sign out ends the passes");
+});
+
+// Card sol-settle-fix-review-p3s, the review of ed8f79692: a buy that ends "sent" while the follow already runs gets
+// its pass at once, as the first one does (d59370557 ran settleReserved() at its follow): its follow wakes the wait the
+// loop is in (buy A's 32 s here), the pass runs, and the wait starts again from 2 s. One loop still: B's follow
+// starts no second one
+test("card sol-settle-fix-review-p3s: a second buy that ends sent while the follow waits 32 s gets its pass at once, and the wait starts again from 2 s", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  type Host = ReturnType<Parameters<typeof import("../src/pool-buy.ts").poolBuyKind>[0]>;
+  let hostOf: (() => Host) | null = null;
+  const buy = ((h: () => Host) => ((hostOf = h), () => ({ error: "not_allowed" }))) as unknown as typeof import("../src/pool-buy.ts").poolBuyKind;
+  let following = false;
+  const waits: number[] = [];
+  const go: (() => void)[] = [];
+  const wait = (ms: number): Promise<void> => (following ? (waits.push(ms), new Promise<void>((r) => go.push(r))) : Promise.resolve());
+  const until = async (f: () => boolean, what: string): Promise<void> => {
+    for (let i = 0; i < 400 && !f(); i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(f(), what);
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], tradeKinds: { buy }, wait });
+  await land(ns, await incoming(ns, null, 9));
+  await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs();
+  const [a, b] = (await t.readyWith(async () => null)).ready!;
+  assert.ok(a && b && a.noteId !== b.noteId, "two ready proofs");
+  type Followed = Host & { follow(post: (s: "filled" | "not_landed") => void): void };
+  const ha = hostOf!() as Followed;
+  const hb = hostOf!() as Followed;
+  await ha.take(a!.noteId, a!.attempt, undefined, 151n);
+  await hb.take(b!.noteId, b!.attempt, undefined, 151n);
+  const posts: string[] = [];
+  following = true;
+  // buy A followed with its RPCs down: passes at 2, 4, 8 and 16 s leave it unknown, and the loop waits 32 s
+  ha.follow((s) => void posts.push(`A ${s}`));
+  for (const n of [1, 2, 3, 4, 5]) {
+    await until(() => waits.length === n, `wait ${n}`);
+    if (n < 5) go.shift()!();
+  }
+  assert.deepEqual([posts, waits], [[], [2_000, 4_000, 8_000, 16_000, 32_000]]);
+  // buy B ends "sent" (its pass, like A's, reads nothing yet): its follow wakes the 32 s wait, the pass runs now, and
+  // with A and B both unknown the loop waits again from 2 s; one loop (no second wait beside it)
+  hb.follow((s) => void posts.push(`B ${s}`));
+  await until(() => waits.length === 6, "B's pass at once, then the wait again");
+  assert.deepEqual([posts, waits.slice(5)], [[], [2_000]]);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(waits.length, 6, "one loop");
+  // both freed by the next pass: each end posted once, and no pass after the last
+  await ns.move(a!.noteId, "RESERVED", "UNSPENT", { finalHeight: 152n });
+  await ns.move(b!.noteId, "RESERVED", "UNSPENT", { finalHeight: 152n });
+  go.pop()!();
+  await until(() => posts.length === 2, "both ends");
+  assert.deepEqual(posts.sort(), ["A not_landed", "B not_landed"]);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(waits.length, 6, "no pass after the last end");
+  await t.signedOut();
+});
+
+// Card sol-settle-fix-review-p3s, the review of 1b00ffa04: a sign out while the old session's loop is inside its pass
+// leaves that loop with a stopped session. It must wait nothing (an aborted signal fires no abort event, so its wait ran
+// the full time) and take no wake (lateWake is the page's: it took the new session's loop's), so a buy of the new
+// session that ends "sent" still wakes its own session's loop: its pass at once
+test("card sol-settle-fix-review-p3s: a sign out during the late follow's pass: the old loop waits nothing and takes no wake; the next session's buy that ends sent gets its pass at once", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  type Host = ReturnType<Parameters<typeof import("../src/pool-buy.ts").poolBuyKind>[0]>;
+  let hostOf: (() => Host) | null = null;
+  const buy = ((h: () => Host) => ((hostOf = h), () => ({ error: "not_allowed" }))) as unknown as typeof import("../src/pool-buy.ts").poolBuyKind;
+  // the seed read a pass makes, held once at the gate: the old session's pass stays open across the sign out
+  let gate: Promise<void> | null = null;
+  let letGo!: () => void;
+  let held = false;
+  const seed64 = async (): Promise<Uint8Array> => {
+    if (gate) {
+      const g = gate;
+      gate = null;
+      held = true;
+      await g;
+    }
+    return SEED64.slice();
+  };
+  let following = false;
+  const waits: number[] = [];
+  const go: (() => void)[] = [];
+  const wait = (ms: number): Promise<void> => (following ? (waits.push(ms), new Promise<void>((r) => go.push(r))) : Promise.resolve());
+  const until = async (f: () => boolean, what: string): Promise<void> => {
+    for (let i = 0; i < 400 && !f(); i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(f(), what);
+  };
+  const t = testnetPool({ store: async () => w, seed64 }, { pool, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], tradeKinds: { buy }, wait });
+  for (let i = 0; i < 3; i++) await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs();
+  const ready = (await t.readyWith(async () => null)).ready!;
+  assert.equal(new Set(ready.map((x) => x.noteId)).size, 3, "three ready proofs");
+  type Followed = Host & { follow(post: (s: "filled" | "not_landed") => void): void };
+  const [ha, hb, hc] = [0, 1, 2].map(() => hostOf!() as Followed);
+  for (const [h, r] of [[ha, ready[0]!], [hb, ready[1]!], [hc, ready[2]!]] as const) await h!.take(r.noteId, r.attempt, undefined, 151n);
+  const posts: string[] = [];
+  following = true;
+  // 1-2. buy A ends sent, its RPCs down; its pass held open at the seed read, and the user signs out
+  gate = new Promise<void>((r) => (letGo = r));
+  ha!.follow((s) => void posts.push(`A ${s}`));
+  await until(() => held, "A's pass inside its seed read");
+  await t.signedOut();
+  // 3. the next session: buy B ends sent, its loop's pass reads nothing, and it waits 2 s
+  hb!.follow((s) => void posts.push(`B ${s}`));
+  await until(() => waits.length === 1, "B's loop waits");
+  assert.deepEqual(waits, [2_000]);
+  // 4. the old pass goes on and ends: the old loop waits nothing (no over.wait) and ends
+  letGo();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(waits, [2_000], "the old loop makes no wait after the sign out");
+  // 5. buy C ends sent; by now every RESERVED note is freed (both RPCs past their last height, A's too, its follow
+  // dropped at the sign out): C's follow wakes B's loop, whose pass runs at once (not at the end of B's 2 s wait) and
+  // posts both ends, and the loop ends
+  await ns.move(ready[0]!.noteId, "RESERVED", "UNSPENT", { finalHeight: 152n });
+  await ns.move(ready[1]!.noteId, "RESERVED", "UNSPENT", { finalHeight: 152n });
+  await ns.move(ready[2]!.noteId, "RESERVED", "UNSPENT", { finalHeight: 152n });
+  hc!.follow((s) => void posts.push(`C ${s}`));
+  await until(() => posts.length === 2, "C's pass at once");
+  assert.deepEqual(posts.sort(), ["B not_landed", "C not_landed"]);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(waits, [2_000], "B's 2 s wait never let go: the pass came at C's follow, and none after it");
   await t.signedOut();
 });
 
