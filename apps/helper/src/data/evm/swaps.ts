@@ -532,6 +532,12 @@ const TRADERS_MAX = 5_000;
  *  transaction no provider gives, or a bundle's receipt two providers never agree on, so no tape stays filling for it.
  *  [design: 3, as BACK_FAILS_MAX: a lookup answered three times running with none will not give one on the fourth.] */
 export const TRADER_TRIES = 3;
+/** The longest a row waits for its trader from its first hold (trades), on the helper's clock: then it is served with
+ *  trader null while its lookup goes on, and a later read names it. A lookup paced, held or never answered counts no
+ *  try, so without it a busy helper could keep a tape filling with no end (card evm-tape-trader-never-null). [design:
+ *  20 s, under the 45 s a filling tape is given (scripts/live-checks/tape-read.mjs FILLED_MS), with room for its read
+ *  back.] */
+export const HOLD_MS = 20_000;
 /** Agreed eth_call results kept (callsAgreed), oldest out first. */
 const CALLED_MAX = 5_000;
 export const TRADES_MAX = 50;
@@ -2967,9 +2973,21 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Each transaction's lookups a provider answered and that still gave it no trader (lookTraders), bounded as the
    *  traders are: TRADER_TRIES of them and it can never be read (card evm-tape-trader-never-null). */
   const tries = new Map<string, number>();
-  /** Whether a row's trader is not read yet, and so the row waits (trades): not held, and not answered TRADER_TRIES
-   *  times with none. */
-  const unread = (tx: string): boolean => !traders.has(tx) && (tries.get(tx) ?? 0) < TRADER_TRIES;
+  /** Whether a row's trader is not read yet, and so the row waits (trades): not held, not answered TRADER_TRIES times
+   *  with none, and held less than HOLD_MS. */
+  /** When each row was first held for its trader, bounded as the traders are. */
+  const heldSince = new Map<string, number>();
+  const unread = (tx: string): boolean => {
+    if (traders.has(tx) || (tries.get(tx) ?? 0) >= TRADER_TRIES) return false;
+    const at = now();
+    const since = heldSince.get(tx);
+    if (since === undefined) {
+      if (heldSince.size >= TRADERS_MAX) heldSince.delete(heldSince.keys().next().value!);
+      heldSince.set(tx, at);
+      return true;
+    }
+    return at - since < HOLD_MS;
+  };
   /** Each transaction's sender into `traders`, one lookup per hash however many callers ask it at once. */
   async function tradersOf(txs: string[]): Promise<void> {
     const ask = [...new Set(txs)].filter((t) => !traders.has(t));
