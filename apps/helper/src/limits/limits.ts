@@ -147,8 +147,9 @@ export type ProviderHolds = {
    *  caller's draw, now on one bucket for dRPC's three keys, would stand still whenever one caller reads a second). */
   take(url: string, calls: number, background: boolean, sender?: boolean, probe?: boolean, page?: boolean): number;
   /** True when `url`'s daily budget (Pace day) cannot fit `calls` more today: out for the rest of the UTC day, which is
-   *  no wait (review M3 of 424dce1e: a walk counts it down, so every provider failing is 503, never a 429). */
-  dayOut(url: string, calls: number): boolean;
+   *  no wait (review M3 of 424dce1e: a walk counts it down, so every provider failing is 503, never a 429).
+   *  `background`: for the helper's own reads, whose day ends CALLER_DAY_ROOM sooner. */
+  dayOut(url: string, calls: number, background?: boolean): boolean;
   reserve(url: string): void;
   room(url: string): number;
   paceOf(url: string): Pace | undefined;
@@ -327,6 +328,13 @@ export const CALLER_HOLD_MS = 1_000;
 /** The share of a paced provider's burst background reads leave for callers' reads. [design: a quarter, so a caller's
  *  read finds room at once on the provider it asks first while the walks run at three quarters of its pace.] */
 export const CALLER_ROOM = 0.25;
+/** The share of a daily budget (Pace day) background reads leave for callers' reads (card solana-marks-route-answers):
+ *  the walks, the fills and the index stop short of it, so a caller's read (a restore's mark scan, a sign-in's reads)
+ *  finds the account's day where they left it. Live 16 Nov 23:37Z: route B's one provider, quicknode-solana, had spent
+ *  319,710 of its 322,580 credits (the box's day files), past the 319,370 a non-probe draw may reach, so every mark scan
+ *  was 503 at 0 ms until 00:00Z. [design: CALLER_ROOM, the quarter of each bucket background already leaves callers,
+ *  now of each day: 80,640 of quicknode-solana's credits, 2,688 calls at 30, for callers alone.] */
+export const CALLER_DAY_ROOM = CALLER_ROOM;
 /** The share of a paced provider's burst callers' reads (/v1/rpc, the swap reads a caller asked for) leave for the pool
  *  senders' reads, on the providers they read (reserve) (card robinhood-mainnet-rpcs fold A): as plain callers the senders shared CALLER_ROOM with every
  *  /v1/rpc client, and enough clients took each refill first, so a withdraw waited past its deadline. Under
@@ -403,13 +411,14 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
     }
   };
   // the units a draw may reach: the plan's day for a probe, else the day less the probes' share (PROBE_DAY_SHARE), in
-  // whole calls (a day too small for one keeps none)
-  const dayCap = (p: Pace, probe: boolean): number => {
+  // whole calls (a day too small for one keeps none); a background draw's also less callers' share (CALLER_DAY_ROOM)
+  const dayCap = (p: Pace, probe: boolean, background = false): number => {
     if (p.day === undefined) return Infinity;
     const cost = p.cost ?? 1;
-    return probe ? p.day : p.day - Math.floor((p.day * PROBE_DAY_SHARE) / cost) * cost;
+    const share = (f: number) => Math.floor((p.day! * f) / cost) * cost;
+    return probe ? p.day : p.day - share(PROBE_DAY_SHARE) - (background ? share(CALLER_DAY_ROOM) : 0);
   };
-  const dayOut = (k: string, p: Pace, calls: number, t: number, probe = false): boolean => p.day !== undefined && usedToday(k, t) + Math.max(calls, 1) * (p.cost ?? 1) > dayCap(p, probe);
+  const dayOut = (k: string, p: Pace, calls: number, t: number, probe = false, background = false): boolean => p.day !== undefined && usedToday(k, t) + Math.max(calls, 1) * (p.cost ?? 1) > dayCap(p, probe, background);
   // a company's URLs share one bucket and one caller wait (Pace group, card rpc-keyed-lists), or the company's rate's
   // (Pace rate: dRPC's per IP, card helper-base-keyed-holds-under-load)
   const rateOf = (url: string, p: Pace): string => p.rate ?? p.group ?? url;
@@ -432,7 +441,7 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       // the day's budget (review M2): a draw it cannot fit waits for the next UTC day, so every path asks another
       // provider; a pool sender's few reads are never refused by it (pool/evm.ts pacedEvmRpc waits out what take names)
       const need = Math.max(calls, 1) * (p.cost ?? 1);
-      if (!sender && dayOut(k, p, calls, t, probe)) return Math.max(1, Math.ceil((Math.floor(t / DAY_MS) + 1) * DAY_MS - t));
+      if (!sender && dayOut(k, p, calls, t, probe, background && !probe)) return Math.max(1, Math.ceil((Math.floor(t / DAY_MS) + 1) * DAY_MS - t));
       const spend = () => {
         if (p.day === undefined) return;
         const day = Math.floor(t / DAY_MS);
@@ -464,9 +473,9 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       if (!background && !page) shortWaits.set(rk, Math.max(shortWaits.get(rk) ?? 0, t + w));
       return w;
     },
-    dayOut(url, calls) {
+    dayOut(url, calls, background = false) {
       const p = pace[url];
-      return p !== undefined && dayOut(p.group ?? url, p, calls, now());
+      return p !== undefined && dayOut(p.group ?? url, p, calls, now(), false, background);
     },
     reserve(url) {
       reserved.add(url);

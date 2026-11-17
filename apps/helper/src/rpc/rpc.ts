@@ -1161,7 +1161,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     return wait * 1000;
   };
   const fillSend = async (c: RpcChain, url: string, pool: string, a: bigint, b: bigint): Promise<PoolLog[] | number | null> => {
-    if (holdsAll.dayOut(url, 1)) return null;
+    if (holdsAll.dayOut(url, 1, true)) return null;
     const back = (fillBacks.get(url)?.until ?? 0) - now();
     if (back > 0) return back;
     const held = holdsAll.heldMs(url);
@@ -1654,6 +1654,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     for (let tries = 0; ; tries++) {
       let soonestMs = Infinity;
       let down = false;
+      // card solana-marks-route-answers: every provider skipped for its day alone, named in the 503's refusal line
+      let daysOut = 0;
       let sent = false;
       let shaped: { status: number; body: string } | undefined;
       let capped: { span: bigint; status: number; body: string } | undefined;
@@ -1674,6 +1676,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         // review M3: a URL past its day's budget is out until the next UTC day, which is no wait: down for this read
         if (holds.dayOut(url, methods.length)) {
           down = true;
+          daysOut++;
           continue;
         }
         const h = holds.heldMs(url);
@@ -1785,7 +1788,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       if (shaped !== undefined && soonestMs === Infinity) return { status: shaped.status, body: shaped.body };
       // every provider failed (none held or out of room; a company past its day's budget is down, review M3): upstream,
       // so the device reads its own; else the soonest wait
-      return down && soonestMs === Infinity ? UPSTREAM() : throttled(soonestMs === Infinity ? RETRY_AFTER_MAX_S : Math.min(RETRY_AFTER_MAX_S, Math.max(1, Math.ceil(soonestMs / 1000))), undefined, `${c} every provider held`);
+      if (down && soonestMs === Infinity) return daysOut === list.length ? { ...UPSTREAM(), why: `${c} every provider past its day` } : UPSTREAM();
+      return throttled(soonestMs === Infinity ? RETRY_AFTER_MAX_S : Math.min(RETRY_AFTER_MAX_S, Math.max(1, Math.ceil(soonestMs / 1000))), undefined, `${c} every provider held`);
     }
   }
 
