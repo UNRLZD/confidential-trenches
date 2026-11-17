@@ -13,6 +13,23 @@
 export const FILLED_MS = 45_000;
 export const FILL_POLL_MS = 2_000;
 
+/** The first thing wrong with a trades answer's own fields, or null: exactly, in the helper's wire order on every chain, trades, `filling`
+ *  (only true, while the helper still reads its older trades), `whole_ms` (card token-stats-count-every-trade: how far
+ *  back the tape holds every trade, claimed only by a tape not filling, a whole ms from 0 to its as_of_ms plus a
+ *  minute), src, as_of_ms. Every check that freezes the trades fields reads them here, so a field the helper adds is
+ *  named in one place (card trades-checks-pass-on-177: five checks' own lists went red on release 177's whole_ms). */
+export function tapeFieldsFault(b) {
+  if (typeof b !== "object" || b === null || Array.isArray(b)) return "no JSON object";
+  const want = ["trades", ...(b.filling === true ? ["filling"] : []), ...(Object.hasOwn(b, "whole_ms") ? ["whole_ms"] : []), "src", "as_of_ms"];
+  if (JSON.stringify(Object.keys(b)) !== JSON.stringify(want)) return `keys ${JSON.stringify(Object.keys(b))}`;
+  if (!Number.isSafeInteger(b.as_of_ms)) return `as_of_ms ${JSON.stringify(b.as_of_ms)}`;
+  if (Object.hasOwn(b, "whole_ms")) {
+    if (b.filling === true) return "whole_ms on a filling tape";
+    if (!Number.isSafeInteger(b.whole_ms) || b.whole_ms < 0 || b.whole_ms > b.as_of_ms + 60_000) return `whole_ms ${JSON.stringify(b.whole_ms)}`;
+  }
+  return null;
+}
+
 /** Whether a tape's body is marked filling. */
 export function fillingOf(body) {
   try {

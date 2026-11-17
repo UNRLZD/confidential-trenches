@@ -8,7 +8,7 @@
 //   GET /v1/market/candles?chain=solana&token=<t>&tf=1s&limit=60
 // and passes only when:
 //   - each answers 200 JSON with X-Helper-Commit a full sha, X-Helper-Source "chain", X-Fetched-At an ISO time within
-//     15 s of the read and Access-Control-Allow-Origin echoing APP_HOST; the trades hold exactly trades, src, as_of_ms,
+//     15 s of the read and Access-Control-Allow-Origin echoing APP_HOST; the trades hold exactly the tape's fields (tape-read.mjs tapeFieldsFault: trades, filling, whole_ms, src, as_of_ms),
 //     each {t_ms, side, usd, amt, trader, tx}, newest first;
 //   - the fresh trade's signature is on the tape in a read that answered within 2 s of the check holding the trade, with
 //     its side, its time (the event's clock) and its trader (the event's user);
@@ -20,6 +20,7 @@
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { candlesReader, waitsText } from "./candles-read.mjs";
+import { tapeFieldsFault } from "./tape-read.mjs";
 import { writeFileSync } from "node:fs";
 import { fromLogs, poolMints, PUMP_AMM, USDC, WSOL } from "../../apps/helper/src/data/solana/decode.ts";
 
@@ -47,8 +48,8 @@ const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 /** The first thing wrong with a Trades answer, or null. */
 export function tradesFault(t) {
   // `filling` true: a tape whose older trades the helper still reads (card token-page-data-complete-and-fast); never false
-  const keys = isObj(t) && t.filling === true ? ["trades", "filling", "src", "as_of_ms"] : ["trades", "src", "as_of_ms"];
-  if (!isObj(t) || !same(Object.keys(t), keys)) return `keys ${show(isObj(t) ? Object.keys(t) : t)}`;
+  // its own fields, whole_ms among them (tape-read.mjs tapeFieldsFault)
+  if (!isObj(t) || tapeFieldsFault(t) !== null) return isObj(t) ? tapeFieldsFault(t) : `keys ${show(t)}`;
   if (t.src !== "chain" || !Number.isSafeInteger(t.as_of_ms)) return `src ${show(t.src)}`;
   if (!Array.isArray(t.trades) || t.trades.length > 50) return "trades not a list of at most 50";
   for (const [i, r] of t.trades.entries()) {

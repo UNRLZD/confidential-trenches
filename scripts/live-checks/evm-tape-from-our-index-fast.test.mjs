@@ -90,10 +90,13 @@ test("planted from the good answer: FAIL, or INCONCLUSIVE when nothing was short
 const ROW = (t, i) => ({ t_ms: t, side: "b", usd: "1.5", amt: "100", trader: "0x" + "ab".repeat(20), tx: "0x" + i.toString(16).padStart(64, "0") });
 test("bodyFault: the tape's fields exactly, filling only as true, rows newest first", () => {
   assert.equal(bodyFault({ trades: [ROW(2, 1), ROW(1, 2)], src: "chain", as_of_ms: 1 }), null);
-  assert.equal(bodyFault({ trades: [], src: "chain", as_of_ms: 1, filling: true }), null);
+  assert.equal(bodyFault({ trades: [], filling: true, src: "chain", as_of_ms: 1 }), null);
+  // release 177's settled tape with its reach (card trades-checks-pass-on-177), and a reach a filling tape claims
+  assert.equal(bodyFault({ trades: [], whole_ms: 0, src: "chain", as_of_ms: 1 }), null);
+  assert.match(bodyFault({ trades: [], filling: true, whole_ms: 0, src: "chain", as_of_ms: 1 }), /whole_ms on a filling tape/);
   assert.equal(bodyFault({ trades: [{ ...ROW(2, 1), trader: null }], src: "chain", as_of_ms: 1 }), null);
   for (const [what, b, want] of [
-    ["filling false", { trades: [], src: "chain", as_of_ms: 1, filling: false }, /filling false/],
+    ["filling false", { trades: [], filling: false, src: "chain", as_of_ms: 1 }, /filling false/],
     ["an extra field", { trades: [], src: "chain", as_of_ms: 1, pool: "x" }, /fields/],
     ["no src", { trades: [], as_of_ms: 1 }, /fields/],
     ["a row missing tx", { trades: [(({ tx: _, ...r }) => r)(ROW(1, 1))], src: "chain", as_of_ms: 1 }, /not the row fields/],
@@ -123,9 +126,9 @@ test("readRun: opens new's and trending_1h's next OPEN / 2 past helper-base-tape
     const n = (reads.get(t) ?? 0) + 1;
     reads.set(t, n);
     const body =
-      t === tok("3") ? { trades: Array.from({ length: n < 3 ? 1 : 4 }, (_, i) => ROW(10 - i, i)), src: "chain", as_of_ms: 1, ...(n < 3 ? { filling: true } : {}) }
+      t === tok("3") ? { trades: Array.from({ length: n < 3 ? 1 : 4 }, (_, i) => ROW(10 - i, i)), ...(n < 3 ? { filling: true } : {}), src: "chain", as_of_ms: 1 }
       : t === tok("6") ? { trades: Array.from({ length: TRADES_MAX }, (_, i) => ROW(100 - i, i)), src: "chain", as_of_ms: 1 }
-      : { trades: [], src: "chain", as_of_ms: 1, filling: true };
+      : { trades: [], filling: true, src: "chain", as_of_ms: 1 };
     return new Response(JSON.stringify(body), { status: 200, headers: h });
   };
   const run = await readRun("https://h.example", { fetchFn, sleep: async (ms) => void (clock += ms), now: () => clock });

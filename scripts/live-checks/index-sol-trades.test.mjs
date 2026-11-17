@@ -82,6 +82,9 @@ test("the tape's wire form: oldest first or an extra field fails", () => {
   assert.equal(tradesFault({ trades: rows.slice().reverse(), src: "chain", as_of_ms: 1 }), null);
   // a tape still filling carries `filling: true` between trades and src; any other value or place is a fault
   assert.equal(tradesFault({ trades: rows.slice().reverse(), filling: true, src: "chain", as_of_ms: 1 }), null);
+  // release 177's settled tape with its reach (card trades-checks-pass-on-177); a reach on a filling tape is a fault
+  assert.equal(tradesFault({ trades: rows.slice().reverse(), whole_ms: 1_000, src: "chain", as_of_ms: 5_000 }), null);
+  assert.match(tradesFault({ trades: rows.slice().reverse(), filling: true, whole_ms: 1_000, src: "chain", as_of_ms: 5_000 }), /whole_ms on a filling tape/);
   assert.match(tradesFault({ trades: rows.slice().reverse(), filling: false, src: "chain", as_of_ms: 1 }), /keys/);
   assert.match(tradesFault({ trades: rows.slice().reverse(), src: "chain", filling: true, as_of_ms: 1 }), /keys/);
 });

@@ -11,7 +11,7 @@
 // the read and Access-Control-Allow-Origin echoing APP_HOST, and the bodies hold exactly the frozen fields: the lists
 // {chain: "near", lists: {new, trending, ...}, as_of_ms} with rows exactly the terminal's Row fields, chain near, a
 // decimal price; the page {row, decimals, pool, risk, route, filling, links} for that token; holders {holders, total,
-// top_bps, src, as_of_ms}; trades {trades, src, as_of_ms} with rows {t_ms, side, usd, amt, trader, tx}; candles {tf,
+// top_bps, src, as_of_ms}; trades in the tape's fields (tape-read.mjs tapeFieldsFault) with rows {t_ms, side, usd, amt, trader, tx}; candles {tf,
 // candles, src, as_of_ms} with 6-value bars; each part's src one the helper gives it (SRC); and the account with no pool
 // answers 404. Anything else is a FAIL.
 // After: helper
@@ -20,6 +20,7 @@
 //   tokens cold (token, trades and candles at once, as the page does) and prints the first answer's and the last's time.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
+import { tapeFieldsFault } from "./tape-read.mjs";
 import { ROW_FIELDS as TERMINAL_FIELDS } from "../../apps/terminal/src/screens/discover/fields.ts";
 
 const KEY = "helper-near-lists-and-token";
@@ -102,7 +103,8 @@ export const FAULTS = {
   },
   holders: (b) => (same(b, HOLDERS) && Array.isArray(b.holders) ? srcFault("holders", b) : "not the holders fields"),
   trades: (b) => {
-    if (!same(b, ["trades", "src", "as_of_ms"]) || !Array.isArray(b.trades)) return "not the trades fields";
+    // the tape's own fields, whole_ms among them (tape-read.mjs tapeFieldsFault)
+    if (!isObj(b) || tapeFieldsFault(b) !== null || !Array.isArray(b.trades)) return `not the trades fields: ${isObj(b) ? tapeFieldsFault(b) : show(b)}`;
     if (srcFault("trades", b) !== null) return srcFault("trades", b);
     for (const t of b.trades) if (!same(t, TAPE) || (t.side !== "b" && t.side !== "s") || !DEC.test(t.usd) || !DEC.test(t.amt)) return `trade ${show(t)}`;
     return null;

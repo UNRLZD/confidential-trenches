@@ -1094,8 +1094,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return `evm-open;dur=${Math.round(openMs)}, evm-queue;dur=${Math.round(pace + slot)};desc="${posts} posts: pace ${Math.round(pace)} ms, in flight ${Math.round(slot)} ms"`;
   };
 
-  /** One JSON-RPC batch to a provider: each call's reply, or the wait a refusal names; null when it failed. */
-  async function batchTo(url: string, calls: Call[], patient = false): Promise<Reply[] | null> {
+  /** One JSON-RPC batch to a provider: each call's reply, or the wait a refusal names; null when it failed. `unsent`,
+   *  when given, is marked when a part was never sent for want of the provider's pace or a place in its in-flight queue
+   *  (our own reads' load, no answer of the provider's), not for a hold its refusal set. */
+  async function batchTo(url: string, calls: Call[], patient = false, unsent?: { paced: boolean }): Promise<Reply[] | null> {
     const max = batchOf(url);
     const parts: Call[][] = [];
     for (let i = 0; i < calls.length; i += max) parts.push(calls.slice(i, i + max));
@@ -1103,8 +1105,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // for them before it takes a place, so it never holds one asleep (card helper-deploy-reads-fast: background posts
     // asleep on the pace in the places held a caller's read 2.6 s in the queue behind them)
     const wait = patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS;
-    const send = (part: Call[]) => async () => ((await paceFor(url, part.length, patient)) ? one(url, part) : null);
-    const got = await Promise.all(parts.map(async (part) => (fgNow() ? slot(url, part.length, wait, send(part)) : (await paceFor(url, part.length, patient)) ? slot(url, part.length, wait, () => one(url, part)) : null)));
+    const paceOk = async (n: number): Promise<boolean> => {
+      const ok = await paceFor(url, n, patient);
+      if (!ok && unsent !== undefined && holds.heldFor(url) === 0) unsent.paced = true;
+      return ok;
+    };
+    const send = (part: Call[]) => async () => ((await paceOk(part.length)) ? one(url, part) : null);
+    const got = await Promise.all(parts.map(async (part) => (fgNow() ? slot(url, part.length, wait, send(part)) : (await paceOk(part.length)) ? slot(url, part.length, wait, () => one(url, part)) : null)));
+    if (unsent !== undefined && got.some((g) => g === GAVE_UP)) unsent.paced = true;
     // a part given back from the queue (slot) is no answer for its requests alone: the parts answered are kept, and only
     // its requests are asked of the next provider
     if (got.every((g) => g === GAVE_UP)) return null;
@@ -2276,6 +2284,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (V.backOnly && back.located !== true) {
       const at = await locate(e, end, back.lo - 1);
       const steps: Back = { ...back, located: true, fails: 0 };
+      // a locate our own load kept from being sent (the provider's pace of a post a second, shared by every tape that
+      // opens at once) is no fail: it is asked again at its turn, a second on (card trades-checks-pass-on-177: counted
+      // as one, three in a row sent a burst's short tapes to walk the day in 87 steps, still filling at 46 s, live run
+      // 43977576335; swaps-search.test.ts, 12 tapes at once: 6 still filling at 50 s at ad9337504)
+      if (at === "paced") {
+        e.back = { ...back, until: now() + Math.ceil(1_000 / Math.max(holds.paceOf(BACK_LOCATE[0]!)?.perS ?? 1, 0.001)) };
+        return;
+      }
       if (at === undefined || at === "held") {
         const fails = (back.fails ?? 0) + 1;
         const wait = at === "held" ? { until: now() + Math.max(1, ...BACK_LOCATE.map((u) => holds.heldMs(u))) } : {};
@@ -2335,9 +2351,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     e.back = { lo: next, logs: all, tape: backBook(e, all), done: lo <= end || born || marks?.length === 0, ...(marks === undefined ? {} : { located: true as const, marks }), ...(born ? { born: true as const } : {}) };
   }
   /** The blocks in `lo` to `hi` that hold a swap of `e`'s pool, newest first (none: an empty list), as BACK_LOCATE answers one read of the whole
-   *  range: "held" when no such provider is free, "steps" when no such read can be made, undefined when it did not answer. Past MARKS_MAX blocks readBack keeps
+   *  range: "held" when no such provider is free, "steps" when no such read can be made, "paced" when the read was not
+   *  sent for the provider's pace or queue (our own load: other tapes' locates), undefined when it did not answer. Past MARKS_MAX blocks readBack keeps
    *  the newest alone, and the steps read every block below it, as before (card robinhood-trades-finish-filling). */
-  async function locate(e: Entry, lo: number, hi: number): Promise<number[] | "held" | "steps" | undefined> {
+  async function locate(e: Entry, lo: number, hi: number): Promise<number[] | "held" | "steps" | "paced" | undefined> {
     if (lo > hi) return [];
     const [main] = poolFilters(e.pool, lo, hi, chain);
     if (main === undefined) return [];
@@ -2355,7 +2372,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     let each: (string | null)[][] = [[]];
     for (const t of topics) each = each.flatMap((pre) => (Array.isArray(t) ? t : [t]).map((v) => [...pre, v]));
     if (each.length > LOCATE_FILTERS_MAX) return "steps";
-    const r = await batchTo(u, each.map((ts) => ({ method: "eth_getLogs", params: [{ ...main, ...(topics.length === 0 ? {} : { topics: ts }), fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }] })));
+    const unsent = { paced: false };
+    const r = await batchTo(u, each.map((ts) => ({ method: "eth_getLogs", params: [{ ...main, ...(topics.length === 0 ? {} : { topics: ts }), fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }] })), false, unsent);
+    if (r === null && unsent.paced) return "paced";
     const got = (r ?? []).map((x) => (x?.ok ? parseLogs((x as { result: unknown }).result) : null));
     if (r === null || got.length === 0 || got.some((x) => x === null)) return undefined;
     const logs = (got as Log[][]).flat();

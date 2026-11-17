@@ -29,7 +29,7 @@
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { EXIT } from "./provider-answer.mjs";
-import { FILLED_MS } from "./tape-read.mjs";
+import { FILLED_MS, tapeFieldsFault } from "./tape-read.mjs";
 
 const KEY = "evm-tape-from-our-index-fast";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -63,13 +63,14 @@ const read = (base) => ({
   trades: (t) => `${base}/v1/market/trades?chain=base&token=${t}&limit=${TRADES_MAX}`,
 });
 
-/** The first thing wrong with a tape's body, or null: exactly {trades, src, as_of_ms} and filling true when it says
- *  so, at most TRADES_MAX rows, each exactly the row fields, newest first. */
+/** The first thing wrong with a tape's body, or null: exactly the tape's fields (tapeFieldsFault: trades, filling
+ *  true when it says so, whole_ms, src, as_of_ms), at most TRADES_MAX rows, each exactly the row fields, newest first. */
 export function bodyFault(b) {
   if (!isObj(b)) return "no JSON object";
-  const keys = Object.keys(b).sort().join(",");
-  if (keys !== "as_of_ms,src,trades" && keys !== "as_of_ms,filling,src,trades") return `fields ${keys}`;
+  // the tape's own fields, whole_ms among them (tape-read.mjs tapeFieldsFault); a filling not true is no field of it
   if (Object.hasOwn(b, "filling") && b.filling !== true) return `filling ${JSON.stringify(b.filling)}`;
+  const fields = tapeFieldsFault(b);
+  if (fields !== null) return `fields ${fields}`;
   if (!Array.isArray(b.trades) || b.trades.length > TRADES_MAX) return "trades: no list of at most TRADES_MAX";
   if (typeof b.src !== "string" || !Number.isSafeInteger(b.as_of_ms)) return "src or as_of_ms";
   let last = Infinity;
