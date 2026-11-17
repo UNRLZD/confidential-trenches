@@ -74,7 +74,7 @@ test("a day spent to its end by callers is the 503 it was, and says why in the r
   assert.equal(last.why, "solana-marks every provider past its day");
 });
 
-test("the CO's hypothesis, ruled out: Base's background reads on a dRPC key hold its pace, and a mark scan on that key is still served", async () => {
+test("ruled out: Base's background reads on a dRPC key hold its pace, and a mark scan on that key is still served", async () => {
   // were route B's dRPC names set (they are empty on the box), each dRPC key is one account across chains (rpc.ts
   // keyedAccountOf) on one per-IP bucket (limits.ts DRPC_IP_PACE): background leaves CALLER_ROOM of it, so a caller waits
   // at most one refill, never a 503
