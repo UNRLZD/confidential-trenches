@@ -1,0 +1,21 @@
+{
+ "_note": "bad: SIGN_HOST as deployed, read 2026-11-17T22:24:54Z (before this card: no refund floor in its /app.js). good: this tree's build (packages/signpage: index.html and public/app.js, --site) on card/refunded-needs-the-refund, read 2026-11-17T22:24Z, which the deploy serves; re-recorded from SIGN_HOST once this card is deployed.",
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-mR+sDFTP/pvzKq1FEEP/HYKJhwH9JmNyc728o2AM010cVUno4YEYejCwdA99FxyN\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-mR+sDFTP/pvzKq1FEEP/HYKJhwH9JmNyc728o2AM010cVUno4YEYejCwdA99FxyN",
+   "markers": []
+  }
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-xGHlPFMcBvd0cxBhmErm6jRlOmVH3vQlPAmu0yojyh02D6057JcT1kNc0XqFtzdp\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-xGHlPFMcBvd0cxBhmErm6jRlOmVH3vQlPAmu0yojyh02D6057JcT1kNc0XqFtzdp",
+   "markers": [
+    "`speck`",
+    "refund_min",
+    "the quote's lowest refund is not a positive amount"
+   ]
+  }
+ }
+}

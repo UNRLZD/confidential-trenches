@@ -139,6 +139,7 @@ export interface OneClickChecked {
   amountOut: bigint;
   minAmountOut: bigint;
   withdrawFee: bigint | undefined; // signed: a live answer's only
+  refundFee: bigint | undefined; // signed: a live answer's only, in the origin's base units (D52); undefined when it names none
   unsignedDryWithdrawFee: bigint | undefined; // a dry answer's figure, not signed (SDK 0.1.26 dist/index.mjs:1626-1636)
   deadline: string | undefined; // a live answer's signed deadline
   timeEstimate: unknown; // a live answer's signed timeEstimate as it came (seconds), unchecked; never set for a dry one
@@ -419,7 +420,10 @@ export function checkOneClickQuote(request: OneClickRequest, answer: unknown, op
     pricing: opts.pricing, decimalsIn: opts.decimalsIn, decimalsOut: opts.decimalsOut, intoVault: opts.intoVault });
   if (amountOut < floor.amountOut) fail("floor", `amountOut ${amountOut} is below the device's floor ${floor.amountOut}`);
   if (minAmountOut < floor.minAmountOut) fail("floor", `minAmountOut ${minAmountOut} is below the device's floor ${floor.minAmountOut}`);
-  return { depositAddress, amountIn, amountOut, minAmountOut, withdrawFee: request.dry ? undefined : fee,
+  // what 1Click keeps of a refund (D52): read for the device's refund floor, never taken off a fill, and never a refusal
+  // (none, or no base-unit amount: undefined, and the floor is the whole amountIn)
+  const refundFee = !request.dry && typeof q.refundFee === "string" && UINT.test(q.refundFee) ? BigInt(q.refundFee) : undefined;
+  return { depositAddress, amountIn, amountOut, minAmountOut, withdrawFee: request.dry ? undefined : fee, refundFee,
     unsignedDryWithdrawFee: request.dry ? fee : undefined, deadline, timeEstimate: request.dry ? undefined : q.timeEstimate,
     unsignedDryTimeEstimate: request.dry ? q.timeEstimate : undefined, timestamp: a.timestamp as string };
 }

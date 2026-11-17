@@ -92,7 +92,8 @@ test("the quote host hands the follow U from the record its rule checked, never 
   const d = host({ origin_asset: SOL_USDC, amount: "25" }, { id: "dq-9" });
   await d.after;
   assert.ok("result" in (d.answer() as object));
-  assert.deepEqual(got, [{ id: "dq-9", address: MOCK_ADDRESS, u: { scope: 7n, index: 3, u: MOCK_U } }]);
+  // with the checked quote's lowest refund (card refunded-needs-the-refund): amountIn less its signed refundFee
+  assert.deepEqual(got, [{ id: "dq-9", address: MOCK_ADDRESS, u: { scope: 7n, index: 3, u: MOCK_U, refund_min: "25000000" } }]);
   assert.equal(r, 2, "two reads, as the rule makes them; no third");
   // the follow's write throws: the answer is down, never an address nothing follows
   const down = depositQuoteHost({ scope: () => 7n, read: async () => SAVED, fetch: h1c({}).fetch, now: () => MOCK_NOW, checked: async () => { throw new Error("no store"); } });

@@ -45,7 +45,16 @@ test("a good quote to U passes and gives the signed address; the request names U
       deposit_address: ADDRESS, origin_asset: SOL_USDC, amount_in: "25", min_amount_out: "24.74208",
       deadline: new Date(NOW + 30 * 60_000 + H72).toISOString(), time_estimate_s: 20,
     },
+    refund_min: "25000000",
   });
+});
+
+test("card refunded-needs-the-refund: the op's lowest refund is the checked quote's amountIn less its signed refundFee, never in the answer", async () => {
+  const m = h1c({ before: (a) => { a.quote.refundFee = "255215"; } });
+  const a = await depositQuoteKind(PARAMS, ctx(m.fetch));
+  assert.ok(a.ok);
+  assert.equal(a.refund_min, (25_000_000n - 255_215n).toString());
+  assert.ok(!("refund_min" in a.result), "the app's answer carries no refund floor");
 });
 
 test("a quote exactly at the device's floors passes", async () => {

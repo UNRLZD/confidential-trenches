@@ -51,7 +51,7 @@ export interface DepositWireDeps {
    * deposit record the rule checked it under, never a fresh read. A throw answers "down", so no address goes out
    * that nothing follows.
    */
-  checked(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string; refund_to?: string }): Promise<void>;
+  checked(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string; refund_to?: string; refund_min?: string }): Promise<void>;
   /**
    * A host whose quotes a device wallet pays (card refunds-land-on-the-devices-own-wallet: pool to Cash, a leftover's
    * carry): U_{scope,index}'s own address on `chain`, derived on the device (base58 of the id's key on Solana, U^evm on
@@ -115,7 +115,9 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       if (!now || !same(now.deposit, before.deposit)) return;
       // no request id, no follow: no address goes out
       if (ctx === undefined) return;
-      await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id, ...(refund === undefined ? {} : { refund_to: refund.to }) });
+      // the quote's lowest refund rides with the op, never in the answer: refunded counts only at or over it (card
+      // refunded-needs-the-refund)
+      await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id, ...(refund === undefined ? {} : { refund_to: refund.to }), refund_min: got.refund_min });
       if (stopped()) return void (out = { error: "not_allowed" });
       out = { result: got.result };
     })().catch(() => {

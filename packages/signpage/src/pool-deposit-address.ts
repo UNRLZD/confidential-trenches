@@ -35,6 +35,7 @@ import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../kit/src/checks
 import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
 import { POOL_ASSET_DECIMALS, type PoolAsset, type PoolChain, type PoolStatePrice, type SignpageResults } from "../../kit/src/signpage/messages.ts";
 import { DEPOSIT_QUOTE_DEADLINE_MS, POOL_DEPOSIT_DESTINATION, POOL_DEPOSIT_NETWORK, askDepositQuoteAgain, poolCoinChain, poolDepositQuoteRequest, type OriginRefund } from "../../wallet/src/deposit/quote.ts";
+import { refundFloor } from "../../wallet/src/deposit/follow.ts";
 import type { Deferred, HostAnswer, HostRefusal } from "./api.ts";
 import type { DepositPublic } from "./deposit-wire.ts";
 import { checkPoolDepositQuote, evmPoolDepositFloor, solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
@@ -159,7 +160,7 @@ export interface PoolAddressDeps {
   /** The device's floor for a quote into X's pool to U_X, read at quote time on two RPCs (readSolanaPoolFloor); null
    *  when it has none for the chain. None given: no quote. */
   floor?(chain: PoolChain, wallet: string, signal?: AbortSignal): Promise<bigint | null>;
-  checked?(id: string, chain: PoolChain, result: NonNullable<SignpageResults["pool.address"]["quote"]>, u: { scope: bigint; index: number; wallet: string; refundId: string; refund_to?: string }): Promise<void>;
+  checked?(id: string, chain: PoolChain, result: NonNullable<SignpageResults["pool.address"]["quote"]>, u: { scope: bigint; index: number; wallet: string; refundId: string; refund_to?: string; refund_min?: string }): Promise<void>;
   /** A Move from another pool (card refunds-land-on-the-devices-own-wallet): U_{scope,index}'s own address on `chain`,
    *  the origin coin's chain, derived on the device (base58 of the id's key on Solana, U^evm on Base and Robinhood). That
    *  quote then refunds ORIGIN_CHAIN there, never INTENTS. None (money from an outside wallet, Cash's NEAR USDC): INTENTS
@@ -405,7 +406,8 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
         deadline: checked.deadline,
         time_estimate_s: timeEstimate,
       };
-      await deps.checked(ctx.id, chain, quote, { scope: pool.scope, index: before.record.index, wallet: before.wallet, refundId: before.record.id, ...(refund === undefined ? {} : { refund_to: refund.to }) });
+      // the quote's lowest refund rides with the op (card refunded-needs-the-refund): refunded counts only at or over it
+      await deps.checked(ctx.id, chain, quote, { scope: pool.scope, index: before.record.index, wallet: before.wallet, refundId: before.record.id, ...(refund === undefined ? {} : { refund_to: refund.to }), refund_min: refundFloor(checked.amountIn, checked.refundFee).toString() });
       if (stopped()) return void (out = { error: "not_allowed" });
       out = { result: { chain, address: before.wallet, asset, quote } };
     })().catch(() => {

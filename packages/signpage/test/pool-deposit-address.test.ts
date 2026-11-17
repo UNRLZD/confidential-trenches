@@ -123,7 +123,11 @@ test("from another chain: a quote to U_X, its refund under U_{s,i}'s id, checked
   assert.equal(w.sent[0]!.recipient, SOL_U);
   assert.equal(w.sent[0]!.refundTo, SOL_ID);
   assert.equal(w.sent[0]!.refundType, "INTENTS");
-  assert.deepEqual((w.took[0] as { u: unknown }).u, { scope: SOL_S, index: 3, wallet: SOL_U, refundId: SOL_ID });
+  // the quote's lowest refund rides with the op (card refunded-needs-the-refund): amountIn less its signed refundFee
+  assert.deepEqual((w.took[0] as { u: unknown }).u, { scope: SOL_S, index: 3, wallet: SOL_U, refundId: SOL_ID, refund_min: "25000000" });
+  const fee = world({ change: (a) => { a.quote.refundFee = "300000"; } });
+  await ask(fee, { chain: "solana", origin_asset: BASE_USDC, amount: "25" });
+  assert.equal((fee.took[0] as { u: { refund_min: string } }).u.refund_min, "24700000");
   const b = world();
   await ask(b, { chain: "base", origin_asset: BASE_USDC, amount: "25" });
   assert.equal(b.sent[0]!.recipient, BASE_U);

@@ -30,6 +30,7 @@ import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../../kit/src/che
 import type { DepositRefusal, SignpageResults } from "../../../kit/src/signpage/messages.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../../kit/src/helper/v1.ts";
 import { askDepositQuoteAgain, depositQuoteRequest, type OriginRefund } from "../../../wallet/src/deposit/quote.ts";
+import { refundFloor } from "../../../wallet/src/deposit/follow.ts";
 import { backupFirst } from "../../../wallet/src/store/index.ts";
 import { checkDepositQuote, DepositRuleRefused, type DepositQuoteContext } from "./deposit.ts";
 import { DEPOSIT_ANSWERED, DEPOSIT_QUOTE_PATH, belowDepositBound, shortOnlyOfMinimum } from "./deposit-dry.ts";
@@ -65,7 +66,9 @@ export interface DepositQuoteKindContext {
 }
 
 export type DepositQuoteKindAnswer =
-  | { ok: true; result: SignpageResults["deposit.quote"] }
+  /** refund_min: the checked quote's lowest refund in its origin's base units (the wallet's refundFloor), kept with the op
+   *  and never answered (card refunded-needs-the-refund). */
+  | { ok: true; result: SignpageResults["deposit.quote"]; refund_min: string }
   | { ok: false; code: DepositRefusal };
 
 const DEC = /^[0-9]+(\.[0-9]+)?$/;
@@ -181,5 +184,6 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
       deadline: checked.deadline,
       time_estimate_s: timeEstimate,
     },
+    refund_min: refundFloor(checked.amountIn, checked.refundFee).toString(),
   };
 }
