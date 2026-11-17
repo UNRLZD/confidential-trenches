@@ -656,3 +656,18 @@ test("recorded race runs: main's page leaves tab a Cancelled (FAIL); this card's
   assert.deepEqual([answers.raceCard.prf.race.a.first, answers.raceCard.prf.race.a.state], ["cancelled", "signed-in"]);
   assert.equal(answers.raceCard.prf.race.a.account, answers.raceCard.prf.race.b.account);
 });
+
+// card signpage-near-pace-shared-across-tabs: the prf run reads the page's own ct-pace database after its two tabs have
+// read NEAR. A record cut before the card holds no pace read and is judged without the line; one that holds it passes
+// only with a ct-pace record per provider URL, and a build whose tabs each keep their own pace (no ct-pace) fails it.
+test("the shared pace line: ct-pace holding a provider's record passes; no database, an empty one or another key fails it alone", () => {
+  const PACE = "BAD prf: the page's NEAR paces are one for every tab, kept in its own database";
+  assert.equal(judge(answers.good).lines.some((l) => l.includes("NEAR paces are one for every tab")), false, "a record cut before the card: no line");
+  const on = (pace) => { const r = clone(answers.good); r.prf.pace = pace; return r; };
+  const good = judge(on({ db: true, keys: ["ct-pace:https://near.drpc.org", "ct-pace:https://rpc.mainnet.fastnear.com"] }));
+  assert.equal(good.pass, true, good.lines.join("\n"));
+  assert.ok(good.lines.some((l) => /^ok\s+prf: the page's NEAR paces are one for every tab/.test(l) && l.includes("holds 2 provider(s)")), good.lines.join("\n"));
+  for (const pace of [{ db: false, keys: [] }, { db: true, keys: [] }, { db: true, keys: ["ct-wallet:seed"] }, { db: true, keys: "ct-pace:https://near.drpc.org" }, null]) {
+    assert.deepEqual(BAD(on(pace)), [PACE], JSON.stringify(pace));
+  }
+});

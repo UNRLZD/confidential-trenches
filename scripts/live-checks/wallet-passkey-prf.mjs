@@ -81,6 +81,27 @@ const KEY = "wallet-passkey-prf";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const SIGN_HOST = "confidential.unrealized.trade";
 export const APP_HOST = "ct-app.unrealized.trade"; // the one parent SIGN_HOST's frame-ancestors allows
+/** The signing page's shared NEAR pace records (packages/wallet/src/pace.ts PACE_DB "ct-pace", store "paces"): whether
+ *  the database exists, and its keys ("ct-pace:<provider URL>"); read in the page, nothing written. */
+export const PACE_RECORDS = async () => {
+  if (!(await indexedDB.databases()).some((d) => d.name === "ct-pace")) return { db: false, keys: [] };
+  const db = await new Promise((res, rej) => {
+    const r = indexedDB.open("ct-pace");
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  try {
+    if (!db.objectStoreNames.contains("paces")) return { db: true, keys: [] };
+    const keys = await new Promise((res, rej) => {
+      const q = db.transaction("paces").objectStore("paces").getAllKeys();
+      q.onsuccess = () => res(q.result);
+      q.onerror = () => rej(q.error);
+    });
+    return { db: true, keys: keys.map(String) };
+  } finally {
+    db.close();
+  }
+};
 const FRAME_PARENT = `<!doctype html><iframe src="https://${SIGN_HOST}/"></iframe>`;
 /** The harness's APP_HOST page inside the shell: the terminal's first controls, a link and a button. */
 export const APP_STAND_IN = `<!doctype html><title>APP_HOST</title><a href="/">Trenches</a> <button type="button">Sign in</button>`;
@@ -261,6 +282,13 @@ export function judge(rec, era = SIGN_OUT_NOW) {
   const r = p.race ?? {};
   say(r.a?.state === "signed-in" && r.b?.state === "signed-in" && HEX64.test(r.a?.account ?? "") && r.a?.account === r.b?.account && r.reload?.account === r.a?.account,
     `prf: two tabs that create at once end on one account, the one stored (${r.a?.account && r.a?.account === r.b?.account ? "one" : "two"})`);
+  // card signpage-near-pace-shared-across-tabs: a record cut before it carries no pace read; one that does must show the
+  // page's NEAR paces kept in its own database for every tab (a build with each tab on its own pace has no ct-pace)
+  if (p.pace !== undefined) {
+    const keys = Array.isArray(p.pace?.keys) ? p.pace.keys : [];
+    say(p.pace?.db === true && keys.some((k) => /^ct-pace:https:\/\/\S+$/.test(k)),
+      `prf: the page's NEAR paces are one for every tab, kept in its own database (ct-pace ${p.pace?.db === true ? `holds ${keys.length} provider(s)` : "absent"})`);
+  }
   const rps = p.credentials ?? [];
   say(rps.length === 1 && rps[0].rpId === SIGN_HOST, `prf: one passkey, rp.id ${rps.map((c) => c.rpId).join(", ") || "none"}`);
   say(p.prfOk === true && HEX64.test(p.expected ?? "") && p.expected === A, `prf: the account is T_0 of the passkey's PRF output, derived apart from the kit (${p.expected === A ? "equal" : "differs"})`);
@@ -755,6 +783,9 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       record.prf.crossTab = await tab2.evaluate(() => ({ state: document.getElementById("signin").dataset.signin, account: document.getElementById("signin").dataset.account ?? null }));
       steps.signin = await click(page, "use");
       record.prf.steps = steps;
+      // the page's NEAR paces, one for every tab of the origin (card signpage-near-pace-shared-across-tabs): both tabs'
+      // restores have read NEAR by now, so the page's own database ct-pace holds a record per provider URL it paced
+      record.prf.pace = await page.evaluate(PACE_RECORDS);
       // framed by APP_HOST: the parent is a page this check serves at APP_HOST's address; the frame is SIGN_HOST itself
       const APP = `https://${APP_HOST}/__wallet-passkey-prf-frame.html`;
       if (!h.harnessApp) await ctx.route(APP, (rt) => rt.fulfill({ status: 200, contentType: "text/html", body: FRAME_PARENT }));
