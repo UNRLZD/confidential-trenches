@@ -14,6 +14,9 @@
 // one swap whose Transfer does not match, two providers' differing legs: each FAIL by name.
 // penny_two_pools (card helper-live-run-green-after-122): the deployed helper's PENNY tape, its side pool's, every sampled
 // trade a route through two of the token's pools: judged on the busier over the window, a FAIL or a PASS by which is busier.
+// routed_weth_usdc, quiet_coin (card evm-tape-follows-the-trading-pool): a routed buy whose receipt also swaps on WETH/USDC,
+// judged on the coin's own pool: PASS (FAIL at 9dc3a90a0), short of a swap FAIL; an empty tape on --token with no Transfer
+// of the coin on chain over the window: INCONCLUSIVE, with one: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -764,4 +767,137 @@ test("card charts-say-coingecko: a Base chart from CoinGecko's paid plan before 
     assert.equal(run(rec).ok, false, src);
   }
   assert.equal(run(A.bad_not_deployed).ok, false);
+});
+
+// card evm-tape-follows-the-trading-pool: Base 0x2713d97a's one trade in hours (tx 0xb3fa9883) buys it with USDC, USDC to
+// WETH on Uniswap v3's WETH/USDC pool 0xb4cb8009, then WETH to the coin on v4 pool 0x1120acfa. Both keys are in every
+// sampled receipt; the check judged the busier, WETH/USDC, and named its swaps missing from the coin's tape. Only a key
+// whose emitter moved the coin in a Transfer of the receipt is the coin's pool (coinKeys). routed_weth_usdc: read() at
+// 9dc3a90a0 on the real providers, the heads pinned after the trade. quiet_coin: the deployed helper's empty, whole tape
+// of the coin on --token, its chain read by the fixed check: INCONCLUSIVE; the same with the coin moving on chain FAILs.
+const ROUTED = A.routed_weth_usdc;
+const [WETH_USDC, COIN_POOL] = ["0xb4cb800910b228ed3d0834cf79d697127bbb00e5", "0x498581ff718922c3f8e6a244956af099b2652b2b:0x1120acfa69f97094bca0a183b23f61dac3f033d40dd386919b2cad3beec3f593"];
+
+test("card evm-tape-follows-the-trading-pool: a routed trade whose receipt also swaps on WETH/USDC is judged on the coin's own pool and PASSES; the check at 9dc3a90a0 judged WETH/USDC and named its swaps missing", () => {
+  assert.deepEqual(ROUTED.chain.shared.map((x) => [x.pool, x.logs.length]), [[WETH_USDC, 17], [COIN_POOL, 0]]);
+  assert.equal(ROUTED.chain.poolLogs.pool, WETH_USDC);
+  const r = run(ROUTED);
+  assert.deepEqual(bad(r), []);
+  assert.equal(r.verdict, "PASS");
+  assert.ok(r.lines.includes(`ok  the sampled trades share a pool: ${JSON.stringify([COIN_POOL])}`), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("ok ") && /amt 9260443\.431256111215452636 is this pool's Swap leg/.test(l)), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("ok ") && /0 missing from the tape/.test(l)), r.lines.join("\n"));
+  assert.ok(!r.lines.some((l) => l.includes(WETH_USDC)), r.lines.join("\n"));
+});
+
+test("card evm-tape-follows-the-trading-pool: the same routed tape short of a swap of the coin's pool in the window FAILs, named", () => {
+  const rec = structuredClone(ROUTED);
+  const s = rec.chain.shared.find((x) => x.pool === COIN_POOL);
+  s.logs.push({ blockNumber: hex(s.to - 5), transactionHash: `0x${"c".repeat(64)}` });
+  const r = run(rec);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l.includes(`1 swap transaction of the pool in blocks`) && l.includes(`1 missing from the tape: 0x${"c".repeat(64)}`)), bad(r).join("\n"));
+});
+
+test("card evm-tape-follows-the-trading-pool: a receipt whose only shared key moved no coin has no pool: FAIL, never judged on it", () => {
+  const rec = structuredClone(ROUTED);
+  const r0 = rec.chain.receipts[JSON.parse(rec.reads.trades.body).trades[0].tx];
+  r0.logs = r0.logs.filter((l) => !(l.address === "0x498581ff718922c3f8e6a244956af099b2652b2b" && l.topics[0] === TOPIC.swap4));
+  const r = run(rec);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l === "BAD the sampled trades share a pool: []"), bad(r).join("\n"));
+});
+
+test("card evm-tape-follows-the-trading-pool: read() reads the coin's own pool's logs, never the routed-through WETH/USDC's, and its run PASSES", async () => {
+  const c = ROUTED.chain;
+  const asked = [];
+  const f = async (url, init) => {
+    if (url.startsWith("https://ct-api.unrealized.trade")) {
+      const k = url.includes("/candles?") ? "candles" : "trades";
+      return new Response(ROUTED.reads[k].body, { status: 200, headers: ROUTED.reads[k].headers });
+    }
+    const req = JSON.parse(init.body);
+    const ok = (result) => new Response(JSON.stringify({ jsonrpc: "2.0", id: req.id, result }), { status: 200 });
+    if (req.method === "eth_blockNumber") return ok(hex(c.heads[0]));
+    if (req.method === "eth_call") return ok(`0x${c.decimals.toString(16).padStart(64, "0")}`);
+    if (req.method === "eth_getTransactionReceipt") return ok(c.receipts[req.params[0]]);
+    assert.equal(req.method, "eth_getLogs");
+    const q = req.params[0];
+    asked.push(q.address);
+    const s = c.shared.find((x) => x.pool === `${q.address}:${q.topics[1]}`);
+    assert.ok(s, `a log read of ${q.address} ${q.topics[1]}`);
+    const [lo, hi] = [Number.parseInt(q.fromBlock, 16), Number.parseInt(q.toBlock, 16)];
+    return ok(s.logs.filter((l) => Number.parseInt(l.blockNumber, 16) >= lo && Number.parseInt(l.blockNumber, 16) <= hi).map((l) => ({ ...l, logIndex: "0x0" })));
+  };
+  const again = await read("https://ct-api.unrealized.trade", ROUTED.coin, f, undefined, "base", candlesReader(), async () => undefined);
+  assert.ok(asked.length > 0 && asked.every((a) => a === "0x498581ff718922c3f8e6a244956af099b2652b2b"), asked.join());
+  assert.equal(again.chain.shared, undefined);
+  assert.deepEqual(again.chain.poolLogs, c.shared.find((x) => x.pool === COIN_POOL));
+  again.readAt = ROUTED.readAt;
+  again.reads.candles.at = ROUTED.reads.candles.at;
+  again.reads.trades.at = ROUTED.reads.trades.at;
+  again.chain.headsAt = c.headsAt;
+  assert.equal(judge(again).verdict, "PASS", judge(again).lines.join("\n"));
+});
+
+const QUIET = A.quiet_coin;
+const quietWith = (fn) => {
+  const rec = structuredClone(QUIET);
+  fn(rec);
+  return rec;
+};
+
+test("card evm-tape-follows-the-trading-pool: a coin given by --token with an empty tape and no Transfer of it on chain over the window is INCONCLUSIVE, named", () => {
+  assert.deepEqual(JSON.parse(QUIET.reads.trades.body).trades, []);
+  const r = run(QUIET);
+  assert.deepEqual(bad(r), []);
+  assert.equal(r.verdict, "INCONCLUSIVE");
+  assert.ok(r.lines.includes(`--  trades: the tape is empty and the chain holds no Transfer of the token in blocks ${QUIET.chain.quiet.from} to ${QUIET.chain.quiet.to}, read on two agreeing providers (a quiet coin): INCONCLUSIVE`), r.lines.join("\n"));
+});
+
+test("card evm-tape-follows-the-trading-pool: an empty tape FAILs where the chain shows the coin moving, where its Transfers were not agreed or not read over the window, where no --token read them, or where the heads are off", () => {
+  const tx = "0xb3fa9883dfce0ab91337105b3de223fdcc8c952a9c529cffd095ab857f0200c7";
+  for (const [name, fn, want] of [
+    ["the coin moving", (r) => r.chain.quiet.txs.push(tx), `1 transaction in blocks ${QUIET.chain.quiet.from} to ${QUIET.chain.quiet.to} move the token on chain: ${tx}`],
+    ["not agreed", (r) => (r.chain.quiet = null), "were not read on two agreeing providers"],
+    ["a window short of the head", (r) => (r.chain.quiet.to -= 1), "were not read on two agreeing providers"],
+    ["a window shorter than the pool read's", (r) => (r.chain.quiet.from += 1), "were not read on two agreeing providers"],
+    ["no --token", (r) => delete r.chain.quiet, "trades: exactly the frozen fields in their wire forms: trades 0"],
+    ["heads far apart", (r) => (r.chain.heads[1] += 51), "the chain: two providers' newest blocks"],
+  ]) {
+    const r = run(quietWith(fn));
+    assert.equal(r.verdict, "FAIL", name);
+    assert.ok(bad(r).some((l) => l.includes(want)), `${name}: ${bad(r).join("\n")}`);
+  }
+});
+
+test("card evm-tape-follows-the-trading-pool: read() of a coin given by --token with an empty tape reads its Transfers over the window on two providers; a listed run never does", async () => {
+  const c = QUIET.chain;
+  const asked = [];
+  const f = async (url, init) => {
+    if (url.startsWith("https://ct-api.unrealized.trade")) {
+      if (url.includes("/lists?")) return new Response(JSON.stringify({ lists: { trending: [{ token: QUIET.coin }] } }), { status: 200, headers: { "content-type": "application/json" } });
+      const k = url.includes("/candles?") ? "candles" : "trades";
+      return new Response(QUIET.reads[k].body, { status: 200, headers: QUIET.reads[k].headers });
+    }
+    const req = JSON.parse(init.body);
+    const ok = (result) => new Response(JSON.stringify({ jsonrpc: "2.0", id: req.id, result }), { status: 200 });
+    if (req.method === "eth_blockNumber") return ok(hex(c.heads[0]));
+    if (req.method === "eth_call") return ok(`0x${c.decimals.toString(16).padStart(64, "0")}`);
+    assert.equal(req.method, "eth_getLogs");
+    const q = req.params[0];
+    assert.deepEqual([q.address, q.topics], [QUIET.coin, [TOPIC.transfer]]);
+    asked.push([Number.parseInt(q.fromBlock, 16), Number.parseInt(q.toBlock, 16)]);
+    return ok([]);
+  };
+  const again = await read("https://ct-api.unrealized.trade", QUIET.coin, f, undefined, "base", candlesReader(), async () => undefined);
+  const last = c.heads[0] - check.MARGIN.base;
+  assert.deepEqual(again.chain.quiet, { from: last - 6000, to: last, txs: [] });
+  assert.equal(asked[0][0], last - 6000);
+  assert.equal(asked.at(-1)[1], last);
+  assert.ok(asked.every(([lo, hi]) => hi - lo < 1000), JSON.stringify(asked));
+  asked.length = 0;
+  const listed = await read("https://ct-api.unrealized.trade", undefined, f, undefined, "base", candlesReader(), async () => undefined);
+  assert.equal(listed.chain?.quiet, undefined);
+  assert.deepEqual(asked, []);
 });
