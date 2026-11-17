@@ -45,7 +45,7 @@
 import type { PoolAsset, PoolChain, PoolDepositStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
 import type { NoteRecord, NoteState } from "../../wallet/src/notes/store.ts";
-import { followRpc, type MoveRead, type OneClickStatus, readDepositStatus, type StatusRead } from "../../wallet/src/deposit/follow.ts";
+import { followRpc, type MoveRead, type OneClickStatus, readDepositStatus, refundIsThere, type StatusRead } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { type BindRpc, RELEASE_RELAYER } from "../../wallet/src/deposit/bind.ts";
 import { solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -81,6 +81,10 @@ export interface PoolFollowRecord {
   deadline_ms: number;
   origin: string;
   min_out: string;
+  /** The quote's lowest refund in its origin asset's base units (the wallet's refundFloor of the checked quote): what
+   *  U_{s,i} must hold of the origin before it counts as this op's refund (refundIsThere, card refunded-needs-the-refund).
+   *  Absent on an op recorded before it, and on a plain send (no 1Click quote, no refund). */
+  refund_min?: string;
   /** The refund carry's last move (poolRefundMover), written before it is sent. */
   move?: PoolMove;
   /** A plain send's: U_X's lower balance as its follow began (card deposit-takes-each-pools-own-coin, review P3-a), in
@@ -138,10 +142,12 @@ export type PoolDepositEnd = "filled" | "part_filled" | "not_landed" | "sent" | 
  *  answer's landed txs, or the sent answer's sends. Heard, never shown: the follow shows only what `landed` reads. */
 export type PoolDepositRun = { end: PoolDepositEnd; txs: TxRef[] };
 
-/** The refund carry's answer (poolRefundMover): "moved" and "held" read money under U_{s,i} inside intents.near on both
- *  of NEAR's RPCs (moved on, or not moved this round); "none" read nothing there; "wait" read nothing that counts (the
- *  reads did not agree, or a recorded move is still in its window). */
-export type RefundRead = "moved" | "held" | "none" | "wait";
+/** The refund carry's answer (poolRefundMover): "moved" and "held" read the op's refund under U_{s,i} inside intents.near
+ *  on both of NEAR's RPCs (moved on, or not moved this round); "speck" read money there under the quote's lowest refund
+ *  (refundIsThere: no refund of this op, a broken-in helper's speck beside a forged REFUNDED), neither shown nor moved;
+ *  "none" read nothing there; "wait" read nothing that counts (the reads did not agree, or a recorded move is still in
+ *  its window). */
+export type RefundRead = "moved" | "held" | "speck" | "none" | "wait";
 
 /** One U_X: its chain, the pool's scope and index it was named at, its address on X and U_{s,i}'s 64-hex id. */
 export type PoolUx = Pick<PoolFollowRecord, "chain" | "s" | "i" | "u" | "refund_id">;
@@ -564,7 +570,7 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
         // nothing seen sent by the deadline on both RPCs' clocks: expired, and read on (a late send to the address is
         // refunded by 1Click, and that refund is carried as any other). A REFUNDED whose read found nothing under U_{s,i}
         // is no send seen; one whose read did not count ("wait") is read again first
-        const unseen = st === null || ("status" in st && (st.status === "PENDING_DEPOSIT" || (st.status === "REFUNDED" && (refund === null || refund === "none"))));
+        const unseen = st === null || ("status" in st && (st.status === "PENDING_DEPOSIT" || (st.status === "REFUNDED" && (refund === null || refund === "none" || refund === "speck"))));
         if (shown === "quote_checked" && unseen && (await deps.past(f))) {
           // on Solana the follow's own pair (review P3-b of the delta: one RPC lagging at 0 is no expired send either)
           if (plain && !chainSeen) {
@@ -650,7 +656,7 @@ export function resumeOf(op: PoolDepositOp): PoolDepositOp {
 /** One follower per op across tabs: POOL_FOLLOW_LOCK/<op id>, held while it is followed. */
 export const POOL_FOLLOW_LOCK = "ct-wallet/pool-follow/";
 
-const FOLLOW_KEYS = ["chain", "s", "i", "u", "refund_id", "refund_to", "address", "deadline_ms", "origin", "min_out"] as const;
+const FOLLOW_KEYS = ["chain", "s", "i", "u", "refund_id", "refund_to", "address", "deadline_ms", "origin", "min_out", "refund_min"] as const;
 const isPoolOp = (v: unknown): v is PoolDepositOp =>
   typeof v === "object" && v !== null && (v as PoolDepositOp).kind === "pool_deposit" && typeof (v as PoolDepositOp).follow === "object" && (v as PoolDepositOp).follow !== null;
 /** A pool op's follow ended: in_pool read on past its quote's deadline. Every other op is followed again at each landing. */
@@ -833,12 +839,13 @@ export function poolFollows(h: PoolFollowHost) {
      * pool.address checked `quote` under request `id` for U_X (`u`): the op is written and followed. Throws when it
      * cannot be written, so no address goes out that nothing follows.
      */
-    async quoted(id: string, chain: PoolChain, quote: { deposit_address: string; origin_asset: string; min_amount_out: string; deadline: string }, u: { scope: bigint; index: number; wallet: string; refundId: string; refund_to?: string }): Promise<void> {
+    async quoted(id: string, chain: PoolChain, quote: { deposit_address: string; origin_asset: string; min_amount_out: string; deadline: string }, u: { scope: bigint; index: number; wallet: string; refundId: string; refund_to?: string; refund_min?: string }): Promise<void> {
       const deadline = Date.parse(quote.deadline);
       if (!Number.isSafeInteger(deadline)) throw new Error("the quote's deadline is not a time");
       const minOut = baseUnits(quote.min_amount_out, h.decimals(chain));
       if (minOut === null) throw new Error("the quote's min_amount_out is not an amount of the pool's coin");
-      const f: PoolFollowRecord = { chain, s: u.scope.toString(), i: u.index, u: u.wallet, refund_id: u.refundId, address: quote.deposit_address, deadline_ms: deadline, origin: quote.origin_asset, min_out: minOut.toString(), ...(u.refund_to === undefined ? {} : { refund_to: u.refund_to }) };
+      if (u.refund_min !== undefined && !/^[1-9][0-9]*$/.test(u.refund_min)) throw new Error("the quote's lowest refund is not a positive amount");
+      const f: PoolFollowRecord = { chain, s: u.scope.toString(), i: u.index, u: u.wallet, refund_id: u.refundId, address: quote.deposit_address, deadline_ms: deadline, origin: quote.origin_asset, min_out: minOut.toString(), ...(u.refund_to === undefined ? {} : { refund_to: u.refund_to }), ...(u.refund_min === undefined ? {} : { refund_min: u.refund_min }) };
       const ops = await h.store();
       // a plain send's base, read before its address goes out (review P2-c): one read after it, at a later start, would
       // count a send that landed meanwhile as what U_X held before. A read that fails throws, so the address is refused
@@ -993,6 +1000,10 @@ export function depositToEnd(
  *   RPCs that is not moved this round (no price read, a quote that fails a check, one under the pool's floor among them:
  *   it waits under U_{s,i}, a relayer that refuses, a seed that is not U_{s,i}'s): "held", read again next round; the
  *   follow shows refunded on "held" and "moved" alone (review P2).
+ * - Money there under the quote's lowest refund (f.refund_min; refundIsThere, the wallet follow's one rule; card
+ *   refunded-needs-the-refund) is no refund of this op: "speck", nothing quoted or signed. It waits under U_{s,i} (a
+ *   restore names the id as holding money) and is moved with the refund once that lands beside it. Past a move read
+ *   through on its nonce the op's refund was real, so what is left after it is moved as before.
  */
 export interface PoolRefundHost {
   /** NEAR mainnet's two RPCs (FastNEAR and dRPC) and intents.near. */
@@ -1105,6 +1116,8 @@ export function poolRefundMover(h: PoolRefundHost): PoolRefundMover {
       }
     }
     if (r.held === 0n) return "none";
+    // under the quote's lowest refund, before any move of this op went through: a speck, never this op's refund
+    if (!(m !== undefined && r.used === true) && !refundIsThere(r.held, f.refund_min)) return "speck";
     // money under U_{s,i} on both RPCs from here: "held" unless it moves
     const priced = h.priced(f);
     if (priced === null) return "held";

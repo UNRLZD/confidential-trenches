@@ -452,3 +452,56 @@ test("card pool-usd-price-never-stale, review P1: the refund quote is checked at
   const same = at({ decimalsIn: 6, pricing: PRICING });
   assert.equal(await poolRefundMover(same.host)(F, signal), "moved");
 });
+
+// ------------------------------------------------------------------------------- card refunded-needs-the-refund
+
+// The quote's lowest refund (its amountIn less its signed refundFee): 25 USDC in, 0.3 USDC refundFee. The helper's
+// REFUNDED is its word; a speck under U_{s,i} under that floor is no refund of this op (pool-deposit-stages' delta P3)
+const REFUND_MIN = 24_700_000n;
+const FR = { ...F, refund_min: REFUND_MIN.toString() };
+
+/** The pool follow on Solana with a forged REFUNDED every round and nothing under U_X, its refund carry the real one. */
+async function followRefunded(host: Host) {
+  const { followPoolQuote } = await import("../src/pool-deposit-follow.ts");
+  const { SOL_LADDER } = await import("../../wallet/src/pool/solana.ts");
+  type Deps = Parameters<typeof followPoolQuote>[1];
+  const stages: string[] = [];
+  const ac = new AbortController();
+  let k = 0;
+  const deps: Deps = {
+    status: async () => ({ status: "REFUNDED", delivered: null }),
+    balances: async () => [0n, 0n] as const,
+    costs: async () => ({ floor: 13_586_400n, perRung: 2_936_160n, keep: 650_240n }),
+    ladder: SOL_LADDER,
+    deposit: async () => ({ end: "filled", txs: [] }),
+    past: async () => k >= 3,
+    stage: async (s) => void stages.push(s),
+    sleep: async () => void (++k >= 6 && ac.abort()),
+    signal: ac.signal,
+    refund: poolRefundMover(host),
+  };
+  await followPoolQuote(FR, deps);
+  return stages;
+}
+
+test("refunded-needs-the-refund: 1 unit under the quote's lowest refund under U_{s,i} with a forged REFUNDED: a speck, nothing quoted or signed, never refunded (expired past the deadline)", async () => {
+  for (const held of [1n, REFUND_MIN - 1n]) {
+    const f = world({ read: readOf(held) });
+    const stages = await followRefunded(f.host);
+    assert.ok(!stages.includes("refunded") && !stages.includes("refund_move"), `held ${held}: ${stages.join()}`);
+    assert.deepEqual(stages, ["expired"], "nothing seen sent by the deadline");
+    const w = world({ read: readOf(held) });
+    assert.equal(await poolRefundMover(w.host)(FR, signal), "speck", `held ${held}`);
+    assert.deepEqual(w.log, [], "nothing quoted, opened, recorded or sent");
+  }
+});
+
+test("refunded-needs-the-refund: the real refund (at the quote's lowest refund) still shows refunded and is moved; past a move through, what is left moves as before", async () => {
+  const w = world({ read: readOf(REFUND_MIN) });
+  assert.equal(await poolRefundMover(w.host)(FR, signal), "moved");
+  const f = world({ read: readOf(REFUND_MIN) });
+  const stages = await followRefunded(f.host);
+  assert.deepEqual(stages.slice(0, 2), ["refunded", "refund_move"], stages.join());
+  const through = world({ read: readOf(25_000_000n - REFUND_MIN + 5_000_000n, true), move: { nonce: "n", deadline_ms: NOW + 60_000, asset: BASE_USDC, amount: REFUND_MIN.toString(), height: 99 } });
+  assert.equal(await poolRefundMover(through.host)(FR, signal), "moved");
+});

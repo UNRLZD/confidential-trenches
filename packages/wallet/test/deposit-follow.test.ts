@@ -2499,3 +2499,64 @@ test("review of d791adda L2: a field another writer puts between the follow's re
   assert.ok(writes >= 3, "the follow wrote the op again after the other writer");
   assert.deepEqual((await opOf(w)).follow.out, out, "the other writer's field was dropped");
 });
+
+// card refunded-needs-the-refund (pool-deposit-stages' delta review P3): the status is the helper's word, so a forged
+// REFUNDED beside a speck under U (anyone can transfer a base unit to U inside intents.near) is no refund. The op's own
+// lowest refund (refund_min: the checked quote's amountIn less its signed refundFee) is the floor, read on both RPCs.
+const REFUND_MIN = 2_000_000n; // a quote of 2,100,000 in with a 100,000 refundFee
+
+test("refunded-needs-the-refund: a forged REFUNDED with 1 unit under the quote's lowest refund under U (and a NEAR USDC speck): never refunded, nothing moved as its refund", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = REFUND_MIN - 1n;
+  t.chain.heldUsdc = 1n;
+  const log: string[] = [];
+  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
+  await assert.rejects(followDeposit({ ...t.args, refund_min: REFUND_MIN.toString() }, { ...t.deps, refundMove: landing(t, log), signal: stop(t, 8) }), /stop/);
+  const op = await opOf(t.w);
+  assert.ok(!t.stages.includes("refunded") && !t.stages.includes("refund_move"), t.stages.join());
+  assert.notEqual(op.stage, "refunded");
+  assert.equal(op.refunded, undefined, "no refunded fact on the op");
+  assert.ok(!log.some((l) => l.startsWith(`moved ${ORIGIN}`)), `the speck is not moved as the op's refund: ${log.join()}`);
+  assert.equal(t.chain.a.held, REFUND_MIN - 1n, "the speck waits under U");
+});
+
+test("refunded-needs-the-refund: the real refund (at the quote's lowest refund, and over it) still shows refunded, and is moved", async () => {
+  for (const held of [REFUND_MIN, REFUND_MIN + 100_000n]) {
+    const t = await setup(["REFUNDED"]);
+    t.chain.a.held = t.chain.b.held = held;
+    await assert.rejects(followDeposit({ ...t.args, refund_min: REFUND_MIN.toString() }, { ...t.deps, signal: stop(t, 3) }), /stop/);
+    assert.equal((await opOf(t.w)).stage, "refunded", `held ${held}`);
+    assert.deepEqual(t.stages, ["refunded"]);
+  }
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = REFUND_MIN;
+  const log: string[] = [];
+  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
+  await followDeposit({ ...t.args, refund_min: REFUND_MIN.toString() }, { ...t.deps, refundMove: landing(t, log), signal: stop(t, 30) }).catch(() => {});
+  assert.ok(t.stages.includes("refunded") && t.stages.includes("refund_move"), t.stages.join());
+  assert.ok(log.includes(`moved ${ORIGIN} ${REFUND_MIN}`), log.join());
+});
+
+test("refunded-needs-the-refund: a speck first shows nothing; the refund landing beside it shows refunded, and both are moved", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = 1n;
+  const log: string[] = [];
+  const at: string[] = [];
+  t.onTick.fn = (n) => {
+    t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000;
+    if (n === 4) (at.push(t.stages.join()), (t.chain.a.held = t.chain.b.held = 1n + REFUND_MIN));
+  };
+  await followDeposit({ ...t.args, refund_min: REFUND_MIN.toString() }, { ...t.deps, refundMove: landing(t, log), signal: stop(t, 30) }).catch(() => {});
+  assert.deepEqual(at, [""], "nothing shown while only the speck is there");
+  assert.ok(t.stages.includes("refunded") && t.stages.includes("refund_move"), t.stages.join());
+  assert.ok(log.includes(`moved ${ORIGIN} ${1n + REFUND_MIN}`), `the refund and the speck beside it are moved: ${log.join()}`);
+});
+
+test("refunded-needs-the-refund: NEAR USDC counts as an op's refund (a failed delivery's return) only at or over its min_out", async () => {
+  for (const [usdc, shown] of [[BigInt(MIN_OUT) - 1n, false], [BigInt(MIN_OUT), true]] as const) {
+    const t = await setup(["REFUNDED"]);
+    t.chain.heldUsdc = usdc;
+    await assert.rejects(followDeposit({ ...t.args, refund_min: REFUND_MIN.toString() }, { ...t.deps, signal: stop(t, 3) }), /stop/);
+    assert.equal((await opOf(t.w)).stage === "refunded", shown, `NEAR USDC ${usdc}`);
+  }
+});
