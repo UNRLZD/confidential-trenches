@@ -3007,6 +3007,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const got = new Map<string, Record<string, unknown>>();
     /** The hashes a provider answered a read of (its answer naming the transaction or not). */
     const answered = new Set<string>();
+    /** The bundles whose receipts providers answered with different traders and none two alike: can never be read. */
+    const differ = new Set<string>();
     const keep = (t: string, x: Traders) => {
       if (traders.size >= TRADERS_MAX) traders.delete(traders.keys().next().value!);
       traders.set(t, x);
@@ -3030,6 +3032,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const bundles = async (part: string[]): Promise<void> => {
       const ask = part.filter((t) => got.has(t) && toEntryPoint(got.get(t)!) && !traders.has(t));
       if (ask.length === 0) return;
+      // each answer's traders, by hash, to tell a disagreement (two providers that answered differently) from a miss
+      const seen = new Map<string, Set<string>>();
       const ops = await agreed<Traders>(
         rpcs,
         ask.length,
@@ -3037,7 +3041,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           const r = await batchTo(u, idx.map((i) => ({ method: "eth_getTransactionReceipt", params: [ask[i]] })), patient);
           return idx.map((i, k) => {
             const x = r?.[k];
-            return x?.ok ? txTraders(got.get(ask[i]!)!, obj(x.result)) : null;
+            const v = x?.ok ? txTraders(got.get(ask[i]!)!, obj(x.result)) : null;
+            if (v != null) seen.set(ask[i]!, (seen.get(ask[i]!) ?? new Set<string>()).add(JSON.stringify(v)));
+            return v;
           });
         },
         (a, b) => JSON.stringify(a) === JSON.stringify(b),
@@ -3046,6 +3052,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       ask.forEach((t, i) => {
         const x = ops[i];
         if (x != null) keep(t, x);
+        else if ((seen.get(t)?.size ?? 0) >= 2) differ.add(t);
       });
     };
     await Promise.all(
@@ -3065,7 +3072,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     for (const t of answered)
       if (!traders.has(t)) {
         if (tries.size >= TRADERS_MAX && !tries.has(t)) tries.delete(tries.keys().next().value!);
-        tries.set(t, (tries.get(t) ?? 0) + 1);
+        // receipts that answered and differ are no miss: never read, its row served as it is now (no trader named)
+        tries.set(t, differ.has(t) ? TRADER_TRIES : (tries.get(t) ?? 0) + 1);
       }
   }
 

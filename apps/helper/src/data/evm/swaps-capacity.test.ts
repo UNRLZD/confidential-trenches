@@ -62,7 +62,16 @@ test("card helper-robinhood-capacity: 12 cold tokens at once, the chain's own RP
     const first = await Promise.all(TOKENS.map((t) => s.trades(t, 50)));
     const firstMs = Date.now() - t0;
     const cold = (a: { status: number; body: string }) => a.status === 503 || (JSON.parse(a.body) as { filling?: boolean }).filling === true;
-    const got = await Promise.all(first.map((a, i) => (cold(a) ? s.trades(TOKENS[i]!, 50) : a)));
+    // asked again as the page asks a tape still filling, 3 s apart (TRADES_POLL_MS), up to 10 times: a row whose trader is
+    // not read yet waits, its answer filling (card evm-tape-trader-never-null)
+    const again = async (i: number, a: { status: number; body: string }) => {
+      for (let k = 0; k < 10 && cold(a); k++) {
+        if (k > 0) await new Promise((go) => setTimeout(go, 3_000));
+        a = await s.trades(TOKENS[i]!, 50);
+      }
+      return a;
+    };
+    const got = await Promise.all(first.map((a, i) => again(i, a)));
     s.stop();
     return { first, firstMs, got };
   });
