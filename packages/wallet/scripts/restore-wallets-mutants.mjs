@@ -17,6 +17,10 @@ const NOTES = "wallet/src/notes/restore.ts";
 const ID = ["wallet", "test/restore-id-reader.test.ts"];
 const NR = ["wallet", "test/note-restore.test.ts"];
 const RW = ["wallet", "test/restore-wallets.test.ts"];
+const STORE = "wallet/src/notes/store.ts";
+const FOUND = ["wallet", "test/note-store-found.test.ts"];
+const PRS = "signpage/src/pool-restore.ts";
+const PRT = ["signpage", "test/pool-restore.test.ts"];
 // card kit-sol-pool-deposit-floor (S-01 review): the same-chain deposit hands the kit's builder the rent the device read
 const SC = "wallet/src/pool/same-chain.ts";
 const PSC = ["wallet", "test/pool-same-chain.test.ts"];
@@ -121,6 +125,16 @@ const M = [
   ["R13: the lanes' order not checked", WAL, [["|| !lanes.every((x, k) => x.lane === k)", ""]], RW, "step 7"],
   ["R01: the seed in the Worker's message", WALK, [[SENT, "precommitments: [...precommitments], seed64 } as WalkAsk;"]], NR, "Worker bridge"],
   ["R02: no Worker error listener", WALK, [['      w.addEventListener("error", () => end(() => reject(new Error(`lane ${lane}: the walk worker failed`))));\n', ""]], NR, "Worker bridge"],
+  // card notes-plan-at-restored-index: each refusal of the note store's found deposit (planFound), its place outside
+  // planDeposit's one unfunded index, and the restore's carry that writes it
+  ["planFound: an index the store holds taken", STORE, [["if (all.some((n) => refKey(n.ref) === key)) throw new Error(`deposit index", "if (false) throw new Error(`deposit index"]], FOUND, "notes-plan-at-restored-index"],
+  ["planFound: an index of the store's lane its counter has not passed taken", STORE, [["        if (i % WALLET_LANES === store.lane) {", "        if (false) {"]], FOUND, "notes-plan-at-restored-index"],
+  ["planFound: one provider's read taken", STORE, [["a.length !== 2 ||", "a.length < 1 ||"], ["  if (a[0] !== a[1]) throw", "  if (a.length === 2 && a[0] !== a[1]) throw"]], FOUND, "notes-plan-at-restored-index"],
+  ["planFound: two providers apart taken", STORE, [["  if (a[0] !== a[1]) throw", "  if (false) throw"]], FOUND, "notes-plan-at-restored-index"],
+  ["planFound: a read of no money taken", STORE, [["  if (a[0]! <= 0n) throw", "  if (false) throw"]], FOUND, "notes-plan-at-restored-index"],
+  ["planDeposit counts a found note as the scope's unfunded index", STORE, [[' && n.state === "PLANNED" && !found.has(refKey(n.ref)));', ' && n.state === "PLANNED");']], FOUND, "notes-plan-at-restored-index"],
+  ["the restore names a U_X with no note, never writes its note", PRS, [["has.has(f.i) || ((amounts) => own.found(w.scope, f.i, amounts))", "has.has(f.i)"]], PRT, "notes-plan-at-restored-index"],
+  ["carryUx deposits from a U_X with no note written", PRS, [["        await noted([a, b]);", "        void 0;"]], PRT, "notes-plan-at-restored-index"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
 const only = process.argv[2];

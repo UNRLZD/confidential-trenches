@@ -2396,6 +2396,24 @@ test("from a fixed U_X: a U the store never planned, or another pool's scope, is
   assert.equal(c.lamports(ux.address), 0);
 });
 
+test("notes-plan-at-restored-index: a fixed U_X whose deposit note a restore wrote (planFound, money both providers read alike) goes in from U_X; before it is written the U is refused", async () => {
+  const c = chain();
+  const ns = await notes();
+  // the sign-in's planned index, in the store's lane, and a lost store's quote in another lane far past it
+  const mine = await plannedU(ns);
+  const i = (((mine.i % 8) + 3) % 8) + 8 * 30;
+  c.fund(U(i), Number(RUNG) + COST);
+  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG), { s: SCOPE, i, u: U(i) }), { error: "not_allowed" }, "no note at i yet");
+  const held = BigInt(Number(RUNG) + COST);
+  const found = await ns.planFound(SCOPE, i, (ref) => noteSecrets(SEED64, ref).precommitment, { s: SCOPE, i, amounts: [held, held] });
+  const r = await runPoolDeposit(host(c, ns), ask(RUNG), { s: SCOPE, i, u: U(i) });
+  assert.equal((r as { stage: string }).stage, "filled", JSON.stringify(r));
+  assert.equal(c.lamports(U(i)), 0, "the rung went in from U_X");
+  assert.equal((await ns.get(found.id))!.state, "UNSPENT");
+  // the scope's unfunded index is still the sign-in's
+  assert.equal((await plannedU(ns)).i, mine.i);
+});
+
 test("from a fixed U_X: U_X short with the planned U funded answers not_funded and never falls back to the planned U; the kind passes its fixed source through", async () => {
   const c = chain();
   const ns = await notes();

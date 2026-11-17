@@ -78,9 +78,11 @@
 //     per request, paced per provider, so no request names two of the user's wallets and the reads spread over the
 //     minutes step 5 takes: both must give the same balance, else the id is unread and the run ends stalled by name. A U_X
 //     holding any balance is history (the id reads "money"), so its lane is read DEPOSIT_ID_MARGIN past it.
-//     Once a scope's ids are read, each U_X that covers one deposit (the follow's floor) and whose index has a deposit
-//     note in the store (the page's pool.deposit pays from U_{s,i} only on one; a U_X with none on this device, as a
-//     delivery the lost store's quote named, is named with its balance and the run ends stalled) is carried into the
+//     Once a scope's ids are read, each U_X that covers one deposit (the follow's floor) is carried into the pool from
+//     its index's deposit note (the page's pool.deposit pays from U_{s,i} only on one). A U_X with none on this device,
+//     as a delivery the lost store's quote named, gets one first (card notes-plan-at-restored-index): the note store's
+//     planFound writes it PLANNED from the balance both RPCs just read alike, refusing an index the store holds or one of
+//     its own lane its counter has not passed (then U_X is named and the run ends stalled). It is carried into the
 //     pool as the follow carries it (askOf's largest ask, the page's pool.deposit from that U_{s,i}), read again after each deposit
 //     and carried on while it still covers one; a carry that does not fill, or a balance a filled deposit did not lower,
 //     ends the run stalled with the U_X named. Less than one deposit's floor (the rent a carried U_X keeps) is left, as
@@ -132,6 +134,7 @@ import { pacedNearRpc } from "../../wallet/src/pace.ts";
 import { PAGE_NETWORK } from "./withdraw/handoff.ts";
 import { vaultScope } from "./withdraw/checks.ts";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
+import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import { evmRestoreNotes } from "../../wallet/src/pool/evm-restore.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPoolScopeOf, type EvmNetwork, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { restoreEvmHoldings, restoreEvmTrades, type EvmBuySpend } from "./pool-sell-evm.ts";
@@ -333,7 +336,8 @@ async function readDepositIds(
   signal: AbortSignal,
   out: Step5Reasons,
   noted: (scope: bigint) => Promise<ReadonlySet<number>>,
-  own: { lane: number; raise(scope: bigint, min: number): Promise<void> },
+  /** `found`: the deposit note of index i written for money its U_X holds, read alike on both RPCs (planFound) */
+  own: { lane: number; raise(scope: bigint, min: number): Promise<void>; found(scope: bigint, i: number, amounts: readonly [bigint, bigint]): Promise<void> },
   kept: {
     of(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>>;
     add(scope: bigint, lane: number, readTo: number, highest: number | null): Promise<void>;
@@ -416,12 +420,13 @@ async function readDepositIds(
     undone(w.label, r);
     // each U_X found holding a balance, in index order, carried into the pool or named. The page's pool.deposit pays
     // from U_{s,i} only on a deposit note the store holds for its index (src/pool-deposit.ts runPoolDeposit's fixed
-    // source); a U_X whose index has none on this device (a delivery the lost store's quote named) is named, never
-    // carried here and never done
+    // source); a U_X whose index has none on this device (a delivery the lost store's quote named) gets its deposit
+    // note first, from the balance both RPCs read alike (card notes-plan-at-restored-index: the note store's planFound,
+    // which refuses an index it holds or one of this store's lane its counter has not passed), and is carried
     const has = held.size === 0 ? new Set<number>() : await noted(w.scope);
     for (const f of [...held.values()].sort((x, y) => x.i - y.i)) {
       signal.throwIfAborted();
-      const c = await carryUx(ux, f, has.has(f.i), signal);
+      const c = await carryUx(ux, f, has.has(f.i) || ((amounts) => own.found(w.scope, f.i, amounts)), signal);
       if (c !== null) (c.retry ? out.held : out.named).push(`${w.label}: deposit index ${f.i}'s one-time wallet ${f.u} ${c.why}`);
     }
     // each id NEAR reads as holding money, in index order: what it holds above the base unit a move out keeps
@@ -481,8 +486,11 @@ async function uxOf(seed: SeedUse, chain: PoolChain, scope: bigint, i: number, i
  * pool.deposit, read again after each. null when what is left is under one deposit's floor; else why it is not carried
  * (`noted` false: the store holds no deposit note for its index, which pool.deposit's fixed source pays from), a read to
  * try again (`retry`) only when its two RPCs read it apart before any deposit from it.
+ * `noted` a function (card notes-plan-at-restored-index): the store holds no deposit note for the index, and the
+ * function writes one (the note store's planFound) from the balance both RPCs just read alike, before the first deposit;
+ * a write it refuses names U_X, nothing carried.
  */
-export async function carryUx(ux: PoolUxReads, f: PoolUx, noted: boolean, signal: AbortSignal): Promise<{ why: string; retry: boolean } | null> {
+export async function carryUx(ux: PoolUxReads, f: PoolUx, noted: boolean | ((amounts: readonly [bigint, bigint]) => Promise<void>), signal: AbortSignal): Promise<{ why: string; retry: boolean } | null> {
   let before: bigint | null = null;
   // what is left, read on both alike, is U_X's op's `left` (review r3 P2-1: state.deposit_wallets lists what U_X holds,
   // never what a carry here took into the pool); a write that fails leaves it to the next landing's read
@@ -498,6 +506,18 @@ export async function carryUx(ux: PoolUxReads, f: PoolUx, noted: boolean, signal
     if (amount === 0n) return left(a);
     if (!noted) return { why: `holds ${String(a)}, with no deposit note on this device for its index to carry it into the pool`, retry: false };
     signal.throwIfAborted();
+    // the index's deposit note, written for the money both RPCs read just now (a lost store's quote this one never
+    // planned): pool.deposit's fixed source pays from it
+    if (typeof noted === "function") {
+      try {
+        await noted([a, b]);
+      } catch (e) {
+        signal.throwIfAborted();
+        if (e instanceof SeedGone) throw e;
+        return { why: `holds ${String(a)}; its deposit note was not written (${e instanceof Error ? e.message : "it threw"}): restore again to carry it`, retry: false };
+      }
+      noted = true;
+    }
     // listed nowhere while the carry lands (the pools count it once its note lands): `left` 0 first
     await left(0n);
     const { end } = await ux.deposit(f, amount, signal);
@@ -1069,7 +1089,20 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
             notes.close();
           }
         };
-        const own = { lane: (await h.store()).lane, raise: (scope: bigint, min: number) => seedHeld(async () => void (await (await h.store()).raiseDepositIndex(scope, min))) };
+        const own = {
+          lane: (await h.store()).lane,
+          raise: (scope: bigint, min: number) => seedHeld(async () => void (await (await h.store()).raiseDepositIndex(scope, min))),
+          // under the seed lock and the run's check, as the floor's write: the precommitment from the stored seed
+          found: (scope: bigint, i: number, amounts: readonly [bigint, bigint]) =>
+            seedHeld(async (s) => {
+              const notes = await openNoteStore(await h.store());
+              try {
+                await notes.planFound(scope, i, (ref) => noteSecrets(s, ref).precommitment, { s: scope, i, amounts });
+              } finally {
+                notes.close();
+              }
+            }),
+        };
         // the lanes the marker keeps read whole, by scope; a lane is added only while the marker is there (never one
         // written again after a try removed it)
         // the lanes this run's marker keeps read whole, by scope: one is skipped only while its notes are what they were
