@@ -177,42 +177,46 @@ test("card helper-robinhood-search-ahead: the search ahead starts none while two
   assert.ok(value.late > 0, "the search never started once they refilled");
 });
 
-test("card trades-checks-pass-on-177: 12 short cold tapes opened at once, the chain's own RPC answering the day read (locate) at its pace of a post a second, each read again as the page reads it: every tape says filling false within FILLED_MS (45 s), none walks the day in steps (red at ad9337504: a locate not sent for the pace counted as a fail, three of them walked the day 10,000 blocks a step, live run 43977576335: ten Robinhood tapes still filling at 46 s)", async () => {
+test("card trades-checks-pass-on-177: 12 short cold tapes opened at once, the chain's own RPC answering the day read (locate) at its pace of a post a second, each read again as the page reads it: by FILLED_MS (45 s of the virtual clock) every tape's last answer says filling false, none walks the day in steps (red at ad9337504: a locate not sent for the pace counted as a fail, three of them walked the day 10,000 blocks a step, live run 43977576335: ten Robinhood tapes still filling at 46 s)", async () => {
   const r = rig([]);
   // the own RPC serves the day in one read (one value per topic position), as live
   r.chain.st.faults.set(CHAIN_RPC, { span: 1_000_000 });
+  const sleep = (ms: number) => new Promise((go) => setTimeout(go, ms));
   const { value } = await onVirtualTime(9_000_000, async () => {
     const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
     await (s as Ahead).ahead?.(TOKENS.map((x) => x.token));
-    const t0 = Date.now();
-    // the page's read again of a filling tape (apps/terminal/src/screens/token/trades.ts TRADES_POLL_MS), the helper's
-    // tick between, until it says filling false or FILLED_MS
-    const ticking = (async () => {
-      while (Date.now() - t0 < 50_000) {
-        await new Promise((go) => setTimeout(go, 1_000));
-        await s.tick();
-      }
-    })();
-    const filled = async (token: string) => {
-      for (;;) {
+    // each tape's latest answer, and the page's reads of it so far (TRADES_POLL_MS 3 s apart)
+    const latest = new Map<string, { status: number; filling: boolean; n: number; reads: number }>();
+    let over = false;
+    const poll = async (token: string) => {
+      for (let reads = 1; !over; reads++) {
         const a = await s.trades(token, 50);
         const j = a.status === 200 ? (JSON.parse(a.body) as { trades: unknown[]; filling?: boolean }) : null;
-        if (j === null || j.filling !== true || Date.now() - t0 > 50_000) return { a, ms: Date.now() - t0 };
-        await new Promise((go) => setTimeout(go, 3_000));
+        latest.set(token, { status: a.status, filling: j?.filling === true, n: j?.trades.length ?? -1, reads });
+        if (j === null || j.filling !== true) return;
+        await sleep(3_000);
       }
     };
-    const got = await Promise.all(TOKENS.map(({ token }) => filled(token)));
-    await ticking;
+    // FILLED_MS on the virtual clock (scripts/live-checks/tape-read.mjs): what each tape last answered by then
+    const by = sleep(45_000).then(() => {
+      over = true;
+      return TOKENS.map(({ token }) => latest.get(token));
+    });
+    const polls = Promise.all(TOKENS.map(({ token }) => poll(token)));
+    // the helper's tick, a second apart, until the bound
+    for (let i = 0; i < 45 && !over; i++) {
+      await sleep(1_000);
+      await s.tick();
+    }
+    const got = await by;
+    await polls;
     s.stop();
     return got;
   });
-  const line = value.map((g, i) => `${TOKENS[i]!.token.slice(-4)} ${g.a.status} ${JSON.parse(g.a.body).filling === true ? "filling" : "done"} ${(g.ms / 1000).toFixed(1)} s`).join(", ");
+  const line = value.map((g, i) => `${TOKENS[i]!.token.slice(-4)} ${g?.status} ${g?.filling ? "filling" : "done"} n${g?.n} read ${g?.reads}`).join(", ");
   for (const g of value) {
-    assert.equal(g.a.status, 200, line);
-    const j = JSON.parse(g.a.body) as { trades: unknown[]; filling?: boolean };
-    assert.equal(j.filling, undefined, `a tape still filling: ${line}`);
-    assert.equal(j.trades.length, SWAPS, `the token's own tape: ${line}`);
+    assert.equal(g?.status, 200, line);
+    assert.equal(g.filling, false, `a tape still filling at 45 s: ${line}`);
+    assert.equal(g.n, SWAPS, `the token's own tape: ${line}`);
   }
-  const slowest = Math.max(...value.map((g) => g.ms));
-  assert.ok(slowest <= 45_000, `the slowest tape took ${(slowest / 1000).toFixed(1)} s, past 45 s: ${line}`);
 });
