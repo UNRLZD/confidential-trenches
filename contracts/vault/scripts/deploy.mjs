@@ -383,7 +383,9 @@ export async function reproducibleBuild({ flavor, buildDir, crate = CRATE, log =
       log(`build ${name}: ${cmd} ${args.join(" ")} (in ${crate})`);
       const r = await runBuild(cmd, args, { cwd: crate, env }, children);
       if (interrupted) throw Object.assign(new Error(`interrupted by ${interrupted}: the build target dirs were removed, nothing was sent`), { signal: interrupted });
-      if (r.status !== 0) throw new Error(`build ${name} failed (exit ${r.status ?? r.signal}): ${r.output.split("\n").slice(-15).join("\n")}`);
+      // all the build said (its last 64 KiB): the container's own error comes before cargo-near's closing lines, and
+      // a tail of 15 lines left only those (merge queue run 44005544940, card vault-build-passes-in-the-queue)
+      if (r.status !== 0) throw new Error(`build ${name} failed (exit ${r.status ?? r.signal}); its output:\n${r.output}`);
       const wasm = readFileSync(path.join(target, "blindfill_vault.wasm"));
       out.push({ wasm, sha: sha256(wasm) });
       log(`build ${name}: ${wasm.length} B sha256 ${out.at(-1).sha}`);
