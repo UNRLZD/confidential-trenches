@@ -4304,7 +4304,7 @@ export async function evmSellRevertedPools(quote: EvmPoolSellQuote, txHash: stri
  *  index). */
 export function evmEvidenceProviders(chain: EvmPoolChain, fetchFn: typeof fetch, venues: EvmPoolVenueList = evmPoolVenues()): EvmRpc[] {
   const p = venue(chain, venues).providers;
-  if (p === undefined) return refuse("no_quoter", `${chain} has no pinned providers`);
+  if (p === undefined) return refuse("no_quoter", `a ban's evidence has no providers on ${chain}`);
   const raw = Object.hasOwn(venues, chain) ? venues[chain] : undefined;
   const keep = raw === undefined ? [] : [...(evmReadProvidersOf(raw) ?? [])];
   return evmProviders([...evmRanked(keep), ...evmRanked(p.filter((u) => !keep.includes(u)))], fetchFn);

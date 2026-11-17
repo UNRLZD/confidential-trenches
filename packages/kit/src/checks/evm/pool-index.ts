@@ -410,6 +410,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     // state is a non-zero word from its Initialize on at every later block; the receipt below proves its block. No block
     // both agree on: every such pool is unread, as an unanswered state read is
     const now = await agreedNow();
+    if (now === null) error ??= new EvmQuoteError("rpc_error", "the index readers agree on no block at or past N to read the PoolManager's state at");
     const calls = ones.map((p) => ({ method: "eth_call", params: [{ to: pm, data: "0x" + SEL_EXTSLOAD + stateSlot(p.id).slice(2) }, { blockHash: now }] }));
     // INDEX_STATE_BATCH reads a batch (fewer where a reader takes fewer, c.batchMax), one batch at a time on each reader
     const per = Math.max(1, Math.min(INDEX_STATE_BATCH, c.batchMax ?? INDEX_STATE_BATCH));

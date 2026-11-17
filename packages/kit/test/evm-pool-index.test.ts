@@ -760,6 +760,10 @@ test("F5's state read needs no old block: a reader keeping only the newest block
   assert.ok(!ids(zero.pools).has(evmPoolIdOf(real.key)));
   const half = await evmPoolIndexSync(null, cfgOf({ head, pools: [real, deep], state: both2, calls: [], keeps: 10, moves: 12 }, { head, pools: [deep], receipts: [real, deep], state: none, calls: [], moves: 12 })).catch((e: unknown) => e);
   assert.ok(half instanceof EvmQuoteError && half.code === "rpc_disagree", String(half));
+  // no newer block both agree on (their hashes past N differ): the pool is unread and the sync partial, as before
+  const split = await evmPoolIndexSync(null, cfgOf({ head, pools: [real, deep], state: both2, calls: [], moves: 12 }, { head, pools: [deep], receipts: [real, deep], state: both2, calls: [], moves: 12, hash: (n) => blockHash(n, n > head ? "fork" : "") }));
+  assert.equal(split.coversThrough, null);
+  assert.match(split.error?.message ?? "", /agree on no block at or past N/);
 });
 
 test("F5's state reads take each reader's batchMax: no batch of more calls than it takes", async () => {
