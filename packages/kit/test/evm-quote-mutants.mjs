@@ -148,7 +148,7 @@ export const MUTANTS = [
   [QUOTE, "  const zf = (f: Found) => f.other === f.key.currency0;", "  const zf = (f: Found) => f.other !== f.key.currency0;", R, "RK3 "],
   [QUOTE, "    return u === null || u >= floor;", "    return u !== null && u >= floor;", R, "PROBE C "],
   [QUOTE, "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(", "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn / 1000n)) f.quotes.push(", R, "PROBE D "],
-  [QUOTE, "      if (!can(p, xa)) continue;\n      p.quotes.push(quoteOf(fourth,", "      if (!can(p, xa / 1000n)) continue;\n      p.quotes.push(quoteOf(fourth,", R, "PROBE A "],
+  [QUOTE, "        if (!can(p, xa)) continue;\n        p.quotes.push(quoteOf(fourth,", "        if (!can(p, xa / 1000n)) continue;\n        p.quotes.push(quoteOf(fourth,", R, "PROBE A "],
   [QUOTE, "        if (marketQuote.has(mk) || !needs(c, ubOf(mk, amountIn))) continue;", "        if (marketQuote.has(mk) || !needs(c, ubOf(mk, amountIn / 1000n))) continue;", R, "PROBE A2 "],
   [QUOTE, "    (xPools.get(c) ?? []).some((p) => can(p, x)) ||", "    false ||", R, "PROBE A2 "],
   [QUOTE, "    [...vias].some(([x2, fs]) => fs.some((via) => via.other === c && (xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x)))));", "    false;", R, "RK7 "],
@@ -237,8 +237,8 @@ export const MUTANTS = [
   [QUOTE, "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(", "    if (false) f.quotes.push(", R, "A1 "],
   // (no mutant reads `found` for `held` here: a buy's pool the PoolManager does not hold reads a price of 0, which the
   // prune's bound reads as giving nothing, so it is never quoted and its hook never replaced; S1c holds that rule)
-  [QUOTE, "      if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);\n      continue;", "      return refuse(\"no_reference\", `${x} has no market`);", R, "B1 "],
-  [QUOTE, "      if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);\n", "", R, "T3 "],
+  [QUOTE, "    if (!trades && markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);\n", "    if (!trades) return refuse(\"no_reference\", `${x} has no market`);\n", R, "B1 "],
+  [QUOTE, "    if (!trades && markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);\n", "", R, "T3 "],
   // the warm round (card evm-quote-warm-round): the last quote's later reads asked in the first round within the range,
   // each counted only where the quote asks it again; its scans started beside the token's; a connect failure asked again
   [QUOTE, "      const i = kept.get(readKey(r));", "      const i = undefined as number | undefined;", R, "W1 "],
@@ -450,7 +450,7 @@ export const MUTANTS = [
   [QUOTE, "const agreed = (a: Answer, b: Answer) => same(a, b) && (a.kind === \"out\" || a.gas === (b as { gas?: true }).gas) && a.used === b.used;", "const agreed = (a: Answer, b: Answer) => same(a, b) && a.used === b.used;", R, "GS5 "],
   [QUOTE, "      if (m.kind === \"revert\" && m.gas === true) return missed(\"no_quote\", ", "      if (false) return missed(\"no_quote\", ", R, "GS3 "],
   // a route that quotes nothing names R (card evm-buy-and-sell-on-mainnet)
-  [QUOTE, "    return refuse(noMainCode, noMain, r);", "    return refuse(noMainCode, noMain);", R, "card evm-buy-and-sell-on-mainnet: an asked route with no pool"],
+  [QUOTE, "    return refuse(noMainCode, noMain, await named(r));", "    return refuse(noMainCode, noMain);", R, "card evm-buy-and-sell-on-mainnet: an asked route with no pool"],
   [BUYU, "  if (!(quoted && route.venue === \"uniswap-v4\")) {", "  if (!quoted) {", R, "D1 "],
   [BUYU, "  return routeData(chain, route, true);", "  return routeData(chain, route, false);", R, "D1 "],
   [BUYU, "  const { data, token: buys } = routeData(chain, route, quoted);", "  const { data, token: buys } = routeData(chain, route, false);", R, "D1 "],
@@ -532,7 +532,7 @@ export const MUTANTS = [
   [QUOTE, "rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", "rpcs, scan: undefined, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", R, "P1 "],
   // the review of edb4dbb: F1 the sell goes further where the buy does; F2 X's markets at the X the token's pool
   // gives; F5 `bought` kept only where the sell builder takes it; F6 minOut off the reference
-  [QUOTE, "if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);", "if (markets.has(x) && !a.sell) further.push(x);", R, "PA "],
+  [QUOTE, "if (!trades && markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);", "if (!trades && markets.has(x) && !a.sell) further.push(x);", R, "PA "],
   [QUOTE, "quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, leg.amount));", "quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, amountIn));", R, "PB2 "],
   [QUOTE, "        append(legs, x, { q: quoteOf(second, { venue: \"uniswap-v4\", currencyIn: x, hops: [hopTo(lower(token), p.key)] }, [p.key]), p });\n", "", R, "PB "],
   // (card evm-buy-hook-converge: `bought` is now kept through any hook, and the mutant that keeps it whatever the
@@ -1077,6 +1077,28 @@ export const MUTANTS = [
   [QUOTE, "      scanAsks++;\n", "", R, "QE12 "],
   // a request queued at the gate past the bound: a plain rpc_error there is asked as its halves and handed to the spare
   [QUOTE, "      if (now >= untilMs) throw past();", '      if (now >= untilMs) throw new EvmQuoteError("rpc_error", "past the bound");', R, "QE13 "],
+  // card evm-buy-never-below-a-hidden-market: a buy's route that fills with its hooks replaced but not as it is counts in
+  // R at the lowest of its reads that answer, X's best market ranked the same, only where its read with its hooks
+  // replaced fills; R's swap read through a hook the venue does not list with those hooks replaced, the route's own as it is
+  [QUOTE, "    if (x !== null || c.real === undefined || !fills(c) || fills(c.real)) return x;", "    return x;", R, "ZZ1 "],
+  [QUOTE, "    if (x !== null || c.real === undefined || !fills(c) || fills(c.real)) return x;", "    if (x !== null || a.sell || c.real === undefined || !fills(c) || fills(c.real)) return x;", R, "ZZ7 "],
+  [QUOTE, " || c.real === undefined || !fills(c) || fills(c.real)) return x;", " || c.real === undefined || fills(c.real)) return x;", R, "ZZ5 "],
+  [QUOTE, " || c.real === undefined || !fills(c) || fills(c.real)) return x;", " || c.real === undefined || !fills(c)) return x;", R, "review of a2d82dc6, F2 "],
+  [QUOTE, "      if (y !== null && y > 0n && y < m) m = y;", "      if (false as boolean) m = y;", R, "ZZ6 "],
+  [QUOTE, "    const h = bestBy(c, heldOf);", "    const h = bestBy(c, valueOf);", R, "ZZ2 "],
+  [QUOTE, "    return { mks: h === null ? [] : t === null || t === h ? [h] : [h, t], trades: t !== null };", "    return { mks: h === null ? [] : [h], trades: t !== null };", R, "ZZ7b "],
+  [QUOTE, "    return { mks: h === null ? [] : t === null || t === h ? [h] : [h, t], trades: t !== null };", "    return { mks: h === null ? [] : t === null || t === h ? [h] : [h, t], trades: h !== null };", R, "ZZ7c "],
+  [QUOTE, "      const x = heldOf(c);\n      if (x !== null) filled.push", "      const x = valueOf(c);\n      if (x !== null) filled.push", R, "ZZ1 "],
+  [QUOTE, "      fitReads.set(r, f === null || hs.length === 0 ? f : { ...f, override: { ...f.override, ...noopOf(hs) } });", "      fitReads.set(r, f);", R, "ZZ1c "],
+  [QUOTE, "      const hs = r === route || r.venue", "      const hs = r.venue", R, "ZZ1c "],
+  // a refusal whose R the device can read but not trade through names the best open route within the slippage of R
+  [QUOTE, "    if (r === null || !heldRoutes.has(JSON.stringify(r.route))) return r;", "    return r;", R, "ZZ9 "],
+  [QUOTE, "!hookedRoute(chain, c.route) && near(c.amountOut, r.amountOut)", "near(c.amountOut, r.amountOut)", R, "ZZ9 "],
+  [QUOTE, "!hookedRoute(chain, c.route) && near(c.amountOut, r.amountOut)", "!hookedRoute(chain, c.route)", R, "ZZ8 "],
+  [QUOTE, "    return refuse(noMainCode, noMain, await named(r));", "    return refuse(noMainCode, noMain, r);", R, "ZZ9 "],
+  [QUOTE, "below the standard pool's ${reference.amountOut}`, await named(reference));", "below the standard pool's ${reference.amountOut}`, reference);", R, "ZZ9 "],
+  [QUOTE, '", and no route does" : ""}`, await named(reference));', '", and no route does" : ""}`, reference);', R, "ZZ9 "],
+  [QUOTE, "valueOf(c) === null ? { route: c.route, amountOut: x, held: true } : ", "", R, "ZZ9 "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);

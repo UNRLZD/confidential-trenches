@@ -9,6 +9,9 @@
 // moves only to the next timer due, so the time read is the posts' time through each provider's limit and pace, the
 // same on any runner. A replay clock of its own that moved only on posts counted none of the pace's waits: the quote
 // read 7.2 s on it and 13.4 s on the shared clock (card robinhood-quote-inside-the-bound-under-the-pace).
+// Topped up 2026-11-17 at the recording's own block hash (card evm-buy-never-below-a-hidden-market): 27 calls the
+// rule adds, read again on the providers; the quote and its reference unchanged, 194 posts in 7.07 s of the clock
+// (main 195 in 7.23 s).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

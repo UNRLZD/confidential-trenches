@@ -4,6 +4,9 @@
 // does not list (0xe5e7…f044), which a buy may not take, so the tap's true refusal is not_allowed, never the generic
 // quote_check_failed release 150's run read. Its own file: the kit keeps a token's scan for the module's life
 // (test/evm-buy-tap-names.test.ts replays the same token with no pools served).
+// Topped up 2026-11-17 at the recording's own block hashes, read again on the same providers (card
+// evm-buy-never-below-a-hidden-market): the reads a market the device can read but not trade through adds, its own
+// calls and outcome unchanged.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EvmBuyTapRefused } from "../src/trade/evm/buy-tap.ts";

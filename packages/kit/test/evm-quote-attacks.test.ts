@@ -10,6 +10,7 @@ import { codeAnswer, codeResult } from "./evm-quote-gas-fx.ts";
 import { onTestClock } from "./test-clock.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import assert from "node:assert/strict";
+import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap } from "../src/index.ts";
 import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolSellQuoteRequest, type EvmPoolKey, type EvmRoute, type EvmV4Route } from "../src/index.ts";
 import { EVM_QUOTE_MAX_KEYS, evmBuyRevertedPoolsWith, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolSellQuoteWith, evmSellRevertedPoolsWith, type EvmPoolSellQuote, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 // as namespaces: the red run before card evm-route-parity reads them where evmSellRouteOf and evmSellRouteCheck are not
@@ -614,6 +615,9 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     for (let k = 2; k < a.data.length; k += 2) cost += a.data.slice(k, k + 2) === "00" ? 4n : 16n;
     const exec = BigInt(a.gas!) - cost;
     const b = Number(w(0)) / 32;
+    // a v3 route's swap, through the chain's pinned v3 adapter: no v3 pool in the model, so it reverts (a buy tap asks
+    // the first v3 tier after its first v4 shape)
+    if (V3_ADAPTERS.has("0x" + W(w(b)).slice(24))) return null;
     const [minOut, token] = [w(b + 2), "0x" + W(w(b + 3)).slice(24)];
     const at = b + Number(w(b + 1)) / 32 + 1;
     const arr = at + Number(w(at + 1)) / 32;
@@ -628,7 +632,9 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       if (p === undefined) return null;
       spent += p.gas ?? SWAP_HOP_GAS;
       if (spent > exec) return OUT_OF_GAS;
-      const next = p.exec !== undefined ? p.exec(got, { ...ctx, over: overridden, dir: "buy" }) : p.key.hooks !== NATIVE && p.lie !== undefined ? p.lie(got) : p.give(got);
+      // a hook the call's override replaces by the no-op hook swaps on the pool's curve, as in buyRun (card
+      // evm-buy-never-below-a-hidden-market: R's swap read through a hook the venue does not list)
+      const next = p.key.hooks !== NATIVE && overridden.has(p.key.hooks) ? (p.neutral !== undefined ? p.neutral(got, ctx) : p.give(got)) : p.exec !== undefined ? p.exec(got, { ...ctx, over: overridden, dir: "buy" }) : p.key.hooks !== NATIVE && p.lie !== undefined ? p.lie(got) : p.give(got);
       if (next === null) return null;
       [from, got] = [cur, next];
     }
@@ -2059,15 +2065,21 @@ test("D1 the reference through unlisted v4 middles is a route the device quotes 
   assert.equal(code(() => builder.evmPoolBuildUnpinned("base", ADAPTER, { venue: "uniswap-v3", tokens: [WETH, ZORA, token], fees: [3000, 3000] }, 1n, token, true)), "middle_not_listed");
 });
 
-test("H2 a found pool whose hook reverts every swap cannot set R; one whose hook takes half counts for that half", async () => {
+test("H2 a found pool whose hook reverts every swap sets R at its read with the hook replaced, never a route bought, and with no liquidity behind it sets none; one whose hook takes half counts for that half", async () => {
   const token = "0x00000000000000000000000000000000000ab3ab";
   const HOOK = "0x00000000000000000000000000000000000050cc";
   // ten times the standard pool's price with the hook replaced; as it is, the hook lets no swap through (a pool only
-  // its own router may swap in, as one of USDG's WETH pools on Robinhood)
+  // its own router may swap in, as one of USDG's WETH pools on Robinhood): a market the device can read but not trade
+  // through (card evm-buy-never-below-a-hidden-market; before it, the route below it was accepted)
   const closed: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, HOOK), give: (a) => 100n * a, lie: () => null, state: pricedAt(100n) };
   const logs = [{ key: closed.key, at: 4_500_000 }];
   const v = await quoteOn([best(token), closed], token, bestRoute(token), scanner(5_000_000, logs));
-  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.deepEqual(v, { accepted: false, code: "below_reference" }, show(v));
+  // the same hook with no liquidity behind it: nothing to read, the route is accepted
+  const t1 = "0x00000000000000000000000000000000000ab5ab";
+  const empty: ModelPool = { key: keyOf(t1, NATIVE, 3000, 60, HOOK), give: () => 0n, lie: () => null };
+  const e = await quoteOnStill([best(t1), empty], t1, bestRoute(t1), scanner(5_000_000, [{ key: empty.key, at: 4_500_000 }]));
+  assert.equal(e.accepted, true, String((e as { code?: string }).code));
   const t2 = "0x00000000000000000000000000000000000ab4ab";
   const half: ModelPool = { key: keyOf(t2, NATIVE, 3000, 60, HOOK), give: (a) => 100n * a, lie: (a) => 50n * a, state: pricedAt(100n) };
   await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token: t2, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(t2) }, [chain([best(t2), half], 0), chain([best(t2), half], 1)], NOW, scanner(5_000_000, [{ key: half.key, at: 4_500_000 }])), (e: unknown) => {
@@ -6617,6 +6629,8 @@ const [BUY_SWAP_GAS, BUY_FAIL_GAS, BUY_RELEASE_GAS, BUY_GAS] = [500_000n, 150_00
 const SWAP_GAS_TOO_LOW = Symbol("SwapGasTooLow");
 const OUT_OF_GAS = Symbol("OutOfGas");
 const SEL_BUY_SWAP = Buffer.from(keccak_256(new TextEncoder().encode("buySwap((address,bytes,uint256,address),address,uint256)"))).toString("hex").slice(0, 8);
+// every chain's pinned v3 adapter (buy-unpinned.ts), whose swaps the model's buySwap reverts: it holds no v3 pool
+const V3_ADAPTERS = new Set(Object.values(builder.evmPoolVenues()).flatMap((v) => (v?.adapters?.v3 !== undefined ? [v.adapters.v3.toLowerCase()] : [])));
 // what the model's buySwap spends before its hops, and through a hop whose pool names no `gas` (Base's v4 one-hop
 // swaps ran 115,591 to 158,981 at 07:07Z on 2026-11-08)
 const [SWAP_BASE_GAS, SWAP_HOP_GAS] = [80_000n, 50_000n];
@@ -8702,8 +8716,10 @@ test("GS2 two providers with the same 50M cap that agree on a starved read: the 
 
 test("GS3 a read that runs out of its gas alone prices nothing, and the buy's own route that does is refused by name", async () => {
   const token = "0x00000000000000000000000000000000000a5a53";
-  // the real pool burns all it is given, read alone too: its route counts for nothing, and the seeded route is best
-  assert.equal((await gasQuote([seeded(token), heavyReal(token, Infinity)], token, seededRoute(token))).accepted, true);
+  // the real pool's hook burns all it is given, read alone too: its read as it is prices nothing, and its read with the
+  // hook replaced holds the seeded route, a market the device can read but not trade through (card
+  // evm-buy-never-below-a-hidden-market; before it, the seeded route was best and accepted)
+  assert.deepEqual(await gasQuote([seeded(token), heavyReal(token, Infinity)], token, seededRoute(token)), { accepted: false, code: "below_reference" });
   // the buy's own route burns all it is given
   await assert.rejects(
     evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain([{ ...seeded(token), readGas: Infinity }], 0), chain([{ ...seeded(token), readGas: Infinity }], 1)], NOW),
@@ -9439,4 +9455,248 @@ test("review of e00bd2c5a, P6 X's market behind a hook the venue does not list w
   const route = v4Route([{ currency: x, fee: 3000, tickSpacing: 60, hooks: RH(0x64) }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE }]);
   refusedRoute(await hbQuote(pools, token, logs, route));
   assert.deepEqual(await hbConverge(pools, token, logs, route), noBuy);
+});
+
+// card evm-buy-never-below-a-hidden-market: a market the device can read but not trade through (its route fills with
+// its hooks replaced, not as it is: a hook that reverts the quoter alone, or lets only its own router swap; or a route
+// the device itself refuses, unlisted_hook_route) counts in R for refusal and is never a route the device buys. A buy
+// below it by more than the slippage is refused below_reference naming it; the tap follows no such reference. Its read
+// with its hooks replaced must fill the user's whole amount, so a freeze costs the pool's real liquidity for that
+// amount, priced past the slippage above the market (ZZ3b, ZZ5: none or dust freezes nothing). Review tests ZZ1-ZZ4.
+const zzTap = async (pools: ModelPool[], token: string, logs: { key: EvmPoolKey; at: number }[]): Promise<EvmPoolBuyQuote | { code: string; last: unknown }> => {
+  evmBuyTapReset();
+  try {
+    return await evmPoolBuyQuoteTap({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100 }, {
+      quote: (r) => evmPoolBuyQuoteWith(r, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0),
+      indexPools: () => null,
+      held: () => null,
+    });
+  } catch (e) {
+    if (!(e instanceof EvmBuyTapRefused)) throw e;
+    return { code: e.code, last: e.last };
+  }
+};
+// the kit's refusal under a tap's, as the tap's caller reads it
+const zzLast = (t: { last: unknown }) => t.last as EvmQuoteError;
+const zzOne = (token: string, k: EvmPoolKey, from = NATIVE): EvmRoute => ({ venue: "uniswap-v4", currencyIn: from, hops: [{ currency: token, fee: k.fee, tickSpacing: k.tickSpacing, hooks: k.hooks, hookData: "0x" }] });
+
+test("ZZ1 the token's real market behind a hook that reverts only the quoter, a standard pool seeded at a tenth: the seeded route is refused below_reference naming the market, the tap buys nothing (review: bought at a tenth)", async () => {
+  const token = "0x" + (0xfa001).toString(16).padStart(40, "0");
+  const hidden: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, UNPINNED), give: (a) => a, lie: () => null, exec: (a) => a };
+  const seed: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 10n };
+  const logs = [{ key: hidden.key, at: 4_500_000 }];
+  const pools = [hidden, seed];
+  const t = await zzTap(pools, token, logs);
+  assert.ok("code" in t && t.code === "not_allowed", show(t));
+  assert.deepEqual(zzLast(t).reference, { amountOut: AMOUNT, route: zzOne(token, hidden.key) }, show(zzLast(t)));
+  const q = await hbQuote(pools, token, logs, zzOne(token, seed.key));
+  assert.ok("code" in q && q.code === "below_reference", show(q));
+  assert.deepEqual(q.reference, { amountOut: AMOUNT, route: zzOne(token, hidden.key) });
+  // the market itself is never bought: its own quote reads nothing as it is
+  const c = await hbConverge(pools, token, logs, zzOne(token, seed.key));
+  assert.deepEqual({ failed: c.failed, code: c.code }, { failed: 0, code: "no_quote" }, show(c));
+});
+
+test("ZZ1b the token's real market behind an honest hook that lets only its own router swap (quoter and adapter reverted), a standard pool seeded at a tenth: refused below_reference naming the market, the tap buys nothing (review: bought at a tenth)", async () => {
+  const token = "0x" + (0xfa011).toString(16).padStart(40, "0");
+  const gated: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, UNPINNED), give: (a) => a, lie: () => null, exec: () => null };
+  const seed: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 10n };
+  const logs = [{ key: gated.key, at: 4_500_000 }];
+  const pools = [gated, seed];
+  const t = await zzTap(pools, token, logs);
+  assert.ok("code" in t && t.code === "not_allowed", show(t));
+  assert.deepEqual(zzLast(t).reference, { amountOut: AMOUNT, route: zzOne(token, gated.key) }, show(zzLast(t)));
+  const q = await hbQuote(pools, token, logs, zzOne(token, seed.key));
+  assert.ok("code" in q && q.code === "below_reference" && q.reference?.amountOut === AMOUNT, show(q));
+});
+
+test("ZZ1c the token's real market behind a hook honest to the quoter that reverts the device's own swap, a standard pool seeded at a tenth: refused below_reference naming the market, its swap's fit read with its hook replaced", async () => {
+  const token = "0x" + (0xfa012).toString(16).padStart(40, "0");
+  const gated: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, UNPINNED), give: (a) => a, exec: () => null };
+  const seed: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 10n };
+  const logs = [{ key: gated.key, at: 4_500_000 }];
+  const pools = [gated, seed];
+  const t = await zzTap(pools, token, logs);
+  assert.ok("code" in t && t.code === "not_allowed", show(t));
+  const q = await hbQuote(pools, token, logs, zzOne(token, seed.key));
+  assert.ok("code" in q && q.code === "below_reference", show(q));
+  assert.deepEqual(q.reference, { amountOut: AMOUNT, route: zzOne(token, gated.key) });
+  // the market's own route is never bought: its own swap is read as it is, and does not run
+  const own = await hbQuote(pools, token, logs, zzOne(token, gated.key));
+  assert.ok("code" in own && own.code === "over_gas_floor", show(own));
+});
+
+test("ZZ2 a hookless route of two hops through X seeded at a tenth, X's real market behind a hook that reverts only the quoter: refused below_reference naming the route through X's market, the tap buys nothing (review: bought at a tenth)", async () => {
+  const token = "0x" + (0xfa002).toString(16).padStart(40, "0");
+  const x = xAt(0xd02);
+  const xHidden: ModelPool = { key: keyOf(x, NATIVE, 500, 10, UNPINNED), give: (a) => a, lie: () => null, exec: (a) => a };
+  const xSeed: ModelPool = { key: keyOf(x, NATIVE, 10000, 200, NATIVE), give: (a) => a / 10n };
+  const p: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const logs = [{ key: p.key, at: 4_500_000 }, { key: xHidden.key, at: 4_500_001 }];
+  const pools = [xHidden, xSeed, p];
+  const viaHidden = v4Route([{ currency: x, fee: 500, tickSpacing: 10, hooks: UNPINNED }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE }]);
+  const t = await zzTap(pools, token, logs);
+  assert.ok("code" in t && t.code === "not_allowed", show(t));
+  assert.deepEqual(zzLast(t).reference, { amountOut: AMOUNT, route: viaHidden }, show(zzLast(t)));
+  const seeded = v4Route([{ currency: x, fee: 10000, tickSpacing: 200, hooks: NATIVE }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE }]);
+  const q = await hbQuote(pools, token, logs, seeded);
+  assert.ok("code" in q && q.code === "below_reference", show(q));
+  assert.deepEqual(q.reference, { amountOut: AMOUNT, route: viaHidden });
+  // the route through X's market is one the device refuses to buy
+  const r = await hbQuote(pools, token, logs, viaHidden);
+  assert.ok("code" in r && r.code === "unlisted_hook_route", show(r));
+});
+
+test("ZZ3 X's market behind a hook that quotes 2x to the quoter and with its hook replaced (real liquidity at half the price) and reverts every real buy: the honest route through X is refused below_reference naming the route the device refuses, a freeze that costs that liquidity", async () => {
+  const token = "0x" + (0xfa003).toString(16).padStart(40, "0");
+  const x = xAt(0xd03);
+  const xReal: ModelPool = { key: keyOf(x, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const p: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const xHook: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: (a, ctx) => (later(ctx) ? null : 2n * a) };
+  const logs = [{ key: p.key, at: 4_500_000 }, { key: xHook.key, at: 4_500_001 }];
+  const pools = [xReal, p, xHook];
+  const honest = v4Route([{ currency: x, fee: 500, tickSpacing: 10, hooks: NATIVE }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE }]);
+  const viaHook = v4Route([{ currency: x, fee: 3000, tickSpacing: 60, hooks: UNPINNED }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE }]);
+  const q = await hbQuote(pools, token, logs, honest);
+  assert.ok("code" in q && q.code === "below_reference", show(q));
+  assert.deepEqual(q.reference, { amountOut: 2n * AMOUNT, route: viaHook });
+  assert.deepEqual(await hbConverge(pools, token, logs, honest), noBuy);
+  const t = await zzTap(pools, token, logs);
+  assert.ok("code" in t && t.code === "not_allowed", show(t));
+});
+
+test("ZZ3b the same hook with no liquidity behind it (its read with the hook replaced answers 0) freezes nothing: the honest route through X is bought at its own price", async () => {
+  const token = "0x" + (0xfa013).toString(16).padStart(40, "0");
+  const x = xAt(0xd13);
+  const xReal: ModelPool = { key: keyOf(x, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const p: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const xHook: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, UNPINNED), give: () => 0n, lie: (a) => 2n * a };
+  const logs = [{ key: p.key, at: 4_500_000 }, { key: xHook.key, at: 4_500_001 }];
+  const pools = [xReal, p, xHook];
+  const honest = v4Route([{ currency: x, fee: 500, tickSpacing: 10, hooks: NATIVE }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE }]);
+  const q = await hbQuote(pools, token, logs, honest);
+  assert.ok(!("code" in q) && q.amountOut === AMOUNT, show(q));
+});
+
+test("ZZ4 control: the token's market behind a hook honest to everyone: the seeded route is refused naming it, the tap buys nothing", async () => {
+  const token = "0x" + (0xfa014).toString(16).padStart(40, "0");
+  const honest: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, UNPINNED), give: (a) => a };
+  const seed: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 10n };
+  const logs = [{ key: honest.key, at: 4_500_000 }];
+  const t = await zzTap([honest, seed], token, logs);
+  assert.ok("code" in t && t.code === "not_allowed", show(t));
+  const q = await hbQuote([honest, seed], token, logs, zzOne(token, seed.key));
+  assert.ok("code" in q && q.code === "below_reference", show(q));
+  assert.deepEqual(q.reference, { amountOut: AMOUNT, route: zzOne(token, honest.key) });
+});
+
+test("ZZ5 a market the quoter cannot run whose liquidity is less than the buy (dust) freezes nothing: the tap buys through the standard pool, and a market within the slippage of it freezes nothing either", async () => {
+  const token = "0x" + (0xfa015).toString(16).padStart(40, "0");
+  const dust: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, UNPINNED), give: (a) => (a <= AMOUNT / 2n ? a : 0n), lie: () => null, exec: () => null };
+  const std: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 2n };
+  const t = await zzTap([dust, std], token, [{ key: dust.key, at: 4_500_000 }]);
+  assert.ok(!("code" in t) && t.amountOut === AMOUNT / 2n && JSON.stringify(t.route) === JSON.stringify(zzOne(token, std.key)), show(t));
+  // within the slippage (1%) of the hidden market, the standard pool is bought at its own minOut
+  const t2 = "0x" + (0xfa025).toString(16).padStart(40, "0");
+  const near: ModelPool = { key: keyOf(t2, NATIVE, 2500, 50, UNPINNED), give: (a) => a, lie: () => null, exec: () => null };
+  const close: ModelPool = { key: keyOf(t2, NATIVE, 3000, 60, NATIVE), give: (a) => a - a / 200n };
+  const q = await zzTap([near, close], t2, [{ key: near.key, at: 4_500_000 }]);
+  assert.ok(!("code" in q) && q.amountOut === AMOUNT - AMOUNT / 200n && q.minOut === ((AMOUNT - AMOUNT / 200n) * 9900n) / 10000n, show(q));
+  // one that runs out at the amount (its read at twice it gives no more) fills nothing and freezes nothing
+  const t3 = "0x" + (0xfa035).toString(16).padStart(40, "0");
+  const dry: ModelPool = { key: keyOf(t3, NATIVE, 2500, 50, UNPINNED), give: (a) => 2n * (a < AMOUNT ? a : AMOUNT), state: pricedAt(2n), lie: () => null, exec: () => null };
+  const s3: ModelPool = { key: keyOf(t3, NATIVE, 3000, 60, NATIVE), give: (a) => a / 2n };
+  const r3 = await zzTap([dry, s3], t3, [{ key: dry.key, at: 4_500_000 }]);
+  assert.ok(!("code" in r3) && r3.amountOut === AMOUNT / 2n, show(r3));
+});
+
+test("ZZ6 a market the device can read but not trade through counts at the lowest of its reads that answer: its hook as it is answering a twentieth at the amount and twice it, the standard pool at half is bought", async () => {
+  const token = "0x" + (0xfa016).toString(16).padStart(40, "0");
+  const capped: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, UNPINNED), give: (a) => a, lie: () => AMOUNT / 20n, exec: () => null };
+  const std: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 2n };
+  const t = await zzTap([capped, std], token, [{ key: capped.key, at: 4_500_000 }]);
+  assert.ok(!("code" in t) && t.amountOut === AMOUNT / 2n, show(t));
+});
+
+test("ZZ7 (sell) the token's real market behind a hook that reverts only the quoter, a standard pool seeded at a tenth: W's sim of the sale through the market pays, so the sale leaves through it at its price, never at a tenth (main: sold at a tenth); with the market's real sale reverted too, the sim drops it as before", async () => {
+  const token = "0x" + (0xfa017).toString(16).padStart(40, "0");
+  const hidden: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, UNPINNED), give: (a) => a, lie: () => null, exec: (a) => a };
+  const seed: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 10n };
+  const logs = [{ key: hidden.key, at: 4_500_000 }];
+  viaHook(await sellVerdict(sellOn([hidden, seed], token, scanner(5_000_000, logs), seededRoute(token), 100, DELEGATED, signSim)), hidden.key, AMOUNT);
+  // on a chain that pins no sell delegate (no sim): at the lowest of its reads, its pools named for a ban where it reverts
+  viaHook(await sellVerdict(sellOn([hidden, seed], token, scanner(5_000_000, logs))), hidden.key, AMOUNT);
+  const gated: ModelPool = { ...hidden, exec: () => null };
+  const g = await sellVerdict(sellOn([gated, seed], token, scanner(5_000_000, logs), seededRoute(token), 100, DELEGATED, signSim));
+  assert.ok(g.accepted && g.amountOut === AMOUNT / 10n, show(g));
+});
+
+test("ZZ8 X's market the quoter cannot run within the slippage above X's best market that fills: both are routed, and the route through the one that fills is bought at its own minOut; past the slippage it is refused naming the other", async () => {
+  const token = "0x" + (0xfa018).toString(16).padStart(40, "0");
+  const x = xAt(0xd18);
+  const xTrade: ModelPool = { key: keyOf(x, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const p: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const viaTrade = v4Route([{ currency: x, fee: 500, tickSpacing: 10, hooks: NATIVE }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE }]);
+  const viaHidden = v4Route([{ currency: x, fee: 2500, tickSpacing: 50, hooks: UNPINNED }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE }]);
+  const at = (k: bigint, d: bigint): ModelPool => ({ key: keyOf(x, NATIVE, 2500, 50, UNPINNED), give: (a) => (a * k) / d, state: pricedAt(2n), lie: () => null, exec: () => null });
+  const logs = (h: ModelPool) => [{ key: p.key, at: 4_500_000 }, { key: h.key, at: 4_500_001 }];
+  const nearHidden = at(1005n, 1000n);
+  const q = await hbQuote([xTrade, p, nearHidden], token, logs(nearHidden), viaTrade);
+  assert.ok(!("code" in q) && q.amountOut === AMOUNT && q.minOut === (AMOUNT * 9900n) / 10000n, show(q));
+  const farHidden = at(105n, 100n);
+  const r = await hbQuote([xTrade, p, farHidden], token, logs(farHidden), viaTrade);
+  assert.ok("code" in r && r.code === "below_reference", show(r));
+  assert.deepEqual(r.reference, { amountOut: (AMOUNT * 105n) / 100n, route: viaHidden });
+});
+
+test("ZZ7b (sell) the token's only pool is with X, X's market the quoter cannot run (its real sale reverted too) above X's market that fills: the sale leaves through the one that fills, as before", async () => {
+  const token = "0x" + (0xfa027).toString(16).padStart(40, "0");
+  const x = xAt(0xd27);
+  const xTrade: ModelPool = { key: keyOf(x, NATIVE, 500, 10, NATIVE), give: (a) => a / 2n };
+  const xGated: ModelPool = { key: keyOf(x, NATIVE, 2500, 50, UNPINNED), give: (a) => a, lie: () => null, exec: () => null };
+  const p: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const logs = [{ key: p.key, at: 4_500_000 }, { key: xGated.key, at: 4_500_001 }];
+  const s = await sellVerdict(sellOn([xTrade, xGated, p], token, scanner(5_000_000, logs), seededRoute(token), 100, DELEGATED, signSim));
+  assert.ok(s.accepted && s.amountOut === AMOUNT / 2n, show(s));
+  assert.deepEqual(s.route, { venue: "uniswap-v4", hops: [{ currency: x, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }, { currency: NATIVE, fee: 500, tickSpacing: 10, hooks: NATIVE, hookData: "0x" }] });
+});
+
+test("ZZ7c (sell) X's only market is one the quoter cannot run (its real sale reverted too): X still goes one level further, and the sale leaves through X's pool with Y and Y's market, as before", async () => {
+  const token = "0x" + (0xfa037).toString(16).padStart(40, "0");
+  const [x, y] = [xAt(0xd37), xAt(0xd38)];
+  const xGated: ModelPool = { key: keyOf(x, NATIVE, 2500, 50, UNPINNED), give: (a) => a, lie: () => null, exec: () => null };
+  const xy: ModelPool = { key: keyOf(x, y, 3000, 60, NATIVE), give: (a) => a / 2n };
+  const yMarket: ModelPool = { key: keyOf(y, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const p: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const logs = [{ key: p.key, at: 4_500_000 }, { key: xGated.key, at: 4_500_001 }, { key: xy.key, at: 4_500_002 }];
+  const s = await sellVerdict(sellOn([xGated, xy, yMarket, p], token, scanner(5_000_000, logs), seededRoute(token), 100, DELEGATED, signSim));
+  assert.ok(s.accepted && s.amountOut === AMOUNT / 2n, show(s));
+});
+
+test("ZZ9 the tap on a token whose only pool is with X, X's market the quoter cannot run within the slippage above X's market that fills (Robinhood's USDG, live 17 Nov): a refusal names the route through the market that fills, and the tap buys through it at its own minOut", async () => {
+  const token = "0x" + (0xfa019).toString(16).padStart(40, "0");
+  const x = xAt(0xd19);
+  const xTrade: ModelPool = { key: keyOf(x, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const p: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const hidden: ModelPool = { key: keyOf(x, NATIVE, 2500, 50, UNPINNED), give: (a) => (a * 1005n) / 1000n, state: pricedAt(2n), lie: () => null, exec: () => null };
+  const viaTrade = v4Route([{ currency: x, fee: 500, tickSpacing: 10, hooks: NATIVE }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE }]);
+  const logs = [{ key: p.key, at: 4_500_000 }, { key: hidden.key, at: 4_500_001 }];
+  const t = await zzTap([xTrade, p, hidden], token, logs);
+  assert.ok(!("code" in t) && t.amountOut === AMOUNT && t.minOut === (AMOUNT * 9900n) / 10000n, show(t));
+  assert.deepEqual(t.route, viaTrade);
+  // the token's own pool alone, never quoted: the refusal names the route through X's market that fills
+  const q = await hbQuote([xTrade, p, hidden], token, logs, zzOne(token, keyOf(token, NATIVE, 3000, 60, NATIVE)));
+  assert.ok("code" in q && q.code === "no_quote", show(q));
+  assert.deepEqual(q.reference, { amountOut: AMOUNT, route: viaTrade });
+  // a pool of the token seeded at a tenth, and one whose swap does not run: each refusal names the same route
+  const seed: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 10n };
+  const b = await hbQuote([xTrade, p, hidden, seed], token, logs, zzOne(token, seed.key));
+  assert.ok("code" in b && b.code === "below_reference", show(b));
+  assert.deepEqual(b.reference, { amountOut: AMOUNT, route: viaTrade });
+  const heavy: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 2n, exec: () => null };
+  const g = await hbQuote([xTrade, p, hidden, heavy], token, logs, zzOne(token, heavy.key));
+  assert.ok("code" in g && g.code === "over_gas_floor", show(g));
+  assert.deepEqual(g.reference, { amountOut: AMOUNT, route: viaTrade });
+  const tb = await zzTap([xTrade, p, hidden, seed], token, logs);
+  assert.ok(!("code" in tb) && tb.amountOut === AMOUNT, show(tb));
 });
