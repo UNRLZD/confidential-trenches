@@ -766,6 +766,52 @@ test("card solana-trades-show-on-every-token: the pool's trades refused or down,
 });
 let pumpOn: SourceEvents | null = null;
 
+// card solana-dropped-tape-settles: helper 178, live run 43989230034 (robinhood-listed-tape-opens, ~00:51Z): Cat
+// (CoqwPnZ3...u61w), a token the lists had just dropped, answered filling 45,789 ms after its first read (21 reads). Its
+// one pool, Cat / PUMP 8Ur5P74d..., was made 2026-11-17T00:50:56Z (GeckoTerminal /pools/8Ur5P74d..., read 02:5xZ): the
+// vendor named no pool for it yet (404), and a listed token whose own walk holds no trade answered filling for every
+// vendor answer that was not 200, so for as long as the vendor's 404 was held, and forever while it refuses.
+test("card solana-dropped-tape-settles: a listed token whose walk holds no trade settles inside the live checks' 45 s whatever the vendor answers: its 404 (no pool named) at once, a refusal or a failure after VENDOR_WAIT_MS, empty, src chain, never filling past it and never claimed whole (red at 9dc3a90a0: filling at every read for 45 s)", async () => {
+  const clock = { t: TS * 1000 };
+  for (const [name, tape] of [
+    ["404", async () => ({ status: 404, body: JSON.stringify({ error: { code: "not_found" } }) })],
+    ["429", async () => ({ status: 429, body: "{}" })],
+    ["down", async () => Promise.reject(new Error("down"))],
+  ] as const) {
+    // its walk lists no signature of a venue read: the newest are the new pool's, which no venue of ours decodes
+    const fetchFn = rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: NK.tx.slot }, { [NK.mint]: 6 });
+    const t = createSolanaTrades({ fetch: fetchFn, now: () => clock.t, listed: async (m) => m === NK.mint, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => settle(), tape });
+    // the live check's reads: every FILL_POLL_MS (2 s) for FILLED_MS (45 s) from the first
+    let j = JSON.parse((await t.trades(NK.mint, 50)).body) as Record<string, unknown>;
+    let reads = 1;
+    for (let ms = 2_000; ms <= 45_000 && j.filling === true; ms += 2_000, reads++) {
+      clock.t += 2_000;
+      await settle();
+      const a = await t.trades(NK.mint, 50);
+      assert.equal(a.status, 200, `${name}: ${a.body}`);
+      j = JSON.parse(a.body) as Record<string, unknown>;
+    }
+    assert.equal(j.filling, undefined, `${name}: still filling after ${reads} reads over 45 s`);
+    assert.deepEqual(j.trades, [], name);
+    assert.equal(j.src, "chain", name);
+    assert.equal(j.whole_ms, undefined, `${name}: a tape whose vendor never answered is not the token's whole`);
+    if (name !== "404") assert.ok(reads > 1, `${name}: a refusal is read again inside the wait, not settled at once`);
+    t.stop();
+    clock.t = TS * 1000;
+  }
+});
+
+test("card solana-dropped-tape-settles: a token the lists do not hold whose vendor refuses answers filling inside VENDOR_WAIT_MS and the vendor's own refusal past it, never filling for good and never an empty 200 (red at 9dc3a90a0: filling for 45 s)", async () => {
+  const clock = { t: TS * 1000 };
+  const t = createSolanaTrades({ fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: NK.tx.slot }, { [NK.mint]: 6 }), now: () => clock.t, listed: async () => false, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: async () => ({ status: 429, body: JSON.stringify({ error: { code: "rate_limited" } }), retryAfterS: 5 }) });
+  assert.equal(JSON.parse((await t.trades(NK.mint, 50)).body).filling, true, "filling at first");
+  clock.t += 45_000;
+  const a = await t.trades(NK.mint, 50);
+  assert.equal(a.status, 429, a.body);
+  assert.equal(a.retryAfterS, 5);
+  t.stop();
+});
+
 test("card solana-trades-show-on-every-token: a token Discover's lists do not hold (a searched token, as NEARKAT and BONK were on the live helper at 837d9d810: 404 not_found) is served its top pool's trades with no walk of ours opened, never 404; a mint no pool names stays 404; the pool's trades refused, empty with filling", async () => {
   let rpcCalls = 0;
   const counted = rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: NK.tx.slot }, { [NK.mint]: 6 });

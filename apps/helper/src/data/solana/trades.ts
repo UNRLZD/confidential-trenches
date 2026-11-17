@@ -107,6 +107,13 @@ const BACK_INDEX = 1e12;
 export const REPORT_MS = 60_000;
 const QUOTES_MAX = 200;
 export const TRADES_MAX = 50;
+/** The longest a tape whose own walk holds no trade says filling while the vendor (deps.tape) refuses or fails: past it
+ *  the tape answers what it holds, and a token with no walk of ours the vendor's own refusal (card
+ *  solana-dropped-tape-settles). [design: 30 s, under the live checks' 45 s (scripts/live-checks/tape-read.mjs
+ *  FILLED_MS) with room for the page's 2 s reads; a vendor's 429 waits out its minute's budget meanwhile] */
+export const VENDOR_WAIT_MS = 30_000;
+/** Mints poolTape waits on at once, at most [design: OPEN_MAX's walks and the page's searched tokens, a few hundred]. */
+const WAITING_MAX = 1_000;
 export const CANDLES_MAX = 500;
 const POOLS_MAX = 5_000;
 const ANSWER_MAX = 4 * 1024 * 1024;
@@ -791,11 +798,35 @@ export function createSolanaTrades(deps: {
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
 
+  /** Each mint's tape the vendor has not answered (poolTape): since when, and its last such read; a read more than
+   *  IDLE_MS after the last starts a new wait. At most WAITING_MAX, oldest out first. */
+  const waiting = new Map<string, { since: number; last: number }>();
   /** The token's top pool's newest `limit` trades (deps.tape), src theirs, dated by their read. Refused or down, the
-   *  empty tape with `filling`, so the page reads again; for a token with no open walk (`e` null), a mint no pool names
-   *  is the 404 it was. */
+   *  empty tape with `filling`, so the page reads again, for VENDOR_WAIT_MS at most; then, and at once for a vendor that
+   *  names no pool (404), the token's own empty tape (filling only while its walk reads), or for a token with no open
+   *  walk (`e` null) the vendor's refusal, and a mint no pool names is the 404 it was. */
   async function poolTape(mint: string, limit: number, e: Entry | null): Promise<DataAnswer> {
     const v = await deps.tape!(mint).catch(() => null);
+    if (v === null || v.status !== 200) {
+      // card solana-dropped-tape-settles: a tape waits for the vendor VENDOR_WAIT_MS at most, filling, then answers what
+      // it holds: helper 178, live run 43989230034, Cat (CoqwPnZ3...u61w) answered filling for 45.8 s, its one pool made
+      // a minute before (00:50:56Z) and so named by no vendor (404), as every answer not 200 was filling for good
+      const t = now();
+      const w = waiting.get(mint);
+      const since = w !== undefined && t - w.last <= IDLE_MS ? w.since : t;
+      waiting.delete(mint);
+      waiting.set(mint, { since, last: t });
+      if (waiting.size > WAITING_MAX) waiting.delete(waiting.keys().next().value!);
+      // a vendor that names no pool (404) has nothing to come: no wait
+      if (v?.status === 404 || t - since >= VENDOR_WAIT_MS) {
+        waiting.delete(mint);
+        if (e === null) return v?.status === 404 ? NOT_FOUND : (v ?? UPSTREAM);
+        // the token's own walk: empty, filling only while it still reads its newest signatures, never claimed whole
+        const at = e.readAt ?? t;
+        const fill = e.state === "cold" ? { filling: true } : {};
+        return { status: 200, body: JSON.stringify({ trades: [], ...fill, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+      }
+    } else waiting.delete(mint);
     if (v !== null && v.status === 200) {
       const all = JSON.parse(v.body) as unknown[];
       const got = all.slice(0, limit);
@@ -806,7 +837,6 @@ export function createSolanaTrades(deps: {
       const whole = typeof oldest === "number" && Number.isSafeInteger(oldest) ? { whole_ms: oldest + 1_000 } : {};
       return { status: 200, body: JSON.stringify({ trades: got, ...whole, src, as_of_ms: at }), src, asOfMs: at };
     }
-    if (e === null && v !== null && v.status === 404) return NOT_FOUND;
     const at = e?.readAt ?? now();
     return { status: 200, body: JSON.stringify({ trades: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
   }
