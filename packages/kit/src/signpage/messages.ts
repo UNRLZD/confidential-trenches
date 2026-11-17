@@ -47,6 +47,7 @@ export const SIGNPAGE_KINDS = [
   "pool.buy.dry",
   "pool.move",
   "pool.move.dry",
+  "deposit.coin",
 ] as const;
 deepFreeze(SIGNPAGE_KINDS);
 
@@ -192,6 +193,14 @@ export interface SignpageParams {
    */
   "deposit.dry": { origin_asset: string; amount: string };
   /**
+   * One pool's own coin as the deposit sheet lists it (card deposit-list-reads-fast): SOL on Solana, ETH on Base or ETH on
+   * Robinhood, sent straight to U_X, its minimum the pool's floor read now on the pool's RPCs. Asked per chain beside
+   * deposit.assets, which lists the USDC rows, so each row is drawn as its own floor lands and no row waits on another.
+   * Asks 1Click nothing, signs nothing and needs no sign-in; a chain with no pool open, or whose floor does not answer,
+   * is refused not_available.
+   */
+  "deposit.coin": { chain: PoolChain };
+  /**
    * Where money for chain X's pool goes (card pool-deposit-address): U_X, the chain's one-time deposit wallet the device
    * names ahead, and, with `origin_asset` and `amount` (both or neither, as deposit.quote's), a checked 1Click deposit
    * address for money from another chain whose recipient is U_X and whose refund lands inside intents.near under
@@ -296,6 +305,7 @@ export interface SignpageResults {
   /** Answered once the move has left (or failed); its later stages come in state.ops under the request's id. */
   "pool.move": { stage: MoveStage; txs: TxRef[] };
   "pool.move.dry": PoolMoveDry;
+  "deposit.coin": { asset: DepositAsset };
 }
 
 /**

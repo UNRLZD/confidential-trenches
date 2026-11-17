@@ -1592,7 +1592,7 @@ function pagePoolScopes(): { chain: PoolChain; scope: bigint }[] {
 function pageAddressPools(): { chain: PoolChain; scope: bigint }[] {
   return pagePoolScopes().filter((p) => poolWayOut(p.chain));
 }
-// deposit.assets' minimum for each pool's own coin (card deposit-takes-each-pools-own-coin): the pool's floor read now on
+// deposit.coin's minimum for each pool's own coin (card deposit-takes-each-pools-own-coin): the pool's floor read now on
 // its two RPCs, as pool.address reads it (one deposit's worst-case cost from U_X and the rent U_X keeps), on a pool
 // pool.address answers; no U_X named (the Solana fee message is priced at POOL_FLOOR_PLACEHOLDER). The frame and the
 // top-level page alike: a function declaration, held by the kinds made above this line

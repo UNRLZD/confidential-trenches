@@ -159,8 +159,9 @@ async function runOne(browser, w, scheme, shots, route) {
     await page.screenshot({ path: path.join(shots, `${w.name}-${scheme}.png`) });
     if (scheme !== "dark" || run.screen !== "portfolio") return run;
     const taps = {};
-    // the sheet's own reads on opening (its asset list, the pools' deposit addresses) are no open: they are not the tap's
-    const opens = (ks) => ks.filter((k) => k !== "deposit.assets" && k !== "pool.address");
+    // the sheet's own reads on opening (its asset list, each pool coin's row: card deposit-list-reads-fast, the pools'
+    // deposit addresses) are no open: they are not the tap's
+    const opens = (ks) => ks.filter((k) => k !== "deposit.assets" && k !== "deposit.coin" && k !== "pool.address");
     taps.withdraw = opens(await tap(page, f, "[data-screen='portfolio'] [data-control='withdraw']"))[0] ?? null;
     // money in two places: the app's Withdraw, by its tiles; Solana's, with Max and a Solana address, asks for its pool
     const tiles = await f.locator("[data-sheet='deposit'][data-mode='withdraw'] [data-form='withdraw'] [data-from]").evaluateAll((ts) => ts.map((t) => t.dataset.from));

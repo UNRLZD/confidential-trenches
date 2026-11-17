@@ -82,6 +82,11 @@ export const READY_MS = 5_000;
 /** deposit.assets reads /v0/tokens and quotes three assets through the helper; deposit.dry quotes one. */
 export const ASSETS_MS = 30_000;
 export const DRY_MS = 20_000;
+/** How long the run waits for every pool coin's row (deposit.coin, card deposit-list-reads-fast: one read per chain,
+ *  the pool's floor on its RPCs): the page's read deadline, 14 s, and a margin. */
+export const COIN_MS = 16_000;
+/** The pool chains deposit.coin is asked for, after deposit.dry (the kit's POOL_CHAINS). */
+export const COIN_CHAINS = Object.freeze(["solana", "base", "robinhood"]);
 const SETTLE_MS = 1_500;
 /** What the dry run asks: 25 USDC from Solana. */
 export const ASKED = { origin_asset: SOL_USDC, amount: "25" };
@@ -322,7 +327,7 @@ window.__ask = (kind, params) => {
     window.__hello = true;
     parent.postMessage(${JSON.stringify({ v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION })}, ${JSON.stringify(signOrigin)}); // the kit's hello first, as the kit's client sends it (card kit-frame-version): an app that names none is kit-v1.4
   }
-  const m = kind === "assets" ? { v: 1, id: crypto.randomUUID(), type: "deposit.assets" } : { v: 1, id: crypto.randomUUID(), type: "deposit.dry", ...params };
+  const m = kind === "assets" ? { v: 1, id: crypto.randomUUID(), type: "deposit.assets" } : kind === "coin" ? { v: 1, id: crypto.randomUUID(), type: "deposit.coin", ...params } : { v: 1, id: crypto.randomUUID(), type: "deposit.dry", ...params };
   parent.postMessage(m, ${JSON.stringify(signOrigin)});
   return m.id;
 };
@@ -387,13 +392,17 @@ async function pageRun(browser, { signUrl, dir }) {
     return false;
   };
   const ready = await waitFor(READY_MS, (l) => l.some((m) => m.fromParent && m.data?.type === "ready"));
-  const ids = { assets: null, dry: null };
+  const ids = { assets: null, dry: null, coins: {} };
   if (ready) {
     ids.assets = await app().evaluate(() => window.__ask("assets"));
     await waitFor(ASSETS_MS, (l) => l.some((m) => m.data?.id === ids.assets));
     phase = "dry";
     ids.dry = await app().evaluate((p) => window.__ask("dry", p), ASKED);
     await waitFor(DRY_MS, (l) => l.some((m) => m.data?.id === ids.dry));
+    // each pool coin's row, its own read per chain (card deposit-list-reads-fast); a page before it refuses them
+    phase = "coins";
+    for (const chain of COIN_CHAINS) ids.coins[chain] = await app().evaluate((p) => window.__ask("coin", p), { chain });
+    await waitFor(COIN_MS, (l) => Object.values(ids.coins).every((id) => l.some((m) => m.data?.id === id)));
     await page.waitForTimeout(SETTLE_MS);
     log = await read(log);
   }

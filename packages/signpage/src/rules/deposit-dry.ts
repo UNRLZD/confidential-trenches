@@ -15,11 +15,12 @@
 // MIN_DEPOSIT is refused below_min too, never quote_check_failed: the device read the reason off a verified answer.
 //
 // Each pool's own coin on its own chain (card deposit-takes-each-pools-own-coin): SOL on Solana, ETH on Base and
-// Robinhood, listed after the USDC rows, each under 1Click's own id for it (DEPOSIT_POOL_COINS) and sent straight to
-// U_X with no quote (src/pool-deposit-address.ts). Its minimum is the pool's floor read now on the pool's two RPCs
-// (`poolFloor`: the least rung, one deposit's worst-case cost from U_X and the rent U_X keeps), so no send at it
-// leaves money at U_X that cannot go on into the pool. A chain whose floor does not answer is left out; 1Click busy or
-// down answers that code for the whole list, as before.
+// Robinhood, each under 1Click's own id for it (DEPOSIT_POOL_COINS) and sent straight to U_X with no quote
+// (src/pool-deposit-address.ts). Its minimum is the pool's floor read now on the pool's two RPCs (`poolFloor`: the least
+// rung, one deposit's worst-case cost from U_X and the rent U_X keeps), so no send at it leaves money at U_X that cannot
+// go on into the pool. Each is deposit.coin's own read, per chain (card deposit-list-reads-fast: the floors take 1-3 s,
+// the USDC rows under 1 s), so the sheet draws each row as it lands; a chain whose floor does not answer is
+// not_available for that row alone.
 import {
   ONECLICK_USDC_ASSETS, ONECLICK_VAULT_MIN_OUT, OneClickQuoteError, checkOneClickQuote, oneClickFeeBps, oneClickFloors,
   type OneClickChecked, type OneClickCheckOptions, type OneClickPath, type OneClickRequest,
@@ -62,14 +63,11 @@ export const DEPOSIT_POOL_COINS: readonly { id: string; chain: PoolChain; symbol
   Object.freeze({ id: POOL_DEPOSIT_DESTINATION.robinhood, chain: "robinhood", symbol: "ETH", decimals: POOL_ASSET_DECIMALS.ETH }),
 ] as const);
 
-/** How long past the probes deposit.assets waits for a pool's floor (card deposit-takes-each-pools-own-coin). */
-export const DEPOSIT_FLOOR_GRACE_MS = 2_000;
-
 export interface DepositReadContext {
   fetch?: typeof fetch;
   now?: () => number;
   /** Each pool's floor for one deposit from U_X, read now on the pool's two RPCs, in the pool coin's base units; null
-   *  with no pool pinned on the chain (src/main.ts). None given: no pool coin is listed. */
+   *  with no pool pinned on the chain (src/main.ts). deposit.coin's alone; none given: not_available. */
   poolFloor?: (chain: PoolChain, signal?: AbortSignal) => Promise<bigint | null>;
   /** The pause before a re-ask (askDepositQuoteAgain); a test's ends at once. */
   sleep?: (ms: number) => Promise<void>;
@@ -280,21 +278,25 @@ function listed(list: unknown, a: (typeof DEPOSIT_ASSET_CHAINS)[number]): boolea
  * down answers that code (not kept, so the same request again runs again); none left is not_available.
  */
 export async function depositAssetsKind(ctx: DepositReadContext = {}): Promise<DepositReadAnswer<{ assets: DepositAsset[] }>> {
+  // card deposit-list-reads-fast (QA walk item 11: the sheet opened cold filled in 3.9 s): the token list and each
+  // asset's probe are asked at once, never one after another. Each probe is the request it was and is checked as it
+  // was; the list only decides which probes count, and a probe of an asset the list leaves out is dropped unread. A token
+  // list refused ends the probes still out, so nothing is asked again for an answer already given. The pools' own coins
+  // are deposit.coin's, one read per chain (depositCoinKind), so no USDC row waits on a pool's floor.
+  const stop = new AbortController();
+  const probeCtx: DepositReadContext = { ...ctx, signal: ctx.signal ? AbortSignal.any([ctx.signal, stop.signal]) : stop.signal };
+  const asked = DEPOSIT_ASSET_CHAINS.map((a) => dryQuote(a.id, DEPOSIT_PROBE_AMOUNT, probeCtx));
   const tokens = await readTokens(ctx.fetch, ctx.signal);
-  if (!tokens.ok) return tokens;
-  const kept = DEPOSIT_ASSET_CHAINS.filter((a) => listed(tokens.result, a));
-  // each pool's floor beside the probes; one not back by DEPOSIT_FLOOR_GRACE_MS after them leaves its chain out of this
-  // read, so a slow pool RPC never holds the USDC rows past the read's deadline
-  const floors: (bigint | null)[] = DEPOSIT_POOL_COINS.map(() => null);
-  const floorReads = Promise.all(DEPOSIT_POOL_COINS.map((c, i) => (ctx.poolFloor ? ctx.poolFloor(c.chain, ctx.signal).then((f) => void (floors[i] = f), () => {}) : undefined)));
-  const probes = await Promise.all(kept.map((a) => dryQuote(a.id, DEPOSIT_PROBE_AMOUNT, ctx)));
+  if (!tokens.ok) {
+    stop.abort(new DOMException("the token list was refused", "AbortError"));
+    return tokens;
+  }
+  const kept = DEPOSIT_ASSET_CHAINS.flatMap((a, i) => (listed(tokens.result, a) ? [{ a, probe: asked[i]! }] : []));
+  const probes = await Promise.all(kept.map((k) => k.probe));
   const notNow = probes.find((p): p is { ok: false; code: DepositRefusal } => !p.ok && (p.code === "busy" || p.code === "down"));
   if (notNow) return notNow;
-  let grace: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([floorReads, new Promise<void>((ok) => (grace = setTimeout(ok, DEPOSIT_FLOOR_GRACE_MS)))]);
-  clearTimeout(grace);
   const assets: DepositAsset[] = [];
-  kept.forEach((a, i) => {
+  kept.forEach(({ a }, i) => {
     const p = probes[i]!;
     if (!p.ok) return;
     // the withdraw fee no higher than the signed amounts allow, the minimum at the live quote's fee
@@ -303,14 +305,27 @@ export async function depositAssetsKind(ctx: DepositReadContext = {}): Promise<D
     assets.push({ origin_asset: a.id, chain: a.chain, symbol: "USDC", decimals: USDC_DECIMALS, min: decimal(min, USDC_DECIMALS),
       max_usd: decimal(HELPER_BIND_DEPOSIT_CAP, USDC_DECIMALS) });
   });
-  // each pool's own coin, sent straight to U_X: its minimum the pool's floor read now, rounded up to six decimals (an
-  // 18-decimal Min is no amount to read or type, and rounded up it still clears the floor the plain send is held to)
-  floors.forEach((floor, i) => {
-    const c = DEPOSIT_POOL_COINS[i]!;
-    if (typeof floor !== "bigint" || floor <= 0n) return;
-    const step = 10n ** BigInt(Math.max(0, c.decimals - 6));
-    assets.push({ origin_asset: c.id, chain: c.chain, symbol: c.symbol, decimals: c.decimals, min: decimal(((floor + step - 1n) / step) * step, c.decimals),
-      max_usd: decimal(HELPER_BIND_DEPOSIT_CAP, USDC_DECIMALS) });
-  });
   return assets.length > 0 ? { ok: true, result: { assets } } : no("not_available");
+}
+
+/**
+ * Answers deposit.coin (card deposit-list-reads-fast): the pool's own coin on `chain` as the sheet lists it, sent
+ * straight to U_X with no quote, its minimum the pool's floor read now on the pool's two RPCs (ctx.poolFloor), rounded
+ * up to six decimals (an 18-decimal Min is no amount to read or type, and rounded up it still clears the floor the plain
+ * send is held to). A chain with no pool open (a null floor), a floor that fails or none given is not_available; 1Click
+ * is asked nothing.
+ */
+export async function depositCoinKind(params: Record<string, unknown>, ctx: DepositReadContext = {}): Promise<DepositReadAnswer<{ asset: DepositAsset }>> {
+  const c = DEPOSIT_POOL_COINS.find((x) => x.chain === params.chain);
+  if (!c) return no("not_allowed");
+  let floor: bigint | null;
+  try {
+    floor = ctx.poolFloor ? await ctx.poolFloor(c.chain, ctx.signal) : null;
+  } catch {
+    return no("not_available");
+  }
+  if (typeof floor !== "bigint" || floor <= 0n) return no("not_available");
+  const step = 10n ** BigInt(Math.max(0, c.decimals - 6));
+  return { ok: true, result: { asset: { origin_asset: c.id, chain: c.chain, symbol: c.symbol, decimals: c.decimals,
+    min: decimal(((floor + step - 1n) / step) * step, c.decimals), max_usd: decimal(HELPER_BIND_DEPOSIT_CAP, USDC_DECIMALS) } } };
 }

@@ -1,17 +1,17 @@
 import type { PoolChain, SignpageClientSnapshot, SignpageResults } from "@blindfill/kit";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { SignpageClient } from "@blindfill/kit";
 import { useReturnHop } from "../../shell/ReturnHop.tsx";
 import type { ReturnHopView } from "../../shell/ReturnHop.tsx";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
-import { DEPOSIT_ASSETS } from "./assets.ts";
-import type { AssetsAsk } from "./assets.ts";
-import { assetOf, poolStatusFor, statusOf } from "./model.ts";
+import { assetsAsk, DEPOSIT_ASSETS, refusal } from "./assets.ts";
+import { poolStatusFor, statusOf } from "./model.ts";
 import type { Asset, DepositStatus, DryQuote, PoolDepositStatus, QuoteRefusal } from "./model.ts";
 
 // What the deposit sheet reads and does, all through the kit's deposit calls (kit-deposit-assets-dry, kit-deposit-calls):
-// `deposit.assets` (the assets 1Click takes, each with its minimum and the beta cap) when the sheet opens, `deposit.dry`
+// `deposit.assets` (the USDC rows 1Click takes, each with its minimum and the beta cap) and, sent at once beside it, one
+// `deposit.coin` per pool chain (that pool's own coin, its minimum the pool's floor; card deposit-list-reads-fast,
+// assets.ts assetsAsk) when the sheet opens, each row drawn as it lands, `deposit.dry`
 // (the quote lines for an amount, no address) as the amount is typed, `deposit.quote` (the quote SIGN_HOST fetches and
 // checks before any address exists, W:667), and the deposit's stage and facts from `state.ops` under that request's id;
 // for a pool (card deposit-to-pool-pools) `pool.address`: with no asset, whether the page answers the chain at all; with
@@ -59,17 +59,8 @@ export interface DepositSource {
 const Fixture = createContext<DepositSource | null>(null);
 export const DepositSourceProvider = Fixture.Provider;
 
-const KNOWN: ReadonlySet<string> = new Set(["below_min", "above_max", "not_available", "busy", "down", "quote_check_failed"]);
-const refusal = (code: string): QuoteRefusal => (KNOWN.has(code) ? (code as QuoteRefusal) : "not_available");
-
 /** The dry quote waits for the typing to pause this long, so one amount typed is one request, not one per key. */
 export const DRY_PAUSE_MS = 300;
-
-/** deposit.assets on `client`, as the held list's ask (assets.ts). */
-const assetsAsk =
-  (client: SignpageClient): AssetsAsk =>
-  () =>
-    client.request("deposit.assets", {}).outcome.then((o) => (o.ok ? { ok: true, list: o.result.assets.map(assetOf) } : { ok: false, code: refusal(o.error.code) }));
 
 /** A Deposit control's intent (card app-faults-seen-on-124, fault 9): pointed at, focused or pressed, the asset list is
  *  asked (assets.ts intent: only with no list held, none out and none asked in the last minute), so the sheet mostly

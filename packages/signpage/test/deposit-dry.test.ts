@@ -115,7 +115,7 @@ const closers: (() => void)[] = [];
 after(() => closers.forEach((c) => c()));
 let n = 0;
 /** The frame's page over a real, empty wallet store (signed out), answering the two reads, as main.ts wires the frame. */
-function frame(net: Net = {}, deadlineMs?: number) {
+function frame(net: Net = {}, deadlineMs?: number, poolFloor?: (chain: "solana" | "base" | "robinhood") => Promise<bigint | null>) {
   const h = helper(net);
   const idb = new IDBFactory();
   const fs = frameState((onEvent) => openWalletStoreReader({ indexedDB: idb, name: `deposit-dry-${process.pid}-${n++}`, onEvent }), () => {});
@@ -123,7 +123,7 @@ function frame(net: Net = {}, deadlineMs?: number) {
   const posted: unknown[] = [];
   const parent = { postMessage: (msg: unknown, to: string) => void (to === APP_ORIGIN && posted.push(msg)) };
   let listener: ((e: IncomingMessage) => void) | null = null;
-  const api = startApi({ parent, listen: (fn) => (listener = fn), state: fs.state, watch: fs.watch, kinds: { ...depositReadHosts({ fetch: h.fetch, now: () => NOW, deadlineMs, sleep: async () => {} }) } });
+  const api = startApi({ parent, listen: (fn) => (listener = fn), state: fs.state, watch: fs.watch, kinds: { ...depositReadHosts({ fetch: h.fetch, now: () => NOW, deadlineMs, sleep: async () => {}, poolFloor }) } });
   const send = (data: unknown) => listener!({ origin: APP_ORIGIN, source: parent, data });
   send({ v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION });
   // the reads are Running kinds (src/deposit-wire.ts): the queue does not wait for them, so wait for the answer itself
@@ -180,13 +180,35 @@ test("deposit.assets through the frame, signed out: the three assets as 1Click l
     ],
   });
   assert.equal(SIGNPAGE_RESULT_SCHEMAS["deposit.assets"](a.result), true, "the kit's client takes it");
-  // the token list, then one dry quote per asset, each to the placeholder: nothing of the user's
+  // the token list and one dry quote per asset, asked at once (card deposit-list-reads-fast), each quote to the
+  // placeholder: nothing of the user's
   assert.deepEqual(f.sent.map((s) => s.method), ["POST", "POST", "POST", "POST"]);
-  for (const s of f.sent.slice(1)) {
+  assert.equal(f.sent.filter((s) => s.url === DEPOSIT_TOKENS_URL).length, 1);
+  for (const s of f.sent.filter((x) => x.url !== DEPOSIT_TOKENS_URL)) {
     assert.equal(s.body!.dry, true);
     assert.equal(s.body!.recipient, DEPOSIT_DRY_PLACEHOLDER);
     assert.equal(s.body!.refundTo, DEPOSIT_DRY_PLACEHOLDER);
   }
+});
+
+// card deposit-list-reads-fast: each pool coin's row is its own read through the frame, beside deposit.assets
+test("deposit.coin through the frame, signed out: the chain's row at its floor, while a slower chain's floor is still out; 1Click asked nothing", async () => {
+  let release!: (v: bigint) => void;
+  const slow = new Promise<bigint>((ok) => (release = ok));
+  const f = frame({}, undefined, async (chain) => (chain === "robinhood" ? slow : chain === "base" ? 1_200_000_000_000_000n : null));
+  const base = await f.ask({ type: "deposit.coin", chain: "base" });
+  assert.deepEqual(base.result, { asset: { origin_asset: "nep141:base.omft.near", chain: "base", symbol: "ETH", decimals: 18, min: "0.0012", max_usd: "1000" } });
+  assert.equal(SIGNPAGE_RESULT_SCHEMAS["deposit.coin"](base.result), true, "the kit's client takes it");
+  // deposit.assets answers its USDC rows while Robinhood's floor is still out
+  const assets = await f.ask(ASSETS);
+  assert.deepEqual((assets.result!.assets as { chain: string }[]).map((a) => a.chain), ["near", "solana", "base"]);
+  const id = crypto.randomUUID();
+  f.send({ v: 1, id, type: "deposit.coin", chain: "robinhood" });
+  release(1_050_000_000_000_000n);
+  assert.equal(((await f.answerOf(id)).result!.asset as { min: string }).min, "0.00105");
+  assert.deepEqual(await f.ask({ type: "deposit.coin", chain: "solana" }), { v: 1, id: (f.posted.at(-1) as { id: string }).id, ok: false, error: { code: "not_available" } });
+  assert.deepEqual((await f.ask({ type: "deposit.coin", chain: "near" })).error, { code: "not_allowed" });
+  assert.equal(f.sent.filter((s) => s.url !== DEPOSIT_TOKENS_URL).length, 3, "the three USDC probes alone");
 });
 
 test("deposit.assets: the minimum follows 1Click's quoted withdraw fee, per asset", async () => {

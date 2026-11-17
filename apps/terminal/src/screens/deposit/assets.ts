@@ -1,3 +1,6 @@
+import { POOL_CHAINS } from "@blindfill/kit";
+import type { PoolChain, SignpageClient } from "@blindfill/kit";
+import { assetOf, ownCoin } from "./model.ts";
 import type { Asset, QuoteRefusal } from "./model.ts";
 
 // The deposit sheet's asset list, held for the app's session (card app-faults-seen-on-122, walk of release 122 row 7: the
@@ -27,6 +30,12 @@ import type { Asset, QuoteRefusal } from "./model.ts";
 // useDepositIntent), and as the sheet opens, the fallback. A busy answer (the helper's 429, the signing page's "busy")
 // while the sheet is open is asked once more by itself after BUSY_RETRY_MS, then the sheet's busy state and its Retry
 // stand; closing the sheet or signing out stops that ask.
+//
+// Card deposit-list-reads-fast: one ask (assetsAsk) sends deposit.assets, now the USDC rows alone (about 0.9 s), and one
+// deposit.coin per pool chain (SOL on Solana, ETH on Base and Robinhood, each from its pool's floor, 1-3 s) all at once.
+// The USDC rows are drawn as they land and each coin row is merged in as it lands (merge), so no row waits on another.
+// A held list's pool row stays until this ask's read of that coin answers, so a re-open never drops the SOL and ETH rows.
+// An older signing page refuses deposit.coin not_allowed and lists the pool rows inside deposit.assets: those stay.
 
 /** How long a held list is fresh, and the least time between two asks: longer than the 10 s window the helper counts a
  *  device's 1Click share in (apps/helper/src/limits/limits.ts LIMIT_WINDOW_MS), so two asks never share one, and as
@@ -43,7 +52,44 @@ export interface AssetsView {
   refused: QuoteRefusal | null;
 }
 
-export type AssetsAsk = () => Promise<{ ok: true; list: Asset[] } | { ok: false; code: QuoteRefusal }>;
+/** The list's ask: deposit.assets' answer, and each pool coin's row through `coin` as it lands (null: refused). */
+export type AssetsAsk = (coin: (chain: PoolChain, row: Asset | null) => void) => Promise<{ ok: true; list: Asset[] } | { ok: false; code: QuoteRefusal }>;
+
+const KNOWN: ReadonlySet<string> = new Set(["below_min", "above_max", "not_available", "busy", "down", "quote_check_failed"]);
+/** A refusal the sheet draws: the kit's code when the sheet knows it, else not_available. */
+export const refusal = (code: string): QuoteRefusal => (KNOWN.has(code) ? (code as QuoteRefusal) : "not_available");
+
+/** deposit.assets and one deposit.coin per pool chain on `client`, all sent at once, as the held list's ask. */
+export const assetsAsk =
+  (client: Pick<SignpageClient, "request">): AssetsAsk =>
+  (coin) => {
+    const list = client.request("deposit.assets", {}).outcome;
+    for (const chain of POOL_CHAINS) {
+      void client.request("deposit.coin", { chain }).outcome.then(
+        (o) => coin(chain, o.ok ? assetOf(o.result.asset) : null),
+        () => coin(chain, null),
+      );
+    }
+    return list.then((o) => (o.ok ? { ok: true, list: o.result.assets.map(assetOf) } : { ok: false, code: refusal(o.error.code) }));
+  };
+
+const keyOf = (a: Asset) => `${a.id}\n${a.chain}`;
+/**
+ * The list drawn from this ask's deposit.assets rows (`base`) and the coin rows landed so far (`coins`, null: refused):
+ * `base`'s other rows (the USDC rows) less any a coin row replaces (same asset id and chain), then one pool row per
+ * chain in POOL_CHAINS order: the coin row landed, else the one `base` gave (an older page), else, while that chain's
+ * read is still out, the one in `prior` (the list on screen). A refused chain keeps only what `base` gave.
+ */
+function merge(base: readonly Asset[], coins: ReadonlyMap<PoolChain, Asset | null>, prior: readonly Asset[] | null): Asset[] {
+  const landed = new Set([...coins.values()].flatMap((a) => (a ? [keyOf(a)] : [])));
+  const out = base.filter((a) => !POOL_CHAINS.some((c) => ownCoin(c, a)) && !landed.has(keyOf(a)));
+  for (const chain of POOL_CHAINS) {
+    const c = coins.get(chain);
+    const row = c ?? base.find((a) => ownCoin(chain, a)) ?? (c === undefined ? prior?.find((a) => ownCoin(chain, a)) : undefined);
+    if (row) out.push(row);
+  }
+  return out;
+}
 
 export interface AssetsStore {
   view(): AssetsView;
@@ -131,7 +177,18 @@ export function createAssetsStore(deps: { now?: () => number; storage?: AssetsSt
     const n = ++asked;
     lastAsk = now();
     save();
-    void read()
+    // this ask's deposit.assets rows once they land (the held list when they are refused while one is held), and each
+    // pool coin's row as it lands; a row is drawn only while this ask is the newest and a list is held
+    let base: Asset[] | null = null;
+    const coins = new Map<PoolChain, Asset | null>();
+    const coin = (chain: PoolChain, row: Asset | null) => {
+      if (n !== asked || coins.has(chain)) return;
+      coins.set(chain, row);
+      if (base === null || view.list === null) return;
+      set({ list: merge(base, coins, view.list), refused: view.refused });
+      save();
+    };
+    void read(coin)
       .then(
         (r) => (r.ok ? { list: r.list, refused: null } : view.list !== null ? view : { list: null, refused: r.code }),
         (): AssetsView => (view.list !== null ? view : { list: null, refused: "down" }),
@@ -140,11 +197,17 @@ export function createAssetsStore(deps: { now?: () => number; storage?: AssetsSt
         out--;
         if (n !== asked) return;
         if (v.refused === "busy" && open && autoLeft) later(read);
-        if (v.refused === null && v !== view) {
-          at = now();
-          set(v);
+        if (v.list === null) {
+          if (v !== view) set(v);
+          return;
+        }
+        const fresh = v !== view;
+        base = v.list;
+        if (fresh) at = now();
+        if (fresh || coins.size > 0) {
+          set({ list: merge(base, coins, view.list), refused: null });
           save();
-        } else if (v !== view) set(v);
+        }
       });
   };
   /** One ask after BUSY_RETRY_MS, the open sheet's one automatic ask spent on it. */
