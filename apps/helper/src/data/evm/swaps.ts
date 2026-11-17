@@ -2516,25 +2516,29 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    * in a post of its own, so one locate's size never costs another its read.
    */
   type LocateAsk = { key: string; calls: Call[]; alone: boolean; done: (a: { r: Reply[] | null; paced: boolean }) => void };
-  const locateQueue: LocateAsk[] = [];
-  /** The pools whose locate is asked again in a post of its own, a shared one having failed whole (a tape at most each). */
-  const locateAlone = new Set<string>();
-  let locateOut = false;
+  /** Each locate provider's line: its queued locates, whether its post is out, and the pools whose locate is asked
+   *  again in a post of its own there, a shared one having failed whole (a tape at most each). Keyed by the provider's
+   *  URL, so a locate is only ever sent to the provider it was asked of. */
+  type LocateLine = { queue: LocateAsk[]; out: boolean; alone: Set<string> };
+  const locateLines = new Map<string, LocateLine>();
   function locatePost(u: string, key: string, calls: Call[]): Promise<{ r: Reply[] | null; paced: boolean }> {
+    let line = locateLines.get(u);
+    if (line === undefined) locateLines.set(u, (line = { queue: [], out: false, alone: new Set() }));
+    const l = line;
     return new Promise((done) => {
-      locateQueue.push({ key, calls, alone: locateAlone.delete(key), done });
-      if (!locateOut) void locatePump(u);
+      l.queue.push({ key, calls, alone: l.alone.delete(key), done });
+      if (!l.out) void locatePump(u, l);
     });
   }
-  async function locatePump(u: string): Promise<void> {
-    locateOut = true;
+  async function locatePump(u: string, l: LocateLine): Promise<void> {
+    l.out = true;
     try {
-      while (locateQueue.length > 0) {
+      while (l.queue.length > 0) {
         const max = batchOf(u);
-        const take: LocateAsk[] = [locateQueue.shift()!];
+        const take: LocateAsk[] = [l.queue.shift()!];
         let n = take[0]!.calls.length;
-        while (!take[0]!.alone && locateQueue.length > 0 && !locateQueue[0]!.alone && n + locateQueue[0]!.calls.length <= max) {
-          const next = locateQueue.shift()!;
+        while (!take[0]!.alone && l.queue.length > 0 && !l.queue[0]!.alone && n + l.queue[0]!.calls.length <= max) {
+          const next = l.queue.shift()!;
           take.push(next);
           n += next.calls.length;
         }
@@ -2543,13 +2547,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         const lost = r === null && !unsent.paced && holds.heldFor(u) === 0 && take.length > 1;
         let k = 0;
         for (const a of take) {
-          if (lost && locateAlone.size < OPEN_MAX) locateAlone.add(a.key);
+          if (lost && l.alone.size < OPEN_MAX) l.alone.add(a.key);
           a.done({ r: r === null ? null : r.slice(k, k + a.calls.length), paced: unsent.paced || lost });
           k += a.calls.length;
         }
       }
     } finally {
-      locateOut = false;
+      l.out = false;
     }
   }
   /** A short tape's read back, step after step, while its book is open: a step that reads no new block (a locate
@@ -3505,6 +3509,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // never an empty chart because the book's first window held no trade (live run 43785080982 job 133030981593:
       // Robinhood DELTA answered 200 with no bars two minutes after a restart; it charts 1,000 hourly bars)
       const mine = joinBars(e.back?.tape?.candles(tf as Tf, to, limit) ?? [], own).slice(-limit);
+      // the read back's state as its bars were taken, never after GeckoTerminal's wait (as trades)
+      const filling = backing(e);
       let bars: Candle[] = mine;
       let src = "chain";
       // the history before our first bar refused or failed with none held: the answer says filling, so the page reads it
@@ -3534,7 +3540,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const at = e.readAt ?? now();
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
-      if ((short || backing(e)) && bars.length < limit) body.filling = true;
+      if ((short || filling) && bars.length < limit) body.filling = true;
       body.as_of_ms = at;
       return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at });
     },
@@ -3569,13 +3575,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (e === "none") return timed(await noneTrades(t, limit, lane, until));
       if (!("book" in e)) return timed(e);
       const rows = tapeOf(e, limit);
+      // the read back's state as the rows were taken, never after the traders' wait: a read back that ends in that wait
+      // made an answer of the rows before it say not filling, with the reach of rows it did not serve (card
+      // robinhood-trades-finish-filling, swaps-back-resume.test: 33 of 50 rows answered filling false with whole_ms;
+      // card base-tape-fills-inside-45s: a spread coin's 4 of 5 trades answered not filling)
+      const filling = backing(e);
+      const reach = wholeOf(e);
       await within(lanes.run(lane, () => tradersOf(rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
       const at = e.readAt ?? now();
       const waiting = rows.some((r) => unread(r.tx));
       const trades = rows.filter((r) => !unread(r.tx)).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
       // no reach while a row waits: the rows served are not every trade back to it
-      const whole = waiting ? undefined : wholeOf(e);
-      return timed({ status: 200, body: JSON.stringify({ trades, ...(backing(e) || waiting ? { filling: true } : {}), ...(whole === undefined ? {} : { whole_ms: whole }), src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
+      const whole = waiting ? undefined : reach;
+      return timed({ status: 200, body: JSON.stringify({ trades, ...(filling || waiting ? { filling: true } : {}), ...(whole === undefined ? {} : { whole_ms: whole }), src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
     },
   };
 }

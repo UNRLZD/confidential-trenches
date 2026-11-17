@@ -24,6 +24,7 @@
 // each of their 50 spans is a daybreak post of its own (one call a post, 7 a second), the bound left for a provider
 // that serves old blocks in batches. The chain's own RPC's refusals (the rig's option) are asserted on their own below.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fakeChain, open, REC, timeAt } from "../../../test/evm-swaps/robinhood.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
@@ -77,7 +78,7 @@ TOKENS.forEach(({ token, pool }, n) => {
   TRANSFERS.set(token, tl.sort((x, y) => x.b - y.b || x.i - y.i));
 });
 
-function rig(o: { ownFrom?: number; ownTo?: number } = {}) {
+function rig(o: { ownFrom?: number; ownTo?: number; traderLateMs?: number } = {}) {
   const chain = fakeChain();
   chain.st.head = HEAD;
   chain.st.faults.set(OWN, { zeroTime: true, span: 1_000_000 });
@@ -87,7 +88,7 @@ function rig(o: { ownFrom?: number; ownTo?: number } = {}) {
   let t0 = 0;
   /** The chain's own RPC's refusals: every post 429 (Retry-After 1) from `ownFrom` to `ownTo`. */
   const refused = (url: string): Response | null => {
-    const at = Date.now() - t0;
+    const at = clock.t - t0;
     if (url === OWN && o.ownFrom !== undefined && at >= o.ownFrom && at < (o.ownTo ?? Infinity)) return new Response("{}", { status: 429, headers: { "retry-after": "1" } });
     return null;
   };
@@ -132,7 +133,9 @@ function rig(o: { ownFrom?: number; ownTo?: number } = {}) {
     return { result: mine.filter((l) => l.b >= from && l.b <= to && want.includes(l.t[0])).map((l) => wire(l, f.zeroTime === true)) };
   };
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
-    await new Promise((go) => setTimeout(go, LATE_MS));
+    // a post that looks up a trader (eth_getTransactionByHash) answered `traderLateMs` late on top
+    const late = o.traderLateMs !== undefined && String(init.body).includes("eth_getTransactionByHash") ? o.traderLateMs : 0;
+    await new Promise((go) => setTimeout(go, LATE_MS + late));
     posts.set(url, (posts.get(url) ?? 0) + 1);
     const f = chain.st.faults.get(url) ?? {};
     if (f.down) return new Response("down", { status: 503 });
@@ -145,9 +148,11 @@ function rig(o: { ownFrom?: number; ownTo?: number } = {}) {
     const out = reqs.map((r, i) => (mine[i] !== undefined ? { jsonrpc: "2.0", id: r.id, ...(mine[i] as object) } : fwd.find((x) => x.id === r.id)));
     return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
   };
-  return { chain, fetch, reads, posts, spans, start: () => (t0 = Date.now()) };
+  return { chain, fetch, reads, posts, spans, start: () => (t0 = clock.t) };
 }
 
+/** The swaps' injected clock (open's `now`), and the one every time here is read on: each test runs in onVirtualTime,
+ *  so it is the virtual clock the timers move, never the machine's. */
 const clock = { get t() { return Date.now(); } };
 
 /** How long the rig runs: past the live checks' bound, so a tape that fills after it is timed too. */
@@ -161,7 +166,7 @@ async function fillTimes(r: ReturnType<typeof rig>, only: number[] = TOKENS.map(
   const sleep = (ms: number) => new Promise((go) => setTimeout(go, ms));
   const { value } = await onVirtualTime(9_000_000, async () => {
     r.start();
-    const t0 = Date.now();
+    const t0 = clock.t;
     const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
     let over = false;
     // each tape read as the page reads it, 3 s apart while it fills; its time the answer's that holds the whole tape
@@ -175,7 +180,7 @@ async function fillTimes(r: ReturnType<typeof rig>, only: number[] = TOKENS.map(
         if (j !== null && j.filling !== true) {
           // settled: the whole tape, newest first, or it settled short
           const whole = j.trades.length === TRADES_MAX && j.trades[0]!.tx === SWAPS.get(pool)!.at(-1)!.tx;
-          return { ms: whole ? Date.now() - t0 : null, ...last };
+          return { ms: whole ? clock.t - t0 : null, ...last };
         }
         await sleep(3_000);
       }
@@ -237,4 +242,55 @@ test("card robinhood-trades-finish-filling: a coin opened alone, busy (its newes
     assert.ok(reads <= b.reads, `more pool reads than at 909222c27: ${line}`);
     if (b.what === "busy") assert.ok(posts <= b.posts, `a busy coin sent more posts than at 909222c27: ${line}`);
   }
+});
+
+test("card robinhood-trades-finish-filling: an answer's rows and its filling are of one moment: a coin whose read back ends while an answer waits on its rows' traders (each trader lookup 5 s late) never answers filling false over the rows taken before the read back ended (red at 70adfdca3: rows taken before the traders' wait, filling judged after it, so the answer said done with part of the tape)", async () => {
+  const r = rig({ traderLateMs: 5_000 });
+  const { token, pool } = TOKENS[2]!;
+  const newest = SWAPS.get(pool)!.at(-1)!.tx;
+  const sleep = (ms: number) => new Promise((go) => setTimeout(go, ms));
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    r.start();
+    const t0 = clock.t;
+    const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
+    const seen: { ms: number; n: number; filling: boolean; whole: boolean; newest: boolean }[] = [];
+    let over = false;
+    // readers 500 ms apart, each its own call, so one is waiting on traders whenever the read back ends
+    const reader = async (lag: number) => {
+      await sleep(lag);
+      while (!over) {
+        const a = await s.trades(token, TRADES_MAX);
+        if (a.status === 200) {
+          const j = JSON.parse(a.body) as { trades: { tx: string }[]; filling?: boolean; whole_ms?: number };
+          seen.push({ ms: clock.t - t0, n: j.trades.length, filling: j.filling === true, whole: j.whole_ms !== undefined, newest: j.trades[0]?.tx === newest });
+        }
+        await sleep(500);
+      }
+    };
+    const readers = Promise.all([0, 500, 1_000, 1_500, 2_000, 2_500].map(reader));
+    for (let i = 0; i < 60_000 / TICK_EVERY_MS; i++) {
+      await sleep(TICK_EVERY_MS);
+      await s.tick();
+    }
+    over = true;
+    await readers;
+    s.stop();
+    return seen;
+  });
+  const done = value.filter((a) => !a.filling);
+  const short = done.filter((a) => a.n !== TRADES_MAX || !a.newest);
+  console.log(`${value.length} answers, ${done.length} filling false, the first at ${done[0]?.ms} ms; filling false short of the tape: ${JSON.stringify(short.slice(0, 5))}`);
+  assert.ok(done.length > 0, "the tape never filled");
+  assert.deepEqual(short, [], "an answer said filling false over rows taken before the read back ended");
+});
+
+test("card robinhood-trades-finish-filling: each locate provider has its own line (queue, post out, locates asked alone), keyed by its URL, so a second BACK_LOCATE provider's locates are never sent in the first one's post (a source pin: BACK_LOCATE is one URL today and not injectable; red at 70adfdca3: one module-wide queue and out flag)", () => {
+  const src = readFileSync(new URL("./swaps.ts", import.meta.url), "utf8");
+  assert.match(src, /type LocateLine = \{ queue: LocateAsk\[\]; out: boolean; alone: Set<string> \};\n  const locateLines = new Map<string, LocateLine>\(\)/, "the locate lines are a Map from the provider's URL");
+  const pump = src.slice(src.indexOf("async function locatePump("), src.indexOf("\n  }\n", src.indexOf("async function locatePump(")));
+  assert.ok(pump.length > 0, "locatePump found");
+  assert.match(pump, /^async function locatePump\(u: string, l: LocateLine\)/, "the pump is handed its URL's line");
+  assert.doesNotMatch(src, /\blocate(Queue|Out|Alone)\b/, "no module-wide locate queue, out flag or alone set");
+  // every queue, out and alone the pump touches is its line's
+  for (const m of pump.matchAll(/\b(queue|out)\b|\b(alone)\.(?:add|delete|size|has)/g)) assert.equal(pump.slice(m.index - 2, m.index), "l.", `locatePump touches ${m[1] ?? m[2]} off its line at ${pump.slice(Math.max(0, m.index - 20), m.index + 10)}`);
 });
