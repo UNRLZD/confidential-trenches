@@ -229,7 +229,7 @@ test("paceDb: the shared records live in an IndexedDB database of their own, ct-
   assert.equal(a.PACE_DB, "ct-pace");
 });
 
-// CO 02:00Z: the lock's own wait is bounded too. A tab holding a URL's lock whose timers stop (a throttled or frozen
+// The lock's own wait is bounded too. A tab holding a URL's lock whose timers stop (a throttled or frozen
 // tab mid-callback, a devtools pause) would otherwise hold every NEAR read of every tab for as long, and no storage
 // bound ever runs. A turn waits SHARE_LOCK_MS at most to be granted the lock, then takes the tab's own pace, as a
 // storage fault does, and asks the lock no more; a busy hold's write-through is bounded the same way.

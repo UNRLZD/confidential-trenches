@@ -348,7 +348,7 @@ const SHARED_AHEAD_MAX_MS = 120_000;
 /** The longest a read or a write of the shared record is waited, under the URL's lock: a storage that never answers (an
  *  IndexedDB open another tab blocks) must not hold every NEAR read of every tab; past it the tab's own pace has the turn. */
 export const SHARE_STORAGE_MS = 1_000;
-/** The longest a turn or a hold waits to be granted the URL's lock (CO 02:00Z): another tab holding it whose timers
+/** The longest a turn or a hold waits to be granted the URL's lock: another tab holding it whose timers
  *  stopped (throttled or frozen mid-callback, a devtools pause) must not hold every tab's NEAR reads, and no storage
  *  bound runs while the lock is not granted. A holder's callback is two storage calls of SHARE_STORAGE_MS at most, so
  *  3 s is a held lock's longest honest wait with room; past it the tab takes its own pace, as on a storage fault. */
