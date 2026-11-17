@@ -2476,9 +2476,12 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     scan,
     reads,
     speculate,
-    // the route's own pools: the hook's take in them is H - Q, shown as a fee and bounded by minOut (M360), so R is
-    // held to every other pool, never to the route's own pool with its hook replaced
-    seen: keys.map(poolId),
+    // the route's own pools whose hook a read replaces: the hook's take in them is H - Q, shown as a fee and bounded by
+    // minOut (M360), so R is held to every other pool, never to the route's own pool with its hook replaced. A pool of
+    // the route with no hook, or a hook the venue lists, is read as it is and counts as any found pool does, as a
+    // standard pool's route counts its own (card evm-buy-quotes-pass-on-helper-178: PONS on Robinhood, whose only pool
+    // is a hookless v4 pool at fee 75 and tick spacing 1, refused its own route no_reference)
+    seen: hookedKeys.map(poolId),
     banned,
     hints: req.pools,
     sell: false,

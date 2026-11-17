@@ -8134,10 +8134,21 @@ test("GF6 a swap that needs exactly EVM_BUY_SWAP_FIT fits; one more gas does not
 });
 
 test("GF7 a route through a pool the scan found fits, but no standard pool's route does: refused over_gas_floor, no reference, never priced against nothing", async () => {
+  // the found pool behind a hook the venue does not list: R is never that pool with its hook replaced, so no route that
+  // fits prices it
   const token = "0x00000000000000000000000000000000000f1f07";
-  const found: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
-  const r = await hbQuote([found, gfMarket(token, 500_000n), gfSeeded(token, 500_000n)], token, [{ key: found.key, at: 4_500_000 }], v4Route([{ currency: token, fee: 2500, tickSpacing: 50, hooks: NATIVE }]));
+  const found: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, UNPINNED), give: (a) => a };
+  const r = await hbQuote([found, gfMarket(token, 500_000n), gfSeeded(token, 500_000n)], token, [{ key: found.key, at: 4_500_000 }], v4Route([{ currency: token, fee: 2500, tickSpacing: 50, hooks: UNPINNED }]));
   assert.deepEqual(r, { code: "over_gas_floor", reference: null }, show(r));
+  // the found pool with no hook (card evm-buy-quotes-pass-on-helper-178): read as it is, it is a route that fits, the
+  // best one, so the route is priced against it, its own pool, as a standard pool's route is
+  const t2 = "0x00000000000000000000000000000000000f1f17";
+  const plain: ModelPool = { key: keyOf(t2, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const route = v4Route([{ currency: t2, fee: 2500, tickSpacing: 50, hooks: NATIVE }]);
+  const q = await hbQuote([plain, gfMarket(t2, 500_000n), gfSeeded(t2, 500_000n)], t2, [{ key: plain.key, at: 4_500_000 }], route);
+  assert.ok(!("code" in q), show(q));
+  assert.equal(q.amountOut, AMOUNT);
+  assert.deepEqual(q.reference, { amountOut: AMOUNT, route }, show(q.reference));
 });
 
 test("GF8 on Robinhood a native pool whose swap does not fit does not hold a WETH route to native_first: the WETH launchpad route that fits is bought, held to the best native route that fits", async () => {
@@ -8257,7 +8268,9 @@ test("GF11 out of gas is no fit only for the swap read: the same words to any ot
 test("GF12 when no route in the band fits, the rest of the list is read in one round, not one route a round (review 2 of c9a8df14, L1)", async () => {
   const token = "0x00000000000000000000000000000000000f2f20";
   const [K1, K2] = [10, 30];
-  const own: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => (a * 6n) / 10n };
+  // the route's own pool behind a hook the venue does not list, so it is no route of the band that fits: R is never the
+  // route's own pool with its hook replaced (card evm-buy-quotes-pass-on-helper-178: a hookless one is, and fits)
+  const own: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, UNPINNED), give: (a) => (a * 6n) / 10n };
   const above: ModelPool[] = Array.from({ length: K1 }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a) => (a * 7n) / 10n, gas: 600_000n }));
   const below: ModelPool[] = Array.from({ length: K2 }, (_, i) => ({ key: keyOf(token, NATIVE, 4000 + i, 50, NATIVE), give: (a) => (a * 55n) / 100n, gas: 600_000n }));
   const pools = [{ ...gfMarket(token), give: (a: bigint) => a / 2n }, own, ...above, ...below];
@@ -8268,7 +8281,7 @@ test("GF12 when no route in the band fits, the rest of the list is read in one r
     if (n > 0) sizes.push(n);
     return rpc(calls);
   };
-  const route = v4Route([{ currency: token, fee: 2500, tickSpacing: 50, hooks: NATIVE }]);
+  const route = v4Route([{ currency: token, fee: 2500, tickSpacing: 50, hooks: UNPINNED }]);
   const q = await evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route }, [spy(chain(pools, 0)), chain(pools, 1)], NOW, scanner(5_000_000, logs));
   assert.ok(!("code" in q), show(q));
   assert.equal(q.amountOut, (AMOUNT * 6n) / 10n);
@@ -9183,3 +9196,26 @@ test("GS22 the fold on planted answers both providers give: a read after a starv
     const d = (await foldRun("0x00000000000000000000000000000000000a5aa8", new Map([[1, { first: [2, 1_000_000], six: [0, 8_000_000] }], [3, { first: [2, 150_000], six: [0, 150_000] }]]))).kept;
     assert.deepEqual([d(1), d(3)], [6, 6], "a read that used S or less at first counted as one that starved the reads after it");
   }));
+
+// card evm-buy-quotes-pass-on-helper-178: PONS on Robinhood (0x0268…abc4, read only on mainnet 2026-11-17 01:3xZ) has
+// one pool, native/PONS v4 at fee 75 and tick spacing 1 with no hook, a shape the kit does not list. The tap asked it
+// first and the kit refused no_reference: the route's own pools were left out of the pools R is the best of, its hookless
+// one too, so the token's only market was no reference for its own route (a route on a standard pool counts its own).
+// Only the route's own pools whose hook a read replaces are left out: R is never the route's own pool with its hook
+// replaced (PO2).
+test("PO1 a route on the token's only pool, a scanned hookless pool of a shape the kit does not list, is its own reference: quoted, never no_reference", async () => {
+  const token = "0x00000000000000000000000000000000000f75f1";
+  const only: ModelPool = { key: keyOf(token, NATIVE, 75, 1, NATIVE), give: (a) => a };
+  const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 75, tickSpacing: 1, hooks: NATIVE, hookData: "0x" }] };
+  const got = await quoteOnStill([only], token, route, scanner(5_000_000, [{ key: only.key, at: 4_500_000 }]));
+  assert.equal(got.accepted, true, JSON.stringify(got, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+  assert.equal(got.amountOut, AMOUNT);
+});
+
+test("PO2 a route on the token's only pool behind a hook the venue does not list never takes that pool with its hook replaced as its reference: no_reference, never below_reference", async () => {
+  const token = "0x00000000000000000000000000000000000f75f2";
+  // the hook takes half: its pool with the hook replaced would give the whole amount, above the route's own quote
+  const pool = real(token, (a) => a / 2n);
+  const got = await quoteOnStill([pool], token, realRoute(token), scanner(5_000_000, [{ key: pool.key, at: 4_500_000 }]));
+  assert.deepEqual(got, { accepted: false, code: "no_reference" });
+});

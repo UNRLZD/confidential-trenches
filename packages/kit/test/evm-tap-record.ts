@@ -3,14 +3,17 @@
 // helper's answer for the token's pools handed to the kit first as the page does (signpage src/evm-served.ts), so
 // test/evm-buy-tap-names.test.ts replays it: each kit quote's JSON-RPC calls kept apart (the chain's head moves between
 // two quotes of one tap), each call alone, its method and params with the provider's answer (a provider's own where it
-// differs from the first), the device's clock, the routes the tap asked and each kit refusal. Reads only: no key, no transaction, no money moves.
-//   node packages/kit/test/evm-tap-record.ts <base|robinhood> <token> <fixture name> [served]
+// differs from the first), the device's clock, the routes the tap asked and each kit refusal. With `index`, the tap is
+// handed the token's pools from the chain's pool index synced on its two index readers, as the mainnet check's tap is
+// (card evm-buy-quotes-pass-on-helper-178), kept in the recording as `indexPools`; the kit's quote still scans with no
+// index served. Reads only: no key, no transaction, no money moves.
+//   node packages/kit/test/evm-tap-record.ts <base|robinhood> <token> <fixture name> [served|index]
 import { fileURLToPath } from "node:url";
 import { readFileSync, writeFileSync } from "node:fs";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolServedUse, evmProviders, evmRanked, evmSpeedReset } from "../src/checks/evm/quote.ts";
+import { evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexPools, evmPoolIndexReset, evmPoolServedUse, evmProviders, evmRanked, evmSpeedReset } from "../src/checks/evm/quote.ts";
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
-import { evmBuyTapReset, evmPoolBuyQuoteTap } from "../src/trade/evm/buy-tap.ts";
+import { evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolIndexRefresh } from "../src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, type EvmPoolChain } from "../src/trade/evm/buy-unpinned.ts";
 import { callKey } from "./evm-quote-calls-record.ts";
 
@@ -48,8 +51,9 @@ const replayed = (F: { quotes: { calls: [string, unknown][]; own: [string, unkno
 /** Replays the recorded tap `name` (test/fixtures/<name>.json.gz) call by call through the tap and the kit's quote,
  *  each post answered POST_MS of the clock after it is sent: its end, the calls not in the recording, the recording. Run
  *  it on the test clock (test/test-clock.ts), one recording of a chain and token a process: the kit's scan of a token is
- *  kept for the module's life, so a second replay of the same token tops up from the first's head. */
-export const replayTap = async (name: string): Promise<{ end: unknown; missed: string[]; F: ReturnType<typeof fixture> }> => {
+ *  kept for the module's life, so a second replay of the same token tops up from the first's head. `quotes`: the kit
+ *  quotes the tap asked. */
+export const replayTap = async (name: string): Promise<{ end: unknown; missed: string[]; F: ReturnType<typeof fixture>; quotes: number }> => {
   evmSpeedReset();
   evmPaceReset();
   evmPoolIndexReset();
@@ -58,13 +62,14 @@ export const replayTap = async (name: string): Promise<{ end: unknown; missed: s
   const chain = F.chain as EvmPoolChain;
   const v = evmPoolVenues()[chain]!;
   const r = replayed(F);
+  let quotes = 0;
   if (F.served !== undefined) evmPoolServedUse(chain, F.buys, Promise.resolve(F.served));
   const scans = [v.scan!.url, ...(v.scan!.spares ?? []).map((s) => s.url)].map((u) => evmJsonRpc(u, r.fetchFn, 16 << 20));
   const end = await evmPoolBuyQuoteTap(
     { chain, token: F.buys, amountIn: BigInt(F.amountIn), slippageBps: 300 },
-    { indexPools: () => null, quote: (req) => (r.next(), evmPoolBuyQuoteWith(req, evmProviders(evmRanked(v.providers!), r.fetchFn), F.now, scans)) },
+    { indexPools: () => F.indexPools ?? null, quote: (req) => (quotes++, r.next(), evmPoolBuyQuoteWith(req, evmProviders(evmRanked(v.providers!), r.fetchFn), F.now, scans)) },
   ).catch((e: unknown) => e);
-  return { end, missed: r.missed, F };
+  return { end, missed: r.missed, F, quotes };
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -72,6 +77,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // the page's ask (signpage src/evm-served.ts): the helper's pools of the token
   const served = serve === "served" ? await fetch(`https://ct-api.unrealized.trade/v1/market/pools?chain=${chain}&token=${token.toLowerCase()}`).then((r) => (r.ok ? r.json() : null)) : undefined;
   if (served !== undefined) evmPoolServedUse(chain, token, Promise.resolve(served));
+  // the token's pools in the chain's index, then the index forgotten: the kit's quote scans as with none served
+  let indexPools: unknown;
+  if (serve === "index") {
+    if (!(await evmPoolIndexRefresh(chain, null)).served) throw new Error(`${chain}'s pool index was not served`);
+    indexPools = evmPoolIndexPools(chain, token);
+    evmPoolIndexReset();
+  }
   const v = evmPoolVenues()[chain]!;
   const quotes: { answers: Map<string, unknown>; own: Map<string, unknown> }[] = [];
   const recording: typeof fetch = async (url, init) => {
@@ -104,7 +116,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let outcome: Record<string, unknown>;
   try {
     const q = await evmPoolBuyQuoteTap({ chain, token, amountIn: TAP_AMOUNT, slippageBps: 300 }, {
-      indexPools: () => null,
+      indexPools: () => (indexPools ?? null) as ReturnType<typeof evmPoolIndexPools>,
       quote: async (req) => {
         quotes.push({ answers: new Map(), own: new Map() });
         try {
@@ -121,6 +133,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     outcome = { code: (e as { code?: string }).code, message: String((e as Error).message) };
   }
   console.log("outcome", JSON.stringify(outcome), "asked", JSON.stringify(asked), "calls", quotes.map((q) => `${q.answers.size}+${q.own.size}`).join(" "));
-  const out = { recorded: new Date().toISOString(), chain, buys: token, amountIn: TAP_AMOUNT.toString(), now, ...(served === undefined ? {} : { served }), asked, outcome, quotes: quotes.map((q) => ({ calls: [...q.answers], own: [...q.own] })) };
+  const out = { recorded: new Date().toISOString(), chain, buys: token, amountIn: TAP_AMOUNT.toString(), now, ...(served === undefined ? {} : { served }), ...(indexPools === undefined ? {} : { indexPools }), asked, outcome, quotes: quotes.map((q) => ({ calls: [...q.answers], own: [...q.own] })) };
   writeFileSync(fileURLToPath(new URL(`./fixtures/${name}.json.gz`, import.meta.url)), gzipSync(JSON.stringify(out), { level: 9 }));
 }

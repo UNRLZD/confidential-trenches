@@ -638,6 +638,10 @@ export const MUTANTS = [
   [QUOTE, "if (keys.some((k) => banned.has(\"0x\" + poolId(k)))) return refuse(", "if (false) return refuse(", R, "HB5 "],
   [QUOTE, "    banned,\n    hints: req.pools,", "    hints: req.pools,", R, "HB1 "],
   [QUOTE, "const hooked = Object.freeze(hookedKeys.map(", "const hooked = Object.freeze([].map(", R, "HB1 "],
+  // card evm-buy-quotes-pass-on-helper-178: R holds the route's own pool read as it is (PONS), never its own pool with
+  // its hook replaced
+  [QUOTE, "    seen: hookedKeys.map(poolId),", "    seen: keys.map(poolId),", R, "PO1 "],
+  [QUOTE, "    seen: hookedKeys.map(poolId),", "    seen: [],", R, "PO2 "],
   [QUOTE, "    if (x < value) value = x;\n", "", R, "N1B (buy"],
   [QUOTE, "const lows = subsetsOf(unlisted).map(", "const lows = subsetsOf(unlisted).filter((hs) => hs.length === unlisted.length).map(", R, "N1B (buy"],
   // review of 72e28658, M1: every set of the unlisted hooks, never only each alone and all together

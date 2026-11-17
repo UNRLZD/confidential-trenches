@@ -25,3 +25,18 @@ for (const [name, coin, code] of [
     assert.equal(end.code, code, end.message);
   }));
 }
+
+// PONS on Robinhood (0x0268…abc4), recorded on mainnet 2026-11-17 01:54Z (test/evm-tap-record.ts … index): its only
+// pool, the one the chain's pool index holds, is native/PONS v4 at fee 75 and tick spacing 1 with no hook. Release
+// 168's sign run 43992754796 read quote_check_failed on all four taps: the kit refused that route no_reference (the
+// route's own hookless pool left out of R), then named it as R of the v3 tier the tap asked next (card
+// evm-buy-quotes-pass-on-helper-178). The tap quotes it with one kit quote.
+test("PONS on Robinhood: the recorded tap quotes its only pool, a hookless pool of a shape the kit does not list, with one kit quote", () => onTestClock(async () => {
+  const { end, missed, F, quotes } = await replayTap("evm-tap-pons");
+  assert.equal(F.outcome.code, "ok");
+  assert.ok(!(end instanceof Error), String(end));
+  assert.deepEqual(missed, [], "every call the replay asks is in the recording");
+  assert.equal(quotes, 1);
+  const r = (end as { route: { venue: string; hops: { fee: number; tickSpacing: number; hooks: string }[] } }).route;
+  assert.deepEqual([r.venue, r.hops[0]!.fee, r.hops[0]!.tickSpacing, r.hops[0]!.hooks], ["uniswap-v4", 75, 1, "0x0000000000000000000000000000000000000000"]);
+}));
