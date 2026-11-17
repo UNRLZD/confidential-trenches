@@ -2078,7 +2078,7 @@ test("H2 a found pool whose hook reverts every swap sets R at its read with the 
   // the same hook with no liquidity behind it: nothing to read, the route is accepted
   const t1 = "0x00000000000000000000000000000000000ab5ab";
   const empty: ModelPool = { key: keyOf(t1, NATIVE, 3000, 60, HOOK), give: () => 0n, lie: () => null };
-  const e = await quoteOn([best(t1), empty], t1, bestRoute(t1), scanner(5_000_000, [{ key: empty.key, at: 4_500_000 }]));
+  const e = await quoteOnStill([best(t1), empty], t1, bestRoute(t1), scanner(5_000_000, [{ key: empty.key, at: 4_500_000 }]));
   assert.equal(e.accepted, true, String((e as { code?: string }).code));
   const t2 = "0x00000000000000000000000000000000000ab4ab";
   const half: ModelPool = { key: keyOf(t2, NATIVE, 3000, 60, HOOK), give: (a) => 100n * a, lie: (a) => 50n * a, state: pricedAt(100n) };
@@ -9467,7 +9467,7 @@ const zzTap = async (pools: ModelPool[], token: string, logs: { key: EvmPoolKey;
   evmBuyTapReset();
   try {
     return await evmPoolBuyQuoteTap({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100 }, {
-      quote: (r) => evmPoolBuyQuoteWith(r, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)),
+      quote: (r) => evmPoolBuyQuoteWith(r, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0),
       indexPools: () => null,
       held: () => null,
     });
