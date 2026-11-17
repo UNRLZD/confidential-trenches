@@ -648,7 +648,18 @@ export const MUTANTS = [
   [QUOTE, "(keys.length > 1 ? [] : hookedKeys)", "(keys.length > 1 ? keys : hookedKeys)", R, "XL2 "],
   [QUOTE, "(keys.length > 1 ? [] : hookedKeys)", "(keys.length > 1 ? keys.filter((k) => k.hooks !== NATIVE) : hookedKeys)", R, "XL3 "],
   [QUOTE, "(keys.length > 1 ? [] : hookedKeys)", "(keys.length > 1 ? [] : keys.filter((k) => k.hooks !== NATIVE))", R, "XL3 "],
-  [QUOTE, "const filled = unlisted.length === 0 ? set.filled : set.filled.filter(", "const filled = true ? set.filled : set.filled.filter(", R, "XL1 "],
+  [QUOTE, "  const filled = set.filled.filter((c) => !usesOwn(c.route));", "  const filled = set.filled;", R, "XL1 "],
+  // review of cb7289706: the X leg held on the reads with every such hook replaced (1), R never through a pool of the
+  // route's own behind one in any order (2), and a route through X's or Y's best market behind one held to the next (3)
+  [QUOTE, "    if (leg !== null) return refuse(", "    if (false) return refuse(", R, "XL4 "],
+  [QUOTE, "if (c.real !== undefined && fills(c)) curves.push({ route: c.route, amountOut: out(c.at)! });", "if (c.real !== undefined && x !== null) curves.push({ route: c.route, amountOut: x });", R, "XL4 "],
+  [QUOTE, "  const filled = set.filled.filter((c) => !usesOwn(c.route));", "  const filled = set.filled.filter((c) => !(c.route.venue === \"uniswap-v4\" && hopKeys(c.route).map(poolId).join() === keys.map(poolId).join()));", R, "XL5 "],
+  [QUOTE, "      if (own && a.own?.has(mk.id) === true) continue;", "", R, "XL6 "],
+  [QUOTE, "      if (mk === top && !can(p, xa)) continue;", "      if (!can(p, xa)) continue;", R, "XL6 "],
+  [QUOTE, "      const mk = ys.includes(via.other) ? bestMarket(via.other, true) : null;", "      const mk = ys.includes(via.other) ? bestMarket(via.other) : null;", R, "XL7 "],
+  [QUOTE, "        if (!next && !can(p, xa)) continue;", "        if (!can(p, xa)) continue;", R, "XL7 "],
+  [QUOTE, "if ((priceOf || hs.some((mk) => a.own?.has(mk.id) === true)) && !a.sell", "if (priceOf && !a.sell", R, "XL7 "],
+  [QUOTE, "}, noMain !== null || keys.some((k) => banned.has(\"0x\" + poolId(k))) ? 1n : out(main)!),", "}, noMain !== null ? 1n : out(main)!),", R, "XL8 "],
   [QUOTE, "    if (x < value) value = x;\n", "", R, "N1B (buy"],
   [QUOTE, "const lows = subsetsOf(unlisted).map(", "const lows = subsetsOf(unlisted).filter((hs) => hs.length === unlisted.length).map(", R, "N1B (buy"],
   // review of 72e28658, M1: every set of the unlisted hooks, never only each alone and all together
