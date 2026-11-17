@@ -4295,13 +4295,14 @@ export async function evmSellRevertedPools(quote: EvmPoolSellQuote, txHash: stri
 }
 
 /** The providers a ban's evidence walks (card evm-quote-reads-need-no-old-state): the trade's block and its parent are
- *  seconds to a minute old when it is read, and on Robinhood two of the five quote providers (bloXroute, Globalstake)
- *  answer -32000 "historical state ... is not available" at every age and publicnode at half of the blocks 15 to 55 s
- *  back (buy-unpinned.ts readProviders, 2026-11-10), so the quote list alone left Robinhood's own and dRPC, and dRPC's
- *  code 27 left one. The venue's read list (each operator keeping state a minute back at least) is asked first, by
- *  the quote's measured speed, then the rest of the quote list; agreeing still takes every value from two of them that
- *  agree, and a contested one from more than half of them all. `venues` and `fetchFn` for the tests (not in the
- *  index). */
+ *  seconds to a minute old when it is read, and the quote list alone holds operators that drop that state. Read 17 Nov
+ *  22:31Z from this Mac, one state read by hash, 8 rounds a chain: on Robinhood 24 s back Robinhood's own answered 8 of
+ *  8, Pocket, dRPC and publicnode 2 of 8 each, bloXroute and Globalstake 0 of 8 (-32000 "historical state ... is not
+ *  available"); two operators of the quote list held the block in 3 of 8 rounds, of this list in 4 of 8, and 54 s back
+ *  4 and 7 of 8. On Base every operator of both lists answered 8 of 8 to 54 s. So the venue's read list (Pocket on
+ *  Robinhood, Tenderly on Base) is asked first, by the quote's measured speed, then the rest of the quote list;
+ *  agreeing still takes every value from two of them that agree, and a contested one from more than half of them all.
+ *  `venues` and `fetchFn` for the tests (not in the index). */
 export function evmEvidenceProviders(chain: EvmPoolChain, fetchFn: typeof fetch, venues: EvmPoolVenueList = evmPoolVenues()): EvmRpc[] {
   const p = venue(chain, venues).providers;
   if (p === undefined) return refuse("no_quoter", `a ban's evidence has no providers on ${chain}`);

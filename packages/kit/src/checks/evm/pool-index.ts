@@ -21,8 +21,9 @@
 //   pool id at two blocks, in two spans or in a span and the stored index is refused rpc_disagree: a pool initializes
 //   once;
 // - F5: a pool that only one reader reported counts only where the PoolManager's state of it (extsload of its state
-//   slot, by the hash of the newest block both readers agree on, at or past N) is the same non-zero word on both readers: 0 on both is no pool, any other pair refuses
-//   rpc_disagree; its id is recomputed from its key, and any log whose pool id is not the key's is no log;
+//   slot, by the hash of the newest block both readers agree on, at or past N) is the same non-zero word on both
+//   readers: 0 on both is no pool, any other pair refuses rpc_disagree; its id is recomputed from its key, and any log
+//   whose pool id is not the key's is no log;
 // - F6: past the venue's `index.cap` pools both readers report, the sync refuses too_many_pools by name and serves
 //   nothing; one reader's pools that take it past (held or not) refuse rpc_disagree;
 // - F4d: what it stores ends `index.margin` blocks below N (a reorg's reach), so the next sync's gap starts there and
@@ -395,8 +396,8 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     where.set(p.id, p.block);
   }
 
-  // F5: a pool one reader reported counts only where the PoolManager's state of it (at or past N) is the same non-zero word on
-  // both readers; 0 on both is no pool; any other pair is a lie at one pinned hash. Where that is not answered, the
+  // F5: a pool one reader reported counts only where the PoolManager's state of it (at or past N) is the same non-zero
+  // word on both readers; 0 on both is no pool; any other pair is a lie at one pinned hash. Where that is not answered, the
   // spans that hold such a pool are not proven
   const ones = proved.flatMap((p) => p.one);
   // more pools one reader alone reported than the cap: the readers disagree past any honest lag, and none is read
