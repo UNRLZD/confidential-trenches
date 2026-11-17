@@ -507,3 +507,19 @@ test("card sign-out-stops-the-pages-reads: the page's fetch is the gate; it clos
   assert.match(src, /kinds: kindsFor\(whileSignedIn\(follows!\.withFollow\(\{/, "every shell kind is refused while leaving");
   assert.match(src, /\(\.\.\.a: never\[\]\) => \(leaving \? null : f\(\.\.\.a\)\)/, "refused not_allowed (null) while leaving");
 });
+
+// card signpage-near-pace-shared-across-tabs: the page's NEAR paces are one for every tab of its origin
+// (../../wallet/src/pace.ts sharePaces; its behaviour in ../../wallet/test/pace-tabs.test.ts): main.ts shares them on
+// this origin's Web Locks and its own IndexedDB database (paceDb) at load, and keeps its own where either is missing. They
+// are one origin's only while the page is never framed: every document's frame-ancestors is 'none' (public/_headers /*).
+test("the NEAR paces are shared across this origin's tabs at load, on navigator.locks and IndexedDB, never localStorage; the page is never framed", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  assert.match(src, /import \{[^}]*\bsharePaces\b[^}]*\} from "\.\.\/\.\.\/wallet\/src\/pace\.ts";/);
+  assert.ok(src.includes('\nif (navigator.locks && typeof indexedDB !== "undefined") sharePaces({ locks: navigator.locks, storage: paceDb(), origin: performance.timeOrigin });\n'), "sharePaces at load (module scope)");
+  assert.doesNotMatch(src, /\blocalStorage\b/, "the page never uses localStorage (wallet.md:153)");
+  assert.equal(src.split("sharePaces(").length - 1, 1, "one call");
+  const headers = readFileSync(new URL("../public/_headers", import.meta.url), "utf8");
+  // the /* rule's CSP, every document's (the other rules' CSPs are the worker scripts', which no frame loads)
+  const all = /^\/\*\n  Content-Security-Policy: ([^\n]+)$/m.exec(headers)?.[1] ?? "";
+  assert.match(all, /; frame-ancestors 'none'(;|$)/, "/*: frame-ancestors 'none'");
+});
