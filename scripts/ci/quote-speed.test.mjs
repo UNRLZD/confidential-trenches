@@ -255,16 +255,80 @@ function job(yml, id) {
   return lines.slice(at, end < 0 ? undefined : end);
 }
 
+const CI_YML = () => readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
+/** ci.yml's quote-speed step (in the deep-import job), with that job's lines. */
+function gateStep(yml) {
+  const lines = job(yml, "deep-import");
+  const start = lines.findIndex((l) => /^ {6}- name: .*evm-quote-warm-round/.test(l));
+  assert.ok(start >= 0, lines.join("\n"));
+  const next = lines.findIndex((l, i) => i > start && /^ {6}- /.test(l));
+  return { lines, start, step: lines.slice(start, next < 0 ? undefined : next).join("\n") };
+}
+/** The paths the step's pull request branch extracts from the base into $RUNNER_TEMP/base (its one git archive line). */
+function archived(step) {
+  const all = [...step.matchAll(/git archive "\$PR_BASE" ([^|]+?) \| tar -x -f - -C "\$RUNNER_TEMP\/base"/g)];
+  assert.equal(all.length, 1, `one git archive of the base in the step:\n${step}`);
+  return all[0][1].trim().split(/\s+/);
+}
+
+// A root built as ci.yml's step builds main's copy: `git archive <rev> <paths>` of `repo` into a temp dir, its packages
+// linked to repo's own (linkKit); then `check` imported from there with repo as the working directory, as the base's
+// quote-speed.mjs imports CHECK. Gives the child's exit, its output and every file it loaded (real paths).
+function loadsFromBase(t, repo, paths, check, rev = "HEAD") {
+  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "quote-base-root-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const root = path.join(dir, "base");
+  mkdirSync(root);
+  const tar = path.join(dir, "base.tar");
+  execFileSync("git", ["archive", "--output", tar, rev, ...paths], { cwd: repo });
+  execFileSync("tar", ["-x", "-f", tar, "-C", root]);
+  linkKit(root, repo);
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", TRACE, pathToFileURL(path.join(root, check)).href], { cwd: repo, encoding: "utf8" });
+  const files = r.status === 0 ? JSON.parse(r.stdout).map((u) => realpathSync(fileURLToPath(u))) : [];
+  return { root, status: r.status, out: `${r.stdout}\n${r.stderr}`, files };
+}
+/** Each loaded file that came neither from the base's root nor from the checkout's packages/ (linked) or an install. */
+const notFromBase = (files, root, repo) => {
+  const kit = realpathSync(path.join(repo, "packages")) + path.sep;
+  return files.filter((f) => !f.startsWith(root + path.sep) && !f.startsWith(kit) && !f.includes(`${path.sep}node_modules${path.sep}`));
+};
+
+test("main's copy of CHECK loads whole from a root built as ci.yml builds it (its archived paths and linkKit)", (t) => {
+  const paths = archived(gateStep(CI_YML()).step);
+  const r = loadsFromBase(t, ROOT, paths, CHECK);
+  assert.equal(r.status, 0, `CHECK does not load from the base's ${paths.join(" ")}: an import outside them goes in ci.yml's git archive line\n${r.out}`);
+  assert.ok(r.files.includes(realpathSync(path.join(r.root, CHECK))), r.files.join("\n"));
+  assert.deepEqual(notFromBase(r.files, r.root, ROOT), [], "every file CHECK loads past the kit comes from the base");
+});
+
+test("planted: a check whose import leaves the archived paths fails to load from the base; archived, it loads", (t) => {
+  const repo = realpathSync(mkdtempSync(path.join(tmpdir(), "quote-base-plant-")));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const check = "scripts/live-checks/c.mjs";
+  mkdirSync(path.join(repo, "scripts/live-checks"), { recursive: true });
+  mkdirSync(path.join(repo, "apps/x"), { recursive: true });
+  mkdirSync(path.join(repo, "packages"));
+  writeFileSync(path.join(repo, check), 'import { N } from "../../apps/x/n.ts";\nexport const check = () => N;\n');
+  writeFileSync(path.join(repo, "apps/x/n.ts"), "export const N: number = 1;\n");
+  git(repo, "init", "-q", "-b", "main");
+  git(repo, "add", "--", check, "apps/x/n.ts");
+  git(repo, "commit", "-qm", "m0", "--", check, "apps/x/n.ts");
+  const out = loadsFromBase(t, repo, ["scripts"], check);
+  assert.notEqual(out.status, 0, out.out);
+  assert.match(out.out, /ERR_MODULE_NOT_FOUND[\s\S]*apps\/x\/n\.ts|Cannot find module .*apps\/x\/n\.ts/, out.out);
+  const ok = loadsFromBase(t, repo, ["scripts", "apps/x/n.ts"], check);
+  assert.equal(ok.status, 0, ok.out);
+  assert.deepEqual(notFromBase(ok.files, ok.root, repo), []);
+  // and a file loaded from the checkout instead of the base is named
+  assert.deepEqual(notFromBase([path.join(repo, "apps/x/n.ts")], ok.root, repo), [path.join(repo, "apps/x/n.ts")]);
+});
+
 test("ci.yml runs the gate as main has it in the required deep-import job, every event, nothing letting it pass on a failure", () => {
-  const yml = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
+  const yml = CI_YML();
   const header = yml.split(/\n(?!#)/)[0].replace(/\n# ?/g, " ");
   assert.match(header, /required checks of main's ruleset \([^)]*\): [a-z, -]*\bdeep-import\b[a-z, -]*\./);
-  const lines = job(yml, "deep-import");
+  const { lines, start, step } = gateStep(yml);
   const text = lines.join("\n");
-  const start = lines.findIndex((l) => /^ {6}- name: .*evm-quote-warm-round/.test(l));
-  assert.ok(start >= 0, text);
-  const next = lines.findIndex((l, i) => i > start && /^ {6}- /.test(l));
-  const step = lines.slice(start, next < 0 ? undefined : next).join("\n");
   assert.doesNotMatch(step, /^\s+(if|continue-on-error):/m, step);
   // GitHub's bash is "bash --noprofile --norc -eo pipefail {0}": a failed git archive stops the step
   assert.match(step, /^ {8}shell: bash$/m, step);
@@ -273,8 +337,8 @@ test("ci.yml runs the gate as main has it in the required deep-import job, every
   assert.match(text, /^ {10}fetch-depth: 0$/m, "the base and the change are in the checkout");
   assert.match(text, /^ {6}- run: pnpm install --frozen-lockfile$/m);
   assert.ok(lines.findIndex((l) => /pnpm install --frozen-lockfile/.test(l)) < start, "the install comes before the step");
-  // pull_request: the base's scripts/ tree, its gate on the head's change
-  assert.match(step, /git archive "\$PR_BASE" scripts \| tar -x -f - -C "\$RUNNER_TEMP\/base"/);
+  // pull_request: the base's scripts/ tree and the files CHECK imports past it, its gate on the head's change
+  assert.equal(archived(step)[0], "scripts", step);
   assert.match(step, /node "\$RUNNER_TEMP\/base\/scripts\/ci\/quote-speed\.mjs" "\$PR_BASE" "\$PR_HEAD"/);
   assert.match(step, /PR_BASE: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
   assert.match(step, /PR_HEAD: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
