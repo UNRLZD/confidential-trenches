@@ -2453,8 +2453,16 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // The pool's swap gas (audit I-4): the route's own swap, run as the pool runs it, is read in the first round
   const fitReads = new Map<EvmRoute, Read | null>();
   let fitAt = "";
+  // A route the quote prices the buy against through a hook the venue does not list has its swap read with each such
+  // hook replaced (card evm-buy-never-below-a-hidden-market): the pool's own gas bounds it, never its hook's, so a hook
+  // that reverts the device's own swap (and honours the quoter) cannot drop the token's real market out of R either
+  // (ZZ1c). The route itself is read as it is: its swap is the buy's
   const fitOf = (r: EvmRoute) => {
-    if (!fitReads.has(r)) fitReads.set(r, fitRead(chain, v, r, amountIn, fitAt));
+    if (!fitReads.has(r)) {
+      const f = fitRead(chain, v, r, amountIn, fitAt);
+      const hs = r === route || r.venue !== "uniswap-v4" ? [] : [...new Set(hopKeys(r).filter((k) => k.hooks !== NATIVE && !evmHookListed(chain, k.hooks, k.fee, k.tickSpacing)).map((k) => k.hooks))].sort();
+      fitReads.set(r, f === null || hs.length === 0 ? f : { ...f, override: { ...f.override, ...noopOf(hs) } });
+    }
     return fitReads.get(r)!;
   };
   let ownFit = -1;
@@ -3295,6 +3303,31 @@ async function routeSetOf(a: {
     }
     return m;
   };
+  // What a route counts for in R (card evm-buy-never-below-a-hidden-market): valueOf where it is not null; a route that
+  // fills with its hooks replaced but not as it is (a hook that reverts the quoter alone, or lets only its own router
+  // swap, as one of USDG's WETH pools on Robinhood) is a market the device can read but not trade through, and counts at
+  // the lowest of its reads that answer above 0. Left out, its token's real market dropped out of R and a standard pool
+  // seeded at a tenth beside it was its own reference and bought (review ZZ1, ZZ1b, ZZ2), or sold into (ZZ7). A buy never
+  // takes it: its own quote reads nothing as it is (no_quote), and the tap follows no reference through such a hook
+  // (buy-tap.ts `takes`). A sell takes it only where W's own sim of the sale through it pays (simmedSells; dropped where
+  // the sim reverts, as before), or where no sim runs at the lower of its reads, a reverted sale then banning it (card
+  // evm-sell-hook-converge). The freeze it can put on a coin's buys (every buy more than the slippage below it refused
+  // below_reference) is never free: its read with every such hook replaced must fill the user's whole amount and grow at
+  // twice it (fills; the V4Quoter reverts NotEnoughLiquidity where a hookless hop runs out), and the prune quotes it only
+  // where its spot price after its fee can beat the route (ubOf), so the attacker locks real liquidity in the pool, the
+  // coin's own for the whole amount of every buy it freezes, priced past the slippage above the coin's market (1% at the
+  // tap's default: about 1.01 ETH of the coin to freeze a 1 ETH buy), for as long as the freeze lasts; dust or none
+  // freezes nothing (ZZ3b, ZZ5), and a buy within the slippage of it is taken at its own minOut
+  const heldOf = (c: Quote): bigint | null => {
+    const x = valueOf(c);
+    if (x !== null || c.real === undefined || !fills(c)) return x;
+    let m = out(c.at)!;
+    for (const i of [c.real.at, ...(c.alone ?? [])]) {
+      const y = out(i);
+      if (y !== null && y > 0n && y < m) m = y;
+    }
+    return m;
+  };
   // one more round of reads at the same block, its answers after the ones before
   const round = async (more: Read[]) => {
     if (more.length === 0) return;
@@ -3498,15 +3531,24 @@ async function routeSetOf(a: {
       if (priceOf && !a.sell && left !== null) marketQuote.set(left[0], quoteOf(into, routeOfKey(left[0].key, c), [left[0].key]));
     }
   };
-  // c's market whose quote counts for the most of c at the user's amount; the first in order on a tie
-  const bestMarket = (c: string): Found | null => {
+  // c's market whose quote counts for the most of c at the user's amount by `value`; the first in order on a tie
+  const bestBy = (c: string, value: (q: Quote) => bigint | null): Found | null => {
     let [b, bv]: [Found | null, bigint] = [null, 0n];
     for (const mk of markets.get(c) ?? []) {
       const r = marketQuote.get(mk);
-      const x = r === undefined ? null : valueOf(r);
+      const x = r === undefined ? null : value(r);
       if (x !== null && (b === null || x > bv)) [b, bv] = [mk, x];
     }
     return b;
+  };
+  // the markets of c a route goes through: c's best market that fills (valueOf), and where one the device can read but
+  // not trade through counts for more (heldOf), that one too (card evm-buy-never-below-a-hidden-market): it holds the
+  // route through the best that fills to R, which a buy within the slippage of it still takes (ZZ8). `trades`: c has a
+  // market that fills, as before; one with none goes one level further, as before
+  const routeMarkets = (c: string): { mks: Found[]; trades: boolean } => {
+    const t = bestBy(c, valueOf);
+    const h = bestBy(c, heldOf);
+    return { mks: h === null ? [] : t === null || t === h ? [h] : [h, t], trades: t !== null };
   };
   const third: Read[] = [];
   quoteMarkets(xs, third, true);
@@ -3514,18 +3556,17 @@ async function routeSetOf(a: {
   const fourth: Read[] = [];
   const further: string[] = [];
   for (const x of xs) {
-    const mk = bestMarket(x);
-    if (mk === null) {
-      // a sell's X that no pool of the token reaches gives no route further either
-      if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);
-      continue;
-    }
-    // the X the market gives with its hook replaced, as in the route's own read: a pool of X that cannot turn it into
-    // more than Q is not quoted
-    const xa = out(marketQuote.get(mk)!.at)!;
-    for (const p of xPools.get(x)!) {
-      if (!can(p, xa)) continue;
-      p.quotes.push(quoteOf(fourth, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]));
+    const { mks, trades } = routeMarkets(x);
+    // a sell's X that no pool of the token reaches gives no route further either
+    if (!trades && markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);
+    for (const mk of mks) {
+      // the X the market gives with its hook replaced, as in the route's own read: a pool of X that cannot turn it into
+      // more than Q is not quoted
+      const xa = out(marketQuote.get(mk)!.at)!;
+      for (const p of xPools.get(x)!) {
+        if (!can(p, xa)) continue;
+        p.quotes.push(quoteOf(fourth, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]));
+      }
     }
   }
   // one level further: X's pools with Y, from one scan of every such X's pools
@@ -3568,13 +3609,13 @@ async function routeSetOf(a: {
   const seventh: Read[] = [];
   for (const [x, fs] of vias) {
     for (const via of fs) {
-      const mk = ys.includes(via.other) ? bestMarket(via.other) : null;
-      if (mk === null) continue;
-      const xa = ubOf(via, out(marketQuote.get(mk)!.at)!);
-      for (const p of xPools.get(x)!) {
-        if (!can(p, xa)) continue;
-        const r: EvmV4Route = { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)] };
-        p.quotes.push(quoteOf(seventh, r, [mk.key, via.key, p.key]));
+      for (const mk of ys.includes(via.other) ? routeMarkets(via.other).mks : []) {
+        const xa = ubOf(via, out(marketQuote.get(mk)!.at)!);
+        for (const p of xPools.get(x)!) {
+          if (!can(p, xa)) continue;
+          const r: EvmV4Route = { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)] };
+          p.quotes.push(quoteOf(seventh, r, [mk.key, via.key, p.key]));
+        }
       }
     }
   }
@@ -3585,7 +3626,7 @@ async function routeSetOf(a: {
   const filled: Filled[] = candidates.flatMap((c) => (fills(c, c.route.venue === "uniswap-v3") ? [{ route: c.route, amountOut: out(c.at)! }] : []));
   for (const f of held) {
     for (const c of f.quotes) {
-      const x = valueOf(c);
+      const x = heldOf(c);
       if (x !== null) filled.push({ route: c.route, amountOut: x });
     }
   }

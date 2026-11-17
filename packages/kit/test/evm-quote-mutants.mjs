@@ -1077,6 +1077,19 @@ export const MUTANTS = [
   [QUOTE, "      scanAsks++;\n", "", R, "QE12 "],
   // a request queued at the gate past the bound: a plain rpc_error there is asked as its halves and handed to the spare
   [QUOTE, "      if (now >= untilMs) throw past();", '      if (now >= untilMs) throw new EvmQuoteError("rpc_error", "past the bound");', R, "QE13 "],
+  // card evm-buy-never-below-a-hidden-market: a buy's route that fills with its hooks replaced but not as it is counts in
+  // R at the lowest of its reads that answer, X's best market ranked the same, only where its read with its hooks
+  // replaced fills; R's swap read through a hook the venue does not list with those hooks replaced, the route's own as it is
+  [QUOTE, "    if (x !== null || c.real === undefined || !fills(c)) return x;", "    return x;", R, "ZZ1 "],
+  [QUOTE, "    if (x !== null || c.real === undefined || !fills(c)) return x;", "    if (x !== null || a.sell || c.real === undefined || !fills(c)) return x;", R, "ZZ7 "],
+  [QUOTE, " || c.real === undefined || !fills(c)) return x;", " || c.real === undefined) return x;", R, "ZZ5 "],
+  [QUOTE, "      if (y !== null && y > 0n && y < m) m = y;", "      if (false as boolean) m = y;", R, "ZZ6 "],
+  [QUOTE, "    const h = bestBy(c, heldOf);", "    const h = bestBy(c, valueOf);", R, "ZZ2 "],
+  [QUOTE, "    return { mks: h === null ? [] : t === null || t === h ? [h] : [h, t], trades: t !== null };", "    return { mks: h === null ? [] : [h], trades: t !== null };", R, "ZZ7b "],
+  [QUOTE, "    return { mks: h === null ? [] : t === null || t === h ? [h] : [h, t], trades: t !== null };", "    return { mks: h === null ? [] : t === null || t === h ? [h] : [h, t], trades: h !== null };", R, "ZZ7c "],
+  [QUOTE, "      const x = heldOf(c);\n      if (x !== null) filled.push", "      const x = valueOf(c);\n      if (x !== null) filled.push", R, "ZZ1 "],
+  [QUOTE, "      fitReads.set(r, f === null || hs.length === 0 ? f : { ...f, override: { ...f.override, ...noopOf(hs) } });", "      fitReads.set(r, f);", R, "ZZ1c "],
+  [QUOTE, "      const hs = r === route || r.venue", "      const hs = r.venue", R, "ZZ1c "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
