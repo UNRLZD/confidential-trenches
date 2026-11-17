@@ -120,7 +120,7 @@ function reader(r: Reader): EvmRpc {
           return { error: { code: -32005, message: "25/second request limit reached" } };
         }
         const out = { result: [...r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf), ...(r.extraLogs ?? [])] };
-        if (r.moves !== undefined) (r.head += r.moves), (r.moves = undefined);
+        if (r.moves !== undefined) (r.head += r.moves), delete r.moves;
         return out;
       }
       if (c.method === "eth_getTransactionReceipt") {

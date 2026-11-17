@@ -7398,6 +7398,43 @@ test("card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped by a tr
   assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT, banned: [hcPid(hostile.key)] }, show(r));
 });
 
+test("card evm-quote-reads-need-no-old-state (buy, Robinhood) the evidence's reads at the buy's block and its parent, 24 s old, walk the operators that keep that state: with every quote provider but Robinhood's own answering -32000 historical state there, the quote list alone refuses and the evidence's list (Pocket of the read list first) proves the ban", async () => {
+  const { pools, q, hostile } = await ihBuy(earlierHook, 3, EARLY);
+  const hash = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
+  // a provider keeping only the newest blocks' state: a state read by block hash is refused, its head and the trade's
+  // transaction, receipt and block still answered (Pocket and publicnode on Robinhood, 2026-11-10 21:03Z)
+  const stateless = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const out = await rpc(calls);
+    return calls.map((c, i) => ((c.method === "eth_call" || c.method === "eth_getStorageAt") && typeof c.params.at(c.method === "eth_call" ? 1 : 2) === "object" ? { error: { code: -32000, message: "historical state 9f3c41d2e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1 is not available" } } : out[i]));
+  };
+  const rh = builder.evmPoolVenues().robinhood!;
+  const keeps = new Set(["rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"]);
+  const hosts = [...new Set([...rh.providers!, ...builder.evmReadProvidersOf(rh)!])].map(hostOf);
+  assert.ok(hosts.includes("robinhood.api.pocket.network") && !rh.providers!.map(hostOf).includes("robinhood.api.pocket.network"), "Pocket keeps the state and is on the read list, not the quote list");
+  const asked = new Map<string, number>();
+  const { f } = hosted(Object.fromEntries(hosts.map((h) => {
+    const model = chain(pools, 0, undefined, undefined, undefined, true);
+    const counted: EvmRpc = async (calls) => (asked.set(h, (asked.get(h) ?? 0) + 1), (keeps.has(h) ? model : stateless(model))(calls));
+    return [h, { rpc: counted, ms: 1 }];
+  })));
+  quoteMod.evmSpeedReset();
+  evmPaceReset();
+  // the quote list alone, as the ban read it before: one operator keeps the state, so no two agree
+  await assert.rejects(quoteMod.evmBuyRevertedPoolsWith(q, hash, quoteMod.evmProviders(quoteMod.evmRanked(rh.providers!), f), RH_NET.venues, rhTrace(pools)), (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error", "the quote list alone");
+  // the evidence's list: the read list's operators first, then the rest of the quote list
+  const list = quoteMod.evmEvidenceProviders("robinhood", f);
+  assert.equal(list.length, hosts.length);
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, hash, list, RH_NET.venues, rhTrace(pools)), [hcPid(hostile.key)]);
+  assert.ok((asked.get("robinhood.api.pocket.network") ?? 0) > 0, JSON.stringify([...asked]));
+  // nothing loosened: two operators that keep the state and answer apart still refuse the replay, never a third's word
+  // decides it (agreeing's majority over the whole list)
+  quoteMod.evmSpeedReset();
+  // the same chain with the hook's fault gone: its replay passes where the buy failed
+  const liar = chain(pools.map(({ exec: _, ...p }) => (void _, p)), 0, undefined, undefined, undefined, true);
+  const { f: f2 } = hosted(Object.fromEntries(hosts.map((h) => [h, { rpc: h === "robinhood.api.pocket.network" ? liar : keeps.has(h) ? chain(pools, 0, undefined, undefined, undefined, true) : stateless(chain(pools, 0, undefined, undefined, undefined, true)), ms: 1 }])));
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, hash, quoteMod.evmEvidenceProviders("robinhood", f2), RH_NET.venues, rhTrace(pools)), [], "a replay two operators answer apart proves nothing");
+});
+
 test("card evm-sell-hook-intrablock, HC2 (buy, Robinhood) the replay's override is the trace's prestate with ArbOS's state left out (Nitro refuses it), the sender's balance its own; on Base, with no trace pair, nothing is traced", async () => {
   const { pools, q, hostile } = await ihBuy(earlierHook, 2, EARLY);
   const hash = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);

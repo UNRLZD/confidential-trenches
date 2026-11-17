@@ -61,6 +61,7 @@ import {
   copyRoute,
   evmPoolProvidersOf,
   evmPoolRouteDataQuoted,
+  evmReadProvidersOf,
   evmPoolVenues,
   pathKeysAbi,
   type EvmPoolChain,
@@ -4290,9 +4291,23 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
  *  caller hands it), the kit's tests assert the error once per case without asking again, and no live check calls it. */
 export async function evmSellRevertedPools(quote: EvmPoolSellQuote, txHash: string): Promise<readonly string[]> {
   if (!evmIsDeviceSellQuote(quote)) return refuse("bad_request", "a ban is proved only against a quote evmPoolSellQuote returned");
-  const p = venue(quote.chain).providers;
-  if (p === undefined) return refuse("no_quoter", `${quote.chain} has no pinned providers`);
-  return evmSellRevertedPoolsWith(quote, txHash, evmProviders(evmRanked(p), fetch));
+  return evmSellRevertedPoolsWith(quote, txHash, evmEvidenceProviders(quote.chain, fetch));
+}
+
+/** The providers a ban's evidence walks (card evm-quote-reads-need-no-old-state): the trade's block and its parent are
+ *  seconds to a minute old when it is read, and on Robinhood two of the five quote providers (bloXroute, Globalstake)
+ *  answer -32000 "historical state ... is not available" at every age and publicnode at half of the blocks 15 to 55 s
+ *  back (buy-unpinned.ts readProviders, 2026-11-10), so the quote list alone left Robinhood's own and dRPC, and dRPC's
+ *  code 27 left one. The venue's read list (each operator keeping state a minute back at least) is asked first, by
+ *  the quote's measured speed, then the rest of the quote list; agreeing still takes every value from two of them that
+ *  agree, and a contested one from more than half of them all. `venues` and `fetchFn` for the tests (not in the
+ *  index). */
+export function evmEvidenceProviders(chain: EvmPoolChain, fetchFn: typeof fetch, venues: EvmPoolVenueList = evmPoolVenues()): EvmRpc[] {
+  const p = venue(chain, venues).providers;
+  if (p === undefined) return refuse("no_quoter", `${chain} has no pinned providers`);
+  const raw = Object.hasOwn(venues, chain) ? venues[chain] : undefined;
+  const keep = raw === undefined ? [] : [...(evmReadProvidersOf(raw) ?? [])];
+  return evmProviders([...evmRanked(keep), ...evmRanked(p.filter((u) => !keep.includes(u)))], fetchFn);
 }
 
 const SEL_SELL = "0c2cb9ca"; // a literal, never a top-level call (the kit's index reaches the signing page's bundle): SellDelegate.sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)
@@ -4788,9 +4803,7 @@ export async function evmSellRevertedPoolsWith(quote: EvmPoolSellQuote, txHash: 
  *  pool/evm-sell-bans.ts, shared with the sale). Its trace's rpc_error is the sale's (EVM_TRACE_UNANSWERED, above). */
 export async function evmBuyRevertedPools(quote: EvmPoolBuyQuote, txHash: string): Promise<readonly string[]> {
   if (!evmIsDeviceQuote(quote)) return refuse("bad_request", "a ban is proved only against a quote evmPoolBuyQuote returned");
-  const p = venue(quote.chain).providers;
-  if (p === undefined) return refuse("no_quoter", `${quote.chain} has no pinned providers`);
-  return evmBuyRevertedPoolsWith(quote, txHash, evmProviders(evmRanked(p), fetch));
+  return evmBuyRevertedPoolsWith(quote, txHash, evmEvidenceProviders(quote.chain, fetch));
 }
 
 // the pool's events (IPrivacyPool.sol): Withdrawn(address,address,uint256,uint256,uint256,uint256) and
