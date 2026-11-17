@@ -141,7 +141,7 @@ function stubs(dir, a, b = a) {
     `#!/bin/sh\ncase " $* " in *" --version "*) echo "\${STUB_NEAR_VERSION:-${CARGO_NEAR}}"; exit 0;; esac\n` +
       'prev=; for x in "$@"; do [ "$prev" = --out-dir ] && CARGO_TARGET_DIR=$x; prev=$x; done\n' +
       'SUF=; case " $* " in *" --variant testnet "*) SUF=.testnet;; esac; [ -n "$STUB_NO_META" ] && SUF=.raw\n' +
-      '[ -n "$STUB_FAIL" ] && { echo "stub: a crates.io blip, before any wasm exists" >&2; exit 101; }\n' +
+      '[ -n "$STUB_FAIL" ] && { echo "stub: a crates.io blip, before any wasm exists" >&2; i=0; while [ "$i" -lt "${STUB_FAIL_TAIL:-0}" ]; do echo "stub: tail line $i" >&2; i=$((i+1)); done; exit 101; }\n' +
       'mkdir -p "$CARGO_TARGET_DIR"\necho "$*" >> "$CARGO_TARGET_DIR/../cargo-args.log"\nname=$(basename "$CARGO_TARGET_DIR")\n' +
       `if [ "$name" = a ] && [ -n "$STUB_FILES" ]; then "${process.execPath}" -e 'const fs=require("fs");const d=process.argv[1]+"/many";fs.mkdirSync(d);for(let i=0;i<+process.argv[2];i++)fs.writeFileSync(d+"/"+i,"x")' "$CARGO_TARGET_DIR" "$STUB_FILES"; fi\n` +
       'if [ -n "$STUB_SLEEP" ]; then echo $$ > "$CARGO_TARGET_DIR/../build.pid"; sleep "$STUB_SLEEP"; fi\n' +
@@ -309,6 +309,18 @@ test("--build-only: two builds that differ exit 3, the code vault-build never re
   const failed = run(dir2, args(dir2), { ...stubs(dir2, wasm()), STUB_FAIL: "1" });
   assert.equal(failed.status, 1, failed.stdout + failed.stderr);
   assert.match(failed.stderr, /build a failed \(exit 101\)/);
+});
+
+// card vault-build-passes-in-the-queue: merge queue runs 44005544940 and 44008351220 printed only the last 15 lines of
+// a failed build, cargo-near's own "Location: ... metadata.rs:313 / See output above", so the container's error (the
+// cargo metadata stderr above them) was never seen. A failed build prints all it kept, its cause first.
+test("--build-only: a failed build prints the build's own error, not only its last lines", () => {
+  const dir = fresh();
+  const r = run(dir, ["--build-only", "--flavor", "testnet", "--build-dir", path.join(dir, "build")], { ...stubs(dir, wasm()), STUB_FAIL: "1", STUB_FAIL_TAIL: "40" });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /build a failed \(exit 101\)/);
+  assert.match(r.stderr, /stub: a crates\.io blip, before any wasm exists/, r.stderr);
+  assert.match(r.stderr, /stub: tail line 0\n[\s\S]*stub: tail line 39/, r.stderr);
 });
 
 test("the fetch block holds: a wasm that passes every rule stops at the first RPC read, after the build", () => {
