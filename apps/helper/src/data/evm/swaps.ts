@@ -528,6 +528,10 @@ function within<T>(p: Promise<T>, ms: number): Promise<T | typeof LATE> {
 }
 const LOGS_MAX = 20_000;
 const TRADERS_MAX = 5_000;
+/** Lookups of a transaction answered with no trader after which its row is served as it is, trader null (trades): a
+ *  transaction no provider gives, or a bundle's receipt two providers never agree on, so no tape stays filling for it.
+ *  [design: 3, as BACK_FAILS_MAX: a lookup answered three times running with none will not give one on the fourth.] */
+export const TRADER_TRIES = 3;
 /** Agreed eth_call results kept (callsAgreed), oldest out first. */
 const CALLED_MAX = 5_000;
 export const TRADES_MAX = 50;
@@ -2960,6 +2964,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  this time and is asked again the next. */
   /** The lookups out now, by transaction: a tape asks a hash in flight once (card helper-robinhood-capacity fold 8). */
   const looking = new Map<string, Promise<void>>();
+  /** Each transaction's lookups a provider answered and that still gave it no trader (lookTraders), bounded as the
+   *  traders are: TRADER_TRIES of them and it can never be read (card evm-tape-trader-never-null). */
+  const tries = new Map<string, number>();
+  /** Whether a row's trader is not read yet, and so the row waits (trades): not held, and not answered TRADER_TRIES
+   *  times with none. */
+  const unread = (tx: string): boolean => !traders.has(tx) && (tries.get(tx) ?? 0) < TRADER_TRIES;
   /** Each transaction's sender into `traders`, one lookup per hash however many callers ask it at once. */
   async function tradersOf(txs: string[]): Promise<void> {
     const ask = [...new Set(txs)].filter((t) => !traders.has(t));
@@ -2995,6 +3005,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const shares = [...share].map(([u, part]) => ({ u, part }));
     // the transactions read, by hash: one sent to an EntryPoint waits for its receipt (bundles) before it has traders
     const got = new Map<string, Record<string, unknown>>();
+    /** The hashes a provider answered a read of (its answer naming the transaction or not). */
+    const answered = new Set<string>();
     const keep = (t: string, x: Traders) => {
       if (traders.size >= TRADERS_MAX) traders.delete(traders.keys().next().value!);
       traders.set(t, x);
@@ -3002,6 +3014,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const read = async (u: string, part: string[]): Promise<boolean> => {
       const r = await batchTo(u, part.map((t) => ({ method: "eth_getTransactionByHash", params: [t] })));
       if (r === null) return false;
+      part.forEach((t, i) => r[i]?.ok && answered.add(t));
       part.forEach((t, i) => {
         const x = r[i];
         const tx = x?.ok ? obj(x.result) : null;
@@ -3047,6 +3060,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         await bundles(part);
       }),
     );
+    // a lookup answered that still gave no trader counts toward TRADER_TRIES; one never sent or never answered (paced,
+    // held, failed) does not, so a busy helper holds its rows rather than serving them nameless
+    for (const t of answered)
+      if (!traders.has(t)) {
+        if (tries.size >= TRADERS_MAX && !tries.has(t)) tries.delete(tries.keys().next().value!);
+        tries.set(t, (tries.get(t) ?? 0) + 1);
+      }
   }
 
   /** Whether every price the book holds (its close and its day bars' highs and lows, the coarsest bars it keeps, so all
@@ -3285,7 +3305,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const t = evmAddress(token);
       if (t === null || !Number.isSafeInteger(limit) || limit < 1 || limit > TRADES_MAX) return NOT_FOUND;
       // a first open past its bound answers filling and its read goes on (OPEN_BOUND_MS); the traders are looked up
-      // within what is left of it, and one not read by then is null this time, asked again the next
+      // within what is left of it, and a row whose trader is not read by then waits: the answer says filling and the
+      // page reads it again (card evm-tape-trader-never-null: live run 43977576335 served Robinhood 0x6a3c037a's bundle
+      // 0x8d950a97 with trader null under load, its account 0x3e9741fd named alike by three providers), as the vendor
+      // path holds a row whose receipt is not read (exactOf); one that can never be read (TRADER_TRIES) is served as is
       const until = performance.now() + OPEN_BOUND_MS;
       // a caller's reads, in the foreground lane, their wait named in the answer (as candles)
       const lane = newLane(true);
@@ -3302,7 +3325,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         // next read gets the rows. 503 is only a read that failed.
         const held = books.get(t);
         const at = now();
-        const trades = (held === undefined ? [] : tapeOf(held, limit)).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
+        const trades = (held === undefined ? [] : tapeOf(held, limit)).filter((r) => !unread(r.tx)).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
         return timed({ status: 200, body: JSON.stringify({ trades, filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
       }
       if (e === "none") return timed(await noneTrades(t, limit, lane, until));
@@ -3310,9 +3333,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const rows = tapeOf(e, limit);
       await within(lanes.run(lane, () => tradersOf(rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
       const at = e.readAt ?? now();
-      const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
-      const whole = wholeOf(e);
-      return timed({ status: 200, body: JSON.stringify({ trades, ...(backing(e) ? { filling: true } : {}), ...(whole === undefined ? {} : { whole_ms: whole }), src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
+      const waiting = rows.some((r) => unread(r.tx));
+      const trades = rows.filter((r) => !unread(r.tx)).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
+      // no reach while a row waits: the rows served are not every trade back to it
+      const whole = waiting ? undefined : wholeOf(e);
+      return timed({ status: 200, body: JSON.stringify({ trades, ...(backing(e) || waiting ? { filling: true } : {}), ...(whole === undefined ? {} : { whole_ms: whole }), src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
     },
   };
 }
