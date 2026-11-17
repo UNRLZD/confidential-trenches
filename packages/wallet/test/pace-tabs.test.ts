@@ -11,7 +11,7 @@ import { onTestClock } from "../../kit/test/test-clock.ts";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 
 type Pace = typeof import("../src/pace.ts");
-type Share = { locks: { request(name: string, fn: (lock: unknown) => unknown): Promise<unknown> }; storage: { get(k: string): Promise<string | null> | string | null; set(k: string, v: string): Promise<void> | void }; origin: number };
+type Share = { locks: { request(name: string, options: { signal?: AbortSignal }, fn: (lock: unknown) => unknown): Promise<unknown> }; storage: { get(k: string): Promise<string | null> | string | null; set(k: string, v: string): Promise<void> | void }; origin: number };
 const FAST = NEAR_NETWORKS.mainnet.fastnear[0];
 const answer = () => new Response(JSON.stringify({ jsonrpc: "2.0", id: "blindfill", result: { ok: true } }), { status: 200 });
 
@@ -23,16 +23,41 @@ async function tab(share: Share | null): Promise<Pace> {
   if (share !== null) set?.(share);
   return P;
 }
-/** Web Locks as the browser grants them: one holder of a name at a time, in request order; a holder's callback may wait. */
-function locks(): Share["locks"] {
-  const tails = new Map<string, Promise<unknown>>();
-  return {
-    request(name, fn) {
-      const run = (tails.get(name) ?? Promise.resolve()).then(() => fn({ name, mode: "exclusive" }));
-      tails.set(name, run.catch(() => {}));
-      return run;
+/** Web Locks as the browser grants them: one holder of a name at a time, in request order; a holder's callback may wait;
+ *  a request whose signal ends before it is granted rejects with the signal's reason and never runs (the next in line
+ *  waits for the holder alone). `asked` counts the requests. Takes (name, fn) too, the form before the lock wait's bound. */
+function locks(): Share["locks"] & { asked: number } {
+  const tails = new Map<string, Promise<void>>();
+  const l = {
+    asked: 0,
+    request(name: string, a: unknown, b?: unknown): Promise<unknown> {
+      l.asked++;
+      const [opts, fn] = (typeof a === "function" ? [{}, a] : [a ?? {}, b]) as [{ signal?: AbortSignal }, (lock: unknown) => unknown];
+      const prev = tails.get(name) ?? Promise.resolve();
+      let release!: () => void;
+      const mine = new Promise<void>((r) => (release = r));
+      tails.set(name, prev.then(() => mine));
+      const sig = opts.signal;
+      return new Promise((res, rej) => {
+        let granted = false;
+        const stop = () => void (granted || rej(sig!.reason));
+        sig?.addEventListener("abort", stop, { once: true });
+        void prev.then(async () => {
+          if (sig?.aborted) return release();
+          granted = true;
+          sig?.removeEventListener("abort", stop);
+          try {
+            res(await fn({ name, mode: "exclusive" }));
+          } catch (e) {
+            rej(e);
+          } finally {
+            release();
+          }
+        });
+      });
     },
   };
+  return l;
 }
 function storage(): Share["storage"] & { map: Map<string, string> } {
   const map = new Map<string, string>();
@@ -203,3 +228,49 @@ test("paceDb: the shared records live in an IndexedDB database of their own, ct-
   assert.deepEqual((await idb.databases()).map((d) => d.name), [a.PACE_DB]);
   assert.equal(a.PACE_DB, "ct-pace");
 });
+
+// CO 02:00Z: the lock's own wait is bounded too. A tab holding a URL's lock whose timers stop (a throttled or frozen
+// tab mid-callback, a devtools pause) would otherwise hold every NEAR read of every tab for as long, and no storage
+// bound ever runs. A turn waits SHARE_LOCK_MS at most to be granted the lock, then takes the tab's own pace, as a
+// storage fault does, and asks the lock no more; a busy hold's write-through is bounded the same way.
+test("a lock another tab never releases: the turn goes on this tab's own pace within SHARE_LOCK_MS, and later turns never ask the lock", { timeout: 60_000 }, () => onTestClock(async () => {
+  const sh = share() as Share & { locks: ReturnType<typeof locks> };
+  const [a, b] = [await tab(sh), await tab(sh)];
+  void b;
+  // the other tab holds FastNEAR's lock and never lets go
+  void sh.locks.request(`ct-pace:${FAST}`, {}, () => new Promise(() => {}));
+  const sends: number[] = [];
+  const f = a.pacedFetch(FAST, async () => (sends.push(performance.now()), answer()));
+  const t0 = performance.now();
+  const bound = (a as Partial<{ SHARE_LOCK_MS: number }>).SHARE_LOCK_MS ?? 3_000;
+  const first = f(FAST);
+  await Promise.race([first, new Promise((r) => setTimeout(r, 30_000))]);
+  assert.equal(sends.length, 1, "the read is sent, never held by the other tab's lock");
+  assert.ok(sends[0]! <= t0 + bound, `sent at ${sends[0]} ms, past the lock's bound at ${t0 + bound} ms`);
+  const asked = sh.locks.asked;
+  await Promise.all(Array.from({ length: 9 }, () => f(FAST)));
+  assert.equal(sends.length, 10);
+  assert.equal(sh.locks.asked, asked, "later turns ask no lock");
+  assert.equal(read(sends, a).past, null, "the tab's own pace holds");
+  // a busy hold written through while the lock is held never waits on it: the tab's own hold stands
+  const [c] = [await tab(sh)];
+  const p = c.paceOf(FAST);
+  c.paceHold(p, performance.now(), 5_000);
+  const at = performance.now();
+  const got: number[] = [];
+  await c.pacedFetch(FAST, async () => (got.push(performance.now()), answer()))(FAST);
+  assert.ok(got[0]! >= at + 5_000 && got[0]! <= at + 5_000 + bound, `sent at ${got[0]} ms, the hold ends at ${at + 5_000} ms`);
+  // the caller's own end of a wait for the lock is thrown as it is and keeps the share: the next turn asks the lock again
+  const sh2 = share() as Share & { locks: ReturnType<typeof locks> };
+  const d = await tab(sh2);
+  let release!: () => void;
+  void sh2.locks.request(`ct-pace:${FAST}`, {}, () => new Promise<void>((r) => (release = r)));
+  const stop = new AbortController();
+  setTimeout(() => stop.abort(new Error("signed out")), 100);
+  const fd = d.pacedFetch(FAST, async () => answer());
+  await assert.rejects(fd(FAST, { signal: stop.signal }), /^Error: signed out$/);
+  const before = sh2.locks.asked;
+  release();
+  await fd(FAST);
+  assert.equal(sh2.locks.asked, before + 1, "still shared: the next turn asked the lock");
+}));

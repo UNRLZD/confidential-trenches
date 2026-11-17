@@ -99,9 +99,10 @@ const paceOf = (text) => {
   // taken only once it is due (never one ahead), the record written back, and the wait to the due slot returned; its
   // own pace (the turn with own true) when unshared; and the busy hold written through under the same lock
   const [SH, TAKE, TURN] = [m.SH, m.TAKE, m.TURN].map(esc);
-  const st = one(text, String.raw`async function ${esc(m.STURN)}\((?<e>§),(?<p>§),(?<g>§)\)\{let (?<u>§)=(?<URL>§)\(\k<p>\);for\(;;\)\{if\(\k<g>\?\.throwIfAborted\(\),${SH}!==\k<e>\|\|\k<u>===void 0\)return ${TURN}\(\k<p>,\k<g>,!0\);let (?<w>§);try\{\k<w>=await \k<e>\.locks\.request\((?<KEY>§)\(\k<u>\),async\(\)=>\{await (?<LOAD>§)\(\k<e>,\k<u>,\k<p>,performance\.now\(\)\);let (?<n>§)=performance\.now\(\),(?<d>§)=Math\.max\(\k<p>\.tat,\k<n>\)-\(\k<p>\.burst-1\)\*\k<p>\.every;return \k<d><=\k<n>&&${TAKE}\(\k<p>,\k<n>\),await (?<SAVE>§)\(\k<e>,\k<u>,\k<p>\),\k<d>-\k<n>\}\)\}catch\{(?<UN>§)\(\k<e>\);continue\}if\(\k<w><=0\)return;`);
-  if (st === null) return null;
-  const sh = one(text, String.raw`function ${esc(m.SHOLD)}\((?<e>§),(?<p>§),(?<n>§)\)\{let (?<u>§)=${esc(st.URL)}\(\k<p>\);\k<u>!==void 0&&\k<e>\.locks\.request\(${esc(st.KEY)}\(\k<u>\),async\(\)=>\{await ${esc(st.LOAD)}\(\k<e>,\k<u>,\k<p>,\k<n>\),await ${esc(st.SAVE)}\(\k<e>,\k<u>,\k<p>\)\}\)\.catch\(\(\)=>${esc(st.UN)}\(\k<e>\)\)\}`);
+  const st = one(text, String.raw`async function ${esc(m.STURN)}\((?<e>§),(?<p>§),(?<g>§)\)\{let (?<u>§)=(?<URL>§)\(\k<p>\);for\(;;\)\{if\(\k<g>\?\.throwIfAborted\(\),${SH}!==\k<e>\|\|\k<u>===void 0\)return ${TURN}\(\k<p>,\k<g>,!0\);let (?<w>§);try\{let (?<a>§)=AbortSignal\.timeout\((?<LM>§)\);\k<w>=await \k<e>\.locks\.request\((?<KEY>§)\(\k<u>\),\{signal:\k<g>\?AbortSignal\.any\(\[\k<g>,\k<a>\]\):\k<a>\},async\(\)=>\{await (?<LOAD>§)\(\k<e>,\k<u>,\k<p>,performance\.now\(\)\);let (?<n>§)=performance\.now\(\),(?<d>§)=Math\.max\(\k<p>\.tat,\k<n>\)-\(\k<p>\.burst-1\)\*\k<p>\.every;return \k<d><=\k<n>&&${TAKE}\(\k<p>,\k<n>\),await (?<SAVE>§)\(\k<e>,\k<u>,\k<p>\),\k<d>-\k<n>\}\)\}catch\{if\(\k<g>\?\.aborted\)throw \k<g>\.reason;(?<UN>§)\(\k<e>\);continue\}if\(\k<w><=0\)return;`);
+  // the wait to be granted the lock is bounded at 3 s (SHARE_LOCK_MS): a tab that holds it and stops never stalls another
+  if (st === null || all(text, rx(String.raw`(?<![\w$.])${esc(st.LM)}=3e3[,;]`)).length !== 1) return null;
+  const sh = one(text, String.raw`function ${esc(m.SHOLD)}\((?<e>§),(?<p>§),(?<n>§)\)\{let (?<u>§)=${esc(st.URL)}\(\k<p>\);\k<u>!==void 0&&\k<e>\.locks\.request\(${esc(st.KEY)}\(\k<u>\),\{signal:AbortSignal\.timeout\(${esc(st.LM)}\)\},async\(\)=>\{await ${esc(st.LOAD)}\(\k<e>,\k<u>,\k<p>,\k<n>\),await ${esc(st.SAVE)}\(\k<e>,\k<u>,\k<p>\)\}\)\.catch\(\(\)=>${esc(st.UN)}\(\k<e>\)\)\}`);
   return sh === null ? null : m;
 };
 /**

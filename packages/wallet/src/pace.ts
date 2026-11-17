@@ -324,12 +324,13 @@ export function nearSeatRpc(network: NearNetwork, fetchFn: typeof fetch = (...a)
  * busy floor only; no slot is ever given back (holes are a tab's own pace's), an ended wait has taken nothing, and the
  * sends keep GCRA's bound (test/pace-tabs.test.ts: the delta-review cases above, across two tabs). A busy hold
  * (paceHold) is written to the record at once (shareHold); each turn writes the later of the record and the tab's own. With no share, a lock
- * refused, or storage that fails or takes past SHARE_STORAGE_MS, the tab's own pace holds, as before. paceSlot (a
+ * refused or not granted within SHARE_LOCK_MS, or storage that fails or takes past SHARE_STORAGE_MS, the tab's own pace
+ * holds, as before. paceSlot (a
  * reader on a fetch of its own, not paced at its transport: tests) stays the tab's own; every reader of the page is on
  * pacedFetch (test/pace.test.ts, review P3-1).
  */
 export type PaceShare = {
-  locks: { request(name: string, fn: (lock: unknown) => unknown): Promise<unknown> };
+  locks: { request(name: string, options: { signal?: AbortSignal }, fn: (lock: unknown) => unknown): Promise<unknown> };
   storage: { get(key: string): Promise<string | null> | string | null; set(key: string, value: string): Promise<void> | void };
   /** This tab's performance.timeOrigin: the epoch time of its performance.now() 0. */
   origin: number;
@@ -347,6 +348,11 @@ const SHARED_AHEAD_MAX_MS = 120_000;
 /** The longest a read or a write of the shared record is waited, under the URL's lock: a storage that never answers (an
  *  IndexedDB open another tab blocks) must not hold every NEAR read of every tab; past it the tab's own pace has the turn. */
 export const SHARE_STORAGE_MS = 1_000;
+/** The longest a turn or a hold waits to be granted the URL's lock (CO 02:00Z): another tab holding it whose timers
+ *  stopped (throttled or frozen mid-callback, a devtools pause) must not hold every tab's NEAR reads, and no storage
+ *  bound runs while the lock is not granted. A holder's callback is two storage calls of SHARE_STORAGE_MS at most, so
+ *  3 s is a held lock's longest honest wait with room; past it the tab takes its own pace, as on a storage fault. */
+export const SHARE_LOCK_MS = 3_000;
 /** `v` settled within SHARE_STORAGE_MS, else a rejection. */
 function inTime<T>(v: Promise<T> | T): Promise<T> {
   return new Promise<T>((res, rej) => {
@@ -428,7 +434,7 @@ export function paceDb(idb: IDBFactory = indexedDB): PaceShare["storage"] {
 function shareHold(s: PaceShare, p: Pace, now: number): void {
   const url = urlOf(p);
   if (url === undefined) return;
-  s.locks.request(shareKey(url), async () => {
+  s.locks.request(shareKey(url), { signal: AbortSignal.timeout(SHARE_LOCK_MS) }, async () => {
     await loadShared(s, url, p, now);
     await saveShared(s, url, p);
   }).catch(() => unshare(s));
@@ -440,7 +446,8 @@ function urlOf(p: Pace): string | undefined {
 }
 /** One slot of the URL's shared pace: under its lock the record is read (the later of it and this tab's own) and
  *  written back, and a slot due now is taken; else the wait to the next due slot is slept (the caller's signal ends it,
- *  nothing taken) and the turn asked again. A lock the page refuses, like a storage fault, leaves the tab its own pace. */
+ *  nothing taken) and the turn asked again. A lock the page refuses or does not grant within SHARE_LOCK_MS, like a
+ *  storage fault, leaves the tab its own pace; the caller's own end of the wait is thrown as it is. */
 async function sharedTurn(s: PaceShare, p: Pace, signal?: AbortSignal): Promise<void> {
   const url = urlOf(p);
   for (;;) {
@@ -448,7 +455,8 @@ async function sharedTurn(s: PaceShare, p: Pace, signal?: AbortSignal): Promise<
     if (SHARE !== s || url === undefined) return paceTurn(p, signal, true);
     let wait: number;
     try {
-      wait = (await s.locks.request(shareKey(url), async () => {
+      const bound = AbortSignal.timeout(SHARE_LOCK_MS);
+      wait = (await s.locks.request(shareKey(url), { signal: signal ? AbortSignal.any([signal, bound]) : bound }, async () => {
         await loadShared(s, url, p, performance.now());
         const now = performance.now();
         const due = Math.max(p.tat, now) - (p.burst - 1) * p.every;
@@ -457,6 +465,7 @@ async function sharedTurn(s: PaceShare, p: Pace, signal?: AbortSignal): Promise<
         return due - now;
       })) as number;
     } catch {
+      if (signal?.aborted) throw signal.reason;
       unshare(s);
       continue;
     }
