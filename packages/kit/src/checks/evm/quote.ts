@@ -157,6 +157,7 @@ export type EvmQuoteErrorCode =
   | "not_landed" // a provider's head is still below the block a sell's buy landed in, past EVM_MIN_BLOCK_WAIT_MS
   | "below_minimum" // a sell's minOut less the fee rule's cap is under the pool's MIN_DEPOSIT: its deposit back would revert
   | "no_exit" // a buy's route goes through a pool its sell could not leave through
+  | "unlisted_hook_route" // a buy's route of more than one hop goes through a pool whose hook the venue does not list (card evm-quote-x-leg-held-to-its-market)
   | "out_of_gas" // a route of more than one v3 hop that may beat the quote runs out of a read's gas alone at twice the amount (card evm-quote-read-gas-starve)
   | "over_gas_floor"; // a buy's route needs more gas than the pool guarantees its swap, with the margin (card evm-buy-gas-floor); `reference` names the best route that fits, or none fits
 export class EvmQuoteError extends Error {
@@ -2423,6 +2424,18 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const hooks = route.venue === "uniswap-v4" ? [...new Set(route.hops.map((h) => lower(h.hooks)).filter((h) => h !== NATIVE))] : [];
   // the hookless read replaces each hook's code: never an address the reads call, nor the token
   if (hooks.some((h) => v.called.has(h) || h === lower(token))) return refuse("bad_request", "a hook of the route is an address the quote calls");
+  // A route of more than one hop through a pool whose hook the venue does not list is refused before any read (card
+  // evm-quote-x-leg-held-to-its-market): such a hook runs in every read of the route's own pools, so it can make the
+  // route's reference read what it wants (switch off, by reverting or keeping most of a larger swap, the route through
+  // the middle coin's real market that holds a leg seeded at a tenth; hide its own fee from the leg's hold), and three
+  // reviews (of 6be4d55a5, cb7289706, d1db30cee) each found a new way to have a device buy at a tenth through one. Hooks
+  // are taken on a list, the industry baseline: a route of any length through hookless pools or hooks the venue lists
+  // (evmHookListed), and a single hop through any hook, held to every other pool with its hook's take shown and bounded
+  // by minOut (M360; PO1, PO2). The tap asks single hops only, and follows no reference through such a hook (buy-tap.ts)
+  if (route.venue === "uniswap-v4" && route.hops.length > 1) {
+    const k = hopKeys(route).find((x) => x.hooks !== NATIVE && !evmHookListed(chain, x.hooks, x.fee, x.tickSpacing));
+    if (k !== undefined) return refuse("unlisted_hook_route", `the route's pool 0x${poolId(k)} (${k.currency0}/${k.currency1}, fee ${k.fee}, tick spacing ${k.tickSpacing}) is behind the hook ${k.hooks}, which the venue does not list: only a route of one hop may go through such a pool`);
+  }
   // the buy enters only where its sell can leave: the same pools backwards, as the sell builder takes them (card
   // evm-route-parity; review of evm-sell-device-quote, H1), a hook the venue does not list included, as the sell takes
   // one on the route its own quote picks and on the route the note was bought through (card evm-buy-hook-converge)
@@ -2436,15 +2449,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const keys = route.venue === "uniswap-v4" ? hopKeys(route) : [];
   const hookedKeys = keys.filter((k) => k.hooks !== NATIVE && !evmHookListed(chain, k.hooks, k.fee, k.tickSpacing));
   const unlisted = [...new Set(hookedKeys.map((k) => k.hooks))].sort();
-  const subsets = subsetsOf(unlisted);
-  const lows = subsets.map((hs) => (hs.length === hooks.length ? hookless : at(route, amountIn, noopOf(hs))));
-  // the route's read with every such hook replaced, which the X leg is held on (below)
-  const offAll = unlisted.length === 0 ? -1 : lows[subsets.findIndex((hs) => hs.length === unlisted.length)]!;
-  // the route's own pools behind such a hook: R never holds a route through one of them, in any order or repeat, as a
-  // value of that pool's reads is its own hook's word on itself (PO2; review of cb7289706, 2: a loop native -p-> token
-  // -q-> X -q-> token had p back in R as a single hop)
-  const ownPools = new Set(hookedKeys.map(poolId));
-  const usesOwn = (r: EvmRoute) => r.venue === "uniswap-v4" && hopKeys(r).some((k) => ownPools.has(poolId(k)));
+  const lows = subsetsOf(unlisted).map((hs) => (hs.length === hooks.length ? hookless : at(route, amountIn, noopOf(hs))));
   // The pool's swap gas (audit I-4): the route's own swap, run as the pool runs it, is read in the first round
   const fitReads = new Map<EvmRoute, Read | null>();
   let fitAt = "";
@@ -2488,14 +2493,8 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     // minOut (M360), so R is held to every other pool, never to the route's own pool with its hook replaced. A pool of
     // the route with no hook, or a hook the venue lists, is read as it is and counts as any found pool does, as a
     // standard pool's route counts its own (card evm-buy-quotes-pass-on-helper-178: PONS on Robinhood, whose only pool
-    // is a hookless v4 pool at fee 75 and tick spacing 1, refused its own route no_reference). Only a single hop leaves
-    // such a pool out, where the route the set makes from it is the route itself, its one read saved: through a middle
-    // coin X the set makes the token's same pool into a route through X's best market, which the route's X leg is held
-    // to (`curves`, below), while R never holds a route through it (`filled`). Left out there too, nothing held the X
-    // leg: a route through an X market seeded at a tenth of X's price was accepted at a tenth against a native dust pool
-    // of the token (card evm-quote-x-leg-held-to-its-market, review of 6be4d55a5)
-    seen: (keys.length > 1 ? [] : hookedKeys).map(poolId),
-    own: ownPools,
+    // is a hookless v4 pool at fee 75 and tick spacing 1, refused its own route no_reference)
+    seen: hookedKeys.map(poolId),
     banned,
     hints: req.pools,
     sell: false,
@@ -2532,10 +2531,9 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     // the quote below (review of a2d82dc6, F2), so it lowers nothing here. A route that quotes nothing (noMain) counts
     // for nothing, so every route that fills could be R: the floor is 1 wei, the least a route that fills gives
     // (fills: an output above 0), and the bounds are ceilings, so it drops only a pool that gives nothing (0n would
-    // also skip the X prune, which then cuts only such pools). A route through a pool this device banned counts for
-    // nothing the same way, refused whatever it quotes: its floor is 1 wei, so R, which the refusal names, is found
-    // below what the banned pool quotes (review of cb7289706: X's best market behind a hook that let only the quoter
-    // through, banned after its one failed try, pruned X's next market, and the loop ended no_reference, never buying)
+    // also skip the X prune, which then cuts only such pools). A route through a pool this device banned is no route
+    // at all (refused below_reference naming R, below), so it counts for nothing too: its own read, a hook's answer
+    // that only the quoter gets, would prune the token's real market and leave the refusal naming no route
     floor: (out) => lows.reduce((m, i) => {
       const x = out(i);
       return x !== null && x > 0n && x < m ? x : m;
@@ -2564,11 +2562,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // the warm round sent beside the scan was not the one the scan asks for: the quote again, its scan first, on the
   // device's clock as it runs now (card evm-quote-fast-from-asia)
   if (set === null) return evmPoolBuyQuoteWith(req, rpcsIn, nowMs + Math.max(0, mono() - start), scan, watch, mono, false);
-  const { block, out, fills } = set;
-  // R never holds a route through a pool of the route's own behind a hook the venue does not list (`ownPools`, PO2): a single
-  // hop's pool is left out of the set (seen), every other route through one is taken out here (card
-  // evm-quote-x-leg-held-to-its-market)
-  const filled = set.filled.filter((c) => !usesOwn(c.route));
+  const { block, out, fills, filled } = set;
   const q = out(main)!;
   // The routes of more than one v3 hop dropped because a read at twice ran out of its gas alone (`outOfGas`) may be
   // partial fills, so none prices the buy: each stands in every list a verdict is priced against, at its 1x, and a
@@ -2696,24 +2690,6 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   if (value < reference.amountOut) ranOut(reference, "the best route that fits");
   if (value < reference.amountOut && !underHooked) {
     return refuse("below_reference", `the route quotes ${value}, below the standard pool's ${reference.amountOut}`, reference);
-  }
-  // The X leg (card evm-quote-x-leg-held-to-its-market; review of cb7289706, 1): a route through a pool of its own behind
-  // a hook the venue does not list is held to every route the set made through that same pool (X's best market's into
-  // the token's pool with X), on the reads with every such hook replaced: no such hook runs in either, so none can tell
-  // the route's read from the other's. Run as it is, the token's pool's hook could revert, or keep most of, any swap
-  // the size the real X market gives and not the seeded market's tenth, and the X leg went unheld (accepted at a tenth,
-  // and bought). Only the route itself, the same pools in the same order, is left out; the route is refused below the
-  // best of them, which the refusal names. The cost is a refusal, never a buy: such a route whose hook, as it is, gives
-  // less than the route does is named all the same, and its own quote then holds it as any route is held
-  if (unlisted.length > 0) {
-    const off = out(offAll)!;
-    const self = keys.map(poolId).join();
-    let leg: Filled | null = null;
-    for (const c of set.curves) {
-      if (!usesOwn(c.route) || hopKeys(c.route as EvmV4Route).map(poolId).join() === self) continue;
-      if (c.amountOut > off && (leg === null || c.amountOut > leg.amountOut)) leg = c;
-    }
-    if (leg !== null) return refuse("below_reference", `with every hook the venue does not list replaced the route quotes ${off}, below the ${leg.amountOut} a route through the same pool of its own quotes`, leg);
   }
   if (unlisted.length > 0) {
     if (listed !== null && near(listed.amountOut, value)) ranOut(listed, "the best route through listed pools within the slippage");
@@ -2926,9 +2902,6 @@ async function routeSetOf(a: {
   bought?: EvmRoute | undefined;
   /** pool ids the set leaves out */
   seen: readonly string[];
-  /** a buy's own pools behind a hook the venue does not list (pool ids): never the market of X or Y a route is made
-   *  through, so a route through such a market is held to the next one (card evm-quote-x-leg-held-to-its-market) */
-  own?: ReadonlySet<string>;
   /** a sell's banned pools (card evm-sell-hook-converge), PoolIds 0x and 64 lower-case hex digits: never a pool of any
    *  route, a market of X or Y, nor a pool of X with Y, so no pick among X's markets or the token's pools with X falls
    *  on one and shadows the rest (review of 919742f5, F1) */
@@ -2956,7 +2929,7 @@ async function routeSetOf(a: {
   /** what a route must give to matter, read once the first round is in (the buy's own route's Q): a pool that cannot
    *  give it is never quoted (see "The prune"); none for the sell */
   floor?: (out: (i: number) => bigint | null) => bigint;
-}, end: (() => void)[]): Promise<{ block: Block; out: (i: number) => bigint | null; fills: (c: { at: number; twice: number; route?: EvmRoute }, v3?: boolean) => boolean; filled: Filled[]; outOfGas: Filled[]; curves: Filled[] }> {
+}, end: (() => void)[]): Promise<{ block: Block; out: (i: number) => bigint | null; fills: (c: { at: number; twice: number; route?: EvmRoute }, v3?: boolean) => boolean; filled: Filled[]; outOfGas: Filled[] }> {
   const { chain, v, token, amountIn, rpcs, scan, reads } = a;
   // a banned pool is no pool at all to this set (review of 919742f5, F1)
   const isBanned = (k: EvmPoolKey) => a.banned !== undefined && a.banned.has("0x" + poolId(k));
@@ -3522,19 +3495,13 @@ async function routeSetOf(a: {
         }
         marketQuote.set(mk, leg === null ? quoteOf(into, routeOfKey(mk.key, c), [mk.key]) : quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, leg.amount));
       }
-      // and a buy's c one of whose markets is a pool of its own route behind such a hook: the market left out may be the
-      // next market its route is held to, which R needs as it can never hold the route's own (review of cb7289706, 3)
-      if ((priceOf || hs.some((mk) => a.own?.has(mk.id) === true)) && !a.sell && left !== null) marketQuote.set(left[0], quoteOf(into, routeOfKey(left[0].key, c), [left[0].key]));
+      if (priceOf && !a.sell && left !== null) marketQuote.set(left[0], quoteOf(into, routeOfKey(left[0].key, c), [left[0].key]));
     }
   };
-  // c's market whose quote counts for the most of c at the user's amount; the first in order on a tie. `own`: never a
-  // pool of a buy's own route behind a hook the venue does not list (a.own), whose route R never holds: a route through
-  // X's best market behind such a hook is held to X's next market (review of cb7289706, 3: at cb7289706 no_reference,
-  // at 6be4d55a5 its own reference)
-  const bestMarket = (c: string, own = false): Found | null => {
+  // c's market whose quote counts for the most of c at the user's amount; the first in order on a tie
+  const bestMarket = (c: string): Found | null => {
     let [b, bv]: [Found | null, bigint] = [null, 0n];
     for (const mk of markets.get(c) ?? []) {
-      if (own && a.own?.has(mk.id) === true) continue;
       const r = marketQuote.get(mk);
       const x = r === undefined ? null : valueOf(r);
       if (x !== null && (b === null || x > bv)) [b, bv] = [mk, x];
@@ -3547,21 +3514,17 @@ async function routeSetOf(a: {
   const fourth: Read[] = [];
   const further: string[] = [];
   for (const x of xs) {
-    const top = bestMarket(x);
-    if (top === null) {
+    const mk = bestMarket(x);
+    if (mk === null) {
       // a sell's X that no pool of the token reaches gives no route further either
       if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);
       continue;
     }
-    // an X whose only market that fills is a pool of the buy's own behind such a hook has no route R could hold
-    const mk = bestMarket(x, true);
-    if (mk === null) continue;
     // the X the market gives with its hook replaced, as in the route's own read: a pool of X that cannot turn it into
-    // more than Q is not quoted, but through X's next market (the best is the buy's own): its routes are the only ones
-    // through X that R can hold, which the route, through the better market, beats (review of cb7289706, 3)
+    // more than Q is not quoted
     const xa = out(marketQuote.get(mk)!.at)!;
     for (const p of xPools.get(x)!) {
-      if (mk === top && !can(p, xa)) continue;
+      if (!can(p, xa)) continue;
       p.quotes.push(quoteOf(fourth, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]));
     }
   }
@@ -3605,13 +3568,11 @@ async function routeSetOf(a: {
   const seventh: Read[] = [];
   for (const [x, fs] of vias) {
     for (const via of fs) {
-      const mk = ys.includes(via.other) ? bestMarket(via.other, true) : null;
+      const mk = ys.includes(via.other) ? bestMarket(via.other) : null;
       if (mk === null) continue;
       const xa = ubOf(via, out(marketQuote.get(mk)!.at)!);
-      // through Y's next market, as through X's (above)
-      const next = mk !== bestMarket(via.other);
       for (const p of xPools.get(x)!) {
-        if (!next && !can(p, xa)) continue;
+        if (!can(p, xa)) continue;
         const r: EvmV4Route = { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)] };
         p.quotes.push(quoteOf(seventh, r, [mk.key, via.key, p.key]));
       }
@@ -3622,14 +3583,10 @@ async function routeSetOf(a: {
   // The standard pools: each that quotes and fills completely; and every route the device made from a found pool that
   // fills
   const filled: Filled[] = candidates.flatMap((c) => (fills(c, c.route.venue === "uniswap-v3") ? [{ route: c.route, amountOut: out(c.at)! }] : []));
-  // and each such route with a hook replaced, at its read with every such hook replaced, where that read fills: what a
-  // buy's route through one of its own pools behind such a hook is held to (card evm-quote-x-leg-held-to-its-market)
-  const curves: Filled[] = [];
   for (const f of held) {
     for (const c of f.quotes) {
       const x = valueOf(c);
       if (x !== null) filled.push({ route: c.route, amountOut: x });
-      if (c.real !== undefined && fills(c)) curves.push({ route: c.route, amountOut: out(c.at)! });
     }
   }
   if (bought !== null) {
@@ -3642,7 +3599,7 @@ async function routeSetOf(a: {
   // 5452011, S1), so a pool that vanished since never puts its hook's override into a read
   PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j))), scans: asked, xs: [...xPools.keys()] });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
-  return { block, out, fills, filled, outOfGas: [...outOfGas.values()], curves };
+  return { block, out, fills, filled, outOfGas: [...outOfGas.values()] };
 }
 
 // Every quote evmPoolBuyQuote returned: the quoted builder (trade/evm/buy.ts) builds only from one of these
