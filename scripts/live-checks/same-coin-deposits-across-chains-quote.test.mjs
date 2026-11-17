@@ -111,6 +111,18 @@ test("the fee entry is held to the kit's rule both ways: 20 on a listed route, 1
     assert.equal(judge(withQuote(ETH_BASE, mode, (b) => { b.quoteRequest.appFees.push({ recipient: COLLECTOR[mode], fee: 1 }); })).verdict, "FAIL");
   }
 });
+test("an answer that names no fee entry (1Click's since 17 Nov) passes on every route and mode; its public one still meets the whole check", () => {
+  const r = structuredClone(RAW.good);
+  for (const a of r.quotes) {
+    if (a.status !== 200 && a.status !== 201) continue;
+    const b = JSON.parse(a.body); b.quoteRequest.appFees = []; a.body = JSON.stringify(b);
+  }
+  const v = judge(signed(r));
+  assert.equal(v.verdict, "PASS", v.lines.join("\n"));
+  const u = judge(r);
+  assert.equal(u.verdict, "FAIL");
+  assert.ok(bads(u).every((l) => / public: .*\(signature\)/.test(l)), bads(u).join("\n"));
+});
 test("a public answer short of the device's floor fails the whole check (its signed amounts, signed again)", () => {
   const v = judge(withQuote(ETH_BASE, "public", (b) => { b.quote.minAmountOut = "1"; b.quote.amountOut = "2"; b.quote.amountOutFormatted = "0.000000000000000002"; }));
   assert.equal(v.verdict, "FAIL");

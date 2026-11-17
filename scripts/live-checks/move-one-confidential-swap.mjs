@@ -53,11 +53,12 @@ export function facts(index, js) {
   return { index, sha384: sha384(js), marks: Object.keys(MARKS).filter((k) => MARKS[k].test(js)) };
 }
 
-/** One dry quote's answer, kept as the check judges it: its HTTP status, the mode it echoes and the collector it names. */
+/** One dry quote's answer, kept as the check judges it: its HTTP status, the mode it echoes, the collector it names and
+ *  how many fee entries it names (null where appFees is not a list). */
 export function pairOf(pair, status, body) {
   const qr = body && typeof body === "object" ? body.quoteRequest : undefined;
   const fees = Array.isArray(qr?.appFees) ? qr.appFees : [];
-  return { pair, status, mode: qr?.confidentiality ?? null, collector: fees.length === 1 ? fees[0]?.recipient ?? null : null, out: typeof body?.quote?.amountOut === "string" ? body.quote.amountOut : null };
+  return { pair, status, mode: qr?.confidentiality ?? null, collector: fees.length === 1 ? fees[0]?.recipient ?? null : null, entries: Array.isArray(qr?.appFees) ? qr.appFees.length : null, out: typeof body?.quote?.amountOut === "string" ? body.quote.amountOut : null };
 }
 
 /** The verdict on an answer { index, sha384, marks, pairs, tell: { hidden: {status, message}, public: {status, state} } }. */
@@ -75,7 +76,9 @@ export function judge(a) {
     const q = pairs.find((x) => x?.pair === p);
     if (!q) bad(`no dry quote read for ${p}`);
     else if (q.status !== 201) bad(`${p}: the helper's dry "advanced" quote answered HTTP ${q.status}, not 201`);
-    else if (q.mode !== "advanced" || q.collector !== CONF_COLLECTOR || !/^[1-9][0-9]*$/.test(q.out ?? "")) bad(`${p}: the answer is not a confidential quote (mode ${q.mode}, collector ${q.collector}, out ${q.out})`);
+    // no fee entry at all is 1Click's answer since 17 Nov 2026 (card oneclick-answer-names-no-fee-entry); the mode's
+    // echo and the 201 only the partner key gets (keyless, an "advanced" quote answers 401) still show it confidential
+    else if (q.mode !== "advanced" || (q.collector !== CONF_COLLECTOR && q.entries !== 0) || !/^[1-9][0-9]*$/.test(q.out ?? "")) bad(`${p}: the answer is not a confidential quote (mode ${q.mode}, collector ${q.collector}, out ${q.out})`);
   }
   const h = a?.tell?.hidden, u = a?.tell?.public;
   if (!(h?.status === 404 && h?.message === `Deposit address ${HIDDEN} not found`)) bad(`1Click's keyless status no longer answers not found for a confidential address (HTTP ${h?.status}): the Move's tell refuses every Move`);
