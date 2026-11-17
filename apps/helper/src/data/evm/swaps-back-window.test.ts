@@ -53,6 +53,8 @@ function rig(head: number, at: readonly number[], gt?: (url: string) => Promise<
     [getPool, word(BigInt(PCS.pool))],
   ]);
   const swaps = at.map((b, k) => ({ ...PCS.log, blockNumber: `0x${b.toString(16)}`, blockTimestamp: `0x${B.timeOf(b).toString(16)}`, logIndex: "0x1", transactionHash: `0x${(k + 1).toString(16).padStart(64, "e")}` }));
+  // the clock the swaps are opened with (onVirtualTime's), read by the providers' paces and by fill()
+  const now = () => Date.now();
   const st = { posts: 0, poolReads: 0, callerWaits: [] as number[] };
   const free = new Map<string, number>();
   const answer = async (url: string, init: RequestInit): Promise<Response> => {
@@ -81,7 +83,7 @@ function rig(head: number, at: readonly number[], gt?: (url: string) => Promise<
   let loading = true;
   const load = (): void => {
     if (!loading) return;
-    for (const u of B.URLS) free.set(u, Math.max(Date.now(), free.get(u) ?? 0) + PACE_MS);
+    for (const u of B.URLS) free.set(u, Math.max(now(), free.get(u) ?? 0) + PACE_MS);
     setTimeout(load, LOAD_MS);
   };
   setTimeout(load, LOAD_MS);
@@ -89,36 +91,36 @@ function rig(head: number, at: readonly number[], gt?: (url: string) => Promise<
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     if (url.includes("geckoterminal")) return gt!(url);
     st.posts++;
-    const go = Math.max(Date.now(), free.get(url) ?? 0) + PACE_MS;
+    const go = Math.max(now(), free.get(url) ?? 0) + PACE_MS;
     free.set(url, go);
     // a caller's post (the ICNT tape's open): its wait behind the posts already queued at this provider
-    if (String(init.body).includes(B.POOL_ICNT.id)) st.callerWaits.push(go - PACE_MS - Date.now());
-    await new Promise((ok) => setTimeout(ok, go - Date.now()));
+    if (String(init.body).includes(B.POOL_ICNT.id)) st.callerWaits.push(go - PACE_MS - now());
+    await new Promise((ok) => setTimeout(ok, go - now()));
     return answer(url, init);
   };
-  const s = B.open(chain, undefined, { fetch: fetch as never, now: () => Date.now(), pools: new Map([[B.ICNT, B.KNOWN.get(B.ICNT)!]]), hint: async (t) => (t === PCS.asset0 ? PCS.pool : null), ...(gt === undefined ? {} : { gecko: geckoBudget(() => Date.now()) }) });
+  const s = B.open(chain, undefined, { fetch: fetch as never, now, pools: new Map([[B.ICNT, B.KNOWN.get(B.ICNT)!]]), hint: async (t) => (t === PCS.asset0 ? PCS.pool : null), ...(gt === undefined ? {} : { gecko: geckoBudget(now) }) });
   const halt = s.stop;
-  return { s: Object.assign(s, { stop: () => ((loading = false), halt()) }), st };
+  return { s: Object.assign(s, { stop: () => ((loading = false), halt()) }), st, now };
 }
 
 /** The tape read every 500 ms (the tick every TICK_MS) until it says filling no longer or `maxMs` passes: each answer's
  *  time from the first read, its trades and whether it said filling. */
-async function fill(s: ReturnType<typeof B.open>, token: string, maxMs: number, during?: (ms: number) => Promise<void>) {
-  const t0 = Date.now();
+async function fill(s: ReturnType<typeof B.open>, now: () => number, token: string, maxMs: number, during?: (ms: number) => Promise<void>) {
+  const t0 = now();
   const seen: { ms: number; n: number; filling: boolean }[] = [];
   let nextTick = t0;
   let fired = false;
   for (;;) {
-    const ms = Date.now() - t0;
+    const ms = now() - t0;
     const b = JSON.parse((await s.trades(token, TRADES_MAX)).body) as { trades: unknown[]; filling?: boolean };
-    seen.push({ ms: Date.now() - t0, n: b.trades.length, filling: b.filling === true });
+    seen.push({ ms: now() - t0, n: b.trades.length, filling: b.filling === true });
     if (b.filling !== true || ms > maxMs) break;
     if (during !== undefined && !fired && ms >= 8_000) {
       fired = true;
       await during(ms);
     }
-    if (Date.now() >= nextTick) {
-      nextTick = Date.now() + 1_000;
+    if (now() >= nextTick) {
+      nextTick = now() + 1_000;
       void s.tick();
     }
     await new Promise((ok) => setTimeout(ok, 500));
@@ -133,9 +135,9 @@ const QUIET = [0, 120, 300, 450, 560].map((d) => FIRST - 13_500 + d);
 
 test("a quiet Base coin, 5 swaps 45 minutes back, ends filling inside 45 s with each provider answering a post every 850 ms beside the helper's other reads (red at 9855b8fbe: the walk's 12 steps one after another)", async () => {
   const { value } = await onVirtualTime(1_800_000_000_000, async () => {
-    const { s, st } = rig(HEAD, QUIET);
+    const { s, st, now } = rig(HEAD, QUIET);
     try {
-      const seen = await fill(s, PCS.asset0, 120_000);
+      const seen = await fill(s, now, PCS.asset0, 120_000);
       return { seen, posts: st.posts };
     } finally {
       s.stop();
@@ -154,9 +156,9 @@ test("a busy Base coin whose newest step fills the tape reads what it read at 98
   // 60 swaps in the newest step back, past the cold window: the step fills the tape, no window is read
   const busy = Array.from({ length: 60 }, (_, k) => FIRST - 1_400 + k * 20);
   const { value } = await onVirtualTime(1_800_000_000_000, async () => {
-    const { s, st } = rig(HEAD, busy);
+    const { s, st, now } = rig(HEAD, busy);
     try {
-      const seen = await fill(s, PCS.asset0, 120_000);
+      const seen = await fill(s, now, PCS.asset0, 120_000);
       return { seen, posts: st.posts, poolReads: st.poolReads };
     } finally {
       s.stop();
@@ -172,9 +174,9 @@ test("a busy Base coin whose newest step fills the tape reads what it read at 98
 
 test("a caller's read in the middle of a quiet coin's cold fill waits in the providers' queues no more than one PACE_MS over its wait behind the walk (CALLER_WAIT_MS at 9855b8fbe)", async () => {
   const { value } = await onVirtualTime(1_800_000_000_000, async () => {
-    const { s, st } = rig(HEAD, QUIET);
+    const { s, st, now } = rig(HEAD, QUIET);
     try {
-      await fill(s, PCS.asset0, 120_000, async () => {
+      await fill(s, now, PCS.asset0, 120_000, async () => {
         const a = await s.trades(B.ICNT, TRADES_MAX);
         assert.equal(a.status, 200, a.body);
       });
@@ -192,9 +194,9 @@ test("a caller's read in the middle of a quiet coin's cold fill waits in the pro
 test("rows arrive as their spans agree: a coin with a swap every 3,000 blocks of its hour shows more trades answer after answer, each answer short of the hour saying filling, and ends filling only with the window whole", async () => {
   const spread = [2_000, 5_000, 8_000, 11_000, 14_000].map((d) => FIRST - d);
   const { value } = await onVirtualTime(1_800_000_000_000, async () => {
-    const { s } = rig(HEAD, spread);
+    const { s, now } = rig(HEAD, spread);
     try {
-      return await fill(s, PCS.asset0, 120_000);
+      return await fill(s, now, PCS.asset0, 120_000);
     } finally {
       s.stop();
     }
@@ -215,13 +217,13 @@ test("an answer says filling as its rows were taken: a chart asked while the rea
   const { value } = await onVirtualTime(1_800_000_000_000, async () => {
     let release = (): void => undefined;
     const ended = new Promise<void>((ok) => (release = ok));
-    const { s } = rig(HEAD, spread, async () => {
+    const { s, now } = rig(HEAD, spread, async () => {
       await ended;
       return new Response(JSON.stringify({ data: { attributes: { ohlcv_list: [] } } }), { status: 200, headers: { "content-type": "application/json" } });
     });
     try {
       let chart: Promise<{ body: string }> | undefined;
-      const seen = await fill(s, PCS.asset0, 120_000, async () => {
+      const seen = await fill(s, now, PCS.asset0, 120_000, async () => {
         chart = s.candles(PCS.asset0, "1m", null, 500);
       });
       release();
