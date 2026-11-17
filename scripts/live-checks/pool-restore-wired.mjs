@@ -36,6 +36,9 @@
 // second try's start (STEP5_WAIT_MS), so a first try that ends on a read to retry still shows its reads; a told try is
 // never a read (delta review P3-C: a deploy whose step 5 fails before any id read, or reads on one operator only, fails). A local build serves no pinned host, so there that line is not judged. The page's
 // lines are printed with it.
+// Since card sign-in-restore-rides-out-a-held-server the run records each answer of the helper's that was busy (429 or
+// 5xx), by status and route (busy): a run that met one must still end done, the page having waited it out and asked
+// again (release 167's restore stalled on one try at the mark list's 503); the line names them either way.
 // After: sign
 // Bundle: out a browser
 //   node scripts/live-checks/pool-restore-wired.mjs [--record <file>]           the deployed SIGN_HOST
@@ -58,6 +61,8 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const SIGN_HOST = "confidential.unrealized.trade";
 const APP_HOST = "ct-app.unrealized.trade";
 const SIGN = `https://${SIGN_HOST}`;
+/** The helper's host, every route of it (its busy answers are recorded by route). */
+const HELPER_HOST = "ct-api.unrealized.trade";
 const START = "/portfolio";
 export const WAIT_MS = 120_000;
 // BALANCE_MS, the bound on the first pool's balance from Continue (card restore-shows-the-balance-in-seconds): the
@@ -131,6 +136,10 @@ export function judge(rec) {
   say(stages[0] === "reading" && stages.at(-1) === "done" && !stages.includes("stalled"), `its progress reads, then ends done, never stalled (${stages.join(", ") || "none"})`);
   const stalled = (rec?.console ?? []).filter((c) => typeof c === "string" && c.includes("restore stalled:"));
   if (stalled.length) say(false, `the page logged no stalled restore (${stalled.join(" | ")})`);
+  // card sign-in-restore-rides-out-a-held-server: a helper that answered busy (429, 5xx) during the run is waited out,
+  // the run still done; a record from before the card has no `busy`
+  const busy = isObj(rec?.busy) ? Object.entries(rec.busy) : [];
+  if (busy.length) say(auto.length === 1 && auto[0].stage === "done" && stages.at(-1) === "done" && stalled.length === 0, `the helper's busy answers were waited out, the restore done (${busy.map(([k, n]) => `${k} ${n}`).join(", ")})`);
   // each host the run asked, with its count (a record before this card lists its requests one by one)
   const count = isObj(rec?.hosts) ? rec.hosts : Object.fromEntries(Object.entries(Object.groupBy(Array.isArray(rec?.requests) ? rec.requests : [], (x) => x?.host)).map(([h, v]) => [h, v.length]));
   const hosts = Object.keys(count);
@@ -197,7 +206,7 @@ async function until(f, ms = WAIT_MS) {
 }
 
 export async function collect({ local, net = false }) {
-  const rec = { source: local ? `local: this checkout's committed packages/signpage build${net ? ", the pinned hosts on the network" : ""}` : `live ${SIGN}`, at: new Date().toISOString(), browser: null, steps: {}, connect: null, hosts: {}, afterDone: Object.fromEntries(NEAR_OPS.map((h) => [h, 0])), stray: [], console: [], walked: [], errors: [] };
+  const rec = { source: local ? `local: this checkout's committed packages/signpage build${net ? ", the pinned hosts on the network" : ""}` : `live ${SIGN}`, at: new Date().toISOString(), browser: null, steps: {}, connect: null, hosts: {}, afterDone: Object.fromEntries(NEAR_OPS.map((h) => [h, 0])), stray: [], console: [], walked: [], busy: {}, errors: [] };
   // set once the run with no tap is seen done: each NEAR `query` after it is step 5 reading on
   let done = false;
   let built = null;
@@ -245,6 +254,12 @@ export async function collect({ local, net = false }) {
     });
     page.on("response", (res) => {
       if (res.request().isNavigationRequest() && res.frame() === page.mainFrame() && rec.connect === null) rec.connect = connectHosts(res.headers()["content-security-policy"] ?? "");
+      // the helper's busy answers (card sign-in-restore-rides-out-a-held-server): each 429 or 5xx by status and route
+      const st = res.status();
+      try {
+        const u = new URL(res.url());
+        if (u.host === HELPER_HOST && (st === 429 || (st >= 500 && st <= 599))) rec.busy[`${st} ${u.pathname}`] = (rec.busy[`${st} ${u.pathname}`] ?? 0) + 1;
+      } catch {}
     });
     const app = () => page.frames().find((f) => { try { return new URL(f.url()).host === APP_HOST; } catch { return false; } });
     const msgs = () => reports.filter((m) => m.kind === "message");

@@ -33,7 +33,8 @@ import { evmPoolProvidersOf, evmPoolVenues } from "../../kit/src/trade/evm/buy-u
 import { MAINNET_POOL_RPCS, pageEvmPoolRpcs, pageEvmPoolUrls } from "../src/pool-testnet.ts";
 import { RESTORE_GAP, walkEnd, writeRestored, type SeedUse } from "../../wallet/src/notes/restore.ts";
 import { base58, hex } from "@scure/base";
-import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { ReadBusy } from "../src/read-waits.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { askOf, solanaPoolFollowDeps, type PoolDepositEnd, type PoolUxReads } from "../src/pool-deposit-follow.ts";
 import { TRADE_HELPER } from "../src/trade.ts";
@@ -2409,4 +2410,60 @@ test("L12: a Sync whose wait for the stopped resume spans a sign out is refused 
   await r.idle();
   assert.deepEqual(walks, ["signed in"], "no walk after the sign out");
   assert.equal(a.posted.find((m) => m.id === id && m.error !== undefined)?.error?.code, "not_allowed");
+});
+
+// card sign-in-restore-rides-out-a-held-server: release 167's sign-in restore ended "solana: HTTP 503 (http_5xx, 1 try at
+// ct-api.unrealized.trade)", stalled on one try while the helper's mark list was held. A busy answer (HTTP 429 or 5xx, a
+// JSON-RPC throttle) on any chain's walk is waited out on the throttle rule, the provider's Retry-After honoured, and the
+// walk asked again; the run ends done. Anything else still stalls at once, and a provider busy past the bound still stalls.
+const busySol = (fault: "http_5xx" | "http_429" | "rpc_throttled", afterMs: number | null = null) => new SolanaRpcTransportError(fault, fault === "http_5xx" ? "HTTP 503" : "HTTP 429", 1, "ct-api.unrealized.trade", afterMs);
+const nearBusy = (status: number, retryAfterMs?: number) => Object.assign(new Error(`HTTP ${status}`), { status, ...(retryAfterMs === undefined ? {} : { retryAfterMs }) });
+const NEAR_POOL: RestorePool = { chain: "near", network: "mainnet", scope: 33n, rpcs: () => [{ name: "a", query: async () => null }, { name: "b", query: async () => null }] as never };
+test("a busy provider on every chain's walk: the helper's 503 and 429 (Retry-After honoured), a JSON-RPC throttle and NEAR's 503 are waited out and walked again; the run ends done with every pool's notes", async () => {
+  const waits: number[] = [];
+  const tries = { solana: 0, evm: 0, near: 0 };
+  const w = await world({
+    pools: () => [NEAR_POOL, ...POOLS],
+    busyWait: async (ms) => void waits.push(ms),
+    // the mark list's 503 twice, then the list
+    solana: (async () => (++tries.solana <= 2 ? Promise.reject(busySol("http_5xx")) : { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never,
+    // the helper's 429 naming 4 s, a JSON-RPC throttle inside a 200 wrapped by the walk, then the logs
+    evm: (async () => {
+      const n = ++tries.evm;
+      if (n === 1) throw busySol("http_429", 4_000);
+      if (n === 2) throw new Error("rpc 1: eth_getLogs failed", { cause: busySol("rpc_throttled") });
+      return { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n };
+    }) as never,
+    vault: (async () => (++tries.near === 1 ? Promise.reject(nearBusy(503)) : { notes: [] })) as never,
+  });
+  assert.equal(await w.r.auto(), "done");
+  assert.deepEqual(w.ends, [{ stage: "done", why: [] }]);
+  assert.deepEqual(tries, { solana: 3, evm: 3, near: 2 });
+  // each pool's own rule: Solana 1 s then 2 s, Base the 429's 4 s then 8 s, NEAR 1 s
+  assert.deepEqual([...waits].sort((a, b) => a - b), [1_000, 1_000, 2_000, 4_000, 8_000]);
+  assert.deepEqual(await listed(w.store), [...notesOf(SOL_SCOPE, LABEL_S, 1000n), ...notesOf(EVM_SCOPE, LABEL_E, 2000n)].map((n) => `${refKey(n.ref)} ${n.state}`).sort());
+});
+test("a busy provider past the bound ends the run stalled naming its last answer, its waits within RESTORE_BUSY_TOTAL_MS; an answer that is not busy stalls on its one try", async () => {
+  const waits: number[] = [];
+  let solTries = 0;
+  const w = await world({ busyWait: async (ms) => void waits.push(ms), solana: (async () => (solTries++, Promise.reject(busySol("http_5xx")))) as never });
+  assert.equal(await w.r.auto(), "stalled");
+  assert.deepEqual(w.ends, [{ stage: "stalled", why: ["solana: HTTP 503 (http_5xx, 1 try at ct-api.unrealized.trade)"] }]);
+  assert.ok(waits.reduce((a, b) => a + b, 0) <= restoreKind.RESTORE_BUSY_TOTAL_MS);
+  assert.deepEqual(waits, [1_000, 2_000, 4_000, 8_000, 10_000, 10_000, 10_000, 10_000]);
+  assert.equal(solTries, waits.length + 1);
+  let evmTries = 0;
+  const x = await world({ busyWait: async () => assert.fail("no wait"), evm: (async () => (evmTries++, Promise.reject(new SolanaRpcTransportError("timeout", "no answer in 3500 ms", 1, "rpc.example")))) as never });
+  assert.equal(await x.r.auto(), "stalled");
+  assert.equal(evmTries, 1);
+});
+test("busyOf: the page client's 429, 5xx and JSON-RPC throttle, a busy vendor answer and NEAR's 429 or 5xx, on the error or its cause; nothing else", () => {
+  assert.deepEqual(restoreKind.busyOf(busySol("http_5xx")), { afterMs: null });
+  assert.deepEqual(restoreKind.busyOf(busySol("http_429", 7_000)), { afterMs: 7_000 });
+  assert.deepEqual(restoreKind.busyOf(new Error("x", { cause: busySol("rpc_throttled") })), { afterMs: null });
+  assert.deepEqual(restoreKind.busyOf(new ReadBusy(503, 2_000)), { afterMs: 2_000 });
+  assert.deepEqual(restoreKind.busyOf(nearBusy(429, 3_000)), { afterMs: 3_000 });
+  assert.deepEqual(restoreKind.busyOf(nearBusy(502)), { afterMs: null });
+  for (const e of [new SolanaRpcTransportError("timeout", "t", 1, "h"), new SolanaRpcTransportError("not_json", "t", 1, "h"), nearBusy(400), new Error("HTTP 503"), "HTTP 503", null])
+    assert.equal(restoreKind.busyOf(e), null, String(e));
 });

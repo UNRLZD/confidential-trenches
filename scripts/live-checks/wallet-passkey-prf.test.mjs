@@ -391,7 +391,7 @@ test("live547 (the sign live run 42499353181's early Backup press at 547 ms, the
 
 test("the good answer's verdict is PASS, and every recorded bad answer's is FAIL", () => {
   assert.equal(judge(answers.good).verdict, "PASS");
-  for (const k of Object.keys(answers).filter((x) => x !== "note" && x !== "good" && x !== "live547")) assert.equal(judge(answers[k]).verdict, "FAIL", k);
+  for (const k of Object.keys(answers).filter((x) => x !== "note" && x !== "good" && x !== "live547" && x !== "raceCard")) assert.equal(judge(answers[k]).verdict, "FAIL", k);
 });
 
 // each in-window press, by where its record is and what its window reads: [name, step, timing at the edge, an act]
@@ -613,4 +613,46 @@ test("a record cut before this card (good, 2 Nov, before the reload) passes its 
   assert.ok(!BAD(old).some((l) => l.startsWith("BAD prf: Sign out") || l.startsWith("BAD phone: a still tap after")), BAD(old).join("\n"));
   const now = judgeNow(old).lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0]);
   assert.ok(now.includes(SO_NOW) && now.includes(STILL_NOW), now.join("\n"));
+});
+
+// card sign-in-restore-rides-out-a-held-server: the helper's mark list (/v1/rpc/solana-marks) answering 503 or 429 to the
+// signed-in page's restore read (release 167, 16 Nov 22:33Z and 22:50Z: two console 503s there) is the helper's, which
+// the page waits out: each line matched by a response the page read is a WARN with its count, never FAIL and never
+// hidden; a line with no response under it, or a 503 on another route, stays BAD.
+const MARKS = "https://ct-api.unrealized.trade/v1/rpc/solana-marks";
+const marks503 = `console: Failed to load resource: the server responded with a status of 503 () (${MARKS})`;
+const withMarks = (seen, errors) => {
+  const r = clone(answers.good);
+  r.marketRefused = seen;
+  r.errors.push(...errors);
+  return judge(r);
+};
+test("the helper's mark list busy (503, 429) under the page's own responses is a WARN, named; unmatched or elsewhere stays BAD", () => {
+  const run = withMarks([{ url: MARKS, status: 503 }, { url: MARKS, status: 503 }], [marks503, marks503]);
+  assert.equal(run.verdict, "PASS", run.lines.filter((l) => !l.startsWith("ok")).join("\n"));
+  assert.ok(run.lines.includes("WARN the helper's mark list answered busy 2 times (429 or 503), a restore read the page waits out; the helper's, not the page's error"), run.lines.join("\n"));
+  assert.equal(withMarks([{ url: MARKS, status: 429 }], [marks503.replace("503", "429")]).verdict, "PASS");
+  assert.equal(withMarks([], [marks503]).verdict, "FAIL", "a console 503 with no response read under it");
+  assert.equal(withMarks([{ url: MARKS, status: 503 }], [marks503, marks503]).verdict, "FAIL", "more lines than responses");
+  assert.equal(withMarks([{ url: MARKS, status: 429 }], [marks503]).verdict, "FAIL", "a 503 line under a 429 response");
+  assert.equal(withMarks([{ url: MARKS, status: 503 }], ["console: Failed to load resource: the server responded with a status of 503 () (https://ct-api.unrealized.trade/v1/rpc/solana)"]).verdict, "FAIL", "the solana route's 503");
+});
+// live167: the live page on release 167 (16 Nov 22:50Z, on the Mac), recorded before the check read the mark list's
+// responses: its two 503 lines there have none under them, so they stay BAD, and the two-tab race is BAD (tab a
+// Cancelled, tab b signed in: the page's fault this card fixes, src/main.ts landStored)
+test("recorded bad answer: release 167's live run fails on the two-tab race and on its mark-list 503 lines", () => {
+  const b = BAD(answers.live167);
+  assert.ok(b.includes("BAD prf: two tabs that create at once end on one account, the one stored"), b.join("\n"));
+  assert.ok(b.some((l) => l.startsWith("BAD no page error or CSP violation")), b.join("\n"));
+  assert.deepEqual([answers.live167.prf.race.a.state, answers.live167.prf.race.b.state], ["cancelled", "signed-in"]);
+});
+// raceMain / raceCard: the harness run of main 6df1ca4e2's page and of this card's, each read by this card's check: the
+// tab whose sheet Chrome refused stays Cancelled on main (FAIL), and on the card's page lands on the other tab's seed
+test("recorded race runs: main's page leaves tab a Cancelled (FAIL); this card's page lands it on the stored account (PASS)", () => {
+  assert.deepEqual(BAD(answers.raceMain), ["BAD prf: two tabs that create at once end on one account, the one stored"]);
+  assert.equal(answers.raceMain.prf.race.a.state, "cancelled");
+  const r = judge(answers.raceCard);
+  assert.equal(r.pass, true, r.lines.join("\n"));
+  assert.deepEqual([answers.raceCard.prf.race.a.first, answers.raceCard.prf.race.a.state], ["cancelled", "signed-in"]);
+  assert.equal(answers.raceCard.prf.race.a.account, answers.raceCard.prf.race.b.account);
 });

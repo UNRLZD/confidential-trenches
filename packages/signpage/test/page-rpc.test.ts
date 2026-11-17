@@ -605,3 +605,30 @@ test("a page read of base-rpc.publicnode.com takes the kit's lane for the provid
     evmPaceReset();
   }
 }));
+
+// card sign-in-restore-rides-out-a-held-server: the mark lister reads only for a settle and the restore, which have no
+// quote to age, so it waits out a helper's hold as the settle pair's helper seat does: a 429 or 503 whose Retry-After
+// (6 s here; the helper names up to 10 s) is past the trade bound's 3.5 s is asked again once it ends, never refused on
+// its one try (release 167's sign-in restore: "solana: HTTP 503 (http_5xx, 1 try at ct-api.unrealized.trade)").
+test("the mainnet mark lister rides out the helper's 429 and 503 with a Retry-After of 6 s: asked again after it, answered", () => onTestClock(async () => {
+  const real = globalThis.fetch;
+  try {
+    for (const status of [429, 503]) {
+      resetHostLanes();
+      const sent: number[] = [];
+      globalThis.fetch = (async (_u: string | URL | Request, init?: RequestInit) => {
+        const b = JSON.parse(String(init?.body)) as { id: string };
+        sent.push(performance.now());
+        if (sent.length === 1) return new Response(JSON.stringify({ error: { code: "rate_limited" } }), { status, headers: { "retry-after": "6" } });
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: 42 }), { status: 200 });
+      }) as typeof fetch;
+      const lister = pageSolanaLister()!;
+      assert.equal(await lister("getProgramAccounts", ["EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 17 }] }]), 42, `${status}`);
+      assert.equal(sent.length, 2, `${status}: asked again once`);
+      assert.ok(sent[1]! - sent[0]! >= 6_000, `${status}: after the Retry-After (${sent[1]! - sent[0]!} ms)`);
+    }
+  } finally {
+    globalThis.fetch = real;
+    resetHostLanes();
+  }
+}));

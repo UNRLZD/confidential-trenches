@@ -107,7 +107,9 @@ g.BroadcastChannel = class extends BC {
   }
 };
 
-g.fetch = async () => new Response("{}", { status: 503 });
+// (a 404, a refusal: a 503 is a busy answer the restore waits out and asks again, card
+// sign-in-restore-rides-out-a-held-server, which would hold these steps' process for its waits)
+g.fetch = async () => new Response("{}", { status: 404 });
 
 export const until = async (what: string, ok: () => boolean) => {
   for (let t = 0; t < 500; t++) {

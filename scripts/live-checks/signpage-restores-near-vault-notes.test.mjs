@@ -44,3 +44,27 @@ test("planted bad answers: a vault the page could not read, a run that ends stal
   fails(mut((rec) => (rec.steps.asked.stages = ["reading", "stalled"])), /never stalled/);
   fails(mut((rec) => (rec.connect = rec.connect.filter((h) => h !== "near.drpc.org"))), /not in its connect-src: near\.drpc\.org/);
 });
+
+// card sign-in-restore-rides-out-a-held-server: the check records the helper's busy answers by route (busy) and holds a
+// run that met one to its end, done
+test("recorded bad answer: release 167's sign-in restore stalled on one try at the helper's mark list 503: FAIL, the busy answer named", () => {
+  const r = judge(A.live167);
+  fails(r, /ran one restore with no tap, and it ended done/);
+  fails(r, /restore stalled: solana: HTTP 503 \(http_5xx, 1 try at ct-api\.unrealized\.trade\)/);
+  fails(r, /the helper's busy answers were waited out, the restore done \(503 \/v1\/rpc\/solana-marks 2\)/);
+  assert.deepEqual(A.live167, WIRED.live167);
+});
+test("recorded run of this card's build on the same helper: the mark list asked again 18 times, every answer 503, stalled at its bound: FAIL", () => {
+  fails(judge(A.net167Branch), /the helper's busy answers were waited out, the restore done \(503 \/v1\/rpc\/solana-marks 18\)/);
+  assert.deepEqual(A.net167Branch, WIRED.net167Branch);
+});
+test("planted good answer: a run that met the helper's 503 and 429 on the mark list and ended done: PASS, the busy answers named", () => {
+  const rec = structuredClone(WIRED.live135);
+  rec.busy = { "503 /v1/rpc/solana-marks": 2, "429 /v1/rpc/solana-marks": 1 };
+  const r = judge(rec);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.ok(r.lines.includes("OK  the helper's busy answers were waited out, the restore done (503 /v1/rpc/solana-marks 2, 429 /v1/rpc/solana-marks 1)"), r.lines.join("\n"));
+  // the same busy answers on a run that ended stalled: FAIL
+  rec.steps.asked.stages = ["reading", "stalled"];
+  fails(judge(rec), /busy answers were waited out/);
+});
