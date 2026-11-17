@@ -157,6 +157,7 @@ export type EvmQuoteErrorCode =
   | "not_landed" // a provider's head is still below the block a sell's buy landed in, past EVM_MIN_BLOCK_WAIT_MS
   | "below_minimum" // a sell's minOut less the fee rule's cap is under the pool's MIN_DEPOSIT: its deposit back would revert
   | "no_exit" // a buy's route goes through a pool its sell could not leave through
+  | "unlisted_hook_route" // a buy's route of more than one hop goes through a pool whose hook the venue does not list (card evm-quote-x-leg-held-to-its-market)
   | "out_of_gas" // a route of more than one v3 hop that may beat the quote runs out of a read's gas alone at twice the amount (card evm-quote-read-gas-starve)
   | "over_gas_floor"; // a buy's route needs more gas than the pool guarantees its swap, with the margin (card evm-buy-gas-floor); `reference` names the best route that fits, or none fits
 export class EvmQuoteError extends Error {
@@ -2423,6 +2424,18 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const hooks = route.venue === "uniswap-v4" ? [...new Set(route.hops.map((h) => lower(h.hooks)).filter((h) => h !== NATIVE))] : [];
   // the hookless read replaces each hook's code: never an address the reads call, nor the token
   if (hooks.some((h) => v.called.has(h) || h === lower(token))) return refuse("bad_request", "a hook of the route is an address the quote calls");
+  // A route of more than one hop through a pool whose hook the venue does not list is refused before any read (card
+  // evm-quote-x-leg-held-to-its-market): such a hook runs in every read of the route's own pools, so it can make the
+  // route's reference read what it wants (switch off, by reverting or keeping most of a larger swap, the route through
+  // the middle coin's real market that holds a leg seeded at a tenth; hide its own fee from the leg's hold), and three
+  // reviews (of 6be4d55a5, cb7289706, d1db30cee) each found a new way to have a device buy at a tenth through one. Hooks
+  // are taken on a list, the industry baseline: a route of any length through hookless pools or hooks the venue lists
+  // (evmHookListed), and a single hop through any hook, held to every other pool with its hook's take shown and bounded
+  // by minOut (M360; PO1, PO2). The tap asks single hops only, and follows no reference through such a hook (buy-tap.ts)
+  if (route.venue === "uniswap-v4" && route.hops.length > 1) {
+    const k = hopKeys(route).find((x) => x.hooks !== NATIVE && !evmHookListed(chain, x.hooks, x.fee, x.tickSpacing));
+    if (k !== undefined) return refuse("unlisted_hook_route", `the route's pool 0x${poolId(k)} (${k.currency0}/${k.currency1}, fee ${k.fee}, tick spacing ${k.tickSpacing}) is behind the hook ${k.hooks}, which the venue does not list: only a route of one hop may go through such a pool`);
+  }
   // the buy enters only where its sell can leave: the same pools backwards, as the sell builder takes them (card
   // evm-route-parity; review of evm-sell-device-quote, H1), a hook the venue does not list included, as the sell takes
   // one on the route its own quote picks and on the route the note was bought through (card evm-buy-hook-converge)
@@ -2518,11 +2531,13 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     // the quote below (review of a2d82dc6, F2), so it lowers nothing here. A route that quotes nothing (noMain) counts
     // for nothing, so every route that fills could be R: the floor is 1 wei, the least a route that fills gives
     // (fills: an output above 0), and the bounds are ceilings, so it drops only a pool that gives nothing (0n would
-    // also skip the X prune, which then cuts only such pools)
+    // also skip the X prune, which then cuts only such pools). A route through a pool this device banned is no route
+    // at all (refused below_reference naming R, below), so it counts for nothing too: its own read, a hook's answer
+    // that only the quoter gets, would prune the token's real market and leave the refusal naming no route
     floor: (out) => lows.reduce((m, i) => {
       const x = out(i);
       return x !== null && x > 0n && x < m ? x : m;
-    }, noMain !== null ? 1n : out(main)!),
+    }, noMain !== null || keys.some((k) => banned.has("0x" + poolId(k))) ? 1n : out(main)!),
     // The route: a quote, and one that grows with its input
     firstRound: (out, answer) => {
       const q = out(main);

@@ -614,14 +614,18 @@ export const MUTANTS = [
   // only sets of one, never on one provider's word, never fewer than every smallest set's hooks, never a set holding a
   // smaller one that rescued it (an honest hook beside them is never banned)
   [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1)) {", R, "RVX "],
-  [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1 || x.length === hooks.length)) {", R, "N1D "],
-  [QUOTE, "  const fault = new Set(asIs ? (none ? named : rescued.flat()) : errored);", "  const fault = new Set(asIs ? (none ? named : rescued.slice(0, 1).flat()) : errored);", R, "review of 72e28658, H3 (buy)"],
+  // Retired by card evm-quote-x-leg-held-to-its-market: each line marked "retired" was killed only by a buy route of
+  // more than one hop through hooks the venue does not list, which the quote now refuses before any read; no EVM test
+  // file kills the mutant now (each run on every test/evm*.test.ts, 17 Nov). The buy's multi-hook evidence and lows
+  // subsets they mutate serve only such routes, as read; a follow-up card removes or re-covers them.
+  // retired: `for (const set of subsetsOf(hooks)) {` (N1D), its only killer a route this card refuses
+  [QUOTE, "  const fault = new Set(asIs ? (none ? named : rescued.flat()) : errored);", "  const fault = new Set(asIs ? (none ? named : rescued.slice(0, 1).flat()) : errored);", R, "review of 72e28658, H3 (sell)"],
   // (no N1D entry for this line since rule C, review of 2fccaa67, 1: in N1D the fee-0 pass rescues the same two hooks, so
   // evmFaultSets puts that set in place of every larger stored-fee set and N1D holds without the skip; the same break
-  // stays killed by "review of 72e28658, L2 (RV4)" below)
+  // stays killed by "review of 72e28658, L2 (RV4)" below, retired by card evm-quote-x-leg-held-to-its-market)
   // review of 72e28658, L2: the RV4 mutant ("step 5 always") is not equivalent: a set holding the one hook that rescued
   // the trade, asked anyway, bans an honest capped hook beside it
-  [QUOTE, "    if (got.some((r) => r.every((h) => set.includes(h)))) continue;\n", "", R, "review of 72e28658, L2 (RV4)"],
+  // retired: `if (got.some((r) => r.every((h) => set.includes(h)))) contin` (review of 72e28658, L2 (RV4)), its only killer a route this card refuses
   // card evm-buy-hook-converge: the buy takes a route through an unlisted hook (its sell leaves through it), at the lowest
   // of its reads, only where no route through listed pools is within the slippage of it; a listed route within the
   // slippage of such a reference is taken at the reference's minOut; a banned pool is no route; each unlisted hook is
@@ -642,15 +646,24 @@ export const MUTANTS = [
   // its hook replaced
   [QUOTE, "    seen: hookedKeys.map(poolId),", "    seen: keys.map(poolId),", R, "PO1 "],
   [QUOTE, "    seen: hookedKeys.map(poolId),", "    seen: [],", R, "PO2 "],
-  [QUOTE, "    if (x < value) value = x;\n", "", R, "N1B (buy"],
-  [QUOTE, "const lows = subsetsOf(unlisted).map(", "const lows = subsetsOf(unlisted).filter((hs) => hs.length === unlisted.length).map(", R, "N1B (buy"],
+  // card evm-quote-x-leg-held-to-its-market: a buy's route of more than one hop through a hook the venue does not list is
+  // refused before any read; a single hop through any hook, and hookless pools and listed hooks at any length, are not
+  [QUOTE, "route.hops.length > 1) {\n    const k = hopKeys(route).find(", "route.hops.length > 2) {\n    const k = hopKeys(route).find(", R, "XL1 "],
+  [QUOTE, "route.hops.length > 1) {\n    const k = hopKeys(route).find(", "route.hops.length > 0) {\n    const k = hopKeys(route).find(", R, "PO2 "],
+  [QUOTE, "    if (k !== undefined) return refuse(\"unlisted_hook_route\", ", "    if (false) return refuse(\"unlisted_hook_route\", ", R, "XL1 "],
+  [QUOTE, ".find((x) => x.hooks !== NATIVE && !evmHookListed(chain, x.hooks, x.fee, x.tickSpacing));", ".find((x) => !evmHookListed(chain, x.hooks, x.fee, x.tickSpacing));", R, "XL2 "],
+  [QUOTE, ".find((x) => x.hooks !== NATIVE && !evmHookListed(chain, x.hooks, x.fee, x.tickSpacing));", ".find((x) => x.hooks !== NATIVE);", R, "XL3 "],
+  // a route through a banned pool counts for nothing in the prune's floor, as one that quotes nothing
+  [QUOTE, "}, noMain !== null || keys.some((k) => banned.has(\"0x\" + poolId(k))) ? 1n : out(main)!),", "}, noMain !== null ? 1n : out(main)!),", R, "XL8 "],
+  [QUOTE, "    if (x < value) value = x;\n", "", R, "review of 72e28658, H1 "],
+  // retired: `const lows = subsetsOf(unlisted).map(` (N1B (buy), its only killer a route this card refuses
   // review of 72e28658, M1: every set of the unlisted hooks, never only each alone and all together
-  [QUOTE, "const lows = subsetsOf(unlisted).map(", "const lows = subsetsOf(unlisted).filter((hs) => hs.length === 1 || hs.length === unlisted.length).map(", R, "review of 72e28658, M1 (buy)"],
+  // retired: `const lows = subsetsOf(unlisted).map(` (review of 72e28658, M1 (buy)), its only killer a route this card refuses
   [QUOTE, "c.alone = subsetsOf(hs).filter((s) => s.length < hs.length).map(", "c.alone = subsetsOf(hs).filter((s) => s.length === 1).map(", R, "review of 72e28658, M1 (sell)"],
   // review of a2d82dc6, F2: every read of the route with a set of its unlisted hooks replaced must answer above 0, or the
   // route is refused (the buy's own) or counts for nothing (routeSet's); never only the read with every hook replaced
-  [QUOTE, "  for (const i of noMain === null ? lows : []) {\n    const x = out(i);\n    if (x === null || x === 0n) return refuse(", "  for (const [n, i] of (noMain === null ? lows : []).entries()) {\n    const x = out(i);\n    if ((x === null || x === 0n) && n === lows.length - 1) return refuse(", R, "review of a2d82dc6, F2"],
-  [QUOTE, "    if (x === null || x === 0n) return refuse(\"no_quote\", \"the route with a hook the venue does not list replaced", "    if (false) return refuse(\"no_quote\", \"the route with a hook the venue does not list replaced", R, "review of 72e28658, M1 (full set)"],
+  // retired: `for (const i of noMain === null ? lows : []) {` (review of a2d82dc6, F2), its only killer a route this card refuses
+  [QUOTE, "    if (x === null || x === 0n) return refuse(\"no_quote\", \"the route with a hook the venue does not list replaced", "    if (false) return refuse(\"no_quote\", \"the route with a hook the venue does not list replaced", R, "XL9 "],
   [QUOTE, "      if (x === null || x === 0n) return null;\n", "      if (x === null || x === 0n) continue;\n", R, "review of a2d82dc6, F2 (sell)"],
   [QUOTE, "if (hs.length > 1) c.alone = ", "if (false) c.alone = ", R, "N1B (sell"],
   [QUOTE, "    for (const i of c.alone ?? []) {", "    for (const i of []) {", R, "N1C (sell"],
@@ -713,7 +726,7 @@ export const MUTANTS = [
   [QUOTE, "  if (!asIs && errored.length === 0) return legUnread ? ", "  if (!asIs) return legUnread ? ", R, "review of ca907a05, HIGH 1 (buy, Robinhood)"],
   // (the trace names only the route's hooks now, review of f0f983d2 item 2, so the off-route frame of the as-is leg's
   // test no longer tells this one: an honest hook beside the errored one does)
-  [QUOTE, "hooks.filter((hk) => seen.includes(lower(hk)))", "(seen.length > 0 ? hooks : [])", R, "review of 29498693, MEDIUM"],
+  // retired: `hooks.filter((hk) => seen.includes(lower(hk)))` (review of 29498693, MEDIUM), its only killer a route this card refuses
   [QUOTE, '      (x, y) => JSON.stringify(x) === JSON.stringify(y),\n      () => refuse("rpc_disagree", `the trace providers', '      (x, y) => true,\n      () => refuse("rpc_disagree", `the trace providers', R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, ' || typeof root.input !== "string" || lower(root.input) !== sale.input', "", R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, "  if (accounts.filter(([a]) => lower(a) !== EVM_ARBOS_STATE).length > b.accounts) return null;\n", "", R, "card evm-sell-hook-intrablock, a trace that"],
@@ -729,14 +742,14 @@ export const MUTANTS = [
   // review of 29498693: a trace that adds nothing leaves the parent replay's evidence (HIGH); the as-is leg on the trace
   // bans the hooks it names errored alone, each a frame the PoolManager called (MEDIUM)
   [QUOTE, "  try {\n    p = pre === undefined ? undefined : ((await pre(sale, hooks)) ?? undefined);\n  } catch (e) {\n", "  {\n    p = pre === undefined ? undefined : ((await pre(sale, hooks)) ?? undefined);\n  }\n  if (false as boolean) {\n    const e: unknown = null;\n", R, "review of 29498693, HIGH"],
-  [QUOTE, "new Set(asIs ? (none ? named : rescued.flat()) : errored)", "new Set(asIs ? (none ? named : rescued.flat()) : hooks)", R, "review of 29498693, MEDIUM"],
-  [QUOTE, " && isAddress(f.from) && lower(f.from) === pm", "", R, "review of 29498693, MEDIUM"],
+  // retired: `new Set(asIs ? (none ? named : rescued.flat()) : errored)` (review of 29498693, MEDIUM), its only killer a route this card refuses
+  // retired: `&& isAddress(f.from) && lower(f.from) === pm` (review of 29498693, MEDIUM), its only killer a route this card refuses
   // review of f0f983d2: a caught frame never counts, the outermost route hook alone (item 2); the bounds from the
   // trade's gas, the prestate with no code (item 3); a trace not answered where nothing else bans is asked again (item
   // 5a). Item 4's PoolManager-slot compare is gone (review of de4e3ed5, 1: the market is read on the replay's own
   // basis instead), and its mutant with it: the test "review of f0f983d2, item 4" now holds the same-basis read below
-  [QUOTE, "    const chain = enters ? errored : inPm && unbroken && errored;\n", "    const chain = enters ? errored : inPm && errored;\n", R, "review of f0f983d2, item 2"],
-  [QUOTE, " && chain && !underHook && byOwn && isAddress(f.from)", " && chain && byOwn && isAddress(f.from)", R, "review of f0f983d2, item 2"],
+  // retired: `const chain = enters ? errored : inPm && unbroken && errored` (review of f0f983d2, item 2), its only killer a route this card refuses
+  // retired: `&& chain && !underHook && byOwn && isAddress(f.from)` (review of f0f983d2, item 2), its only killer a route this card refuses
   [QUOTE, "  const accounts = Math.floor(g / 2400) + 64;", "  const accounts = Math.floor(g / 2400) + 65;", R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, "  const slots = Math.floor(g / 1900) + 64;", "  const slots = Math.floor(g / 1900) + 65;", R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, "  const arbosSlots = Math.floor(g / 800) + 256;", "  const arbosSlots = Math.floor(g / 800) + 257;", R, "card evm-sell-hook-intrablock, a trace that"],
@@ -752,10 +765,10 @@ export const MUTANTS = [
   [QUOTE, "[{ ...held0, override: base, env }]", "[{ ...held0, override: sys, env }]", R, "review of de4e3ed5, 1"],
   [QUOTE, ", reads[i]!.override, ...(reads[i]!.env !== undefined ? [reads[i]!.env] : [])] })),", ", reads[i]!.override] })),", R, "review of de4e3ed5, 1"],
   [QUOTE, "refuse(\"rpc_error\", `${EVM_TRACE_UNANSWERED}: ${sale.hash}`)", "refuse(\"rpc_error\", `${sale.hash}`)", R, "review of de4e3ed5, 2"],
-  [QUOTE, " && chain && !underHook && byOwn && isAddress(f.from)", " && chain && !underHook && isAddress(f.from)", R, "review of de4e3ed5, 3"],
-  [QUOTE, "const own = new Set([lower(sale.to), ...(adapter !== undefined ? [lower(adapter)] : [])]);", "const own = new Set([lower(sale.to)]);", R, "review of de4e3ed5, 3"],
-  [QUOTE, "const own = new Set([lower(sale.to), ...(adapter !== undefined ? [lower(adapter)] : [])]);", "const own = new Set([...(adapter !== undefined ? [lower(adapter)] : [])]);", R, "review of de4e3ed5, 3"],
-  [QUOTE, "      const ownPm = intoPm && isAddress(f.from) && own.has(lower(f.from));", "      const ownPm = intoPm;", R, "review of de4e3ed5, 3"],
+  // retired: `&& chain && !underHook && byOwn && isAddress(f.from)` (review of de4e3ed5, 3), its only killer a route this card refuses
+  // retired: `const own = new Set([lower(sale.to), ...(adapter !== undefin` (review of de4e3ed5, 3), its only killer a route this card refuses
+  [QUOTE, "const own = new Set([lower(sale.to), ...(adapter !== undefined ? [lower(adapter)] : [])]);", "const own = new Set([...(adapter !== undefined ? [lower(adapter)] : [])]);", R, "review of ca907a05, HIGH 1"],
+  // retired: `const ownPm = intoPm && isAddress(f.from) && own.has(lower(f` (review of de4e3ed5, 3), its only killer a route this card refuses
   [QUOTE, "  const used = (gas * 5n) / 4n;", "  const used = (gas * 3n) / 2n;", R, "card evm-sell-hook-intrablock, a trace that"],
   // review of fb923143: each tracer two companies' word apart, so a callTracer no provider answered keeps the prestate
   // both did, and only the as-is leg is unread (1); a callTracer answered apart or not the trade's own call still drops
@@ -784,8 +797,8 @@ export const MUTANTS = [
   [QUOTE, "    const atZero = await pass(EVM_EVIDENCE_NOOP_HOOK_CODE);", "    const atZero: string[][] = [];", R, "review of 1ee73a00, 1d"],
   [QUOTE, "    const atZero = await pass(EVM_EVIDENCE_NOOP_HOOK_CODE);", "    const atZero: string[][] = [];", R, "review of 1ee73a00, 1e"],
   // review of d6d055bf, 1: the stored-fee pass's sets count, the fee-0 pass's only where it has none
-  [QUOTE, "  for (const s of atStored.length > 0 ? atStored : atZero) {", "  for (const s of atZero) {", R, "review of d6d055bf, 1 "],
-  [QUOTE, "    const atStored = await pass(EVM_NOOP_HOOK_CODE);", "    const atStored = await pass(EVM_EVIDENCE_NOOP_HOOK_CODE);", R, "review of d6d055bf, 1 "],
+  [QUOTE, "  for (const s of atStored.length > 0 ? atStored : atZero) {", "  for (const s of atZero) {", R, "review of 2fccaa67, 1 rule"],
+  // retired: `const atStored = await pass(EVM_NOOP_HOOK_CODE);` (review of d6d055bf, 1), its only killer a route this card refuses
   [QUOTE, "  for (const s of atStored.length > 0 ? atStored : atZero) {", "  for (const s of atStored) {", R, "review of 1ee73a00, 1d"],
   // review of 2fccaa67, 1: a stored-fee set yields to the smaller fee-0 sets inside it
   [QUOTE, "    const under = atZero.filter((t) => t.length < s.length && t.every((h) => s.includes(h)));", "    const under: string[][] = [];", R, "review of 2fccaa67, 1 "],
@@ -795,7 +808,7 @@ export const MUTANTS = [
   // inside s as large as s is s; and atZero holds no set inside another (pass skips every superset of one it found,
   // subsetsOf smallest first), so s in atZero has no smaller fee-0 set inside it: either way the output is [s])
   [QUOTE, "    for (const x of under.length > 0 ? under : [s]) if (", "    for (const x of under.length > 0 ? under.slice(0, 1) : [s]) if (", R, "review of 2fccaa67, 1 rule"],
-  [QUOTE, "    for (const x of under.length > 0 ? under : [s]) if (", "    for (const x of under.length > 0 ? under.slice(0, 1) : [s]) if (", R, "review of 6e8d18ad, nit"],
+  // retired: `for (const x of under.length > 0 ? under : [s]) if (` (review of 6e8d18ad, nit), the entry above is the same mutant
   [QUOTE, "if (!out.some((r) => r.length === x.length && r.every((h) => x.includes(h)))) out.push([...x]);", "out.push([...x]);", R, "review of 2fccaa67, 1 rule"],
   [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1 "],
   [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1d"],
@@ -805,7 +818,7 @@ export const MUTANTS = [
   [QUOTE, 'if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };', 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };', R, "review of fb923143, 1d"],
   [QUOTE, "      trace.map((t) => t[at]),", "      trace.map((t) => t[0]),", R, "review of 1ee73a00, 3 "],
   [QUOTE, "[evmJsonRpc(u, fetch, b.preBytes), evmJsonRpc(u, fetch, b.callBytes)]", "[evmJsonRpc(u, fetch, b.preBytes), evmJsonRpc(u, fetch, b.preBytes)]", R, "review of 1ee73a00, 3 "],
-  [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => r.ok, (r) => boughtOf(r) === false, preStateOf(v, trace));", R, "N1D "],
+  [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => r.ok, (r) => boughtOf(r) === false, preStateOf(v, trace));", R, "review of fb923143, 2 step 4"],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => boughtOf(r) === true, (r) => !r.ok, preStateOf(v, trace));", R, "HB1 "],
   [QUOTE, "if (bAdapter !== BigInt(v.adapterV4) || bToken", "if (bToken", R, "HB6 "],
   [QUOTE, " || bMinOut !== quote.minOut) return [];", ") return [];", R, "HB6 "],

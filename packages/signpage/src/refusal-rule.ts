@@ -26,7 +26,7 @@ export const POOL_RULE_WORDS: ReadonlySet<string> = new Set([
 const QUOTE_CODES = [
   "bad_request", "token_mismatch", "no_quoter", "rpc_error", "rpc_disagree", "no_quote", "partial_fill", "below_reference",
   "native_first", "no_reference", "stale_quote", "too_many_pools", "fee_on_transfer", "not_landed", "below_minimum",
-  "no_exit", "out_of_gas", "over_gas_floor",
+  "no_exit", "out_of_gas", "over_gas_floor", "unlisted_hook_route",
 ] as const satisfies readonly EvmQuoteErrorCode[];
 const BUILD_CODES = [
   "weth_after_first", "middle_not_listed", "token_mismatch", "not_built", "bad_route", "bad_amount", "bad_key",
