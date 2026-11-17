@@ -545,11 +545,6 @@ export const TRADES_MAX = 50;
  *  each further fail to BACK_RETRY_MAX_MS; it never ends on a fail, so a short tape stays filling. [design: 3, three
  *  ticks: a provider pair that cannot answer a step three times running is down for the forward reads too.] */
 export const BACK_FAILS_MAX = 3;
-/** The posts each of the first two providers a read back's window round asks (readWindow, card
- *  base-tape-fills-inside-45s): the spans of one round are this many of the smaller of their batches. [design: 2, the
- *  in-flight places a walk's step held on each (its swaps' post and its ETH price's), so a burst of a cold fill never
- *  holds more of a provider's INFLIGHT_MAX than the walk did, and a caller's read waits behind no more of it] */
-export const WINDOW_POSTS = 2;
 /** [design: 5 s, a tick; at most a minute, so a pair back up is read again within one; the industry's capped
  *  exponential backoff.] */
 export const BACK_RETRY_MS = 5_000;
@@ -2407,11 +2402,6 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       e.back = { lo: read.at(-1)!, logs: all, tape: backBook(e, all), done: born || left.length === 0, located: true, marks: left, got, ...(born ? { born: true as const } : {}) };
       return;
     }
-    // card base-tape-fills-inside-45s: once the newest step left the tape short, the rest of the window is read in
-    // rounds of many spans at once (readWindow), never step after step (helper 179, live run 44008440768: a Base coin
-    // with 5 trades in its hour, still filling at 46.2 s, its walk 12 steps one after another, each waiting the helper's
-    // paces; the same code idle took 17.7 to 28.6 s)
-    if (!V.backOnly && back.lo < e.from) return readWindow(e, back, urls, end, failed);
     const hi = back.lo - 1;
     const lo = Math.max(end, hi - V.backStep + 1);
     // the pool's swaps first, alone; only a step that holds one reads what prices it: the ETH price over the step (the
@@ -2438,107 +2428,6 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const all = logs.concat(back.logs);
     tradersAhead(e.pool, logs);
     e.back = { lo, logs: all, tape: backBook(e, all), done: lo <= end || born, ...(back.located === true ? { located: true as const } : {}), ...(born ? { born: true as const } : {}) };
-  }
-  /**
-   * A short Base tape's read back past its newest step (readBack, card base-tape-fills-inside-45s): the rest of the
-   * window, in V.span spans newest first, read WINDOW_POSTS posts a provider at a time, never one step after another.
-   * The rule is the walk's: every span's swaps (and the pool's birth) agreed on two providers, a span not agreed read
-   * again, and only a span that holds a swap reads what prices it: the ETH price's V.span spans of the V.refBack blocks
-   * before each of its swaps (the located read back's rule) and a hooked pool's other filters over its swaps' blocks.
-   * Each post's spans settle as they agree: the newest spans whose every read agreed are the tape's at once, so its
-   * first trades show while the rest fill; the first span that is not, and every span below it, are read again. `got`
-   * keeps each agreed read until its span is.
-   */
-  async function readWindow(e: Entry, back: Back, urls: readonly string[], end: number, failed: (base?: Back) => void): Promise<void> {
-    const eth = e.pool.quote.kind === "eth";
-    const got = back.got ?? new Map<string, Log[]>();
-    const spansLeft: number[] = [];
-    const his = new Map<number, number>();
-    for (let hi = back.lo - 1; hi >= end; hi -= V.span) {
-      const lo = Math.max(end, hi - V.span + 1);
-      spansLeft.push(lo);
-      his.set(lo, hi);
-    }
-    const hiOf = (lo: number) => his.get(lo)!;
-    // the spans of one round: WINDOW_POSTS posts on each of the two providers asked first, so the read back holds the
-    // slots it held as a walk and a caller's read never waits behind more of it
-    const first = askOrder(urls, true).slice(0, 2);
-    const per = Math.max(1, Math.min(...(first.length === 0 ? [1] : first.map(batchOf))));
-    const [main] = poolFilters(e.pool, 0, 0, chain);
-    const at = (f: Record<string, unknown>, a: number, b: number) => ({ ...f, fromBlock: `0x${a.toString(16)}`, toBlock: `0x${b.toString(16)}` });
-    const swapsOf = (lo: number) => (got.get(`s ${lo}`) ?? []).filter((l) => decodeSwap(e.pool, l, chain) !== null);
-    const grid = (x: number) => x - (x % V.span);
-    const refOf = (b: number) => (eth ? Array.from({ length: (grid(b) - grid(Math.max(0, b - V.refBack))) / V.span + 1 }, (_, k) => grid(Math.max(0, b - V.refBack)) + k * V.span) : []);
-    /** The reads a span whose swaps agreed still needs: its swaps' ETH price spans and its hook's other filters. */
-    const extraOf = (lo: number): { key: string; f: Record<string, unknown> }[] => {
-      const sw = swapsOf(lo);
-      if (sw.length === 0) return [];
-      const others = poolFilters(e.pool, sw[0]!.block, sw.at(-1)!.block, chain).slice(1);
-      return [...others.map((f, k) => ({ key: `o${k} ${lo}`, f })), ...[...new Set(sw.flatMap((l) => refOf(l.block)))].map((g) => ({ key: `r ${g}`, f: refFilter(g, g + V.span - 1, chain) }))];
-    };
-    /** Asks the reads of `asks` not yet agreed, at once: null when none was to ask, else whether any agreed. */
-    const ask = async (asks: { key: string; f: Record<string, unknown> }[]): Promise<boolean | null> => {
-      const want = asks.filter((x, i) => !got.has(x.key) && asks.findIndex((y) => y.key === x.key) === i);
-      if (want.length === 0) return null;
-      const parts = await agreedLogs(urls, want.map((x) => x.f), false, true);
-      parts.forEach((p, i) => p != null && got.set(want[i]!.key, p));
-      return parts.some((p) => p != null);
-    };
-    // the round: the newest spans still unread, WINDOW_POSTS posts of one batch each on each provider, all at once;
-    // each post's spans, once agreed, settle what they can (one settle at a time), so the newest trades show first
-    const round = spansLeft.filter((lo) => !got.has(`s ${lo}`)).slice(0, WINDOW_POSTS * per);
-    let k = 0;
-    let anyOk = false;
-    let asked = false;
-    let lock: Promise<void> = Promise.resolve();
-    const note = (r: boolean | null) => {
-      if (r !== null) asked = true;
-      if (r === true) anyOk = true;
-    };
-    /** The newest spans whose swaps agreed get what prices them; the newest whose every read agreed are the tape's. */
-    const settle = (): Promise<void> =>
-      (lock = lock.then(async () => {
-        if (k > 0 && e.back?.done === true) return;
-        const ready: number[] = [];
-        for (const lo of spansLeft.slice(k)) {
-          if (!got.has(`s ${lo}`)) break;
-          ready.push(lo);
-        }
-        note(await ask(ready.flatMap(extraOf)));
-        const done: number[] = [];
-        for (const lo of ready) {
-          if (extraOf(lo).some((x) => !got.has(x.key))) break;
-          done.push(lo);
-          if ((got.get(`s ${lo}`) ?? []).some((l) => isBirth(e.pool, l, chain))) break;
-        }
-        if (done.length === 0) return;
-        const base = k > 0 ? e.back! : back;
-        const logs = done.flatMap((lo) => [...(got.get(`s ${lo}`) ?? []), ...extraOf(lo).flatMap((x) => got.get(x.key)!)]);
-        for (const lo of done) {
-          for (const x of extraOf(lo)) if (!x.key.startsWith("r ")) got.delete(x.key);
-          got.delete(`s ${lo}`);
-        }
-        const all = [...logs, ...base.logs].sort((a, b) => a.block - b.block || a.index - b.index).filter((l, i, xs) => i === 0 || l.block !== xs[i - 1]!.block || l.index !== xs[i - 1]!.index);
-        const born = logs.some((l) => isBirth(e.pool, l, chain));
-        const lo = done.at(-1)!;
-        k += done.length;
-        tradersAhead(e.pool, logs);
-        e.back = { lo, logs: all, tape: backBook(e, all), done: lo <= end || born, got, ...(born ? { born: true as const } : {}) };
-      }));
-    const posts: number[][] = [];
-    for (let i = 0; i < round.length; i += per) posts.push(round.slice(i, i + per));
-    await Promise.all(
-      posts.map(async (c) => {
-        note(await ask(c.map((lo) => ({ key: `s ${lo}`, f: bornFilter(e.pool, at(main!, lo, hiOf(lo))) }))));
-        await settle();
-      }),
-    );
-    if (posts.length === 0) await settle();
-    await lock;
-    if (k > 0) return;
-    // nothing new is the tape's: every read asked failed is a fail (read again as the walk's are); else what agreed is kept
-    if (asked && !anyOk) return failed({ ...back, got });
-    e.back = { ...back, got };
   }
   /** The blocks in `lo` to `hi` that hold a swap of `e`'s pool, newest first (none: an empty list), as BACK_LOCATE answers one read of the whole
    *  range: "held" when no such provider is free, "steps" when no such read can be made, "paced" when the read was not
@@ -3496,8 +3385,6 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // never an empty chart because the book's first window held no trade (live run 43785080982 job 133030981593:
       // Robinhood DELTA answered 200 with no bars two minutes after a restart; it charts 1,000 hourly bars)
       const mine = joinBars(e.back?.tape?.candles(tf as Tf, to, limit) ?? [], own).slice(-limit);
-      // the read back's state as its bars were taken, never after GeckoTerminal's wait (as trades)
-      const filling = backing(e);
       let bars: Candle[] = mine;
       let src = "chain";
       // the history before our first bar refused or failed with none held: the answer says filling, so the page reads it
@@ -3527,7 +3414,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const at = e.readAt ?? now();
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
-      if ((short || filling) && bars.length < limit) body.filling = true;
+      if ((short || backing(e)) && bars.length < limit) body.filling = true;
       body.as_of_ms = at;
       return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at });
     },
@@ -3562,18 +3449,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (e === "none") return timed(await noneTrades(t, limit, lane, until));
       if (!("book" in e)) return timed(e);
       const rows = tapeOf(e, limit);
-      // the read back's state as the rows were taken, never after the traders' wait: a read back that ends in that wait
-      // made an answer of the rows before it say not filling, with the reach of rows it did not serve (card
-      // base-tape-fills-inside-45s: a spread coin's 4 of 5 trades answered not filling)
-      const filling = backing(e);
-      const reach = wholeOf(e);
       await within(lanes.run(lane, () => tradersOf(rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
       const at = e.readAt ?? now();
       const waiting = rows.some((r) => unread(r.tx));
       const trades = rows.filter((r) => !unread(r.tx)).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
       // no reach while a row waits: the rows served are not every trade back to it
-      const whole = waiting ? undefined : reach;
-      return timed({ status: 200, body: JSON.stringify({ trades, ...(filling || waiting ? { filling: true } : {}), ...(whole === undefined ? {} : { whole_ms: whole }), src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
+      const whole = waiting ? undefined : wholeOf(e);
+      return timed({ status: 200, body: JSON.stringify({ trades, ...(backing(e) || waiting ? { filling: true } : {}), ...(whole === undefined ? {} : { whole_ms: whole }), src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
     },
   };
 }
