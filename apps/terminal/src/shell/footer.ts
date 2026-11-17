@@ -1,7 +1,8 @@
 // The desktop footer's data (card app-footer-bar; R5's footer, design/proto/assets/app.js:375-385 at design-lock-r5).
 // Only what is read is drawn:
 // - the block and the connection: NEAR's final block, read on the release's pair (the two RPCs Verify reads, already
-//   in APP_HOST's connect-src; a testnet build reads the testnet pair), the first that answers, every BLOCK_EVERY_MS
+//   in APP_HOST's connect-src; a testnet build reads the testnet pair), dRPC first, the first that answers, an RPC that
+//   answered 429 left a minute (footerRpcs, BUSY_HOLD_MS), every BLOCK_EVERY_MS
 //   while the page shows. An answer is Stable with its round trip; no answer from either is Offline. The block drawn
 //   is the highest final block read, so one RPC a block behind the other never draws the chain going back.
 // - the prices: SOL and ETH in USD only as the signing page read them for the pools (state.pools[].price: Pyth's
@@ -46,8 +47,22 @@ export const FOOTER_WORDS = {
 /** The footer's page links, in R5's order; the Verify pill names the panel (verify/words.ts title). */
 export const FOOTER_LINKS = { terms: "/terms", privacy: "/privacy", verify: "/verify" } as const;
 
-/** The pair the footer reads: the release's, as Verify reads it. */
-export const footerRpcs = (network: NearNetwork): readonly string[] => VERIFY_RELEASES[network].rpcs;
+/** The pair the footer reads, the release's as Verify reads it, in the footer's own order: dRPC first, FastNEAR its
+ *  fallback (card signpage-footer-reads-inside-fastnear-limit). FastNEAR's keyless URL holds about 0.39 requests a
+ *  second from one address (packages/wallet/src/pace.ts PACE, read 9 Nov), the budget the signing page's money reads
+ *  on the same device share; asked first every BLOCK_EVERY_MS the footer alone took 0.33 a second of it (release 167's
+ *  prf run: 34 footer 429s). dRPC's keyless URL allows 25 a second (docs.drpc.org/howitworks/ratelimiting, pace.ts). */
+export const footerRpcs = (network: NearNetwork): readonly string[] => {
+  const [fastnear, drpc] = VERIFY_RELEASES[network].rpcs; // release.ts: [FastNEAR, dRPC] on both networks
+  return [drpc, fastnear];
+};
+
+/** How long an RPC that answered 429 is not asked: FastNEAR's 429 names no Retry-After (read 17 Nov 00:04Z: body
+ *  code -429 "Rate limits exceeded", no rate header), and asking a blocked FastNEAR again only lengthens its block
+ *  (pace.ts), so the footer leaves it a minute and reads the other RPC meanwhile. */
+export const BUSY_HOLD_MS = 60_000;
+/** Each RPC's hold's end on the read's clock, for the page's life. */
+const HELD = new Map<string, number>();
 
 export type BlockRead = { height: number; ms: number };
 
@@ -57,13 +72,16 @@ export type BlockRead = { height: number; ms: number };
 export const FOOTER_QUERY = "ct=footer";
 export const footerUrl = (rpc: string): string => `${rpc.replace(/\/$/, "")}/?${FOOTER_QUERY}`;
 
-/** NEAR's final block from the first RPC of `rpcs` that answers one, with that answer's round trip in ms; null when none does. */
-export async function readFinalBlock(rpcs: readonly string[], fetchFn: typeof fetch = fetch, clock: () => number = () => performance.now()): Promise<BlockRead | null> {
+/** NEAR's final block from the first RPC of `rpcs` that answers one, with that answer's round trip in ms; null when none
+ *  does. An RPC that answers 429 is held BUSY_HOLD_MS in `held` and not asked until then; none asked is null. */
+export async function readFinalBlock(rpcs: readonly string[], fetchFn: typeof fetch = fetch, clock: () => number = () => performance.now(), held: Map<string, number> = HELD): Promise<BlockRead | null> {
   const body = JSON.stringify({ jsonrpc: "2.0", id: "ct-footer", method: "block", params: { finality: "final" } });
   for (const url of rpcs) {
     const t0 = clock();
+    if (t0 < (held.get(url) ?? -Infinity)) continue;
     try {
       const res = await fetchFn(footerUrl(url), { method: "POST", headers: { "content-type": "application/json" }, body, redirect: "error", signal: AbortSignal.timeout(BLOCK_READ_MS) });
+      if (res.status === 429) held.set(url, clock() + BUSY_HOLD_MS);
       if (!res.ok) continue;
       const height = ((await res.json()) as { result?: { header?: { height?: unknown } } })?.result?.header?.height;
       if (typeof height === "number" && Number.isSafeInteger(height) && height > 0) return { height, ms: Math.round(clock() - t0) };
