@@ -136,6 +136,9 @@ export const STATE_READ_MS = 5_000;
 /** The rent backs' retry while a W is left to try (card round-trip-costs-less): the first wait and the most, doubling. */
 export const BACKS_FIRST_MS = 30_000;
 export const BACKS_MAX_MS = 600_000;
+/** The wait between two of the page's own passes for a buy that ended "sent" with its end not known (card
+ *  sol-settle-fix-review-p3s): the first and the most, doubling, the owed send's retry (2 s up to 60 s). */
+export const LATE_BUY_WAIT_MS: Readonly<{ min: number; max: number }> = Object.freeze({ min: 2_000, max: 60_000 });
 /** A load's first run of the rent backs, at the first state read past a time drawn once a load from [MIN, MAX] after it
  *  (review P2-1 of 024e8a89d): no leftover W's pass goes at the instant a page opens, which a network could tie to the
  *  page's own first reads. */
@@ -709,7 +712,8 @@ export type TestnetOver = {
    *  with no Solana pin, as SIGN_HOST's until the pool deploys). */
   pin?: SolanaPoolPin | null;
   /** The withdraw run's clock and wait (the page's own otherwise): a test's read-back bound passes on its clock, so no
-   *  run outlives its test (fold 5: each held node ~120 s on the wall clock). */
+   *  run outlives its test (fold 5: each held node ~120 s on the wall clock). The wait is also the late buys' follow's
+   *  between its passes (lateFollow). */
   now?: () => bigint;
   wait?: (ms: number) => Promise<void>;
   /** An EVM chain's pool pin (EVM_POOLS of the page's network otherwise), its pool list, seats first (pageEvmPoolRpcs
@@ -2246,11 +2250,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         taken = got[got.length - 1] ?? null;
         return got;
       },
-      // the run ended "sent": its note is followed by the state reads' pass until its end is known (followBuys)
+      // the run ended "sent": its note is followed by the page's own passes until its end is known (followBuys, lateFollow)
       follow: (post) => {
         if (taken === null) return;
         lateBuys.set(taken.noteId, { r: taken, post, places: new Map() });
-        void settleReserved().catch(() => {});
+        void lateFollow();
       },
       seed64: page.seed64,
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
@@ -2352,6 +2356,56 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       b.post(end);
     }
   };
+  // the passes that follow the buys whose run ended "sent" (card sol-settle-fix-review-p3s, review P3-3 of 5253be08: a
+  // settle that could not answer for the whole run, the lister down or throttled, left the buy on "sent" and nothing
+  // told the app its end): one pass at once, then, while a followed buy's end is still not known, another after a wait
+  // that doubles (LATE_BUY_WAIT_MS), with no state read from the app, until every followed buy's end is posted. One
+  // follow at a time per session: a sign out (solanaStop) ends it, its wait included, and the next session's follow
+  // starts its own. A buy that ends "sent" while the follow runs gets its pass at once, as the first one did: its follow
+  // wakes the follow's wait (or, during a pass, has one more run right after it), and the wait starts again from the
+  // least
+  let lateFollowing: AbortSignal | null = null;
+  // a follow that came while the loop runs (lateNew), and the wake of the loop's wait in progress (lateWake)
+  let lateNew = false;
+  let lateWake: (() => void) | null = null;
+  const lateFollow = async (): Promise<void> => {
+    const stop = solanaStop.signal;
+    if (!locks) return;
+    if (lateFollowing === stop) {
+      lateNew = true;
+      lateWake?.();
+      return;
+    }
+    lateFollowing = stop;
+    try {
+      let ms = LATE_BUY_WAIT_MS.min;
+      while (!stop.aborted) {
+        lateNew = false;
+        await settleReserved().catch(() => {});
+        if (lateBuys.size === 0) return;
+        if (!lateNew) await waitUnless(ms, stop);
+        ms = lateNew ? LATE_BUY_WAIT_MS.min : Math.min(ms * 2, LATE_BUY_WAIT_MS.max);
+      }
+    } finally {
+      if (lateFollowing === stop) lateFollowing = null;
+    }
+  };
+  // the late follow's wait (the page's, or a test's over.wait), ended early by `stop` or by a new follow (lateWake). A
+  // loop whose session stopped already (a sign out during its pass) waits nothing and takes no wake: an aborted signal
+  // fires no abort event, and lateWake is the next session's loop's
+  const waitUnless = (ms: number, stop: AbortSignal): Promise<void> =>
+    new Promise<void>((done) => {
+      if (stop.aborted) return done();
+      const end = (): void => {
+        stop.removeEventListener("abort", end);
+        if (lateWake === end) lateWake = null;
+        done();
+      };
+      lateWake = end;
+      stop.addEventListener("abort", end, { once: true });
+      if (over.wait) void over.wait(ms).then(end, end);
+      else (setTimeout(end, ms) as { unref?: () => void }).unref?.();
+    });
   const buy = (over.tradeKinds?.buy ?? poolBuyKind)(() => buyHost());
   let settling: Promise<void> | null = null;
   // a signed-in load also gets back the buy records a restore left owed, in the background (src/sol-buy-records.ts)

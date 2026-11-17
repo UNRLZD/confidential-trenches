@@ -1,0 +1,19 @@
+{
+  "_note": [
+    "good: facts() over this card's build (build-app.mjs at the card's branch); bad: SIGN_HOST's served page before the card, read 2026-11-17T06:25Z"
+  ],
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-6Tehx5i9ykFTDidAMczh1IwA7B6vynJRe2x1ed3Blfzc5q1TgWSmB8fJVeCnoyTJ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-6Tehx5i9ykFTDidAMczh1IwA7B6vynJRe2x1ed3Blfzc5q1TgWSmB8fJVeCnoyTJ",
+    "follow": true,
+    "loop": true,
+    "old": false
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-IPrCUuEDT8KKw13YQ6LWQkLLGHwbe9XW5Efe8WIYhYj4FnUsPOldv+0v/z9a34RJ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-IPrCUuEDT8KKw13YQ6LWQkLLGHwbe9XW5Efe8WIYhYj4FnUsPOldv+0v/z9a34RJ",
+    "follow": false,
+    "loop": false,
+    "old": true
+  }
+}

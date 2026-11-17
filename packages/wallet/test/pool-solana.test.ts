@@ -1724,6 +1724,35 @@ test("already spent (MX6): the settle reads the pages at or past its marks' slot
   assert.deepEqual(log, spentReads);
 });
 
+// Card sol-settle-fix-review-p3s (review of sol-settle-failed-is-not-unspent at 5253be08, P3-2, its probe W1): the
+// page's not_landed verdict rests on an "unspent" read at or past each RPC's slot of the read that saw the blockhash
+// past (signpage pool-buy.ts pastAt). Seats behind a load balancer answer from before the spend unless held to a slot at
+// or past it. Handed the right slots, the real settle finds the spend; handed none, it answers unspent (the gap the
+// slots close); handed a low slot for one RPC (that RPC's lie, or a host that swaps or lowers the pair), it finds the
+// spend or refuses, and never answers unspent, whatever the cache holds.
+test("W1: the real settle held to the verdict's slots: the right pair finds a landed spend; a low slot on either RPC finds it or refuses, never unspent; no slots, unspent", async () => {
+  const { chain, beforeSpend, l0 } = restorePool();
+  // a seat that answers from before the spend (slot 697) unless asked for the spend's slot (700) or later
+  const seat = (url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => rpc(((p[1] as { minContextSlot?: number } | undefined)?.minContextSlot ?? 0) >= chain.slot ? chain : beforeSpend, MAINNET)(m, p), { url });
+  const seats = (): [SolanaRpc, SolanaRpc] => [seat("https://a.example"), seat("https://b.example")];
+  const settle = async (minSlots: readonly [number, number] | undefined, cache?: SolanaPoolCache): Promise<string> => {
+    const n = await reservedDeposit0(l0);
+    return solanaSettleSpent({ seed64: SEED, notes: n.ns, noteId: n.id, program: PROGRAM, rpcs: seats(), lagWait: instant, ...(minSlots ? { minSlots } : {}), ...(cache ? { cache } : {}) }).then((x) => x.kind, () => "refused");
+  };
+  assert.equal(await settle([chain.slot, chain.slot]), "spent", "the verdict's own slots");
+  assert.equal(await settle(undefined), "unspent", "no slots: the seats answer from before the spend");
+  const low = [0, 1, beforeSpend.slot, chain.slot - 1];
+  for (const cache of ["cold", "warm before the spend"] as const)
+    for (const k of [0, 1] as const)
+      for (const l of low) {
+        // warm: a settle with no slots first, so the cache holds the marks from before the spend
+        const c: SolanaPoolCache = {};
+        if (cache !== "cold") assert.equal(await settle(undefined, c), "unspent");
+        const slots: [number, number] = k === 0 ? [l, chain.slot] : [chain.slot, l];
+        assert.notEqual(await settle(slots, c), "unspent", `${cache}, rpc ${k} handed ${l}`);
+      }
+});
+
 // ---------------------------------------------------------------------------------------------- fold 3 (re-check)
 // One RPC on its own script. clock, shared by the pair (and a lister of its own), counts the marks reads: each list's
 // first call (the spent marks' bucket 0) moves it on. As the lister, its list in read i sees marksAt(i); its other reads
