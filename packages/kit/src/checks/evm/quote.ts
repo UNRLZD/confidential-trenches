@@ -2480,8 +2480,13 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     // minOut (M360), so R is held to every other pool, never to the route's own pool with its hook replaced. A pool of
     // the route with no hook, or a hook the venue lists, is read as it is and counts as any found pool does, as a
     // standard pool's route counts its own (card evm-buy-quotes-pass-on-helper-178: PONS on Robinhood, whose only pool
-    // is a hookless v4 pool at fee 75 and tick spacing 1, refused its own route no_reference)
-    seen: hookedKeys.map(poolId),
+    // is a hookless v4 pool at fee 75 and tick spacing 1, refused its own route no_reference). Only a single hop leaves
+    // such a pool out, where the route the set makes from it is the route itself: through a middle coin X the set makes
+    // the token's same pool into a route through X's best market, which holds the route's X leg to that market, and the
+    // route itself is taken out of R below (`filled`). Left out there too, nothing held the X leg: a route through an X
+    // market seeded at a tenth of X's price was accepted at a tenth against a native dust pool of the token (card
+    // evm-quote-x-leg-held-to-its-market, review of 6be4d55a5)
+    seen: (keys.length > 1 ? [] : hookedKeys).map(poolId),
     banned,
     hints: req.pools,
     sell: false,
@@ -2547,7 +2552,12 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // the warm round sent beside the scan was not the one the scan asks for: the quote again, its scan first, on the
   // device's clock as it runs now (card evm-quote-fast-from-asia)
   if (set === null) return evmPoolBuyQuoteWith(req, rpcsIn, nowMs + Math.max(0, mono() - start), scan, watch, mono, false);
-  const { block, out, fills, filled } = set;
+  const { block, out, fills } = set;
+  // R is never the route itself where it has a hook the venue does not list (PO2): its value is its own reads, so it
+  // would be its own reference. A single hop's pool is left out of the set (seen); a route through X is taken out here,
+  // the same pools in the same order (card evm-quote-x-leg-held-to-its-market)
+  const ownIds = keys.map(poolId).join();
+  const filled = unlisted.length === 0 ? set.filled : set.filled.filter((c) => c.route.venue !== "uniswap-v4" || hopKeys(c.route).map(poolId).join() !== ownIds);
   const q = out(main)!;
   // The routes of more than one v3 hop dropped because a read at twice ran out of its gas alone (`outOfGas`) may be
   // partial fills, so none prices the buy: each stands in every list a verdict is priced against, at its 1x, and a

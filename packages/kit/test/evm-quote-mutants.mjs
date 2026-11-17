@@ -640,8 +640,15 @@ export const MUTANTS = [
   [QUOTE, "const hooked = Object.freeze(hookedKeys.map(", "const hooked = Object.freeze([].map(", R, "HB1 "],
   // card evm-buy-quotes-pass-on-helper-178: R holds the route's own pool read as it is (PONS), never its own pool with
   // its hook replaced
-  [QUOTE, "    seen: hookedKeys.map(poolId),", "    seen: keys.map(poolId),", R, "PO1 "],
-  [QUOTE, "    seen: hookedKeys.map(poolId),", "    seen: [],", R, "PO2 "],
+  [QUOTE, "    seen: (keys.length > 1 ? [] : hookedKeys).map(poolId),", "    seen: keys.map(poolId),", R, "PO1 "],
+  [QUOTE, "    seen: (keys.length > 1 ? [] : hookedKeys).map(poolId),", "    seen: [],", R, "PO2 "],
+  // card evm-quote-x-leg-held-to-its-market: a route through X lets its own pool of the token into R, so its X leg is
+  // held to X's best market, and R is never the route itself where it has a hook the venue does not list
+  [QUOTE, "(keys.length > 1 ? [] : hookedKeys)", "(keys.length > 1 ? hookedKeys : hookedKeys)", R, "XL1 "],
+  [QUOTE, "(keys.length > 1 ? [] : hookedKeys)", "(keys.length > 1 ? keys : hookedKeys)", R, "XL2 "],
+  [QUOTE, "(keys.length > 1 ? [] : hookedKeys)", "(keys.length > 1 ? keys.filter((k) => k.hooks !== NATIVE) : hookedKeys)", R, "XL3 "],
+  [QUOTE, "(keys.length > 1 ? [] : hookedKeys)", "(keys.length > 1 ? [] : keys.filter((k) => k.hooks !== NATIVE))", R, "XL3 "],
+  [QUOTE, "const filled = unlisted.length === 0 ? set.filled : set.filled.filter(", "const filled = true ? set.filled : set.filled.filter(", R, "XL1 "],
   [QUOTE, "    if (x < value) value = x;\n", "", R, "N1B (buy"],
   [QUOTE, "const lows = subsetsOf(unlisted).map(", "const lows = subsetsOf(unlisted).filter((hs) => hs.length === unlisted.length).map(", R, "N1B (buy"],
   // review of 72e28658, M1: every set of the unlisted hooks, never only each alone and all together

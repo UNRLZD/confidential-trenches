@@ -9201,8 +9201,8 @@ test("GS22 the fold on planted answers both providers give: a read after a starv
 // one pool, native/PONS v4 at fee 75 and tick spacing 1 with no hook, a shape the kit does not list. The tap asked it
 // first and the kit refused no_reference: the route's own pools were left out of the pools R is the best of, its hookless
 // one too, so the token's only market was no reference for its own route (a route on a standard pool counts its own).
-// Only the route's own pools whose hook a read replaces are left out: R is never the route's own pool with its hook
-// replaced (PO2).
+// Only the route's own pools whose hook a read replaces are left out: valued at the lowest of its reads, such a pool's
+// route is the route itself, never its own reference (PO2).
 test("PO1 a route on the token's only pool, a scanned hookless pool of a shape the kit does not list, is its own reference: quoted, never no_reference", async () => {
   const token = "0x00000000000000000000000000000000000f75f1";
   const only: ModelPool = { key: keyOf(token, NATIVE, 75, 1, NATIVE), give: (a) => a };
@@ -9212,10 +9212,92 @@ test("PO1 a route on the token's only pool, a scanned hookless pool of a shape t
   assert.equal(got.amountOut, AMOUNT);
 });
 
-test("PO2 a route on the token's only pool behind a hook the venue does not list never takes that pool with its hook replaced as its reference: no_reference, never below_reference", async () => {
+test("PO2 a route on the token's only pool behind a hook the venue does not list is never its own reference: no_reference, never accepted against itself", async () => {
   const token = "0x00000000000000000000000000000000000f75f2";
-  // the hook takes half: its pool with the hook replaced would give the whole amount, above the route's own quote
+  // the hook takes half: its pool with the hook replaced gives the whole amount, but the set values it at the lowest of
+  // its reads (valueOf), the route's own 0.5, so with that pool in R the route would be accepted at 0.5 against itself
+  // (at 6be4d55a5 under seen: [], before R left the route itself out: XL1)
   const pool = real(token, (a) => a / 2n);
-  const got = await quoteOnStill([pool], token, realRoute(token), scanner(5_000_000, [{ key: pool.key, at: 4_500_000 }]));
+  // the pool is left out of the set, not only out of R (card evm-quote-x-leg-held-to-its-market): a single hop quotes
+  // it only in the route's own reads of the first round, never in a round of its own after it (red under seen: [], a
+  // second round that quoted it again)
+  let rounds = 0;
+  const spy = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    let mine = false;
+    for (const c of calls) {
+      const p = c.params[0] as { to?: string; data?: string };
+      if (c.method !== "eth_call" || p.to?.toLowerCase() !== MC3) continue;
+      for (const d of decodeAggregate(p.data!)) if (d.startsWith("ca253dc9") && poolOf(d).to.join() === token && poolOf(d).hooks.join() === UNPINNED) mine = true;
+    }
+    if (mine) rounds++;
+    return rpc(calls);
+  };
+  const pools = [pool];
+  const got = await verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: realRoute(token) }, [spy(chain(pools, 0)), chain(pools, 1)], NOW, scanner(5_000_000, [{ key: pool.key, at: 4_500_000 }]), undefined, () => 0));
   assert.deepEqual(got, { accepted: false, code: "no_reference" });
+  assert.equal(rounds, 1, `${rounds} requests quote the route's own pool`);
+});
+
+// card evm-quote-x-leg-held-to-its-market (independent review of 6be4d55a5, 17 Nov 03:09Z): a buy through a middle coin
+// X is held to the route the device makes through X's best market and the token's same pool with X. Where that pool sat
+// behind a hook the venue does not list, it was left out of the pools R is the best of (seen), so nothing held the X leg:
+// a helper that seeded an X market at a tenth of X's price and a native dust pool of the token (so R was not null) had
+// the device accept the buy at a tenth. A route through X now lets its own pool of the token into R, and R is never the
+// route itself where it has such a hook (PO2's rule, now on every shape: a single hop keeps it by leaving its pool out)
+const xl = (n: number) => {
+  const token = "0x" + (0xf76a0 + n).toString(16).padStart(40, "0");
+  const x = xAt(0xc20 + n);
+  // X's real market (a standard shape, so no scan finds it), and one someone seeded at a tenth of X's price
+  const xReal: ModelPool = { key: keyOf(x, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const xSeed: ModelPool = { key: keyOf(x, NATIVE, 10000, 200, NATIVE), give: (a) => a / 10n };
+  // a native dust pool of the token that fills, so R is never null
+  const dust: ModelPool = { key: keyOf(token, NATIVE, 100, 1, NATIVE), give: (a) => a / 1000n };
+  // the route: native -> X through `m`, then X -> token through the token's pool with X
+  const via = (m: ModelPool, p: ModelPool): EvmRoute => v4Route([
+    { currency: x, fee: m.key.fee, tickSpacing: m.key.tickSpacing, hooks: m.key.hooks },
+    { currency: token, fee: p.key.fee, tickSpacing: p.key.tickSpacing, hooks: p.key.hooks },
+  ]);
+  return { token, x, xReal, xSeed, dust, via };
+};
+
+test("XL1 a route through a seeded X market at a tenth into the token's pool with X behind a hook the venue does not list is held to X's best market: below_reference naming that route, never accepted at a tenth", async () => {
+  const { token, x, xReal, xSeed, dust, via } = xl(1);
+  const pool: ModelPool = { key: keyOf(token, x, 3000, 60, UNPINNED), give: (a) => a };
+  const logs = [{ key: pool.key, at: 4_500_000 }];
+  const q = await hbQuote([xReal, xSeed, dust, pool], token, logs, via(xSeed, pool));
+  assert.ok("code" in q && q.code === "below_reference", show(q));
+  assert.deepEqual(q.reference, { amountOut: AMOUNT, route: via(xReal, pool) }, show(q.reference));
+  // the route the refusal names, through X's best market, is never its own reference: it is held to the dust pool and
+  // quoted at the full price
+  const r = await hbQuote([xReal, xSeed, dust, pool], token, logs, via(xReal, pool));
+  assert.ok(!("code" in r), show(r));
+  assert.equal(r.amountOut, AMOUNT);
+  assert.equal(r.reference?.amountOut, AMOUNT / 1000n, show(r.reference));
+  // with no other pool of the token it has no reference, as a single hop on such a pool has none (PO2)
+  const alone = await hbQuote([xReal, xSeed, pool], token, logs, via(xReal, pool));
+  assert.deepEqual(alone, { code: "no_reference", reference: null }, show(alone));
+});
+
+test("XL2 the same with the token's pool with X hookless: the X leg is held to X's best market through that pool, on a route of two hops", async () => {
+  const { token, x, xReal, xSeed, dust, via } = xl(2);
+  const pool: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const q = await hbQuote([xReal, xSeed, dust, pool], token, [{ key: pool.key, at: 4_500_000 }], via(xSeed, pool));
+  assert.ok("code" in q && q.code === "below_reference", show(q));
+  assert.deepEqual(q.reference, { amountOut: AMOUNT, route: via(xReal, pool) }, show(q.reference));
+});
+
+test("XL3 the token's pool behind a hook the venue lists, paired with other than the listed launchpad's own currency, is read as it is and counts in R: through X the X leg is held to X's best market, and on a single hop the pool is its own reference", async () => {
+  // Clanker's hook, fee and tick spacing, listed with WETH (evmHookListed reads no pairing): here with X
+  const { token, x, xReal, xSeed, dust, via } = xl(3);
+  const pool: ModelPool = { key: keyOf(token, x, 0x800000, 200, CLANKER), give: (a) => a };
+  const q = await hbQuote([xReal, xSeed, dust, pool], token, [{ key: pool.key, at: 4_500_000 }], via(xSeed, pool));
+  assert.ok("code" in q && q.code === "below_reference", show(q));
+  assert.deepEqual(q.reference, { amountOut: AMOUNT, route: via(xReal, pool) }, show(q.reference));
+  // and with the native asset, the token's only pool: quoted against itself as PO1's hookless pool is, never no_reference
+  const t2 = "0x" + (0xf76b3).toString(16).padStart(40, "0");
+  const only: ModelPool = { key: keyOf(t2, NATIVE, 0x800000, 200, CLANKER), give: (a) => a };
+  const route = v4Route([{ currency: t2, fee: 0x800000, tickSpacing: 200, hooks: CLANKER }]);
+  const r = await hbQuote([only], t2, [{ key: only.key, at: 4_500_000 }], route);
+  assert.ok(!("code" in r), show(r));
+  assert.deepEqual(r.reference, { amountOut: AMOUNT, route }, show(r.reference));
 });
