@@ -391,7 +391,7 @@ test("live547 (the sign live run 42499353181's early Backup press at 547 ms, the
 
 test("the good answer's verdict is PASS, and every recorded bad answer's is FAIL", () => {
   assert.equal(judge(answers.good).verdict, "PASS");
-  for (const k of Object.keys(answers).filter((x) => x !== "note" && x !== "good" && x !== "live547" && x !== "raceCard")) assert.equal(judge(answers[k]).verdict, "FAIL", k);
+  for (const k of Object.keys(answers).filter((x) => x !== "note" && x !== "good" && x !== "live547" && x !== "raceCard" && x !== "paceCard")) assert.equal(judge(answers[k]).verdict, "FAIL", k);
 });
 
 // each in-window press, by where its record is and what its window reads: [name, step, timing at the edge, an act]
@@ -670,4 +670,14 @@ test("the shared pace line: ct-pace holding a provider's record passes; no datab
   for (const pace of [{ db: false, keys: [] }, { db: true, keys: [] }, { db: true, keys: ["ct-wallet:seed"] }, { db: true, keys: "ct-pace:https://near.drpc.org" }, null]) {
     assert.deepEqual(BAD(on(pace)), [PACE], JSON.stringify(pace));
   }
+});
+// paceMain / paceCard: the harness run (17 Nov, on a Mac, --harness, Google Chrome) of base ce77b45a8's page (its
+// pace.ts and main.ts, each tab on its own pace) and of this card's, each read by this card's check: base keeps no
+// ct-pace database and fails on that line alone; the card's page holds FastNEAR's and dRPC's records and passes
+test("recorded pace runs: base ce77b45a8's page keeps no shared pace (FAIL on that line alone); this card's holds FastNEAR's and dRPC's (PASS)", () => {
+  assert.deepEqual(BAD(answers.paceMain), ["BAD prf: the page's NEAR paces are one for every tab, kept in its own database"]);
+  assert.deepEqual(answers.paceMain.prf.pace, { db: false, keys: [] });
+  const r = judge(answers.paceCard);
+  assert.equal(r.pass, true, r.lines.join("\n"));
+  assert.deepEqual([...answers.paceCard.prf.pace.keys].sort(), ["ct-pace:https://near.drpc.org", "ct-pace:https://rpc.mainnet.fastnear.com"]);
 });

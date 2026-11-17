@@ -102,6 +102,17 @@ export const PACE_RECORDS = async () => {
     db.close();
   }
 };
+/** How long the prf run waits for the page's first paced NEAR read to write its ct-pace record. */
+const PACE_WAIT_MS = 30_000;
+/** PACE_RECORDS in `page`, read again each second until it holds a record or PACE_WAIT_MS has passed. */
+async function paceRecords(page) {
+  const end = Date.now() + PACE_WAIT_MS;
+  for (;;) {
+    const r = await page.evaluate(PACE_RECORDS).catch((e) => ({ db: false, keys: [], error: String(e).slice(0, 120) }));
+    if ((r.db && r.keys.length > 0) || Date.now() >= end) return r;
+    await page.waitForTimeout(1_000);
+  }
+}
 const FRAME_PARENT = `<!doctype html><iframe src="https://${SIGN_HOST}/"></iframe>`;
 /** The harness's APP_HOST page inside the shell: the terminal's first controls, a link and a button. */
 export const APP_STAND_IN = `<!doctype html><title>APP_HOST</title><a href="/">Trenches</a> <button type="button">Sign in</button>`;
@@ -783,9 +794,6 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       record.prf.crossTab = await tab2.evaluate(() => ({ state: document.getElementById("signin").dataset.signin, account: document.getElementById("signin").dataset.account ?? null }));
       steps.signin = await click(page, "use");
       record.prf.steps = steps;
-      // the page's NEAR paces, one for every tab of the origin (card signpage-near-pace-shared-across-tabs): both tabs'
-      // restores have read NEAR by now, so the page's own database ct-pace holds a record per provider URL it paced
-      record.prf.pace = await page.evaluate(PACE_RECORDS);
       // framed by APP_HOST: the parent is a page this check serves at APP_HOST's address; the frame is SIGN_HOST itself
       const APP = `https://${APP_HOST}/__wallet-passkey-prf-frame.html`;
       if (!h.harnessApp) await ctx.route(APP, (rt) => rt.fulfill({ status: 200, contentType: "text/html", body: FRAME_PARENT }));
@@ -838,6 +846,10 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
         prfHex = out;
         record.prf.expected = accountOfPrf(Buffer.from(out, "hex"), await wordlist(fetchFn));
       }
+      // the page's NEAR paces, one for every tab of the origin (card signpage-near-pace-shared-across-tabs): once a tab's
+      // restore reads NEAR (its vault scope's ids, on FastNEAR and dRPC), the page's own database ct-pace holds a record
+      // per provider URL it paced; read last in the run, waited up to PACE_WAIT_MS for the restore to reach NEAR
+      record.prf.pace = await paceRecords(page);
     } finally {
       await h.close();
     }
