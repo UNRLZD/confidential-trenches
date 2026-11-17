@@ -2352,10 +2352,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         // the locate's provider (BACK_LOCATE, one post a second) is left to the locates while two others are free: as
         // the third ask of every read daybreak's pace left unanswered, its posts kept the locates of the tapes opened
         // with them from being sent (swaps-back-located.test.ts: 2 of 12 tapes with no trade at 45 s, the chain's own
-        // RPC asked 19 of their reads beside the 24 of the locates); a held provider leaves it to agree with the one left
+        // RPC asked 19 of their reads beside the 24 of the locates); a held provider leaves it to agree with the one left.
+        // A read the two left wholly unagreed asks it again as the third, the tie-break (agreedLogs' `third`), so two
+        // that disagree never stall the tape (swaps-own-third.test.ts: pocket's times a second late)
         const free = backRpcs.filter((u) => usable([u]).length > 0);
         const two = free.filter((u) => !BACK_LOCATE.includes(u));
-        const urls = two.length >= 2 ? two : free;
+        const urls = two.length >= 2 && (back.fails ?? 0) === 0 ? two : free;
         // one agreed read for each run of a kind's reads that every provider asked takes as one (the narrowest BACK_SPAN
         // of them: daybreak's 2,000), all at once: a provider answers each run on its own, so one its pace leaves
         // unanswered costs that run, never the others (batchTo answers no part when one part's pace wait runs out; the
