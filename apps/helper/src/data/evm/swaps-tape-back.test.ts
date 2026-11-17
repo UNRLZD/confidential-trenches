@@ -190,7 +190,7 @@ test("a short ETH-quoted tape reads back with the ETH price read only in the ste
   s.stop();
 });
 
-test("a pool born inside the hour: its read back ends at the step that holds its own Initialize, no step before it is read (card evm-tape-from-our-index-fast: a new list's tapes read all 12 steps of an hour their pools were not in, still filling at 45 s; red at a00fdfa56: every step read)", async () => {
+test("a pool born inside the hour: its read back ends at its own Initialize, done, the spans before it read in one round, never step after step (card evm-tape-from-our-index-fast: a new list's tapes read all 12 steps of an hour their pools were not in, still filling at 45 s; red at a00fdfa56: every step read)", async () => {
   const V = VENUES.base;
   const head = B.REC.firstHead + 200;
   const first = head - V.cold + 1;
@@ -205,7 +205,12 @@ test("a pool born inside the hour: its read back ends at the step that holds its
   assert.equal(await reach(s, PCS.asset0), 0, "the tape holds every trade since the pool's birth");
   const back = asked.filter((b) => b < first);
   console.log(`read back of a pool born ${first - born} blocks before the first read: ${back.length} pool reads, the oldest from block ${Math.min(...back)} (born ${born})`);
-  assert.ok(Math.min(...back) >= born - V.step, `no step read wholly before its birth: the oldest read from ${Math.min(...back)}, born ${born}`);
+  // card base-tape-fills-inside-45s: past its newest step a short tape reads the rest of the window in one round
+  // (readWindow), so the spans before the birth are that round's, each asked of two providers once, none twice and none
+  // past the window: at a00fdfa56..9855b8fbe the walk stopped at the birth's step (8 reads), here 38 in 3 posts a provider
+  const spans = Math.ceil(V.step / V.span) + Math.ceil((V.tapeBack - V.step) / V.span);
+  assert.ok(back.length <= 2 * spans, `the read back is one round: ${back.length} pool reads before the first, at most ${2 * spans}`);
+  assert.ok(Math.min(...back) >= first - V.tapeBack, `no read past the window: the oldest from ${Math.min(...back)}`);
   s.stop();
 });
 
