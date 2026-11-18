@@ -198,10 +198,10 @@ const M = [
 // delta review 8, ruling 1: holdAll's status read (src/deposit/follow.ts), run against the follow's own tests
 const FF = `${W}/src/deposit/follow.ts`;
 const MF = [
-  ["H8a (review 8, ruling 1) holdAll holds an op with no status read", "      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());\n      await ops.update", "      const st = null as StatusRead | null;\n      await ops.update"],
+  ["H8a (review 8, ruling 1) holdAll holds an op with no status read", "      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now(), op.follow.refund_to ?? U);\n      await ops.update", "      const st = null as StatusRead | null;\n      await ops.update"],
   ["H8b (review 8, ruling 1) holdAll's read never marks the send seen", "  if (st.status !== \"PENDING_DEPOSIT\" && !f.sent) read.sent = true;\n", ""],
   ["H8c (review 8, ruling 1) holdAll's SUCCESS read never keeps delivered", "  if (st.status === \"SUCCESS\" && f.delivered === undefined) read.delivered = (st.delivered ?? 0n).toString();\n", ""],
-  ["H9a (review 9, ruling 2) holdAll reads each op's status before its held write", "    for (const [id, op] of all) await write(id, \"held\", legFacts(op, \"held\"), { why });\n    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());\n", "    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());\n      await write(id, \"held\", legFacts(op, \"held\"), { why });\n"],
+  ["H9a (review 9, ruling 2) holdAll reads each op's status before its held write", "    for (const [id, op] of all) await write(id, \"held\", legFacts(op, \"held\"), { why });\n    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now(), op.follow.refund_to ?? U);\n", "    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now(), op.follow.refund_to ?? U);\n      await write(id, \"held\", legFacts(op, \"held\"), { why });\n"],
 ];
 const ALL = [...M.map((m) => [F, TESTS, m]), ...MF.map((m) => [FF, ["test/deposit-follow.test.ts"], m])];
 // every mutant's name, in the order the parts take them
