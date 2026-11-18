@@ -320,6 +320,9 @@ export function Rail({ chain, token, store = RAIL }: { chain: MarketChain | null
   // a chip switch ends a pause (UNRLZD: "a chip or tab switch ends it")
   useLayoutEffect(() => setHeld(false), [list]);
   const closeMenu = useCallback(() => setMenu(false), []);
+  // none (and the first render, before the mode is read): the rail draws nothing inside, as it reads nothing; its full
+  // body's links need the app's router, which a page mounted without one (test/trade-box ?page=1) has not
+  if (!drawn) return <aside ref={self} className="tkr" data-testid="token-rail" data-mode={mode} />;
   return (
     <aside ref={self} className="tkr" data-testid="token-rail" data-mode={mode} data-open={narrow && open} data-slim={slim} data-collapsed={!narrow && collapsed} data-list={list} data-state={data.status}>
       {slim ? (
