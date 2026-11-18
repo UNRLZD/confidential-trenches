@@ -2654,8 +2654,24 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
   // a run before the page's first tap (`opts.idle`; card rent-backs-resume-private): no W is passed, so a page load names
   // no W, and no token account of one, to the public seat; the helper's find read above is the run's one read of them,
   // the one the positions' pass already makes of every W. Each W waits as its record stands (no pass counted, a ride
-  // kept booked: held) for a run after the tap, whose pass reads W on both seats before it signs anything
+  // kept booked: held) for a run after the tap, whose pass reads W on both seats before it signs anything. Its RETURNING
+  // row takes W's lamports from that helper read, as a held W's does (heldListing): display alone, never signed on; the
+  // record is written only when the amount changed, its pass count and `seen` as they stood
   if (opts.idle === true) {
+    for (const address of todo) {
+      const lamports = read?.get(address)?.lamports;
+      if (lamports === undefined) continue;
+      const f = found.find((x) => x.address === address);
+      const go = await withHolds(locks, address, true, wait, async () => {
+        const o = (await h.owed!.list()).find((r) => r.address === address) ?? (f ? { address, l: f.l.toString(), j: f.j, mints: [], passes: 0 } : undefined);
+        if (!o) return;
+        const shown = heldListing(o, f !== undefined, listed.find((x) => x.address === address)?.evidence, lamports);
+        if (shown === undefined || o.lamports === shown.toString()) return;
+        await h.owed!.put({ ...o, lamports: shown.toString() });
+      });
+      // a sell holds the sell lock: the rest wait for the next run
+      if (!go) return true;
+    }
     opts.held?.();
     return fault !== null || read === null;
   }

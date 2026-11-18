@@ -2599,7 +2599,7 @@ const rentBackLoad = async () => {
   };
   const publicNaming = (): string[] => byHost.filter((c) => c.host === "public" && [...named].some((a) => c.params.includes(a))).map((c) => `${c.method} ${c.params.slice(0, 60)}`);
   const helperNaming = (): number => byHost.filter((c) => c.host === "helper" && Ws.every((a) => c.params.includes(a))).length;
-  return { t, read, publicNaming, helperNaming, runs, advance: (ms: number) => void (now += ms), restore: () => void ((Date.now = realNow), (g.indexedDB = hadIdb)), BACKS_LOAD_MAX_MS };
+  return { t, Ws, read, publicNaming, helperNaming, runs, advance: (ms: number) => void (now += ms), restore: () => void ((Date.now = realNow), (g.indexedDB = hadIdb)), BACKS_LOAD_MAX_MS };
 };
 test("rent-backs-resume-private: a page load with owed Ws names none of them, nor a token account of one, to the public seat; the helper's seat reads them", async () => {
   const l = await rentBackLoad();
@@ -2613,6 +2613,26 @@ test("rent-backs-resume-private: a page load with owed Ws names none of them, no
       l.advance(30 * 60_000);
       await l.read();
     }
+    assert.deepEqual(l.publicNaming(), [], "no request named a W or its token account to the public seat");
+  } finally {
+    l.restore();
+  }
+});
+test("rent-backs-resume-private: a load with a found W shows its amount with no tap, from the helper's read, and no public request names it", async () => {
+  const { returningWallets } = await import("../src/positions.ts");
+  const l = await rentBackLoad();
+  try {
+    const found = l.Ws[1]!;
+    assert.equal((await l.t.returning()).find((r) => r.address === found)?.lamports, undefined, "no amount before the load's run");
+    l.advance(l.BACKS_LOAD_MAX_MS);
+    await l.read();
+    const rec = (await l.t.returning()).find((r) => r.address === found);
+    assert.equal(rec?.lamports, "5000000", "W's lamports as the helper's seat read them");
+    assert.equal(rec?.passes, 1, "no pass counted");
+    assert.equal(rec?.seen, undefined, "nothing settled: the pass after the tap still runs");
+    // 150 USD a SOL, as test/positions.test.ts prices it
+    const rows = returningWallets(await l.t.returning(), { price: "15000000000", expo: -8, published_s: 1, read_ms: 1 }, []);
+    assert.ok(rows.some((r) => r.address === found && r.state === "RETURNING" && r.size === "0.75"), JSON.stringify(rows));
     assert.deepEqual(l.publicNaming(), [], "no request named a W or its token account to the public seat");
   } finally {
     l.restore();

@@ -1878,7 +1878,8 @@ test("rent-backs-resume-private: an idle run reads W on the helper's seat alone,
   const naming = w.c.calls.slice(calls).filter((c) => JSON.stringify(c.params).includes(W.address));
   assert.deepEqual(naming.filter((c) => c.p === 0).map((c) => c.method), [], "nothing named W to the public seat");
   assert.deepEqual(naming.map((c) => `${c.p} ${c.method}`), ["1 getMultipleAccounts", "1 getMultipleAccounts", "1 getMultipleAccounts"], "the helper's find read alone, once a run");
-  assert.deepEqual(w.owed.get(W.address), rec, "the record as it stood: no pass counted");
+  // the record as it stood, no pass counted and nothing settled; its RETURNING amount W's lamports as the helper read them
+  assert.deepEqual(w.owed.get(W.address), { ...rec, lamports: String(w.c.accounts.get(W.address)!.lamports) }, "the record as it stood but its amount: no pass counted");
   assert.equal(held, 3, "a ride held, so it stays booked");
   assert.equal(sends(w).length, s0, "nothing signed");
   await resumeRentBacks(loaded, fakeLocks());
