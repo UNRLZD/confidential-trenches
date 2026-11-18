@@ -15,6 +15,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runSync } from "../group-run.mjs";
 
 export const MUTANT_FILE = /(^|\/)([\w.-]+-)?mutants\.mjs$/;
 
@@ -132,6 +133,55 @@ export function anchorRefusals(rel, plants, read = (f) => readFileSync(f, "utf8"
 
 const short = (s) => s.split("\n")[0].trim().slice(0, 90);
 
+/**
+ * Each sweep file's list (and its `vars`), by repo path: { g: { list, ...vars } } or { error }. Each file's text up to
+ * its list's end (listModule) is written to a copy beside it, so its own imports resolve, and the copies are evaluated
+ * in one node child run through scripts/group-run.mjs, which prints them as JSON (a bigint as its digits); the copies
+ * are removed at once. The child imports them, never this gate: a sweep file sits inside packages/ or contracts/,
+ * which nothing outside them reaches but the kit's entry (scripts/ci/kit-reach.mjs), and the list's text alone is read
+ * here. Evaluated as a module of its own (not the sweep's main), no sweep's runner part runs.
+ */
+export function readLists(root, rels) {
+  const copies = [];
+  const out = {};
+  try {
+    for (const rel of rels) {
+      const abs = path.join(root, rel);
+      const copy = path.join(path.dirname(abs), `.mutant-anchors-${process.pid}-${path.basename(abs)}`);
+      try {
+        writeFileSync(copy, listModule(readFileSync(abs, "utf8"), SWEEPS[rel].list, SWEEPS[rel].vars));
+        copies.push([rel, pathToFileURL(copy).href, copy]);
+      } catch (e) {
+        out[rel] = { error: String(e?.message ?? e).split("\n")[0] };
+      }
+    }
+    if (copies.length === 0) return out;
+    const r = runSync(process.execPath, ["--input-type=module", "-e", CHILD], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, MUTANT_ANCHOR_COPIES: JSON.stringify(copies.map(([rel, url]) => [rel, url])) },
+      timeoutMs: 120_000,
+    });
+    if (r.status !== 0) throw new Error(`mutant-anchors: the lists' reader exited ${r.status}${r.timedOut ? " (timed out)" : ""}: ${String(r.stderr).split("\n").slice(0, 3).join(" ")}`);
+    return { ...out, ...JSON.parse(r.stdout) };
+  } finally {
+    for (const [, , copy] of copies) rmSync(copy, { force: true });
+  }
+}
+
+// the lists' reader: each copy imported in turn, its __ANCHORS printed; a copy that throws is named with its error
+const CHILD = `
+const out = {};
+for (const [rel, url] of JSON.parse(process.env.MUTANT_ANCHOR_COPIES)) {
+  try {
+    out[rel] = { g: (await import(url)).__ANCHORS };
+  } catch (e) {
+    out[rel] = { error: String(e?.message ?? e).split("\\n")[0] };
+  }
+}
+process.stdout.write(JSON.stringify(out, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+`;
+
 /** Every sweep file's plants read and counted: { refusals, plants, files }. */
 export async function mutantAnchors(root) {
   const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8", maxBuffer: 1 << 26 }).split("\0").filter((f) => MUTANT_FILE.test(f));
@@ -139,25 +189,21 @@ export async function mutantAnchors(root) {
   const listed = []; // stale plants KNOWN_STALE names
   const anchored = []; // KNOWN_STALE entries no longer stale
   let plants = 0;
+  const swept = [];
   for (const rel of tracked) {
     if (Object.hasOwn(NOT_SWEPT, rel)) continue;
+    if (!SWEEPS[rel]) refusals.push(`${rel}: a sweep file this gate has no reader for: add it to SWEEPS in scripts/ci/mutant-anchors.mjs`);
+    else swept.push(rel);
+  }
+  const lists = readLists(root, swept);
+  for (const rel of swept) {
     const sweep = SWEEPS[rel];
-    if (!sweep) {
-      refusals.push(`${rel}: a sweep file this gate has no reader for: add it to SWEEPS in scripts/ci/mutant-anchors.mjs`);
+    const got = lists[rel];
+    if (!got || "error" in got) {
+      refusals.push(`${rel}: its mutant list cannot be read (${got?.error ?? "no answer for it"})`);
       continue;
     }
-    const abs = path.join(root, rel);
-    const copy = path.join(path.dirname(abs), `.mutant-anchors-${process.pid}-${path.basename(abs)}`);
-    let g;
-    try {
-      writeFileSync(copy, listModule(readFileSync(abs, "utf8"), sweep.list, sweep.vars));
-      g = (await import(pathToFileURL(copy).href)).__ANCHORS;
-    } catch (e) {
-      refusals.push(`${rel}: its mutant list cannot be read (${String(e?.message ?? e).split("\n")[0]})`);
-      continue;
-    } finally {
-      rmSync(copy, { force: true });
-    }
+    const g = got.g;
     const entries = sweep.once ? g.list.slice(0, 1) : g.list;
     const mine = entries.flatMap((e) => sweep.read(e, g, root));
     plants += mine.length;
