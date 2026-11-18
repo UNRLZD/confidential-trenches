@@ -237,3 +237,78 @@ test("each venue's read list: two operators at least, one seat each, Base and Ro
   assert.deepEqual(evmReadProvidersOf(v.robinhood!), [RH, DR, PK, PN]);
   assert.deepEqual(evmReadProvidersOf(v.base!)!.map(evmRpcOperator), ["base.org", "publicnode.com", "pocket.network", "tenderly.co"]);
 });
+
+// card device-evm-read-residuals (delta review of 1d895550, item 1): a keyed seat's own path segments, query and userinfo
+// never reach a message, in any form a provider's words may hold them; errors[] and cause carry the same cleaned words
+const KEYED = "https://us3r:PaSs%2FW0rdSeCrEt@lb.drpc.live/robinhood/AkEySeCrEt0123456789?apikey=QuErYsEcReT0123456789";
+const SEG_S = "AkEySeCrEt0123456789";
+const QUERY_S = "QuErYsEcReT0123456789";
+const HOSTILE: readonly (readonly [string, string])[] = [
+  ["the seat's URL as is", `upstream ${KEYED} said no`],
+  ["in upper case", `upstream ${KEYED.toUpperCase()} said no`],
+  ["with a port", `upstream https://lb.drpc.live:443/robinhood/${SEG_S} said no`],
+  ["a listed host with no scheme", `lb.drpc.live/robinhood/${SEG_S}`],
+  ["an unlisted host's userinfo", `upstream https://user:${SEG_S}@other.example/x/${SEG_S}?k=${QUERY_S}`],
+  ["a query alone", `bad request ?apikey=${QUERY_S}`],
+  ["a path alone", `no route /robinhood/${SEG_S}`],
+  ["JSON-escaped slashes", `{"url":"https:\\/\\/lb.drpc.live\\/robinhood\\/${SEG_S}"}`],
+  ["percent-encoded", `redirect to ${encodeURIComponent(`https://lb.drpc.live/robinhood/${SEG_S}?apikey=${QUERY_S}`)}`],
+  ["wss on an unlisted host", `try wss://ws.other.example/robinhood/${SEG_S}`],
+  ["an unlisted host with no scheme", `mirror.other.example/robinhood/${SEG_S}`],
+  ["a trailing-dot host", `lb.drpc.live./robinhood/${SEG_S}`],
+  ["a backslash path", `lb.drpc.live\\robinhood\\${SEG_S}`],
+  ["userinfo holding a slash", `upstream https://us3r:PaSs/W0rdSeCrEt@lb.drpc.live/x refused`],
+  ["the password percent-encoded", `auth PaSs%2fW0rdSeCrEt refused`],
+  ["a key cut short by the provider", `key AkEySeCrEt01… rejected`],
+  ["a key alone in another case", `${SEG_S.toLowerCase()} is not a valid key`],
+  ["a key in a JSON body", `{"error":"invalid key ${QUERY_S}"}`],
+  ["a long Unicode run before the URL", `İ${"İ".repeat(5000)} ${KEYED}`],
+  ["a backtick-quoted URL", "`" + `https://lb.drpc.live/x?apikey=${QUERY_S}` + "`"],
+];
+// any piece of a secret, in any case; the password's start "PaSs" in its own mixed case (in any case it is a common word)
+const LEAK = { test: (s: string) => /AkEySeCr|QuErYsEc|W0rdSeCr|%2fW0rd/i.test(s) || /PaSs/.test(s) };
+test("a keyed seat's path, query and userinfo never reach a message, errors[] or cause: every one of the 20 hostile forms", async () => {
+  assert.equal(HOSTILE.length, 20);
+  const leaked: string[] = [];
+  for (const [name, words] of HOSTILE) {
+    class SeatFault extends Error {
+      readonly body = words;
+    }
+    const thrown = new SeatFault(words, { cause: new Error(`inner ${words}`) });
+    const e = await evmTwoOperators(seats([[RH, ok("0x1")], [KEYED, { calls: 0, answer: async () => Promise.reject(thrown) }]])).read("fee", f, eq).then(
+      () => null,
+      (x: unknown) => x,
+    );
+    assert.ok(e instanceof EvmOperatorsUnanswered, `${name}: ${String(e)}`);
+    const seen = [e.message, String(e.stack), ...e.errors.flatMap((z) => [(z as Error).message, String((z as Error).stack), String((z as SeatFault).body), String(((z as Error).cause as Error)?.message)]), String((e.cause as Error)?.message)];
+    if (seen.some((s) => LEAK.test(s))) leaked.push(`${name}: ${seen.find((s) => LEAK.test(s))!.slice(0, 160)}`);
+    assert.ok(e.errors[0] instanceof SeatFault, `${name}: errors[] keeps the seat error's class`);
+    assert.equal(e.cause, e.errors.at(-1), `${name}: cause is errors[]'s last`);
+    assert.ok(e.message.includes(`lb.drpc.live: ${(e.errors[0] as Error).message}`), `${name}: the message and errors[] carry the same words`);
+  }
+  assert.deepEqual(leaked, []);
+});
+
+test("cleaned words keep what a caller reads: a provider's own words, the seat's host, a lag's class and code", async () => {
+  class LagLike extends Error {
+    readonly code = "lag";
+    constructor(m: string) {
+      super(m);
+      this.name = "LagLike";
+    }
+  }
+  const words = `HTTP 400: RPC error 27: Unknown state. First available state is 1 (https://lb.drpc.live/robinhood/${SEG_S})`;
+  const e = await evmTwoOperators(seats([[RH, ok("0x1")], [KEYED, { calls: 0, answer: async () => Promise.reject(new LagLike(words)) }]])).read("fee", f, eq).catch((x: unknown) => x);
+  assert.ok(e instanceof EvmOperatorsUnanswered);
+  const z = e.errors[0] as LagLike;
+  assert.ok(z instanceof LagLike);
+  assert.equal(z.name, "LagLike");
+  assert.equal(z.code, "lag");
+  // a URL's run takes all to the next space or quote, a closing bracket too (a path may hold one): the host stands for it
+  assert.equal(z.message, "HTTP 400: RPC error 27: Unknown state. First available state is 1 (lb.drpc.live");
+  // a thrown DOMException (fetch's timeout) is copied without its getters throwing
+  const t = await evmTwoOperators(seats([[RH, ok("0x1")], [KEYED, { calls: 0, answer: async () => Promise.reject(new DOMException(`timed out at ${KEYED}`, "TimeoutError")) }]])).read("fee", f, eq).catch((x: unknown) => x);
+  assert.ok(t instanceof EvmOperatorsUnanswered);
+  assert.equal((t.errors[0] as DOMException).name, "TimeoutError");
+  assert.ok(!LEAK.test((t.errors[0] as Error).message) && !LEAK.test(t.message), t.message);
+});
