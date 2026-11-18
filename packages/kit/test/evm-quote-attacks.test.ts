@@ -726,6 +726,13 @@ function scanner(headNo: number, logs: { key: EvmPoolKey; at: number }[], asked:
       return { jsonrpc: "2.0", id, result };
     });
 }
+/** One scan provider whose chain moves on between quotes (card evm-scan-chain-tail: the device keeps one tail a chain and
+ *  first scan provider, so a later quote's scanner is the same provider at a later head): `to` points it at a world. */
+const moving = () => {
+  let at: EvmRpc = async () => [];
+  const rpc: EvmRpc = (calls, signal) => at(calls, signal);
+  return { rpc, to: (r: EvmRpc) => ((at = r), rpc) };
+};
 // the route the helper sends: the standard 1% pool someone seeded at a tenth of the price
 const seededRoute = (token: string): EvmRoute => ({ venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 10000, tickSpacing: 200, hooks: NATIVE, hookData: "0x" }] });
 const seeded = (token: string): ModelPool => ({ key: keyOf(token, NATIVE, 10000, 200, NATIVE), give: (a) => a / 10n });
@@ -757,16 +764,18 @@ test("N1a a seeded standard pool is held to the token's real pool the device's o
   // without the scan nothing the device reads holds the seeded pool: it is its own reference
   assert.equal((await quoteOn(pools, token, seededRoute(token))).accepted, true);
   const asked: [number, number][] = [];
-  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked)), below);
-  // the first scan reads 1M blocks back in Base's 10k spans; the next one only from where it stopped
+  const m = moving();
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), m.to(scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked))), below);
+  // the first scan reads 1M blocks back in Base's 10k spans, one getLogs a request (the event alone, card
+  // evm-scan-chain-tail; on main two, a topic position each); the next one only from where it stopped
   assert.equal(Math.min(...asked.map((x) => x[0])), 4_000_001);
-  assert.equal(asked.length, 2 * 100);
+  assert.equal(asked.length, 100);
   asked.length = 0;
-  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_010, [], asked), undefined, "base", 5_000_010), below);
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), m.to(scanner(5_000_010, [], asked)), undefined, "base", 5_000_010), below);
   // the gap past the kept scan is read once the quote ends (routeSet's `later`): a quote with no round left after its
   // set ends before it lands (card evm-warm-tap-ends-inside-two-seconds)
-  for (let i = 0; i < 400 && asked.length < 2; i++) await new Promise((go) => setTimeout(go, 5));
-  assert.deepEqual(asked, [[5_000_001, 5_000_010], [5_000_001, 5_000_010]]);
+  for (let i = 0; i < 400 && asked.length < 1; i++) await new Promise((go) => setTimeout(go, 5));
+  assert.deepEqual(asked, [[5_000_001, 5_000_010]]);
   // a scan provider that answers no logs refuses the quote: a source that fails is not skipped
   const broken: EvmRpc = async (calls) => calls.map((c, id) => (c.method === "eth_blockNumber" ? { jsonrpc: "2.0", id, result: "0x4c4b40" } : { jsonrpc: "2.0", id, error: { code: -32701, message: "exceed maximum block range: 50000" } }));
   assert.deepEqual(await quoteOn(pools, "0x00000000000000000000000000000000000a22a2", seededRoute("0x00000000000000000000000000000000000a22a2"), broken), { accepted: false, code: "rpc_error" });
@@ -819,10 +828,10 @@ test("card evm-buy-and-sell-on-mainnet: with the device's pool index served, a q
     assert.equal(evmPoolIndexUse("base", sync({}, null)), false);
     assert.equal(evmPoolIndexUse("base", sync()), true);
     // the scan provider holds no log of the real pool: the index's alone holds the seeded route, and the scan asks only
-    // the ten blocks past the index's N, one request (both topic positions)
+    // the ten blocks past the index's N, one request of one getLogs (the event alone, card evm-scan-chain-tail)
     const asked: [number, number][] = [];
     assert.deepEqual(await quoteOnStill(pools, token, seededRoute(token), scanner(5_000_000, [], asked)), below);
-    assert.deepEqual(asked, [[4_999_991, 5_000_000], [4_999_991, 5_000_000]]);
+    assert.deepEqual(asked, [[4_999_991, 5_000_000]]);
     // an older sync than the one held changes nothing
     assert.equal(evmPoolIndexUse("base", sync({}, 4_999_000)), false);
   } finally {
@@ -882,7 +891,7 @@ test("card evm-buy-and-sell-on-mainnet: a coin the served index holds no pool of
     const answered: [number, number][][] = [];
     const v = await quoteOnStill(pools, token, seededRoute(token), scanner(5_000_000, [{ key: real(token).key, at: 4_999_995 }], asked)).finally(() => answered.push([...asked]));
     assert.deepEqual(v, below);
-    assert.deepEqual(answered, [[[4_999_991, 5_000_000], [4_999_991, 5_000_000]]], "the blocks past N are read before the answer");
+    assert.deepEqual(answered, [[[4_999_991, 5_000_000]]], "the blocks past N are read before the answer");
   } finally {
     evmPoolIndexReset();
   }
@@ -953,9 +962,12 @@ test("card evm-buy-and-sell-on-mainnet: an asked route that runs out (a thin poo
 test("card evm-buy-and-sell-on-mainnet: a token with no pool at all, or none that fills, still refuses no_quote with no reference", async () => {
   const token = "0x00000000000000000000000000000000000e05e5";
   assert.deepEqual(await noQuoteOf([], token, seededRoute(token), scanner(5_000_000, [])), { code: "no_quote", reference: null });
-  // a pool whose hook reverts every quote as it is never counts, so it is no R
+  // a pool whose hook reverts every quote as it is: a market the device can read but not trade through, which counts at
+  // its read with the hook replaced (card evm-buy-never-below-a-hidden-market, ZZ6). On main this case read no block:
+  // the first quote's kept scan of the token (kept per token) left the second nothing to scan, so the dead pool was
+  // never found; the tail is kept per scan provider (card evm-scan-chain-tail), so this scan reads it
   const dead: ModelPool = { key: keyOf(token, NATIVE, 0, 120, HOSTILE), give: (a) => a, lie: () => null };
-  assert.deepEqual(await noQuoteOf([dead], token, seededRoute(token), scanner(5_000_000, [{ key: dead.key, at: 4_500_000 }])), { code: "no_quote", reference: null });
+  assert.deepEqual(await noQuoteOf([dead], token, seededRoute(token), scanner(5_000_000, [{ key: dead.key, at: 4_500_000 }])), { code: "no_quote", reference: { amountOut: AMOUNT, route: { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 0, tickSpacing: 120, hooks: HOSTILE, hookData: "0x" }] } } });
 });
 
 test("card evm-quote-head-watch: a scan provider that fails a full span (a timeout, too many logs) is asked by halves, and the real pool it finds still holds a seeded one", async () => {
@@ -1021,7 +1033,8 @@ test("card evm-quote-head-watch: a scan that ends more than maxLag blocks behind
   const both: EvmRpc = (calls) => (calls.some((c) => c.method === "eth_getBlockByNumber" && Number(c.params[0]) === 5_000_000) && ++pinned > 0 ? caught(calls) : late(calls));
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), both), below);
   assert.equal(pinned, 1, "the catch-up request carries the agreed block");
-  assert.deepEqual(asked.slice(-2), [[4_999_901, 5_000_000], [4_999_901, 5_000_000]]);
+  // the catch-up: one getLogs (the event alone, card evm-scan-chain-tail)
+  assert.deepEqual(asked.slice(-1), [[4_999_901, 5_000_000]]);
 });
 
 test("review of 4830f1f, H1: a scan backend more than maxLag behind that answers [] past its own head refuses as main did, and never keeps a scan its provider did not name", async () => {
@@ -1267,12 +1280,14 @@ test("S2b a scan is kept only once the quote's block is confirmed on both provid
     return out.map((a, i) => (calls[i]!.method === "eth_getBlockByNumber" && calls[i]!.params[0] !== "latest" ? { ...a, result: head("0x" + (5_000_000).toString(16), "0x" + "cc".repeat(32)) } : a));
   };
   const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) };
-  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), forked], NOW, scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked))), { accepted: false, code: "rpc_disagree" });
+  // one provider for both quotes (the tail is kept per chain and first scan provider, card evm-scan-chain-tail)
+  const m = moving();
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), forked], NOW, m.to(scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked)))), { accepted: false, code: "rpc_disagree" });
   asked.length = 0;
-  // the next quote scans the whole depth again
-  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked)), below);
+  // the next quote scans the whole depth again, one getLogs a request (the event alone)
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), m.to(scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked))), below);
   assert.equal(Math.min(...asked.map((x) => x[0])), 4_000_001);
-  assert.equal(asked.length, 2 * 100);
+  assert.equal(asked.length, 100);
 });
 
 test("S3c a market whose hook is not pinned is quoted only once it exists, with its hook and the pool's replaced in one read", async () => {
@@ -1509,6 +1524,57 @@ test("X4 one scan request of several currencies finds the market of each, not on
     return true;
   });
 });
+// card evm-scan-chain-tail: the scan names the Initialize event alone and keeps one tail a chain, so every currency is a
+// lookup over it: X's markets and a later quote's coin read no block the chain's tail already holds
+test("TAIL1 one scan of the token's blocks finds X's market too: the quote sends no getLogs past the token's scan, and none names a currency", async () => {
+  const token = "0x00000000000000000000000000000000000f5f6f";
+  const x = xAt(0x5100);
+  const real: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const market: ModelPool = { key: keyOf(x, NATIVE, 2500, 50, NATIVE), give: (a) => 100n * a, state: pricedAt(100n) };
+  const pools = [best(token), real, market];
+  const logs = [real, market].map((p, i) => ({ key: p.key, at: 4_100_000 + i }));
+  const inner = scanner(5_000_000, logs);
+  const topics: unknown[][] = [];
+  const scan: EvmRpc = (calls, signal) => {
+    for (const f of getLogsOf(calls)) topics.push(f.topics);
+    return inner(calls, signal);
+  };
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) }, [chain(pools, 0), chain(pools, 1)], NOW, scan), (e: unknown) => {
+    assert.ok(e instanceof EvmQuoteError && e.code === "below_reference", String(e));
+    assert.equal(e.reference!.amountOut, 100n * AMOUNT);
+    return true;
+  });
+  // the depth's 100 spans once (Base's 10k), the token's scan alone: X's markets are a lookup of what it read
+  assert.equal(topics.length, 100);
+  assert.ok(topics.every((t) => t.length === 1), "a getLogs named a currency");
+});
+test("TAIL2 a second coin quoted on the same chain and provider reads no block the first quote's scan read: its pools are a lookup of the chain's tail", async () => {
+  const [a, b] = ["0x00000000000000000000000000000000000f5f7a", "0x00000000000000000000000000000000000f5f7b"];
+  const pools = [seeded(a), real(a), seeded(b), real(b)];
+  const logs = [{ key: real(a).key, at: 4_200_000 }, { key: real(b).key, at: 4_300_000 }];
+  const asked: [number, number][] = [];
+  const m = moving();
+  assert.deepEqual(await quoteOnStill(pools, a, seededRoute(a), m.to(scanner(5_000_000, logs, asked))), below);
+  assert.equal(asked.length, 100);
+  asked.length = 0;
+  // the same provider at the same head: b's real pool, read by a's scan, holds b's seeded route with no getLogs
+  assert.deepEqual(await quoteOnStill(pools, b, seededRoute(b), m.to(scanner(5_000_000, logs, asked))), below);
+  assert.deepEqual(asked, []);
+});
+test("TAIL3 a coin with no pool in the index or the chain's tail reads the newest blocks before it answers: a pool made within maxLag still holds its seeded route", async () => {
+  const [a, b] = ["0x00000000000000000000000000000000000f5f8a", "0x00000000000000000000000000000000000f5f8b"];
+  const pools = [seeded(a), real(a), seeded(b), real(b)];
+  const asked: [number, number][] = [];
+  const answered: [number, number][][] = [];
+  const m = moving();
+  assert.deepEqual(await quoteOnStill(pools, a, seededRoute(a), m.to(scanner(5_000_000, [{ key: real(a).key, at: 4_200_000 }], asked))), below);
+  asked.length = 0;
+  // b's real pool made 5 blocks past what the tail holds, inside maxLag (Base's 50): read before the answer
+  const logs = [{ key: real(a).key, at: 4_200_000 }, { key: real(b).key, at: 5_000_005 }];
+  const v = await quoteOnStill(pools, b, seededRoute(b), m.to(scanner(5_000_010, logs, asked)), undefined, "base", 5_000_010).finally(() => answered.push([...asked]));
+  assert.deepEqual(v, below);
+  assert.deepEqual(answered, [[[5_000_001, 5_000_010]]], "the newest blocks are read before the answer");
+});
 test("X3 an X with 16,384 empty markets beside its real one is priced through the real one (card evm-quote-one-round: a bound never leaves X's markets unread)", async () => {
   const token = "0x00000000000000000000000000000000000ff7ff";
   const x = xAt(0x900);
@@ -1567,20 +1633,16 @@ test("G1 every scan of one quote, the token's and each X's, shares the chain's l
   }
 });
 
-test("G2 an X whose scan fails refuses the quote, as the token's own scan does: nothing is priced on a partial read", () => onTestClock(async () => {
+test("G2 a scan that fails on the blocks of X's market refuses the quote, as one failing on the token's own does: nothing is priced on a partial read (card evm-scan-chain-tail: X's markets are a lookup of the one scan, main: X's own scan)", () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000000ff4ff";
   const x = xAt(0x430);
   const real: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
   const market = marketOf(x);
   const inner = scanner(5_000_000, [{ key: real.key, at: 4_500_000 }, { key: market.key, at: 4_100_000 }]);
-  const tx = "0x" + x.slice(2).padStart(64, "0");
-  // the scan provider answers the token's logs and every other scan, and fails each request for x's markets (x with the
-  // native asset or WETH; HTTP 503, its only provider): a quote that went on without them would find x unpriced and
-  // pass the seeded route
-  const pair = ["0x" + "0".repeat(64), "0x" + WETH.slice(2).padStart(64, "0")];
+  // the scan provider fails each request holding the block of x's market (HTTP 503, its only provider): a quote that
+  // went on without it would find x unpriced and pass the seeded route
   const broken: EvmRpc = async (calls) => {
-    const t = calls.flatMap((c) => (c.method === "eth_getLogs" ? (c.params[0] as { topics: unknown[] }).topics.flat() : []));
-    if (t.includes(tx) && t.some((x) => pair.includes(x as string))) throw new Error("the provider answered HTTP 503");
+    if (getLogsOf(calls).some((f) => Number(f.fromBlock) <= 4_100_000 && Number(f.toBlock) >= 4_100_000)) throw new Error("the provider answered HTTP 503");
     return inner(calls);
   };
   assert.deepEqual(await quoteOn([seeded(token), real, market], token, seededRoute(token), broken), { accepted: false, code: "rpc_error" });
@@ -1776,7 +1838,8 @@ test("B1 USDG on Robinhood: its standard ETH pool quotes, though 120 currencies 
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
   assert.equal((v as { amountOut: bigint }).amountOut, 3000n * AMOUNT);
   // past USDG's own two requests of the whole depth, every request at the OR span: none the provider refuses
-  assert.equal(asked.filter(([a, b]) => b - a + 1 > 100_000).length, 2, `${asked.length} getLogs`);
+  // the depth in one request of one getLogs (the event alone, card evm-scan-chain-tail; main: two topic positions)
+  assert.equal(asked.filter(([a, b]) => b - a + 1 > 100_000).length, 1, `${asked.length} getLogs`);
 });
 
 // Card rh-cold-quote: TORCH on Robinhood (2026-11-06 01:3xZ): its quote route, the hookless native 0.3% pool, and 100
@@ -1850,7 +1913,7 @@ test("card rh-cold-quote: seeded pools whose output of Q needs more than 2^127 i
   const route: EvmRoute = { ...rcRoute, hops: [{ ...rcRoute.hops[0]!, currency: coin }] };
   const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token: coin, amountIn: AMOUNT, slippageBps: 100, route }, [chain([eth, ...seeded], 0, RC_HEAD), chain([eth, ...seeded], 1, RC_HEAD)], NOW, scanner(RC_HEAD, rcLogs(seeded), asked, 100_000)));
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
-  assert.equal(asked.length, 2, "the token's two topic positions alone");
+  assert.equal(asked.length, 1, "the token's scan alone, one getLogs (the event alone, card evm-scan-chain-tail)");
 });
 
 test("card rh-cold-quote: one provider that answers SafeCastOverflow for a currency's pool, to hide its market, is refused (rpc_disagree), against a revert or an answer", async () => {
@@ -1895,7 +1958,9 @@ test("card evm-spare-list-green: a quote prunes a currency the quote before scan
   const pools = [eth, xPool, uPool, via, ...uOwn];
   const logs = rcLogs([xPool, uPool, via, ...uOwn]);
   const route: EvmRoute = { ...rcRoute, hops: [{ ...rcRoute.hops[0]!, currency: coin }] };
-  const quote = (asked: [number, number][]) => verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token: coin, amountIn: AMOUNT, slippageBps: 100, route }, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, scanner(RC_HEAD, logs, asked, 100_000)));
+  // one provider for both quotes (the tail is kept per chain and first scan provider, card evm-scan-chain-tail)
+  const m = moving();
+  const quote = (asked: [number, number][]) => verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token: coin, amountIn: AMOUNT, slippageBps: 100, route }, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, m.to(scanner(RC_HEAD, logs, asked, 100_000))));
   const first = await quote([]);
   assert.equal(first.accepted, true, String((first as { code?: string }).code));
   assert.equal((first as { amountOut: bigint }).amountOut, 3000n * AMOUNT);
@@ -3436,18 +3501,19 @@ test("W2b a pool made in the last maxLag blocks before the agreed block is misse
   const pools = [seeded(token), viaX, marketOf(x)];
   const logs = [{ key: viaX.key, at: 4_100_000 }, { key: marketOf(x).key, at: 4_100_001 }];
   const req = { ...warmReq(token), route: seededRoute(token) };
-  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0))).accepted, true);
+  const m = moving();
+  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, m.to(scanner(5_000_000, logs)), undefined, () => 0))).accepted, true);
   const better: ModelPool = { key: keyOf(token, NATIVE, 9000, 9, NATIVE), give: (a) => a };
   const now = [...pools, better];
   const asked: [number, number][] = [];
   const scan = scanner(5_000_010, [...logs, { key: better.key, at: 5_000_005 }], asked);
   const h = heldFrom(scan, 5_000_001);
-  const v2 = await verdict(h.answered(evmPoolBuyQuoteWith(req, [chain(now, 0, 5_000_010), chain(now, 1, 5_000_010)], NOW, h.rpc, undefined, () => 0)));
+  const v2 = await verdict(h.answered(evmPoolBuyQuoteWith(req, [chain(now, 0, 5_000_010), chain(now, 1, 5_000_010)], NOW, m.to(h.rpc), undefined, () => 0)));
   assert.equal(v2.accepted, true, String((v2 as { code?: string }).code));
   await pause(20);
   assert.equal(h.order[0], "answer", h.order.join(" -> "));
   assert.ok(h.order.includes("gap read") && asked.some(([a, b]) => a === 5_000_001 && b === 5_000_010), JSON.stringify(asked));
-  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(now, 0, 5_000_010), chain(now, 1, 5_000_010)], NOW, scan, undefined, () => 0)), below);
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(now, 0, 5_000_010), chain(now, 1, 5_000_010)], NOW, m.to(scan), undefined, () => 0)), below);
 });
 
 test("W2c a warm quote that does not wait for its last blocks is still held to the best pool it read, on both providers: a kept pool above the route refuses it", async () => {
@@ -3532,7 +3598,9 @@ test("W2f a gap read later keeps what a newer quote kept meanwhile: the next quo
   const pools = [seeded(token)];
   const req = { ...warmReq(token), route: seededRoute(token) };
   const logs = [{ key: seeded(token).key, at: 4_100_000 }];
-  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0))).accepted, true);
+  // one provider as the chain moves on (the tail is kept per chain and first scan provider, card evm-scan-chain-tail)
+  const m = moving();
+  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, m.to(scanner(5_000_000, logs)), undefined, () => 0))).accepted, true);
   let release = () => {};
   const released = new Promise<void>((r) => (release = r));
   const q1scan = scanner(5_000_010, logs);
@@ -3540,15 +3608,16 @@ test("W2f a gap read later keeps what a newer quote kept meanwhile: the next quo
     if (getLogsOf(calls).some((f) => Number(f.toBlock) === 5_000_010)) await released;
     return q1scan(calls);
   };
-  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, 5_000_010), chain(pools, 1, 5_000_010)], NOW, held, undefined, () => 0))).accepted, true);
+  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, 5_000_010), chain(pools, 1, 5_000_010)], NOW, m.to(held), undefined, () => 0))).accepted, true);
   const q2asked: [number, number][] = [];
-  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, 5_000_020), chain(pools, 1, 5_000_020)], NOW, scanner(5_000_020, logs, q2asked), undefined, () => 0))).accepted, true);
+  const q2 = scanner(5_000_020, logs, q2asked);
+  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, 5_000_020), chain(pools, 1, 5_000_020)], NOW, m.to(async (calls, signal) => (getLogsOf(calls).some((f) => Number(f.toBlock) === 5_000_010) ? held(calls, signal) : q2(calls, signal))), undefined, () => 0))).accepted, true);
   await pause(20);
   assert.ok(q2asked.some(([, y]) => y === 5_000_020), JSON.stringify(q2asked));
   release();
   await pause(20);
   const q3asked: [number, number][] = [];
-  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, 5_000_030), chain(pools, 1, 5_000_030)], NOW, scanner(5_000_030, logs, q3asked), undefined, () => 0))).accepted, true);
+  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, 5_000_030), chain(pools, 1, 5_000_030)], NOW, m.to(scanner(5_000_030, logs, q3asked)), undefined, () => 0))).accepted, true);
   await pause(20);
   assert.ok(q3asked.length > 0 && q3asked.every(([x]) => x >= 5_000_021), JSON.stringify(q3asked));
 });
@@ -3618,7 +3687,7 @@ test("card robinhood-quotes-inside-provider-limits: a warm Robinhood quote of a 
 // quote whose scans were the token's, X's markets, X's pools one level further and Y's markets sent 5 posts (a warm
 // Robinhood tap of HOOKR 7, mainnet from the Mac, 2026-11-14 23:2xZ). The quote reads them once it ends, one request of
 // each kind: its head and 2 posts.
-test("card robinhood-quotes-inside-provider-limits: a warm Robinhood quote whose scans are of both kinds over several currencies sends the scan provider its head and one request of each kind", async () => {
+test("card robinhood-quotes-inside-provider-limits: a warm Robinhood quote over several currencies sends the scan provider its head and one request of the chain's tail (card evm-scan-chain-tail; main: one of each kind)", async () => {
   const token = "0x0000000000000000000000000000000000ee1402";
   const x = "0x" + (0x7d0100).toString(16).padStart(40, "0");
   const y = "0x" + (0x7d0200).toString(16).padStart(40, "0");
@@ -3626,20 +3695,21 @@ test("card robinhood-quotes-inside-provider-limits: a warm Robinhood quote whose
   const pools = [best(token), { key: keyOf(token, x, 3000, 60, NATIVE), give: (a: bigint) => 10n * a }, { key: keyOf(x, y, 2500, 50, NATIVE), give: (a: bigint) => a }, marketOf(y)] as ModelPool[];
   const logs = pools.map((p, i) => ({ key: p.key, at: RC_HEAD - 1_000_000 + i }));
   const req = { chain: "robinhood" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) };
-  const cold = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, scanner(RC_HEAD, logs, [], 100_000), undefined, () => 0));
+  const m = moving();
+  const cold = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, m.to(scanner(RC_HEAD, logs, [], 100_000)), undefined, () => 0));
   assert.equal(cold.accepted, true, String((cold as { code?: string }).code));
   await pause(50);
   const posts: string[][] = [];
   const inner = scanner(RC_HEAD + 10, logs, [], 100_000);
   const scan: EvmRpc = (calls, s) => (posts.push(calls.map((c) => c.method)), inner(calls, s));
-  const warm = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD + 10), chain(pools, 1, RC_HEAD + 10)], NOW, scan, undefined, () => 0));
+  const warm = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD + 10), chain(pools, 1, RC_HEAD + 10)], NOW, m.to(scan), undefined, () => 0));
   assert.deepEqual(warm, cold.accepted ? { ...cold, block: warm.accepted ? (warm as { block: bigint }).block : 0n } : cold);
   await pause(50);
   assert.ok(posts.filter((p) => p.includes("eth_getLogs")).length > 0, "the gaps were read");
-  assert.ok(posts.length <= 3, `${posts.length} posts to the scan provider, 3 at most (its head, one of each kind): ${JSON.stringify(posts)}`);
+  assert.ok(posts.length <= 2, `${posts.length} posts to the scan provider, 2 at most (its head, one of the chain's tail): ${JSON.stringify(posts)}`);
   // what the later read found is kept: the next quote, ten blocks on, asks only its own blocks
   const asked: [number, number][] = [];
-  await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD + 20), chain(pools, 1, RC_HEAD + 20)], NOW, scanner(RC_HEAD + 20, logs, asked, 100_000), undefined, () => 0));
+  await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD + 20), chain(pools, 1, RC_HEAD + 20)], NOW, m.to(scanner(RC_HEAD + 20, logs, asked, 100_000)), undefined, () => 0));
   await pause(50);
   assert.ok(asked.length > 0 && asked.every(([a]) => a >= RC_HEAD + 11), JSON.stringify(asked));
 });
@@ -3669,29 +3739,8 @@ test("W4 past EVM_WARM_RANGE_S of block time nothing kept is asked: the quote ta
   assert.ok(late.n.calls >= 3, `rounds: ${late.n.calls}`);
 });
 
-test("W1b a warm quote asks its kept scans beside the token's: X's markets are scanned before its first round of reads is answered", async () => {
-  const token = "0x00000000000000000000000000000000000ee0e5";
-  const x = xAt(0x3a40);
-  const { pools, logs } = warmCase(token, x);
-  const events: string[] = [];
-  const watched = (rpc: EvmRpc): EvmRpc => async (calls) => {
-    if (!calls.some((c) => c.method === "eth_call")) return rpc(calls);
-    await new Promise((r) => setTimeout(r, 20));
-    const out = await rpc(calls);
-    events.push("round");
-    return out;
-  };
-  const scanWatched = (rpc: EvmRpc): EvmRpc => async (calls) => {
-    for (const c of calls) if (c.method === "eth_getLogs" && JSON.stringify(c.params).includes(W(BigInt(x)))) events.push("scan X");
-    return rpc(calls);
-  };
-  await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)));
-  events.length = 0;
-  // a hundred blocks on (past Base's maxLag of 50): each scan asks the blocks since its last
-  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [watched(chain(pools, 0, 5_000_100)), watched(chain(pools, 1, 5_000_100))], NOW, scanWatched(scanner(5_000_100, logs)), undefined, () => 0));
-  assert.equal(v.accepted, true, String((v as { code?: string }).code));
-  assert.ok(events.indexOf("scan X") >= 0 && events.indexOf("scan X") < events.indexOf("round"), events.join(", "));
-});
+// W1b deleted (card evm-scan-chain-tail): a warm quote no longer starts kept scans of X beside the token's; X's markets
+// are a lookup of the token's one scan of the chain's tail, which sends no getLogs of X's own (TAIL1 holds that)
 
 test("W5 a kept read the quote did not ask again is not kept for the next: a change of amount leaves the old amount's quotes behind", async () => {
   // a provider that adds up the calldata of its eth_calls
@@ -3931,7 +3980,9 @@ test("V4 the providers are asked fastest first by measured time; one with a requ
 // read; a span the provider throttles is asked again whole, never as halves that only send it more.
 const getLogsOf = (calls: readonly EvmRpcCall[]) => calls.filter((c) => c.method === "eth_getLogs").map((c) => c.params[0] as { fromBlock: string; toBlock: string; topics: unknown[] });
 // a request of the token's own scan: its topics name the token alone
-const ofToken = (f: { topics: unknown[] }, token: string) => f.topics.some((t) => t === "0x" + W(BigInt(token)));
+// a getLogs that reads `token`'s pools: one naming it, or one naming no currency (the chain's tail, card
+// evm-scan-chain-tail, whose logs serve every currency)
+const ofToken = (f: { topics: unknown[] }, token: string) => f.topics.length <= 1 || f.topics.some((t) => t === "0x" + W(BigInt(token)));
 
 test("J1 a scan that lost one span keeps every other: the next quote reads only the blocks of the span that failed, and decides as a quote that lost none", async () => {
   const token = "0x00000000000000000000000000000000000ee0f4";
@@ -4191,34 +4242,8 @@ test("J4 a kept scan started early that ends before the token's scan waits for t
   assert.ok(events.indexOf("heads") > events.lastIndexOf("token"), events.join(" -> "));
 });
 
-test("J5 a kept scan started early that fails before the token's scan ends waits for the quote to pick the block too", async () => {
-  const token = freshToken();
-  const x = xAt(0x3c20);
-  const { pools, logs } = warmCase(token, x);
-  await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)));
-  const events: string[] = [];
-  // a hundred blocks on, past Base's maxLag of 50, so both scans are read before the quote answers
-  const inner = scanner(5_000_100, logs);
-  const scan: EvmRpc = async (calls) => {
-    const ls = getLogsOf(calls);
-    const mine = ls.some((f) => ofToken(f, token));
-    if (ls.length > 0 && !mine) {
-      events.push("X failed");
-      return calls.map((_, id) => ({ jsonrpc: "2.0", id, error: { code: -32000, message: "internal error" } }));
-    }
-    if (mine) await pause(300);
-    const out = await inner(calls);
-    if (mine) events.push("token");
-    return out;
-  };
-  const heads = (rpc: EvmRpc): EvmRpc => async (calls) => {
-    if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] === "latest")) events.push("heads");
-    return rpc(calls);
-  };
-  await verdict(evmPoolBuyQuoteWith(warmReq(token), [heads(chain(pools, 0, 5_000_100)), heads(chain(pools, 1, 5_000_100))], NOW, scan, undefined, () => 0));
-  assert.ok(events.includes("X failed") && events.includes("token"), events.join(" -> "));
-  assert.ok(events.indexOf("heads") > events.lastIndexOf("token"), events.join(" -> "));
-});
+// J5 deleted (card evm-scan-chain-tail): no scan is started early beside the token's (the warm round's kept scans are
+// gone with the scan kinds); a scan that fails before the block is picked keeps its spans as J1 and S2b hold
 
 test("J6 a scan of two currencies with different blocks left keeps each span only for the currency whose request came back: the next quote asks X2's failed part and finds its market", async () => {
   const [A, B] = [freshToken(), freshToken()];
@@ -5480,9 +5505,11 @@ test("SP1 a first scan provider that refuses connections: the scan goes on at th
 /** A warm quote: the token's scan read up to 5,000,000 by a quote before, the chain's head now 5,000,010, the real pool
  *  made at 5,000,005, so only the second's answer for those ten blocks finds it. */
 const warmPair = async (token: string, first: EvmRpc, chainName: "base" | "robinhood" = "base") => {
-  await pairQuote(token, scanner(5_000_000, []), scanner(5_000_000, []), chainName);
+  // the same first provider both quotes (the tail is kept per chain and first scan provider, card evm-scan-chain-tail)
+  const m = moving();
+  await pairQuote(token, m.to(scanner(5_000_000, [])), scanner(5_000_000, []), chainName);
   const asked: [number, number][] = [];
-  const r = await pairQuote(token, first, scanner(5_000_010, realAt(token, 5_000_005), asked), chainName, 5_000_010);
+  const r = await pairQuote(token, m.to(first), scanner(5_000_010, realAt(token, 5_000_005), asked), chainName, 5_000_010);
   return { ...r, asked };
 };
 
@@ -5505,7 +5532,7 @@ test("SP2 a first scan provider that does not answer a warm scan: the second has
   // the first's one getLogs was ended at the 2 s hold, never at its own 10 s timeout or the quote's 60 s bound, and
   // never asked again
   assert.deepEqual(why, ["rpc_error: the scan provider did not answer within 2000 ms"]);
-  assert.deepEqual(asked, [[5_000_001, 5_000_010], [5_000_001, 5_000_010]]);
+  assert.deepEqual(asked, [[5_000_001, 5_000_010]]); // one getLogs, the event alone (card evm-scan-chain-tail)
   // a cold scan the second cannot carry in one round stays on the first while it answers: its newest request, answered
   // after 2.5 s, is waited for, never passed over at 2 s
   const token2 = "0x00000000000000000000000000000000005c4508";
@@ -5966,7 +5993,7 @@ test("SP5 a first scan provider that answers a warm scan with no logs: the reque
   const { v, asked } = await warmPair(token, noLogs, "robinhood");
   assert.deepEqual(v, below);
   assert.ok(ranges.every(([a, b]) => a === 5_000_001 && b === 5_000_010), `the first was asked ${JSON.stringify(ranges)}`);
-  assert.deepEqual(asked, [[5_000_001, 5_000_010], [5_000_001, 5_000_010]]);
+  assert.deepEqual(asked, [[5_000_001, 5_000_010]]); // one getLogs, the event alone (card evm-scan-chain-tail)
 });
 
 test("SP6 a first scan provider whose head read takes 2.5 s: the head is the second's, a cold scan's requests stay on the first", { timeout: 60_000 }, () => onTestClock(async () => {
