@@ -3540,6 +3540,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const mine = joinBars(e.back?.tape?.candles(tf as Tf, to, limit) ?? [], own).slice(-limit);
       // the read back's state as its bars were taken, never after GeckoTerminal's wait (as trades)
       const filling = backing(e);
+      // a live chart (no `to`) whose book is behind the chain (behind, BEHIND_MAX) is not current: filling, whatever its
+      // bar count, and the block it is read to named as the tape names it (card every-tape-and-chart-says-filling-behind-
+      // the-head: a chart's last bar was drawn as current while its book was behind, as live run 44228233209's tape was)
+      const late = to === null && behind(e);
+      const timing = readTo(e);
       let bars: Candle[] = mine;
       let src = "chain";
       // the history before our first bar refused or failed with none held: the answer says filling, so the page reads it
@@ -3569,9 +3574,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const at = e.readAt ?? now();
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
-      if ((short || filling) && bars.length < limit) body.filling = true;
+      if (((short || filling) && bars.length < limit) || late) body.filling = true;
       body.as_of_ms = at;
-      return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at });
+      return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at, timing });
     },
     /** 06b Trades: the newest `limit` swaps, newest first. */
     async trades(token: string, limit: number, client?: string): Promise<DataAnswer> {
