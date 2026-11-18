@@ -94,6 +94,10 @@ const ONECLICK_QUOTE = "oneclick/v0/quote";
 /** GET /v1/health's header naming mainnet NEAR's agreement pair (card near-pair-on-keyed-providers; token-status/status.ts
  *  pairNames): "<first>, <second>", each "<company's domain>[ key<n>][ keyless]", never a URL or a key. */
 export const NEAR_PAIR_HEADER = "X-Helper-Near-Pair";
+/** GET /v1/health's header naming when this process started, in ms (card helper-evm-tapes-survive-a-restart): the live
+ *  check that reads a coin's tape right after a deploy knows the helper it reads is the new one, and how new. */
+export const STARTED_HEADER = "X-Helper-Started";
+const STARTED_MS = Date.now();
 const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/", "/v1/market/pools"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind", "/v1/bind/record"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD, LOGO_PREFIX, MARKET_POOLS] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL, POOL_SOLANA_PIECES] = MOUNTED.relay;
@@ -425,7 +429,7 @@ export function handler(
       }
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        return send(200, health(commit, SERVED, release, ready(), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", ") });
+        return send(200, health(commit, SERVED, release, ready(), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", "), [STARTED_HEADER]: String(STARTED_MS) });
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });

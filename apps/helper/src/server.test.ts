@@ -19,7 +19,7 @@ import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, upstreamBudget } from "./
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
-import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
+import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, STARTED_HEADER, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
 import { pairNames } from "./token-status/status.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
@@ -65,6 +65,10 @@ test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay
   assert.equal(r.headers["cache-control"], "no-store");
   assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
   assert.equal(r.headers["set-cookie"], undefined);
+  // card helper-evm-tapes-survive-a-restart: when this process started, in ms, never ahead of the answer (a header, as
+  // the near pair: the body has 11 B left under the kit's 1 KB)
+  const started = Number(r.headers[STARTED_HEADER.toLowerCase()]);
+  assert.ok(Number.isSafeInteger(started) && started > 1.7e12 && started <= Date.now(), String(started));
 });
 
 // card near-pair-on-keyed-providers: GET /v1/health names, in X-Helper-Near-Pair, the two providers mainnet's
