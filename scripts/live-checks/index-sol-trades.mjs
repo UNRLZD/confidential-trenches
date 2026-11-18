@@ -25,7 +25,9 @@
 // day (dbc_curves, from the same lists). Card sol-meteora-tape-inside-rpc-budget: a coin whose tape answer names
 // `sol-whole-cut` in Server-Timing (the helper read its Meteora trades whole past their budget and serves it its pool's
 // tape, trades.ts) is skipped, named in the run's `cut`, and its venue watched again; a venue whose every sampled coin
-// was cut is BAD, naming the cut (the budget starved it).
+// was cut is BAD, naming the cut (the budget starved it). A found trade out of the span its coin's tape answers for
+// (older than a full tape's 50 rows, or than the reach the answer names in whole_ms: the route takes no time bound) is
+// skipped and named in the run's `rolled`; a venue whose every sampled trade was skipped is BAD.
 // The candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
 // one 75 s span; a 429 still standing after it, or no bar at the trade's second, is BAD as any other answer.
 // After: helper
@@ -43,7 +45,7 @@ export const APP = "https://ct-app.unrealized.trade";
 export const WS = "wss://api.mainnet-beta.solana.com";
 const RPC = "https://api.mainnet-beta.solana.com";
 export const FRESH_MS = 2_000;
-const OPEN = 8;
+export const OPEN = 8;
 const POLL_MS = 200;
 const WAIT_MS = 90_000;
 const SHA = /^[0-9a-f]{40}$/;
@@ -213,9 +215,13 @@ export const METEORA = { "meteora-dlmm": METEORA_DLMM, "meteora-dbc": METEORA_DB
 export const READ_BACK = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
 const METEORA_WAIT_MS = 180_000;
 const METEORA_TAPE_MS = 30_000;
-const METEORA_WATCH = 100;
+/** Card sol-meteora-tape-inside-rpc-budget: the Meteora part's coins, watched and kept open on the helper, at most. With the
+ *  pump.fun part's OPEN (open until IDLE_MS after it) they hold 28 of the helper's OPEN_MAX 40 walks (trades.ts), so the
+ *  users' pages keep 12. At 100 the check took every walk: "refused /v1/market/trades solana trades open 41 in 10 s", and
+ *  its own DLMM coin was answered 429 (a local helper at 8ddec0fe2, 18 Nov 20:12Z). */
+export const METEORA_WATCH = 20;
 /** Card sol-meteora-tape-inside-rpc-budget: a found venue's tape read once a second, so the check stays one caller inside
- *  the helper's API_RATE_MAX (120 in 10 s): its 100 coins kept open every 20 s (50) and three venues' reads (30). At
+ *  the helper's API_RATE_MAX (120 in 10 s): its coins kept open every 20 s (10) and three venues' reads (30). At
  *  POLL_MS (200 ms) three reads drew 150 in 10 s, and the helper answered the check 429 (a local helper at 7239c82e4,
  *  18 Nov 19:28Z and 19:34Z: "refused /v1/market/trades client window"). */
 export const METEORA_POLL_MS = 1_000;
@@ -372,24 +378,27 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
   // skipped and named, and its venue watched again: its trade is judged on a coin the helper reads whole
   const cut = {};
   const skip = (venue, f, p) => void ((cut[venue] ??= []).some((c) => c.sig === f.sig) || cut[venue].push({ coin: f.coin, sig: f.sig, timing: cutOf(p) }));
+  // and a trade out of the span its coin's tape answers for (outOfSpan) is skipped and named in `rolled`
+  const rolled = {};
+  const roll = (venue, v) => void ((rolled[venue] ??= []).some((c) => c.sig === v.sig) || rolled[venue].push({ coin: v.coin, sig: v.sig, ts: v.ts, why: outOfSpan(v) }));
   await watchMeteora(tokens, ws, waitMs, async (venue, f) => {
     const r = (reading[venue] = readMeteoraOne(base, f, fetchFn));
-    const { polls } = await r;
-    if (cutOf(polls[0]) !== null) {
-      skip(venue, f, polls[0]);
-      if (reading[venue] === r) delete reading[venue];
-      return false;
-    }
-    const b = polls[0]?.status === 200 ? JSON.parse(polls[0].body) : null;
-    // kept unless the trade had already left the tape's 50 newest rows when it was read
-    return !(Array.isArray(b?.trades) && b.trades.length === 50 && !b.trades.some((x) => x.tx === f.sig) && b.trades.at(-1).t_ms > f.ts * 1000);
+    const v = await r;
+    const { polls } = v;
+    // kept unless cut, or its trade out of the span its tape answers for (rolled), each named and its venue watched again
+    if (cutOf(polls[0]) !== null) skip(venue, f, polls[0]);
+    else if (outOfSpan(v) !== null) roll(venue, v);
+    else return true;
+    if (reading[venue] === r) delete reading[venue];
+    return false;
   }).finally(stop);
   const out = {};
   for (const [venue, r] of Object.entries(reading)) {
     const v = await r;
     // a read the watch's end left unjudged is skipped when cut, as the watch skips it (a local helper at aeb7b0a81, 18 Nov
-    // 19:01Z: a DLMM coin served past the budget was judged)
+    // 19:01Z: a DLMM coin served past the budget was judged), and when its trade is out of its tape's span
     if (cutOf(v.polls.at(-1)) !== null) skip(venue, v, v.polls.at(-1));
+    else if (outOfSpan(v) !== null) roll(venue, v);
     else out[venue] = v;
   }
   // a venue none of whose listed coins traded in the wait (DBC: 3 listed coins at 18 Nov 14:50Z): the newest rows of
@@ -398,6 +407,10 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
   for (const coin of tokens.slice(0, METEORA_SCAN)) {
     if (left.size === 0) break;
     const p = await get(base, TRADES_PATH(coin), fetchFn).catch(() => null);
+    // only a tape of the helper's own chain reads names a trade it decoded: a vendor's (a coin past OPEN_MAX's walks, or
+    // with no decoded venue) is passed over (a local helper at 8ddec0fe2, 18 Nov 20:07Z: a DLMM row off Ce2gx9KG's
+    // CoinGecko tape was judged, and had left that tape's 50 rows by its next read)
+    if (p?.headers?.["x-helper-source"] !== "chain") continue;
     const rows = p?.status === 200 ? (JSON.parse(p.body).trades ?? []).slice(0, 3) : [];
     for (const row of rows) {
       const t = B58.test(row?.tx ?? "") ? await meteoraTradeOf(row.tx, coin, left).catch(() => null) : null;
@@ -415,6 +428,10 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
         skip(t.venue, f, v.polls.at(-1));
         break;
       }
+      if (outOfSpan(v) !== null) {
+        roll(t.venue, v);
+        break;
+      }
       left.delete(t.venue);
       out[t.venue] = v;
       break;
@@ -423,7 +440,33 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
   // the listed coins on a DBC curve that trade (DBC_VOL_USD in a day): with none, no listed coin can show a DBC trade
   out.dbc_curves = dbcCurves(rows);
   out.cut = cut;
+  out.rolled = rolled;
   return out;
+}
+
+/** Card sol-meteora-tape-inside-rpc-budget: why a found trade its coin's tape does not hold is outside what that tape
+ *  answers for, or null when the tape holds it or should (it is then judged). GET /v1/market/trades takes a limit only (at
+ *  most TRADES_MAX, 50: no time or cursor bound), so a trade is out when
+ *    - 50 rows were answered and the trade is older than the oldest of them (a busy coin's trade rolled past them), or
+ *    - the answer names its reach (whole_ms: every trade from then on) and the trade is older than it (a local helper at
+ *      7239c82e4, 18 Nov 19:47Z: DAMM v2 trade m6AJaXiFvoPs at 1795031220 s, whole_ms 1795031235000, newest row 1795031191
+ *      s, oldest 1795029860 s of 50).
+ *  A missing trade inside the rows' span and inside the named reach is the tape's fault and is judged. */
+export function outOfSpan(v) {
+  const p = Array.isArray(v?.polls) ? v.polls.at(-1) : undefined;
+  if (p?.status !== 200 || !Number.isSafeInteger(v?.ts)) return null;
+  let b;
+  try {
+    b = JSON.parse(p.body);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(b?.trades) || b.trades.some((r) => r?.tx === v.sig)) return null;
+  const at = v.ts * 1000;
+  const oldest = b.trades.at(-1)?.t_ms;
+  if (b.trades.length >= 50 && Number.isSafeInteger(oldest) && at < oldest) return `rolled past the tape's 50 rows (oldest ${oldest})`;
+  if (Number.isSafeInteger(b.whole_ms) && at < b.whole_ms) return `before the tape's named reach (whole_ms ${b.whole_ms})`;
+  return null;
 }
 
 /** Card sol-meteora-tape-inside-rpc-budget: an answer's `sol-whole-cut` Server-Timing entry (the helper served the coin
@@ -443,10 +486,23 @@ export function judgeMeteora(m) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   for (const venue of Object.keys(METEORA)) {
-    const v = isObj(m) ? m[venue] : undefined;
     // card sol-meteora-tape-inside-rpc-budget: coins past the helper's whole reads' budget are skipped and named; a venue
     // whose every sampled coin was past it is the budget starving the venue, a fault, never a pass
     const cut = isObj(m) && isObj(m.cut) && Array.isArray(m.cut[venue]) ? m.cut[venue] : [];
+    // card sol-meteora-tape-inside-rpc-budget: a trade out of the span its tape answers for (outOfSpan) is skipped and named,
+    // the judged one included; a venue whose every sampled trade was skipped has none judged, a fault, never a pass
+    const rolled = [...(isObj(m) && isObj(m.rolled) && Array.isArray(m.rolled[venue]) ? m.rolled[venue] : [])];
+    let v = isObj(m) ? m[venue] : undefined;
+    if (isObj(v) && outOfSpan(v) !== null) {
+      rolled.push({ coin: v.coin, sig: v.sig, ts: v.ts, why: outOfSpan(v) });
+      v = undefined;
+    }
+    const rolledSay = rolled.map((c) => `${String(c.sig).slice(0, 12)} ${c.why}`).join("; ");
+    if (!isObj(v) && rolled.length > 0) {
+      lines.push(`BAD ${venue}: every sampled trade was skipped, none judged: ${rolled.length} out of its tape's span (${rolledSay})${cut.length > 0 ? `, ${cut.length} coin(s) past the helper's whole reads' budget` : ""}`);
+      continue;
+    }
+    if (rolled.length > 0) lines.push(`ok  ${venue}: ${rolled.length} trade(s) out of its tape's span skipped: ${rolledSay}`);
     if (!isObj(v) && cut.length > 0) {
       lines.push(`BAD ${venue}: every sampled coin (${cut.length}: ${cut.map((c) => String(c.coin).slice(0, 8)).join(", ")}) was served past the helper's whole reads' budget (${cut[0].timing}): the budget starved the venue`);
       continue;
@@ -468,7 +524,11 @@ export function judgeMeteora(m) {
     if (b === undefined) continue;
     const fault = tradesFault(b);
     say(fault === null, `${venue}: the tape holds exactly the frozen fields in their wire forms${fault === null ? "" : `: ${fault}`}`);
-    const row = fault === null ? b.trades.find((r) => r.tx === v.sig) : undefined;
+    // card sol-meteora-tape-inside-rpc-budget: a transaction can hold several trades of the coin (a buy on one pool and a
+    // sell on another: 25KF3ptvBtY1 of E5cbap6o, a local helper at 8ddec0fe2, 18 Nov 20:12Z, two rows of 26023135.8611,
+    // "s" first): the trade is the row of its side and time among the transaction's rows, else its first row
+    const mine = fault === null ? b.trades.filter((r) => r.tx === v.sig) : [];
+    const row = mine.find((r) => r.side === v.side && r.t_ms === v.ts * 1000) ?? mine[0];
     say(row !== undefined, `${venue}: the trade ${String(v.sig).slice(0, 12)} is on the coin's tape${row === undefined ? `, not in its ${Array.isArray(b.trades) ? b.trades.length : 0} rows` : ""}`);
     if (row !== undefined) say(row.side === v.side && row.t_ms === v.ts * 1000, `${venue}: its side ${show(row.side)} and time ${row.t_ms} are the event's (${v.side}, ${v.ts * 1000})`);
     for (const u of READ_BACK) {
