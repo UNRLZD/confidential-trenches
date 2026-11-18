@@ -3,7 +3,10 @@
   "good": "The deployed helper (de80994dc, card helper-listed-charts-own-reads round 1 with KEYED_COLD_ONLY) read by this check at 2026-11-16T00:25:43.899Z: BONK 500 bars src chain,coingecko, Base DRB 0x3ec2...6ea2 500 bars src chain,coingecko.",
   "bad": "The deployed helper read by this check in live run 43776130630 (15 Nov 23:56Z). The run keeps no record, so this is its two verdict lines as printed, each chart's nine reads with their src as printed and the bars of the last read only: BONK 500 bars src chain,geckoterminal (a full chart: it passes under the re-cut bar), Base DRB 3 bars, src chain, after 9 reads (a short chart: it fails).",
   "old_bar_bad": "The previous bad answer (main b1b679c42, no key, 13 Nov 10:50Z): both charts 500 bars, src chain,geckoterminal. It failed the old bar (src naming coingecko) and passes the re-cut one: full charts of our own reads with GeckoTerminal's history before them.",
-  "held_bonk": "The deployed helper (f73ef454b) read by this check from the Mac at 2026-11-16T07:02:18Z, the same verdict as live run 43816654565 (job 133130245625, 06:5xZ): BONK 500 bars src geckoterminal after 9 reads, Base 0x22af...6f3b 500 bars src chain,coingecko. BONK is on none of Solana's lists, so its chart is the history source's alone (apps/helper/src/data/solana/trades.ts candles), and held, its re-read is keyless (KEYED_COLD_ONLY, token.ts chartRead): at 07:01Z its 500 bars matched GeckoTerminal's keyless minute bars of its pool 5zpyutJu9ee6jFymDGoK7F6S5Kczqtc9FomP3ueKuyA9 in 499 of 500 (the open minute moved). It failed the bar before card held-chart-names-its-bars and passes it after: a full chart named by its source."
+  "held_bonk": "The deployed helper (f73ef454b) read by this check from the Mac at 2026-11-16T07:02:18Z, the same verdict as live run 43816654565 (job 133130245625, 06:5xZ): BONK 500 bars src geckoterminal after 9 reads, Base 0x22af...6f3b 500 bars src chain,coingecko. BONK is on none of Solana's lists, so its chart is the history source's alone (apps/helper/src/data/solana/trades.ts candles), and held, its re-read is keyless (KEYED_COLD_ONLY, token.ts chartRead): at 07:01Z its 500 bars matched GeckoTerminal's keyless minute bars of its pool 5zpyutJu9ee6jFymDGoK7F6S5Kczqtc9FomP3ueKuyA9 in 499 of 500 (the open minute moved). It failed the bar before card held-chart-names-its-bars and passes it after: a full chart named by its source.",
+  "active_pick": "The fixed check (card helper-candles-full-after-tape-behind, tree a6c1109c7) read from the Mac against the deployed helper at 2026-11-18T07:22:08.751Z: Trending 1h's row 0 had no trade in 5m, so the pick took row 1 (23 trades in 5m); BONK and the pick 500 bars src chain,coingecko.",
+  "quiet_pick_bad": "Live run 44249482613 (18 Nov 06:13Z), which keeps no record: its verdict lines as printed. The old pick took Trending 1h's first row, Base ANZ 0xeec46833 (0 buys and 0 sells in 5m, 858 USD in 24h); 84 bars src chain,coingecko after 9 reads (the bars of the last read only), BONK 500 bars src geckoterminal after 1 read. The in-process A/B served ANZ the same 86 bars at df5aa68bf, 27c4d830a and 979bfc37b: its whole one-minute history.",
+  "lists_quiet_then_hot": "Two rows of the deployed helper's Base Trending 1h as read at 2026-11-18T07:17:10.649Z (as_of_ms), the fields the pick reads and why it skips: ANZ (quiet) then PROS (hot), in that order. Each row keeps its address as coin (a field named token reads as a key to the secret scan); the test serves it as token, the field the helper sends."
  },
  "good": {
   "base": "https://ct-api.unrealized.trade",
@@ -374,5 +377,136 @@
     ]
    }
   ]
+ },
+ "active_pick": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T07:22:08.751Z",
+  "lists": {
+   "base": 200,
+   "pick": {
+    "list": "trending_1h",
+    "row": 1,
+    "trades_5m": 23
+   }
+  },
+  "charts": [
+   {
+    "chain": "solana",
+    "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "reads": [
+     {
+      "status": 200,
+      "ms": 209,
+      "bars": 500,
+      "src": "chain,coingecko",
+      "filling": false
+     }
+    ]
+   },
+   {
+    "chain": "base",
+    "address": "0xb200000000000000000000397293cb8cda9a10c5",
+    "reads": [
+     {
+      "status": 200,
+      "ms": 1496,
+      "bars": 500,
+      "src": "chain,coingecko",
+      "filling": false
+     }
+    ]
+   }
+  ]
+ },
+ "quiet_pick_bad": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T06:13Z",
+  "lists": {
+   "base": 200
+  },
+  "charts": [
+   {
+    "chain": "solana",
+    "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "reads": [
+     {
+      "status": 200,
+      "bars": 500,
+      "src": "geckoterminal",
+      "filling": false
+     }
+    ]
+   },
+   {
+    "chain": "base",
+    "address": "0xeec468333ccc16d4bf1cef497a56cf8c0aae4ca3",
+    "reads": [
+     {
+      "status": 200,
+      "src": "chain,coingecko"
+     },
+     {
+      "status": 200,
+      "src": "chain,coingecko"
+     },
+     {
+      "status": 200,
+      "src": "chain,coingecko"
+     },
+     {
+      "status": 200,
+      "src": "chain,coingecko"
+     },
+     {
+      "status": 200,
+      "src": "chain,coingecko"
+     },
+     {
+      "status": 200,
+      "src": "chain,coingecko"
+     },
+     {
+      "status": 200,
+      "src": "chain,coingecko"
+     },
+     {
+      "status": 200,
+      "src": "chain,coingecko"
+     },
+     {
+      "status": 200,
+      "bars": 84,
+      "src": "chain,coingecko",
+      "filling": false
+     }
+    ]
+   }
+  ]
+ },
+ "lists_quiet_then_hot": {
+  "lists": {
+   "trending_1h": [
+    {
+     "coin": "0xeec468333ccc16d4bf1cef497a56cf8c0aae4ca3",
+     "symbol": "ANZ",
+     "buys_5m": 0,
+     "sells_5m": 0,
+     "buys_1h": 3,
+     "sells_1h": 2,
+     "vol_1h_usd": "10.7129736221",
+     "vol_24h_usd": "858.358589345"
+    },
+    {
+     "coin": "0x8b7dde054be9d180c1be7fae0874697374a49832",
+     "symbol": "PROS",
+     "buys_5m": 38,
+     "sells_5m": 30,
+     "buys_1h": 1161,
+     "sells_1h": 1156,
+     "vol_1h_usd": "299320.776817",
+     "vol_24h_usd": "10594851.617"
+    }
+   ]
+  }
  }
 }
