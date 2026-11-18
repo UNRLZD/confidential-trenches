@@ -3,7 +3,8 @@
 // as served before the card: FAIL. Planted on the good one: another /app.js, no pin, each fact taken away: each FAIL.
 // Planted in a bundle: the refusal gone, a skip that writes TAKEN or skips a quoted index, a plan that names a skipped
 // index, a host that marks after its ask or not at all, a mark handed to fewer hosts, a step 5 read (the vault's) past
-// the skipping reader, a used id skipped by nothing: each FAIL.
+// the skipping reader, a used id skipped by nothing, a skip that opens the seed for an index with no PLANNED note: each
+// FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -48,7 +49,7 @@ test("planted in a bundle: each rule broken in place FAILs", () => {
     "m=CN({scope:M9,quoted:p,x:1}),k=sV({pools:P9,quoted:p,x:1}),q={a:CN({quoted:p,y:1}),b:sV({quoted:p})}",
     "var B5=(e,t,n)=>async(r,i)=>{let a=await n(r,i);return a===`used`&&i!==void 0&&await e.skip(t,i),a}",
     "x=await G(c,r.scope,{},B5(s,r.scope,h),1),y=await G(c,r.scope,{},B5(s,r.scope,f),1),z=await G(c,t.scope,{},B5(o,t.scope,m),{first:o.lane})",
-    "skip:(t,n)=>y(async()=>{let r=await wP(await e.store());try{await r.skipUsed(t,n)}finally{r.close()}})",
+    "skip:async(t,n)=>{let r=await AP(await e.store());try{if(!(await r.list()).some(e=>e.state===`PLANNED`&&e.ref.kind===`deposit`&&e.ref.s===t&&e.ref.i===n))return}finally{r.close()}await y(async()=>{let r=await AP(await e.store());try{await r.skipUsed(t,n)}finally{r.close()}})}",
   ].join(";");
   const at = (s) => facts("", s);
   assert.deepEqual([at(js).store, at(js).marks, at(js).skip], [true, true, true]);
@@ -64,4 +65,5 @@ test("planted in a bundle: each rule broken in place FAILs", () => {
   assert.equal(at(js.replace("B5(o,t.scope,m)", "m")).skip, false, "the vault's read past the skipping reader");
   assert.equal(at(js.replace("&&await e.skip(t,i)", "")).skip, false, "a used id skipped by nothing");
   assert.equal(at(js.replace("await r.skipUsed(t,n)", "await r.takeUnquoted(t,n)")).skip, false, "own.skip that takes");
+  assert.equal(at(js.replace("try{if(!(await r.list()).some(e=>e.state===`PLANNED`&&e.ref.kind===`deposit`&&e.ref.s===t&&e.ref.i===n))return}finally{r.close()}", "")).skip, false, "own.skip that opens the seed for every used id");
 });

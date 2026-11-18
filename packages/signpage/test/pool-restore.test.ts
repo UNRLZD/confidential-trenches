@@ -1693,6 +1693,30 @@ test("Q4 (card restore-shows-a-note-on-a-planned-index): step 5 reads the index 
   }
 });
 
+test("card restore-shows-a-note-on-a-planned-index (review P3-3 of a435601ce): a used id whose index the store holds no PLANNED note at opens no seed; one it holds PLANNED opens one, to skip it", async () => {
+  const seedsWith = async (planned: boolean): Promise<{ seeds: number; at: number }> => {
+    const base = await world({ pools: () => SOL_ONLY });
+    const at = base.store.lane;
+    if (planned) {
+      const ns = await openNoteStore(base.store);
+      try {
+        assert.equal(((await ns.planDeposit(SOL_SCOPE, (ref) => noteSecrets(SEED(), ref).precommitment)).ref as { i: number }).i, at);
+      } finally {
+        ns.close();
+      }
+    }
+    const near = nearOf(new Map<string, As>([[idOf(SOL_SCOPE, at), "used_storage"]]));
+    const w = await world({ store: async () => base.store, pools: () => SOL_ONLY, solana: emptyWalk, ids: near.ids, ux: () => uxOf(new Map()).reads });
+    assert.equal(await whole(w), "done", JSON.stringify(w.steps));
+    assert.deepEqual(near.found.get(SOL_SCOPE)!.lanes.find((x) => x.lane === at)!.used, [at]);
+    return { seeds: w.seeds.length, at };
+  };
+  const held = await seedsWith(true);
+  const none = await seedsWith(false);
+  // the same reads on both: the one difference is the skip's seed open, only where a PLANNED note is there to skip
+  assert.equal(held.seeds - none.seeds, 1, `held ${held.seeds}, none ${none.seeds}`);
+});
+
 test("P2 (card restore-shows-a-note-on-a-planned-index, review of 69e52470c): two devices on one seed share a lane; B's restore reads the index both planned as used, quoted on A only; A's deposit lands on it, and B's next walk shows the money", async () => {
   // two stores of one seed whose lanes agree (each draws its lane at its first open, one in 8)
   const a = await world({ pools: () => SOL_ONLY });

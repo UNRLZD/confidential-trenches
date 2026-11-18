@@ -10,7 +10,8 @@
 //     plain send, no 1Click ask before it), and the page hands every one of its four quote hosts the one mark, the note
 //     store's markQuoted under the seed lock shared (src/main.ts quotedIndex);
 //   - skip: restore step 5 reads every id through one `skipping` reader, whose "used" answer goes to own.skip, the note
-//     store's skipUsed under the run's seed use, on the pools' two reads and the vault's one (src/pool-restore.ts).
+//     store's skipUsed under the run's seed use (no seed opened for an index the store holds no PLANNED note at), on
+//     the pools' two reads and the vault's one (src/pool-restore.ts).
 // What each does is held by the card's tests (packages/wallet/test/note-store.test.ts Q1,
 // packages/signpage/test/pool-deposit-address.test.ts Q2, deposit-wire.test.ts Q3, pool-restore.test.ts Q4, P2 and the
 // vault's). The
@@ -45,7 +46,9 @@ const POOL_MARK = new RegExp(`if\\(!(${ID})\\)return;if\\(await ${ID}\\.quoted\\
 const MARKER = new RegExp(`(${ID})=\\((${ID}),(${ID})\\)=>navigator\\.locks\\.request\\(${ID},\\{mode:\`shared\`\\},async\\(\\)=>\\{let (${ID})=await ${ID}\\(await ${ID}\\(\\)\\);try\\{await \\4\\.markQuoted\\(\\2,\\3\\)\\}finally\\{\\4\\.close\\(\\)\\}\\}\\)`);
 // restore step 5: one reader whose "used" answer goes to own.skip, which is the note store's skipUsed under the run's seed use
 const SKIPPING = new RegExp(`(${ID})=\\((${ID}),(${ID}),(${ID})\\)=>async\\((${ID}),(${ID})\\)=>\\{let (${ID})=await \\4\\(\\5,\\6\\);return \\7===\`used\`&&\\6!==void 0&&await \\2\\.skip\\(\\3,\\6\\),\\7\\}`);
-const SKIP = new RegExp(`skip:\\((${ID}),(${ID})\\)=>${ID}\\(async\\(\\)=>\\{let (${ID})=await ${ID}\\(await ${ID}\\.store\\(\\)\\);try\\{await \\3\\.skipUsed\\(\\1,\\2\\)\\}finally\\{\\3\\.close\\(\\)\\}\\}\\)`);
+// own.skip: a used id whose index the store holds no PLANNED note at returns before any seed opens (review P3-3); else
+// the note store's skipUsed under the run's seed use
+const SKIP = new RegExp(`skip:async\\((${ID}),(${ID})\\)=>\\{let (${ID})=await ${ID}\\(await ${ID}\\.store\\(\\)\\);try\\{if\\(!\\(await \\3\\.list\\(\\)\\)\\.some\\(${ID}=>${ID}\\.state===\`PLANNED\`&&${ID}\\.ref\\.kind===\`deposit\`&&${ID}\\.ref\\.s===\\1&&${ID}\\.ref\\.i===\\2\\)\\)return\\}finally\\{\\3\\.close\\(\\)\\}await ${ID}\\(async\\(\\)=>\\{let (${ID})=await ${ID}\\(await ${ID}\\.store\\(\\)\\);try\\{await \\4\\.skipUsed\\(\\1,\\2\\)\\}finally\\{\\4\\.close\\(\\)\\}\\}\\)\\}`);
 const esc = (name) => name.replace(/[$]/g, "\\$");
 
 /** The skip set's rules in the note store: skipUsed writes only the set, planDeposit leaves it out. */

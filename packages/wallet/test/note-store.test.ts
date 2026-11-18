@@ -616,6 +616,23 @@ test("Q1 (card restore-shows-a-note-on-a-planned-index): a quoted deposit index 
   await t.ns.markQuoted(f, lane); // not skipped: its mark is not refused
 });
 
+test("card restore-shows-a-note-on-a-planned-index (review P3-2 of a435601ce): a skip writes the notes store, the change the page names again on (src/main.ts notesMoved); a skip that changes nothing writes nothing", async () => {
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  opened.push(w);
+  const wrote: string[] = [];
+  const logged: WalletStore = { ...w, put: async (s, k, v) => (wrote.push(s), w.put(s, k, v)), update: (async (s: never, k: never, f: never) => (wrote.push(s), (w.update as (...a: unknown[]) => unknown)(s, k, f))) as WalletStore["update"] };
+  const ns = await openNoteStore(logged);
+  notes.push(ns);
+  const u = await ns.planDeposit(971n, pc);
+  wrote.length = 0;
+  await ns.skipUsed(971n, (u.ref as { i: number }).i);
+  assert.deepEqual(wrote, ["meta", "notes"], "the skip set, then the note written again as it is");
+  assert.deepEqual((await ns.get(u.id))!, u, "the note itself unchanged");
+  wrote.length = 0;
+  await ns.skipUsed(971n, (u.ref as { i: number }).i);
+  assert.deepEqual(wrote, [], "skipped already: nothing written");
+});
+
 test("pool sends (card signpage-pool-notes): the first with PLANNED -> INCOMING, more by addSend at the same value, compare-and-set; a taken note's next arrival plans", async () => {
   const t = await tab();
   const a = await t.ns.planDeposit(951n, pc);

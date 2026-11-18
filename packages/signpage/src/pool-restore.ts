@@ -1320,16 +1320,24 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
               }
             }),
           // an id read as used: its PLANNED note named no more (never TAKEN) only when no address or quote of it left
-          // the device (the wallet's skipUsed), under the seed lock and the run's check, as the floor's write
-          skip: (scope: bigint, i: number) =>
-            seedHeld(async () => {
+          // the device (the wallet's skipUsed), under the seed lock and the run's check, as the floor's write; an id
+          // whose index the store holds no PLANNED note at opens no seed (review P3-3: most used ids have none)
+          skip: async (scope: bigint, i: number) => {
+            const read = await openNoteStore(await h.store());
+            try {
+              if (!(await read.list()).some((n) => n.state === "PLANNED" && n.ref.kind === "deposit" && n.ref.s === scope && n.ref.i === i)) return;
+            } finally {
+              read.close();
+            }
+            await seedHeld(async () => {
               const notes = await openNoteStore(await h.store());
               try {
                 await notes.skipUsed(scope, i);
               } finally {
                 notes.close();
               }
-            }),
+            });
+          },
         };
         // the lanes the marker keeps read whole, by scope; a lane is added only while the marker is there (never one
         // written again after a try removed it)

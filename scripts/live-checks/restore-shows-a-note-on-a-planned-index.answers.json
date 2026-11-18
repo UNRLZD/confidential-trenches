@@ -1,11 +1,11 @@
 {
   "_note": {
-    "good": "this card's SIGN_HOST build (mainnet): packages/signpage index.html and app.js built at 622c5fb2e on card/restore-shows-a-note-on-a-planned-index (build-app.mjs --out), the skip set on the pools' and the vault's step 5",
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage index.html and app.js built at dc31cc977 (origin/main a6c1109c7 merged) plus the own.skip guard, on card/restore-shows-a-note-on-a-planned-index (build-app.mjs --out), the skip set on the pools' and the vault's step 5",
     "bad": "SIGN_HOST as served 18 Nov 06:19Z (release before this card): no quoted mark, no skip: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-EdsnG+d0pQrMNuUb4EuUHjpqrYpzalvmAWvcbpIaJNmqeESmj8lGJZjiinOC7yMY\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-EdsnG+d0pQrMNuUb4EuUHjpqrYpzalvmAWvcbpIaJNmqeESmj8lGJZjiinOC7yMY",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Yi2zNyBErKtdqqYlc4zBtcGS7dOOMzT7nbXpY8b4nn7QDSmxwhfle10FrgKiuCgC\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Yi2zNyBErKtdqqYlc4zBtcGS7dOOMzT7nbXpY8b4nn7QDSmxwhfle10FrgKiuCgC",
     "store": true,
     "marks": true,
     "skip": true
