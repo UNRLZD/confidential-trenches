@@ -2765,11 +2765,12 @@ test("load-reads-name-no-w-to-the-public-seat: a sell in flight a closed page ke
     answer: (_host, method, params) => (method === "getTransaction" && params[0] === S ? { slot: 5, transaction: [base64.encode(landed), "base64"], meta: { err: null } } : undefined),
   });
   try {
-    const t0 = performance.now();
+    // the speed as work counted: settled at the load's first state read, after this many seat calls of the sell's
     await l.read();
-    const ms = performance.now() - t0;
     assert.deepEqual(await keptSells(async () => l.w).list(), [], "settled (filled) at the first state read");
-    tc.diagnostic(`kept sell settled at the load's first state read in ${ms.toFixed(1)} ms`);
+    const calls = l.naming("public", l.flight).length + l.naming("helper", l.flight).length;
+    assert.equal(calls, 2, "one read back on each seat");
+    tc.diagnostic(`kept sell settled at the load's first state read after ${calls} seat calls naming it`);
     // a trade in flight: its verdict (filled, refused, not landed) is both seats' word, as the run's own read back
     assert.ok(l.naming("public", l.flight).length >= 1 && l.naming("helper", l.flight).length >= 1, "the verdict read on both seats");
     assert.deepEqual(l.publicNaming(), [], "no W address named to the public seat");
