@@ -366,13 +366,13 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
   // card sol-meteora-tape-inside-rpc-budget: a coin the helper serves past its whole reads' budget (sol-whole-cut) is
   // skipped and named, and its venue watched again: its trade is judged on a coin the helper reads whole
   const cut = {};
-  const skip = (venue, f, p) => (cut[venue] ??= []).push({ coin: f.coin, sig: f.sig, timing: cutOf(p) });
+  const skip = (venue, f, p) => void ((cut[venue] ??= []).some((c) => c.sig === f.sig) || cut[venue].push({ coin: f.coin, sig: f.sig, timing: cutOf(p) }));
   await watchMeteora(tokens, ws, waitMs, async (venue, f) => {
     const r = (reading[venue] = readMeteoraOne(base, f, fetchFn));
     const { polls } = await r;
     if (cutOf(polls[0]) !== null) {
       skip(venue, f, polls[0]);
-      delete reading[venue];
+      if (reading[venue] === r) delete reading[venue];
       return false;
     }
     const b = polls[0]?.status === 200 ? JSON.parse(polls[0].body) : null;
@@ -380,7 +380,13 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
     return !(Array.isArray(b?.trades) && b.trades.length === 50 && !b.trades.some((x) => x.tx === f.sig) && b.trades.at(-1).t_ms > f.ts * 1000);
   }).finally(stop);
   const out = {};
-  for (const [venue, r] of Object.entries(reading)) out[venue] = await r;
+  for (const [venue, r] of Object.entries(reading)) {
+    const v = await r;
+    // a read the watch's end left unjudged is skipped when cut, as the watch skips it (a local helper at aeb7b0a81, 18 Nov
+    // 19:01Z: a DLMM coin served past the budget was judged)
+    if (cutOf(v.polls.at(-1)) !== null) skip(venue, v, v.polls.at(-1));
+    else out[venue] = v;
+  }
   // a venue none of whose listed coins traded in the wait (DBC: 3 listed coins at 18 Nov 14:50Z): the newest rows of
   // those coins' tapes on the helper, the first that is a trade of the venue by the helper's own decoder (`fromTape`)
   const left = new Set(Object.keys(METEORA).filter((v) => !(v in out)));
@@ -397,8 +403,15 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
         skip(t.venue, f, p);
         continue;
       }
+      // and a coin cut by the time its tape is read is skipped too (a starved local helper, 18 Nov 19:10Z: a DLMM coin's
+      // scan read uncut, its tape cut 5 s on)
+      const v = await readMeteoraOne(base, f, fetchFn);
+      if (cutOf(v.polls.at(-1)) !== null) {
+        skip(t.venue, f, v.polls.at(-1));
+        break;
+      }
       left.delete(t.venue);
-      out[t.venue] = await readMeteoraOne(base, f, fetchFn);
+      out[t.venue] = v;
       break;
     }
   }
