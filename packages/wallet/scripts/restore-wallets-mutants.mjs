@@ -144,6 +144,8 @@ const M = [
   ["a vault late send taken on one provider's read", PRS, [["const { found, why } = lateFound(x, token);", 'const { found, why } = "error" in x ? { found: null, why: [] } : { found: x.held.find((h) => h.asset === token)?.amounts ?? null, why: [] };']], PRT, "vault-late-send-carried"],
   ["a vault late send under MIN_DEPOSIT carried", PRS, [["found[0] < VAULT_CONSTANTS.MIN_DEPOSIT", "found[0] < 0n"]], PRT, "vault-late-send-carried"],
   ["a vault carry refused never named", PRS, [["    if (c !== null) (c.retry ? out.held : out.named).push(`${at} ${c.why}`);", "    void c;"]], PRT, "vault-late-send-carried"],
+  ["step 7's window ended at the first answered try", PRS, [["          if (owed) stays = true;", "          void owed;"]], PRT, "vault-late-send-carried"],
+  ["step 7's window restarted on each load", PRS, [["              if (o.late !== undefined) return void (first = o.late);\n", ""]], PRT, "vault-late-send-carried"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
 const only = process.argv[2];

@@ -2612,3 +2612,26 @@ test("card vault-late-send-carried: under MIN_DEPOSIT is left under the id, as t
   assert.equal(await whole(w), "stalled");
   assert.ok(why5(w).includes(`near vault: deposit index 3's id ${id} the relayer refused its carry (x)`), JSON.stringify(why5(w)));
 });
+
+test("card vault-late-send-carried: step 7 holds for 72 h of block time past the first restore's pass: the marker keeps that pass's time and stays, so each load reads the vault's ids again; past the window it is removed", async (t) => {
+  // the first run: nothing under any id; the marker stays with the pass block's time (both providers' header time)
+  const w = await vworld(t, { pools: () => VAULT_ONLY, vault: vaultWalk, ids: vaultChain(new Map()).ids, vaultCarry: carries().carry });
+  assert.equal(await whole(w), "done");
+  const m = (await w.store.get("meta", restoreKind.RESTORE_IDS_KEY)) as { scopes: string[]; late?: number };
+  assert.deepEqual(m.scopes, [VSCOPE.toString()]);
+  assert.equal(typeof m.late, "number");
+  // a load inside the window reads the ids again: a send that landed since is carried
+  const id = idOf(VSCOPE, 3);
+  const c = carries();
+  const later = poolRestore({ ...w.host, ids: vaultChain(new Map([[id, [5_000_000n, 5_000_000n] as const]])).ids, vaultCarry: c.carry });
+  await later.resume();
+  await later.idle();
+  assert.deepEqual(c.got.map((x) => [x.i, x.amount]), [[3, 5_000_000n]]);
+  assert.equal(((await w.store.get("meta", restoreKind.RESTORE_IDS_KEY)) as { late?: number }).late, m.late, "the window is the first restore's, never restarted");
+  // a load past the window (the first pass's time REREAD_MS before this one's): the answered try removes the marker
+  await w.store.put("meta", restoreKind.RESTORE_IDS_KEY, { scopes: [VSCOPE.toString()], late: 1 });
+  const past = poolRestore({ ...w.host, ids: vaultChain(new Map()).ids, vaultCarry: carries().carry });
+  await past.resume();
+  await past.idle();
+  assert.equal(await w.store.get("meta", restoreKind.RESTORE_IDS_KEY), undefined);
+});

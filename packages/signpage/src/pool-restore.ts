@@ -112,8 +112,11 @@
 //   the deposit follow leaves it (withdraw.open takes it). A carry that ends anything but deposited is named. The
 //   vault's scope joins step 5's marker, so a load while it is owed reads it again. A note at the id that this device
 //   holds and no restore's read wrote (its own planned deposit) is the deposit follow's, never carried here.
-//   The pools hold the same rule (a U_X found holding money is written and carried, above); what neither path has yet
-//   is a read on a later open, once step 5's marker is gone, for a send that lands after step 5 read its id.
+//   Step 7 runs on each load for 72 h of block time (REREAD_MS) past the first restore's pass: that pass's time, both
+//   providers' agreed header time (passTimeMs), is kept on step 5's marker (`late`), and an answered try leaves the
+//   marker in place while a try's own pass is inside the window, so the next load's resume reads the vault's ids again
+//   (a Sync keeps the window, never restarts it). The pools' U_X have no such re-read yet: a send to a pool deposit's
+//   U_X that lands after step 5 read it waits for the next Sync (card restore-carries-pool-refund's lane).
 // - No request names a note: each restore reads its pool's whole public set and finds the seed's own notes on the
 //   device (solana-restore.ts, evm-restore.ts headers). The seed is opened only for one use at a time (a SeedUse,
 //   ../../wallet/src/notes/restore.ts): under the store's seed lock, shared, after a check that it is still stored and
@@ -160,9 +163,9 @@ import { TRADE_HELPER } from "./trade.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { solanaRestoreNotes, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
-import { idReadKeep, keptIdReader, nearIdHeldReader, type IdHeld, type IdReaderOpts, type IdReadKeep, type PassOpts } from "../../wallet/src/restore/id-reader.ts";
+import { idReadKeep, keptIdReader, nearIdHeldReader, passTimeMs, type IdHeld, type IdReaderOpts, type IdReadKeep, type PassOpts } from "../../wallet/src/restore/id-reader.ts";
 import { ID_KEEP } from "../../wallet/src/deposit/moveout.ts";
-import { afterRestore, coverTo, restoreDepositIds, type DepositIds, type IdReader, type LaneIds } from "../../wallet/src/restore/wallets.ts";
+import { afterRestore, coverTo, REREAD_MS, restoreDepositIds, type DepositIds, type IdReader, type LaneIds } from "../../wallet/src/restore/wallets.ts";
 import { lateFound, rereadOnOpen, type AfterRpc } from "../../wallet/src/restore/after.ts";
 import { bindDeposit, bindRpc, POLL_MS, type BindRpc } from "../../wallet/src/deposit/bind.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
@@ -366,7 +369,7 @@ async function readDepositIds(
     part(scope: bigint, lane: number, readTo: number, highest: number | null, noteHighest: number | null): Promise<void>;
   },
   /** the NEAR vault walked, its ids read after the pools' (card vault-late-send-carried), or null */
-  vault: { v: VaultWalked; notesAt: Parameters<typeof readVaultLate>[7]; carry: VaultCarry } | null = null,
+  vault: { v: VaultWalked; notesAt: Parameters<typeof readVaultLate>[7]; carry: VaultCarry; late: Parameters<typeof readVaultLate>[9] } | null = null,
 ): Promise<void> {
   const { rpcs, pass, reader } = await letGo(keptIdReader(POOL_DEPOSIT_NETWORK, ids.rpcs, keep, { ...ids.opts, signal }), signal);
   // what an id read as money holds, by asset on both providers at the same pass, opened now beside the id reader on the
@@ -461,7 +464,7 @@ async function readDepositIds(
   // the vault's deposit ids, step 5 then step 7 (card vault-late-send-carried), on the run's kept pass; a throw of its
   // own is a read to try again by the vault's label, the pools' reasons kept
   if (vault !== null)
-    await readVaultLate(seed, vault.v, ids, keep, signal, out, own, vault.notesAt, vault.carry).catch((e: unknown) => {
+    await readVaultLate(seed, vault.v, ids, keep, signal, out, own, vault.notesAt, vault.carry, vault.late).catch((e: unknown) => {
       if (signal.aborted || e instanceof SeedGone) throw e;
       out.retry.push(`${vault.v.label}: its deposit ids' read did not finish: ${e instanceof Error ? e.message : "it threw"}`);
     });
@@ -493,10 +496,18 @@ async function readVaultLate(
   own: { lane: number; raise(scope: bigint, min: number): Promise<void>; found(scope: bigint, i: number, amounts: readonly [bigint, bigint]): Promise<void> },
   notesAt: (scope: bigint) => Promise<ReadonlyMap<number, { id: string; found: boolean; landed: boolean }>>,
   carry: VaultCarry,
+  /** step 7's window across loads: handed this run's pass block time, it keeps the first restore's (on step 5's marker)
+   *  and tells whether this pass is still within REREAD_MS of it (the marker then stays, so the next load reads again) */
+  late: (passMs: number) => Promise<boolean>,
 ): Promise<void> {
   // the pools' ids are read on the network 1Click pays out on: the vault's ids on the same pair, so only that network's
   if (v.network !== POOL_DEPOSIT_NETWORK) return void out.named.push(`${v.label}: its deposit ids are on ${v.network}, which this build does not read them on`);
   const { rpcs, pass, reader } = await letGo(keptIdReader(v.network, ids.rpcs, keep, { ...ids.opts, signal }), signal);
+  // step 7's 72 h count from the first restore's pass block, both providers' agreed time (passTimeMs), kept on step 5's
+  // marker: each load while it is owed reads the ids again (wallet.md §2.3 step 7, "on each open"); a pass with no time
+  // (providers that read no blocks) is refused by rereadOnOpen below
+  const ms = passTimeMs(pass);
+  if (ms !== null) await late(ms);
   const holds: IdReader = async (u, i) => {
     signal.throwIfAborted();
     return letGo(reader(u, i), signal);
@@ -807,7 +818,7 @@ export const RESTORE_IDS_KEY = "owed/restore-ids";
  *   step 5 starts no id read before it, so a reload never asks sooner than one page left open would. A `next` further
  *   ahead than the longest pause (a clock moved back) counts as due.
  */
-type IdsOwed = { scopes: string[]; read?: Record<string, [number, number, number | null][]>; part?: Record<string, PartEntry[]>; run?: string; next?: number };
+type IdsOwed = { scopes: string[]; read?: Record<string, [number, number, number | null][]>; part?: Record<string, PartEntry[]>; run?: string; next?: number; late?: number };
 /** A lane step 5 left part way (`part`, by scope): its lane, the index it read to with nothing to tell, the lane's highest
  *  with history then, and its highest note when kept (a lane whose notes moved is read from its start again). */
 type PartEntry = [number, number, number | null, number | null];
@@ -840,6 +851,8 @@ const owedOf = (v: unknown): IdsOwed | null => {
     ...(typeof o.part === "object" && o.part !== null && !Array.isArray(o.part) && Object.values(o.part as unknown as Record<string, unknown>).every((xs) => Array.isArray(xs) && xs.every(partEntry)) ? { part: o.part } : {}),
     ...(typeof o.run === "string" ? { run: o.run } : {}),
     ...(typeof o.next === "number" && Number.isFinite(o.next) ? { next: o.next } : {}),
+    // card vault-late-send-carried: the first restore's pass block time (ms), step 7's window on the vault's ids
+    ...(typeof o.late === "number" && Number.isSafeInteger(o.late) && o.late > 0 ? { late: o.late } : {}),
   };
 };
 /** How long a load's step 5 waits for the marker's `next` (ms): none past it, a `next` further ahead than the longest
@@ -1223,7 +1236,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
             (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
               const o = owedOf(v);
               const keep = owed && o !== null && JSON.stringify(o.scopes) === JSON.stringify(scopes);
-              marker = keep ? { ...o!, run: runId } : { scopes, run: runId };
+              // step 7's window (`late`) is kept by every run: a Sync never restarts the 72 h, nor ends them
+              marker = keep ? { ...o!, run: runId } : { scopes, run: runId, ...(o?.late === undefined ? {} : { late: o.late }) };
               return marker;
             }),
           );
@@ -1332,6 +1346,24 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           }
         };
         const carry = h.vaultCarry ?? (vaultIds === null ? null : vaultCarry({ network: vaultIds.network, store: h.store, seedHeld }));
+        // step 7's window on the vault's ids, per try: the first restore's pass time kept on this run's marker, and whether
+        // this try's pass is still inside REREAD_MS of it. `stays`: the answered try keeps the marker for the next load (a
+        // pool's walk failed, or the window is not past)
+        let stays = walkFailed;
+        const late = async (passMs: number): Promise<boolean> => {
+          let first = passMs;
+          await seedHeld(async () =>
+            void (await (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
+              const o = owedOf(v);
+              if (o === null || o.run !== runId) return undefined;
+              if (o.late !== undefined) return void (first = o.late);
+              return { ...o, late: passMs };
+            })),
+          );
+          const owed = passMs < first + REREAD_MS;
+          if (owed) stays = true;
+          return owed;
+        };
         const pauses = h.pausesMs ?? STEP5_PAUSES_MS;
         // a load's step 5 asks no id before the marker's next (an earlier page's pause): never sooner than one page left
         // open would ask
@@ -1339,7 +1371,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         if (wait > 0) await pause(wait, signal);
         for (let t = 1; ; t++) {
           const out: Step5Reasons = { retry: [], held: [], named: [] };
-          await readDepositIds(seed, walked, ids, keep, signal, out, noted, own, lanesKept, vaultIds === null || carry === null ? null : { v: vaultIds, notesAt, carry }).catch((e: unknown) => {
+          stays = walkFailed;
+          await readDepositIds(seed, walked, ids, keep, signal, out, noted, own, lanesKept, vaultIds === null || carry === null ? null : { v: vaultIds, notesAt, carry, late }).catch((e: unknown) => {
             // the run's seed gone (a sign out, other words signed in): the run stops, and no try of it reads again
             if (e instanceof SeedGone || signal.aborted) throw e;
             out.retry.push(`step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`);
@@ -1351,12 +1384,14 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           await tell(last ? { retry: [], held: [], named: [...out.named, ...out.held, ...out.retry], tries: t, last } : { ...out, tries: t, last });
           if (answered) {
             // every id read and nothing found: nothing is owed, unless a pool's walk failed (the next load walks it and
-            // reads its ids, its kept lanes skipped); a finding keeps the marker, so the next load reads again (review P2-1)
+            // reads its ids, its kept lanes skipped) or step 7's 72 h on the vault's ids are not past (card
+            // vault-late-send-carried: each load reads them again); a finding keeps the marker, so the next load reads
+            // again (review P2-1)
             await seedHeld(async () => {
               const st = await h.store();
               const o = owedOf(await st.get("meta", RESTORE_IDS_KEY));
               if (o?.run !== runId) return;
-              if (!walkFailed && out.named.length === 0) return void (await st.delete("meta", RESTORE_IDS_KEY));
+              if (!stays && out.named.length === 0) return void (await st.delete("meta", RESTORE_IDS_KEY));
               const { next: _, ...rest } = o;
               await st.put("meta", RESTORE_IDS_KEY, rest);
             });
