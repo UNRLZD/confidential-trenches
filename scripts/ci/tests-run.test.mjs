@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { TEST_MS } from "../test-bound.mjs";
 import { mutantCommands, packageItems, packagesPart } from "./test-shards.mjs";
 
@@ -374,6 +375,88 @@ test("planted: a test script with no bound, a looser one or no force exit is ref
     assert.deepEqual(unbounded(dir), [`packages/w: node --test lacks ${bound}`], "each node --test of a chain");
     pkg("tsc -p .");
     assert.deepEqual(unbounded(dir), ["packages/w: its test script runs no node --test"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --test-force-exit ends a test file once the tests registered so far have ended, so a test registered after a top-level
+// await (scripts/test-bound.mjs) is cancelled with "Promise resolution is still pending but the event loop has already
+// resolved" (signpage's words-final.test.ts: 3 of 6 cancelled in the merge queue). In each package whose node --test
+// runs --test-force-exit, each test file it names keeps every top-level await above its first test( / it( / describe(
+// / suite( call. Reads the file's syntax: an await inside a function, a test callback included, is no top-level await.
+const REGISTERS = new Set(["test", "it", "describe", "suite"]);
+function topLevel(node, hit) {
+  if (hit(node)) return true;
+  if (ts.isFunctionLike(node) || ts.isClassLike(node)) return false;
+  return ts.forEachChild(node, (c) => topLevel(c, hit) || undefined) ?? false;
+}
+const isAwait = (n) => ts.isAwaitExpression(n) || (ts.isForOfStatement(n) && n.awaitModifier !== undefined);
+const isRegister = (n) => {
+  if (!ts.isCallExpression(n)) return false;
+  const e = ts.isPropertyAccessExpression(n.expression) ? n.expression.expression : n.expression;
+  return ts.isIdentifier(e) && REGISTERS.has(e.text);
+};
+/** The lines of `text` (a test file at `file`) holding a top-level await below its first test registration. */
+export function awaitsAfterFirstTest(file, text) {
+  const src = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, /\.m?js$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS);
+  const out = [];
+  let registered = false;
+  for (const s of src.statements) {
+    if (registered && topLevel(s, isAwait)) out.push(src.getLineAndCharacterOfPosition(s.getStart(src)).line + 1);
+    if (topLevel(s, isRegister)) registered = true;
+  }
+  return out;
+}
+
+export function lateAwaits(root) {
+  const out = [];
+  const globs = [...readFileSync(path.join(root, "pnpm-workspace.yaml"), "utf8").matchAll(/^\s+-\s+["']?([^"'\s]+)["']?\s*$/gm)].map((m) => m[1]);
+  for (const pkg of globs.flatMap((g) => globSync(`${g}/package.json`, { cwd: root })).sort()) {
+    const test = JSON.parse(readFileSync(path.join(root, pkg), "utf8")).scripts?.test;
+    if (typeof test !== "string") continue;
+    const dir = path.join(root, path.dirname(pkg));
+    for (const seg of test.split(/&&|\|\||[;|\n]/)) {
+      const w = seg.trim().split(/\s+/).map((x) => x.replace(/^(['"])(.*)\1$/, "$2"));
+      if (!(/(^|\/)node$/.test(w[0]) && w.includes("--test") && w.includes("--test-force-exit"))) continue;
+      for (const pattern of w.slice(w.indexOf("--test") + 1).filter((x) => !x.startsWith("-")))
+        for (const f of globSync(pattern, { cwd: dir }).sort()) {
+          const rel = path.relative(root, path.join(dir, f)).split(path.sep).join("/");
+          for (const line of awaitsAfterFirstTest(f, readFileSync(path.join(dir, f), "utf8"))) out.push(`${rel}:${line}: a top-level await below the file's first test, which --test-force-exit cancels`);
+        }
+    }
+  }
+  return out;
+}
+
+test("no test file run under --test-force-exit awaits at its top level below its first test", () => {
+  assert.deepEqual(lateAwaits(ROOT), []);
+});
+
+test("planted: a top-level await below a test is refused under --test-force-exit; above it, in a test or without the flag it passes", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "tests-run-late-await-"));
+  try {
+    const put = (f, text) => {
+      mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+      writeFileSync(path.join(dir, f), text);
+    };
+    put("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n');
+    const pkg = (flags) => put("packages/w/package.json", JSON.stringify({ scripts: { test: `node --test ${flags} "test/*.test.ts" test/*.test.mjs` } }));
+    const late = 'import { test } from "node:test";\ntest("a", () => {});\nconst m = await import("./m.ts");\ntest("b", () => {});\n';
+    put("packages/w/test/late.test.ts", late);
+    put("packages/w/test/loop.test.mjs", 'import { test } from "node:test";\ndescribe("d", () => {});\nfor await (const x of [1]) test(`${x}`, () => {});\n');
+    put("packages/w/test/fine.test.ts", 'import { test } from "node:test";\nconst m = await import("./m.ts");\ntest("a", async () => {\n  await m.x();\n});\nconst f = async () => await m.y();\ntest.skip("b", () => {});\n');
+    pkg("--test-force-exit");
+    assert.deepEqual(lateAwaits(dir), [
+      "packages/w/test/late.test.ts:3: a top-level await below the file's first test, which --test-force-exit cancels",
+      "packages/w/test/loop.test.mjs:3: a top-level await below the file's first test, which --test-force-exit cancels",
+    ]);
+    pkg("--test-timeout=1000");
+    assert.deepEqual(lateAwaits(dir), [], "no --test-force-exit: the runner waits for the late tests");
+    put("packages/w/test/late.test.ts", 'import { test } from "node:test";\nconst m = await import("./m.ts");\ntest("a", () => {});\ntest("b", () => {});\n');
+    put("packages/w/test/loop.test.mjs", 'import { test } from "node:test";\n');
+    pkg("--test-force-exit");
+    assert.deepEqual(lateAwaits(dir), [], "the await moved above the first test");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

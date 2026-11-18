@@ -69,6 +69,8 @@ async function signedIn(): Promise<{ w: WalletStore; ns: NoteStore }> {
 const recordOf = async (w: WalletStore) => (await w.get("meta", `deposit/${SCOPE}`)) as { index: number; id: string };
 const PLAIN = (i: number, u: string) => ({ chain: "solana" as const, s: SCOPE.toString(), i, u, refund_id: "ab".repeat(32), address: u, deadline_ms: 1, origin: POOL_DEPOSIT_DESTINATION.solana, min_out: FLOOR.toString() });
 
+const { poolFollows, poolFollowEnded } = await import("../src/pool-deposit-follow.ts");
+
 test("a plain send's remainder keeps its U_X named: the next send to it tops it up and its follow carries both", async () => {
   const { w, ns } = await signedIn();
   const x = ledger(0n);
@@ -145,7 +147,6 @@ test("the vault's U is never held: a funded vault index is never named again (W:
 });
 
 // ------------------------------------------------------------------ review P2-b, P3-a, P3-b: the follow of a plain send
-const { poolFollows, poolFollowEnded } = await import("../src/pool-deposit-follow.ts");
 type Round = { bal: readonly [bigint, bigint]; chain?: readonly [bigint, bigint]; past?: boolean };
 /** A follow whose reads go round by round (each deposit fills; the balances are the round's). */
 function rounds(list: Round[]) {
