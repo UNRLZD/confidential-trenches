@@ -428,7 +428,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // CoinGecko's keyed read and never the GeckoTerminal budget (card evm-token-page-off-the-5-call-window), its pool and
   // decimals the swap reads' (and handed to start, above)
   // card every-cell-shows-a-value: with one GoPlus reader for every chain's contract checks
-  assert.match(main, /const goplus = createGoPlus\(\);\n    const evmTokens: EvmTokens = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmToken\(c, \{ lists: evmLists\[c\]!, named: evmNamed\[c\], keyed, kept: swaps\[c\]\?\.kept, goplus \}\)\]\)\);/);
+  assert.match(main, /const goplus = createGoPlus\(\);\n    \/\/ and the holders' own quarter[^\n]*\n    const day = holdersDay\(Date\.now, dayFiles\(storeDir, randomUUID\(\)\)\);\n    const evmTokens: EvmTokens = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmToken\(c, \{ lists: evmLists\[c\]!, named: evmNamed\[c\], keyed, kept: swaps\[c\]\?\.kept, day, goplus \}\)\]\)\);/);
   // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
   // card robinhood-mainnet-rpcs: the pool senders' reads on that same hold and pace per provider
   assert.match(main, /const evmPools = evmPoolSendersFromEnv\(process\.env, undefined, holds\);/);

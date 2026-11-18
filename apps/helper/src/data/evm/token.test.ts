@@ -14,7 +14,10 @@ import { after, before, test } from "node:test";
 import { ROW_FIELDS } from "../../../../terminal/src/screens/discover/fields.ts";
 import { start } from "../../server.ts";
 import { HOLDERS_FIELDS, PAGE_FIELDS, RISK_FIELDS } from "../solana/token.ts";
-import { CHASE_PER_TICK, CHASE_TICK_MS, CHASE_TRIES, createEvmToken, INFO_FRESH_MS, INFO_SERVE_MS, INFO_WAIT_MS, toInfo } from "./token.ts";
+import { CHASE_PER_TICK, CHASE_TICK_MS, CHASE_TRIES, createEvmToken, HOLDERS_DAY, HOLDERS_GROUP, holdersDay, INFO_FRESH_MS, INFO_SERVE_MS, INFO_WAIT_MS, MISSED_HOLD_MS, toInfo } from "./token.ts";
+import { CG_DAY } from "../coingecko.ts";
+import { DAY_SYNC_MS, PROBE_DAY_SHARE } from "../../limits/limits.ts";
+import type { DayPeers } from "../../limits/day-spend.ts";
 import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
 
 /** `p`'s answer once the promise steps queued now have run, with no timer firing; undefined while it waits on one. */
@@ -300,7 +303,7 @@ test("a first read the key misses answers src none, is chased in the background,
   assert.equal(due.length, 0, "the chase ended");
 });
 
-test("a token the key never answers: chased CHASE_TRIES times, then not read again for INFO_FRESH_MS; at most CHASE_TRIES + 1 calls", async () => {
+test("a token the key never answers: chased CHASE_TRIES times, then not read again for MISSED_HOLD_MS; at most CHASE_TRIES + 1 calls", async () => {
   let t = NOW;
   calls = 0;
   const due: { at: number; fn: () => void }[] = [];
@@ -315,8 +318,8 @@ test("a token the key never answers: chased CHASE_TRIES times, then not read aga
   assert.equal(due.length, 0, "the chase ended");
   assert.equal(calls, CHASE_TRIES + 1);
   for (let i = 0; i < 10; i++) assert.equal(JSON.parse((await tok.holders(CASES[0].addr)).body).src, "none");
-  assert.equal(calls, CHASE_TRIES + 1, "not read again inside INFO_FRESH_MS");
-  t += INFO_FRESH_MS;
+  assert.equal(calls, CHASE_TRIES + 1, "not read again inside MISSED_HOLD_MS");
+  t += MISSED_HOLD_MS;
   await tok.holders(CASES[0].addr);
   assert.equal(calls, CHASE_TRIES + 2, "read again after it");
   assert.ok(CHASE_PER_TICK >= 1);
@@ -329,4 +332,57 @@ test("no key set: no read, holders src none at once, nothing chased", async () =
   assert.deepEqual([h.status, JSON.parse(h.body).src], [200, "none"]);
   assert.equal(JSON.parse((await tok.page(CASES[0].addr)).body).row.holders, null);
   assert.equal(due.length, 0);
+});
+
+// The CO's fold at b25a82fb7: the holders read within their own quarter of the CoinGecko key's day, apart from the charts'.
+const callerCap = HOLDERS_DAY - Math.floor(HOLDERS_DAY * PROBE_DAY_SHARE);
+
+test("HOLDERS_DAY is a quarter of the key's day; the holders' day stops at it and opens again at 00:00Z", () => {
+  assert.equal(HOLDERS_DAY, Math.floor(CG_DAY / 4));
+  let t = Date.parse("2026-11-18T10:00:00Z");
+  const d = holdersDay(() => t);
+  let n = 0;
+  while (d.left() && n < 10_000) (d.spend(), n++);
+  assert.equal(n, callerCap, "the cap, less the share every paced day keeps for probes (limits.ts PROBE_DAY_SHARE)");
+  t = Date.parse("2026-11-19T00:00:00Z");
+  assert.equal(d.left(), true, "a new UTC day");
+});
+
+test("the holders' day spent: no keyed call; a held count is still served, a token nothing is held for answers src none", async () => {
+  let t = NOW;
+  calls = 0;
+  const day = holdersDay(() => t);
+  const tok = createEvmToken("robinhood", { lists: listsOf("robinhood"), keyed: keyedOf("robinhood"), now: () => t, later: () => {}, day });
+  const held = CASES[1];
+  assert.equal(JSON.parse((await tok.holders(held.addr)).body).total, held.holders);
+  assert.equal(calls, 1);
+  while (day.left()) day.spend();
+  t += INFO_FRESH_MS; // a re-read is due, the day is spent
+  const h = await tok.holders(held.addr);
+  assert.deepEqual([JSON.parse(h.body).total, JSON.parse(h.body).src], [held.holders, "coingecko"], "the held count, under INFO_SERVE_MS");
+  const other = Object.keys(FX.robinhood.info).find((a) => a !== held.addr)!;
+  const o = await tok.holders(other);
+  assert.deepEqual([o.status, JSON.parse(o.body).total, JSON.parse(o.body).src], [200, null, "none"]);
+  assert.equal(calls, 1, "no call once the holders' day is spent");
+});
+
+test("the holders' day is counted with the helper it replaces: a deploy's next helper starts from the day's spend", () => {
+  let t = Date.parse("2026-11-18T10:00:00Z");
+  const files = new Map<string, { day: number; units: Map<string, number> }>();
+  const peersOf = (id: string): DayPeers => ({
+    write: (day, units) => void files.set(id, { day, units: new Map(units) }),
+    read: (day) => {
+      const sum = new Map<string, number>();
+      for (const [k, f] of files) if (k !== id && f.day === day) for (const [g, u] of f.units) sum.set(g, (sum.get(g) ?? 0) + u);
+      return sum;
+    },
+  });
+  const old = holdersDay(() => t, peersOf("a"));
+  // a read each DAY_SYNC_MS (limits.ts), so each spend is written to the old helper's file as it is made
+  for (let i = 0; i < callerCap - 10; i++) (old.spend(), (t += DAY_SYNC_MS));
+  assert.equal(files.get("a")?.units.get(HOLDERS_GROUP) !== undefined, true, "the old helper's spend is in its day file");
+  const next = holdersDay(() => t, peersOf("b"));
+  let n = 0;
+  while (next.left() && n < 10_000) (next.spend(), n++);
+  assert.ok(n <= 10, `the next helper read ${n}, the day had ${10} left`);
 });

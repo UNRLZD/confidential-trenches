@@ -24,7 +24,11 @@
 //     background (limits.ts CALLER_ROOM), the held count served, dated by its read, while under INFO_SERVE_MS (card
 //     market-data-evm-capacity). A first read the key could not answer (its minute or day spent, CoinGecko down, no key
 //     set) is chased in the background (CHASE_TICK_MS, CHASE_PER_TICK, CHASE_TRIES), so a holders tab's next
-//     poll (a minute) has the count; one that never answers is not read again for INFO_FRESH_MS. The page waits for a
+//     poll (a minute) has the count; one that never answers is not read again for MISSED_HOLD_MS. Every read, a miss
+//     included, draws on the holders' own share of the key's day, HOLDERS_DAY (a quarter of CG_DAY), kept in the
+//     helper's day files apart from the charts' (holdersDay), so the charts' three quarters never lose a call to a
+//     holder count; past it each token answers its held count while under INFO_SERVE_MS, else src none, until 00:00Z
+//     (card evm-token-page-off-the-5-call-window, the CO's fold at b25a82fb7). The page waits for a
 //     first read at most INFO_WAIT_MS and is otherwise answered with those fields null, the read held for the next.
 //   - pool and decimals on chain: the token's main pool and decimals the swap reads already found and checked on two
 //     providers (swaps.ts mainPool), when they hold them; nothing is read for the page.
@@ -39,17 +43,28 @@
 import type { Row } from "../solana/lists.ts";
 import type { ListsAnswer } from "../solana/lists.ts";
 import { CACHE_MAX, NOT_FOUND, RISK_FIELDS, UPSTREAM, type DataAnswer, type Field } from "../solana/token.ts";
-import { CG_SRC, type Keyed } from "../coingecko.ts";
+import { CG_DAY, CG_SRC, type Keyed } from "../coingecko.ts";
+import { providerHolds } from "../../limits/limits.ts";
+import type { DayPeers } from "../../limits/day-spend.ts";
 import { evmAddress, GT_NETWORK, type EvmChain } from "./lists.ts";
 import { LINKS, linksOf, type Links } from "../links.ts";
 import type { EvmNamed } from "./named.ts";
 import type { ContractRisk, GoPlus } from "../goplus.ts";
 
-/** A token's info is read again once this old [design: the holder count moves slowly (GeckoTerminal's own
- *  `last_updated`, which CoinGecko's on-chain info serves, was 1-3 min behind its read, 2026-11-09 01:50Z); 5 min keeps
- *  a page's holders current to the minute at one call a token, and a holders tab polling each minute
- *  (apps/terminal/src/screens/token/lower.ts HOLDERS_POLL_MS) spends a fifth of a call a minute of the key's day]. */
-export const INFO_FRESH_MS = 300_000;
+/** A token's info is read again once this old [design: the holder count moves slowly and the answer carries its
+ *  own date (`as_of_ms`, the info's `last_updated`); 30 min is 48 calls a day for a token open all day, where 5 min was
+ *  288 and 50 open tokens spent the key's whole day (CG_DAY 3,225) before noon, taking the charts' calls (the CO's
+ *  fold at b25a82fb7; token-load.test.ts "a day of 50 open tokens")]. */
+export const INFO_FRESH_MS = 1_800_000;
+/** A token whose chase never got an answer is not read again this long [design: 5 min, the chase's bound of
+ *  CHASE_TRIES + 1 reads repeated at most 12 times an hour for a token CoinGecko does not know, all on HOLDERS_DAY]. */
+export const MISSED_HOLD_MS = 300_000;
+/** The holders' share of the CoinGecko key's day, apart from the charts' [design: a quarter of CG_DAY (806 of 3,225),
+ *  the CO's fold at b25a82fb7: a holder count is worth less than a chart, so the charts keep three quarters whatever
+ *  the holders read; each read counts, a miss included]. */
+export const HOLDERS_DAY = Math.floor(CG_DAY / 4);
+/** The holders' day's key in the day files (limits/day-spend.ts), apart from the charts' group "coingecko". */
+export const HOLDERS_GROUP = "coingecko-holders";
 /** A held info serves, dated by its own read (`as_of_ms`, X-Fetched-At), this long; past it the token is read as one
  *  nobody holds [design (card market-data-evm-capacity): the holder count and top 10 share are display data that move
  *  slowly; an hour keeps every token opened in the last hour answering with its count while the key's minute or day
@@ -67,8 +82,8 @@ export const INFO_WAIT_MS = 700;
  *  at once and 1.35 a second after, less the quarter background leaves callers (limits.ts CALLER_ROOM), cover 50 coins
  *  opened at once before the holders tab's next poll a minute later (token-load.test.ts: 50 of 50 at 2 a tick and 6 or
  *  8 tries, 49 at 5 tries, 44 at 3 a tick; reads at 1, 2, 4 ... 32 s left 28, a bucket refilled past its burst between
- *  them losing that refill). 8 for room; a token CoinGecko never answers costs at most CHASE_TRIES + 1 calls an
- *  INFO_FRESH_MS]. */
+ *  them losing that refill). 8 for room; a token CoinGecko never answers costs at most CHASE_TRIES + 1 calls a
+ *  MISSED_HOLD_MS, on HOLDERS_DAY]. */
 export const CHASE_TICK_MS = 1_000;
 export const CHASE_PER_TICK = 2;
 export const CHASE_TRIES = 8;
@@ -188,20 +203,32 @@ function bounded<V>(max: number) {
   };
 }
 
+/** The holders' day: whether a read fits HOLDERS_DAY, and its spend. One for every chain, as the server's; `peers`: the
+ *  day files under the helper's store (limits/day-spend.ts dayFiles, its own id), so a deploy's next helper and the one
+ *  it replaces count each other's spend, as the key's own day does (limits.ts providerHolds). */
+export function holdersDay(now: () => number = Date.now, peers?: DayPeers): HoldersDay {
+  // a pace whose minute never refuses: only its day counts
+  const holds = providerHolds(now, { [HOLDERS_GROUP]: { perS: 1e9, burst: 1e9, unit: "call", group: HOLDERS_GROUP, day: HOLDERS_DAY } }, peers);
+  return { left: () => !holds.dayOut(HOLDERS_GROUP, 1), spend: () => void holds.take(HOLDERS_GROUP, 1, false) };
+}
+export type HoldersDay = { left(): boolean; spend(): void };
+
 /** One EVM chain's token page and holders. `lists`: the chain's Discover lists (lists.ts get and listed); `kept`: the
  *  swap reads' pool and decimals for a token, when held (swaps.ts kept); `keyed`: CoinGecko's keyed reads
- *  (../coingecko.ts createKeyed), null or absent when no key is set (no count, src "none"); `later`: runs a chase. */
+ *  (../coingecko.ts createKeyed), null or absent when no key is set (no count, src "none"); `later`: runs a chase;
+ *  `day`: the holders' day (holdersDay; default one of its own, in memory). */
 export function createEvmToken(
   chain: EvmChain,
-  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean>; maker?(token: string, createdS: number): Promise<string | null | undefined> }; named?: Pick<EvmNamed, "named">; keyed?: Pick<Keyed, "read"> | null; kept?: (token: string) => { pool: string; decimals: number } | undefined; now?: () => number; later?: (fn: () => void, ms: number) => void; goplus?: Pick<GoPlus, "risk"> },
+  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean>; maker?(token: string, createdS: number): Promise<string | null | undefined> }; named?: Pick<EvmNamed, "named">; keyed?: Pick<Keyed, "read"> | null; kept?: (token: string) => { pool: string; decimals: number } | undefined; now?: () => number; later?: (fn: () => void, ms: number) => void; day?: HoldersDay; goplus?: Pick<GoPlus, "risk"> },
 ) {
   const now = deps.now ?? Date.now;
   const later = deps.later ?? ((fn: () => void, ms: number) => void setTimeout(fn, ms).unref());
+  const day = deps.day ?? holdersDay(now);
   const rows = bounded<Row>(CACHE_MAX);
   let seen: string | undefined;
   const infos = bounded<{ info: Info | "none"; at: number }>(CACHE_MAX);
   const running = new Map<string, Promise<Read>>();
-  /** The tokens being chased, and when each chase that never got an answer ended (not read again for INFO_FRESH_MS). */
+  /** The tokens being chased, and when each chase that never got an answer ended (not read again for MISSED_HOLD_MS). */
   const chasing = new Set<string>();
   const queue: { token: string; tries: number }[] = [];
   let ticking = false;
@@ -248,7 +275,8 @@ export function createEvmToken(
    *  info's re-read or a chase, which leaves callers their room. */
   async function readInfo(token: string, background: boolean): Promise<Read> {
     const keyed = deps.keyed;
-    if (keyed === undefined || keyed === null) return "missed";
+    if (keyed === undefined || keyed === null || !day.left()) return "missed";
+    day.spend();
     const got: { info: Info | null } = { info: null };
     const j = await keyed.read(`/networks/${GT_NETWORK[chain]}/tokens/${token}/info`, (x) => (got.info = toInfo(token, x, now())) !== null, background);
     if (j === undefined || got.info === null) return "missed";
@@ -274,7 +302,7 @@ export function createEvmToken(
 
   /** A first read the key missed, queued: each CHASE_TICK_MS the first CHASE_PER_TICK are read in the background, a miss
    *  going to the back, CHASE_TRIES misses a token at most; one that never answers is marked missed, not read again for
-   *  INFO_FRESH_MS. */
+   *  MISSED_HOLD_MS. */
   function chase(token: string): void {
     if (chasing.has(token) || chasing.size >= CHASE_MAX) return;
     chasing.add(token);
@@ -305,14 +333,14 @@ export function createEvmToken(
 
   /** The info held for the token while servable (under INFO_SERVE_MS) and, when it is not fresh, the read that refreshes
    *  it: a caller's when nothing servable is held, else background. Nothing is read while a chase runs or after one
-   *  missed, for INFO_FRESH_MS, or with no key. */
+   *  missed, for MISSED_HOLD_MS, or with no key. */
   function infoOf(token: string): { held: Info | "none" | undefined; read: Promise<Read> | undefined } {
     const h = infos.get(token);
     if (h !== undefined && now() - h.at < INFO_FRESH_MS) return { held: h.info, read: undefined };
     const servable = h !== undefined && now() - h.at < INFO_SERVE_MS;
     const held = servable ? h.info : undefined;
     const m = missed.get(token);
-    if (deps.keyed === undefined || deps.keyed === null || (!servable && (chasing.has(token) || (m !== undefined && now() - m < INFO_FRESH_MS)))) return { held, read: running.get(token) };
+    if (deps.keyed === undefined || deps.keyed === null || (!servable && (chasing.has(token) || (m !== undefined && now() - m < MISSED_HOLD_MS)))) return { held, read: running.get(token) };
     const read = start(token, servable).then((x) => {
       if (x === "missed" && !servable) chase(token);
       return x;

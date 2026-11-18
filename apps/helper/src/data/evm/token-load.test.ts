@@ -17,13 +17,17 @@
 // the five calls the whole helper gets in 75 s, three of them its own lists' and ahead reads.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { coingeckoPace, createKeyed, CG_ONCHAIN } from "../coingecko.ts";
+import { coingeckoPace, createKeyed, CG_DAY, CG_ONCHAIN, CG_URL } from "../coingecko.ts";
 import { geckoBudget, type GeckoBudget } from "../gecko.ts";
 import { DEX_BASE, DEX_LIMITS } from "../held.ts";
-import { providerHolds, upstreamBudget } from "../../limits/limits.ts";
+import { PROBE_DAY_SHARE, providerHolds, upstreamBudget } from "../../limits/limits.ts";
 import { GT_BASE, type EvmChain } from "./lists.ts";
 import { createEvmNamed } from "./named.ts";
-import { createEvmToken } from "./token.ts";
+import * as token from "./token.ts";
+
+const { createEvmToken } = token;
+/** token.ts holdersDay where it exists; before the CO's fold (b25a82fb7) there was none, and each part drew the key's day. */
+const holdersDay = (clock: () => number): unknown => ("holdersDay" in token ? (token.holdersDay as (c: () => number) => unknown)(clock) : undefined);
 
 const NOW = Date.parse("2026-11-18T10:00:00Z");
 const USERS = 50;
@@ -121,4 +125,56 @@ test("fifty users on fifty Base and Robinhood coins at once: no 429, and every h
   assert.equal(pollCount, USERS, "every user's holders has its count by the next poll");
   assert.equal(hits.gt, 0, "the token page and holders take no call from GeckoTerminal's keyless window: it is the charts'");
   assert.ok(gecko.take("pages"), "a chart's first bars still find a GeckoTerminal call");
+});
+
+// The CO's fold at b25a82fb7: holder counts drew the CoinGecko key's one day (CG_DAY, 3,225 calls) with the charts, each
+// open token re-read every 5 min, so 50 tokens open all day spent the whole day and the charts lost their calls (red at
+// b25a82fb7: the holders took the day). A count is read again every 30 min, and only within the holders' own quarter
+// of the day (token.ts HOLDERS_DAY), so the charts' three quarters stay whole.
+test("a day of 50 open tokens, their holders tabs polling each minute: the holders spend at most their quarter of the key's day and never a chart's call", { timeout: 120_000 }, async () => {
+  let t = Date.parse("2026-11-18T00:00:00Z");
+  const clock = () => t;
+  const due: { at: number; fn: () => void }[] = [];
+  const later = (fn: () => void, ms: number) => void due.push({ at: t + ms, fn });
+  let cg = 0;
+  const fetch = async (url: string): Promise<Response> => {
+    const cgm = new RegExp(`^${CG_ONCHAIN}/networks/(base|robinhood)/tokens/(0x[0-9a-f]{40})/info$`).exec(url);
+    const dex = new RegExp(`^${DEX_BASE}/tokens/v1/(base|robinhood)/(0x[0-9a-f]{40})$`).exec(url);
+    const m = cgm ?? dex;
+    if (m === null) throw new Error(`unexpected ${url}`);
+    const c = byToken.get(m[2]!)!;
+    if (dex) return new Response(JSON.stringify(pairOf(c.chain, c.token)), { status: 200 });
+    cg++;
+    return new Response(JSON.stringify(infoOf(c.token, c.holders, t)), { status: 200 });
+  };
+  const env = { COINGECKO_API_KEY: "load-test-key-0123456789", COINGECKO_CALLS_PER_MIN: "100" };
+  const holds = providerHolds(clock, coingeckoPace(env));
+  const keyed = createKeyed(env, holds, { fetch });
+  const dex = upstreamBudget(() => DEX_LIMITS, clock);
+  const lists = { get: async () => ({ status: 200, body: JSON.stringify({ as_of_ms: t, lists: {} }), asOfMs: t }), listed: async () => false };
+  // one holders' day for both chains, as the server's
+  const day = holdersDay(clock);
+  const tok = Object.fromEntries(
+    CHAINS.map((c) => [c, createEvmToken(c, { lists, named: createEvmNamed(c, { dex, fetch, now: clock }), keyed, now: clock, later, day } as Parameters<typeof createEvmToken>[1])]),
+  ) as Record<EvmChain, ReturnType<typeof createEvmToken>>;
+  const end = t + 86_400_000 - 60_000;
+  let counted = 0;
+  let r429 = 0;
+  for (; t <= end; t += 60_000) {
+    while (due.length > 0 && due[0]!.at <= t) {
+      due.sort((a, b) => a.at - b.at);
+      due.shift()!.fn();
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    }
+    const got = await Promise.all(COINS.map((c, i) => tok[c.chain].holders(c.token, `198.51.100.${i}`)));
+    r429 += got.filter((a) => a.status === 429).length;
+    counted += got.filter((a) => a.status === 200 && JSON.parse(a.body).total !== null).length;
+  }
+  t = end; // the day's last minute, still the same UTC day
+  const quarter = Math.floor(CG_DAY / 4);
+  const charts = CG_DAY - Math.floor(CG_DAY * PROBE_DAY_SHARE) - quarter;
+  console.log(`day: ${USERS} tokens polled each minute for 24 h: CoinGecko calls by holders ${cg} (their quarter ${quarter}, the day ${CG_DAY}); answers with a count ${counted} of ${USERS * 1440}; 429 ${r429}; the charts can still take ${charts}: ${!holds.dayOut(CG_URL, charts)}`);
+  assert.equal(r429, 0);
+  assert.ok(cg <= quarter, `the holders made ${cg} calls, their quarter is ${quarter}`);
+  assert.equal(holds.dayOut(CG_URL, charts), false, `the charts' ${charts} calls of the day are still theirs`);
 });

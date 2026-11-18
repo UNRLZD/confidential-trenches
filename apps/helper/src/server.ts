@@ -30,7 +30,7 @@ import { LOGO_NONE_MS, LOGOS, type LogoChain, type Logos } from "./data/logo.ts"
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
 import { createSwaps, INDEX_RPCS, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
 import { createPoolIndex, jsonRpcPost, type PoolIndex, type PoolIndexConfig } from "./data/evm/pool-index.ts";
-import { createEvmToken, type EvmToken } from "./data/evm/token.ts";
+import { createEvmToken, holdersDay, type EvmToken } from "./data/evm/token.ts";
 import { createHeld, DEX_LIMITS, parseHeld, type Held } from "./data/held.ts";
 import { createEvmNamed, type EvmNamed } from "./data/evm/named.ts";
 import { createNearLists } from "./data/near/lists.ts";
@@ -1413,7 +1413,9 @@ if (import.meta.main) {
     // decimals the swap reads' when they hold them
     // card every-cell-shows-a-value: and each token's contract checks from GoPlus, one pace for the helper (data/goplus.ts)
     const goplus = createGoPlus();
-    const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, named: evmNamed[c], keyed, kept: swaps[c]?.kept, goplus })]));
+    // and the holders' own quarter of the key's day, in day files of their own id, so the charts keep three quarters
+    const day = holdersDay(Date.now, dayFiles(storeDir, randomUUID()));
+    const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, named: evmNamed[c], keyed, kept: swaps[c]?.kept, day, goplus })]));
     if (warm !== null) restoreEvmMarket(warm, SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] }));
     const held = heldFrom(token, evmLists, dex);
     // card helper-near-lists-and-token: NEAR's lists from Rhea classic's views, read now and on their cadence; card
