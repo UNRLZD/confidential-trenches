@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
+import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolVenues, SECRET_SCRUB_MAX } from "@blindfill/kit";
 import { providerHolds, throttleOf } from "../limits/limits.ts";
 import * as evm from "./evm.ts";
 
@@ -916,8 +916,8 @@ test("review of f86e1c27 P2: 500 strings of the key, its starts and cases, U+013
   `) as [number, string][];
   assert.equal(outs.length, 500);
   for (const [i, [inLength, out]] of outs.entries()) {
-    assert.ok(out.length <= evm.EVM_SCRUB_MAX + 1, `${i}: ${out.length} characters`);
-    assert.ok(inLength <= evm.EVM_SCRUB_MAX || out.endsWith("…"), `${i}: the cut is marked`);
+    assert.ok(out.length <= SECRET_SCRUB_MAX + 1, `${i}: ${out.length} characters`);
+    assert.ok(inLength <= SECRET_SCRUB_MAX || out.endsWith("…"), `${i}: the cut is marked`);
     assert.ok(!holdsKey(out) && !holdsKey(out, QK), `${i}: ${JSON.stringify(out.slice(0, 300))}`);
   }
 });
@@ -1037,7 +1037,7 @@ test("review of 41c6c371 P3-2: a secret of 4,000 or 20,000 characters in a seat 
     for (const n of [4000, 20000]) {
       const k = "LONGkey-" + "0123456789abcdef".repeat(Math.ceil(n / 16)).slice(0, n - 8);
       const scrub = evm.evmScrubber(["https://a.example/v2/" + k]);
-      // cut within its first 256 characters (EVM_SCRUB_KEY_MAX), the start the patterns read
+      // cut within its first 256 characters (the kit's SEAT_SECRET_START_MAX), the start the patterns read
       res.push([scrub("whole " + k + " end"), scrub("cut " + k.slice(0, 200)), scrub("upper " + k.slice(0, 100).toUpperCase())]);
     }
     console.log(JSON.stringify(res));
