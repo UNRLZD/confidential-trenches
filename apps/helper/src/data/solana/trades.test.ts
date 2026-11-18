@@ -170,7 +170,7 @@ test("the websocket source: up only once every subscription is in force; a close
   type Fake = { sent: string[]; onopen: (() => void) | null; onmessage: ((m: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; send(s: string): void; close(): void };
   const sockets: Fake[] = [];
   const events: string[] = [];
-  const src = wsSource("wss://test", { note: (m, n) => events.push(`note ${m} ${n.sig}`), down: () => events.push("down"), up: () => events.push("up") }, {
+  const src = wsSource("wss://test", { note: (m, n) => events.push(`note ${m} ${n.sig}`), down: () => events.push("down"), up: () => events.push("up"), clock: () => undefined }, {
     ws: () => {
       const f: Fake = { sent: [], onopen: null, onmessage: null, onclose: null, onerror: null, send: (s) => void f.sent.push(s), close: () => undefined };
       sockets.push(f);

@@ -113,7 +113,7 @@ test("the stream: a key that goes silent for 30 s falls back to the public strea
   let now = 1_800_000_000_000;
   const slot = createSlot("stream", true, { now: () => now, log: () => undefined });
   const sockets: Fake[] = [];
-  const src = wsSource(KEYED_WS, { note: () => undefined, down: () => undefined, up: () => undefined }, {
+  const src = wsSource(KEYED_WS, { note: () => undefined, down: () => undefined, up: () => undefined, clock: () => undefined }, {
     now: () => now,
     fallback: { url: STREAM_WS, slot },
     ws: (url: string) => {
@@ -138,7 +138,7 @@ test("the stream: a keyed slot that has not failed is never probed (no probe soc
   t.after(() => resetTimers(t.mock.timers));
   const slot = createSlot("stream", true, { log: () => undefined });
   const sockets: string[] = [];
-  const src = wsSource(KEYED_WS, { note: () => undefined, down: () => undefined, up: () => undefined }, {
+  const src = wsSource(KEYED_WS, { note: () => undefined, down: () => undefined, up: () => undefined, clock: () => undefined }, {
     fallback: { url: STREAM_WS, slot },
     ws: (url: string) => (sockets.push(url), { send: () => undefined, close: () => undefined, onopen: null, onmessage: null, onclose: null, onerror: null }),
   } as never);
