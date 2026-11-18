@@ -113,7 +113,11 @@ export function judge(rec) {
 
     if (rec.run === "wallet") {
       say((w.creates ?? []).length === 0, `${at} no passkey made on the wallet way (${(w.creates ?? []).length})`);
-      say(w.newAccount === "no-wallet", `${at} New account drawn and not offered with no wallet in the window: ${w.newAccount ?? "not drawn"}`);
+      // card wallet-signin-wallet: a launch recorded with it notes the window's wallet (walletInWindow, none on this
+      // harness) and New account is drawn and not offered for that reason; one recorded before it holds no such note and
+      // drew New account with no code behind it (data-pending="wallet-signature")
+      const want = Object.hasOwn(w, "walletInWindow") ? (w.walletInWindow === false ? "no-wallet" : "a launch with no wallet") : "wallet-signature";
+      say(w.newAccount === want, `${at} New account drawn and not offered (${want}): ${w.newAccount ?? "not drawn"}`);
     }
     if (rec.run === "no-prf") say(seen.includes("backup") && w.words === 12 && seen.at(-1) === "signed-in", `${at} SIGN_HOST: ${seen.join(" > ")}, ${w.words ?? 0} words drawn (FR-N4)`);
     if (rec.run === "wallet") say(["choose", "existing", "words"].every((s) => seen.includes(s)) && seen.at(-1) === "signed-in", `${at} SIGN_HOST: ${seen.join(" > ")}`);
@@ -388,6 +392,11 @@ async function oneWidth(h, runName, w, { plant, shotDir, cpu }) {
       arrived();
       await page.waitForTimeout(300);
       out.newAccount = await choose.locator('button[data-action="new-account"]').evaluate((b) => (b.disabled ? b.dataset.pending ?? "disabled" : "offered"));
+      // the wallet the page would ask, read where the page reads it (SIGN_HOST's top window): none on this harness
+      out.walletInWindow = await page.evaluate(() => {
+        const g = globalThis;
+        return typeof g.ethereum?.request === "function" || typeof (g.phantom?.solana ?? g.solana)?.signMessage === "function";
+      });
       await shot("W2-choose");
       mark("have-one");
       await tap(choose.locator('button[data-action="have-one"]'));
