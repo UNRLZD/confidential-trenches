@@ -4,7 +4,9 @@
 // `release` (card helper-release-bump) is HELPER_RELEASE, which deploy/redeploy.sh raises by one for every new commit,
 // or null when the host sets none; it is for the operator's live check, and the kit's answer type leaves it out.
 // `ready` (card helper-ready-gate): false until this process's warm-up is done (server.ts warmUntilReady: the Solana
-// and EVM lists answer 200, and a Solana token page and its holders answer 200), true from then on; the deploy's
+// and EVM lists answer 200, and a Solana token page and its holders answer 200), true from then on but while a mainnet
+// EVM pool holds no fee for the running minute (card helper-start-residuals: server.ts names each in its
+// X-Helper-Pool-Fees header); the deploy's
 // healthcheck (deploy/compose.yaml) moves traffic only to a helper that answers true. Like `release`, the kit's answer
 // type leaves it out.
 import { HELPER_PARTS, type HelperPart, type HelperPartState } from "@blindfill/kit";

@@ -780,6 +780,9 @@ export type EvmPoolSender = {
   warm(epochStartMs: number, sleep?: (ms: number) => Promise<void>): Promise<void>;
   /** warm's read of the period (the same one read), true once its fee is in memory. */
   held(epochStartMs: number, sleep?: (ms: number) => Promise<void>): Promise<boolean>;
+  /** The period's fee as GET /v1/health names it (card helper-start-residuals), at once: its fee in wei once in memory
+   *  (warm's read or a read on demand), "reading" while the read ahead is under way or not yet due, else null. */
+  feeNow(epochStartMs: number): bigint | "reading" | null;
   /**
    * The start's check (card evm-buy-hookdata-fee, review fold 2 MEDIUM-A; card helper-evm-ready-holds-a-fee), in two
    * steps, resolving once both pass (server.ts: the helper is ready only then, so a deploy's old helper serves until):
@@ -955,7 +958,7 @@ export function evmPoolSender(
   const reverted = new Set<string>();
   const revertMemory = cfg.memory ?? POOL_SEND_MEMORY;
   /** Each period's fee read; `until`, set when it failed, the time it stops answering (EVM_FEE_MISS_MS). */
-  const fees = new Map<number, { p: Promise<{ block: EvmBlock; fee: bigint } | null>; until?: number }>();
+  const fees = new Map<number, { p: Promise<{ block: EvmBlock; fee: bigint } | null>; until?: number; fee?: bigint }>();
   // the sell's chain: the network's kit chain (the helper's network names are the kit's), its venue and its pinned
   // sell delegate; a network the kit does not list, or one with no pinned delegate, refuses every sell
   const venues: Readonly<Partial<Record<string, EvmPoolVenue>>> = cfg.venues ?? evmPoolVenues();
@@ -1101,24 +1104,36 @@ export function evmPoolSender(
       const chainFee = evmPoolChainFee(cfg.network, EVM_POOL_TX_BYTES, answers);
       return { block, fee: evmPoolFee({ gas, gasPrice: block.baseFeePerGas, chainFee }) };
     })();
-    const entry: { p: typeof p; until?: number } = { p };
+    const entry: { p: typeof p; until?: number; fee?: bigint } = { p };
     fees.set(epochStartMs, entry);
-    // a period whose first block is not out yet (null) is read again by the next caller; a failed read is kept
-    p.then((v) => v === null && fees.get(epochStartMs) === entry && fees.delete(epochStartMs), () => void (entry.until = now() + EVM_FEE_MISS_MS));
+    // a period whose first block is not out yet (null) is read again by the next caller; a failed read is kept; a fee
+    // read is kept as a value too, for feeNow (card helper-start-residuals)
+    p.then((v) => (v === null ? fees.get(epochStartMs) === entry && fees.delete(epochStartMs) : void (entry.fee = v.fee)), () => void (entry.until = now() + EVM_FEE_MISS_MS));
     while (fees.size > EPOCH_MEMORY) fees.delete(fees.keys().next().value as number);
     return p;
   };
   // the periods warm() has taken, each with its read, so a period is read ahead once whatever calls it (the timer, the
   // start's check) and every caller waits for that one read: true once the period's fee is in memory
-  const warmed = new Map<number, Promise<boolean>>();
+  const warmed = new Map<number, { p: Promise<boolean>; done: boolean }>();
   const warmOf = (epochStartMs: number, sleep?: (ms: number) => Promise<void>): Promise<boolean> => {
-    let p = warmed.get(epochStartMs);
-    if (p === undefined) {
-      p = warmRead(epochStartMs, sleep);
-      warmed.set(epochStartMs, p);
+    let w = warmed.get(epochStartMs);
+    if (w === undefined) {
+      const x = { p: warmRead(epochStartMs, sleep), done: false };
+      x.p.then(() => void (x.done = true), () => void (x.done = true));
+      w = x;
+      warmed.set(epochStartMs, w);
       while (warmed.size > EPOCH_MEMORY) warmed.delete(warmed.keys().next().value as number);
     }
-    return p;
+    return w.p;
+  };
+  // card helper-start-residuals: the period's fee in memory; else "reading" while its read ahead is under way, or not
+  // yet due (the timer takes it EVM_FEE_WARM_DELAY_MS in, one try's wait of slack); else null: that read ended with none
+  const feeNow = (epochStartMs: number): bigint | "reading" | null => {
+    const f = fees.get(epochStartMs)?.fee;
+    if (f !== undefined) return f;
+    const w = warmed.get(epochStartMs);
+    if (w !== undefined) return w.done ? null : "reading";
+    return now() < epochStartMs + EVM_FEE_WARM_DELAY_MS + EVM_FEE_WARM_EVERY_MS ? "reading" : null;
   };
   const warm = (epochStartMs: number, sleep?: (ms: number) => Promise<void>): Promise<void> => warmOf(epochStartMs, sleep).then(() => undefined);
   const warmRead = async (epochStartMs: number, sleep = (ms: number) => new Promise<void>((ok) => setTimeout(ok, ms).unref())): Promise<boolean> => {
@@ -1876,6 +1891,7 @@ export function evmPoolSender(
     carry,
     sell,
     held: warmOf,
+    feeNow,
     async ready(sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))) {
       // 1. the chain and the fee's state a proof's life back, each read on two operators of the seat list (pair.both),
       // each answer named by its seat (review P3-3); a try they do not both answer, or one seat's odd answer, is made
@@ -1891,8 +1907,12 @@ export function evmPoolSender(
       // the bound holds the reads' time with the waits' (review timing note: at one post a second a try takes ~15 s)
       const t0 = now();
       let waited = 0;
+      // card helper-start-residuals: when the try that failed began, while every try since has found fewer than two
+      // operators answering JSON-RPC at all (pair.alive), else null
+      let deadSince: number | null = null;
       for (let n = 1; ; n++) {
         let block: EvmBlock | null = null;
+        const began = now();
         try {
           // review P2-1: a seat on another chain whose blocks are under ours passed the start, then every send failed
           const ids = await two("eth_chainId", []);
@@ -1929,6 +1949,17 @@ export function evmPoolSender(
           if (refused.has(e as object) || failedInExecution(e) || spent + wait > EVM_READY_MISS_MS) {
             const where = block === null ? "" : ` at block ${block.number}, ${Math.round(now() / 1000) - Number(block.timestamp)} s old (a proof's fee is read up to ${POOL_LIFE_MAX_MS / 1000} s back)`;
             throw new Error(`the fee's state${where}, ${n} ${n === 1 ? "try" : "tries"} over ${Math.round(spent / 1000)} s: ${String((e as Error | undefined)?.message ?? e).slice(0, 1_200)}`);
+          }
+          // card helper-start-residuals: seats that answer nothing are no state miss a period on clears: fewer than two
+          // operators answering JSON-RPC for EVM_READY_DEAD_MS of tries refuses the start then, never at the 90 s bound
+          const census = await pair.alive?.();
+          if (census === undefined || census.operators.length >= 2) deadSince = null;
+          else {
+            deadSince ??= began;
+            if (now() - deadSince + wait > EVM_READY_DEAD_MS) {
+              const who = census.operators.length === 0 ? "none" : `${census.operators[0]} alone`;
+              throw new Error(`the fee's state, ${n} ${n === 1 ? "try" : "tries"} over ${Math.round(Math.max(waited, now() - t0) / 1000)} s: fewer than two operators answer JSON-RPC (${who}): ${census.dead.join("; ")}`.slice(0, 1_400));
+            }
           }
           waited += wait;
           await sleep(wait);
@@ -1972,6 +2003,15 @@ const firstWord = (v: unknown): string | null => {
 export const EVM_READY_WAIT_MS = 1_000;
 export const EVM_READY_WAIT_MAX_MS = 8_000;
 export const EVM_READY_MISS_MS = 90_000;
+/**
+ * How long the start's state check keeps trying while fewer than two operators answer JSON-RPC at all (card
+ * helper-start-residuals): each failed try asks every seat its chain id afresh (evmReadPair alive), and once the tries
+ * since the first that found fewer than two would pass this, the start is refused naming each seat that answered none.
+ * [design: four hung seats were refused only at EVM_READY_MISS_MS, 87 s in (review of card helper-evm-ready-holds-a-fee),
+ * a bound set for state misses that clear within a period. A hung seat costs its client's 5 s timeout, so 20 s is at
+ * least two tries and two censuses: one seat's slow moment never refuses a start, a down one is refused by about 30 s.]
+ */
+export const EVM_READY_DEAD_MS = 20_000;
 
 /** Per network: the pool, the sender's key (0x + 64 hex, gas only), the fee's floor (unset, or the kit's
  *  EVM_POOL_FEE_FLOOR), its recipient, two RPC URLs. The mainnets only (card helper-mainnet-pools-only; owner, 12 Nov:
@@ -2082,6 +2122,12 @@ export type EvmPair = {
   both(method: string, params: readonly unknown[]): Promise<[EvmSideAnswer, EvmSideAnswer]>;
   /** Each seat's chain id (null: it did not answer), where the pair has seats. */
   chains?(): Promise<{ seat: string; id: bigint | null }[]>;
+  /** A census of the seats (card helper-start-residuals), where the pair has seats: each asked its chain id afresh, at
+   *  once; `operators`, those with a seat that answers JSON-RPC on the pinned chain (a throttle, an RPC error or an
+   *  HTTP status that is no seatDead counts: patient on throttles, and a seat passed over for its pace or its day is
+   *  counted unasked); `dead`, each seat that answered no JSON-RPC (seatDead, no connection, no answer in the read's
+   *  budget) or names another chain, with its words. */
+  alive?(): Promise<{ operators: string[]; dead: string[] }>;
 };
 
 /** Two fixed providers, one a side, as a pair: each side asks its own and nothing else (a test's two fakes, or two
@@ -2239,6 +2285,31 @@ export function evmReadPair(seats: readonly EvmSeat[], first: readonly [string, 
           .filter((p) => p.skip?.() !== true && !((heldUntil.get(p) ?? -Infinity) > now()))
           .map((p) => idOf(p).then((id) => ({ seat: p.name, id }), (e: unknown) => (seatDead(e) && heldUntil.set(p, now() + EVM_SEAT_HOLD_MS), { seat: p.name, id: null }))),
       ),
+    // card helper-start-residuals: a seat that answers is no longer passed over, one that answers no JSON-RPC is held
+    // as in a walk; asked whether held or not, so the census is of now, never of a hold 30 s old
+    alive: async () => {
+      const dead: string[] = [];
+      const ops = new Set<string>();
+      await Promise.all(
+        seats.map(async (p) => {
+          if (p.skip?.() === true) return void ops.add(p.operator);
+          try {
+            const id = qty(await within(p.rpc("eth_chainId", []), budgetMs));
+            if (o.chainId !== undefined && id !== o.chainId) return void dead.push(`${p.name}: names chain ${id}`);
+            ids.set(p, id);
+            heldUntil.delete(p);
+            ops.add(p.operator);
+          } catch (e) {
+            if (!(seatDead(e) || e instanceof TypeError || e === CUT)) return void ops.add(p.operator);
+            heldUntil.set(p, now() + EVM_SEAT_HOLD_MS);
+            dead.push(`${p.name}: ${said(e)}`);
+          }
+        }),
+      );
+      // in the list's order, whatever answered first
+      const order = seats.map((p) => p.name);
+      return { operators: operators.filter((op) => ops.has(op)), dead: dead.sort((x, y) => order.findIndex((n) => x.startsWith(`${n}: `)) - order.findIndex((n) => y.startsWith(`${n}: `))) };
+    },
     one: (k, method, params) => walk(k, method, params, new Set(), NONE).then((r) => r.value),
     both: (method, params) => {
       // each side's own first operator is its claim before either side asks anything: a side whose first seat is held
