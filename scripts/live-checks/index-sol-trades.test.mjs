@@ -1,8 +1,9 @@
 // node --test scripts/live-checks/index-sol-trades.test.mjs: the live check replays recorded answers
 // (index-sol-trades.answers.json). good: apps/helper's trades.ts run on a Mac, its pump.fun part as recorded before, its
-// Meteora part (card index-sol-trades-2) at that card's 180162ef0 (index-sol-trades.record-local.mjs --meteora: Solana
-// lists passed through from the deployed helper, trades read from the public chain endpoints), 2026-11-18: PASS, one
-// Meteora coin per venue. bad_not_deployed: the deployed
+// Meteora part (card index-sol-trades-2) at that card's 180162ef0, the check's own readMeteora against trades.ts run in
+// process behind its routes (a one-off recorder kept out of the tree: live-checks-provider-answer refuses a new file that
+// imports a check still building its own JSON-RPC; Solana lists passed through from the deployed helper, trades read from
+// the public chain endpoints), 2026-11-18: PASS, one Meteora coin per venue. bad_not_deployed: the deployed
 // helper before this card, 404 on a listed Solana token's trades: FAIL. Made from the good answer: a tape that holds the
 // trade only after 2 s, another trader, another side, no 1s bar at the trade's second, a vendor source, a stale read, no
 // CORS echo, a tape oldest first, an extra field: each FAIL.
@@ -135,10 +136,8 @@ test("the 1s candles: a 200 after a 429 that cleared inside the span passes; a 4
   assert.ok(bad(empty).some((l) => /the 1s candles hold the trade's second/.test(l)), bad(empty).join("\n"));
 });
 
-// card index-sol-trades-2: one listed Meteora coin per venue. good (re-recorded for this card): its pump.fun part the
-// check's own read() against this tree's trades.ts in process (index-sol-trades.record-local.mjs), its Meteora part the
-// same recorder's --meteora run (the public websocket refused a second connection while the in-process helper held its
-// own). On 18 Nov the lists held no coin on a DBC curve that traded, so the DBC leg reads "none to read" and its decoding
+// card index-sol-trades-2: one listed Meteora coin per venue. good.meteora: the in-process recorder's Meteora part, its
+// signatures read back once that process's helper had stopped (its reads on the same public RPC drew 429s). On 18 Nov the lists held no coin on a DBC curve that traded, so the DBC leg reads "none to read" and its decoding
 // is held by decode.test.ts's recorded DBC trades. bad_meteora_before: the deployed helper before this card read by the
 // check's Meteora part: FAIL.
 const VENUES = ["meteora-dlmm", "meteora-dbc", "meteora-damm2"];
