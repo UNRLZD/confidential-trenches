@@ -1065,6 +1065,11 @@ export const MUTANTS = [
   [QUOTE, "      if (left() < 0 || resumeAt - now > left()) throw stale();\n", "", R, "QE7 "],
   [QUOTE, "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, DEADLINE.get(rpcs))", "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined)", R, "QE7 "],
   [QUOTE, "gated(poolRpcs, v.scan?.parallel ?? 2, DEADLINE.get(rpcs))", "gated(poolRpcs, v.scan?.parallel ?? 2)", R, "QE8 "],
+  // card evm-5xx-holds-the-provider-for-the-round: a provider that answers HTTP 5xx is held for the rest of its round, so
+  // the round's batches queued in its gate go to the next unsent, and the scan's requests the next would be handed too
+  [QUOTE, "        late,\n        down,\n      );", "        late,\n      );", R, "FH1 "],
+  [QUOTE, "          if (serverFault(e)) gate?.down?.();\n          throw e;", "          throw e;", R, "FH1 "],
+  [QUOTE, "            down = true;\n", "", R, "SP5xx "],
   // card evm-buy-quote-in-window: a round's reads 64 to a call
   [BUYU, "      reads: bare({ perCall: 64, maxBytes: 200_000 }),", "      reads: Object.freeze({ perCall: 6, maxBytes: 200_000 }),", R, "QE9 "],
   // review of 2c02f7df: each venue's reads pinned, and no request past the venue's bytes (a call's split, a batch's cut)
