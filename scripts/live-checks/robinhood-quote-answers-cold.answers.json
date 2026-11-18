@@ -1,22 +1,22 @@
 {
  "want": {
-  "base": "ecf9f8baea23e0d773b3acccca3cd5839b99d99e8b9b88e20f86bb6747499cc8",
+  "base": "0a76467047efac8fa7aec5619842482efc1e562645edeb9ed85b5fb75d3e6c1a",
   "robinhood": "087f3c1017457be2d0b2eab03b1b94b6c6442fa1bae0acf35968a900021b3480"
  },
  "good": {
-  "note": "this branch, 2026-11-16 05:0xZ: the snapshots read from deploy.mjs --build's folder (--site), byte for byte the committed data/evm-index files: PASS",
+  "note": "card base-buy-box-answers-a-fresh-account, 2026-11-18 00:4xZ: the Base snapshot refreshed (through 58,859,903), both snapshots read from a folder holding the committed data/evm-index files byte for byte (--site): PASS",
   "run": {
    "sign": "https://confidential.unrealized.trade",
    "site": "a build folder at SIGN_HOST's name",
-   "at": "2026-11-16T04:59:37.208Z",
+   "at": "2026-11-18T00:43:04.393Z",
    "snapshots": {
     "base": {
      "status": 200,
-     "bytes": 672436,
-     "sha": "ecf9f8baea23e0d773b3acccca3cd5839b99d99e8b9b88e20f86bb6747499cc8",
-     "through": 58051548,
-     "pools": 4320,
-     "head": 58074009
+     "bytes": 958084,
+     "sha": "0a76467047efac8fa7aec5619842482efc1e562645edeb9ed85b5fb75d3e6c1a",
+     "through": 58859903,
+     "pools": 6148,
+     "head": 58861045
     },
     "robinhood": {
      "status": 200,
@@ -24,7 +24,7 @@
      "sha": "087f3c1017457be2d0b2eab03b1b94b6c6442fa1bae0acf35968a900021b3480",
      "through": 115460916,
      "pools": 38719,
-     "head": 115508224
+     "head": 117005425
     }
    }
   }
