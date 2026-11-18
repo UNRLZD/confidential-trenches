@@ -80,6 +80,14 @@ const saleOut = async (v: "pump" | "pumpswap", token: string, units: bigint): Pr
   return { e: best.expectedOut, cashback: best.cashback };
 };
 
+// Card app-sell-shows-what-you-receive, devnet run 116 (11 Nov): right after a buy's Filled the preview answered
+// not_funded for 7.6 s, waiting for the positions pass's finder read of the new W, while a sale tapped then planned W from
+// its buy mint and W's own read. The preview takes a W bought since the last whole pass as the sale's plan does: its buy
+// mint names the token (boughtSincePass), and W's own read (pool-sell.ts wHeldNow, the sale's wHeld) says what it holds.
+const { solanaAta } = await import("../../kit/src/checks/solana/message.ts");
+const { base58 } = await import("@scure/base");
+const { boughtSincePass, keptHeldOf, readFirst } = await import("../src/pool-sell-dry.ts");
+
 test("the preview's out is the sale's own quote for the units pool.sell would sell, on both recorded venues, for a share and a typed amount", async () => {
   for (const [v, token] of [["pump", MINT], ["pumpswap", SWAP_MINT]] as const) {
     for (const [params, units] of [[share(token, 10_000), HELD], [share(token, 5_000), HELD / 2n], [share(token, 2_500), HELD / 4n], [{ chain: "solana", token, amount: "1000000", slippage_bps: 300 }, 1_000_000_000_000n]] as const) {
@@ -673,13 +681,6 @@ test("the kept answers are the preview's only: a sale's reference after a previe
   assert.match(main, /const dryPair = \(\): readonly \[SolanaRpc, SolanaRpc\] \| null => \(PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)\);/, "the preview's pair is its own, made per ask");
 });
 
-// Card app-sell-shows-what-you-receive, devnet run 116 (11 Nov): right after a buy's Filled the preview answered
-// not_funded for 7.6 s, waiting for the positions pass's finder read of the new W, while a sale tapped then planned W from
-// its buy mint and W's own read. The preview takes a W bought since the last whole pass as the sale's plan does: its buy
-// mint names the token (boughtSincePass), and W's own read (pool-sell.ts wHeldNow, the sale's wHeld) says what it holds.
-const { solanaAta } = await import("../../kit/src/checks/solana/message.ts");
-const { base58 } = await import("@scure/base");
-const { boughtSincePass, keptHeldOf, readFirst } = await import("../src/pool-sell-dry.ts");
 type BoughtW = import("../src/pool-sell-dry.ts").BoughtW;
 type StoreWs = import("../src/pool-sell-dry.ts").StoreWs;
 const MINT_PROGRAM = (Object.entries(fx.pump.reads[0]).find(([k]) => JSON.parse(k)[0] === MINT)![1] as { value: { owner: string }[] }).value[0]!.owner;
