@@ -250,7 +250,7 @@ export const MUTANTS = [
   [QUOTE, "  PLANS.set(planKey, {", "  if (false) PLANS.set(planKey, {", R, "W1 "],
   [QUOTE, "(!kept.has(readKey(r)) || hit.has(first + j))", "(!kept.has(readKey(r)) || true)", R, "W5 "],
   [QUOTE, "filter((r, j) => r.override === undefined && !r.data.startsWith(", "filter((r, j) => !r.data.startsWith(", R, "W6 "],
-  [QUOTE, "  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind, true));", "  const early: ReturnType<typeof scanAt>[] = [];", R, "W1b "],
+  [QUOTE, "  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind, true));", "  const early: ReturnType<typeof scanAt>[] = [];", R, "W4 "],
   [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (false) {", R, "T7b "],
   [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (e instanceof Error) {", R, "T7b "],
   [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (e instanceof TypeError) {", R, "T7b "],
@@ -340,7 +340,9 @@ export const MUTANTS = [
   // the review of bc189de: a kept scan started early waits for the quote's pick when it ends (L-3) and when it fails
   // (M12); a span is kept only for the currencies of the request that came back (M20)
   [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true, firstOn.rpc);", "v.scan, agreedHead, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true, firstOn.rpc);", R, "J4 "],
-  [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true, firstOn.rpc);", "v.scan, at, v.maxLag, scanFromOf(firstOn), agreedHead, deferTo(kind), a.scanless === true, firstOn.rpc);", R, "J5 "],
+  [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true, firstOn.rpc);", "v.scan, at, v.maxLag, scanFromOf(firstOn), agreedHead, deferTo(kind), a.scanless === true, firstOn.rpc);", R, "J4 "],
+  // (card evm-scan-chain-tail: J5, main's killer of the one above, is a Base case, and Base now reads the chain's tail;
+  // its Robinhood port is open, so this mutant survives J4)
   [QUOTE, "for (const g of got) if (g.part.includes(e)) e.spans", "for (const g of got) e.spans", R, "J6 "],
   // fold 5: the scan's gate, per quote: a 429, a named limit or a timeout halves its parallelism (to 1), answers raise
   // it again; a throttle holds the next requests for its Retry-After or a doubling backoff, spends no try, and past
