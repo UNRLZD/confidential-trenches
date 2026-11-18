@@ -1475,7 +1475,8 @@ function evmTailFill(chain: EvmPoolChain, by: EvmRpc, read: () => ReturnType<typ
   FILLS.set(src, running);
   if (running.has(chain) || FLOODED.get(src)?.has(chain) === true) return;
   running.add(chain);
-  const p = read()
+  const p = quiet(chain)
+    .then(read)
     .then((sc) => sc.commit())
     // a tail that answered a flood of pools (TailFlood) is never read again for this provider: each quote scans by
     // currency, as main does (TAIL8)
@@ -1485,6 +1486,29 @@ function evmTailFill(chain: EvmPoolChain, by: EvmRpc, read: () => ReturnType<typ
   RUNNING_FILLS.set(src, ps.add(p));
 }
 const RUNNING_FILLS = new WeakMap<object, Set<Promise<unknown>>>();
+// the quotes of each chain running now, and what waits for none to run (quiet)
+const QUOTING = new Map<string, number>();
+const QUIET = new Map<string, (() => void)[]>();
+/** Settles once no quote of `chain` runs, a turn of the event loop after the last ended: a tap's next quote, asked
+ *  right after its last answered, goes before the chain's tail's read (TAILF9; a Base tap of two quotes at 0b37db8a1
+ *  sent its second beside the tail's 16 reads, 11.5 and 13.6 s against main's 7.0) */
+const quiet = (chain: string): Promise<void> =>
+  new Promise((go) => {
+    const check = (): void => {
+      if ((QUOTING.get(chain) ?? 0) > 0) QUIET.set(chain, [...(QUIET.get(chain) ?? []), check]);
+      else go();
+    };
+    setTimeout(check, 0);
+  });
+/** A quote of `chain` starts (`+1`) or ends (`-1`); at none running, what waited for it looks again a turn later. */
+const quoting = (chain: string, d: 1 | -1): void => {
+  const n = (QUOTING.get(chain) ?? 0) + d;
+  QUOTING.set(chain, n);
+  if (n > 0) return;
+  QUOTING.delete(chain);
+  for (const f of QUIET.get(chain) ?? []) setTimeout(f, 0);
+  QUIET.delete(chain);
+};
 const FLOODED = new WeakMap<object, Set<EvmPoolChain>>();
 /** For the tests: settles once every read of a chain's tail started so far on `by`'s first scan provider has ended.
  *  Not in the kit's index. */
@@ -2809,6 +2833,8 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const seen: { at: string | null } = { at: null };
   // what the quote leaves for after its answer (routeSet `after`): the chain's tail's read
   const after: (() => void)[] = [];
+  const chainOf = String(typeof req === "object" && req !== null ? req.chain : "");
+  quoting(chainOf, 1);
   try {
     return await buyQuoteWith(req, rpcsIn, nowMs, scan, watch, mono, speculate, pin, seen, after).catch((e) => {
       // a pin the chain no longer holds, or fewer than two providers hold: asked again as a quote with no `at` and
@@ -2823,6 +2849,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     throw e;
   } finally {
     for (const f of after.splice(0)) f();
+    quoting(chainOf, -1);
   }
 }
 
@@ -4324,10 +4351,13 @@ export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<Ev
 export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan?: EvmRpc | readonly EvmRpc[], venues?: EvmPoolVenueList, mono: () => number = monotonic, poolRpcs: readonly EvmRpc[] = rpcsIn): Promise<EvmPoolSellQuote> {
   // what the quote leaves for after its answer (routeSet `after`): the chain's tail's read
   const after: (() => void)[] = [];
+  const chainOf = String(typeof req === "object" && req !== null ? req.chain : "");
+  quoting(chainOf, 1);
   try {
     return await sellQuoteWith(req, rpcsIn, nowMs, scan, venues, mono, poolRpcs, after);
   } finally {
     for (const f of after.splice(0)) f();
+    quoting(chainOf, -1);
   }
 }
 async function sellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan: EvmRpc | readonly EvmRpc[] | undefined, venues: EvmPoolVenueList | undefined, mono: () => number, poolRpcs: readonly EvmRpc[], after: (() => void)[]): Promise<EvmPoolSellQuote> {
