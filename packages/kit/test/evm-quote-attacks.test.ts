@@ -10434,3 +10434,18 @@ test("J5r (J5 on Robinhood, card evm-scan-chain-tail) a kept scan started early 
   assert.ok(events.includes("X failed") && events.includes("token"), events.join(" -> "));
   assert.ok(events.indexOf("heads") > events.lastIndexOf("token"), events.join(" -> "));
 });
+test("TAIL9 (card evm-scan-chain-tail, M3) the chain's tail forgets the pools made below the depth's floor of currencies no scan asked for, never a quoted coin's: its real pool still holds its seeded route once the floor passes it", async () => {
+  const [c, d, e] = ["0x00000000000000000000000000000000000e7e91", "0x00000000000000000000000000000000000e7e92", "0x00000000000000000000000000000000000e7e93"];
+  const pools = [seeded(c), real(c), seeded(d), real(d), seeded(e), real(e)];
+  const logs = [{ key: real(c).key, at: 4_100_000 }, { key: real(d).key, at: 4_900_000 }, { key: real(e).key, at: 4_100_001 }];
+  const m = moving();
+  // C quoted at 5,000,000: the tail reads C's, D's and E's pools (the depth's floor 4,000,001)
+  assert.deepEqual(await quoteOnStill(pools, c, seededRoute(c), m.to(scanner(5_000_000, logs))), below);
+  // D quoted 200,000 blocks on: the floor (4,200,001) is past C's and E's pools
+  const asked: [number, number][] = [];
+  assert.deepEqual(await quoteOnStill(pools, d, seededRoute(d), m.to(scanner(5_200_000, logs, asked)), undefined, "base", 5_200_000), below);
+  // C again: its real pool, below the floor, is still the reference (as main keeps a quoted coin's pools)
+  assert.deepEqual(await quoteOnStill(pools, c, seededRoute(c), m.to(scanner(5_200_000, logs)), undefined, "base", 5_200_000), below);
+  // E, never quoted: its pool below the floor is gone, so its seeded route has no reference left
+  assert.notDeepEqual(await quoteOnStill(pools, e, seededRoute(e), m.to(scanner(5_200_000, logs)), undefined, "base", 5_200_000), below);
+});

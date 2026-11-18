@@ -1457,7 +1457,7 @@ const SCANS = new Map<string, { spans: Spans; pools: EvmPoolKey[] }>();
 // blocks a caller's provider answered empty never stand in for the pinned providers' reads. A quote reads the tail only
 // from a near start (scanPools): an event-alone request returns every pool made in its blocks, about 2,900 a day on
 // Robinhood, so from a start further back than SCAN_MAX_LOGS of them it asks a currency's pools as an OR, as before.
-type Tail = { spans: Spans; byCurrency: Map<string, EvmPoolKey[]>; ids: Set<string>; at: Map<string, number>; own?: { quote: object; spans: Spans } | undefined; band?: Spans };
+type Tail = { spans: Spans; byCurrency: Map<string, EvmPoolKey[]>; ids: Set<string>; at: Map<string, number>; own?: { quote: object; spans: Spans } | undefined; band?: Spans; asked?: Set<string> };
 const TAILS = new WeakMap<object, Map<EvmPoolChain, Tail>>();
 /** The kit's scan rpcs' source: one object per URL (scanRpcOf). */
 const SCAN_SOURCE = new Map<string, object>();
@@ -2400,22 +2400,30 @@ async function scanPools(
         const top = head - tailLag;
         if (t.own?.quote !== quote) t.own = quote === undefined ? undefined : { quote, spans: [] };
         for (const g of got) {
-          if (g.spare || !g.part.includes(e)) continue;
+          if (!g.part.includes(e)) continue;
+          // a spare's answer within the margin counts for the deferral rule too (its re-read goes after the answer, and
+          // it keeps nothing: a Robinhood quote's newest span the spare carried made each warm quote read the margin on
+          // the first, 1 a second, before it answered, 2.9 s against main's 0.5 s)
+          if (g.b > top) t.band = withSpan(t.band ?? [], Math.max(g.a, top + 1), g.b);
+          if (g.spare) continue;
           if (g.a <= top) t.spans = withSpan(t.spans, g.a, Math.min(g.b, top));
           if (g.b > top && t.own !== undefined) t.own.spans = withSpan(t.own.spans, Math.max(g.a, top + 1), g.b);
-          if (g.b > top) t.band = withSpan(t.band ?? [], Math.max(g.a, top + 1), g.b);
         }
         for (const ks of tailKept.byCurrency.values()) for (const k of ks) tailAdd(t, k, tailKept.at.get(poolId(k))!);
-        // nothing below the depth's floor is kept (M3: a tail of every pool of the chain, never pruned, grew for the
-        // page's life)
+        // no block below the depth's floor is kept, nor a pool made there of a currency no scan asked for (M3: a tail of
+        // every pool of the chain, never pruned, grew for the page's life); a pool of one a scan asked for stays, as main
+        // keeps a currency's pools past the floor (its kept scan's)
         t.spans = t.spans.filter(([, y]) => y >= floor).map(([x, y]) => [Math.max(x, floor), y]);
         t.band = (t.band ?? []).filter(([, y]) => y >= floor).map(([x, y]) => [Math.max(x, floor), y]);
-        for (const [id, n] of t.at) if (n < floor) (t.at.delete(id), t.ids.delete(id));
+        const asked = (t.asked ??= new Set());
+        for (const x of each) asked.add(x.c);
         for (const [c, ks] of t.byCurrency) {
-          const left = ks.filter((k: EvmPoolKey) => t.ids.has(poolId(k)));
+          const left = ks.filter((k: EvmPoolKey) => (t.at.get(poolId(k)) ?? floor) >= floor || asked.has(k.currency0) || asked.has(k.currency1));
           if (left.length === 0) t.byCurrency.delete(c);
           else if (left.length < ks.length) t.byCurrency.set(c, left);
         }
+        const held = new Set([...t.byCurrency.values()].flat().map(poolId));
+        for (const id of t.ids) if (!held.has(id)) (t.ids.delete(id), t.at.delete(id));
         byChain.set(chain, t);
         TAILS.set(src, byChain);
         continue;
