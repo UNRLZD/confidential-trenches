@@ -112,6 +112,44 @@ export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutM
   return once();
 }
 
+/** One JSON-RPC batch on `url`: `calls`, each [method, params], in one POST with ids 1 to n, as the kit sends its reads
+ *  (card rh-provider-fails-64-read-batch), read again once on a no-answer. `{ status, answers }`: each call's answer by
+ *  its id, read as `classify` reads one answer, or a no-answer naming the call the batch left out; or, for the batch as a
+ *  whole, `{ status, noAnswer }` (an HTTP answer `classify` names a no-answer, or a lone result for a batch of more than
+ *  one call), `{ noAnswer }` (a fetch that failed) or `{ status, error }` (one JSON-RPC error for the whole batch,
+ *  judged); each with `bytes`, the request body's length. */
+export async function rpcBatchAnswer(url, calls, { fetchFn = fetch, timeoutMs = RPC_TIMEOUT_MS } = {}) {
+  const host = new URL(url).host;
+  const body = JSON.stringify(calls.map(([method, params], i) => ({ jsonrpc: "2.0", id: i + 1, method, params })));
+  const once = async () => {
+    let r;
+    try {
+      r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (e) {
+      return { noAnswer: thrown(host, e) };
+    }
+    const text = await r.text().catch(() => "");
+    let j;
+    try {
+      j = JSON.parse(text);
+    } catch {}
+    if (!Array.isArray(j)) {
+      const a = classify(host, r.status, text);
+      return { status: r.status, ...("result" in a ? { noAnswer: `${host} HTTP ${r.status}: one answer for a batch of ${calls.length} calls` } : a) };
+    }
+    const answers = calls.map((_, i) => {
+      const x = j.find((y) => y !== null && typeof y === "object" && y.id === i + 1);
+      return x === undefined ? { noAnswer: `${host} HTTP ${r.status}: no answer for call ${i + 1} of ${calls.length}` } : classify(host, r.status, JSON.stringify(x));
+    });
+    return { status: r.status, answers };
+  };
+  const missed = (a) => a.noAnswer !== undefined || (a.answers ?? []).some((x) => x.noAnswer !== undefined);
+  const a = await once();
+  if (!missed(a)) return { ...a, bytes: body.length };
+  await new Promise((r) => setTimeout(r, RETRY.ms));
+  return { ...(await once()), bytes: body.length };
+}
+
 /** Why a page at `origin` gets nothing from this answer (`rpcAnswer` with the page's headers), or null. An HTTP answer
  *  whose Access-Control-Allow-Origin admits neither `origin` nor * is what the page really gets, a refusal, judged
  *  before the answer's kind and never a no-answer: api.mainnet-beta.solana.com's non-JSON 403 to an Origin header (card
