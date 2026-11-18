@@ -1,0 +1,140 @@
+{
+ "_about": {
+  "good": "18 Nov 15:39Z: this card branch (e004d97be) NEAR market wired as apps/helper/src/server.ts wires it (engineFirst over Rhea lists, token and trades) on mainnet reads, served to this check read() through a local fetch (base http://local-near-market); each tape asked once after the quiet gap claims its reach, its rows read 0 to 1 ms before",
+  "bad": "18 Nov 15:38:41Z: node scripts/live-checks/near-tape-reach-on-trending.mjs --record, the deployed helper at 91d3b459e, main before this card (its X-Helper-Commit read 15:40Z); each tape asked once after the quiet gap is the held rows read 12 to 13 s before, no reach claimed"
+ },
+ "good": {
+  "base": "http://local-near-market",
+  "at": "2026-11-18T15:39:55.760Z",
+  "lists_status": 200,
+  "coins": [
+   {
+    "coin": "prl.omft.near",
+    "first": {
+     "at": 1795016380330,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 1 ms ago\"",
+     "n": 50,
+     "whole_ms": 1795016156210,
+     "src": "unrealized",
+     "as_of_ms": 1795016380847
+    },
+    "second": {
+     "at": 1795016393840,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 1 ms ago\"",
+     "n": 50,
+     "whole_ms": 1795016159550,
+     "src": "unrealized",
+     "as_of_ms": 1795016394761
+    }
+   },
+   {
+    "coin": "zec.omft.near",
+    "first": {
+     "at": 1795016380848,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 1 ms ago\"",
+     "n": 50,
+     "whole_ms": 1795016015095,
+     "src": "unrealized",
+     "as_of_ms": 1795016381352
+    },
+    "second": {
+     "at": 1795016394763,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 0 ms ago\"",
+     "n": 50,
+     "whole_ms": 1795016031223,
+     "src": "unrealized",
+     "as_of_ms": 1795016395244
+    }
+   },
+   {
+    "coin": "token.rhealab.near",
+    "first": {
+     "at": 1795016381353,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 0 ms ago\"",
+     "n": 50,
+     "whole_ms": 1795006898751,
+     "src": "unrealized",
+     "as_of_ms": 1795016381839
+    },
+    "second": {
+     "at": 1795016395245,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 1 ms ago\"",
+     "n": 50,
+     "whole_ms": 1795006912463,
+     "src": "unrealized",
+     "as_of_ms": 1795016395758
+    }
+   }
+  ]
+ },
+ "bad": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T15:38:56.054Z",
+  "lists_status": 200,
+  "coins": [
+   {
+    "coin": "prl.omft.near",
+    "first": {
+     "at": 1795016322368,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 336643 ms ago\", total;dur=1",
+     "n": 50,
+     "src": "unrealized",
+     "as_of_ms": 1795015985835
+    },
+    "second": {
+     "at": 1795016335013,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 12772 ms ago\", total;dur=3",
+     "n": 50,
+     "src": "unrealized",
+     "as_of_ms": 1795016322764
+    }
+   },
+   {
+    "coin": "zec.omft.near",
+    "first": {
+     "at": 1795016322579,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 582743 ms ago\", total;dur=1",
+     "n": 50,
+     "src": "unrealized",
+     "as_of_ms": 1795015739961
+    },
+    "second": {
+     "at": 1795016335634,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 12478 ms ago\", total;dur=1",
+     "n": 50,
+     "src": "unrealized",
+     "as_of_ms": 1795016323263
+    }
+   },
+   {
+    "coin": "qtc.omft.near",
+    "first": {
+     "at": 1795016322805,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 582454 ms ago\", total;dur=1",
+     "n": 50,
+     "src": "unrealized",
+     "as_of_ms": 1795015740459
+    },
+    "second": {
+     "at": 1795016335841,
+     "status": 200,
+     "timing": "near-vendor-read;desc=\"rows read 12217 ms ago\", total;dur=1",
+     "n": 50,
+     "src": "unrealized",
+     "as_of_ms": 1795016323738
+    }
+   }
+  ]
+ }
+}

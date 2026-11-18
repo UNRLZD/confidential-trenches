@@ -73,6 +73,31 @@ test("a NEAR engine tape read within NEAR_VENDOR_REACH_MS claims every trade aft
   assert.deepEqual(named, ["0", String(NEAR_VENDOR_REACH_MS), String(NEAR_VENDOR_REACH_MS + 1), "0"]);
 });
 
+test("a NEAR engine tape read once after a quiet gap is its renewal, claiming its reach: held rows past NEAR_VENDOR_REACH_MS never answer while the engine answers", async () => {
+  // card near-tape-reach-on-trending: the deployed helper answered prl.omft.near's first ask after a quiet minute with
+  // its 50 rows read 57 s before and no whole_ms (18 Nov 15:28:58Z), so the live check, which reads a settled tape once,
+  // counted no reach for it
+  const clock = { t: Date.UTC(2026, 10, 14, 3, 53) };
+  const engine = { trades: 0 };
+  const fetch = async (url: string): Promise<Response> => {
+    const path = url.slice(ENGINE.length);
+    if (path === `/token/${T}/trades`) engine.trades++;
+    return path === `/token/${T}` ? new Response(fx("token"), { status: 200 }) : path === `/token/${T}/trades` ? new Response(fx("trades"), { status: 200 }) : new Response("{}", { status: 404 });
+  };
+  const near = engineFirst(rhea, createEngineNear({ fetch: fetch as never, now: () => clock.t }));
+  const first = JSON.parse((await near.trades.trades(T, 50)).body) as Tape;
+  const oldest = first.trades.at(-1)!.t_ms;
+  for (const gap of [NEAR_VENDOR_REACH_MS + 1, 57_000, 600_000]) {
+    clock.t += gap;
+    const asked = engine.trades;
+    const a = await near.trades.trades(T, 50);
+    const j = JSON.parse(a.body) as Tape;
+    assert.equal(engine.trades, asked + 1, `${gap} ms on: the rows are read again`);
+    assert.deepEqual([a.status, j.src, j.as_of_ms, j.whole_ms], [200, "unrealized", clock.t, oldest + 1_000], `${gap} ms on: the one ask is answered the renewed rows, claiming their reach`);
+    assert.equal(VENDOR_READ.exec(a.timing ?? "")?.[1], "0", `${gap} ms on: its read named 0 ms old`);
+  }
+});
+
 test("a NEAR engine tape keeps its claim through a normal renewal: the held rows served while it runs are inside the bound", async () => {
   const clock = { t: Date.UTC(2026, 10, 14, 3, 53) };
   const read0 = clock.t;
