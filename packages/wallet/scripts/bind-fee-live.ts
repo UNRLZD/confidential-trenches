@@ -7,11 +7,12 @@
 // depth is the pool's public currentTreeSize() at the block, read on two operators of the list (the device counts its
 // sync's leaves there, the same number). A try that still fails on its last lag retry because a provider did not know
 // the block yet records that provider's hosts as `lagging` (lag-hosts.ts), which the check judges INCONCLUSIVE. No key,
-// no seed, nothing signed or sent. It prints one JSON record on stdout:
+// no seed, nothing signed or sent. Every seat is read through the page's retry (lag-hosts.ts pageRpc, SOLANA_RPC_RETRY),
+// as the signing page reads it. It prints one JSON record on stdout:
 //   node --import ./scripts/net-window.mjs packages/wallet/scripts/bind-fee-live.ts
-import { evmPoolProvidersOf, evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, solanaJsonRpc, type SolanaRpc } from "@blindfill/kit";
+import { evmPoolProvidersOf, evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, type SolanaRpc } from "@blindfill/kit";
 import { evmBindChainFee, evmEpochBlock, evmRetryLag, type EvmNetwork } from "../src/pool/evm.ts";
-import { laggingHosts, walkLag } from "./lag-hosts.ts";
+import { laggingHosts, pageRpc, walkLag } from "./lag-hosts.ts";
 
 const EPOCH_MS = 60_000;
 /** currentTreeSize() */
@@ -25,7 +26,7 @@ for (const chain of ["base", "robinhood"] as const) {
   // a seat's client, marking the seats whose eth_call answered (the fee read's two operators) and each seat's last eth_call
   // refusal (lag-hosts.ts walkLag)
   const client = (url: string, answered?: Set<string>, refused?: Map<string, string>): SolanaRpc => {
-    const rpc = solanaJsonRpc(url);
+    const rpc = pageRpc(url);
     return Object.assign(async (method: string, params: readonly unknown[]) => {
       let r;
       try {
