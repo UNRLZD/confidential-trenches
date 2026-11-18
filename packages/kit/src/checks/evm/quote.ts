@@ -113,6 +113,11 @@ export type EvmPoolBuyQuoteRequest = {
    *  first quote's providers agreed on there answered as they agreed it and only the rest sent; else at its own block,
    *  as with none. Every check runs as on any block. */
   at?: string;
+  /** (optional) true: the quote reads no log (card evm-tree-reads-only-when-needed): its pools are the served index's
+   *  (evmPoolIndexUse) and the helper's (evmPoolServedUse), each read at the agreed block on both providers like any
+   *  candidate, and no block past the index is scanned or kept. For a shown price that is never signed (the page's
+   *  pool.buy.dry on a device that holds nothing): a pool made past the index that the helper leaves out lowers it. */
+  scanless?: boolean;
 };
 
 /** A v4 pool's key, as the PoolManager's Initialize event gives it (currency0 below currency1). */
@@ -123,6 +128,8 @@ export type EvmPoolKey = { readonly currency0: string; readonly currency1: strin
 export type EvmHookTake = { readonly hookless: bigint | null; readonly take: bigint | null; readonly takeBps: number | null };
 
 export type EvmPoolBuyQuote = {
+  /** true: asked scanless (EvmPoolBuyQuoteRequest.scanless), a price to show that no signature may be made from */
+  readonly scanless?: true;
   readonly chain: EvmPoolChain;
   readonly token: string;
   readonly amountIn: bigint;
@@ -1979,7 +1986,14 @@ async function scanPools(
   from: Promise<ScanFrom>,
   picked: () => Promise<Block> = agreed,
   defer?: (cs: readonly string[]) => void,
+  scanless = false,
 ): Promise<{ pools: Map<string, EvmPoolKey[]>; commit: () => void }> {
+  // a scanless quote: the served index's pools from the depth's floor and the helper's, no log read and nothing kept
+  if (scanless) {
+    const floor = Math.max(0, (INDEXES.get(chain)?.through ?? 0) - s.depth + 1);
+    const all = await Promise.all(cs.map(async (c) => [c, [...new Map([...(indexScanOf(chain, kind, c, weth, floor)?.pools ?? []), ...(await servedOf(chain, kind, c, weth))].map((k) => [poolId(k), k])).values()]] as [string, EvmPoolKey[]]));
+    return { pools: new Map(all), commit: () => {} };
+  }
   const { head: scanHead, first } = await from;
   const second = first.next;
   // the logs up to the scan provider's head are read beside the round before (at most depth / span requests for each
@@ -2369,8 +2383,9 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   const pools = req.pools;
   const banned = req.banned;
   const later = req.later === true;
+  const scanless = req.scanless === true;
   const at = req.at;
-  const asked: EvmPoolBuyQuoteRequest = { ...(typeof at === "string" ? { at } : {}), chain: req.chain, token: req.token, amountIn: req.amountIn, slippageBps: req.slippageBps, route: req.route, ...(pools === undefined ? {} : { pools }), ...(banned === undefined ? {} : { banned }) };
+  const asked: EvmPoolBuyQuoteRequest = { ...(typeof at === "string" ? { at } : {}), chain: req.chain, token: req.token, amountIn: req.amountIn, slippageBps: req.slippageBps, route: req.route, ...(pools === undefined ? {} : { pools }), ...(banned === undefined ? {} : { banned }), ...(scanless ? { scanless } : {}) };
   const { chain } = asked;
   const v = venue(chain);
   const p = v.providers;
@@ -2378,7 +2393,8 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   let watch = WATCHES.get(chain);
   if (watch === undefined) WATCHES.set(chain, (watch = evmHeadWatch(() => evmProviders(evmRanked(p), fetch), v.maxLag)));
   // a scan's answer is a list of logs, bounded by the scan provider's own cap per request (16 MiB read at most)
-  return evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch, later), Date.now(), scansOf(v.scan, later), watch);
+  const q = await evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch, later), Date.now(), scansOf(v.scan, later), watch);
+  return scanless ? { ...q, scanless: true } : q;
 }
 
 // Each pinned provider's measured speed (card evm-quote-warm-round): its time to answer a batch, an average that weighs
@@ -2689,6 +2705,7 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
     banned,
     hints: req.pools,
     sell: false,
+    scanless: req.scanless === true,
     watch,
     mono,
     start,
@@ -3114,6 +3131,8 @@ async function routeSetOf(a: {
   hints: unknown;
   /** quote each route backwards, from the token */
   sell: boolean;
+  /** read no log: the scans answer the served index's and the helper's pools alone (EvmPoolBuyQuoteRequest.scanless) */
+  scanless?: boolean;
   /** the chain's held head (card evm-quote-head-watch) */
   watch?: EvmHeadWatch | undefined;
   /** the lowest block the set reads at (a sell's buy's block; agreedBlock waits for it); a held head (the buy's) has none */
@@ -3286,7 +3305,7 @@ async function routeSetOf(a: {
   const scanAt = (cs: readonly string[], kind: ScanKind, early = false) => {
     if (firstOn === undefined || v.poolManager === undefined || v.scan === undefined || cs.length === 0) return null;
     const at = early ? () => picked : agreedHead;
-    return scanPools(chain, cs, kind, lower(v.weth), v.poolManager, v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind));
+    return scanPools(chain, cs, kind, lower(v.weth), v.poolManager, v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true);
   };
   // the warm round: the token's kept reads and scans; a scan asked again in this quote is the one started here
   const planKey = `${chain}:${a.sell ? "sell" : "buy"}:${lower(token)}`;
