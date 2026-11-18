@@ -26,7 +26,7 @@ import { createEvmNamed } from "./named.ts";
 import * as token from "./token.ts";
 
 const { createEvmToken } = token;
-/** token.ts holdersDay where it exists; before the CO's fold (b25a82fb7) there was none, and each part drew the key's day. */
+/** token.ts holdersDay where it exists; before the review's fold (b25a82fb7) there was none, and each part drew the key's day. */
 const holdersDay = (clock: () => number): unknown => ("holdersDay" in token ? (token.holdersDay as (c: () => number) => unknown)(clock) : undefined);
 
 const NOW = Date.parse("2026-11-18T10:00:00Z");
@@ -127,7 +127,7 @@ test("fifty users on fifty Base and Robinhood coins at once: no 429, and every h
   assert.ok(gecko.take("pages"), "a chart's first bars still find a GeckoTerminal call");
 });
 
-// The CO's fold at b25a82fb7: holder counts drew the CoinGecko key's one day (CG_DAY, 3,225 calls) with the charts, each
+// The review's fold at b25a82fb7: holder counts drew the CoinGecko key's one day (CG_DAY, 3,225 calls) with the charts, each
 // open token re-read every 5 min, so 50 tokens open all day spent the whole day and the charts lost their calls (red at
 // b25a82fb7: the holders took the day). A count is read again every 30 min, and only within the holders' own quarter
 // of the day (token.ts HOLDERS_DAY), so the charts' three quarters stay whole.

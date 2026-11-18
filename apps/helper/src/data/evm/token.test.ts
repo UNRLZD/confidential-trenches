@@ -334,7 +334,7 @@ test("no key set: no read, holders src none at once, nothing chased", async () =
   assert.equal(due.length, 0);
 });
 
-// The CO's fold at b25a82fb7: the holders read within their own quarter of the CoinGecko key's day, apart from the charts'.
+// The review's fold at b25a82fb7: the holders read within their own quarter of the CoinGecko key's day, apart from the charts'.
 const callerCap = HOLDERS_DAY - Math.floor(HOLDERS_DAY * PROBE_DAY_SHARE);
 
 test("HOLDERS_DAY is a quarter of the key's day; the holders' day stops at it and opens again at 00:00Z", () => {

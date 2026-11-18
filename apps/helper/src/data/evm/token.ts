@@ -28,7 +28,7 @@
 //     included, draws on the holders' own share of the key's day, HOLDERS_DAY (a quarter of CG_DAY), kept in the
 //     helper's day files apart from the charts' (holdersDay), so the charts' three quarters never lose a call to a
 //     holder count; past it each token answers its held count while under INFO_SERVE_MS, else src none, until 00:00Z
-//     (card evm-token-page-off-the-5-call-window, the CO's fold at b25a82fb7). The page waits for a
+//     (card evm-token-page-off-the-5-call-window, the review's fold at b25a82fb7). The page waits for a
 //     first read at most INFO_WAIT_MS and is otherwise answered with those fields null, the read held for the next.
 //   - pool and decimals on chain: the token's main pool and decimals the swap reads already found and checked on two
 //     providers (swaps.ts mainPool), when they hold them; nothing is read for the page.
@@ -53,14 +53,14 @@ import type { ContractRisk, GoPlus } from "../goplus.ts";
 
 /** A token's info is read again once this old [design: the holder count moves slowly and the answer carries its
  *  own date (`as_of_ms`, the info's `last_updated`); 30 min is 48 calls a day for a token open all day, where 5 min was
- *  288 and 50 open tokens spent the key's whole day (CG_DAY 3,225) before noon, taking the charts' calls (the CO's
+ *  288 and 50 open tokens spent the key's whole day (CG_DAY 3,225) before noon, taking the charts' calls (the review's
  *  fold at b25a82fb7; token-load.test.ts "a day of 50 open tokens")]. */
 export const INFO_FRESH_MS = 1_800_000;
 /** A token whose chase never got an answer is not read again this long [design: 5 min, the chase's bound of
  *  CHASE_TRIES + 1 reads repeated at most 12 times an hour for a token CoinGecko does not know, all on HOLDERS_DAY]. */
 export const MISSED_HOLD_MS = 300_000;
 /** The holders' share of the CoinGecko key's day, apart from the charts' [design: a quarter of CG_DAY (806 of 3,225),
- *  the CO's fold at b25a82fb7: a holder count is worth less than a chart, so the charts keep three quarters whatever
+ *  the review's fold at b25a82fb7: a holder count is worth less than a chart, so the charts keep three quarters whatever
  *  the holders read; each read counts, a miss included]. */
 export const HOLDERS_DAY = Math.floor(CG_DAY / 4);
 /** The holders' day's key in the day files (limits/day-spend.ts), apart from the charts' group "coingecko". */
