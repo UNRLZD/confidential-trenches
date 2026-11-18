@@ -1127,6 +1127,34 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
   // `low`: the lower head's own provider (card evm-quote-lag-held: held where that head lags the scan provider's)
   return { block: lo, confirm, low: list[own]! };
 }
+// A follow's pinned block that the chain no longer holds at its height: the quote at it is refused and asked again at a
+// new head (evmPoolBuyQuoteWith)
+const PIN_GONE = new WeakSet<object>();
+/** A follow's pinned block (a request's `at`) still the chain's at its height, asked by number beside the first round's
+ *  reads (readAgreed judges it first, so nothing read is used before it passes; review of card
+ *  evm-cold-multihop-quote-inside-the-kpi, P3-1: a follow answered wholly from the kept agreement sent no read that
+ *  requires the block canonical). Two providers in the quote's order must hold it, the first two asked at once and
+ *  the rest only where one fails; one that holds another block there refuses the pin (PIN_GONE). */
+function pinConfirm(rpcs: readonly EvmRpc[], pin: Block): () => Promise<void> {
+  return async () => {
+    const by = { method: "eth_getBlockByNumber", params: ["0x" + pin.number.toString(16), false] };
+    const one = async (k: number) => header((await askAt(rpcs[k]!, [by]))[0], `provider ${k + 1}`);
+    let holds = 0;
+    let failed = null as { e: unknown } | null;
+    const judge = (r: PromiseSettledResult<Block>, k: number) => {
+      if (r.status === "rejected") return void (failed ??= { e: r.reason });
+      if (r.value.hash !== pin.hash || r.value.number !== pin.number) {
+        const e = new EvmQuoteError("rpc_disagree", `provider ${k + 1} holds another block at ${pin.number} than the one asked at`);
+        PIN_GONE.add(e);
+        throw e;
+      }
+      holds++;
+    };
+    (await Promise.allSettled([0, 1].filter((k) => k < rpcs.length).map(one))).forEach(judge);
+    for (let k = 2; k < rpcs.length && holds < 2; k++) judge((await Promise.allSettled([one(k)]))[0]!, k);
+    if (holds < 2) throw failed?.e ?? new EvmQuoteError("rpc_error", `fewer than two providers hold block ${pin.number}`);
+  };
+}
 /** The oldest block a quote reads, and the oldest quote a buy is built from, behind the device's clock. */
 export const EVM_QUOTE_MAX_AGE_MS = 30_000;
 /** How long a sell quote waits for both providers' heads to reach its buy's block, and how often it asks: as long as a
@@ -2482,10 +2510,16 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // young enough, else none; read once
   const at = typeof req === "object" && req !== null ? req.at : undefined;
   const pin = typeof at === "string" && /^0x[0-9a-fA-F]{64}$/.test(at) ? (watch?.held?.(at.toLowerCase(), nowMs) ?? null) : null;
+  const start = mono();
   const seen: { at: string | null } = { at: null };
   if (pin !== null) AGREED_USE.set(pin.hash, (AGREED_USE.get(pin.hash) ?? 0) + 1);
   try {
-    return await buyQuoteWith(req, rpcsIn, nowMs, scan, watch, mono, speculate, pin, seen);
+    return await buyQuoteWith(req, rpcsIn, nowMs, scan, watch, mono, speculate, pin, seen).catch((e) => {
+      // a pin the chain no longer holds: asked again at a new head, as a quote with no `at`
+      if (pin === null || !PIN_GONE.has(e as object)) throw e;
+      seen.at = null;
+      return buyQuoteWith(req, rpcsIn, nowMs + Math.max(0, mono() - start), scan, watch, mono, speculate, null, seen);
+    });
   } catch (e) {
     if (e instanceof EvmQuoteError && e.at === null) e.at = seen.at;
     throw e;
@@ -3152,7 +3186,7 @@ async function routeSetOf(a: {
   const agreedAt = async (): Promise<{ block: Block; confirm: () => Promise<void> }> => {
     // a warm buy's read round already sent at the held block (`spec`) is agreed on that same block, never a newer one
     // the watch held meanwhile
-    let got: { block: Block; confirm: () => Promise<void>; low?: EvmRpc } = spec !== null ? { block: spec, confirm: async () => {} } : a.pin !== undefined ? { block: a.pin, confirm: async () => {} } : a.watch === undefined ? await fresh(rpcs) : await a.watch.head(a.nowMs);
+    let got: { block: Block; confirm: () => Promise<void>; low?: EvmRpc } = spec !== null ? { block: spec, confirm: async () => {} } : a.pin !== undefined ? { block: a.pin, confirm: pinConfirm(rpcs, a.pin) } : a.watch === undefined ? await fresh(rpcs) : await a.watch.head(a.nowMs);
     if (!(await behind(got.block))) return got;
     if (got.low === undefined) {
       got = await fresh(rpcs);
