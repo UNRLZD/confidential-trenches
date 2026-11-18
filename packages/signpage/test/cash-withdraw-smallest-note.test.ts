@@ -9,7 +9,7 @@ import { test } from "node:test";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import { planPoolWithdraw, WITHDRAW_PLAN_NOTES, type WithdrawSource } from "../src/pool-withdraw.ts";
 import { withdrawNoteFloor } from "../src/rules/pool.ts";
-import { cashCosts, cashNotes, cashSendable, planCashWithdraw } from "../src/withdraw/checks.ts";
+import { cashCosts, cashNotes, cashSendable, checkAmount, planCashWithdraw } from "../src/withdraw/checks.ts";
 
 const FEE = 120_000n; // WU-09's fixture relay fee, 0.12 USDC
 const usdc = (x: string): bigint => {
@@ -66,13 +66,29 @@ function rng(seed: number): (n: number) => number {
   };
 }
 
-/** What the planner sent before this card, for at most WITHDRAW_PLAN_NOTES giving notes: Max whole, else the search. */
-function searchAlone(src: readonly WithdrawSource[], amount: bigint, fee: bigint, minPart: bigint): boolean {
-  if (amount < minPart) return false;
-  const giving = src.filter((n) => n.value - fee >= minPart);
-  if (amount === cashSendable(giving, fee, minPart)) return true;
-  return planPoolWithdraw(giving, amount, cashCosts(fee, minPart)) !== null;
+/** planCashWithdraw as it was before this card (a6c1109c7), the oracle of which amounts a plan sends. */
+function planBefore(notes: readonly WithdrawSource[], amount: bigint, fee: bigint, minPart: bigint): unknown[] | null {
+  if (amount < minPart) return null;
+  const all = notes.filter((n) => n.value - fee >= minPart).sort((x, y) => (x.value !== y.value ? (x.value > y.value ? -1 : 1) : x.id < y.id ? -1 : 1));
+  const whole = (n: WithdrawSource) => ({ noteId: n.id, part: n.value - fee, chunk: n.value });
+  if (amount === cashSendable(all, fee, minPart)) return all.map(whole);
+  if (all.length <= WITHDRAW_PLAN_NOTES) return planPoolWithdraw(all, amount, cashCosts(fee, minPart));
+  const [first, ...rest] = all as [WithdrawSource, ...WithdrawSource[]];
+  const tail = amount > first.value - fee ? planBefore(rest, amount - (first.value - fee), fee, minPart) : null;
+  return tail !== null ? [whole(first), ...tail] : planPoolWithdraw(all, amount, cashCosts(fee, minPart));
 }
+const searchAlone = (src: readonly WithdrawSource[], amount: bigint, fee: bigint, minPart: bigint): boolean => planBefore(src, amount, fee, minPart) !== null;
+
+test("past the search's 16 notes: a smaller note it never reads pays nothing alone, so the form's nearest amounts stay what runs", () => {
+  // 16 notes of 0.42 and one of 0.32 (review of f340ddbd1): 0.20 fits only the 0.32 note, outside the 16 the search reads
+  const src = [...Array.from({ length: WITHDRAW_PLAN_NOTES }, (_, i) => ({ id: `b${String(i).padStart(2, "0")}`, value: 420_000n })), { id: "s", value: 320_000n }];
+  assert.equal(planCashWithdraw(src, 200_000n, FEE), null);
+  assert.equal(searchAlone(src, 200_000n, FEE, FEE + 1n), false);
+  const c = checkAmount("0.2", { notes: src, fee: FEE });
+  assert.equal(c.ok, false);
+  // within the 16: 0.30 is one 0.42 note whole, as before
+  assert.deepEqual(planCashWithdraw(src, 300_000n, FEE), [{ noteId: "b00", part: 300_000n, chunk: 420_000n }]);
+});
 
 test("random note sets: every plan sends the amount exactly from unheld notes above 0, each part a withdrawal the vault takes, and the same amounts are plannable as by the search alone", () => {
   const r = rng(0x5eed);
@@ -82,7 +98,7 @@ test("random note sets: every plan sends the amount exactly from unheld notes ab
     const fee = BigInt(r(300_000));
     const minPart = fee + 1n + (r(3) === 0 ? BigInt(r(2_000_000)) : 0n);
     const floor = withdrawNoteFloor(cashCosts(fee, minPart));
-    const rs = Array.from({ length: 1 + r(WITHDRAW_PLAN_NOTES) }, (_, i) =>
+    const rs = Array.from({ length: 1 + r(WITHDRAW_PLAN_NOTES + 8) }, (_, i) =>
       rec(`x${i}`, r(5) === 0 ? 0n : BigInt(r(4) === 0 ? r(3_000_000) : r(80_000_000)), r(5) === 0 ? "HELD" : "UNSPENT"));
     const src = sources(rs);
     const max = cashSendable(src, fee, minPart);
@@ -112,7 +128,9 @@ test("random note sets: every plan sends the amount exactly from unheld notes ab
         assert.ok(fee * 10_000n <= x.chunk * 5_000n, `the vault's MAX_RELAY_FEE_BPS backstop: ${why}`);
       }
       // one note covering the amount with a change that moves: the plan is that note alone, the smallest such
-      const covers = src.filter((n) => n.value - fee >= amount && (n.value - fee === amount || n.value - fee - amount >= floor));
+      // (among the notes the search reads: the WITHDRAW_PLAN_NOTES largest)
+      const read = [...src].filter((n) => n.value - fee >= minPart).sort((x, y) => (x.value !== y.value ? (x.value > y.value ? -1 : 1) : x.id < y.id ? -1 : 1)).slice(0, WITHDRAW_PLAN_NOTES);
+      const covers = read.filter((n) => n.value - fee >= amount && (n.value - fee === amount || n.value - fee - amount >= floor));
       if (covers.length > 0) {
         const least = covers.reduce((a, b) => (b.value < a.value || (b.value === a.value && b.id < a.id) ? b : a));
         assert.deepEqual(p, [{ noteId: least.id, part: amount, chunk: amount + fee }], `the smallest covering note: ${why}`);

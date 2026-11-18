@@ -142,7 +142,8 @@ export function planCashWithdraw(notes: readonly WithdrawSource[], amount: bigin
   if (amount === cashSendable(all, fee, minPart)) return all.map((n) => whole(n, fee));
   const floor = withdrawNoteFloor(cashCosts(fee, minPart));
   let one: WithdrawSource | undefined;
-  for (const n of all) {
+  // within the notes the search reads (the WITHDRAW_PLAN_NOTES largest), so nearestPlannable names the same amounts
+  for (const n of all.slice(0, WITHDRAW_PLAN_NOTES)) {
     const change = n.value - fee - amount;
     if ((change === 0n || change >= floor) && (one === undefined || n.value < one.value || (n.value === one.value && n.id < one.id))) one = n;
   }
