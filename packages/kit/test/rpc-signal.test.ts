@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { evmJsonRpc } from "../src/checks/evm/quote.ts";
-import { solanaJsonRpc, solanaTimedRpc } from "../src/trade/solana/send.ts";
+import { sendSolanaSet, solanaJsonRpc, solanaTimedRpc, type SolanaRpc, type SolanaSendPath } from "../src/trade/solana/send.ts";
 
 /** A provider that never answers: each request is held until its signal aborts, then rejects with the signal's reason. */
 function hung() {
@@ -112,4 +112,27 @@ test("evmJsonRpc: the caller's abort ends the hung request at the provider, and 
   ac.abort(why);
   await assert.rejects(call, (e: unknown) => e === why);
   assert.deepEqual(p.aborted, [why], "the fetch saw the caller's abort");
+});
+
+test("sendSolanaSet: a status read past the set's call bound is ended at the provider, not only waited out", { timeout: 2_000 }, async (t) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: 0 });
+  t.after(() => resetTimers(t.mock.timers));
+  // providers that never answer, each keeping the signal its read was handed
+  const signals: (AbortSignal | undefined)[] = [];
+  const never = ((_m: string, _p: readonly unknown[], signal?: AbortSignal) => (signals.push(signal), new Promise<never>(() => {}))) as SolanaRpc;
+  const quiet = (name: string): SolanaSendPath => ({ name, send: () => new Promise<string>(() => {}) });
+  // one v0 tx, as the set tests build it (solana-send.test.ts tx())
+  const msg = [0x80, 1, 0, 1, 2, ...new Array(32).fill(2), ...new Array(32).fill(0), ...new Array(32).fill(7), 1, 1, 1, 0, 0, 0];
+  const wire = Uint8Array.from([1, ...new Array(64).fill(1), ...msg]);
+  const h = sendSolanaSet([{ wire, lastValidBlockHeight: 1_000 }], { paths: [quiet("a"), quiet("b")], providers: [never, Object.assign(never.bind(null), {}) as SolanaRpc], callTimeoutMs: 500 });
+  for (let ms = 0; ms < 2_000 && !signals.some((s) => s?.aborted); ms += 50) {
+    t.mock.timers.tick(50);
+    await flush();
+  }
+  h.stop();
+  assert.ok(signals.length >= 1, "the set read its providers");
+  const cut = signals.find((s) => s?.aborted);
+  assert.ok(cut !== undefined, "a status read's bound aborted its request");
+  assert.match(String((cut.reason as Error).message), /no answer in 500 ms/);
+  await h.done;
 });

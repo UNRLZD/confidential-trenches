@@ -901,7 +901,9 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
     return (wait ?? Promise.resolve()).then(() => {
       pending.delete(drop);
       if (over) { drop(); throw new Error("the set is over"); }
-      return withTimeout(Promise.resolve().then(() => run(params)), callTimeoutMs);
+      // the bound ends the request at the provider too (card kit-rpc-client-takes-a-signal)
+      const cut = new AbortController();
+      return withTimeout(Promise.resolve().then(() => run(params, cut.signal)), callTimeoutMs, undefined, cut);
     }).then(
       (v) => { backoffMs[p] = 0; return v; },
       (e) => {
