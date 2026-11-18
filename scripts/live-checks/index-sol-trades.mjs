@@ -13,12 +13,16 @@
 //   - the fresh trade's signature is on the tape in a read that answered within 2 s of the check holding the trade, with
 //     its side, its time (the event's clock) and its trader (the event's user);
 //   - the 1s candles hold a bar at the trade's second with a volume above 0.
-// Card index-sol-trades-2 adds one listed Meteora coin per venue (DLMM, DBC, DAMM v2): the check watches the listed
-// tokens on the public websocket until each venue has a fresh trade of a listed coin against SOL or USDC, decoded from
-// the venue's own event (read whole on the public RPC: the three send their events only to themselves), and passes only
-// when, for each venue, that coin's tape on the helper (read every second, up to METEORA_TAPE_MS) holds the trade's
-// signature with its side and time, its answer is src "chain" and well-formed, and the signature reads back succeeded on
-// two public RPCs (getSignatureStatuses, the history searched).
+// Card index-sol-trades-2 adds one listed Meteora coin per venue (DLMM, DBC, DAMM v2), after the pump.fun part: the
+// check opens the listed coins off pump.fun on the helper (met-dbc's first) and watches them on the public websocket
+// until each venue has a fresh trade of a listed coin against SOL or USDC, decoded from the venue's own event (read whole
+// on the public RPC: the three send their events only to themselves); a venue with none in the wait takes a trade of
+// the venue among the newest rows of those coins' tapes. It passes only when, for each venue, that coin's tape on the
+// helper (read every POLL_MS from the moment the trade is found, up to METEORA_TAPE_MS; a trade that left a busy coin's
+// 50 newest rows first is replaced by the venue's next) holds the trade's signature with its side and time, its answer
+// is src "chain" and well-formed, and the signature reads back succeeded on two public RPCs (getSignatureStatuses, the
+// history searched). DBC alone may read none, and only while the lists hold no coin on a DBC curve with DBC_VOL_USD in a
+// day (dbc_curves, from the same lists).
 // The candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
 // one 75 s span; a 429 still standing after it, or no bar at the trade's second, is BAD as any other answer.
 // After: helper
