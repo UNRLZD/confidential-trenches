@@ -1,0 +1,28 @@
+{
+ "key": "evm-deposit-pruned-sim-says-why",
+ "note": "Two real runs from the Mac (--record), none edited: good = --local, this card build in SIGN_HOST place; bad_live_before = SIGN_HOST as served on 2026-11-18 11:34Z, before this card, its app.js pin as recorded.",
+ "good": {
+  "readAt": "2026-11-18T11:34:27.643Z",
+  "from": "local build",
+  "page": {
+   "pin": "sha384-tFoMtrS8dVQfGnv22HAF6Lc5LQFgSKbDuN8ng7eoz5b/Cly8HO7tB+fH7Mcioqxo",
+   "sha384": "sha384-tFoMtrS8dVQfGnv22HAF6Lc5LQFgSKbDuN8ng7eoz5b/Cly8HO7tB+fH7Mcioqxo",
+   "miss": true,
+   "sim": true,
+   "down": true,
+   "own": true
+  }
+ },
+ "bad_live_before": {
+  "readAt": "2026-11-18T11:34:28.434Z",
+  "from": "https://confidential.unrealized.trade",
+  "page": {
+   "pin": "sha384-9zdVRUrbjWKM6PrnlI+5+ozEmNLwcGeoOlOEpV3jDrkI3CU7GEYGQwQrpsDEw+8p",
+   "sha384": "sha384-9zdVRUrbjWKM6PrnlI+5+ozEmNLwcGeoOlOEpV3jDrkI3CU7GEYGQwQrpsDEw+8p",
+   "miss": false,
+   "sim": false,
+   "down": false,
+   "own": false
+  }
+ }
+}
