@@ -55,12 +55,13 @@ export function evmSignatureValid(address: string, message: string, signature: u
   const v = b[64];
   const rec = v === 27 || v === 28 ? v - 27 : v === 0 || v === 1 ? v : -1;
   if (rec < 0) return false;
+  // s low (EIP-2): a high-s twin of a signature is not the wallet's answer
+  if (BigInt(`0x${hex(b.slice(32, 64))}`) > SECP_HALF_N) return false;
   try {
-    const sig = secp256k1.Signature.fromBytes(b.slice(0, 64), "compact");
-    // s low (EIP-2): a high-s twin of a signature is not the wallet's answer
-    if (sig.s > SECP_HALF_N) return false;
-    const pub = sig.addRecoveryBit(rec).recoverPublicKey(eip191Digest(utf8(message)));
-    return evmAddress(pub.toBytes(false)) === address;
+    // noble's recovered form is recovery ‖ r ‖ s; the digest is already hashed
+    const recovered = Uint8Array.from([rec, ...b.slice(0, 64)]);
+    const pub = secp256k1.recoverPublicKey(recovered, eip191Digest(utf8(message)), { prehash: false });
+    return evmAddress(pub) === address;
   } catch {
     return false;
   }
