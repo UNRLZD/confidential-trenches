@@ -14,9 +14,10 @@ import { geckoBudget, WINDOW_MS } from "../gecko.ts";
 import { SERVED_MAX, SERVED_MS, servedTokens } from "../solana/lists.ts";
 import { evmSwapsFromEnv } from "../../server.ts";
 import {
-  batch, blockAt, blockRange, createEvmLists, FACTORIES, GT_BASE, GT_READS, joinLogs, LIST_MS, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, RECORDS,
+  batch, blockAt, blockRange, createEvmLists, FACTORIES, GT_BASE, GT_READS, heldFetch, joinLogs, LIST_MS, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, RECORDS,
   recordCalls, recordPad, SETTLE_MS, STALE_MS, toRows,
 } from "./lists.ts";
+import { providerHolds } from "../../limits/limits.ts";
 
 const fx = (f: string) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
 const GT: Record<string, string> = {
@@ -694,4 +695,69 @@ test("a priced coin's market cap of 0 is unknown: the FDV stands in, never MC 0"
   assert.equal(mc({ market_cap_usd: "0.0", fdv_usd: "0.0" }), null);
   assert.equal(mc({ market_cap_usd: null, fdv_usd: null }), null);
   assert.equal(mc({ market_cap_usd: "1500000.5", fdv_usd: "2605877.44952697" }), "1500000.5", "a known cap is the cap");
+});
+
+// ---- card helper-rpc-batch-learns-reader-size: the maker reads fit each provider's batch size ----
+const POCKET_RH = "https://robinhood.api.pocket.network";
+/** Pocket's own refusal past 5 calls (HTTP 413, plain text; base and robinhood .api.pocket.network, 2026-11-18 20:41Z and
+ *  23:20Z from the Mac). */
+const pocket413 = () => new Response("request entity too large: the batch has more items than this window allows\n", { status: 413, headers: { "content-type": "text/plain" } });
+/** A provider answering every call's result `0x<id>` by id; `refuse(n)` a refusal of a post of n calls, or null. */
+function sized(refuse: (n: number) => Response | null) {
+  const posts: number[] = [];
+  const fetch = async (_u: string, init: RequestInit): Promise<Response> => {
+    const reqs = JSON.parse(String(init.body)) as { id: number }[];
+    posts.push(reqs.length);
+    return refuse(reqs.length) ?? new Response(JSON.stringify(reqs.map((q) => ({ jsonrpc: "2.0", id: q.id, result: "0x" + q.id.toString(16) }))), { status: 200 });
+  };
+  return { fetch, posts };
+}
+const tenCalls = Array.from({ length: 10 }, (_, i) => ({ method: "eth_getCode", params: [`0x${"0".repeat(39)}${i}`, "latest"] }));
+const answered = (got: unknown[]) => got.filter((x) => typeof x === "string").length;
+
+test("Robinhood records with Pocket the second to answer: its 413 past 5 never leaves the read one provider short (Pocket starts at 5): the two agree", async () => {
+  const gs = later("GS");
+  // the chain's own, PublicNode and thirdweb down; dRPC and Pocket (answering as dRPC's recorded reads) left
+  const r = rhRecords({ down: [0, 1, 4], sparesAs: 2 });
+  const fetch = async (u: string, init: RequestInit) => ((JSON.parse(String(init.body)) as unknown[]).length > 5 && u === POCKET_RH ? pocket413() : r.fetch(u, init));
+  const got = await readMakers("robinhood", fetch, [{ token: gs.address, createdS: gs.created_s }, ...RH.cases.slice(0, 3).map((c) => ({ token: c.address, createdS: c.created_s }))], REC_NOW);
+  assert.equal(got.get(gs.address), "pons");
+  assert.equal(BATCH_MAX[POCKET_RH], 5);
+  assert.equal(BATCH_MAX["https://base.api.pocket.network"], 5);
+});
+
+test("a provider with no known size that refuses past 4, naming its max: split to 4, every call answered, and the next batch goes at 4 at once", async () => {
+  const p = sized((n) => (n > 4 ? Response.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "batch too large: max 4 calls" } }, { status: 413 }) : null));
+  const url = "https://lists-sized-4.test";
+  assert.equal(answered(await batch(p.fetch, url, tenCalls)), 10);
+  assert.deepEqual(p.posts, [10, 4, 4, 2]);
+  p.posts.length = 0;
+  assert.equal(answered(await batch(p.fetch, url, tenCalls)), 10);
+  assert.deepEqual(p.posts, [4, 4, 2], "the kept size: no refused post");
+});
+
+test("through the maker reads' held fetch: Sentio's 429 code 8 past 5 is a size refusal, never a hold: split to 5, every call answered", async () => {
+  const sentio = sized((n) => (n > 5 ? Response.json({ code: 8, message: "JSON-RPC batch exceeds the maximum of 5 requests" }, { status: 429 }) : null));
+  const holds = providerHolds(() => 1_000_000, {});
+  const S = "https://lists-sentio-like.test";
+  assert.equal(answered(await batch(heldFetch(sentio.fetch, holds, () => 1_000_000), S, tenCalls)), 10);
+  assert.equal(holds.heldFor(S), 0, "a size refusal holds nothing");
+});
+
+test("through the maker reads' held fetch: a throttle's 429 on a batch still holds the provider, unsplit", async () => {
+  const holds = providerHolds(() => 1_000_000, {});
+  const T = "https://lists-throttle.test";
+  const busy = sized(() => new Response("Too Many Requests", { status: 429, headers: { "retry-after": "20" } }));
+  assert.equal(answered(await batch(heldFetch(busy.fetch, holds, () => 1_000_000), T, tenCalls)), 0);
+  assert.ok(holds.heldFor(T) > 0, "held");
+  assert.deepEqual(busy.posts, [10], "a throttle is never split, and nothing after it is sent");
+});
+
+test("a refusal's words are read to 64 KiB at most: a 400 naming max 4 past that is no size refusal, and nothing is kept", async () => {
+  const url = "https://lists-long-refusal.test";
+  const long = sized((n) => (n > 1 ? new Response(`batch too large: max 4 calls ${" ".repeat(70 * 1024)}`, { status: 400 }) : null));
+  assert.equal(answered(await batch(long.fetch, url, tenCalls)), 0);
+  assert.deepEqual(long.posts, [10], "not split");
+  const short = sized((n) => (n > 4 ? new Response("batch too large: max 4 calls", { status: 400 }) : null));
+  assert.equal(answered(await batch(short.fetch, url, tenCalls)), 10, "the same words, short: split to 4");
 });

@@ -79,6 +79,7 @@ import { BUCKETS_MAX, change4h, createBook, fixed, joinBars, PRICE_SCALE, TFS, t
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
+import { BATCH_SIZES, batchRefusal, readWords } from "../../rpc/batch-sizes.ts";
 import { HELD_WAIT_MS, isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, TF as GT_TF, type DataAnswer, type TapeIds, type TapeRow } from "../solana/token.ts";
 import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
@@ -1253,7 +1254,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return true;
   }
   async function one(url: string, part: Call[]): Promise<Reply[] | null> {
+    // card helper-rpc-batch-learns-reader-size: a part past the most calls the provider takes (the helper's one map,
+    // rpc/batch-sizes.ts: a size it refused, any path's) goes as its parts, all at once, the replies in the calls' order;
+    // they draw no more of its pace than the part drew
+    const most = BATCH_SIZES.most(url);
+    if (part.length > most) {
+      const subs: Call[][] = [];
+      for (let i = 0; i < part.length; i += most) subs.push(part.slice(i, i + most));
+      const got = await Promise.all(subs.map((s) => one(url, s)));
+      return got.some((g) => g === null) ? null : (got as Reply[][]).flat();
+    }
     if (holds.heldFor(url) > 0) return null;
+    // a size refusal's maximum (null: none named), set where the post is refused for its size, then asked again below
+    let refit: number | null | undefined;
     const sent = performance.now();
     const o = out.get(url) ?? new Set<number>();
     out.set(url, o);
@@ -1267,8 +1280,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
       latency.set(url, (latency.get(url) ?? LATENCY_START_MS) * (1 - LATENCY_WEIGHT) + (performance.now() - sent) * LATENCY_WEIGHT);
+      // a post refused for its size (batchRefusal, the kit's rule: Pocket's 413, Sentio's 429 code 8, dRPC's 400 code 31)
+      // is no throttle and holds nothing: its most is kept and its calls asked again in parts (refit, below)
+      if (part.length > 1 && r.status >= 400 && r.status < 500) {
+        refit = batchRefusal(r.status, await readWords(r), part.length);
+        if (refit !== undefined) throw new Error("refused for its size");
+        if (r.status !== 429) return null;
+      }
       if (r.status === 429) {
-        await r.body?.cancel();
+        await r.body?.cancel().catch(() => {});
         // a later, shorter wait never cuts a longer one (providerHolds), as the limit path below
         holds.hold(url, upstreamRetryAfterS(r.headers, now()));
         return null;
@@ -1279,6 +1299,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
       const text = await r.text();
       if (text.length > ANSWER_MAX) return null;
+      refit = batchRefusal(200, text, part.length);
+      if (refit !== undefined) throw new Error("refused for its size");
       const parsed: unknown = JSON.parse(text);
       const answers = Array.isArray(parsed) ? parsed : [parsed];
       const got: Reply[] = part.map(() => ({ ok: false, wait: 0 }));
@@ -1294,10 +1316,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
       return got;
     } catch {
-      return null;
+      if (refit === undefined) return null;
+      BATCH_SIZES.refused(url, part.length, refit);
     } finally {
       o.delete(sent);
     }
+    return one(url, part);
   }
   /** Waits for `p` until it settles or one of `urls` has a post out (sent, unanswered) HEDGE_MS or longer. */
   async function hedged(p: Promise<unknown>, urls: readonly string[]): Promise<void> {

@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createRpc, RPC_UPSTREAMS } from "./rpc.ts";
 import { providerHolds, type Pace } from "../limits/limits.ts";
+import { batchSizes } from "./batch-sizes.ts";
 
 const SPARE = "https://spare.test";
 const clock = () => {
@@ -59,7 +60,7 @@ for (const chain of ["base", "robinhood"] as const) {
     test(`${chain}, ${what}: a batch of 10 is answered by the same upstream in parts of ${most}, in the device's order, and the next batch goes at that size at once`, async () => {
       const u = upstream(A, refuse);
       const c = clock();
-      const r = createRpc({}, { fetch: u.fetch as never, holds: providerHolds(c.now, {}), pinned: { [chain]: [SPARE] }, now: c.now, sleep: c.sleep, log: () => undefined });
+      const r = createRpc({}, { fetch: u.fetch as never, holds: providerHolds(c.now, {}), pinned: { [chain]: [SPARE] }, now: c.now, sleep: c.sleep, log: () => undefined, batch: batchSizes() });
       const a = await r.handle(chain, "application/json", batch(chain, 10), client());
       assert.equal(a.status, 200, a.body);
       assert.deepEqual(results(a.body), want("A", 10), `posts ${JSON.stringify(u.posts)}`);
@@ -84,7 +85,7 @@ for (const chain of ["base", "robinhood"] as const) {
     for (const body of ["Too Many Requests", JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32005, message: "rate limit exceeded" } })]) {
       const u = upstream(A, () => new Response(body, { status: 429, headers: { "retry-after": "20" } }));
       const c = clock();
-      const r = createRpc({}, { fetch: u.fetch as never, holds: providerHolds(c.now, {}), pinned: { [chain]: [SPARE] }, now: c.now, sleep: c.sleep, log: () => undefined });
+      const r = createRpc({}, { fetch: u.fetch as never, holds: providerHolds(c.now, {}), pinned: { [chain]: [SPARE] }, now: c.now, sleep: c.sleep, log: () => undefined, batch: batchSizes() });
       const a = await r.handle(chain, "application/json", batch(chain, 10), client());
       assert.equal(a.status, 200, a.body);
       assert.deepEqual(results(a.body), want("spare", 10));
@@ -99,7 +100,7 @@ for (const chain of ["base", "robinhood"] as const) {
     let n = 0;
     const u = upstream(A, (s) => (s.length > 5 ? new Response("too large", { status: 413 }) : ++n === 2 ? new Response("down", { status: 503 }) : null));
     const c = clock();
-    const r = createRpc({}, { fetch: u.fetch as never, holds: providerHolds(c.now, {}), pinned: { [chain]: [SPARE] }, now: c.now, sleep: c.sleep, log: () => undefined });
+    const r = createRpc({}, { fetch: u.fetch as never, holds: providerHolds(c.now, {}), pinned: { [chain]: [SPARE] }, now: c.now, sleep: c.sleep, log: () => undefined, batch: batchSizes() });
     const a = await r.handle(chain, "application/json", batch(chain, 10), client());
     assert.equal(a.status, 200, a.body);
     assert.deepEqual(results(a.body), want("spare", 10));
@@ -108,7 +109,7 @@ for (const chain of ["base", "robinhood"] as const) {
   test(`${chain}: an upstream that refuses even one call for size ends at parts of one, a bounded number of posts, and the spare answers`, async () => {
     const u = upstream(A, () => new Response("request entity too large", { status: 413 }));
     const c = clock();
-    const r = createRpc({}, { fetch: u.fetch as never, holds: providerHolds(c.now, {}), pinned: { [chain]: [SPARE] }, now: c.now, sleep: c.sleep, log: () => undefined });
+    const r = createRpc({}, { fetch: u.fetch as never, holds: providerHolds(c.now, {}), pinned: { [chain]: [SPARE] }, now: c.now, sleep: c.sleep, log: () => undefined, batch: batchSizes() });
     const a = await r.handle(chain, "application/json", batch(chain, 10), client());
     assert.equal(a.status, 200, a.body);
     assert.deepEqual(results(a.body), want("spare", 10));
@@ -121,7 +122,7 @@ for (const chain of ["base", "robinhood"] as const) {
     const lines: string[] = [];
     const u = upstream(K, (s) => (s.length > 5 ? new Response("request entity too large", { status: 413 }) : null));
     const c = clock();
-    const r = createRpc({ [RPC_UPSTREAMS[chain].env]: K }, { fetch: u.fetch as never, holds: providerHolds(c.now, {}), pinned: { [chain]: [SPARE] }, now: c.now, sleep: c.sleep, log: (l) => lines.push(l) });
+    const r = createRpc({ [RPC_UPSTREAMS[chain].env]: K }, { fetch: u.fetch as never, holds: providerHolds(c.now, {}), pinned: { [chain]: [SPARE] }, now: c.now, sleep: c.sleep, log: (l) => lines.push(l), batch: batchSizes() });
     const a = await r.handle(chain, "application/json", batch(chain, 10), client());
     assert.equal(a.status, 200, a.body);
     assert.deepEqual(results(a.body), want("A", 10));
@@ -137,7 +138,7 @@ test("a post-paced upstream's parts each draw a post of its pace", async () => {
   const c = clock();
   const pace: Record<string, Pace> = { [A]: { perS: 0.001, burst: 4, unit: "post" } };
   const holds = providerHolds(c.now, pace);
-  const r = createRpc({}, { fetch: u.fetch as never, holds, pinned: { base: [SPARE] }, now: c.now, sleep: c.sleep, log: () => undefined });
+  const r = createRpc({}, { fetch: u.fetch as never, holds, pinned: { base: [SPARE] }, now: c.now, sleep: c.sleep, log: () => undefined, batch: batchSizes() });
   assert.equal((await r.handle("base", "application/json", batch("base", 10), client())).status, 200);
   const before = holds.room(A);
   const b = await r.handle("base", "application/json", batch("base", 10, 101), client());
@@ -149,7 +150,7 @@ test("solana: the first key (call()) refusing a batch for its size (413) serves 
   const K = "https://mainnet.helius.test/?api-key=plantedSOLbatchkey0123456789";
   const u = upstream(K, (s) => (s.length > 5 ? new Response("request entity too large", { status: 413 }) : null));
   const c = clock();
-  const r = createRpc({ SOLANA_RPC_URL: K }, { fetch: u.fetch as never, now: c.now, sleep: c.sleep, log: () => undefined });
+  const r = createRpc({ SOLANA_RPC_URL: K }, { fetch: u.fetch as never, now: c.now, sleep: c.sleep, log: () => undefined, batch: batchSizes() });
   const a = await r.handle("solana", "application/json", batch("solana", 10), client());
   assert.equal(a.status, 200, a.body);
   assert.deepEqual(results(a.body), want("A", 10), `posts ${JSON.stringify(u.posts)}`);
