@@ -5,6 +5,7 @@
 // as the mutant run shows), and a block the chain dropped would go unseen.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { evmQuoteWarmReset } from "../src/checks/evm/quote.ts";
 import { firstThenFollow } from "./evm-quote-follow-fx.ts";
 import { onTestClock } from "./test-clock.ts";
 
@@ -15,8 +16,9 @@ test("SCOPE a quote with no `at` at the block a quote was pinned to reads every 
   assert.equal(q2.block.hash, q1.block.hash);
   const before = r2.methods.get("eth_call") ?? 0;
   assert.equal(before, 0, "the pinned follow read again");
-  // its reads are sent (the recording, made cold, may not hold each in the batches a warm quote sends: an answer
-  // missing there ends it rpc_error, after the reads this counts)
+  // asked as the follow was (no warm plan), so each of its reads is one the kept agreement holds: served from it, the
+  // quote would send none
+  evmQuoteWarmReset();
   await plain().catch(() => null);
   const reads = (r2.methods.get("eth_call") ?? 0) - before;
   assert.ok(reads > 0, "a quote with no `at` was answered from the kept agreement: no read required its block canonical");
