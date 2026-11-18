@@ -1,6 +1,6 @@
 // card mutant-sweeps-refuse-no-verdict: every mutant sweep reads its runs through scripts/mutant-run.mjs, so a run with no
 // verdict is refused, never read as a survivor or a kill, and its plant goes back before the sweep's process ends. Before,
-// thirteen sweeps read `ℹ fail` themselves: a hung run printed "SURVIVED pass undefined fail undefined", and a sweep
+// thirteen sweeps read `ℹ fail` themselves (and restore-wallets-mutants.mjs kept its own copy of the rule): a hung run printed "SURVIVED pass undefined fail undefined", and a sweep
 // that ended inside a run (group-run's exit 124 at its bound, which skips the sweep's own finally) left its plant written
 // into the source.
 //   node --test scripts/ci/mutant-run.test.mjs
@@ -36,6 +36,7 @@ const SWEEPS = [
   ["packages/wallet/scripts/note-restore-refund-mutants.mjs", WALLET],
   ["packages/wallet/scripts/refund-move-mutants.mjs", [...WALLET, ...SIGN]],
   ["packages/wallet/scripts/pool-evm-restore-mutants.mjs", WALLET],
+  ["packages/wallet/scripts/restore-wallets-mutants.mjs", [...WALLET, ...SIGN]],
 ];
 const BOUND_MS = 5_000;
 // A test process (the runner under --test-isolation=none, a test file's own process otherwise) started while a plant is
