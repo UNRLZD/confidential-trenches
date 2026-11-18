@@ -31,7 +31,7 @@ export const HELPER_WINDOW = Object.freeze({
   "/v1/rpc/solana-marks": 30,
   "/v1/rpc/base": 30,
   "/v1/rpc/robinhood": 30,
-  "/v1/rpc/near": 30,
+  "/v1/rpc/near": 90,
   "/v1/proxy": 120, // UPSTREAM_ROUTE_MAX, the proxy route apart
   "/v1/pool": 30, // POOL_RATE_MAX
   other: 120, // API_RATE_MAX

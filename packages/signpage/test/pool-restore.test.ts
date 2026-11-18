@@ -38,6 +38,8 @@ import { ReadBusy } from "../src/read-waits.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { askOf, solanaPoolFollowDeps, type PoolDepositEnd, type PoolUxReads } from "../src/pool-deposit-follow.ts";
 import { TRADE_HELPER } from "../src/trade.ts";
+import { vaultScope } from "../src/withdraw/checks.ts";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 const SOL_SCOPE = 11n;
 const EVM_SCOPE = 22n;
@@ -2534,4 +2536,132 @@ test("busyOf: the page client's 429, 5xx and JSON-RPC throttle, a busy vendor an
   assert.deepEqual(restoreKind.busyOf(nearBusy(502)), { afterMs: null });
   for (const e of [new SolanaRpcTransportError("timeout", "t", 1, "h"), new SolanaRpcTransportError("not_json", "t", 1, "h"), nearBusy(400), new Error("HTTP 503"), "HTTP 503", null])
     assert.equal(restoreKind.busyOf(e), null, String(e));
+});
+
+// ---------- card vault-late-send-carried: the NEAR vault's deposit ids, step 5 then step 7 ----------
+// (each test closes its store when it ends, failed or not: a run with the vault's pool left the file's process open past its
+// last test with the store closed only by the file's after hook)
+// A NEAR chain whose every final read moves the tip one block on (so step 7's own pass is above the restore's), each
+// block's header read by height or hash, its time T0 + h s; `money` gives each id's USDC on each provider (FastNEAR,
+// dRPC), `fail` the ids whose ft_balance_of one provider (by index) never answers. Every other id never used.
+const VSCOPE = vaultScope("mainnet")!;
+const VAULT_ONLY: readonly RestorePool[] = [{ chain: "near", network: "mainnet", scope: VSCOPE, rpcs: () => [{ name: FAST, query: async () => null }, { name: DRPC, query: async () => null }] as never }];
+const vaultWalk = (async () => ({ scope: VSCOPE, notes: [] })) as never;
+function vaultChain(money: ReadonlyMap<string, readonly [bigint, bigint]>, fail: ReadonlyMap<string, number> = new Map()) {
+  let tip = 2_000;
+  const hashes = new Map<string, number>();
+  const hashOf = (h: number): string => {
+    const x = base58.encode(sha256(new TextEncoder().encode(`block ${h}`)));
+    hashes.set(x, h);
+    return x;
+  };
+  const bytes = (v: unknown) => [...new TextEncoder().encode(JSON.stringify(v))];
+  const at = (p: Record<string, unknown>): number => (p.finality === "final" ? ++tip : typeof p.block_id === "number" ? p.block_id : hashes.get(p.block_id as string)!);
+  const one = (k: 0 | 1, url: string) => ({
+    name: url,
+    query: async (p: Record<string, unknown>) => {
+      const h = at(p);
+      const b = { block_height: h, block_hash: hashOf(h) };
+      const u = (p.request_type === "view_account" ? p.account_id : argsOf(p).account_id) as string;
+      if (p.request_type === "view_account" && u === "intents.near") return { jsonrpc: "2.0", result: { amount: "1", locked: "0", storage_usage: 1, ...b } };
+      const m = money.get(u)?.[k] ?? 0n;
+      if (p.request_type === "view_account") return m > 0n ? { jsonrpc: "2.0", result: { amount: "1", locked: "0", storage_usage: 1, ...b } } : { jsonrpc: "2.0", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT" } } };
+      if (p.method_name === "storage_balance_of") return { jsonrpc: "2.0", result: { result: bytes(m > 0n ? { total: "1250000000000000000000", available: "0" } : null), ...b } };
+      if (p.method_name === "ft_balance_of") {
+        if (fail.get(u) === k) throw new Error("HTTP 400");
+        return { jsonrpc: "2.0", result: { result: bytes(String(m)), ...b } };
+      }
+      if (p.method_name === "mt_tokens_for_owner") return { jsonrpc: "2.0", result: { result: bytes([]), ...b } };
+      throw new Error(`unexpected view ${JSON.stringify(p)}`);
+    },
+    block: async (p: { block_id: number } | { finality: "final" }) => {
+      const h = "finality" in p ? ++tip : p.block_id;
+      return { jsonrpc: "2.0", result: { header: { height: h, hash: hashOf(h), timestamp_nanosec: String(BigInt(1_762_600_000_000 + h * 1000) * 1_000_000n) } } };
+    },
+  });
+  const rpcs = [one(0, FAST), one(1, DRPC)] as const;
+  const ids: NonNullable<PoolRestoreHost["ids"]> = { rpcs: () => rpcs, opts: { tries: 1, sleep: async () => {}, now: () => performance.now() } };
+  return { ids };
+}
+function carries() {
+  const got: { scope: bigint; i: number; noteId: string; amount: bigint }[] = [];
+  const carry: restoreKind.VaultCarry = async (a) => (got.push(a), null);
+  return { got, carry };
+}
+async function vworld(t: { after(fn: () => void): void }, over: Partial<PoolRestoreHost>) {
+  const w = await world(over);
+  t.after(() => w.store.close());
+  return w;
+}
+const depositsOf = async (store: WalletStore, scope: bigint) => {
+  const ns = await openNoteStore(store);
+  try {
+    return (await ns.list()).filter((n) => n.ref.kind === "deposit" && n.ref.s === scope).map((n) => ({ id: n.id, i: (n.ref as { i: number }).i, state: n.state, precommitment: n.precommitment }));
+  } finally {
+    ns.close();
+  }
+};
+
+test("card vault-late-send-carried: a vault deposit id holding money with no note on this device (a lost store's quote) is read by asset on both providers, its deposit note written from the amount both read alike, and carried: done", async (t) => {
+  const id = idOf(VSCOPE, 3);
+  const chain = vaultChain(new Map([[id, [9_000_000n, 9_000_000n] as const]]));
+  const c = carries();
+  const w = await vworld(t, { pools: () => VAULT_ONLY, vault: vaultWalk, ids: chain.ids, vaultCarry: c.carry });
+  assert.equal(await whole(w), "done", JSON.stringify(w.steps));
+  const dep = await depositsOf(w.store, VSCOPE);
+  assert.deepEqual(dep.map((x) => [x.i, x.state, x.precommitment]), [[3, "PLANNED", noteSecrets(SEED(), { kind: "deposit", s: VSCOPE, i: 3 }).precommitment]]);
+  assert.deepEqual(c.got, [{ scope: VSCOPE, i: 3, noteId: dep[0]!.id, amount: 9_000_000n }]);
+  // the note is one a restore's read wrote (planFound), so planDeposit never names index 3
+  assert.deepEqual(await w.store.get("meta", "owed/found-deposits"), { [refKey({ kind: "deposit", s: VSCOPE, i: 3 })]: true });
+});
+
+test("card vault-late-send-carried: one provider's read of a vault deposit id, or two providers reading it apart, writes no note and carries nothing; the run names the id", async (t) => {
+  const id = idOf(VSCOPE, 3);
+  for (const [what, money, fail] of [
+    ["two apart", new Map([[id, [9_000_000n, 0n] as const]]), new Map<string, number>()],
+    ["one provider", new Map([[id, [9_000_000n, 9_000_000n] as const]]), new Map([[id, 1]])],
+  ] as const) {
+    const c = carries();
+    const w = await vworld(t, { pools: () => VAULT_ONLY, vault: vaultWalk, ids: vaultChain(money, fail).ids, vaultCarry: c.carry });
+    assert.equal(await whole(w), "stalled", what);
+    assert.deepEqual(await depositsOf(w.store, VSCOPE), [], `${what}: no note written`);
+    assert.deepEqual(c.got, [], `${what}: nothing carried`);
+    assert.ok(why5(w).some((x) => x.includes(`deposit index 3's id ${id}`)), `${what}: ${JSON.stringify(why5(w))}`);
+    }
+});
+
+test("card vault-late-send-carried: under MIN_DEPOSIT is left under the id, as the deposit follow leaves it; a carry that is refused is named", async (t) => {
+  const id = idOf(VSCOPE, 3);
+  {
+    const c = carries();
+    const w = await vworld(t, { pools: () => VAULT_ONLY, vault: vaultWalk, ids: vaultChain(new Map([[id, [999_999n, 999_999n] as const]])).ids, vaultCarry: c.carry });
+    assert.equal(await whole(w), "done");
+    assert.deepEqual(c.got, []);
+    }
+  const w = await vworld(t, { pools: () => VAULT_ONLY, vault: vaultWalk, ids: vaultChain(new Map([[id, [9_000_000n, 9_000_000n] as const]])).ids, vaultCarry: async () => ({ why: "the relayer refused its carry (x)", retry: false }) });
+  assert.equal(await whole(w), "stalled");
+  assert.ok(why5(w).includes(`near vault: deposit index 3's id ${id} the relayer refused its carry (x)`), JSON.stringify(why5(w)));
+});
+
+test("card vault-late-send-carried: step 7 holds for 72 h of block time past the first restore's pass: the marker keeps that pass's time and stays, so each load reads the vault's ids again; past the window it is removed", async (t) => {
+  // the first run: nothing under any id; the marker stays with the pass block's time (both providers' header time)
+  const w = await vworld(t, { pools: () => VAULT_ONLY, vault: vaultWalk, ids: vaultChain(new Map()).ids, vaultCarry: carries().carry });
+  assert.equal(await whole(w), "done");
+  const m = (await w.store.get("meta", restoreKind.RESTORE_IDS_KEY)) as { scopes: string[]; late?: number };
+  assert.deepEqual(m.scopes, [VSCOPE.toString()]);
+  assert.equal(typeof m.late, "number");
+  // a load inside the window reads the ids again: a send that landed since is carried
+  const id = idOf(VSCOPE, 3);
+  const c = carries();
+  const later = poolRestore({ ...w.host, ids: vaultChain(new Map([[id, [5_000_000n, 5_000_000n] as const]])).ids, vaultCarry: c.carry });
+  await later.resume();
+  await later.idle();
+  assert.deepEqual(c.got.map((x) => [x.i, x.amount]), [[3, 5_000_000n]]);
+  assert.equal(((await w.store.get("meta", restoreKind.RESTORE_IDS_KEY)) as { late?: number }).late, m.late, "the window is the first restore's, never restarted");
+  // a load past the window (the first pass's time REREAD_MS before this one's): the answered try removes the marker
+  await w.store.put("meta", restoreKind.RESTORE_IDS_KEY, { scopes: [VSCOPE.toString()], late: 1 });
+  const past = poolRestore({ ...w.host, ids: vaultChain(new Map()).ids, vaultCarry: carries().carry });
+  await past.resume();
+  await past.idle();
+  assert.equal(await w.store.get("meta", restoreKind.RESTORE_IDS_KEY), undefined);
 });

@@ -24,8 +24,11 @@ import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/
  *  pin before it, 654639cf7943e0a05961477f2ace244a03375ecc9dc96fb244f6392411b9ab1f, so nothing else moved. Then
  *  rpc-robinhood.globalstake.io left Robinhood's quote list and its in-flight pin (card rh-provider-fails-64-read-batch:
  *  HTTP 500 to the kit's batch; 6,616 characters before it): the list with those two put back hashes to the pin before
- *  it, e50afe03bdf2d0f151b32bda6f2a8bf1550ce7dd5a6edc807152dca6d6fdeab7, so nothing else moved. */
-const BEFORE = "335426e132ba2336276daf62450687750e090d388bab4c0cbcea4e0e15aec395";
+ *  it, e50afe03bdf2d0f151b32bda6f2a8bf1550ce7dd5a6edc807152dca6d6fdeab7, so nothing else moved. Then Base
+ *  publicnode's in-flight pin went from 2 to 8 (card evm-first-quote-inside-the-kpi, same length): the list with its 2
+ *  put back hashes to the pin before it, 335426e132ba2336276daf62450687750e090d388bab4c0cbcea4e0e15aec395, so nothing
+ *  else moved. */
+const BEFORE = "aaca27e76a69e65f0793ccd60e1759d25f0ecda7c44d8c8b73c58016fb7456f0";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
   const all = evmPoolVenues();

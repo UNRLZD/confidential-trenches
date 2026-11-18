@@ -1,0 +1,710 @@
+{
+ "key": "near-seat-pace-fits-one-quote",
+ "goodNote": "derived until the next helper deploy is recorded: the bad run of 2026-11-18 03:00:58Z with each read the helper refused answered as its first read was (200, first try); re-record with --record after redeploy.sh",
+ "good": {
+  "at": "2026-11-18T03:00:58.171Z",
+  "final": {
+   "statuses": [
+    200
+   ],
+   "status": 200,
+   "acao": "https://confidential.unrealized.trade",
+   "height": 225052755
+  },
+  "burst": [
+   {
+    "i": 0,
+    "sentMs": 0,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 1,
+    "sentMs": 0,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 2,
+    "sentMs": 1,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 3,
+    "sentMs": 1,
+    "doneMs": 1011,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 4,
+    "sentMs": 1,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 5,
+    "sentMs": 1,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 6,
+    "sentMs": 1,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 7,
+    "sentMs": 2,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 8,
+    "sentMs": 2,
+    "doneMs": 794,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 9,
+    "sentMs": 2,
+    "doneMs": 744,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 10,
+    "sentMs": 2,
+    "doneMs": 782,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 11,
+    "sentMs": 2,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 12,
+    "sentMs": 2,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 13,
+    "sentMs": 2,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 14,
+    "sentMs": 2,
+    "doneMs": 806,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 15,
+    "sentMs": 2,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 16,
+    "sentMs": 2,
+    "doneMs": 813,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 17,
+    "sentMs": 3,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 18,
+    "sentMs": 4,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 19,
+    "sentMs": 4,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 20,
+    "sentMs": 4,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 21,
+    "sentMs": 4,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 22,
+    "sentMs": 4,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 23,
+    "sentMs": 4,
+    "doneMs": 1154,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 24,
+    "sentMs": 4,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 25,
+    "sentMs": 5,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 26,
+    "sentMs": 5,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 27,
+    "sentMs": 5,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 28,
+    "sentMs": 5,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   }
+  ]
+ },
+ "bad": {
+  "at": "2026-11-18T03:00:58.171Z",
+  "final": {
+   "statuses": [
+    200
+   ],
+   "status": 200,
+   "acao": "https://confidential.unrealized.trade",
+   "height": 225052755
+  },
+  "burst": [
+   {
+    "i": 0,
+    "sentMs": 0,
+    "doneMs": 287,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 1,
+    "sentMs": 0,
+    "doneMs": 2769,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 2,
+    "sentMs": 1,
+    "doneMs": 2759,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 3,
+    "sentMs": 1,
+    "doneMs": 1011,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 4,
+    "sentMs": 1,
+    "doneMs": 2764,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 5,
+    "sentMs": 1,
+    "doneMs": 2761,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 6,
+    "sentMs": 1,
+    "doneMs": 2442,
+    "statuses": [
+     429,
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "HTTP 429, then 200"
+   },
+   {
+    "i": 7,
+    "sentMs": 2,
+    "doneMs": 2760,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 8,
+    "sentMs": 2,
+    "doneMs": 794,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 9,
+    "sentMs": 2,
+    "doneMs": 744,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 10,
+    "sentMs": 2,
+    "doneMs": 782,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 11,
+    "sentMs": 2,
+    "doneMs": 2760,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 12,
+    "sentMs": 2,
+    "doneMs": 2412,
+    "statuses": [
+     429,
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "HTTP 429, then 200"
+   },
+   {
+    "i": 13,
+    "sentMs": 2,
+    "doneMs": 2769,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 14,
+    "sentMs": 2,
+    "doneMs": 806,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 15,
+    "sentMs": 2,
+    "doneMs": 2766,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 16,
+    "sentMs": 2,
+    "doneMs": 813,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 17,
+    "sentMs": 3,
+    "doneMs": 2761,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 18,
+    "sentMs": 4,
+    "doneMs": 2452,
+    "statuses": [
+     429,
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "HTTP 429, then 200"
+   },
+   {
+    "i": 19,
+    "sentMs": 4,
+    "doneMs": 2769,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 20,
+    "sentMs": 4,
+    "doneMs": 2766,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 21,
+    "sentMs": 4,
+    "doneMs": 2785,
+    "statuses": [
+     429,
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "HTTP 429, then 200"
+   },
+   {
+    "i": 22,
+    "sentMs": 4,
+    "doneMs": 2412,
+    "statuses": [
+     429,
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "HTTP 429, then 200"
+   },
+   {
+    "i": 23,
+    "sentMs": 4,
+    "doneMs": 1154,
+    "statuses": [
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": true
+   },
+   {
+    "i": 24,
+    "sentMs": 4,
+    "doneMs": 2768,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 25,
+    "sentMs": 5,
+    "doneMs": 2760,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 26,
+    "sentMs": 5,
+    "doneMs": 2768,
+    "statuses": [
+     429,
+     429
+    ],
+    "status": 429,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests"
+   },
+   {
+    "i": 27,
+    "sentMs": 5,
+    "doneMs": 2426,
+    "statuses": [
+     429,
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "HTTP 429, then 200"
+   },
+   {
+    "i": 28,
+    "sentMs": 5,
+    "doneMs": 2595,
+    "statuses": [
+     429,
+     200
+    ],
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ok": false,
+    "why": "HTTP 429, then 200"
+   }
+  ]
+ }
+}
