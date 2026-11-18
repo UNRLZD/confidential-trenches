@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { b58encode } from "./lists.ts";
-import { cutTrades, decodeEvent, fromInner, fromLogs, ORCA, poolMints, poolPair, PUMP, PUMP_AMM, RAY_CLMM, RAY_CPMM, RAY_LAUNCHLAB, USDC, WSOL, type RawTrade } from "./decode.ts";
+import { b58data, cutTrades, dbcPair, decodeEvent, eventsInInner, fromInner, fromLogs, METEORA_DAMM2, METEORA_DBC, METEORA_DLMM, ORCA, poolMints, poolPair, PUMP, PUMP_AMM, RAY_CLMM, RAY_CPMM, RAY_LAUNCHLAB, USDC, WSOL, type RawTrade } from "./decode.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"), "utf8")) as {
@@ -101,8 +101,9 @@ test("Orca Whirlpool: a `Traded` event is a trade told as the pool's mint A sees
 test("Orca Whirlpool: a log the runtime cut keeps the trades it logged before the cut (an event Orca logs, never sends to itself)", () => {
   const f = fromLogs(vlogs("orca-cut"));
   assert.equal(f.truncated, true);
-  const cut = cutTrades(f, V.txs["orca-cut"]!.result);
-  // the pool JUP/USDC paid 242,083 JUP for 63,886 USDC
+  const cut = cutTrades(f, V.txs["orca-cut"]!.result).filter((t) => t.venue === "orca");
+  // the pool JUP/USDC paid 242,083 JUP for 63,886 USDC (the route's Meteora DLMM hop, read from the inner instructions:
+  // card index-sol-trades-2, below)
   assert.deepEqual(cut, [{ venue: "orca", mint: null, pool: "4Ui9QdDNuUaAGqCPcDSp191QrixLzQiLxJ1Gnqvz3szP", side: "b", amt: 242083n, quote: 63886n, quoteMint: null, user: "", ts: 0 }]);
   assert.deepEqual(poolPair("orca", ORCA, pool("4Ui9QdDNuUaAGqCPcDSp191QrixLzQiLxJ1Gnqvz3szP").data), { a: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", b: USDC });
   // a pump event CPI in the inner instructions still comes from them: the recorded pump transactions, cut, read the same
@@ -234,4 +235,131 @@ test("card sol-tape-trader-is-the-events-user: a cut log's inner instructions ma
   const jump = structuredClone(r);
   jump.meta.innerInstructions[0]!.instructions.at(-2)!.stackHeight = 9;
   assert.deepEqual(fromInner(jump).map((t) => [t.side, t.tape]), [["b", undefined], ["s", undefined]]);
+});
+
+// card index-sol-trades-2: the Meteora venues (fixtures/sol-meteora-txs.json, recorded 2026-11-18 14:28Z on
+// solana-rpc.publicnode.com and api.mainnet-beta.solana.com, each transaction equal on both). DLMM, DBC and DAMM v2 send
+// their swap event to themselves only (Anchor's event CPI): the log holds no event of theirs, so the trades come from the
+// inner instructions (`cutTrades`, read whenever `eventsInInner` says one of them ran). Each event's amounts are its
+// pool's own token balance changes in the same transaction (checked below from the recorded balances).
+const M = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-meteora-txs.json"), "utf8")) as typeof F;
+const mlogs = (k: string): string[] => M.txs[k]!.result.meta.logMessages;
+const mpool = (a: string) => ({ owner: M.pools[a]!.owner, data: Buffer.from(M.pools[a]!.data, "base64") });
+const meteora = (k: string): RawTrade[] => cutTrades(fromLogs(mlogs(k)), M.txs[k]!.result).filter((t) => t.venue.startsWith("meteora"));
+/** A transaction's token balance change of `owner` in `mint` (post less pre), from its recorded balances. */
+const moved = (k: string, owner: string, mint: string): bigint => {
+  const m = M.txs[k]!.result.meta as unknown as Record<string, { owner: string; mint: string; uiTokenAmount: { amount: string } }[]>;
+  const sum = (l: string) => m[l]!.filter((b) => b.owner === owner && b.mint === mint).reduce((s, b) => s + BigInt(b.uiTokenAmount.amount), 0n);
+  return sum("postTokenBalances") - sum("preTokenBalances");
+};
+const TTW = "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo";
+
+test("card index-sol-trades-2: every recorded Meteora transaction names a Meteora venue ran, and its log holds no Meteora event; a log with none of them reads no inner instructions", () => {
+  for (const k of Object.keys(M.txs)) {
+    assert.equal(eventsInInner(mlogs(k)), true, k);
+    assert.deepEqual(fromLogs(mlogs(k)).trades.filter((t) => t.venue.startsWith("meteora")), [], k);
+  }
+  for (const k of Object.keys(F.txs)) assert.equal(eventsInInner(logs(k)), false, k);
+  assert.equal(eventsInInner(vlogs("clmm-buy")), false);
+  // the venue fixture's routes that cross DLMM (an Orca route cut short, a CPMM route) name it
+  assert.equal(eventsInInner(vlogs("orca-cut")), true);
+  assert.equal(eventsInInner(vlogs("cpmm-buy-fee")), true);
+  assert.equal(eventsInInner("not a list"), false);
+  assert.equal(eventsInInner([`Program log: Program ${METEORA_DLMM} invoke [1]`]), false);
+});
+
+test("card index-sol-trades-2: Meteora DLMM: a `Swap` event is a trade told as the pool's token X sees it, `from` the trader; the pool names X and Y", () => {
+  assert.equal(M.txs["dlmm-buy"]!.signature, "4u4YWsk5kQ62jhhWudgRLm6yF6Por1DJBkQrjDA29HrtufJGtZMdMLR2aKvZwHE6Jr3BUUQUhpPMi2fD97HTBoNQ");
+  // swap_for_y false: the pool took 800,000,000 lamports of Y (its fee inside) and paid 276,952 of X
+  assert.deepEqual(meteora("dlmm-buy"), [{ venue: "meteora-dlmm", mint: null, pool: "E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN", side: "b", amt: 276952n, quote: 800000000n, quoteMint: null, user: "GPCp5rTs2j6PQG51cUBRejspiQW3VMY1T4BUDY9vZBPY", ts: 0 }]);
+  assert.equal(moved("dlmm-buy", "E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN", TTW), -276952n);
+  assert.equal(moved("dlmm-buy", "E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN", WSOL), 800000000n);
+  // the same route then sells the TTW into PumpSwap: its event once, from the inner instructions, beside DLMM's
+  assert.deepEqual(cutTrades(fromLogs(mlogs("dlmm-buy")), M.txs["dlmm-buy"]!.result).map((t) => t.venue), ["meteora-dlmm", "pumpswap"]);
+  // swap_for_y true: the pool took 156,051 of X and paid 452,058,240 lamports
+  assert.deepEqual(meteora("dlmm-sell").map((t) => [t.pool, t.side, t.amt, t.quote, t.user]), [["E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN", "s", 156051n, 452058240n, "62e471ndp1F71EsqQjb3HWxAMDgZZTMBBWnFHLVvECnC"]]);
+  assert.equal(moved("dlmm-sell", "E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN", TTW), 156051n);
+  assert.equal(moved("dlmm-sell", "E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN", WSOL), -452058240n);
+  const p = mpool("E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN");
+  assert.equal(p.owner, METEORA_DLMM);
+  assert.deepEqual(poolPair("meteora-dlmm", p.owner, p.data), { a: TTW, b: WSOL });
+  assert.equal(poolPair("meteora-dlmm", ORCA, p.data), null);
+  assert.equal(poolPair("meteora-dlmm", METEORA_DLMM, Buffer.alloc(904)), null);
+  // the venue fixture's routes through DLMM read their DLMM swap too: the Orca route cut short, the CPMM route whole
+  // (their router logs each hop: "MeteoraDlmmSwap2 amount_in: 48416 ... amount_out: 178562", and "MeteoraDlmmDynamic
+  // ... amount_in: 782848769, amount_out: 114146586323"; each is the pool's in and out)
+  assert.deepEqual(cutTrades(fromLogs(vlogs("orca-cut")), V.txs["orca-cut"]!.result).map((t) => [t.venue, t.amt, t.quote]), [["meteora-dlmm", 178562n, 48416n], ["orca", 242083n, 63886n]]);
+  assert.deepEqual(cutTrades(fromLogs(vlogs("cpmm-buy-fee")), V.txs["cpmm-buy-fee"]!.result).map((t) => [t.venue, t.amt, t.quote]), [["meteora-dlmm", 114146586323n, 782848769n], ["raydium-cpmm", 114146586323n, 3264281114937n]]);
+});
+
+test("card index-sol-trades-2: Meteora DBC: an `EvtSwap2` is a trade told as the pool's base mint sees it, at the event's clock; the pool names its base and its config the quote", () => {
+  assert.equal(M.txs["dbc-buy"]!.signature, "34ThoAsik275GA82aN1cZ7bpQtXeVhrGZ4fd2TNK3afkYGc4cQS3hXSp7LxoTCiD73DsgpkjZY7ffpjphCSEmntQ");
+  // QuoteToBase: the pool took 19,900,000 lamports (its fee inside) and paid 111,805,885,269,579 base
+  assert.deepEqual(meteora("dbc-buy"), [{ venue: "meteora-dbc", mint: null, pool: "4H7ji7AWAkJP6NxnkhvLsE1PDqzYs4YsKFG6rp3xApfp", config: "Bg9svMVKRf4Ci94xV6BE76QJG1SsdwvhpZmAxhARfByq", side: "b", amt: 111805885269579n, quote: 19900000n, quoteMint: null, user: "", ts: 1795011862 }]);
+  // DBC's pool signer PDA, the owner of every DBC pool's vaults
+  const VAULTS = "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM";
+  assert.equal(moved("dbc-buy", VAULTS, WSOL), 19900000n);
+  assert.equal(moved("dbc-buy", VAULTS, "9HvcdB9SGRY1qCYFXhTtdgcF6C7SGR1PZH1KjzV8BAGS"), -111805885269579n);
+  // BaseToQuote: the pool took 2,476,882,604,592,232 base and paid 248,063,617 lamports
+  assert.deepEqual(meteora("dbc-sell").map((t) => [t.pool, t.side, t.amt, t.quote, t.ts]), [["8Tp5wm2uG2XQCnokawES2cL4QgCg8bWq992XepiQzhC5", "s", 2476882604592232n, 248063617n, 1795011812]]);
+  assert.equal(moved("dbc-sell", VAULTS, WSOL), -248063617n);
+  // each pool's mints: its base from the pool, its quote from its own config (SOL, USDC)
+  const pair = (pool: string, config: string) => dbcPair(mpool(pool), mpool(config), config);
+  assert.deepEqual(pair("4H7ji7AWAkJP6NxnkhvLsE1PDqzYs4YsKFG6rp3xApfp", "Bg9svMVKRf4Ci94xV6BE76QJG1SsdwvhpZmAxhARfByq"), { a: "9HvcdB9SGRY1qCYFXhTtdgcF6C7SGR1PZH1KjzV8BAGS", b: WSOL });
+  assert.deepEqual(meteora("dbc-buy-usdc").map((t) => [t.side, t.amt, t.quote, t.config]), [["b", 140195474297n, 4846455n, "FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM"]]);
+  assert.deepEqual(pair("2vHhAP3Z2uVHvjeSgDPrckXsmYByd7hGzVuK5UQ6ucMV", "FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM"), { a: "8HuYsEpBS2WZACBCbAKcoh8XmbNYYqRjoJrCqC3Cmoon", b: USDC });
+  // a config the pool does not name, or either account owned by another program, gives no pair
+  assert.equal(pair("2vHhAP3Z2uVHvjeSgDPrckXsmYByd7hGzVuK5UQ6ucMV", "Bg9svMVKRf4Ci94xV6BE76QJG1SsdwvhpZmAxhARfByq"), null);
+  const pool = mpool("4H7ji7AWAkJP6NxnkhvLsE1PDqzYs4YsKFG6rp3xApfp");
+  const cfg = mpool("Bg9svMVKRf4Ci94xV6BE76QJG1SsdwvhpZmAxhARfByq");
+  assert.equal(dbcPair({ ...pool, owner: METEORA_DAMM2 }, cfg, "Bg9svMVKRf4Ci94xV6BE76QJG1SsdwvhpZmAxhARfByq"), null);
+  assert.equal(dbcPair(pool, { ...cfg, owner: RAY_CLMM }, "Bg9svMVKRf4Ci94xV6BE76QJG1SsdwvhpZmAxhARfByq"), null);
+  assert.equal(dbcPair(cfg, pool, "Bg9svMVKRf4Ci94xV6BE76QJG1SsdwvhpZmAxhARfByq"), null);
+  assert.equal(poolPair("meteora-dbc", METEORA_DBC, pool.data), null, "a DBC pool needs its config: dbcPair");
+});
+
+test("card index-sol-trades-2: Meteora DAMM v2: an `EvtSwap2` is a trade told as the pool's token A sees it, at the event's clock; the pool names A and B", () => {
+  assert.equal(M.txs["damm-buy"]!.signature, "48UrxbY9r7rmskyE9EF9NcEBLBENaUDA5eqvdxBifCStRP9RTkVi4YhyJtcPWr5mBiY6fkhNindCCym4Y1bNSvCR");
+  // B to A: the pool took 1,372,417,910 lamports of B and paid 164,412,686,233 of A
+  assert.deepEqual(meteora("damm-buy"), [{ venue: "meteora-damm2", mint: null, pool: "5DJKBkCNGSj1DryDHM5kdZBh1KysMH5jfMiVVy9dWtJb", side: "b", amt: 164412686233n, quote: 1372417910n, quoteMint: null, user: "", ts: 1795011890 }]);
+  // DAMM v2's pool signer PDA, the owner of every DAMM v2 pool's vaults
+  const VAULTS = "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC";
+  assert.equal(moved("damm-buy", VAULTS, WSOL), 1372417910n);
+  assert.deepEqual(poolPair("meteora-damm2", METEORA_DAMM2, mpool("5DJKBkCNGSj1DryDHM5kdZBh1KysMH5jfMiVVy9dWtJb").data), { a: "26Ekp9mYjJS3CjFMHKkuTS4uP75oysve4A4c8CPeayBG", b: WSOL });
+  // B to A where A is SOL: told as SOL sees it (the reader turns it round for the token, B)
+  assert.deepEqual(meteora("damm-sell").map((t) => [t.pool, t.side, t.amt, t.quote]), [["4Fk2beWHZ3DYn8cLkRs31dP6eTw7Vwpq7kNDSNvW8dWz", "b", 698738224n, 2340517796257n]]);
+  assert.equal(moved("damm-sell", VAULTS, "467cTkm8GXBA96QDGG5Spm1WbpVHp2LnPA1VAcrMctem"), 2340517796257n);
+  assert.deepEqual(poolPair("meteora-damm2", METEORA_DAMM2, mpool("4Fk2beWHZ3DYn8cLkRs31dP6eTw7Vwpq7kNDSNvW8dWz").data), { a: WSOL, b: "467cTkm8GXBA96QDGG5Spm1WbpVHp2LnPA1VAcrMctem" });
+  // DAMM v2's pool shares PumpSwap's account discriminator ("account:Pool"): the owner tells them apart
+  const d = mpool("5DJKBkCNGSj1DryDHM5kdZBh1KysMH5jfMiVVy9dWtJb").data;
+  assert.equal(poolPair("meteora-damm2", PUMP_AMM, d), null);
+  // DBC's and DAMM v2's EvtSwap2 share a discriminator: each program's bytes count only under that program and length
+  const ev = (k: string, program: string): Buffer => {
+    const r = M.txs[k]!.result as unknown as { meta: { innerInstructions: { instructions: { programIdIndex: number; data: string }[] }[]; loadedAddresses: { writable: string[]; readonly: string[] } }; transaction: { message: { accountKeys: string[] } } };
+    const keys = [...r.transaction.message.accountKeys, ...r.meta.loadedAddresses.writable, ...r.meta.loadedAddresses.readonly];
+    const ix = r.meta.innerInstructions.flatMap((g) => g.instructions).find((i) => keys[i.programIdIndex] === program && Buffer.from(b58data(i.data)!).subarray(8, 16).toString("hex") === "bd4233a826507599")!;
+    return Buffer.from(b58data(ix.data)!).subarray(8);
+  };
+  const damm = ev("damm-buy", METEORA_DAMM2);
+  const dbc = ev("dbc-buy", METEORA_DBC);
+  assert.notEqual(decodeEvent(METEORA_DAMM2, damm), null);
+  assert.equal(decodeEvent(METEORA_DAMM2, dbc), null, "DBC's 179 bytes are short of DAMM v2's 180");
+  assert.equal(decodeEvent(METEORA_DAMM2, damm.subarray(0, 8 + 179)), null);
+  assert.equal(decodeEvent(METEORA_DBC, dbc.subarray(0, 8 + 178)), null);
+  assert.equal(decodeEvent(PUMP_AMM, damm), null);
+  const bad = Buffer.from(damm);
+  bad[8 + 32] = 2; // a trade direction past AtoB and BtoA
+  assert.equal(decodeEvent(METEORA_DAMM2, bad), null);
+  const zero = Buffer.from(damm);
+  zero.fill(0, 8 + 76, 8 + 84); // output_amount 0
+  assert.equal(decodeEvent(METEORA_DAMM2, zero), null);
+});
+
+test("card index-sol-trades-2: a Meteora event CPI made by another program is no trade", () => {
+  const r = structuredClone(M.txs["damm-buy"]!.result) as unknown as { meta: { innerInstructions: { instructions: { programIdIndex: number }[] }[] }; transaction: { message: { accountKeys: string[] } } };
+  const keys = r.transaction.message.accountKeys;
+  const at = keys.indexOf(METEORA_DAMM2);
+  // the same bytes sent by the token program are not DAMM v2's event
+  for (const g of r.meta.innerInstructions) for (const i of g.instructions) if (i.programIdIndex === at) i.programIdIndex = keys.indexOf("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+  assert.deepEqual(fromInner(r), []);
 });

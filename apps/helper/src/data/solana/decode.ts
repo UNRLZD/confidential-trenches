@@ -58,6 +58,35 @@
 // Every offset checked against the recorded transactions in fixtures/sol-venue-txs.json: each event's amounts equal its
 // pool's own token balance changes in the same transaction, and each pool's mints the mints of those balances.
 //
+// The Meteora venues (card index-sol-trades-2; Meteora DLMM ran 17 of the 72 sampled above). All three send their swap
+// event to themselves only (Anchor's `emit_cpi!`, DAMM v2's pinocchio swap the same CPI by hand): the log holds no event
+// of theirs, so a transaction whose log names one of them running (`eventsInInner`) is read whole and its trades taken
+// from its inner instructions (`cutTrades`). A pool is told as its first mint sees it, as the venues above.
+//   - DLMM LBUZKhRx... (its official IDL, github.com/MeteoraAg/dlmm-sdk at commit 1532e540, 2026-11-04, idls/dlmm.json):
+//     `Swap` (discriminator 516ce3becdd00ac4) lb_pair, from at 32 (the trader), start/end bin i32, amount_in u64 at 72
+//     (what the pool took, its fee inside), amount_out at 80 (what it paid), swap_for_y bool at 88 (X paid in), then
+//     the fees (129 bytes). The program also sends `Swap2Evt` (2e7452d7941b544d) for the same swap: not read, so a swap
+//     is one trade. No clock (`ts` 0). The `LbPair` account (210b3162b565b10d) holds token_x_mint at byte 88 and
+//     token_y_mint at 120.
+//   - DBC dbcij3LW... (dynamic bonding curve; its official IDL, github.com/MeteoraAg/dynamic-bonding-curve-sdk at commit
+//     ad127729, 2026-11-04, packages/dynamic-bonding-curve/src/idl/dynamic-bonding-curve/idl.json): `EvtSwap2`
+//     (bd4233a826507599) pool, config at 32, trade_direction u8 at 64 (0 BaseToQuote, 1 QuoteToBase), has_referral,
+//     swap_parameters (17 bytes), swap_result: included_fee_input_amount u64 at 83 (what the pool took, its fee inside),
+//     excluded_fee_input_amount, amount_left, output_amount at 107 (what the trader got, fees out), the price and fees,
+//     then quote_reserve_amount, migration_threshold and current_timestamp u64 at 171 (179 bytes). The program sends
+//     `EvtSwap` and `EvtSwap3` for the same swap too: neither read. The `VirtualPool` account (d5e005d16245775c) holds
+//     config at byte 72 and base_mint at 136; the quote mint is the config's, `PoolConfig` (1a6c0e7b74e6812b) quote_mint
+//     at byte 8 (`dbcPair`, both taken only with DBC as their owner and the pool naming that config).
+//   - DAMM v2 cpamdpZC... (its official IDL, github.com/MeteoraAg/damm-v2-sdk at commit eab5e8aa, 2026-11-04,
+//     src/idl/cp_amm.json): `EvtSwap2` (bd4233a826507599, DBC's too: the running program and the length tell them
+//     apart) pool, trade_direction u8 at 32 (0 AtoB, 1 BtoA), collect_fee_mode, has_referral, params (17 bytes),
+//     swap_result: included_fee_input_amount u64 at 52 (what the pool took, its fee inside), ..., output_amount at 76
+//     (what the pool paid), the price and fees, the transfer-fee amounts, current_timestamp u64 at 156, the reserves
+//     (180 bytes). The `Pool` account (f19a6d0411b16dbc, PumpSwap's discriminator too: the owner tells them apart) holds
+//     token_a_mint at byte 168 and token_b_mint at 200.
+// Every offset checked against fixtures/sol-meteora-txs.json: each event's amounts equal its pool's vault balance changes
+// in the same transaction, and each pool's (and config's) mints the mints of those balances.
+//
 // Display only: nothing here feeds a signature. Every value is hostile input: a line counts only with the program at
 // the top of the invoke stack the same logs build, an event only with its exact discriminator and a length that holds
 // every field read, an amount only > 0.
@@ -68,6 +97,9 @@ export const ORCA = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
 export const RAY_CLMM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK";
 export const RAY_CPMM = "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C";
 export const RAY_LAUNCHLAB = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj";
+export const METEORA_DLMM = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo";
+export const METEORA_DBC = "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN";
+export const METEORA_DAMM2 = "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG";
 export const WSOL = "So11111111111111111111111111111111111111112";
 export const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 import { b58encode } from "./lists.ts";
@@ -86,6 +118,12 @@ const DISC = {
   clmmSwap: "40c6cde8260871e2",
   /** Raydium's `PoolState`, CLMM's, CPMM's and LaunchLab's alike. */
   clmmPool: "f7ede3f5d7c3de46",
+  dlmmSwap: "516ce3becdd00ac4",
+  dlmmPool: "210b3162b565b10d",
+  /** `EvtSwap2`, DBC's and DAMM v2's alike. */
+  evtSwap2: "bd4233a826507599",
+  dbcPool: "d5e005d16245775c",
+  dbcConfig: "1a6c0e7b74e6812b",
   /** Anchor's event-CPI tag: the first 8 bytes of an event an Anchor program sends to itself. */
   cpi: "e445a52e51cb9a1d",
 } as const;
@@ -113,7 +151,7 @@ export function b58data(s: string, max = 2_048): Uint8Array | null {
 }
 
 /** A venue whose pool names two mints, either one the token (the trade told as the first mint sees it). */
-export type PairVenue = "orca" | "raydium-clmm" | "raydium-cpmm" | "raydium-launchlab";
+export type PairVenue = "orca" | "raydium-clmm" | "raydium-cpmm" | "raydium-launchlab" | "meteora-dlmm" | "meteora-dbc" | "meteora-damm2";
 /** One trade as the venue logged it. `mint` is the token (curve) or null until the pool is read (the pool venues). */
 export type RawTrade = {
   venue: "pump" | "pumpswap" | PairVenue;
@@ -128,6 +166,8 @@ export type RawTrade = {
   quoteMint: string | null;
   /** A pair venue's two mints when its event names them (Raydium CPMM: input, then output); otherwise the pool is read. */
   pair?: { a: string; b: string };
+  /** Meteora DBC: the config its event names, which holds the pool's quote mint (`dbcPair`). */
+  config?: string;
   /** The trader, or "" when the event names none (Orca). */
   user: string;
   /** The event's own clock, unix seconds; 0 when the event has none (the pair venues: the reader dates it by its block). */
@@ -226,6 +266,50 @@ function launchlabTrade(b: Buffer): RawTrade | null {
   return { venue: "raydium-launchlab", mint: null, pool: key(b, 0), side: dir === 0 ? "b" : "s", amt, quote, quoteMint: null, user: "", ts: 0 };
 }
 
+/** A Meteora DLMM `Swap` body, told as the pool's token X sees it, or null. */
+function dlmmTrade(b: Buffer): RawTrade | null {
+  if (b.length < 129) return null;
+  const forY = b[88];
+  if (forY !== 0 && forY !== 1) return null;
+  const took = b.readBigUInt64LE(72);
+  const paid = b.readBigUInt64LE(80);
+  if (took <= 0n || paid <= 0n) return null;
+  const [amt, quote] = forY === 1 ? [took, paid] : [paid, took];
+  return { venue: "meteora-dlmm", mint: null, pool: key(b, 0), side: forY === 1 ? "s" : "b", amt, quote, quoteMint: null, user: key(b, 32), ts: 0 };
+}
+
+/** The event's clock (u64 unix seconds), or null past a safe integer. */
+const clock = (b: Buffer, o: number): number | null => {
+  const t = b.readBigUInt64LE(o);
+  return t > 0n && t <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(t) : null;
+};
+
+/** A Meteora DBC `EvtSwap2` body, told as the pool's base mint sees it, or null. */
+function dbcTrade(b: Buffer): RawTrade | null {
+  if (b.length < 179) return null;
+  const dir = b[64];
+  if (dir !== 0 && dir !== 1) return null;
+  const took = b.readBigUInt64LE(83);
+  const paid = b.readBigUInt64LE(107);
+  const ts = clock(b, 171);
+  if (took <= 0n || paid <= 0n || ts === null) return null;
+  const [amt, quote] = dir === 1 ? [paid, took] : [took, paid];
+  return { venue: "meteora-dbc", mint: null, pool: key(b, 0), config: key(b, 32), side: dir === 1 ? "b" : "s", amt, quote, quoteMint: null, user: "", ts };
+}
+
+/** A Meteora DAMM v2 `EvtSwap2` body, told as the pool's token A sees it, or null. */
+function damm2Trade(b: Buffer): RawTrade | null {
+  if (b.length < 180) return null;
+  const dir = b[32];
+  if (dir !== 0 && dir !== 1) return null;
+  const took = b.readBigUInt64LE(52);
+  const paid = b.readBigUInt64LE(76);
+  const ts = clock(b, 156);
+  if (took <= 0n || paid <= 0n || ts === null) return null;
+  const [amt, quote] = dir === 0 ? [took, paid] : [paid, took];
+  return { venue: "meteora-damm2", mint: null, pool: key(b, 0), side: dir === 0 ? "s" : "b", amt, quote, quoteMint: null, user: "", ts };
+}
+
 /** The trade an event of `program` holds (its bytes with the discriminator first), or null. */
 export function decodeEvent(program: string, data: Buffer): RawTrade | null {
   if (data.length < 8) return null;
@@ -238,6 +322,9 @@ export function decodeEvent(program: string, data: Buffer): RawTrade | null {
   if (program === RAY_CLMM && d === DISC.clmmSwap) return clmmTrade(body);
   if (program === RAY_CPMM && d === DISC.clmmSwap) return cpmmTrade(body);
   if (program === RAY_LAUNCHLAB && d === DISC.trade) return launchlabTrade(body);
+  if (program === METEORA_DLMM && d === DISC.dlmmSwap) return dlmmTrade(body);
+  if (program === METEORA_DBC && d === DISC.evtSwap2) return dbcTrade(body);
+  if (program === METEORA_DAMM2 && d === DISC.evtSwap2) return damm2Trade(body);
   return null;
 }
 
@@ -247,7 +334,11 @@ export function decodeEvent(program: string, data: Buffer): RawTrade | null {
  *  from the trader's own instruction or a router's (Jupiter, GMGN's, ...), never from inside another venue's: every
  *  recorded transaction in fixtures/sol-trades-txs.json, sol-venue-txs.json and sol-trades-hour.json.gz has its venue
  *  swaps side by side. A venue's event sent to itself (Anchor's event CPI) is the same venue's frame, not a swap. */
-const VENUES: ReadonlySet<string> = new Set([PUMP, PUMP_AMM, ORCA, RAY_CLMM, RAY_CPMM, RAY_LAUNCHLAB]);
+const VENUES: ReadonlySet<string> = new Set([PUMP, PUMP_AMM, ORCA, RAY_CLMM, RAY_CPMM, RAY_LAUNCHLAB, METEORA_DLMM, METEORA_DBC, METEORA_DAMM2]);
+/** The venues that send their events to themselves (Anchor's event CPI), read from the inner instructions. */
+const CPI_VENUES: ReadonlySet<string> = new Set([PUMP, PUMP_AMM, RAY_LAUNCHLAB, METEORA_DLMM, METEORA_DBC, METEORA_DAMM2]);
+/** The venues that send them only so: their log holds none. */
+const INNER_ONLY: ReadonlySet<string> = new Set([METEORA_DLMM, METEORA_DBC, METEORA_DAMM2]);
 /** `t` marked the program's own (off the tape) when a decoded venue runs below its frame (`below`: the frames under
  *  the one that logged it, outermost first). */
 const placed = (t: RawTrade, below: readonly (string | undefined)[]): RawTrade => (below.some((p) => p !== undefined && VENUES.has(p)) ? { ...t, tape: false } : t);
@@ -320,7 +411,7 @@ export function fromInner(result: unknown): RawTrade[] {
         frames.length = (h as number) - 1;
         frames.push(program);
       } else whole = false;
-      if ((program !== PUMP && program !== PUMP_AMM && program !== RAY_LAUNCHLAB) || typeof ix.data !== "string") continue;
+      if (program === undefined || !CPI_VENUES.has(program) || typeof ix.data !== "string") continue;
       const bytes = b58data(ix.data);
       if (bytes === null || Buffer.from(bytes.subarray(0, 8)).toString("hex") !== DISC.cpi) continue;
       const t = decodeEvent(program, Buffer.from(bytes.subarray(8)));
@@ -332,8 +423,22 @@ export function fromInner(result: unknown): RawTrade[] {
 }
 
 /**
- * A cut log's trades: the inner instructions' event CPIs (pump.fun, PumpSwap, LaunchLab) and the log's own events of the
- * venues that only log theirs (Orca, Raydium CLMM and CPMM), which the runtime wrote before it cut the log. `f` is that log's `fromLogs`.
+ * Whether a log names a venue that sends its events only to itself (Meteora DLMM, DBC, DAMM v2) running: its trades are
+ * then in the transaction's inner instructions alone (`cutTrades`), never in the log.
+ */
+export function eventsInInner(logs: unknown): boolean {
+  if (!Array.isArray(logs) || logs.length > LINES_MAX) return false;
+  for (const line of logs) {
+    const m = typeof line === "string" && line.length <= LINE_MAX ? INVOKE.exec(line) : null;
+    if (m !== null && INNER_ONLY.has(m[1]!)) return true;
+  }
+  return false;
+}
+
+/**
+ * A cut log's trades, or the trades of a transaction `eventsInInner` names: the inner instructions' event CPIs (pump.fun,
+ * PumpSwap, LaunchLab, the Meteora venues) and the log's own events of the venues that only log theirs (Orca, Raydium
+ * CLMM and CPMM), which the runtime wrote before it cut the log. `f` is that log's `fromLogs`.
  */
 export function cutTrades(f: { trades: RawTrade[] }, result: unknown): RawTrade[] {
   return [...fromInner(result), ...f.trades.filter((t) => t.venue === "orca" || t.venue === "raydium-clmm" || t.venue === "raydium-cpmm")];
@@ -346,7 +451,19 @@ export function poolPair(venue: PairVenue, owner: unknown, data: Buffer): { a: s
   if (venue === "orca") return owner === ORCA && d === DISC.orcaPool && data.length >= 213 ? { a: key(data, 101), b: key(data, 181) } : null;
   if (venue === "raydium-clmm") return owner === RAY_CLMM && d === DISC.clmmPool && data.length >= 137 ? { a: key(data, 73), b: key(data, 105) } : null;
   if (venue === "raydium-launchlab") return owner === RAY_LAUNCHLAB && d === DISC.clmmPool && data.length >= 269 ? { a: key(data, 205), b: key(data, 237) } : null;
+  if (venue === "meteora-dlmm") return owner === METEORA_DLMM && d === DISC.dlmmPool && data.length >= 152 ? { a: key(data, 88), b: key(data, 120) } : null;
+  if (venue === "meteora-damm2") return owner === METEORA_DAMM2 && d === DISC.pool && data.length >= 232 ? { a: key(data, 168), b: key(data, 200) } : null;
+  // DBC: the quote mint is its config's (dbcPair)
   return null;
+}
+
+/** A Meteora DBC pool's base mint and its config's quote mint (base, quote), or null unless DBC owns both accounts, each
+ *  is the account it should be, and the pool names `config` (the event's) as its config. */
+export function dbcPair(pool: { owner: unknown; data: Buffer }, cfg: { owner: unknown; data: Buffer }, config: string): { a: string; b: string } | null {
+  if (pool.owner !== METEORA_DBC || cfg.owner !== METEORA_DBC) return null;
+  if (pool.data.length < 168 || pool.data.subarray(0, 8).toString("hex") !== DISC.dbcPool || key(pool.data, 72) !== config) return null;
+  if (cfg.data.length < 40 || cfg.data.subarray(0, 8).toString("hex") !== DISC.dbcConfig) return null;
+  return { a: key(pool.data, 136), b: key(cfg.data, 8) };
 }
 
 /** A PumpSwap `Pool` account's mints (its base64 data), or null when it is not one. */
