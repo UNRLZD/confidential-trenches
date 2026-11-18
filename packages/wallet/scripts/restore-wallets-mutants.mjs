@@ -6,7 +6,7 @@
 // precommitments as strings to a Worker that takes them restores no note with every check on the walk passing.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { runMutant } from "./mutant-run.mjs";
 const P = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const WALK = "wallet/src/restore/walk.ts";
 const WAL = "wallet/src/restore/wallets.ts";
@@ -173,12 +173,17 @@ const M = [
   ["review of 4f6e75ad9 P3: a marker taken over keeping its kept lanes", PRS, [["            return o.run === runId ? undefined : { scopes, run: runId,", "            return o.run === runId ? undefined : { ...o, scopes, run: runId,"]], PRT, "review of 4f6e75ad9 P3"],
   ["review of 4f6e75ad9 P3: the wait for the ids lock not on the run's signal", PRS, [['request(RESTORE_IDS_LOCK, { mode: "exclusive", signal }, async', 'request(RESTORE_IDS_LOCK, { mode: "exclusive" }, async']], PRT, "review of 4f6e75ad9 P3"],
   ["review of 4f6e75ad9 P3: a step 5 read on in its tries on another run's marker", PRS, [["          if (t > 1 && owedOf(await seedHeld(async () => (await h.store()).get(\"meta\", RESTORE_IDS_KEY)))?.run !== runId) return;\n", ""]], PRT, "review of 4f6e75ad9 P3"],
+  ["restore-follow-up-run-op: a joined request's run that ends stalled writes no op (the earlier done stands)", PRS, [['      if (!first(stage) && stage === "stalled" && !owed && !signal.aborted) await stalledOp().catch(() => {});\n', "      first(stage);\n"]], PRT, "restore-follow-up-run-op"],
+  ["restore-follow-up-run-op: a load's resume that ends stalled writes an op", PRS, [['stage === "stalled" && !owed && !signal.aborted)', 'stage === "stalled" && !signal.aborted)']], PRT, "restore-follow-up-run-op"],
+  ["restore-follow-up-run-op: a clean last try writes done over a walk that ended stalled", PRS, [['if (!r.last || !run.finding || stage === "stalled") return;', "if (!r.last || !run.finding) return;"]], PRT, "restore-follow-up-run-op"],
+  ["restore-follow-up-run-op: a walk's throw told after the run's key is zeroed (its op's seed check fails)", PRS, [["        await stop(e);\n        runKey.fill(0);", "        runKey.fill(0);"]], PRT, "restore-follow-up-run-op"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
 const only = process.argv[2];
 const RUN = only === undefined ? M : M.filter(([name]) => name.includes(only));
 if (RUN.length === 0) throw new Error(`no plant named ${only}`);
 let ok = 0;
+let none = 0;
 for (const [name, file, edits, [pkg, test], pat] of RUN) {
   const path = `${P}/${file}`;
   const src = readFileSync(path, "utf8");
@@ -191,18 +196,25 @@ for (const [name, file, edits, [pkg, test], pat] of RUN) {
     planted = planted.replace(from, to);
   }
   writeFileSync(path, planted);
-  // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
+  // a run past 180 s is killed, its process group with it (scripts/mutant-run.mjs, scripts/group-run.mjs)
   let r;
   try {
-    r = runSync("node", ["--test", `--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, encoding: "utf8", timeoutMs: 180_000 });
+    r = runMutant([`--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, timeoutMs: 180_000 });
   } finally {
     writeFileSync(path, src);
   }
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const killed = r.status !== 0 && Number(fail) > 0;
-  if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}`);
+  // card restore-sweep-world-tests-exit-alone: a run that ends with no verdict is a refusal, never a survivor: HUNG (killed
+  // at the cap), CANCELLED (its only failures tests stopped at their own timeout, on two runs) or NO TEST (no summary
+  // naming a test that ran). A hung run printed "SURVIVED pass undefined fail undefined" before.
+  const ran = Number((r.stdout.match(/ℹ tests (\d+)/) ?? [])[1] ?? 0);
+  const no = r.verdict === "hung" ? "HUNG" : r.verdict === "cancelled" ? "CANCELLED" : ran === 0 ? "NO TEST" : null;
+  if (no !== null) {
+    none++;
+    console.log(`${no} [${name}] pass ${r.pass} fail ${r.fail} cancelled ${r.cancelled}: no verdict, refused`);
+    continue;
+  }
+  if (r.verdict === "killed") ok++;
+  console.log(`${r.verdict === "killed" ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}`);
 }
-console.log(`${ok}/${RUN.length} killed`);
+console.log(`${ok}/${RUN.length} killed${none > 0 ? `; ${none} with no verdict, refused` : ""}`);
 if (ok !== RUN.length) process.exitCode = 1;

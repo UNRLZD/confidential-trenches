@@ -27,11 +27,13 @@ import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/
  *  it, e50afe03bdf2d0f151b32bda6f2a8bf1550ce7dd5a6edc807152dca6d6fdeab7, so nothing else moved. Then Base
  *  publicnode's in-flight pin went from 2 to 8 (card evm-first-quote-inside-the-kpi, same length): the list with its 2
  *  put back hashes to the pin before it, 335426e132ba2336276daf62450687750e090d388bab4c0cbcea4e0e15aec395, so nothing
- *  else moved. Then each mainnet's scan
+ *  else moved. Then each mainnet's v3Factory added (card robinhood-tap-asks-no-missing-v3-tier; 6,536 characters before
+ *  them): the list with those two taken out hashes to the pin before it,
+ *  aaca27e76a69e65f0793ccd60e1759d25f0ecda7c44d8c8b73c58016fb7456f0, so nothing else moved. Then each mainnet's scan
  *  gained its measured Initialize rate, `initialized` (card evm-scan-chain-tail: the chain's tail spans and its flood
- *  bound; 6,536 characters before it): the list with those two taken out hashes to the pin before it,
- *  aaca27e76a69e65f0793ccd60e1759d25f0ecda7c44d8c8b73c58016fb7456f0, so nothing else moved. */
-const BEFORE = "9733121081eaa3907bfbf28b2e55da69b63a2640214f02f6b192bc7202394902";
+ *  bound; 6,650 characters before it): the list with those two taken out hashes to the pin before it,
+ *  b0239a3ac9c10f43a2db48ea15f4ed26f3fce85189c257f98ac061724d7fed23, so nothing else moved. */
+const BEFORE = "cec5fcd8ee010c5043cac23cb21ee3ff6d9ba3195f542c19ca62b89726849760";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
   const all = evmPoolVenues();
@@ -40,7 +42,7 @@ test("the two halves together are the venue list before the split, entry for ent
   assert.deepEqual(Object.keys(evmTestnetVenues()), ["base-sepolia", "robinhood-testnet"]);
   assert.deepEqual({ ...all }, { ...evmMainnetVenues(), ...evmTestnetVenues() });
   const json = JSON.stringify(all);
-  assert.equal(json.length, 6_628);
+  assert.equal(json.length, 6_742);
   assert.equal(createHash("sha256").update(json).digest("hex"), BEFORE);
 });
 

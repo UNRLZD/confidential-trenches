@@ -279,8 +279,10 @@ export function createEngineNear(deps: EngineDeps = {}) {
     return JSON.parse(body);
   }
 
-  /** A per-key cache of the last good answer, read again past FRESH_MS (the held one serves meanwhile), one at a time. */
-  function cached<T>(freshMs: number) {
+  /** A per-key cache of the last good answer, read again past FRESH_MS (the held one serves meanwhile, while it is at most
+   *  `staleMs` old; past that the caller waits for the new read, and is served the held one only when it fails), one at
+   *  a time. */
+  function cached<T>(freshMs: number, staleMs = Infinity) {
     const held = new Map<string, { at: number; v: T | undefined }>();
     const reading = new Map<string, Promise<{ at: number; v: T | undefined } | null>>();
     return async (key: string, read: () => Promise<T | undefined>): Promise<{ at: number; v: T | undefined } | null> => {
@@ -299,14 +301,20 @@ export function createEngineNear(deps: EngineDeps = {}) {
           .finally(() => reading.delete(key));
         reading.set(key, p);
       }
-      if (had !== undefined) return had; // the held answer serves while the new read runs
-      return p;
+      if (had !== undefined && now() - had.at <= staleMs) return had; // the held answer serves while the new read runs
+      return p.then((got) => got ?? had ?? null);
     };
   }
 
   const tokens = cached<{ raw: unknown; row: Row }>(FRESH_MS);
   const holderReads = cached<unknown>(FRESH_MS);
-  const tradeReads = cached<unknown>(FRESH_MS);
+  // card near-tape-reach-on-trending: held trade rows serve behind their renewal only while they still claim their reach.
+  // At any age they were the answer to the first ask after a quiet minute, so a tape read once (a page opened, the live
+  // check) claimed none: the deployed helper served prl.omft.near's, zec.omft.near's and qtc.omft.near's 50 rows read
+  // 57, 47 and 37 s before with no whole_ms (18 Nov 15:28:58Z), each fresh read of theirs claiming one (15:27Z, 0.6 s).
+  // Past the bound the ask waits for the renewal, as a cold one does (0.6 to 1.0 s); a failed renewal serves the held rows,
+  // their age named and no reach claimed (trades below).
+  const tradeReads = cached<unknown>(FRESH_MS, NEAR_VENDOR_REACH_MS);
   const barReads = cached<unknown>(FRESH_MS);
 
   let last: { body: string; gzip: Buffer; asOfMs: number } | null = null;

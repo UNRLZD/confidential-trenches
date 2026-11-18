@@ -361,8 +361,15 @@ export const MAINNET_EVM_FEE_RPCS: Readonly<Record<"base" | "robinhood", readonl
   base: /* @__PURE__ */ Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.gateway.tenderly.co"]),
   robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com"]),
 });
-/** An EVM chain's fee list as the page reads it (testnetRpc each). */
-export const pageEvmFeeRpcs = (chain: "base" | "robinhood", kind: ReadKind = "trade"): readonly EvmRpc[] => (POOL_TESTNET ? TESTNET_EVM_FEE_RPCS[chain] : MAINNET_EVM_FEE_RPCS[chain]).map((u) => testnetRpc(u, SOLANA_RPC_RETRY, kind));
+/** How far behind the head a fee list member keeps a block's state, for a member that keeps less than a bind may ask
+ *  (the wallet's EvmFeeRpc stateMs; card robinhood-fee-read-old-blocks-own-rpc): a fee read at a block that old or older
+ *  walks the list without it, in the list's order, so Robinhood's own is asked first; a block at the head walks it
+ *  whole. robinhood-rpc.publicnode.com answers HTTP 403 "Archive requests require a personal token" from about 10 s
+ *  back (5 of 5 under 10 s and 12 of 12 from 10 s, 2026-11-10 23:21-23:37Z; at 23 to 383 s back, 2026-11-18 15:36Z),
+ *  where Robinhood's own and dRPC answered to 383 s. Base's four answered at 1 to 244 s back (15:36Z): none listed. */
+export const EVM_FEE_STATE_MS: Readonly<Record<string, number>> = /* @__PURE__ */ Object.freeze({ "https://robinhood-rpc.publicnode.com": 10_000 });
+/** An EVM chain's fee list as the page reads it (testnetRpc each, with its EVM_FEE_STATE_MS). */
+export const pageEvmFeeRpcs = (chain: "base" | "robinhood", kind: ReadKind = "trade"): readonly EvmRpc[] => (POOL_TESTNET ? TESTNET_EVM_FEE_RPCS[chain] : MAINNET_EVM_FEE_RPCS[chain]).map((u) => Object.assign(testnetRpc(u, SOLANA_RPC_RETRY, kind), Object.hasOwn(EVM_FEE_STATE_MS, u) ? { stateMs: EVM_FEE_STATE_MS[u]! } : {}));
 /** The kit's epoch fee rule (../../wallet/src/pool/evm.ts EvmEpochFeeRule): the helper's own (apps/helper pool/evm.ts). */
 export const evmEpochFee = (at: { baseFeePerGas: bigint; depth: number; chainFee: bigint }): bigint => evmPoolFee({ gas: evmPoolGas(at.depth), gasPrice: at.baseFeePerGas, chainFee: at.chainFee });
 /** The Solana pool the page's network pins: SOL_POOLS.devnet in the testnet build, SOL_POOLS.mainnet (card sol-pools-mainnet-pin) on SIGN_HOST's. */

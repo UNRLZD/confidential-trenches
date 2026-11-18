@@ -13,7 +13,7 @@
 import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { after, beforeEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { resetPaces } from "../../wallet/src/pace.ts";
 // each test's clock starts at its own zero: one pace per provider URL is shared by every reader (card wallet-id-reader-paced)
@@ -36,6 +36,7 @@ import { base58, hex } from "@scure/base";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { ReadBusy } from "../src/read-waits.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
+import { ID_KEEP as KEEP } from "../../wallet/src/deposit/moveout.ts";
 import { askOf, solanaPoolFollowDeps, type PoolDepositEnd, type PoolUxReads } from "../src/pool-deposit-follow.ts";
 import { TRADE_HELPER } from "../src/trade.ts";
 import { vaultScope } from "../src/withdraw/checks.ts";
@@ -119,8 +120,11 @@ function nearOf(as: ReadonlyMap<string, As> = new Map()) {
 }
 
 let db = 0;
+// every store a test opens is closed at that test's end, as vworld does (card restore-sweep-world-tests-exit-alone): a
+// test run alone by name then exits. Closed at the file's end, a store a test past a top-level await opened stayed open
+// (the root's after ran once the tests above it were filtered out), its BroadcastChannel holding the process.
 const closers: (() => void)[] = [];
-after(() => closers.forEach((f) => f()));
+afterEach(() => closers.splice(0).forEach((f) => f()));
 async function world(over: Partial<PoolRestoreHost> = {}) {
   const store = await openWalletStore({ name: `restore-${db++}`, indexedDB: new IDBFactory() });
   closers.push(() => store.close());
@@ -1208,7 +1212,6 @@ function nearPlanted(plant: ReadonlyMap<string, readonly [bigint, bigint]>, as: 
   };
   return n;
 }
-const KEEP = (await import("../../wallet/src/deposit/moveout.ts")).ID_KEEP;
 
 test("review P1: a refund left under U_{s,i} inside intents.near, every U_X empty, ends stalled with that money named by asset, never done", async () => {
   const id = idOf(SOL_SCOPE, 3);
@@ -1582,7 +1585,7 @@ test("E3: step 5 is owed by a marker (scopes only) from the walk's end; a reload
   const factory = new IDBFactory();
   const name = `restore-owed-${db++}`;
   const store = await openWalletStore({ name, indexedDB: factory });
-  // closed at the file's end like every world's store: a failure before the sign out below would leave its
+  // closed at the test's end like every world's store: a failure before the sign out below would leave its
   // BroadcastChannel open, and the test process would never exit
   closers.push(() => store.close());
   const w = await world({ store: async () => store, pools: () => SOL_ONLY, ids: g.ids, ux: () => uxOf(new Map()).reads });
@@ -2144,6 +2147,18 @@ test("delta P3-B: a finding a later try of the run no longer reads leaves the ne
   assert.equal(await markerOf(w.store), undefined);
 });
 
+test("restore-follow-up-run-op: a finding a later try no longer reads, in a run whose walk ended stalled (a pool's walk failed), leaves the newest restore op stalled, never done", async (t) => {
+  usedMap = new Map();
+  const held = solUx(idOf(SOL_SCOPE, 3));
+  const off = solUx(idOf(SOL_SCOPE, 10));
+  const planted = new Map<string, UxAs>([[held, "held"], [off, "off"]]);
+  const w = await vworld(t, { solana: emptyWalk, evm: (async () => { throw new Error("evm down"); }) as never, ids: nearOf().ids, ux: () => uxOf(planted, STUCK).reads, pausesMs: [1, 1, 1, 1], step5: (e) => void (w.steps.push(e), planted.set(held, "empty"), planted.set(off, "empty")), now: (() => { let t = 1_000; return () => (t += 10); })() });
+  assert.equal(await w.r.auto(), "stalled");
+  await w.r.idle();
+  assert.deepEqual(w.steps.map((s) => s.named.length > 0), [true, false]);
+  assert.deepEqual((await restoreOps(w.store)).map((x) => x.stage), ["stalled"]);
+});
+
 test("delta P3-C: a lane read is kept on the marker only while the run's seed is the one stored", async () => {
   usedMap = new Map();
   let other = false;
@@ -2289,6 +2304,43 @@ test("restore-residuals ze2 (review of 4f6e75ad9 P2): a Sync that joins while th
     await tab2.idle();
     assert.equal(walks, out ? 1 : 2, out ? "signed out: no walk after it" : "the second Sync walked on its own once tab 2's run ended");
   }
+});
+
+// card restore-follow-up-run-op (review of 4f6e75ad9 P3): the run started for a Sync that joined a running id read has
+// no request of its own, so its end is the newest restore op's: stalled, never the earlier done left standing
+test("restore-follow-up-run-op: a joined Sync's own run whose walk ends stalled (a pool's walk fails, or its floor's write throws) leaves the newest restore op stalled; one that ends done writes nothing more", async (t) => {
+  for (const how of ["walk", "floor", "done"] as const) {
+    usedMap = new Map();
+    const n = nearOf();
+    const g = gated(n);
+    let walks = 0;
+    let clock = 1_000;
+    const solana = (async () => {
+      walks++;
+      if (walks > 1 && how === "walk") throw new Error("solana down");
+      // the floor's write throws: one of the walk's notes with another precommitment than the store holds
+      return { notes: notesOf(SOL_SCOPE, LABEL_S, walks > 1 && how === "floor" ? 5000n : 1000n), spends: [] };
+    }) as never;
+    const w = await vworld(t, { now: () => (clock += 10), pools: () => SOL_ONLY, solana, ids: g.ids, ux: () => uxOf(new Map()).reads });
+    assert.equal(await w.r.auto(), "done");
+    await until("step 5 reading", () => g.asked() > 0, 5_000);
+    const a = api(w.r.kind);
+    const id = a.ask();
+    await until("the Sync answered", () => a.posted.some((m) => m.id === id && m.stage === "done"), 5_000);
+    g.open();
+    await w.r.idle();
+    assert.equal(walks, 2, `${how}: the Sync's own run walked once the running one ended`);
+    assert.deepEqual(w.ends.map((x) => x.stage), ["done", how === "done" ? "done" : "stalled"], how);
+    assert.deepEqual((await restoreOps(w.store)).map((x) => x.stage), how === "done" ? ["done", "done"] : ["done", "done", "stalled"], how);
+  }
+});
+
+test("restore-follow-up-run-op: a load's resume whose walk ends stalled writes no op (no request waits on it: the header's resume)", async (t) => {
+  const w = await vworld(t, { pools: () => SOL_ONLY, solana: (async () => { throw new Error("solana down"); }) as never });
+  assert.equal(await w.r.resume(), "stalled");
+  await w.r.idle();
+  assert.deepEqual(w.ends.map((x) => x.stage), ["stalled"]);
+  assert.deepEqual(await restoreOps(w.store), []);
 });
 
 test("restore-residuals (review of 4f6e75ad9 P3): a step 5 that waited for the ids lock takes over a marker a run since wrote in a tab now closed and reads every id; a marker removed meanwhile, it reads none", async (t) => {

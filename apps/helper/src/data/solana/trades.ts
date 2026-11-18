@@ -43,8 +43,10 @@
 // trade most, decode.ts) are read the same way: the pool account (or CPMM's own event) names the two mints (a pool
 // taken only with that venue's program as its owner), the token is either one and the other is the quote, priced as
 // above; their events carry no clock, so a trade is dated by its block (a walk's
-// transaction its blockTime, a stream's the second it arrived: measured p95 1.78 s after the block, above). A venue not
-// decoded yet keeps GeckoTerminal's bars and tape for its coins.
+// transaction its blockTime, a stream's the second it arrived: measured p95 1.78 s after the block, above). Meteora DLMM, DBC
+// and DAMM v2 (card index-sol-trades-2) send their events only to themselves, so a stream transaction whose log names one
+// running is read whole (`eventsInInner`) and dated by its block. A venue not decoded yet keeps GeckoTerminal's bars and
+// tape for its coins.
 // Every REPORT_MS the log says how many open tokens have an empty tape and why (a quote with no price, or no trade of
 // a venue we read in the transactions that named the token), never which tokens.
 //
@@ -53,8 +55,8 @@
 // is the token, bounded books, subscriptions and caches.
 import { change4h, createBook, joinBars, TF_SECONDS, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
 import { address } from "./lists.ts";
-import { HELD_WAIT_MS, TAPE_FRESH_MS, type DataAnswer } from "./token.ts";
-import { cutTrades, fromLogs, poolMints, poolPair, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
+import { HELD_WAIT_MS, SOL_BEHIND_MS, SOL_VENDOR_REACH_MS, type DataAnswer } from "./token.ts";
+import { cutTrades, dbcPair, eventsInInner, fromLogs, poolMints, poolPair, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
 import { CREDITS, type Slot } from "../../rpc/slot.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -85,21 +87,9 @@ export const SETTLE_SLOTS = 150;
 /** A first read answers after its walk, or after this with what it holds by then. */
 export const COLD_WAIT_MS = 3_000;
 export const SILENT_MS = 30_000;
-/** How long the stream may go without a message and a token's tape and chart still be served as current (card
- *  every-tape-and-chart-says-filling-behind-the-head, the rule ../evm/swaps.ts BEHIND_MAX holds on Base and
- *  Robinhood): past it, or while a dropped stream's gap is walked (`refilling`), the tape says filling with no whole_ms
- *  and a live chart says filling. Until this card both were served as current for up to SILENT_MS of silence and through
- *  the whole refill. [design: 5 s, past the stream's follow cadence: its heartbeat is the slot subscription, a slot
- *  every ~400 ms (wsSource), so 5 s is about 12 slots unheard; a trade's note arrives p50 1.19 s, p95 1.78 s after its
- *  block (header, measured 3 Nov), under a third of it] */
-export const SOL_BEHIND_MS = 5_000;
-/** How old the vendor's rows a tape serves (poolTape: a token the chain tape does not decode or the lists do not hold)
- *  may be and the tape still claim them complete (`whole_ms`): the read is renewed each TAPE_FRESH_MS (token.ts tape),
- *  and a renewal overdue by more than SOL_BEHIND_MS, the bound this chain's own tape holds a silent stream to, ends the
- *  claim as that one does (card vendor-tapes-name-their-reach-every-chain: a held read whose refresh failed was served
- *  with its whole_ms whatever its age, as card evm-vendor-tape-names-its-reach found on Base and Robinhood). SOL_BEHIND_MS
- *  alone is under TAPE_FRESH_MS: every held read in the second half of its fresh window would claim none. */
-export const SOL_VENDOR_REACH_MS = TAPE_FRESH_MS + SOL_BEHIND_MS;
+/** SOL_BEHIND_MS and SOL_VENDOR_REACH_MS live in token.ts, whose tapes wait past the reach (card
+ *  sol-vendor-tape-waits-past-reach); token.ts cannot import this file, which imports it. */
+export { SOL_BEHIND_MS, SOL_VENDOR_REACH_MS };
 export const REF_MS = 5_000;
 export const REF_STALE_S = 120;
 export const IDLE_MS = 60_000;
@@ -528,7 +518,8 @@ export function createSolanaTrades(deps: {
     const kept = pools.get(k);
     if (kept !== undefined) return kept;
     const venue = t.venue;
-    const read = account(t.pool!).then((a) => {
+    // Meteora DBC: the quote mint is the pool's config's (card index-sol-trades-2)
+    const read: Promise<{ a: string; b: string } | null> = venue === "meteora-dbc" ? Promise.all([account(t.pool!), account(t.config!)]).then(([a, c]) => (a === null || c === null ? null : dbcPair(a, c, t.config!))) : account(t.pool!).then((a) => {
       if (a === null) return null;
       if (venue === "pumpswap") {
         const p = a.owner === PUMP_AMM ? poolMints(a.data) : null;
@@ -599,7 +590,8 @@ export function createSolanaTrades(deps: {
     const f = fromLogs(logs);
     // a stream transaction's block time is the second it arrived (the stream sends none)
     const arrived = Math.floor(now() / 1000);
-    if (!f.truncated) return forMint(mint, f.trades, arrived);
+    // a Meteora venue's events are in the inner instructions only (card index-sol-trades-2): read the transaction whole
+    if (!f.truncated && !eventsInInner(logs)) return forMint(mint, f.trades, arrived);
     const r = (await rpc("getTransaction", [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
     if (r === null) return null;
     return forMint(mint, cutTrades(f, r), blockTime(r) ?? arrived);
@@ -730,7 +722,7 @@ export function createSolanaTrades(deps: {
           const meta = (r.meta ?? {}) as Record<string, unknown>;
           const f = fromLogs(meta.logMessages);
           const bt = blockTime(r) ?? Math.floor(now() / 1000);
-          hold(e, s.signature, s.slot, s.order, await forMint(e.mint, f.truncated ? cutTrades(f, r) : f.trades, bt));
+          hold(e, s.signature, s.slot, s.order, await forMint(e.mint, f.truncated || eventsInInner(meta.logMessages) ? cutTrades(f, r) : f.trades, bt));
         }),
       );
       if (round !== undefined) {
@@ -999,7 +991,7 @@ export function createSolanaTrades(deps: {
         const r = (await rpc("getTransaction", [x.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]).catch(() => null)) as Record<string, unknown> | null;
         if (r === null) return false;
         const f = fromLogs(((r.meta ?? {}) as Record<string, unknown>).logMessages);
-        const got = await forMint(e.mint, f.truncated ? cutTrades(f, r) : f.trades, blockTime(r) ?? x.t ?? Math.floor(now() / 1000));
+        const got = await forMint(e.mint, f.truncated || eventsInInner(((r.meta ?? {}) as Record<string, unknown>).logMessages) ? cutTrades(f, r) : f.trades, blockTime(r) ?? x.t ?? Math.floor(now() / 1000));
         let i = 0;
         for (const t of got) {
           if (t.quoteMint !== e.quoteMint) continue;
@@ -1191,8 +1183,8 @@ export function createSolanaTrades(deps: {
       const e = await open(mint);
       if (!("mint" in e)) return e;
       const rows = e.book === null ? [] : e.book.tape(limit);
-      // a token with no trade of a venue this tape decodes (Raydium's other pools, Meteora, the other launchpads: a
-      // token not on the pump.fun curve, PumpSwap, Orca, Raydium CLMM, CPMM or LaunchLab) is served its top pool's trades (token.ts tape),
+      // a token with no trade of a venue this tape decodes (Raydium's other pools, Meteora's older pools, the other launchpads: a
+      // token not on the pump.fun curve, PumpSwap, Orca, Raydium CLMM, CPMM, LaunchLab, Meteora DLMM, DBC or DAMM v2) is served its top pool's trades (token.ts tape),
       // never an empty tape for a token that trades (card solana-trades-show-on-every-token: NEARKAT and BONK answered 0
       // rows, src chain, while their pools traded)
       if (rows.length === 0 && deps.tape !== undefined) return poolTape(mint, limit, e);
