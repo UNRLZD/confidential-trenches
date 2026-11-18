@@ -1,0 +1,26 @@
+{
+ "_note": {
+  "good": "this card build (card/rent-backs-resume-private 3da6dce76, packages/signpage/index.html and public/app.js as scripts/build-app.mjs writes them, mainnet): PASS",
+  "bad": "SIGN_HOST as served 2026-11-18T20:39Z, before this card (main 41472929c and earlier): FAIL, every mark named"
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-M9KOQUgBcjMhQS7IgF3C6qBfikfw8lFGYRKmX+uH/ni0KrLb8kcGN9K36vnGEI18\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-M9KOQUgBcjMhQS7IgF3C6qBfikfw8lFGYRKmX+uH/ni0KrLb8kcGN9K36vnGEI18",
+  "carries": {
+   "an idle run stops after the helper's find read, before any pass: its ride held, no pass counted": true,
+   "the schedule: idle until the page's first tap's drawn time, which books one run however the idle runs ended; a ride waits for it; a later tap moves nothing": true,
+   "each run before then is idle, and is handed so to the rent backs": true,
+   "a tap of the page's flow books the passes: a buy or sell a load's start after it, a deposit or withdraw the ride's gap": true
+  }
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-rL1CKtvfREBqVE1EpMEbHyg42I0P6cMGRC+pwmysPeSXyOXCfsijnQ+BWMCTlGxZ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-rL1CKtvfREBqVE1EpMEbHyg42I0P6cMGRC+pwmysPeSXyOXCfsijnQ+BWMCTlGxZ",
+  "carries": {
+   "an idle run stops after the helper's find read, before any pass: its ride held, no pass counted": false,
+   "the schedule: idle until the page's first tap's drawn time, which books one run however the idle runs ended; a ride waits for it; a later tap moves nothing": false,
+   "each run before then is idle, and is handed so to the rent backs": false,
+   "a tap of the page's flow books the passes: a buy or sell a load's start after it, a deposit or withdraw the ride's gap": false
+  }
+ }
+}
