@@ -1748,18 +1748,22 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return evmPoolIndexFromSnapshot(raw, { chainId: v.chainId, poolManager: v.poolManager, cap: v.index.cap });
   };
   const indexStore: EvmIndexStore | null = over.evmIndexStore !== undefined ? over.evmIndexStore : over.evmIndexSync !== undefined ? null : evmIndexStore();
-  // the index the device already has, served to the kit's quote with no RPC read: the one kept in the page's store, if
-  // newer than this tab's own (another tab's sync kept it), else the release's snapshot. Reads only, run before the
-  // lock ct-evm-index/{chain} (card evm-index-served-before-lock: inside it, a tab that found the lock held by another
-  // was served none, and its quote scanned the chain's Initialize logs from the depth, 71 getLogs below the snapshot's
-  // end on a mainnet Robinhood quote, 18 Nov 18:51Z); the store's one write stays in the sync, under the lock
+  // the index the device already has, served to the kit's quote with no RPC read. The tab's first serve takes the newer
+  // (by its through) of the one kept in the page's store and the release's snapshot: a device back after days keeps an
+  // older release's index, whose sync would read on from its end, not the snapshot's (a kept index 2.16M blocks behind
+  // on Robinhood ended stale_quote, 18 Nov 18:49Z). A later serve takes the kept one if newer than the tab's own
+  // (another tab's sync kept it). Reads only, run before the lock ct-evm-index/{chain} (card
+  // evm-index-served-before-lock: inside it, a tab that found the lock held by another was served none, and its quote
+  // scanned the chain's Initialize logs from the depth, 56 getLogs below the snapshot's end on a mainnet Robinhood quote,
+  // 18 Nov 19:01Z); the store's one write stays in the sync, under the lock
   const evmIndexServe = async (chain: "base" | "robinhood", network: EvmPoolChain, signal: AbortSignal): Promise<void> => {
     const own = evmIndex.get(chain) ?? null;
-    const kept = await indexStore?.get(network).catch(() => null);
-    if (kept != null && (own === null || kept.through > own.through) && !signal.aborted && evmPoolIndexUse(network, { index: kept, coversThrough: kept.through, pools: kept.pools })) evmIndex.set(chain, kept);
-    if (!evmIndex.has(chain)) {
-      const shipped = await snapshotOf(network).catch(() => null);
-      if (shipped !== null && !signal.aborted && evmPoolIndexUse(network, { index: shipped, coversThrough: shipped.through, pools: shipped.pools })) evmIndex.set(chain, shipped);
+    const kept = (await indexStore?.get(network).catch(() => null)) ?? null;
+    const shipped = own === null ? await snapshotOf(network).catch(() => null) : null;
+    const newer = [kept, shipped].filter((x): x is EvmPoolIndexData => x !== null && (own === null || x.through > own.through)).sort((a, b) => b.through - a.through);
+    for (const ix of newer) {
+      if (signal.aborted) return;
+      if (evmPoolIndexUse(network, { index: ix, coversThrough: ix.through, pools: ix.pools })) return void evmIndex.set(chain, ix);
     }
   };
   const evmIndexOf = (chain: "base" | "robinhood"): Promise<void> | undefined => {

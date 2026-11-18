@@ -1600,3 +1600,48 @@ test("a dry's quote on a device that holds nothing, in a tab without the chain's
     await b.signedOut();
   }
 });
+
+// Card evm-index-served-before-lock (review of 6c8a6dd30): the first serve took the kept index whenever there was
+// one, even one older than the release's snapshot, so a device back after days synced on from an old release's index
+// end, not the snapshot's. The first serve takes the newer of the two by its through.
+test("a tab's first serve takes the newer of the kept index and the release's snapshot, and its sync reads on from it", async () => {
+  const v = evmPoolVenues().robinhood;
+  const pm = v.poolManager!.toLowerCase();
+  const ixAt = (through: number) => ({ v: 1, chainId: v.chainId, poolManager: pm, from: 1, through, head: { number: through, hash: "0x" + "1".repeat(64) }, spans: [[1, through]], pools: [] });
+  const RH: EvmPoolPin = Object.freeze({ ...PIN, network: "robinhood" as never });
+  const stats = { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 };
+  const firstSync = async (keptThrough: number, snapshotThrough: number) => {
+    const { w, ns } = await wallet();
+    await landed(ns);
+    evmPoolIndexReset();
+    const kept = new Map<string, unknown>([["robinhood", ixAt(keptThrough)]]);
+    const prevs: (number | null)[] = [];
+    const tt = turnTimers({ now: 1_800_000_000_000 + 20_000 });
+    const t = testnetPool({ ...page(w), held: async () => w }, {
+      prover: { vault: signalsProver(), stop: () => {} },
+      evmPin: (c: string) => (c === "robinhood" ? RH : undefined),
+      evmRpcs: unread,
+      evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+      evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+      evmHelper: (c: string) => (c === "robinhood" ? (async () => null) as EvmRpc : undefined),
+      evmTurn: tt.evmTurn,
+      locks: navigator.locks,
+      evmIndexStore: { get: async (c: string) => (kept.get(c) ?? null) as never, put: async (c: string, i: unknown) => void kept.set(c, i) },
+      evmIndexSnapshot: async (n: string) => (n === "robinhood" ? ixAt(snapshotThrough) : null),
+      evmIndexSync: async (_chain: string, prev: { through: number } | null) => {
+        prevs.push(prev?.through ?? null);
+        return { index: null, coversThrough: null, pools: null, error: { code: "rpc_failed", message: "x" }, stats };
+      },
+    } as unknown as Parameters<typeof testnetPool>[1]);
+    try {
+      await t.stateRead();
+      await indexSettle();
+      return prevs;
+    } finally {
+      evmPoolIndexReset();
+      await t.signedOut();
+    }
+  };
+  assert.deepEqual(await firstSync(100, 200), [200], "a kept index older than the snapshot: the snapshot is served and the sync reads on from its end");
+  assert.deepEqual(await firstSync(300, 200), [300], "a kept index newer than the snapshot: the kept one");
+});
