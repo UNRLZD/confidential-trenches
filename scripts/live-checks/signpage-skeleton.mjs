@@ -33,8 +33,9 @@ const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org http
 // (packages/kit/src/trade/solana/send.ts); packages/signpage/test/trade.test.ts reads them from the page's trade deps;
 // and Pocket's gateway, the second of the restore's U_X pair (card wallet-restore-reads-ux, pool-restore.ts RESTORE_UX_SOLANA);
 // and Solana Vibe Station's, a found W's token-account seat (card found-wallet-sweep-reads-on-a-pair-that-answers,
-// pool-testnet.ts SOLANA_TOKEN_SEAT)
-const SOLANA = "https://solana-rpc.publicnode.com https://solana.api.pocket.network https://public.rpc.solanavibestation.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com";
+// pool-testnet.ts SOLANA_TOKEN_SEAT); no api.mainnet-beta.solana.com, which 403s every POST from the page's Origin and
+// which no send path names since the kit's public send path is provider A (card solana-send-browser-origin)
+const SOLANA = "https://solana-rpc.publicnode.com https://solana.api.pocket.network https://public.rpc.solanavibestation.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf";
 // the kit's EVM providers' origins (card page-evm-rpc-csp), read from the kit's venue lists: the mainnets' alone, the
 // venues SIGN_HOST's build carries (card evm-pools-on-mainnet)
 const EVM = evmOrigins(venuesOf(SIGN_CHAINS)).join(" ");
