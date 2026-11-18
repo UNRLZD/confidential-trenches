@@ -13,9 +13,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  e2ePart, listedSeconds, mutantCommands, mutantParts, mutantsPart, packageItems, packageKey, packageParts, packagesPart, runPart, selectedPackages, staleWarning,
+  e2ePart, e2eParts, listedSeconds, mutantCommands, mutantParts, mutantsPart, packageItems, packageKey, packageParts, packagesPart, runPart, selectedPackages, staleWarning,
   testFilters, typecheckArgs, unnamedMutantFiles, MAX_SWEEP_SECONDS, MUTANT_SECONDS, NEW_PACKAGE_SECONDS, NEW_SWEEP_SECONDS, PACKAGE_PART_BUDGET_SECONDS,
-  PACKAGE_SECONDS, PART_BUDGET_SECONDS, STALE_FACTOR,
+  PACKAGE_SECONDS, PART_BUDGET_SECONDS, STALE_FACTOR, E2E_DIR, E2E_FIXED_SECONDS, E2E_PROVER_SECONDS, E2E_SECONDS, NEW_E2E_SECONDS,
 } from "./test-shards.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -139,7 +139,12 @@ export function shardProblems(ci) {
     if (!/^ {10}INDEX: \$\{\{ strategy\.job-index \}\}$/m.test(browser) || !/^ {10}TOTAL: \$\{\{ strategy\.job-total \}\}$/m.test(browser)) {
       p.push("test-browser does not take its part from strategy.job-index and strategy.job-total");
     }
-    if (!browser.includes('node scripts/ci/test-shards.mjs e2e "$INDEX" "$TOTAL"')) p.push("test-browser does not run scripts/ci/test-shards.mjs e2e \"$INDEX\" \"$TOTAL\"");
+    if (!/^ {8}run: node scripts\/ci\/test-shards\.mjs e2e-run "\$INDEX" "\$TOTAL"$/m.test(browser)) p.push("test-browser does not run scripts/ci/test-shards.mjs e2e-run \"$INDEX\" \"$TOTAL\"");
+    // card ci-e2e-shards-by-time: the plan counts the prover's seconds in the first part, the one that runs it
+    const lines = browser.split("\n");
+    const at = lines.findIndex((l) => l.trim() === "- name: the prover in Chromium (KIT_PROVER_E2E)");
+    if (at < 0 || lines[at + 1] !== "        if: strategy.job-index == 0") p.push("test-browser runs the prover in Chromium in a part but the first, or in every part, and the plan counts its seconds in the first only");
+    p.push(...browserBudgetProblems(ci, E2E));
   }
   p.push(...mutantJobProblems(all, ci, mutantCommands(ROOT)));
   return p;
@@ -172,6 +177,28 @@ function mutantJobProblems(all, ci, commands) {
   return p;
 }
 
+// card ci-e2e-shards-by-time: every test-browser part, its planned seconds and the job's own steps (E2E_FIXED_SECONDS),
+// inside the job's timeout-minutes as ci.yml lists it. deal(script, total) is the deal under test, [{ commands, seconds }]
+function browserBudgetProblems(ci, script, deal = (s, n) => e2eParts(s, n)) {
+  const job = jobs(ci)["test-browser"];
+  if (!job) return ["ci.yml has no test-browser shard"];
+  const parts = /^ {8}part:\s*\[([^\]]*)\]\s*$/m.exec(job)?.[1].split(",").map((x) => x.trim());
+  if (!parts?.length || parts.some((x, i) => x !== String(i + 1))) return ["test-browser has no matrix part: [1, ..., N]"];
+  const minutes = Number(/^ {4}timeout-minutes:\s*(\d+)\s*$/m.exec(job)?.[1]);
+  if (!minutes) return ["test-browser has no timeout-minutes"];
+  let plan;
+  try {
+    plan = deal(script, parts.length);
+  } catch (e) {
+    return [`test-browser: ${e.message}`];
+  }
+  return plan.flatMap((part, i) => {
+    const total = part.seconds + E2E_FIXED_SECONDS;
+    if (total <= minutes * 60) return [];
+    return [`test-browser part ${i + 1} of ${parts.length} is planned at ${total} s (its commands${i === 0 ? " and the prover" : ""} ${part.seconds} s, the job's own steps ${E2E_FIXED_SECONDS} s), over its timeout-minutes: ${minutes} (${minutes * 60} s): add a part to the matrix`];
+  });
+}
+
 test("ci.yml: test needs every shard and passes only when each one passed", () => {
   assert.deepEqual(shardProblems(CI), []);
 });
@@ -194,7 +221,15 @@ const PLANTED = {
   "a step that may fail in a shard": ["      - name: the EVM pool's tests\n", "      - name: the EVM pool's tests\n        continue-on-error: true\n", "test-scripts has continue-on-error"],
   "a Foundry install that may fail": ["      - name: Foundry v1.7.1\n", "      - name: Foundry v1.7.1\n        continue-on-error: true\n", "test-scripts has continue-on-error"],
   "a shard with no timeout": [/(\n  test-vault:\n(?:.*\n){3}) {4}timeout-minutes: \d+\n/, "$1", "test-vault has no timeout of its own"],
-  "a browser part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: \|)/, "$1TOTAL: 2$2", "test-browser does not take its part"],
+  "a browser part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: node scripts\/ci\/test-shards\.mjs e2e-run)/, "$1TOTAL: 2$2", "test-browser does not take its part"],
+  // card ci-e2e-shards-by-time: each way a browser part can be planned past its job's limit, or run outside the split
+  "the browser runs as one chain again, untimed": ['        run: node scripts/ci/test-shards.mjs e2e-run "$INDEX" "$TOTAL"\n', '        run: |\n          cmd="$(node scripts/ci/test-shards.mjs e2e "$INDEX" "$TOTAL")"\n          cd apps/terminal && pnpm exec sh -c "$cmd"\n', "test-browser does not run scripts/ci/test-shards.mjs e2e-run"],
+  "one browser part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1]", "test-browser part 1 of 1 is planned at"],
+  "two browser parts": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1, 2]", "test-browser part 1 of 2 is planned at"],
+  "a browser matrix that skips a part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1, 3]", "test-browser has no matrix part"],
+  "a browser timeout cut to 10 minutes": [/(\n {2}test-browser:\n(?:.*\n){3} {4}timeout-minutes: )15\n/, "$110\n", "test-browser part 1 of 3 is planned at"],
+  "the prover moved to the second part": ["        if: strategy.job-index == 0\n        run: KIT_PROVER_E2E=1", "        if: strategy.job-index == 1\n        run: KIT_PROVER_E2E=1", "test-browser runs the prover in Chromium in a part but the first"],
+  "the prover in every part": ["        if: strategy.job-index == 0\n        run: KIT_PROVER_E2E=1", "        run: KIT_PROVER_E2E=1", "test-browser runs the prover in Chromium in a part but the first"],
   "a mutant part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: node)/, "$1TOTAL: 4$2", "test-mutants does not take its part"],
   "the mutant sweeps run whole in every part": ['run: node scripts/ci/test-shards.mjs mutants "$INDEX" "$TOTAL"', "run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test:mutants", "test-mutants does not run scripts/ci/test-shards.mjs mutants"],
   "the whole sweep run again beside the split": ["      - name: the wallet package's test script\n", "      - run: pnpm -r --if-present run test:mutants\n      - name: the wallet package's test script\n", "a ci.yml line runs a test:mutants script beside the split"],
@@ -243,18 +278,163 @@ for (const [name, [from, to, want]] of Object.entries(PLANTED)) {
   });
 }
 
-test("the browser runs: the build in every part, each later command in exactly one, for 1 to 4 parts", () => {
-  const [build, ...runs] = E2E.split("&&").map((c) => c.trim());
-  assert.match(build, /^vite build$/);
-  for (let total = 1; total <= 4; total++) {
+// each later command of script in exactly one part of every total from 1 to one part per command, the build first in
+// every part, no part with nothing but the build; the parts' seconds add up to the listed times and the prover's
+function e2eSplitProblems(script, seconds = E2E_SECONDS) {
+  const [build, ...runs] = script.split("&&").map((c) => c.trim());
+  const listed = runs.reduce((n, c) => n + (seconds[`${E2E_DIR}: ${c}`] ?? NEW_E2E_SECONDS), 0);
+  const p = [];
+  for (let total = 1; total <= runs.length; total++) {
     const seen = [];
     for (let index = 0; index < total; index++) {
-      const [first, ...mine] = e2ePart(E2E, index, total).split(" && ");
-      assert.equal(first, build);
-      assert.ok(mine.length > 0, `part ${index} of ${total} runs nothing but the build`);
+      const [first, ...mine] = e2ePart(script, index, total, seconds).split(" && ");
+      if (first !== build) p.push(`part ${index} of ${total} does not start with the build`);
+      if (!mine.length) p.push(`part ${index} of ${total} runs nothing but the build`);
       seen.push(...mine);
     }
-    assert.deepEqual(seen.toSorted(), runs.toSorted(), `${total} parts`);
+    for (const c of new Set(runs)) {
+      const n = seen.filter((x) => x === c).length;
+      if (n !== runs.filter((x) => x === c).length) p.push(`${c} runs in ${n} part(s) of ${total}`);
+    }
+    for (const c of new Set(seen)) if (!runs.includes(c)) p.push(`${c} is no command of test:e2e, in a part of ${total}`);
+    const planned = e2eParts(script, total, seconds).reduce((n, x) => n + x.seconds, 0);
+    if (planned !== listed + E2E_PROVER_SECONDS) p.push(`${total} parts plan ${planned} s, not the listed ${listed} s and the prover's ${E2E_PROVER_SECONDS} s`);
+  }
+  return p;
+}
+
+test("the browser runs: the build in every part, each later command in exactly one, for every count of parts", () => {
+  assert.match(E2E.split("&&")[0].trim(), /^vite build$/);
+  assert.deepEqual(e2eSplitProblems(E2E), []);
+  // a command added anywhere in the chain, with no measured time, lands in exactly one part, and so does each other
+  const runs = E2E.split("&&").map((c) => c.trim()).slice(1);
+  for (const at of [0, Math.floor(runs.length / 2), runs.length]) {
+    const added = ["vite build", ...runs.slice(0, at), "node test/new/run.mjs", ...runs.slice(at)].join(" && ");
+    assert.deepEqual(e2eSplitProblems(added), [], `added at ${at}`);
+  }
+});
+
+test("planted: a deal that drops, doubles or moves a command, or leaves a part only the build, fails", () => {
+  const runs = E2E.split("&&").map((c) => c.trim()).slice(1);
+  const last = runs.at(-1);
+  const found = (deal) => {
+    const p = [];
+    for (let total = 1; total <= 4; total++) {
+      const seen = Array.from({ length: total }, (_, i) => deal(i, total)).flat();
+      for (const c of runs) if (seen.filter((x) => x === c).length !== 1) p.push(`${c} runs in ${seen.filter((x) => x === c).length} part(s) of ${total}`);
+    }
+    return p;
+  };
+  const own = (i, n) => e2ePart(E2E, i, n).split(" && ").slice(1);
+  assert.deepEqual(found(own), []);
+  assert.ok(found((i, n) => own(i, n).filter((c) => c !== last)).includes(`${last} runs in 0 part(s) of 1`));
+  assert.ok(found((i, n) => [...new Set([...own(i, n), last])]).includes(`${last} runs in 2 part(s) of 2`));
+});
+
+// card ci-e2e-shards-by-time: PR #1029's test:e2e as its branch had it (card/app-token-rail-r5-fit at 269c7b137): main's
+// list with node test/token-rail/sweep.mjs after node test/token-rail/run.mjs. Its sweep took 59.7 s on run 44375738505
+// (job 135054405087, part 3)
+const PR_1029_E2E = "vite build && node ../../scripts/live-checks/app-in-shell.mjs --harness --engines chromium && node test/bar10/run.mjs && node test/harness-sockets/run.mjs && node test/deposit-sheet/run.mjs && node test/welcome/run.mjs && node test/verify/run.mjs && node test/verify-mount/run.mjs && node test/no-blank-pages/run.mjs && node ../../scripts/live-checks/app-portfolio-mount.mjs --harness && node ../../scripts/live-checks/app-deposit-mount.mjs --harness && node ../../scripts/live-checks/app-footer-bar.mjs --harness && node ../../scripts/live-checks/deposit-to-pool.mjs --harness && node ../../scripts/live-checks/app-faults-seen-on-122.mjs --harness && node ../../scripts/live-checks/app-faults-seen-on-124.mjs --harness && node ../../scripts/live-checks/app-faults-seen-on-126.mjs --harness && node ../../scripts/live-checks/screens-never-say-proof.mjs --harness && node ../../scripts/live-checks/app-lock-holds-until-the-layer-closes.mjs --harness && node ../../scripts/live-checks/signed-out-portfolio-and-account-say-what-appears.mjs --harness && node ../../scripts/live-checks/app-pages-open-right.mjs --harness && node test/withdraw/run.mjs && node test/withdraw-form/run.mjs && node test/portfolio/run.mjs && node test/trade-box/run.mjs && node test/trade-pool/run.mjs && node test/trade-reads-after-buy/run.mjs && node test/buy-route/run.mjs && node test/holds-still/run.mjs && node test/token-page/run.mjs && node test/chart-pointer/run.mjs && node test/token-route/run.mjs && node test/chains-evm/run.mjs && node test/token-rail/run.mjs && node test/token-rail/sweep.mjs && node test/header-search/run.mjs && node test/trade-box-mount/run.mjs && node test/trade-sheet/run.mjs && node test/quick-buy/run.mjs && node test/signin-screens/run.mjs && node test/discover-screens/run.mjs && node test/discover-logos/run.mjs && node test/sell-positions/run.mjs && node test/near-trade/run.mjs && node test/orders-soon/run.mjs && node ../../scripts/live-checks/app-sell-mount.mjs --harness && node test/e2e/signin/run.mjs && node test/e2e/signing-sheet/run.mjs && node ../../scripts/live-checks/signpage-shell.mjs --engine chromium --width phone && node ../../scripts/live-checks/deposit-quote-no-liquidity.mjs --local && node ../../scripts/live-checks/sign-out-stops-the-pages-reads.mjs --engine chromium --width phone";
+const PR_1029_SECONDS = { ...E2E_SECONDS, [`${E2E_DIR}: node test/token-rail/sweep.mjs`]: 60 };
+
+// the deal before this card: command i after the build in part (i - 1) % total, the first part with the prover
+function roundRobin(script, total, seconds = E2E_SECONDS) {
+  const runs = script.split("&&").map((c) => c.trim()).slice(1);
+  return Array.from({ length: total }, (_, j) => {
+    const commands = runs.filter((_, i) => i % total === j);
+    return { commands, seconds: commands.reduce((n, c) => n + (seconds[`${E2E_DIR}: ${c}`] ?? NEW_E2E_SECONDS), 0) + (j === 0 ? E2E_PROVER_SECONDS : 0) };
+  });
+}
+
+test("the browser parts: main's list and PR #1029's each plan every part of ci.yml's matrix inside test-browser's timeout", () => {
+  assert.deepEqual(browserBudgetProblems(CI, E2E), []);
+  assert.deepEqual(browserBudgetProblems(CI, PR_1029_E2E, (s, n) => e2eParts(s, n, PR_1029_SECONDS)), []);
+  // and with the sweep not yet timed, planted at NEW_E2E_SECONDS
+  assert.deepEqual(browserBudgetProblems(CI, PR_1029_E2E), []);
+  assert.deepEqual(e2eSplitProblems(PR_1029_E2E, PR_1029_SECONDS), []);
+});
+
+test("planted: the round-robin deal takes PR #1029's list past test-browser (1)'s timeout, as run 44375738505 did", () => {
+  const found = browserBudgetProblems(CI, PR_1029_E2E, (s, n) => roundRobin(s, n, PR_1029_SECONDS));
+  assert.ok(found.some((f) => f.startsWith("test-browser part 1 of 3 is planned at")), JSON.stringify(found));
+  // the deal by time, on the same list and the same matrix, does not
+  assert.deepEqual(browserBudgetProblems(CI, PR_1029_E2E, (s, n) => e2eParts(s, n, PR_1029_SECONDS)), []);
+});
+
+test("the browser runs' measured times: every command of test:e2e has one, each names a command, and a stale one fails", () => {
+  const keys = (script) => script.split("&&").map((c) => c.trim()).slice(1).map((c) => `${E2E_DIR}: ${c}`);
+  const missing = (script, seconds) => keys(script).filter((k) => !Object.hasOwn(seconds, k));
+  const stale = (script, seconds) => Object.keys(seconds).filter((k) => !keys(script).includes(k));
+  assert.deepEqual(missing(E2E, E2E_SECONDS), [], "a test:e2e command with no E2E_SECONDS time: read it off its test-browser job log and add it");
+  assert.deepEqual(stale(E2E, E2E_SECONDS), [], "an E2E_SECONDS key in scripts/ci/test-shards.mjs names no test:e2e command: rename it to the command's new text, or remove it");
+  // planted: a new command with no key (PR #1029's sweep was one until its card listed it), and a key whose command is gone
+  assert.deepEqual(missing(`${E2E} && node test/new-screen/run.mjs`, E2E_SECONDS), [`${E2E_DIR}: node test/new-screen/run.mjs`]);
+  assert.deepEqual(missing(PR_1029_E2E, E2E_SECONDS), []);
+  assert.deepEqual(stale(E2E, { ...E2E_SECONDS, [`${E2E_DIR}: node test/gone/run.mjs`]: 10 }), [`${E2E_DIR}: node test/gone/run.mjs`]);
+  for (const [k, n] of Object.entries(E2E_SECONDS)) assert.ok(Number.isInteger(n) && n > 0, k);
+  assert.equal(NEW_E2E_SECONDS, 37);
+  assert.ok(Number.isInteger(E2E_FIXED_SECONDS) && E2E_FIXED_SECONDS > 0 && Number.isInteger(E2E_PROVER_SECONDS) && E2E_PROVER_SECONDS > 0);
+});
+
+test("a browser command past 1.25 times its listed seconds prints a ::warning:: naming it and E2E_SECONDS (fake clock)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "test-shards-e2e-"));
+  try {
+    mkdirSync(path.join(dir, E2E_DIR), { recursive: true });
+    writeFileSync(path.join(dir, E2E_DIR, "package.json"), JSON.stringify({ name: "terminal" }));
+    const cmds = [{ dir: E2E_DIR, name: "terminal", command: "true" }, { dir: E2E_DIR, name: "terminal", command: "true && true" }];
+    // 125 s against 100 listed (no warning), then 47 s with no listed time (planned at NEW_E2E_SECONDS 37: warning)
+    const times = [0, 125_000, 125_000, 172_000];
+    const lines = [];
+    const names = { seconds: { [`${E2E_DIR}: true`]: 100 }, table: "E2E_SECONDS", fallback: NEW_E2E_SECONDS };
+    const ran = runPart(cmds, dir, (l) => lines.push(l), { clock: () => times.shift(), ...names });
+    assert.deepEqual(ran.map((r) => [r.ok, r.seconds]), [[true, 125], [true, 47]]);
+    const warnings = lines.filter((l) => l.startsWith("::warning::"));
+    assert.deepEqual(warnings.length, 1, lines.join("\n"));
+    assert.match(warnings[0], /^::warning::apps\/terminal: true && true took 47 s, no listed time, planned at 37 s: set its E2E_SECONDS time in scripts\/ci\/test-shards\.mjs/);
+    assert.match(staleWarning(cmds[0], 125.1, names.seconds, names), /took 125\.1 s, listed 100 s: set its E2E_SECONDS time/);
+    assert.equal(staleWarning(cmds[0], 125, names.seconds, names), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("e2e-run in a copy of the tree: the build, then each of the part's commands in apps/terminal, all after a failed one, exit 1; a failed build runs nothing more", () => {
+  // the real path: the script runs its command line only when argv[1] is its own path, and macOS's tmpdir is a link
+  const dir = realpath(mkdtempSync(path.join(tmpdir(), "test-shards-e2e-run-")));
+  try {
+    mkdirSync(path.join(dir, "scripts/ci"), { recursive: true });
+    mkdirSync(path.join(dir, E2E_DIR), { recursive: true });
+    writeFileSync(path.join(dir, "scripts/ci/test-shards.mjs"), readFileSync(path.join(ROOT, "scripts/ci/test-shards.mjs")));
+    const put = (e2e) => writeFileSync(path.join(dir, E2E_DIR, "package.json"), JSON.stringify({ name: "terminal", scripts: { "test:e2e": e2e } }));
+    const run = (i, n) => spawnSync(process.execPath, [path.join(dir, "scripts/ci/test-shards.mjs"), "e2e-run", String(i), String(n)], { encoding: "utf8" });
+    put("echo built > ran.txt && echo a >> ran.txt && exit 3 && echo c >> ran.txt");
+    const one = run(0, 1);
+    assert.equal(one.status, 1, one.stdout + one.stderr);
+    assert.equal(readFileSync(path.join(dir, E2E_DIR, "ran.txt"), "utf8"), "built\na\nc\n");
+    assert.match(one.stdout, /^part 1 of 1, planned \d+ s \(the prover's 42 s in it\):$/m);
+    assert.match(one.stdout, /^== failed \(exit 3\) in [\d.]+ s: apps\/terminal: exit 3$/m);
+    // two parts: each runs the build and its own share only
+    put("echo built >> ran.txt && echo a >> ran.txt && echo b >> ran.txt && echo c >> ran.txt");
+    rmSync(path.join(dir, E2E_DIR, "ran.txt"));
+    for (const i of [0, 1]) assert.equal(run(i, 2).status, 0);
+    assert.deepEqual(readFileSync(path.join(dir, E2E_DIR, "ran.txt"), "utf8").trim().split("\n").toSorted(), ["a", "b", "built", "built", "c"]);
+    put("exit 4 && echo a > ran.txt && echo b > ran.txt");
+    rmSync(path.join(dir, E2E_DIR, "ran.txt"));
+    const bad = run(0, 1);
+    assert.equal(bad.status, 1);
+    assert.match(bad.stdout, /^== failed \(exit 4\) in [\d.]+ s: apps\/terminal: exit 4$/m);
+    assert.throws(() => readFileSync(path.join(dir, E2E_DIR, "ran.txt")), /ENOENT/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the e2e-run command line: a missing, non-number or out-of-range part is refused with exit 1 and runs nothing", () => {
+  const script = path.join(ROOT, "scripts/ci/test-shards.mjs");
+  for (const args of [["e2e-run"], ["e2e-run", "0"], ["e2e-run", "x", "3"], ["e2e-run", "3", "3"], ["e2e-run", "0", "0"], ["e2e-run", "0", "999"]]) {
+    const r = spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+    assert.equal(r.status, 1, `${args.join(" ")}: ${r.stdout}`);
+    assert.equal(r.stdout, "");
   }
 });
 
@@ -275,7 +455,10 @@ test("planted: a chain the split cannot read, a part with nothing to run, and a 
   ]) {
     assert.throws(() => e2ePart(script, index, total), want, `${script} ${index}/${total}`);
   }
-  assert.equal(e2ePart("vite build && node a.mjs && node b.mjs && node c.mjs", 1, 2), "vite build && node b.mjs");
+  // three untimed commands, each planned at NEW_E2E_SECONDS, the first part holding the prover's seconds: a to the empty
+  // second part, b to the first (empty yet), c to the second (37 s against 42 + 37)
+  assert.equal(e2ePart("vite build && node a.mjs && node b.mjs && node c.mjs", 0, 2), "vite build && node b.mjs");
+  assert.equal(e2ePart("vite build && node a.mjs && node b.mjs && node c.mjs", 1, 2), "vite build && node a.mjs && node c.mjs");
 });
 
 test("the command line: a missing or non-number part is refused with exit 1", () => {

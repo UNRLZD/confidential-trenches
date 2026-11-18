@@ -85,6 +85,13 @@ const unread = (): readonly EvmRpc[] => ["https://a.example", "https://b.example
 const ev = (block: bigint, e: Partial<EvmPoolEvent> & Pick<EvmPoolEvent, "kind" | "state" | "value">): EvmPoolEvent => ({ block, blockHash: `0x${"11".repeat(32)}`, logIndex: 0n, bytes: "", label: null, precommitment: null, nullifier: null, recipient: null, token: null, ...e });
 const page = (w: WalletStore, signedIn = () => true) => ({ store: async () => w, seed64: async () => (signedIn() ? SEED64.slice() : Promise.reject(new Error("no seed is stored"))) });
 
+// A keyless operator keeps a block's state seconds to minutes, so the page reads each chain's period fee a few seconds
+// past the turn, while the period's first block is fresh, and runs the queue's pass then, only for a chain with its
+// queue open or its notes landed.
+const { EVM_SIGHT_MS, EVM_TURN_PASS_MS, EVM_TURN_SPREAD_MS } = await import("../src/pool-testnet.ts");
+const { evmPool: walletEvmPool } = await import("../../wallet/src/pool/evm.ts");
+const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+
 test("each EVM chain's fee list is the kit's read list (evmReadProvidersOf), and the epoch fee rule is the kit's evmPoolFee", () => {
   const v = evmPoolVenues();
   assert.deepEqual(TESTNET_EVM_FEE_RPCS.base, evmReadProvidersOf(v["base-sepolia"]));
@@ -595,12 +602,6 @@ test("the EVM buy's live check reads what the testnet page reads: its pairs, cha
 });
 
 // ---- the turn pass (card evm-device-reads-need-no-old-state) ----
-// A keyless operator keeps a block's state seconds to minutes, so the page reads each chain's period fee a few seconds
-// past the turn, while the period's first block is fresh, and runs the queue's pass then, only for a chain with its
-// queue open or its notes landed.
-const { EVM_SIGHT_MS, EVM_TURN_PASS_MS, EVM_TURN_SPREAD_MS } = await import("../src/pool-testnet.ts");
-const { evmPool: walletEvmPool } = await import("../../wallet/src/pool/evm.ts");
-const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
 /** The page's turn timers, by hand: each set timer's wait and its callback (which returns the pass). */
 function turnTimers(o: { now: number; random?: () => number; hidden?: () => boolean }) {
   // `at`: the device's time the timer fires at

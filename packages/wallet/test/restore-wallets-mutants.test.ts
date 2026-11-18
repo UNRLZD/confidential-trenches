@@ -21,7 +21,7 @@ function sweep(body: string, boundMs: number): { status: number | null; out: str
   const dir = mkdtempSync(path.join(tmpdir(), "restore-sweep-"));
   try {
     const at = (p: string) => (mkdirSync(path.dirname(path.join(dir, p)), { recursive: true }), path.join(dir, p));
-    for (const f of ["scripts/group-run.mjs", "packages/wallet/scripts/restore-wallets-mutants.mjs", "packages/wallet/scripts/mutant-run.mjs"]) copyFileSync(path.join(ROOT, f), at(f));
+    for (const f of ["scripts/group-run.mjs", "packages/wallet/scripts/restore-wallets-mutants.mjs", "scripts/mutant-run.mjs"]) copyFileSync(path.join(ROOT, f), at(f));
     writeFileSync(at("package.json"), '{ "type": "module" }\n');
     writeFileSync(at("packages/wallet/src/pool/same-chain.ts"), STUB);
     writeFileSync(at("packages/wallet/test/pool-same-chain.test.ts"), `import { test } from "node:test";\ntest("S-01 review: planted", async () => {\n  ${body}\n});\n`);

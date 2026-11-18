@@ -4,9 +4,9 @@
 // back. Also the same-chain deposit's rent hand-off to the kit's builder (card kit-sol-pool-deposit-floor, src/pool/
 // same-chain.ts). "strings sent and taken" is the wallet-restore-notes round-3 review's case: a bridge that sends the
 // precommitments as strings to a Worker that takes them restores no note with every check on the walk passing.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runMutant } from "./mutant-run.mjs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 const P = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const WALK = "wallet/src/restore/walk.ts";
 const WAL = "wallet/src/restore/wallets.ts";
@@ -195,22 +195,11 @@ for (const [name, file, edits, [pkg, test], pat] of RUN) {
     }
     planted = planted.replace(from, to);
   }
-  writeFileSync(path, planted);
-  // a run past 180 s is killed, its process group with it (scripts/mutant-run.mjs, scripts/group-run.mjs)
-  let r;
-  try {
-    r = runMutant([`--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, timeoutMs: 180_000 });
-  } finally {
-    writeFileSync(path, src);
-  }
-  // card restore-sweep-world-tests-exit-alone: a run that ends with no verdict is a refusal, never a survivor: HUNG (killed
-  // at the cap), CANCELLED (its only failures tests stopped at their own timeout, on two runs) or NO TEST (no summary
-  // naming a test that ran). A hung run printed "SURVIVED pass undefined fail undefined" before.
-  const ran = Number((r.stdout.match(/ℹ tests (\d+)/) ?? [])[1] ?? 0);
-  const no = r.verdict === "hung" ? "HUNG" : r.verdict === "cancelled" ? "CANCELLED" : ran === 0 ? "NO TEST" : null;
-  if (no !== null) {
+  // a run past 180 s is killed, its process group with it; a run with no verdict (HUNG, CANCELLED, NO TEST) is refused,
+  // never a survivor (scripts/mutant-run.mjs; cards restore-sweep-world-tests-exit-alone, mutant-sweeps-refuse-no-verdict)
+  const r = withPlant(path, planted, () => runMutant([`--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, timeoutMs: 180_000 }));
+  if (refused(name, r)) {
     none++;
-    console.log(`${no} [${name}] pass ${r.pass} fail ${r.fail} cancelled ${r.cancelled}: no verdict, refused`);
     continue;
   }
   if (r.verdict === "killed") ok++;

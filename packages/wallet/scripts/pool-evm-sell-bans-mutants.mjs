@@ -1,7 +1,7 @@
 // node packages/wallet/scripts/pool-evm-sell-bans-mutants.mjs (card evm-sell-hook-converge): plants one mutant at a time in the bans store, runs the named test, expects it to fail, puts the source back.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const B = `${W}/src/pool/evm-sell-bans.ts`, ST = `${W}/src/store/index.ts`;
 const T = "test/pool-evm-sell-bans.test.ts";
@@ -35,15 +35,12 @@ let ok = 0;
 for (const [f, find, repl, file, pat] of M) {
   const src = readFileSync(f, "utf8");
   if (src.split(find).length !== 2) { console.log(`NOT ONCE: ${find}`); process.exitCode = 1; continue; }
-  writeFileSync(f, src.replace(find, repl));
-  // a run past 120 s is killed, its process group with it (scripts/group-run.mjs)
-  const r = runSync("node", ["--test", `--test-name-pattern=${pat}`, file], { cwd: W, encoding: "utf8", timeoutMs: 120_000 });
-  writeFileSync(f, src);
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const killed = r.status !== 0 && Number(fail) > 0;
+  // a run past 120 s is killed, its process group with it; a run with no verdict is refused (scripts/mutant-run.mjs)
+  const r = withPlant(f, src.replace(find, repl), () => runMutant([`--test-name-pattern=${pat}`, file], { cwd: W, timeoutMs: 120_000 }));
+  if (refused(`${pat} ${f.split("/").pop()}: ${find.slice(0, 70)}`, r)) continue;
+  const killed = r.verdict === "killed";
   if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${pat}] pass ${pass} fail ${fail}: ${f.split("/").pop()}: ${find.slice(0, 70)}`);
+  console.log(`${killed ? "KILLED" : "SURVIVED"} [${pat}] pass ${r.pass} fail ${r.fail}: ${f.split("/").pop()}: ${find.slice(0, 70)}`);
 }
 console.log(`${ok}/${M.length} killed`);
 if (ok !== M.length) process.exitCode = 1;
