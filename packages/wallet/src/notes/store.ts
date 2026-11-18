@@ -48,9 +48,12 @@
 //   quote naming it, leaves the device (the signing page's pool.address and deposit.quote, under the seed lock),
 //   markQuoted puts i's refKey in QUOTED_DEPOSITS_KEY, refused while the store holds i TAKEN. From then i is never
 //   TAKEN (move refuses PLANNED or INCOMING -> TAKEN for it): a send to an address the user was shown lands as the
-//   user's note, and a restore lands it on the PLANNED note (./restore.ts writeRestored). A restore that reads i's id as
-//   used moves a PLANNED i to TAKEN only through takeUnquoted, which leaves a quoted or found i PLANNED. Both run under
-//   the notes lock, so a mark and a take never both act on one read: the first to write decides.
+//   user's note, and a restore lands it on the PLANNED note (./restore.ts writeRestored).
+// - Skipped deposit indices (same card): a restore that reads a PLANNED i's id as used never writes TAKEN. skipUsed
+//   puts i's refKey in SKIPPED_DEPOSITS_KEY, only for an i neither quoted nor found; planDeposit then leaves i out and
+//   names a fresh index, and markQuoted refuses i, so its address leaves no more. The note stays PLANNED, so a deposit
+//   another device of the seed sends to i still lands as the user's note at the next restore (writeRestored). The mark
+//   and the skip both run under the notes lock, so they never both act on one read: the first to write decides.
 // - Second arrivals: n counts from 0 per id with no gap, and n + 1 is planned only once n has landed (:191-192), so
 //   restore's walk "until the first miss" finds every one.
 // - Every note write runs under the Web Lock "ct-wallet/notes", so two tabs never both act on one read. With no Web
@@ -265,6 +268,10 @@ function quotedOf(v: unknown): Set<string> {
   if (v === null || typeof v !== "object") return new Set();
   return new Set(Object.entries(v as Record<string, unknown>).flatMap(([k, x]) => (x === true ? [k] : [])));
 }
+/** meta/owed/skipped-deposits: the refKey of each PLANNED deposit index a restore read used with no address or quote of
+ *  it from this device (skipUsed): named no more, never TAKEN (an owed/ key, which no reader lists). */
+export const SKIPPED_DEPOSITS_KEY = "owed/skipped-deposits";
+const skippedOf = quotedOf;
 
 function marksOf(v: unknown): Map<string, ReservedMark> {
   const out = new Map<string, ReservedMark>();
@@ -380,10 +387,12 @@ export interface NoteStore {
   /** Marks deposit index `i` of `scope` quoted, before its address or a quote naming it leaves the device (the header's
    *  "Quoted deposit indices"); refused when the store holds that index TAKEN (its address is dead: nothing may go). */
   markQuoted(scope: bigint, i: number): Promise<void>;
-  /** A restore read deposit index `i`'s id of `scope` as used: the store's PLANNED deposit note there goes TAKEN only
-   *  when no address or quote of it left the device and restore did not find money for it (planFound); else, or with no
-   *  PLANNED note there, it is left as it is. Returns the note at i as stored after, or undefined when there is none. */
-  takeUnquoted(scope: bigint, i: number): Promise<NoteRecord | undefined>;
+  /** A restore read deposit index `i`'s id of `scope` as used: the store's PLANNED deposit note there is skipped
+   *  (SKIPPED_DEPOSITS_KEY: planDeposit names it no more and names a fresh index; the note stays PLANNED, so a deposit
+   *  that lands on it is still landed) only when no address or quote of it left the device and restore did not find
+   *  money for it (planFound); else, or with no PLANNED note there, it is left as it is. Never TAKEN. Returns the note
+   *  at i as stored after, or undefined when there is none. */
+  skipUsed(scope: bigint, i: number): Promise<NoteRecord | undefined>;
   add(note: NewNote): Promise<NoteRecord>;
   move(id: string, from: NoteState, to: NoteState, fields?: MoveFields): Promise<NoteRecord>;
   /** A second attempt on a note this tab holds by `attempt` (its first or, once let go, its other), with the second's
@@ -1410,7 +1419,10 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
         const all = await settle();
         // a note planFound wrote is funded: never the scope's unfunded index, never named to a quote
         const found = foundOf(await store.get("meta", FOUND_DEPOSITS_KEY));
-        const open = all.filter((n) => n.ref.kind === "deposit" && n.scope === scope && n.state === "PLANNED" && !found.has(refKey(n.ref)));
+        // and one a restore read used (skipUsed): it stays PLANNED, so a deposit that lands on it is still landed, but it
+        // is named no more
+        const skipped = skippedOf(await store.get("meta", SKIPPED_DEPOSITS_KEY));
+        const open = all.filter((n) => n.ref.kind === "deposit" && n.scope === scope && n.state === "PLANNED" && !found.has(refKey(n.ref)) && !skipped.has(refKey(n.ref)));
         if (open.length > 1) throw new Error(`scope ${scope} has ${open.length} unfunded deposit indices`);
         if (open[0] !== undefined) return open[0];
         // the next index, read without moving the counter (../store: key i/<scope>, { next }; lane d when absent), so a
@@ -1463,12 +1475,14 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
         const key = refKey({ kind: "deposit", s: scope, i });
         const n = (await settle()).find((x) => refKey(x.ref) === key);
         if (n?.state === "TAKEN") throw new Error(`deposit index ${i} of scope ${scope} is TAKEN: its address is not shown`);
+        // skipped (a restore read its id used): the page names a fresh index, so this one's address goes out no more
+        if (n?.state === "PLANNED" && skippedOf(await store.get("meta", SKIPPED_DEPOSITS_KEY)).has(key)) throw new Error(`deposit index ${i} of scope ${scope} was read used and is no longer named: its address is not shown`);
         if (quotedOf(await store.get("meta", QUOTED_DEPOSITS_KEY)).has(key)) return;
         if (closed) throw new Error("the note store is closed");
         await store.update("meta", QUOTED_DEPOSITS_KEY, (v) => Object.fromEntries([...quotedOf(v), key].map((k) => [k, true])));
       });
     },
-    takeUnquoted(scope, i) {
+    skipUsed(scope, i) {
       field(scope, "scope");
       u32(i, "deposit index");
       return locked(async () => {
@@ -1476,7 +1490,13 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
         const n = (await settle()).find((x) => refKey(x.ref) === key);
         if (n === undefined || n.state !== "PLANNED") return n;
         if (quotedOf(await store.get("meta", QUOTED_DEPOSITS_KEY)).has(key) || foundOf(await store.get("meta", FOUND_DEPOSITS_KEY)).has(key)) return n;
-        return moveLocked(n.id, "PLANNED", "TAKEN");
+        if (skippedOf(await store.get("meta", SKIPPED_DEPOSITS_KEY)).has(key)) return n;
+        if (closed) throw new Error("the note store is closed");
+        // the mark first, then the note written again as it is: the write is the notes change the page names again on
+        // (src/main.ts notesMoved hears only a change to the notes); a page killed between the two names at the next one
+        await store.update("meta", SKIPPED_DEPOSITS_KEY, (v) => Object.fromEntries([...skippedOf(v), key].map((k) => [k, true])));
+        await write(n);
+        return n;
       });
     },
   };

@@ -53,14 +53,15 @@
 //     for it. The raise moves only an index planned after it, so the index the page plans and names at the sign-in
 //     (src/deposit-name.ts, before step 5 reads the lane) is settled by its own read (card
 //     restore-shows-a-note-on-a-planned-index; review P3-1 of 53f5e92f and of restore-first-sign-in-under-two-minutes):
-//     an id read as used whose index the store holds PLANNED goes TAKEN (own.take, the wallet's takeUnquoted) only when
-//     no address or quote of it left the device (every pool.address and deposit.quote marks its index first, the
-//     wallet's markQuoted), and the page then names a fresh index. One the user was shown stays PLANNED: a send to it
-//     still lands as the user's, and a walk that finds it landed shows it (writeRestored lands a PLANNED note, E5),
-//     where a TAKEN one would stay unshown (src/pool-deposit.ts reads a TAKEN record dead). What is left: an index this
-//     device quoted that a lost store also quoted is named again, 1Click sees one id quoted twice, and if both quotes
-//     are funded the two outside sends share it. Never a loss: the second deposit on the precommitment goes in as the
-//     id's next note (src/pool-deposit.ts, taken).
+//     an id read as used whose index the store holds PLANNED is skipped (own.skip, the wallet's skipUsed) only when no
+//     address or quote of it left the device (every pool.address and deposit.quote marks its index first, the wallet's
+//     markQuoted), and the page then names a fresh index. Never TAKEN, on the pools' lanes and the vault's alike
+//     (readVaultLate reads through the same `skipping`): the note stays PLANNED, so a deposit another device of the
+//     seed sends to it, or one to an address the user was shown, lands as the user's note and a walk that finds it
+//     shows it (writeRestored lands a PLANNED note, E5), where a TAKEN one would stay unshown (src/pool-deposit.ts reads
+//     a TAKEN record dead). What is left: an index this device quoted that a lost store also quoted is named again,
+//     1Click sees one id quoted twice, and if both quotes are funded the two outside sends share it. Never a loss: the
+//     second deposit on the precommitment goes in as the id's next note (src/pool-deposit.ts, taken).
 //   - Each try's reasons are of two kinds (Step5Reasons). A read that did not answer (`retry`: an id unread on both
 //     providers or read apart by them, the lane reading on past it; a pass the providers refuse; any read that throws)
 //     writes nothing the user sees on the tries before the last: step 5 is asked again by itself after
@@ -347,6 +348,23 @@ export function lanesOf(notes: readonly RestoredNote[], scope: bigint): { laneHi
  */
 export type Step5Reasons = { retry: string[]; held: string[]; named: string[] };
 
+/** This store's part in step 5: its lane, its counter's raise, `found` (the deposit note of index i written for money
+ *  its U_X holds, read alike on both RPCs: planFound) and `skip` (an id read as used: its PLANNED deposit note named no
+ *  more unless its address or a quote of it left the device: skipUsed; never TAKEN). */
+type Own = { lane: number; raise(scope: bigint, min: number): Promise<void>; found(scope: bigint, i: number, amounts: readonly [bigint, bigint]): Promise<void>; skip(scope: bigint, i: number): Promise<void> };
+
+/**
+ * An IdReader whose "used" answer for index i skips the store's PLANNED note at i (own.skip; card
+ * restore-shows-a-note-on-a-planned-index) before the answer is counted, so the page names a fresh index while the
+ * note stays PLANNED and a deposit that lands on it is still shown. One rule for the pools' lanes and the vault's. A
+ * skip that throws leaves the id unread, read again next try.
+ */
+const skipping = (own: Pick<Own, "skip">, scope: bigint, read: IdReader): IdReader => async (u, i) => {
+  const state = await read(u, i);
+  if (state === "used" && i !== undefined) await own.skip(scope, i);
+  return state;
+};
+
 /**
  * One try of step 5 on every pool walked, in order, on one pass and one IdReader, each reason it is not done pushed to
  * `out`. The first id unread on both providers stops every read after it (each throws at once, so its lane ends with
@@ -364,8 +382,7 @@ async function readDepositIds(
   out: Step5Reasons,
   noted: (scope: bigint) => Promise<ReadonlySet<number>>,
   /** `found`: the deposit note of index i written for money its U_X holds, read alike on both RPCs (planFound) */
-  /** `take`: an id read as used, its PLANNED deposit note TAKEN unless its address or a quote of it left the device */
-  own: { lane: number; raise(scope: bigint, min: number): Promise<void>; found(scope: bigint, i: number, amounts: readonly [bigint, bigint]): Promise<void>; take(scope: bigint, i: number): Promise<void> },
+  own: Own,
   kept: {
     of(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>>;
     add(scope: bigint, lane: number, readTo: number, highest: number | null): Promise<void>;
@@ -388,14 +405,6 @@ async function readDepositIds(
   const holds: IdReader = async (u, i) => {
     signal.throwIfAborted();
     return letGo(reader(u, i), signal);
-  };
-  // an id whose answer is used (its U_X read too, where it has one): the store's PLANNED note at its index goes TAKEN
-  // only when no address or quote of it left the device (card restore-shows-a-note-on-a-planned-index), before the
-  // answer is counted, so the page names a fresh index; a take that throws leaves the id unread, read again next try
-  const taking = (scope: bigint, read: IdReader): IdReader => async (u, i) => {
-    const state = await read(u, i);
-    if (state === "used" && i !== undefined) await own.take(scope, i);
-    return state;
   };
   const undone = (label: string, r: DepositIds): void => {
     for (const y of idsUndoneOf(r)) out[y.kind].push(`${label}: ${y.why}`);
@@ -430,7 +439,7 @@ async function readDepositIds(
     if (!w.addressed) continue;
     const ux = w.ux;
     if (ux === null) {
-      const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, taking(w.scope, holds), await lanes(w.scope, w.notes));
+      const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, skipping(own, w.scope, holds), await lanes(w.scope, w.notes));
       ids.read?.(w.scope, r);
       undone(w.label, r);
       out.named.push(`${w.label}: ${POOL_CHAIN_UNREAD}`);
@@ -453,7 +462,7 @@ async function readDepositIds(
       held.set(i, { chain, s: w.scope.toString(), i, u, refund_id: id });
       return "money";
     };
-    const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, taking(w.scope, both), await lanes(w.scope, w.notes));
+    const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, skipping(own, w.scope, both), await lanes(w.scope, w.notes));
     ids.read?.(w.scope, r);
     undone(w.label, r);
     // each U_X found holding a balance, in index order, carried into the pool or named. The page's pool.deposit pays
@@ -507,7 +516,7 @@ async function readVaultLate(
   keep: IdReadKeep,
   signal: AbortSignal,
   out: Step5Reasons,
-  own: { lane: number; raise(scope: bigint, min: number): Promise<void>; found(scope: bigint, i: number, amounts: readonly [bigint, bigint]): Promise<void> },
+  own: Own,
   notesAt: (scope: bigint) => Promise<ReadonlyMap<number, { id: string; found: boolean; landed: boolean }>>,
   carry: VaultCarry,
   /** step 7's window across loads: handed this run's pass block time, it keeps the first restore's (on step 5's marker)
@@ -526,7 +535,7 @@ async function readVaultLate(
     signal.throwIfAborted();
     return letGo(reader(u, i), signal);
   };
-  const r = await restoreDepositIds(seed, v.scope, { notes: [...v.notes], ...lanesOf(v.notes, v.scope) }, holds, {
+  const r = await restoreDepositIds(seed, v.scope, { notes: [...v.notes], ...lanesOf(v.notes, v.scope) }, skipping(own, v.scope, holds), {
     first: own.lane,
     signal,
     laneRead: async (x: LaneIds) => {
@@ -1310,13 +1319,13 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
                 notes.close();
               }
             }),
-          // an id read as used: its PLANNED note TAKEN only when no address or quote of it left the device (the wallet's
-          // takeUnquoted), under the seed lock and the run's check, as the floor's write
-          take: (scope: bigint, i: number) =>
+          // an id read as used: its PLANNED note named no more (never TAKEN) only when no address or quote of it left
+          // the device (the wallet's skipUsed), under the seed lock and the run's check, as the floor's write
+          skip: (scope: bigint, i: number) =>
             seedHeld(async () => {
               const notes = await openNoteStore(await h.store());
               try {
-                await notes.takeUnquoted(scope, i);
+                await notes.skipUsed(scope, i);
               } finally {
                 notes.close();
               }

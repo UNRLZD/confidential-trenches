@@ -568,39 +568,52 @@ test("F4: a PLANNED deposit index with history this store did not record is TAKE
   await assert.rejects(t.ns.move(ret.id, "PLANNED", "TAKEN"), /only a deposit index/);
 });
 
-test("Q1 (card restore-shows-a-note-on-a-planned-index): a quoted deposit index is never TAKEN; a restore's used read takes only an unquoted, unfound PLANNED one", async () => {
+test("Q1 (card restore-shows-a-note-on-a-planned-index): a quoted deposit index is never TAKEN; a restore's used read skips only an unquoted, unfound PLANNED one, and never writes TAKEN", async () => {
   const t = await tab();
   const i = (n: NoteRecord) => (n.ref as { i: number }).i;
-  // quoted: the mark stands before the read, so the used read leaves the note PLANNED, and no move makes it TAKEN
+  // quoted: the mark stands before the read, so the used read leaves the note PLANNED and named, and no move makes it TAKEN
   const q = await t.ns.planDeposit(961n, pc);
   await t.ns.markQuoted(961n, i(q));
   await t.ns.markQuoted(961n, i(q)); // a second mark writes nothing new
-  assert.equal((await t.ns.takeUnquoted(961n, i(q)))!.state, "PLANNED");
+  assert.equal((await t.ns.skipUsed(961n, i(q)))!.state, "PLANNED");
+  assert.equal((await t.ns.planDeposit(961n, pc)).id, q.id, "a quoted index read used is still the one named");
   await assert.rejects(t.ns.move(q.id, "PLANNED", "TAKEN"), /was quoted/);
   // ... and once a send left (INCOMING), not TAKEN either: the send to the address shown lands as the user's
   const qi = await t.ns.move(q.id, "PLANNED", "INCOMING");
   await assert.rejects(t.ns.move(qi.id, "INCOMING", "TAKEN"), /was quoted/);
-  assert.equal((await t.ns.takeUnquoted(961n, i(q)))!.state, "INCOMING", "a note past PLANNED is left as it is");
-  // never quoted: the used read takes it, and the next plan names a new index
+  assert.equal((await t.ns.skipUsed(961n, i(q)))!.state, "INCOMING", "a note past PLANNED is left as it is");
+  // never quoted: the used read skips it. It stays PLANNED (a deposit that lands on it is still the user's), the next
+  // plan names a new index, and its address leaves no more
   const u = await t.ns.planDeposit(962n, pc);
-  const taken = await t.ns.takeUnquoted(962n, i(u));
-  assert.equal(taken!.state, "TAKEN");
-  assert.equal(i(await t.ns.planDeposit(962n, pc)), i(u) + 8);
+  const skipped = await t.ns.skipUsed(962n, i(u));
+  assert.equal(skipped!.state, "PLANNED");
+  assert.equal((await t.ns.get(u.id))!.state, "PLANNED", "never TAKEN");
+  const next = await t.ns.planDeposit(962n, pc);
+  assert.equal(i(next), i(u) + 8);
+  assert.equal((await t.ns.planDeposit(962n, pc)).id, next.id, "the fresh index is the one named from now on");
+  await assert.rejects(t.ns.markQuoted(962n, i(u)), /read used/);
+  assert.equal((await t.ns.skipUsed(962n, i(u)))!.state, "PLANNED", "a second skip writes nothing new");
+  // the skipped note still lands: PLANNED -> INCOMING -> UNSPENT as any deposit note
+  assert.equal((await t.ns.move(u.id, "PLANNED", "INCOMING")).state, "INCOMING");
   // a TAKEN index's address is dead: no mark, so nothing of it may leave the device
-  await assert.rejects(t.ns.markQuoted(962n, i(u)), /TAKEN/);
-  // no note at the index: nothing to take
-  assert.equal(await t.ns.takeUnquoted(963n, 5), undefined);
+  const d = await t.ns.planDeposit(967n, pc);
+  await t.ns.move(d.id, "PLANNED", "TAKEN");
+  await assert.rejects(t.ns.markQuoted(967n, i(d)), /TAKEN/);
+  // no note at the index: nothing to skip
+  assert.equal(await t.ns.skipUsed(963n, 5), undefined);
   // the store's mark is per index and per scope: another scope's same index is not quoted
   const o = await t.ns.planDeposit(964n, pc);
   await t.ns.markQuoted(965n, i(o));
-  assert.equal((await t.ns.takeUnquoted(964n, i(o)))!.state, "TAKEN");
-  // a found deposit (money restore read at the index, planFound) is funded: left PLANNED
+  await t.ns.skipUsed(964n, i(o));
+  assert.notEqual((await t.ns.planDeposit(964n, pc)).id, o.id, "another scope's mark leaves this one skipped");
+  // a found deposit (money restore read at the index, planFound) is funded: left PLANNED, not skipped
   const f = 966n;
   const lane = t.w.lane;
   await t.w.raiseDepositIndex(f, lane + 16);
   const found = await t.ns.planFound(f, lane, pc, { s: f, i: lane, amounts: [5n, 5n] });
-  assert.equal((await t.ns.takeUnquoted(f, lane))!.state, "PLANNED");
+  assert.equal((await t.ns.skipUsed(f, lane))!.state, "PLANNED");
   assert.equal(found.state, "PLANNED");
+  await t.ns.markQuoted(f, lane); // not skipped: its mark is not refused
 });
 
 test("pool sends (card signpage-pool-notes): the first with PLANNED -> INCOMING, more by addSend at the same value, compare-and-set; a taken note's next arrival plans", async () => {
