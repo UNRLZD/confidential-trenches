@@ -8,8 +8,11 @@
 // - The one peer is window.opener (src/shell.ts popup). The origin shown is the one the browser checked on the opener's
 //   message (e.origin), never a name or field the app sends. It must pass outsideOrigin: https, or http on localhost and
 //   127.0.0.1 for a developer's own build; never SIGN_HOST's own origin, never an opaque one.
-// - Before the user's Allow on the connect sheet nothing is answered: no state, balance, position or address. Allow binds
-//   the session to that exact origin, posted to with that targetOrigin only. Nothing is remembered: a new popup asks again.
+// - Before the user's Allow on the connect sheet nothing is answered: no state, balance, position or address. Allow keeps
+//   the origin's approval on the device (src/connections.ts, card signpage-other-apps-connect), then binds the session to
+//   that exact origin, posted to with that targetOrigin only. Every request and state push is read against the kept
+//   approval first (src/api.ts admit): once it is removed, the next request is refused not_allowed with no wallet read. A
+//   new popup still asks again.
 // - Connect and every Confirm stay in this one document: no nav, no reload, no other route (a route serving COOP
 //   same-origin would cut the opener).
 // - The app may ask only OUTSIDE_KINDS: the state, sign-in, the deposit kinds, withdraw.open with the app's given, and

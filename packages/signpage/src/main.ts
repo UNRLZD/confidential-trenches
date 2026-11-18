@@ -100,6 +100,7 @@ import { withVaultBalance } from "./vault-balance.ts";
 import { returningWallets, withPositions, withReturning } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { CONFIRM_TITLE, CONNECT_PATH, confirmLines, outsideKinds, outsideOrigin, type ConfirmedKind } from "./outside.ts";
+import { connections } from "./connections.ts";
 import { drawBackdrop, drawSealedGround, groundLogo } from "./backdrop.ts";
 import { GROUND_LOGO_SVG } from "./ground-logo.ts";
 import { SEALED } from "./frame-cover.ts";
@@ -187,6 +188,9 @@ let shell: Shell | null = null;
 // card signpage-answers-outside-apps (src/outside.ts): on /connect this page is an outside app's popup, its opener the
 // one peer; on every other path, APP_HOST's shell, which nothing here changes
 const outside = !framed && location.pathname === CONNECT_PATH;
+// card signpage-other-apps-connect (src/connections.ts): the origins the user connected, kept on this device; on /connect
+// every request and state push is read against it first (src/api.ts admit). APP_HOST's shell never opens it.
+const connected = outside ? connections() : null;
 // top-level, on every build: the page network's pool flow, its settling and the next buy's proofs (src/pool-testnet.ts,
 // card signpage-pool-mainnet); with no pool pinned on the network it refuses every pool kind and reads nothing; the
 // store and the seed are opened when a run needs them
@@ -953,6 +957,7 @@ else {
       ...(restore ? { restore: restore.kind } : {}),
     }))),
     popup: outside ? { opener: (window.opener as Window | null) ?? null, knock } : undefined,
+    ...(connected ? { admit: (o: string) => connected.has(o) } : {}),
   });
   shell.body.append(root);
   // the user's own Esc, close tap or scrim tap: Cancel's step, on a screen Cancel is drawn on (show() below). Esc leaves
@@ -973,7 +978,8 @@ function kindsFor<K extends object>(kinds: K): K {
 }
 
 // An outside app's sheet, drawn in the layer in root's place: the connect step (its origin, Allow, Cancel), then each
-// buy's or sell's Confirm (its origin and what it does). Nothing is kept: a reload asks to connect again.
+// buy's or sell's Confirm (its origin and what it does). Allow keeps the origin's approval (src/connections.ts), which
+// every request is read against; a reload still asks to connect again.
 const outsideView = document.createElement("main");
 outsideView.id = "outside";
 let confirming = false;
@@ -1022,10 +1028,17 @@ function knock(origin: string): void {
     originLine(`Connect ${origin}`),
     button("allow", "Allow", () => {
       hideOutside();
-      allowedOrigin = origin;
-      status.textContent = `Connected ${origin}`;
-      if (!status.isConnected) document.body.append(status);
-      shell!.allow(origin);
+      // the approval is kept first: every request from the origin is read against it, so a session is bound only once
+      // its write completed, and a write that failed binds none
+      void connected!.add(origin).then(
+        () => {
+          allowedOrigin = origin;
+          status.textContent = `Connected ${origin}`;
+          if (!status.isConnected) document.body.append(status);
+          shell!.allow(origin);
+        },
+        notConnected,
+      );
     }),
     button("cancel", "Cancel", notConnected),
   ]);

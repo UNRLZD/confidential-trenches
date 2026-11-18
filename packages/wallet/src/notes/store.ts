@@ -37,6 +37,12 @@
 //   (written before it is returned, ../store) and writes the note PLANNED. A page killed between the two skips an index
 //   nothing outside ever saw. An index that shows history this store did not record is "marked taken and skipped"
 //   (:347-348): PLANNED -> TAKEN, terminal, and the next planDeposit names a new index.
+// - A deposit found by a restore (card notes-plan-at-restored-index): planFound writes the deposit note PLANNED at an
+//   index i whose money a restore read waiting at i's one-time account, on two providers that agree on a balance above
+//   0, for a lost store's quote this store never planned. Only while the store holds no note at i and, for an index of
+//   this store's lane, the scope's counter is past i, so planDeposit never names i (an index of another lane it never
+//   names at all). Its refKey goes in FOUND_DEPOSITS_KEY before the note is written, and planDeposit leaves such a note
+//   out of the scope's one unfunded index: i is funded, so the rule (:349-353) still holds.
 // - Second arrivals: n counts from 0 per id with no gap, and n + 1 is planned only once n has landed (:191-192), so
 //   restore's walk "until the first miss" finds every one.
 // - Every note write runs under the Web Lock "ct-wallet/notes", so two tabs never both act on one read. With no Web
@@ -99,7 +105,7 @@
 //   not on the note, or the note's own attempt), so nothing the device does not record can be sent.
 import { VAULT_FIELD_P, vaultSyncStart, type VaultSyncCursor } from "@blindfill/kit";
 import { CHAINS } from "../derive/index.ts";
-import { WALLET_SYNC_PREFIX, type WalletStore } from "../store/index.ts";
+import { WALLET_LANES, WALLET_SYNC_PREFIX, type WalletStore } from "../store/index.ts";
 import { noteCommitment, type NoteRef } from "./secrets.ts";
 
 export const NOTES_LOCK = "ct-wallet/notes";
@@ -223,6 +229,27 @@ export type ReservedMark = { attempt: string; lastHeight?: bigint; nullifier?: b
 /** meta/owed/reserved-notes: an owed/ key, which no reader of any release lists (store keys() leaves owed/ out). */
 export const RESERVED_MARKS_KEY = "owed/reserved-notes";
 
+/** What a restore read at deposit index `i` of scope `s` (card notes-plan-at-restored-index): the balance i's one-time
+ *  account holds, on each of two providers of different operators. */
+export type FoundRead = { s: bigint; i: number; amounts: readonly [bigint, bigint] };
+/** meta/owed/found-deposits: the refKey of each deposit note planFound wrote (an owed/ key, which no reader lists). */
+export const FOUND_DEPOSITS_KEY = "owed/found-deposits";
+function foundOf(v: unknown): Set<string> {
+  if (v === null || typeof v !== "object") return new Set();
+  return new Set(Object.entries(v as Record<string, unknown>).flatMap(([k, x]) => (x === true ? [k] : [])));
+}
+// the read planFound takes: of (scope, i), two providers' balances, the two the same and above 0 (one provider's word,
+// or two apart, is no read: either may fake money)
+function checkFound(read: unknown, scope: bigint, i: number): void {
+  if (read === null || typeof read !== "object") throw new Error("a found read is an object");
+  const r = read as Partial<FoundRead>;
+  if (r.s !== scope || r.i !== i) throw new Error(`the found read is not of deposit index ${i} of scope ${scope}`);
+  const a = r.amounts;
+  if (!Array.isArray(a) || a.length !== 2 || !a.every((x) => typeof x === "bigint")) throw new Error("a found read holds two providers' balances");
+  if (a[0] !== a[1]) throw new Error(`the two providers read ${String(a[0])} and ${String(a[1])}: no agreed balance`);
+  if (a[0]! <= 0n) throw new Error("the two providers read no money");
+}
+
 function marksOf(v: unknown): Map<string, ReservedMark> {
   const out = new Map<string, ReservedMark>();
   if (v === null || typeof v !== "object") return out;
@@ -330,6 +357,10 @@ export interface NoteStore {
   get(id: string): Promise<NoteRecord | undefined>;
   list(): Promise<NoteRecord[]>;
   planDeposit(scope: bigint, precommitmentOf: (ref: NoteRef) => bigint): Promise<NoteRecord>;
+  /** The deposit note PLANNED at index `i` of `scope` for money a restore found there (the header's "A deposit found by
+   *  a restore"): refused unless `read` names (scope, i) with two providers' balances that agree above 0, the store
+   *  holds no note at i, and an index of this store's lane is under the scope's counter. */
+  planFound(scope: bigint, i: number, precommitmentOf: (ref: NoteRef) => bigint, read: FoundRead): Promise<NoteRecord>;
   add(note: NewNote): Promise<NoteRecord>;
   move(id: string, from: NoteState, to: NoteState, fields?: MoveFields): Promise<NoteRecord>;
   /** A second attempt on a note this tab holds by `attempt` (its first or, once let go, its other), with the second's
@@ -1351,7 +1382,9 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
       field(scope, "scope");
       return locked(async () => {
         const all = await settle();
-        const open = all.filter((n) => n.ref.kind === "deposit" && n.scope === scope && n.state === "PLANNED");
+        // a note planFound wrote is funded: never the scope's unfunded index, never named to a quote
+        const found = foundOf(await store.get("meta", FOUND_DEPOSITS_KEY));
+        const open = all.filter((n) => n.ref.kind === "deposit" && n.scope === scope && n.state === "PLANNED" && !found.has(refKey(n.ref)));
         if (open.length > 1) throw new Error(`scope ${scope} has ${open.length} unfunded deposit indices`);
         if (open[0] !== undefined) return open[0];
         // the next index, read without moving the counter (../store: key i/<scope>, { next }; lane d when absent), so a
@@ -1368,6 +1401,31 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
         let n = make(want);
         const i = await store.reserveDepositIndex(scope); // durable before it is returned (../store)
         if (i !== want) n = make(i); // the counter moved outside the notes lock (restore's raise): name what was reserved
+        await write(n);
+        return n;
+      });
+    },
+    async planFound(scope, i, precommitmentOf, read) {
+      field(scope, "scope");
+      u32(i, "deposit index");
+      checkFound(read, scope, i);
+      return locked(async () => {
+        const all = await settle();
+        const ref: NoteRef = { kind: "deposit", s: scope, i };
+        const key = refKey(ref);
+        if (all.some((n) => refKey(n.ref) === key)) throw new Error(`deposit index ${i} of scope ${scope} is already a note`);
+        // an index of this store's lane at or past its counter is one planDeposit may still name: never written here
+        if (i % WALLET_LANES === store.lane) {
+          const c = (await store.get("counters", `i/${scope.toString()}`)) as { next: number } | undefined;
+          if (c === undefined || !(c.next > i)) throw new Error(`deposit index ${i} of scope ${scope} is not under the scope's counter (${String(c?.next ?? "none")}): planDeposit names it`);
+        }
+        const precommitment = field(precommitmentOf(ref), "precommitment");
+        if (all.some((n) => n.precommitment === precommitment)) throw new Error("that precommitment is already in the store");
+        const n: NoteRecord = { id: newId(), ref, scope, precommitment, state: "PLANNED" };
+        // the mark before the note: a page killed between the two leaves a mark no note holds, never a found note
+        // planDeposit would count as the scope's unfunded index
+        if (closed) throw new Error("the note store is closed");
+        await store.update("meta", FOUND_DEPOSITS_KEY, (v) => Object.fromEntries([...foundOf(v), key].map((k) => [k, true])));
         await write(n);
         return n;
       });

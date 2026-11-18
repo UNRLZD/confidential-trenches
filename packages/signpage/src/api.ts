@@ -10,7 +10,9 @@
 // is answered with the state; every other kind, a kind with no row, a v other than 1 and a field its row does not allow
 // are refused as "not_allowed" (W:917; app.md §2.1 A2-A4, A:116-117), each signing kind until its own payload rules
 // land (W:886-917). No field of a refused message is read, so a return_key such as "constructor" is never looked up.
-// A kind the host answers may refuse with its own code (deposit.quote, src/deposit-wire.ts).
+// A kind the host answers may refuse with its own code (deposit.quote, src/deposit-wire.ts). An outside app's popup sets
+// a gate (host.admit, card signpage-other-apps-connect): a request from an origin it does not approve now is refused
+// "not_allowed" before any read, and no state event goes to it; APP_HOST's terminal sets none.
 // A repeated request gets its first answer again, never a second run, but for a "busy" or "down" refusal (RETRY_CODES),
 // which is not kept, so a retry runs again; a repeated id with another body is refused "id_reused" (startApi). Answers carry states only, never a key, the words or a note secret (W §2.9 row 11).
 // The state is the host's: in the frame, src/state.ts reads it from the wallet store (card signpage-frame-state). On
@@ -94,6 +96,13 @@ export interface ApiHost {
    * signpage-answers-outside-apps).
    */
   origin?: string;
+  /**
+   * An outside app's approval (card signpage-other-apps-connect, src/connections.ts): asked with the app's origin, in the
+   * queue, before a request is read past its envelope and before each state push. Anything but true (false, a throw, a
+   * rejection) refuses the request "not_allowed" and pushes nothing: no state read, no kind run, no answer kept. Unset
+   * (APP_HOST's terminal), every request goes on as before.
+   */
+  admit?(origin: string): boolean | Promise<boolean>;
   /**
    * Adds the page's message listener. `data` must be what the browser's structured clone made (MessageEvent.data):
    * plain values that read the same every time. A Proxy or getter whose value changes between reads would pass the
@@ -288,6 +297,15 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     if (out !== null) host.parent.postMessage(out, appOrigin());
   };
   const clock = host.now ?? Date.now;
+  // an outside app's gate (APP_HOST has none, and is never awaited on it): true only when it answers exactly true for the
+  // bound origin now
+  const admitted = async (): Promise<boolean> => {
+    try {
+      return (await host.admit!(appOrigin())) === true;
+    } catch {
+      return false;
+    }
+  };
   // the JSON of the last state sent, as the app's kit reads it; null until the first `state` answer
   let sent: string | null = null;
   const read = async (): Promise<SignpageState> => {
@@ -304,6 +322,8 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     const m = envelope(data);
     if (!m) return;
     const id = m.id as string;
+    // an outside app with no approval, or one removed since: refused before any read, and the refusal is not kept
+    if (host.admit && !(await admitted())) return post({ v: 1, id, ok: false, error: { code: "not_allowed" } });
     const sha = hex(await crypto.subtle.digest("SHA-256", bytes));
     const first = answered.get(id);
     if (first && first.sha !== sha) return post({ v: 1, id, ok: false, error: { code: "id_reused" } });
@@ -386,7 +406,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     queue = queue
       .then(async () => {
         pushQueued = false;
-        if (sent === null) return;
+        if (sent === null || (host.admit && !(await admitted()))) return;
         const before = sent;
         const s = await read();
         if (sent !== before) post({ v: 1, type: "state", state: s });

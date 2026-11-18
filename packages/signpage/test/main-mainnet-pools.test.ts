@@ -90,8 +90,20 @@ class El extends EventTarget {
     this.attrs[k] = v;
   }
 }
-const posted: { v: number; id?: string; ok?: boolean; error?: { code: string } }[] = [];
-const frameWindow = { postMessage: (m: (typeof posted)[number]) => void posted.push(m) };
+type Answer = { v: number; id?: string; ok?: boolean; result?: unknown; error?: { code: string } };
+// each request's waiter, called in the very call the page posts its answer (card signpage-pool-address-test-no-answer):
+// a wait ends on the page's own answer, never on a poll of the real clock. A page that never answers holds the test
+// until its own { timeout } (HANG_MS), which the runner enforces: red, with the test's name
+const waiters = new Map<string, (m: Answer) => void>();
+const frameWindow = {
+  postMessage: (m: Answer) => {
+    if (typeof m.id === "string" && "ok" in m) waiters.get(m.id)?.(m);
+  },
+};
+/** A test's hang bound: far past any answer this file's stand-ins give (tens of ms each), so only a page that never
+ *  answers reaches it, however starved the machine. */
+const HANG_MS = 120_000;
+const HANG = { timeout: HANG_MS } as const;
 class Frame extends El {
   src = "";
   contentWindow = frameWindow;
@@ -141,6 +153,9 @@ mintData[45] = 1;
  *  the landing's settle pass's reads, held, as a provider that is down and retried holds them; heldReads counts them. */
 let hold: Promise<void> | undefined;
 let heldReads = 0;
+// settled at the first read the hold meets, in that read's own call: the test waits for it on no clock
+let heldMet!: () => void;
+const firstHeld = new Promise<void>((ok) => (heldMet = ok));
 g.fetch = async (url: unknown, init?: RequestInit) => {
   let body: { id?: unknown; method?: string; params?: unknown[] } = {};
   try {
@@ -151,6 +166,7 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
   const rentOrMint = body.method === "getAccountInfo" && (body.params?.[0] === "SysvarRent111111111111111111111111111111111" || body.params?.[0] === SELL_MINT);
   if (hold && typeof body.method === "string" && !rentOrMint && !String(url).includes("/oneclick/")) {
     heldReads++;
+    heldMet();
     await hold;
   }
   if (body.method === "getAccountInfo" && body.params?.[0] === "SysvarRent111111111111111111111111111111111") {
@@ -169,39 +185,43 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
   return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: "not in this test" } }), { status: 200 });
 };
 
+const byId = (el: El, id: string): El | undefined => (el.id === id ? el : el.children.map((c) => byId(c, id)).find((x) => x !== undefined));
+/** Sends `data` as the APP_HOST frame does, under a fresh id; the page's answer to it, once the page posts it. While a
+ *  sheet shows (src/sheet.ts's layer, #screen), the shell reads no message from the frame (src/shell.ts listen) and none
+ *  is ever answered: refused here at once, by name. That was PR 597's "no answer to pool.address" (job 130133309042):
+ *  the pool.withdraw test ran before these asks then, and its screen took the frame away FRAME_LEAVE_MS (100 ms of real
+ *  time) after it opened, so on a slow runner an ask past those 100 ms went to no frame. */
+function askPage(data: Record<string, unknown>): Promise<Answer> {
+  const screen = byId(doc.body, "screen");
+  if (screen !== undefined && !screen.hidden) throw new Error(`${String(data.type)}: asked while a sheet shows, when the shell reads no message from the frame; ask it before the test that opens one`);
+  const id = crypto.randomUUID();
+  const answered = new Promise<Answer>((ok) => waiters.set(id, ok));
+  const e = new Event("message");
+  Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, ...data } } });
+  win.dispatchEvent(e);
+  return answered.finally(() => waiters.delete(id));
+}
+
 /** Asks deposit.quote as the APP_HOST frame does; its answer's code (any: this test's helper refuses the quote). */
 async function askQuote(): Promise<string> {
-  const id = crypto.randomUUID();
-  const e = new Event("message");
-  Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "deposit.quote", origin_asset: ONECLICK_USDC_ASSETS[1], amount: "25" } } });
-  win.dispatchEvent(e);
-  for (let t = 0; t < 2000; t++) {
-    const a = posted.find((m) => m.id === id);
-    if (a) return a.ok ? "ok" : a.error!.code;
-    await new Promise((ok) => setTimeout(ok, 5));
-  }
-  throw new Error("no answer to deposit.quote");
+  const a = await askPage({ type: "deposit.quote", origin_asset: ONECLICK_USDC_ASSETS[1], amount: "25" });
+  return a.ok ? "ok" : a.error!.code;
 }
 
 async function askState(): Promise<{ signed_in: boolean; pools?: { chain: string; ready?: string; tap_max?: string; price?: { price: string; expo: number } }[] }> {
-  const id = crypto.randomUUID();
   // the app on this kit names its version before it asks, as the kit's client does (card kit-frame-version)
   const hello = new Event("message");
   Object.defineProperties(hello, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION } } });
   win.dispatchEvent(hello);
-  const e = new Event("message");
-  Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "state" } } });
-  win.dispatchEvent(e);
-  for (let t = 0; t < 500; t++) {
-    const a = posted.find((m) => m.id === id) as { ok?: boolean; result?: Awaited<ReturnType<typeof askState>> } | undefined;
-    if (a?.ok) return a.result!;
-    if (a) throw new Error("state refused");
-    await new Promise((ok) => setTimeout(ok, 10));
-  }
-  throw new Error("no answer to state");
+  const a = await askPage({ type: "state" });
+  if (!a.ok) throw new Error("state refused");
+  return a.result as Awaited<ReturnType<typeof askState>>;
 }
 
-test("the mainnet build's state with a pinned pool: the queue's ready proof as ready, the page's price, and tap_max once the Rent is read", async () => {
+/** Asks pool.address with `data`; the page's answer. */
+const askAddress = (data: Record<string, unknown>): Promise<Answer> => askPage({ type: "pool.address", ...data });
+
+test("the mainnet build's state with a pinned pool: the queue's ready proof as ready, the page's price, and tap_max once the Rent is read", HANG, async () => {
   const w = await openWalletStore({});
   await w.insertSeed({ v: 1, entropy: new Uint8Array(16).fill(0x7f), source: "code", code_saved: true, created_ms: 1 });
   // a deposit note landed and HELD by a proof of attempt a1
@@ -225,8 +245,9 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
   assert.ok(app, "the shell framed APP_HOST");
   app.dispatchEvent(new Event("load"));
   const quoted = await askQuote().then(() => true, () => false);
-  // the settle pass did run into the hold (waited for by count, on no clock): the quote above answered beside it
-  for (let t = 0; t < 2000 && heldReads === 0; t++) await new Promise((ok) => setTimeout(ok, 5));
+  // the settle pass did run into the hold (waited for by its first held read, on no clock): the quote above answered
+  // beside it. A quote that waits behind the held reads never answers, and the test's own timeout ends it red
+  await firstHeld;
   const heldSeen = heldReads;
   hold = undefined;
   release();
@@ -236,7 +257,8 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
   const want = `0.${solanaTapSpendOf(RENT, undefined, pageBuyTip)([{ chunk: CHUNK, feeCap: FEE_CAP, tipCap: SOL_TIP_CAP }]).toString().padStart(9, "0")}`.replace(/0+$/, "");
   let pool: NonNullable<Awaited<ReturnType<typeof askState>>["pools"]>[number] | undefined;
   // the first state starts the price and Rent reads; each landing is heard, so a later state carries them
-  for (let t = 0; t < 300; t++) {
+  // until both have landed: each state is the page's own answer, and a page that never lands them meets HANG_MS
+  for (;;) {
     const s = await askState();
     assert.equal(s.signed_in, true);
     pool = s.pools?.find((x) => x.chain === "solana");
@@ -275,19 +297,8 @@ test("the mainnet build's pool reads on the network's own pair and fee route: SI
   assert.equal(asked[0], `https://ct-api.unrealized.trade/v1/pool/fee?cluster=mainnet&pool=${pool}&epoch=1800000000000`);
 });
 
-test("pool.address's quote reads the price for the origin asked (main.ts pricedFor, review of eb2dfdc5 W2): USDC goes on to the floor read; any other origin gets no price, refused not_allowed with no read", async () => {
-  const ask = async (data: Record<string, unknown>): Promise<{ ok?: boolean; error?: { code: string } }> => {
-    const id = crypto.randomUUID();
-    const e = new Event("message");
-    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "pool.address", ...data } } });
-    win.dispatchEvent(e);
-    for (let t = 0; t < 1500; t++) {
-      const a = posted.find((m) => m.id === id);
-      if (a) return a;
-      await new Promise((ok) => setTimeout(ok, 10));
-    }
-    throw new Error("no answer to pool.address");
-  };
+test("pool.address's quote reads the price for the origin asked (main.ts pricedFor, review of eb2dfdc5 W2): USDC goes on to the floor read; any other origin gets no price, refused not_allowed with no read", HANG, async () => {
+  const ask = askAddress;
   // the page names U_X under the pinned pool's scope, and holds its own price
   let named: { ok?: boolean } = {};
   for (let t = 0; t < 50 && !named.ok; t++) named = await ask({ chain: "solana" });
@@ -303,19 +314,8 @@ test("pool.address's quote reads the price for the origin asked (main.ts pricedF
   assert.deepEqual(calls.slice(from).filter((c) => c.url.includes("/oneclick/")), [], "no quote asked for an unpriced origin");
 });
 
-test("card evm-deposit-on-mainnet: on the mainnet build pool.address gives Base's and Robinhood's U_X as it gives Solana's, each the one-time wallet of the chain's pool scope (the build carries their withdraw)", async () => {
-  const ask = async (data: Record<string, unknown>): Promise<{ ok?: boolean; result?: unknown; error?: { code: string } }> => {
-    const id = crypto.randomUUID();
-    const e = new Event("message");
-    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "pool.address", ...data } } });
-    win.dispatchEvent(e);
-    for (let t = 0; t < 1500; t++) {
-      const a = posted.find((m) => m.id === id);
-      if (a) return a;
-      await new Promise((ok) => setTimeout(ok, 10));
-    }
-    throw new Error("no answer to pool.address");
-  };
+test("card evm-deposit-on-mainnet: on the mainnet build pool.address gives Base's and Robinhood's U_X as it gives Solana's, each the one-time wallet of the chain's pool scope (the build carries their withdraw)", HANG, async () => {
+  const ask = askAddress;
   let named: { ok?: boolean } = {};
   for (let t = 0; t < 50 && !named.ok; t++) named = await ask({ chain: "solana" });
   assert.equal(named.ok, true, JSON.stringify(named));
@@ -336,19 +336,8 @@ test("review of 56a57ed2, card evm-deposit-on-mainnet: main.ts's restore host sa
   assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.ux?.(c) != null]), [["solana", true], ["base", true], ["robinhood", true]]);
 });
 
-test("review P2-1 (G3), the one rule at its doors: a build planted to carry no Base withdraw gives no Base deposit address on pool.address, and its restore host says Base is not addressed; Robinhood as before", async () => {
-  const ask = async (data: Record<string, unknown>): Promise<{ ok?: boolean; result?: unknown; error?: { code: string } }> => {
-    const id = crypto.randomUUID();
-    const e = new Event("message");
-    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "pool.address", ...data } } });
-    win.dispatchEvent(e);
-    for (let t = 0; t < 1500; t++) {
-      const a = posted.find((m) => m.id === id);
-      if (a) return a;
-      await new Promise((ok) => setTimeout(ok, 10));
-    }
-    throw new Error("no answer to pool.address");
-  };
+test("review P2-1 (G3), the one rule at its doors: a build planted to carry no Base withdraw gives no Base deposit address on pool.address, and its restore host says Base is not addressed; Robinhood as before", HANG, async () => {
+  const ask = askAddress;
   const h = (globalThis as { __ctRestoreHost?: { addressed?: (chain: string) => boolean } }).__ctRestoreHost;
   gl.__ctBuilt = { base: false };
   try {
@@ -367,7 +356,7 @@ test("review P2-1 (G3), the one rule at its doors: a build planted to carry no B
 
 // last in this file: pool.withdraw opens the page's screen, and while a sheet shows the shell reads no message from the
 // frame (src/shell.ts listen), so a test after it would get no answer (card signing-views-open-over-the-app)
-test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw reach the page's pool flow: none is refused not_allowed", async () => {
+test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw reach the page's pool flow: none is refused not_allowed", HANG, async () => {
   // a note of the pool's scope another device spent: its buy's W is the sell's to read, on the helper's keyed route only
   const w = await openWalletStore({});
   const ns = await openNoteStore(w);
@@ -376,17 +365,8 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
   await ns.move(p.id, "INCOMING", "UNSPENT", { leaf: { value: CHUNK, label: 2n, commitment: noteCommitment(CHUNK, 2n, p.precommitment), leafIndex: 1n } });
   await ns.move(p.id, "UNSPENT", "SPENT", {});
   const ask = async (data: Record<string, unknown>): Promise<Record<string, unknown>> => {
-    const id = crypto.randomUUID();
-    const e = new Event("message");
-    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, ...data } } });
-    win.dispatchEvent(e);
-    let a: { ok?: boolean; error?: { code: string } } | undefined;
-    for (let t = 0; t < 1500 && !a; t++) {
-      a = posted.find((m) => m.id === id) as typeof a;
-      if (!a) await new Promise((ok) => setTimeout(ok, 10));
-    }
-    assert.ok(a, `${String(data.type)}: answered`);
-    assert.notEqual(a?.error?.code, "not_allowed", `${String(data.type)} was refused not_allowed: it never reached the flow`);
+    const a = await askPage(data);
+    assert.notEqual(a.error?.code, "not_allowed", `${String(data.type)} was refused not_allowed: it never reached the flow`);
     const { v: _v, id: _id, ...got } = a as Record<string, unknown>;
     return got;
   };

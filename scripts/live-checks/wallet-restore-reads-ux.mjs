@@ -24,9 +24,10 @@
 //     call right after it is handed;
 //   - ux_carry: a U_X is carried as the follow carries it: the lower of two equal balances, the follow's floor and
 //     askOf's ask, the page's pool.deposit (its run's end, card pool-deposit-op-txs), read again after a filled one, and named when it does not fill or a filled
-//     one leaves the balance as it was; a U_X whose index has no deposit note in the store is named with its index,
-//     address and balance, never carried (card notes-plan-at-restored-index makes that note); the carry called is this
-//     one, on the scope's own U_X reads and held map;
+//     one leaves the balance as it was; a U_X whose index has no deposit note in the store gets one first (card
+//     notes-plan-at-restored-index: the carry hands the two equal balances to the step's `found`, which writes it, before
+//     its first deposit; a write refused names U_X, never carried); the carry called is this one, on the scope's own U_X
+//     reads and held map;
 //   - id_held: each id NEAR read as money is read again by asset on both providers at once (the wallet's
 //     nearIdHeldReader: the token and what intents.near holds, on each, an asset dropped only at 0 on both), and named
 //     into step 5's own list while one asset is above the kept unit a move out leaves (ID_KEEP, 1n) or the two read it
@@ -98,13 +99,18 @@ const UX_CARRY = new RegExp(
     `for\\(;;\\)\\{let\\[(${N}),(${N})\\]=await \\2\\.balances\\(\\3\\);if\\(\\9!==\\10\\)return\\{why:${Q}reads [^${Q}]*${Q},retry:\\6===null\\};` +
     `if\\(\\6!==null&&\\9>=\\6\\)return\\{why:${Q}holds [^${Q}]*after a deposit from it filled: read again${Q},retry:!1\\};if\\(\\9<\\2\\.ladder\\.min\\)return \\7\\(\\9\\);let (${N})=await \\2\\.costs\\(\\3\\);if\\(\\9<\\11\\.floor\\)return \\7\\(\\9\\);` +
     `let (${N})=${N}\\(\\2\\.ladder,\\9,\\11\\.perRung,\\11\\.keep\\);if\\(\\12===0n\\)return \\7\\(\\9\\);if\\(!\\4\\)return\\{why:${Q}holds \\$\\{String\\(\\9\\)\\}, with no deposit note on this device for its index to carry it into the pool${Q},retry:!1\\};` +
-    `\\5\\.throwIfAborted\\(\\),await \\7\\(0n\\);let\\{end:(${N})\\}=await \\2\\.deposit\\(\\3,\\12,\\5\\);` +
-    `if\\(\\13!==${Q}filled${Q}&&\\13!==${Q}part_filled${Q}\\)return\\{why:${Q}holds [^${Q}]*its carry into the pool ended [^${Q}]*${Q},retry:!1\\};\\6=\\9\\}\\}`,
+    // card notes-plan-at-restored-index: a U_X with no note here (`noted` a function) has its note written from the two
+    // equal balances before its first deposit; a write refused is named, never carried, and a sign out goes on as a throw
+    `if\\(\\5\\.throwIfAborted\\(\\),typeof \\4==${Q}function${Q}\\)\\{try\\{await \\4\\(\\[\\9,\\10\\]\\)\\}catch\\((${N})\\)\\{if\\(\\5\\.throwIfAborted\\(\\),\\13 instanceof ${N}\\)throw \\13;` +
+    `return\\{why:${Q}holds \\$\\{String\\(\\9\\)\\}; its deposit note was not written \\(\\$\\{\\13 instanceof Error\\?\\13\\.message:${Q}it threw${Q}\\}\\): restore again to carry it${Q},retry:!1\\}\\}\\4=!0\\}` +
+    `await \\7\\(0n\\);let\\{end:(${N})\\}=await \\2\\.deposit\\(\\3,\\12,\\5\\);` +
+    `if\\(\\14!==${Q}filled${Q}&&\\14!==${Q}part_filled${Q}\\)return\\{why:${Q}holds [^${Q}]*its carry into the pool ended [^${Q}]*${Q},retry:!1\\};\\6=\\9\\}\\}`,
 );
 // the carry's call site, bound to the reader's held map (`held`), the scope's U_X reads (`ux`) and the carry's own name:
-// `noted(scope)` read once per scope with a U_X held, and the carry handed whether U_{s,i}'s own index is among them
+// `noted(scope)` read once per scope with a U_X held, and the carry handed whether U_{s,i}'s own index is among them,
+// else (card notes-plan-at-restored-index) the step's `found` for that scope and index, handed the carry's two balances
 const UX_NOTED = (held, ux, carry) =>
-  new RegExp(`=${esc(held)}\\.size===0\\?new Set:await ${N}\\(${N}\\.scope\\);for\\(let (${N}) of\\[\\.\\.\\.${esc(held)}\\.values\\(\\)\\]\\.sort\\(\\([^)]*\\)=>[^)]*\\)\\)\\{${N}\\.throwIfAborted\\(\\);let ${N}=await ${esc(carry)}\\(${esc(ux)},\\1,${N}\\.has\\(\\1\\.i\\),${N}\\)`);
+  new RegExp(`=${esc(held)}\\.size===0\\?new Set:await ${N}\\((${N})\\.scope\\);for\\(let (${N}) of\\[\\.\\.\\.${esc(held)}\\.values\\(\\)\\]\\.sort\\(\\([^)]*\\)=>[^)]*\\)\\)\\{${N}\\.throwIfAborted\\(\\);let ${N}=await ${esc(carry)}\\(${esc(ux)},\\2,${N}\\.has\\(\\2\\.i\\)\\|\\|\\((${N})=>${N}\\.found\\(\\1\\.scope,\\2\\.i,\\3\\)\\),${N}\\)`);
 // each id NEAR read as money (`D`), in index order, named by the held rule (`H`) on the both-provider held reader, into
 // step 5's own lists (delta review 2 P3-1: a push into any other list names nothing; card
 // restore-first-sign-in-under-two-minutes: a read again on `held`, which the last try tells as a finding, the rest on
