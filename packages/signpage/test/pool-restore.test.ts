@@ -13,7 +13,7 @@
 import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { after, beforeEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { resetPaces } from "../../wallet/src/pace.ts";
 // each test's clock starts at its own zero: one pace per provider URL is shared by every reader (card wallet-id-reader-paced)
@@ -36,6 +36,7 @@ import { base58, hex } from "@scure/base";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { ReadBusy } from "../src/read-waits.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
+import { ID_KEEP as KEEP } from "../../wallet/src/deposit/moveout.ts";
 import { askOf, solanaPoolFollowDeps, type PoolDepositEnd, type PoolUxReads } from "../src/pool-deposit-follow.ts";
 import { TRADE_HELPER } from "../src/trade.ts";
 import { vaultScope } from "../src/withdraw/checks.ts";
@@ -119,8 +120,11 @@ function nearOf(as: ReadonlyMap<string, As> = new Map()) {
 }
 
 let db = 0;
+// every store a test opens is closed at that test's end, as vworld does (card restore-sweep-world-tests-exit-alone): a
+// test run alone by name then exits. Closed at the file's end, a store a test past a top-level await opened stayed open
+// (the root's after ran once the tests above it were filtered out), its BroadcastChannel holding the process.
 const closers: (() => void)[] = [];
-after(() => closers.forEach((f) => f()));
+afterEach(() => closers.splice(0).forEach((f) => f()));
 async function world(over: Partial<PoolRestoreHost> = {}) {
   const store = await openWalletStore({ name: `restore-${db++}`, indexedDB: new IDBFactory() });
   closers.push(() => store.close());
@@ -1208,7 +1212,6 @@ function nearPlanted(plant: ReadonlyMap<string, readonly [bigint, bigint]>, as: 
   };
   return n;
 }
-const KEEP = (await import("../../wallet/src/deposit/moveout.ts")).ID_KEEP;
 
 test("review P1: a refund left under U_{s,i} inside intents.near, every U_X empty, ends stalled with that money named by asset, never done", async () => {
   const id = idOf(SOL_SCOPE, 3);
@@ -1582,7 +1585,7 @@ test("E3: step 5 is owed by a marker (scopes only) from the walk's end; a reload
   const factory = new IDBFactory();
   const name = `restore-owed-${db++}`;
   const store = await openWalletStore({ name, indexedDB: factory });
-  // closed at the file's end like every world's store: a failure before the sign out below would leave its
+  // closed at the test's end like every world's store: a failure before the sign out below would leave its
   // BroadcastChannel open, and the test process would never exit
   closers.push(() => store.close());
   const w = await world({ store: async () => store, pools: () => SOL_ONLY, ids: g.ids, ux: () => uxOf(new Map()).reads });

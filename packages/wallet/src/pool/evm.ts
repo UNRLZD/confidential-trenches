@@ -86,6 +86,8 @@ import { perEpoch, PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, typ
 
 /** One JSON-RPC call on one EVM provider (the kit's JSON-RPC client shape, solanaJsonRpc, which speaks any JSON-RPC). */
 export type EvmRpc = SolanaRpc;
+/** A fee list seat (EvmPoolArgs feeRpcs): `stateMs`, when set, how far behind the head it keeps a block's state, ms. */
+export type EvmFeeRpc = EvmRpc & { readonly stateMs?: number };
 
 /** ETH's ladder: one = the pool's MIN_DEPOSIT, 0.0001 ETH (src/PrivacyPool.sol:53), from 0.001 ETH = 10 x one, as
  * SOL_LADDER's smallest chunk is 0.01 SOL = 10 x the Solana program's MIN_DEPOSIT (./solana.ts SOL_LADDER) [design:
@@ -2786,8 +2788,13 @@ export type EvmPoolArgs = {
    * Robinhood testnet no second free provider gives both (read 2026-11-04 20:09-20:44Z: PublicNode keeps about 15 s of
    * state and pages 50,000 blocks of logs; dRPC keeps 600 s and more but refuses a 1,000-block page of the pool's old
    * logs).
+   * A seat with `stateMs` keeps a block's state only that long behind the head (card
+   * robinhood-fee-read-old-blocks-own-rpc: robinhood-rpc.publicnode.com answers HTTP 403 "Archive requests require a
+   * personal token" from about 10 s back, read 2026-11-18 14:49Z and 15:36Z): a read at a block that old or older, by
+   * the device clock against the block's time, walks the list without it, in the list's order; a younger one walks it
+   * whole. The seats with no `stateMs` hold two operators at least.
    */
-  feeRpcs: readonly EvmRpc[];
+  feeRpcs: readonly EvmFeeRpc[];
   /** Where the device holds the pool's sync between syncs (EvmSyncArgs held). */
   held?: EvmSyncHold;
   /** Where else the pool's logs may be read (EvmSyncArgs history), before the providers of `rpcs`. */
@@ -2808,6 +2815,8 @@ export type EvmPoolArgs = {
   epochFee: EvmEpochFeeRule;
   /** tests only: the fee walk's cut, budget, rest and clock (the kit's EvmTwoOperatorsOpts; its defaults live) */
   feeRead?: EvmTwoOperatorsOpts;
+  /** tests only: the device clock a fee read's block age is taken on, ms (Date.now) */
+  clock?: () => number;
   /** tests only: the salt source (16 random bytes unless given) and the wait between lag retries */
   salt?: () => Uint8Array;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -2835,7 +2844,25 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   if (!Array.isArray(a.feeRpcs) || a.feeRpcs.length < 2 || a.feeRpcs.some((r) => typeof r !== "function")) throw new Error("feeRpcs: two or more");
   if (a.feeRpcs.some((r) => typeof r.url !== "string")) throw new Error("feeRpcs: each with its url (its operator)");
   for (let i = 0; i < a.feeRpcs.length; i++) for (let j = i + 1; j < a.feeRpcs.length; j++) if (solanaSameProvider(a.feeRpcs[i]!, a.feeRpcs[j]!)) throw new Error("feeRpcs: one provider twice is one read");
-  const feeRpcs = evmTwoOperators(a.feeRpcs.map((rpc) => ({ url: rpc.url!, rpc })), a.feeRead);
+  for (const r of a.feeRpcs) if (r.stateMs !== undefined && !(Number.isFinite(r.stateMs) && r.stateMs > 0)) throw new Error("feeRpcs: stateMs a positive number of ms");
+  // a fee walk for each set of seats a block's age leaves (the list's order kept), made once: the seats that keep any
+  // block's state, then one more set for each stateMs; the oldest's made here, so a list with fewer than two operators
+  // keeping old state is refused at once
+  const feeWalks = new Map<string, EvmTwoOperators<EvmRpc>>();
+  const clock = a.clock ?? (() => Date.now());
+  const feeWalkAt = (block: EvmBlock): EvmTwoOperators<EvmRpc> => {
+    const age = clock() - Number(block.timestamp) * 1000;
+    const seats = a.feeRpcs.filter((r) => r.stateMs === undefined || age < r.stateMs);
+    const key = seats.map((r) => r.url).join(" ");
+    let w = feeWalks.get(key);
+    if (w === undefined) feeWalks.set(key, (w = evmTwoOperators(seats.map((rpc) => ({ url: rpc.url!, rpc })), a.feeRead)));
+    return w;
+  };
+  try {
+    feeWalkAt({ number: 0n, hash: "", timestamp: 0n, baseFeePerGas: null });
+  } catch (e) {
+    throw new Error(`feeRpcs, the seats that keep old state: ${(e as Error).message}`);
+  }
   if (typeof a.epochFee !== "function" || typeof a.relayFee !== "function") throw new Error("epochFee and relayFee: functions");
   const pool = lower(a.pin.pool);
   const feeRecipient = lower(a.pin.feeRecipient);
@@ -2908,7 +2935,7 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
         // the period's fee state read while its block is fresh, straight after the block (review of 7fbf2af3, P2-2);
         // held by the block's hash (a reorg that replaced the block is another block)
         const stop = new AbortController();
-        const held: HeldFee = { hash: block.hash, block, read: evmPeriodChainFee(feeRpcs, a.pin.network, pool, block, stop.signal, sleep), done: false, waiting: 0, stop };
+        const held: HeldFee = { hash: block.hash, block, read: evmPeriodChainFee(feeWalkAt(block), a.pin.network, pool, block, stop.signal, sleep), done: false, waiting: 0, stop };
         held.read.then(() => void (held.done = true), () => void (heldFees.get(epochStartMs) === held && heldFees.delete(epochStartMs)));
         heldFees.set(epochStartMs, (h = held));
         const newest = [...heldFees.keys()].reduce((x, y) => (y > x ? y : x));
