@@ -175,6 +175,7 @@ const M = [
   ["review of 4f6e75ad9 P3: a step 5 read on in its tries on another run's marker", PRS, [["          if (t > 1 && owedOf(await seedHeld(async () => (await h.store()).get(\"meta\", RESTORE_IDS_KEY)))?.run !== runId) return;\n", ""]], PRT, "review of 4f6e75ad9 P3"],
   ["restore-follow-up-run-op: a joined request's run that ends stalled writes no op (the earlier done stands)", PRS, [['      if (!first(stage) && stage === "stalled" && !owed && !signal.aborted) await stalledOp().catch(() => {});\n', "      first(stage);\n"]], PRT, "restore-follow-up-run-op"],
   ["restore-follow-up-run-op: a load's resume that ends stalled writes an op", PRS, [['stage === "stalled" && !owed && !signal.aborted)', 'stage === "stalled" && !signal.aborted)']], PRT, "restore-follow-up-run-op"],
+  ["restore-follow-up-run-op: a clean last try writes done over a walk that ended stalled", PRS, [['if (!r.last || !run.finding || stage === "stalled") return;', "if (!r.last || !run.finding) return;"]], PRT, "restore-follow-up-run-op"],
   ["restore-follow-up-run-op: a walk's throw told after the run's key is zeroed (its op's seed check fails)", PRS, [["        await stop(e);\n        runKey.fill(0);", "        runKey.fill(0);"]], PRT, "restore-follow-up-run-op"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"

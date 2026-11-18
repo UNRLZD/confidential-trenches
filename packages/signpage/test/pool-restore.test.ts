@@ -2144,6 +2144,18 @@ test("delta P3-B: a finding a later try of the run no longer reads leaves the ne
   assert.equal(await markerOf(w.store), undefined);
 });
 
+test("restore-follow-up-run-op: a finding a later try no longer reads, in a run whose walk ended stalled (a pool's walk failed), leaves the newest restore op stalled, never done", async (t) => {
+  usedMap = new Map();
+  const held = solUx(idOf(SOL_SCOPE, 3));
+  const off = solUx(idOf(SOL_SCOPE, 10));
+  const planted = new Map<string, UxAs>([[held, "held"], [off, "off"]]);
+  const w = await vworld(t, { solana: emptyWalk, evm: (async () => { throw new Error("evm down"); }) as never, ids: nearOf().ids, ux: () => uxOf(planted, STUCK).reads, pausesMs: [1, 1, 1, 1], step5: (e) => void (w.steps.push(e), planted.set(held, "empty"), planted.set(off, "empty")), now: (() => { let t = 1_000; return () => (t += 10); })() });
+  assert.equal(await w.r.auto(), "stalled");
+  await w.r.idle();
+  assert.deepEqual(w.steps.map((s) => s.named.length > 0), [true, false]);
+  assert.deepEqual((await restoreOps(w.store)).map((x) => x.stage), ["stalled"]);
+});
+
 test("delta P3-C: a lane read is kept on the marker only while the run's seed is the one stored", async () => {
   usedMap = new Map();
   let other = false;

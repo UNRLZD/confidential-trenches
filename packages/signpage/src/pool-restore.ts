@@ -1429,8 +1429,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           h.step5?.(r);
           if (r.named.length === 0) {
             // the run's last try read every id with nothing to tell after a finding was told: the newest restore op is
-            // done again, so the stalled sheet never stands on nothing (delta review P3-B)
-            if (!r.last || !run.finding) return;
+            // done again, so the stalled sheet never stands on nothing (delta review P3-B); never over a walk that ended
+            // stalled, whose reasons stand (card restore-follow-up-run-op)
+            if (!r.last || !run.finding || stage === "stalled") return;
             run.finding = false;
             await seedHeld(async () => (await h.store()).put("ops", crypto.randomUUID(), { kind: "restore", stage: "done", txs: [], created_ms: now() }));
             return;
