@@ -3,6 +3,9 @@
 // Robinhood providers refuse holds no key-shaped run. After a helper deploy it asks, as the signing page does (Origin
 // SIGN_HOST), each chain's ?keyed=only RPC route (the chain's keyed URLs alone) for one eth_call whose data is odd-length
 // hex, which every provider refuses as bad params; the helper answers with the provider's refusal, or its own words.
+// That refusal is the path this card changed (apps/helper/src/rpc/rpc.ts answerHoldsKey: a keyed provider's refusal
+// whose words hold its key in any form the kit's secretScrubber reads is withheld, a 503). The helper's log lines (the
+// EVM seats', the NEAR client's, the Solana rent line) are not readable from outside; their unit tests hold them.
 // A key-shaped run is 16 or more characters of a key's alphabet (letters, digits, - _ + / = %) holding a letter and a
 // digit that is not 0x-hex: a provider key (dRPC's, QuickNode's 40-hex path, Alchemy's), whole or cut, as written or
 // percent-encoded, with or without its URL path before it.
