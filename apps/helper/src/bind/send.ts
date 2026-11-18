@@ -39,7 +39,7 @@
 // create-if-absent) and fsync of the directory, owned by one process through an exclusive lock the kernel holds.
 import { createHash, createPrivateKey, createPublicKey, sign as edSign } from "node:crypto";
 import * as nodeFs from "node:fs";
-import { HELPER_CODE_STATUS } from "@blindfill/kit";
+import { HELPER_CODE_STATUS, secretScrubber } from "@blindfill/kit";
 import { base58, checkBindDeposit, decodeSignedDelegate, type BindCode, type BindConfig, type BindLedger, type BindReads, type KeyRead } from "./checks.ts";
 import { tokenHeld, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { openDurableDir, type DurableDir, type StoreFs } from "../store/durable.ts";
@@ -675,8 +675,33 @@ async function carryChecked(deps: SendDeps, d: Checked, sha: string): Promise<An
 export const RPC_TIMEOUT_MS = 10_000;
 const RPC_ANSWER_MAX = 4 * 1024 * 1024;
 
-/** A JSON-RPC client for one NEAR provider: a bounded answer, a timeout, the `error` object thrown as is. */
+/** A JSON-RPC client for one NEAR provider: a bounded answer, a timeout, the `error` object thrown as is (its data kept
+ *  for the caller to read). Every error it throws has its words, and its cause's, cleaned of the URL's secrets by the
+ *  kit's one rule, secretScrubber (card helper-scrubber-takes-the-kits-rule): the provider's error JSON, a body the
+ *  parser quotes and a failed fetch may each echo the key, and callers log e.message (withdraw/send.ts, bind/trade.ts). */
 export function nearRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): Rpc {
+  const scrub = secretScrubber([url]);
+  const call = nearRpcCall(url, fetchFn, timeoutMs);
+  return (method, params) => call(method, params).catch((e: unknown) => Promise.reject(scrubbed(e, scrub)));
+}
+
+/** `e` with its message, stack and cause's message put through `scrub`, its class and other fields kept (a DOMException's
+ *  read-only message is redefined on the instance); a value that is not an Error becomes one of its scrubbed words. */
+function scrubbed(e: unknown, scrub: (text: string) => string): Error {
+  if (!(e instanceof Error)) return new Error(scrub(String(e)));
+  const set = (o: object, k: string, v: string) => Object.defineProperty(o, k, { value: v, writable: true, configurable: true });
+  try {
+    set(e, "message", scrub(e.message));
+    set(e, "stack", scrub(String(e.stack)));
+    if (e.cause instanceof Error) set(e.cause, "message", scrub(e.cause.message)), set(e.cause, "stack", scrub(String(e.cause.stack)));
+    else if (e.cause !== undefined) set(e, "cause", scrub(String(e.cause)));
+    return e;
+  } catch {
+    return new Error(scrub(e.message));
+  }
+}
+
+function nearRpcCall(url: string, fetchFn: typeof fetch, timeoutMs: number): Rpc {
   return async (method, params) => {
     const res = await fetchFn(url, {
       method: "POST",

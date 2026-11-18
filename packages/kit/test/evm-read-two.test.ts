@@ -3,7 +3,7 @@
 // operator, two answers that differ, one operator alone.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { EVM_READ_BUDGET_MS, EVM_READ_CALL_MS, EVM_READ_REST_MS, EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, type EvmReadSeat } from "../src/index.ts";
+import { EVM_READ_BUDGET_MS, EVM_READ_CALL_MS, EVM_READ_REST_MS, EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, secretScrubber, SECRET_SCRUB_MAX, type EvmReadSeat } from "../src/index.ts";
 
 type Fake = { calls: number; answer: (signal: AbortSignal) => Promise<string> };
 const ok = (v: string): Fake => ({ calls: 0, answer: async () => v });
@@ -311,4 +311,38 @@ test("cleaned words keep what a caller reads: a provider's own words, the seat's
   assert.ok(t instanceof EvmOperatorsUnanswered);
   assert.equal((t.errors[0] as DOMException).name, "TimeoutError");
   assert.ok(!LEAK.test((t.errors[0] as Error).message) && !LEAK.test(t.message), t.message);
+});
+
+// card helper-scrubber-takes-the-kits-rule: the rule is the kit's public secretScrubber, which the helper cleans every
+// provider's words with; the forms past the 20 that card found
+test("secretScrubber: a raw '+' in a query key, as written, cut or percent-encoded, leaves none of it; the longest start at a place goes", () => {
+  const PK = "PlUsKeY0+9876543210fedcba";
+  const scrub = secretScrubber([`https://b.example/rpc?apikey=${PK}`]);
+  assert.equal(scrub(`invalid api key ${PK} for this plan`), "invalid api key <key> for this plan");
+  assert.equal(scrub("key PlUsKeY0+987654 rejected"), "key <key> rejected");
+  assert.equal(scrub(`bad ${encodeURIComponent(PK)} here`), "bad <key> here");
+  assert.equal(scrub(`bad ${PK.replace("+", " ")} here`), "bad <key> here");
+});
+
+test("secretScrubber: a chain's name in a seat's path is a word, so its hosts and env names stay readable; a key beside it goes", () => {
+  const scrub = secretScrubber(["https://lb.drpc.live/robinhood/AkEySeCrEt0123456789", "https://x.example/base-mainnet/rpc?access_token=T0kEnSeCrEt99"]);
+  assert.equal(scrub("robinhood.drpc.org: HTTP 400; drpc.live (ROBINHOOD_RPC_URL_DRPC_1): base-mainnet access_token AkEySeCrEt0123 T0kEnSeCrEt99"), "robinhood.drpc.org: HTTP 400; drpc.live (ROBINHOOD_RPC_URL_DRPC_1): base-mainnet access_token <key> <key>");
+});
+
+test("secretScrubber: a URL that does not parse is passed over; words past SECRET_SCRUB_MAX are cut, the cut marked, a whole key past it still gone", () => {
+  const scrub = secretScrubber(["not a url", "https://a.example/v2/AkEySeCrEt0123456789"]);
+  assert.equal(scrub("not a url said no"), "not a url said no");
+  const out = scrub(`${"y".repeat(SECRET_SCRUB_MAX)} AkEySeCrEt0123456789`);
+  assert.equal(out.length, SECRET_SCRUB_MAX + 1);
+  assert.ok(out.endsWith("…") && !out.includes("AkEySeCr"));
+  assert.equal(secretScrubber(["https://a.example/v2/AkEySeCrEt0123456789"], 10)("0123456789abc"), "0123456789…");
+});
+
+test("secretScrubber: a lowercase word is a word only as a path segment or a query name; as a password, a query value or a fragment it is a secret", () => {
+  const pw = ["correct", "horse", "battery"].join("-");
+  const scrub = secretScrubber([`https://user:${pw}@node.example.com/robinhood?apikey=${"pinkelephantdance"}#${"supersecretfragment"}`]);
+  assert.equal(scrub(`auth failed for user:${pw}`), "auth failed for user:<key>");
+  assert.equal(scrub("bad apikey pinkelephantdance"), "bad apikey <key>");
+  assert.equal(scrub("no route supersecretfragment"), "no route <key>");
+  assert.equal(scrub("robinhood is down"), "robinhood is down");
 });
