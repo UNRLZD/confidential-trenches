@@ -5,9 +5,9 @@
 // FINAL gate with the relayer named, a failed key read's pace; the review of 59c2db71: the last nonce's FINAL, the wait
 // past the nonce with no relayer named, a short read held), runs the named test, expects it to fail, puts the source
 // back.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const B = `${W}/src/deposit/bind.ts`, F = `${W}/src/deposit/follow.ts`;
 const V = "test/deposit-prepay-taken.test.ts", TB = "test/deposit-bind.test.ts";
@@ -47,19 +47,12 @@ for (const [name, file, find, repl, test, pat] of M) {
     process.exitCode = 1;
     continue;
   }
-  writeFileSync(file, src[file].replace(find, repl));
-  // a run past 120 s is killed, its process group with it (scripts/group-run.mjs)
-  let r;
-  try {
-    r = runSync("node", ["--test", `--test-name-pattern=${pat}`, test], { cwd: W, encoding: "utf8", timeoutMs: 120_000 });
-  } finally {
-    writeFileSync(file, src[file]);
-  }
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const killed = r.status !== 0 && Number(fail) > 0;
+  // a run past 120 s is killed, its process group with it; a run with no verdict is refused (scripts/mutant-run.mjs)
+  const r = withPlant(file, src[file].replace(find, repl), () => runMutant([`--test-name-pattern=${pat}`, test], { cwd: W, timeoutMs: 120_000 }));
+  if (refused(name, r)) continue;
+  const killed = r.verdict === "killed";
   if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}`);
+  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}`);
 }
 console.log(`${ok}/${M.length} killed`);
 if (ok !== M.length) process.exitCode = 1;
