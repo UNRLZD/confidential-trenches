@@ -170,3 +170,19 @@ test("a deploy's new helper writes nothing until the senders are its own, then t
   assert.deepEqual([copy.from, copy.to], [911, 1_010]);
   assert.deepEqual(copy.logs, chainLogs(911, 1_010));
 });
+
+test("the other helper of a deploy mid-write: the new one reads the copy committed before it, drops nothing", async (t) => {
+  const file = join(dir(t), "swap-index-robinhood.sqlite");
+  await helper(file).index.upTo(1_000);
+  const other = new DatabaseSync(file);
+  t.after(() => other.close());
+  other.exec("BEGIN IMMEDIATE; DELETE FROM logs; UPDATE meta SET v = '5' WHERE k = 'from';");
+  const next = helper(file);
+  assert.deepEqual(next.logged, [], "no drop");
+  assert.ok(next.store !== null);
+  assert.equal(await next.index.upTo(1_000), true);
+  assert.deepEqual(next.reads, [], "the copy committed before the write in flight is served");
+  assert.deepEqual(next.index.logs(0, 2_000), chainLogs(901, 1_000));
+  other.exec("ROLLBACK");
+  assert.equal(helper(file).store!.load()!.logs.length, 200);
+});

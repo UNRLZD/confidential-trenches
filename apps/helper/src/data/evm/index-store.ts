@@ -48,8 +48,12 @@ function logOf(r: Row, topics: ReadonlySet<string>, from: number, to: number): L
   return { block: r.block, index: r.idx, tx: r.tx, address: r.address, topics: ts, data: r.data, t: r.t as number | null };
 }
 
+/** How long a statement waits for the other helper of a deploy to finish a write (both mount the store volume while
+ *  they overlap; only the one that holds the senders writes, index.ts `writable`). */
+const BUSY_MS = 5_000;
+
 function open(file: string, topicsKey: string): DatabaseSync {
-  const db = new DatabaseSync(file);
+  const db = new DatabaseSync(file, { timeout: BUSY_MS });
   try {
     db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;
       CREATE TABLE IF NOT EXISTS logs (block INTEGER NOT NULL, idx INTEGER NOT NULL, tx TEXT NOT NULL, address TEXT NOT NULL, topics TEXT NOT NULL, data TEXT NOT NULL, t INTEGER, PRIMARY KEY (block, idx)) WITHOUT ROWID;
@@ -77,6 +81,11 @@ export function openIndexStore(file: string, topicList: readonly string[], log: 
   try {
     db = open(file, topicsKey);
   } catch (e) {
+    // a file the other helper holds locked is that helper's, never dropped: this one runs in memory
+    if (/locked|busy/i.test((e as Error).message)) {
+      log(`swap index store ${file}: not opened (${(e as Error).message}), the index runs in memory`);
+      return null;
+    }
     log(`swap index store ${file}: dropped (${(e as Error).message}), started again`);
     try {
       drop();
