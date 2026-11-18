@@ -497,7 +497,8 @@ async function verdictOf(r: Run, n: NoteRecord, kept: (n: NoteRecord) => void = 
     const pick = evmTakenNotes(r.seed, r.scope, round.events, first, round.finalBlock);
     const block = round.events[Number(leaf.leafIndex)]!.block;
     const own: EvmRestoredNote = { ref: n.ref, scope: r.scope, precommitment: n.precommitment, leaf, state: "UNSPENT", ...(block > round.finalBlock ? { landed: { block, fin: round.finalBlock } } : {}) };
-    for (const c of await evmClaimTaken(r.store, [...pick.taken.filter((t) => !sameRef(t.ref, n.ref)), own])) r.h.landed?.(c);
+    // the walk's takes in its chain's order, as before; the note's own after them when the walk stopped short of it
+    for (const c of await evmClaimTaken(r.store, pick.taken.some((t) => sameRef(t.ref, n.ref)) ? pick.taken : [...pick.taken, own])) r.h.landed?.(c);
     const now = (await r.store.get(n.id))!;
     return { kind: "landed", note: now, filled: now.leaf?.value === n.evmSends?.[0]?.value };
   }

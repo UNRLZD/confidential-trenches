@@ -42,9 +42,9 @@ const SIM = (miss) => new RegExp(`\`eth_call\`,\\[\\{from:${N},to:${N}\\.to,valu
 const DOWN = (lag) => new RegExp(`${N} instanceof ${esc(lag)}\\?\\(${N}\\.fault=${N},\\{error:\`down\`\\}\\)`);
 /** verdictOf: `let o=await e.h.round(),s=ZR(e.scope,o.events,t.precommitment);if(s!==null){if(bB(e.h))return{kind:\`pending\`};
  *  let n=JR(e.seed,e.scope,o.events,r,o.finalBlock),i=o.events[Number(s.leafIndex)].block,a={ref:t.ref,...,leaf:s,state:\`UNSPENT\`,...};
- *  for(let r of await XR(e.store,[...n.taken.filter(...),a]))...}if(i===void 0)return{kind:\`dead\`};let c=t.evmSpent!==void 0` */
+ *  for(let r of await XR(e.store,n.taken.some(...)?n.taken:[...n.taken,a]))...}if(i===void 0)return{kind:\`dead\`};let c=t.evmSpent!==void 0` */
 const OWN = new RegExp(
-  `let (${N})=await (${N})\\.h\\.round\\(\\),(${N})=${N}\\(\\2\\.scope,\\1\\.events,(${N})\\.precommitment\\);if\\(\\3!==null\\)\\{if\\(${N}\\(\\2\\.h\\)\\)return\\{kind:\`pending\`\\};let (${N})=${N}\\(\\2\\.seed,\\2\\.scope,\\1\\.events,${N},\\1\\.finalBlock\\),(${N})=\\1\\.events\\[Number\\(\\3\\.leafIndex\\)\\]\\.block,(${N})=\\{ref:\\4\\.ref,scope:\\2\\.scope,precommitment:\\4\\.precommitment,leaf:\\3,state:\`UNSPENT\`,[^]{0,120}?\\};for\\(let ${N} of await ${N}\\(\\2\\.store,\\[\\.\\.\\.\\5\\.taken\\.filter\\([^]{0,60}?\\),\\7\\]\\)\\)[^]{0,240}?return\\{kind:\`landed\`,[^]{0,120}?\\}\\}if\\(${N}===void 0\\)return\\{kind:\`dead\`\\};let ${N}=\\4\\.evmSpent!==void 0`,
+  `let (${N})=await (${N})\\.h\\.round\\(\\),(${N})=${N}\\(\\2\\.scope,\\1\\.events,(${N})\\.precommitment\\);if\\(\\3!==null\\)\\{if\\(${N}\\(\\2\\.h\\)\\)return\\{kind:\`pending\`\\};let (${N})=${N}\\(\\2\\.seed,\\2\\.scope,\\1\\.events,${N},\\1\\.finalBlock\\),(${N})=\\1\\.events\\[Number\\(\\3\\.leafIndex\\)\\]\\.block,(${N})=\\{ref:\\4\\.ref,scope:\\2\\.scope,precommitment:\\4\\.precommitment,leaf:\\3,state:\`UNSPENT\`,[^]{0,120}?\\};for\\(let ${N} of await ${N}\\(\\2\\.store,\\5\\.taken\\.some\\([^]{0,60}?\\)\\?\\5\\.taken:\\[\\.\\.\\.\\5\\.taken,\\7\\]\\)\\)[^]{0,240}?return\\{kind:\`landed\`,[^]{0,120}?\\}\\}if\\(${N}===void 0\\)return\\{kind:\`dead\`\\};let ${N}=\\4\\.evmSpent!==void 0`,
 );
 
 /** What the check keeps of SIGN_HOST's build: its pin and sha384, and each part found exactly once. */

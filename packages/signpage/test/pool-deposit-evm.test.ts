@@ -1859,3 +1859,19 @@ test("evm-deposit-pruned-sim-says-why: a note's verdict reads its Deposited by i
   assert.deepEqual(shorts, [], "no top-up named for a funded U");
   assert.equal(ch.c.sent.length, 0, "never built again");
 });
+
+test("evm-deposit-pruned-sim-says-why: a note its Deposited lands is claimed in its chain's order: a take past it (U's next note, not yet in the store) is written after it, never refused", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  const i = (planned.ref as { i: number }).i;
+  // U's deposit note sent and in the pool; a front-runner's MIN_DEPOSIT on U's second arrival 0 after it
+  const send = { hash: `0x${"5f".repeat(32)}`, nonce: 0n, value: RUNG, sentMs: 1_000n };
+  await ns.move(planned.id, "PLANNED", "INCOMING", { evmSend: send });
+  ch.deposit(planned.precommitment, RUNG);
+  const ref0: NoteRef = { kind: "second", id: { id: "U", s: SCOPE, i }, n: 0 };
+  ch.deposit(noteSecrets(SEED, ref0).precommitment, EVM_POOL_MIN_DEPOSIT);
+  ch.c.nonce = 1n;
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { now: () => 1_000_000 }), null);
+  assert.deepEqual(a, { stage: "filled", txs: [] });
+  const mine = await ours(ns);
+  assert.deepEqual(mine.map((n) => [n.ref.kind, n.state, n.leaf?.value]).sort(), [["deposit", "UNSPENT", RUNG], ["second", "UNSPENT", EVM_POOL_MIN_DEPOSIT]].sort());
+});
