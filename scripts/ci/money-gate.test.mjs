@@ -90,7 +90,7 @@ test("an EVM RPC on the wrong chain is refused", async () => {
 
 test("a record that is not a money path reads nothing", async () => {
   const r = await moneyGate(rec("Money path: no\n"), good, RPCS);
-  assert.deepEqual(r, { refusals: [], read: [], notes: [], proven: [], gone: [] });
+  assert.deepEqual(r, { refusals: [], read: [], notes: [], proven: [], gone: [], unread: [] });
 });
 
 test("a tx from before the build is refused on every chain", async () => {
@@ -892,14 +892,16 @@ test("dRPC answers 429 before ok: the gate waits out each Retry-After and passes
   assert.match(s.log[i - 1], /^sleep ([1-9]\d{0,2}|1000)$/);
 });
 
-test("a 429 with no Retry-After waits 2 s, doubling, and is still no answer after the last try: refused", async () => {
+test("a 429 with no Retry-After waits 2 s, doubling, each round, and is still no answer after the gate's last round: refused on its proof", async () => {
   const s = rateLimited(() => ({}));
   const r = await nearTx(s.fetchFn, s.sleep);
   assert.match(r.refusals.join("\n"), /no answer \(rate limited \d+ times in a row\) on https:\/\/near\.drpc\.org/);
-  // the tx read is waited out; the stub's tx answer has no tx JSON to rebuild its bytes from, so no proof is asked for
-  // and nothing more is waited
+  // the tx read is waited out in each of the gate's four rounds, with the gate's pause between; then FastNEAR's one
+  // read is proven, and the stub's tx answer has no tx JSON to rebuild its bytes from, so no proof is asked for and
+  // nothing more is waited
   const waits = ["sleep 2000", "sleep 4000", "sleep 8000", "sleep 16000", "sleep 32000"];
-  assert.deepEqual(s.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), waits);
+  assert.deepEqual(s.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), [...waits, "sleep 30000", ...waits, "sleep 60000", ...waits, "sleep 120000", ...waits]);
+  assert.deepEqual(r.unread, []);
   assert.match(r.refusals.join("\n"), new RegExp(`not proven: its tx JSON names hash undefined, not ${NEAR_TX}`));
 });
 
@@ -921,12 +923,13 @@ test("dRPC answers HTTP 200 with its code-15 rate limit twice before ok: the gat
   assert.deepEqual(s.log.filter((l) => l === `ask ${DRPC} code 15` || /^sleep (2000|4000)$/.test(l)), [`ask ${DRPC} code 15`, "sleep 2000", `ask ${DRPC} code 15`, "sleep 4000"]);
 });
 
-test("a 429 whose Retry-After is past the 600 s cap is no answer at once: refused, never waited", async () => {
+test("a 429 whose Retry-After is past the 600 s cap is no answer at once, never waited: asked once a round, then refused on its proof", async () => {
   const s = rateLimited(() => ({ "retry-after": "900" }));
   const r = await nearTx(s.fetchFn, s.sleep);
   assert.match(r.refusals.join("\n"), /no answer \(rate limited, Retry-After 900 s is past the 600 s cap\) on https:\/\/near\.drpc\.org/);
-  assert.equal(s.log.filter((l) => l === `ask ${DRPC} EXPERIMENTAL_tx_status`).length, 1);
-  assert.deepEqual(s.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), []);
+  assert.equal(s.log.filter((l) => l === `ask ${DRPC} EXPERIMENTAL_tx_status`).length, 4);
+  // only the gate's own pauses between its rounds, never the 900 s
+  assert.deepEqual(s.log.filter((l) => /^sleep \d+$/.test(l) && Number(l.slice(6)) > 1000), ["sleep 30000", "sleep 60000", "sleep 120000"]);
 });
 
 // Card money-gate-light-proof: a NEAR tx only one operator reads passes only by NEAR's light-client proof. The
@@ -1764,4 +1767,169 @@ test("tx rebuild planted: a DeployContract tx with a field it does not rebuild i
     await assert.rejects(findTxBytes(s.fetchFn, t.host, t.id, known, s.sleep), /does not rebuild|not 32 bytes/, what);
     assert.deepEqual(s.log, [], what);
   }
+});
+
+// Card money-gate-rate-limit-is-not-missing: a throttled read is no answer, never an answer of absent. Each chain's
+// not-found answer, read 2026-11-18 at 11:32Z: NEAR's UNKNOWN_TRANSACTION (near.drpc.org, a tx past its window), a
+// Solana getTransaction result null (api.mainnet-beta.solana.com and public.rpc.solanavibestation.com, an unknown
+// signature) and an EVM eth_getTransactionReceipt result null (mainnet.base.org, rpc.mainnet.chain.robinhood.com,
+// robinhood-rpc.publicnode.com, an unknown hash). Each one's throttle, as the stand-in below answers it: HTTP 429
+// (base.drpc.org answered one at 11:32Z, with its code 15 "You reached Public endpoint rate limit" body), a transport
+// error, mainnet.base.org's -32016 "over rate limit" and EIP-1474's -32005 (apps/helper/src/limits/limits.ts, cited
+// there). A host that throttles past rpc()'s own bound is asked again in the gate's next round, after a pause on the
+// injected clock; a tx is refused only on an answer (failed, old, or absent on two operators, or every host answered
+// and two operators do not read it ok), and one no host could read within the bound is COULD NOT READ, never a pass.
+// read by name, so each planted case below fails on its own on a gate without it, not the whole file at import
+const { outcome } = await import("./money-gate.mjs");
+const flakyJson = (status, body) => ({ ok: status < 400, status, headers: new Headers(), json: async () => body });
+const THROTTLE = {
+  "HTTP 429": () => flakyJson(429, { jsonrpc: "2.0", id: 1, error: { code: 15, message: "You reached Public endpoint rate limit, please upgrade to paid plan" } }),
+  "a transport error": () => {
+    throw new TypeError("fetch failed");
+  },
+  "-32016 over rate limit": () => flakyJson(200, { jsonrpc: "2.0", id: 1, error: { code: -32016, message: "over rate limit" } }),
+  "-32005 limit exceeded": () => flakyJson(200, { jsonrpc: "2.0", id: 1, error: { code: -32005, message: "limit exceeded" } }),
+};
+// `answer(url, method, round)`: round counts the gate's own pauses so far (0 in its first round); it returns a THROTTLE
+// name, an answer body, or null for the landed tx's own answer (chainAnswers)
+const GATE_PAUSE = /^sleep (30000|60000|120000)$/;
+function flaky(answer) {
+  const log = [];
+  const asks = new Map();
+  const fetchFn = async (url, init) => {
+    const { method } = JSON.parse(init.body);
+    asks.set(url, (asks.get(url) ?? 0) + 1);
+    log.push(`ask ${url} ${method}`);
+    const a = answer(url, method, log.filter((l) => GATE_PAUSE.test(l)).length);
+    if (typeof a === "string") return THROTTLE[a]();
+    return flakyJson(200, { jsonrpc: "2.0", id: 1, ...(a ?? chainAnswers(NOV2)(url, method)) });
+  };
+  const sleep = async (ms) => void log.push(`sleep ${ms}`);
+  return { fetchFn, sleep, log, asks };
+}
+const MISSING = { near: { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } }, other: { result: null } };
+const NEAR_CHAINS = new Set(["near", "near-testnet"]);
+const missingOn = (chain, method) =>
+  (NEAR_CHAINS.has(chain) ? method === "EXPERIMENTAL_tx_status" : method === "getTransaction" || method === "eth_getTransactionReceipt") ? (NEAR_CHAINS.has(chain) ? MISSING.near : MISSING.other) : null;
+const ONE = {
+  near: `Tx: near ${NEAR_TX} intents.near`,
+  solana: `Tx: solana ${SOL_TX}`,
+  base: `Tx: base ${BASE_TX}`,
+  robinhood: `Tx: robinhood ${BASE_TX}`,
+};
+const oneTx = (chain) => rec(`Money path: yes\n${ONE[chain]}\n`);
+
+test("planted: a landed tx whose second host throttles through the first round passes once it answers, on every chain and every throttle", async () => {
+  for (const chain of ["near", "solana", "base", "robinhood"])
+    for (const kind of Object.keys(THROTTLE)) {
+      const second = RPCS[chain][1];
+      const s = flaky((url, method, round) => (url === second && round === 0 ? kind : null));
+      const r = await moneyGate(oneTx(chain), s.fetchFn, RPCS, { sleep: s.sleep });
+      assert.deepEqual(r.refusals, [], `${chain} ${kind}`);
+      assert.deepEqual(r.unread, [], `${chain} ${kind}`);
+      assert.equal(r.read.length, 2, `${chain} ${kind}`);
+      // the pause before the gate's second round, on the injected clock
+      assert.ok(s.log.includes("sleep 30000"), `${chain} ${kind}`);
+    }
+});
+
+test("planted: absent on two operators is refused, never COULD NOT READ, a third host throttled or not", async () => {
+  for (const chain of ["solana", "base", "robinhood", "near"]) {
+    const s = flaky((url, method) => missingOn(chain, method));
+    const r = await moneyGate(oneTx(chain), s.fetchFn, RPCS, { sleep: s.sleep });
+    assert.deepEqual(r.unread, [], chain);
+    assert.match(r.refusals.join("\n"), new RegExp(`missing on ${RPCS[chain][0]}, missing on ${RPCS[chain][1]}$`), chain);
+    assert.equal(outcome(r), 1, chain);
+  }
+  // NEAR's real hosts: FastNEAR's archive and dRPC answer absent; near.org (FastNEAR's second door, no second operator) throttles
+  const s = flaky((url, method) => (url === REAL_RPCS.near[2] ? "HTTP 429" : missingOn("near", method)));
+  const r = await moneyGate(oneTx("near"), s.fetchFn, { near: REAL_RPCS.near }, { sleep: s.sleep });
+  assert.deepEqual(r.unread, []);
+  assert.match(r.refusals.join("\n"), /missing on https:\/\/archival-rpc\.mainnet\.fastnear\.com, missing on https:\/\/near\.drpc\.org, /);
+  assert.equal(outcome(r), 1);
+});
+
+test("planted: a failed tx is refused while the other host throttles, and absent on one operator beside a throttle is COULD NOT READ", async () => {
+  const failed = flaky((url, method, n) =>
+    url === "s1" ? "HTTP 429" : method === "getTransaction" ? { result: { meta: { err: { InstructionError: [0, "x"] } }, blockTime: NOV2 } } : null,
+  );
+  const f = await moneyGate(oneTx("solana"), failed.fetchFn, RPCS, { sleep: failed.sleep });
+  assert.deepEqual(f.unread, []);
+  assert.match(f.refusals.join("\n"), /failed on s2/);
+  assert.equal(outcome(f), 1);
+  const half = flaky((url, method) => (url === "b1" ? missingOn("base", method) : "HTTP 429"));
+  const h = await moneyGate(oneTx("base"), half.fetchFn, RPCS, { sleep: half.sleep });
+  assert.equal(h.unread.length, 1);
+  assert.match(h.unread[0], /missing on b1, no answer \(rate limited \d+ times in a row\) on b2$/);
+  assert.equal(outcome(h), 3);
+});
+
+test("planted: a tx every host throttles past the bound is COULD NOT READ, never a pass, after a bounded number of asks and pauses", async () => {
+  for (const chain of ["near", "solana", "base", "robinhood"])
+    for (const kind of Object.keys(THROTTLE)) {
+      const s = flaky(() => kind);
+      const r = await moneyGate(oneTx(chain), s.fetchFn, RPCS, { sleep: s.sleep });
+      assert.deepEqual(r.read, [], `${chain} ${kind}`);
+      assert.equal(r.unread.length, 1, `${chain} ${kind}`);
+      assert.match(r.unread[0], /^could not read: scripts\/live-checks\/demo\.md: /, `${chain} ${kind}`);
+      // a could-not-read is also in refusals, so a caller that reads refusals alone still never passes it
+      assert.deepEqual(r.refusals, r.unread, `${chain} ${kind}`);
+      assert.equal(outcome(r), 3, `${chain} ${kind}`);
+      // the gate's own pauses: 30 s, 60 s, 120 s, then it stops
+      assert.deepEqual(s.log.filter((l) => GATE_PAUSE.test(l)), ["sleep 30000", "sleep 60000", "sleep 120000"], `${chain} ${kind}`);
+      for (const [url, n] of s.asks) assert.ok(n <= 4 * 2 * 6, `${chain} ${kind} ${url} asked ${n} times`);
+    }
+});
+
+test("planted: a swept account read gone on one operator while the other throttles is read again and passes once it answers", async () => {
+  // the sweep's Transfer read ok on both hosts (the fixture without its refund receipt); view_account per `views`
+  const sweep = (views) =>
+    flaky((url, method, round) => {
+      if (method === "query") return views(url, round);
+      if (method !== "EXPERIMENTAL_tx_status") return null;
+      const a = structuredClone(DEL);
+      a.result.receipts_outcome = a.result.receipts_outcome.filter((o) => o.id !== REFUND);
+      return a;
+    });
+  const s = sweep((url, round) => (url === "n2" && round === 0 ? "HTTP 429" : UNKNOWN_ACCOUNT(DEL_A)));
+  const r = await moneyGate(delRec, s.fetchFn, RPCS, { sleep: s.sleep });
+  assert.deepEqual([r.refusals, r.unread, r.read.length], [[], [], 2]);
+  assert.deepEqual(r.gone, [`near ${DEL_A} gone (UNKNOWN_ACCOUNT) on n1, n2`]);
+  const never = sweep((url) => (url === "n2" ? "HTTP 429" : UNKNOWN_ACCOUNT(DEL_A)));
+  const g = await moneyGate(delRec, never.fetchFn, RPCS, { sleep: never.sleep });
+  assert.equal(g.unread.length, 1);
+  assert.match(g.unread[0], /near \S+ is not gone: gone on n1, no answer \(rate limited \d+ times in a row\) on n2$/);
+  assert.equal(outcome(g), 3);
+});
+
+test("planted: the exit code: 0 on a pass, 1 on any refusal (a could-not-read beside it included), 3 on could-not-read alone", () => {
+  assert.equal(outcome({ refusals: [], unread: [] }), 0);
+  assert.equal(outcome({ refusals: ["a: refused"], unread: [] }), 1);
+  assert.equal(outcome({ refusals: ["a: refused", "could not read: b"], unread: ["could not read: b"] }), 1);
+  assert.equal(outcome({ refusals: ["could not read: b"], unread: ["could not read: b"] }), 3);
+});
+
+test("planted: a NEAR proof whose dRPC reads throttle is proven again next round and passes; throttled every round it is COULD NOT READ", async () => {
+  // dRPC answers the tx read (absent, past its window) but throttles its status read, which the proof needs
+  const throttledHead = (rounds) => {
+    const s = proofHosts(LP);
+    const fetchFn = async (url, init) => {
+      const { method } = JSON.parse(init.body);
+      if (url === T_DR && method === "status" && s.log.filter((l) => GATE_PAUSE.test(l)).length < rounds) {
+        s.log.push(`ask ${url} ${method} 429`);
+        return THROTTLE["HTTP 429"]();
+      }
+      return s.fetchFn(url, init);
+    };
+    return { ...s, fetchFn };
+  };
+  const once = throttledHead(1);
+  const r = await moneyGate(lpRec(LP), once.fetchFn, T_RPCS, { sleep: once.sleep });
+  assert.deepEqual([r.refusals, r.unread, r.proven.length], [[], [], 1]);
+  assert.deepEqual(once.log.filter((l) => GATE_PAUSE.test(l)), ["sleep 30000"]);
+  const always = throttledHead(Infinity);
+  const g = await moneyGate(lpRec(LP), always.fetchFn, T_RPCS, { sleep: always.sleep });
+  assert.equal(g.unread.length, 1);
+  assert.match(g.unread[0], /not proven: near-testnet\.drpc\.org status: no answer \(rate limited 6 times in a row\)$/);
+  assert.equal(outcome(g), 3);
 });
