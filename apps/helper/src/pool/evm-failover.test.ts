@@ -1102,7 +1102,7 @@ async function deadStart(t: TestContext, env: Record<string, string>, plant: (ho
   return { r, s: (at.T - NOW_MS) / 1000, ms: at.T - NOW_MS };
 }
 
-test("card helper-start-residuals 1: every seat hung to its client's 5 s timeout: refused within 35 s (was 93 s), naming no operator that answers and each seat that answered none", async (t) => {
+test("card helper-start-residuals 1: every seat hung to its client's 5 s timeout: refused within 35 s (84 s before the card), naming no operator that answers and each seat that answered none", async (t) => {
   const { r, s, ms } = await deadStart(t, ENV, () => HUNG);
   t.diagnostic(`refused after ${s} s: ${r.out.slice(0, 400)}`);
   assert.notEqual(r.out, "ready");
@@ -1112,7 +1112,7 @@ test("card helper-start-residuals 1: every seat hung to its client's 5 s timeout
   assert.ok(!r.out.includes(FAKE), "no key in the refusal");
 });
 
-test("card helper-start-residuals 1: the review's four hung seats with Robinhood's own RPC the one other operator (no keyed seat set): refused within 35 s (was 91 s), naming it alone", async (t) => {
+test("card helper-start-residuals 1: the review's four hung seats with Robinhood's own RPC the one other operator (no keyed seat set): refused within 35 s (87 s before the card, the figure the review read), naming it alone", async (t) => {
   const { r, s, ms } = await deadStart(t, ENV_RH, (host) => (host === "rpc.mainnet.chain.robinhood.com" ? null : HUNG));
   t.diagnostic(`refused after ${s} s: ${r.out.slice(0, 400)}`);
   assert.ok(ms <= DEAD_BOUND_MS, `refused after ${s} s, over ${DEAD_BOUND_MS / 1000} s`);
