@@ -22,7 +22,10 @@
 // 50 newest rows first is replaced by the venue's next) holds the trade's signature with its side and time, its answer
 // is src "chain" and well-formed, and the signature reads back succeeded on two public RPCs (getSignatureStatuses, the
 // history searched). DBC alone may read none, and only while the lists hold no coin on a DBC curve with DBC_VOL_USD in a
-// day (dbc_curves, from the same lists).
+// day (dbc_curves, from the same lists). Card sol-meteora-tape-inside-rpc-budget: a coin whose tape answer names
+// `sol-whole-cut` in Server-Timing (the helper read its Meteora trades whole past their budget and serves it its pool's
+// tape, trades.ts) is skipped, named in the run's `cut`, and its venue watched again; a venue whose every sampled coin
+// was cut is BAD, naming the cut (the budget starved it).
 // The candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
 // one 75 s span; a 429 still standing after it, or no bar at the trade's second, is BAD as any other answer.
 // After: helper
@@ -360,9 +363,18 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
   await Promise.all(tokens.map((t) => get(base, TRADES_PATH(t), fetchFn).catch(() => null)));
   const stop = keepOpen(base, tokens, fetchFn);
   const reading = {};
+  // card sol-meteora-tape-inside-rpc-budget: a coin the helper serves past its whole reads' budget (sol-whole-cut) is
+  // skipped and named, and its venue watched again: its trade is judged on a coin the helper reads whole
+  const cut = {};
+  const skip = (venue, f, p) => (cut[venue] ??= []).push({ coin: f.coin, sig: f.sig, timing: cutOf(p) });
   await watchMeteora(tokens, ws, waitMs, async (venue, f) => {
     const r = (reading[venue] = readMeteoraOne(base, f, fetchFn));
     const { polls } = await r;
+    if (cutOf(polls[0]) !== null) {
+      skip(venue, f, polls[0]);
+      delete reading[venue];
+      return false;
+    }
     const b = polls[0]?.status === 200 ? JSON.parse(polls[0].body) : null;
     // kept unless the trade had already left the tape's 50 newest rows when it was read
     return !(Array.isArray(b?.trades) && b.trades.length === 50 && !b.trades.some((x) => x.tx === f.sig) && b.trades.at(-1).t_ms > f.ts * 1000);
@@ -379,14 +391,28 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
     for (const row of rows) {
       const t = B58.test(row?.tx ?? "") ? await meteoraTradeOf(row.tx, coin, left).catch(() => null) : null;
       if (t === null) continue;
+      const f = { coin, sig: row.tx, heldAtMs: Date.now(), side: t.side, ts: t.ts, fromTape: true };
+      // a tape past the budget is the vendor's: its row names no trade of ours (card sol-meteora-tape-inside-rpc-budget)
+      if (cutOf(p) !== null) {
+        skip(t.venue, f, p);
+        continue;
+      }
       left.delete(t.venue);
-      out[t.venue] = await readMeteoraOne(base, { coin, sig: row.tx, heldAtMs: Date.now(), side: t.side, ts: t.ts, fromTape: true }, fetchFn);
+      out[t.venue] = await readMeteoraOne(base, f, fetchFn);
       break;
     }
   }
   // the listed coins on a DBC curve that trade (DBC_VOL_USD in a day): with none, no listed coin can show a DBC trade
   out.dbc_curves = dbcCurves(rows);
+  out.cut = cut;
   return out;
+}
+
+/** Card sol-meteora-tape-inside-rpc-budget: an answer's `sol-whole-cut` Server-Timing entry (the helper served the coin
+ *  its pool's tape: a Meteora trade of it went unread past the whole reads' budget, trades.ts), or null. */
+export function cutOf(p) {
+  const t = String(p?.headers?.["server-timing"] ?? "");
+  return /(^|,\s*)sol-whole-cut(;|,|$)/.test(t) ? t.match(/sol-whole-cut[^,]*/)[0] : null;
 }
 
 /** The listed coins still on a DBC curve (curve_bps under 10,000) with DBC_VOL_USD in a day. */
@@ -400,6 +426,18 @@ export function judgeMeteora(m) {
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   for (const venue of Object.keys(METEORA)) {
     const v = isObj(m) ? m[venue] : undefined;
+    // card sol-meteora-tape-inside-rpc-budget: coins past the helper's whole reads' budget are skipped and named; a venue
+    // whose every sampled coin was past it is the budget starving the venue, a fault, never a pass
+    const cut = isObj(m) && isObj(m.cut) && Array.isArray(m.cut[venue]) ? m.cut[venue] : [];
+    if (!isObj(v) && cut.length > 0) {
+      lines.push(`BAD ${venue}: every sampled coin (${cut.length}: ${cut.map((c) => String(c.coin).slice(0, 8)).join(", ")}) was served past the helper's whole reads' budget (${cut[0].timing}): the budget starved the venue`);
+      continue;
+    }
+    if (cut.length > 0) lines.push(`ok  ${venue}: ${cut.length} coin(s) past the helper's whole reads' budget skipped (sol-whole-cut): ${cut.map((c) => String(c.coin).slice(0, 8)).join(", ")}`);
+    if (isObj(v) && Array.isArray(v.polls) && cutOf(v.polls.at(-1)) !== null) {
+      lines.push(`BAD ${venue}: the judged coin ${show(v.coin)} was served past the budget (${cutOf(v.polls.at(-1))})`);
+      continue;
+    }
     // DBC is a launchpad curve: while the lists hold no coin on a DBC curve that trades, no listed coin can show one
     if (venue === "meteora-dbc" && !isObj(v) && isObj(m) && Array.isArray(m.dbc_curves) && m.dbc_curves.length === 0) {
       lines.push(`ok  ${venue}: none to read: the lists hold no coin on a DBC curve with ${DBC_VOL_USD} USD in a day (its decoding is held by decode.test.ts's recorded DBC trades)`);
