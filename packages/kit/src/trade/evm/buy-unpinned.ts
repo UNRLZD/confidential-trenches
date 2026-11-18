@@ -242,10 +242,15 @@ export const evmMainnetVenues = () =>
       // Each provider's posts at once (card robinhood-quotes-inside-provider-limits): 5 bursts of 2, 4, 6 and 8 posts at
       // once, 1.5 s apart, each post a batch of 3 eth_call PoolManager extsload(bytes32[]) of 110 slots at latest (22 KB,
       // a quote's request), from the Mac 2026-11-14 05:10-05:11Z: every post of all four served at 8, none refused (429
-      // or a rate-limit error). publicnode 2: the helper's PROVIDER_PACE (apps/helper/src/limits/limits.ts) holds it to 6
-      // calls at once and a quote's post carries up to 3; mainnet.base.org 8, under its 20; blastapi and Pocket's Base
+      // or a rate-limit error). publicnode 8, as measured (card evm-first-quote-inside-the-kpi): the 2 it had was the
+      // helper's PROVIDER_PACE (apps/helper/src/limits/limits.ts, 6 calls at once for the helper's one address), which
+      // no device shares; the device's own bound for it is its pace (checks/evm/pace.ts, 36 calls a second, eth_call
+      // alone 900 in 25 s none refused). At 2 a cold Base quote's reads queued behind it while blastapi answered 8 at once:
+      // a fresh account's first quote of a coin whose market is a WETH-USDC-coin v3 route took 10.1 s, its first round
+      // 1.56 s on publicnode against 0.54 s on blastapi; at 8 the same quote took 6.6 s and seven cold coins in a row
+      // drew no 429 (2026-11-18 02:5xZ from this Mac). mainnet.base.org 8, under its 20; blastapi and Pocket's Base
       // endpoint 8 (the helper names neither: the measurement alone)
-      inflight: bare<Record<string, number>>({ "https://base-rpc.publicnode.com": 2, "https://base-mainnet.public.blastapi.io": 8, "https://mainnet.base.org": 8, "https://base.api.pocket.network": 8 }),
+      inflight: bare<Record<string, number>>({ "https://base-rpc.publicnode.com": 8, "https://base-mainnet.public.blastapi.io": 8, "https://mainnet.base.org": 8, "https://base.api.pocket.network": 8 }),
       // 6 reads a call: aggregate3 shares one call's gas, and 64 of a 100 ETH buy's exact-out reads (8 of them 8.4-9.4M gas
       // each) needed 77.3M, past base-rpc.publicnode.com's 50M eth_call cap (3/3 refused "out of gas: gas required exceeds:
       // 50000000"; at 6 a call 30/30 answered; review of 2c02f7df, Base block 54,810,601). 24,000 bytes a request:
