@@ -145,7 +145,8 @@ test("the cash run stops at the first withdrawal that does not leave the vault: 
 });
 
 // ---------- card near-buy-works-on-live: the quote's window ----------
-// The helper keeps a fee quote FEE_QUOTE_WINDOW_BLOCKS (100) blocks (apps/helper/src/withdraw/fee.ts); past it a POST is
+// The helper keeps a fee quote FEE_QUOTE_WINDOW_BLOCKS blocks (apps/helper/src/withdraw/fee.ts: 100 at this card, 1,200
+// since near-cash-pays-any-amount; the world keeps 100, so a slow read or proof outlasts it); past it a POST is
 // priced at the fee now and a lower relay_fee is refused fee_too_low, which holds the note RESERVED until its deadline
 // with nothing paid (live 14 Nov 20:5xZ: a $1 NEAR buy's payout never reached the chain, its note held). A chain of
 // heights stands in for the network: each quote is the fee at its height, open 100 blocks; fee_min rises one unit a
@@ -220,4 +221,23 @@ test("every proof outlasts its quote's window: after the tries the hand-off ends
   assert.equal(n!.state, "UNSPENT", "Cash holds the whole note again");
   assert.deepEqual(c.answers, [], "nothing sent");
   assert.equal(end.kind, "fee");
+});
+
+// card wallet-withdraw-requote: a re-quote is made only before RESERVED; a request the relayer refuses once sent stands
+// (wallet relay.ts: a check's refusal ends the sends, the deadline frees the note), so no tap loops on re-proofs
+test("a re-quoted request the relayer still refuses fee_too_low: the tap ends on it, quoted and proved twice and sent once, never quoted or proved again", async () => {
+  const v = await world([5_000_000n]);
+  const { c, over, prover } = windowWorld({ slowProofs: [150, 0] });
+  const refused: HandoffOver["relay"] = async (_seed, req) => {
+    c.sent.push(req);
+    c.answers.push("fee_too_low");
+    return { kind: "expired", note: (await v.ns.get(req.noteId))!, route: "relayer", lastAnswer: "fee_too_low" };
+  };
+  const h = await handoffOf(v, page(v, prover), { ...over(v), relay: refused });
+  const end = await h({ recipient: "ab".repeat(32), amount: 1_000_000n }, RELAY_FEE + 1_000n);
+  assert.deepEqual(end, { kind: "expired" });
+  assert.deepEqual(c.answers, ["fee_too_low"], "one send, its refusal shown as the end");
+  assert.equal(c.quotes.length, 2, "the stale quote and one re-quote");
+  assert.equal(c.proofs, 2, "the stale proof and one re-proof");
+  assert.equal(c.sent[0]!.body.withdrawal.relay_fee, String(c.quotes[1]!.fee), "sent at the re-quote's fee");
 });
