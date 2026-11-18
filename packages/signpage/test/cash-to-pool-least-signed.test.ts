@@ -60,9 +60,12 @@ test("honest 1Click: the least is the amount its 400 names, once a signed quote 
 
 test("a helper that rewrites the 400's N lower never sets the plan's least to its N", async () => {
   const lie = LEAST / 2n; // 38,680: under the fee, so a plan held to it would show a least part of the fee and one unit
-  // every 400 rewritten: the ask at its N meets 1Click's own 400 again, rewritten to the same N, no amount above it
+  // every 400 rewritten: the ask at its N meets 1Click's own 400 again, rewritten to the same N, at or under the amount
+  // asked, so each ask is a hundredth more, until the bound: never a least
   const always = (_req: unknown, reply: Reply): Reply => (reply.status === 400 ? tooLow(lie) : reply);
-  await assert.rejects(readOneClickLeast("solana", least1Click(LEAST, SOL_PRICE, { helper: always }).fetchFn, LEAST_NOW, sol), /names no least/);
+  const held1 = least1Click(LEAST, SOL_PRICE, { helper: always });
+  await assert.rejects(readOneClickLeast("solana", held1.fetchFn, LEAST_NOW, sol), new RegExp(`no least in ${LEAST_READ_ASKS} asks`));
+  assert.ok(held1.asked.every((x) => BigInt(x) < LEAST), "1Click refused every amount the lie led to");
   const held = await planned(least1Click(LEAST, SOL_PRICE, { helper: always }).fetchFn);
   assert.deepEqual(held.r, { error: "down" }, "no least: no plan, never one held to the lie");
   assert.deepEqual(held.t.quoted, []);
@@ -146,8 +149,17 @@ test("the read checks at the device's own price: with none read, no least", asyn
   await assert.rejects(readOneClickLeast("solana", least1Click(LEAST, SOL_PRICE).fetchFn, LEAST_NOW, { price: () => ({ price: "4000000000", expo: -8 }), sleep }), /quote check failed \(floor\)/);
 });
 
-test("a 400's N is where to ask next only: one at or under the amount asked names no least, and the asks are bounded", async () => {
-  for (const n of ["0", "1"]) await assert.rejects(readOneClickLeast("solana", least1Click(LEAST, SOL_PRICE, { helper: () => tooLow(n) }).fetchFn, LEAST_NOW, sol), /names no least/, n);
+test("a 400's N is where to ask next only: one at or under the amount asked asks a hundredth more, and the asks are bounded", async () => {
+  // 1Click refusing its own N with the same N (into SOL, 18 Nov 23:15Z): a hundredth more, then its signed quote
+  const own = least1Click(LEAST, SOL_PRICE, { helper: (req, reply) => (req.amount === String(LEAST) ? tooLow(LEAST) : reply) });
+  assert.equal(await readOneClickLeast("solana", own.fetchFn, LEAST_NOW, sol), LEAST + LEAST / 100n);
+  assert.deepEqual(own.asked, ["1", String(LEAST), String(LEAST + LEAST / 100n)]);
+  // an N of none or of the amount asked is no least either: asked one unit more each time, until the bound
+  for (const n of ["0", "1"]) {
+    const o = least1Click(LEAST, SOL_PRICE, { helper: () => tooLow(n) });
+    await assert.rejects(readOneClickLeast("solana", o.fetchFn, LEAST_NOW, sol), new RegExp(`no least in ${LEAST_READ_ASKS} asks`), n);
+    assert.deepEqual(o.asked.slice(0, 3), ["1", "2", "3"], n);
+  }
   // a helper that names one unit more each time: never a least, and no more than LEAST_READ_ASKS asks
   const creep = least1Click(LEAST, SOL_PRICE, { helper: (req) => tooLow(BigInt(req.amount) + 1n) });
   await assert.rejects(readOneClickLeast("solana", creep.fetchFn, LEAST_NOW, sol), new RegExp(`no least in ${LEAST_READ_ASKS} asks`));

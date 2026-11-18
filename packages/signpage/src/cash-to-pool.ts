@@ -438,8 +438,9 @@ export function planCashExact(notes: readonly CashNote[], fee: bigint, usdc: big
  *  signed field the device's own request, the floors at the device's `price` of the pool's coin, as the Move's own
  *  quote is checked, pool-deposit-address.ts poolQuotePricing); nothing the helper could write after 1Click signed sets
  *  it. One unit first. A refusal that names an amount ("Amount is too low for bridge, try at least N", 13:0xZ 15 Nov:
- *  75,621 into SOL, 18,533 into Robinhood's ETH) is unsigned, so N says only where to ask next, and only above the
- *  amount just asked; a quote at N is what sets it. Before any N, where 1Click cannot price so little it answers "Failed
+ *  75,621 into SOL, 18,533 into Robinhood's ETH) is unsigned, so N says only where to ask next; a quote at N is what
+ *  sets it. An N at or under the amount it refused (into SOL, 18 Nov 23:15Z: "try at least 75971" to 75,971 itself) asks
+ *  a hundredth more. Before any N, where 1Click cannot price so little it answers "Failed
  *  to get quote" (into Base's ETH at one unit, 15 Nov 13:30Z, "try at least 1042" at ten; into Robinhood's the same by
  *  13:31Z), and the read asks again at ten times as much, up to one USDC (card cash-buys-spend-every-note-evm). A
  *  signed answer whose fees take all that so little brings (the kit's floor: into Base's and Robinhood's ETH at
@@ -501,10 +502,10 @@ export async function readOneClickLeast(chain: PoolChain, fetchFn: typeof fetch,
       const m = /"message"\s*:\s*"Amount is too low for bridge, try at least (\d{1,30})"/.exec(head);
       const said = `HTTP ${r.status} ${/"message"\s*:\s*"([^"]{0,120})"/.exec(head)?.[1] ?? head.slice(0, 120).replace(/\s+/g, " ")}`;
       if (m !== null) {
-        // unsigned: where to ask next, never the least, and only above the amount just asked
+        // unsigned: where to ask next, never the least; one at or under the amount it refused (1Click refused its own
+        // N 75,971 into SOL with the same N, 18 Nov 23:15Z) asks a hundredth more
         const n = BigInt(m[1]!);
-        if (n <= amount) throw new LeastRefused(`1Click names no least: ${said} at ${amount}`);
-        amount = n;
+        amount = n > amount ? n : amount + (amount / 100n > 0n ? amount / 100n : 1n);
         named = true;
         continue;
       }

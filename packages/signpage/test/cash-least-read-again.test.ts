@@ -126,8 +126,8 @@ test("a refusal that names no least is no blip: never asked again, and no plan",
   await assert.rejects(readOneClickLeast("solana", o.fetchFn, LEAST_NOW, { price, sleep: c.sleep }), /names no least: HTTP 400 recipient is not valid/);
   assert.deepEqual(o.asked, ["1"]);
   assert.deepEqual(c.waits, []);
-  // a least of none is no least
-  await assert.rejects(readOneClickLeast("solana", oneClick([() => new Response(body("Amount is too low for bridge, try at least 0"), { status: 400 })]).fetchFn, LEAST_NOW, { price, sleep: c.sleep }), /names no least/);
+  // a least of none is no least: asked more, never set (card cash-to-pool-least-signed)
+  await assert.rejects(readOneClickLeast("solana", oneClick([() => new Response(body("Amount is too low for bridge, try at least 0"), { status: 400 })]).fetchFn, LEAST_NOW, { price, sleep: c.sleep }), /no least in 16 asks/);
 });
 
 test("the budget: a read past it asks nothing more and names it", async () => {

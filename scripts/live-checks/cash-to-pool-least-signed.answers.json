@@ -1,0 +1,164 @@
+{
+ "good_built": {
+  "from": "the card branch build (build-app.mjs --out, --local), 1Click live through the helper proxy, 2026-11-18 23:20:15Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-S1YBbQn69fX3W/K8ehjgRZ8t75owpPcSNoJRyBJJ5UWTxY7ioZ66lPGHAokeLxCY\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-S1YBbQn69fX3W/K8ehjgRZ8t75owpPcSNoJRyBJJ5UWTxY7ioZ66lPGHAokeLxCY",
+  "mark": true,
+  "chains": {
+   "solana": {
+    "usd": "73.06",
+    "asks": [
+     {
+      "amount": "1",
+      "status": 400,
+      "text": "{\"message\":\"Amount is too low for bridge, try at least 75864\",\"correlationId\":\"f65bbdd2-e490-47d0-be3f-458889eed9c4\",\"timestamp\":\"2026-11-18T23:20:18.169Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "75864",
+      "status": 400,
+      "text": "{\"message\":\"Amount is too low for bridge, try at least 75864\",\"correlationId\":\"1a45b24c-19c5-4417-ac78-85d01f8eaf00\",\"timestamp\":\"2026-11-18T23:20:19.501Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "76622",
+      "status": 201,
+      "text": "{\"quote\":{\"amountIn\":\"76622\",\"amountInFormatted\":\"0.076622\",\"amountInUsd\":\"0.076588286320\",\"minAmountIn\":\"76622\",\"amountOut\":\"910217\",\"amountOutFormatted\":\"0.000910217\",\"amountOutUsd\":\"0.066500454020\",\"minAmountOut\":\"901114\",\"timeEstimate\":9,\"refundFee\":\"0\",\"withdrawFee\":\"136874\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:sol.omft.near\",\"amount\":\"76622\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"So11111111111111111111111111111111111111112\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T23:30:17.231Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T23:20:19.731Z\",\"correlationId\":\"171c4275-20a3-427b-88de-f3005c811c4c\",\"signature\":\"ed25519:(left out)\"}"
+     }
+    ],
+    "least": "76622"
+   },
+   "base": {
+    "usd": "1764.76",
+    "asks": [
+     {
+      "amount": "1",
+      "status": 400,
+      "text": "{\"message\":\"Failed to get quote\",\"correlationId\":\"d8963762-189d-4990-8662-ff025d043a16\",\"timestamp\":\"2026-11-18T23:20:20.977Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "10",
+      "status": 400,
+      "text": "{\"message\":\"Amount is too low for bridge, try at least 1003\",\"correlationId\":\"eec8d68e-ffb4-40d2-86e0-042a1b626361\",\"timestamp\":\"2026-11-18T23:20:21.885Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "1003",
+      "status": 201,
+      "text": "{\"quote\":{\"amountIn\":\"1003\",\"amountInFormatted\":\"0.001003\",\"amountInUsd\":\"0.001002558680\",\"minAmountIn\":\"1003\",\"amountOut\":\"5332402854\",\"amountOutFormatted\":\"0.000000005332402854\",\"amountOutUsd\":\"0.000009410411\",\"minAmountOut\":\"5279078825\",\"timeEstimate\":14,\"refundFee\":\"0\",\"withdrawFee\":\"560000000000\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:base.omft.near\",\"amount\":\"1003\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"0x1111111111111111111111111111111111111111\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T23:30:20.371Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T23:20:22.119Z\",\"correlationId\":\"37668ba5-0468-4dbd-ac8e-4c46499b3a8f\",\"signature\":\"ed25519:(left out)\"}"
+     },
+     {
+      "amount": "2006",
+      "status": 201,
+      "text": "{\"quote\":{\"amountIn\":\"2006\",\"amountInFormatted\":\"0.002006\",\"amountInUsd\":\"0.002005117360\",\"minAmountIn\":\"2006\",\"amountOut\":\"572364201711\",\"amountOutFormatted\":\"0.000000572364201711\",\"amountOutUsd\":\"0.001010085449\",\"minAmountOut\":\"566640559693\",\"timeEstimate\":14,\"refundFee\":\"0\",\"withdrawFee\":\"560000000000\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:base.omft.near\",\"amount\":\"2006\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"0x1111111111111111111111111111111111111111\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T23:30:20.371Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T23:20:22.708Z\",\"correlationId\":\"e8546c92-d2e1-401e-bcdc-6bb5940b9e10\",\"signature\":\"ed25519:(left out)\"}"
+     }
+    ],
+    "least": "2006"
+   },
+   "robinhood": {
+    "usd": "1764.76",
+    "asks": [
+     {
+      "amount": "1",
+      "status": 400,
+      "text": "{\"message\":\"Failed to get quote\",\"correlationId\":\"bb7ed53a-7fef-48f4-a402-7539cdedc7cf\",\"timestamp\":\"2026-11-18T23:20:23.393Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "10",
+      "status": 400,
+      "text": "{\"message\":\"Amount is too low for bridge, try at least 17878\",\"correlationId\":\"d05b03fd-2fa8-4673-938e-ade6892824fc\",\"timestamp\":\"2026-11-18T23:20:24.260Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "17878",
+      "status": 201,
+      "text": "{\"quote\":{\"amountIn\":\"17878\",\"amountInFormatted\":\"0.017878\",\"amountInUsd\":\"0.017870133680\",\"minAmountIn\":\"17878\",\"amountOut\":\"104837650149\",\"amountOutFormatted\":\"0.000000104837650149\",\"amountOutUsd\":\"0.000185013291\",\"minAmountOut\":\"103789273647\",\"timeEstimate\":11,\"refundFee\":\"0\",\"withdrawFee\":\"10000000000000\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:hood.omft.near\",\"amount\":\"17878\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"0x1111111111111111111111111111111111111111\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T23:30:23.255Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T23:20:24.495Z\",\"correlationId\":\"c9c63ea8-0a6b-4c77-943f-0d10570559b4\",\"signature\":\"ed25519:(left out)\"}"
+     },
+     {
+      "amount": "35756",
+      "status": 201,
+      "text": "{\"quote\":{\"amountIn\":\"35756\",\"amountInFormatted\":\"0.035756\",\"amountInUsd\":\"0.035740267360\",\"minAmountIn\":\"35756\",\"amountOut\":\"10211609959255\",\"amountOutFormatted\":\"0.000010211609959255\",\"amountOutUsd\":\"0.018021040792\",\"minAmountOut\":\"10109493859662\",\"timeEstimate\":11,\"refundFee\":\"0\",\"withdrawFee\":\"10000000000000\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:hood.omft.near\",\"amount\":\"35756\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"0x1111111111111111111111111111111111111111\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T23:30:23.255Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T23:20:25.155Z\",\"correlationId\":\"ad58ac31-cc97-45b4-95af-fa9d7135acfc\",\"signature\":\"ed25519:(left out)\"}"
+     }
+    ],
+    "least": "35756"
+   }
+  }
+ },
+ "bad_live_before": {
+  "from": "SIGN_HOST live as served before the card, 1Click live through the helper proxy, 2026-11-18 23:20:25Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-rL1CKtvfREBqVE1EpMEbHyg42I0P6cMGRC+pwmysPeSXyOXCfsijnQ+BWMCTlGxZ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-rL1CKtvfREBqVE1EpMEbHyg42I0P6cMGRC+pwmysPeSXyOXCfsijnQ+BWMCTlGxZ",
+  "mark": false,
+  "chains": {
+   "solana": {
+    "usd": "73.06",
+    "asks": [
+     {
+      "amount": "1",
+      "status": 400,
+      "text": "{\"message\":\"Amount is too low for bridge, try at least 75846\",\"correlationId\":\"865b631e-e7c6-4d2b-8283-82539d7d3a62\",\"timestamp\":\"2026-11-18T23:20:28.891Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "75846",
+      "status": 400,
+      "text": "{\"message\":\"Amount is too low for bridge, try at least 75846\",\"correlationId\":\"5b2f152c-39e2-457f-8bff-3e41cafd3093\",\"timestamp\":\"2026-11-18T23:20:30.290Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "76604",
+      "status": 201,
+      "text": "{\"quote\":{\"amountIn\":\"76604\",\"amountInFormatted\":\"0.076604\",\"amountInUsd\":\"0.076570294240\",\"minAmountIn\":\"76604\",\"amountOut\":\"909947\",\"amountOutFormatted\":\"0.000909947\",\"amountOutUsd\":\"0.066480727820\",\"minAmountOut\":\"900847\",\"timeEstimate\":9,\"refundFee\":\"0\",\"withdrawFee\":\"136874\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:sol.omft.near\",\"amount\":\"76604\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"So11111111111111111111111111111111111111112\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T23:30:27.973Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T23:20:30.557Z\",\"correlationId\":\"0fe2a0e9-e95b-4d1a-904c-b6fe869f4db7\",\"signature\":\"ed25519:(left out)\"}"
+     }
+    ],
+    "least": "76604"
+   },
+   "base": {
+    "usd": "1764.76",
+    "asks": [
+     {
+      "amount": "1",
+      "status": 400,
+      "text": "{\"message\":\"Failed to get quote\",\"correlationId\":\"23d9623a-3d83-4bc3-8af6-7ab227e00f72\",\"timestamp\":\"2026-11-18T23:20:31.580Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "10",
+      "status": 400,
+      "text": "{\"message\":\"Amount is too low for bridge, try at least 1003\",\"correlationId\":\"fd55d7f4-1179-4191-a259-40a3a71bdac1\",\"timestamp\":\"2026-11-18T23:20:32.470Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "1003",
+      "status": 201,
+      "text": "{\"quote\":{\"amountIn\":\"1003\",\"amountInFormatted\":\"0.001003\",\"amountInUsd\":\"0.001002558680\",\"minAmountIn\":\"1003\",\"amountOut\":\"5412498686\",\"amountOutFormatted\":\"0.000000005412498686\",\"amountOutUsd\":\"0.000009551761\",\"minAmountOut\":\"5358373699\",\"timeEstimate\":14,\"refundFee\":\"0\",\"withdrawFee\":\"560000000000\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:base.omft.near\",\"amount\":\"1003\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"0x1111111111111111111111111111111111111111\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T23:30:31.343Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T23:20:32.738Z\",\"correlationId\":\"d14bda92-398b-4470-8fde-d36fca66add6\",\"signature\":\"ed25519:(left out)\"}"
+     },
+     {
+      "amount": "2006",
+      "status": 201,
+      "text": "{\"quote\":{\"amountIn\":\"2006\",\"amountInFormatted\":\"0.002006\",\"amountInUsd\":\"0.002005117360\",\"minAmountIn\":\"2006\",\"amountOut\":\"572543889090\",\"amountOutFormatted\":\"0.00000057254388909\",\"amountOutUsd\":\"0.001010402554\",\"minAmountOut\":\"566818450199\",\"timeEstimate\":14,\"refundFee\":\"0\",\"withdrawFee\":\"560000000000\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:base.omft.near\",\"amount\":\"2006\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"0x1111111111111111111111111111111111111111\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T23:30:31.343Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T23:20:33.329Z\",\"correlationId\":\"3f8f64e2-74b6-4c87-93c3-9380b2dc1b05\",\"signature\":\"ed25519:(left out)\"}"
+     }
+    ],
+    "least": "2006"
+   },
+   "robinhood": {
+    "usd": "1764.76",
+    "asks": [
+     {
+      "amount": "1",
+      "status": 400,
+      "text": "{\"message\":\"Failed to get quote\",\"correlationId\":\"1dad1490-235f-4235-bab1-b17a717e1a9a\",\"timestamp\":\"2026-11-18T23:20:34.135Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "10",
+      "status": 400,
+      "text": "{\"message\":\"Amount is too low for bridge, try at least 17875\",\"correlationId\":\"9a1b670c-3343-4541-94c9-4c6c04b7f90e\",\"timestamp\":\"2026-11-18T23:20:35.042Z\",\"path\":\"/v0/quote\"}"
+     },
+     {
+      "amount": "17875",
+      "status": 201,
+      "text": "{\"quote\":{\"amountIn\":\"17875\",\"amountInFormatted\":\"0.017875\",\"amountInUsd\":\"0.017867135000\",\"minAmountIn\":\"17875\",\"amountOut\":\"104741452108\",\"amountOutFormatted\":\"0.000000104741452108\",\"amountOutUsd\":\"0.000184843525\",\"minAmountOut\":\"103694037586\",\"timeEstimate\":11,\"refundFee\":\"0\",\"withdrawFee\":\"10000000000000\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:hood.omft.near\",\"amount\":\"17875\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"0x1111111111111111111111111111111111111111\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T23:30:33.971Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T23:20:35.309Z\",\"correlationId\":\"abe343b0-d405-4cf9-b460-76b42c2f6323\",\"signature\":\"ed25519:(left out)\"}"
+     },
+     {
+      "amount": "35750",
+      "status": 201,
+      "text": "{\"quote\":{\"amountIn\":\"35750\",\"amountInFormatted\":\"0.03575\",\"amountInUsd\":\"0.035734270000\",\"minAmountIn\":\"35750\",\"amountOut\":\"10210616040349\",\"amountOutFormatted\":\"0.000010210616040349\",\"amountOutUsd\":\"0.018019286763\",\"minAmountOut\":\"10108509879945\",\"timeEstimate\":11,\"refundFee\":\"0\",\"withdrawFee\":\"10000000000000\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:hood.omft.near\",\"amount\":\"35750\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"0x1111111111111111111111111111111111111111\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T23:30:33.971Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T23:20:35.906Z\",\"correlationId\":\"5197b2fe-3cbd-4281-9d9a-9d4325071fb0\",\"signature\":\"ed25519:(left out)\"}"
+     }
+    ],
+    "least": "35750"
+   }
+  }
+ }
+}
