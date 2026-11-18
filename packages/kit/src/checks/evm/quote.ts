@@ -1509,6 +1509,9 @@ export function evmPoolIndexPools(chain: EvmPoolChain, token: string): readonly 
 export const evmPoolIndexReset = (): void => (INDEXES.clear(), SERVED.clear());
 /** For the tests: forgets every chain's scanned tail (not in the kit's index): each test's chain is its own. */
 export const evmScanTailReset = (): void => void (TAILS = new WeakMap());
+/** Tests: `rpc` reads and keeps the tail `as` does (one chain's history behind two rpc objects, a provider that turns
+ *  hostile between two quotes). */
+export const evmScanTailAlias = (rpc: EvmRpc, as: EvmRpc): void => void SOURCE_OF.set(rpc, SOURCE_OF.get(as) ?? as);
 // The helper's pools of a currency (card evm-pool-index-from-the-first-pool): the helper keeps every Initialize log of
 // the PoolManager from its first block, and answers a currency's pools, so a pool older than the scan's depth (NOVAAI's
 // native pool on Robinhood: block 40,138,722, the depth's 10M blocks back from 113,982,434) is still a candidate. Never

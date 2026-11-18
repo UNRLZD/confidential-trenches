@@ -5505,11 +5505,12 @@ test("SP1 a first scan provider that refuses connections: the scan goes on at th
 /** A warm quote: the token's scan read up to 5,000,000 by a quote before, the chain's head now 5,000,010, the real pool
  *  made at 5,000,005, so only the second's answer for those ten blocks finds it. */
 const warmPair = async (token: string, first: EvmRpc, chainName: "base" | "robinhood" = "base") => {
-  // the same first provider both quotes (the tail is kept per chain and first scan provider, card evm-scan-chain-tail)
-  const m = moving();
-  await pairQuote(token, m.to(scanner(5_000_000, [])), scanner(5_000_000, []), chainName);
+  // one first provider for both quotes (the tail is kept per chain and first scan provider, card evm-scan-chain-tail)
+  const warm = scanner(5_000_000, []);
+  quoteMod.evmScanTailAlias(first, warm);
+  await pairQuote(token, warm, scanner(5_000_000, []), chainName);
   const asked: [number, number][] = [];
-  const r = await pairQuote(token, m.to(first), scanner(5_000_010, realAt(token, 5_000_005), asked), chainName, 5_000_010);
+  const r = await pairQuote(token, first, scanner(5_000_010, realAt(token, 5_000_005), asked), chainName, 5_000_010);
   return { ...r, asked };
 };
 
@@ -5712,13 +5713,14 @@ test("SP429 card evm-taps-meet-no-429: a first scan provider that answers a warm
   const token = "0x00000000000000000000000000000000005c450b";
   let inner = scanner(5_000_010, []);
   const posts: string[] = [];
-  const first = evmJsonRpc("https://throttles.sp7.test", (async (_u: string, init: RequestInit) => {
+  const throttles = (async (_u: string, init: RequestInit) => {
     const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
     const logs = calls.some((c) => c.method === "eth_getLogs");
     posts.push(logs ? "logs" : calls.map((c) => c.method).join("+"));
     if (logs) return new Response(JSON.stringify({ jsonrpc: "2.0", error: { code: 429, message: "Too Many Requests" } }), { status: 429 });
     return new Response(JSON.stringify(await inner(calls)), { status: 200 });
-  }) as unknown as typeof fetch);
+  }) as unknown as typeof fetch;
+  const first = evmJsonRpc("https://throttles.sp7.test", throttles);
   const { v, asked } = await warmPair(token, first, "robinhood");
   assert.deepEqual(v, below);
   // one 429, then the second at once: never asked of the first again after a backoff
@@ -5738,10 +5740,15 @@ test("SP429 card evm-taps-meet-no-429: a first scan provider that answers a warm
   // scan, as the gap past an index and its margin is; inside it as each request): the second reads them in its own
   // spans, the first is asked nothing
   const token2 = "0x00000000000000000000000000000000005c450c";
-  await pairQuote(token2, scanner(4_991_030, []), scanner(4_991_030, []), "robinhood", 4_991_030);
+  // its own world (card evm-scan-chain-tail: the tail is the chain's, so token2's pool at 4,995,000 is in a history
+  // read only up to 4,991,030): the same provider's URL, so its hold is the same
+  const first2 = evmJsonRpc("https://throttles.sp7.test", throttles);
+  const warm2 = scanner(4_991_030, []);
+  quoteMod.evmScanTailAlias(first2, warm2);
+  await pairQuote(token2, warm2, scanner(4_991_030, []), "robinhood", 4_991_030);
   const at2 = posts.length;
   const span2: [number, number][] = [];
-  const cold = await pairQuote(token2, first, scanner(5_000_030, realAt(token2, 4_995_000), span2), "robinhood", 5_000_030);
+  const cold = await pairQuote(token2, first2, scanner(5_000_030, realAt(token2, 4_995_000), span2), "robinhood", 5_000_030);
   assert.deepEqual(cold.v, below);
   assert.deepEqual(posts.slice(at2), [], "the held first was asked a cold scan's blocks within its hold");
   assert.ok(span2.length > 0 && span2.every(([a, b]) => b - a + 1 <= 2_000), `the second read ${JSON.stringify(span2)}`);
@@ -5892,7 +5899,9 @@ test("PACE4 card evm-taps-meet-no-429: a warm scan request whose first provider'
     if (calls.some((c) => c.method === "eth_getLogs")) firstLogs++;
     return new Response(JSON.stringify(await inner(calls)), { status: 200 });
   }) as unknown as typeof fetch);
-  await pairQuote(token, scanner(5_000_000, []), scanner(5_000_000, []), "robinhood");
+  const warm = scanner(5_000_000, []);
+  quoteMod.evmScanTailAlias(first, warm);
+  await pairQuote(token, warm, scanner(5_000_000, []), "robinhood");
   // another reader on the device (the index, a scan) spent the provider's turns just now: two getLogs posts, 16 of its
   // bucket's 18 at 8 each
   const logs = [{ method: "eth_getLogs" }];
@@ -6114,21 +6123,27 @@ test("SL3 a lone scan provider one block behind its own head: the newest request
   const token = "0x00000000000000000000000000000000005c4611";
   const pools = [seeded(token), real(token)];
   const lone = (scan: EvmRpc, headNo: number) => verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan));
-  await lone(scanner(5_000_000, []), 5_000_000);
+  // each warm quote's provider reads its first quote's tail (card evm-scan-chain-tail)
+  const warm = scanner(5_000_000, []);
+  await lone(warm, 5_000_000);
   // its head read names 5,000,010; the first batch's backend holds 5,000,009, the next the head
   const asked: [number, number][] = [];
   const front = scanner(5_000_010, realAt(token, 5_000_005), asked);
   const behind = scanner(5_000_009, realAt(token, 5_000_005));
   let batches = 0;
   const lag: EvmRpc = (calls, signal) => (calls.some((c) => c.method === "eth_getLogs") && batches++ === 0 ? behind(calls, signal) : front(calls, signal));
+  quoteMod.evmScanTailAlias(lag, warm);
   // the same quote with no lag, for the scan batches it sends
   const token2 = "0x00000000000000000000000000000000005c4612";
   const pools2 = [seeded(token2), real(token2)];
   const lone2 = (scan: EvmRpc, headNo: number) => verdict(evmPoolBuyQuoteWith({ chain: "base", token: token2, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token2) } as EvmPoolBuyQuoteRequest, [chain(pools2, 0, headNo), chain(pools2, 1, headNo)], NOW, scan));
-  await lone2(scanner(5_000_000, []), 5_000_000);
+  const warm2 = scanner(5_000_000, []);
+  await lone2(warm2, 5_000_000);
   let plain = 0;
   const inner = scanner(5_000_010, realAt(token2, 5_000_005));
-  assert.deepEqual(await lone2((calls, signal) => (calls.some((c) => c.method === "eth_getLogs") && plain++, inner(calls, signal)), 5_000_010), below);
+  const counted: EvmRpc = (calls, signal) => (calls.some((c) => c.method === "eth_getLogs") && plain++, inner(calls, signal));
+  quoteMod.evmScanTailAlias(counted, warm2);
+  assert.deepEqual(await lone2(counted, 5_000_010), below);
   assert.deepEqual(await lone(lag, 5_000_010), below);
   assert.equal(batches, plain + 1, `${batches} scan batches where ${plain + 1} do`);
   assert.ok(asked.every(([a, b]) => a === 5_000_001 && b === 5_000_010), `a request was halved: ${JSON.stringify(asked)}`);
@@ -6170,12 +6185,15 @@ test("SL6 card base-rpc-list-fix: a warm Base scan with its first two down and i
   let k = 0;
   for (const down of [refusing, answering503]) {
     const token = "0x00000000000000000000000000000000005c462" + (++k).toString(16);
-    await triQuote(token, [scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, [])]);
+    const warm = scanner(5_000_000, []);
+    await triQuote(token, [warm, scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, [])]);
+    const one = down("one.sl6.test");
+    quoteMod.evmScanTailAlias(one, warm);
     const inner = scanner(5_000_010, realAt(token, 5_000_005));
     const noLogs: EvmRpc = async (calls) => (await inner(calls)).map((o, i) => (calls[i]!.method === "eth_getLogs" ? { jsonrpc: "2.0", id: i, error: { code: -32000, message: "no logs" } } : o));
     const asked: [number, number][] = [];
     const t = performance.now();
-    const v = await triQuote(token, [down("one.sl6.test"), down("two.sl6.test"), noLogs, scanner(5_000_010, realAt(token, 5_000_005), asked)], "base", 5_000_010);
+    const v = await triQuote(token, [one, down("two.sl6.test"), noLogs, scanner(5_000_010, realAt(token, 5_000_005), asked)], "base", 5_000_010);
     assert.deepEqual(v, below, down.name);
     assert.ok(performance.now() - t < 5_000, `${down.name}: the warm quote took ${Math.round(performance.now() - t)} ms`);
     assert.ok(asked.some(([a, b]) => a <= 5_000_005 && b >= 5_000_005), `${down.name}: block 5,000,005 not asked of the fourth: ${JSON.stringify(asked)}`);
@@ -6209,8 +6227,12 @@ const shortAt = (host: string, inner: EvmRpc, shortOf: (calls: EvmRpcCall[], out
  *  now 5,000,001, the token's real pool made at 5,000,001; `list(inner)` is the list, `inner` the chain's scan answers. */
 const oneBlock = async (token: string, chainName: "base" | "robinhood", list: (inner: EvmRpc) => EvmRpc[], headNo = 5_000_001) => {
   const n = list(scanner(5_000_000, [])).length;
-  await triQuote(token, Array.from({ length: n }, () => scanner(5_000_000, [])), chainName);
-  return { v: await triQuote(token, list(scanner(headNo, realAt(token, headNo))), chainName, headNo) };
+  const warm = Array.from({ length: n }, () => scanner(5_000_000, []));
+  await triQuote(token, warm, chainName);
+  // the warm quote's first provider reads the first quote's tail (card evm-scan-chain-tail)
+  const now = list(scanner(headNo, realAt(token, headNo)));
+  quoteMod.evmScanTailAlias(now[0]!, warm[0]!);
+  return { v: await triQuote(token, now, chainName, headNo) };
 };
 /** The captured answer (base.api.pocket.network, a held base-hook quote's batch, 2026-11-13 18:0xZ from this Mac): each
  *  call of a batch answered by a backend of its own, the first getLogs [], the block by hash, and the second getLogs
@@ -6225,7 +6247,8 @@ const laggard = (host: string, inner: EvmRpc, lagHead: number) => {
   const rpc = evmJsonRpc(`https://${host}`, (async (_u: unknown, init: { body: string }) => {
     const calls = (JSON.parse(init.body) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
     const out: unknown[] = (await inner(calls)).map((x, id) => ({ ...(x as object), id }));
-    const i = calls.map((c, n) => (c.method === "eth_getLogs" ? n : -1)).filter((n) => n >= 0)[1];
+    // the batch's last getLogs (main's second topic position; one getLogs a request since card evm-scan-chain-tail)
+    const i = calls.map((c, n) => (c.method === "eth_getLogs" ? n : -1)).filter((n) => n >= 0).at(-1);
     const to = i === undefined ? 0 : Number((calls[i]!.params[0] as { toBlock: string }).toBlock);
     if (to > lagHead) past++;
     const range = i === undefined ? "" : `${(calls[i]!.params[0] as { fromBlock: string }).fromBlock}-${to}`;
