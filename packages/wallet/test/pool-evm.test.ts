@@ -972,6 +972,46 @@ test("bind walks the fee list past an operator that refuses the block's state fo
   }
 });
 
+// card robinhood-fee-read-old-blocks-own-rpc: Robinhood's fee list, its four providers' answers to the period fee read
+// (ArbGasInfo 0x6c, f5d6ded7) by the block's hash, read 2026-11-18 14:49Z and 15:36Z: Robinhood's own answers 2 to 383 s
+// back; dRPC (HTTP 400 code 27) and Pocket (-32000 "historical state") answer intermittently; publicnode answers under
+// about 10 s back and from then refuses (HTTP 403 "Archive requests require a personal token"), which is no lag, so it
+// ended the read where the lag retry reads it again. A block 10 s or more behind the head walks the list without
+// publicnode, own first; a block at the head walks it whole.
+test("a Robinhood fee read 10 s or more behind the head asks Robinhood's own first and never publicnode; at the head publicnode is a seat", async () => {
+  const c = { ...CB(), head: 31 };
+  const blockMs = Number(c.ts(30)) * 1000;
+  const OWN = "https://rpc.mainnet.chain.robinhood.com", DRPC = "https://robinhood.drpc.org", POCKET = "https://robinhood.api.pocket.network", PUBLICNODE = "https://robinhood-rpc.publicnode.com";
+  for (const [name, ageMs, drpcAnswersAfter] of [["60 s back", 60_000, 1], ["10 s back", 10_000, 1], ["the head, 3 s back", 3_000, Infinity]] as const) {
+    const asked: string[] = [];
+    const drpcAsks = { n: 0 };
+    const answers: Record<string, Over["chainFee"]> = {
+      [OWN]: () => 0n,
+      [DRPC]: () => { if (drpcAsks.n++ < drpcAnswersAfter) throw new Error(UNKNOWN_STATE); return 0n; },
+      [POCKET]: () => { throw new Error("RPC error -32000: historical state bea3dab671ea9af74e4a35773096c6e5b7f8eceb9cd is not available"); },
+      [PUBLICNODE]: () => { if (ageMs >= 10_000) throw new Error(ARCHIVE_403); return 0n; },
+    };
+    const seat = (url: string) => {
+      const r = rpc(c, { url, chainId: 4663n, chainFee: answers[url] });
+      return Object.assign(async (m: string, p: readonly unknown[]) => (m === "eth_call" && asked.push(new URL(url).host), r(m, p)), { url }, url === PUBLICNODE ? { stateMs: 10_000 } : {}) as EvmRpc;
+    };
+    const p = evmPool({ pin: { ...PIN, network: "robinhood" }, rpcs: pair(c, c, { chainId: 4663n }, { chainId: 4663n }), feeRpcs: [OWN, DRPC, POCKET, PUBLICNODE].map(seat), clock: () => blockMs + ageMs, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined } as Parameters<typeof evmPool>[0]);
+    await p.holdFee(EPOCH);
+    assert.equal(asked[0], new URL(OWN).host, `${name}: Robinhood's own asked first (${asked.join(", ")})`);
+    if (ageMs >= 10_000) assert.ok(!asked.includes(new URL(PUBLICNODE).host), `${name}: publicnode never asked (${asked.join(", ")})`);
+    else assert.ok(asked.includes(new URL(PUBLICNODE).host), `${name}: publicnode a seat at the head (${asked.join(", ")})`);
+  }
+});
+
+test("feeRpcs: a stateMs is a positive number of ms, and the seats with none hold two operators", () => {
+  const c = CB();
+  const seat = (url: string, stateMs?: number) => Object.assign(rpc(c, { url }), stateMs === undefined ? {} : { stateMs }) as EvmRpc;
+  const mk = (feeRpcs: EvmRpc[]) => () => evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs, relayFee: async () => answer(), epochFee: feeRule([]) });
+  for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) assert.throws(mk([seat("https://c.example"), seat("https://d.example"), seat("https://e.example", bad)]), /^Error: feeRpcs: stateMs a positive number of ms$/, String(bad));
+  assert.throws(mk([seat("https://c.example"), seat("https://d.example", 10_000), seat("https://e.example", 10_000)]), /^Error: feeRpcs, the seats that keep old state: seats: two operators at least/);
+  assert.doesNotThrow(mk([seat("https://c.example"), seat("https://d.example"), seat("https://e.example", 10_000)]));
+});
+
 // card kit-rpc-client-takes-a-signal (review of device-evm-fee-read-walks-operators, P3-7): the walk's cut ended the wait
 // for a hung operator but not its request, which held the connection to the client's own 10 s timeout. The seat is the
 // kit's real client (solanaJsonRpc, as the device builds it) over a fetch that never answers an eth_call: the walk's
