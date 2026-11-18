@@ -57,7 +57,7 @@
 // Nothing here logs.
 import { POOL_ASSET_DECIMALS, type PoolStatePrice, type TradeStage, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { evmPoolBuyQuote, evmPoolIndexPools, EvmQuoteError, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../kit/src/checks/evm/quote.ts";
-import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap } from "../../kit/src/trade/evm/buy-tap.ts";
+import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolBuyWarm } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
@@ -452,17 +452,22 @@ export function evmDryQuote(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRp
   return { network: pin.network, venues: evmPoolVenues(), quote: pageQuote(fetchFn, true, scanless), indexPools: evmPoolIndexPools, decimals: pageDecimals(chain, rpcs), ...(indexed === undefined ? {} : { indexed }) };
 }
 
+/** Whether the chain's index sync the dry's host started (`indexed`) has ended, waiting for it at most
+ *  EVM_DRY_INDEX_WAIT_MS: true with no sync to wait for, or one that ended in any way; false while it still runs. */
+async function indexEnded(h: EvmDryQuote): Promise<boolean> {
+  if (h.indexed === undefined) return true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const ended = await Promise.race([h.indexed().then(() => true, () => true), new Promise<false>((r) => (timer = setTimeout(() => r(false), EVM_DRY_INDEX_WAIT_MS)))]);
+  clearTimeout(timer);
+  return ended;
+}
+
 /** pool.buy.dry's `out` on Base and Robinhood: one tap quote (quoteOf, three kit quotes at most, no retry) of `amountIn`
  *  wei, its expected out before slippage in whole units of the token at its decimals as the tap reads them, read beside
  *  the quote. Null when either read fails, or the quote is not of this token, chain and amount, or gives nothing;
  *  EVM_DRY_SYNCING, with no quote asked, while the chain's index sync still runs past EVM_DRY_INDEX_WAIT_MS. */
 export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint): Promise<string | null | typeof EVM_DRY_SYNCING> {
-  if (h.indexed !== undefined) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const ended = await Promise.race([h.indexed().then(() => true, () => true), new Promise<false>((r) => (timer = setTimeout(() => r(false), EVM_DRY_INDEX_WAIT_MS)))]);
-    clearTimeout(timer);
-    if (!ended) return EVM_DRY_SYNCING;
-  }
+  if (!(await indexEnded(h))) return EVM_DRY_SYNCING;
   try {
     const [q, decimals] = await Promise.all([quoteOf(h, h.network, token, amountIn, 0), h.decimals(token)]);
     if (q.chain !== h.network || typeof q.token !== "string" || lower(q.token) !== lower(token) || q.amountIn !== amountIn) return null;
@@ -470,6 +475,24 @@ export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint)
     return poolUnits(q.amountOut, decimals);
   } catch {
     return null;
+  }
+}
+
+/** The coin's warm on the page (card evm-quote-warm-from-the-coin-page): the box asks pool.buy.dry with no amount as it
+ *  opens on a coin (its Max), and the kit's evmPoolBuyWarm then quotes the coin once at a small amount on the dry's own
+ *  host (its background reads, the page's quote, venues and index pools), so the reads that do not depend on the amount
+ *  are held when one is typed: a fresh account's first quote of a Base coin took 5.2 to 7.7 s cold. Like the dry's own
+ *  quote it waits for the chain's index sync it started, at most EVM_DRY_INDEX_WAIT_MS, and reads nothing past it, so
+ *  it never starts a scan with no index beside it. Its quotes are the dry's (h.quote): on a device that holds nothing
+ *  they read no log (scanless, card evm-tree-reads-only-when-needed), and none is ever signed: the warm drops every
+ *  answer, and the tap's own quote host takes each quote it signs through signedQuote. Resolves once it ends; never
+ *  throws. */
+export async function evmDryWarm(h: EvmDryQuote, token: string): Promise<void> {
+  try {
+    if (!(await indexEnded(h))) return;
+    await evmPoolBuyWarm({ chain: h.network, token }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null) });
+  } catch {
+    // a warm reads ahead only: what it meets, the tap meets again
   }
 }
 
@@ -525,6 +548,11 @@ export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmB
     if (d.trading()) return void (answer = { error: "busy" });
     const got = await d.tap();
     if (got === null) return void (answer = { error: "not_funded" });
+    // the box on the coin with no amount yet (its Max ask): the coin's warm, never waited for (evmDryWarm)
+    if (amount === null) {
+      const w = d.quote();
+      if (w !== null) void evmDryWarm(w, token);
+    }
     const tap = evmDryAmount(got.tapMax);
     // above tap_max: the move cashFirst starts, sized by the tap's own plan over the ready proofs and the notes it brings
     const above = amount !== null && typeof tap === "bigint" && amount > tap && d.fee !== undefined && d.moved !== undefined;

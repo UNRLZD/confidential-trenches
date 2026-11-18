@@ -1,0 +1,86 @@
+{
+ "_note": {
+  "good": "The check run from the Mac at 2026-11-18T08:44:07.325Z on the branch (tree 005f5e1ec plus this check), every coin warmed then tapped at TAP_IN: 0x07b3d9 warm 6553 ms, tap 2364 ms; the Clanker coin warm 1799 ms, tap 770 ms; the Mac at a load of about 18 (other agents and the owner's run). Recorded before the check stopped counting rounds: the field was dropped, posts and eth_calls were not counted then.",
+  "bad": "Planted from a real run at main 2a4ac7715, where nothing warms the coin: 0x07b3d9's first tap on a fresh device (scratch measure.mjs, mode cold, from the Mac at 08:2xZ) took 7,333 ms with 75 posts and 136 eth_calls, quoted 159506262204199822828; written over the good run's 0x07b3d9 tap (its warm 0 ms: none ran), the rest as the good run read it. A run of this check at main cannot be recorded: main has no evmPoolBuyWarm."
+ },
+ "good": {
+  "sign": "https://confidential.unrealized.trade",
+  "site": null,
+  "at": "2026-11-18T08:44:07.325Z",
+  "snapshot": {
+   "status": 200,
+   "through": 58859903,
+   "pools": 6148
+  },
+  "sync": {
+   "ms": 10390,
+   "served": true
+  },
+  "coins": [
+   {
+    "coin": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+    "warm": {
+     "ms": 6553
+    },
+    "tap": {
+     "ms": 2364,
+     "out": "159375425903990261825",
+     "asks": 1
+    }
+   },
+   {
+    "coin": "0x530ac7167531304a854087204092a2bf83051b07",
+    "warm": {
+     "ms": 1799
+    },
+    "tap": {
+     "ms": 770,
+     "out": "14981563488387694273735825",
+     "asks": 1
+    }
+   }
+  ],
+  "s429": {}
+ },
+ "bad": {
+  "sign": "https://confidential.unrealized.trade",
+  "site": null,
+  "at": "2026-11-18T08:2xZ",
+  "snapshot": {
+   "status": 200,
+   "through": 58859903,
+   "pools": 6148
+  },
+  "sync": {
+   "ms": 10390,
+   "served": true
+  },
+  "coins": [
+   {
+    "coin": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+    "warm": {
+     "ms": 0
+    },
+    "tap": {
+     "ms": 7333,
+     "out": "159506262204199822828",
+     "asks": 1,
+     "posts": 75,
+     "calls": 136
+    }
+   },
+   {
+    "coin": "0x530ac7167531304a854087204092a2bf83051b07",
+    "warm": {
+     "ms": 1799
+    },
+    "tap": {
+     "ms": 770,
+     "out": "14981563488387694273735825",
+     "asks": 1
+    }
+   }
+  ],
+  "s429": {}
+ }
+}

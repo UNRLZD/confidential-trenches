@@ -32,7 +32,7 @@ export {
   type EvmQuoteErrorCode,
 } from "./checks/evm/quote.ts";
 // a buy tap's quote on Base and Robinhood (its route order, three kit quotes at most) and the pool index sync it reads
-export { EVM_BUY_TAP_QUOTES, EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolIndexRefresh, type EvmBuyTapHost } from "./trade/evm/buy-tap.ts";
+export { EVM_BUY_TAP_QUOTES, EVM_BUY_WARM_EVERY_MS, EVM_BUY_WARM_IN, EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolBuyWarm, evmPoolIndexRefresh, type EvmBuyTapHost } from "./trade/evm/buy-tap.ts";
 export type { EvmPoolIndexData, EvmPoolIndexSync } from "./checks/evm/pool-index.ts";
 // a shipped pool index snapshot read through the kit's own shape check, so an app starts its sync from one as the page does
 export { evmPoolIndexFromSnapshot } from "./checks/evm/pool-index.ts";
