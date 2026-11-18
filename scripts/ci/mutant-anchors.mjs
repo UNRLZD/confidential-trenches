@@ -70,6 +70,27 @@ export const NOT_SWEPT = {
   "packages/wallet/scripts/pool-solana-review-mutants.mjs": "no test:mutants or CI line runs it",
 };
 
+/**
+ * Stale plants left to the cards that change their file, each named by its anchor's first line as this gate prints it:
+ * a listed anchor still stale passes; any other stale anchor in the file is refused, so no new one enters; a listed one
+ * found once again is said, to be taken off the list. The kit's evm-quote sweep and evm-quote.ts are changed by cards
+ * evm-unreachable-moves-on and evm-5xx-holds-the-provider-for-the-round, still on their branches (each re-anchors the
+ * ask's, the scan's 5xx's and the transport's plants), so this card leaves that file to them.
+ */
+export const KNOWN_STALE = {
+  "packages/kit/test/evm-quote-mutants.mjs": {
+    why: "re-anchored on cards evm-unreachable-moves-on and evm-5xx-holds-the-provider-for-the-round, not on main yet",
+    // SL1, T7b (three), TH9 and T7 (two): the plants those two branches re-anchor
+    anchors: new Set([
+      "if (spareNext && /^the provider answered HTTP 5",
+      'if (e instanceof TypeError && (cause === undefined || (typeof code === "string" && CONNECT',
+      "if (e instanceof Unreachable) {",
+      "if (res.status === 429) throw new RateLimited(",
+      "if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) {",
+    ]),
+  },
+};
+
 /** The text of `file` up to the end of its `list` declaration, then an export of the list and `vars`. */
 export function listModule(text, list, vars = []) {
   const head = new RegExp(`^(?:export )?const ${list} = \\[`, "m").exec(text);
@@ -86,8 +107,9 @@ export function listModule(text, list, vars = []) {
 const count = (text, find) => (typeof find !== "string" || find === "" ? 0 : text.split(find).length - 1);
 
 /** The refusals in one sweep's plants: one line per anchor not found exactly once. */
-export function anchorRefusals(rel, plants, read = (f) => readFileSync(f, "utf8")) {
+export function anchorRefusals(rel, plants, read = (f) => readFileSync(f, "utf8"), keyed = false) {
   const out = [];
+  const push = (line, anchor) => out.push(keyed ? { line, anchor } : line);
   const texts = new Map();
   const textOf = (f) => (texts.has(f) ? texts.get(f) : (texts.set(f, read(f)), texts.get(f)));
   for (const { name, file, finds, seq } of plants) {
@@ -95,14 +117,14 @@ export function anchorRefusals(rel, plants, read = (f) => readFileSync(f, "utf8"
     try {
       text = textOf(file);
     } catch {
-      out.push(`${rel}: mutant ${JSON.stringify(short(name))}: its file ${file} cannot be read`);
+      push(`${rel}: mutant ${JSON.stringify(short(name))}: its file ${file} cannot be read`, null);
       continue;
     }
-    for (const find of finds) {
+    for (const [i, find] of finds.entries()) {
       const n = count(text, find);
-      if (n !== 1) out.push(`${rel}: mutant ${JSON.stringify(short(name))}: its anchor is in ${path.basename(file)} ${n} times, not once: ${JSON.stringify(short(String(find)))}`);
+      if (n !== 1) push(`${rel}: mutant ${JSON.stringify(short(name))}: its anchor is in ${path.basename(file)} ${n} times, not once: ${JSON.stringify(short(String(find)))}`, short(String(find)));
       // a sequential sweep plants each edit before it reads the next anchor, so the next is counted in the planted text
-      else if (seq) text = text.replace(find, () => seq[finds.indexOf(find)]);
+      else if (seq) text = text.replace(find, () => seq[i]);
     }
   }
   return out;
@@ -114,6 +136,8 @@ const short = (s) => s.split("\n")[0].trim().slice(0, 90);
 export async function mutantAnchors(root) {
   const tracked = execFileSync("git", ["ls-files", "-z", "--", "*mutants.mjs"], { cwd: root, encoding: "utf8" }).split("\0").filter((f) => MUTANT_FILE.test(f));
   const refusals = [];
+  const listed = []; // stale plants KNOWN_STALE names
+  const anchored = []; // KNOWN_STALE entries no longer stale
   let plants = 0;
   for (const rel of tracked) {
     if (Object.hasOwn(NOT_SWEPT, rel)) continue;
@@ -137,14 +161,22 @@ export async function mutantAnchors(root) {
     const entries = sweep.once ? g.list.slice(0, 1) : g.list;
     const mine = entries.flatMap((e) => sweep.read(e, g, root));
     plants += mine.length;
-    refusals.push(...anchorRefusals(rel, mine));
+    const known = KNOWN_STALE[rel];
+    const found = anchorRefusals(rel, mine, undefined, true);
+    for (const r of found) {
+      if (known?.anchors.has(r.anchor)) listed.push(r);
+      else refusals.push(r.line);
+    }
+    if (known) for (const a of known.anchors) if (!found.some((r) => r.anchor === a)) anchored.push(`${rel}: ${JSON.stringify(a)} is found once now: take it off KNOWN_STALE`);
   }
-  return { refusals, plants, files: tracked.length };
+  return { refusals, plants, files: tracked.length, listed, anchored };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = process.argv[2] ?? process.cwd();
-  const { refusals, plants, files } = await mutantAnchors(root);
+  const { refusals, plants, files, listed, anchored } = await mutantAnchors(root);
+  for (const r of listed) console.log(`mutant-anchors: listed in KNOWN_STALE: ${r.line}`);
+  for (const a of anchored) console.log(`mutant-anchors: ${a}`);
   for (const r of refusals) console.error(`mutant-anchors: REFUSED: ${r}`);
   if (refusals.length) {
     console.error(`mutant-anchors: ${refusals.length} refusal(s) in ${files} sweep file(s), ${plants} plant(s) read`);
