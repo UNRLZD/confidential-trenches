@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
-import { EVM_BUY_TAP_QUOTES, EvmBuyTapRefused, EvmQuoteError, evmBuyTapReset, evmPoolBuyQuoteTap, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../src/index.ts";
+import { EVM_BUY_TAP_QUOTES, EVM_BUY_WARM_EVERY_MS, EVM_BUY_WARM_IN, EvmBuyTapRefused, EvmQuoteError, evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolBuyWarm, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../src/index.ts";
 
 const ZERO = "0x0000000000000000000000000000000000000000";
 const TOKEN = "0x00000000000000000000000000000000000ca5ca";
@@ -188,4 +188,42 @@ test("card evm-warm-tap-ends-inside-two-seconds: a provider's fault is never hel
   const first = m;
   await assert.rejects(two(), (e) => e instanceof EvmBuyTapRefused);
   assert.equal(m, 2 * first);
+});
+
+// Card evm-quote-warm-from-the-coin-page: the coin page's warm is one buy tap quote of the coin at EVM_BUY_WARM_IN, what
+// it ends in dropped; one a coin at a time and none again within EVM_BUY_WARM_EVERY_MS; a hostile ask reads nothing.
+test("card evm-quote-warm-from-the-coin-page: a warm asks one tap at EVM_BUY_WARM_IN and drops its refusal; again within EVM_BUY_WARM_EVERY_MS it asks nothing, after it once more; a hostile ask asks nothing", async () => {
+  evmBuyTapReset();
+  const asked: EvmPoolBuyQuoteRequest[] = [];
+  const route = { venue: "uniswap-v3" as const, tokens: ["0x0bd7d308f8e1639fab988df18a8011f41eacad73", TOKEN], fees: [10_000] };
+  const quote = async (r: EvmPoolBuyQuoteRequest) => (asked.push(r), Promise.reject(new EvmQuoteError("no_quote", "the route reverts or quotes nothing", { amountOut: 1n, route })));
+  let t = 1_000;
+  const now = () => t;
+  const host = { quote, indexPools: () => [] };
+  await evmPoolBuyWarm({ chain: "robinhood", token: TOKEN }, host, now);
+  assert.ok(asked.length >= 1 && asked.length <= EVM_BUY_TAP_QUOTES, `${asked.length} kit quotes`);
+  assert.ok(asked.every((r) => r.amountIn === EVM_BUY_WARM_IN && r.chain === "robinhood" && r.token === TOKEN && r.at === undefined), JSON.stringify(asked, (_, x) => (typeof x === "bigint" ? String(x) : x)));
+  const first = asked.length;
+  // the same coin again, in any case of its address, within the bound: nothing asked
+  t += EVM_BUY_WARM_EVERY_MS - 1;
+  await evmPoolBuyWarm({ chain: "robinhood", token: TOKEN.toUpperCase().replace("0X", "0x") }, host, now);
+  assert.equal(asked.length, first);
+  // past it: one warm more
+  t += 1;
+  await evmPoolBuyWarm({ chain: "robinhood", token: TOKEN }, host, now);
+  assert.equal(asked.length, 2 * first);
+  // two warms at once share one run
+  evmBuyTapReset();
+  asked.length = 0;
+  await Promise.all([evmPoolBuyWarm({ chain: "robinhood", token: TOKEN }, host, now), evmPoolBuyWarm({ chain: "robinhood", token: TOKEN }, host, now)]);
+  assert.equal(asked.length, first);
+  // hostile asks: nothing read, nothing thrown
+  asked.length = 0;
+  for (const bad of [null, {}, { chain: "robinhood" }, { chain: "robinhood", token: "0x12" }, { chain: "robinhood", token: TOKEN + "00" }, { chain: 7, token: TOKEN }]) {
+    await evmPoolBuyWarm(bad as never, host, now);
+  }
+  assert.equal(asked.length, 0);
+  // a chain with no venue: the tap's own refusal, dropped
+  await evmPoolBuyWarm({ chain: "nowhere" as never, token: TOKEN }, host, now);
+  assert.equal(asked.length, 0);
 });

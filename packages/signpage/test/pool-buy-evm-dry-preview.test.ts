@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { EvmPoolBuyQuote, EvmPoolBuyQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
-import { EVM_BUY_TAP_QUOTES } from "../../kit/src/trade/evm/buy-tap.ts";
+import { EVM_BUY_TAP_QUOTES, EVM_BUY_WARM_IN } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmBuyDry, evmBuyPieces, evmDryCost, evmDryTap, evmLastRouteReset, evmMostWithCash, evmMovedPieces, evmMoveShort, evmTapBuys, EVM_MOVE_FEE_ROOM, type EvmBuyDryDeps, type EvmDryQuote } from "../src/pool-buy-evm.ts";
 import { planEvmBuy, poolUnits, type PoolAsk } from "../src/rules/pool.ts";
 import { evmBalancePool, evmTapSpendOf } from "../../wallet/src/pool/balances.ts";
@@ -110,12 +110,16 @@ test("a quote that fails, or is not the one asked, or decimals that fail: cost a
   assert.deepEqual(e, { result: { tap_max: "0.0147", with_cash: "0.05", cost: "0.0004" } });
 });
 
-test("no amount, zero, or over tap_max: no plan, no quote, no cost", async () => {
+test("no amount, zero, or over tap_max: no plan, no quote of an amount, no cost; no amount warms the coin alone (card evm-quote-warm-from-the-coin-page)", async () => {
   for (const amount of [undefined, "0", "0.05"]) {
+    evmLastRouteReset();
     const asked: Asked = [];
     const a = await run({ chain: "base", token: COIN, ...(amount === undefined ? {} : { amount }) }, deps({ quoteHost: quoteHost(asked, good) }));
     assert.deepEqual(a, { result: { tap_max: "0.0147", with_cash: "0.05" } }, String(amount));
-    assert.equal(asked.length, 0);
+    await new Promise((r) => setTimeout(r, 0));
+    // the box's Max ask (no amount) starts the coin's warm: kit quotes at EVM_BUY_WARM_IN only, none of the answer
+    if (amount === undefined) assert.ok(asked.length >= 1 && asked.every((r) => r.amountIn === EVM_BUY_WARM_IN && r.token === COIN), asked.map((r) => r.amountIn).join(", "));
+    else assert.equal(asked.length, 0);
   }
 });
 

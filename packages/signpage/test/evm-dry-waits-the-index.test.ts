@@ -76,3 +76,38 @@ test("DRYIX3 pool.buy.dry answers down while the index sync runs past the wait, 
   assert.deepEqual(r.answer(), { error: "down" });
   assert.equal(q.asked, 0, "a quote was asked beside the running sync");
 }));
+
+// Card evm-quote-warm-from-the-coin-page: the box asks pool.buy.dry with no amount as it opens on a coin, and that dry
+// starts the coin's warm (kit evmPoolBuyWarm: one tap quote at EVM_BUY_WARM_IN on the dry's host), after the index
+// sync as the dry's own quote waits for it; a dry with an amount starts none, nor one while a trade runs or signed out.
+test("DRYIX4 a dry with no amount warms the coin once the index sync ends, at EVM_BUY_WARM_IN on the dry's host; none past the wait, none with an amount, busy or signed out", { timeout: 60_000 }, () => onTestClock(async () => {
+  const { evmBuyTapReset, EVM_BUY_WARM_IN } = await import("../../kit/src/trade/evm/buy-tap.ts");
+  const run = async (params: Record<string, unknown>, indexed: () => Promise<boolean>, over: Record<string, unknown> = {}) => {
+    evmBuyTapReset();
+    const asked: bigint[] = [];
+    const h = { ...hostOf(indexed, { asked: 0 }), network: "base" as const, quote: async (r: { amountIn: bigint }) => (asked.push(r.amountIn), Promise.reject(Object.assign(new Error("no route"), { code: "no_quote" }))) };
+    const r = dry.evmBuyDry("base", { token: TOKEN, ...params }, { trading: () => false, tap: async () => ({ tapMax: "0", ready: [] }), withCash: async () => null, quote: () => h as never, ...over });
+    await r.after;
+    return { r, asked };
+  };
+  // the index served at 3,000 ms: no quote before it, the warm's after it, every one at EVM_BUY_WARM_IN
+  let { r, asked } = await run({}, () => new Promise<boolean>((ok) => setTimeout(() => ok(true), 3_000)));
+  assert.equal("result" in (r.answer() as object), true, JSON.stringify(r.answer()));
+  assert.equal(asked.length, 0, "a warm quote was asked before the index was served");
+  await past(3_010);
+  assert.ok(asked.length >= 1 && asked.every((a) => a === EVM_BUY_WARM_IN), `warm quotes: ${asked.join(", ")}`);
+  // a sync that runs past the wait: no warm quote, ever
+  ({ asked } = await run({}, () => new Promise<boolean>(() => {})));
+  await past(dry.EVM_DRY_INDEX_WAIT_MS * 2);
+  assert.equal(asked.length, 0, "a warm quote was asked beside the running sync");
+  // an amount: the dry's own quote at that amount, no warm at EVM_BUY_WARM_IN
+  ({ asked } = await run({ amount: "0.002" }, () => Promise.resolve(true), { fee: async () => null, moved: async () => null }));
+  await past(10);
+  assert.ok(asked.length >= 1 && asked.every((a) => a === 2n * 10n ** 15n), `quotes: ${asked.join(", ")}`);
+  // busy, or signed out: nothing read
+  for (const over of [{ trading: () => true }, { tap: async () => null }]) {
+    ({ asked } = await run({}, () => Promise.resolve(true), over));
+    await past(10);
+    assert.equal(asked.length, 0, JSON.stringify(Object.keys(over)));
+  }
+}));
