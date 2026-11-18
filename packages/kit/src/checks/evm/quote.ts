@@ -107,6 +107,11 @@ export type EvmPoolBuyQuoteRequest = {
    *  its provider's turn after every trade's waiting there and leaves that provider's `keep` (pace.ts), so a tap asked
    *  meanwhile never waits behind it. It changes nothing the quote reads or checks. */
   later?: boolean;
+  /** (optional) true: the quote reads no log (card evm-tree-reads-only-when-needed): its pools are the served index's
+   *  (evmPoolIndexUse) and the helper's (evmPoolServedUse), each read at the agreed block on both providers like any
+   *  candidate, and no block past the index is scanned or kept. For a shown price that is never signed (the page's
+   *  pool.buy.dry on a device that holds nothing): a pool made past the index that the helper leaves out lowers it. */
+  scanless?: boolean;
 };
 
 /** A v4 pool's key, as the PoolManager's Initialize event gives it (currency0 below currency1). */
@@ -1825,7 +1830,14 @@ async function scanPools(
   from: Promise<ScanFrom>,
   picked: () => Promise<Block> = agreed,
   defer?: (cs: readonly string[]) => void,
+  scanless = false,
 ): Promise<{ pools: Map<string, EvmPoolKey[]>; commit: () => void }> {
+  // a scanless quote: the served index's pools from the depth's floor and the helper's, no log read and nothing kept
+  if (scanless) {
+    const floor = Math.max(0, (INDEXES.get(chain)?.through ?? 0) - s.depth + 1);
+    const all = await Promise.all(cs.map(async (c) => [c, [...new Map([...(indexScanOf(chain, kind, c, weth, floor)?.pools ?? []), ...(await servedOf(chain, kind, c, weth))].map((k) => [poolId(k), k])).values()]] as [string, EvmPoolKey[]]));
+    return { pools: new Map(all), commit: () => {} };
+  }
   const { head: scanHead, first } = await from;
   const second = first.next;
   // the logs up to the scan provider's head are read beside the round before (at most depth / span requests for each
@@ -2215,7 +2227,8 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   const pools = req.pools;
   const banned = req.banned;
   const later = req.later === true;
-  const asked: EvmPoolBuyQuoteRequest = { chain: req.chain, token: req.token, amountIn: req.amountIn, slippageBps: req.slippageBps, route: req.route, ...(pools === undefined ? {} : { pools }), ...(banned === undefined ? {} : { banned }) };
+  const scanless = req.scanless === true;
+  const asked: EvmPoolBuyQuoteRequest = { chain: req.chain, token: req.token, amountIn: req.amountIn, slippageBps: req.slippageBps, route: req.route, ...(pools === undefined ? {} : { pools }), ...(banned === undefined ? {} : { banned }), ...(scanless ? { scanless } : {}) };
   const { chain } = asked;
   const v = venue(chain);
   const p = v.providers;
@@ -2507,6 +2520,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     banned,
     hints: req.pools,
     sell: false,
+    scanless: req.scanless === true,
     watch,
     mono,
     start,
@@ -2930,6 +2944,8 @@ async function routeSetOf(a: {
   hints: unknown;
   /** quote each route backwards, from the token */
   sell: boolean;
+  /** read no log: the scans answer the served index's and the helper's pools alone (EvmPoolBuyQuoteRequest.scanless) */
+  scanless?: boolean;
   /** the chain's held head (card evm-quote-head-watch) */
   watch?: EvmHeadWatch | undefined;
   /** the lowest block the set reads at (a sell's buy's block; agreedBlock waits for it); a held head (the buy's) has none */
@@ -3099,7 +3115,7 @@ async function routeSetOf(a: {
   const scanAt = (cs: readonly string[], kind: ScanKind, early = false) => {
     if (firstOn === undefined || v.poolManager === undefined || v.scan === undefined || cs.length === 0) return null;
     const at = early ? () => picked : agreedHead;
-    return scanPools(chain, cs, kind, lower(v.weth), v.poolManager, v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind));
+    return scanPools(chain, cs, kind, lower(v.weth), v.poolManager, v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true);
   };
   // the warm round: the token's kept reads and scans; a scan asked again in this quote is the one started here
   const planKey = `${chain}:${a.sell ? "sell" : "buy"}:${lower(token)}`;

@@ -739,11 +739,11 @@ const quoteOn = (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmR
 // test of the quote's pool counts and cuts is pure work over tens of thousands of made-up pools, and its quote's block must
 // not age 30 s, nor its scan reach its bound, on a slow or busy runner: under the packages' tests run side by side KB1, KB3 and
 // KB4 refused stale_quote at 37 to 47 s (card ci-fresh-run-ends-with-room)
-const quoteOnStill = async (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmRpc, hints?: EvmPoolKey[], chainName: "base" | "robinhood" = "base", headNo = 5_000_000) => {
+const quoteOnStill = async (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmRpc, hints?: EvmPoolKey[], chainName: "base" | "robinhood" = "base", headNo = 5_000_000, scanless = false) => {
   evmScanBound?.(Number.MAX_SAFE_INTEGER / 4);
   try {
     return await verdict(
-      evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route, ...(hints ? { pools: hints } : {}) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan, undefined, () => 0),
+      evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route, ...(hints ? { pools: hints } : {}), ...(scanless ? { scanless } : {}) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan, undefined, () => 0),
     );
   } finally {
     evmScanBound?.();
@@ -825,6 +825,22 @@ test("card evm-buy-and-sell-on-mainnet: with the device's pool index served, a q
     assert.deepEqual(asked, [[4_999_991, 5_000_000], [4_999_991, 5_000_000]]);
     // an older sync than the one held changes nothing
     assert.equal(evmPoolIndexUse("base", sync({}, 4_999_000)), false);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
+// card evm-tree-reads-only-when-needed: a scanless quote (the page's shown price on a device that holds nothing) reads no
+// log: the served index's pools and the helper's, each read on both providers like any candidate, and no block scanned
+test("SCANLESS a scanless quote asks the scan provider nothing and prices on the served index's pools as a scanned one does", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const token = "0x00000000000000000000000000000000000a66a6";
+  const pools = [seeded(token), real(token)];
+  try {
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 4_999_990, pools: [{ key: real(token).key }] }), true);
+    const asked: [number, number][] = [];
+    assert.deepEqual(await quoteOnStill(pools, token, seededRoute(token), scanner(5_000_000, [], asked), undefined, "base", 5_000_000, true), below);
+    assert.deepEqual(asked, [], "a scanless quote asked the scan provider for logs");
   } finally {
     evmPoolIndexReset();
   }

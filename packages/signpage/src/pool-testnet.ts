@@ -876,6 +876,9 @@ export type TestnetPool = {
    *  is served (from the kept index, else the release's snapshot), and true once one is served to the kit's quote, false
    *  where the sync ends without one (a partial sync, another tab's, no pin). Never started at a load: only a quote asks. */
   evmIndexReady(chain: "base" | "robinhood"): Promise<boolean>;
+  /** Whether the device holds money anywhere, as the last state read found it (a held note of any scope, or a buy or
+   *  sale record): a device that holds none syncs no pool index and its shown prices read no log. */
+  evmMoney(): boolean;
   /** Base's or Robinhood's relay fee for a note proved now (card evm-cash-move-brings-its-fee): the pool's bind's
    *  epoch fee on the pass pool's reads and fee hold (pool-withdraw-evm.ts evmEpochFeeNow), the fee a note a move from
    *  Cash brings is proved at; null with no pool. A read that fails throws. */
@@ -3738,6 +3741,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       return pin === undefined || !wayOut("solana") ? { error: "not_allowed" } : deposit(ask, ctx, from);
     },
     evmPoolOf: (chain) => ((e) => (e === null ? null : (evmWarm(chain), evmSight(chain), { pin: e.pin, rpcs: e.rpcs })))(evmPool(chain)),
+    evmMoney: () => evmMoney,
     evmIndexReady: async (chain) => {
       if (evmIndexed.has(chain)) return true;
       await evmIndexOf(chain);

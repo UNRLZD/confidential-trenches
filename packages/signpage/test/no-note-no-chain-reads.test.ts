@@ -226,6 +226,8 @@ test("a fresh account's Robinhood coin quotes are served the release's snapshot 
   await loadAndLook(t, doc);
   assert.deepEqual(reads.robinhood, [], "the load synced Robinhood's index");
   assert.equal(snapshots(), 0, "the load read the snapshot");
+  // its shown prices read no log (main.ts asks the dry's kit quote scanless on its word)
+  assert.equal((t as unknown as { evmMoney: () => boolean }).evmMoney(), false, "an account that holds nothing counts as holding money");
   await ready("robinhood");
   assert.deepEqual(prevs, [], "a quote of an account that holds nothing synced the index past the snapshot");
   assert.notEqual(evmPoolIndexPools("robinhood", "0x" + "11".repeat(20)), null, "the snapshot was not served to the quote");
@@ -240,6 +242,7 @@ test("an account that holds money syncs Robinhood's index from the release's sna
   (await import("../../kit/src/checks/evm/quote.ts")).evmPoolIndexReset();
   const { t, doc, ready, prevs, through } = await snapshotPage("named+solana");
   await loadAndLook(t, doc);
+  assert.equal((t as unknown as { evmMoney: () => boolean }).evmMoney(), true, "an account holding money counts as holding none");
   assert.equal(await ready("robinhood"), true, "the index was not synced for an account holding money");
   assert.ok(prevs.includes(through), `the sync was not started from the snapshot: ${prevs.join(", ")}`);
 });

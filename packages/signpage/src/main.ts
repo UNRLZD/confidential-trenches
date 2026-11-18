@@ -621,7 +621,8 @@ else {
         const e = testnet?.evmPoolOf(chain) ?? null;
         // the chain's pool index, started by this first coin quote where none runs or is served (card
         // robinhood-quote-answers-cold: from the release's snapshot), its sync waited for at most EVM_DRY_INDEX_WAIT_MS
-        return e === null ? null : evmDryQuote(chain, e.pin, e.rpcs, undefined, () => testnet!.evmIndexReady(chain));
+        // and, on a device that holds nothing, a quote that reads no log (card evm-tree-reads-only-when-needed)
+        return e === null ? null : evmDryQuote(chain, e.pin, e.rpcs, undefined, () => testnet!.evmIndexReady(chain), () => !testnet!.evmMoney());
       },
       // above tap_max (card evm-cash-move-brings-its-fee): the move cashFirst starts, sized at the epoch's relay fee
       // (src/pool-buy-evm.ts evmMoveShort over the rungs its parts land, `rungs`) and priced on the device (card
