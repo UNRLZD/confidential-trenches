@@ -29,7 +29,7 @@ test("contractRisk: honeypot, tax, mint, freeze (pause or blacklist), creator sh
   assert.deepEqual([taxed.tax, taxed.honeypot], [{ buy_bps: 500, sell_bps: 1000 }, true]);
 });
 
-test("toPage: with GoPlus's checks the grid's mint, freeze, dev, tax and honeypot cells hold values, src goplus; holders and top 10 stay GeckoTerminal's when it has them", () => {
+test("toPage: with GoPlus's checks the grid's mint, freeze, dev, tax and honeypot cells hold values, src goplus; holders and top 10 stay the on-chain info's (CoinGecko's keyed read, card evm-token-page-off-the-5-call-window) when it has them", () => {
   const row = { chain: "robinhood", token: RH, symbol: "SANTACOIN", name: "SANTACOIN", liq_usd: "16848.47", created_s: null, as_of_ms: AT, holders: null, top10_bps: null } as never;
   const risk = contractRisk(JSON.parse(fx("robinhood")), RH, AT);
   const page = toPage(row, null, undefined, risk);
@@ -37,7 +37,7 @@ test("toPage: with GoPlus's checks the grid's mint, freeze, dev, tax and honeypo
   const filled = Object.entries(page.risk).filter(([, f]) => f.v !== null).map(([k, f]) => `${k}:${f.src}`);
   assert.deepEqual(filled, ["mint_auth:goplus", "freeze_auth:goplus", "top10_bps:goplus", "dev_bps:goplus", "holders:goplus", "liq_usd:geckoterminal", "tax:goplus", "honeypot:goplus"]);
   const withInfo = toPage(row, { holders: 2701, top10Bps: 4100, decimals: 18, asOfMs: AT } as never, undefined, risk);
-  assert.deepEqual([withInfo.risk.holders.v, withInfo.risk.holders.src, withInfo.risk.top10_bps.v], [2701, "geckoterminal", 4100]);
+  assert.deepEqual([withInfo.risk.holders.v, withInfo.risk.holders.src, withInfo.risk.top10_bps.v], [2701, "coingecko", 4100]);
   // without GoPlus (down, or not answered in time) the cells are as before
   assert.deepEqual(Object.entries(toPage(row, null, undefined, null).risk).filter(([, f]) => f.v !== null).map(([k]) => k), ["liq_usd"]);
 });

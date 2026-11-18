@@ -484,6 +484,13 @@ const PROVIDERS_MAX = 4;
 export const LAG_MAX = VENUES.base.lagMax;
 /** A token nobody asked for this long stops being read (its book is dropped). */
 export const IDLE_MS = 60_000;
+/** Idle books kept at rest (a book nobody asked for past IDLE_MS, no longer read), so a coin opened again answers its
+ *  whole list at once and reads only the blocks since (card robinhood-spread-tapes-fill-inside-45s: the idle book was
+ *  deleted with its read back, and the live checks that open the listed coins a few minutes apart refilled each from
+ *  nothing: live run 44263447481, 8 Robinhood coins still filling past 45 s). The oldest rested is dropped first.
+ *  [design: 100, the EVM lists' 45 Base and 37 Robinhood coins (15 Nov 22:3xZ) with room; a done read back rests as its
+ *  tape alone, its raw logs dropped] */
+export const REST_MAX = 100;
 /** The tick period. */
 export const TICK_MS = 1_000;
 /** An agreed head read within this is every reader's (agreedHead). [design: a tick's period, so a tick reads at most one
@@ -1053,7 +1060,7 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null; indexFile?: string; writable?: Promise<unknown> }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null; indexFile?: string; writable?: Promise<unknown>; restMax?: number }) {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const doFetch = deps.fetch ?? fetch;
@@ -2691,6 +2698,54 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return e.first;
   }
 
+  /** Books nobody asked for past IDLE_MS, no longer read (REST_MAX, the oldest rested out first), by chain and token so
+   *  a kept list never answers another chain's or token's open. */
+  const resting = new Map<string, Entry>();
+  const restKey = (token: string): string => `${chain}:${token}`;
+  /** An idle book put at rest: a done read back keeps its tape alone (its raw logs and agreed reads are only a read
+   *  back's next step's), one still going keeps all, to go on at the reopen. */
+  function rest(token: string, e: Entry): void {
+    if (e.readAt === null) return;
+    if (e.back?.done === true) e.back = { lo: e.back.lo, logs: [], tape: e.back.tape, done: true, ...(e.back.located === true ? { located: true as const } : {}), ...(e.back.born === true ? { born: true as const } : {}) };
+    resting.delete(restKey(token));
+    resting.set(restKey(token), e);
+    while (resting.size > (deps.restMax ?? REST_MAX)) resting.delete(resting.keys().next().value!);
+  }
+  /** Whether a rested book's blocks since are a read no wider than a cold open's: inside the cold window of `headN` (one
+   *  read, as a first read's first step), or held whole by the chain's swap index (no post at all). A gap wider is a
+   *  cold book's, as before: read forward it would cost more than the cold open's own reads. */
+  function gapHeld(e: Entry, headN: number): boolean {
+    const from = e.book.settledTo + 1;
+    if (headN - from + 1 <= V.cold) return true;
+    const r = index?.range() ?? null;
+    return r !== null && r.from <= from;
+  }
+  /** A rested book opened again (open): the blocks since its last read, read before it is served (from the index where
+   *  it holds them), up to the agreed head, then its read back goes on where it was. A gap wider than gapHeld's opens
+   *  the coin cold, as a book never opened. */
+  function reopen(token: string, e: Entry): Promise<void> {
+    e.first ??= (async () => {
+      const head = await agreedHead();
+      // no head read: served as held, behind (filling), and the ticks read it on
+      if (head === null) return;
+      if (gapHeld(e, head.n)) {
+        // the ETH price read to the same block first, as a tick reads it, so no swap of the gap is priced by an older one
+        const refReady = e.pool.quote.kind === "eth" ? readRef(head.with, head.n, undefined, true).catch(() => false) : Promise.resolve(true);
+        // read once at least, so the book is dated by this head (behind), however few blocks came since
+        for (let i = 0; i < 3 && (i === 0 || e.headN < head.n); i++) if (!(await readBook(e, head.with, head, refReady).catch(() => false))) break;
+        backFrom(e, head.with);
+        return;
+      }
+      if (books.get(token) !== e) return;
+      // a new book in its place: its first read is the open's (firstRead), and anything of the rested one still going
+      // ends on seeing it gone (backAll)
+      books.set(token, { pool: e.pool, decimals: e.decimals, book: createBook({ decimals: e.decimals, quote: e.pool.quote }), touched: now(), readAt: null, headN: 0 });
+    })().finally(() => {
+      e.first = undefined;
+    });
+    return e.first;
+  }
+
   /** A book that holds no bar (its pool's reads held no swap): its pool's own state at the agreed head, read with
    *  callsAgreed (two providers alike, never one's word), as its mark (../candles.ts header), at the head block's time.
    *  An ETH-quoted pool's needs the ETH price at the same block: the reference pool's Slot0, read in the same round. A
@@ -2720,7 +2775,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** The timer fired while a tick ran: the next starts as soon as it ends, never a skipped period. */
   let again = false;
   async function tick(): Promise<void> {
-    for (const [t, e] of books) if (now() - e.touched > IDLE_MS) books.delete(t);
+    for (const [t, e] of books)
+      if (now() - e.touched > IDLE_MS) {
+        books.delete(t);
+        rest(t, e);
+      }
     if (books.size === 0) return;
     const head = await agreedHead(true);
     if (head === null) return;
@@ -2774,6 +2833,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  listed token our reads find no pool of, served as an empty chart and tape from our own reads, never a 404. */
   async function open(token: string, client?: string): Promise<Entry | DataAnswer | "none"> {
     let e = books.get(token);
+    // a book at rest (rest) opens again as it was: its list at once, the blocks since read before it is served (reopen)
+    const kept = e === undefined && books.size < OPEN_MAX ? resting.get(restKey(token)) : undefined;
+    if (kept !== undefined) {
+      resting.delete(restKey(token));
+      books.set(token, kept);
+      e = kept;
+      void reopen(token, kept);
+    }
     if (e === undefined) {
       let found: Found | null | "unlisted" = null;
       // a first open waiting for its pool: the lists' search (ahead) starts no other meanwhile
@@ -2811,6 +2878,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     e.touched = now();
     ensureTimer();
+    // a reopen's read of the blocks since (or the cold book that replaced it) is every caller's wait, as a first read is
+    if (e.first !== undefined) {
+      await e.first;
+      e = books.get(token) ?? e;
+      e.touched = now();
+    }
     if (e.readAt === null) await firstRead(e);
     for (let attempt = 0; e.readAt === null && attempt < 2; attempt++) await start();
     if (e.readAt === null) return UPSTREAM;

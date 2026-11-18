@@ -12,10 +12,8 @@ import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { ROW_FIELDS } from "../../../../terminal/src/screens/discover/fields.ts";
 import { start } from "../../server.ts";
-import { geckoBudget } from "../gecko.ts";
 import { DEX_BASE } from "../held.ts";
 import { HOLDERS_FIELDS, PAGE_FIELDS } from "../solana/token.ts";
-import { GT_BASE } from "./lists.ts";
 import { createEvmNamed, toNamed } from "./named.ts";
 import { createEvmToken } from "./token.ts";
 
@@ -47,7 +45,6 @@ const listsOf = (chain: Chain) => {
 /** DexScreener behind a fake fetch: the recorded answer for each asked token ([] for one it has none for), or `status`. */
 let dexCalls = 0;
 const dexFetch = (status = 200) => async (url: string): Promise<Response> => {
-  if (url.startsWith(GT_BASE)) return new Response("{}", { status: 404 }); // GeckoTerminal's info: none held for these
   const m = new RegExp(`^${DEX_BASE}/tokens/v1/(base|robinhood)/(0x[0-9a-f]{40})$`).exec(url);
   if (m === null) throw new Error(`unexpected ${url}`);
   dexCalls++;
@@ -58,7 +55,7 @@ const tokensWith = (status = 200) =>
   Object.fromEntries(
     (["base", "robinhood"] as const).map((c) => {
       const fetch = dexFetch(status);
-      return [c, createEvmToken(c, { lists: listsOf(c), named: createEvmNamed(c, { fetch, now: () => NOW }), gecko: geckoBudget(() => NOW), fetch, now: () => NOW })];
+      return [c, createEvmToken(c, { lists: listsOf(c), named: createEvmNamed(c, { fetch, now: () => NOW }), now: () => NOW })];
     }),
   );
 const at = (evmTokens: ReturnType<typeof tokensWith>) => start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, evmTokens);

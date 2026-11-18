@@ -413,3 +413,34 @@ test("no read outlives its test: a pool check's wait let go has made its reads b
   globalThis.fetch = REAL_FETCH;
   assert.deepEqual(late, []);
 });
+
+// ---- card helper-start-residuals 2: what GET /v1/health names of each pool's fee for the running period (server.ts
+// X-Helper-Pool-Fees, and ready false while a mainnet pool names none) ----
+test("card helper-start-residuals 2: feeNow names the running period's fee once it is in memory, 'reading' while its read ahead is under way or not yet due, and null once that read ended with none; a read on demand that lands names it", async (t) => {
+  const at = { T: E };
+  let down = (T: number) => T < E + 12_000;
+  chain(t, (_host, method, _age, T) => (method === "eth_call" && down(T) ? { status: 502, body: { code: -32603, message: "bad gateway" } } : null), at);
+  const s = sendersOf(ENV_RH, []).get(RH)!;
+  // the period's first second: its read ahead is not due yet
+  assert.equal(s.feeNow(E), "reading");
+  // under way: every wait between its tries sees "reading"; failing all through its window, it ends with none
+  at.T = E + evm.EVM_FEE_WARM_DELAY_MS;
+  const seen: unknown[] = [];
+  await s.warm(E, async (ms) => void (seen.push(s.feeNow(E)), (at.T += ms)));
+  assert.ok(seen.length > 0 && seen.every((x) => x === "reading"), seen.join(","));
+  assert.equal(s.feeNow(E), null, "the read ended with no fee");
+  // a read on demand that lands: named from memory
+  at.T = E + 13_000;
+  assert.equal((await s.fee(at.T))?.fee, feeOf("robinhood").toString());
+  assert.equal(s.feeNow(E), feeOf("robinhood"));
+  // the next period: not due at its first half second; past its due with no read taken (the timer never ran): none
+  const E2 = E + 60_000;
+  at.T = E2 + 500;
+  assert.equal(s.feeNow(E2), "reading");
+  at.T = E2 + evm.EVM_FEE_WARM_DELAY_MS + evm.EVM_FEE_WARM_EVERY_MS + 1;
+  assert.equal(s.feeNow(E2), null);
+  // the read ahead taken late, the chain up: named
+  down = () => false;
+  await s.warm(E2, async (ms) => void (at.T += ms));
+  assert.equal(s.feeNow(E2), feeOf("robinhood"));
+});

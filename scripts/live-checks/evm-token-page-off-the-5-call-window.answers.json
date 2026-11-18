@@ -1,0 +1,1040 @@
+{
+ "bad_deployed": {
+  "note": "the deployed helper (X-Helper-Commit ff65a04030cd, main before this card) at 2026-11-18 09:54:53Z, read by this check from a Mac: 5 listed tokens a chain, page and holders at once; 3 of 10 holders answers carried a count, each src \"geckoterminal\" (the keyless window), the other 7 src \"none\"; each lists answer cut to the rows read",
+  "run": {
+   "base": "https://ct-api.unrealized.trade",
+   "readAt": "2026-11-18T09:54:53.883Z",
+   "chains": {
+    "base": {
+     "lists": {
+      "at": "2026-11-18T09:54:53.884Z",
+      "ms": 613,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-encoding": "gzip",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 09:54:54 GMT",
+       "vary": "Origin, Accept-Encoding",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-18T09:53:02.130Z",
+       "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+       "x-helper-source": "geckoterminal"
+      },
+      "body": "{\"chain\":\"base\",\"lists\":{\"new\":[],\"trending\":[],\"trending_5m\":[],\"trending_1h\":[{\"chain\":\"base\",\"token\":\"0xef5997c2cf2f6c138196f8a6203afc335206b3c1\",\"symbol\":\"OWB\",\"name\":\"OWB\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1759747591,\"price_usd\":\"0.00861783560198\",\"mc_usd\":\"3387449.23289\",\"vol_24h_usd\":\"267951.888125\",\"chg_5m_bps\":0,\"chg_1h_bps\":284,\"chg_24h_bps\":-623,\"liq_usd\":\"59318.3599\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"22.9894192448\",\"buys_5m\":0,\"sells_5m\":1,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"14118.7235265\",\"chg_4h_bps\":null,\"buys_24h\":1000,\"sells_24h\":1048,\"buys_1h\":70,\"sells_1h\":49},{\"chain\":\"base\",\"token\":\"0x0947fb7076bfa307796f8fd533055f6016c6cccc\",\"symbol\":\"AX1\",\"name\":\"AX1\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1794929825,\"price_usd\":\"0.00978026386409\",\"mc_usd\":\"9780263.864\",\"vol_24h_usd\":\"1249911.12703\",\"chg_5m_bps\":-46,\"chg_1h_bps\":659,\"chg_24h_bps\":1198807,\"liq_usd\":\"391445.8283\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"354.843597367\",\"buys_5m\":5,\"sells_5m\":3,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"7614.74066891\",\"chg_4h_bps\":null,\"buys_24h\":2321,\"sells_24h\":1779,\"buys_1h\":29,\"sells_1h\":24},{\"chain\":\"base\",\"token\":\"0x07b3d902783c3c12b077508c3b5c00113d1291d0\",\"symbol\":\"xdp\",\"name\":\"Doppler Finance\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1790599925,\"price_usd\":\"0.017130798888\",\"mc_usd\":\"17024648.23\",\"vol_24h_usd\":\"10252298.205\",\"chg_5m_bps\":-5,\"chg_1h_bps\":33,\"chg_24h_bps\":-153,\"liq_usd\":\"782946.3059\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"12520.3836416\",\"buys_5m\":35,\"sells_5m\":29,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"286145.780383\",\"chg_4h_bps\":null,\"buys_24h\":25691,\"sells_24h\":26174,\"buys_1h\":817,\"sells_1h\":778},{\"chain\":\"base\",\"token\":\"0xb200000000000000000000397293cb8cda9a10c5\",\"symbol\":\"SNDKc\",\"name\":\"Sandisk Corporation\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1792637453,\"price_usd\":\"831.977821266\",\"mc_usd\":\"2425106.42762\",\"vol_24h_usd\":\"27296287.9353\",\"chg_5m_bps\":-6,\"chg_1h_bps\":35,\"chg_24h_bps\":360,\"liq_usd\":\"1566885.2839\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"50227.4313302\",\"buys_5m\":22,\"sells_5m\":17,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"1094391.69306\",\"chg_4h_bps\":null,\"buys_24h\":15280,\"sells_24h\":15417,\"buys_1h\":579,\"sells_1h\":532},{\"chain\":\"base\",\"token\":\"0xe0cd4cacddcbf4f36e845407ce53e87717b6601d\",\"symbol\":\"ICNT\",\"name\":\"Impossible Cloud Network Token\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1751473135,\"price_usd\":\"0.314839192713\",\"mc_usd\":\"78780905.0694\",\"vol_24h_usd\":\"1089918.49405\",\"chg_5m_bps\":299,\"chg_1h_bps\":387,\"chg_24h_bps\":3183,\"liq_usd\":\"129017.8453\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"10104.0534337\",\"buys_5m\":58,\"sells_5m\":55,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"103499.460765\",\"chg_4h_bps\":null,\"buys_24h\":7757,\"sells_24h\":7277,\"buys_1h\":609,\"sells_1h\":656}],\"graduating\":[]},\"as_of_ms\":1794995582130,\"unsettled\":[],\"pools\":{\"0xef5997c2cf2f6c138196f8a6203afc335206b3c1\":\"0x995985c9027e8a90c823a5e0a9112fea72d1f4dd\",\"0x0947fb7076bfa307796f8fd533055f6016c6cccc\":\"0x28752b1c1be27a1d5947dc880dd7d969de945f7a7718d6f3747776dfd536ea76\",\"0x07b3d902783c3c12b077508c3b5c00113d1291d0\":\"0x2df380544b88adb3ad0a94100dcc45fd705aae2d\",\"0xb200000000000000000000397293cb8cda9a10c5\":\"0x2836e062a3fe75943a7f4a552e2365b98e414e75\",\"0xe0cd4cacddcbf4f36e845407ce53e87717b6601d\":\"0x9331f571f79d1e186a095c93756b5680a43932ac\",\"0xb2000000000000000000004884b426556b92883d\":\"0x66dcd42e6314b287110922ae36cb2a8bdeecc153\",\"0xb20000000000000000000078ee7ce2fe4908108c\":\"0xf668e21993f0acd7ab00bb1cfbaed0df28a3c8ec\",\"0x8b7dde054be9d180c1be7fae0874697374a49832\":\"0x8a8e4170c09074b109352190d47e54d7c1f61e4e\",\"0x311935cd80b76769bf2ecc9d8ab7635b2139cf82\":\"0x868eed6bad4bd368cd053b766f84cc727697589a\",\"0xb2000000000000000000007b9fcbd005511acbd5\":\"0x880db7dda4407d99508574e680d067d1164b3cfe\",\"0x3e12b9d6a4d12cd9b4a6d613872d0eb32f68b380\":\"0xafe30319a948f322585fafc1cab1671a47eb3786\",\"0x29cc30f9d113b356ce408667aa6433589cecbdca\":\"0x83f3aca29bc79b048b99c56013475570acc97ccf\",\"0xb2000000000000000000002d0ba3164cc74f58b7\":\"0x16c70f04c3080a127486cdf5a4c33c066bbf47c3\",\"0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee\":\"0x422df9aa896e883c9cdcbad309c0785b7364a1cf\",\"0xb200000000000000000000fd2f87532b90095211\":\"0x41e21950362b1014bc629252ecfff8fca5f1646c\",\"0xbf927b841994731c573bdf09ceb0c6b0aa887cdd\":\"0x6b0f53cbd9272d8117e9535fe25371dedf39a1be\",\"0xc0634090f2fe6c6d75e61be2b949464abb498973\":\"0xd9edc75a3a797ec92ca370f19051babebfb2edee\",\"0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf\":\"0x0faae4ff5f4180b90a4234cc7877c01dbabb5d70eae518cc7b67118a96c89026\",\"0x14d6c649292c5c9790c5196d1a9ea039307947a1\":\"0x95475b9b1492cf109969ff25c2862ef38d1a9998c6288f8b9b7d1c99c6443c2e\",\"0x1a44233fae8d50f1aeb3a5d58dd426ff4814cb53\":\"0x07c4bc0f5fb6cb069124df3e1ae0b8fd8148ccc4\",\"0xb20000000000000000000043a599976181bcf336\":\"0x41d7793faa4ca181b6f021423ff3f9015c00b2ff\",\"0x8644f1a48692e62342dfd63cf0aa5948e7ab2e43\":\"0xa4090555e84e7c106b5446c7b86e380062be01c58a64c8db311c13efd3da0983\",\"0xb2000000000000000000008501b13360000cb2ec\":\"0xe7030be388b8e247abe0c9fa876673e83fbcbd3c\",\"0x015dfbde23f47ab191cb4443ba2a39ed1024dd10\":\"0xa120eb6723c158e5a8dcbcb464d323082c8dc7e0\",\"0x3bf58700f5d74116994fcdce162e799393c6ff3d\":\"0x868d7679d13dca82b06d55834cf84c1b6cc585438b9214c1747c3d6596fae0d3\",\"0xa30898801bedcda24d609cd9d769b082f8d4778f\":\"0x972555d83dc2e9a227d974657089231057798e3c30881c875062cd9144ea0105\",\"0x66861487855f2b24a8ac05b8ef0056763aecefa0\":\"0xf55208b5cd5bc92cd6a93f767a5d8cd0a51051bf9b0cdd8261cd0b865d38b5c5\",\"0xb20000000000000000000082a4dff766b98ca1be\":\"0xd447101ed5f4d22d49b3dbbbfd363c9a857176300070bc0383424e0f9bb594d3\",\"0x1ffba6cdfee1d56c37154521dd61a95a1be163b5\":\"0x11b5049d7c2c88bdcff4a838514d071d7d596c7f\",\"0x1167d48bd1b233c583269f333ce0168c8d6a661b\":\"0x870ae2377b51ed3a2879e5b1a3c86327060d128d7478a7fbbb88707ad9fbe852\",\"0x17db15b7f1ecdd91f1dba5797ec034160f80fee1\":\"0xcda5a1817969edc45fb6c3935598ede36b9bee4fbbe014a49c8d9da183267229\",\"0xb2000000000000000000009d468d0af3d993d552\":\"0x4ba20c25a4c30c33cc9a2bcaf7cacc62115a0d7d339bd1f001afc0f182f5f2e3\",\"0xaac3b655d2027aab78a5d66cfee31b23dc527e6d\":\"0x0b6b97d6d406cf64cbc701abeddf2f8811988344\",\"0x0f88616d80fd952195267a7d1108a6d84ce37255\":\"0x038b7cbe2009bbbfc22458ba40f33079986ef7b85006cf2f662a61bf665f2aa8\",\"0xc28c4ff1818ecebdd0cbe6ebffdb1083ca1df832\":\"0xb8a6d8ef6ae5d1886c4ec32ffc2e39030ea01ff7626bc50ce1ebc2a1088ac84a\",\"0x2609140f384f40e16574eafba71bd0be1fee5bca\":\"0x9e4720603625436bd10703914df8d1d56f87bfc8\",\"0x1379fd215bd20cfbd212e78ba67cc3374b15d1d5\":\"0x66efb4ea2d6844b450f68cab3f25b0b2eae1374123f95851c8618088523590e1\",\"0xdd0d98ef5997f3511e6096bcf6274135ff82b03a\":\"0xda593675c44f261e7189335e1fae7b391862dcc7\",\"0xcede2861413e205a5d56b75ff4474ece9cb87a01\":\"0xe69923061399a9db47d88b606791482de3ab101029b5a2505a5742e194a0619f\",\"0x3f451f04e5a4f7d51ad3eb07849c6b3dc2a261f4\":\"0x74f5d3086d4259d04ae9306c95c44cfc9238a3fa\",\"0x4c73c7849d584f52c94b0ad225d9c29c3266b867\":\"0x0a815c4abda256d2b098827509f44469574808da\",\"0xb3a6e457de62e80e9d26639ca0cfbb66f6dfcccc\":\"0xc77f2d47b8e5c815beb388d9355033ab045370a0d5853f475c45e603e9adda32\",\"0x78935f73b9a10bcf10d4ca4ec2ebe934949df454\":\"0xce494a830c20f5dc223e4ac9b2566abb5d850eb354bfee55614a0af149259160\"}}"
+     },
+     "tokens": {
+      "0xef5997c2cf2f6c138196f8a6203afc335206b3c1": {
+       "token": {
+        "at": "2026-11-18T09:54:54.698Z",
+        "ms": 629,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-length": "687",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=426",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:21.001Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"base\",\"token\":\"0xef5997c2cf2f6c138196f8a6203afc335206b3c1\",\"symbol\":\"OWB\",\"name\":\"OWB\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1759747591,\"price_usd\":\"0.00861783560198\",\"mc_usd\":\"3387449.23289\",\"vol_24h_usd\":\"267951.888125\",\"chg_5m_bps\":0,\"chg_1h_bps\":284,\"chg_24h_bps\":-623,\"liq_usd\":\"59318.3599\",\"holders\":86725,\"top10_bps\":6990,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"22.9894192448\",\"buys_5m\":0,\"sells_5m\":1,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"14118.7235265\",\"chg_4h_bps\":null,\"buys_24h\":1000,\"sells_24h\":1048,\"buys_1h\":70,\"sells_1h\":49},\"decimals\":18,\"pool\":\"0xf252f51919dfca2c9c0ea279f11183580edee4d6\",\"risk\":{\"mint_auth\":{\"v\":true,\"src\":\"goplus\",\"as_of_ms\":1794995564936},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995564936},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"top10_bps\":{\"v\":6990,\"src\":\"geckoterminal\",\"as_of_ms\":1794995517000},\"dev_bps\":{\"v\":0,\"src\":\"goplus\",\"as_of_ms\":1794995564936},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"holders\":{\"v\":86725,\"src\":\"geckoterminal\",\"as_of_ms\":1794995517000},\"liq_usd\":{\"v\":\"59318.3599\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"age_s\":{\"v\":35248070,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995564936},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995564936},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001}},\"route\":\"unknown\",\"filling\":false,\"links\":{\"site\":\"https://clashofcoins.com/\",\"x\":\"https://x.com/clashofcoins\"}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.698Z",
+        "ms": 677,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-length": "90",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:57.000Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"holders\":[],\"total\":86725,\"top_bps\":6990,\"src\":\"geckoterminal\",\"as_of_ms\":1794995517000}"
+       }
+      },
+      "0xb200000000000000000000397293cb8cda9a10c5": {
+       "token": {
+        "at": "2026-11-18T09:54:54.700Z",
+        "ms": 653,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-length": "652",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=6",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:21.001Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"base\",\"token\":\"0xb200000000000000000000397293cb8cda9a10c5\",\"symbol\":\"SNDKc\",\"name\":\"Sandisk Corporation\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1792637453,\"price_usd\":\"831.977821266\",\"mc_usd\":\"2425106.42762\",\"vol_24h_usd\":\"27296287.9353\",\"chg_5m_bps\":-6,\"chg_1h_bps\":35,\"chg_24h_bps\":360,\"liq_usd\":\"1566885.2839\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"50227.4313302\",\"buys_5m\":22,\"sells_5m\":17,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"1094391.69306\",\"chg_4h_bps\":null,\"buys_24h\":15280,\"sells_24h\":15417,\"buys_1h\":579,\"sells_1h\":532},\"decimals\":8,\"pool\":\"0x2836e062a3fe75943a7f4a552e2365b98e414e75\",\"risk\":{\"mint_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"freeze_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"top10_bps\":{\"v\":8330,\"src\":\"goplus\",\"as_of_ms\":1794995569317},\"dev_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"holders\":{\"v\":2131,\"src\":\"goplus\",\"as_of_ms\":1794995569317},\"liq_usd\":{\"v\":\"1566885.2839\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"age_s\":{\"v\":2358208,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995569317},\"honeypot\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.701Z",
+        "ms": 680,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-length": "80",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.293Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":null,\"top_bps\":null,\"src\":\"none\",\"as_of_ms\":1794995695293}"
+       }
+      },
+      "0x07b3d902783c3c12b077508c3b5c00113d1291d0": {
+       "token": {
+        "at": "2026-11-18T09:54:54.699Z",
+        "ms": 784,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-length": "661",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:21.001Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"base\",\"token\":\"0x07b3d902783c3c12b077508c3b5c00113d1291d0\",\"symbol\":\"xdp\",\"name\":\"Doppler Finance\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1790599925,\"price_usd\":\"0.017130798888\",\"mc_usd\":\"17024648.23\",\"vol_24h_usd\":\"10252298.205\",\"chg_5m_bps\":-5,\"chg_1h_bps\":33,\"chg_24h_bps\":-153,\"liq_usd\":\"782946.3059\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"12520.3836416\",\"buys_5m\":35,\"sells_5m\":29,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"286145.780383\",\"chg_4h_bps\":null,\"buys_24h\":25691,\"sells_24h\":26174,\"buys_1h\":817,\"sells_1h\":778},\"decimals\":18,\"pool\":\"0x2df380544b88adb3ad0a94100dcc45fd705aae2d\",\"risk\":{\"mint_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"top10_bps\":{\"v\":9403,\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"dev_bps\":{\"v\":0,\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"holders\":{\"v\":15940,\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"liq_usd\":{\"v\":\"782946.3059\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"age_s\":{\"v\":4395736,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.700Z",
+        "ms": 657,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-length": "80",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=4",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.270Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":null,\"top_bps\":null,\"src\":\"none\",\"as_of_ms\":1794995695270}"
+       }
+      },
+      "0x0947fb7076bfa307796f8fd533055f6016c6cccc": {
+       "token": {
+        "at": "2026-11-18T09:54:54.699Z",
+        "ms": 967,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-length": "690",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=267",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:21.001Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"base\",\"token\":\"0x0947fb7076bfa307796f8fd533055f6016c6cccc\",\"symbol\":\"AX1\",\"name\":\"AX1\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1794929825,\"price_usd\":\"0.00978026386409\",\"mc_usd\":\"9780263.864\",\"vol_24h_usd\":\"1249911.12703\",\"chg_5m_bps\":-46,\"chg_1h_bps\":659,\"chg_24h_bps\":1198807,\"liq_usd\":\"391445.8283\",\"holders\":2555,\"top10_bps\":9769,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"354.843597367\",\"buys_5m\":5,\"sells_5m\":3,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"7614.74066891\",\"chg_4h_bps\":null,\"buys_24h\":2321,\"sells_24h\":1779,\"buys_1h\":29,\"sells_1h\":24},\"decimals\":18,\"pool\":\"0x28752b1c1be27a1d5947dc880dd7d969de945f7a7718d6f3747776dfd536ea76\",\"risk\":{\"mint_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"freeze_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"top10_bps\":{\"v\":9769,\"src\":\"geckoterminal\",\"as_of_ms\":1794994735000},\"dev_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"holders\":{\"v\":2555,\"src\":\"geckoterminal\",\"as_of_ms\":1794994735000},\"liq_usd\":{\"v\":\"391445.8283\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"age_s\":{\"v\":65836,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"tax\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"honeypot\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001}},\"route\":\"unknown\",\"filling\":false,\"links\":{\"site\":\"https://www.clanker.world/clanker/0x0947FB7076BFa307796F8fd533055f6016C6cccC\"}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.699Z",
+        "ms": 965,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-length": "89",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=327",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:38:55.000Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"holders\":[],\"total\":2555,\"top_bps\":9769,\"src\":\"geckoterminal\",\"as_of_ms\":1794994735000}"
+       }
+      },
+      "0xe0cd4cacddcbf4f36e845407ce53e87717b6601d": {
+       "token": {
+        "at": "2026-11-18T09:54:54.701Z",
+        "ms": 2151,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-length": "635",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:56 GMT",
+         "server-timing": "total;dur=1504",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:21.001Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"base\",\"token\":\"0xe0cd4cacddcbf4f36e845407ce53e87717b6601d\",\"symbol\":\"ICNT\",\"name\":\"Impossible Cloud Network Token\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1751473135,\"price_usd\":\"0.314839192713\",\"mc_usd\":\"78780905.0694\",\"vol_24h_usd\":\"1089918.49405\",\"chg_5m_bps\":299,\"chg_1h_bps\":387,\"chg_24h_bps\":3183,\"liq_usd\":\"129017.8453\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"10104.0534337\",\"buys_5m\":58,\"sells_5m\":55,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"103499.460765\",\"chg_4h_bps\":null,\"buys_24h\":7757,\"sells_24h\":7277,\"buys_1h\":609,\"sells_1h\":656},\"decimals\":18,\"pool\":\"0x9331f571f79d1e186a095c93756b5680a43932ac\",\"risk\":{\"mint_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"freeze_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"top10_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"dev_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"holders\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"liq_usd\":{\"v\":\"129017.8453\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"age_s\":{\"v\":43522526,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"tax\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"honeypot\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.701Z",
+        "ms": 781,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-length": "80",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.310Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":null,\"top_bps\":null,\"src\":\"none\",\"as_of_ms\":1794995695310}"
+       }
+      }
+     }
+    },
+    "robinhood": {
+     "lists": {
+      "at": "2026-11-18T09:54:54.497Z",
+      "ms": 200,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-encoding": "gzip",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 09:54:54 GMT",
+       "vary": "Origin, Accept-Encoding",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-18T09:51:46.178Z",
+       "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+       "x-helper-source": "geckoterminal"
+      },
+      "body": "{\"chain\":\"robinhood\",\"lists\":{\"new\":[],\"trending\":[],\"trending_5m\":[],\"trending_1h\":[{\"chain\":\"robinhood\",\"token\":\"0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8\",\"symbol\":\"TEXEL\",\"name\":\"Texel\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1794155661,\"price_usd\":\"0.000108705780852\",\"mc_usd\":\"108705.7809\",\"vol_24h_usd\":\"24059.4519248\",\"chg_5m_bps\":85,\"chg_1h_bps\":1087,\"chg_24h_bps\":873,\"liq_usd\":\"25970.3805\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"104.784846018\",\"buys_5m\":3,\"sells_5m\":0,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":\"pons\",\"curve_bps\":null,\"vol_1h_usd\":\"1060.54361368\",\"chg_4h_bps\":null,\"buys_24h\":217,\"sells_24h\":139,\"buys_1h\":13,\"sells_1h\":5},{\"chain\":\"robinhood\",\"token\":\"0x18e674231a58c239dc7daedcffe15ec3a24cff5c\",\"symbol\":\"HOOKR\",\"name\":\"Hookr.fun\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1785990057,\"price_usd\":\"0.0134235755587\",\"mc_usd\":\"13423575.56\",\"vol_24h_usd\":\"355104.345217\",\"chg_5m_bps\":297,\"chg_1h_bps\":1328,\"chg_24h_bps\":1718,\"liq_usd\":\"787264.2472\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"20430.0219964\",\"buys_5m\":6,\"sells_5m\":49,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"54710.751739\",\"chg_4h_bps\":null,\"buys_24h\":677,\"sells_24h\":805,\"buys_1h\":24,\"sells_1h\":112},{\"chain\":\"robinhood\",\"token\":\"0x39dbed3a2bd333467115de45665cc57f813c4571\",\"symbol\":\"PONS\",\"name\":\"Pons\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1786419242,\"price_usd\":\"0.116473137186\",\"mc_usd\":\"77971599.9032\",\"vol_24h_usd\":\"1338961.25172\",\"chg_5m_bps\":1,\"chg_1h_bps\":88,\"chg_24h_bps\":-4,\"liq_usd\":\"362121.2227\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"3394.08402099\",\"buys_5m\":11,\"sells_5m\":15,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"38389.3964266\",\"chg_4h_bps\":null,\"buys_24h\":3788,\"sells_24h\":4155,\"buys_1h\":115,\"sells_1h\":192},{\"chain\":\"robinhood\",\"token\":\"0x020bfc650a365f8bb26819deaabf3e21291018b4\",\"symbol\":\"CASHCAT\",\"name\":\"Cash Cat\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1782934722,\"price_usd\":\"0.0444617296429\",\"mc_usd\":\"43909322.774\",\"vol_24h_usd\":\"1241266.14057\",\"chg_5m_bps\":0,\"chg_1h_bps\":-60,\"chg_24h_bps\":-556,\"liq_usd\":\"695348.9245\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"0.017916723\",\"buys_5m\":1,\"sells_5m\":0,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"23924.4816724\",\"chg_4h_bps\":null,\"buys_24h\":2222,\"sells_24h\":2169,\"buys_1h\":40,\"sells_1h\":113},{\"chain\":\"robinhood\",\"token\":\"0xc9675fe679c7d4e1b94416f66d61c96127eb964a\",\"symbol\":\"GIGATENEV\",\"name\":\"Giga Tenev\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1791568900,\"price_usd\":\"0.000608523581697\",\"mc_usd\":\"608523.5817\",\"vol_24h_usd\":\"219527.455453\",\"chg_5m_bps\":-43,\"chg_1h_bps\":-97,\"chg_24h_bps\":187,\"liq_usd\":\"51371.2263\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"97.3218032951\",\"buys_5m\":2,\"sells_5m\":4,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"5380.31700956\",\"chg_4h_bps\":null,\"buys_24h\":3407,\"sells_24h\":3328,\"buys_1h\":91,\"sells_1h\":73}],\"graduating\":[]},\"as_of_ms\":1794995506178,\"unsettled\":[],\"pools\":{\"0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8\":\"0x5e73f5892ef5cf4d553fe0cc9b109e884c3c2a52635bf6c4f1dceff9637fe932\",\"0x18e674231a58c239dc7daedcffe15ec3a24cff5c\":\"0x590dcb6a87828bf688b48089a62239b693378f1fb64d2286e6a399ed8c005fdf\",\"0x39dbed3a2bd333467115de45665cc57f813c4571\":\"0xf2a0be59ab76b96f957bd5e5b967f2b75e8db269\",\"0x020bfc650a365f8bb26819deaabf3e21291018b4\":\"0xd42a491087a15e5afd51feb3606066cc152d2b09\",\"0xc9675fe679c7d4e1b94416f66d61c96127eb964a\":\"0xe96c99be1ffcc204714ebce32870ab12b8b362308fa50b9352c03b2486a5d448\",\"0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f\":\"0x2b0d0183d017c58b924401ca8ac362f6e01f0e9e\",\"0x56910d4409f3a0c78c64dd8d0545ff0705389870\":\"0xd29893ffac8b29ec4db2cfe0cdb3fe1377c028ff\",\"0xded852de9fe9ba9b6f27f39e8e81cf851a5c79cc\":\"0x05c53aa8db4ac905381ba999d92a40a13fc0bc93b5d0a287ca16dc107bd8d11b\",\"0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa\":\"0x5291cfd042d8a771a510534ee31090bc4f4dc72724871e8f321aecfd12332a9a\",\"0xb815559286e633a902621c4a5dbf08976092855b\":\"0xedb0f576ceb12c79bac96c1ff02c8778ce30780ef0dd54efea21985d95e91b56\",\"0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111\":\"0x1649550af1e3363b4c25236434530af7e6886b183e1f574a98fdd1d04d287a2d\",\"0x4db7374e966097be94c6680d49156d580f097bbf\":\"0xbf7dc545ff6d3b0e23f6264f7c23d4fa16a0f3bb1b26eda350593bd63a94da97\",\"0xd281bf1649c5db6744d23f61bb25b05b4d1dff35\":\"0x3d51da970e62e8ce0f8d9d54b38de89d01b208e93d070ab893cc1a15ad8d8850\",\"0x1186554ccf9beea39e85fe1b40c14535517532c9\":\"0x03be79f900474ac54ccd5d9aa30397e9849e77c3\",\"0x57c0e45cb534413d1c20a4240955d6bb250bb4f1\":\"0x23d641feccd207e8794c593e8240444a0674c4ba\",\"0xfce34d21a92069100e3226638140706cf03a266e\":\"0x7ffd58d9ab075007d3ff9a2fa31ed8993aa918680154d87eeed1861d1683b34e\",\"0x42afa2124ca5a2b83898e46b2da9a190995b1e18\":\"0xc749412e31087a6e6f9210af575bc9100159fbc9f45da3ca8b26b31f3bf5777e\",\"0x9cc546a4091f184898c4155c1b9f6290075ef8fb\":\"0x59c4d64edc16d5621d0b38fb690370577679310967f6b3af0e733f4636c7b236\",\"0x78c1c2d4cd6207b6ff4e84362d314d1cd0830041\":\"0xb09d95f6b76f2b861dbad27d02293e7b17d8f473e3198f723c538e56467da01f\",\"0xe8ffd7e24187f72afb08d75b1bb13088a989a791\":\"0xd64fbda67e1015df43fa5e49f02ca844729e5f94\",\"0x72be1277e198d0c476869253cb4e62807e14533c\":\"0xdb36324392b4a3f4261230e21f9f3f04e627074e8866ec9b69ee1d00af96d60a\",\"0xe4119a9bfcc86915368502b598bbed4745f7051d\":\"0x780ab912bafd2c7c4a41cdaf517ff48e76d84218ffabafea14be5d27591efe52\",\"0x255979302fd6a5e2ff6dce0d8b018f51e06e243a\":\"0xa8f330994e5832b499e1c82921846f423a20ba7601fe9b42340715d2f81c8bd0\",\"0xcec185eb182c47d1ba1efc84e6959e18cd620be4\":\"0xa0eff919d3cff0eab35e9884543e9334edd1b4d2cfa6cc9f8f3982d9aa737308\",\"0xccee82fe024c36fa15e1005ede3e9e4787e23d09\":\"0x67983c0d78cea3a8b4a5cc283feeeefd278a8ae5c6504b983b0c72bde13d1c0c\",\"0x51250b135174ca09450ec01c4aff73cf69dbb590\":\"0xa85f02f8e836e92912c8e0588f60b8868eedc154e558c10a1966269e5122b77c\",\"0x07ebb29a38fbcb41563817e5e19f2cec619c90d2\":\"0x06e308b77bdafd691d179645296ce8c40e33c6af4a879a913efc7eedc402581c\",\"0x16346d2a370852a1d9cd5330ab9bdc877773817b\":\"0xcf8b2df547170568e3bf0c00b6e895a7484350b7\",\"0x45842cd15b88c22cd5e199c80f61003fe55ce4af\":\"0xad860ffeb66735a8e36cc9b67d996e6b0eefeb8bd516cfb2624b2b1f63e94d9c\",\"0x03143b67e2a8aeda8c2b4b7c47f97a7867237777\":\"0xf55a3dd532afc38500c2f593081033d1e6166840c99d154a39cdf339b276575e\",\"0xa7858af26dd167c3ff3ff74d16aac5383abfba8a\":\"0xfe4e18d3ac6349c634c4e143c47bb3288d1fd7867b7ee1b503a34c6ed6d57b16\",\"0xfc54c3e66660c7e47b973524311b78c5363cb6b8\":\"0x7e209adbd9a35758c51bf83587a5ae85bd8e89ffb8b99b9571261bfeadad03c4\",\"0x312491cea909ebb87d76184206991b329bdc05d3\":\"0x632d8bbc08f35c3ddac8b71c6e9975ad9aa0999b63c024a3e751ca50efa2fb53\",\"0x920fcf2c9b10ab8e18fdd00f0be6804a0a4d96d5\":\"0x386ae5c0b66ff84cbb3fc17dc560b07da36c9900c96002c23419e4d1752004a7\",\"0x4e069e8853cb878a76924019ec765b3b9b199de1\":\"0x400e1efc375735618ed236df639d03650ed9a58fdabc4076ee1147302ea69a03\",\"0x131d5231f4e5848f54ca5c8ff7b0020d16042446\":\"0xe69d939a9cd2273800fcd5b643bf1796777f579d\",\"0x1672862260df6cdc7947632ebcdfb70f59aa0087\":\"0xae0283c486334b4cd3d59908558225a8b926c2c0e8f82730b6193321b54999cb\",\"0x18348cd0c0bd48ec9a2922f8836939cf0f02ea0a\":\"0x0ed6a8ce87f429274b49d9dc6e4fba9090e67112\",\"0xbcb553919c88c43c9c8171962c604e72f3ecc600\":\"0xfbfb1ba9837a360d536a03f4f51a7994f5029ff718d0454194c8f4326ca8237e\",\"0x8848ab098d63c99a34d039756101897c8be6467a\":\"0xd968794b8bd10f0f0f4fc0a1816ad890f22720ed217f745fa9eee466d9760269\",\"0xa24971add5935e38294c7206920eed83015b7ec4\":\"0x0089e130e64cca74ca7f7a108493be4a20acee79e8f6db80ea30fd47cca1f27a\",\"0x81f3567cfcbfaf595d804f3508627e73d7dea9d3\":\"0x59b358feb891b7bb0b937b597ea6353caa19df89cff479ac5b2f401e2da2a7bf\",\"0x8f79030bff73b9ae36326360b5b0321ebc9afb3a\":\"0x095e5edfac73fad77da774b27b8d8b9f1c3709b7\",\"0x4c60ae7ff03a8d0e57c1aa665131aabda3f09545\":\"0x22a610d968b9eaf2668af4d3e3fed78b68e9c9d8\",\"0xa9b4f651cc0bec07084f8bc2699080ea9ad82bdf\":\"0x85ce07a2d1e1218b3cba67e9cace7091152ad522a150e44aa7313a7398a3f6f6\",\"0x8603d3397f3f1955d9201472790f424aaa4cd756\":\"0xeffa8f2ab4859a18db4ad869355709096551a68768abdc1c9062cee3939cb71c\",\"0x66c16ea2003178fa0e5636d16610e0752a8b695b\":\"0xdfbe8b739ddeb3a926c59781799059859f4fee66\"}}"
+     },
+     "tokens": {
+      "0x39dbed3a2bd333467115de45665cc57f813c4571": {
+       "token": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 681,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-length": "676",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:46.178Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"robinhood\",\"token\":\"0x39dbed3a2bd333467115de45665cc57f813c4571\",\"symbol\":\"PONS\",\"name\":\"Pons\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1786419242,\"price_usd\":\"0.116473137186\",\"mc_usd\":\"77971599.9032\",\"vol_24h_usd\":\"1338961.25172\",\"chg_5m_bps\":1,\"chg_1h_bps\":88,\"chg_24h_bps\":-4,\"liq_usd\":\"362121.2227\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"3394.08402099\",\"buys_5m\":11,\"sells_5m\":15,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"38389.3964266\",\"chg_4h_bps\":null,\"buys_24h\":3788,\"sells_24h\":4155,\"buys_1h\":115,\"sells_1h\":192},\"decimals\":18,\"pool\":\"0xf2a0be59ab76b96f957bd5e5b967f2b75e8db269\",\"risk\":{\"mint_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"top10_bps\":{\"v\":5438,\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"dev_bps\":{\"v\":0,\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"holders\":{\"v\":105560,\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"liq_usd\":{\"v\":\"362121.2227\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"age_s\":{\"v\":8576264,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 779,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-length": "80",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.324Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":null,\"top_bps\":null,\"src\":\"none\",\"as_of_ms\":1794995695324}"
+       }
+      },
+      "0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8": {
+       "token": {
+        "at": "2026-11-18T09:54:54.702Z",
+        "ms": 782,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-length": "704",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=2",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:46.178Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"robinhood\",\"token\":\"0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8\",\"symbol\":\"TEXEL\",\"name\":\"Texel\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1794155661,\"price_usd\":\"0.000108705780852\",\"mc_usd\":\"108705.7809\",\"vol_24h_usd\":\"24059.4519248\",\"chg_5m_bps\":85,\"chg_1h_bps\":1087,\"chg_24h_bps\":873,\"liq_usd\":\"25970.3805\",\"holders\":475,\"top10_bps\":4333,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"104.784846018\",\"buys_5m\":3,\"sells_5m\":0,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":\"pons\",\"curve_bps\":null,\"vol_1h_usd\":\"1060.54361368\",\"chg_4h_bps\":null,\"buys_24h\":217,\"sells_24h\":139,\"buys_1h\":13,\"sells_1h\":5},\"decimals\":18,\"pool\":\"0x5e73f5892ef5cf4d553fe0cc9b109e884c3c2a52635bf6c4f1dceff9637fe932\",\"risk\":{\"mint_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995557630},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995557630},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"top10_bps\":{\"v\":4333,\"src\":\"geckoterminal\",\"as_of_ms\":1794995524000},\"dev_bps\":{\"v\":0,\"src\":\"goplus\",\"as_of_ms\":1794995557630},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"holders\":{\"v\":475,\"src\":\"geckoterminal\",\"as_of_ms\":1794995524000},\"liq_usd\":{\"v\":\"25970.3805\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"age_s\":{\"v\":839845,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995557630},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995557630},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178}},\"route\":\"unknown\",\"filling\":false,\"links\":{\"site\":\"https://texel.run/\",\"x\":\"https://x.com/texelrun\"}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.702Z",
+        "ms": 661,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-length": "88",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=5",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:52:04.000Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"holders\":[],\"total\":475,\"top_bps\":4333,\"src\":\"geckoterminal\",\"as_of_ms\":1794995524000}"
+       }
+      },
+      "0x18e674231a58c239dc7daedcffe15ec3a24cff5c": {
+       "token": {
+        "at": "2026-11-18T09:54:54.702Z",
+        "ms": 781,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-length": "677",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:46.178Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"robinhood\",\"token\":\"0x18e674231a58c239dc7daedcffe15ec3a24cff5c\",\"symbol\":\"HOOKR\",\"name\":\"Hookr.fun\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1785990057,\"price_usd\":\"0.0134235755587\",\"mc_usd\":\"13423575.56\",\"vol_24h_usd\":\"355104.345217\",\"chg_5m_bps\":297,\"chg_1h_bps\":1328,\"chg_24h_bps\":1718,\"liq_usd\":\"787264.2472\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"20430.0219964\",\"buys_5m\":6,\"sells_5m\":49,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"54710.751739\",\"chg_4h_bps\":null,\"buys_24h\":677,\"sells_24h\":805,\"buys_1h\":24,\"sells_1h\":112},\"decimals\":18,\"pool\":\"0x590dcb6a87828bf688b48089a62239b693378f1fb64d2286e6a399ed8c005fdf\",\"risk\":{\"mint_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"top10_bps\":{\"v\":1896,\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"dev_bps\":{\"v\":225,\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"holders\":{\"v\":10378,\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"liq_usd\":{\"v\":\"787264.2472\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"age_s\":{\"v\":9005449,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.702Z",
+        "ms": 780,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-length": "80",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.307Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":null,\"top_bps\":null,\"src\":\"none\",\"as_of_ms\":1794995695307}"
+       }
+      },
+      "0xc9675fe679c7d4e1b94416f66d61c96127eb964a": {
+       "token": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 780,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-length": "643",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=2",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:46.178Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"robinhood\",\"token\":\"0xc9675fe679c7d4e1b94416f66d61c96127eb964a\",\"symbol\":\"GIGATENEV\",\"name\":\"Giga Tenev\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1791568900,\"price_usd\":\"0.000608523581697\",\"mc_usd\":\"608523.5817\",\"vol_24h_usd\":\"219527.455453\",\"chg_5m_bps\":-43,\"chg_1h_bps\":-97,\"chg_24h_bps\":187,\"liq_usd\":\"51371.2263\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"97.3218032951\",\"buys_5m\":2,\"sells_5m\":4,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"5380.31700956\",\"chg_4h_bps\":null,\"buys_24h\":3407,\"sells_24h\":3328,\"buys_1h\":91,\"sells_1h\":73},\"decimals\":18,\"pool\":\"0xe96c99be1ffcc204714ebce32870ab12b8b362308fa50b9352c03b2486a5d448\",\"risk\":{\"mint_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"freeze_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"top10_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"dev_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"holders\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"liq_usd\":{\"v\":\"51371.2263\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"age_s\":{\"v\":3426606,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"tax\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"honeypot\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 672,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-length": "80",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=4",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.289Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":null,\"top_bps\":null,\"src\":\"none\",\"as_of_ms\":1794995695289}"
+       }
+      },
+      "0x020bfc650a365f8bb26819deaabf3e21291018b4": {
+       "token": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 2186,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-length": "640",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:56 GMT",
+         "server-timing": "total;dur=1503",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:46.178Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"robinhood\",\"token\":\"0x020bfc650a365f8bb26819deaabf3e21291018b4\",\"symbol\":\"CASHCAT\",\"name\":\"Cash Cat\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1782934722,\"price_usd\":\"0.0444617296429\",\"mc_usd\":\"43909322.774\",\"vol_24h_usd\":\"1241266.14057\",\"chg_5m_bps\":0,\"chg_1h_bps\":-60,\"chg_24h_bps\":-556,\"liq_usd\":\"695348.9245\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"0.017916723\",\"buys_5m\":1,\"sells_5m\":0,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"23924.4816724\",\"chg_4h_bps\":null,\"buys_24h\":2222,\"sells_24h\":2169,\"buys_1h\":40,\"sells_1h\":113},\"decimals\":18,\"pool\":\"0x31608601d541e868706aa557558a4d4f99c57e6dd13bd3362edcf05d00a16212\",\"risk\":{\"mint_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"freeze_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"top10_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"dev_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"holders\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"liq_usd\":{\"v\":\"695348.9245\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"age_s\":{\"v\":12060784,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"tax\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"honeypot\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 672,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-length": "80",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=4",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.280Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":null,\"top_bps\":null,\"src\":\"none\",\"as_of_ms\":1794995695280}"
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "good": {
+  "note": "made from bad_deployed: each holders answer and each page risk.holders as this card answers them, a count with src \"coingecko\" (CoinGecko keyed on-chain info); no run of the card is deployed yet to record, re-record from the first helper deploy that serves it",
+  "run": {
+   "base": "https://ct-api.unrealized.trade",
+   "readAt": "2026-11-18T09:54:53.883Z",
+   "chains": {
+    "base": {
+     "lists": {
+      "at": "2026-11-18T09:54:53.884Z",
+      "ms": 613,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-encoding": "gzip",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 09:54:54 GMT",
+       "vary": "Origin, Accept-Encoding",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-18T09:53:02.130Z",
+       "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+       "x-helper-source": "geckoterminal"
+      },
+      "body": "{\"chain\":\"base\",\"lists\":{\"new\":[],\"trending\":[],\"trending_5m\":[],\"trending_1h\":[{\"chain\":\"base\",\"token\":\"0xef5997c2cf2f6c138196f8a6203afc335206b3c1\",\"symbol\":\"OWB\",\"name\":\"OWB\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1759747591,\"price_usd\":\"0.00861783560198\",\"mc_usd\":\"3387449.23289\",\"vol_24h_usd\":\"267951.888125\",\"chg_5m_bps\":0,\"chg_1h_bps\":284,\"chg_24h_bps\":-623,\"liq_usd\":\"59318.3599\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"22.9894192448\",\"buys_5m\":0,\"sells_5m\":1,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"14118.7235265\",\"chg_4h_bps\":null,\"buys_24h\":1000,\"sells_24h\":1048,\"buys_1h\":70,\"sells_1h\":49},{\"chain\":\"base\",\"token\":\"0x0947fb7076bfa307796f8fd533055f6016c6cccc\",\"symbol\":\"AX1\",\"name\":\"AX1\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1794929825,\"price_usd\":\"0.00978026386409\",\"mc_usd\":\"9780263.864\",\"vol_24h_usd\":\"1249911.12703\",\"chg_5m_bps\":-46,\"chg_1h_bps\":659,\"chg_24h_bps\":1198807,\"liq_usd\":\"391445.8283\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"354.843597367\",\"buys_5m\":5,\"sells_5m\":3,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"7614.74066891\",\"chg_4h_bps\":null,\"buys_24h\":2321,\"sells_24h\":1779,\"buys_1h\":29,\"sells_1h\":24},{\"chain\":\"base\",\"token\":\"0x07b3d902783c3c12b077508c3b5c00113d1291d0\",\"symbol\":\"xdp\",\"name\":\"Doppler Finance\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1790599925,\"price_usd\":\"0.017130798888\",\"mc_usd\":\"17024648.23\",\"vol_24h_usd\":\"10252298.205\",\"chg_5m_bps\":-5,\"chg_1h_bps\":33,\"chg_24h_bps\":-153,\"liq_usd\":\"782946.3059\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"12520.3836416\",\"buys_5m\":35,\"sells_5m\":29,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"286145.780383\",\"chg_4h_bps\":null,\"buys_24h\":25691,\"sells_24h\":26174,\"buys_1h\":817,\"sells_1h\":778},{\"chain\":\"base\",\"token\":\"0xb200000000000000000000397293cb8cda9a10c5\",\"symbol\":\"SNDKc\",\"name\":\"Sandisk Corporation\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1792637453,\"price_usd\":\"831.977821266\",\"mc_usd\":\"2425106.42762\",\"vol_24h_usd\":\"27296287.9353\",\"chg_5m_bps\":-6,\"chg_1h_bps\":35,\"chg_24h_bps\":360,\"liq_usd\":\"1566885.2839\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"50227.4313302\",\"buys_5m\":22,\"sells_5m\":17,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"1094391.69306\",\"chg_4h_bps\":null,\"buys_24h\":15280,\"sells_24h\":15417,\"buys_1h\":579,\"sells_1h\":532},{\"chain\":\"base\",\"token\":\"0xe0cd4cacddcbf4f36e845407ce53e87717b6601d\",\"symbol\":\"ICNT\",\"name\":\"Impossible Cloud Network Token\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1751473135,\"price_usd\":\"0.314839192713\",\"mc_usd\":\"78780905.0694\",\"vol_24h_usd\":\"1089918.49405\",\"chg_5m_bps\":299,\"chg_1h_bps\":387,\"chg_24h_bps\":3183,\"liq_usd\":\"129017.8453\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"10104.0534337\",\"buys_5m\":58,\"sells_5m\":55,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"103499.460765\",\"chg_4h_bps\":null,\"buys_24h\":7757,\"sells_24h\":7277,\"buys_1h\":609,\"sells_1h\":656}],\"graduating\":[]},\"as_of_ms\":1794995582130,\"unsettled\":[],\"pools\":{\"0xef5997c2cf2f6c138196f8a6203afc335206b3c1\":\"0x995985c9027e8a90c823a5e0a9112fea72d1f4dd\",\"0x0947fb7076bfa307796f8fd533055f6016c6cccc\":\"0x28752b1c1be27a1d5947dc880dd7d969de945f7a7718d6f3747776dfd536ea76\",\"0x07b3d902783c3c12b077508c3b5c00113d1291d0\":\"0x2df380544b88adb3ad0a94100dcc45fd705aae2d\",\"0xb200000000000000000000397293cb8cda9a10c5\":\"0x2836e062a3fe75943a7f4a552e2365b98e414e75\",\"0xe0cd4cacddcbf4f36e845407ce53e87717b6601d\":\"0x9331f571f79d1e186a095c93756b5680a43932ac\",\"0xb2000000000000000000004884b426556b92883d\":\"0x66dcd42e6314b287110922ae36cb2a8bdeecc153\",\"0xb20000000000000000000078ee7ce2fe4908108c\":\"0xf668e21993f0acd7ab00bb1cfbaed0df28a3c8ec\",\"0x8b7dde054be9d180c1be7fae0874697374a49832\":\"0x8a8e4170c09074b109352190d47e54d7c1f61e4e\",\"0x311935cd80b76769bf2ecc9d8ab7635b2139cf82\":\"0x868eed6bad4bd368cd053b766f84cc727697589a\",\"0xb2000000000000000000007b9fcbd005511acbd5\":\"0x880db7dda4407d99508574e680d067d1164b3cfe\",\"0x3e12b9d6a4d12cd9b4a6d613872d0eb32f68b380\":\"0xafe30319a948f322585fafc1cab1671a47eb3786\",\"0x29cc30f9d113b356ce408667aa6433589cecbdca\":\"0x83f3aca29bc79b048b99c56013475570acc97ccf\",\"0xb2000000000000000000002d0ba3164cc74f58b7\":\"0x16c70f04c3080a127486cdf5a4c33c066bbf47c3\",\"0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee\":\"0x422df9aa896e883c9cdcbad309c0785b7364a1cf\",\"0xb200000000000000000000fd2f87532b90095211\":\"0x41e21950362b1014bc629252ecfff8fca5f1646c\",\"0xbf927b841994731c573bdf09ceb0c6b0aa887cdd\":\"0x6b0f53cbd9272d8117e9535fe25371dedf39a1be\",\"0xc0634090f2fe6c6d75e61be2b949464abb498973\":\"0xd9edc75a3a797ec92ca370f19051babebfb2edee\",\"0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf\":\"0x0faae4ff5f4180b90a4234cc7877c01dbabb5d70eae518cc7b67118a96c89026\",\"0x14d6c649292c5c9790c5196d1a9ea039307947a1\":\"0x95475b9b1492cf109969ff25c2862ef38d1a9998c6288f8b9b7d1c99c6443c2e\",\"0x1a44233fae8d50f1aeb3a5d58dd426ff4814cb53\":\"0x07c4bc0f5fb6cb069124df3e1ae0b8fd8148ccc4\",\"0xb20000000000000000000043a599976181bcf336\":\"0x41d7793faa4ca181b6f021423ff3f9015c00b2ff\",\"0x8644f1a48692e62342dfd63cf0aa5948e7ab2e43\":\"0xa4090555e84e7c106b5446c7b86e380062be01c58a64c8db311c13efd3da0983\",\"0xb2000000000000000000008501b13360000cb2ec\":\"0xe7030be388b8e247abe0c9fa876673e83fbcbd3c\",\"0x015dfbde23f47ab191cb4443ba2a39ed1024dd10\":\"0xa120eb6723c158e5a8dcbcb464d323082c8dc7e0\",\"0x3bf58700f5d74116994fcdce162e799393c6ff3d\":\"0x868d7679d13dca82b06d55834cf84c1b6cc585438b9214c1747c3d6596fae0d3\",\"0xa30898801bedcda24d609cd9d769b082f8d4778f\":\"0x972555d83dc2e9a227d974657089231057798e3c30881c875062cd9144ea0105\",\"0x66861487855f2b24a8ac05b8ef0056763aecefa0\":\"0xf55208b5cd5bc92cd6a93f767a5d8cd0a51051bf9b0cdd8261cd0b865d38b5c5\",\"0xb20000000000000000000082a4dff766b98ca1be\":\"0xd447101ed5f4d22d49b3dbbbfd363c9a857176300070bc0383424e0f9bb594d3\",\"0x1ffba6cdfee1d56c37154521dd61a95a1be163b5\":\"0x11b5049d7c2c88bdcff4a838514d071d7d596c7f\",\"0x1167d48bd1b233c583269f333ce0168c8d6a661b\":\"0x870ae2377b51ed3a2879e5b1a3c86327060d128d7478a7fbbb88707ad9fbe852\",\"0x17db15b7f1ecdd91f1dba5797ec034160f80fee1\":\"0xcda5a1817969edc45fb6c3935598ede36b9bee4fbbe014a49c8d9da183267229\",\"0xb2000000000000000000009d468d0af3d993d552\":\"0x4ba20c25a4c30c33cc9a2bcaf7cacc62115a0d7d339bd1f001afc0f182f5f2e3\",\"0xaac3b655d2027aab78a5d66cfee31b23dc527e6d\":\"0x0b6b97d6d406cf64cbc701abeddf2f8811988344\",\"0x0f88616d80fd952195267a7d1108a6d84ce37255\":\"0x038b7cbe2009bbbfc22458ba40f33079986ef7b85006cf2f662a61bf665f2aa8\",\"0xc28c4ff1818ecebdd0cbe6ebffdb1083ca1df832\":\"0xb8a6d8ef6ae5d1886c4ec32ffc2e39030ea01ff7626bc50ce1ebc2a1088ac84a\",\"0x2609140f384f40e16574eafba71bd0be1fee5bca\":\"0x9e4720603625436bd10703914df8d1d56f87bfc8\",\"0x1379fd215bd20cfbd212e78ba67cc3374b15d1d5\":\"0x66efb4ea2d6844b450f68cab3f25b0b2eae1374123f95851c8618088523590e1\",\"0xdd0d98ef5997f3511e6096bcf6274135ff82b03a\":\"0xda593675c44f261e7189335e1fae7b391862dcc7\",\"0xcede2861413e205a5d56b75ff4474ece9cb87a01\":\"0xe69923061399a9db47d88b606791482de3ab101029b5a2505a5742e194a0619f\",\"0x3f451f04e5a4f7d51ad3eb07849c6b3dc2a261f4\":\"0x74f5d3086d4259d04ae9306c95c44cfc9238a3fa\",\"0x4c73c7849d584f52c94b0ad225d9c29c3266b867\":\"0x0a815c4abda256d2b098827509f44469574808da\",\"0xb3a6e457de62e80e9d26639ca0cfbb66f6dfcccc\":\"0xc77f2d47b8e5c815beb388d9355033ab045370a0d5853f475c45e603e9adda32\",\"0x78935f73b9a10bcf10d4ca4ec2ebe934949df454\":\"0xce494a830c20f5dc223e4ac9b2566abb5d850eb354bfee55614a0af149259160\"}}"
+     },
+     "tokens": {
+      "0xef5997c2cf2f6c138196f8a6203afc335206b3c1": {
+       "token": {
+        "at": "2026-11-18T09:54:54.698Z",
+        "ms": 629,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=426",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:21.001Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"base\",\"token\":\"0xef5997c2cf2f6c138196f8a6203afc335206b3c1\",\"symbol\":\"OWB\",\"name\":\"OWB\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1759747591,\"price_usd\":\"0.00861783560198\",\"mc_usd\":\"3387449.23289\",\"vol_24h_usd\":\"267951.888125\",\"chg_5m_bps\":0,\"chg_1h_bps\":284,\"chg_24h_bps\":-623,\"liq_usd\":\"59318.3599\",\"holders\":1001,\"top10_bps\":1250,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"22.9894192448\",\"buys_5m\":0,\"sells_5m\":1,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"14118.7235265\",\"chg_4h_bps\":null,\"buys_24h\":1000,\"sells_24h\":1048,\"buys_1h\":70,\"sells_1h\":49},\"decimals\":18,\"pool\":\"0xf252f51919dfca2c9c0ea279f11183580edee4d6\",\"risk\":{\"mint_auth\":{\"v\":true,\"src\":\"goplus\",\"as_of_ms\":1794995564936},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995564936},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"top10_bps\":{\"v\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995517000},\"dev_bps\":{\"v\":0,\"src\":\"goplus\",\"as_of_ms\":1794995564936},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"holders\":{\"v\":1001,\"src\":\"coingecko\",\"as_of_ms\":1794995517000},\"liq_usd\":{\"v\":\"59318.3599\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"age_s\":{\"v\":35248070,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995564936},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995564936},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001}},\"route\":\"unknown\",\"filling\":false,\"links\":{\"site\":\"https://clashofcoins.com/\",\"x\":\"https://x.com/clashofcoins\"}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.698Z",
+        "ms": 677,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:57.000Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"holders\":[],\"total\":1001,\"top_bps\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995517000}"
+       }
+      },
+      "0xb200000000000000000000397293cb8cda9a10c5": {
+       "token": {
+        "at": "2026-11-18T09:54:54.700Z",
+        "ms": 653,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=6",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:21.001Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"base\",\"token\":\"0xb200000000000000000000397293cb8cda9a10c5\",\"symbol\":\"SNDKc\",\"name\":\"Sandisk Corporation\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1792637453,\"price_usd\":\"831.977821266\",\"mc_usd\":\"2425106.42762\",\"vol_24h_usd\":\"27296287.9353\",\"chg_5m_bps\":-6,\"chg_1h_bps\":35,\"chg_24h_bps\":360,\"liq_usd\":\"1566885.2839\",\"holders\":1002,\"top10_bps\":1250,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"50227.4313302\",\"buys_5m\":22,\"sells_5m\":17,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"1094391.69306\",\"chg_4h_bps\":null,\"buys_24h\":15280,\"sells_24h\":15417,\"buys_1h\":579,\"sells_1h\":532},\"decimals\":8,\"pool\":\"0x2836e062a3fe75943a7f4a552e2365b98e414e75\",\"risk\":{\"mint_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"freeze_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"top10_bps\":{\"v\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695293},\"dev_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"holders\":{\"v\":1002,\"src\":\"coingecko\",\"as_of_ms\":1794995695293},\"liq_usd\":{\"v\":\"1566885.2839\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"age_s\":{\"v\":2358208,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995569317},\"honeypot\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.701Z",
+        "ms": 680,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.293Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":1002,\"top_bps\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695293}"
+       }
+      },
+      "0x07b3d902783c3c12b077508c3b5c00113d1291d0": {
+       "token": {
+        "at": "2026-11-18T09:54:54.699Z",
+        "ms": 784,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:21.001Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"base\",\"token\":\"0x07b3d902783c3c12b077508c3b5c00113d1291d0\",\"symbol\":\"xdp\",\"name\":\"Doppler Finance\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1790599925,\"price_usd\":\"0.017130798888\",\"mc_usd\":\"17024648.23\",\"vol_24h_usd\":\"10252298.205\",\"chg_5m_bps\":-5,\"chg_1h_bps\":33,\"chg_24h_bps\":-153,\"liq_usd\":\"782946.3059\",\"holders\":1003,\"top10_bps\":1250,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"12520.3836416\",\"buys_5m\":35,\"sells_5m\":29,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"286145.780383\",\"chg_4h_bps\":null,\"buys_24h\":25691,\"sells_24h\":26174,\"buys_1h\":817,\"sells_1h\":778},\"decimals\":18,\"pool\":\"0x2df380544b88adb3ad0a94100dcc45fd705aae2d\",\"risk\":{\"mint_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"top10_bps\":{\"v\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695270},\"dev_bps\":{\"v\":0,\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"holders\":{\"v\":1003,\"src\":\"coingecko\",\"as_of_ms\":1794995695270},\"liq_usd\":{\"v\":\"782946.3059\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"age_s\":{\"v\":4395736,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995567109},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.700Z",
+        "ms": 657,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=4",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.270Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":1003,\"top_bps\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695270}"
+       }
+      },
+      "0x0947fb7076bfa307796f8fd533055f6016c6cccc": {
+       "token": {
+        "at": "2026-11-18T09:54:54.699Z",
+        "ms": 967,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=267",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:21.001Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"base\",\"token\":\"0x0947fb7076bfa307796f8fd533055f6016c6cccc\",\"symbol\":\"AX1\",\"name\":\"AX1\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1794929825,\"price_usd\":\"0.00978026386409\",\"mc_usd\":\"9780263.864\",\"vol_24h_usd\":\"1249911.12703\",\"chg_5m_bps\":-46,\"chg_1h_bps\":659,\"chg_24h_bps\":1198807,\"liq_usd\":\"391445.8283\",\"holders\":1004,\"top10_bps\":1250,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"354.843597367\",\"buys_5m\":5,\"sells_5m\":3,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"7614.74066891\",\"chg_4h_bps\":null,\"buys_24h\":2321,\"sells_24h\":1779,\"buys_1h\":29,\"sells_1h\":24},\"decimals\":18,\"pool\":\"0x28752b1c1be27a1d5947dc880dd7d969de945f7a7718d6f3747776dfd536ea76\",\"risk\":{\"mint_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"freeze_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"top10_bps\":{\"v\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794994735000},\"dev_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"holders\":{\"v\":1004,\"src\":\"coingecko\",\"as_of_ms\":1794994735000},\"liq_usd\":{\"v\":\"391445.8283\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"age_s\":{\"v\":65836,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"tax\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"honeypot\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001}},\"route\":\"unknown\",\"filling\":false,\"links\":{\"site\":\"https://www.clanker.world/clanker/0x0947FB7076BFa307796F8fd533055f6016C6cccC\"}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.699Z",
+        "ms": 965,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=327",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:38:55.000Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"holders\":[],\"total\":1004,\"top_bps\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794994735000}"
+       }
+      },
+      "0xe0cd4cacddcbf4f36e845407ce53e87717b6601d": {
+       "token": {
+        "at": "2026-11-18T09:54:54.701Z",
+        "ms": 2151,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:56 GMT",
+         "server-timing": "total;dur=1504",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:21.001Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"base\",\"token\":\"0xe0cd4cacddcbf4f36e845407ce53e87717b6601d\",\"symbol\":\"ICNT\",\"name\":\"Impossible Cloud Network Token\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1751473135,\"price_usd\":\"0.314839192713\",\"mc_usd\":\"78780905.0694\",\"vol_24h_usd\":\"1089918.49405\",\"chg_5m_bps\":299,\"chg_1h_bps\":387,\"chg_24h_bps\":3183,\"liq_usd\":\"129017.8453\",\"holders\":1005,\"top10_bps\":1250,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"10104.0534337\",\"buys_5m\":58,\"sells_5m\":55,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"103499.460765\",\"chg_4h_bps\":null,\"buys_24h\":7757,\"sells_24h\":7277,\"buys_1h\":609,\"sells_1h\":656},\"decimals\":18,\"pool\":\"0x9331f571f79d1e186a095c93756b5680a43932ac\",\"risk\":{\"mint_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"freeze_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"top10_bps\":{\"v\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695310},\"dev_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"holders\":{\"v\":1005,\"src\":\"coingecko\",\"as_of_ms\":1794995695310},\"liq_usd\":{\"v\":\"129017.8453\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"age_s\":{\"v\":43522526,\"src\":\"geckoterminal\",\"as_of_ms\":1794995661001},\"tax\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"honeypot\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995661001}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.701Z",
+        "ms": 781,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.310Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":1005,\"top_bps\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695310}"
+       }
+      }
+     }
+    },
+    "robinhood": {
+     "lists": {
+      "at": "2026-11-18T09:54:54.497Z",
+      "ms": 200,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-encoding": "gzip",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 09:54:54 GMT",
+       "vary": "Origin, Accept-Encoding",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-18T09:51:46.178Z",
+       "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+       "x-helper-source": "geckoterminal"
+      },
+      "body": "{\"chain\":\"robinhood\",\"lists\":{\"new\":[],\"trending\":[],\"trending_5m\":[],\"trending_1h\":[{\"chain\":\"robinhood\",\"token\":\"0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8\",\"symbol\":\"TEXEL\",\"name\":\"Texel\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1794155661,\"price_usd\":\"0.000108705780852\",\"mc_usd\":\"108705.7809\",\"vol_24h_usd\":\"24059.4519248\",\"chg_5m_bps\":85,\"chg_1h_bps\":1087,\"chg_24h_bps\":873,\"liq_usd\":\"25970.3805\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"104.784846018\",\"buys_5m\":3,\"sells_5m\":0,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":\"pons\",\"curve_bps\":null,\"vol_1h_usd\":\"1060.54361368\",\"chg_4h_bps\":null,\"buys_24h\":217,\"sells_24h\":139,\"buys_1h\":13,\"sells_1h\":5},{\"chain\":\"robinhood\",\"token\":\"0x18e674231a58c239dc7daedcffe15ec3a24cff5c\",\"symbol\":\"HOOKR\",\"name\":\"Hookr.fun\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1785990057,\"price_usd\":\"0.0134235755587\",\"mc_usd\":\"13423575.56\",\"vol_24h_usd\":\"355104.345217\",\"chg_5m_bps\":297,\"chg_1h_bps\":1328,\"chg_24h_bps\":1718,\"liq_usd\":\"787264.2472\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"20430.0219964\",\"buys_5m\":6,\"sells_5m\":49,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"54710.751739\",\"chg_4h_bps\":null,\"buys_24h\":677,\"sells_24h\":805,\"buys_1h\":24,\"sells_1h\":112},{\"chain\":\"robinhood\",\"token\":\"0x39dbed3a2bd333467115de45665cc57f813c4571\",\"symbol\":\"PONS\",\"name\":\"Pons\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1786419242,\"price_usd\":\"0.116473137186\",\"mc_usd\":\"77971599.9032\",\"vol_24h_usd\":\"1338961.25172\",\"chg_5m_bps\":1,\"chg_1h_bps\":88,\"chg_24h_bps\":-4,\"liq_usd\":\"362121.2227\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"3394.08402099\",\"buys_5m\":11,\"sells_5m\":15,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"38389.3964266\",\"chg_4h_bps\":null,\"buys_24h\":3788,\"sells_24h\":4155,\"buys_1h\":115,\"sells_1h\":192},{\"chain\":\"robinhood\",\"token\":\"0x020bfc650a365f8bb26819deaabf3e21291018b4\",\"symbol\":\"CASHCAT\",\"name\":\"Cash Cat\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1782934722,\"price_usd\":\"0.0444617296429\",\"mc_usd\":\"43909322.774\",\"vol_24h_usd\":\"1241266.14057\",\"chg_5m_bps\":0,\"chg_1h_bps\":-60,\"chg_24h_bps\":-556,\"liq_usd\":\"695348.9245\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"0.017916723\",\"buys_5m\":1,\"sells_5m\":0,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"23924.4816724\",\"chg_4h_bps\":null,\"buys_24h\":2222,\"sells_24h\":2169,\"buys_1h\":40,\"sells_1h\":113},{\"chain\":\"robinhood\",\"token\":\"0xc9675fe679c7d4e1b94416f66d61c96127eb964a\",\"symbol\":\"GIGATENEV\",\"name\":\"Giga Tenev\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1791568900,\"price_usd\":\"0.000608523581697\",\"mc_usd\":\"608523.5817\",\"vol_24h_usd\":\"219527.455453\",\"chg_5m_bps\":-43,\"chg_1h_bps\":-97,\"chg_24h_bps\":187,\"liq_usd\":\"51371.2263\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"97.3218032951\",\"buys_5m\":2,\"sells_5m\":4,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"5380.31700956\",\"chg_4h_bps\":null,\"buys_24h\":3407,\"sells_24h\":3328,\"buys_1h\":91,\"sells_1h\":73}],\"graduating\":[]},\"as_of_ms\":1794995506178,\"unsettled\":[],\"pools\":{\"0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8\":\"0x5e73f5892ef5cf4d553fe0cc9b109e884c3c2a52635bf6c4f1dceff9637fe932\",\"0x18e674231a58c239dc7daedcffe15ec3a24cff5c\":\"0x590dcb6a87828bf688b48089a62239b693378f1fb64d2286e6a399ed8c005fdf\",\"0x39dbed3a2bd333467115de45665cc57f813c4571\":\"0xf2a0be59ab76b96f957bd5e5b967f2b75e8db269\",\"0x020bfc650a365f8bb26819deaabf3e21291018b4\":\"0xd42a491087a15e5afd51feb3606066cc152d2b09\",\"0xc9675fe679c7d4e1b94416f66d61c96127eb964a\":\"0xe96c99be1ffcc204714ebce32870ab12b8b362308fa50b9352c03b2486a5d448\",\"0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f\":\"0x2b0d0183d017c58b924401ca8ac362f6e01f0e9e\",\"0x56910d4409f3a0c78c64dd8d0545ff0705389870\":\"0xd29893ffac8b29ec4db2cfe0cdb3fe1377c028ff\",\"0xded852de9fe9ba9b6f27f39e8e81cf851a5c79cc\":\"0x05c53aa8db4ac905381ba999d92a40a13fc0bc93b5d0a287ca16dc107bd8d11b\",\"0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa\":\"0x5291cfd042d8a771a510534ee31090bc4f4dc72724871e8f321aecfd12332a9a\",\"0xb815559286e633a902621c4a5dbf08976092855b\":\"0xedb0f576ceb12c79bac96c1ff02c8778ce30780ef0dd54efea21985d95e91b56\",\"0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111\":\"0x1649550af1e3363b4c25236434530af7e6886b183e1f574a98fdd1d04d287a2d\",\"0x4db7374e966097be94c6680d49156d580f097bbf\":\"0xbf7dc545ff6d3b0e23f6264f7c23d4fa16a0f3bb1b26eda350593bd63a94da97\",\"0xd281bf1649c5db6744d23f61bb25b05b4d1dff35\":\"0x3d51da970e62e8ce0f8d9d54b38de89d01b208e93d070ab893cc1a15ad8d8850\",\"0x1186554ccf9beea39e85fe1b40c14535517532c9\":\"0x03be79f900474ac54ccd5d9aa30397e9849e77c3\",\"0x57c0e45cb534413d1c20a4240955d6bb250bb4f1\":\"0x23d641feccd207e8794c593e8240444a0674c4ba\",\"0xfce34d21a92069100e3226638140706cf03a266e\":\"0x7ffd58d9ab075007d3ff9a2fa31ed8993aa918680154d87eeed1861d1683b34e\",\"0x42afa2124ca5a2b83898e46b2da9a190995b1e18\":\"0xc749412e31087a6e6f9210af575bc9100159fbc9f45da3ca8b26b31f3bf5777e\",\"0x9cc546a4091f184898c4155c1b9f6290075ef8fb\":\"0x59c4d64edc16d5621d0b38fb690370577679310967f6b3af0e733f4636c7b236\",\"0x78c1c2d4cd6207b6ff4e84362d314d1cd0830041\":\"0xb09d95f6b76f2b861dbad27d02293e7b17d8f473e3198f723c538e56467da01f\",\"0xe8ffd7e24187f72afb08d75b1bb13088a989a791\":\"0xd64fbda67e1015df43fa5e49f02ca844729e5f94\",\"0x72be1277e198d0c476869253cb4e62807e14533c\":\"0xdb36324392b4a3f4261230e21f9f3f04e627074e8866ec9b69ee1d00af96d60a\",\"0xe4119a9bfcc86915368502b598bbed4745f7051d\":\"0x780ab912bafd2c7c4a41cdaf517ff48e76d84218ffabafea14be5d27591efe52\",\"0x255979302fd6a5e2ff6dce0d8b018f51e06e243a\":\"0xa8f330994e5832b499e1c82921846f423a20ba7601fe9b42340715d2f81c8bd0\",\"0xcec185eb182c47d1ba1efc84e6959e18cd620be4\":\"0xa0eff919d3cff0eab35e9884543e9334edd1b4d2cfa6cc9f8f3982d9aa737308\",\"0xccee82fe024c36fa15e1005ede3e9e4787e23d09\":\"0x67983c0d78cea3a8b4a5cc283feeeefd278a8ae5c6504b983b0c72bde13d1c0c\",\"0x51250b135174ca09450ec01c4aff73cf69dbb590\":\"0xa85f02f8e836e92912c8e0588f60b8868eedc154e558c10a1966269e5122b77c\",\"0x07ebb29a38fbcb41563817e5e19f2cec619c90d2\":\"0x06e308b77bdafd691d179645296ce8c40e33c6af4a879a913efc7eedc402581c\",\"0x16346d2a370852a1d9cd5330ab9bdc877773817b\":\"0xcf8b2df547170568e3bf0c00b6e895a7484350b7\",\"0x45842cd15b88c22cd5e199c80f61003fe55ce4af\":\"0xad860ffeb66735a8e36cc9b67d996e6b0eefeb8bd516cfb2624b2b1f63e94d9c\",\"0x03143b67e2a8aeda8c2b4b7c47f97a7867237777\":\"0xf55a3dd532afc38500c2f593081033d1e6166840c99d154a39cdf339b276575e\",\"0xa7858af26dd167c3ff3ff74d16aac5383abfba8a\":\"0xfe4e18d3ac6349c634c4e143c47bb3288d1fd7867b7ee1b503a34c6ed6d57b16\",\"0xfc54c3e66660c7e47b973524311b78c5363cb6b8\":\"0x7e209adbd9a35758c51bf83587a5ae85bd8e89ffb8b99b9571261bfeadad03c4\",\"0x312491cea909ebb87d76184206991b329bdc05d3\":\"0x632d8bbc08f35c3ddac8b71c6e9975ad9aa0999b63c024a3e751ca50efa2fb53\",\"0x920fcf2c9b10ab8e18fdd00f0be6804a0a4d96d5\":\"0x386ae5c0b66ff84cbb3fc17dc560b07da36c9900c96002c23419e4d1752004a7\",\"0x4e069e8853cb878a76924019ec765b3b9b199de1\":\"0x400e1efc375735618ed236df639d03650ed9a58fdabc4076ee1147302ea69a03\",\"0x131d5231f4e5848f54ca5c8ff7b0020d16042446\":\"0xe69d939a9cd2273800fcd5b643bf1796777f579d\",\"0x1672862260df6cdc7947632ebcdfb70f59aa0087\":\"0xae0283c486334b4cd3d59908558225a8b926c2c0e8f82730b6193321b54999cb\",\"0x18348cd0c0bd48ec9a2922f8836939cf0f02ea0a\":\"0x0ed6a8ce87f429274b49d9dc6e4fba9090e67112\",\"0xbcb553919c88c43c9c8171962c604e72f3ecc600\":\"0xfbfb1ba9837a360d536a03f4f51a7994f5029ff718d0454194c8f4326ca8237e\",\"0x8848ab098d63c99a34d039756101897c8be6467a\":\"0xd968794b8bd10f0f0f4fc0a1816ad890f22720ed217f745fa9eee466d9760269\",\"0xa24971add5935e38294c7206920eed83015b7ec4\":\"0x0089e130e64cca74ca7f7a108493be4a20acee79e8f6db80ea30fd47cca1f27a\",\"0x81f3567cfcbfaf595d804f3508627e73d7dea9d3\":\"0x59b358feb891b7bb0b937b597ea6353caa19df89cff479ac5b2f401e2da2a7bf\",\"0x8f79030bff73b9ae36326360b5b0321ebc9afb3a\":\"0x095e5edfac73fad77da774b27b8d8b9f1c3709b7\",\"0x4c60ae7ff03a8d0e57c1aa665131aabda3f09545\":\"0x22a610d968b9eaf2668af4d3e3fed78b68e9c9d8\",\"0xa9b4f651cc0bec07084f8bc2699080ea9ad82bdf\":\"0x85ce07a2d1e1218b3cba67e9cace7091152ad522a150e44aa7313a7398a3f6f6\",\"0x8603d3397f3f1955d9201472790f424aaa4cd756\":\"0xeffa8f2ab4859a18db4ad869355709096551a68768abdc1c9062cee3939cb71c\",\"0x66c16ea2003178fa0e5636d16610e0752a8b695b\":\"0xdfbe8b739ddeb3a926c59781799059859f4fee66\"}}"
+     },
+     "tokens": {
+      "0x39dbed3a2bd333467115de45665cc57f813c4571": {
+       "token": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 681,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:46.178Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"robinhood\",\"token\":\"0x39dbed3a2bd333467115de45665cc57f813c4571\",\"symbol\":\"PONS\",\"name\":\"Pons\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1786419242,\"price_usd\":\"0.116473137186\",\"mc_usd\":\"77971599.9032\",\"vol_24h_usd\":\"1338961.25172\",\"chg_5m_bps\":1,\"chg_1h_bps\":88,\"chg_24h_bps\":-4,\"liq_usd\":\"362121.2227\",\"holders\":1006,\"top10_bps\":1250,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"3394.08402099\",\"buys_5m\":11,\"sells_5m\":15,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"38389.3964266\",\"chg_4h_bps\":null,\"buys_24h\":3788,\"sells_24h\":4155,\"buys_1h\":115,\"sells_1h\":192},\"decimals\":18,\"pool\":\"0xf2a0be59ab76b96f957bd5e5b967f2b75e8db269\",\"risk\":{\"mint_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"top10_bps\":{\"v\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695324},\"dev_bps\":{\"v\":0,\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"holders\":{\"v\":1006,\"src\":\"coingecko\",\"as_of_ms\":1794995695324},\"liq_usd\":{\"v\":\"362121.2227\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"age_s\":{\"v\":8576264,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995575935},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 779,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.324Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":1006,\"top_bps\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695324}"
+       }
+      },
+      "0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8": {
+       "token": {
+        "at": "2026-11-18T09:54:54.702Z",
+        "ms": 782,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=2",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:46.178Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"robinhood\",\"token\":\"0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8\",\"symbol\":\"TEXEL\",\"name\":\"Texel\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1794155661,\"price_usd\":\"0.000108705780852\",\"mc_usd\":\"108705.7809\",\"vol_24h_usd\":\"24059.4519248\",\"chg_5m_bps\":85,\"chg_1h_bps\":1087,\"chg_24h_bps\":873,\"liq_usd\":\"25970.3805\",\"holders\":1007,\"top10_bps\":1250,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"104.784846018\",\"buys_5m\":3,\"sells_5m\":0,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":\"pons\",\"curve_bps\":null,\"vol_1h_usd\":\"1060.54361368\",\"chg_4h_bps\":null,\"buys_24h\":217,\"sells_24h\":139,\"buys_1h\":13,\"sells_1h\":5},\"decimals\":18,\"pool\":\"0x5e73f5892ef5cf4d553fe0cc9b109e884c3c2a52635bf6c4f1dceff9637fe932\",\"risk\":{\"mint_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995557630},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995557630},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"top10_bps\":{\"v\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995524000},\"dev_bps\":{\"v\":0,\"src\":\"goplus\",\"as_of_ms\":1794995557630},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"holders\":{\"v\":1007,\"src\":\"coingecko\",\"as_of_ms\":1794995524000},\"liq_usd\":{\"v\":\"25970.3805\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"age_s\":{\"v\":839845,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995557630},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995557630},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178}},\"route\":\"unknown\",\"filling\":false,\"links\":{\"site\":\"https://texel.run/\",\"x\":\"https://x.com/texelrun\"}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.702Z",
+        "ms": 661,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=5",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:52:04.000Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"holders\":[],\"total\":1007,\"top_bps\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995524000}"
+       }
+      },
+      "0x18e674231a58c239dc7daedcffe15ec3a24cff5c": {
+       "token": {
+        "at": "2026-11-18T09:54:54.702Z",
+        "ms": 781,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:46.178Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"robinhood\",\"token\":\"0x18e674231a58c239dc7daedcffe15ec3a24cff5c\",\"symbol\":\"HOOKR\",\"name\":\"Hookr.fun\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1785990057,\"price_usd\":\"0.0134235755587\",\"mc_usd\":\"13423575.56\",\"vol_24h_usd\":\"355104.345217\",\"chg_5m_bps\":297,\"chg_1h_bps\":1328,\"chg_24h_bps\":1718,\"liq_usd\":\"787264.2472\",\"holders\":1008,\"top10_bps\":1250,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"20430.0219964\",\"buys_5m\":6,\"sells_5m\":49,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"54710.751739\",\"chg_4h_bps\":null,\"buys_24h\":677,\"sells_24h\":805,\"buys_1h\":24,\"sells_1h\":112},\"decimals\":18,\"pool\":\"0x590dcb6a87828bf688b48089a62239b693378f1fb64d2286e6a399ed8c005fdf\",\"risk\":{\"mint_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"top10_bps\":{\"v\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695307},\"dev_bps\":{\"v\":225,\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"holders\":{\"v\":1008,\"src\":\"coingecko\",\"as_of_ms\":1794995695307},\"liq_usd\":{\"v\":\"787264.2472\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"age_s\":{\"v\":9005449,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794995573939},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.702Z",
+        "ms": 780,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=3",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.307Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":1008,\"top_bps\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695307}"
+       }
+      },
+      "0xc9675fe679c7d4e1b94416f66d61c96127eb964a": {
+       "token": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 780,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=2",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:46.178Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"robinhood\",\"token\":\"0xc9675fe679c7d4e1b94416f66d61c96127eb964a\",\"symbol\":\"GIGATENEV\",\"name\":\"Giga Tenev\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1791568900,\"price_usd\":\"0.000608523581697\",\"mc_usd\":\"608523.5817\",\"vol_24h_usd\":\"219527.455453\",\"chg_5m_bps\":-43,\"chg_1h_bps\":-97,\"chg_24h_bps\":187,\"liq_usd\":\"51371.2263\",\"holders\":1009,\"top10_bps\":1250,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"97.3218032951\",\"buys_5m\":2,\"sells_5m\":4,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"5380.31700956\",\"chg_4h_bps\":null,\"buys_24h\":3407,\"sells_24h\":3328,\"buys_1h\":91,\"sells_1h\":73},\"decimals\":18,\"pool\":\"0xe96c99be1ffcc204714ebce32870ab12b8b362308fa50b9352c03b2486a5d448\",\"risk\":{\"mint_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"freeze_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"top10_bps\":{\"v\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695289},\"dev_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"holders\":{\"v\":1009,\"src\":\"coingecko\",\"as_of_ms\":1794995695289},\"liq_usd\":{\"v\":\"51371.2263\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"age_s\":{\"v\":3426606,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"tax\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"honeypot\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 672,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=4",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.289Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":1009,\"top_bps\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695289}"
+       }
+      },
+      "0x020bfc650a365f8bb26819deaabf3e21291018b4": {
+       "token": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 2186,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-encoding": "gzip",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:56 GMT",
+         "server-timing": "total;dur=1503",
+         "vary": "Origin, Accept-Encoding",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:51:46.178Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "geckoterminal"
+        },
+        "body": "{\"row\":{\"chain\":\"robinhood\",\"token\":\"0x020bfc650a365f8bb26819deaabf3e21291018b4\",\"symbol\":\"CASHCAT\",\"name\":\"Cash Cat\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1782934722,\"price_usd\":\"0.0444617296429\",\"mc_usd\":\"43909322.774\",\"vol_24h_usd\":\"1241266.14057\",\"chg_5m_bps\":0,\"chg_1h_bps\":-60,\"chg_24h_bps\":-556,\"liq_usd\":\"695348.9245\",\"holders\":1010,\"top10_bps\":1250,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"0.017916723\",\"buys_5m\":1,\"sells_5m\":0,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"23924.4816724\",\"chg_4h_bps\":null,\"buys_24h\":2222,\"sells_24h\":2169,\"buys_1h\":40,\"sells_1h\":113},\"decimals\":18,\"pool\":\"0x31608601d541e868706aa557558a4d4f99c57e6dd13bd3362edcf05d00a16212\",\"risk\":{\"mint_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"freeze_auth\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"top10_bps\":{\"v\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695280},\"dev_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"holders\":{\"v\":1010,\"src\":\"coingecko\",\"as_of_ms\":1794995695280},\"liq_usd\":{\"v\":\"695348.9245\",\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"age_s\":{\"v\":12060784,\"src\":\"geckoterminal\",\"as_of_ms\":1794995506178},\"tax\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"honeypot\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794995506178}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+       },
+       "holders": {
+        "at": "2026-11-18T09:54:54.703Z",
+        "ms": 672,
+        "status": 200,
+        "headers": {
+         "access-control-allow-origin": "https://ct-app.unrealized.trade",
+         "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+         "alt-svc": "h3=\":443\"; ma=2592000",
+         "cache-control": "no-store",
+         "content-type": "application/json; charset=utf-8",
+         "date": "Wed, 18 Nov 2026 09:54:55 GMT",
+         "server-timing": "total;dur=4",
+         "vary": "Origin",
+         "via": "1.1 Caddy",
+         "x-content-type-options": "nosniff",
+         "x-fetched-at": "2026-11-18T09:54:55.280Z",
+         "x-helper-commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+         "x-helper-source": "none"
+        },
+        "body": "{\"holders\":[],\"total\":1010,\"top_bps\":1250,\"src\":\"coingecko\",\"as_of_ms\":1794995695280}"
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}
