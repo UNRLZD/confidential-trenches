@@ -54,7 +54,7 @@ function dclPays(path: string[], from: string, to: string, amount: bigint): bigi
 }
 
 type Asked = Record<string, string[]>;
-function world(o: { frozenDcl?: string[]; notRunning?: string[] } = {}) {
+function world(o: { frozenDcl?: string[]; notRunning?: string[]; has?: string[] } = {}) {
   const asked: Asked = { [FAST]: [], [DRPC]: [] };
   const rpcs = [FAST, DRPC].map((name) => ({
     name,
@@ -73,7 +73,7 @@ function world(o: { frozenDcl?: string[]; notRunning?: string[] } = {}) {
       else if (what === `${DCLX} get_pool`) {
         const pid = String(args.pool_id);
         const pool = dclPoolOf(pid)!;
-        v = pid in RATE ? { pool_id: pid, token_x: pool.x, token_y: pool.y, fee: pool.fee, state: o.notRunning?.includes(pid) ? "Paused" : "Running", whitelist: null, tax: null } : null;
+        v = pid in RATE && (o.has === undefined || o.has.includes(pid)) ? { pool_id: pid, token_x: pool.x, token_y: pool.y, fee: pool.fee, state: o.notRunning?.includes(pid) ? "Paused" : "Running", whitelist: null, tax: null } : null;
       } else if (what === `${DCLX} quote`) v = { amount: String(dclPays(args.pool_ids, args.input_token, args.output_token, BigInt(args.input_amount))), tag: null };
       else throw new Error(`not made: ${what}`);
       return { jsonrpc: "2.0", id: "1", result: { ...result, result: enc(v), logs: [] } };
@@ -81,10 +81,10 @@ function world(o: { frozenDcl?: string[]; notRunning?: string[] } = {}) {
   })) as unknown as readonly [Parameters<typeof nearFinal>[1][0], Parameters<typeof nearFinal>[1][1]];
   return { asked, rpcs };
 }
-const buy = async (rpcs: ReturnType<typeof world>["rpcs"], asked: Asked) => {
+const buy = async (rpcs: ReturnType<typeof world>["rpcs"], asked: Asked, dclPools = [...TOKEN_WRAP, ...USDC_WRAP]) => {
   const final = await nearFinal("mainnet", rpcs);
   for (const k of Object.keys(asked)) asked[k] = [];
-  return nearQuote({ network: "mainnet", rpcs, side: "buy", token: TOKEN, amountIn: 1_000_000n, pools: [9], dclPools: [...TOKEN_WRAP, ...USDC_WRAP], final });
+  return nearQuote({ network: "mainnet", rpcs, side: "buy", token: TOKEN, amountIn: 1_000_000n, pools: [9], dclPools, final });
 };
 
 test("one quote's reads at its block, per provider: the token's account once, DCL's two-hop path picked per hop", async () => {
@@ -117,4 +117,20 @@ test("a DCL pool not Running at the block, or a token frozen there, is never quo
   // every DCL pool paused: no DCL path; classic's quote
   const none = world({ notRunning: [...USDC_WRAP, ...TOKEN_WRAP] });
   assert.ok(!isDclQuote(await buy(none.rpcs, none.asked)));
+});
+
+// A coin with one DCL pool of its own: at 11c636a6a the page asked DCL all four of its fee tiers with wNEAR and USDC's
+// four (8 ids), and one quote asked each provider 19 reads (classic 4; DCL 15: metadata, frozen list, 8 pools, the
+// token's account, 4 quote views). The page now asks only the pools its kept read found (src/near-pools.ts
+// dclPoolsKept: 1 + 4), with the token's account read once: 15 a provider, the same quote.
+test("a coin with one DCL pool of its own, asked only the pools found: 15 reads a provider, the same quote as 8 ids", async () => {
+  const has = [TOKEN_WRAP[1]!, ...USDC_WRAP];
+  const all8 = [...[100, 400, 2000, 10000].map((f) => id(TOKEN, WRAP, f)), ...USDC_WRAP];
+  const before = world({ has });
+  const q8 = await buy(before.rpcs, before.asked, all8);
+  const now = world({ has });
+  const q5 = await buy(now.rpcs, now.asked, has);
+  assert.ok(isDclQuote(q5) && isDclQuote(q8));
+  assert.equal(q5.amountOut, q8.amountOut);
+  for (const name of [FAST, DRPC]) assert.equal(now.asked[name]!.length, 4 + (2 + 5 + 4), `${name}: classic 4, DCL 11: ${now.asked[name]!.join(", ")}`);
 });
