@@ -1332,7 +1332,7 @@ for (const [what, message] of [
 
 test("card helper-scrubber-takes-the-kits-rule: Solana's keyed URL echoing its key in another case in a refusal is withheld (call's path)", async () => {
   next = { status: 200, type: JSON_T, body: (req) => JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(req).id, error: { code: -32602, message: `bad key ${KEY.toUpperCase()}` } }) };
-  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}` });
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}` }, { now: STILL });
   const a = await call(r, "solana", { jsonrpc: "2.0", id: 4, method: "getSlot", params: [] });
   assert.ok(!a.body.toLowerCase().includes(KEY.slice(0, 12)), a.body);
   next = { status: 200, type: JSON_T, body: echo };
