@@ -495,10 +495,10 @@ function holdingsRoute(make: (fetch: SolanaFetch) => SolanaRpc, queue: "own" | "
   const key = `${queue} ${String(bare.url)}`;
   let r = holdingsRoutes.get(key);
   if (r === undefined) {
-    // a call whose read was stopped while it waited its turn is not sent
-    const stopped = (method: string, params: readonly unknown[]): Promise<unknown> => {
+    // a call whose read was stopped while it waited its turn is not sent; the caller's signal goes to the provider
+    const stopped = (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
       const stop = stopOf.get(params);
-      return stop?.aborted ? Promise.reject(stop.reason) : bare(method, params);
+      return stop?.aborted ? Promise.reject(stop.reason) : bare(method, params, signal);
     };
     const rpc = queue === "url" ? solanaPacedRpc(Object.assign(stopped, { url: bare.url })) : solanaPacedRpc(stopped, HOLDINGS_RPC_LIMIT);
     // the gate is the route's own: a 429 met here pauses these readers, never the host's lane (a trade's reads go on);
@@ -748,12 +748,12 @@ function evmHelperRoute(origin: string, chain: "base" | "robinhood"): EvmRoute {
     // the background calls in the queue now, and those waiting for room, in order
     let inQueue = 0;
     const waiting: (() => void)[] = [];
-    const pass = (method: string, params: readonly unknown[]): Promise<unknown> => {
+    const pass = (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
       const go = (): Promise<unknown> => {
         inQueue++;
         let p: Promise<unknown>;
         try {
-          p = Promise.resolve(r.rpc(method, params));
+          p = Promise.resolve(r.rpc(method, params, signal));
         } catch (err) {
           p = Promise.reject(err);
         }
@@ -797,13 +797,13 @@ export function evmHelperKeyedRpc(origin: string, chain: "base" | "robinhood"): 
     // the pool's pages: the same client and fetch settings, counted on the helper's lane as every request, on a queue
     // keyed on this function (no url, so the kit adds no limit to the route URL's queue), stopped as the route's are
     const bare = solanaJsonRpc(url, { init: HELPER_FETCH_INIT, fetch: (u, i) => laneFetch()(u, i) });
-    const pages = solanaPacedRpc((method: string, params: readonly unknown[]): Promise<unknown> => {
+    const pages = solanaPacedRpc((method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
       const stop = stopOf.get(params);
-      return stop?.aborted ? Promise.reject(stop.reason) : bare(method, params);
+      return stop?.aborted ? Promise.reject(stop.reason) : bare(method, params, signal);
     }, EVM_POOL_PAGES_LIMIT);
     const pool = EVM_POOLS[chain]?.pool.toLowerCase();
     // `wide`: the pool sync's walk asks it first for the pool's whole range (evm.ts EvmWideSource)
-    r = Object.assign((method: string, params: readonly unknown[]) => (evmPoolPage(pool, method, params) ? pages : route.rpc)(method, params), { url, operator: "helper", wide: true }) as SolanaRpc;
+    r = Object.assign((method: string, params: readonly unknown[], signal?: AbortSignal) => (evmPoolPage(pool, method, params) ? pages : route.rpc)(method, params, signal), { url, operator: "helper", wide: true }) as SolanaRpc;
     keyedRoutes.set(url, r);
   }
   return r;
