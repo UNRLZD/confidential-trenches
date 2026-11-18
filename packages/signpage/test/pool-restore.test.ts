@@ -1503,7 +1503,9 @@ test("E1: a restore is done once the walk's notes are written, before any deposi
   await until("the second request done", () => a.posted.some((m) => m.id === again && m.stage === "done"), 5_000);
   g.open();
   await w.r.idle();
-  assert.deepEqual(w.steps, [{ retry: [], held: [], named: [], tries: 1, last: true }]);
+  // the second request joined while step 5 read: once that run ends a run of its own reads the ids again (card
+  // restore-residuals, ze2), and tells nothing more
+  assert.deepEqual(w.steps, [{ retry: [], held: [], named: [], tries: 1, last: true }, { retry: [], held: [], named: [], tries: 1, last: true }]);
   assert.equal(n.found.get(SOL_SCOPE)?.complete, true);
   // nothing told the user after the walk's end: one op per request, both done
   const ops = await Promise.all((await w.store.keys("ops")).map(async (k) => (await opOf(w.store, k))?.stage));
@@ -1829,8 +1831,11 @@ test("review P2-1: a finding told in a run holds: a Retry joining in a pause is 
   await until("retry answered", () => a.posted.some((m) => m.id === retry && (m.stage === "done" || m.stage === "stalled")), 5_000);
   assert.deepEqual(a.posted.filter((m) => m.id === retry && (m.stage === "done" || m.stage === "stalled")).map((m) => m.stage), ["stalled"]);
   await w.r.idle();
-  assert.equal(steps.length, 2);
+  // try 2 of the run, then the Retry's own run (it joined while step 5 read: card restore-residuals, ze2), each naming
+  // the money
+  assert.equal(steps.length, 3);
   assert.ok(steps[1]!.named.some((x) => x.includes(solUx(held))), JSON.stringify(steps[1]));
+  assert.ok(steps[2]!.named.some((x) => x.includes(solUx(held))), JSON.stringify(steps[2]));
   assert.equal((await restoreOps(w.store)).at(-1)!.stage, "stalled");
   // a finding stands: step 5 is still owed, the next load reads it again
   assert.deepEqual(((await w.store.get("meta", IDS_KEY())) as { scopes?: unknown } | undefined)?.scopes, [SOL_SCOPE.toString()]);
@@ -1872,20 +1877,30 @@ test("review P2-2: one NEAR provider answering apart on one id is that id unread
   assert.equal((await restoreOps(w.store)).at(-1)!.stage, "stalled");
 });
 
-test("review P2-4: a second tab's restore is answered at its own walk's end while the first tab's step 5 reads on, and reads no id beside it", async () => {
+// card restore-residuals (delta review of c2761c71, ze2): the second tab's Sync waits for the first tab's id read to
+// end and then reads every id itself, never told done with none read
+test("review P2-4, restore-residuals ze2: a second tab's restore is answered at its own walk's end while the first tab's step 5 reads on, reads no id beside it, and reads every id itself once that read ends", async (t) => {
   const n = nearOf();
   const g = gated(n);
-  const w = await world({ pools: () => SOL_ONLY, ids: g.ids, ux: () => uxOf(new Map()).reads });
+  const w = await vworld(t, { pools: () => SOL_ONLY, ids: g.ids, ux: () => uxOf(new Map()).reads });
   assert.equal(await w.r.auto(), "done");
+  await until("tab 1's step 5 reading", () => g.asked() > 0, 5_000);
   const n2 = nearOf();
   const tab2 = poolRestore({ ...w.host, ids: n2.ids, ux: () => uxOf(new Map()).reads, ended: () => {}, step5: () => {} });
   const a = api(tab2.kind);
   const id = a.ask();
-  await until("tab 2 answered", () => a.posted.some((m) => m.id === id && m.stage === "done"), 5_000);
-  await tab2.idle();
-  assert.deepEqual(n2.log, [], "tab 2 reads no id while tab 1's step 5 reads them");
-  g.open();
+  try {
+    await until("tab 2 answered", () => a.posted.some((m) => m.id === id && m.stage === "done"), 5_000);
+    await until("tab 2's step 5 waits for tab 1's", async () => ((await navigator.locks.query()).pending ?? []).some((l) => l.name === K.RESTORE_IDS_LOCK), 5_000);
+    assert.deepEqual(n2.log, [], "tab 2 reads no id while tab 1's step 5 reads them");
+  } finally {
+    // tab 1's read ends whatever was seen, so no run outlives the test
+    g.open();
+  }
   await w.r.idle();
+  await tab2.idle();
+  assert.deepEqual([...new Set(idsAsked(n2.log))].sort(), [...new Set(idsAsked(n.log))].sort(), "tab 2 read every id once tab 1's read ended");
+  assert.equal(await w.store.get("meta", IDS_KEY()), undefined, "tab 2's clean read removed its marker");
 });
 
 test("review P2-3: the marker keeps each lane read whole with nothing to tell; the next load reads only the others; a lane kept lasts the marker's life", async () => {
@@ -1914,7 +1929,7 @@ test("review P2-3: the marker keeps each lane read whole with nothing to tell; t
   r1 = poolRestore(host(c1.ids));
   await r1.auto();
   await r1.idle();
-  assert.deepEqual((await marker())?.read?.[SOL_SCOPE.toString()], [[order[0]!, order[0]! + 8 * 20, null]]);
+  assert.deepEqual((await marker())?.read?.[SOL_SCOPE.toString()], [[order[0]!, order[0]! + 8 * 20, null, 0]]);
   // load 2: the kept lane is not read; every other lane is, whole; the finding keeps the marker, every clean lane kept
   let r2: ReturnType<typeof poolRestore> | null = null;
   const c2 = closing(null, () => r2!);
@@ -2097,11 +2112,14 @@ test("delta P2-A: a new marker starts empty: a marker for other scopes keeps no 
   assert.equal(await markerOf(probe.store), undefined);
 });
 
-test("delta P3-A: a marker's `read` of another shape is dropped whole (more reading, never less); release 112/113's {scopes} reads 168 ids and is removed", async () => {
+test("delta P3-A: a marker's `read` of another shape is dropped whole (more reading, never less); release 112/113's {scopes} reads 168 ids and is removed", async (ctx) => {
   usedMap = new Map();
   const S = SOL_SCOPE.toString();
-  for (const read of [{ [S]: [[0, 1e15, null]] }, { [S]: "x" }, { [S]: [[3, 160, null]] }, { [S]: [[0.5, 160, null]] }, { [S]: [[0, 160, 9]] }, "x", undefined]) {
-    const probe = await world();
+  // each kept entry below reaches its lane's bound (the lane's first index plus 8 * 21), so one taken would skip a lane:
+  // a readTo past u32 or off its lane (restore-residuals: 1000 is lane 0's, kept for lane 3), a lane that is not one, a
+  // highest off its lane, a note count that is not one, and the shape before the count was kept
+  for (const read of [{ [S]: [[0, 1e15, null, 0]] }, { [S]: "x" }, { [S]: [[3, 1000, null, 0]] }, { [S]: [[0.5, 168, null, 0]] }, { [S]: [[0, 168, 9, 1]] }, { [S]: [[0, 168, null, -1]] }, { [S]: [[0, 168, null]] }, "x", undefined]) {
+    const probe = await vworld(ctx, {});
     await probe.store.put("meta", IDS_KEY(), read === undefined ? { scopes: [S] } : { scopes: [S], read });
     const t = tracked();
     const r = poolRestore({ ...probe.host, pools: () => SOL_ONLY, solana: emptyWalk, ids: t.ids, ux: () => uxOf(new Map()).reads, pausesMs: [] });
@@ -2141,24 +2159,131 @@ test("delta P3-C: a lane read is kept on the marker only while the run's seed is
   assert.deepEqual(read.map(([l]) => l), [order[0]!]);
 });
 
-test("delta P3-D: a tab whose step 5 ends never removes the marker another tab's later walk wrote", async () => {
+test("delta P3-D: a tab whose step 5 ends never removes the marker another tab's later walk wrote", async (t) => {
   usedMap = new Map();
   const n = nearOf();
   const g = gated(n);
-  const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: g.ids, ux: () => uxOf(new Map()).reads });
+  const w = await vworld(t, { pools: () => SOL_ONLY, solana: emptyWalk, ids: g.ids, ux: () => uxOf(new Map()).reads });
   assert.equal(await w.r.auto(), "done");
   await until("tab 1's step 5 reading", () => g.asked() > 0, 5_000);
-  // tab 2: the user's Sync walks again and writes its own marker while tab 1's step 5 reads (its own step 5 waits)
-  const tab2 = poolRestore({ ...w.host, ids: nearOf().ids, ux: () => uxOf(new Map()).reads, ended: () => {}, step5: () => {} });
+  // tab 2: the user's Sync walks again and writes its own marker while tab 1's step 5 reads (its own step 5 waits for
+  // tab 1's, then reads, held here at its own gate)
+  const g2 = gated(nearOf());
+  const tab2 = poolRestore({ ...w.host, ids: g2.ids, ux: () => uxOf(new Map()).reads, ended: () => {}, step5: () => {} });
   const a = api(tab2.kind);
   const id = a.ask();
   await until("tab 2 answered", () => a.posted.some((m) => m.id === id && m.stage === "done"), 5_000);
-  await tab2.idle();
   const mine = await markerOf(w.store);
-  assert.notEqual(mine, undefined);
+  try {
+    assert.notEqual(mine, undefined);
+    g.open();
+    await w.r.idle();
+    assert.deepEqual(await markerOf(w.store), mine, "tab 2's marker stands: tab 2 reads for it");
+  } finally {
+    g.open();
+    g2.open();
+  }
+  await tab2.idle();
+  assert.ok(g2.asked() > 0, "tab 2 read the ids itself");
+  assert.equal(await markerOf(w.store), undefined, "tab 2's own clean read removed it");
+});
+
+// ---------- delta review of c2761c71 (card restore-residuals): ze1, ze2, and the two mutants that passed every test ----------
+test("restore-residuals ze1: a kept lane whose notes gained one below its highest (a second device on the lane) is read whole again on a load", async (t) => {
+  usedMap = new Map();
+  const probe = await vworld(t, {});
+  const order = laneOrder(probe.store.lane);
+  const B = order[1]!, F = order[2]!;
+  // lane F: a finding that never clears, so the marker lives on to the next load
+  const planted = new Map<string, UxAs>([[solUx(idOf(SOL_SCOPE, F)), "held"]]);
+  let notes: RestoredNote[] = [depositNote(B + 8 * 5, 0n)];
+  const host = (ids: NonNullable<PoolRestoreHost["ids"]>) => ({ ...probe.host, store: async () => probe.store, pools: () => SOL_ONLY, solana: (async () => ({ notes, spends: [] })) as never, ids, ux: () => uxOf(planted, STUCK).reads, pausesMs: [] });
+  const r1 = poolRestore(host(tracked().ids));
+  await r1.auto();
+  await r1.idle();
+  const kept = ((await markerOf(probe.store))!.read![SOL_SCOPE.toString()] as (number | null)[][]).find(([l]) => l === B);
+  assert.deepEqual(kept?.slice(0, 3), [B, B + 8 * 26, B + 8 * 5], "lane B kept, read to its highest note plus the margin");
+  // the other device's deposit lands on lane B below its highest note (the highest the same), and money rests up the lane
+  notes = [depositNote(B + 8 * 2, 1n), depositNote(B + 8 * 5, 0n)];
+  const up = idOf(SOL_SCOPE, B + 8 * 10);
+  planted.set(solUx(up), "held");
+  const t2 = tracked();
+  const r2 = poolRestore(host(t2.ids));
+  assert.equal(await r2.resume(), "done");
+  await r2.idle();
+  assert.ok(laneSet(t2.asked(), B).length >= 21, `lane B read whole again (${laneSet(t2.asked(), B).length} ids)`);
+  assert.ok(t2.asked().has(up), "the money up lane B found");
+  // the lane's note count is kept beside its highest: lane B's entry is load 1's, one note, which load 2's two no longer match
+  assert.deepEqual(((await markerOf(probe.store))!.read![SOL_SCOPE.toString()] as unknown[][]).find(([l]) => l === B), [B, B + 8 * 26, B + 8 * 5, 1]);
+});
+
+test("restore-residuals ze1: a lane left part way whose notes gained one below its highest is read from its start again, not on from its point", async (t) => {
+  usedMap = new Map();
+  const probe = await vworld(t, {});
+  const B = probe.store.lane;
+  let notes: RestoredNote[] = [depositNote(B + 8 * 5, 0n)];
+  const host = (ids: NonNullable<PoolRestoreHost["ids"]>) => ({ ...probe.host, store: async () => probe.store, pools: () => SOL_ONLY, solana: (async () => ({ notes, spends: [] })) as never, ids, ux: () => uxOf(new Map()).reads, pausesMs: [] });
+  // load 1 closes (a sign out stands in for it) once lane B's id at B + 8 * 12 is asked: lane B, the store's own and
+  // read first, is left part way
+  let r1: ReturnType<typeof poolRestore> | null = null;
+  const t1 = tracked((u) => void (u === idOf(SOL_SCOPE, B + 8 * 12) && r1!.signedOut()));
+  r1 = poolRestore(host(t1.ids));
+  await r1.auto();
+  await r1.idle();
+  const part = ((await probe.store.get("meta", IDS_KEY())) as { part?: Record<string, number[][]> } | undefined)?.part?.[SOL_SCOPE.toString()]?.find(([l]) => l === B);
+  assert.ok(part !== undefined && part[1]! > B + 8 * 5, `lane B left part way past its notes: ${JSON.stringify(part)}`);
+  // the other device's deposit lands on lane B below its highest note
+  notes = [depositNote(B + 8 * 2, 1n), depositNote(B + 8 * 5, 0n)];
+  const t2 = tracked();
+  const r2 = poolRestore(host(t2.ids));
+  assert.equal(await r2.resume(), "done");
+  await r2.idle();
+  assert.ok(t2.asked().has(idOf(SOL_SCOPE, B)), "lane B read from its start");
+  assert.ok(laneSet(t2.asked(), B).length >= 21, `lane B read whole (${laneSet(t2.asked(), B).length} ids)`);
+});
+
+test("restore-residuals ze2: a Sync that joins a running id read is told the walk's end, and once that run ends a run of its own walks and reads every id again", async (t) => {
+  usedMap = new Map();
+  const n = nearOf();
+  const g = gated(n);
+  let walks = 0;
+  const reads: bigint[] = [];
+  const w = await vworld(t, { pools: () => SOL_ONLY, solana: (async () => (walks++, { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never, ids: { ...g.ids, read: (s: bigint) => void reads.push(s) }, ux: () => uxOf(new Map()).reads });
+  assert.equal(await w.r.auto(), "done");
+  await until("step 5 reading", () => g.asked() > 0, 5_000);
+  const a = api(w.r.kind);
+  const id = a.ask();
+  await until("the Sync answered", () => a.posted.some((m) => m.id === id && m.stage === "done"), 5_000);
   g.open();
   await w.r.idle();
-  assert.deepEqual(await markerOf(w.store), mine, "tab 2's marker stands: the next load reads for it");
+  assert.equal(walks, 2, "the Sync's own run walked once the running one ended");
+  assert.deepEqual(reads, [SOL_SCOPE, SOL_SCOPE], "and read the scope's ids again");
+  assert.deepEqual(w.steps.map((s) => [s.retry.length, s.held.length, s.named.length]), [[0, 0, 0], [0, 0, 0]]);
+  assert.equal(await markerOf(w.store), undefined);
+  assert.deepEqual((await restoreOps(w.store)).map((x) => x.stage), ["done", "done"], "one op a request, nothing more told");
+});
+
+test("restore-residuals: a run never skips a lane another run kept: its marker taken over during its step 5 (another tab's Sync), it reads every lane", async (t) => {
+  usedMap = new Map();
+  const probe = await vworld(t, {});
+  const S = SOL_SCOPE.toString();
+  const n = nearOf();
+  const base = n.ids.rpcs;
+  let swapped = false;
+  // another run's marker, every lane kept to its bound, written before this run's step 5 asks its first read
+  const ids = { ...n.ids, rpcs: () => base().map((x) => ({ name: x.name, query: async (p: Record<string, unknown>) => {
+    if (!swapped) {
+      swapped = true;
+      await probe.store.put("meta", IDS_KEY(), { scopes: [S], run: "another", read: { [S]: [...Array(8).keys()].map((l) => [l, l + 8 * 21, null, 0]) } });
+    }
+    return x.query(p as never);
+  } })) as unknown as readonly [NearRpc, NearRpc] };
+  const r = poolRestore({ ...probe.host, pools: () => SOL_ONLY, solana: emptyWalk, ids, ux: () => uxOf(new Map()).reads, pausesMs: [] });
+  await r.auto();
+  await r.idle();
+  assert.ok(swapped);
+  assert.equal(new Set(idsAsked(n.log)).size, 168, "every lane read whole");
+  assert.equal((await markerOf(probe.store))?.run, "another", "the other run's marker left as it is");
 });
 
 // card signpage-evm-pool-sell: the mainnet build writes no EVM buy record from a restore (the sale is the testnet

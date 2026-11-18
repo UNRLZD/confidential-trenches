@@ -344,6 +344,17 @@ export function lanesOf(notes: readonly RestoredNote[], scope: bigint): { laneHi
 }
 
 /**
+ * Each lane's count of deposit notes of `scope`. A lane kept on step 5's marker is matched on it beside its highest note:
+ * a second device on the lane adds a note below the highest, which leaves the highest as it was (card
+ * restore-residuals, delta review of c2761c71 ze1).
+ */
+export function laneCounts(notes: readonly RestoredNote[], scope: bigint): number[] {
+  const n = Array<number>(RESTORE_LANES).fill(0);
+  for (const x of notes) if (x.ref.kind === "deposit" && x.ref.s === scope) n[x.ref.i % RESTORE_LANES]! += 1;
+  return n;
+}
+
+/**
  * Each reason one try of step 5 is not done, as found, on one of three lists (so a throw keeps the reasons before it):
  * - `retry`: a read that did not answer (an id unread on both providers, a pass refused, any throw), asked again by
  *   itself; on the page's last try it is told as a finding, and the marker stays;
@@ -393,12 +404,12 @@ async function readDepositIds(
   /** `found`: the deposit note of index i written for money its U_X holds, read alike on both RPCs (planFound) */
   own: Own,
   kept: {
-    of(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>>;
-    add(scope: bigint, lane: number, readTo: number, highest: number | null): Promise<void>;
+    of(scope: bigint, laneHighest: readonly (number | null)[], laneCount: readonly number[]): Promise<ReadonlyMap<number, number>>;
+    add(scope: bigint, lane: number, readTo: number, highest: number | null, count: number): Promise<void>;
     /** the lanes this run's marker holds part read, as restoreDepositIds' `from`, while their notes are as they were */
-    parts(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, { readTo: number; highest: number | null }>>;
+    parts(scope: bigint, laneHighest: readonly (number | null)[], laneCount: readonly number[]): Promise<ReadonlyMap<number, { readTo: number; highest: number | null }>>;
     /** a lane read clean to `readTo`: kept on this run's marker, so a reload goes on past it */
-    part(scope: bigint, lane: number, readTo: number, highest: number | null, noteHighest: number | null): Promise<void>;
+    part(scope: bigint, lane: number, readTo: number, highest: number | null, noteHighest: number | null, noteCount: number): Promise<void>;
   },
   /** the NEAR vault walked, its ids read after the pools' (card vault-late-send-carried), or null */
   vault: { v: VaultWalked; notesAt: Parameters<typeof readVaultLate>[7]; carry: VaultCarry; late: Parameters<typeof readVaultLate>[9] } | null = null,
@@ -430,17 +441,19 @@ async function readDepositIds(
   // is kept on the marker, so the next run reads only the others (review P2-3 of 53f5e92f)
   const lanes = async (scope: bigint, notes: readonly RestoredNote[]) => {
     const { laneHighest } = lanesOf(notes, scope);
+    // a lane is kept while its notes are as they were: its highest note and how many (ze1)
+    const laneCount = laneCounts(notes, scope);
     return {
       first: own.lane,
       signal,
-      done: await kept.of(scope, laneHighest),
+      done: await kept.of(scope, laneHighest, laneCount),
       // card a-load-proves-first-and-walks-the-restore-once: a lane an earlier page read part way goes on past its last
       // clean id, and each clean id read is kept, so a reload never asks an id it already read
-      from: await kept.parts(scope, laneHighest),
-      progress: (lane: number, readTo: number, highest: number | null) => kept.part(scope, lane, readTo, highest, laneHighest[lane] ?? null),
+      from: await kept.parts(scope, laneHighest, laneCount),
+      progress: (lane: number, readTo: number, highest: number | null) => kept.part(scope, lane, readTo, highest, laneHighest[lane] ?? null, laneCount[lane]!),
       laneRead: async (x: LaneIds) => {
         if (x.lane === own.lane && x.reach === null) await own.raise(scope, coverTo(x));
-        if (x.reach === null && x.unread.length === 0 && x.money.length === 0) await kept.add(scope, x.lane, x.readTo, laneHighest[x.lane] ?? null);
+        if (x.reach === null && x.unread.length === 0 && x.money.length === 0) await kept.add(scope, x.lane, x.readTo, laneHighest[x.lane] ?? null, laneCount[x.lane]!);
       },
     };
   };
@@ -538,7 +551,7 @@ async function readPoolLate(
   seed: SeedUse,
   w: Walked & { ux: PoolUxReads },
   r: DepositIds,
-  kept: { of(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>> },
+  kept: { of(scope: bigint, laneHighest: readonly (number | null)[], laneCount: readonly number[]): Promise<ReadonlyMap<number, number>> },
   near: { rpcs: readonly [NearRpc, NearRpc]; pass: RestorePass; opts: NonNullable<Parameters<typeof rereadOnOpen>[0]["opts"]> },
   signal: AbortSignal,
   out: Step5Reasons,
@@ -546,7 +559,7 @@ async function readPoolLate(
   notesAt: Parameters<typeof readVaultLate>[7],
   skip: { ux: ReadonlySet<number>; near: ReadonlySet<number> },
 ): Promise<void> {
-  const done = await kept.of(w.scope, lanesOf(w.notes, w.scope).laneHighest);
+  const done = await kept.of(w.scope, lanesOf(w.notes, w.scope).laneHighest, laneCounts(w.notes, w.scope));
   const lanes: LaneIds[] = Array.from({ length: RESTORE_LANES }, (_, lane) => {
     const x = r.lanes.find((y) => y.lane === lane);
     if (x !== undefined) return x;
@@ -933,27 +946,31 @@ export const STEP5_PAUSES_MS: readonly number[] = Object.freeze([30_000, 120_000
  */
 export const RESTORE_IDS_KEY = "owed/restore-ids";
 /**
- * The marker: the pools' scopes; by scope each lane read whole, with the index it read to and its highest note when it
- * was kept (null: none); and the run that wrote it, so a run keeps lanes on and removes only its own marker.
+ * The marker: the pools' scopes; by scope each lane read whole, with the index it read to, its highest note when it was
+ * kept (null: none) and its count of notes then (a note a second device adds below the highest moves the count only:
+ * card restore-residuals, ze1); and the run that wrote it, so a run keeps lanes on and removes only its own marker.
  * Card a-load-proves-first-and-walks-the-restore-once, progress only (lane numbers, indices, a time; no id, no address):
  * - `part`: by scope, each lane a try left part way, at the last window it read clean, so a reload goes on from there;
  * - `next`: when step 5 is asked again (ms) after a try that left a read to try again (STEP5_PAUSES_MS's pause): a load's
  *   step 5 starts no id read before it, so a reload never asks sooner than one page left open would. A `next` further
  *   ahead than the longest pause (a clock moved back) counts as due.
  */
-type IdsOwed = { scopes: string[]; read?: Record<string, [number, number, number | null][]>; part?: Record<string, PartEntry[]>; run?: string; next?: number; late?: number };
+type IdsOwed = { scopes: string[]; read?: Record<string, [number, number, number | null, number][]>; part?: Record<string, PartEntry[]>; run?: string; next?: number; late?: number };
 /** A lane step 5 left part way (`part`, by scope): its lane, the index it read to with nothing to tell, the lane's highest
- *  with history then, and its highest note when kept (a lane whose notes moved is read from its start again). */
-type PartEntry = [number, number, number | null, number | null];
+ *  with history then, and its highest note and count of notes when kept (a lane whose notes moved is read from its start
+ *  again). */
+type PartEntry = [number, number, number | null, number | null, number];
+// a lane's count of notes as the marker holds it: within u32, as its indices
+const countOk = (x: unknown): boolean => Number.isInteger(x) && (x as number) >= 0 && (x as number) <= 0xffff_ffff;
 const laneIndex = (x: unknown, lane: number, max = 0xffff_ffff): boolean => Number.isInteger(x) && (x as number) >= 0 && (x as number) <= max && (x as number) % RESTORE_LANES === lane;
 const partEntry = (x: unknown): boolean =>
-  Array.isArray(x) && x.length === 4 && Number.isInteger(x[0]) && x[0] >= 0 && x[0] < RESTORE_LANES && laneIndex(x[1], x[0]) && (x[2] === null || laneIndex(x[2], x[0], x[1])) && (x[3] === null || laneIndex(x[3], x[0]));
+  Array.isArray(x) && x.length === 5 && Number.isInteger(x[0]) && x[0] >= 0 && x[0] < RESTORE_LANES && laneIndex(x[1], x[0]) && (x[2] === null || laneIndex(x[2], x[0], x[1])) && (x[3] === null || laneIndex(x[3], x[0])) && countOk(x[4]);
 // a kept lane as the marker holds it: its lane, an index of the lane it read to within u32, its highest note at or below
-// that (or null); any other entry drops the marker's `read` whole, so a broken marker reads more, never less (delta
-// review P3-A)
+// that (or null), its count of notes; any other entry (the shape before the count was kept among them) drops the
+// marker's `read` whole, so a broken marker reads more, never less (delta review P3-A)
 const keptEntry = (x: unknown): boolean =>
   Array.isArray(x) &&
-  x.length === 3 &&
+  x.length === 4 &&
   Number.isInteger(x[0]) &&
   x[0] >= 0 &&
   x[0] < RESTORE_LANES &&
@@ -961,7 +978,8 @@ const keptEntry = (x: unknown): boolean =>
   x[1] >= 0 &&
   x[1] <= 0xffff_ffff &&
   x[1] % RESTORE_LANES === x[0] &&
-  (x[2] === null || (Number.isInteger(x[2]) && x[2] >= 0 && x[2] <= x[1] && x[2] % RESTORE_LANES === x[0]));
+  (x[2] === null || (Number.isInteger(x[2]) && x[2] >= 0 && x[2] <= x[1] && x[2] % RESTORE_LANES === x[0])) &&
+  countOk(x[3]);
 const owedOf = (v: unknown): IdsOwed | null => {
   const o = v as IdsOwed;
   if (typeof v !== "object" || v === null || !Array.isArray(o.scopes) || !o.scopes.every((x) => typeof x === "string")) return null;
@@ -1070,6 +1088,9 @@ export type PoolRestoreHost = {
 
 /** A run: its first end (the walk's notes written: what every follower is told), its whole end (step 5 included). */
 type Run = { owed: boolean; first: Promise<RestoreStage>; done: Promise<void>; follow(id: string, progress?: (s: RestoreStage) => void): void };
+/** What a run's step 5 tells its requests: a finding told (each joining request is told stalled), and whether it has
+ *  started reading its ids (each joining request is read for again once the run ends). */
+type RunState = { finding: boolean; reading: boolean };
 
 export type PoolRestore = {
   /** The `restore` kind's handler: "started" once the seed is read as stored (else not_allowed), the run's stages after. */
@@ -1128,7 +1149,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
 
   // one run: the walk, its notes written (the floor), `first` told; then step 5, tried again by itself on a read that did
   // not answer. `owed`: a load's resume, which reads nothing when another tab removed the marker meanwhile
-  const read = async (signal: AbortSignal, owed: boolean, first: (stage: RestoreStage) => void, run: { finding: boolean }): Promise<void> => {
+  const read = async (signal: AbortSignal, owed: boolean, first: (stage: RestoreStage) => void, run: RunState): Promise<void> => {
     // a load's resume reads as the page's passes do (behind every trade's read), a run the user waits for as a trade
     const kind: ReadKind = owed ? "pass" : "trade";
     const pools = h.pools ? h.pools(kind) : pagePools(EVM_POOLS, kind);
@@ -1397,6 +1418,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // the testnet build: named at the walk's end above, nothing for step 5 to read
         if (ids === null) return;
         if ((walked.length === 0 && vaultIds === null) || !idsOwed) return;
+        // step 5 waits for another tab's (RESTORE_IDS_LOCK, below): a marker another run wrote since (a later Sync's,
+        // which reads for it once this one lets the lock go) or removed is that run's to read, never read twice
+        if (owedOf(await seedHeld(async () => (await h.store()).get("meta", RESTORE_IDS_KEY)))?.run !== runId) return;
         // the scope's deposit indices the note store holds now (the floor's notes among them), for the U_X carry
         const noted = async (scope: bigint): Promise<ReadonlySet<number>> => {
           const notes = await openNoteStore(await h.store());
@@ -1442,14 +1466,15 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // the lanes the marker keeps read whole, by scope; a lane is added only while the marker is there (never one
         // written again after a try removed it)
         // the lanes this run's marker keeps read whole, by scope: one is skipped only while its notes are what they were
-        // when it was kept (its highest note the same: delta review P2-A); a lane is added only to this run's own marker
+        // when it was kept (its highest note the same: delta review P2-A; and its count of notes, which a note a second
+        // device adds below the highest moves: card restore-residuals, ze1); a lane is added only to this run's own marker
         const lanesKept = {
-          of: async (scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>> => {
+          of: async (scope: bigint, laneHighest: readonly (number | null)[], laneCount: readonly number[]): Promise<ReadonlyMap<number, number>> => {
             const o = owedOf(await seedHeld(async () => (await h.store()).get("meta", RESTORE_IDS_KEY)));
             if (o?.run !== runId) return new Map();
-            return new Map((o.read?.[scope.toString()] ?? []).filter(([l, , hi]) => hi === (laneHighest[l] ?? null)).map(([l, to]) => [l, to]));
+            return new Map((o.read?.[scope.toString()] ?? []).filter(([l, , hi, n]) => hi === (laneHighest[l] ?? null) && n === laneCount[l]).map(([l, to]) => [l, to]));
           },
-          add: (scope: bigint, lane: number, readTo: number, highest: number | null): Promise<void> =>
+          add: (scope: bigint, lane: number, readTo: number, highest: number | null, count: number): Promise<void> =>
             seedHeld(async () =>
               void (await (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
                 const o = owedOf(v);
@@ -1457,21 +1482,21 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
                 const k = scope.toString();
                 // a lane read whole leaves its part point
                 const part = { ...o.part, [k]: (o.part?.[k] ?? []).filter(([l]) => l !== lane) };
-                return { ...o, part, read: { ...o.read, [k]: [...(o.read?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo, highest]] } };
+                return { ...o, part, read: { ...o.read, [k]: [...(o.read?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo, highest, count]] } };
               })),
             ),
-          parts: async (scope: bigint, laneHighest: readonly (number | null)[]) => {
+          parts: async (scope: bigint, laneHighest: readonly (number | null)[], laneCount: readonly number[]) => {
             const o = owedOf(await seedHeld(async () => (await h.store()).get("meta", RESTORE_IDS_KEY)));
             if (o?.run !== runId) return new Map();
-            return new Map((o.part?.[scope.toString()] ?? []).filter(([l, , , nh]) => nh === (laneHighest[l] ?? null)).map(([l, readTo, highest]) => [l, { readTo, highest }]));
+            return new Map((o.part?.[scope.toString()] ?? []).filter(([l, , , nh, nc]) => nh === (laneHighest[l] ?? null) && nc === laneCount[l]).map(([l, readTo, highest]) => [l, { readTo, highest }]));
           },
-          part: (scope: bigint, lane: number, readTo: number, highest: number | null, noteHighest: number | null): Promise<void> =>
+          part: (scope: bigint, lane: number, readTo: number, highest: number | null, noteHighest: number | null, noteCount: number): Promise<void> =>
             seedHeld(async () =>
               void (await (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
                 const o = owedOf(v);
                 if (o === null || o.run !== runId) return undefined;
                 const k = scope.toString();
-                return { ...o, part: { ...o.part, [k]: [...(o.part?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo, highest, noteHighest] as PartEntry] } };
+                return { ...o, part: { ...o.part, [k]: [...(o.part?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo, highest, noteHighest, noteCount] as PartEntry] } };
               })),
             ),
         };
@@ -1511,6 +1536,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // open would ask
         const wait = step5Wait(marker, now());
         if (wait > 0) await pause(wait, signal);
+        // from here the ids are read: a request that joins now is read for again once this run ends (start's follow)
+        run.reading = true;
         for (let t = 1; ; t++) {
           const out: Step5Reasons = { retry: [], held: [], named: [] };
           stays = walkFailed;
@@ -1562,9 +1589,14 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       .then(async () => {
         try {
           // step 5 under a lock of its own, one tab at a time: a tab whose step 5 another tab runs reads no id beside
-          // it (that tab's run reads them, and removes the marker once every id is read)
+          // it, and reads them itself once that one ends, on the run's signal (card restore-residuals, delta review of
+          // c2761c71 ze2: a Sync was told done with none read)
           const go = step5 as (() => Promise<void>) | null;
-          if (go !== null) await locks().request(RESTORE_IDS_LOCK, { mode: "exclusive", ifAvailable: true }, async (l) => void (l !== null && (signal.throwIfAborted(), await go())));
+          if (go !== null)
+            await locks().request(RESTORE_IDS_LOCK, { mode: "exclusive", signal }, async () => {
+              signal.throwIfAborted();
+              await go();
+            });
         } finally {
           runKey.fill(0);
           mark?.fill(0);
@@ -1577,7 +1609,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
     }) as Promise<void>;
   };
 
-  const start = (owed: boolean): Run => {
+  // `finding`: a finding told by the run this one reads again for (its stalled op made done by a clean last try)
+  const start = (owed: boolean, finding = false): Run => {
     started = true;
     if (run) return run;
     // each follower's op record, its writes in order (a stage never lands before the one it follows)
@@ -1611,7 +1644,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       // the walk's end is its followers' records' end: each one's write landed (or failed)
       void Promise.all(followers.map((f) => f.writes)).then(() => firstOf(s));
     };
-    const state = { finding: false };
+    const state: RunState = { finding, reading: false };
+    // a request that joined while step 5 read its ids (a Sync, a Retry): read for once this run ends
+    let again = false;
+    const e = epoch;
     const done = read(ctl.signal, owed, post, state)
       .catch(() => {})
       .then(async () => {
@@ -1620,6 +1656,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         run = null;
         if (abort === ctl) abort = null;
         await first;
+        // its own run walks and reads every id once this one ends, never told done with none read after its tap (card
+        // restore-residuals, delta review of c2761c71 ze2); none after a sign out, nor while a run started meanwhile
+        if (again && epoch === e && !ctl.signal.aborted && run === null) start(false, state.finding);
       });
     const r: Run = {
       owed,
@@ -1636,8 +1675,11 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         write(f, "reading");
         progress?.("reading");
         // a request after the walk's end (a Retry, a Sync while step 5 reads on) is told that end at once, stalled once
-        // step 5 has told a finding in this run (review P2-1)
-        if (stage !== null) tell(f, state.finding ? "stalled" : stage);
+        // step 5 has told a finding in this run (review P2-1); one that joins once step 5 reads is read for again
+        if (stage !== null) {
+          if (state.reading) again = true;
+          tell(f, state.finding ? "stalled" : stage);
+        }
       },
     };
     run = r;
@@ -1716,7 +1758,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         });
       }
     },
-    idle: () => run?.done ?? Promise.resolve(),
+    // every run's end, a run read again for a request (start's `again`) included
+    idle: async () => {
+      while (run) await run.done;
+    },
   };
 }
 
