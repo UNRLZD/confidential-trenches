@@ -3665,7 +3665,7 @@ test("WA a warm quote at one amount leaves the token's next quote at another amo
   const tap = { ...warmReq(token), amountIn: 3n * AMOUNT };
   // the tap's amount quoted cold on a device of its own (no plan, no fits): the verdict the warm one must reach
   quoteMod.evmQuoteWarmReset();
-  const cold = await verdict(evmPoolBuyQuoteWith(tap, [chain(plain, 0), chain(plain, 1)], NOW, scanner(5_000_000, logs)));
+  const cold = await verdict(evmPoolBuyQuoteWith(tap, [chain(plain, 0), chain(plain, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0));
   assert.equal(cold.accepted, true, String((cold as { code?: string }).code));
   quoteMod.evmQuoteWarmReset();
   let rounds = 0;
