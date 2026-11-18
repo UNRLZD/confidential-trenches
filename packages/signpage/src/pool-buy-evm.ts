@@ -56,7 +56,7 @@
 //   nullifier or a transaction hash.
 // Nothing here logs.
 import { POOL_ASSET_DECIMALS, type PoolStatePrice, type TradeStage, type TxRef } from "../../kit/src/signpage/messages.ts";
-import { evmPoolBuyQuote, evmPoolIndexPools, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../kit/src/checks/evm/quote.ts";
+import { evmPoolBuyQuote, evmPoolIndexPools, EvmQuoteError, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../kit/src/checks/evm/quote.ts";
 import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
@@ -438,6 +438,12 @@ export const EVM_DRY_SYNCING = Symbol("evm-dry-syncing");
  *  holds nothing (card evm-tree-reads-only-when-needed): a quote that reads no log, its pools the served index's and the
  *  helper's, for a price shown and never signed. */
 const pageQuote = (fetchFn?: typeof fetch, later = false, scanless?: () => boolean) => (req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote> => (evmServedAsk(laneFetch(fetchFn), TRADE_HELPER, req.chain, req.token), evmPoolBuyQuote(later ? { ...req, later, ...(scanless?.() === true ? { scanless: true } : {}) } : req));
+/** A quote a buy may sign from: never one asked scanless (card evm-tree-reads-only-when-needed: its pools are the served
+ *  index's and the helper's, a price to show, and the helper can leave a pool out). */
+export function signedQuote(q: EvmPoolBuyQuote): EvmPoolBuyQuote {
+  if (q.scanless === true) throw new EvmQuoteError("bad_request", "a quote asked scanless is a shown price, never one a buy signs from");
+  return q;
+}
 /** The token's decimals as a buy reads them: the page's kept read on both pool RPCs, no wait (pool-kinds.ts keptTokenDecimals). */
 const pageDecimals = (chain: Chain, rpcs: readonly [EvmRpc, EvmRpc]) => (token: string): Promise<number> => keptTokenDecimals(chain, token, rpcs as readonly [PoolRpc, PoolRpc], { waits: 0 });
 
@@ -985,8 +991,9 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
       return null;
     },
     seed64: page.seed64,
-    // the helper's pools of the token from the PoolManager's first block, asked beside the quote (evm-served.ts)
-    quote: pageQuote(page.fetch),
+    // the helper's pools of the token from the PoolManager's first block, asked beside the quote (evm-served.ts); a
+    // quote asked scanless (a shown price's) is never one a buy signs from (signedQuote)
+    quote: (req) => pageQuote(page.fetch)(req).then(signedQuote),
     indexPools: evmPoolIndexPools,
     build: evmPoolBuildQuoted,
     // the page's kept decimals (pool-kinds.ts keptTokenDecimals: read on both RPCs and kept, so a sell after it reads none);

@@ -122,6 +122,8 @@ export type EvmPoolKey = { readonly currency0: string; readonly currency1: strin
 export type EvmHookTake = { readonly hookless: bigint | null; readonly take: bigint | null; readonly takeBps: number | null };
 
 export type EvmPoolBuyQuote = {
+  /** true: asked scanless (EvmPoolBuyQuoteRequest.scanless), a price to show that no signature may be made from */
+  readonly scanless?: true;
   readonly chain: EvmPoolChain;
   readonly token: string;
   readonly amountIn: bigint;
@@ -2236,7 +2238,8 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   let watch = WATCHES.get(chain);
   if (watch === undefined) WATCHES.set(chain, (watch = evmHeadWatch(() => evmProviders(evmRanked(p), fetch), v.maxLag)));
   // a scan's answer is a list of logs, bounded by the scan provider's own cap per request (16 MiB read at most)
-  return evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch, later), Date.now(), scansOf(v.scan, later), watch);
+  const q = await evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch, later), Date.now(), scansOf(v.scan, later), watch);
+  return scanless ? { ...q, scanless: true } : q;
 }
 
 // Each pinned provider's measured speed (card evm-quote-warm-round): its time to answer a batch, an average that weighs

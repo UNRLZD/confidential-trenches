@@ -846,6 +846,30 @@ test("SCANLESS a scanless quote asks the scan provider nothing and prices on the
   }
 });
 
+test("SCANLESSH a scanless quote takes the helper's pool only where its key hashes to the id it is served with and both providers hold it; an invented one counts for nothing", async () => {
+  const { evmPoolIndexUse, evmPoolServedUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolServedUse: (c: string, t: string, a: Promise<unknown>) => void; evmPoolIndexReset: () => void };
+  const answer = (pools: unknown[]) => ({ chainId: 8453, poolManager: PM, complete: true, through: 4_999_990, pools });
+  const asked: [number, number][] = [];
+  const run = async (n: number, served: (t: string) => unknown[]) => {
+    const token = "0x00000000000000000000000000000000000c" + n.toString(16).padStart(4, "0");
+    evmPoolServedUse("base", token, Promise.resolve().then(() => answer(served(token))));
+    return quoteOnStill([seeded(token), real(token)], token, seededRoute(token), scanner(5_000_000, [{ key: real(token).key, at: 4_999_995 }], asked), undefined, "base", 5_000_000, true);
+  };
+  try {
+    // the served index holds none of these coins' pools
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 4_999_990, pools: [] }), true);
+    // served right, the real pool is a candidate read on both providers: the seeded route is below it
+    assert.deepEqual(await run(1, (t) => [{ id: "0x" + pidOf(real(t).key), key: real(t).key }]), below);
+    // a key that does not hash to the id it is served with is dropped
+    assert.equal((await run(2, (t) => [{ id: "0x" + "11".repeat(32), key: real(t).key }])).accepted, true);
+    // an invented pool, its hash right, that the PoolManager does not hold counts for nothing
+    assert.equal((await run(3, (t) => [{ id: "0x" + pidOf(keyOf(t, NATIVE, 500, 10, NATIVE)), key: keyOf(t, NATIVE, 500, 10, NATIVE) }])).accepted, true);
+    assert.deepEqual(asked, [], "a scanless quote asked the scan provider for logs");
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
 test("card evm-buy-and-sell-on-mainnet: a coin the served index holds no pool of is scanned past the index's N before the quote answers, so a coin made within maxLag is never quoted without its pool", async () => {
   const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
   const token = "0x00000000000000000000000000000000000a44a4";
