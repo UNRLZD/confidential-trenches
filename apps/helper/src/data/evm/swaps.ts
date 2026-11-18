@@ -3001,10 +3001,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const rows = h.rows.slice(0, limit);
       await within(lanes.run(lane, () => exacting(token, rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
       const { trades, waiting } = exactOf(token, rows);
-      // the vendor's newest trades of the pool, every one after its oldest (card token-stats-count-every-trade)
+      // the vendor's newest trades of the pool, every one after its oldest (card token-stats-count-every-trade), up to
+      // their read: claimed complete only while that read is within BEHIND_MAX's ms, the bound a chain tape's complete
+      // list holds to (behind), as the page counts each window up to its own clock (card evm-vendor-tape-names-its-reach:
+      // a held tape whose refresh failed was served with its whole_ms whatever its age); the read's age always named
+      const age = Math.max(0, now() - h.at);
       const oldest = h.rows.at(-1);
-      const whole = waiting || oldest === undefined ? {} : { whole_ms: oldest.t_ms + 1_000 };
-      return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at };
+      const whole = waiting || oldest === undefined || age > BEHIND_MAX[chain].ms ? {} : { whole_ms: oldest.t_ms + 1_000 };
+      const timing = `evm-vendor-read;desc="rows read ${age} ms ago"`;
+      return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at, timing };
     };
     const owed = async (): Promise<DataAnswer> => (held !== undefined ? serve(held) : empty({ trades: [], filling: true }));
     if (held !== undefined && now() - held.at < TAPE_FRESH_MS) return serve(held);
