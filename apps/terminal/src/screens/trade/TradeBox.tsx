@@ -399,10 +399,11 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   useEffect(() => {
     if (!kit.onProgress) return;
     // the time is read when the stage arrives, not when React renders it: a late render must not stretch Filled's time
-    return kit.onProgress((id, stage) => {
+    return kit.onProgress((id, stage, txs) => {
       const at = src.now();
       setPhase((p) => progress(p, id, stage, at));
-      setRoute((r) => fromProgress(r, id, stage, at));
+      // the end's transaction, when the stage names it (the fill toast's link)
+      setRoute((r) => fromProgress(r, id, stage, at, txs));
     });
   }, [kit.onProgress, src.now]);
 

@@ -1196,12 +1196,13 @@ export function poolSellEvmKind(host: () => EvmSellHost & { end?(): void }, lock
               if (!answer) answer = { result: { stage: "sent", txs: [] } };
               give();
             },
-            late: (x) => ctx?.progress(x.stage),
+            // the end with its transactions: the early answer names none (card evm-buy-end-carries-its-tx)
+            late: (x) => ctx?.progress(x.stage, x.txs),
           },
           ask,
         );
         if (!answer) answer = evmSellAnswer(a);
-        if ("stage" in a) ctx?.progress(a.stage);
+        if ("stage" in a) ctx?.progress(a.stage, a.txs);
       } finally {
         h.end?.();
       }

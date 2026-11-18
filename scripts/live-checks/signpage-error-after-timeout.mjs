@@ -6,7 +6,9 @@
 //     kit-frame-version the request's kind is read once, `let _=d.type`, and handed to `give` first, `let e=rl.has(_)`),
 //     and the set holds buy, pool.buy, pool.sell and pool.deposit;
 //   - `give`, for such a kind, posts "refused" for a refusal (never for id_reused) or the result's own stage, when that
-//     stage ends a trade (filled, part_filled, not_landed, refused) and was not posted already.
+//     stage ends a trade (filled, part_filled, not_landed, refused, and from kit 1.19 owed_back) and was not posted
+//     already; from card evm-buy-end-carries-its-tx with the result's own transactions, the stages posted read as
+//     {stage, txs}.
 // The kit's client drops an answer that comes past its 10 s window; the app then ends the trade's button and strip on a
 // progress stage alone (apps/terminal/src/screens/trade/model.ts progress, route.ts fromStage), so without this a trade
 // refused late leaves its button stuck. Each kind's own path is held by its test in packages/signpage/test (trade,
@@ -27,7 +29,7 @@ export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 export const TRADE_KINDS = ["buy", "pool.buy", "pool.sell", "pool.deposit"];
-export const END_STAGES = ["filled", "part_filled", "not_landed", "refused"];
+export const END_STAGES = ["filled", "part_filled", "not_landed", "refused", "owed_back"];
 
 /** Every `X=new Set([`a`,`b`])` of string literals in the bundle, by its name. */
 const SETS = /([\w$]+)=new Set\(\[((?:`[^`$\\]*`,?)*)\]\)/g;
@@ -40,21 +42,28 @@ const RUNNING = new RegExp(
     /let ([\w$]+)=[\w$]+\.type,([\w$]+)=[\w$]+\([^]{0,80}?\);if\(\5&&`running`in \5\)\{[^]{0,120}?let ([\w$]+)=([\w$]+)\.has\(\4\);\5\.after\.catch\(\(\)=>\{\}\)\.then\(\(\)=>[\w$]+\(\4,[\w$]+,[\w$]+,\5\.answer\(\),[\w$]+,\6\)\);return\}/.source,
   ].join("|"),
 );
-/** `give`'s end: refused for a refusal but id_reused, else the result's stage; posted when it ends a trade, once. */
-const RULE = /if\(([\w$]+)\)\{let ([\w$]+)=([\w$]+)\?\3\.result\.stage:[\w$]+===`id_reused`\?null:`refused`;typeof \2==`string`&&([\w$]+)\.has\(\2\)&&![\w$]+\.includes\(\2\)&&[\w$]+\(\2\)\}/;
+/** `give`'s end: refused for a refusal but id_reused, else the result's stage; posted when it ends a trade, once. From
+ *  card evm-buy-end-carries-its-tx the result's txs ride with it (group 4) and the stages posted are {stage, txs}
+ *  (group 6): both or neither. The end set is group 5. */
+const RULE = /if\(([\w$]+)\)\{let ([\w$]+)=([\w$]+)\?\3\.result\.stage:[\w$]+===`id_reused`\?null:`refused`(?:,([\w$]+)=\3\?\3\.result\.txs:void 0)?;typeof \2==`string`&&([\w$]+)\.has\(\2\)&&!(?:[\w$]+\.includes\(\2\)|[\w$]+\.some\(([\w$]+)=>\6\.stage===\2\))&&[\w$]+\((?:\2|\2,Array\.isArray\(\4\)\?\4:void 0)\)\}/;
+/** The rule's txs and its {stage, txs} read together (a bundle with one alone is no build of either era). */
+const ruleOf = (js) => {
+  const m = RULE.exec(js);
+  return m && (m[4] === undefined) === (m[6] === undefined) && (m[4] === undefined || m[0].endsWith(`,Array.isArray(${m[4]})?${m[4]}:void 0)}`)) ? m : null;
+};
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and the facts read from the bundle. */
 export function facts(index, js) {
   const sets = new Map([...js.matchAll(SETS)].map((m) => [m[1], m[2] ? m[2].split(",").map((s) => s.slice(1, -1)) : []]));
   const running = RUNNING.exec(js);
-  const rule = RULE.exec(js);
+  const rule = ruleOf(js);
   return {
     index,
     sha384: sha384(js),
     running: running?.[0] ?? null,
     kinds: running ? (sets.get(running[3] ?? running[7]) ?? null) : null,
     rule: rule?.[0] ?? null,
-    ends: rule ? (sets.get(rule[4]) ?? null) : null,
+    ends: rule ? (sets.get(rule[5]) ?? null) : null,
   };
 }
 

@@ -277,6 +277,64 @@ test("kind: the host's end runs once even when the run throws", async () => {
   assert.deepEqual(r.answer(), { error: "failed" });
 });
 
+// ---- card evm-buy-end-carries-its-tx: the end's stage carries its transaction ----
+
+/** The pool's Withdrawn for W: the swap failed in the pool's own call, W got the chunk less the fee in ETH. */
+const WITHDRAWN_LOG = { ...BOUGHT_LOG, topics: [topic(EVM_POOL_EVENTS.Withdrawn), "0x" + w32(BigInt(W))], data: "0x" + [BigInt(FEE_TO), CHUNK, FEE, NULLIFIER, 99n].map(w32).join("") };
+/** A context that keeps each progress post's stage and transactions. */
+function endsContext(on?: (s: Stage) => void): { ctx: KindContext; posts: [Stage, unknown][] } {
+  const posts: [Stage, unknown][] = [];
+  const progress = (s: Stage, txs?: unknown) => {
+    posts.push([s, txs]);
+    on?.(s);
+  };
+  return { ctx: { id: "r1", sha: "00", progress } as KindContext, posts };
+}
+
+test("kind (evm-buy-end-carries-its-tx): a filled buy's end goes out as progress with its transaction, though the answer stays the early sent", async () => {
+  let open!: () => void;
+  const gate = new Promise<void>((r) => (open = r));
+  const { h, ended } = sending({ gate });
+  const { locks } = lockManager();
+  const { ctx, posts } = endsContext();
+  const r = poolBuyEvmKind(() => h, locks)(ASK, ctx) as { after: Promise<unknown>; answer(): unknown };
+  await within(r.after, "the answer");
+  assert.deepEqual(r.answer(), { result: { stage: "sent", txs: [] } });
+  open();
+  await within(ended, "the run's end");
+  assert.deepEqual(posts, [["filled", [{ chain: "base", hash: HASH }]]]);
+});
+
+test("kind (evm-buy-end-carries-its-tx): a late filled end goes out with its transaction", async () => {
+  let sentYet = false;
+  let t = NOW;
+  const { h, ended } = sending({ now: () => (sentYet ? (t += 200_000n) : NOW), logs: (round) => (round === 0 ? [] : [BOUGHT_LOG]) });
+  const send = h.send;
+  h.send = async (b) => {
+    sentYet = true;
+    return send(b);
+  };
+  let late!: () => void;
+  const lateCame = new Promise<void>((r) => (late = r));
+  const { ctx, posts } = endsContext((s) => s === "filled" && late());
+  const { locks } = lockManager();
+  const r = poolBuyEvmKind(() => h, locks)(ASK, ctx) as { after: Promise<unknown>; answer(): unknown };
+  await within(r.after, "the answer");
+  await within(ended, "the run's end");
+  await within(lateCame, "the late end");
+  assert.deepEqual(posts, [["sent", []], ["filled", [{ chain: "base", hash: HASH }]]]);
+});
+
+test("kind (evm-buy-end-carries-its-tx): a swap that failed with the ETH on W ends owed_back with the release's transaction, never refused", async () => {
+  const { h, ended } = sending({ logs: () => [WITHDRAWN_LOG] });
+  const { locks } = lockManager();
+  const { ctx, posts } = endsContext();
+  const r = poolBuyEvmKind(() => h, locks)(ASK, ctx) as { after: Promise<unknown>; answer(): unknown };
+  await within(r.after, "the answer");
+  await within(ended, "the run's end");
+  assert.deepEqual(posts, [["owed_back", [{ chain: "base", hash: HASH }]]]);
+});
+
 // ---- the page's host ----
 
 function store(seed: Record<string, unknown> = {}): { store: WalletStore; data: Map<string, unknown> } {

@@ -1,5 +1,5 @@
 {
- "note": "recorded-run: good is the three launches with the CPU slowed 4x, bad each planted prf launch, written by run.mjs --record. States, counts, times and boxes only. good was recorded again with card signing-views-open-over-the-app (11 Nov, the sign-in landing in the same APP_HOST document under the sheet); goodPageOfItsOwn is the good before it (a new document after the sign-in).",
+ "note": "recorded-run: good is the three launches with the CPU slowed 4x, bad each planted prf launch, written by run.mjs --record. States, counts, times and boxes only. good was recorded again with card signing-views-open-over-the-app (11 Nov, the sign-in landing in the same APP_HOST document under the sheet); goodPageOfItsOwn is the good before it (a new document after the sign-in). good's wallet launch was recorded again with card wallet-signin-wallet (18 Nov, the build box, CPU 4x): New account drawn and not offered with no wallet in the window (data-pending no-wallet, walletInWindow false); goodPageOfItsOwn keeps its wallet launch as recorded, read at its own era (wallet-signature, no walletInWindow).",
  "good": [
   {
    "run": "prf",
@@ -917,18 +917,19 @@
        ]
       }
      },
-     "readyMs": 207,
-     "newAccount": "wallet-signature",
+     "readyMs": 199,
+     "newAccount": "no-wallet",
+     "walletInWindow": false,
      "landing": {
       "header": "S1.3",
       "sheet": 1,
-      "sheetState": "S19.5",
+      "sheetState": "S19.1",
       "dot": false,
       "topPath": "/discover",
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 328,
+     "landMs": 609,
      "pages": 1,
      "creates": [],
      "signinStates": [
@@ -944,12 +945,14 @@
       "state",
       "hello",
       "state",
+      "painted",
       "nav",
       "signin.open",
       "hello",
       "state",
       "hello",
       "state",
+      "painted",
       "nav"
      ],
      "csp": [],
@@ -960,61 +963,61 @@
       },
       {
        "step": "signin",
-       "t": 58
+       "t": 80
       },
       {
        "step": "wallet",
-       "t": 572
+       "t": 625
       },
       {
        "step": "have-one",
-       "t": 984
+       "t": 1094
       },
       {
        "step": "recovery",
-       "t": 1114
+       "t": 1218
       },
       {
        "step": "continue",
-       "t": 1242
+       "t": 1367
       },
       {
        "step": "end",
-       "t": 2381
+       "t": 2817
       }
      ],
      "blank": {
-      "frames": 32,
+      "frames": 43,
       "white": 0,
       "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 57,
+        "ms": 106,
         "blankMs": 0,
         "colour": null
        },
        {
         "step": "wallet",
-        "ms": 73,
+        "ms": 104,
         "blankMs": 0,
         "colour": null
        },
        {
         "step": "have-one",
-        "ms": 96,
+        "ms": 72,
         "blankMs": 0,
         "colour": null
        },
        {
         "step": "recovery",
-        "ms": 73,
+        "ms": 79,
         "blankMs": 0,
         "colour": null
        },
        {
         "step": "continue",
-        "ms": 338,
+        "ms": 649,
         "blankMs": 0,
         "colour": null
        }
@@ -1022,41 +1025,40 @@
       "resting": [],
       "signhost": [],
       "hops": [
-       51
+       90
       ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "9wmf0r",
+        "doc": "pecq3l",
         "host": "ct-app.unrealized.trade",
         "top": true,
         "sum": 0,
         "sources": []
        },
        {
-        "doc": "369mzt",
+        "doc": "xg8kus",
         "host": "confidential.unrealized.trade",
         "top": true,
         "sum": 0,
         "sources": []
        },
        {
-        "doc": "cmkiqz",
+        "doc": "o8sdal",
         "host": "ct-app.unrealized.trade",
         "top": false,
         "sum": 0,
         "sources": []
        },
        {
-        "doc": "90t62z",
+        "doc": "frdw8q",
         "host": "ct-app.unrealized.trade",
         "top": false,
-        "sum": 0.013797561824756856,
+        "sum": 0.0020846903708362343,
         "sources": [
          "div.phh-acct 299,6,79,44 -> 230,6,148,44",
-         "button.hit44.sfi 251,6,44,44 -> 182,6,44,44",
-         "div.sgn-box 0,682,390,163 -> 0,641,390,204"
+         "button.hit44.sfi 251,6,44,44 -> 182,6,44,44"
         ]
        }
       ],
@@ -1151,18 +1153,19 @@
        ]
       }
      },
-     "readyMs": 137,
-     "newAccount": "wallet-signature",
+     "readyMs": 252,
+     "newAccount": "no-wallet",
+     "walletInWindow": false,
      "landing": {
       "header": "S1.3",
       "sheet": 1,
-      "sheetState": "S19.5",
+      "sheetState": "S19.1",
       "dot": false,
       "topPath": "/discover",
       "framePath": "/discover",
       "scrollY": 0
      },
-     "landMs": 336,
+     "landMs": 632,
      "pages": 1,
      "creates": [],
      "signinStates": [
@@ -1178,10 +1181,12 @@
       "state",
       "hello",
       "state",
+      "painted",
       "nav",
       "signin.open",
       "hello",
       "state",
+      "painted",
       "hello",
       "state",
       "nav"
@@ -1194,61 +1199,61 @@
       },
       {
        "step": "signin",
-       "t": 54
+       "t": 80
       },
       {
        "step": "wallet",
-       "t": 555
+       "t": 661
       },
       {
        "step": "have-one",
-       "t": 973
+       "t": 1147
       },
       {
        "step": "recovery",
-       "t": 1077
+       "t": 1260
       },
       {
        "step": "continue",
-       "t": 1208
+       "t": 1430
       },
       {
        "step": "end",
-       "t": 2410
+       "t": 2920
       }
      ],
      "blank": {
-      "frames": 42,
+      "frames": 43,
       "white": 0,
       "longestMs": 0,
       "steps": [
        {
         "step": "signin",
-        "ms": 64,
+        "ms": 136,
         "blankMs": 0,
         "colour": null
        },
        {
         "step": "wallet",
-        "ms": 69,
+        "ms": 123,
         "blankMs": 0,
         "colour": null
        },
        {
         "step": "have-one",
-        "ms": 67,
+        "ms": 65,
         "blankMs": 0,
         "colour": null
        },
        {
         "step": "recovery",
-        "ms": 73,
+        "ms": 110,
         "blankMs": 0,
         "colour": null
        },
        {
         "step": "continue",
-        "ms": 401,
+        "ms": 689,
         "blankMs": 0,
         "colour": null
        }
@@ -1256,42 +1261,41 @@
       "resting": [],
       "signhost": [],
       "hops": [
-       54
+       73
       ]
      },
      "cls": {
       "pages": [
        {
-        "doc": "zg5ba6",
+        "doc": "vth84v",
         "host": "ct-app.unrealized.trade",
         "top": true,
         "sum": 0,
         "sources": []
        },
        {
-        "doc": "v48vjc",
+        "doc": "hskko9",
         "host": "confidential.unrealized.trade",
         "top": true,
         "sum": 0,
         "sources": []
        },
        {
-        "doc": "vwmbg8",
+        "doc": "wn9be4",
         "host": "ct-app.unrealized.trade",
         "top": false,
         "sum": 0,
         "sources": []
        },
        {
-        "doc": "2fisax",
+        "doc": "yot4e9",
         "host": "ct-app.unrealized.trade",
         "top": false,
-        "sum": 0.002551799909175669,
+        "sum": 0.00155109461403678,
         "sources": [
          "div.search 651,8,390,30 -> 583,8,390,30",
          "div.tb-acct 1364,7,63,32 -> 1229,7,198,32",
-         "div.srch-chip 1295,10,60,26 -> 1160,10,60,26",
-         "div.sgn-box 465,327,510,291 -> 465,315,510,315"
+         "div.srch-chip 1295,10,60,26 -> 1160,10,60,26"
         ]
        }
       ],
@@ -1335,7 +1339,7 @@
      }
     }
    ],
-   "ms": 8872
+   "ms": 11579
   }
  ],
  "goodPageOfItsOwn": [

@@ -1223,8 +1223,9 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
         const why = stage === "settled" ? `one tap spends ${have} of the ${ask.amount} asked, with nothing more landing or proving` : stage === "stopped" ? (moved?.error ?? "the move stopped") : stage === "signed_out" ? "signed out" : undefined;
         t("move", { move: op, stage, amount: have.toString(), ...(why === undefined ? {} : { error: why }) });
       }
-      // the pool buy's stages as trace lines too (sent, filled, not_landed: its answer comes at its first send)
-      const seen: KindContext | null = ctx === null ? null : { ...ctx, progress: (s) => (t("swap", { stage: s }), ctx.progress(s)) };
+      // the pool buy's stages as trace lines too (sent, filled, not_landed: its answer comes at its first send), each to the
+      // api with its transactions (card evm-buy-end-carries-its-tx: a Base or Robinhood buy's late end names its tx)
+      const seen: KindContext | null = ctx === null ? null : { ...ctx, progress: (s, txs) => (t("swap", { stage: s }), ctx.progress(s, txs)) };
       const r = inner(ask, seen);
       if (!("after" in r)) {
         answer = r;

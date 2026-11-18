@@ -1600,8 +1600,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // its record on. A sale refused not_funded: read again, since the row it sold from may be one a spent round left
   const evmEnds = (chain: "base" | "robinhood", ctx: KindContext): KindContext => ({
     ...ctx,
-    progress: (stage) => {
-      ctx.progress(stage);
+    // the stage with its transactions (card evm-buy-end-carries-its-tx: the late end's tx is the fill's link)
+    progress: (stage, txs) => {
+      ctx.progress(stage, txs);
       if (EVM_TRADE_ENDS.has(stage)) evmPositions(chain)?.refresh();
     },
   });
@@ -1616,7 +1617,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
     return run;
   };
-  const EVM_TRADE_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed"]);
+  const EVM_TRADE_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed", "owed_back"]);
   // each chain's open sales for its positions (src/positions-evm.ts evmSaleHolds): from a sale's record on, its token
   // shows no amount agreed under the sale's floor (its Deposited's block, the one both RPCs' verdict named)
   const evmHolds = new Map<"base" | "robinhood", EvmSaleHolds>();
@@ -2845,8 +2846,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const a = r && "answer" in r ? (r.answer() as { result?: { txs?: TxRef[] } }) : null;
       return a?.result?.txs ?? [];
     };
-    const progress = (stage: Parameters<KindContext["progress"]>[0]): void => {
-      ctx.progress(stage);
+    const progress = (stage: Parameters<KindContext["progress"]>[0], txs?: Parameters<KindContext["progress"]>[1]): void => {
+      ctx.progress(stage, txs);
       if (TRADE_ENDS.has(stage)) finish({ result: { stage, txs: txsOf() } });
       // the run ended "sent" (its spend not read as final): no records, its W looked for, its decimals let go
       else if (stage === "sent" && !done && facts.wallet !== undefined) {
@@ -2886,8 +2887,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         .catch(() => {})
         .finally(() => positions.refresh());
     };
-    const progress = (stage: Parameters<KindContext["progress"]>[0]): void => {
-      ctx.progress(stage);
+    const progress = (stage: Parameters<KindContext["progress"]>[0], txs?: Parameters<KindContext["progress"]>[1]): void => {
+      ctx.progress(stage, txs);
       if (TRADE_ENDS.has(stage)) ended(stage);
     };
     const run = sell(ask, { ...ctx, progress });

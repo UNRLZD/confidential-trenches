@@ -153,9 +153,13 @@ const unfill = (r: Route): Route => ({ ...r, st: set(set(r.st, 2, "active"), 3, 
  * "sent", pool-buy.ts poolBuyKind) after the amount out puts the strip back to the pool waiting, as the button goes
  * back to Landing (model.ts progress). The request's answer "sent" is the early one and never does (fromOutcome).
  */
-export function fromProgress(r: Route, id: string, stage: Stage | "refused", at?: number): Route {
+export function fromProgress(r: Route, id: string, stage: Stage | "refused", at?: number, txs?: readonly { hash: string }[]): Route {
   if (stage === "sent" && r.id === id && filledOnly(r)) return unfill(r);
-  return fromStage(r, id, stage, undefined, at);
+  // the end's transaction (card evm-buy-end-carries-its-tx): a Base or Robinhood buy's early answer names none, so its end
+  // stage does, filled or owed back; a transaction the answer named stays
+  const tx = txs?.[0]?.hash;
+  const n = fromStage(r, id, stage, tx, at);
+  return tx ? routeEvent(n, { t: "tx", id, tx }) : n;
 }
 
 /**
@@ -175,7 +179,7 @@ export function fromStage(r: Route, id: string, stage: Stage | "refused", tx?: s
     ev({ t: "taken", id, ...when });
     ev({ t: "sent", id, ...(tx ? { tx } : {}) });
     ev({ t: "filled", id });
-  } else if (stage === "part_filled" || stage === "not_landed" || stage === "refused") ev({ t: "fail", id, ...when });
+  } else if (stage === "part_filled" || stage === "not_landed" || stage === "refused" || stage === "owed_back") ev({ t: "fail", id, ...when });
   return n;
 }
 

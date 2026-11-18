@@ -195,7 +195,8 @@ export async function finishRest(
     await writeRest(h, w, { end: "unsent" }).catch(() => {});
     if (st.held) await h.record(w, { ...leg.holding, state: "withdrawn", route: route(release.tx) }).catch(() => {});
     carry();
-    return { stage: "refused", txs };
+    // W holds the change in ETH and the carry puts it back: owed back, never refused (card evm-buy-end-carries-its-tx)
+    return { stage: "owed_back", txs };
   }
   const s = st.signed;
   txs.push({ chain: h.chain, hash: s.hash });
@@ -213,7 +214,7 @@ export async function finishRest(
       await h.record(w, { ...leg.holding, state: "withdrawn", route: route(s.hash) }).catch(() => {});
       await writeRest(h, w, { end: "reverted" }).catch(() => {});
       carry();
-      return { stage: "refused", txs };
+      return { stage: "owed_back", txs };
     }
     if (!more()) {
       st.round++;
