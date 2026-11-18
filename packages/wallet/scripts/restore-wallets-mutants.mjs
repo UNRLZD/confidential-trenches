@@ -139,6 +139,11 @@ const M = [
   ["late send: two providers apart taken", AFT, [["    if (a !== b) out.push", "    if (false) out.push"]], ID, "step 7's late send"],
   ["late send: a failed read taken as nothing held", AFT, [['if ("error" in x) return { found: null, why: [{ text: `its read failed (${x.error}): read again`, retry: true }] };', 'if ("error" in x) return { found: null, why: [] };']], ID, "step 7's late send"],
   ["late send: an intents.near asset taken as the token", AFT, [["    else if (asset !== token) out.push", "    else if (false) out.push"]], ID, "step 7's late send"],
+  ["the restore reads no vault deposit id", PRS, [["          if (vaultIds !== null && carry !== null)\n", "          if (false)\n"]], PRT, "vault-late-send-carried"],
+  ["a vault late send carried with no note written", PRS, [["        await own.found(v.scope, x.i, found);", "        void 0;"]], PRT, "vault-late-send-carried"],
+  ["a vault late send taken on one provider's read", PRS, [["const { found, why } = lateFound(x, token);", 'const { found, why } = "error" in x ? { found: null, why: [] } : { found: x.held.find((h) => h.asset === token)?.amounts ?? null, why: [] };']], PRT, "vault-late-send-carried"],
+  ["a vault late send under MIN_DEPOSIT carried", PRS, [["found[0] < VAULT_CONSTANTS.MIN_DEPOSIT", "found[0] < 0n"]], PRT, "vault-late-send-carried"],
+  ["a vault carry refused never named", PRS, [["    if (c !== null) (c.retry ? out.held : out.named).push(`${at} ${c.why}`);", "    void c;"]], PRT, "vault-late-send-carried"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
 const only = process.argv[2];
