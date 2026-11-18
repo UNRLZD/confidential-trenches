@@ -1,0 +1,246 @@
+{
+ "note": "good: this branch (card every-tape-and-chart-says-filling-behind-the-head) createSwaps for Base and Robinhood and createSolanaTrades in-process on the real public providers and the public Solana stream, read through the check's read() with a fetch that answers /v1/market/candles and /v1/market/trades from them (the helper host given as http://helper.local), the EVM books opened 25 s before, 18 Nov 05:3xZ. bad: the deployed helper ct-api.unrealized.trade before the card, 18 Nov 05:2xZ: current charts and a current Solana tape naming no read-to.",
+ "good": {
+  "run": {
+   "at": "2026-11-18T05:28:20.280Z",
+   "base": "http://helper.local",
+   "paths": [
+    {
+     "chain": "base",
+     "what": "candles",
+     "reads": [
+      {
+       "coin": "0xc0d2ac10952d75d9b20435da5c3a5669ba774057",
+       "answers": [
+        {
+         "at": 1794979700281,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 58946617 of head 58946621, read 1 s ago\"",
+         "rows": 2,
+         "filling": false,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794979699500
+        }
+       ],
+       "head": {
+        "n": 58946626,
+        "at": 1794979700867,
+        "of": 2
+       }
+      }
+     ]
+    },
+    {
+     "chain": "robinhood",
+     "what": "candles",
+     "reads": [
+      {
+       "coin": "0x8810b5d8c71a406663e9b877b2cbd2d3a3fb1efc",
+       "answers": [
+        {
+         "at": 1794979700867,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117165257 of head 117165282, read 3 s ago\"",
+         "rows": 2,
+         "filling": false,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794979700279
+        }
+       ],
+       "head": {
+        "n": 117165290,
+        "at": 1794979701341,
+        "of": 2
+       }
+      }
+     ]
+    },
+    {
+     "chain": "solana",
+     "what": "trades",
+     "reads": [
+      {
+       "coin": "6m2zUVWNSAFY3wJgGY2vUwHUXdqvYWL5P8KnU3YWpump",
+       "answers": [
+        {
+         "at": 1794979701341,
+         "status": 200,
+         "error": null,
+         "timing": "sol-read-to;desc=\"slot 470817430 of head 470817881, heard 0 s ago\"",
+         "rows": 3,
+         "filling": false,
+         "whole_ms": 0,
+         "src": "chain",
+         "as_of_ms": 1794979702888
+        }
+       ],
+       "head": {
+        "n": 470817879,
+        "at": 1794979703279,
+        "of": 2
+       }
+      }
+     ]
+    },
+    {
+     "chain": "solana",
+     "what": "candles",
+     "reads": [
+      {
+       "coin": "6m2zUVWNSAFY3wJgGY2vUwHUXdqvYWL5P8KnU3YWpump",
+       "answers": [
+        {
+         "at": 1794979703279,
+         "status": 200,
+         "error": null,
+         "timing": "sol-read-to;desc=\"slot 470817430 of head 470817883, heard 0 s ago\"",
+         "rows": 1,
+         "filling": false,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794979702888
+        }
+       ],
+       "head": {
+        "n": 470817880,
+        "at": 1794979703574,
+        "of": 2
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "bad": {
+  "run": {
+   "at": "2026-11-18T05:26:57.197Z",
+   "base": "https://ct-api.unrealized.trade",
+   "paths": [
+    {
+     "chain": "base",
+     "what": "candles",
+     "reads": [
+      {
+       "coin": "0xc0d2ac10952d75d9b20435da5c3a5669ba774057",
+       "answers": [
+        {
+         "at": 1794979618008,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "rows": 2,
+         "filling": false,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794979617846
+        }
+       ],
+       "head": {
+        "n": 58946216,
+        "at": 1794979618972,
+        "of": 2
+       }
+      }
+     ]
+    },
+    {
+     "chain": "robinhood",
+     "what": "candles",
+     "reads": [
+      {
+       "coin": "0x8810b5d8c71a406663e9b877b2cbd2d3a3fb1efc",
+       "answers": [
+        {
+         "at": 1794979619235,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "rows": 2,
+         "filling": false,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794979618271
+        }
+       ],
+       "head": {
+        "n": 117164561,
+        "at": 1794979620273,
+        "of": 2
+       }
+      }
+     ]
+    },
+    {
+     "chain": "solana",
+     "what": "trades",
+     "reads": [
+      {
+       "coin": "6m2zUVWNSAFY3wJgGY2vUwHUXdqvYWL5P8KnU3YWpump",
+       "answers": [
+        {
+         "at": 1794979621051,
+         "status": 200,
+         "error": null,
+         "timing": "total;dur=134",
+         "rows": 3,
+         "filling": false,
+         "whole_ms": 0,
+         "src": "chain",
+         "as_of_ms": 1794979621304
+        }
+       ],
+       "head": {
+        "n": 470817502,
+        "at": 1794979622127,
+        "of": 2
+       }
+      }
+     ]
+    },
+    {
+     "chain": "solana",
+     "what": "candles",
+     "reads": [
+      {
+       "coin": "6m2zUVWNSAFY3wJgGY2vUwHUXdqvYWL5P8KnU3YWpump",
+       "answers": [
+        {
+         "at": 1794979622127,
+         "status": 200,
+         "error": null,
+         "timing": "total;dur=562",
+         "rows": 1,
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794979622305
+        },
+        {
+         "at": 1794979623949,
+         "status": 200,
+         "error": null,
+         "timing": "total;dur=1",
+         "rows": 1,
+         "filling": false,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794979623304
+        }
+       ],
+       "head": {
+        "n": 470817512,
+        "at": 1794979624527,
+        "of": 2
+       }
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

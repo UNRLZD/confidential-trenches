@@ -457,11 +457,14 @@ test("card helper-live-bars-no-503: a held token's tape and live candles (limit 
     // the held tape, as_of_ms its last read; while the gap is unread it claims no reach (card token-stats-count-every-trade)
     const { whole_ms, ...held } = JSON.parse(tape0.body) as Record<string, unknown>;
     assert.equal(whole_ms, 0, "the walk listed the mint's every signature");
-    assert.deepEqual(JSON.parse(a.body), held, "the held tape, as_of_ms its last read, and no reach while a gap is unread");
+    // and filling while the gap is unread: behind the chain, no complete list (card
+    // every-tape-and-chart-says-filling-behind-the-head, SOL_BEHIND_MS)
+    const { trades, src, as_of_ms } = held;
+    assert.deepEqual(JSON.parse(a.body), { trades, filling: true, src, as_of_ms }, "the held tape, as_of_ms its last read, filling and no reach while a gap is unread");
     assert.equal(a.asOfMs, readAt);
     const c = await t.candles(MINT, "1m", null, 2);
     assert.equal(c.status, 200, c.body);
-    assert.equal(c.body, bars0.body, "the held bars, as_of_ms their last read");
+    assert.deepEqual(JSON.parse(c.body), { ...JSON.parse(bars0.body), filling: true }, "the held bars, as_of_ms their last read, filling");
   }
 
   rpcUp = true;
