@@ -5,7 +5,11 @@
 // block 58908200, the providers' head 58908608, the book's head read some 46 s before behind a paced queue. Since the
 // card the tape's answer names the block its book holds every swap to in Server-Timing (apps/helper/src/data/evm/
 // swaps.ts readTo: evm-read-to;desc="block N of head M, read S s ago", M the newest head the helper read) and answers
-// filling with no whole_ms past BEHIND_MAX (Base 75 blocks or 15 s, Robinhood 150 blocks or 15 s).
+// filling with no whole_ms past BEHIND_MAX (Base 75 blocks or 15 s, Robinhood 150 blocks or 15 s). A coin our reads
+// find no pool of is served the vendor's rows (swaps.ts noneTrades, src not "chain"): since card
+// evm-vendor-tape-names-its-reach their answer names how long before the rows were read (evm-vendor-read;desc="rows read
+// A ms ago") and claims whole_ms only while A is within BEHIND_MAX's ms. Live run 44290570091 (18 Nov 11:25Z) read Base
+// 0x1668cd48's vendor tape served complete naming no reach; read again at 11:38:05Z its rows were 1,094 s old.
 // Read, with no key and no transaction, for each chain:
 //   - GET <helper>/v1/market/lists?chain=<chain>, then for its first coins (or --token <chain>:<address>) GET
 //     /v1/market/trades?chain=<chain>&token=<t>&limit=50 with Origin APP, every POLL_MS until it is not filling or
@@ -14,8 +18,10 @@
 // Judged on each answer: a 200 tape not filling, with its whole_ms (a complete list the page counts by), names
 // evm-read-to and claims no more than BEHIND_MAX (M - N blocks, S seconds), and the providers' head read right after
 // it is no further past N than BEHIND_MAX's blocks, its ms in the chain's blocks (BLOCK_MS), the blocks between the
-// answer and the head read, and LAG_BLOCKS. A tape still filling
-// at FILLED_MS on every coin read: INCONCLUSIVE (it claimed no complete list).
+// answer and the head read, and LAG_BLOCKS. A vendor tape (src not "chain") with its whole_ms names evm-vendor-read with
+// A at most BEHIND_MAX's ms, and its as_of_ms is at most that before its request was sent, but for SKEW_MS (the two
+// clocks apart). A tape still filling at FILLED_MS, or claiming no reach, on every coin read: INCONCLUSIVE (it claimed
+// no complete list).
 // Its recorded runs are base-tape-never-complete-behind-the-index.answers.json, replayed by its .test.mjs.
 // After: helper
 // Serial: evm-keyed 220 (its Base and Robinhood tape reads draw the keyed providers)
@@ -25,6 +31,7 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { BEHIND_MAX, SWAP_RPCS } from "../../apps/helper/src/data/evm/swaps.ts";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+import { SKEW_MS } from "./index-evm-swaps.mjs";
 import { FILLED_MS } from "./tape-read.mjs";
 
 export const BASE = "https://ct-api.unrealized.trade";
@@ -41,12 +48,20 @@ const COINS = 3;
 const POLL_MS = 1_000;
 const TIMEOUT_MS = 15_000;
 const READ_TO = /(?:^|,)\s*evm-read-to;desc="block (\d+) of head (\d+), read (\d+) s ago"/;
+const VENDOR_READ = /(?:^|,)\s*evm-vendor-read;desc="rows read (\d+) ms ago"/;
 
 /** The block the tape holds every swap to, the newest head the helper read and that head's age in s, from the
  *  answer's Server-Timing; null when it names none. */
 export function readToOf(timing) {
   const m = READ_TO.exec(String(timing ?? ""));
   return m === null ? null : { block: Number(m[1]), head: Number(m[2]), ageS: Number(m[3]) };
+}
+
+/** How long before the answer the vendor's rows it serves were read, in ms, from its Server-Timing; null when it names
+ *  none. */
+export function vendorReadOf(timing) {
+  const m = VENDOR_READ.exec(String(timing ?? ""));
+  return m === null ? null : { ageMs: Number(m[1]) };
 }
 
 /** The highest head of the first two of the chain's providers that answer: { n, at } or { noAnswer }. */
@@ -137,13 +152,23 @@ export function judge(run) {
           continue;
         }
         // a filling tape claims no complete list (a first open past its bound has no book to name a block of); a tape with
-        // no whole_ms claims no reach to count by (a coin our reads find no pool of: the vendor's rows or none)
+        // no whole_ms claims no reach to count by (the vendor's rows read too long before, or none)
         if (a.filling) continue;
         if (a.whole_ms === null) {
           lines.push(`--  ${tag} a tape with no whole_ms (src ${a.src ?? "none"}, ${a.trades} trades): no complete list claimed`);
           continue;
         }
         complete++;
+        // the vendor's rows (a coin our reads find no pool of): complete up to their read, which is within BEHIND_MAX's ms
+        if (a.src !== "chain") {
+          const what = `${tag} served the vendor's rows (src ${a.src ?? "none"}, ${a.trades} trades) complete (whole_ms ${a.whole_ms})`;
+          const v = vendorReadOf(a.timing);
+          if (v === null) say(false, `${what} naming no read they reach to (Server-Timing ${JSON.stringify(a.timing)})`);
+          else say(v.ageMs <= ms, `${what}, read ${v.ageMs} ms before by the helper's word (at most ${ms})`);
+          const age = Number.isSafeInteger(a.as_of_ms) && Number.isSafeInteger(a.at) ? a.at - a.as_of_ms : null;
+          say(age !== null && age <= ms + SKEW_MS, `${what}, its as_of_ms ${age === null ? `${a.as_of_ms} unread` : `${age} ms before its request`} (at most ${ms} + ${SKEW_MS} for the clocks)`);
+          continue;
+        }
         const r = readToOf(a.timing);
         if (r === null) {
           say(false, `${tag} served complete (filling ${a.filling}, whole_ms ${a.whole_ms}, ${a.trades} trades) naming no block it is read to (Server-Timing ${JSON.stringify(a.timing)})`);
@@ -161,7 +186,7 @@ export function judge(run) {
       }
     }
     if (complete === 0) {
-      lines.push(`--  [${chain}] every tape read was filling up to ${FILLED_MS} ms: none claimed a complete list`);
+      lines.push(`--  [${chain}] every tape read was filling up to ${FILLED_MS} ms or claimed no reach: none claimed a complete list`);
       quiet = true;
     }
   }

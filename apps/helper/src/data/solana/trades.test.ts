@@ -11,6 +11,7 @@ import { fromLogs } from "./decode.ts";
 import { joinBars } from "../candles.ts";
 import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
 import { createRpc } from "../../rpc/rpc.ts";
+import { b58encode } from "./lists.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"), "utf8")) as {
@@ -1144,4 +1145,60 @@ test("card token-stats-count-every-trade: the first walk's reach: 0 from the min
   assert.equal(await reach({ sigs: (p) => (p.before === undefined ? sigsOf(COLD_SIGS) : []), txs: txs(COLD_SIGS), price: 9_342_267_796n, pub: TS, slot: 100 }), (TS - 100 - (COLD_SIGS - 1)) * 1000 + 1000);
   // the whole list, one transaction not read: a trade may be missing at its second, so the reach is past it
   assert.equal(await reach({ sigs: () => sigsOf(5), txs: txs(5, [3]), price: 9_342_267_796n, pub: TS, slot: 100 }), (TS - 103) * 1000 + 1000);
+});
+
+// card sol-tape-trader-is-the-events-user: the recorded pump-buy (a router 6Vo3 calling the pump.fun curve, its
+// TradeEvent at log line 31) with a second swap of the curve made by the curve's own program inside the trader's buy:
+// the shape of Base tx 0xa1782de0 (a v4 pool's hook selling its fees in its own pool inside the trader's sell, card
+// market-reads-hold-under-load), on the Solana venue whose real transaction the fixture copies. No decoded venue does
+// this on mainnet today; the next one may.
+const OWN_USER = new Uint8Array(32).fill(7); // the program's own account (a PDA in a real one)
+/** The recorded buy's event, turned into a sell of a tenth of its legs by `user`. */
+function ownSell(user: Uint8Array): string {
+  const line = BUY.result.meta.logMessages[31]!;
+  const b = Buffer.from(line.slice("Program data: ".length), "base64");
+  b.writeBigUInt64LE(b.readBigUInt64LE(8 + 32) / 10n, 8 + 32); // sol_amount
+  b.writeBigUInt64LE(b.readBigUInt64LE(8 + 40) / 10n, 8 + 40); // token_amount
+  b[8 + 48] = 0; // is_buy: a sell
+  Buffer.from(user).copy(b, 8 + 49); // user
+  return `Program data: ${b.toString("base64")}`;
+}
+const PUMP_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+/** The curve's own sell, invoked by the curve at `depth`, its event sent to itself as Anchor's event CPI. */
+const ownFrame = (depth: number, user: Uint8Array) => [
+  `Program ${PUMP_ID} invoke [${depth}]`,
+  "Program log: Instruction: Sell",
+  ownSell(user),
+  `Program ${PUMP_ID} invoke [${depth + 1}]`,
+  `Program ${PUMP_ID} consumed 2170 of 200000 compute units`,
+  `Program ${PUMP_ID} success`,
+  `Program ${PUMP_ID} consumed 40000 of 250000 compute units`,
+  `Program ${PUMP_ID} success`,
+];
+
+test("card sol-tape-trader-is-the-events-user: a swap the venue's own program makes inside the trader's swap is off the tape and in the bars; each row is named by its own event's user", async () => {
+  const logs = BUY.result.meta.logMessages;
+  // nested: the curve's own sell inside the curve's frame of the trader's buy (before the curve's own end, line 35)
+  const nested = [...logs.slice(0, 35), ...ownFrame(3, OWN_USER), ...logs.slice(35)];
+  assert.deepEqual(fromLogs(logs).truncated, false);
+  assert.deepEqual(fromLogs(nested).truncated, false, "a well-formed invoke stack");
+  // apart: the same sell as its own instruction after the router's (one transaction, two traders, as two signers make it)
+  const apart = [...logs.slice(0, 39), ...ownFrame(1, OWN_USER), ...logs.slice(39)];
+  const run = async (lines: string[]) => {
+    const s = setup({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 });
+    await s.t.trades(MINT, 50);
+    s.on().note(MINT, { sig: BUY.signature, slot: 465_000_000, err: false, logs: lines });
+    await settle();
+    const bars = JSON.parse((await s.t.candles(MINT, "1s", null, 10)).body) as { candles: [number, string, string, string, string, string][] };
+    return { rows: (await tape(s.t)).trades, bars: bars.candles };
+  };
+  const one = await run(nested);
+  // one trade: the trader's buy, named by its event's user
+  assert.deepEqual(one.rows, [{ t_ms: TS * 1000, side: "b", usd: "9.18540990521034652", amt: "2156510.335886", trader: "4ZvukwqXc2AFAHcuvW8VrKD9j3zGHuoqW4hvEQfANH2n", tx: BUY.signature }]);
+  const two = await run(apart);
+  // two traders' trades, each named by its own event's user, never the transaction's first
+  assert.deepEqual(two.rows.map((r) => [r.side, r.trader]), [["s", b58encode(OWN_USER)], ["b", "4ZvukwqXc2AFAHcuvW8VrKD9j3zGHuoqW4hvEQfANH2n"]]);
+  // the bars hold the program's own swap, price and volume both: the same bars as when it is a trader's
+  assert.deepEqual(one.bars, two.bars);
+  assert.notEqual(one.bars[0]![5], "9.18540990521034652", "the own swap's volume is in the bar");
 });

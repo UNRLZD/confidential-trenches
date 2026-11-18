@@ -159,7 +159,14 @@ export const MUTANTS = [
   // (the verdict reads the round first since evm-deposit-ready-in-ten-seconds: a landed note is told whatever U's nonce read does,
   // so the rule's plant is the verdict reading U's nonce before the round, with no read held;
   // the verdict holds no fault now, so its old "with no Deposited it stands" plant is gone, and the end's reads' own is the next two)
-  [EVM, [["  const round = await r.h.round();\n  const pick = evmTakenNotes(r.seed, r.scope, round.events, first, round.finalBlock);\n  if (pick.taken.some", "  if (last !== undefined) await spentFinal(r.h.rpcs, id.address, last.nonce, undefined, sleepOf(r.h), r.h.signal);\n  const round = await r.h.round();\n  const pick = evmTakenNotes(r.seed, r.scope, round.events, first, round.finalBlock);\n  if (pick.taken.some"]], "evm-deposit-note-stays-incoming review 1: a landed deposit whose nonce read"],
+  [EVM, [["  const round = await r.h.round();\n  const leaf = evmDepositLeaf(r.scope, round.events, n.precommitment);\n  if (leaf !== null)", "  if (last !== undefined) await spentFinal(r.h.rpcs, id.address, last.nonce, undefined, sleepOf(r.h), r.h.signal);\n  const round = await r.h.round();\n  const leaf = evmDepositLeaf(r.scope, round.events, n.precommitment);\n  if (leaf !== null)"]], "evm-deposit-note-stays-incoming review 1: a landed deposit whose nonce read"],
+  // card evm-deposit-pruned-sim-says-why: a simulation a node refused for want of state is a lag (read again, then
+  // down), never sim_failed and not_funded; a revert on either RPC stays the chain's word; a note's verdict finds its
+  // Deposited by its own precommitment, never through the chain walk
+  [EVM, [["  if (refused.length > 0 && refused.every(stateMiss)) throw new EvmLagError(`the simulation at block ${acct.block}: an RPC holds no state there`);\n", ""]], "evm-deposit-pruned-sim-says-why: a simulation refused"],
+  [EVM, [["refused.length > 0 && refused.every(stateMiss)", "refused.length > 0 && refused.some(stateMiss)"]], "evm-deposit-pruned-sim-says-why: a node that never holds"],
+  [EVM, [["  return !REVERT.test(m) && STATE_MISS.test(m);", "  return STATE_MISS.test(m);"]], "evm-deposit-pruned-sim-says-why: a node that never holds"],
+  [EVM, [["  const leaf = evmDepositLeaf(r.scope, round.events, n.precommitment);\n", "  const leaf = evmTakenNotes(r.seed, r.scope, round.events, first, round.finalBlock).taken.find((t) => sameRef(t.ref, n.ref))?.leaf ?? null;\n"]], "evm-deposit-pruned-sim-says-why: a note's verdict reads"],
   [EVM, [["    fault = { e };\n  }\n  stopped(h);", "    throw e;\n  }\n  stopped(h);"]], "evm-deposit-note-stays-incoming review 1: the end's reads tell filled"],
   [EVM, [["  if (fault !== null) throw fault.e;\n  return spent", "  return spent"]], "evm-deposit-note-stays-incoming review 1: the end's reads tell filled"],
   [EVM, [["(ask === null && (passFault ??= { e }), { kind: \"pending\" as const })", "Promise.reject(e)"]], "evm-deposit-note-stays-incoming review 1 (P2-1)"],
