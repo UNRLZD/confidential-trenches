@@ -8410,6 +8410,46 @@ test("GF12 a second quote of the same token and amount reads the last quote's sw
   assert.ok(rounds1 > reads1 && rounds === reads, `rounds ${rounds1} (reads from ${reads1}) then ${rounds} (reads from ${reads})`);
 }));
 
+// Card evm-5xx-holds-the-provider-for-the-round, with GF12's early fits: a warm quote reads the last quote's swap fits
+// beside its first round, and a provider that answers HTTP 5xx to one is held in the other. At a87cbd3ff
+// each read held it in its own reads alone, and the first round's batches queued in its gate behind the failed fits
+// were still sent to it (34 requests).
+test("FH5 a provider that answers HTTP 500 to a warm quote's early swap fits is sent none of the first round's batches queued behind them", { timeout: 20_000 }, async () => {
+  const token = "0x00000000000000000000000000000000000f1f15";
+  const K = 6;
+  const fakes: ModelPool[] = Array.from({ length: K }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a) => a, gas: 600_000n }));
+  const pools = [{ ...gfMarket(token), give: (a: bigint) => a / 2n }, gfSeeded(token), ...fakes];
+  const logs = fakes.map((p) => ({ key: p.key, at: 4_500_000 }));
+  const datas = (calls: readonly EvmRpcCall[]) => calls.map((c) => String((c.params[0] as { data?: string } | undefined)?.data));
+  const second = { on: false, failed: 0, readsAfter: 0 };
+  const p1 = chain(pools, 1);
+  // the second provider, while `on`: every request of swap fits answered HTTP 500 after 200 ms; `readsAfter`: the
+  // aggregate3 requests (the first round's reads) sent to it once a 500 came back
+  const failing: EvmRpc = async (calls) => {
+    const d = datas(calls);
+    if (second.on && second.failed > 0 && d.some((x) => x.startsWith("0x82ad56cb"))) second.readsAfter++;
+    if (second.on && d.some((x) => x.startsWith("0x" + SEL_BUY_SWAP))) {
+      await new Promise((r) => setTimeout(r, 200));
+      second.failed++;
+      throw new Error("the provider answered HTTP 500");
+    }
+    return p1(calls);
+  };
+  // one read a call, so the first round is more batches than the provider's gate sends at once (Robinhood's, 2)
+  quoteMod.evmReadsPerCall(1);
+  try {
+    const ask = () => evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route: marketRoute(token) }, [chain(pools, 0), failing, chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs));
+    const q1 = await ask();
+    second.on = true;
+    const q2 = await ask();
+    assert.equal(q2.amountOut, q1.amountOut);
+  } finally {
+    quoteMod.evmReadsPerCall();
+  }
+  assert.ok(second.failed > 0, "the second provider answered HTTP 500 to the warm quote's early fits");
+  assert.equal(second.readsAfter, 0, `${second.readsAfter} first-round requests were sent to the provider after its HTTP 500 in the same round`);
+});
+
 test("GF11 out of gas is no fit only for the swap read: the same words to any other read (the hookless read here) refuse rpc_error", async () => {
   const token = "0x00000000000000000000000000000000000f1f11";
   const hooked: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => a };
