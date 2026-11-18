@@ -400,9 +400,9 @@ const WIDE_SPAN: Readonly<Record<string, number>> = {
  *  its nodes, 10,000 blocks 20,000, 400,000 and 800,000 back in 0.2-1.8 s, each log with its block time;
  *  robinhood.daybreak-rpc.network 2,000 at most, the same three in 0.2-0.5 s, timed; rpc.mainnet.chain.robinhood.com 747
  *  over the day in 571 ms, untimed (HEADER_TIMED: a block header a swap's block, one post a second); keyless
- *  rpc-robinhood.blockmachine.io serves the newest 5,000 blocks only and robinhood.drpc.org refuses any range of old
- *  blocks ("ranges over 10000 blocks"). [design: what each answered every time; pocket and daybreak agree a step with
- *  their own times, the chain's own the third] */
+ *  rpc-robinhood.blockmachine.io serves the newest 5,000 blocks only and robinhood.drpc.org refuses 2,000 blocks and more
+ *  (code 35 "ranges over 10000 blocks are not supported on free plan"; BACK_NARROW). [design: what each answered every
+ *  time; pocket and daybreak agree a step with their own times, the chain's own the third] */
 /** The providers that answer a pool's swaps over a whole tapeBack in one read (readBack's locate), in order: the chain's
  *  own, 747 logs over the day in 571 ms (read above). */
 const BACK_LOCATE: readonly string[] = ["https://rpc.mainnet.chain.robinhood.com"];
@@ -414,6 +414,14 @@ const BACK_SPAN: Readonly<Record<string, number>> = {
   "https://robinhood.daybreak-rpc.network": 2_000,
   "https://rpc.mainnet.chain.robinhood.com": 10_000,
 };
+/** The providers that serve old blocks only as narrow as the chain's VENUES span, each log with its block time: a located
+ *  read back's runs that one such read takes (a named block, an ETH price span) are theirs to answer too (card
+ *  robinhood-spread-tapes-fill-inside-45s, read 2026-11-18 04:28Z from the Mac, the v4 PoolManager's logs 20,000 and
+ *  500,000 blocks back: robinhood.drpc.org answered 1 and 100 blocks in 156 to 242 ms, each log's blockTimestamp the
+ *  others', a batch of 3 single blocks in 158 ms, and refused 2,000 code 35; daybreak 346 to 443 ms, pocket 284 to 1,560
+ *  ms). With daybreak in every pair of a located read back, its 7 posts a second, a post a named block, was every
+ *  spread coin's floor: four coins over 50 spans filled at 51.5 to 53.9 s on swaps-back-resume.test.ts's rig. */
+const BACK_NARROW: readonly string[] = ["https://robinhood.drpc.org"];
 
 /** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
  *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ);
@@ -1055,6 +1063,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const spares = new Set(deps.spares ?? []);
   /** The providers a read back is asked of (VENUES backOnly), and whether a tape reads back at all: two of them at least. */
   const backRpcs = rpcs.filter((u) => BACK_SPAN[u] !== undefined);
+  const backNarrow = rpcs.filter((u) => BACK_NARROW.includes(u));
   const canBack = VENUES[chain].tapeBack > 0 && (!VENUES[chain].backOnly || backRpcs.length >= 2);
   const headerTimed = deps.headerTimed ?? HEADER_TIMED;
   const V = VENUES[chain];
@@ -1539,7 +1548,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
 
   /** For each filter, its logs when two providers return the same ones; null where they do not agree. */
-  function agreedLogs(urls: readonly string[], filters: Record<string, unknown>[], only = false, back = false): Promise<(Log[] | null)[]> {
+  function agreedLogs(urls: readonly string[], filters: Record<string, unknown>[], only = false, back = false, wideFirst = true): Promise<(Log[] | null)[]> {
     // the requests a header-timed provider answered with more blocks than its pace times within the read's wait: never
     // asked of it again in this read (card robinhood-trades-finish-filling: live 16 Nov 15:5xZ, the chain's own RPC was
     // asked a busy ETH price's 931 logs three times in one read, the first pair, again as a wide provider and first in
@@ -1560,7 +1569,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         return out;
       },
       (a, b) => sameLogs(a, b, true),
-      true,
+      wideFirst,
       only,
       LOGS_REFUSED,
       headerTimed,
@@ -2401,16 +2410,27 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // asked its 49 spans at once, daybreak one call a post, and with 12 coins at once 220 posts queued in its 3 places
       // at 7 a second gave up their waits before they were sent: swaps-back-resume.test.ts, rounds of 14 to 20 s that
       // agreed none. A busy coin's newest 50 lie in one or two spans: one round, as before.
-      let spans = 0;
-      let first = -1;
+      // A span whose named blocks one read of V.span blocks takes is the narrow seats' too (BACK_NARROW), and such spans
+      // are asked together, one post a batch of theirs: a round is BACK_ROUND_SPANS posts a seat, a wide span one, the
+      // narrow ones one a narrow batch (card robinhood-spread-tapes-fill-inside-45s: a spread coin's 50 single-block
+      // spans were 25 rounds of 2 posts a seat; on swaps-back-resume.test.ts's rig its rounds of 2 took 0.9 to 1.8 s)
+      const narrow = backNarrow.filter((u) => usable([u]).length > 0);
+      const perPost = narrow.length === 0 ? 1 : Math.max(1, Math.min(...narrow.map(batchOf)));
+      let wides = 0;
+      let narrows = 0;
       let cut = take.length;
-      for (let i = 0; i < take.length; i++) {
-        if (first >= 0 && first - take[i]! + 1 <= wide) continue;
-        if (++spans > BACK_ROUND_SPANS) {
+      for (let i = 0; i < take.length; ) {
+        let j = i + 1;
+        while (j < take.length && take[i]! - take[j]! + 1 <= wide) j++;
+        // an ETH-quoted pool's span also reads the ETH price's V.refBack blocks before it, a wide run of its own
+        const thin = !eth && narrow.length > 0 && take[i]! - take[j - 1]! + 1 <= V.span;
+        if (thin) narrows++;
+        else wides++;
+        if (wides + Math.ceil(narrows / perPost) > BACK_ROUND_SPANS) {
           cut = i;
           break;
         }
-        first = take[i]!;
+        i = j;
       }
       const round = take.slice(0, cut);
       const [main, ...others] = poolFilters(e.pool, 0, 0, chain);
@@ -2439,7 +2459,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           if (r !== undefined && r[0]!.key.split(" ")[0] === x.key.split(" ")[0] && x.hi - r[0]!.lo + 1 <= wide) r.push(x);
           else runs.push([x]);
         }
-        const parts = (await Promise.all(runs.map((r) => agreedLogs(urls, r.map((x) => x.f), true, true)))).flat();
+        // the runs one read of V.span blocks takes (a spread coin's named block, an ETH price span) are one agreed read,
+        // asked of the narrow seats too (BACK_NARROW), every seat ranked by its expected wait alone (a wide one is no
+        // better for them), so each seat batches them and the pairs spread over drpc, pocket and daybreak, never all on
+        // daybreak's 7 posts a second (card robinhood-spread-tapes-fill-inside-45s: with daybreak in every pair, four
+        // coins over 50 spans filled at 51.5 to 53.9 s); a wider run stays the wide seats' own read, as before
+        const one = (r: typeof asks) => narrow.length > 0 && r.at(-1)!.hi - r[0]!.lo + 1 <= V.span;
+        const thin = runs.filter(one).flat();
+        const thick = runs.filter((r) => !one(r));
+        const [thinParts, ...thickParts] = await Promise.all([thin.length === 0 ? Promise.resolve([]) : agreedLogs([...urls, ...narrow], thin.map((x) => x.f), true, true, false), ...thick.map((r) => agreedLogs(urls, r.map((x) => x.f), true, true))]);
+        const byKey = new Map<string, Log[] | null>();
+        thin.forEach((x, i) => byKey.set(x.key, thinParts![i] ?? null));
+        thick.forEach((r, k) => r.forEach((x, i) => byKey.set(x.key, thickParts[k]![i] ?? null)));
+        const parts = asks.map((x) => byKey.get(x.key) ?? null);
         // an agreed answer is kept, so a read the providers' paces answer in part is never asked again whole: its old
         // blocks never change (the same test: with every read asked again whole, 7 of 12 tapes had no trade at 45 s)
         parts.forEach((p, i) => p != null && got.set(asks[i]!.key, p));
@@ -3540,6 +3572,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const mine = joinBars(e.back?.tape?.candles(tf as Tf, to, limit) ?? [], own).slice(-limit);
       // the read back's state as its bars were taken, never after GeckoTerminal's wait (as trades)
       const filling = backing(e);
+      // a live chart (no `to`) whose book is behind the chain (behind, BEHIND_MAX) is not current: filling, whatever its
+      // bar count, and the block it is read to named as the tape names it (card every-tape-and-chart-says-filling-behind-
+      // the-head: a chart's last bar was drawn as current while its book was behind, as live run 44228233209's tape was)
+      const late = to === null && behind(e);
+      const timing = readTo(e);
       let bars: Candle[] = mine;
       let src = "chain";
       // the history before our first bar refused or failed with none held: the answer says filling, so the page reads it
@@ -3569,9 +3606,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const at = e.readAt ?? now();
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
-      if ((short || filling) && bars.length < limit) body.filling = true;
+      if (((short || filling) && bars.length < limit) || late) body.filling = true;
       body.as_of_ms = at;
-      return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at });
+      return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at, timing });
     },
     /** 06b Trades: the newest `limit` swaps, newest first. */
     async trades(token: string, limit: number, client?: string): Promise<DataAnswer> {
