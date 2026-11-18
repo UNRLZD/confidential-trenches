@@ -7,13 +7,17 @@
 //   - the served /app.js is the one index.html pins (its sha384), and in it the least read's mark, the regex literal
 //     that reads 1Click's "Amount is too low for bridge, try at least N", as the minifier keeps it;
 //   - 1Click, through the helper's proxy, names that least for USDC on NEAR into SOL now: the device's plan and Max are
-//     held to it (an answer that names none leaves only each part's own quote, so the check fails to say so).
+//     held to it. An answer that is a quote, or a refusal that names no least, FAILs: the device would have none. A
+//     blip (card cash-least-read-again: "Failed to get quote" and "No liquidity available" over seconds in which 1Click
+//     named its least before and after, sign live run 44300899132, 18 Nov 12:09Z; a 429, a 5xx, no answer) is the one
+//     the device asks again: it proves nothing either way, INCONCLUSIVE, and the run reads again.
 // That the plan spends every note, never asks a note too small for a part and checks every part's quote before any note
 // leaves Cash is packages/signpage/test/cash-buys-spend-every-note.test.ts's. The money run is the owner's $2 buy.
 // After: sign
 // Bundle: read sign
 //   node scripts/live-checks/cash-buys-spend-every-note.mjs [--record <file>] [--answer <file>]
-// PASS exit 0, FAIL exit 1, error exit 2. Reads only: a dry quote names no account of anyone's, nothing is made or sent.
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. Reads only: a dry quote names no account of anyone's,
+// nothing is made or sent.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -29,10 +33,19 @@ const LEAST = /"message"\s*:\s*"Amount is too low for bridge, try at least (\d{1
 
 export const NO_MARK = "BAD the served page does not read 1Click's least for a move of Cash (the dry quote's refusal)";
 export const NO_LEAST = "BAD 1Click names no least for USDC on NEAR into SOL: the device's parts would be held to their own quotes alone";
+export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
 
-/** What the check keeps of the reads: the index, the served bundle's sha384, the mark, and 1Click's answer's text. */
-export function facts(index, js, oneclick) {
-  return { index, sha384: sha384(js), mark: MARK.test(js), oneclick: String(oneclick).slice(0, 2048) };
+/** Whether 1Click's answer is a blip the device asks again (cash-to-pool.ts readOneClickLeast): "Failed to get quote",
+ *  "No liquidity available", a 429, a 5xx, or no answer (status 0). An answer recorded with no status is judged on its
+ *  text alone. */
+export function blip(text, status) {
+  return /"message"\s*:\s*"(?:Failed to get quote|No liquidity available)"/.test(String(text ?? "")) || status === 0 || status === 429 || (Number.isInteger(status) && status >= 500);
+}
+
+/** What the check keeps of the reads: the index, the served bundle's sha384, the mark, and 1Click's answer's text and
+ *  HTTP status (0: no answer). */
+export function facts(index, js, oneclick, status) {
+  return { index, sha384: sha384(js), mark: MARK.test(js), oneclick: String(oneclick).slice(0, 2048), ...(status === undefined ? {} : { status }) };
 }
 
 /** The build's half of the verdict: the pin and the least read's mark, which the pull request's own build is held to. */
@@ -43,15 +56,21 @@ function buildLines(a, bad) {
   if (a?.mark !== true) bad(NO_MARK);
 }
 
-/** The verdict on an answer { index, sha384, mark, oneclick }. */
+/** The verdict on an answer { index, sha384, mark, oneclick, status }: PASS, FAIL (any BAD line) or INCONCLUSIVE. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(m.startsWith("BAD ") ? m : `BAD ${m}`);
   buildLines(a, bad);
   const least = LEAST.exec(a?.oneclick ?? "")?.[1];
-  if (least === undefined || BigInt(least) <= 0n) bad(NO_LEAST);
-  else lines.push(`ok 1Click's least into SOL: ${least} USDC base units`);
-  return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
+  let quiet = false;
+  if (least !== undefined && BigInt(least) > 0n) lines.push(`ok 1Click's least into SOL: ${least} USDC base units`);
+  else if (least === undefined && blip(a?.oneclick, a?.status)) {
+    quiet = true;
+    lines.push(`INCONCLUSIVE 1Click gave a blip, no least and no refusal (HTTP ${a?.status ?? "?"} ${String(a?.oneclick ?? "").slice(0, 120)}): read again`);
+  } else bad(NO_LEAST);
+  const failed = lines.some((l) => l.startsWith("BAD"));
+  const verdict = failed ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS";
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 /** The bundle checks' run on a build (scripts/ci/bundle-checks.mjs): its pin and mark; 1Click is past the build, read live only. */
@@ -78,8 +97,11 @@ export async function read(fetchFn = fetch) {
     destinationAsset: "nep141:sol.omft.near", amount: "1", refundTo: "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0", refundType: "INTENTS",
     recipient: "So11111111111111111111111111111111111111112", recipientType: "DESTINATION_CHAIN", deadline: new Date(Date.now() + 600_000).toISOString(),
   };
-  const oc = await fetchFn(ONECLICK, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.text());
-  return facts(await get("/"), await get("/app.js"), oc);
+  const oc = await fetchFn(ONECLICK, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(15_000) }).then(
+    async (r) => ({ status: r.status, text: await r.text() }),
+    (e) => ({ status: 0, text: `no answer: ${e?.name ?? "failed"}` }),
+  );
+  return facts(await get("/"), await get("/app.js"), oc.text, oc.status);
 }
 
 if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url))) {
@@ -92,8 +114,8 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     if (arg("--record")) writeFileSync(arg("--record"), `${JSON.stringify(answer)}\n`);
     const v = judge(answer);
     for (const l of v.lines) console.log(l);
-    console.log(v.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
-    process.exit(v.ok ? 0 : 1);
+    console.log(`${v.verdict} ${KEY}`);
+    process.exit(EXIT[v.verdict]);
   } catch (e) {
     console.error(`ERROR ${KEY}: ${e?.message ?? e}`);
     process.exit(2);

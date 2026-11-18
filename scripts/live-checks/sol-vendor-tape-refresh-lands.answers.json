@@ -1,0 +1,421 @@
+{
+ "_about": {
+  "good": "node scripts/live-checks/sol-vendor-tape-refresh-lands.mjs --base http://127.0.0.1:18931 --record, 2026-11-18 14:26Z: a local helper at 769a555d4 (this card) on mainnet reads with the CoinGecko key, a fresh store; BONK from the vendor, 23 answers over 44 s, its rows read at most 9,820 ms before: PASS",
+  "bad": "the same run, 18 Nov 2026 14:05Z, against a local helper at b2d5c3308 (main before this card) with the same key: BONK from the vendor, its rows read up to 42 s before, 14 of 22 answers past 15 s: FAIL"
+ },
+ "good": {
+  "base": "http://127.0.0.1:18931",
+  "at": "2026-11-18T14:26:52.096Z",
+  "lists_status": 200,
+  "coins": [
+   {
+    "coin": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "reads": [
+     {
+      "at": 1795011968041,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 9820 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011958222,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011970045,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 1249 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011968798,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011972056,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 3259 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011968798,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011974058,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 5260 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011968798,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011976059,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 7262 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011968798,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011978061,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 9264 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011968798,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011980063,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 1421 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011978642,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011982065,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 3424 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011978642,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011984067,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 5426 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011978642,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011986070,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 7428 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011978642,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011988071,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 9430 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011978642,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011990074,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 963 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011989111,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011992076,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 2965 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011989111,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011994077,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 4967 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011989111,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011996080,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 6969 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011989111,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795011998081,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 8970 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011989111,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795012000083,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 1363 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011998720,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795012002085,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 3366 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011998720,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795012004087,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 5368 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011998720,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795012006089,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 7369 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011998720,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795012008091,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 9371 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795011998720,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795012010094,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 1397 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795012008697,
+      "whole_ms": 1795004998000
+     },
+     {
+      "at": 1795012012095,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 3398 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795012008697,
+      "whole_ms": 1795004998000
+     }
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "base": "http://127.0.0.1:18932",
+  "at": "2026-11-18T14:05:35.056Z",
+  "lists_status": 200,
+  "coins": [
+   {
+    "coin": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "reads": [
+     {
+      "at": 1795010692005,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 1 ms ago\", total;dur=995",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001,
+      "whole_ms": 1795004953000
+     },
+     {
+      "at": 1795010695004,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 2004 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001,
+      "whole_ms": 1795004953000
+     },
+     {
+      "at": 1795010697006,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 4006 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001,
+      "whole_ms": 1795004953000
+     },
+     {
+      "at": 1795010699008,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 6008 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001,
+      "whole_ms": 1795004953000
+     },
+     {
+      "at": 1795010701010,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 8010 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001,
+      "whole_ms": 1795004953000
+     },
+     {
+      "at": 1795010703012,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 10012 ms ago\", total;dur=1",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001,
+      "whole_ms": 1795004953000
+     },
+     {
+      "at": 1795010705015,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 12015 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001,
+      "whole_ms": 1795004953000
+     },
+     {
+      "at": 1795010707016,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 14016 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001,
+      "whole_ms": 1795004953000
+     },
+     {
+      "at": 1795010709019,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 16019 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010711022,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 18021 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010713024,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 20024 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010715031,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 22034 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010717037,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 24037 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010719038,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 26038 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010721040,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 28040 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010723042,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 30041 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010725044,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 32044 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010727046,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 34045 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010729047,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 36047 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010731049,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 38050 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010733053,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 40052 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     },
+     {
+      "at": 1795010735055,
+      "status": 200,
+      "timing": "sol-vendor-read;desc=\"rows read 42054 ms ago\", total;dur=0",
+      "src": "coingecko",
+      "n": 50,
+      "as_of_ms": 1795010693001
+     }
+    ]
+   }
+  ]
+ }
+}

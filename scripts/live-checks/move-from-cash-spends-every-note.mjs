@@ -10,8 +10,9 @@
 //     gives that part; one note that pays it with no change or one a later move sends, else the Cash form's planner of
 //     an exact sum at that least part (withdraw/checks.ts planCashWithdraw), else the nearest amounts a plan sends;
 //   - move: the mover's pool.move plans with it (the notes, the fee, the pool's floor and 1Click's least read now, down
-//     when the floor is not read) and sends that plan's parts through the buy's own sender (sendParts: every part's
-//     quote checked before any note leaves Cash), refusing an amount no plan sends;
+//     when the floor or the least is not read, card cash-least-read-again) and sends that plan's parts through the
+//     buy's own sender (sendParts: every part's quote checked before any note leaves Cash), refusing an amount no plan
+//     sends;
 //   - dry: pool.move.dry from Cash prices that same plan: its out each part's least, its Fee a relay fee a part, its
 //     Max the plan's, and for an amount no plan sends the plan's max, min, below and above.
 // What the plan sends for which notes, floors and prices is held by
@@ -40,9 +41,10 @@ const PLAN = new RegExp(`function (${N})\\((${N}),(${N}),(${N}),(${N}),(${N}),($
 const splitOf = (m) =>
   new RegExp(`let (${N})=${N}\\(${esc(m[2])},${esc(m[4])},${esc(m[3])},${esc(m[8])}\\);return \\1===null\\?\\{fee:${esc(m[3])},max:${esc(m[10])},part:${esc(m[8])},parts:null,\\.\\.\\.${N}\\(${esc(m[2])},${esc(m[4])},${N}\\(${esc(m[3])},${esc(m[8])}\\)\\)\\}`);
 /** The mover's plan of an exact move: the price, the notes, the fee, the floor and 1Click's least read now, planned by
- *  planCashExact at the device's price, down with no floor read (group 1: its name). */
+ *  planCashExact at the device's price, down with no floor or no least read (card cash-least-read-again) (group 1:
+ *  its name). */
 const plannedOf = (plan) =>
-  new RegExp(`(${N})=async\\((${N}),(${N})\\)=>\\{let (${N})=${N}\\.price\\(\\2\\);if\\(\\4===null\\|\\|\\3<=0n\\|\\|[^;]{0,80}\\)return\\{error:\`not_allowed\`\\};let\\[(${N}),(${N}),(${N}),(${N})\\]=await Promise\\.all\\(\\[[^;]{0,400}?\\]\\);return typeof \\7==\`bigint\`\\?${esc(plan)}\\(\\6,\\5,\\3,(${N})=>${N}\\(\\9,\\4,\\2\\),\\7,\\8\\)\\?\\?\\{error:\`not_allowed\`\\}:\\{error:\`down\`\\}`);
+  new RegExp(`(${N})=async\\((${N}),(${N})\\)=>\\{let (${N})=${N}\\.price\\(\\2\\);if\\(\\4===null\\|\\|\\3<=0n\\|\\|[^;]{0,80}\\)return\\{error:\`not_allowed\`\\};let\\[(${N}),(${N}),(${N}),(${N})\\]=await Promise\\.all\\(\\[[^;]{0,400}?\\]\\);return typeof \\7!=\`bigint\`\\|\\|\\8===void 0\\?\\{error:\`down\`\\}:${esc(plan)}\\(\\6,\\5,\\3,(${N})=>${N}\\(\\9,\\4,\\2\\),\\7,\\8\\)\\?\\?\\{error:\`not_allowed\`\\}`);
 /** pool.move's mover move: that plan, refused with nothing sent when it sends nothing, its parts sent by the sender the
  *  buy's move uses (group 6). */
 const moveOf = (planned) =>
