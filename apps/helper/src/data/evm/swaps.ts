@@ -2399,7 +2399,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       for (let i = 0; i < take.length; ) {
         let j = i + 1;
         while (j < take.length && take[i]! - take[j]! + 1 <= wide) j++;
-        const thin = narrow.length > 0 && take[i]! - take[j - 1]! + 1 <= V.span;
+        // an ETH-quoted pool's span also reads the ETH price's V.refBack blocks before it, a wide run of its own
+        const thin = !eth && narrow.length > 0 && take[i]! - take[j - 1]! + 1 <= V.span;
         if (thin) narrows++;
         else wides++;
         if (wides + Math.ceil(narrows / perPost) > BACK_ROUND_SPANS) {
@@ -2408,7 +2409,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         }
         i = j;
       }
-      const round = take.slice(0, Math.max(cut, 1));
+      const round = take.slice(0, cut);
       const [main, ...others] = poolFilters(e.pool, 0, 0, chain);
       const at = (f: Record<string, unknown>, a: number, b: number) => ({ ...f, fromBlock: `0x${a.toString(16)}`, toBlock: `0x${b.toString(16)}` });
       // each block's reads: its swaps (and the pool's birth), its other filters, and the ETH price's V.span spans of the
