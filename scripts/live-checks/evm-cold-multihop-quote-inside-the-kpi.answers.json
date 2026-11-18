@@ -1,0 +1,110 @@
+{
+ "good": {
+  "note": "this branch (card evm-cold-multihop-quote-inside-the-kpi, 62a99265c) at 2026-11-18T05:42:49.670Z, the repo Base snapshot read from a build folder: 0x07b3d9 cold quoted in 5972 ms, its second kit quote asked at the refused quote block, every read at one block hash; again one kit quote in 3206 ms: PASS",
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "site": "a build folder at SIGN_HOST's name",
+   "at": "2026-11-18T05:42:49.670Z",
+   "snapshot": {
+    "status": 200,
+    "through": 58859903,
+    "pools": 6148
+   },
+   "sync": {
+    "ms": 5266,
+    "served": true
+   },
+   "coins": [
+    {
+     "coin": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+     "first": {
+      "ms": 5972,
+      "out": "158860517057937312739",
+      "asks": [
+       {
+        "at": null
+       },
+       {
+        "at": "0xc005bc95574d2173581c4e85a08cc7269c4cc9f22a90fbd6a5dc199b5e44fe5a"
+       }
+      ],
+      "blocks": [
+       "0xc005bc95574d2173581c4e85a08cc7269c4cc9f22a90fbd6a5dc199b5e44fe5a"
+      ]
+     },
+     "again": {
+      "ms": 3206,
+      "out": "158867117488238378910",
+      "asks": [
+       {
+        "at": null
+       }
+      ],
+      "blocks": [
+       "0x4099175c1fb5231c6922ea4c171365e53104e103b0583edebf4afbd42b714f24"
+      ]
+     }
+    }
+   ],
+   "s429": {}
+  }
+ },
+ "bad": {
+  "note": "the card base ef1433dc8 (main with PR 978) at 2026-11-18T05:43:21.894Z, the same snapshot: the cold tap second kit quote asked at no block and read at a second block hash; again three kit quotes, refused no_quote in 6271 ms: FAIL",
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "site": "a build folder at SIGN_HOST's name",
+   "at": "2026-11-18T05:43:21.894Z",
+   "snapshot": {
+    "status": 200,
+    "through": 58859903,
+    "pools": 6148
+   },
+   "sync": {
+    "ms": 5791,
+    "served": true
+   },
+   "coins": [
+    {
+     "coin": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+     "first": {
+      "ms": 7708,
+      "out": "158825956381454644153",
+      "asks": [
+       {
+        "at": null
+       },
+       {
+        "at": null
+       }
+      ],
+      "blocks": [
+       "0x509410bb4c5ca2fe5342f34074d1b72bd7b923279a6cd520ec2321355a06e9d5",
+       "0x38eba2f2850b5500a2a080a986451d6902fa93f3da76f1dd3612abc8ec93ed05"
+      ]
+     },
+     "again": {
+      "ms": 6271,
+      "code": "no_quote",
+      "asks": [
+       {
+        "at": null
+       },
+       {
+        "at": null
+       },
+       {
+        "at": null
+       }
+      ],
+      "blocks": [
+       "0x717d9e6722c4781be196886a6f42375c1d3d213b419f603f300e51b1fd9cac10",
+       "0xfd9e16c46dc2f7192928c1673282c72dfb5d8593d187d24057e2a95d445a9e7d"
+      ]
+     }
+    }
+   ],
+   "s429": {}
+  }
+ }
+}

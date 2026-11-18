@@ -15,6 +15,7 @@
 // Built for any chain (helper-lists-own-index puts Discover's lists and Base on it): `createSwapIndex` takes the chain's
 // read and its topics, nothing of Robinhood's.
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import type { IndexStore } from "./index-store.ts";
 import type { Log } from "./swaps.ts";
 
 // -------------------------------------------------------------------------------------------------------------
@@ -133,8 +134,13 @@ export type SwapIndex = {
  * `read(lo, hi)`: the chain's logs of `topics` over blocks lo..hi, agreed by two providers, or null. `window`: the blocks
  * held behind the newest (the tape's cold window and the ETH price's before it); a gap past it starts the index again
  * at the newest `window` blocks. `chunk`: the most blocks one call to `read` asks, so a long catch-up is a few reads.
+ * `store` (card helper-evm-tapes-survive-a-restart, index-store.ts): the copy a previous process wrote is held from the
+ * start, served only once the index has read up to a head read since (upTo), a copy past `window` behind that head (or
+ * ahead of it) dropped and the window read again; every chunk read after is written as it is held. `writable`: writes
+ * wait for it (the senders handed over, so a deploy's two helpers never write the file at once), then the held range is
+ * written whole.
  */
-export function createSwapIndex(deps: { topics: readonly string[]; read: (lo: number, hi: number) => Promise<Log[] | null>; window: number; chunk: number }): SwapIndex {
+export function createSwapIndex(deps: { topics: readonly string[]; read: (lo: number, hi: number) => Promise<Log[] | null>; window: number; chunk: number; store?: IndexStore | null; writable?: Promise<unknown>; log?: (line: string) => void }): SwapIndex {
   const topics = new Set(deps.topics.map((t) => t.toLowerCase()));
   let from = -1;
   let to = -1;
@@ -171,12 +177,40 @@ export function createSwapIndex(deps: { topics: readonly string[]; read: (lo: nu
   };
   const sorted = (a: Log[]) => a.sort((x, y) => x.block - y.block || x.index - y.index);
 
+  // the copy on disk: held, not served until checked against a head (upTo)
+  let store = deps.store ?? null;
+  let checked = true;
+  let canWrite = deps.writable === undefined;
+  const all = () => sorted([...byAddr.values()].flat());
+  /** One write; a failed one stops the writes (the file keeps the range before it, whole) and never the index. */
+  const save = (logs: readonly Log[], whole = false) => {
+    if (store === null || !canWrite) return;
+    try {
+      if (to < 0) store.clear();
+      else store.put(from, to, logs, whole);
+    } catch (e) {
+      deps.log?.(`swap index store: write failed (${(e as Error).message}), the index goes on in memory`);
+      store = null;
+    }
+  };
+  if (store !== null) {
+    const copy = store.load();
+    if (copy !== null) {
+      add(copy.logs);
+      from = copy.from;
+      to = copy.to;
+      checked = false;
+    }
+    if (!canWrite) void deps.writable!.then(() => ((canWrite = true), save(all(), true)));
+  }
+
   async function readTo(n: number): Promise<void> {
     // a gap past the window, or nothing held: the newest `window` blocks again, each chunk held as it is agreed, so a
     // chunk that fails costs that chunk and the next read goes on from it (card helper-robinhood-trades-hang: all or
     // nothing over five chunks, the first read never landed in 135 s while one provider timed out on one post in five)
     if (to < 0 || n - to > deps.window) {
       reset();
+      save([]);
       const lo = Math.max(0, n - deps.window + 1);
       for (let a = lo; a <= n; a += deps.chunk) {
         const b = Math.min(n, a + deps.chunk - 1);
@@ -185,6 +219,7 @@ export function createSwapIndex(deps: { topics: readonly string[]; read: (lo: nu
         add(sorted(got));
         from = lo;
         to = b;
+        save(got);
       }
       return;
     }
@@ -195,8 +230,9 @@ export function createSwapIndex(deps: { topics: readonly string[]; read: (lo: nu
       if (got.some((l) => l.block < a || l.block > b)) return;
       add(sorted(got));
       to = b;
+      if (to - from + 1 > deps.window) prune(to - deps.window + 1);
+      save(got);
     }
-    if (to - from + 1 > deps.window) prune(to - deps.window + 1);
   }
 
   const matches = (l: Log, f: Record<string, unknown>): boolean => {
@@ -206,14 +242,19 @@ export function createSwapIndex(deps: { topics: readonly string[]; read: (lo: nu
 
   return {
     topics,
-    range: () => (to < 0 ? null : { from, to }),
-    holds: (lo, hi) => to >= 0 && lo >= from && hi <= to,
+    range: () => (to < 0 || !checked ? null : { from, to }),
+    holds: (lo, hi) => checked && to >= 0 && lo >= from && hi <= to,
     indexes(f) {
       const t0 = Array.isArray(f.topics) ? (f.topics as unknown[])[0] : undefined;
       const first = Array.isArray(t0) ? t0 : [t0];
       return typeof f.address === "string" && first.length > 0 && first.every((x) => typeof x === "string" && topics.has(x));
     },
     async upTo(n) {
+      // a copy ahead of the head by more than the window is no copy of this chain's newest blocks: read it again
+      if (!checked && to - n > deps.window) {
+        reset();
+        save([]);
+      }
       while (to < n) {
         if (reading === null) {
           const target = n;
@@ -224,15 +265,18 @@ export function createSwapIndex(deps: { topics: readonly string[]; read: (lo: nu
           if (to < target) return false;
         } else await reading;
       }
+      checked = true;
       return true;
     },
     query(f, lo, hi) {
+      if (!checked) return [];
       const addr = String(f.address).toLowerCase();
       const t1 = Array.isArray(f.topics) ? (f.topics as unknown[])[1] : undefined;
       const list = typeof t1 === "string" ? (byKey.get(`${addr} ${t1}`) ?? []) : (byAddr.get(addr) ?? []);
       return list.filter((l) => l.block >= lo && l.block <= hi && matches(l, f));
     },
     logs(lo, hi) {
+      if (!checked) return [];
       return sorted([...byAddr.values()].flat().filter((l) => l.block >= lo && l.block <= hi));
     },
   };

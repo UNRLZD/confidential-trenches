@@ -41,6 +41,43 @@ test("a refusal naming the kit's best route asks it once; one through a hook the
   assert.ok(!seen.includes(JSON.stringify(hooked)) && seen.length <= 2, seen.join("\n"));
 });
 
+test("TAPAT a followed reference is asked at the block its refusal was read at (`at`), the first ask at none (card evm-cold-multihop-quote-inside-the-kpi)", async () => {
+  evmBuyTapReset();
+  const real = { venue: "uniswap-v3" as const, tokens: ["0x0bd7d308f8e1639fab988df18a8011f41eacad73", "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", TOKEN], fees: [500, 10_000] };
+  const AT = "0x" + "ab".repeat(32);
+  const asks: { route: string; at: unknown }[] = [];
+  const q = await tap(async (r) => {
+    asks.push({ route: JSON.stringify(r.route), at: (r as { at?: unknown }).at });
+    if (JSON.stringify(r.route) === JSON.stringify(real)) return { route: real } as unknown as EvmPoolBuyQuote;
+    const e = new EvmQuoteError("no_quote", "the route reverts or quotes nothing", { amountOut: 1n, route: real });
+    (e as { at: string | null }).at = AT;
+    return Promise.reject(e);
+  }, spam(1));
+  assert.deepEqual(q.route, real);
+  assert.equal(asks.length, 2);
+  assert.equal(asks[0]!.at, undefined, "the first ask named a block");
+  assert.equal(asks[1]!.at, AT, "the reference was not asked at the refusal's block");
+});
+
+test("TAPHELD a refusal read at the held head is held for it; one read at another block (a follow's) is not, so the next tap asks again (card evm-cold-multihop-quote-inside-the-kpi)", async () => {
+  const HEAD = "0x" + "ab".repeat(32);
+  for (const [readAt, held] of [[HEAD, true], ["0x" + "cd".repeat(32), false], [null, true]] as const) {
+    evmBuyTapReset();
+    let n = 0;
+    const quote = async () => {
+      n++;
+      const e = new EvmQuoteError("no_quote", "the route reverts or quotes nothing");
+      (e as { at: string | null }).at = readAt;
+      return Promise.reject(e);
+    };
+    const go = () => evmPoolBuyQuoteTap({ chain: "robinhood", token: TOKEN, amountIn: 10n ** 15n, slippageBps: 300 }, { quote, indexPools: () => spam(1), held: () => HEAD });
+    await assert.rejects(go());
+    const first = n;
+    await assert.rejects(go());
+    assert.equal(n === first, held, `read at ${readAt}: ${first} then ${n} quotes`);
+  }
+});
+
 test("card base-coin-quote-check-names-its-cause: a route refused for another reason than no route anywhere stays quote_check_failed", async () => {
   evmBuyTapReset();
   await assert.rejects(

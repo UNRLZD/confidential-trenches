@@ -119,6 +119,7 @@ import {
   solanaDecodeLookupTable,
   solanaDecodePoolRelease,
   solanaDecodeTransaction,
+  secretScrubber,
   solanaJsonRpc,
   readSolanaRent,
   solanaPoolAccount,
@@ -441,6 +442,9 @@ export type SolanaPoolSenderDeps = {
   pause?: (ms: number) => Promise<void>;
   /** Where a failed start read is told (POOL_START_LOG_MS apart at most once); default stderr. */
   log?: (line: string) => void;
+  /** The providers' URLs, whose secrets that line never carries (the kit's secretScrubber); none: any URL in it is cut
+   *  to its host. */
+  urls?: readonly string[];
 };
 
 /** A read after a buy's tag 2s landed (card owners-solana-buy-lands): asked again for at most this long, the life of a
@@ -536,15 +540,17 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     for (const m of [epochFees, known]) for (const k of [...m.keys()]) if (k < epoch - POOL_LIFE_MAX_MS) m.delete(k);
     return p;
   };
-  // a failed start read on stderr, naming the cluster and the error (each URL cut to its host: a key may sit in its
-  // path or query); the first, then one a POOL_START_LOG_MS. A mismatch is not one: the helper exits naming it.
+  // a failed start read on stderr, naming the cluster and the error (the kit's secretScrubber over the providers' URLs:
+  // a key in a path or query, echoed with its URL or alone, never printed; any URL cut to its host); the first, then one a
+  // POOL_START_LOG_MS. A mismatch is not one: the helper exits naming it.
   const log = deps.log ?? ((line: string) => console.error(line));
+  const scrubRead = secretScrubber(deps.urls ?? []);
   let loggedAt = -Infinity;
   const startReadFailed = (e: unknown) => {
     const at = (deps.now ?? Date.now)();
     if (configured !== "unchecked" || at - loggedAt < POOL_START_LOG_MS) return;
     loggedAt = at;
-    const why = (e instanceof Error ? e.message : String(e)).replace(/\bhttps?:\/\/[^\s/?#]+[^\s]*/g, (u) => URL.canParse(u) ? new URL(u).host : "<url>");
+    const why = scrubRead(e instanceof Error ? e.message : String(e));
     log(`helper: the ${cfg.cluster} pool's rent read failed, its start check waits for a good one: ${why}`);
   };
   // each ask before the check reads this epoch's rent unless a read of it is under way or done (feeOf keeps it); a failed
@@ -1163,7 +1169,7 @@ export function solanaPoolSendersFromEnv(env: Record<string, string | undefined>
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[3]} must be two different RPC URLs`);
     const providers = urls.map((u) => solanaJsonRpc(u, fetchFn ? { fetch: fetchFn } : {})) as unknown as readonly [SolanaRpc, SolanaRpc];
     if (!/^[1-9][0-9]{0,18}$/.test(fee!)) throw new Error(`${names[2]} must be a whole number of lamports`);
-    const s = solanaPoolSender({ cluster, program: program!, feePayerSecret: key!, fee: fee! }, { providers });
+    const s = solanaPoolSender({ cluster, program: program!, feePayerSecret: key!, fee: fee! }, { providers, urls });
     out.set(s.pool, s);
   }
   return out;
