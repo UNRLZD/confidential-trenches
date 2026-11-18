@@ -4,10 +4,9 @@
 //
 // Why: helper live run 44298379284 at 6b1926fc9, the build that first read the lists' tapes ahead, had 21 red jobs, all
 // started 11:51:21-11:52:24Z, while the helper's log read "event loop held up to 1714 ms this minute (p99 1278 ms)" and
-// then 2162 ms (p99 1771 ms); the build before it had 2 red jobs, and so did 904efb36b with the read ahead undone (run
-// 44309587474). The read ahead alone never held the loop: on the public providers, both chains' lists read ahead and 24
-// listed coins opened at once, the longest hold in 150 s was 22 ms, and 34 ms with the tapes' read ahead off (a burst
-// replay on a laptop, 18 Nov 13:2xZ). A p99
+// then 2162 ms (p99 1771 ms); the build before it had 2 red jobs (run 44290570091). The read ahead alone never held the
+// loop: on the public providers, both chains' lists read ahead and 24 listed coins opened at once, the longest hold in
+// 150 s was 22 ms, and 34 ms with the tapes' read ahead off (a burst replay on a laptop, 18 Nov 13:2xZ). A p99
 // that near its max is a loop that is late all minute, a backlog, not one long step: the read ahead's extra work came on
 // top of a live run's burst. So it is gated on the load, the way Fastify's under-pressure gates a server's routes: a
 // timer every SAMPLE_MS, and how late it fired.
