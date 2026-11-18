@@ -123,3 +123,20 @@ test("card sol-meteora-tape-inside-rpc-budget: past the budget a coin's tape nam
   assert.equal((JSON.parse((await c.t.trades(TTW, 50)).body) as { src: string }).src, "chain");
   c.t.stop();
 });
+
+test("card sol-meteora-tape-inside-rpc-budget: a coin with no rows of its own whose Meteora trade went past the budget names the cut too", async () => {
+  // a live read (index-sol-trades against a local helper at a54a41709, 18 Nov 18:55Z): a fresh DBC coin, every trade
+  // past the budget, was served the vendor's rows with no sol-whole-cut, as a coin with no trade to decode is
+  const vendor = { status: 200, body: JSON.stringify([{ t_ms: TS * 1000, side: "b", usd: "1", amt: "1", trader: null, tx: "V1" }]), src: "geckoterminal", asOfMs: TS * 1000 };
+  const B = "8HuYsEpBS2WZACBCbAKcoh8XmbNYYqRjoJrCqC3Cmoon";
+  const c = chain([TTW, B], { tape: async () => vendor });
+  for (const m of [TTW, B]) assert.equal((await c.t.trades(m, 50)).status, 200);
+  // the second's budget taken by B, then TTW's one trade: past it, TTW holds no row of its own
+  for (let i = 0; i < T.WHOLE_PER_S; i++) c.stream(B);
+  c.stream(TTW);
+  await settle();
+  const va = await c.t.trades(TTW, 50);
+  assert.equal((JSON.parse(va.body) as { src: string }).src, "geckoterminal");
+  assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago"/, "the vendor's rows name the cut");
+  c.t.stop();
+});

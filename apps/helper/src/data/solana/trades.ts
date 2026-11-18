@@ -1253,14 +1253,16 @@ export function createSolanaTrades(deps: {
       // token not on the pump.fun curve, PumpSwap, Orca, Raydium CLMM, CPMM, LaunchLab, Meteora DLMM, DBC or DAMM v2) is served its top pool's trades (token.ts tape),
       // never an empty tape for a token that trades (card solana-trades-show-on-every-token: NEARKAT and BONK answered 0
       // rows, src chain, while their pools traded)
-      if (rows.length === 0 && deps.tape !== undefined) return poolTape(mint, limit, e);
       // card sol-meteora-tape-inside-rpc-budget: a coin whose Meteora trade went unread inside CUT_KEEP_MS is served its top
-      // pool's trades as a venue not decoded is, while the vendor answers them; else its own rows, whole only past the cut
+      // pool's trades as a venue not decoded is, while the vendor answers them; else its own rows, whole only past the cut.
+      // The vendor's rows are named in Server-Timing, so a reader can tell this coin's chain tape is past the budget, a coin
+      // with no row of its own yet included (every trade of a fresh coin past the budget)
       const cut = e.cut !== undefined && now() - e.cut.at <= CUT_KEEP_MS;
+      const named = (v: DataAnswer): DataAnswer => (cut && v.status === 200 && v.src !== "chain" ? { ...v, timing: `${v.timing === undefined ? "" : `${v.timing}, `}sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago"` } : v);
+      if (rows.length === 0 && deps.tape !== undefined) return named(await poolTape(mint, limit, e));
       if (cut && deps.tape !== undefined) {
         const v = await poolTape(mint, limit, null);
-        // named in Server-Timing, so a reader can tell this coin's chain tape is past the budget
-        if (v.status === 200 && v.src !== "chain") return { ...v, timing: `${v.timing === undefined ? "" : `${v.timing}, `}sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago"` };
+        if (v.status === 200 && v.src !== "chain") return named(v);
       }
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(`${mint} ${r.tx}`)?.[r.index % 8] ?? null, tx: r.tx }));
