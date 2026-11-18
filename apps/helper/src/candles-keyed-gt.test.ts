@@ -6,7 +6,7 @@
 // chart-candles-never-429): no keyed read exists (data/coingecko.ts is missing), every chart read is GeckoTerminal's.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, test } from "node:test";
 import { CG_BLIP_HOLD_S, CG_DAY, CG_ONCHAIN, CG_URL, coingeckoPace, createKeyed } from "./data/coingecko.ts";
@@ -15,6 +15,7 @@ import { createSolanaToken, GT_BASE } from "./data/solana/token.ts";
 import { providerHolds } from "./limits/limits.ts";
 import { handler } from "./server.ts";
 import { fakeChain, open, REC } from "../test/evm-swaps/robinhood.ts";
+import { call, listening } from "../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const APP = "https://ct-app.unrealized.trade";
@@ -50,18 +51,10 @@ after(() => Promise.all(servers.map((s) => new Promise<void>((ok) => (s.closeAll
 async function listen(h: ReturnType<typeof handler>): Promise<number> {
   const s = createServer(h);
   servers.push(s);
-  await new Promise<void>((ok) => s.listen(0, "127.0.0.1", () => ok()));
+  await listening(s.listen(0, "127.0.0.1"), "the helper");
   return (s.address() as AddressInfo).port;
 }
-function get(port: number, path: string) {
-  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port, method: "GET", path, headers: { origin: APP, "x-forwarded-for": "198.18.9.1" } }, (res) => {
-      let body = "";
-      res.setEncoding("utf8").on("data", (d) => (body += d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body }));
-    });
-    r.on("error", fail).end();
-  });
-}
+const get = (port: number, path: string) => call(port, { path, headers: { origin: APP, "x-forwarded-for": "198.18.9.1" } }, "the helper");
 
 test("the pace: the key's rate less a tenth, a tenth of it at once and never past it in any 60 s; the day the month's 100,000 over 31; no key, no pace", () => {
   const p = coingeckoPace(ENV)[CG_URL]!;

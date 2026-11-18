@@ -4,7 +4,6 @@
 // watch not caught up, all hold the relayers. Served on a real server on a free port.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { test } from "node:test";
@@ -39,6 +38,7 @@ import {
   type Read,
   type TokenStatus,
 } from "./status.ts";
+import { call as bounded, listening } from "../../test/servers.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const CHANGED = "GT71B8i42Z2xegTKpA6TUJQYghRqZfyJUNJG6rKf21DT"; // another real code hash (the vault's testnet build)
@@ -147,16 +147,9 @@ test("GET /v1/token-status on the server: the release's USDC answered in the kit
   const w = createTokenWatch("mainnet", ENV, { fetch: nearPair({ final: 7 }).fetch });
   const t = createTokenWatch("testnet", { NEAR_TESTNET_RPC_URL: A, NEAR_TESTNET_RPC_URL_B: B }, { fetch: nearPair({ final: 9 }).fetch });
   const server = start("0123456789abcdef0123456789abcdef01234567", 0, undefined, undefined, { mainnet: w, testnet: t });
-  await new Promise<void>((ok) => server.on("listening", () => ok()));
+  await listening(server, "the helper");
   const port = (server.address() as AddressInfo).port;
-  const call = (method: string, p: string) =>
-    new Promise<{ status: number; headers: Record<string, unknown>; body: string }>((ok, fail) => {
-      const r = request({ host: "127.0.0.1", port, method, path: p, headers: { origin: "https://ct-app.unrealized.trade" } }, (res) => {
-        let body = "";
-        res.setEncoding("utf8").on("data", (d) => (body += d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body }));
-      });
-      r.on("error", fail).end();
-    });
+  const call = (method: string, p: string) => bounded(port, { method, path: p, headers: { origin: "https://ct-app.unrealized.trade" } }, "the helper");
   try {
     const good = await call("GET", `/v1/token-status?token=${USDC}`);
     assert.equal(good.status, 200);
