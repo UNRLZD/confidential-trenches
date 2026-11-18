@@ -1703,6 +1703,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const evmIndex = new Map<"base" | "robinhood", EvmPoolIndexData | null>();
   const evmIndexed = new Set<"base" | "robinhood">();
   const evmIndexing = new Map<"base" | "robinhood", Promise<void>>();
+  // whether the device holds money anywhere (any `held` note of any scope, or a buy or sale record), as the last state
+  // read found it: only then is a chain's index synced past what the device already has. A fresh account's coin quote
+  // is served the kept index or the release's snapshot alone, read from this origin, and its quote's own scan reads the
+  // token's pools past it (card evm-tree-reads-only-when-needed: from release 162, the first quote of an account that
+  // holds nothing synced each chain's whole PoolManager index past the snapshot, 20 to 91 Initialize eth_getLogs a sign
+  // run's walk; with the snapshot alone a cold dry read 10 eth_getLogs on Robinhood and 30 on Base, 18 Nov 08:2xZ)
+  let evmMoney = false;
   // the release's snapshot of the chain's index (card robinhood-quote-answers-cold: scripts/evm-index-snapshot.mjs,
   // data/evm-index/<chain>.json, served at /evm-index/): a device with no kept index syncs from it, so it reads only the blocks past it. A
   // fresh device's cold Robinhood quote with no index sent 20 to 100+ deep getLogs posts to Robinhood's own at about one
@@ -1723,6 +1730,18 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return evmPoolIndexFromSnapshot(raw, { chainId: v.chainId, poolManager: v.poolManager, cap: v.index.cap });
   };
   const indexStore: EvmIndexStore | null = over.evmIndexStore !== undefined ? over.evmIndexStore : over.evmIndexSync !== undefined ? null : evmIndexStore();
+  // the index the device already has, served to the kit's quote with no RPC read: the one kept in the page's store,
+  // else the release's snapshot
+  const evmIndexServe = async (chain: "base" | "robinhood", network: EvmPoolChain, signal: AbortSignal): Promise<void> => {
+    if (!evmIndex.has(chain)) {
+      const kept = await indexStore?.get(network).catch(() => null);
+      if (kept != null && !signal.aborted && evmPoolIndexUse(network, { index: kept, coversThrough: kept.through, pools: kept.pools })) evmIndex.set(chain, kept);
+    }
+    if (!evmIndex.has(chain)) {
+      const shipped = await snapshotOf(network).catch(() => null);
+      if (shipped !== null && !signal.aborted && evmPoolIndexUse(network, { index: shipped, coversThrough: shipped.through, pools: shipped.pools })) evmIndex.set(chain, shipped);
+    }
+  };
   const evmIndexOf = (chain: "base" | "robinhood"): Promise<void> | undefined => {
     const e = evmPool(chain);
     if (e === null || evmIndexing.has(chain) || evmIndexed.has(chain)) return evmIndexing.get(chain);
@@ -1735,14 +1754,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // each reader's request waits for a pass's turn on its host, so a trade's reads there go first
     const passFetch = (async (url: string, init?: RequestInit) => (await hostLane(url).turn("pass", signal), laneFetch()(url, init))) as typeof fetch;
     const sync = async (): Promise<void> => {
-      if (!evmIndex.has(chain)) {
-        const kept = await indexStore?.get(network).catch(() => null);
-        if (kept != null && !signal.aborted && evmPoolIndexUse(network, { index: kept, coversThrough: kept.through, pools: kept.pools })) evmIndex.set(chain, kept);
-      }
-      if (!evmIndex.has(chain)) {
-        const shipped = await snapshotOf(network).catch(() => null);
-        if (shipped !== null && !signal.aborted && evmPoolIndexUse(network, { index: shipped, coversThrough: shipped.through, pools: shipped.pools })) evmIndex.set(chain, shipped);
-      }
+      await evmIndexServe(chain, network, signal);
+      // a device that holds nothing syncs none past it (evmMoney)
+      if (!evmMoney) return;
       const prev = evmIndex.get(chain) ?? null;
       const s = over.evmIndexSync
         ? await over.evmIndexSync(chain, prev)
@@ -2021,7 +2035,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // any `held` note of any scope (Cash is the vault scope's notes in this same store, ./withdraw/checks.ts cashNotes)
     // or a buy or sale record, so a buy on a chain the money is not on yet (one balance buys on every chain) quotes a
     // launchpad hook's pool there; a fresh account with nothing but its named addresses syncs no index
-    const indexed = held.length > 0 || recorded.size > 0 ? (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null) : [];
+    evmMoney = held.length > 0 || recorded.size > 0;
+    const indexed = evmMoney ? (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null) : [];
     if (chains.length === 0) {
       if (!stop.aborted) for (const chain of indexed) evmIndexOf(chain);
       return;

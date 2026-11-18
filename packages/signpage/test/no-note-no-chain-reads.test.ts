@@ -190,11 +190,13 @@ test("signed in with a Solana note alone (or Cash, the vault scope's notes in th
   assert.deepEqual(leaked.filter((u) => /robinhood|base/.test(u)), [], "no other fetch to a Base or Robinhood provider");
 });
 
-// Card robinhood-quote-answers-cold: a fresh account (its named addresses only) syncs no index at its load, and its
-// first EVM coin quote starts one from the release's snapshot (data/evm-index/<chain>.json, served at /evm-index/): the sync is handed the
-// snapshot as the index it reads on from, so it reads only the blocks past it, and the quote is told once it is served.
-// On release 159 and main every cold Robinhood dry quote of such an account ended stale_quote (box run 03:24Z).
-test("a fresh account's first Robinhood coin quote starts the chain's index from the release's snapshot; its load starts none", async () => {
+// Card robinhood-quote-answers-cold: a fresh account's first EVM coin quote is served the release's snapshot
+// (data/evm-index/<chain>.json, served at /evm-index/), so its quote scans only the blocks past it (on release 159 every
+// cold Robinhood dry quote of such an account ended stale_quote, box run 03:24Z). Card evm-tree-reads-only-when-needed:
+// that quote synced the chain's whole index past the snapshot (20 to 91 Initialize eth_getLogs a sign run's walk, from
+// release 162); an account that holds nothing syncs none, at its load or at its quotes, and one that holds money syncs
+// from the snapshot.
+const snapshotPage = async (kind: "named" | "named+solana") => {
   const { evmPoolIndexSnapshotOf } = await import("../../kit/src/checks/evm/pool-index.ts");
   const { evmPoolVenues } = await import("../../kit/src/trade/evm/buy-unpinned.ts");
   const v = evmPoolVenues().robinhood;
@@ -202,7 +204,7 @@ test("a fresh account's first Robinhood coin quote starts the chain's index from
   const shipped = { v: 1 as const, chainId: v.chainId, poolManager: v.poolManager!.toLowerCase(), from: through - 9_999_999, through, head: { number: through + 7_119, hash: "0x" + "ab".repeat(32) }, spans: [[through - 9_999_999, through] as const], pools: [] };
   const prevs: (number | null)[] = [];
   let snapshots = 0;
-  const { t, doc, reads } = await page("named", {
+  const { t, doc, reads } = await page(kind, {
     evmPin: (c: Chain) => (c === "robinhood" ? Object.freeze({ ...PINS.robinhood, network: "robinhood" }) : PINS[c]),
     evmIndexSnapshot: async () => (snapshots++, JSON.parse(JSON.stringify(evmPoolIndexSnapshotOf(shipped as never)))),
     evmIndexSync: async (c: Chain, prev: { through: number } | null) => {
@@ -212,15 +214,32 @@ test("a fresh account's first Robinhood coin quote starts the chain's index from
       return { index: { ...shipped, through: n - 7_119, head: { number: n, hash: "0x" + "cd".repeat(32) }, spans: [[shipped.from, n - 7_119]] }, coversThrough: n, pools: [], error: null, stats: {} };
     },
   });
-  await loadAndLook(t, doc);
-  assert.deepEqual(reads.robinhood, [], "the load synced Robinhood's index");
-  assert.equal(snapshots, 0, "the load read the snapshot");
   const ready = (t as unknown as { evmIndexReady?: (c: Chain) => Promise<boolean> }).evmIndexReady;
   assert.equal(typeof ready, "function", "the page has no evmIndexReady");
-  assert.equal(await ready!("robinhood"), true);
-  assert.deepEqual(prevs, [through], "the sync was not started from the snapshot");
-  // served: a second quote neither syncs nor reads the snapshot again
-  assert.equal(await ready!("robinhood"), true);
-  assert.equal(snapshots, 1);
-  assert.deepEqual(prevs, [through]);
+  return { t, doc, reads, ready: ready!, prevs, snapshots: () => snapshots, through };
+};
+
+test("a fresh account's Robinhood coin quotes are served the release's snapshot and sync no index; its load reads none", async () => {
+  const { evmPoolIndexPools, evmPoolIndexReset } = await import("../../kit/src/checks/evm/quote.ts");
+  evmPoolIndexReset();
+  const { t, doc, reads, ready, prevs, snapshots } = await snapshotPage("named");
+  await loadAndLook(t, doc);
+  assert.deepEqual(reads.robinhood, [], "the load synced Robinhood's index");
+  assert.equal(snapshots(), 0, "the load read the snapshot");
+  await ready("robinhood");
+  assert.deepEqual(prevs, [], "a quote of an account that holds nothing synced the index past the snapshot");
+  assert.notEqual(evmPoolIndexPools("robinhood", "0x" + "11".repeat(20)), null, "the snapshot was not served to the quote");
+  // a second quote reads neither the snapshot nor any chain
+  await ready("robinhood");
+  assert.equal(snapshots(), 1);
+  assert.deepEqual(prevs, []);
+  assert.deepEqual(reads.robinhood, []);
+});
+
+test("an account that holds money syncs Robinhood's index from the release's snapshot, so a buy's quote reads it", async () => {
+  (await import("../../kit/src/checks/evm/quote.ts")).evmPoolIndexReset();
+  const { t, doc, ready, prevs, through } = await snapshotPage("named+solana");
+  await loadAndLook(t, doc);
+  assert.equal(await ready("robinhood"), true, "the index was not synced for an account holding money");
+  assert.ok(prevs.includes(through), `the sync was not started from the snapshot: ${prevs.join(", ")}`);
 });
