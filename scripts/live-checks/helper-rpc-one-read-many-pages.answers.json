@@ -1,0 +1,111 @@
+{
+ "_note": "good: the branch helper at b9a41e97f (card helper-rpc-one-read-many-pages) run on the Mac (port 8799, no Solana key: its public endpoint), read by helper-rpc-one-read-many-pages.mjs --base http://127.0.0.1:8799 --record at 2026-11-18 07:01Z: 4 price reads at once, one result, 3 marked rpc-cache hit; the 2 reads of an account off the list each its own. bad: the deployed helper at 27c4d830a, the same run at 07:00Z: 4 price reads at once answered 2 different results, none marked; the 2 off-list reads each its own.",
+ "good": {
+  "base": "http://127.0.0.1:8799",
+  "at": "2026-11-18T07:01:03.764Z",
+  "reads": [
+   {
+    "id": "price-0",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "status": 200,
+    "timing": "rpc-wait;dur=0, rpc;dur=339;desc=\"public\"",
+    "ms": 358,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":470843707},\"value\":[{\"data\":[\"IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=\",\"base64\"],\"executable\":false,\"lamports\":1825031,\"owner\":\"rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ\",\"rentEpoch\":18446744073709551615,\"space\":134}]},\"id\":\"price-0\"}\n"
+   },
+   {
+    "id": "price-1",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "status": 200,
+    "timing": "rpc-cache;desc=\"hit\", rpc-wait;dur=0, rpc;dur=0;desc=\"none\"",
+    "ms": 346,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"price-1\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":470843707},\"value\":[{\"data\":[\"IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=\",\"base64\"],\"executable\":false,\"lamports\":1825031,\"owner\":\"rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ\",\"rentEpoch\":18446744073709552000,\"space\":134}]}}"
+   },
+   {
+    "id": "price-2",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "status": 200,
+    "timing": "rpc-cache;desc=\"hit\", rpc-wait;dur=0, rpc;dur=0;desc=\"none\"",
+    "ms": 346,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"price-2\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":470843707},\"value\":[{\"data\":[\"IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=\",\"base64\"],\"executable\":false,\"lamports\":1825031,\"owner\":\"rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ\",\"rentEpoch\":18446744073709552000,\"space\":134}]}}"
+   },
+   {
+    "id": "price-3",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "status": 200,
+    "timing": "rpc-cache;desc=\"hit\", rpc-wait;dur=0, rpc;dur=0;desc=\"none\"",
+    "ms": 346,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":\"price-3\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":470843707},\"value\":[{\"data\":[\"IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=\",\"base64\"],\"executable\":false,\"lamports\":1825031,\"owner\":\"rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ\",\"rentEpoch\":18446744073709552000,\"space\":134}]}}"
+   },
+   {
+    "id": "other-0",
+    "account": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+    "status": 200,
+    "timing": "rpc-wait;dur=0, rpc;dur=326;desc=\"public\"",
+    "ms": 337,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":470843707},\"value\":[null]},\"id\":\"other-0\"}\n"
+   },
+   {
+    "id": "other-1",
+    "account": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+    "status": 200,
+    "timing": "rpc-wait;dur=0, rpc;dur=339;desc=\"public\"",
+    "ms": 346,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":470843707},\"value\":[null]},\"id\":\"other-1\"}\n"
+   }
+  ]
+ },
+ "bad": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T07:00:52.913Z",
+  "reads": [
+   {
+    "id": "price-0",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "status": 200,
+    "timing": "rpc-wait;dur=0, rpc;dur=85;desc=\"SOLANA_RPC_URL\"",
+    "ms": 782,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"slot\":470843658,\"apiVersion\":\"4.3.0-alpha.2\"},\"value\":[{\"lamports\":1825031,\"data\":[\"IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=\",\"base64\"],\"owner\":\"rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":134}]},\"id\":\"price-0\"}"
+   },
+   {
+    "id": "price-1",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "status": 200,
+    "timing": "rpc-wait;dur=0, rpc;dur=75;desc=\"SOLANA_RPC_URL\"",
+    "ms": 760,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"slot\":470843658,\"apiVersion\":\"4.3.0-alpha.2\"},\"value\":[{\"lamports\":1825031,\"data\":[\"IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=\",\"base64\"],\"owner\":\"rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":134}]},\"id\":\"price-1\"}"
+   },
+   {
+    "id": "price-2",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "status": 200,
+    "timing": "rpc-wait;dur=0, rpc;dur=82;desc=\"SOLANA_RPC_URL\"",
+    "ms": 771,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"slot\":470843658,\"apiVersion\":\"4.3.0-alpha.2\"},\"value\":[{\"lamports\":1825031,\"data\":[\"IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=\",\"base64\"],\"owner\":\"rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":134}]},\"id\":\"price-2\"}"
+   },
+   {
+    "id": "price-3",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "status": 200,
+    "timing": "rpc-wait;dur=0, rpc;dur=24;desc=\"SOLANA_RPC_URL\"",
+    "ms": 708,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"slot\":470843657,\"apiVersion\":\"4.3.0-alpha.2\"},\"value\":[{\"lamports\":1825031,\"data\":[\"IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=\",\"base64\"],\"owner\":\"rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":134}]},\"id\":\"price-3\"}"
+   },
+   {
+    "id": "other-0",
+    "account": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+    "status": 200,
+    "timing": "rpc-wait;dur=0, rpc;dur=70;desc=\"SOLANA_RPC_URL\"",
+    "ms": 755,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"slot\":470843657,\"apiVersion\":\"4.3.0-alpha.2\"},\"value\":[null]},\"id\":\"other-0\"}"
+   },
+   {
+    "id": "other-1",
+    "account": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+    "status": 200,
+    "timing": "rpc-wait;dur=0, rpc;dur=20;desc=\"SOLANA_RPC_URL\"",
+    "ms": 707,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"slot\":470843657,\"apiVersion\":\"4.3.0-alpha.2\"},\"value\":[null]},\"id\":\"other-1\"}"
+   }
+  ]
+ }
+}
