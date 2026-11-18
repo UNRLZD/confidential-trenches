@@ -13,6 +13,16 @@
 //   - the fresh trade's signature is on the tape in a read that answered within 2 s of the check holding the trade, with
 //     its side, its time (the event's clock) and its trader (the event's user);
 //   - the 1s candles hold a bar at the trade's second with a volume above 0.
+// Card index-sol-trades-2 adds one listed Meteora coin per venue (DLMM, DBC, DAMM v2), after the pump.fun part: the
+// check opens the listed coins off pump.fun on the helper (met-dbc's first) and watches them on the public websocket
+// until each venue has a fresh trade of a listed coin against SOL or USDC, decoded from the venue's own event (read whole
+// on the public RPC: the three send their events only to themselves); a venue with none in the wait takes a trade of
+// the venue among the newest rows of those coins' tapes. It passes only when, for each venue, that coin's tape on the
+// helper (read every POLL_MS from the moment the trade is found, up to METEORA_TAPE_MS; a trade that left a busy coin's
+// 50 newest rows first is replaced by the venue's next) holds the trade's signature with its side and time, its answer
+// is src "chain" and well-formed, and the signature reads back succeeded on two public RPCs (getSignatureStatuses, the
+// history searched). DBC alone may read none, and only while the lists hold no coin on a DBC curve with DBC_VOL_USD in a
+// day (dbc_curves, from the same lists).
 // The candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
 // one 75 s span; a 429 still standing after it, or no bar at the trade's second, is BAD as any other answer.
 // After: helper
@@ -22,7 +32,7 @@ import "../net-window.mjs";
 import { candlesReader, waitsText } from "./candles-read.mjs";
 import { tapeFieldsFault } from "./tape-read.mjs";
 import { writeFileSync } from "node:fs";
-import { fromLogs, poolMints, PUMP_AMM, USDC, WSOL } from "../../apps/helper/src/data/solana/decode.ts";
+import { cutTrades, dbcPair, eventsInInner, fromLogs, METEORA_DAMM2, METEORA_DBC, METEORA_DLMM, poolMints, poolPair, PUMP_AMM, USDC, WSOL } from "../../apps/helper/src/data/solana/decode.ts";
 
 const KEY = "index-sol-trades";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -82,7 +92,7 @@ function answer(say, name, r, readAtMs) {
  * The check on one run: { base, coin, fresh: { sig, heldAtMs, side, ts, user }, polls: [{ atMs, answeredMs, status,
  * headers, body }], candles: { atMs, status, headers, body } }.
  */
-export function judge(run) {
+function judgePump(run) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const f = run.fresh;
@@ -194,18 +204,248 @@ export function keepOpen(base, open, fetchFn = fetch, everyMs = 20_000) {
   return () => clearInterval(timer);
 }
 
+/** Card index-sol-trades-2: the venues the tape decodes past pump.fun's, Meteora's three. */
+export const METEORA = { "meteora-dlmm": METEORA_DLMM, "meteora-dbc": METEORA_DBC, "meteora-damm2": METEORA_DAMM2 };
+/** The two public RPCs a Meteora trade's signature reads back on. */
+export const READ_BACK = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
+const METEORA_WAIT_MS = 180_000;
+const METEORA_TAPE_MS = 30_000;
+const METEORA_WATCH = 100;
+/** The listed coins whose tapes a venue with no fresh trade is looked for in, at most. */
+const METEORA_SCAN = 40;
+/** A DBC curve coin's 24 h volume in USD from which the check needs a DBC trade (the one listed DBC curve coin on 18 Nov
+ *  14:50Z had 0.99 USD in a day and traded none in the run). */
+export const DBC_VOL_USD = 1_000;
+
+async function call(url, method, params) {
+  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(10_000) });
+  if (r.status !== 200) throw new Error(`${method} answered ${r.status}`);
+  const j = await r.json();
+  if (j.error) throw new Error(`${method}: ${JSON.stringify(j.error).slice(0, 120)}`);
+  return j.result;
+}
+/** The first of READ_BACK that answers. */
+async function anyRpc(method, params) {
+  let last;
+  for (const u of READ_BACK) {
+    try {
+      return await call(u, method, params);
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+async function acct(key) {
+  const v = (await anyRpc("getAccountInfo", [key, { encoding: "base64", commitment: "confirmed" }]))?.value;
+  return v ? { owner: v.owner, data: Buffer.from(v.data[0], "base64") } : null;
+}
+/** A Meteora trade's pool's two mints, each account taken only from its own program (decode.ts), or null. */
+async function meteoraPair(t) {
+  if (t.venue === "meteora-dbc") {
+    const [p, c] = await Promise.all([acct(t.pool), acct(t.config)]);
+    return p && c ? dbcPair(p, c, t.config) : null;
+  }
+  const p = await acct(t.pool);
+  return p ? poolPair(t.venue, p.owner, p.data) : null;
+}
+
+/** The first trade of `coin` against SOL or USDC on one of `venues` in transaction `sig` (read whole on the public RPC,
+ *  decoded by the helper's own decoder), told as `coin` sees it: { venue, side, ts }, or null. */
+async function meteoraTradeOf(sig, coin, venues) {
+  const r = await anyRpc("getTransaction", [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]);
+  if (!r || r.meta?.err !== null) return null;
+  for (const t of cutTrades(fromLogs(r.meta.logMessages), r)) {
+    if (!venues.has(t.venue)) continue;
+    const p = await meteoraPair(t);
+    if (p === null || ![p.a, p.b].includes(coin) || !PRICED.includes(p.a === coin ? p.b : p.a)) continue;
+    return { venue: t.venue, side: p.a === coin ? t.side : t.side === "b" ? "s" : "b", ts: t.ts > 0 ? t.ts : r.blockTime };
+  }
+  return null;
+}
+
+/**
+ * Card index-sol-trades-2: the first fresh trade of a listed coin against SOL or USDC on each Meteora venue, watched on
+ * the public websocket across `tokens`: { [venue]: { coin, sig, heldAtMs, side, ts } } for the venues found in time,
+ * each also handed to `onFound` the moment it is found (its tape is read at once: a busy coin's 50 newest rows move on).
+ * `onFound` answers whether the venue is done; a venue it answers false for is watched again (a trade that had left the
+ * 50 newest rows of a coin trading 5 a second before its tape was read).
+ */
+export function watchMeteora(tokens, ws = WS, waitMs = METEORA_WAIT_MS, onFound = async () => true) {
+  return new Promise((resolve) => {
+    const found = {};
+    const want = new Set(Object.keys(METEORA));
+    let reading = 0;
+    let s;
+    let subs = new Map();
+    let busy = 0;
+    let ended = false;
+    const done = () => (ended = true, clearTimeout(timer), s.close(), resolve(found));
+    const timer = setTimeout(done, waitMs);
+    // the public websocket refuses or drops a connection now and then: opened again 2 s on, until the wait ends
+    const connect = () => {
+      s = new WebSocket(ws);
+      subs = new Map();
+      s.onopen = () => tokens.forEach((t, i) => s.send(JSON.stringify({ jsonrpc: "2.0", id: i + 1, method: "logsSubscribe", params: [{ mentions: [t] }, { commitment: "confirmed" }] })));
+      s.onclose = () => void (ended || setTimeout(() => ended || connect(), 2_000));
+      s.onmessage = onMessage;
+    };
+    const onMessage = (m) => {
+      const j = JSON.parse(String(m.data));
+      if (typeof j.id === "number" && typeof j.result === "number") subs.set(j.result, tokens[j.id - 1]);
+      if (j.method !== "logsNotification") return;
+      const coin = subs.get(j.params.subscription);
+      const v = j.params.result.value;
+      const ran = Object.entries(METEORA).filter(([k, p]) => want.has(k) && v.logs.some((l) => l.startsWith(`Program ${p} invoke`)));
+      if (coin === undefined || v.err !== null || ran.length === 0 || !eventsInInner(v.logs) || busy >= 2) return;
+      const heldAtMs = Date.now();
+      busy++;
+      void (async () => {
+        const t = await meteoraTradeOf(v.signature, coin, want);
+        if (t === null || !want.has(t.venue)) return;
+        want.delete(t.venue);
+        found[t.venue] = { coin, sig: v.signature, heldAtMs, side: t.side, ts: t.ts };
+        reading++;
+        void Promise.resolve(onFound(t.venue, found[t.venue]))
+          .catch(() => true)
+          .then((kept) => {
+            reading--;
+            if (!kept && !ended) want.add(t.venue);
+            if (want.size === 0 && reading === 0 && !ended) done();
+          });
+      })()
+        .catch(() => undefined)
+        .finally(() => busy--);
+    };
+    connect();
+  });
+}
+
+/** `sig`'s status on each of READ_BACK, each RPC asked again 2, 4, 8 and 16 s on when it refuses (the public RPC
+ *  answered 429 for 6 s, 18 Nov 15:07Z). */
+export async function readBack(sig) {
+  const reads = {};
+  for (const u of READ_BACK) {
+    for (let i = 0; i < 5; i++) {
+      reads[u] = await call(u, "getSignatureStatuses", [[sig], { searchTransactionHistory: true }]).catch((e) => ({ error: e.message }));
+      if (reads[u].error === undefined || i === 4) break;
+      await new Promise((r) => setTimeout(r, 2_000 * 2 ** i));
+    }
+  }
+  return reads;
+}
+
+/** A found venue's coin's tape on the helper until it holds the trade (every second, up to METEORA_TAPE_MS), then the
+ *  trade's signature read back on each of READ_BACK. */
+export async function readMeteoraOne(base, f, fetchFn = fetch) {
+  const polls = [];
+  // every POLL_MS: a busy coin's 50 newest rows span a few seconds (TTW's 50 spanned 3 s, 18 Nov 15:00Z)
+  for (const t0 = Date.now(); Date.now() - t0 < METEORA_TAPE_MS; await new Promise((r) => setTimeout(r, POLL_MS))) {
+    const p = await get(base, TRADES_PATH(f.coin), fetchFn).catch((e) => ({ status: 0, headers: {}, body: e.message }));
+    polls.push(p);
+    if (p.status === 200 && JSON.parse(p.body).trades?.some((r) => r.tx === f.sig)) break;
+  }
+  const reads = await readBack(f.sig);
+  const hit = polls.findLast((p) => p.status === 200 && JSON.parse(p.body).trades?.some((r) => r.tx === f.sig));
+  return { ...f, polls: [hit ?? polls.at(-1)], reads };
+}
+
+/** The Meteora part of a run: the listed coins off pump.fun watched (a pump.fun coin trades on its curve or PumpSwap; 100
+ *  listed coins with them sent 470 notifications a second, 18 Nov 14:52Z), each venue's tape read as it is found. */
+export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs = METEORA_WAIT_MS) {
+  // Meteora's own launchpad's coins (DBC) first
+  const off = rows.filter((r) => r.launchpad !== "pump.fun");
+  const tokens = [...new Set([...off.filter((r) => r.launchpad === "met-dbc"), ...off].map((r) => r.token))].filter((t) => typeof t === "string" && B58.test(t)).slice(0, METEORA_WATCH);
+  // each watched coin opened on the helper first and kept open, so the helper holds a trade the moment it lands
+  await Promise.all(tokens.map((t) => get(base, TRADES_PATH(t), fetchFn).catch(() => null)));
+  const stop = keepOpen(base, tokens, fetchFn);
+  const reading = {};
+  await watchMeteora(tokens, ws, waitMs, async (venue, f) => {
+    const r = (reading[venue] = readMeteoraOne(base, f, fetchFn));
+    const { polls } = await r;
+    const b = polls[0]?.status === 200 ? JSON.parse(polls[0].body) : null;
+    // kept unless the trade had already left the tape's 50 newest rows when it was read
+    return !(Array.isArray(b?.trades) && b.trades.length === 50 && !b.trades.some((x) => x.tx === f.sig) && b.trades.at(-1).t_ms > f.ts * 1000);
+  }).finally(stop);
+  const out = {};
+  for (const [venue, r] of Object.entries(reading)) out[venue] = await r;
+  // a venue none of whose listed coins traded in the wait (DBC: 3 listed coins at 18 Nov 14:50Z): the newest rows of
+  // those coins' tapes on the helper, the first that is a trade of the venue by the helper's own decoder (`fromTape`)
+  const left = new Set(Object.keys(METEORA).filter((v) => !(v in out)));
+  for (const coin of tokens.slice(0, METEORA_SCAN)) {
+    if (left.size === 0) break;
+    const p = await get(base, TRADES_PATH(coin), fetchFn).catch(() => null);
+    const rows = p?.status === 200 ? (JSON.parse(p.body).trades ?? []).slice(0, 3) : [];
+    for (const row of rows) {
+      const t = B58.test(row?.tx ?? "") ? await meteoraTradeOf(row.tx, coin, left).catch(() => null) : null;
+      if (t === null) continue;
+      left.delete(t.venue);
+      out[t.venue] = await readMeteoraOne(base, { coin, sig: row.tx, heldAtMs: Date.now(), side: t.side, ts: t.ts, fromTape: true }, fetchFn);
+      break;
+    }
+  }
+  // the listed coins on a DBC curve that trade (DBC_VOL_USD in a day): with none, no listed coin can show a DBC trade
+  out.dbc_curves = dbcCurves(rows);
+  return out;
+}
+
+/** The listed coins still on a DBC curve (curve_bps under 10,000) with DBC_VOL_USD in a day. */
+export function dbcCurves(rows) {
+  return rows.filter((r) => r.launchpad === "met-dbc" && Number.isInteger(r.curve_bps) && r.curve_bps < 10_000 && Number(r.vol_24h_usd) >= DBC_VOL_USD).map((r) => r.token);
+}
+
+/** Card index-sol-trades-2: the checks on a run's Meteora venues. */
+export function judgeMeteora(m) {
+  const lines = [];
+  const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  for (const venue of Object.keys(METEORA)) {
+    const v = isObj(m) ? m[venue] : undefined;
+    // DBC is a launchpad curve: while the lists hold no coin on a DBC curve that trades, no listed coin can show one
+    if (venue === "meteora-dbc" && !isObj(v) && isObj(m) && Array.isArray(m.dbc_curves) && m.dbc_curves.length === 0) {
+      lines.push(`ok  ${venue}: none to read: the lists hold no coin on a DBC curve with ${DBC_VOL_USD} USD in a day (its decoding is held by decode.test.ts's recorded DBC trades)`);
+      continue;
+    }
+    say(isObj(v) && B58.test(v.coin ?? "") && B58.test(v.sig ?? "") && ["b", "s"].includes(v.side) && Number.isSafeInteger(v.ts), `${venue}: ${v?.fromTape ? "a trade on a listed coin's tape" : "a fresh trade of a listed coin"} decoded from the venue's own event: ${show(v?.sig)} of ${show(v?.coin)}`);
+    if (!isObj(v)) continue;
+    const p = Array.isArray(v.polls) ? v.polls.at(-1) : undefined;
+    const b = p ? answer(say, `${venue}: GET ${TRADES_PATH(v.coin)}`, p, p.answeredMs) : undefined;
+    if (b === undefined) continue;
+    const fault = tradesFault(b);
+    say(fault === null, `${venue}: the tape holds exactly the frozen fields in their wire forms${fault === null ? "" : `: ${fault}`}`);
+    const row = fault === null ? b.trades.find((r) => r.tx === v.sig) : undefined;
+    say(row !== undefined, `${venue}: the trade ${String(v.sig).slice(0, 12)} is on the coin's tape${row === undefined ? `, not in its ${Array.isArray(b.trades) ? b.trades.length : 0} rows` : ""}`);
+    if (row !== undefined) say(row.side === v.side && row.t_ms === v.ts * 1000, `${venue}: its side ${show(row.side)} and time ${row.t_ms} are the event's (${v.side}, ${v.ts * 1000})`);
+    for (const u of READ_BACK) {
+      const st = v.reads?.[u]?.value?.[0];
+      say(isObj(st) && st.err === null && ["confirmed", "finalized"].includes(st.confirmationStatus), `${venue}: the signature reads back succeeded on ${new URL(u).host}: ${show(st?.confirmationStatus ?? v.reads?.[u]?.error)}`);
+    }
+  }
+  return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
+}
+
+/** The pump.fun part's checks and the Meteora part's (card index-sol-trades-2). */
+export function judge(run) {
+  const p = judgePump(run);
+  const m = judgeMeteora(run.meteora);
+  return { ok: p.ok && m.ok, lines: [...p.lines, ...m.lines] };
+}
+
 /** One live run against `base`. */
 /** `reader`: the run's candles reader (candles-read.mjs): a 429 is read again at its Retry-After, as the page reads it. */
 export async function read(base = BASE, fetchFn = fetch, ws = WS, reader = candlesReader()) {
   const lists = await get(base, LISTS_PATH, fetchFn);
   if (lists.status !== 200) throw new Error(`lists answered ${lists.status}`);
   const rows = Object.values(JSON.parse(lists.body).lists ?? {}).flat();
-  const tokens = [...new Set(rows.map((r) => r.token).filter((t) => typeof t === "string"))].slice(0, OPEN);
+  const listed = [...new Set(rows.map((r) => r.token).filter((t) => typeof t === "string" && B58.test(t)))];
+  const tokens = listed.slice(0, OPEN);
   // open each on the helper (a 404 there is the run's answer for that token), and watch each on the chain
   const first = {};
   for (const t of tokens) first[t] = await get(base, TRADES_PATH(t), fetchFn);
   const open = tokens.filter((t) => first[t].status === 200);
-  if (open.length === 0) return { base, coin: tokens[0] ?? null, fresh: null, polls: tokens.length ? [first[tokens[0]]] : [], candles: null };
+  // card index-sol-trades-2: the Meteora part runs after the pump.fun part, so the public websocket carries one watch at
+  // a time (with both at once it refused the pump.fun watch's connection five times in a row, 18 Nov 14:50Z)
+  const meteora = () => readMeteora(base, rows, ws, fetchFn);
+  if (open.length === 0) return { base, coin: tokens[0] ?? null, fresh: null, polls: tokens.length ? [first[tokens[0]]] : [], candles: null, meteora: await meteora() };
   // the public websocket refuses a connection now and then (several in a row from one address): five tries, 2 s apart
   let fresh;
   const stop = keepOpen(base, open, fetchFn);
@@ -230,7 +470,7 @@ export async function read(base = BASE, fetchFn = fetch, ws = WS, reader = candl
   }
   const candles = await reader.read(() => get(base, CANDLES_PATH(fresh.coin), fetchFn));
   const { coin, ...rest } = fresh;
-  return { base, coin, fresh: rest, polls, candles };
+  return { base, coin, fresh: rest, polls, candles, meteora: await meteora() };
 }
 
 if (import.meta.main) {
