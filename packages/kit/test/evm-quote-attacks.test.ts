@@ -8569,8 +8569,10 @@ const qeFive = (on: { pools: ModelPool[]; failing: boolean }) => {
   };
   return { asks, second, rpcs: [counted(0), counted(1), counted(2), counted(3)] };
 };
+// the FH cases seed currencies at 0x2000 to 0x2362 (rcAt), which no other case scans: a scan is kept per currency
+// for the module's life, so a shared offset leaves another case nothing to scan (QE7 scan's 0xa00)
 test("FH1 a provider that answers HTTP 500 to its first exact-out batch is asked no further batch of the round: its batches go to the next provider at once", { timeout: 20_000 }, sixACall(async () => {
-  const { pools, logs, req } = qeCase(freshToken(), 0xa00);
+  const { pools, logs, req } = qeCase(freshToken(), 0x2000);
   const { asks, second, rpcs } = qeFive({ pools, failing: true });
   const t = performance.now();
   const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
@@ -8589,7 +8591,7 @@ test("FH1 a provider that answers HTTP 500 to its first exact-out batch is asked
 }));
 
 test("FH2 a provider that answers 429 to an exact-out batch keeps the throttle's rule: that request moves to the next at once, never asked of it again, and the round's later batches are still sent to it", { timeout: 20_000 }, sixACall(async () => {
-  const { pools, logs, req } = qeCase(freshToken(), 0xb00);
+  const { pools, logs, req } = qeCase(freshToken(), 0x2100);
   const asks = [0, 0, 0, 0];
   const bodies: string[] = [];
   let throttled = 0;
@@ -8622,7 +8624,7 @@ test("FH2 a provider that answers 429 to an exact-out batch keeps the throttle's
 }));
 
 test("FH3 the 5xx hold ends with its round: the next round asks the provider every batch again", { timeout: 30_000 }, sixACall(async () => {
-  const first = qeCase(freshToken(), 0xc00);
+  const first = qeCase(freshToken(), 0x2200);
   const on = { pools: first.pools, failing: true };
   const { asks, second, rpcs } = qeFive(on);
   const v = await verdict(evmPoolBuyQuoteWith(first.req, rpcs, NOW, scanner(RC_HEAD, first.logs, [], 100_000)));
@@ -8630,7 +8632,7 @@ test("FH3 the 5xx hold ends with its round: the next round asks the provider eve
   assert.ok(second.firstFail >= 0, "the second provider answered HTTP 500");
   assert.equal(second.sentAfter, 0, "the provider was held for the round it failed in");
   // the next round, on the same provider objects: it answers again, and is asked every exact-out read of the round
-  const next = qeCase(freshToken(), 0xd00);
+  const next = qeCase(freshToken(), 0x2300);
   Object.assign(on, { pools: next.pools, failing: false });
   asks.fill(0);
   const w = await verdict(evmPoolBuyQuoteWith(next.req, rpcs, NOW, scanner(RC_HEAD, next.logs, [], 100_000)));
