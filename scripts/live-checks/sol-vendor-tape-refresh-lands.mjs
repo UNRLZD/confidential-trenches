@@ -19,7 +19,6 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { SOL_VENDOR_REACH_MS } from "../../apps/helper/src/data/solana/trades.ts";
 import { TAPE_FRESH_MS } from "../../apps/helper/src/data/solana/token.ts";
-import { vendorReadOf } from "./token-stats-count-every-trade.mjs";
 
 const KEY = "sol-vendor-tape-refresh-lands";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -34,6 +33,14 @@ export const HOLD_MS = 45_000;
 /** Vendor answers a judged coin needs: 2 s apart, more than TAPE_FRESH_MS from first to last. */
 export const MIN_VENDOR = 10;
 export const ENTRY = "sol-vendor-read";
+
+/** The age in ms a Server-Timing names for `entry` (`<entry>;desc="rows read A ms ago"`), or null when it names none
+ *  (as token-stats-count-every-trade.mjs reads it; not imported, since that check reads the keyed EVM routes and the
+ *  live plan would count this one among them). */
+export function vendorReadOf(entry, timing) {
+  const m = new RegExp(`(?:^|,)\\s*${entry};desc="rows read (\\d+) ms ago"`).exec(String(timing ?? ""));
+  return m === null ? null : Number(m[1]);
+}
 
 const obj = (v) => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : {});
 const arr = (v) => (Array.isArray(v) ? v : []);
