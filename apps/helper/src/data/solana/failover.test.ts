@@ -72,7 +72,7 @@ test("the stream: a key refused before the socket opens reconnects to the public
   const slot = createSlot("stream", true, { now: () => now, log: (l) => logs.push(l) });
   const sockets: Fake[] = [];
   const events: string[] = [];
-  const on: SourceEvents = { note: () => undefined, down: () => events.push("down"), up: () => events.push("up") };
+  const on: SourceEvents = { note: () => undefined, down: () => events.push("down"), up: () => events.push("up"), clock: () => undefined };
   const src = wsSource(KEYED_WS, on, {
     now: () => now,
     fallback: { url: STREAM_WS, slot },

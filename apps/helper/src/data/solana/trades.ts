@@ -42,11 +42,13 @@
 // helper-listed-charts-own-reads: Orca Whirlpool, Raydium CLMM, CPMM and LaunchLab, where the listed coins off pump.fun
 // trade most, decode.ts) are read the same way: the pool account (or CPMM's own event) names the two mints (a pool
 // taken only with that venue's program as its owner), the token is either one and the other is the quote, priced as
-// above; their events carry no clock, so a trade is dated by its block (a walk's
-// transaction its blockTime, a stream's the second it arrived: measured p95 1.78 s after the block, above). Meteora DLMM, DBC
-// and DAMM v2 (card index-sol-trades-2) send their events only to themselves, so a stream transaction whose log names one
-// running is read whole (`eventsInInner`) and dated by its block. A venue not decoded yet keeps GeckoTerminal's bars and
-// tape for its coins.
+// above; their events carry no clock, so a trade is dated by its block: a transaction read its blockTime, a stream's the
+// slot's own clock, the Clock sysvar the stream sends for each confirmed slot (`SourceEvents.clock`; the clock a pump.fun
+// or PumpSwap event carries is the same one), or the slot's getBlockTime when the stream sent none within CLOCK_WAIT_MS
+// (card sol-tape-in-order: dated by the second it arrived, 2 s after its block from the deployed helper, an Orca row sat
+// above a DLMM row of its own block on TTWO's tape). Meteora DLMM, DBC and DAMM v2 (card index-sol-trades-2) send their
+// events only to themselves, so a stream transaction whose log names one running is read whole (`eventsInInner`) and
+// dated by its block. A venue not decoded yet keeps GeckoTerminal's bars and tape for its coins.
 // Every REPORT_MS the log says how many open tokens have an empty tape and why (a quote with no price, or no trade of
 // a venue we read in the transactions that named the token), never which tokens.
 //
@@ -68,6 +70,14 @@ export const PYTH_SOL_USD = "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE";
 const PYTH_FEED = "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d";
 const PRICE_UPDATE_DISC = "22f123639d7ef4cd";
 const TOKEN_PROGRAMS = ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"];
+export const SYSVAR_CLOCK = "SysvarC1ock11111111111111111111111111111111";
+const SYSVAR_OWNER = "Sysvar1111111111111111111111111111111111111";
+/** How long a stream trade with no clock of its own waits for its slot's clock before its block time is read (card
+ *  sol-tape-in-order). [design: 1 s; measured 18 Nov 16:5xZ on one public websocket, TTWO's 36,529 notes in 40 s: the
+ *  slot's clock came first for 84%, else p50 32 ms and at most 746 ms after the note, and for every one of 178 slots] */
+export const CLOCK_WAIT_MS = 1_000;
+/** Slots whose clock is held [design: about five minutes of slots (178 in 40 s, read above), far past any note's wait] */
+const CLOCKS_MAX = 1_500;
 
 /** A first read's successful signatures (the bars before them are the history source's), and the transactions read at once. */
 export const COLD_SIGS = 30;
@@ -151,7 +161,8 @@ export type Source = {
    *  connected. A source without it (a test's) is taken as live. */
   heard?(): { at: number; slot: number | null } | null;
 };
-export type SourceEvents = { note(mint: string, n: Note): void; down(): void; up(): void };
+/** `clock`: a confirmed slot's clock (the Clock sysvar's unix_timestamp, the time its block is dated by). */
+export type SourceEvents = { note(mint: string, n: Note): void; down(): void; up(): void; clock(slot: number, unixS: number): void };
 type WsLike = { send(s: string): void; close(): void; onopen: (() => void) | null; onmessage: ((m: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null };
 
 /** The first 4 KB of a refusal's body (enough for its error words), the rest never read. */
@@ -169,6 +180,21 @@ async function head(r: Response, max = 4_096): Promise<string> {
   }
   await r.body?.cancel().catch(() => undefined);
   return Buffer.concat(chunks).toString("utf8").slice(0, max);
+}
+
+/** A Clock sysvar notification's slot and unix time, taken only with the sysvar program as owner, its 40 bytes, the
+ *  slot it names its context's, and a time > 0; else null. */
+export function clockOf(result: unknown): { slot: number; unixS: number } | null {
+  const r = (result ?? {}) as Record<string, unknown>;
+  const ctx = (r.context ?? {}) as Record<string, unknown>;
+  const v = (r.value ?? {}) as Record<string, unknown>;
+  if (v.owner !== SYSVAR_OWNER || !Array.isArray(v.data) || typeof v.data[0] !== "string" || v.data[0].length > 64) return null;
+  const d = Buffer.from(v.data[0], "base64");
+  if (d.length !== 40) return null;
+  const slot = d.readBigUInt64LE(0);
+  const t = d.readBigInt64LE(32);
+  if (slot > BigInt(Number.MAX_SAFE_INTEGER) || t <= 0n || t > BigInt(Number.MAX_SAFE_INTEGER) || Number(slot) !== ctx.slot) return null;
+  return { slot: Number(slot), unixS: Number(t) };
 }
 
 /** How long a probe of a fallen-back stream key waits for its first message (card helper-solana-failover). */
@@ -205,6 +231,9 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
   let lastMsg = now();
   /** The newest slot the slot subscription named (the heartbeat), for the answers' Server-Timing. */
   let lastSlot: number | null = null;
+  /** The Clock sysvar's subscription: its request id, then its subscription id (card sol-tape-in-order). */
+  let clockRid: number | null = null;
+  let clockSub: number | null = null;
   let silence: ReturnType<typeof setInterval> | null = null;
 
   function subscribe(m: string): void {
@@ -223,6 +252,8 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
     const w = ws;
     ws = null;
     live = false;
+    clockRid = null;
+    clockSub = null;
     subOf.clear();
     subId.clear();
     pending.clear();
@@ -253,6 +284,9 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
       // on this connection means the connection, not the market
       w.send(JSON.stringify({ jsonrpc: "2.0", id: 0, method: "slotSubscribe" }));
       for (const m of mints) subscribe(m);
+      // each confirmed slot's clock, so a trade whose event has no clock is dated by its block (card sol-tape-in-order)
+      clockRid = ++id;
+      w.send(JSON.stringify({ jsonrpc: "2.0", id: clockRid, method: "accountSubscribe", params: [SYSVAR_CLOCK, { encoding: "base64", commitment: "confirmed" }] }));
       if (pending.size === 0) {
         upSent = true;
         on.up();
@@ -266,6 +300,17 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
       try {
         j = JSON.parse(msg.data) as Record<string, unknown>;
       } catch {
+        return;
+      }
+      if (j.id === clockRid && clockRid !== null) {
+        if (typeof j.result === "number") clockSub = j.result;
+        return;
+      }
+      if (j.method === "accountNotification") {
+        const p = (j.params ?? {}) as Record<string, unknown>;
+        if (p.subscription !== clockSub || clockSub === null) return;
+        const c = clockOf(p.result);
+        if (c !== null) on.clock(c.slot, c.unixS);
         return;
       }
       if (typeof j.id === "number" && pending.has(j.id)) {
@@ -506,6 +551,54 @@ export function createSolanaTrades(deps: {
   /** A getTransaction answer's block time, unix seconds, or null. */
   const blockTime = (r: Record<string, unknown>): number | null => (Number.isSafeInteger(r.blockTime) && (r.blockTime as number) > 0 ? (r.blockTime as number) : null);
 
+  /** Each confirmed slot's clock the stream sent (CLOCKS_MAX newest), the newest such slot, the stream trades waiting for
+   *  a slot's, and each slot's block time read (card sol-tape-in-order). */
+  const clocks = new Map<number, number>();
+  let clockTo = -1;
+  const clockWaits = new Map<number, { p: Promise<void>; end: () => void }>();
+  const blockTimes = new Map<number, Promise<number | null>>();
+  function onClock(slot: number, unixS: number): void {
+    if (clocks.has(slot)) return;
+    clocks.set(slot, unixS);
+    if (clocks.size > CLOCKS_MAX) clocks.delete(clocks.keys().next().value!);
+    clockTo = Math.max(clockTo, slot);
+    // a slot's clock comes before any later slot's: a wait for this one or an earlier one is over
+    for (const [s, w] of clockWaits) if (s <= slot) w.end();
+  }
+  /** A slot's block time, unix seconds: the stream's clock for it (waited for CLOCK_WAIT_MS while no later slot's came),
+   *  else its getBlockTime, read once; null when neither answers. */
+  async function timeOf(slot: number): Promise<number | null> {
+    if (slot > clockTo && !clocks.has(slot)) {
+      let w = clockWaits.get(slot);
+      if (w === undefined) {
+        let end!: () => void;
+        const p = new Promise<void>((ok) => (end = ok));
+        const timer = setTimeout(() => w!.end(), CLOCK_WAIT_MS);
+        timer.unref?.();
+        w = { p, end: () => (clearTimeout(timer), clockWaits.delete(slot), end()) };
+        clockWaits.set(slot, w);
+      }
+      await w.p;
+    }
+    const held = clocks.get(slot);
+    if (held !== undefined) return held;
+    let read = blockTimes.get(slot);
+    if (read === undefined) {
+      read = rpc("getBlockTime", [slot]).then((v) => (Number.isSafeInteger(v) && (v as number) > 0 ? (v as number) : null), () => null);
+      if (blockTimes.size >= CLOCKS_MAX) blockTimes.delete(blockTimes.keys().next().value!);
+      blockTimes.set(slot, read);
+      void read.then((v) => v === null && blockTimes.get(slot) === read && blockTimes.delete(slot));
+    }
+    return read;
+  }
+  /** The trades each dated: its event's own clock, else its block's (`known`, the transaction's or its signature's block
+   *  time, else the slot's: timeOf); null when a trade needs its block's time and none answers (as a transaction not read). */
+  async function dated(trades: RawTrade[], slot: number, known: number | null): Promise<RawTrade[] | null> {
+    if (trades.every((t) => t.ts > 0)) return trades;
+    const t = known ?? (await timeOf(slot));
+    return t === null ? null : trades.map((x) => (x.ts > 0 ? x : { ...x, ts: t }));
+  }
+
   async function account(key: string): Promise<{ owner: unknown; data: Buffer; slot: number } | null> {
     const r = (await rpc("getAccountInfo", [key, { encoding: "base64", commitment: "confirmed" }])) as Record<string, unknown>;
     const v = r?.value as Record<string, unknown> | null;
@@ -577,11 +670,10 @@ export function createSolanaTrades(deps: {
 
   /** The trades of one transaction for `mint`, with the token named and the quote checked; pools read. A pair venue's
    *  trade (told as the pool's first mint sees it) is turned round when the token is the second; an event with no clock
-   *  takes `blockS`, the transaction's block time. */
-  async function forMint(mint: string, trades: RawTrade[], blockS: number): Promise<RawTrade[]> {
+   *  keeps ts 0 (`dated` gives it its block's). */
+  async function forMint(mint: string, trades: RawTrade[]): Promise<RawTrade[]> {
     const out: RawTrade[] = [];
-    for (const raw of trades) {
-      const t = raw.ts > 0 ? raw : { ...raw, ts: blockS };
+    for (const t of trades) {
       if (t.venue === "pump") {
         if (t.mint === mint) out.push(t);
         continue;
@@ -597,16 +689,15 @@ export function createSolanaTrades(deps: {
     return out;
   }
 
-  /** A transaction's trades: from its log, or its inner instructions when the log was cut. */
-  async function txTrades(mint: string, sig: string, logs: unknown): Promise<RawTrade[] | null> {
+  /** A stream transaction's trades: from its log, or its inner instructions when the log was cut; each dated by its
+   *  block (the stream sends no block time: the slot's clock, card sol-tape-in-order). */
+  async function txTrades(mint: string, sig: string, slot: number, logs: unknown): Promise<RawTrade[] | null> {
     const f = fromLogs(logs);
-    // a stream transaction's block time is the second it arrived (the stream sends none)
-    const arrived = Math.floor(now() / 1000);
     // a Meteora venue's events are in the inner instructions only (card index-sol-trades-2): read the transaction whole
-    if (!f.truncated && !eventsInInner(logs)) return forMint(mint, f.trades, arrived);
+    if (!f.truncated && !eventsInInner(logs)) return dated(await forMint(mint, f.trades), slot, null);
     const r = (await rpc("getTransaction", [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
     if (r === null) return null;
-    return forMint(mint, cutTrades(f, r), blockTime(r) ?? arrived);
+    return dated(await forMint(mint, cutTrades(f, r)), slot, blockTime(r));
   }
 
   /** Holds a transaction's trades, its place `order` (taken when it arrived, before any read it waited on). */
@@ -733,8 +824,10 @@ export function createSolanaTrades(deps: {
           e.seen++;
           const meta = (r.meta ?? {}) as Record<string, unknown>;
           const f = fromLogs(meta.logMessages);
-          const bt = blockTime(r) ?? Math.floor(now() / 1000);
-          hold(e, s.signature, s.slot, s.order, await forMint(e.mint, f.truncated || eventsInInner(meta.logMessages) ? cutTrades(f, r) : f.trades, bt));
+          // dated by its block: the transaction's block time, its signature's, else its slot's (never the walk's clock)
+          const got = await dated(await forMint(e.mint, f.truncated || eventsInInner(meta.logMessages) ? cutTrades(f, r) : f.trades), s.slot, blockTime(r) ?? s.t);
+          if (got === null) return below(s.t);
+          hold(e, s.signature, s.slot, s.order, got);
         }),
       );
       if (round !== undefined) {
@@ -778,7 +871,7 @@ export function createSolanaTrades(deps: {
     e.seen++;
     // nothing settles at or after a transaction still being read (a PumpSwap pool, a cut log)
     e.inflight.set(n.sig, n.slot);
-    const trades = await txTrades(e.mint, n.sig, n.logs).catch(() => null);
+    const trades = await txTrades(e.mint, n.sig, n.slot, n.logs).catch(() => null);
     e.inflight.delete(n.sig);
     if (trades !== null) hold(e, n.sig, n.slot, order, trades);
     e.covered = Math.max(e.covered, n.slot);
@@ -802,6 +895,7 @@ export function createSolanaTrades(deps: {
       deps.log?.(`solana stream: up, ${entries.size} tokens`);
       for (const e of entries.values()) if (e.state === "refilling") refill(e);
     },
+    clock: onClock,
   });
 
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -994,7 +1088,7 @@ export function createSolanaTrades(deps: {
       if (!Array.isArray(page)) return;
       const sigs = (page as Record<string, unknown>[])
         .filter((x) => typeof x?.signature === "string" && Number.isSafeInteger(x.slot))
-        .map((x) => ({ signature: x.signature as string, slot: x.slot as number, err: x.err, t: Number.isSafeInteger(x.blockTime) ? (x.blockTime as number) : null }));
+        .map((x) => ({ signature: x.signature as string, slot: x.slot as number, err: x.err, t: Number.isSafeInteger(x.blockTime) && (x.blockTime as number) > 0 ? (x.blockTime as number) : null }));
       if (sigs.length > 0) b.before = sigs.at(-1)!.signature;
       const todo = sigs.filter(ok).map((x) => ({ ...x, n: ++b.n }));
       // a transaction not read (every provider held or failing) is asked again a second on, three times; still unread,
@@ -1003,7 +1097,8 @@ export function createSolanaTrades(deps: {
         const r = (await rpc("getTransaction", [x.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]).catch(() => null)) as Record<string, unknown> | null;
         if (r === null) return false;
         const f = fromLogs(((r.meta ?? {}) as Record<string, unknown>).logMessages);
-        const got = await forMint(e.mint, f.truncated || eventsInInner(((r.meta ?? {}) as Record<string, unknown>).logMessages) ? cutTrades(f, r) : f.trades, blockTime(r) ?? x.t ?? Math.floor(now() / 1000));
+        const got = await dated(await forMint(e.mint, f.truncated || eventsInInner(((r.meta ?? {}) as Record<string, unknown>).logMessages) ? cutTrades(f, r) : f.trades), x.slot, blockTime(r) ?? x.t);
+        if (got === null) return false;
         let i = 0;
         for (const t of got) {
           if (t.quoteMint !== e.quoteMint) continue;

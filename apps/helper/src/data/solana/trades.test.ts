@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { fromLogs } from "./decode.ts";
 import { joinBars } from "../candles.ts";
-import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
+import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, SYSVAR_CLOCK, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { b58encode } from "./lists.ts";
 
@@ -865,6 +865,8 @@ test("card helper-listed-charts-own-reads: a listed coin off pump.fun (SPYx, Ray
   // no history and no pool tape: the bar and the row can only be ours
   const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === SPYX, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
   assert.equal((await t.trades(SPYX, 50)).status, 200);
+  on!.clock(11, TS); // the stream's clock for the notes' slots (card sol-tape-in-order)
+  on!.clock(10, TS);
   on!.note(SPYX, { sig: "C1", slot: 10, err: false, logs: V.txs["clmm-buy"]!.result.meta.logMessages });
   // a route that only mentions SPYX's neighbours (SOL into SOL/Xs3eBt, then an Orca pool for AMZN): no SPYx trade
   on!.note(SPYX, { sig: "C2", slot: 11, err: false, logs: V.txs["clmm-sol-in"]!.result.meta.logMessages });
@@ -872,7 +874,7 @@ test("card helper-listed-charts-own-reads: a listed coin off pump.fun (SPYx, Ray
   const a = JSON.parse((await t.trades(SPYX, 50)).body) as { trades: unknown[]; src: string };
   assert.equal(a.src, "chain");
   // SPYx is the pool's token 1: the trader paid 2,082,875,407 lamports of token 0 for 0.19699205 SPYx, a buy, dated by
-  // its arrival (the event has no clock); at 93.42267796 USD per SOL
+  // its block (the event has no clock: its slot's clock the stream sent); at 93.42267796 USD per SOL
   assert.deepEqual(a.trades, [{ t_ms: TS * 1000, side: "b", usd: "194.58779837896492972", amt: "0.19699205", trader: "4GQeEya6ZTwvXre4Br6ZfDyfe2WQMkcDz2QbkJZazVqS", tx: "C1" }]);
   const c = JSON.parse((await t.candles(SPYX, "1s", null, 10)).body) as { candles: [number, string, string, string, string, string][]; src: string };
   assert.equal(c.src, "chain");
@@ -924,6 +926,7 @@ test("card helper-listed-charts-own-reads: a Raydium LaunchLab coin's buy reache
     let on: SourceEvents | null = null;
     const t = createSolanaTrades({ fetch: answer(owner), now: () => TS * 1000, listed: async (m) => m === FLOYD, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
     await t.trades(FLOYD, 50);
+    on!.clock(10, TS); // the slot's clock (card sol-tape-in-order)
     on!.note(FLOYD, { sig: "L1", slot: 10, err: false, logs: V.txs["launchlab-buy"]!.result.meta.logMessages });
     await settle();
     const rows = (JSON.parse((await t.trades(FLOYD, 50)).body) as { trades: unknown[] }).trades;
@@ -1300,3 +1303,140 @@ function keyInto(k: string, b: Buffer, o: number): void {
   for (const ch of k) n = n * 58n + BigInt("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".indexOf(ch));
   Buffer.from(n.toString(16).padStart(64, "0"), "hex").copy(b, o);
 }
+
+// card sol-tape-in-order: a busy coin's tape is newest first by its blocks' times. Recorded mainnet (fixtures/sol-tape-
+// order.json): TTWO's two transactions in slot 471007315 (block time 1795020581 on api.mainnet-beta and publicnode), an
+// Orca buy whose event has no clock, then a DLMM sell read whole. The deployed helper c775de255 dated the Orca row by the
+// second the stream sent it (1795020583) and the DLMM row by its block: "trade 29 is newer than trade 28" at 16:49:43Z.
+// The DLMM transaction's two addressTableLookups are left out (gitleaks reads their accountKey field as a key; the
+// decoder reads the addresses they load from meta.loadedAddresses, kept).
+const TO = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-tape-order.json"), "utf8")) as { txs: Record<string, { signature: string; result: Record<string, unknown> & { slot: number; blockTime: number; meta: { logMessages: string[] } } }>; pools: Record<string, { owner: string; data: string }> };
+const TO_SLOT = 471007315;
+const TO_BLOCK = 1795020581;
+function orderChain(opts: { sigs?: (p: Record<string, unknown>) => unknown[]; txs?: Record<string, unknown>; blockTimes?: Record<number, number>; noHistory?: boolean } = {}) {
+  const txs = { ...Object.fromEntries(Object.values(TO.txs).map((x) => [x.signature, x.result])), ...opts.txs };
+  const reads: string[] = [];
+  let nowMs = (TO_BLOCK + 2) * 1000; // the stream's note arrives 2 s after its block, as measured from the helper
+  const inner = rpcFetch({ sigs: opts.sigs ?? (() => []), txs, price: 9_342_267_796n, pub: TO_BLOCK, slot: 100 }, { [TTW_MINT]: 6 });
+  const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string | number] };
+    reads.push(`${req.method} ${req.params[0]}`);
+    if (req.method === "getBlockTime") {
+      const t = opts.blockTimes?.[req.params[0] as number];
+      return new Response(JSON.stringify(t === undefined ? { jsonrpc: "2.0", id: 1, error: { code: -32009, message: "slot skipped" } } : { jsonrpc: "2.0", id: 1, result: t }));
+    }
+    const p = TO.pools[req.params[0] as string];
+    if (req.method === "getAccountInfo" && p !== undefined) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: { owner: p.owner, data: [p.data, "base64"] } } }));
+    // the routes' PumpSwap pools not recorded: no such account
+    if (req.method === "getAccountInfo" && req.params[0] !== PYTH_SOL_USD && req.params[0] !== TTW_MINT) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: null } }));
+    return inner(url, init);
+  };
+  let on: SourceEvents | null = null;
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => nowMs, listed: async (m) => m === TTW_MINT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), ...(opts.noHistory ? { history: async () => ({ status: 404, body: '{"error":{"code":"not_found"}}' }) } : {}), tickMs: 0 });
+  const rows = async () => (JSON.parse((await t.trades(TTW_MINT, 50)).body) as { trades: { t_ms: number; tx: string }[] }).trades;
+  const stream = (k: string) => on!.note(TTW_MINT, { sig: TO.txs[k]!.signature, slot: TO.txs[k]!.result.slot, err: false, logs: TO.txs[k]!.result.meta.logMessages });
+  return { t, rows, stream, reads, on: () => on!, at: (ms: number) => void (nowMs = ms) };
+}
+/** Newest first: no row dated after the row above it. */
+const inOrder = (rows: { t_ms: number }[]): boolean => rows.every((r, i) => i === 0 || r.t_ms <= rows[i - 1]!.t_ms);
+
+test("card sol-tape-in-order: a stream trade whose event has no clock is dated by its block's clock, so it merges into a held tape in order (red at c775de255: dated by its arrival, 2 s late, above a DLMM row of its own block)", async () => {
+  const c = orderChain();
+  await c.t.trades(TTW_MINT, 50);
+  // the stream's Clock sysvar names the slot's clock (absent before this card: the note was dated by its arrival)
+  c.on().clock?.(TO_SLOT, TO_BLOCK);
+  c.stream("orca-older");
+  c.stream("dlmm-newer");
+  await settle();
+  const rows = await c.rows();
+  assert.deepEqual(rows.map((r) => [r.tx, r.t_ms]), [[TO.txs["dlmm-newer"]!.signature, TO_BLOCK * 1000], [TO.txs["orca-older"]!.signature, TO_BLOCK * 1000]]);
+  assert.ok(inOrder(rows));
+  // the Orca trade carried in the log needs no read of its transaction; the DLMM one is read whole once
+  assert.equal(c.reads.filter((r) => r.startsWith("getTransaction")).length, 1);
+  assert.equal(c.reads.filter((r) => r.startsWith("getBlockTime")).length, 0);
+  c.t.stop();
+});
+
+test("card sol-tape-in-order: a stream trade whose slot's clock the stream did not send (a later slot's came) is dated by the slot's block time read once, never by its arrival (red at c775de255)", async () => {
+  const c = orderChain({ blockTimes: { [TO_SLOT]: TO_BLOCK } });
+  await c.t.trades(TTW_MINT, 50);
+  c.on().clock?.(TO_SLOT + 1, TO_BLOCK);
+  c.stream("orca-older");
+  c.stream("dlmm-newer");
+  await settle();
+  const rows = await c.rows();
+  assert.deepEqual(rows.map((r) => r.t_ms), [TO_BLOCK * 1000, TO_BLOCK * 1000]);
+  assert.equal(c.reads.filter((r) => r === `getBlockTime ${TO_SLOT}`).length, 1, "the slot's block time read once");
+  c.t.stop();
+});
+
+test("card sol-tape-in-order: a walk's transaction answered with no block time, its signature listed with none, is dated by its slot's block time, never by the walk's clock (red at c775de255: dated now)", async () => {
+  const orca = TO.txs["orca-older"]!;
+  const c = orderChain({
+    sigs: (p) => (p.before === undefined ? [{ signature: orca.signature, slot: TO_SLOT, err: null }] : []),
+    txs: { [orca.signature]: { ...orca.result, blockTime: null } },
+    blockTimes: { [TO_SLOT]: TO_BLOCK },
+  });
+  c.on().clock?.(TO_SLOT + 1, TO_BLOCK);
+  await c.t.trades(TTW_MINT, 50);
+  await settle();
+  assert.deepEqual((await c.rows()).map((r) => [r.tx, r.t_ms]), [[orca.signature, TO_BLOCK * 1000]]);
+  c.t.stop();
+});
+
+test("card sol-tape-in-order: a read back's transaction answered with no block time, its signature listed with none, is dated by its slot's block time: its bar is its own minute, never the read's (red at c775de255: the minute it was read)", async () => {
+  const orca = TO.txs["orca-older"]!;
+  const dlmm = TO.txs["dlmm-newer"]!;
+  // the walk holds the DLMM trade; the read back before it finds the Orca one, answered with no block time
+  const c = orderChain({
+    sigs: (p) => (p.before === undefined ? [{ signature: dlmm.signature, slot: TO_SLOT, err: null, blockTime: TO_BLOCK }] : p.before === dlmm.signature ? [{ signature: orca.signature, slot: TO_SLOT, err: null }] : []),
+    txs: { [orca.signature]: { ...orca.result, blockTime: null } },
+    blockTimes: { [TO_SLOT]: TO_BLOCK },
+    noHistory: true,
+  });
+  c.at((TO_BLOCK + 90) * 1000); // read a minute and a half after the block, the Pyth price still in force
+  c.on().clock?.(TO_SLOT + 300, TO_BLOCK + 90);
+  const t = c.t;
+  let bars = JSON.parse((await t.candles(TTW_MINT, "1m", null, 500)).body) as { candles: [number, ...string[]][]; filling?: boolean };
+  for (let i = 0; i < 100 && bars.filling === true; i++) {
+    await settle();
+    bars = JSON.parse((await t.candles(TTW_MINT, "1m", null, 500)).body);
+  }
+  t.stop();
+  assert.equal(bars.filling, undefined, "read back");
+  // one bar, the block's minute, holding both trades: the walk's DLMM sell (1.010003 USD) and the read back's Orca buy
+  // (1.158187 USD, the stream test's rows); misdated by the read's minute, the read back's bar fell after ours and was
+  // not joined: 1.010003 alone
+  assert.deepEqual(bars.candles.map((b) => [b[0], b[5]]), [[TO_BLOCK - (TO_BLOCK % 60), "2.16819"]], "both trades in their block's minute");
+});
+
+test("card sol-tape-in-order: the stream subscribes the Clock sysvar at confirmed and passes on each slot's clock, taken only whole: the sysvar program as owner, 40 bytes, the slot its context's", () => {
+  type W = { sent: string[]; onopen: (() => void) | null; onmessage: ((m: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; send(s: string): void; close(): void };
+  let w: W | null = null;
+  const clocks: [number, number][] = [];
+  const src = wsSource("wss://stream.test", { note: () => undefined, down: () => undefined, up: () => undefined, clock: (s, t) => void clocks.push([s, t]) }, {
+    ws: () => (w = { sent: [], onopen: null, onmessage: null, onclose: null, onerror: null, send: (s) => void w!.sent.push(s), close: () => undefined }),
+  });
+  void src.watch(MINT).catch(() => undefined);
+  w!.onopen!();
+  const sub = w!.sent.map((s) => JSON.parse(s) as { id: number; method: string; params?: unknown[] }).find((m) => m.method === "accountSubscribe")!;
+  assert.deepEqual(sub.params, [SYSVAR_CLOCK, { encoding: "base64", commitment: "confirmed" }]);
+  w!.onmessage!({ data: JSON.stringify({ jsonrpc: "2.0", id: sub.id, result: 77 }) });
+  /** A Clock account at `slot` with unix time `t`. */
+  const body = (slot: number, t: number, len = 40) => {
+    const b = Buffer.alloc(len);
+    b.writeBigUInt64LE(BigInt(slot), 0);
+    if (len >= 40) b.writeBigInt64LE(BigInt(t), 32);
+    return b.toString("base64");
+  };
+  const note = (subscription: number, ctx: number, owner: string, data: string) => w!.onmessage!({ data: JSON.stringify({ jsonrpc: "2.0", method: "accountNotification", params: { subscription, result: { context: { slot: ctx }, value: { owner, data: [data, "base64"] } } } }) });
+  const SYSVAR = "Sysvar1111111111111111111111111111111111111";
+  note(77, TO_SLOT, SYSVAR, body(TO_SLOT, TO_BLOCK));
+  note(77, TO_SLOT + 1, "SomeoneElse1111111111111111111111111111111", body(TO_SLOT + 1, TO_BLOCK + 9)); // not the sysvar's
+  note(77, TO_SLOT + 2, SYSVAR, body(TO_SLOT + 2, TO_BLOCK + 9, 32)); // short
+  note(77, TO_SLOT + 4, SYSVAR, body(TO_SLOT + 3, TO_BLOCK + 9)); // another slot than its context's
+  note(78, TO_SLOT + 5, SYSVAR, body(TO_SLOT + 5, TO_BLOCK + 9)); // another subscription
+  note(77, TO_SLOT + 6, SYSVAR, body(TO_SLOT + 6, 0)); // no time
+  assert.deepEqual(clocks, [[TO_SLOT, TO_BLOCK]]);
+  src.close();
+});
