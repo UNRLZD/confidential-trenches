@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createHash } from "node:crypto";
-import { EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaSameProvider, VaultTree } from "@blindfill/kit";
+import { EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaJsonRpc, solanaSameProvider, VaultTree } from "@blindfill/kit";
 import { evmPoolSender } from "../../../apps/helper/src/pool/evm.ts";
 import { evmAddress } from "../src/derive/index.ts";
 import { checkPool, TAKE_SLACK_MS } from "../src/pool/pool.ts";
@@ -968,6 +968,45 @@ test("bind walks the fee list past an operator that refuses the block's state fo
     const fees = [rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com" }), rpc(c, { url: "https://robinhood.drpc.org", ...refusals.state! }), rpc(c, { url: "https://customer-origin.offchainlabs.com" })];
     await assert.rejects(evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined }).bind(bindArgs()), /one operator alone never passes/);
   }
+});
+
+// card kit-rpc-client-takes-a-signal (review of device-evm-fee-read-walks-operators, P3-7): the walk's cut ended the wait
+// for a hung operator but not its request, which held the connection to the client's own 10 s timeout. The seat is the
+// kit's real client (solanaJsonRpc, as the device builds it) over a fetch that never answers an eth_call: the walk's
+// cut (feeRead.callMs, on mocked timers) now reaches that fetch, and the bind still binds on the other two.
+test("the fee walk's cut ends a hung operator's request at the provider, not only the walk's wait for it", { timeout: 10_000 }, async (t) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
+  const c = CB();
+  const base = rpc(c, { url: "https://robinhood.drpc.org" });
+  let hung = 0;
+  const aborted: unknown[] = [];
+  const fetch = async (_u: string, init: RequestInit): Promise<Response> => {
+    const { id, method, params } = JSON.parse(String(init.body)) as { id: string; method: string; params: unknown[] };
+    if (method === "eth_call") {
+      hung++;
+      return new Promise<never>((_, rej) => {
+        const s = init.signal!;
+        s.addEventListener("abort", () => (aborted.push(s.reason), rej(s.reason)), { once: true });
+      });
+    }
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: await base(method, params) }));
+  };
+  const hangs = solanaJsonRpc("https://robinhood.drpc.org", { fetch, retry: SOLANA_RPC_RETRY }) as EvmRpc;
+  const fees = [hangs, rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com" }), rpc(c, { url: "https://robinhood-rpc.publicnode.com" })];
+  const seen: unknown[] = [];
+  const bound = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, feeRead: { callMs: 50 }, relayFee: async () => answer(), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep: async () => undefined }).bind(bindArgs());
+  let done = false;
+  bound.then(() => (done = true), () => (done = true));
+  for (let i = 0; i < 100 && !done; i++) {
+    for (let j = 0; j < 20; j++) await new Promise((r) => setImmediate(r));
+    t.mock.timers.tick(10);
+  }
+  await bound;
+  assert.equal(seen.length, 1, "the bind binds on the other two operators");
+  assert.ok(hung >= 1, "the hung operator was asked");
+  assert.equal(aborted.length, hung, "every hung request was aborted at the provider");
+  assert.ok(aborted.every((e) => /no answer in 50 ms/.test(String((e as Error)?.message))), `the walk's own cut: ${aborted.map(String).join("; ")}`);
 });
 
 // card evm-device-reads-need-no-old-state: with robinhood.drpc.org out, Pocket and publicnode refuse a block's state

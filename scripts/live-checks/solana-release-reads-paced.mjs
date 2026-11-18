@@ -37,13 +37,15 @@ const Q = "[`\"']";
 const N = "[\\w$]+";
 const NOFN = "(?:(?!function )[\\s\\S])";
 const esc = (s) => s.replace(/\$/g, "\\$");
-// the kit's paced wrapper: a call inside its own queue's slot is that slot's call, any other takes a slot (rpcSlot)
-const PACED = new RegExp(`function (${N})\\((${N}),${N}=${N}\\)\\{${NOFN}{0,200}?\\{if\\(${N}===${N}\\)return \\2\\(${N},${N}\\);let ${N}=${N}\\(\\2,${N},${N}\\);return ${N}\\.wait\\?`);
+// the kit's paced wrapper: a call inside its own queue's slot is that slot's call, any other takes a slot (rpcSlot);
+// the call's method, params and signal handed on (card kit-rpc-client-takes-a-signal)
+const PACED = new RegExp(`function (${N})\\((${N}),${N}=${N}\\)\\{${NOFN}{0,200}?\\{if\\(${N}===${N}\\)return \\2\\(${N},${N},${N}\\);let ${N}=${N}\\(\\2,${N},${N}\\);return ${N}\\.wait\\?`);
 // the timed read: its bound taken when its turn comes, the provider called inside the wrapper, synchronously, and that
 // call timed (with the caller's late error); then the timed wrapper (never the provider under it) paced under the limit
-// the provider's queue already names
+// the provider's queue already names. The provider is handed the caller's signal joined with the bound's own cut, and
+// the cut goes to the timer, so the bound ends the request at the provider too (card kit-rpc-client-takes-a-signal)
 const TIMED = (p) =>
-  new RegExp(`function (${N})\\((${N}),(${N}),(${N})\\)\\{let (${N})=${N}\\(\\2,\\((${N}),(${N})\\)=>\\{let (${N}),(${N});try\\{\\9=typeof \\3==${Q}function${Q}\\?\\3\\(\\):\\3,\\8=Promise\\.resolve\\(\\2\\(\\6,\\7\\)\\)\\}catch\\((${N})\\)\\{return Promise\\.reject\\(\\10\\)\\}return ${N}\\(\\8,\\9,\\4\\)\\}\\)${NOFN}{0,200}?\\.limits\\.values\\(\\)\\.next\\(\\)\\.value;return (${N})\\?${esc(p)}\\(\\5,\\11\\):\\5\\}`);
+  new RegExp(`function (${N})\\((${N}),(${N}),(${N})\\)\\{let (${N})=${N}\\(\\2,\\((${N}),(${N}),(${N})\\)=>\\{let (${N}),(${N}),(${N})=new AbortController;try\\{\\10=typeof \\3==${Q}function${Q}\\?\\3\\(\\):\\3,\\9=Promise\\.resolve\\(\\2\\(\\6,\\7,\\8===void 0\\?\\11\\.signal:AbortSignal\\.any\\(\\[\\8,\\11\\.signal\\]\\)\\)\\)\\}catch\\((${N})\\)\\{return Promise\\.reject\\(\\12\\)\\}return ${N}\\(\\9,\\10,\\4,\\11\\)\\}\\)${NOFN}{0,200}?\\.limits\\.values\\(\\)\\.next\\(\\)\\.value;return (${N})\\?${esc(p)}\\(\\5,\\13\\):\\5\\}`);
 // a minified shape: each @X a name (the first its group, the rest the same name), every other character as it is, a
 // quote any of the three
 const shape = (src) => {

@@ -1538,3 +1538,22 @@ test("a buy read's calls are held by the host's pass budget: with the page's win
     st.restore();
   }
 }));
+
+// card kit-rpc-client-takes-a-signal: a holdings read's signal (a sign out, the pass's stop) reaches the provider client,
+// so a read stopped mid-request ends at the provider, never only in the wait for it
+test("a holdings read hands its signal to the provider: a hung request is aborted when the read is stopped", { timeout: 5_000 }, async () => {
+  const seen: AbortSignal[] = [];
+  const hung = (async (_m: string, _p: readonly unknown[], signal?: AbortSignal) => {
+    if (signal !== undefined) seen.push(signal);
+    return new Promise<never>((_, rej) => signal?.addEventListener("abort", () => rej(signal.reason), { once: true }));
+  }) as JsonRpc;
+  const ac = new AbortController();
+  const r = evmHoldingsReader(hung, []).read("0x00000000000000000000000000000000000000a1", ac.signal);
+  r.catch(() => {});
+  for (let i = 0; i < 20; i++) await new Promise((x) => setImmediate(x));
+  assert.equal(seen.length, 1, "the provider got the read's signal");
+  const why = new Error("signed out");
+  ac.abort(why);
+  await assert.rejects(r);
+  assert.ok(seen[0]!.aborted && seen[0]!.reason === why);
+});

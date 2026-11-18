@@ -580,7 +580,7 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
     }
   };
   const seat = (k: number): EvmRpc => {
-    const call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
+    const call = async (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
       const span = method === "eth_getLogs" ? spanOf(params) : null;
       const logs = method === "eth_getLogs";
       // each provider asked at most once in one call, its error kept (review of 8cdf6ee8, MEDIUM: as the helper's
@@ -604,14 +604,17 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
           at[k] = n;
           continue;
         }
+        signal?.throwIfAborted();
         open[k]![i]!++;
         const t0 = Date.now();
         let r: unknown;
         try {
-          r = await list[i]!(method, params);
+          r = await list[i]!(method, params, signal);
         } catch (e) {
           open[k]![i]!--;
           took[i] = Date.now() - t0;
+          // the caller gave up (its bound, or the other side's failure): the provider is neither rested nor walked past
+          if (signal?.aborted) throw e;
           // the provider that refused, on its error, so the pager halves that provider's page however the seat moved
           // since (another call on the seat may have moved it: spreadLogs' readers share it)
           if (e !== null && typeof e === "object" && !Object.hasOwn(e, EVM_REFUSED_BY)) Object.defineProperty(e, EVM_REFUSED_BY, { value: list[i]!.url });
@@ -759,7 +762,7 @@ function blockOf(v: unknown, what: string): EvmBlock | null {
     baseFeePerGas: b.baseFeePerGas === undefined ? null : qty(b.baseFeePerGas, `${what} baseFeePerGas`),
   };
 }
-const getBlock = async (rpc: EvmRpc, at: string, what: string): Promise<EvmBlock | null> => blockOf(await rpc("eth_getBlockByNumber", [at, false]), what);
+const getBlock = async (rpc: EvmRpc, at: string, what: string, signal?: AbortSignal): Promise<EvmBlock | null> => blockOf(await rpc("eth_getBlockByNumber", [at, false], signal), what);
 
 /** The wait after a throttled try `tries` (1 first): the provider's Retry-After, else 1 s doubled per try; at most
  * EVM_LOG_THROTTLE_WAIT_MAX_MS. */
@@ -810,7 +813,7 @@ type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
  * failure named `what`. */
 const poolRead = <T>(what: string, f: () => Promise<T>, signal: AbortSignal | undefined, sleep: Sleep): Promise<T> => evmAnswered(f, signal, sleep, { tries: EVM_POOL_READ_TRIES, waitMs: EVM_POOL_READ_WAIT_MS, what });
 /** A block of the pool's reads, by tag or number, as a pool read. */
-const readBlock = (rpc: EvmRpc, at: string, what: string, signal: AbortSignal | undefined, sleep: Sleep): Promise<EvmBlock | null> => poolRead(what, () => getBlock(rpc, at, what), signal, sleep);
+const readBlock = (rpc: EvmRpc, at: string, what: string, signal: AbortSignal | undefined, sleep: Sleep): Promise<EvmBlock | null> => poolRead(what, () => getBlock(rpc, at, what, signal), signal, sleep);
 
 /** A JSON-RPC error that says the node does not know the block yet (a lag, not a lie). */
 const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such block/i;
@@ -909,7 +912,7 @@ const PRUNED = /missing trie node|historical state \S* ?is not available|state \
 async function view(rpc: EvmRpc, pool: string, data: string, blockHash: string, what: string, signal: AbortSignal | undefined, sleep: Sleep): Promise<bigint> {
   let r: unknown;
   try {
-    r = await poolRead(what, () => rpc("eth_call", [{ to: pool, data: `0x${data}` }, { blockHash }]), signal, sleep);
+    r = await poolRead(what, () => rpc("eth_call", [{ to: pool, data: `0x${data}` }, { blockHash }], signal), signal, sleep);
   } catch (e) {
     if (UNKNOWN_BLOCK.test(String((e as Error)?.message ?? e))) lag(`${what}: the RPC does not know block ${blockHash} yet`);
     if (PRUNED.test(String((e as Error)?.message ?? e))) lag(`${what}: the RPC no longer keeps the state of block ${blockHash}`);
@@ -1103,7 +1106,7 @@ async function oneValueLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filters
   try {
     got = await Promise.all(
       filters.map(async (f, n) => {
-        const r = await rpc("eth_getLogs", [{ ...f, fromBlock: tag(from), toBlock: tag(to) }]);
+        const r = await rpc("eth_getLogs", [{ ...f, fromBlock: tag(from), toBlock: tag(to) }], signal);
         if (!Array.isArray(r)) throw new Error("not a list");
         return r.map((g, i) => decode(g, from, to, `rpc ${k}: log ${i} of value ${n}, ${from}..${to}`));
       }),
@@ -1182,7 +1185,7 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     const end = at + size - 1n < to ? at + size - 1n : to;
     let got: unknown;
     try {
-      got = await rpc("eth_getLogs", [{ ...filter, fromBlock: tag(at), toBlock: tag(end) }]);
+      got = await rpc("eth_getLogs", [{ ...filter, fromBlock: tag(at), toBlock: tag(end) }], signal);
     } catch (e) {
       lastFull = null;
       // the other RPC failed and this read was stopped: never a smaller page for the next W
@@ -1475,9 +1478,9 @@ export async function evmTokensSentTo(rpcs: readonly [EvmRpc, EvmRpc], w: string
  */
 export async function evmHoldsAnchor(rpcs: readonly [EvmRpc, EvmRpc], chainId: bigint, anchor: EvmBlock, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait): Promise<void> {
   checkEvmRpcs(rpcs);
-  const ids = await both(rpcs, async (rpc, k, sig) => qty(await evmAnswered(() => rpc("eth_chainId", []), sig, sleep), `rpc ${k} eth_chainId`), signal);
+  const ids = await both(rpcs, async (rpc, k, sig) => qty(await evmAnswered(() => rpc("eth_chainId", [], sig), sig, sleep), `rpc ${k} eth_chainId`), signal);
   if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${chainId}`);
-  const bs = await both(rpcs, (rpc, k, sig) => evmAnswered(() => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`), sig, sleep), signal);
+  const bs = await both(rpcs, (rpc, k, sig) => evmAnswered(() => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`, sig), sig, sleep), signal);
   if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(`an RPC does not hold block ${anchor.number} as ${anchor.hash}`);
 }
 
@@ -1494,7 +1497,7 @@ export async function evmTokensSentToOne(rpc: EvmRpc, w: string, from: bigint, {
   addr20(w, "W");
   const to = lower(w);
   if (typeof from !== "bigint" || from < 0n) throw new Error("from: a block number");
-  const b = await evmAnswered(() => getBlock(rpc, tag(anchor.number), `block ${anchor.number}`), signal, sleep);
+  const b = await evmAnswered(() => getBlock(rpc, tag(anchor.number), `block ${anchor.number}`, signal), signal, sleep);
   if (b === null || b.hash !== anchor.hash) lag(`the reader does not hold block ${anchor.number} as ${anchor.hash}`);
   if (from > anchor.number) return [];
   const logs = await readLogs(rpc, 0, { topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, "0")}`] }, (raw, f, t, what) => decodeTransfer(raw, to, f, t, what), from, anchor.number, transferPager(page, EVM_LOG_CEILING_PAGES), signal, sleep);
@@ -2007,7 +2010,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       }
     }
     if (!checked) {
-      const ids = await both(rpcs, async (rpc, k, sig) => qty(await poolRead(`rpc ${k} eth_chainId`, () => rpc("eth_chainId", []), sig, sleep), `rpc ${k} eth_chainId`), signal);
+      const ids = await both(rpcs, async (rpc, k, sig) => qty(await poolRead(`rpc ${k} eth_chainId`, () => rpc("eth_chainId", [], sig), sig, sleep), `rpc ${k} eth_chainId`), signal);
       if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${a.pin.network}'s ${chainId}`);
     }
     // the newest anchor first (the pass's own, within EVM_NEWEST_REUSE_MS): the last completed round's block again is
@@ -2124,7 +2127,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       if (cap !== undefined && to - from + 1n > cap) return null;
       let raw: unknown;
       try {
-        raw = await wide!("eth_getLogs", [{ ...poolFilter, fromBlock: tag(from), toBlock: tag(to) }]);
+        raw = await wide!("eth_getLogs", [{ ...poolFilter, fromBlock: tag(from), toBlock: tag(to) }], signal);
       } catch (e) {
         signal?.throwIfAborted();
         const named = capSpanOf(String((e as Error)?.message ?? e));
@@ -2167,10 +2170,10 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         // (a one-event-a-call read's three calls) never holds the walk's next read behind calls no one waits for
         const gated = (r: EvmRpc): EvmRpc => {
           let last: Promise<unknown> = Promise.resolve();
-          const call = (method: string, params: readonly unknown[]): Promise<unknown> => {
+          const call = (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
             const go = last.then(() => {
               ac.signal.throwIfAborted();
-              return r(method, params);
+              return r(method, params, signal);
             });
             last = go.catch(() => {});
             return go;
@@ -2243,12 +2246,12 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         stop.signal.addEventListener("abort", end, { once: true });
         let calls = 0;
         const capped = Object.assign(
-          async (method: string, params: readonly unknown[]): Promise<unknown> => {
+          async (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
             if (method === "eth_getLogs" && ++calls > EVM_SOURCE_CALLS) {
               own.abort(new Error(`more than ${EVM_SOURCE_CALLS} log calls`));
               own.signal.throwIfAborted();
             }
-            return src(method, params);
+            return src(method, params, signal);
           },
           typeof url === "string" ? { url } : {},
         ) as EvmRpc;
@@ -2586,9 +2589,9 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
  *  answer is still asked again as before. */
 const walkSeat = (rpc: EvmRpc): EvmRpc =>
   Object.assign(
-    async (method: string, params: readonly unknown[]) => {
+    async (method: string, params: readonly unknown[], signal?: AbortSignal) => {
       try {
-        return await rpc(method, params);
+        return await rpc(method, params, signal);
       } catch (e) {
         if ((e as { name?: unknown; fault?: unknown } | null)?.name === "SolanaRpcTransportError" && (e as { fault?: unknown }).fault === "network") throw new EvmUnansweredError(String((e as Error).message), e);
         throw e;

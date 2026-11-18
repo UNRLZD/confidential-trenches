@@ -62,11 +62,12 @@ function landedHeld(js) {
 }
 // the slot's call: the provider rpcSlot was handed (its first parameter, never another name taken from it), its queue
 // marked while it runs; and the paced wrapper's own call inside its slot, which hands rpcSlot the wrapper it was given
-// (its own first parameter), never the bare provider under it. No other function's header between either one's
-// header and its mark.
+// (its own first parameter), never the bare provider under it. Both hand the provider the call's signal too (card
+// kit-rpc-client-takes-a-signal: method, params and signal). No other function's header between either one's header
+// and its mark.
 const NOFN = "(?:(?!function )[\\s\\S])";
-const SLOT = new RegExp(`function [\\w$]+\\(([\\w$]+),[\\w$]+,[\\w$]+\\)\\{${NOFN}{0,1500}?let ([\\w$]+)=([\\w$]+);\\3=[\\w$]+;try\\{return \\1\\([\\w$]+,[\\w$]+\\)\\}finally\\{\\3=\\2,`);
-const INSLOT = new RegExp(`function [\\w$]+\\(([\\w$]+),[\\w$]+=[\\w$]+\\)\\{${NOFN}{0,200}?\\{if\\([\\w$]+===[\\w$]+\\)return \\1\\([\\w$]+,[\\w$]+\\);let [\\w$]+=[\\w$]+\\(\\1,[\\w$]+,[\\w$]+\\);return [\\w$]+\\.wait\\?`);
+const SLOT = new RegExp(`function [\\w$]+\\(([\\w$]+),[\\w$]+,[\\w$]+\\)\\{${NOFN}{0,1500}?let ([\\w$]+)=([\\w$]+);\\3=[\\w$]+;try\\{return \\1\\([\\w$]+,[\\w$]+,[\\w$]+\\)\\}finally\\{\\3=\\2,`);
+const INSLOT = new RegExp(`function [\\w$]+\\(([\\w$]+),[\\w$]+=[\\w$]+\\)\\{${NOFN}{0,200}?\\{if\\([\\w$]+===[\\w$]+\\)return \\1\\([\\w$]+,[\\w$]+,[\\w$]+\\);let [\\w$]+=[\\w$]+\\(\\1,[\\w$]+,[\\w$]+\\);return [\\w$]+\\.wait\\?`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {

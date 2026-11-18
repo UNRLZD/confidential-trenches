@@ -41,7 +41,8 @@ test("planted on the good answer: each fact taken away FAILs", () => {
 const OTHERS = "c=[...n.filter(t=>e.rpcs.includes(t.rpc)),...n.filter(t=>!e.rpcs.includes(t.rpc))].filter(e=>r!==void 0&&e.op!==a&&(s===null||o(e.rpc)!==s)&&!gu(e.rpc,r)),l=new Map;";
 const RACE = "try{for(let e=0;e<_.length;e+=e===0?2:1){let t=_.slice(e,e===0?2:e+1).map((t,n)=>o(t,e+n)),n=await new Promise(e=>{let n=t.length;for(let r of t)r.then(t=>t?e(!0):--n===0&&e(!1))});if(a?.throwIfAborted(),n)return!0}return!1}";
 const STANDS = "finally{r.abort(Error(`the run stands`)),a?.removeEventListener(`abort`,i)}";
-const GATED = "o=e=>{let t=Promise.resolve();return Object.assign((n,i)=>{let a=t.then(()=>(r.signal.throwIfAborted(),e(n,i)));return t=a.catch(()=>{}),a},{url:e.url})},";
+// as card kit-rpc-client-takes-a-signal's build minified it: the call's signal handed on
+const GATED = "o=e=>{let t=Promise.resolve();return Object.assign((n,i,a)=>{let o=t.then(()=>(r.signal.throwIfAborted(),e(n,i,a)));return t=o.catch(()=>{}),o},{url:e.url})},";
 const JS = ";" + [OTHERS, RACE, STANDS, GATED].join("");
 
 test("facts over the bundle's pieces: every mark read; each piece broken loses its own mark", () => {
@@ -58,4 +59,8 @@ test("facts over the bundle's pieces: every mark read; each piece broken loses i
   assert.equal(broken("the run stands", "a run").stands, false);
   // a run's calls asked whatever its read's end
   assert.equal(broken("r.signal.throwIfAborted(),", "").gated, false);
+  // a call's signal dropped on its way to the provider (card kit-rpc-client-takes-a-signal), and the wrapper as it was
+  // before it (two arguments taken, two passed on)
+  assert.equal(broken("e(n,i,a)", "e(n,i)").gated, false);
+  assert.equal(broken("(n,i,a)=>{let o=t.then(()=>(r.signal.throwIfAborted(),e(n,i,a)))", "(n,i)=>{let o=t.then(()=>(r.signal.throwIfAborted(),e(n,i)))").gated, false);
 });

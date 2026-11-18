@@ -43,8 +43,9 @@ test("the facts read from a bundle", () => {
   // the minified shapes as the good bundle spells them (the build with the pool-usd fold)
   const js =
     "var hO=`https://ct-api.unrealized.trade`;" +
-    "function Cm(e,t=rm){let n=sm.get(e)??e,r=mm(n,t),i=(n,i)=>{if(cm===r)return e(n,i);let a=hm(e,t,n);return a.wait?a.wait.then(()=>a.run(i)):a.run(i)},a=n.url===void 0?i:Object.assign(i,{url:n.url});return sm.set(a,n),a}" +
-    "function wm(e,t,n){let r=Sm(e,(r,i)=>{let a,o;try{o=typeof t==`function`?t():t,a=Promise.resolve(e(r,i))}catch(e){return Promise.reject(e)}return Em(a,o,n)}),i=sm.get(e)??e,a=(i.url===void 0?om.get(i):am.get(fm(i.url)))?.limits.values().next().value;return a?Cm(r,a):r}" +
+    // card kit-rpc-client-takes-a-signal: the paced wrapper and the timed read take the call's signal and hand it on
+    "function Cm(e,t=rm){let n=sm.get(e)??e,r=mm(n,t),i=(n,i,o)=>{if(cm===r)return e(n,i,o);let a=hm(e,t,n);return a.wait?a.wait.then(()=>o?.aborted?(a.drop(),Promise.reject(o.reason)):a.run(i,o)):a.run(i,o)},a=n.url===void 0?i:Object.assign(i,{url:n.url});return sm.set(a,n),a}" +
+    "function wm(e,t,n){let r=Sm(e,(r,i,s)=>{let a,o,c=new AbortController;try{o=typeof t==`function`?t():t,a=Promise.resolve(e(r,i,s===void 0?c.signal:AbortSignal.any([s,c.signal])))}catch(e){return Promise.reject(e)}return Em(a,o,n,c)}),i=sm.get(e)??e,a=(i.url===void 0?om.get(i):am.get(fm(i.url)))?.limits.values().next().value;return a?Cm(r,a):r}" +
     "Ly=e=>e instanceof Fy||e instanceof jm&&e.fault===`timeout`;async function zy(e,t,n,r,i){for(let a=1;;a++){if(i.stopped)return X(`${r}: not asked again, the read has ended`);" +
     "let o=wm(e,()=>{if(i.stopped)throw Error(`${r}: not asked again, the read ended before its turn`);let e=i.end-Date.now();if(e<=0)throw new Fy(`${r}: no turn inside the read's bound`);return Math.min(My,e)},e=>new Fy(`${r}: no answer in ${e} ms`));try{return await Promise.resolve().then(()=>o(t,n))}catch(e){}}}" +
     "t Promise.all(e.map(async e=>{try{let r=wm(e,n),i=(e,t)=>Promise.resolve().then(()=>r(e,t)),a=Xm(await i(`getLatestBlockhash`,[{commitment:`finalized`}]));" +
@@ -101,10 +102,16 @@ test("the facts read from a bundle", () => {
   // the timed read pacing the provider under it, so its wait counts against its timeout: FAIL
   assert.equal(planted("return a?Cm(r,a):r}", "return a?Cm(e,a):r}").timed, false);
   // the provider called after a turn (a microtask), not inside it, so a paced provider would queue twice: FAIL
-  assert.equal(planted("a=Promise.resolve(e(r,i))}", "a=Promise.resolve().then(()=>e(r,i))}").timed, false);
+  assert.equal(planted("a=Promise.resolve(e(r,i,s===void 0?c.signal:AbortSignal.any([s,c.signal])))}", "a=Promise.resolve().then(()=>e(r,i,s===void 0?c.signal:AbortSignal.any([s,c.signal])))}").timed, false);
   // the bound taken when the wrapper is made, not at the turn, or the caller's late error dropped: FAIL
   assert.equal(planted("o=typeof t==`function`?t():t,", "o=t,").timed, false);
-  assert.equal(planted("return Em(a,o,n)}", "return Em(a,o)}").timed, false);
+  assert.equal(planted("return Em(a,o,n,c)}", "return Em(a,o,c)}").timed, false);
+  // card kit-rpc-client-takes-a-signal: the caller's signal or the bound's cut not handed to the provider, the cut never
+  // given to the timer, or the paced wrapper dropping the signal inside its slot: FAIL
+  assert.equal(planted("e(r,i,s===void 0?c.signal:AbortSignal.any([s,c.signal]))", "e(r,i)").timed, false, "the provider handed no signal");
+  assert.equal(planted("e(r,i,s===void 0?c.signal:AbortSignal.any([s,c.signal]))", "e(r,i,s)").timed, false, "the bound's cut not joined");
+  assert.equal(planted("return Em(a,o,n,c)}", "return Em(a,o,n)}").timed, false, "the cut never aborted at the bound");
+  assert.equal(planted("{if(cm===r)return e(n,i,o);let a", "{if(cm===r)return e(n,i);let a").timed, false, "the paced wrapper drops the signal");
   // no queue looked up: FAIL
   assert.equal(planted("?.limits.values().next().value;", ";").timed, false);
   // each read called bare, the timed read left out: FAIL
@@ -127,6 +134,6 @@ test("the facts read from a bundle", () => {
   assert.equal(planted("Ly=e=>e instanceof Fy||", "Ly=e=>").price, false);
   assert.equal(planted("{if(i.stopped)throw Error(`${r}: not asked again, the read ended before its turn`);let e=", "{let e=").price, false, "a turn after the read ended still sent");
   // the paced wrapper calling past its own slot (no guard): no paced wrapper found, every fact FAILs
-  const unguarded = planted("{if(cm===r)return e(n,i);let a", "{let a");
+  const unguarded = planted("{if(cm===r)return e(n,i,o);let a", "{let a");
   assert.deepEqual([unguarded.release, unguarded.pair, unguarded.timed, unguarded.price], [false, false, false, false]);
 });
