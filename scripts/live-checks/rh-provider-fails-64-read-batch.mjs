@@ -18,9 +18,9 @@
 // control is quoted in full: the provider answers a smaller request and not the kit's, the card's fault (on 10 Nov
 // globalstake answered the gas-starve check's 6-read calls and its 64-read call HTTP 500, eight runs of eight).
 // INCONCLUSIVE, named, and no FAIL: a provider that answers nothing (its latest block, or the batch and the control
-// both: a passing fault, as globalstake's HTTP 500 to that check on GitHub's runners in 3 of 25 runs, 14-17 Nov, while
-// it answered every size from this Mac) or throttles (429, a rate limit's words); never a PASS on fewer than every
-// pinned provider.
+// both: a passing fault, as globalstake's HTTP 500 to that check on GitHub's runners in 8 of 47 runs, 12-17 Nov, every
+// one between 22:28Z and 04:08Z, while it answered 1 to 256 reads in full from this Mac, 6 rounds at 00:18Z inside those
+// hours included) or throttles (429, a rate limit's words); never a PASS on fewer than every pinned provider.
 //   node scripts/live-checks/rh-provider-fails-64-read-batch.mjs [--record <file> --as good|bad] [--answer <file> --as good|bad]
 //     [--calls <n>] [--per-call <n>]   a batch other than the kit's, to record a bad answer (judged against the kit's)
 // PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3.
