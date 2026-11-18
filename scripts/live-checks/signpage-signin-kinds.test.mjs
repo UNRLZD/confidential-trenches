@@ -28,12 +28,16 @@
 // deletes the database and reloads into a fresh store), its sign outs read after the reload; goodNov11 the good before
 // it; badKeepsStore a scratch copy of 6430cba10 whose sign out skips deleteDatabase. A record with no store read is
 // judged at the reading it was cut at (SIGN_OUT_BEFORE_RELOAD).
+// Card wallet-signin-wallet: good re-recorded (18 Nov, the box, Chrome 156) on the card's page at 08e17ac2c with New
+// account run by stand-in wallets (fresh, freshBad, freshNo); goodNov13 the good before it (main 6430cba10, no such
+// step, read on its other lines); badMainNoNewAccount main ff65a0403's page on the same run, New account not offered
+// (data-pending="wallet-signature"): fails the three New account lines only.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { HARNESS_UNRESOLVED, judge as judgeNow, keptAfterSignOut, SIGN_OUT_BEFORE_RELOAD, watch } from "./signpage-signin-kinds.mjs";
+import { eip191, evmAddressOf, HARNESS_UNRESOLVED, judge as judgeNow, keptAfterSignOut, personalSign, SIGN_OUT_BEFORE_RELOAD, WALLET_ADDRESS, watch, WRONG_SIGNER_ADDRESS } from "./signpage-signin-kinds.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // card sign-out-checks-read-the-store-after-the-reload: a record cut before it holds no store read after its sign outs
@@ -255,8 +259,9 @@ test("every live check's harness serves SIGN_HOST as live does: a path with no f
 const SO_NOW = "prf: Sign out goes back to the app signed out, the store left with no account, no seed, no record and a new K_wrap, nothing in localStorage";
 const NP_NOW = "no-prf: Sign out then leaves the store with nothing but a new K_wrap";
 
-test("sign out is judged by the store after the page's reload: the good run (main 6430cba10, release 126) read every store empty but meta's k_wrap and lane, nothing in localStorage, the K_wrap before refused by the one after", () => {
-  for (const a of [answers.good.prf.signout.after, answers.good.noPrf.after]) {
+test("sign out is judged by the store after the page's reload: the good run (main 6430cba10, release 126, goodNov13; and good, 08e17ac2c) read every store empty but meta's k_wrap and lane, nothing in localStorage, the K_wrap before refused by the one after", () => {
+  assert.equal(judgeNow(answers.goodNov13).pass, true);
+  for (const a of [answers.goodNov13.prf.signout.after, answers.goodNov13.noPrf.after, answers.good.prf.signout.after, answers.good.noPrf.after]) {
     assert.equal(a.store.reloaded, true, "read in the reload's new document");
     assert.deepEqual(a.store.metaKeys.sort(), ["k_wrap", "lane"]);
     assert.ok(Object.entries(a.store.stores).every(([n, c]) => (n === "meta" ? c === 2 : c === 0)), JSON.stringify(a.store.stores));
@@ -333,4 +338,77 @@ test("the run on release 128's answers passes, and an open answered closes false
   const c = structuredClone(rec);
   for (const p of opens) at(c, p).answer.result = { pending: true };
   assert.equal(judge(c).pass, true, "the answer before kit 1.13 still passes");
+});
+
+// ------------------------------------------------------------------------------------------------ card wallet-signin-wallet
+const FRESH = "wallet: New account with a wallet that signs for its address makes a seed and draws the backup first, after one personal_sign";
+const FRESH_BAD = "wallet: New account with a wallet whose signature is another key's draws the error page and makes nothing";
+const FRESH_NO = "wallet: New account with a wallet that answers 4001, the user's no, goes back to the two choices and makes nothing";
+const NEW_ACCOUNT = [FRESH, FRESH_BAD, FRESH_NO];
+
+test("the stand-in wallet's signer reproduces the web3.js docs' published accounts.sign vector, and names the published addresses", () => {
+  // web3.js docs, web3.eth.accounts.sign("Some data", "0x4c0883a6..."): messageHash and signature as printed there
+  const key = Uint8Array.from("4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318".match(/../g), (x) => parseInt(x, 16)); // gitleaks:allow (web3.js docs example key)
+  const data = new TextEncoder().encode("Some data");
+  assert.equal(Buffer.from(eip191(data)).toString("hex"), "1da44b586eb0729ff70a73c326926f6ed5a25f5b056e7f47fbc6e58d86871655");
+  assert.equal(personalSign(key, data), "0xb91467e570a6466aa9e9876cbcd013baba02900b8979d43fe208a4a4f339f5fd6007e74cd82e037b800186422fc2da167c747ef045e5d18a5f5d4300f8e1a0291c");
+  assert.equal(evmAddressOf(key), WALLET_ADDRESS);
+  const one = new Uint8Array(32);
+  one[31] = 1;
+  assert.equal(evmAddressOf(one), WRONG_SIGNER_ADDRESS);
+});
+
+test("good (the card's page at 08e17ac2c): New account offered, the good signer makes a seed after one personal_sign, the wrong one and a no make nothing; public values only", () => {
+  const w = answers.good.wallet;
+  const r = judgeNow(answers.good);
+  for (const l of NEW_ACCOUNT) assert.ok(r.lines.some((x) => x.startsWith(`ok  ${l} (`)), `${l}\n${r.lines.join("\n")}`);
+  assert.deepEqual([w.fresh.after.state, w.fresh.after.words, w.fresh.after.codeSaved, w.fresh.after.seed, w.fresh.after.signs], ["backup", 12, "false", true, 1]);
+  assert.deepEqual([w.freshBad.after.state, w.freshBad.after.seed, w.freshBad.after.signs], ["error", false, 1]);
+  assert.deepEqual([w.freshNo.after.state, w.freshNo.after.seed, w.freshNo.after.signs], ["choose", false, 1]);
+  for (const s of ["fresh", "freshBad", "freshNo"]) assert.deepEqual(w[s].offer, { disabled: false, pending: null }, s);
+  // never a key or a signature in a record
+  const text = JSON.stringify(answers.good);
+  assert.ok(!/4c0883a6|0x[0-9a-f]{130}/i.test(text));
+});
+
+test("a record cut before the card (goodNov13) holds no New account step and keeps its verdict: none of the three lines is read on it", () => {
+  assert.ok(!["fresh", "freshBad", "freshNo"].some((k) => Object.hasOwn(answers.goodNov13.wallet, k)));
+  const r = judgeNow(answers.goodNov13);
+  assert.equal(r.pass, true, r.lines.join("\n"));
+  assert.ok(!r.lines.some((l) => NEW_ACCOUNT.some((n) => l.includes(n))));
+});
+
+test("main ff65a0403's page (New account drawn and not offered, wallet-signature), on the same run as good: fails the three New account lines only", () => {
+  const rec = answers.badMainNoNewAccount;
+  const r = judgeNow(rec);
+  assert.deepEqual(BAD_ALL(rec), NEW_ACCOUNT, r.lines.join("\n"));
+  for (const s of ["fresh", "freshBad", "freshNo"]) {
+    assert.deepEqual(rec.wallet[s].offer, { disabled: true, pending: "wallet-signature" }, s);
+    assert.equal(rec.wallet[s].after.signs, 0, s);
+    assert.equal(rec.wallet[s].after.seed, false, s);
+  }
+  assert.ok(r.lines.some((l) => l.startsWith(`BAD ${FRESH} (New account not offered (wallet-signature), choose,`)), r.lines.join("\n"));
+});
+
+test("planted on good: a seed on the wrong signer, two personal_sign, a seed after a no, a step not offered or never run each fail their own line only", () => {
+  const cases = [
+    ["a seed made on the wrong signer", (w) => ((w.freshBad.after.seed = true), (w.freshBad.after.state = "backup"), (w.freshBad.after.words = 12)), [FRESH_BAD]],
+    ["the error page but a seed stored", (w) => (w.freshBad.after.seed = true), [FRESH_BAD]],
+    ["two personal_sign for one New account", (w) => (w.fresh.after.signs = 2), [FRESH]],
+    ["no personal_sign asked", (w) => (w.fresh.after.signs = 0), [FRESH]],
+    ["the wrong signer refused before any personal_sign", (w) => (w.freshBad.after.signs = 0), [FRESH_BAD]],
+    ["the backup marked saved", (w) => (w.fresh.after.codeSaved = "true"), [FRESH]],
+    ["no seed stored", (w) => (w.fresh.after.seed = false), [FRESH]],
+    ["a seed after the user's no", (w) => (w.freshNo.after.seed = true), [FRESH_NO]],
+    ["the error page after the user's no", (w) => (w.freshNo.after.state = "error"), [FRESH_NO]],
+    ["New account not offered", (w) => (w.fresh.offer = { disabled: true, pending: "no-wallet" }), [FRESH]],
+    ["New account never drawn", (w) => (w.freshNo.offer = null), [FRESH_NO]],
+    ["a step that never ran", (w) => delete w.fresh, [FRESH]],
+    ["a press that never drew anything", (w) => delete w.freshBad.after, [FRESH_BAD]],
+  ];
+  for (const [name, plant, want] of cases) {
+    const rec = structuredClone(answers.good);
+    plant(rec.wallet);
+    assert.deepEqual(BAD_ALL(rec), want, name);
+  }
 });
