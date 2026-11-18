@@ -8,7 +8,9 @@
 // requests a second. The route's budgets are its defaults (RPC_BUDGETS solana).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { POOL_USD_FEEDS } from "@blindfill/kit";
 import { onVirtualTime } from "../../test/evm-swaps/virtual-time.ts";
 import { createRpc, SHARED_ACCOUNTS, SHARED_HOLD_MS } from "./rpc.ts";
@@ -138,7 +140,9 @@ test("card helper-rpc-one-read-many-pages: a held answer is the provider's resul
 });
 
 test("card helper-rpc-one-read-many-pages: the named public accounts are the kit's Pyth SOL/USD feed and the mainnet pool its deploy record names, and nothing else", () => {
-  const rec = JSON.parse(readFileSync(new URL("../../../../contracts/pool-solana/deployments/mainnet.json", import.meta.url), "utf8")) as { pool: string };
+  // the deploy record read as data, as apps/helper/deploy/sol-fee-payer-key.test.mjs reads it (no code of contracts/ imported)
+  const record = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../../contracts/pool-solana/deployments/mainnet.json");
+  const rec = JSON.parse(readFileSync(record, "utf8")) as { pool: string };
   assert.deepEqual([...SHARED_ACCOUNTS].sort(), [PYTH, rec.pool].sort());
 });
 
