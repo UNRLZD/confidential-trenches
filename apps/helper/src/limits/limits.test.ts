@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import type { IncomingMessage } from "node:http";
 import { test } from "node:test";
 import { budgetFromEnv, clientOf, clientWindow, heldPerClient, KEYED_DAY, KEYED_PACE, keyOf, PROBE_DAY_SHARE, RETRY_AFTER_MAX_S, throttled, throttleOf, upstreamBudget, upstreamRetryAfterS } from "./limits.ts";
-import { RPC_KEYED_TOTAL, RPC_PAGE_NEED } from "../rpc/rpc.ts";
+import { keyedBudget, RPC_BUDGETS, RPC_KEYED_TOTAL, RPC_PAGE_NEED } from "../rpc/rpc.ts";
 
 /** A clock that moves `step` ms at every read, from `t0`. */
 const moving = (t0: number, step: number) => {
@@ -264,11 +264,14 @@ test("FastNEAR's key is paced from Dev's published rate with headroom: its most 
 });
 
 test("NEAR's keyed route takes two callers' quotes in one second (its pacer: the total over 10 s), and one caller's share is the seat's most in any 10 s (the wallet's PACE.seat: 30 at once, then 5 a second, 80) with room", () => {
-  const total = RPC_KEYED_TOTAL.near!;
+  const total = RPC_KEYED_TOTAL.near!.fastnear!;
   for (const n of QUOTE_READS) assert.ok(total / 10 >= 2 * n, `${total / 10} a second for two quotes of ${n}`);
   assert.ok(total / 10 <= KEYED_PACE.fastnear.perS, "the route never asks the key past its pace");
   assert.ok(RPC_PAGE_NEED.near! >= 80, `the share ${RPC_PAGE_NEED.near}`);
   assert.ok(2 * RPC_PAGE_NEED.near! <= total, "a second caller still finds its full share");
+  // FastNEAR's published rate sets the route's total only with its key first; another operator's keyed URL keeps the default
+  assert.equal(keyedBudget("near", "fastnear").total, total);
+  assert.equal(keyedBudget("near").total, RPC_BUDGETS.near.total);
 });
 
 test("KEYED_DAY bounds FastNEAR's month at Dev's 10,000,000 over 31 days: 11,012 quotes a day at 29 reads, 17,741 at 18, after the probes' share", () => {

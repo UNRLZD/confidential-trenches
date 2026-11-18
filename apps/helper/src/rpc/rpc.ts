@@ -112,15 +112,17 @@ export const RPC_CLIENT_MAX = 16;
  */
 export const RPC_PAGE_NEED: Readonly<Partial<Record<RpcChain, number>>> = { solana: 42, "solana-devnet": 42, "solana-marks": 30, base: 30, robinhood: 30, near: 90 };
 /**
- * A route's 10 s total on its keyed providers where its company's published rate sets it, else RPC_BUDGETS' (keyedBudget):
- *   - near: 600, FastNEAR's key at its pace (limits.ts KEYED_PACE fastnear: 60 a second, read from Dev's published "up
+ * A route's 10 s total on its keyed providers when its first key is this company's (keyedBudget), where that company's
+ * published rate sets it, else RPC_BUDGETS':
+ *   - near, FastNEAR's key first (NEAR_RPC_URL_FASTNEAR): 600, the key at its pace (limits.ts KEYED_PACE fastnear: 60 a second, read from Dev's published "up
  *     to 10,000" requests a minute per key, docs.fastnear.com/pricing, 2026-11-18 02:50Z), so the route's own pacer
  *     (pacedOf: the total over 10 s, 60 in any PACE_SECOND_MS) sends two callers' quotes of 29 reads in one second, and
  *     six callers find their full share (RPC_PAGE_NEED near, 90) at once. Before it, the default 100 paced the seat at 10
  *     a second, so one quote's 29 reads took three seconds of turns (card near-seat-pace-fits-one-quote).
- * The public fallback keeps RPC_BUDGETS' (a route with no key draws it).
+ * The public fallback keeps RPC_BUDGETS' (a route with no key draws it), and so does another keyed URL first or after it
+ * (NEAR_RPC_URL, NEAR_RPC_URL_B: ownPace), whose operator published no rate here.
  */
-export const RPC_KEYED_TOTAL: Readonly<Partial<Record<RpcChain, number>>> = { near: 600 };
+export const RPC_KEYED_TOTAL: Readonly<Partial<Record<RpcChain, Partial<Record<KeyedProvider, number>>>>> = { near: { fastnear: 600 } };
 /**
  * Requests of one method the public Solana endpoint takes in 10 s from every caller together: "Maximum number of
  * requests per 10 seconds per IP for a single RPC: 40" (clusters.mdx:154, the same "Mainnet rate limits" list as
@@ -478,7 +480,7 @@ function evmCapSpan(chain: RpcChain, answer: unknown): bigint | null {
 /** A chain's budget on our keyed providers unless RPC_BUDGET_<CHAIN> names the plan's: the chain's total (Helius free's
  *  100 per 10 s on Solana, the rpc.ts header) and one page's share (RPC_PAGE_NEED), no limit per method (a keyed plan
  *  names its own as a third number). Not the public endpoint's share: there 42 of one method would leave others none. */
-export const keyedBudget = (chain: RpcChain): BudgetLimits => ({ total: RPC_KEYED_TOTAL[chain] ?? RPC_BUDGETS[chain].total, perClient: RPC_PAGE_NEED[chain] ?? RPC_CLIENT_MAX });
+export const keyedBudget = (chain: RpcChain, first?: KeyedProvider): BudgetLimits => ({ total: (first === undefined ? undefined : RPC_KEYED_TOTAL[chain]?.[first]) ?? RPC_BUDGETS[chain].total, perClient: RPC_PAGE_NEED[chain] ?? RPC_CLIENT_MAX });
 /**
  * The part of each company key's 10 s pace (limits.ts KEYED_PACE: QuickNode 7 a second, dRPC's three keys 20 together,
  * one bucket, counted once) a route's total counts (card helper-serves-many-users-at-once). [design: half: the same keys serve the market-data reads (the
@@ -935,11 +937,17 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   // each chain's first key's plan: RPC_BUDGET_<CHAIN>'s total, else the default; its pace (pacedOf, ownPace) is this
   // plan's second, never the chain's summed total (card helper-serves-many-users-at-once)
   const plans = {} as Record<RpcChain, number>;
+  // card near-seat-pace-fits-one-quote: an existing name's keyed URL (ownPace) keeps the plan with no company's
+  // published rate in it (RPC_KEYED_TOTAL), RPC_BUDGET_<CHAIN>'s total else the default
+  const ownPlans = {} as Record<RpcChain, number>;
   const limits = Object.fromEntries(
     RPC_CHAINS.map((ch) => {
       // a share under what one page draws is refused (RPC_PAGE_NEED), as deploy/redeploy.sh budget_ok refuses it first
-      const b = budgetFromEnv(env, rpcBudgetEnv(ch), upstreams[ch].keyed.length > 0 ? keyedBudget(ch) : RPC_BUDGETS[ch], { minShare: rpcLeastShare(ch), perMethod: true, reserve: RPC_RESERVE[ch] });
+      const ks = upstreams[ch].keyed;
+      const opts = { minShare: rpcLeastShare(ch), perMethod: true, reserve: RPC_RESERVE[ch] };
+      const b = budgetFromEnv(env, rpcBudgetEnv(ch), ks.length > 0 ? keyedBudget(ch, KEYED_PROVIDER[ks[0]!.env]) : RPC_BUDGETS[ch], opts);
       plans[ch] = b.total;
+      ownPlans[ch] = ks.length > 0 ? budgetFromEnv(env, rpcBudgetEnv(ch), keyedBudget(ch), opts).total : b.total;
       // the route's total: the first key's plan and its share of each company key it holds (summedTotal)
       const total = summedTotal(ch, upstreams[ch].keyed, b.total, b.perClient, env);
       return [ch, { ...b, total, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(total) }];
@@ -998,7 +1006,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   /** An existing name's URL on a chain whose reads were paced by its chain's pacer before the walk (NEAR_RPC_URL and
    *  NEAR_RPC_URL_B; call() paces the first): its sends a second there, else 0. An EVM chain's walk never paced them. */
   const ownPace = (c: RpcChain, url: string): number =>
-    !EVM_CHAINS.has(c) && upstreams[c].keyed.some((k) => k.url === url && KEYED_PROVIDER[k.env] === undefined) ? Math.max(1, Math.ceil(plans[c] / (LIMIT_WINDOW_MS / 1000))) : 0;
+    !EVM_CHAINS.has(c) && upstreams[c].keyed.some((k) => k.url === url && KEYED_PROVIDER[k.env] === undefined) ? Math.max(1, Math.ceil(ownPlans[c] / (LIMIT_WINDOW_MS / 1000))) : 0;
   /** Whether `c` has a new keyed name set (KEYED_PROVIDER): then every read walks its list (listOf). */
   const walks = (c: RpcChain): boolean => upstreams[c].keyed.some((k) => KEYED_PROVIDER[k.env] !== undefined);
   /** The providers a read on `c` asks, in order: its keyed URLs (else its public fallback first, as before), an EVM chain's
