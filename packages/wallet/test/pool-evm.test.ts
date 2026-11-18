@@ -13,6 +13,8 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createHash } from "node:crypto";
 import { EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaJsonRpc, solanaSameProvider, VaultTree } from "@blindfill/kit";
 import { evmPoolSender } from "../../../apps/helper/src/pool/evm.ts";
+import { evmTwoOperators } from "@blindfill/kit";
+import { evmBindChainFee, evmPeriodChainFee } from "../src/pool/evm.ts";
 import { evmAddress } from "../src/derive/index.ts";
 import { checkPool, TAKE_SLACK_MS } from "../src/pool/pool.ts";
 import { SOL_LADDER } from "../src/pool/solana.ts";
@@ -3918,4 +3920,25 @@ test("card evm-restore-walk-keeps-its-place: a saved place that misses a leaf pa
   const refusing = { getLogs: ({ from }: { from: number }) => { if (from > 900_000) throw new Error("HTTP 403: RPC error -32602: forbidden"); } };
   await assert.rejects(evmTreeSync({ rpcs: pair(c, c, refusing, refusing), pin: PIN, held: bad, ...noWait }).events());
   assert.equal((h as EvmSyncHeld | null)?.to, 950_000n, "kept on a refusal");
+});
+
+// card device-evm-read-residuals (delta review of 1d895550, item 4: the mutant `e.errors.length > 0` survived): a walk that
+// refused with no seat error (its time spent before a side asked any seat) is the walk's own refusal, never a lag, in
+// both fee reads (the bind's chain fee, and the period's: Base reads the pool's size first); one whose every seat error
+// lagged is a lag
+test("a fee walk refused with no seat error is its own refusal, never a lag; every seat error a lag is a lag", async () => {
+  const block = { number: 30n, hash: `0x${"cd".repeat(32)}`, timestamp: 1n, baseFeePerGas: 1n };
+  const urls = ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network"];
+  // a clock that jumps past the walk's budget once the read has started: no seat is asked
+  const spent = () => {
+    let n = 0;
+    return evmTwoOperators(urls.map((url) => ({ url, rpc: Object.assign(async () => assert.fail("no seat is asked"), { url }) as unknown as EvmRpc })), { now: () => (n++ === 0 ? 0 : 1e9) });
+  };
+  const own = (e: unknown) => e instanceof EvmOperatorsUnanswered && e.errors.length === 0 && !(e instanceof EvmLagError) && /none asked/.test(e.message);
+  await assert.rejects(evmBindChainFee(spent(), "base", block, 0), own);
+  await assert.rejects(evmPeriodChainFee(spent(), "base", "0x" + "11".repeat(20), block), own);
+  await assert.rejects(evmBindChainFee(spent(), "robinhood", block, 0), own);
+  // every seat lagging: a lag
+  const lagging = evmTwoOperators(urls.map((url) => ({ url, rpc: Object.assign(async () => Promise.reject(new EvmLagError("behind")), { url }) as unknown as EvmRpc })), { restMs: 0 });
+  await assert.rejects(evmBindChainFee(lagging, "base", block, 0, undefined, async () => {}), (e: unknown) => e instanceof EvmLagError);
 });

@@ -200,14 +200,14 @@ async function fillTimes(r: ReturnType<typeof rig>, only: number[] = TOKENS.map(
   return value;
 }
 
-test("card robinhood-trades-finish-filling: 12 Robinhood coins the discovery finds, opened at once with the helper's tick 8.8 s apart, each at its live coin's trades over the day: the 8 whose newest 50 trades lie in at most 30 of daybreak's 2,000-block spans answer them, filling false, inside the live checks' 45 s, and the 4 spread over 50 spans inside 60 s (red at d59370557: a seeded tape read back only from a tick, a step that read no new block waited the next, each locate waited for a post of its own, and a spread coin asked all its spans at once: six of the eight past 45 s, the slowest at 83 s)", async () => {
+test("card robinhood-spread-tapes-fill-inside-45s: 12 Robinhood coins the discovery finds, opened at once with the helper's tick 8.8 s apart, each at its live coin's trades over the day, every one answers its newest 50 trades, filling false, inside the live checks' 45 s, the 4 spread over 50 of daybreak's 2,000-block spans too (red at cea17ee5f: they took 51.5 to 53.9 s, every named block of theirs a daybreak post at 7 a second; red at d59370557: a seeded tape read back only from a tick, a step that read no new block waited the next, each locate waited for a post of its own, and a spread coin asked all its spans at once: six of the eight dense coins past 45 s, the slowest at 83 s)", async () => {
   const r = rig({});
   const got = await fillTimes(r);
   const line = got.map((g, n) => `${TOKENS[n]!.token.slice(-4)} ${SPANS_OF(n)} spans ${g.ms === null ? `not filled (n${g.n}${g.filling ? " filling" : " settled"})` : `${(g.ms / 1000).toFixed(1)} s`}`).join(", ");
   console.log(`${line}; pool log reads: ${[...r.reads].map(([u, n]) => `${new URL(u).hostname} ${n}`).join(", ")}; posts: ${[...r.posts].map(([u, n]) => `${new URL(u).hostname} ${n}`).join(", ")}`);
   got.forEach((g, n) => {
     assert.notEqual(g.ms, null, `a tape not filled with its newest 50 trades: ${line}`);
-    assert.ok(g.ms! <= (SPANS_OF(n) <= 30 ? FILLED_MS : 60_000), `${TOKENS[n]!.token.slice(-4)} past its bound: ${line}`);
+    assert.ok(g.ms! <= FILLED_MS, `${TOKENS[n]!.token.slice(-4)} past the live checks' 45 s: ${line}`);
   });
   // every swap shown was read from two providers, never the locate's untimed word alone
   assert.ok((r.reads.get(DAYBREAK) ?? 0) > 0 && (r.reads.get(POCKET) ?? 0) > 0, `the read back asked daybreak and pocket: ${[...r.reads].join(" ")}`);
@@ -221,26 +221,27 @@ test("card robinhood-trades-finish-filling: a coin whose locate the chain's own 
   assert.equal(steps, 0, `the day read in ${steps} steps of 10,000 blocks`);
 });
 
-/** Each coin opened alone, at 909222c27 (#943, the located read back before this card) on this rig: its time to its
- *  newest 50 trades, its posts and its pool log reads. */
-const SOLO_909 = [
-  { what: "busy", n: 8, ms: 11_800, posts: 56, reads: 30 },
-  { what: "medium", n: 6, ms: 12_000, posts: 68, reads: 40 },
-  { what: "medium", n: 2, ms: 14_800, posts: 83, reads: 54 },
-  { what: "quiet", n: 7, ms: 17_800, posts: 152, reads: 122 },
+/** Each coin opened alone on this rig at cea17ee5f (main before card robinhood-spread-tapes-fill-inside-45s): its time to
+ *  its newest 50 trades, its posts and its pool log reads (at 909222c27, #943: busy 11.8 s 56 posts 30 reads, medium
+ *  12.0 s 68/40 and 14.8 s 83/54, quiet 17.8 s 152/122). */
+const SOLO_MAIN = [
+  { what: "busy", n: 8, ms: 5_800, posts: 54, reads: 28 },
+  { what: "medium", n: 6, ms: 8_800, posts: 69, reads: 40 },
+  { what: "medium", n: 2, ms: 8_800, posts: 87, reads: 54 },
+  { what: "quiet", n: 7, ms: 15_200, posts: 169, reads: 120 },
 ];
 
-test("card robinhood-trades-finish-filling: a coin opened alone, busy (its newest 50 trades in 6 spans), medium (13 and 18 spans: a few steps past the newest) or quiet (50 spans), fills no later than at 909222c27 and reads no more pool logs; the busy coin sends no more posts (at 909222c27: busy 11.8 s 56 posts 30 reads, medium 12.0 s 68/40 and 14.8 s 83/54, quiet 17.8 s 152/122; now 5.8 s 54/28, 8.8 s 69/40 and 8.8 s 87/54, 15.2 s 169/120: rounds of BACK_ROUND_SPANS cost a medium coin up to 4 posts more, a quiet one 17)", async () => {
-  for (const b of SOLO_909) {
+test("card robinhood-spread-tapes-fill-inside-45s: a coin opened alone, busy (its newest 50 trades in 6 spans), medium (13 and 18 spans) or quiet (50 spans), fills no later than at cea17ee5f and sends no more posts and no more pool log reads (cea17ee5f: busy 5.8 s 54 posts 28 reads, medium 8.8 s 69/40 and 8.8 s 87/54, quiet 15.2 s 169/120; now the same for busy and medium, quiet 8.8 s 82/96: its single-block spans asked six a round, a batch a seat)", async () => {
+  for (const b of SOLO_MAIN) {
     const r = rig({});
     const [g] = await fillTimes(r, [b.n], 120_000);
     const posts = [...r.posts.values()].reduce((x, y) => x + y, 0);
     const reads = [...r.reads.values()].reduce((x, y) => x + y, 0);
-    const line = `${b.what} ${SPANS_OF(b.n)} spans: ${g!.ms === null ? "not filled" : `${(g!.ms / 1000).toFixed(1)} s`}, ${posts} posts, ${reads} pool reads (909222c27: ${(b.ms / 1000).toFixed(1)} s, ${b.posts}, ${b.reads})`;
+    const line = `${b.what} ${SPANS_OF(b.n)} spans: ${g!.ms === null ? "not filled" : `${(g!.ms / 1000).toFixed(1)} s`}, ${posts} posts, ${reads} pool reads (cea17ee5f: ${(b.ms / 1000).toFixed(1)} s, ${b.posts}, ${b.reads})`;
     console.log(line);
-    assert.ok(g!.ms !== null && g!.ms <= b.ms, `slower than at 909222c27: ${line}`);
-    assert.ok(reads <= b.reads, `more pool reads than at 909222c27: ${line}`);
-    if (b.what === "busy") assert.ok(posts <= b.posts, `a busy coin sent more posts than at 909222c27: ${line}`);
+    assert.ok(g!.ms !== null && g!.ms <= b.ms, `slower than at cea17ee5f: ${line}`);
+    assert.ok(reads <= b.reads, `more pool reads than at cea17ee5f: ${line}`);
+    assert.ok(posts <= b.posts, `more posts than at cea17ee5f: ${line}`);
   }
 });
 
