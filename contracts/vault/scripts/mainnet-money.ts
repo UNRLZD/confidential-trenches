@@ -802,9 +802,10 @@ async function go(argv: string[], create: boolean) {
     const before = await balances({ to, F: relayers.withdraw.fee_recipient });
     const priceRpcs = network === "mainnet" ? rpcs : await opened_mainnet_pair();
     const { prover, fee, req } = await requestInOrder({
-      prover: () => {
+      prover: async () => {
         sourceGate("the prover loads and sees the note's secrets");
-        return nodeProver();
+        const prover = await nodeProver();
+        return prover;
       },
       trees: async () => treesOf(await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["leaves", "labels"] })),
       blockNs: () => lowerFinalTime(rpcs),
