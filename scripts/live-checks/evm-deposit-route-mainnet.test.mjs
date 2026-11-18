@@ -44,12 +44,19 @@ test("the excerpt of this build: every mark holds, no wallet reader yet", () => 
 // pool-testnet.ts pageEvmWalletRpc as SIGN_HOST's build minifies it (evm-deposit-on-mainnet.test.mjs plants the same), and
 // its helper address: planted beside the excerpt, which holds neither
 const HELPER_READER =
-  ";var H=`https://ct-api.unrealized.trade`;var pageEvmWalletRpc=(e,t=!1)=>{if(t)return;let n=M.get(e);if(n===void 0){let t=C(H,e);M.set(e,n=Object.assign((e,n)=>t(e,n),{url:`${H}/v1/rpc/${e}`}))}return n};";
+  ";var H=`https://ct-api.unrealized.trade`;var pageEvmWalletRpc=(e,t=!1)=>{if(t)return;let n=M.get(e);if(n===void 0){let t=C(H,e);M.set(e,n=Object.assign((e,n,r)=>t(e,n,r),{url:`${H}/v1/rpc/${e}`}))}return n};";
 
 test("the wallet reader wired (the helper's reader by its name): read as wired, never judged", () => {
   const f = facts(INDEX, JS.replace(/wallet:[\w$]+=>void 0,notes:/, "wallet:pageEvmWalletRpc,notes:") + HELPER_READER);
   assert.equal(f.reader, "wired");
   for (const k of MARKS) assert.equal(f[k], true, k);
+});
+
+test("card signpage-reads-take-the-call-signal: a helper reader that drops the call's signal (or has the old two-argument shape) is not the helper's route: other", () => {
+  for (const [from, to] of [["(e,n,r)=>t(e,n,r)", "(e,n,r)=>t(e,n)"], ["(e,n,r)=>t(e,n,r)", "(e,n)=>t(e,n)"]]) {
+    const f = facts(INDEX, JS.replace(/wallet:[\w$]+=>void 0,notes:/, "wallet:pageEvmWalletRpc,notes:") + HELPER_READER.replace(from, to));
+    assert.equal(f.reader, "other", to);
+  }
 });
 
 test("review P3-4: a wallet reader that is not the helper's route (another function, or the reader with another address) reads other and FAILs on wired", () => {

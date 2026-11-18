@@ -396,7 +396,7 @@ export function tradeKind(host: TradeHost): TradeKind {
         throw e;
       };
       // each provider stays itself to the kit (solanaWrappedRpc): its refusal of two that are one, its URL and its one queue
-      const watched = (rpc: SolanaRpc): SolanaRpc => solanaWrappedRpc(rpc, (method, params) => rpc(method, params).catch(noteDown));
+      const watched = (rpc: SolanaRpc): SolanaRpc => solanaWrappedRpc(rpc, (method, params, signal) => rpc(method, params, signal).catch(noteDown));
       // each stage as it comes: the answer at "sent", the fill stages to the frame at once (before any teardown)
       const onProgress = (stage: SolanaTradeStage): void => {
         if (stage === "signed") write({ stage, txs: signed.slice() });

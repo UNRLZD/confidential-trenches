@@ -423,6 +423,27 @@ test("answered inside the client's 10 s: a read its host holds answers by POOL_S
   }
 });
 
+// card signpage-reads-take-the-call-signal: the bound ends the preview's reads at the provider too, so a held read
+// keeps no host slot or pace token past it
+test("the preview's bound ends every read it still holds at the provider", { timeout: 10_000 }, async (t) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  try {
+    const signals: (AbortSignal | undefined)[] = [];
+    const hold = (url: string) => Object.assign(async (_m: string, _p: readonly unknown[], s?: AbortSignal) => (signals.push(s), new Promise(() => {})), { url });
+    const held = [hold("https://held.example/"), hold("https://held-2.example/")] as unknown as readonly [SolanaRpc, SolanaRpc];
+    let answer: unknown = null;
+    void poolSellDry(deps({ rpcs: () => held }), share(MINT, 5_000)).then((a) => (answer = a));
+    for (let i = 0; i < 5; i++) await null;
+    assert.ok(signals.length > 0 && signals.every((s) => s?.aborted === false), "each read went out with the preview's signal");
+    t.mock.timers.tick(POOL_SELL_DRY_ANSWER_MS);
+    for (let i = 0; i < 20; i++) await null;
+    assert.deepEqual(answer, { error: "busy" });
+    assert.ok(signals.every((s) => s?.aborted === true), "every held read aborted at the bound");
+  } finally {
+    resetTimers(t.mock.timers);
+  }
+});
+
 test("a stopped preview books nothing: N asks with changing shares, then a trade's getMultipleAccounts on the same providers goes out within their answer time (N = 12, 30)", async () => {
   for (const n of [12, 30]) {
     const rec = pair("pump", []);

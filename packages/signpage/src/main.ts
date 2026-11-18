@@ -113,9 +113,9 @@ import { drawWithdrawForm, type GivenWithdraw } from "./withdraw/form.ts";
 import { drawHeldMoveOut, type HeldDeps } from "./withdraw/held.ts";
 import { archivalRpc, heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src/deposit/moveout.ts";
 import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
-import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
+import { FEE_CAP_DRY_KEPT_MS, PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
 import { nearBuyDry, nearBuyKind, nearHoldingsPass, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
-import { dclPoolsKept, rheaPoolsKept } from "./near-pools.ts";
+import { dclPoolsKept, keptDb, rheaPoolsKept, type KeptOptions } from "./near-pools.ts";
 import { nearSeatRpc, paceDb, pacedNearRpc, seatsUp, sharePaces } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm, type GivenPoolWithdraw } from "./withdraw/pool-form.ts";
@@ -643,7 +643,8 @@ else {
     const token = params.token;
     const after = (async () => {
       if (!(await fs.state()).signed_in) return void (answer = { error: "not_funded" });
-      answer = await nearBuyDry(page, token, amount);
+      // a dry's fee takes the device's fee cap read within FEE_CAP_DRY_KEPT_MS (card near-quote-inside-the-kpi)
+      answer = await nearBuyDry({ ...page, fee: (a) => withdrawFormDeps(nearDryVault(), { capKeptMs: FEE_CAP_DRY_KEPT_MS }).fee(a) }, token, amount);
     })().catch(() => void (answer = { error: "failed" }));
     return { running: true, after, answer: () => answer };
   };
@@ -1374,6 +1375,15 @@ function withdrawDeps() {
 // Made at its first use (a tap or the load's settle), never while the module is read: it names the sign out's signal
 // and the seed lock, defined further down.
 let nearPageMade: NearBuyPage | null | undefined;
+/** The kept lists' storage (card near-quote-inside-the-kpi): SIGN_HOST's own IndexedDB, one for the page. */
+let keptMade: KeptOptions | undefined;
+function keptStore(): KeptOptions {
+  return (keptMade ??= typeof indexedDB === "undefined" ? {} : { store: keptDb() });
+}
+/** The vault the NEAR dry's fee reads through: the NEAR buy page's (nearBuyPage), made only once that page is. */
+function nearDryVault() {
+  return { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
+}
 function nearBuyPage(): NearBuyPage | null {
   if (nearPageMade !== undefined) return nearPageMade;
   if (!prover) return (nearPageMade = null);
@@ -1394,8 +1404,9 @@ function nearBuyPage(): NearBuyPage | null {
     settle: () => withdrawSettle(vault()),
     rpcs: () => pair,
     signal: () => withdrawWait.signal,
-    pools: rheaPoolsKept(PAGE_NETWORK, () => pair),
-    dclKept: dclPoolsKept(PAGE_NETWORK, () => pair),
+    // kept across asks and page loads in SIGN_HOST's own storage (card near-quote-inside-the-kpi)
+    pools: rheaPoolsKept(PAGE_NETWORK, () => pair, keptStore()),
+    dclKept: dclPoolsKept(PAGE_NETWORK, () => pair, keptStore()),
     log: (line) => console.info(line),
   });
 }
