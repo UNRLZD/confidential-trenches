@@ -3013,34 +3013,78 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     };
     const owed = async (): Promise<DataAnswer> => (held !== undefined ? serve(held) : empty({ trades: [], filling: true }));
     if (held !== undefined && now() - held.at < TAPE_FRESH_MS) return serve(held);
+    // card evm-vendor-tape-refresh-keyed: a held tape under STALE_MS is renewed as the helper's background read, one
+    // refresh per coin however many callers, as a Solana one is (../solana/token.ts tapes, revalidate); the new rows'
+    // receipts are read before they are held. Inside BEHIND_MAX's ms the held rows are served at once, behind which the
+    // refresh runs; past it the caller waits for that refresh within its bound, then is served the newest rows held, so
+    // a page that opens a coin another reader held up to STALE_MS before is not served rows past the bound while the
+    // vendor answers (a local helper on mainnet served Base 0x1668cd48's at 18.9 s, held 17 s before by another reader,
+    // 18 Nov 15:13:45Z, with the held rows served at once up to STALE_MS). Past STALE_MS the caller's own read
+    if (held !== undefined && now() - held.at <= STALE_MS) {
+      let renew = tapeRenewing.get(token);
+      if (renew === undefined) {
+        renew = lanes
+          .run(newLane(false), async () => {
+            const h = await readTape(token, true);
+            if (h === undefined || h === "none") return;
+            await exacting(token, h.rows.map((r) => r.tx));
+            keepTape(token, h);
+          })
+          .catch(() => undefined)
+          .finally(() => tapeRenewing.delete(token));
+        tapeRenewing.set(token, renew);
+      }
+      if (now() - held.at > BEHIND_MAX[chain].ms) await within(renew, Math.max(0, until - performance.now()));
+      return serve(gtTapes.get(token) ?? held);
+    }
+    const h = await readTape(token, false);
+    if (h === "none") return none;
+    if (h === undefined) return owed();
+    keepTape(token, h);
+    return serve(h);
+  }
+  /** The refresh running behind a held vendor tape's rows (noneTrades), one per coin. */
+  const tapeRenewing = new Map<string, Promise<void>>();
+  const keepTape = (token: string, h: { at: number; rows: TapeRow[]; src: ChartSrc }): void => {
+    if (!gtTapes.has(token) && gtTapes.size >= POOLS_MAX) gtTapes.delete(gtTapes.keys().next().value!);
+    gtTapes.set(token, h);
+  };
+  /** A vendor tape's read: its top pool (held GT_POOL_FRESH_MS) and that pool's newest trades, CoinGecko's keyed API
+   *  first, else GeckoTerminal's keyless one; "none" when the vendor names no pool, undefined when the read was refused
+   *  or failed. `background`: the refresh behind a held tape's rows, which no caller waits on. */
+  async function readTape(token: string, background: boolean): Promise<{ at: number; rows: TapeRow[]; src: ChartSrc } | "none" | undefined> {
+    const held = gtTapes.has(token);
     let p = gtPools.get(token);
     if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
       const keyedPool = p === undefined ? await keyedPoolOf(token) : undefined;
       if (keyedPool !== undefined) p = keyedPool;
       else if (await gtTake(p === undefined ? "pages" : "refresh", `${chain} pool`)) {
         const got = await readPool(token);
-        if (got === null) return none;
+        if (got === null) return "none";
         if (got !== "throttled" && got !== "failed") p = got;
       }
     }
-    if (p === undefined) return owed();
-    if (p.id === null) return none;
+    if (p === undefined) return undefined;
+    if (p.id === null) return "none";
     const path = `/networks/${chain}/pools/${p.id}/trades?token=${token}`;
     const rowsOf = (j: unknown) => toTape(j, token, TAPE_MAX, now(), EVM_IDS);
     let src: ChartSrc = CG_SRC;
-    // a held tape's refresh never spends the key (../solana/token.ts KEYED_COLD_ONLY): read every TAPE_FRESH_MS while
-    // a page watches it, it spent the key's day in hours
-    let j: unknown = deps.keyed == null || held !== undefined ? undefined : await deps.keyed.read(path, (x) => rowsOf(x) !== null);
+    // card evm-vendor-tape-refresh-keyed: the refresh behind a held tape's rows asks the key first as the helper's
+    // background read (../coingecko.ts: it stops CALLER_DAY_ROOM short of the key's day, so a cold read always finds the
+    // callers' share, and waits CG_BACKGROUND_TIMEOUT_MS), then the keyless refresh lane. It went keyless only
+    // (KEYED_COLD_ONLY), and the keyless window has no room for it: the deployed helper's minute lines 18 Nov
+    // 12:56-13:48Z stood at 3 of 5, the refresh lane's cap, so no held tape was renewed (Solana: 0 refreshes in 52
+    // minutes, card sol-vendor-tape-refresh-lands) and its rows aged without bound. Its cost: one call a TAPE_FRESH_MS
+    // per coin a page holds, inside the background day; past it the refresh goes keyless and the tape names its age
+    // with no reach claimed (BEHIND_MAX). A read a caller waits on (cold, or held past STALE_MS) is the callers'
+    let j: unknown = deps.keyed == null ? undefined : await deps.keyed.read(path, (x) => rowsOf(x) !== null, background);
     if (j === undefined) {
       src = "geckoterminal";
-      j = (await gtTake(held === undefined ? "pages" : "refresh", `${chain} trades`)) ? await gtJson(path) : undefined;
+      j = (await gtTake(held ? "refresh" : "pages", `${chain} trades`)) ? await gtJson(path) : undefined;
     }
     const rows = j === undefined || j === "failed" ? null : j === null ? [] : rowsOf(j);
-    if (rows === null) return owed();
-    const h = { at: now(), rows, src };
-    if (gtTapes.size >= POOLS_MAX) gtTapes.delete(gtTapes.keys().next().value!);
-    gtTapes.set(token, h);
-    return serve(h);
+    if (rows === null) return undefined;
+    return { at: now(), rows, src };
   }
   /** Each vendor row's receipt facts (vendor-rows.ts), by "token tx": "none" when two providers gave its receipt and it
    *  shows no successful transaction of that hash; bounded as the traders are. */
