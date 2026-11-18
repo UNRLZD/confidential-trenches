@@ -86,11 +86,12 @@ const esc = (n) => n.replace(/[$]/g, "\\$");
 // broken real one matches twice, or the real one's call site names another function
 const once = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length === 1;
 // step 5's reader of an id, bound to its call site: the U_X reader `R` is the reader argument of the scope's
-// restoreDepositIds call right after it (its lane order after it: card restore-first-sign-in-under-two-minutes), and it notes each id NEAR reads as money (`D`) for the held reads below
+// restoreDepositIds call right after it (its lane order after it: card restore-first-sign-in-under-two-minutes), and it notes each id NEAR reads as money (`D`) for the held reads below;
+// since card restore-shows-a-note-on-a-planned-index `R` may reach the call through its used-id take on the same scope
 const UX_READ = new RegExp(
   `,(${N})=async\\((${N}),(${N})\\)=>\\{if\\(\\3===void 0\\)throw Error\\(${Q}no deposit index for its U_X${Q}\\);let (${N})=await ${N}\\(${N},${N},(${N})\\.scope,\\3,\\2\\),` +
     `\\[(${N}),\\[(${N}),(${N})\\]\\]=await Promise\\.all\\(\\[${N}\\(\\2,\\3\\),(${N})\\.balances\\(\\{u:\\4\\}\\)\\]\\);if\\(\\6===${Q}money${Q}&&(${N})\\.set\\(\\3,\\2\\),\\7!==\\8\\)throw Error\\(${Q}its U_X reads [^${Q}]*${Q}\\);` +
-    `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},\\1,await ${N}\\(\\5\\.scope,\\5\\.notes\\)\\);`,
+    `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},(?:\\1|${N}\\(${N},\\5\\.scope,\\1\\)),await ${N}\\(\\5\\.scope,\\5\\.notes\\)\\);`,
 );
 // (card deposit-takes-each-pools-own-coin, delta review r3 P2-1: what each read leaves at U_X is written as its op's
 // left, `L`: 0 before a deposit is sent, the last read when what is left is under one deposit's floor)

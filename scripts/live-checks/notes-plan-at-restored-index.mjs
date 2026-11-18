@@ -51,7 +51,8 @@ const MARKED = (h) => new RegExp(`await (${N})\\.update\\(${Q}meta${Q},(${N}),[^
 // the mark's key, and planDeposit's one unfunded index leaving each marked note out
 const MARK = (k) => new RegExp(`[,; ]${esc(k)}=${Q}owed/found-deposits${Q}`);
 const UNFUNDED = (k) =>
-  new RegExp(`(${N})=(${N})\\(await ${N}\\.get\\(${Q}meta${Q},${esc(k)}\\)\\),(${N})=${N}\\.filter\\((${N})=>\\4\\.ref\\.kind===${Q}deposit${Q}&&\\4\\.scope===${N}&&\\4\\.state===${Q}PLANNED${Q}&&!\\1\\.has\\(${N}\\(\\4\\.ref\\)\\)\\);if\\(\\3\\.length>1\\)throw Error`);
+  // (card restore-shows-a-note-on-a-planned-index: the skip set read beside it and left out after it, optional)
+  new RegExp(`(${N})=(${N})\\(await ${N}\\.get\\(${Q}meta${Q},${esc(k)}\\)\\),(?:${N}=${N}\\(await ${N}\\.get\\(${Q}meta${Q},${N}\\)\\),)?(${N})=${N}\\.filter\\((${N})=>\\4\\.ref\\.kind===${Q}deposit${Q}&&\\4\\.scope===${N}&&\\4\\.state===${Q}PLANNED${Q}&&!\\1\\.has\\(${N}\\(\\4\\.ref\\)\\)(?:&&!${N}\\.has\\(${N}\\(\\4\\.ref\\)\\))?\\);if\\(\\3\\.length>1\\)throw Error`);
 // step 5's `found`: the note store opened under the seed's use, planFound with the seed's precommitment and the balances
 const WIRED = new RegExp(
   `found:\\((${N}),(${N}),(${N})\\)=>${N}\\(async (${N})=>\\{let (${N})=await ${N}\\(await ${N}\\.store\\(\\)\\);try\\{await \\5\\.planFound\\(\\1,\\2,(${N})=>${N}\\(\\4,\\6\\)\\.precommitment,\\{s:\\1,i:\\2,amounts:\\3\\}\\)\\}finally\\{\\5\\.close\\(\\)\\}\\}\\)`,

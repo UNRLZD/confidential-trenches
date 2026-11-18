@@ -4,6 +4,9 @@
 // tab A showed "Cancelled" beside an account already stored. Here the sheet stands in for both: while it is up the
 // other tab stores its seed (the wallet's own insert-only signInPrf on the same store), then the sheet answers
 // NotAllowedError. The page lands on the stored seed, signed in as the other tab's account, the seed unchanged.
+// The other tab's channel event is held until the page's Create has ended (heldPosts): the order a slow scheduler gave
+// merge queue run 44258172994 ('cancelled' at 374 ms), where the event came after the sheet's end was drawn. The page
+// reads its store before it draws that end, so it never waits on the event.
 //   node --test test/main-create-race.test.ts      (from packages/signpage)
 import { doc, press, root, sendRaw, until } from "./main-dom.ts";
 import assert from "node:assert/strict";
@@ -11,6 +14,19 @@ import { test } from "node:test";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { signInPrf } from "../../wallet/src/signin/words.ts";
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
+
+// every BroadcastChannel post (the other tab's "seed written") held until released, then sent in order
+const realPost = BroadcastChannel.prototype.postMessage;
+let heldPosts: (() => void)[] | null = null;
+BroadcastChannel.prototype.postMessage = function (this: BroadcastChannel, m: unknown) {
+  if (heldPosts) heldPosts.push(() => realPost.call(this, m));
+  else realPost.call(this, m);
+};
+const releasePosts = () => {
+  const q = heldPosts ?? [];
+  heldPosts = null;
+  for (const send of q) send();
+};
 
 test("main.ts: Create refused by the browser while another tab stored its seed lands on that seed, signed in, never Cancelled", async () => {
   let stored: number | null = null;
@@ -32,9 +48,19 @@ test("main.ts: Create refused by the browser while another tab stored its seed l
   doc.body.children.find((c) => c.tagName === "iframe")!.dispatchEvent(new Event("load"));
   sendRaw({ v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION });
   await until("the page signed out", () => root()?.dataset.signin === "signed-out");
+  // every screen the page draws from the tap on, not only the one a poll happens to read
+  const drawn: string[] = [];
+  const r = root();
+  r.dataset = new Proxy(r.dataset, { set: (t, k, v) => ((k === "signin" && drawn.push(v)), (t[k as string] = v), true) });
+  heldPosts = [];
   press("create");
   await until("Create ended", () => root()?.dataset.signin !== "signed-out" && root()?.dataset.signin !== "loading", 5000);
-  assert.equal(root().dataset.signin, "signed-in");
+  const ended = root().dataset.signin;
+  // the event the page did not wait on comes now
+  assert.ok((heldPosts?.length ?? 0) > 0, "the other tab's write posted on the channel");
+  releasePosts();
+  assert.deepEqual(drawn.filter((d) => ["cancelled", "no-prf", "error"].includes(d)), [], `drawn: ${drawn.join(" > ")}`);
+  assert.equal(ended, "signed-in");
   assert.match(root().dataset.account ?? "", /^[0-9a-f]{64}$/);
   // the other tab's seed is the one stored, never replaced
   const s = await openWalletStore({});

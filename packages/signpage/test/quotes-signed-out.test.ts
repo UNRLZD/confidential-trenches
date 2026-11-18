@@ -101,6 +101,7 @@ async function host(page: { stopped: () => AbortSignal }, records: () => boolean
   const { depositQuoteHost } = await import("../src/deposit-wire.ts");
   const sent: unknown[] = [];
   const quote = depositQuoteHost({
+    quoted: async () => {},
     scope: () => 7n,
     read: async () => (records() ? RECORD : null),
     fetch: (async (_url: string, init: RequestInit) => {
