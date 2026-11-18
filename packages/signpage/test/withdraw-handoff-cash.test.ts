@@ -231,7 +231,9 @@ test("a re-quoted request the relayer still refuses fee_too_low: the tap ends on
   const refused: HandoffOver["relay"] = async (_seed, req) => {
     c.sent.push(req);
     c.answers.push("fee_too_low");
-    return { kind: "expired", note: (await v.ns.get(req.noteId))!, route: "relayer", lastAnswer: "fee_too_low" };
+    // as relay.ts does at the deadline: the note UNSPENT again, so a hand-off that quoted again could pick it
+    const freed = await v.ns.move(req.noteId, "RESERVED", "UNSPENT", { blockTimeMs: BigInt(req.body.withdrawal.deadline_ms) + 1n });
+    return { kind: "expired", note: freed, route: "relayer", lastAnswer: "fee_too_low" };
   };
   const h = await handoffOf(v, page(v, prover), { ...over(v), relay: refused });
   const end = await h({ recipient: "ab".repeat(32), amount: 1_000_000n }, RELAY_FEE + 1_000n);
