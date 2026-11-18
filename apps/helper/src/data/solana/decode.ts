@@ -278,10 +278,10 @@ function dlmmTrade(b: Buffer): RawTrade | null {
   return { venue: "meteora-dlmm", mint: null, pool: key(b, 0), side: forY === 1 ? "s" : "b", amt, quote, quoteMint: null, user: key(b, 32), ts: 0 };
 }
 
-/** The event's clock (u64 unix seconds), or null past a safe integer. */
-const clock = (b: Buffer, o: number): number | null => {
+/** The event's clock (u64 unix seconds), or 0 (the reader dates the trade by its block) past a safe integer. */
+const clock = (b: Buffer, o: number): number => {
   const t = b.readBigUInt64LE(o);
-  return t > 0n && t <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(t) : null;
+  return t <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(t) : 0;
 };
 
 /** A Meteora DBC `EvtSwap2` body, told as the pool's base mint sees it, or null. */
@@ -292,7 +292,7 @@ function dbcTrade(b: Buffer): RawTrade | null {
   const took = b.readBigUInt64LE(83);
   const paid = b.readBigUInt64LE(107);
   const ts = clock(b, 171);
-  if (took <= 0n || paid <= 0n || ts === null) return null;
+  if (took <= 0n || paid <= 0n) return null;
   const [amt, quote] = dir === 1 ? [paid, took] : [took, paid];
   return { venue: "meteora-dbc", mint: null, pool: key(b, 0), config: key(b, 32), side: dir === 1 ? "b" : "s", amt, quote, quoteMint: null, user: "", ts };
 }
@@ -305,7 +305,7 @@ function damm2Trade(b: Buffer): RawTrade | null {
   const took = b.readBigUInt64LE(52);
   const paid = b.readBigUInt64LE(76);
   const ts = clock(b, 156);
-  if (took <= 0n || paid <= 0n || ts === null) return null;
+  if (took <= 0n || paid <= 0n) return null;
   const [amt, quote] = dir === 0 ? [took, paid] : [paid, took];
   return { venue: "meteora-damm2", mint: null, pool: key(b, 0), side: dir === 0 ? "s" : "b", amt, quote, quoteMint: null, user: "", ts };
 }

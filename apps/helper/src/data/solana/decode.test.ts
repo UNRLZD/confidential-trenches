@@ -353,6 +353,11 @@ test("card index-sol-trades-2: Meteora DAMM v2: an `EvtSwap2` is a trade told as
   const zero = Buffer.from(damm);
   zero.fill(0, 8 + 76, 8 + 84); // output_amount 0
   assert.equal(decodeEvent(METEORA_DAMM2, zero), null);
+  // a clock past a safe integer is no clock: the trade stays, dated by its block (ts 0)
+  const late = Buffer.from(damm);
+  late.writeBigUInt64LE(2n ** 63n, 8 + 156);
+  assert.equal(decodeEvent(METEORA_DAMM2, late)?.ts, 0);
+  assert.equal(decodeEvent(METEORA_DAMM2, damm)?.ts, 1795011890);
 });
 
 test("card index-sol-trades-2: a Meteora event CPI made by another program is no trade", () => {
