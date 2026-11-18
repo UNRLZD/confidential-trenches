@@ -225,7 +225,7 @@ async function listed(lister: SolanaRpc, rpcs: readonly [SolanaRpc, SolanaRpc], 
       };
       const one = async (part: string[]): Promise<string[]> => {
         signal.throwIfAborted();
-        const a = (await solanaLagRetry(() => rpcs[k]("getMultipleAccounts", [part, { commitment: "finalized", encoding: "base64", ...(at > 0 ? { minContextSlot: at } : {}) }]), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
+        const a = (await solanaLagRetry(() => rpcs[k]("getMultipleAccounts", [part, { commitment: "finalized", encoding: "base64", ...(at > 0 ? { minContextSlot: at } : {}) }], signal), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
         const slot = a?.context?.slot;
         if (!Number.isSafeInteger(slot) || (slot as number) < at || !Array.isArray(a.value) || a.value.length !== part.length) throw new Error(`rpc ${k}: getMultipleAccounts: not one account per listed mark at or past slot ${at}`);
         slots[k] = Math.max(slots[k]!, slot as number);

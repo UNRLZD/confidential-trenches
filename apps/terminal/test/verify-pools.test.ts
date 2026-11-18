@@ -345,3 +345,29 @@ test("the deploy check allows exactly Solana's list in connect-src", async () =>
   const { SOLANA_RPCS } = await import("../scripts/check-deploy.ts");
   assert.deepEqual(SOLANA_RPCS, [...PINS.solana!.rpcs]);
 });
+
+// card kit-rpc-client-takes-a-signal: the page's budget (the caller's signal, and inside it the kit walk's cut) reaches
+// every fetch it starts, so a hung operator's request ends at the provider, never held past the read
+test("a Verify read given up on ends every hung request at the provider: each fetch sees the abort", { timeout: 10_000 }, async () => {
+  forgetPoolWalks();
+  let asked = 0;
+  const aborted: unknown[] = [];
+  const fetchFn = ((_url: string, init: RequestInit) => {
+    asked++;
+    return new Promise<never>((_, rej) => {
+      const s = init.signal!;
+      s.addEventListener("abort", () => (aborted.push(s.reason), rej(s.reason)), { once: true });
+    });
+  }) as unknown as typeof fetch;
+  const ac = new AbortController();
+  const v = livePools(PINS, fetchFn, ac.signal);
+  for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(asked >= 6, `the three rows' first reads are out (${asked})`);
+  assert.equal(aborted.length, 0, "nothing aborted before the page gave up");
+  const why = new Error("the page left");
+  ac.abort(why);
+  await v;
+  assert.equal(aborted.length, asked, "every request was aborted at the provider");
+  assert.ok(aborted.every((e) => e === why), "with the page's own reason");
+  forgetPoolWalks();
+});
