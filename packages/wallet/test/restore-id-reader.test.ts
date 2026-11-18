@@ -20,7 +20,7 @@ import { ID_READ_TRIES, nearBalanceReader as balanceAt, nearIdReader as idReader
 // the names card wallet-id-reader-paced adds, read off the module, so this file still loads where they are missing and
 // each test that needs one fails on its own
 import * as IDR from "../src/restore/id-reader.ts";
-import { rereadOnOpen, secondScan, type AfterRpc } from "../src/restore/after.ts";
+import { lateFound, rereadOnOpen, secondScan, type AfterRpc } from "../src/restore/after.ts";
 import { afterRestore, DEPOSIT_ID_MARGIN, REREAD_MS, restoreDepositIds as depositIds, type IdReader } from "../src/restore/wallets.ts";
 
 const FAST = "https://rpc.mainnet.fastnear.com";
@@ -492,8 +492,48 @@ test("step 7's owned steps take no reader, pass height or clock: the probe5 ways
   assert.equal(await old(id(11)), "unused", "the restore's reader reads block 1000, before the money");
   const got = await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so });
   assert.ok(got.due);
-  assert.deepEqual(got.ids.find((x) => x.i === 11), { lane: 3, i: 11, id: id(11), state: "money" });
+  assert.deepEqual(got.ids.find((x) => x.i === 11), { lane: 3, i: 11, id: id(11), held: [{ asset: USDC, amounts: [9n, 9n] }] });
   assert.equal(got.ids.length, plan.rereads.length);
+});
+
+// card vault-late-send-carried: a lost store's quote named deposit index 11 (no note on this device), and its money lands
+// under U_{s,11} after the restore's block. The re-read gives each provider's amount by asset, and lateFound takes the
+// token only when both amounts agree above 0: one provider failing, or the two apart, is refused, never one's word.
+test("step 7's late send: an id holding money with no note is found on two agreeing amounts; one provider's read, or two apart, is refused", async () => {
+  const { rpcs, set } = stepPair({ tip: 1000, money: [] });
+  const restored = await openRestorePass("mainnet", rpcs, so);
+  const plan = await afterRestore(SEED, store, SCOPE, await restoreDepositIds(SEED, SCOPE, r5(), await idReaderAt("mainnet", rpcs, restored, so)), restored);
+  assert.ok(plan.rereads.some((x) => x.i === 11), "index 11 holds no note: it is re-read");
+  set({ tip: 1200, money: [id(11)] });
+  const got = await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so });
+  assert.ok(got.due);
+  const x = got.ids.find((y) => y.i === 11)!;
+  assert.deepEqual(lateFound(x, USDC), { found: [9n, 9n], why: [] }, "the planted id's money, two agreeing amounts");
+  for (const y of got.ids.filter((z) => z.i !== 11)) assert.deepEqual(lateFound(y, USDC), { found: null, why: [] }, `index ${y.i} holds nothing`);
+  // the two providers apart: dRPC reads no money at 11
+  set({ tip: 1200, money: [id(11)] }, { tip: 1200, money: [] });
+  const apart = (await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so }) as { ids: Parameters<typeof lateFound>[0][] }).ids.find((y) => y.i === 11)!;
+  assert.deepEqual(apart, { lane: 3, i: 11, id: id(11), held: [{ asset: USDC, amounts: [9n, 0n] }] });
+  assert.deepEqual(lateFound(apart, USDC), { found: null, why: [{ text: `holds 9 and 0 of ${USDC} on NEAR's two RPCs: read again`, retry: true }] });
+  // one provider's read: dRPC fails every balance read, FastNEAR reads the money: no amount, the id named unread
+  set({ tip: 1200, money: [id(11)] });
+  const q1 = rpcs[1].query;
+  Object.assign(rpcs[1], { query: async (p: Record<string, unknown>) => (p.method_name === "ft_balance_of" ? Promise.reject(new Error("HTTP 400")) : q1(p)) });
+  try {
+    const one = (await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so }) as { ids: Parameters<typeof lateFound>[0][] }).ids.find((y) => y.i === 11)!;
+    assert.ok("error" in one && /HTTP 400/.test(one.error), "the read fails on the provider that failed");
+    const r = lateFound(one, USDC);
+    assert.equal(r.found, null);
+    assert.equal(r.why.length, 1);
+    assert.equal(r.why[0]!.retry, true);
+  } finally {
+    Object.assign(rpcs[1], { query: q1 });
+  }
+  // an asset inside intents.near is named, not taken as the token
+  assert.deepEqual(lateFound({ lane: 3, i: 11, id: id(11), held: [{ asset: "nep141:x", amounts: [4n, 4n] }, { asset: USDC, amounts: [9n, 9n] }] }, USDC), {
+    found: [9n, 9n],
+    why: [{ text: "holds 4 of nep141:x inside intents.near, which a restore does not carry yet; it stays under the 12 words", retry: false }],
+  });
 });
 
 test("step 7's re-reads: due for 72 h of block time past the restore's block on both finals, on a pass above it", async () => {
@@ -575,7 +615,7 @@ test("step 7's clock: the pass keeps its block's time from its open, agreed on b
   set({ tip: at21, ...gc }, { tip: at21, ...gcB });
   const got = await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so });
   assert.ok(got.due);
-  assert.deepEqual(got.ids.find((x) => x.i === 11), { lane: 3, i: 11, id: id(11), state: "money" });
+  assert.deepEqual(got.ids.find((x) => x.i === 11), { lane: 3, i: 11, id: id(11), held: [{ asset: USDC, amounts: [9n, 9n] }] });
   // the second scan first run then: due, on a later block's time for the long-gone bound block, and it reads
   const scanned = await secondScan({ seed64: SEED, network: "mainnet", rpcs, restored, wallets: { wallets: [], unread: [] }, gap: 3, opts: { ...so, margin: 2 } });
   assert.ok(scanned.due);

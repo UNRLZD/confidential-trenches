@@ -26,7 +26,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { NEAR_NETWORKS, type NearNetwork } from "../deposit/account.ts";
 import { restoreNotes, type NoteRestore, type RestoreArgs } from "../notes/restore.ts";
 import { restoreArmAccounts, SECOND_SCAN_BLOCKS, SECOND_SCAN_DELIVERY_MS, secondScanBoundHeight, secondScanDue, type ArmRestore, type FinalPair } from "./arms.ts";
-import { headerRetried, isRestorePass, NO_BLOCK, nearBalanceReader, nearIdReader, openRestorePass, passTimeMs, type BlockRpc, type IdReaderOpts, type PassOpts, type RestorePass } from "./id-reader.ts";
+import { headerRetried, isRestorePass, NO_BLOCK, nearBalanceReader, nearIdHeldReader, nearIdReader, openRestorePass, passTimeMs, type BlockRpc, type IdHeld, type IdReaderOpts, type PassOpts, type RestorePass } from "./id-reader.ts";
 import { REREAD_MS, restoreDepositIds, type AfterRestore, type DepositIds, type IdState, type WalletRestore } from "./wallets.ts";
 
 /** A NEAR provider for views (`query`) and block headers (`block`), named by its exact URL (../withdraw/relay.ts relayRpc). */
@@ -90,13 +90,19 @@ function ownPass(restored: unknown, network: NearNetwork, rpcs: readonly [AfterR
   if (!isRestorePass(restored, { network, rpcs })) throw new Error("restored: the pass is not one openRestorePass opened on these RPCs");
 }
 
-/** One re-read: the id's state, or the read's error (the id stays to be read on the next open). */
-export type Reread = { lane: number; i: number; id: string } & ({ state: IdState } | { error: string });
+/**
+ * One re-read: what the id holds by asset on both providers at the re-reads' pass (nearIdHeldReader: each provider's
+ * amount, assets at 0 on both left out), or the read's error (the id stays to be read on the next open). Card
+ * vault-late-send-carried: never one state taken from the stronger of two answers; the caller holds the two amounts to
+ * agree (lateFound) before anything is written on them.
+ */
+export type Reread = { lane: number; i: number; id: string } & ({ held: IdHeld[] } | { error: string });
 export type RereadResult = { due: false } | { due: true; ids: Reread[] };
 
 /**
  * Step 7, on each open: the ids `plan` lists (afterRestore, made on `restored`) read again on a pass of this step's own,
- * above the restore's block, while either provider's final block time is within REREAD_MS of the restore block's.
+ * above the restore's block, while either provider's final block time is within REREAD_MS of the restore block's. Each
+ * id is read by asset on both providers (nearIdHeldReader), so a late send's amount is two providers' word, never one's.
  */
 export async function rereadOnOpen(a: { network: NearNetwork; rpcs: readonly [AfterRpc, AfterRpc]; restored: RestorePass; plan: AfterRestore; opts?: AfterOpts }): Promise<RereadResult> {
   const { network, rpcs, restored, plan } = a;
@@ -107,16 +113,35 @@ export async function rereadOnOpen(a: { network: NearNetwork; rpcs: readonly [Af
   const now = await finalsNow(rpcs, o);
   if (Math.min(...now.timesMs) >= restoreMs + REREAD_MS) return { due: false };
   const pass = await openRestorePass(network, rpcs, passOpts(o, restored.h));
-  const read = await nearIdReader(network, rpcs, pass, readerOpts(o));
+  const read = await nearIdHeldReader(network, rpcs, pass, pick(o));
   const ids: Reread[] = [];
   for (const x of plan.rereads) {
     try {
-      ids.push({ lane: x.lane, i: x.i, id: x.id, state: await read(x.id) });
+      ids.push({ lane: x.lane, i: x.i, id: x.id, held: await read(x.id) });
     } catch (e) {
       ids.push({ lane: x.lane, i: x.i, id: x.id, error: why(e) });
     }
   }
   return { due: true, ids };
+}
+
+/**
+ * What one re-read lets the device do with a late send (card vault-late-send-carried; wallet.md §2.3 step 7 "found and
+ * moved into the vault"): `found`, the network's token (`token`, ft_balance_of on U itself) held above 0 with both
+ * providers' amounts equal, the read the note store's planFound takes; and each reason anything else under the id is
+ * not carried, a read to try again (`retry`: the read failed on either provider, or the two read an asset apart) or a
+ * finding (an asset inside intents.near, which only a refund move carries). One provider's word never makes `found`.
+ */
+export function lateFound(x: Reread, token: string): { found: readonly [bigint, bigint] | null; why: { text: string; retry: boolean }[] } {
+  if ("error" in x) return { found: null, why: [{ text: `its read failed (${x.error}): read again`, retry: true }] };
+  let found: readonly [bigint, bigint] | null = null;
+  const out: { text: string; retry: boolean }[] = [];
+  for (const { asset, amounts: [a, b] } of x.held) {
+    if (a !== b) out.push({ text: `holds ${String(a)} and ${String(b)} of ${asset} on NEAR's two RPCs: read again`, retry: true });
+    else if (asset !== token) out.push({ text: `holds ${String(a)} of ${asset} inside intents.near, which a restore does not carry yet; it stays under the 12 words`, retry: false });
+    else if (a > 0n) found = [a, b] as const;
+  }
+  return { found, why: out };
 }
 
 export type SecondScanResult = { due: false } | { due: true; notes: NoteRestore; ids: DepositIds; arms: ArmRestore };
