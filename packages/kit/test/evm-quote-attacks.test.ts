@@ -8574,9 +8574,7 @@ const qeFive = (on: { pools: ModelPool[]; failing: boolean }) => {
 test("FH1 a provider that answers HTTP 500 to its first exact-out batch is asked no further batch of the round: its batches go to the next provider at once", { timeout: 20_000 }, sixACall(async () => {
   const { pools, logs, req } = qeCase(freshToken(), 0x2000);
   const { asks, second, rpcs } = qeFive({ pools, failing: true });
-  const t = performance.now();
   const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
-  const ms = performance.now() - t;
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
   const distinct = asks[0]!;
   assert.ok(distinct > 4 * 18, `${distinct} exact-out reads: more batches than the provider's gate sends at once`);
@@ -8586,8 +8584,9 @@ test("FH1 a provider that answers HTTP 500 to its first exact-out batch is asked
   assert.ok(asks[1]! <= 2 * 18, `the failed provider was sent ${asks[1]} exact-out reads, its gate's 2 batches at most`);
   // every read is still answered by two providers: the spares carry every batch the failed one was given
   assert.ok(asks[2]! + asks[3]! >= distinct, `the spares are asked ${asks[2]! + asks[3]!} exact-out reads of ${distinct}`);
-  // the round pays one failed read's time (1,057 ms), never one per batch it was given
-  assert.ok(ms < 1_057 * 3, `the quote took ${Math.round(ms)} ms`);
+  // the round pays one failed read's time (1,057 ms), never one per batch it was given: counted as the work it stands
+  // for (no batch sent after the 500, at most the gate's 2 in flight beside it), never as the machine's elapsed time
+  // (scripts/ci/no-wall-clock-asserts.mjs)
 }));
 
 test("FH2 a provider that answers 429 to an exact-out batch keeps the throttle's rule: that request moves to the next at once, never asked of it again, and the round's later batches are still sent to it", { timeout: 20_000 }, sixACall(async () => {
