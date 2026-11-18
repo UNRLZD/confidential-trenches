@@ -318,7 +318,15 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
 export const HANDOFF_QUOTE_TRIES = 3;
 /** Blocks the quote must stay open past both providers' final heights when the proof is made: the relay's first round
  *  (the pages, the block time and the fee cap, on the seat) and its send. 30 blocks, about 17 s at mainnet's 0.566 s a
- *  block (224567754 to 224569370 in 915 s, read 14 Nov 21:15Z), against the helper's 100-block window. */
+ *  block (224567754 to 224569370 in 915 s, read 14 Nov 21:15Z). The helper's window was 100 blocks then and is 1,200 since
+ *  card near-cash-pays-any-amount (apps/helper/src/withdraw/fee.ts FEE_QUOTE_WINDOW_BLOCKS): asked after T, it outlives
+ *  the request's last send (deadline_ms - WITHDRAW_SEND_MARGIN_MS, at most T + 480 s) while NEAR's blocks take the
+ *  helper's FEE_BLOCK_MS_MIN, 0.5 s, or more: (1,200 - 120) x 0.5 = 540 s covers the 480 s, the quote's block up to about
+ *  41 s old (MAX_FINAL_AGE_MS 30 s, the reads after it, FEE_CACHE_MS) and the POST's own reads (RELAY_TIMEOUT_MS 10 s),
+ *  the 120 being the blocks the device's pages block may stand behind the pair's higher final (the kit's
+ *  VAULT_SYNC_LAG_MAX); at mainnet's 0.566 s about 1,060 of the 1,200 blocks are used,
+ *  so this check now holds only a tap whose reads and proof outlast the window. A re-quote is made only here, before
+ *  RESERVED: a request sent and refused (fee_too_low) stands, and its deadline frees the note (card wallet-withdraw-requote). */
 export const HANDOFF_QUOTE_MARGIN_BLOCKS = 30;
 /** A quote whose window closes before its request could be sent: the request is made again on a fresh one. */
 export class QuoteStale extends Error {
