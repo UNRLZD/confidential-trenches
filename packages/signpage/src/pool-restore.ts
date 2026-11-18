@@ -1388,6 +1388,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         signal.throwIfAborted();
         // the wait the user sees ends here: their notes are back, shown and spendable
         const stage: RestoreStage = why.length > 0 ? "stalled" : "done";
+        // step 5 reads the ids from here (once another tab's lets the ids lock go, and past the marker's next): a request
+        // that joins from now on is read for again once this run ends (start's follow; review of 4f6e75ad9 P2: a Sync
+        // that joined while this run waited for the lock was told the old walk's end and read for by none)
+        if (ids !== null && idsOwed && (walked.length > 0 || vaultIds !== null)) run.reading = true;
         end(stage);
         step5 = async (): Promise<void> => {
 
@@ -1536,8 +1540,6 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // open would ask
         const wait = step5Wait(marker, now());
         if (wait > 0) await pause(wait, signal);
-        // from here the ids are read: a request that joins now is read for again once this run ends (start's follow)
-        run.reading = true;
         for (let t = 1; ; t++) {
           const out: Step5Reasons = { retry: [], held: [], named: [] };
           stays = walkFailed;

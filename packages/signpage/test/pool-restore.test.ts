@@ -2263,6 +2263,34 @@ test("restore-residuals ze2: a Sync that joins a running id read is told the wal
   assert.deepEqual((await restoreOps(w.store)).map((x) => x.stage), ["done", "done"], "one op a request, nothing more told");
 });
 
+test("restore-residuals ze2 (review of 4f6e75ad9 P2): a Sync that joins while this tab's step 5 waits for another tab's is read for by a walk of its own once that run ends; a sign out meanwhile starts none", async (t) => {
+  usedMap = new Map();
+  for (const out of [false, true]) {
+    const n = nearOf();
+    const g = gated(n);
+    const w = await vworld(t, { pools: () => SOL_ONLY, solana: emptyWalk, ids: g.ids, ux: () => uxOf(new Map()).reads });
+    assert.equal(await w.r.auto(), "done");
+    await until("tab 1's step 5 reading", () => g.asked() > 0, 5_000);
+    let walks = 0;
+    const tab2 = poolRestore({ ...w.host, solana: (async () => (walks++, { notes: [], spends: [] })) as never, ids: nearOf().ids, ux: () => uxOf(new Map()).reads, ended: () => {}, step5: () => {} });
+    const a = api(tab2.kind);
+    try {
+      const first = a.ask();
+      await until("tab 2 answered", () => a.posted.some((m) => m.id === first && m.stage === "done"), 5_000);
+      await until("tab 2's step 5 waits for tab 1's", async () => ((await navigator.locks.query()).pending ?? []).some((l) => l.name === K.RESTORE_IDS_LOCK), 5_000);
+      // a deposit from another device lands; the user taps Sync again while tab 2 waits
+      const second = a.ask();
+      await until("the second Sync answered", () => a.posted.some((m) => m.id === second && m.stage === "done"), 5_000);
+      if (out) tab2.signedOut();
+    } finally {
+      g.open();
+    }
+    await w.r.idle();
+    await tab2.idle();
+    assert.equal(walks, out ? 1 : 2, out ? "signed out: no walk after it" : "the second Sync walked on its own once tab 2's run ended");
+  }
+});
+
 test("restore-residuals: a run never skips a lane another run kept: its marker taken over during its step 5 (another tab's Sync), it reads every lane", async (t) => {
   usedMap = new Map();
   const probe = await vworld(t, {});

@@ -167,6 +167,8 @@ const M = [
   ["ze1: a part lane matched on its highest note alone", PRS, [["nh === (laneHighest[l] ?? null) && nc === laneCount[l])", "nh === (laneHighest[l] ?? null))"]], PRT, "restore-residuals ze1"],
   ["ze2: a step 5 another tab holds is skipped", PRS, [['{ mode: "exclusive", signal }, async () => {\n              signal.throwIfAborted();', '{ mode: "exclusive", ifAvailable: true }, async (l) => {\n              if (l === null) return;\n              signal.throwIfAborted();']], PRT, "P2-4"],
   ["ze2: a request joining a running id read not read for again", PRS, [["          if (state.reading) again = true;\n", ""]], PRT, "restore-residuals ze2"],
+  ["ze2 (review of 4f6e75ad9 P2): a run not reading for joined requests until it holds the ids lock", PRS, [["        if (ids !== null && idsOwed && (walked.length > 0 || vaultIds !== null)) run.reading = true;\n", ""]], PRT, "review of 4f6e75ad9"],
+  ["ze2: a joined request's run started after a sign out", PRS, [["if (again && epoch === e && !ctl.signal.aborted && run === null)", "if (again && run === null)"]], PRT, "review of 4f6e75ad9"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
 const only = process.argv[2];
