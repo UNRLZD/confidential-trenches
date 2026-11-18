@@ -135,7 +135,7 @@ const M = [
   ["planFound: one provider's read taken", STORE, [["a.length !== 2 ||", "a.length < 1 ||"], ["  if (a[0] !== a[1]) throw", "  if (a.length === 2 && a[0] !== a[1]) throw"]], FOUND, "notes-plan-at-restored-index"],
   ["planFound: two providers apart taken", STORE, [["  if (a[0] !== a[1]) throw", "  if (false) throw"]], FOUND, "notes-plan-at-restored-index"],
   ["planFound: a read of no money taken", STORE, [["  if (a[0]! <= 0n) throw", "  if (false) throw"]], FOUND, "notes-plan-at-restored-index"],
-  ["planDeposit counts a found note as the scope's unfunded index", STORE, [[' && n.state === "PLANNED" && !found.has(refKey(n.ref)));', ' && n.state === "PLANNED");']], FOUND, "notes-plan-at-restored-index"],
+  ["planDeposit counts a found note as the scope's unfunded index", STORE, [[' && n.state === "PLANNED" && !found.has(refKey(n.ref)) && !skipped.has(refKey(n.ref)));', ' && n.state === "PLANNED" && !skipped.has(refKey(n.ref)));']], FOUND, "notes-plan-at-restored-index"],
   ["the restore names a U_X with no note, never writes its note", PRS, [["has.has(f.i) || ((amounts) => own.found(w.scope, f.i, amounts))", "has.has(f.i)"]], PRT, "notes-plan-at-restored-index"],
   ["carryUx deposits from a U_X with no note written", PRS, [["        await noted([a, b]);", "        void 0;"]], PRT, "notes-plan-at-restored-index"],
   // card vault-late-send-carried: each refusal of a late send's amount (after.ts lateFound) and the page's vault carry

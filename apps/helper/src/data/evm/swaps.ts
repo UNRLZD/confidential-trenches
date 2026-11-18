@@ -83,6 +83,7 @@ import { HELD_WAIT_MS, isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCand
 import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
+import { openIndexStore } from "./index-store.ts";
 import { exactRow, receiptFacts, type Facts } from "./vendor-rows.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -1052,7 +1053,7 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null; indexFile?: string; writable?: Promise<unknown> }) {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const doFetch = deps.fetch ?? fetch;
@@ -2133,7 +2134,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  each is read once and shared by every tape and tick (fold 5). */
   const called = new Map<string, string>();
   /** The chain's swaps, read chain-wide once for every tape, tick and list (index.ts, fold 6), over the blocks a tape
-   *  and its ETH price read; null on a chain with no two providers that take a filter with no address (INDEX_RPCS). */
+   *  and its ETH price read; null on a chain with no two providers that take a filter with no address (INDEX_RPCS).
+   *  Card helper-evm-tapes-survive-a-restart: kept on disk at `indexFile` (index-store.ts), written once `writable`. */
   const index: SwapIndex | null =
     deps.index === undefined || deps.index.length < 2
       ? null
@@ -2142,6 +2144,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           read: (lo, hi) => agreedRangeOwn(deps.index!, (a, b) => ({ topics: [INDEX_TOPICS], fromBlock: `0x${a.toString(16)}`, toBlock: `0x${b.toString(16)}` }), lo, hi, true),
           window: V.cold + V.refBack + INDEX_SLACK,
           chunk: 1_000,
+          ...(deps.indexFile === undefined ? {} : { store: openIndexStore(deps.indexFile, INDEX_TOPICS, log), log }),
+          ...(deps.writable === undefined ? {} : { writable: deps.writable }),
         });
   /** The index read up to the agreed head: at boot the newest window (readiness does not wait on it), then every
    *  INDEX_FOLLOW_MS the blocks since, one read for every caller (upTo). */
@@ -3399,6 +3403,33 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return more === undefined && POOL_ID.test(id ?? "") && Object.hasOwn(GT_TF, tf ?? "") && (withBefore ? before !== undefined && /^(|[1-9]\d{0,10})$/.test(before) : before === undefined);
   };
   const timed = (at: unknown, t: number, maxAgeMs: number): at is number => typeof at === "number" && Number.isFinite(at) && at <= t && t - at <= maxAgeMs;
+  /** A handed-over main pool (card helper-evm-tapes-survive-a-restart), checked field by field as Pool types it: its
+   *  key is its token, its venue, quote and log one of ours, its id an address or a v4 id (a v4 pool's alone the
+   *  latter), a hook a v4 pool's address, siblings v4 ids, decimals in createBook's range. */
+  const POOL_FIELDS = new Set(["venue", "id", "token", "tokenIs0", "quote", "hook", "siblings", "log"]);
+  const decimalsOk = (d: unknown): d is number => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 77;
+  const isPool = (token: string, v: unknown): v is Pool => {
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+    const p = v as Record<string, unknown>;
+    const q = p.quote as Record<string, unknown> | null | undefined;
+    return (
+      Object.keys(p).every((k) => POOL_FIELDS.has(k)) &&
+      (p.venue === "v4" || p.venue === "v3" || p.venue === "v2" || p.venue === "curve") &&
+      typeof p.id === "string" &&
+      POOL_ID.test(p.id) &&
+      (p.venue === "v4") === (p.id.length === 66) &&
+      p.token === token &&
+      typeof p.tokenIs0 === "boolean" &&
+      typeof q === "object" &&
+      q !== null &&
+      Object.keys(q).length === 2 &&
+      (q.kind === "usd" || q.kind === "eth") &&
+      decimalsOk(q.decimals) &&
+      (p.hook === undefined || (p.venue === "v4" && typeof p.hook === "string" && evmAddress(p.hook) === p.hook)) &&
+      (p.siblings === undefined || (Array.isArray(p.siblings) && p.siblings.length <= HANDOVER_ENTRIES_MAX && p.siblings.every((s) => typeof s === "string" && /^0x[0-9a-f]{64}$/.test(s)))) &&
+      (p.log === undefined || p.log === "pancake" || p.log === "univ2")
+    );
+  };
 
   /** When warm() last tried a pool's chart, whatever it got (bounded as the pools are). */
   const warmed = new Map<string, number>();
@@ -3432,9 +3463,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
      * What this process holds of GeckoTerminal for the chain, as the next one takes it over (card
      * market-reads-hold-under-load, as solana/token.ts state does for Solana): the last good bars per pool and tf, the
      * bars read per range and the top pool of each token our reads find none of, each with its own read time. Newest
-     * first within EVM_HANDOVER_MAX bytes; nothing past the bound its reader serves it within.
+     * first within EVM_HANDOVER_MAX bytes; nothing past the bound its reader serves it within. Card
+     * helper-evm-tapes-survive-a-restart: first, the main pools our discovery found and checked on chain (`found`, kept
+     * POOL_KEEP_MS from their find), so a deploy's next helper opens a listed coin's tape and chart on its pool at once
+     * instead of searching every listed coin's Transfer logs again on the providers the tapes read. A pool taken on the
+     * list's word (`hint`) or a token with none is left out: the next helper decides those itself.
      */
-    state(): { kept: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; history: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; pools: [string, { id: string | null; at: number }][] } {
+    state(): { found: [string, { pool: Pool; decimals: number; at: number }][]; kept: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; history: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; pools: [string, { id: string | null; at: number }][] } {
       const t = now();
       let room = EVM_HANDOVER_MAX;
       const fit = <T>(list: [string, T][]): [string, T][] => {
@@ -3447,7 +3482,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         }
         return out;
       };
+      const found: [string, { pool: Pool; decimals: number; at: number }][] = [];
+      for (const [tk, v] of pools) if (v.found !== null && v.hint === undefined && t - v.at < POOL_KEEP_MS) found.push([tk, { pool: v.found.pool, decimals: v.found.decimals, at: v.at }]);
       return {
+        found: fit(found.slice(-HANDOVER_ENTRIES_MAX)),
         pools: fit([...gtPools].filter(([, v]) => t - v.at <= KEPT_HANDOVER_MS).slice(-HANDOVER_ENTRIES_MAX)),
         kept: fit([...kept].filter(([, v]) => t - v.at <= KEPT_HANDOVER_MS).slice(-HANDOVER_ENTRIES_MAX)),
         history: fit([...history].filter(([, v]) => t - v.at <= GT_FRESH_MS).slice(-HANDOVER_ENTRIES_MAX)),
@@ -3465,16 +3503,24 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (o === null) return false;
       const t = now();
       const list = (v: unknown): unknown[] | null => (v === undefined ? [] : Array.isArray(v) && v.length <= HANDOVER_ENTRIES_MAX ? v : null);
-      const [p, k, h] = [list(o.pools), list(o.kept), list(o.history)];
-      if (p === null || k === null || h === null) return false;
+      const [f, p, k, h] = [list(o.found), list(o.pools), list(o.kept), list(o.history)];
+      if (f === null || p === null || k === null || h === null) return false;
       const pairs = (l: unknown[]) => l.every((e) => Array.isArray(e) && e.length === 2 && typeof e[0] === "string" && typeof e[1] === "object" && e[1] !== null);
-      if (!pairs(p) || !pairs(k) || !pairs(h)) return false;
+      if (!pairs(f) || !pairs(p) || !pairs(k) || !pairs(h)) return false;
+      const F = f as [string, { pool?: unknown; decimals?: unknown; at?: unknown }][];
+      if (!F.every(([tk, v]) => evmAddress(tk) === tk && Object.keys(v).length === 3 && isPool(tk, v.pool) && decimalsOk(v.decimals) && timed(v.at, t, POOL_KEEP_MS - 1))) return false;
       const P = p as [string, { id?: unknown; at?: unknown }][];
       const K = k as [string, { bars?: unknown; at?: unknown; src?: unknown }][];
       const H = h as [string, { bars?: unknown; at?: unknown; src?: unknown }][];
       if (!P.every(([tk, v]) => evmAddress(tk) === tk && (v.id === null || (typeof v.id === "string" && POOL_ID.test(v.id))) && timed(v.at, t, KEPT_HANDOVER_MS))) return false;
       if (!K.every(([key, v]) => barsKey(key, false) && timed(v.at, t, KEPT_HANDOVER_MS) && isBars(v.bars) && v.bars.length > 0)) return false;
       if (!H.every(([key, v]) => barsKey(key, true) && timed(v.at, t, GT_FRESH_MS) && isBars(v.bars))) return false;
+      for (const [tk, v] of F) {
+        const had = pools.get(tk);
+        if (had !== undefined && had.at >= (v.at as number)) continue;
+        if (pools.size >= POOLS_MAX) pools.delete(pools.keys().next().value!);
+        pools.set(tk, { found: { pool: v.pool as Pool, decimals: v.decimals as number }, at: v.at as number });
+      }
       for (const [tk, v] of P) {
         const had = gtPools.get(tk);
         if (had !== undefined && had.at >= (v.at as number)) continue;
