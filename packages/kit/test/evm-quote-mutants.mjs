@@ -343,7 +343,7 @@ export const MUTANTS = [
   // (card evm-scan-chain-tail: J5, main's killer of this one, is a Base case, and Base reads the chain's tail; J5r is its
   // Robinhood port, by currency past the tail's budget)
   [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true, firstOn.rpc, v.indexMargin, false, later);", "v.scan, at, v.maxLag, scanFromOf(firstOn), agreedHead, deferTo(kind), a.scanless === true, firstOn.rpc, v.indexMargin, false, later);", R, "J5r "],
-  [QUOTE, "for (const g of got) if (g.part.includes(e)) e.spans", "for (const g of got) e.spans", R, "J6 "],
+  [QUOTE, "for (const g of got) if (g.part.includes(e)) e.spans", "for (const g of got) e.spans", R, "J6r "],
   // fold 5: the scan's gate, per quote: a 429, a named limit or a timeout halves its parallelism (to 1), answers raise
   // it again; a throttle holds the next requests for its Retry-After or a doubling backoff, spends no try, and past
   // the quote's bound refuses (re-review of 037627c, MEDIUM-1; GitHub's runner at 7d6ec94: the cold quote's getLogs
@@ -380,7 +380,7 @@ export const MUTANTS = [
   [QUOTE, "    if (hooks.some(replaced)) c.real =", "    if (false) c.real =", R, "H2 "],
   [QUOTE, "    let m = out(c.at)! < out(c.real.at)! ? out(c.at)! : out(c.real.at)!;", "    let m = out(c.at)!;", R, "H2 "],
   [QUOTE, ": part.length === 1 ? on.span : or;", ": on.span;", R, "B1 "],
-  [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X4 "],
+  [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X4f "],
   [QUOTE, "[[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]]", "[[e0, null, w(weth), t], [e0, null, t, w(weth)]]", R, "S3 "],
   [QUOTE, "[e0, null, null, t]", "[e0, t]", R, "N1ar "],
   [QUOTE, "const fromScan = scanned?.pools.get(lower(token)) ?? [];", "const fromScan: EvmPoolKey[] = [];", R, "N1a "],
@@ -425,8 +425,8 @@ export const MUTANTS = [
   // answer (P2-1), and a later commit keeps what a newer quote kept (P3)
   [QUOTE, "    laterJobs(scans.filter((e) => e.later.length > 0 && b - BigInt(e.laterFrom ?? Math.min(...e.later.map(([x]) => x))) + 1n > maxLag));\n", "", R, "W2e "],
   [QUOTE, "b - BigInt(e.laterFrom ?? Math.min(...e.later.map(([x]) => x))) + 1n > maxLag", "b - BigInt(e.laterFrom ?? Math.min(...e.later.map(([x]) => x))) + 1n > 2n * maxLag", R, "W2e "],
-  [QUOTE, "now === undefined ? { spans: e.spans, pools: e.pools } :", "true ? { spans: e.spans, pools: e.pools } :", R, "W2f "],
-  [QUOTE, "    const sc = await scanOf(cs, \"markets\");", "    const sc = await (scanOf(cs, \"markets\") ?? Promise.resolve(null)).catch(() => null);", R, "G2 "],
+  [QUOTE, "now === undefined ? { spans: e.spans, pools: e.pools } :", "true ? { spans: e.spans, pools: e.pools } :", R, "W2fc "],
+  [QUOTE, "    const sc = await scanOf(cs, \"markets\");", "    const sc = await (scanOf(cs, \"markets\") ?? Promise.resolve(null)).catch(() => null);", R, "G2r "],
   [QUOTE, "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]))", "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [p.key]))", R, "S3c "],
   [QUOTE, "hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)]", "hops: [hopTo(x, via.key), hopTo(lower(token), p.key)]", R, "T5 "],
   [QUOTE, "    if (res.status === 429) {", "    if (false) {", R, "T7 "],
