@@ -1074,6 +1074,7 @@ export const MUTANTS = [
   [QUOTE, "        late,\n        down,\n      );", "        late,\n      );", R, "FH1 "],
   [QUOTE, "          if (serverFault(e)) gate?.down?.();\n          throw e;", "          throw e;", R, "FH1 "],
   [QUOTE, "            down = true;\n", "", R, "SP5xx "],
+  [QUOTE, "readBoth(rpcs, block.hash, third.slice(own), v.reads, undefined, down)", "readBoth(rpcs, block.hash, third.slice(own), v.reads)", R, "FH4 "],
   // card evm-buy-quote-in-window: a round's reads 64 to a call
   [BUYU, "      reads: bare({ perCall: 64, maxBytes: 200_000 }),", "      reads: Object.freeze({ perCall: 6, maxBytes: 200_000 }),", R, "QE9 "],
   // review of 2c02f7df: each venue's reads pinned, and no request past the venue's bytes (a call's split, a batch's cut)
