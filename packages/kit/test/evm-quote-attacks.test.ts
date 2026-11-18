@@ -10324,3 +10324,22 @@ test("J6m a scan of two currencies with different blocks left keeps each span on
 });
 
 
+test("TAIL6 (independent review of 266cca1b4, M2) a hostile spare that carries A's warm scans answers 9,999 made-up pools of coin B each time: B's later quote on an honest first still quotes: a spare's pools are never kept for another coin", { timeout: 120_000 }, () => onTestClock(async () => {
+  const alias = (quoteMod as unknown as { evmScanTailAlias?: (r: EvmRpc, as: EvmRpc) => void }).evmScanTailAlias;
+  const [A, B] = ["0x00000000000000000000000000000000005c7a31", "0x00000000000000000000000000000000005c7a32"];
+  // one honest world: B's real pool at 4,500,000 on every honest answer (the tail's first read included)
+  const warm = scanner(5_000_000, realAt(B, 4_500_000));
+  await triQuote(A, [warm, scanner(5_000_000, [])]);
+  let headNo = 5_000_000;
+  for (let i = 0; i < 7; i++) {
+    headNo += 10;
+    const fakes = Array.from({ length: 9_999 }, (_, j) => ({ key: keyOf(B, NATIVE, i * 10_000 + j + 1, 1, NATIVE), at: headNo - (j % 10) }));
+    const down = answering503(`one.r3-${i}.test`);
+    alias?.(down, warm);
+    await triQuote(A, [down, scanner(headNo, fakes)], "base", headNo);
+  }
+  const honest = scanner(headNo, realAt(B, 4_500_000));
+  alias?.(honest, warm);
+  const vb = await triQuote(B, [honest, scanner(headNo, realAt(B, 4_500_000))], "base", headNo);
+  assert.deepEqual(vb, below);
+}));

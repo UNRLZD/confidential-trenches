@@ -2080,6 +2080,9 @@ async function scanPools(
   const scans: Each[] = near ? [{ c: "", key: "", spans: tailSpans, gaps: gapsOf(tailSpans, floor, head), pools: [], ids: new Set(), later: [], tail: true }] : each;
   // the tail's pools this scan's logs find (kept in the chain's tail at commit)
   const tailFound: Tail = { spans: [], byCurrency: new Map(), ids: new Set() };
+  // of them, those the first provider answered: the only ones kept for the chain's other coins (independent review of
+  // 266cca1b4, M2: a spare's made-up pools of coin B, kept for every coin, refused B's later quote too_many_pools)
+  const tailKept: Tail = { spans: [], byCurrency: new Map(), ids: new Set() };
   // a currency whose kept or index scan already holds pools and reads to within maxLag of the scan provider's head is
   // not scanned for those last blocks before this quote (card evm-buy-and-sell-on-mainnet: the round cost a warm Base
   // quote 280-520 ms): the kit accepts the same blocks unread where the scan provider's head is behind the agreed block
@@ -2349,7 +2352,7 @@ async function scanPools(
         const byChain = TAILS.get(src) ?? new Map<EvmPoolChain, Tail>();
         const t = byChain.get(chain) ?? { spans: [], byCurrency: new Map(), ids: new Set() };
         for (const g of got) if (!g.spare && g.part.includes(e)) t.spans = withSpan(t.spans, g.a, g.b);
-        for (const ks of tailFound.byCurrency.values()) for (const k of ks) tailAdd(t, k);
+        for (const ks of tailKept.byCurrency.values()) for (const k of ks) tailAdd(t, k);
         byChain.set(chain, t);
         TAILS.set(src, byChain);
         continue;
@@ -2405,7 +2408,7 @@ async function scanPools(
     shortMax += 2 * jobs.length;
     await settle(jobs.map(run)).catch((e) => failing(e, agreedAt));
   }
-  function found({ part, a, b, logs }: (typeof got)[number]) {
+  function found({ part, a, b, logs, spare }: (typeof got)[number]) {
     for (const l of logs) {
       const o = l as { address?: unknown; topics?: unknown; data?: unknown; blockNumber?: unknown };
       const topics = o?.topics;
@@ -2419,6 +2422,7 @@ async function scanPools(
       if (part[0]!.tail) {
         const k = keyOf(raw, raw.currency0);
         if (k !== null) tailAdd(tailFound, k);
+        if (k !== null && !spare) tailAdd(tailKept, k);
         continue;
       }
       for (const e of part) {
