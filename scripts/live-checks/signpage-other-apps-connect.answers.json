@@ -1,0 +1,35 @@
+{
+ "_note": "bad: SIGN_HOST read 2026-11-18 01:27Z (the deployed page, before this card: no gate, no approvals store, no Disconnect, no sign-out clear). good: this branch's build (packages/signpage: index.html and public/app.js, --site) at card signpage-other-apps-connect slice 2, which the deploy serves; re-recorded from SIGN_HOST once deployed.",
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oJm8RtLDhg/7RG+kMipUNMIISF5fRX+5uWB2z1skrC3OKAbwO9a6vnPmgxz1iZiw\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-oJm8RtLDhg/7RG+kMipUNMIISF5fRX+5uWB2z1skrC3OKAbwO9a6vnPmgxz1iZiw",
+   "facts": {
+    "gate_before_any_read": false,
+    "gate_on_state_push": false,
+    "gate_fails_closed": false,
+    "store_own_database": false,
+    "store_bare_origins_only": false,
+    "allow_keeps_then_binds": false,
+    "disconnect_removes_then_drops": false,
+    "signout_clears": false
+   }
+  }
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-I+9ThN2N47PYulPeW7Z8LsqSRVgV3QuaoSiWap2t6UveEcyLhaqEt/f7iKdJ1MVn\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-I+9ThN2N47PYulPeW7Z8LsqSRVgV3QuaoSiWap2t6UveEcyLhaqEt/f7iKdJ1MVn",
+   "facts": {
+    "gate_before_any_read": true,
+    "gate_on_state_push": true,
+    "gate_fails_closed": true,
+    "store_own_database": true,
+    "store_bare_origins_only": true,
+    "allow_keeps_then_binds": true,
+    "disconnect_removes_then_drops": true,
+    "signout_clears": true
+   }
+  }
+ }
+}
