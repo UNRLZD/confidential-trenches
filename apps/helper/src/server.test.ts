@@ -420,10 +420,11 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // card market-token-reads: the held tokens' read takes the Solana token page and the EVM chains' lists, and DexScreener on
   // its own budget for a token no list carries, never the GeckoTerminal budget
   assert.match(main, /const held = heldFrom\(token, evmLists, dex\);/);
-  // card market-data-evm-token: each served EVM chain's token page and holders, its rows the chain's lists, its info on
-  // the one GeckoTerminal budget, its pool and decimals the swap reads' (and handed to start, above)
+  // card market-data-evm-token: each served EVM chain's token page and holders, its rows the chain's lists, its info
+  // CoinGecko's keyed read and never the GeckoTerminal budget (card evm-token-page-off-the-5-call-window), its pool and
+  // decimals the swap reads' (and handed to start, above)
   // card every-cell-shows-a-value: with one GoPlus reader for every chain's contract checks
-  assert.match(main, /const goplus = createGoPlus\(\);\n    const evmTokens: EvmTokens = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmToken\(c, \{ lists: evmLists\[c\]!, named: evmNamed\[c\], gecko, kept: swaps\[c\]\?\.kept, goplus \}\)\]\)\);/);
+  assert.match(main, /const goplus = createGoPlus\(\);\n    const evmTokens: EvmTokens = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmToken\(c, \{ lists: evmLists\[c\]!, named: evmNamed\[c\], keyed, kept: swaps\[c\]\?\.kept, goplus \}\)\]\)\);/);
   // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
   // card robinhood-mainnet-rpcs: the pool senders' reads on that same hold and pace per provider
   assert.match(main, /const evmPools = evmPoolSendersFromEnv\(process\.env, undefined, holds\);/);

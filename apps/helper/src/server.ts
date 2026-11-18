@@ -1408,11 +1408,12 @@ if (import.meta.main) {
     const dex = upstreamBudget(() => DEX_LIMITS, Date.now);
     const evmNamed = evmNamedFrom(SERVED_EVM, dex);
     const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed, { storeDir, writable: senders.held }), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
-    // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info on the one
-    // GeckoTerminal budget, its pool and decimals the swap reads' when they hold them
+    // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info CoinGecko's keyed
+    // on-chain read, never GeckoTerminal's keyless window (card evm-token-page-off-the-5-call-window), its pool and
+    // decimals the swap reads' when they hold them
     // card every-cell-shows-a-value: and each token's contract checks from GoPlus, one pace for the helper (data/goplus.ts)
     const goplus = createGoPlus();
-    const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, named: evmNamed[c], gecko, kept: swaps[c]?.kept, goplus })]));
+    const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, named: evmNamed[c], keyed, kept: swaps[c]?.kept, goplus })]));
     if (warm !== null) restoreEvmMarket(warm, SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] }));
     const held = heldFrom(token, evmLists, dex);
     // card helper-near-lists-and-token: NEAR's lists from Rhea classic's views, read now and on their cadence; card

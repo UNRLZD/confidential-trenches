@@ -10,19 +10,22 @@
 //     waited for beside the info, both within INFO_WAIT_MS of the request's start. 404 only for an address DexScreener
 //     names no pool for (a typo, a wallet); 503 while it cannot be read. The candles and the tape share the gate
 //     (server.ts evmKnown).
-//   - decimals, the holder count and the top 10 share: GeckoTerminal's keyless `networks/<net>/tokens/<address>/info`
-//     (api.geckoterminal.com/docs/index.html, "tokens/{address}/info", read 2026-11-09 01:50Z: `decimals`,
-//     `holders.count`, `holders.distribution_percentage.top_10` and `holders.last_updated` for a Base and a Robinhood
-//     token), one call a token, fresh INFO_FRESH_MS. It draws on the one GeckoTerminal budget (../gecko.ts): a first
-//     read (nothing held, or held past INFO_SERVE_MS) is a page read, a held one's re-read "refresh", which leaves a cold
-//     read its calls (card evm-holders-never-starve: a first read sent to "stale" or "refresh" was refused behind the
-//     helper's own lists and ahead reads, live 14:46Z). A held count is served, dated by its read, while under
-//     INFO_SERVE_MS (card market-data-evm-capacity: display data that moves slowly, on a budget the helper's own
-//     background reads hold 2 to 3 of).
-//     A first read waits for the budget's next free call up to GT_PAGE_WAIT_MS (../gecko.ts takeOrWait, the bound the
-//     Solana path's cold reads wait under) instead of a 429; a held one's re-read never waits, the held count serves.
-//     The page waits for a first read at most INFO_WAIT_MS and is otherwise answered with those fields null, the read
-//     held for the next.
+//   - decimals, the holder count, the top 10 share and the token's links: CoinGecko's keyed on-chain
+//     `/onchain/networks/{network}/tokens/{address}/info` (../coingecko.ts, the key the charts read first with), the same
+//     answer GeckoTerminal's keyless v2 path gives (docs.coingecko.com/reference/token-info-contract-address.md, read
+//     2026-11-18 09:50Z: `holders` {count, distribution_percentage, last_updated}, Base `base` and Robinhood `robinhood`
+//     among its holders networks), one call a token, fresh INFO_FRESH_MS, on the key's own pace. Never GeckoTerminal's
+//     keyless window (card evm-token-page-off-the-5-call-window): 5 calls in 75 s for the whole helper (../gecko.ts),
+//     the lists' and ahead reads holding 3 of them, so of 50 users opening 50 coins at once 2 had a count, first and a
+//     minute later (token-load.test.ts at ff65a0403); the window is the charts'. Blockscout was read for the count
+//     instead, 2026-11-18 09:45Z: base.blockscout.com and robinhoodchain.blockscout.com answered a Cloudflare challenge
+//     (403) to the v2 and the /api paths, api.blockscout.com 402 "Proceed with API key", and the helper holds no
+//     Blockscout key. A first read (nothing held, or held past INFO_SERVE_MS) is a caller's; a held one's re-read is
+//     background (limits.ts CALLER_ROOM), the held count served, dated by its read, while under INFO_SERVE_MS (card
+//     market-data-evm-capacity). A first read the key could not answer (its minute or day spent, CoinGecko down, no key
+//     set) is chased in the background (CHASE_TICK_MS, CHASE_PER_TICK, CHASE_TRIES), so a holders tab's next
+//     poll (a minute) has the count; one that never answers is not read again for INFO_FRESH_MS. The page waits for a
+//     first read at most INFO_WAIT_MS and is otherwise answered with those fields null, the read held for the next.
 //   - pool and decimals on chain: the token's main pool and decimals the swap reads already found and checked on two
 //     providers (swaps.ts mainPool), when they hold them; nothing is read for the page.
 //   - holder rows: none (`holders: []`), as the Solana path answers with no holders provider. No keyless source lists
@@ -31,44 +34,58 @@
 // A field no source here reads is null with src "none" (06b `Field`): mint and freeze authority, LP, dev, snipers,
 // tax, honeypot (06b:1818 names the chain round trip of 06c §4.10 for EVM, not built), insiders, bundlers, fresh.
 //
-// Display only: nothing here feeds a signature. GeckoTerminal's answer is hostile input: used only when it names this
+// Display only: nothing here feeds a signature. CoinGecko's answer is hostile input: used only when it names this
 // token, every number checked finite and in range or null; the caches hold at most CACHE_MAX tokens each.
 import type { Row } from "../solana/lists.ts";
 import type { ListsAnswer } from "../solana/lists.ts";
 import { CACHE_MAX, NOT_FOUND, RISK_FIELDS, UPSTREAM, type DataAnswer, type Field } from "../solana/token.ts";
-import { createWanted, GT_PAGE_WAIT_MS, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
-import { evmAddress, GT_BASE, GT_NETWORK, type EvmChain } from "./lists.ts";
+import { CG_SRC, type Keyed } from "../coingecko.ts";
+import { evmAddress, GT_NETWORK, type EvmChain } from "./lists.ts";
 import { LINKS, linksOf, type Links } from "../links.ts";
 import type { EvmNamed } from "./named.ts";
 import type { ContractRisk, GoPlus } from "../goplus.ts";
 
-/** A token's GeckoTerminal info is read again once this old [design: the holder count moves slowly (GeckoTerminal's own
- *  `last_updated` was 1-3 min behind its read, 2026-11-09 01:50Z) and the keyless budget is 5 calls in 75 s for the
- *  whole helper; 5 min keeps a page's holders current to the minute at one call a token]. */
+/** A token's info is read again once this old [design: the holder count moves slowly (GeckoTerminal's own
+ *  `last_updated`, which CoinGecko's on-chain info serves, was 1-3 min behind its read, 2026-11-09 01:50Z); 5 min keeps
+ *  a page's holders current to the minute at one call a token, and a holders tab polling each minute
+ *  (apps/terminal/src/screens/token/lower.ts HOLDERS_POLL_MS) spends a fifth of a call a minute of the key's day]. */
 export const INFO_FRESH_MS = 300_000;
 /** A held info serves, dated by its own read (`as_of_ms`, X-Fetched-At), this long; past it the token is read as one
  *  nobody holds [design (card market-data-evm-capacity): the holder count and top 10 share are display data that move
- *  slowly, and the keyless budget (5 calls in 75 s) holds the helper's own lists and ahead reads in 2 to 3 of its 5
- *  calls (helper log 21:2x-22:2xZ, 9 Nov: lists 1.42 and ahead 0.73 calls a minute, window 3 of 5 in 40 of 60 minutes),
- *  so a count dropped at GT_SERVE_MS (10 min) was read again on a full window and answered 429 (live 20:34Z). An hour
- *  keeps every token opened in the last hour answering with its count however busy the window is, and the count's age
- *  is on the answer; the live check's own runs are an hour apart]. */
+ *  slowly; an hour keeps every token opened in the last hour answering with its count while the key's minute or day
+ *  is spent, and the count's age is on the answer; the live check's own runs are an hour apart]. */
 export const INFO_SERVE_MS = 3_600_000;
 /** The longest a page waits for a token's first info read [design: GeckoTerminal answered the info in 0.38-0.58 s from
- *  a Mac, 2026-11-09 01:52Z; 700 ms keeps the page inside its 1 s with that read, and a later answer is held for the
- *  next read]. */
+ *  a Mac, 2026-11-09 01:52Z, the answer CoinGecko's on-chain path serves; 700 ms keeps the page inside its 1 s with that
+ *  read, and a later answer is held for the next read]. */
 export const INFO_WAIT_MS = 700;
-const ANSWER_MAX = 256 * 1024;
-const TIMEOUT_MS = 8_000;
+/** A first read the key could not answer is chased in the background: each CHASE_TICK_MS the first CHASE_PER_TICK
+ *  tokens waiting are read, a miss going to the back, at most CHASE_TRIES misses a token [design: the key's pace
+ *  (../coingecko.ts coingeckoPace) refuses a read past its room with no call, so a tick asks for more than the least
+ *  key's refill and takes what the pace gives: at 100 calls a minute, the least a CoinGecko key gets
+ *  (docs.coingecko.com/docs/errors-and-rate-limits, read 2026-11-18 09:52Z: "Demo plan: 100 calls/min"), the pace's 9
+ *  at once and 1.35 a second after, less the quarter background leaves callers (limits.ts CALLER_ROOM), cover 50 coins
+ *  opened at once before the holders tab's next poll a minute later (token-load.test.ts: 50 of 50 at 2 a tick and 6 or
+ *  8 tries, 49 at 5 tries, 44 at 3 a tick; reads at 1, 2, 4 ... 32 s left 28, a bucket refilled past its burst between
+ *  them losing that refill). 8 for room; a token CoinGecko never answers costs at most CHASE_TRIES + 1 calls an
+ *  INFO_FRESH_MS]. */
+export const CHASE_TICK_MS = 1_000;
+export const CHASE_PER_TICK = 2;
+export const CHASE_TRIES = 8;
+/** The most tokens chased at once [design: a chased token passed rowOf (a lists row or DexScreener's name, on
+ *  DexScreener's per-caller share), so a stranger's addresses reach it only at that share; past it a read is not chased
+ *  and the next request asks again]. */
+export const CHASE_MAX = 256;
 const DECIMALS_MAX = 30;
 const DECIMAL = /^\d{1,3}(\.\d{1,20})?$/;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,9})?Z$/;
 
-type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-/** What GeckoTerminal's info says of one token, each value null when it names none or a bad one; `asOfMs`: its holders'
+/** What the token's on-chain info says of it, each value null when it names none or a bad one; `asOfMs`: its holders'
  *  `last_updated`, else our read's time. */
 export type Info = { decimals: number | null; holders: number | null; top10Bps: number | null; asOfMs: number };
-type Read = Info | "none" | "refused" | "failed";
+/** An info read's end: the info, or "missed" (the key could not answer it). "none" is only a previous helper's held
+ *  entry (data/warm.ts), from when GeckoTerminal's 404 named a token it did not know. */
+type Read = Info | "missed";
 export type EvmTokenPage = { row: Row; decimals: number | null; pool: string | null; risk: Record<(typeof RISK_FIELDS)[number], Field<unknown>>; route: "unknown"; filling: false; links: Links };
 
 /** The token's own links in GeckoTerminal's info (card token-page-data-complete-and-fast): its first website, its X
@@ -100,7 +117,7 @@ export function toInfo(token: string, answer: unknown, readAtMs: number): Info |
   return { decimals, holders, top10Bps, asOfMs };
 }
 
-/** The TokenPage from the token's Discover row, its GeckoTerminal info (null when none is held) and the pool and decimals
+/** The TokenPage from the token's Discover row, its on-chain info (null when none is held) and the pool and decimals
  *  the swap reads hold. */
 export function toPage(base: Row, info: Info | null, kept: { pool: string; decimals: number } | undefined, risk: ContractRisk | null = null): EvmTokenPage {
   const row: Row = { ...base };
@@ -110,11 +127,12 @@ export function toPage(base: Row, info: Info | null, kept: { pool: string; decim
   }
   const rowAt = row.as_of_ms as number;
   const none = (): Field<never> => ({ v: null, src: "none", as_of_ms: rowAt });
-  const gt = <T>(v: T | null, at: number): Field<T> => ({ v, src: "geckoterminal", as_of_ms: at });
+  // the row's own values (liquidity, age) carry the row's source: the lists' GeckoTerminal read or DexScreener's
+  const own = <T>(v: T | null): Field<T> => ({ v, src: typeof row.src === "string" && row.src !== "" ? row.src : "geckoterminal", as_of_ms: rowAt });
   // card every-cell-shows-a-value: the contract's own checks from GoPlus (../goplus.ts), and its holders count and top
-  // 10 where GeckoTerminal's info has none
+  // 10 where the on-chain info has none
   const gp = <T>(v: T | null | undefined): Field<T> => (risk === null || v === null || v === undefined ? none() : { v, src: "goplus", as_of_ms: risk.as_of_ms });
-  const gtOr = <T>(v: T | null | undefined, alt: T | null | undefined): Field<T> => (info !== null && v !== null && v !== undefined ? gt(v, info.asOfMs) : gp(alt));
+  const cgOr = <T>(v: T | null | undefined, alt: T | null | undefined): Field<T> => (info !== null && v !== null && v !== undefined ? { v, src: CG_SRC, as_of_ms: info.asOfMs } : gp(alt));
   const created = row.created_s as number | null;
   return {
     row,
@@ -124,13 +142,13 @@ export function toPage(base: Row, info: Info | null, kept: { pool: string; decim
       mint_auth: gp(risk?.mint_auth),
       freeze_auth: gp(risk?.freeze_auth),
       lp: none(),
-      top10_bps: gtOr(info?.top10Bps, risk?.top10_bps),
+      top10_bps: cgOr(info?.top10Bps, risk?.top10_bps),
       dev_bps: gp(risk?.dev_bps),
       snipers_bps: none(),
-      holders: gtOr(info?.holders, risk?.holders),
-      liq_usd: gt(row.liq_usd, rowAt),
+      holders: cgOr(info?.holders, risk?.holders),
+      liq_usd: own(row.liq_usd),
       // the row's time is its pool's, made with the token by every listed launchpad (lists.ts)
-      age_s: gt(created === null ? null : Math.max(0, Math.floor(rowAt / 1000) - created), rowAt),
+      age_s: own(created === null ? null : Math.max(0, Math.floor(rowAt / 1000) - created)),
       tax: gp(risk?.tax),
       honeypot: gp(risk?.honeypot),
       insiders_bps: none(),
@@ -171,18 +189,23 @@ function bounded<V>(max: number) {
 }
 
 /** One EVM chain's token page and holders. `lists`: the chain's Discover lists (lists.ts get and listed); `kept`: the
- *  swap reads' pool and decimals for a token, when held (swaps.ts kept). */
+ *  swap reads' pool and decimals for a token, when held (swaps.ts kept); `keyed`: CoinGecko's keyed reads
+ *  (../coingecko.ts createKeyed), null or absent when no key is set (no count, src "none"); `later`: runs a chase. */
 export function createEvmToken(
   chain: EvmChain,
-  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean>; maker?(token: string, createdS: number): Promise<string | null | undefined> }; named?: Pick<EvmNamed, "named">; gecko: GeckoBudget; kept?: (token: string) => { pool: string; decimals: number } | undefined; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; later?: Later; goplus?: Pick<GoPlus, "risk"> },
+  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean>; maker?(token: string, createdS: number): Promise<string | null | undefined> }; named?: Pick<EvmNamed, "named">; keyed?: Pick<Keyed, "read"> | null; kept?: (token: string) => { pool: string; decimals: number } | undefined; now?: () => number; later?: (fn: () => void, ms: number) => void; goplus?: Pick<GoPlus, "risk"> },
 ) {
   const now = deps.now ?? Date.now;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
-  const doFetch = deps.fetch ?? fetch;
+  const later = deps.later ?? ((fn: () => void, ms: number) => void setTimeout(fn, ms).unref());
   const rows = bounded<Row>(CACHE_MAX);
   let seen: string | undefined;
   const infos = bounded<{ info: Info | "none"; at: number }>(CACHE_MAX);
   const running = new Map<string, Promise<Read>>();
+  /** The tokens being chased, and when each chase that never got an answer ended (not read again for INFO_FRESH_MS). */
+  const chasing = new Set<string>();
+  const queue: { token: string; tries: number }[] = [];
+  let ticking = false;
+  const missed = bounded<number>(CACHE_MAX);
 
   /** The token's row from the lists' newest answer, else the last one an answer held, while the lists still count it
    *  served; null for a token they never served; undefined while the lists have never answered. */
@@ -220,75 +243,81 @@ export function createEvmToken(
     return typeof pad === "string" ? { ...r.row, launchpad: pad } : r.row;
   }
 
-  async function readInfo(token: string, lane: "pages" | "stale" | "refresh", client?: string): Promise<Read> {
-    if ((await takeOrWait(deps.gecko, lane, `${chain} info`, now() + GT_PAGE_WAIT_MS, now, sleep, client)) !== null) return "refused";
-    return fetchInfo(token);
+  /** One keyed info read: "missed" when the key could not answer it (../coingecko.ts Keyed.read: its minute or day
+   *  spent, held after CoinGecko refused or failed, or an answer that does not name this token). `background`: a held
+   *  info's re-read or a chase, which leaves callers their room. */
+  async function readInfo(token: string, background: boolean): Promise<Read> {
+    const keyed = deps.keyed;
+    if (keyed === undefined || keyed === null) return "missed";
+    const got: { info: Info | null } = { info: null };
+    const j = await keyed.read(`/networks/${GT_NETWORK[chain]}/tokens/${token}/info`, (x) => (got.info = toInfo(token, x, now())) !== null, background);
+    if (j === undefined || got.info === null) return "missed";
+    LINKS.remember(chain, token, infoLinks(j));
+    return got.info;
   }
 
-  /** One GeckoTerminal info read, its call already taken. */
-  async function fetchInfo(token: string): Promise<Read> {
-    try {
-      const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/tokens/${token}/info`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
-      if (r.status === 429) {
-        throttledUntil(deps.gecko, r.headers.get("retry-after"), now());
-        await r.body?.cancel();
-        return "refused";
-      }
-      if (r.status === 404) {
-        await r.body?.cancel();
-        return "none";
-      }
-      if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
-        await r.body?.cancel();
-        return "failed";
-      }
-      const body = await r.text();
-      if (body.length > ANSWER_MAX) return "failed";
-      const j = JSON.parse(body) as unknown;
-      const info = toInfo(token, j, now());
-      if (info !== null) LINKS.remember(chain, token, infoLinks(j));
-      return info ?? "failed";
-    } catch {
-      return "failed";
-    }
-  }
-
-  /** The info held for the token while servable (under INFO_SERVE_MS) and, when it is not fresh, the read that refreshes
-   *  it (one at a time): a page read when nothing servable is held, else a "refresh", which leaves COLD_RESERVE calls
-   *  for a read of what nobody holds. The page and holders share it, so either one's read serves the other. */
-  function infoOf(token: string, client?: string): { held: Info | "none" | undefined; read: Promise<Read> | undefined } {
-    const h = infos.get(token);
-    if (h !== undefined && now() - h.at < INFO_FRESH_MS) return { held: h.info, read: undefined };
-    const servable = h !== undefined && now() - h.at < INFO_SERVE_MS;
+  /** The token's read, one at a time: the page, holders and a chase share it, so any one's read serves the others. */
+  function start(token: string, background: boolean): Promise<Read> {
     let p = running.get(token);
     if (p === undefined) {
       const started = now();
-      p = readInfo(token, servable ? "refresh" : "pages", client)
+      p = readInfo(token, background)
         .then((x) => {
-          if (x !== "refused" && x !== "failed") infos.set(token, { info: x, at: started });
+          if (x !== "missed") infos.set(token, { info: x, at: started });
           return x;
         })
         .finally(() => running.delete(token));
       running.set(token, p);
     }
-    return { held: servable && h !== undefined ? h.info : undefined, read: p };
+    return p;
   }
 
-  /** The info reads pages asked for and the budget refused, each in its turn (../gecko.ts createWanted). */
-  const wanted = createWanted(deps.gecko, `${chain} info`, now, deps.later);
-  function wantInfo(token: string): void {
-    wanted.want(token, {
-      done: () => {
-        const h = infos.get(token);
-        return h !== undefined && now() - h.at < INFO_FRESH_MS;
-      },
-      run: async () => {
-        const started = now();
-        const x = await fetchInfo(token);
-        if (x === "refused") return "again";
-        if (x !== "failed") infos.set(token, { info: x, at: started });
-      },
+  /** A first read the key missed, queued: each CHASE_TICK_MS the first CHASE_PER_TICK are read in the background, a miss
+   *  going to the back, CHASE_TRIES misses a token at most; one that never answers is marked missed, not read again for
+   *  INFO_FRESH_MS. */
+  function chase(token: string): void {
+    if (chasing.has(token) || chasing.size >= CHASE_MAX) return;
+    chasing.add(token);
+    queue.push({ token, tries: 0 });
+    tick();
+  }
+  function tick(): void {
+    if (ticking || queue.length === 0) return;
+    ticking = true;
+    later(() => {
+      ticking = false;
+      for (const c of queue.splice(0, CHASE_PER_TICK)) {
+        const h = infos.get(c.token);
+        if (h !== undefined && now() - h.at < INFO_FRESH_MS) {
+          chasing.delete(c.token);
+          continue;
+        }
+        void start(c.token, true).then((x) => {
+          if (x !== "missed") return void chasing.delete(c.token);
+          if (c.tries + 1 < CHASE_TRIES) return void (queue.push({ token: c.token, tries: c.tries + 1 }), tick());
+          chasing.delete(c.token);
+          missed.set(c.token, now());
+        });
+      }
+      tick();
+    }, CHASE_TICK_MS);
+  }
+
+  /** The info held for the token while servable (under INFO_SERVE_MS) and, when it is not fresh, the read that refreshes
+   *  it: a caller's when nothing servable is held, else background. Nothing is read while a chase runs or after one
+   *  missed, for INFO_FRESH_MS, or with no key. */
+  function infoOf(token: string): { held: Info | "none" | undefined; read: Promise<Read> | undefined } {
+    const h = infos.get(token);
+    if (h !== undefined && now() - h.at < INFO_FRESH_MS) return { held: h.info, read: undefined };
+    const servable = h !== undefined && now() - h.at < INFO_SERVE_MS;
+    const held = servable ? h.info : undefined;
+    const m = missed.get(token);
+    if (deps.keyed === undefined || deps.keyed === null || (!servable && (chasing.has(token) || (m !== undefined && now() - m < INFO_FRESH_MS)))) return { held, read: running.get(token) };
+    const read = start(token, servable).then((x) => {
+      if (x === "missed" && !servable) chase(token);
+      return x;
     });
+    return { held, read };
   }
 
   const LATE = Symbol("late");
@@ -333,7 +362,7 @@ export function createEvmToken(
       const found = await rowOf(t, client);
       if (found === undefined) return UPSTREAM;
       if (found === null) return NOT_FOUND;
-      const { held, read } = infoOf(t, client);
+      const { held, read } = infoOf(t);
       const risk = deps.goplus?.risk(chain, t) ?? Promise.resolve(null);
       // the first reads are waited for INFO_WAIT_MS from the request's start, so a coin DexScreener had to name first
       // (rowOf) still answers inside the page's second, its info and tag held for the next read
@@ -342,32 +371,25 @@ export function createEvmToken(
       const page = toPage(row, info, deps.kept?.(t), await risk);
       return { status: 200, body: JSON.stringify(page), src: row.src === "dexscreener" ? "dexscreener" : "geckoterminal", asOfMs: row.as_of_ms as number };
     },
-    /** 06b Holders: no rows, GeckoTerminal's count and top 10 share; no count (src "none", the read queued) when the
-     *  budget refuses a token nothing is held for (or held past INFO_SERVE_MS), 503 when GeckoTerminal fails it. */
+    /** 06b Holders: no rows, the on-chain info's count and top 10 share (src "coingecko"); no count (src "none", the
+     *  read chased) when the key cannot answer a token nothing is held for (or held past INFO_SERVE_MS), never a 429 or
+     *  a 503 for it (card evm-chart-opens-without-a-vendor-call): no keyless source counts an EVM token's holders
+     *  (above), so nothing of ours stands in for it. */
     async holders(token: string, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null) return NOT_FOUND;
       const found = await rowOf(t, client);
       if (found === undefined) return UPSTREAM;
       if (found === null) return NOT_FOUND;
-      const { held, read } = infoOf(t, client);
-      const got: Read | undefined = read === undefined ? held : await read;
-      const info: Info | "none" | undefined = got === "refused" || got === "failed" ? held : got;
-      if (info === undefined) {
-        // refused with nothing held: the read waits in the queue for the next free call (../gecko.ts createWanted) and
-        // the page is answered with no count from no source, never a 429 (card evm-chart-opens-without-a-vendor-call:
-        // the helper's live run at 06:58Z read 429 for a Robinhood token's holders); no keyless source counts an EVM
-        // token's holders (above), so nothing of ours stands in for it
-        if (got === "refused") {
-          wantInfo(t);
-          const at = now();
-          return { status: 200, body: JSON.stringify({ holders: [], total: null, top_bps: null, src: "none", as_of_ms: at }), src: "none", asOfMs: at };
-        }
-        return UPSTREAM;
+      const { held, read } = infoOf(t);
+      const got = read === undefined ? held : await read;
+      const info = got === "missed" ? held : got;
+      const i = info === "none" ? undefined : info;
+      if (i === undefined) {
+        const at = now();
+        return { status: 200, body: JSON.stringify({ holders: [], total: null, top_bps: null, src: "none", as_of_ms: at }), src: "none", asOfMs: at };
       }
-      const i = info === "none" ? null : info;
-      const at = i?.asOfMs ?? now();
-      return { status: 200, body: JSON.stringify({ holders: [], total: i?.holders ?? null, top_bps: i?.top10Bps ?? null, src: "geckoterminal", as_of_ms: at }), src: "geckoterminal", asOfMs: at };
+      return { status: 200, body: JSON.stringify({ holders: [], total: i.holders, top_bps: i.top10Bps, src: CG_SRC, as_of_ms: i.asOfMs }), src: CG_SRC, asOfMs: i.asOfMs };
     },
   };
 }
