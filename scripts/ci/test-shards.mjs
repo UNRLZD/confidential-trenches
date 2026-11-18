@@ -2,10 +2,17 @@
 //   node scripts/ci/test-shards.mjs e2e <index> <total>    (prints the part's command; exit 1 and the reason otherwise)
 //
 // test:e2e is one chain, `a && b && c ...`: its first command (the build) runs in every part, and each later command
-// in exactly one, command i in part (i - 1) % total. ci.yml passes the job's own strategy.job-index and
-// strategy.job-total, so every command runs in some part whatever the matrix lists. A chain this cannot split into
-// commands that stand alone (||, ;, a pipe, a newline) is refused rather than split wrong, and so is a part left
-// with nothing but the build.
+// in exactly one. ci.yml passes the job's own strategy.job-index and strategy.job-total, so every command runs in some
+// part whatever the matrix lists. A chain this cannot split into commands that stand alone (||, ;, a pipe, a newline)
+// is refused rather than split wrong, and so is a part left with nothing but the build.
+// Card ci-e2e-shards-by-time: the commands after the build are dealt largest first, each to the part with the fewest
+// planned seconds, by the times E2E_SECONDS measured on CI; the first part starts with the prover step's seconds,
+// since only it runs that step. The deal was round-robin, command i in part (i - 1) % total, so one command added to
+// the chain moved every later one a part over, and PR #1029's took test-browser (1) past its 15 minutes (run
+// 44375738505). A command with no measured time counts as NEW_E2E_SECONDS.
+//   node scripts/ci/test-shards.mjs e2e-run <index> <total>    (builds, then runs the part's commands, each timed)
+// runs the build, and when it passed each of the part's commands in apps/terminal, all of them even when one fails,
+// with each one's time and a ::warning:: for a command past 1.25 times its listed seconds, as the mutants' parts do.
 //
 // Card ci-mutants-sharded: the share of the mutant sweeps that one part of ci.yml's test-mutants matrix runs.
 //   node scripts/ci/test-shards.mjs mutants <index> <total>    (runs the part's sweeps; exit 1 when one failed)
@@ -50,12 +57,102 @@ function checkPart(index, total) {
   if (!Number.isInteger(index) || index < 0 || index >= total) throw new Error(`index ${index} is not a part of ${total}`);
 }
 
-export function e2ePart(script, index, total) {
+// ---- the terminal's browser runs (card ci-e2e-shards-by-time)
+
+export const E2E_DIR = "apps/terminal";
+// seconds each command took in test-browser, rounded up, the slowest of the three merge queue runs read for this card:
+// A, run 44371886994 (jobs 135040704496 as (1), 135040704826 as (2), 135040704676 as (3)) and B, run 44374813196 (jobs
+// 135051111464, 135051111644, 135051111657), both on main's list, and C, run 44375738505 (jobs 135054404897,
+// 135054404970, 135054405087), the shifted list of PR #1029, so each command ran three times, in two parts at least. A
+// command's time is from the line that ended the command before it (the build's `built in`) to the line that ended it,
+// its PASS or FAIL verdict (`ℹ duration_ms` for the node --test one). A verdict the runner sent in one batch with the
+// next command's lines moves a few seconds from one command to the next, never out of a part's sum. These ran as one
+// `sh -c` chain; e2e-run starts each under its own `pnpm exec`, about a second more each. Keyed `apps/terminal: <command>`, as
+// a part's `== ok in N s:` lines print them; scripts/ci/test-shards.test.mjs fails on a key that names no command of
+// test:e2e, and on a command with no key.
+export const E2E_SECONDS = {
+  "apps/terminal: node ../../scripts/live-checks/app-in-shell.mjs --harness --engines chromium": 53, // C1 52.5
+  "apps/terminal: node test/bar10/run.mjs": 116, // B2 115.7
+  "apps/terminal: node test/harness-sockets/run.mjs": 2, // C3 1.0
+  "apps/terminal: node test/deposit-sheet/run.mjs": 48, // C1 47.3
+  "apps/terminal: node test/welcome/run.mjs": 11, // B2 10.5
+  "apps/terminal: node test/verify/run.mjs": 17, // C3 16.7
+  "apps/terminal: node test/verify-mount/run.mjs": 12, // C1 11.6
+  "apps/terminal: node test/no-blank-pages/run.mjs": 123, // B2 122.0
+  "apps/terminal: node ../../scripts/live-checks/app-portfolio-mount.mjs --harness": 29, // C3 28.2
+  "apps/terminal: node ../../scripts/live-checks/app-deposit-mount.mjs --harness": 47, // C1 46.6
+  "apps/terminal: node ../../scripts/live-checks/app-footer-bar.mjs --harness": 10, // B2 9.1
+  "apps/terminal: node ../../scripts/live-checks/deposit-to-pool.mjs --harness": 73, // C3 72.9
+  "apps/terminal: node ../../scripts/live-checks/app-faults-seen-on-122.mjs --harness": 12, // C1 11.4
+  // C2's 22.5 s holds about 5 s of the next command's: its verdict came in the same batch as that one's lines
+  "apps/terminal: node ../../scripts/live-checks/app-faults-seen-on-124.mjs --harness": 23, // C2 22.5
+  "apps/terminal: node ../../scripts/live-checks/app-faults-seen-on-126.mjs --harness": 10, // C3 9.3
+  "apps/terminal: node ../../scripts/live-checks/screens-never-say-proof.mjs --harness": 22, // C1 21.1
+  "apps/terminal: node ../../scripts/live-checks/app-lock-holds-until-the-layer-closes.mjs --harness": 6, // B2 5.8
+  "apps/terminal: node ../../scripts/live-checks/signed-out-portfolio-and-account-say-what-appears.mjs --harness": 34, // C3 33.8
+  "apps/terminal: node ../../scripts/live-checks/app-pages-open-right.mjs --harness": 30, // A1 29.3
+  "apps/terminal: node test/withdraw/run.mjs": 14, // B2 14.0
+  "apps/terminal: node test/withdraw-form/run.mjs": 5, // C3 4.7
+  "apps/terminal: node test/portfolio/run.mjs": 49, // C1 48.9
+  "apps/terminal: node test/trade-box/run.mjs": 25, // B2 24.3
+  "apps/terminal: node test/trade-pool/run.mjs": 38, // C3 37.2
+  "apps/terminal: node test/trade-reads-after-buy/run.mjs": 29, // C1 28.9
+  "apps/terminal: node test/buy-route/run.mjs": 16, // B2 15.4
+  "apps/terminal: node test/holds-still/run.mjs": 16, // C3 15.5
+  "apps/terminal: node test/token-page/run.mjs": 68, // C1 68.0
+  "apps/terminal: node test/chart-pointer/run.mjs": 33, // B2 32.1
+  "apps/terminal: node test/token-route/run.mjs": 19, // C3 18.9
+  "apps/terminal: node test/chains-evm/run.mjs": 16, // C1 15.3
+  "apps/terminal: node test/token-rail/run.mjs": 45, // B2 44.8
+  "apps/terminal: node test/header-search/run.mjs": 51, // C1 50.3
+  "apps/terminal: node test/trade-box-mount/run.mjs": 6, // C2 5.4
+  "apps/terminal: node test/trade-sheet/run.mjs": 29, // C3 28.7
+  "apps/terminal: node test/quick-buy/run.mjs": 11, // C1 10.9
+  "apps/terminal: node test/signin-screens/run.mjs": 28, // C2 27.4
+  "apps/terminal: node test/discover-screens/run.mjs": 35, // C3 34.6
+  "apps/terminal: node test/discover-logos/run.mjs": 69, // C1 68.5
+  "apps/terminal: node test/sell-positions/run.mjs": 33, // C2 32.0
+  "apps/terminal: node test/near-trade/run.mjs": 29, // C3 29.0
+  "apps/terminal: node test/orders-soon/run.mjs": 11, // C1 10.2
+  "apps/terminal: node ../../scripts/live-checks/app-sell-mount.mjs --harness": 5, // C2 4.8
+  "apps/terminal: node test/e2e/signin/run.mjs": 32, // C3 31.7
+  "apps/terminal: node test/e2e/signing-sheet/run.mjs": 268, // C1 267.2
+  "apps/terminal: node ../../scripts/live-checks/signpage-shell.mjs --engine chromium --width phone": 45, // C2 44.8
+  "apps/terminal: node ../../scripts/live-checks/deposit-quote-no-liquidity.mjs --local": 4, // C3 4.0
+  "apps/terminal: node ../../scripts/live-checks/sign-out-stops-the-pages-reads.mjs --engine chromium --width phone": 45, // C1 44.7
+};
+// a command with no measured time yet: the mean of the 48 measured (1752 s / 48 = 36.5 s), above their median (29 s)
+export const NEW_E2E_SECONDS = 37;
+// test-browser's own steps around the commands, the slowest of the 24 test-browser jobs of the eight merge queue runs
+// read (the three above and 44370112520, 44368477150, 44368474730, 44361957842, 44346930793, 44342817974), from the
+// jobs API's step times: the job's start to the end of the Chrome step (set up, checkout, pnpm, node, install, Chrome)
+// 73 s (job 135040704676), the build 2 s (1.2 s, C3) and the post steps to the job's end 3 s (job 135028592843)
+export const E2E_FIXED_SECONDS = 73 + 2 + 3;
+// the prover in Chromium (KIT_PROVER_E2E), which ci.yml runs in the first part only: 42 s at the slowest (job
+// 135028592843; 21 s to 33 s in the others)
+export const E2E_PROVER_SECONDS = 42;
+
+// the build, and every later command as { dir, name, command }
+function e2eCommands(script) {
   if (typeof script !== "string" || !script.trim()) throw new Error("apps/terminal has no test:e2e script");
-  checkPart(index, total);
   const [build, ...runs] = chain(script, "test:e2e");
+  return { build, runs: runs.map((command) => ({ dir: E2E_DIR, name: "terminal", command })) };
+}
+
+// every part of total: [{ commands, seconds }], each command after the build in exactly one, in test:e2e's order; a
+// part's seconds are its commands' and, for the first part, the prover's
+export function e2eParts(script, total, seconds = E2E_SECONDS) {
+  const { runs } = e2eCommands(script);
+  checkPart(0, total);
   if (runs.length < total) throw new Error(`test:e2e has ${runs.length} command(s) after the build, fewer than ${total} parts`);
-  return [build, ...runs.filter((_, i) => i % total === index)].join(" && ");
+  const start = [E2E_PROVER_SECONDS];
+  return shareOut(runs, total, (c) => listedSeconds(c, seconds, NEW_E2E_SECONDS), start).map((p) => ({ commands: p.at.map((i) => runs[i]), seconds: p.seconds }));
+}
+
+export function e2ePart(script, index, total, seconds = E2E_SECONDS) {
+  const { build } = e2eCommands(script);
+  checkPart(index, total);
+  return [build, ...e2eParts(script, total, seconds)[index].commands.map((c) => c.command)].join(" && ");
 }
 
 // seconds each sweep took on CI, rounded up, the slowest of the two runs read for card ci-mutant-shards-true-times:
@@ -170,19 +267,22 @@ export function mutantCommands(root) {
 }
 
 // items shared out in parts of total: largest first, each to the part with the fewest planned seconds so far; [{ at, seconds }]
-function shareOut(items, total, weight) {
+// (card ci-e2e-shards-by-time: start is the seconds a part holds before any item, by its index, and a part that has no
+// item yet goes first, so a part that starts with seconds is never left with none when there are items enough)
+function shareOut(items, total, weight, start = []) {
   const order = items.map((c, i) => i).sort((a, b) => weight(items[b]) - weight(items[a]) || a - b);
-  const parts = Array.from({ length: total }, () => ({ at: [], seconds: 0 }));
+  const parts = Array.from({ length: total }, (_, j) => ({ at: [], seconds: start[j] ?? 0 }));
+  const fewer = (p, q) => (!p.at.length && q.at.length) || (!p.at.length === !q.at.length && p.seconds < q.seconds);
   for (const i of order) {
-    const least = parts.reduce((best, p, j) => (p.seconds < parts[best].seconds ? j : best), 0);
+    const least = parts.reduce((best, p, j) => (fewer(p, parts[best]) ? j : best), 0);
     parts[least].at.push(i);
     parts[least].seconds += weight(items[i]);
   }
   return parts.map((p) => ({ ...p, at: p.at.sort((a, b) => a - b) }));
 }
 
-// the seconds a sweep is planned at: its listed time, or NEW_SWEEP_SECONDS when it has none
-export const listedSeconds = (c, seconds = MUTANT_SECONDS) => seconds[sweepKey(c)] ?? NEW_SWEEP_SECONDS;
+// the seconds a sweep is planned at: its listed time, or NEW_SWEEP_SECONDS (a browser run's NEW_E2E_SECONDS) when it has none
+export const listedSeconds = (c, seconds = MUTANT_SECONDS, fallback = NEW_SWEEP_SECONDS) => (Object.hasOwn(seconds, sweepKey(c)) ? seconds[sweepKey(c)] : fallback);
 
 // every part of total: [{ commands, seconds }], each command in exactly one
 export function mutantParts(commands, total, seconds = MUTANT_SECONDS) {
@@ -201,19 +301,20 @@ export function mutantsPart(commands, index, total, seconds = MUTANT_SECONDS) {
 export const STALE_FACTOR = 1.25;
 
 // the GitHub annotation for a sweep that ran past STALE_FACTOR times its listed seconds, or null (a workflow command's
-// data escapes %, CR and LF); a sweep with no listed time is planned at NEW_SWEEP_SECONDS
-export function staleWarning(c, measured, seconds = MUTANT_SECONDS) {
-  const listed = listedSeconds(c, seconds);
+// data escapes %, CR and LF); a sweep with no listed time is planned at NEW_SWEEP_SECONDS. A browser run's command
+// names its own table: { table: "E2E_SECONDS", fallback: NEW_E2E_SECONDS }
+export function staleWarning(c, measured, seconds = MUTANT_SECONDS, { table = "MUTANT_SECONDS", fallback = NEW_SWEEP_SECONDS } = {}) {
+  const listed = listedSeconds(c, seconds, fallback);
   if (!(measured > STALE_FACTOR * listed)) return null;
   const note = Object.hasOwn(seconds, sweepKey(c)) ? `listed ${listed} s` : `no listed time, planned at ${listed} s`;
-  const text = `${sweepKey(c)} took ${measured} s, ${note}: set its MUTANT_SECONDS time in scripts/ci/test-shards.mjs to the measured time (a slow runner alone is not a failure)`;
+  const text = `${sweepKey(c)} took ${measured} s, ${note}: set its ${table} time in scripts/ci/test-shards.mjs to the measured time (a slow runner alone is not a failure)`;
   return `::warning::${text.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A")}`;
 }
 
 // runs each command in root/<dir> under `pnpm exec sh -c` (the package's and the root's node_modules/.bin on PATH, as
 // pnpm run gives a script), every one even after a failure: [{ dir, command, seconds, ok }]. `clock` gives milliseconds
 // (injected by the tests); a sweep past STALE_FACTOR times its listed seconds is followed by its warning line.
-export function runPart(commands, root, log = console.log, { clock = () => performance.now(), seconds: table = MUTANT_SECONDS } = {}) {
+export function runPart(commands, root, log = console.log, { clock = () => performance.now(), seconds: table = MUTANT_SECONDS, ...names } = {}) {
   const ran = [];
   for (const c of commands) {
     log(`\n== ${sweepKey(c)}`);
@@ -222,7 +323,7 @@ export function runPart(commands, root, log = console.log, { clock = () => perfo
     const seconds = Math.round((clock() - start) / 100) / 10;
     const ok = r.status === 0;
     log(`== ${ok ? "ok" : `failed (${r.error?.message ?? r.signal ?? `exit ${r.status}`})`} in ${seconds} s: ${sweepKey(c)}`);
-    const warning = staleWarning(c, seconds, table);
+    const warning = staleWarning(c, seconds, table, names);
     if (warning) log(warning);
     ran.push({ dir: c.dir, command: c.command, seconds, ok });
   }
@@ -355,6 +456,22 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (what === "e2e") {
       const script = JSON.parse(readFileSync(path.join(ROOT, "apps/terminal/package.json"), "utf8")).scripts?.["test:e2e"];
       console.log(e2ePart(script, int(index), int(total)));
+    } else if (what === "e2e-run") {
+      const script = JSON.parse(readFileSync(path.join(ROOT, "apps/terminal/package.json"), "utf8")).scripts?.["test:e2e"];
+      const { build } = e2eCommands(script);
+      checkPart(int(index), int(total));
+      const parts = e2eParts(script, int(total));
+      const part = parts[int(index)].commands;
+      console.log(`part ${int(index) + 1} of ${int(total)}, planned ${parts[int(index)].seconds} s${int(index) === 0 ? ` (the prover's ${E2E_PROVER_SECONDS} s in it)` : ""}:`);
+      for (const c of part) console.log(`  ${sweepKey(c)}`);
+      const names = { seconds: E2E_SECONDS, table: "E2E_SECONDS", fallback: NEW_E2E_SECONDS };
+      // the build, timed with the fixed steps (E2E_FIXED_SECONDS), so no table lists it and it is never warned on
+      const [built] = runPart([{ dir: E2E_DIR, name: "terminal", command: build }], ROOT, console.log, { ...names, seconds: {}, fallback: Infinity });
+      if (!built.ok) process.exit(1);
+      const ran = runPart(part, ROOT, console.log, names);
+      console.log(`\npart ${int(index) + 1} of ${int(total)}:`);
+      for (const r of [built, ...ran]) console.log(`  ${String(r.seconds).padStart(7)} s  ${r.ok ? "ok    " : "FAILED"}  ${sweepKey(r)}`);
+      if (ran.some((r) => !r.ok)) process.exit(1);
     } else if (what === "mutants") {
       const commands = mutantCommands(ROOT);
       const parts = mutantParts(commands, int(total));
@@ -369,7 +486,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const [, , , step, i, t] = process.argv;
       packagesMain(step, int(i), int(t));
     } else {
-      throw new Error("usage: node scripts/ci/test-shards.mjs e2e|mutants <index> <total>, or packages plan|tests|typecheck <index> <total>");
+      throw new Error("usage: node scripts/ci/test-shards.mjs e2e|e2e-run|mutants <index> <total>, or packages plan|tests|typecheck <index> <total>");
     }
   } catch (e) {
     console.error(e.message);

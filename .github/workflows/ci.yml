@@ -554,7 +554,10 @@ jobs:
 
   # The terminal's browser runs, split across the matrix: scripts/ci/test-shards.mjs reads apps/terminal's test:e2e,
   # runs its first command (the build) in every part and gives each later command to exactly one part, by the job's
-  # own strategy.job-index of strategy.job-total, so a part added to the matrix or to test:e2e is never dropped.
+  # own strategy.job-index of strategy.job-total, so a part added to the matrix or to test:e2e is never dropped. The
+  # commands are dealt largest first by their measured seconds (E2E_SECONDS; card ci-e2e-shards-by-time), each part
+  # prints each command's time and a warning for one past 1.25 times its listed seconds, and
+  # scripts/ci/test-shards.test.mjs fails when a part's planned seconds and this job's own steps pass timeout-minutes.
   test-browser:
     needs: changes
     if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
@@ -586,10 +589,7 @@ jobs:
         env:
           INDEX: ${{ strategy.job-index }}
           TOTAL: ${{ strategy.job-total }}
-        run: |
-          cmd="$(node scripts/ci/test-shards.mjs e2e "$INDEX" "$TOTAL")"
-          echo "$cmd"
-          cd apps/terminal && pnpm exec sh -c "$cmd"
+        run: node scripts/ci/test-shards.mjs e2e-run "$INDEX" "$TOTAL"
       # The kit's one call in headless Chromium: the real prover worker under SIGN_HOST's own headers proves the fixture's
       # leaves, snarkjs accepts each proof, and a changed leaf or worker answer is refused (vault-prover-e2e; card
       # signpage-prover-host). The browser is the Chrome the step above installs. The first part runs it.
