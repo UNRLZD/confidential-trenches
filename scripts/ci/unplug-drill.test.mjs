@@ -141,3 +141,20 @@ test("the drill takes no words and echoes no unknown argument; a dry run reads n
   assert.match(r.stderr, /never given here/);
   assert.rejects(replayFetch([])("https://near.drpc.org", { body: "{}" }), /not recorded/);
 });
+
+test("the real drill, its input closed before the words: the exit refuses (code 2, no words read) and the drill records FAIL at step 2", () => {
+  // card exit-refuses-when-the-words-never-come: the exit once exited 0 here with nothing said; no network is reached
+  // (the exit refuses before any read, and a record with no Tx is never read back)
+  const dir = mkdtempSync(`${tmpdir()}/unplug-closed-`);
+  try {
+    const out = `${dir}/r.md`;
+    const r = spawnSync(process.execPath, [DRILL, "--out", out], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 });
+    assert.equal(r.status, 1, r.stderr);
+    const text = readFileSync(out, "utf8");
+    assert.match(text, /^CARD unplug-drill \/ live: FAIL$/m);
+    assert.match(text, /^Step 2 the exit: FAIL exit code 2; the exit said: no words were read: the input closed before the 12 words were typed, so nothing was read or sent; near never ended$/m);
+    assert.match(text, /^Step 1 servers off: FAIL 0 request\(s\)/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
