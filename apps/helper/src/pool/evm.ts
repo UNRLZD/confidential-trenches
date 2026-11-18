@@ -210,6 +210,7 @@ import {
   evmPoolVenues,
   evmRpcOperator,
   evmSellRouteOf,
+  secretScrubber,
   solanaJsonRpc,
   type EvmPoolChain,
   type EvmPoolVenue,
@@ -2118,74 +2119,16 @@ export function evmPoolSeats(pair: readonly [string, string], keyed: readonly { 
 }
 
 /**
- * A provider's words as a log line or an error may hold them (card helper-evm-read-two-operators; card
- * helper-evm-ready-holds-a-fee, review P3-6): cut to EVM_SCRUB_MAX characters ("…" marks the cut), then every http(s)
- * URL in them, cut or whole, in any case, becomes its host, and every secret part of `urls` (rpc.ts readUpstreams':
- * user, password, query values, path segments of 16 or more), in any case, written or percent-encoded, and any start of
- * one of 8 characters or more (a provider's message cut inside the key), becomes <key>.
- * Each secret is one case-insensitive pattern (Unicode's simple case folding), built here once: its first 8 characters, then each next one optional
- * inside the one before (the longest start at each place, in one pass with no backtracking past a character), matched
- * on the words as they are, so no index moves between two strings of different length (review of f86e1c27, P2: U+0130
- * lower-cases to two characters). Its work is one pass per secret over at most EVM_SCRUB_MAX characters, whatever the
- * words hold. It only removes text or puts <key>, <url> or a host in its place, so failedInExecution and the throttle
- * reads, which read the scrubbed words, decide as on the words before: no code, "execution reverted", rate or limit
- * word is made or unmade by it (a secret holds no space, so none spans one).
+ * A provider's words as a log line or an answer may hold them: the kit's one rule, its secretScrubber, read through its
+ * public entry (card helper-scrubber-takes-the-kits-rule; the helper's own second rule leaked a key as a bare query
+ * name, in the fragment, in a path segment of 8 to 15 characters and in a password with a JSON-escaped slash). Every
+ * secret part of `urls` (user, password, query names and values as parsed and as written, path segments, fragment, of 8
+ * characters or more), in any case, written, percent-decoded, percent-encoded or JSON-escaped, and any start of one of
+ * 8 or more, becomes <key>; then any URL becomes its host, and a listed host followed by a path becomes the host; cut to
+ * 4,096 characters ("…" marks the cut). It only removes text or puts <key>, <url> or a host in its place, so
+ * failedInExecution and the throttle reads, which read the scrubbed words, decide as on the words before.
  */
-export function evmScrubber(urls: readonly string[]): (text: string) => string {
-  const keys = new Set<string>();
-  for (const u of urls) {
-    let p: URL;
-    try {
-      p = new URL(u);
-    } catch {
-      continue;
-    }
-    for (const x of [p.username, p.password, ...p.searchParams.values(), ...p.pathname.split("/").filter((y) => y.length >= 16)]) {
-      if (x.length >= 8) for (const f of [x, encodeURIComponent(x), decodeURIComponentOr(x)]) keys.add(f);
-    }
-  }
-  // each secret whole, as written, longest first; then its start of 8 to EVM_SCRUB_KEY_MAX characters (code points, each
-  // escaped) in any ASCII case ("i"; no "u": a provider echoes its key as it is or in another case, never in another
-  // script's case pairs, and a code point cut inside its surrogate pair ends the start before it either way). Review of
-  // 41c6c371, P3-2: a pattern of 4,000 nested groups aborts the process when compiled; a start of 256 is ample, and the
-  // whole secret is still removed where it appears whole
-  const whole = [...keys].sort((x, y) => y.length - x.length);
-  const esc = (c: string) => c.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-  const patterns = whole
-    .map((k) => [...k].slice(0, EVM_SCRUB_KEY_MAX).map(esc))
-    .map((cs) => new RegExp(`${cs.slice(0, 8).join("")}${cs.slice(8).map((c) => `(?:${c}`).join("")}${")?".repeat(Math.max(0, cs.length - 8))}`, "gi"));
-  return (text) => {
-    // the secrets before the URLs (review of 41c6c371, P3-3): a URL's run stops at an apostrophe, and a key that holds one
-    // would leave its rest past it, no longer a start of it
-    // each whole secret first, on the whole words (a native split, linear), so one longer than the cut is still removed
-    let all = text;
-    for (const k of whole) all = all.split(k).join("<key>");
-    let m = all.slice(0, EVM_SCRUB_MAX);
-    for (const r of patterns) m = m.replace(r, "<key>");
-    // a URL's run passes over a secret's <key> (review of e52fa55f: a key the secrets pass cut short, a raw "+" in a
-    // query, or the URL's path past its key, stays otherwise)
-    m = m.replace(/https?:\/\/(?:<key>|[^\s"'<>`])*/gi, (u) => {
-      try {
-        return new URL(u).host;
-      } catch {
-        return "<url>";
-      }
-    });
-    return all.length > EVM_SCRUB_MAX ? `${m}…` : m;
-  };
-}
-/** The most of a provider's words the scrubber reads (review of f86e1c27, P2): a JSON-RPC error's words are a line or
- *  two; a log line holds 160 of them, a refusal 1,200. */
-export const EVM_SCRUB_MAX = 4_096;
-/** The longest start of a secret the scrubber's patterns read (review of 41c6c371, P3-2). */
-export const EVM_SCRUB_KEY_MAX = 256;
-const decodeURIComponentOr = (x: string): string => {
-  try {
-    return decodeURIComponent(x);
-  } catch {
-    return x;
-  }
-};
+export const evmScrubber: (urls: readonly string[]) => (text: string) => string = secretScrubber;
 /** A read as a log line names it: the method, and an eth_call's selector, target and block. */
 const readOf = (method: string, params: readonly unknown[]): string => {
   if (method !== "eth_call") return method;

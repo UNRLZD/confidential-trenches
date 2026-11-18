@@ -136,7 +136,9 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
     const txs: string[] = [];
     const steps = (signer: string): Omit<ExitWithdrawSteps, "withdraw"> => ({
       send: (s) => sendOnce(mrpcs, signer, s, sleep, ctx.say),
-      record: async (r) => ctx.say(`${r.step} tx ${r.hash}`),
+      // the signer named with each tx: a NEAR tx is looked up by its hash and its signer (an explorer, the money gate's
+      // read back of the unplug drill's record, scripts/drill/unplug.mjs)
+      record: async (r) => ctx.say(`${r.step} tx ${r.hash} from ${signer}`),
       spend: async (nh) => (await exitReadPages({ network, rpcs: vrpcs, lists: ["spends"] })).spends.find((x) => x.nullifierHash === nh) ?? null,
       account: async (aId) => {
         const b = await finalBlock(mrpcs);

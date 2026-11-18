@@ -1294,3 +1294,42 @@ test("card helper-gives-a-trade-its-reads: a route on our keyed providers gives 
     assert.throws(() => createRpc({ [name]: bad }), (e: Error) => e.message.startsWith(`${name} must be`) && !e.message.includes(bad), `${name}=${bad}`);
   assert.doesNotThrow(() => createRpc({ RPC_BUDGET_SOLANA: "100,42", RPC_BUDGET_SOLANA_DEVNET: "100,42", RPC_BUDGET_SOLANA_MARKS: "100,30", RPC_BUDGET_BASE: "100,30", RPC_BUDGET_ROBINHOOD: "100,30", RPC_BUDGET_NEAR: "600,90" }));
 });
+
+// card helper-scrubber-takes-the-kits-rule (review of 2c930cd39, item 3): a JSON-RPC error that echoes a keyed URL's
+// secret in a form no exact match reads (another case, cut short, a path key under 16 characters) is withheld as the
+// key itself is, by the kit's one rule (secretScrubber) on the error's words; a result is chain data and never read so
+const SHORTK = "Sh0rtK3y9z";
+const SHORT_KEYED = `https://cfg.test/base/${SHORTK}?dkey=${SEGMENT}`;
+for (const [what, message] of [
+  ["a path key under 16 characters", `invalid key ${SHORTK}`],
+  ["a query key in another case", `key ${SEGMENT.toUpperCase()} unknown`],
+  ["a query key cut short", `key ${SEGMENT.slice(0, 15)}… over plan`],
+] as const) {
+  test(`card helper-scrubber-takes-the-kits-rule: a keyed provider's refusal holding ${what} never reaches the caller; a clean refusal and a result still do`, async () => {
+    const asked: string[] = [];
+    const answers: Record<string, (b: { id: unknown }) => Response> = {
+      [SHORT_KEYED]: (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error: { code: -32602, message } }),
+      "https://p1.test": () => new Response("down", { status: 503 }),
+    };
+    const fetch = async (url: string, init: RequestInit): Promise<Response> => (asked.push(url), answers[url]!(JSON.parse(String(init.body))));
+    const t = { v: performance.timeOrigin + performance.now() };
+    const r = createRpc({ BASE_RPC_URL: SHORT_KEYED }, { fetch: fetch as never, holds: providerHolds(() => t.v), pinned: { base: ["https://p1.test"] }, now: () => t.v });
+    const a = await call(r, "base", { jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] });
+    assert.ok(!/Sh0rtK3y|projectsegment0/i.test(a.body), a.body);
+    assert.equal(a.status, 503, a.body);
+    answers[SHORT_KEYED] = (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error: { code: -32602, message: "invalid argument 0: hex string of odd length" } });
+    const clean = await call(r, "base", { jsonrpc: "2.0", id: 2, method: "eth_chainId", params: [] });
+    assert.equal(JSON.parse(clean.body).error?.message, "invalid argument 0: hex string of odd length", clean.body);
+    // a result holding the key's start in hex is chain data: passed as it is
+    answers[SHORT_KEYED] = (b) => jsonOk({ jsonrpc: "2.0", id: b.id, result: `0x${Buffer.from(SHORTK).toString("hex")}` });
+    assert.equal((await call(r, "base", { jsonrpc: "2.0", id: 3, method: "eth_chainId", params: [] })).status, 200);
+  });
+}
+
+test("card helper-scrubber-takes-the-kits-rule: Solana's keyed URL echoing its key in another case in a refusal is withheld (call's path)", async () => {
+  next = { status: 200, type: JSON_T, body: (req) => JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(req).id, error: { code: -32602, message: `bad key ${KEY.toUpperCase()}` } }) };
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}` });
+  const a = await call(r, "solana", { jsonrpc: "2.0", id: 4, method: "getSlot", params: [] });
+  assert.ok(!a.body.toLowerCase().includes(KEY.slice(0, 12)), a.body);
+  next = { status: 200, type: JSON_T, body: echo };
+});

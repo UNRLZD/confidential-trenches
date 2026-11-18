@@ -126,7 +126,10 @@ export const SKIPPED = Object.fromEntries(headerOf("Skipped").map(([k, v]) => [k
 // them between them: run 43683445143 (15 Nov 06:03Z, 90 jobs at once) read the keyed Base route 429 while the plain one
 // answered the same reads off its public list, and 6 such checks red; 5 of them re-run alone at 06:21-06:27Z read PASS.
 // Its members run back to back with no Jupiter idle read (live-serial.mjs idleGated), in parallel with jupiter-budget,
-// whose budget they do not touch.
+// whose budget they do not touch. Card live-market-checks-not-all-at-once: a Base or Robinhood chart (built from the same
+// keyed swap reads), a wallet script on the helper's Base or Robinhood /v1/rpc, and a kit quote on Robinhood (its pool
+// index on the keyed route) are keyed reads too (live-workflow.mjs readsKeyed): run 44249482613 read the group's
+// helper-keyed-logs-serve-a-whole-pool-range at 8952 ms while three such checks ran in jobs of their own.
 // Each member says so in its own header (card ci-stops-costing-reruns: a list every card appended to made ready branches
 // conflict): `// Serial: <group> <position> [why there]`, the group's order by position (10, 20, ...: a check that joins
 // takes a free number between two, and no other check's line changes). A position held twice, or a line with no
