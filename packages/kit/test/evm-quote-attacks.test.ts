@@ -791,6 +791,23 @@ test("N1a a seeded standard pool is held to the token's real pool the device's o
   assert.deepEqual(await quoteOn(pools, "0x00000000000000000000000000000000000a22a2", seededRoute("0x00000000000000000000000000000000000a22a2"), broken), { accepted: false, code: "rpc_error" });
 });
 
+test("TAIL10 a quote whose new blocks start past maxLag reads them alone before its answer: the index's margin, read by the last quote, counts as read for it and its blocks now past the margin are read right after", async () => {
+  const token = "0x00000000000000000000000000000000000a1a10";
+  const pools = [seeded(token), real(token)];
+  const asked: [number, number][] = [];
+  const m = moving();
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), m.to(scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked))), below);
+  asked.length = 0;
+  // 200 blocks later, past Base's maxLag (50): the new blocks cannot wait for the answer
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), m.to(scanner(5_000_200, [], asked)), undefined, "base", 5_000_200), below);
+  for (let i = 0; i < 400 && asked.length < 2; i++) await new Promise((go) => setTimeout(go, 5));
+  // the new blocks first, alone, then (beside the quote's next round, as any later read) the margin's blocks now past
+  // it, kept (TAIL7); never the margin's others, which the last quote read (at c514de6ab one request of all of them with
+  // the new ones before the answer, [4,999,527, 5,000,200]: a Robinhood quote 31 s after the last read 7,471 blocks
+  // before its answer where main read 547)
+  assert.deepEqual(asked, [[5_000_001, 5_000_200], [5_000_000 - TAIL_MARGIN + 1, 5_000_200 - TAIL_MARGIN]]);
+});
+
 test("card evm-pool-index-from-the-first-pool: a token whose only real pool is older than the scan's depth is held to it through the helper's served pools, each key hashed to its id and read on both providers", async () => {
   const { evmPoolServedUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolServedUse: (c: string, t: string, a: Promise<unknown>) => void; evmPoolIndexReset: () => void };
   const answer = (token: string, o: Record<string, unknown> = {}, pools: unknown[] = [{ id: "0x" + pidOf(real(token).key), key: real(token).key }]) => ({ chainId: 8453, poolManager: PM, complete: true, through: 4_999_990, pools, ...o });
@@ -3540,7 +3557,8 @@ test("W2c a warm quote that does not wait for its last blocks is still held to t
   const logs = [{ key: kept.key, at: 4_100_000 }];
   const req = { ...warmReq(token), route: seededRoute(token) };
   assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, wd.warm(scanner(5_000_000, logs)), undefined, () => 0)), below);
-  const h = heldFrom(scanner(5_000_010, logs), 5_000_001);
+  // held: every read from the index's margin below the kept head on (the chain's tail keeps none of it, TAIL7)
+  const h = heldFrom(scanner(5_000_010, logs), 5_000_000 - TAIL_MARGIN + 1);
   const v = await verdict(h.answered(evmPoolBuyQuoteWith(req, [chain(pools, 0, 5_000_010), chain(pools, 1, 5_000_010)], NOW, wd.on(h.rpc), undefined, () => 0)));
   assert.deepEqual(v, below);
   await pause(20);
@@ -4033,7 +4051,7 @@ test("J1 a scan that lost one span keeps every other: the next quote reads only 
   const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scan));
   // the token's blocks read again: the smallest part of the failed span (10,000 blocks halved three times), not 1,000,000
   const ranges = [...new Set(asked.map((r) => r.join("-")))];
-  assert.deepEqual(ranges, ["4498751-4500000", `${5_000_000 - TAIL_MARGIN + 1}-5000000`], "the token's scan reads only the part that failed");
+  assert.deepEqual(ranges, ["4498751-4500000"], "the token's scan reads only the part that failed");
   // and it decides as a quote on a scan that never failed
   const t2 = "0x00000000000000000000000000000000000ee0f5";
   const c2 = warmCase(t2, xAt(0x3b10));
@@ -4278,7 +4296,7 @@ test("J6 a scan whose request for X2's market block failed keeps no span of it: 
   asked.length = 0;
   // X2's market through which B pays ten times the seeded route: found, so the seeded route is refused
   assert.equal(big(await q()), big({ accepted: false, code: "below_reference" }));
-  assert.deepEqual([...new Set(asked)], ["5078751-5080000", `${5_100_000 - TAIL_MARGIN + 1}-5100000`], "and the index's margin below the head, read again (TAIL7)");
+  assert.deepEqual([...new Set(asked)], ["5078751-5080000"], "the head has not moved: the index's margin, read by the last quote, is not read again (TAIL10)");
 });
 
 test("V10 a block two colluders name, which the other three providers hold otherwise, is never read at: a contested block needs more than half the listed providers", async () => {
@@ -6224,6 +6242,22 @@ test("TAIL4 card evm-scan-chain-tail (independent review of 92717c7, MEDIUM 1): 
   const honest = scanner(5_000_010, realAt(B, 5_000_005));
   quoteMod.evmScanTailAlias(honest, warm);
   assert.deepEqual(await triQuote(B, [honest, scanner(5_000_010, realAt(B, 5_000_005))], "base", 5_000_010), below);
+}));
+
+test("TAIL4b blocks older than the index's margin that a spare answered no logs of are never kept as read for another coin: a pool of B made there is found by B's quote on the first", { timeout: 60_000 }, () => onTestClock(async () => {
+  const [A, B] = ["0x00000000000000000000000000000000005c4641", "0x00000000000000000000000000000000005c4642"];
+  const warm = scanner(5_000_000, []);
+  await triQuote(A, [warm, scanner(5_000_000, [])]);
+  // A's quote 1,000 blocks on with the first down: the spare answers [] for blocks 5,000,001 to 5,001,000, which past
+  // 5,000,526 (the head less Base's margin) are only the band, but up to it would be kept; B's real pool is at 5,000,005
+  const down = answering503("one.tail4b.test");
+  quoteMod.evmScanTailAlias(down, warm);
+  await triQuote(A, [down, scanner(5_001_000, [])], "base", 5_001_000);
+  // B's quote, the first honest again: it reads those blocks itself and finds the pool (TAIL4's case past the margin,
+  // where a spare's answer reaches the kept spans: TAIL4 itself, inside the margin, no longer reaches them since TAIL7)
+  const honest = scanner(5_001_000, realAt(B, 5_000_005));
+  quoteMod.evmScanTailAlias(honest, warm);
+  assert.deepEqual(await triQuote(B, [honest, scanner(5_001_000, realAt(B, 5_000_005))], "base", 5_001_000), below);
 }));
 
 // ------------------------------------------------------------------ a one-block answer (card evm-quote-rides-out-a-one-block-answer)
@@ -10332,7 +10366,7 @@ test("J6m a scan of two currencies with different blocks left keeps each span on
   asked.length = 0;
   // X2's market through which B pays ten times the seeded route: found, so the seeded route is refused
   assert.equal(big(await q()), big({ accepted: false, code: "below_reference" }));
-  assert.deepEqual([...new Set(asked)], ["5078751-5080000", `${5_100_000 - TAIL_MARGIN + 1}-5100000`], "and the index's margin below the head, read again (TAIL7)");
+  assert.deepEqual([...new Set(asked)], ["5078751-5080000"], "the head has not moved: the index's margin, read by the last quote, is not read again (TAIL10)");
 });
 
 
