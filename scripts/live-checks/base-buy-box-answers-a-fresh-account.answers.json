@@ -1,0 +1,72 @@
+{
+ "good": {
+  "note": "this branch, 2026-11-18 00:42Z: the refreshed data/evm-index/base.json read from a folder holding it byte for byte (--site), Base heads on two providers, one sync from it on the venue index readers: PASS",
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "site": "a build folder at SIGN_HOST's name",
+   "at": "2026-11-18T00:42:41.827Z",
+   "snapshot": {
+    "status": 200,
+    "bytes": 958084,
+    "through": 58859903,
+    "pools": 6148
+   },
+   "heads": [
+    58860932,
+    58860934
+   ],
+   "sync": {
+    "ms": 2276,
+    "served": true,
+    "coversThrough": 58860935,
+    "requests": [
+     2,
+     2
+    ],
+    "getLogs": [
+     1,
+     1
+    ],
+    "limited": [
+     0,
+     0
+    ]
+   }
+  }
+ },
+ "bad": {
+  "note": "SIGN_HOST at release 171 (main 6eb3a7d91), 2026-11-18 00:42Z: the 16 Nov snapshot 809,329 blocks behind the head: FAIL",
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "site": null,
+   "at": "2026-11-18T00:42:30.588Z",
+   "snapshot": {
+    "status": 200,
+    "bytes": 672436,
+    "through": 58051548,
+    "pools": 4320
+   },
+   "heads": [
+    58860877,
+    58860879
+   ],
+   "sync": {
+    "ms": 9988,
+    "served": true,
+    "coversThrough": 58860881,
+    "requests": [
+     27,
+     27
+    ],
+    "getLogs": [
+     113,
+     113
+    ],
+    "limited": [
+     0,
+     0
+    ]
+   }
+  }
+ }
+}
