@@ -2291,6 +2291,48 @@ test("restore-residuals ze2 (review of 4f6e75ad9 P2): a Sync that joins while th
   }
 });
 
+test("restore-residuals (review of 4f6e75ad9 P3): a step 5 that waited for the ids lock takes over a marker a run since wrote in a tab now closed and reads every id; a marker removed meanwhile, it reads none", async (t) => {
+  usedMap = new Map();
+  for (const removed of [false, true]) {
+    const n = nearOf();
+    const w = await vworld(t, { pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
+    let open!: () => void;
+    const held = new Promise<void>((r) => (open = r));
+    void navigator.locks.request(K.RESTORE_IDS_LOCK as string, { mode: "exclusive" }, () => held);
+    try {
+      assert.equal(await w.r.auto(), "done");
+      await until("step 5 waits for the lock", async () => ((await navigator.locks.query()).pending ?? []).some((l) => l.name === K.RESTORE_IDS_LOCK), 5_000);
+      // a later Sync's walk in another tab wrote its own marker, then that tab closed (or its clean read removed it)
+      if (removed) await w.store.delete("meta", IDS_KEY());
+      else await w.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()], run: "closed", read: { [SOL_SCOPE.toString()]: [...Array(8).keys()].map((l) => [l, l + 8 * 21, null, 0]) } });
+    } finally {
+      open();
+    }
+    await w.r.idle();
+    assert.equal(new Set(idsAsked(n.log)).size, removed ? 0 : 168, removed ? "nothing owed" : "every lane read whole, none of the closed run's lanes kept");
+    assert.equal(await markerOf(w.store), undefined);
+  }
+});
+
+test("restore-residuals (review of 4f6e75ad9 P3): a step 5 whose marker another run took over during a pause lets the lock go: no try after it", async (t) => {
+  usedMap = new Map();
+  // try 1 leaves an id unread (a read to try again); while it reads, a later Sync's walk in another tab writes its marker
+  const down = idOf(SOL_SCOPE, 43);
+  const n = nearOf(new Map<string, As>([[down, "down"]]));
+  const base = n.ids.rpcs;
+  let store!: WalletStore;
+  const ids = { ...n.ids, rpcs: () => base().map((x) => ({ name: x.name, query: async (p: Record<string, unknown>) => {
+    if (idOfU(p) === down) await store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()], run: "newer" });
+    return x.query(p as never);
+  } })) as unknown as readonly [NearRpc, NearRpc] };
+  const w = await vworld(t, { pools: () => SOL_ONLY, solana: emptyWalk, ids, ux: () => uxOf(new Map()).reads, pausesMs: [1, 1] });
+  store = w.store;
+  assert.equal(await w.r.auto(), "done");
+  await w.r.idle();
+  assert.deepEqual(w.steps.map((s) => s.tries), [1], "no try 2 on another run's marker");
+  assert.equal((await markerOf(w.store))?.run, "newer");
+});
+
 test("restore-residuals: a run never skips a lane another run kept: its marker taken over during its step 5 (another tab's Sync), it reads every lane", async (t) => {
   usedMap = new Map();
   const probe = await vworld(t, {});

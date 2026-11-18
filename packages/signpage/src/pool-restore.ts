@@ -1422,9 +1422,21 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // the testnet build: named at the walk's end above, nothing for step 5 to read
         if (ids === null) return;
         if ((walked.length === 0 && vaultIds === null) || !idsOwed) return;
-        // step 5 waits for another tab's (RESTORE_IDS_LOCK, below): a marker another run wrote since (a later Sync's,
-        // which reads for it once this one lets the lock go) or removed is that run's to read, never read twice
-        if (owedOf(await seedHeld(async () => (await h.store()).get("meta", RESTORE_IDS_KEY)))?.run !== runId) return;
+        // step 5 waits for another tab's (RESTORE_IDS_LOCK, below). A marker removed meanwhile was read whole by a run
+        // that walked after this one: nothing is owed. One another run wrote since is taken over, fresh (no lane it kept,
+        // no part point, its window kept), and read here: that run, a later Sync's, may be in a tab that closed, and one
+        // still waiting for the lock reads again after this (review of 4f6e75ad9 P3)
+        const ours = await seedHeld(async () => {
+          let owed = false;
+          await (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
+            const o = owedOf(v);
+            if (o === null) return undefined;
+            owed = true;
+            return o.run === runId ? undefined : { scopes, run: runId, ...(o.late === undefined ? {} : { late: o.late }) };
+          });
+          return owed;
+        });
+        if (!ours) return;
         // the scope's deposit indices the note store holds now (the floor's notes among them), for the U_X carry
         const noted = async (scope: bigint): Promise<ReadonlySet<number>> => {
           const notes = await openNoteStore(await h.store());
@@ -1541,6 +1553,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         const wait = step5Wait(marker, now());
         if (wait > 0) await pause(wait, signal);
         for (let t = 1; ; t++) {
+          // a marker another run took over during a pause (a later Sync's walk, waiting for this lock) is that run's to
+          // read: this one lets the lock go rather than read on for nothing (review of 4f6e75ad9 P3)
+          if (t > 1 && owedOf(await seedHeld(async () => (await h.store()).get("meta", RESTORE_IDS_KEY)))?.run !== runId) return;
           const out: Step5Reasons = { retry: [], held: [], named: [] };
           stays = walkFailed;
           await readDepositIds(seed, walked, ids, keep, signal, out, noted, own, lanesKept, vaultIds === null || carry === null ? null : { v: vaultIds, notesAt, carry, late }, { notesAt, late }).catch((e: unknown) => {

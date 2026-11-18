@@ -169,6 +169,9 @@ const M = [
   ["ze2: a request joining a running id read not read for again", PRS, [["          if (state.reading) again = true;\n", ""]], PRT, "restore-residuals ze2"],
   ["ze2 (review of 4f6e75ad9 P2): a run not reading for joined requests until it holds the ids lock", PRS, [["        if (ids !== null && idsOwed && (walked.length > 0 || vaultIds !== null)) run.reading = true;\n", ""]], PRT, "review of 4f6e75ad9"],
   ["ze2: a joined request's run started after a sign out", PRS, [["if (again && epoch === e && !ctl.signal.aborted && run === null)", "if (again && run === null)"]], PRT, "review of 4f6e75ad9"],
+  ["review of 4f6e75ad9 P3: a marker a closed tab's run wrote skipped, never taken over", PRS, [["            return o.run === runId ? undefined : { scopes, run: runId,", "            if (o.run !== runId) owed = false;\n            return o.run === runId ? undefined : { scopes, run: runId,"]], PRT, "review of 4f6e75ad9 P3"],
+  ["review of 4f6e75ad9 P3: a marker taken over keeping its kept lanes", PRS, [["            return o.run === runId ? undefined : { scopes, run: runId,", "            return o.run === runId ? undefined : { ...o, scopes, run: runId,"]], PRT, "review of 4f6e75ad9 P3"],
+  ["review of 4f6e75ad9 P3: a step 5 read on in its tries on another run's marker", PRS, [["          if (t > 1 && owedOf(await seedHeld(async () => (await h.store()).get(\"meta\", RESTORE_IDS_KEY)))?.run !== runId) return;\n", ""]], PRT, "review of 4f6e75ad9 P3"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
 const only = process.argv[2];
