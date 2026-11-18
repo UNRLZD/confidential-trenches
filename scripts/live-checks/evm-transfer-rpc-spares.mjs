@@ -2,7 +2,9 @@
 // Live check of card evm-transfer-rpc-spares: every EVM read pair the device names a provider to directly is a pinned
 // list read as a pair with spares (the wallet's evmPair), and with any one provider of it out for hours the read still
 // runs on two others, the out one asked at most once and never waited on. Two kinds of list:
-//   - the pool lists (the kit's evmPoolVenues providers, which evmPool and evmTreeSync read): on every network the
+//   - the pool lists (the kit's evmPoolProvidersOf(evmPoolVenues()[network]), the signing page's MAINNET_POOL_RPCS on
+//     mainnet, which evmPool and evmTreeSync read; never the venue's quote list `providers`, which on Base and
+//     Robinhood names others, card rh-provider-fails-64-read-batch): on every network the
 //     newest 2,000 blocks read in the pool's shape (the two anchors, the chain id and the anchor's hash on both, a log
 //     read with an address and the pool's three topics), alike on both;
 //   - the testnets' Transfer lists (the wallet's EVM_TRANSFER_RPCS; Base's and Robinhood's Ws are read on the helper's
@@ -18,17 +20,19 @@
 // so no check here is a second implementation of the wallet's.
 // It passes when every live read and every case not skipped reads alike on two providers of two operators, never the
 // out one, which is asked at most once; it fails if any is refused.
-//   node scripts/live-checks/evm-transfer-rpc-spares.mjs [--record <file>]
+//   node scripts/live-checks/evm-transfer-rpc-spares.mjs [--mainnet] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
+// --mainnet reads Base's and Robinhood's pool lists only, no test network; with --record it keeps the file's recorded
+// test-network answers as they are and records the mainnet ones beside them.
 // --record writes every provider answer read, each with the case it was read in (ctx, the replay's context), as the
 // good run of evm-transfer-rpc-spares.answers.json, and its bad run: the same answers with every answer of Base's pool
 // list but its first provider's a quota 429 too (one left, no pair).
 // Runs: once, it reads no host: the wallet at the checkout against public RPCs; the wallet tests hold the swap rule
 import "../net-window.mjs";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmPoolProvidersOf, evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { W, check, recorder, replayer } from "./wallet-restore-transfer-rpcs.mjs";
 
 const KEY = "evm-transfer-rpc-spares";
@@ -40,11 +44,12 @@ const TRANSFER_LISTS = Object.freeze({
 /** The lists read: each network's pool list from the kit, each testnet's Transfer list (the wallet's, which the
  * wallet's report names; the copy here only labels the run and is checked against that report). */
 export const LISTS = Object.freeze([
-  ...["base", "robinhood", "base-sepolia", "robinhood-testnet"].map((network) => ({ label: `${network} pool`, network, pool: evmPoolVenues()[network].providers })),
+  ...["base", "robinhood", "base-sepolia", "robinhood-testnet"].map((network) => ({ label: `${network} pool`, network, pool: Object.freeze([...(evmPoolProvidersOf(evmPoolVenues()[network]) ?? [])]) })),
   ...Object.entries(TRANSFER_LISTS).map(([network, urls]) => ({ label: `${network} transfer`, network, urls })),
 ]);
 /** thirdweb's keyless daily quota as the device's client ends it (5 Nov 16:28Z and 17:29Z). */
 export const QUOTA = Object.freeze({ error: "HTTP 429 (http_429, 1 try at a provider out for the day)", name: "SolanaRpcTransportError", afterMs: 26_741_000 });
+const MAINNET = Object.freeze(["base", "robinhood"]);
 const host = (u) => new URL(u).host;
 const operator = (u) => new URL(u).hostname.split(".").slice(-2).join(".");
 const THIRDWEB = (u) => operator(u) === "thirdweb.com";
@@ -111,11 +116,16 @@ export function spoil(log) {
 async function main(argv) {
   const at = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : undefined);
   const record = at("--record");
+  const mainnet = argv.includes("--mainnet");
   const rec = recorder();
-  const r = await spares(rec.transport);
+  const r = await spares(rec.transport, mainnet ? { order: (xs) => (xs === LISTS ? xs.filter((l) => MAINNET.includes(l.network)) : xs) } : {});
   for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
   if (record) {
-    writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: rec.log, bad: spoil(rec.log) }, null, 1)}\n`);
+    // --mainnet: the file's test-network answers kept as recorded, after the mainnet ones read now
+    const old = mainnet ? JSON.parse(readFileSync(record, "utf8")) : undefined;
+    const good = [...rec.log, ...(old ? old.good.filter((e) => !MAINNET.includes(e.network)) : [])];
+    const dates = old ? { testnetsRecorded: old.testnetsRecorded ?? old.recorded } : {};
+    writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), ...dates, good, bad: spoil(good) }, null, 1)}\n`);
     console.log(`recorded ${record}`);
   }
   console.log(r.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
