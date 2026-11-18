@@ -1,6 +1,8 @@
 // node --test scripts/live-checks/index-sol-trades.test.mjs: the live check replays recorded answers
-// (index-sol-trades.answers.json). good: apps/helper at the card branch run on a Mac (Solana lists passed through from the
-// deployed helper, trades read from the public chain endpoints), 2026-11-03 21:00Z: PASS. bad_not_deployed: the deployed
+// (index-sol-trades.answers.json). good: apps/helper's trades.ts run on a Mac, its pump.fun part as recorded before, its
+// Meteora part (card index-sol-trades-2) at that card's 180162ef0 (index-sol-trades.record-local.mjs --meteora: Solana
+// lists passed through from the deployed helper, trades read from the public chain endpoints), 2026-11-18: PASS, one
+// Meteora coin per venue. bad_not_deployed: the deployed
 // helper before this card, 404 on a listed Solana token's trades: FAIL. Made from the good answer: a tape that holds the
 // trade only after 2 s, another trader, another side, no 1s bar at the trade's second, a vendor source, a stale read, no
 // CORS echo, a tape oldest first, an extra field: each FAIL.
@@ -131,4 +133,56 @@ test("the 1s candles: a 200 after a 429 that cleared inside the span passes; a 4
   assert.ok(bad(stood).some((l) => l.endsWith("answers 429 after 75 s of reads at each Retry-After (60, 15 s)")), bad(stood).join("\n"));
   const empty = judge(edit((rec) => body(rec.candles, (b) => (b.candles = []))));
   assert.ok(bad(empty).some((l) => /the 1s candles hold the trade's second/.test(l)), bad(empty).join("\n"));
+});
+
+// card index-sol-trades-2: one listed Meteora coin per venue. good (re-recorded for this card): its pump.fun part the
+// check's own read() against this tree's trades.ts in process (index-sol-trades.record-local.mjs), its Meteora part the
+// same recorder's --meteora run (the public websocket refused a second connection while the in-process helper held its
+// own). On 18 Nov the lists held no coin on a DBC curve that traded, so the DBC leg reads "none to read" and its decoding
+// is held by decode.test.ts's recorded DBC trades. bad_meteora_before: the deployed helper before this card read by the
+// check's Meteora part: FAIL.
+const VENUES = ["meteora-dlmm", "meteora-dbc", "meteora-damm2"];
+const READ = VENUES.filter((v) => v in A.good.meteora);
+
+test("card index-sol-trades-2: the good answer holds a fresh trade of a listed coin on each Meteora venue, on its tape, read back on two RPCs", () => {
+  const r = check.judgeMeteora(A.good.meteora);
+  assert.deepEqual(bad(r), []);
+  assert.ok(READ.includes("meteora-dlmm") && READ.includes("meteora-damm2"), READ.join());
+  for (const v of VENUES) assert.ok(r.lines.some((l) => l.startsWith(`ok  ${v}: the trade`) || (v === "meteora-dbc" && l.startsWith(`ok  ${v}: none to read`))), v);
+});
+
+test("card index-sol-trades-2: no DBC trade passes only while the lists hold no coin on a DBC curve that trades", () => {
+  const noDbc = (fn) => edit((rec) => (delete rec.meteora["meteora-dbc"], fn(rec.meteora)));
+  assert.equal(judge(noDbc((m) => (m.dbc_curves = []))).ok, true);
+  assert.equal(judge(noDbc((m) => (m.dbc_curves = ["65iH8k736QNhuUHm1tt8X7yJXpJ517HPPq8BrVdwring"]))).ok, false, "a DBC curve coin listed");
+  assert.equal(judge(noDbc((m) => delete m.dbc_curves)).ok, false, "no DBC curve list");
+  assert.equal(judge(noDbc((m) => (m.dbc_curves = "none"))).ok, false, "a DBC curve list that is not a list");
+  const rows = [
+    { token: "A1", launchpad: "met-dbc", curve_bps: 5_000, vol_24h_usd: 2_000 },
+    { token: "B2", launchpad: "met-dbc", curve_bps: 10_000, vol_24h_usd: 2_000 },
+    { token: "C3", launchpad: "met-dbc", curve_bps: 5_000, vol_24h_usd: 0.99 },
+  ];
+  assert.equal(check.DBC_VOL_USD, 1_000);
+  assert.deepEqual(check.dbcCurves(rows), ["A1"]);
+});
+
+test("card index-sol-trades-2: the deployed helper before this card fails the Meteora part", () => {
+  const r = check.judgeMeteora(A.bad_meteora_before.meteora);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).length > 0);
+  assert.equal(judge({ ...A.good, meteora: A.bad_meteora_before.meteora }).ok, false);
+});
+
+test("card index-sol-trades-2: a venue with no fresh trade, the trade not on the tape, another side or time, a vendor source, or a signature one RPC does not read back succeeded, fails", () => {
+  const onTape = (rec, v, fn) => body(rec.meteora[v].polls.at(-1), (b) => fn(b, b.trades.find((x) => x.tx === rec.meteora[v].sig)));
+  for (const v of READ) {
+    assert.equal(judge(edit((rec) => delete rec.meteora[v])).ok, false, `${v} missing`);
+    assert.equal(judge(edit((rec) => onTape(rec, v, (b) => (b.trades = b.trades.filter((x) => x.tx !== rec.meteora[v].sig))))).ok, false, `${v} not on the tape`);
+    assert.equal(judge(edit((rec) => onTape(rec, v, (b, row) => (row.side = row.side === "b" ? "s" : "b")))).ok, false, `${v} side`);
+    assert.equal(judge(edit((rec) => (rec.meteora[v].ts += 1))).ok, false, `${v} time`);
+    assert.equal(judge(edit((rec) => (rec.meteora[v].polls.at(-1).headers["x-helper-source"] = "vendor"))).ok, false, `${v} source`);
+    assert.equal(judge(edit((rec) => (rec.meteora[v].reads[check.READ_BACK[1]] = { error: "getSignatureStatuses answered 429" }))).ok, false, `${v} read back`);
+    assert.equal(judge(edit((rec) => (rec.meteora[v].reads[check.READ_BACK[0]].value[0].err = { InstructionError: [0, "Custom"] }))).ok, false, `${v} failed`);
+  }
+  assert.equal(judge(edit((rec) => delete rec.meteora)).ok, false, "no Meteora part");
 });
