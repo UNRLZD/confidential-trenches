@@ -111,7 +111,8 @@ export async function dclQuote(args: DclQuoteArgs): Promise<DclQuote> {
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > DCL_QUOTE_POOLS_MAX || new Set(ids).size !== ids.length || !ids.every((p) => dclPoolOf(p) !== null))
     throw new RheaQuoteRefused("input", `pools: 1 to ${DCL_QUOTE_POOLS_MAX} distinct DCL pool ids`);
 
-  const { height } = await finalOf(network, rpcs, args.final, signal);
+  const final = await finalOf(network, rpcs, args.final, signal);
+  const { height } = final;
   let blockHash = "";
   const same = (what: string, x: Answer, y: Answer): void => {
     if (x.height !== height || y.height !== height) throw new RheaQuoteRefused("rpc", `${what}: an answer not at block ${height}`);
@@ -136,10 +137,11 @@ export async function dclQuote(args: DclQuoteArgs): Promise<DclQuote> {
     if (viaWrap) for (const p of ps) if (has(p, tokenIn, wrap)) for (const q of ps) if (q !== p && has(q, wrap, tokenOut)) out.push([p.id, q.id]);
     return out;
   };
-  /** DCL's quote view of `amount` on one path, both providers at the block: its amount, 0 where the view fails on chain. */
-  const quoteOf = async (path: readonly string[], amount: bigint): Promise<bigint> => {
+  /** DCL's quote view of `amount` on one path, `from` into `to` (the trade's own two tokens unless named), both providers
+   *  at the block: its amount, 0 where the view fails on chain. */
+  const quoteOf = async (path: readonly string[], amount: bigint, from = tokenIn, to = tokenOut): Promise<bigint> => {
     const what = `quote ${path.join(",")}`;
-    const a = await both(what, view(exchange, "quote", { pool_ids: path, input_token: tokenIn, output_token: tokenOut, input_amount: amount.toString(), tag: null }, at));
+    const a = await both(what, view(exchange, "quote", { pool_ids: path, input_token: from, output_token: to, input_amount: amount.toString(), tag: null }, at));
     if (a.failed) return 0n;
     const r = json(a, what);
     const out = isObj(r) && sameKeys(r, ["amount", "tag"]) && r.tag === null ? u128(r.amount) : null;
@@ -155,7 +157,7 @@ export async function dclQuote(args: DclQuoteArgs): Promise<DclQuote> {
     both("get_metadata", view(exchange, "get_metadata", {}, at)),
     both("get_frozenlist_tokens", view(exchange, "get_frozenlist_tokens", {}, at)),
     Promise.all(ids.map((id) => both(`get_pool ${id}`, view(exchange, "get_pool", { pool_id: id }, at)))),
-    accountCode(rpcs, token, height, signal, same),
+    accountCode(rpcs, token, final, signal, same),
     feeView ? both(`${token} ${feeView.method}`, view(token, feeView.method, {}, at)) : Promise.resolve(null),
   ]);
 
@@ -199,7 +201,30 @@ export async function dclQuote(args: DclQuoteArgs): Promise<DclQuote> {
   const paths = pathsOf(pools, token !== wrap && !frozenList.includes(wrap));
   if (paths.length === 0) throw new RheaQuoteRefused("no-pool", `no Running DCL pool among ${JSON.stringify(ids)} joins ${tokenIn} to ${tokenOut}, directly or through ${wrap}`);
 
-  const outs = await Promise.all(paths.map((path) => quoteOf(path, venueIn)));
+  // The two-hop paths picked per hop (card near-quote-inside-the-kpi): the first hops' pools (tokenIn with wrapped NEAR)
+  // and the second hops' (wrapped NEAR with tokenOut) are pools of different pairs, so a second hop pays more for more
+  // in and its pay does not depend on which first hop fed it: the path that pays most is the first hop that pays the
+  // most wrapped NEAR, then the second hop that pays most for that. So n first hops and m second hops are n + m views and
+  // one of the chosen path, not n x m; where n x m is no more (one or two of each), every path is quoted as before.
+  // Either way the path chosen is quoted whole on both providers at the block, and that view's amount is the quote.
+  const direct = paths.filter((p) => p.length === 1);
+  const firsts = [...new Set(paths.filter((p) => p.length === 2).map((p) => p[0]!))];
+  const seconds = [...new Set(paths.filter((p) => p.length === 2).map((p) => p[1]!))];
+  let twoHop = paths.filter((p) => p.length === 2);
+  if (firsts.length * seconds.length > firsts.length + seconds.length + 1) {
+    const bestOf = (outs: readonly bigint[]): number => outs.reduce((b, o, k) => (o > 0n && (b < 0 || o > outs[b]!) ? k : b), -1);
+    const hop1 = await Promise.all(firsts.map((p) => quoteOf([p], venueIn, tokenIn, wrap)));
+    const i = bestOf(hop1);
+    if (i < 0) twoHop = [];
+    else {
+      const hop2 = await Promise.all(seconds.map((q) => quoteOf([q], hop1[i]!, wrap, tokenOut)));
+      const j = bestOf(hop2);
+      twoHop = j < 0 ? [] : [[firsts[i]!, seconds[j]!]];
+    }
+  }
+  const quoted = [...direct, ...twoHop];
+  if (quoted.length === 0) throw new RheaQuoteRefused("liquidity", `no DCL path among ${JSON.stringify(ids)} pays anything for ${venueIn} ${tokenIn}`);
+  const outs = await Promise.all(quoted.map((path) => quoteOf(path, venueIn)));
   let best = -1;
   outs.forEach((o, k) => {
     if (o > 0n && (best < 0 || o > (outs[best] as bigint))) best = k;
@@ -207,7 +232,7 @@ export async function dclQuote(args: DclQuoteArgs): Promise<DclQuote> {
   if (best < 0) throw new RheaQuoteRefused("liquidity", `no DCL path among ${JSON.stringify(ids)} pays anything for ${venueIn} ${tokenIn}`);
   const venueOut = outs[best] as bigint;
   const amountOut = side === "buy" ? nearFeeBuyerReceives(fee, exchange, venueOut) : venueOut;
-  return deepFreeze({ venue: "dcl" as const, network, exchange, height, blockHash, side, token, tokenIn, tokenOut, amountIn, venueIn, poolIds: paths[best] as string[], venueOut, amountOut, fee });
+  return deepFreeze({ venue: "dcl" as const, network, exchange, height, blockHash, side, token, tokenIn, tokenOut, amountIn, venueIn, poolIds: quoted[best] as string[], venueOut, amountOut, fee });
 }
 
 // ---------- the Swap ----------

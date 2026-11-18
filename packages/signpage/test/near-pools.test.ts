@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
 import { RHEA_QUOTE_POOLS_MAX } from "../../kit/src/near/rhea.ts";
-import { dclCandidates, dclPoolsKept, NEAR_POOLS_BRIDGE, NEAR_POOLS_PAGE, readRheaPools, rheaCandidates, rheaCandidatesOf, rheaPoolsKept } from "../src/near-pools.ts";
+import { dclCandidates, dclPoolsKept, NEAR_DCL_KEPT_MS, NEAR_POOLS_BRIDGE, NEAR_POOLS_PAGE, NEAR_RHEA_KEPT_MS, readRheaPools, rheaCandidates, rheaCandidatesOf, rheaPoolsKept } from "../src/near-pools.ts";
 import { DCL_QUOTE_POOLS_MAX, dclPoolOf } from "../../kit/src/near/dcl.ts";
 
 const USDC = NEAR_NETWORKS.mainnet.usdc;
@@ -64,7 +64,7 @@ test("the candidates: the token's pools with USDC or wNEAR by the token's reserv
   assert.deepEqual(w, [3, 4, 46, 47, 48, 49, 50, 51]);
 });
 
-test("the pools are read once a session; a read that failed is read again", async () => {
+test("the pools are read whole once, then only their count on each ask (card near-quote-inside-the-kpi); a read that failed is read again", async () => {
   let reads = 0;
   let fail = true;
   const rpc: NearRpc = {
@@ -83,7 +83,7 @@ test("the pools are read once a session; a read that failed is read again", asyn
   fail = false;
   assert.deepEqual(await kept(TOKEN), [0]);
   assert.deepEqual(await kept(TOKEN), [0]);
-  assert.equal(reads, 4, "each provider read once after its failed read");
+  assert.equal(reads, 6, "each provider: its failed read, its whole read, then one count read an ask");
 });
 
 // the honest list: the token's deep pool (id 1), shallow ones, the wNEAR bridge
@@ -130,7 +130,7 @@ test("F7 one provider failing leaves the other's list; it is read again on the n
   assert.ok(downReads > n, "the failed provider is read again");
   const m = downReads;
   await kept(TOKEN);
-  assert.equal(downReads, m, "then kept");
+  assert.equal(downReads, m + 1, "then kept: one count read an ask (card near-quote-inside-the-kpi)");
   // neither read: refused
   const dead: NearRpc = { name: "dead", query: async () => Promise.reject(new Error("HTTP 503")) };
   await assert.rejects(rheaPoolsKept("mainnet", () => [dead, dead])(TOKEN), /503/);
@@ -186,15 +186,18 @@ test("card near-dcl-route: a token with no DCL pool of its own asks DCL nothing;
 });
 
 test("card near-dcl-route: a pool either provider reads is kept with USDC's 4 (a provider hiding it is outvoted); wrapped NEAR asks USDC's 4 alone", async () => {
-  const pair = [dclRpc("a", []), dclRpc("b", [ownIds[3]!])] as const;
+  const pair = [dclRpc("a", usdcIds), dclRpc("b", [ownIds[3]!, ...usdcIds])] as const;
   assert.deepEqual(await dclPoolsKept("mainnet", () => pair)(TOKEN), [ownIds[3], ...usdcIds]);
   assert.deepEqual(await dclPoolsKept("mainnet", () => pair)(WRAP), usdcIds);
+  // USDC's four are kept as read too (card near-quote-inside-the-kpi): one with no pool on either provider is not asked
+  const three = [dclRpc("a", usdcIds.slice(1)), dclRpc("b", [ownIds[3]!, ...usdcIds.slice(1)])] as const;
+  assert.deepEqual(await dclPoolsKept("mainnet", () => three)(TOKEN), [ownIds[3], ...usdcIds.slice(1)]);
 });
 
 test("card near-dcl-route: a provider that fails is read again next time, the other's answer used meanwhile; both failing gives every candidate (a failed read never takes DCL out); a row that is not the id's is a failed read", async () => {
   const asked: string[] = [];
   const down = { down: true, asked };
-  const pair = [dclRpc("a", [ownIds[0]!], down), dclRpc("b", [ownIds[0]!], { asked })] as const;
+  const pair = [dclRpc("a", [ownIds[0]!, ...usdcIds], down), dclRpc("b", [ownIds[0]!, ...usdcIds], { asked })] as const;
   const kept = dclPoolsKept("mainnet", () => pair);
   assert.deepEqual(await kept(TOKEN), [ownIds[0], ...usdcIds]);
   down.down = false;
@@ -204,4 +207,82 @@ test("card near-dcl-route: a provider that fails is read again next time, the ot
   assert.deepEqual(await dclPoolsKept("mainnet", () => both)(TOKEN), dclCandidates("mainnet", TOKEN));
   const junk = [dclRpc("a", [], { junk: true }), dclRpc("b", [])] as const;
   assert.deepEqual(await dclPoolsKept("mainnet", () => junk)(TOKEN), [], "the junk provider failed; the other read none");
+});
+
+// card near-quote-inside-the-kpi: the kept lists across page loads (a KeptStore), with their refresh
+const memStore = () => {
+  const m = new Map<string, string>();
+  return { m, store: { get: async (k: string) => m.get(k) ?? null, set: async (k: string, v: string) => void m.set(k, v) } };
+};
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+test("card near-quote-inside-the-kpi: Rhea's list kept across page loads: the next load reads the count alone; a pool added since is read from the tail and quoted on the next ask", async () => {
+  const { store } = memStore();
+  const all = [...HONEST];
+  const asked: string[] = [];
+  const rpc = rpcOf(all, { asked });
+  let t = 1_000_000;
+  const now = () => t;
+  assert.equal((await rheaPoolsKept("mainnet", () => [rpc, rpc], { store, now })(TOKEN))[0], 1);
+  // a page load later: the stored list, the count read on each provider and no page
+  asked.length = 0;
+  const next = rheaPoolsKept("mainnet", () => [rpc, rpc], { store, now });
+  assert.equal((await next(TOKEN))[0], 1);
+  assert.deepEqual(asked, ["get_number_of_pools {}", "get_number_of_pools {}"]);
+  // a deeper pool of the token added since: the tail alone is read, and it leads the next ask's candidates
+  all.push(pool(USDC, TOKEN, 1n, 10n ** 12n));
+  asked.length = 0;
+  const c = await next(TOKEN);
+  assert.equal(c[0], all.length - 1, "the new pool is the deepest candidate");
+  assert.deepEqual(asked.filter((a) => a.startsWith("get_pools")), [`get_pools {"from_index":${HONEST.length},"limit":1}`, `get_pools {"from_index":${HONEST.length},"limit":1}`]);
+  // past NEAR_RHEA_KEPT_MS the whole list is read again in the background (reserves re-ranked): the pool that was deep
+  // is drained, and the ask after that ranks it last
+  all[1] = pool(USDC, TOKEN, 1n, 1n);
+  all[all.length - 1] = pool(USDC, TOKEN, 1n, 2n);
+  t += NEAR_RHEA_KEPT_MS;
+  asked.length = 0;
+  await next(TOKEN);
+  await flush();
+  assert.ok(asked.filter((a) => a.startsWith("get_pools {\"from_index\":0")).length === 2, "read whole on both providers");
+  const after = await next(TOKEN);
+  assert.notEqual(after[0], 1, "re-ranked by the reserves read now");
+});
+
+test("card near-quote-inside-the-kpi: a stored Rhea list that is not one is dropped and read anew; a count lower than kept reads the whole list", async () => {
+  const { m, store } = memStore();
+  const asked: string[] = [];
+  const rpc = rpcOf(HONEST, { asked });
+  for (const bad of ["{", JSON.stringify({ count: 3, at: 1, rows: [[0, "a.near", "b.near", "-1", "2"]] }), JSON.stringify({ count: 3, at: 1, rows: [[9, "a.near", "b.near", "1", "2"]] }), JSON.stringify({ count: 3, at: 10 ** 15, rows: [] })]) {
+    m.set("rhea-pools:mainnet:0", bad);
+    m.set("rhea-pools:mainnet:1", bad);
+    asked.length = 0;
+    assert.equal((await rheaPoolsKept("mainnet", () => [rpc, rpc], { store, now: () => 1_000 })(TOKEN))[0], 1);
+    assert.ok(asked.some((a) => a.startsWith("get_pools {\"from_index\":0")), `read anew after ${bad.slice(0, 40)}`);
+  }
+  // a stored count above the chain's (pools are never removed): the list is read whole
+  m.set("rhea-pools:mainnet:0", JSON.stringify({ count: 999, at: 1, rows: [] }));
+  m.set("rhea-pools:mainnet:1", JSON.stringify({ count: 999, at: 1, rows: [] }));
+  asked.length = 0;
+  assert.equal((await rheaPoolsKept("mainnet", () => [rpc, rpc], { store, now: () => 1_000 })(TOKEN))[0], 1);
+  assert.equal(asked.filter((a) => a.startsWith("get_pools {\"from_index\":0")).length, 2);
+});
+
+test("card near-quote-inside-the-kpi: DCL's read kept across page loads for NEAR_DCL_KEPT_MS, then read again: a pool added since is seen, one gone is dropped", async () => {
+  const { store } = memStore();
+  const asked: string[] = [];
+  const has = [ownIds[1]!, ...usdcIds];
+  const pair = [dclRpc("a", has, { asked }), dclRpc("b", has, { asked })] as const;
+  let t = 5_000_000;
+  const now = () => t;
+  assert.deepEqual(await dclPoolsKept("mainnet", () => pair, { store, now })(TOKEN), [ownIds[1], ...usdcIds]);
+  // a page load later, inside the age: nothing read
+  asked.length = 0;
+  const next = dclPoolsKept("mainnet", () => pair, { store, now });
+  assert.deepEqual(await next(TOKEN), [ownIds[1], ...usdcIds]);
+  assert.equal(asked.length, 0);
+  // a pool added and one gone: past the age, read again on both providers
+  has.splice(0, 1, ownIds[2]!);
+  t += NEAR_DCL_KEPT_MS;
+  assert.deepEqual(await next(TOKEN), [ownIds[2], ...usdcIds]);
+  assert.equal(asked.length, 16, "the token's 4 and USDC's 4 on each provider");
 });

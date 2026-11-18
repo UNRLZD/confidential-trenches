@@ -31,6 +31,28 @@ test("the testnet form, whose release names a vault and a relayer, offers the ha
   assert.equal(await d.fee(), RELAY_FEE);
 });
 
+// Card near-quote-inside-the-kpi: a NEAR dry's fee (main.ts nearDry) takes the device's fee cap read within
+// FEE_CAP_DRY_KEPT_MS; the fee of a withdrawal (no capKeptMs) reads its own every time, so a kept cap never caps a payment.
+test("card near-quote-inside-the-kpi: a dry's fee takes the fee cap read within its age; a withdrawal's fee reads its own", async () => {
+  // loaded after the world (its 1Click mock first)
+  const { FEE_CAP_DRY_KEPT_MS } = await import("../src/withdraw/handoff.ts");
+  const v = await world([5_000_000n]);
+  // each cap read asks storage_balance_bounds of both providers (readTokenStorageMin): counted here
+  const asked: string[] = [];
+  const count = (side: "a" | "b") => (asked.push(side), MIN);
+  const dry = (ms = FEE_CAP_DRY_KEPT_MS) => testnet(v, { rpcs: pair("testnet", [], count), capKeptMs: ms });
+  assert.equal(await dry().fee(), RELAY_FEE);
+  const n = asked.length;
+  assert.ok(n > 0, "the first dry reads the cap");
+  assert.equal(await dry().fee(), RELAY_FEE);
+  assert.equal(asked.length, n, "the next dry inside the age takes it again");
+  assert.equal(await testnet(v, { rpcs: pair("testnet", [], count) }).fee(), RELAY_FEE);
+  assert.ok(asked.length > n, "a withdrawal's fee reads its own cap");
+  const m = asked.length;
+  await dry(0).fee();
+  assert.ok(asked.length > m, "past the age the cap is read again");
+});
+
 // The release names its mainnet vault and withdrawal relayer (card wallet-mainnet-relayer-pins); the release-with-no-relayer
 // case is held in test/withdraw-mainnet-relayer.test.ts, with the pin planted null.
 test("a mainnet form over testnet notes: the note value 0, the fee refused unasked, nothing to settle", async () => {
