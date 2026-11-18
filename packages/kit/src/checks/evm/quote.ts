@@ -598,15 +598,15 @@ const SLOTS_PER_CALL = 500;
  *  aggregate3 calls of the venue's perCall, the grouped reads of each hook in their own aggregate3 calls with that hook's
  *  override alone, any other read with one in its own call, sent in batches of CALLS_PER_BATCH at once; each call and
  *  each batch kept to the venue's maxBytes (a call holding one read past it is sent alone). */
-async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, again?: number): Promise<Answer[]> {
+async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, again?: number, down = new Set<EvmRpc>()): Promise<Answer[]> {
   // a read pass of its own (`again`) is never memoized: it exists because a first answer was starved of gas
-  if (again !== undefined) return readBothSent(rpcs, hash, reads, lim, again);
+  if (again !== undefined) return readBothSent(rpcs, hash, reads, lim, again, down);
   const kept = MEMO_FOR.get(rpcs) === hash ? AGREED.get(hash) : undefined;
   const keys = reads.map(agreedKey);
   const out: (Answer | undefined)[] = keys.map((k) => kept?.get(k));
   const miss = reads.flatMap((_, i) => (out[i] === undefined ? [i] : []));
   if (miss.length > 0) {
-    const a = await readBothSent(rpcs, hash, miss.map((i) => reads[i]!), lim);
+    const a = await readBothSent(rpcs, hash, miss.map((i) => reads[i]!), lim, undefined, down);
     miss.forEach((i, k) => (out[i] = a[k]!));
     agreedKeep(hash, miss.flatMap((i) => ((out[i] as { gas?: true }).gas === true ? [] : [[keys[i]!, out[i]!] as const])));
   }
@@ -642,7 +642,7 @@ export const evmAgreedReset = (): void => AGREED.clear();
  *  (tests). Not in the index. */
 export const evmQuoteWarmReset = (): void => (PLANS.clear(), FITS.clear());
 
-async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, again?: number): Promise<Answer[]> {
+async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, again: number | undefined, down: Set<EvmRpc>): Promise<Answer[]> {
   // `again`: reads answered `gas` in a call of more, read again this many to a call (READ_AGAIN_PER_CALL, then 1)
   const perCall = again ?? readsOverride ?? lim.perCall;
   const at = { blockHash: hash, requireCanonical: true };
@@ -726,6 +726,11 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
   const n = starts.length;
   let spares = 2 + Math.ceil(n / 5);
   const late = () => spares > 0 && (spares--, true);
+  // `down`: the providers that answered HTTP 5xx in this round, held for the rest of it, so the batches queued behind a
+  // failed one go to the next at once (card evm-5xx-holds-the-provider-for-the-round: a USDG tap on Robinhood drew 36
+  // HTTP 500s of globalstake, p50 1,057 ms each, one per batch it was asked, and took 34.8 s, 2026-11-18). One set a
+  // round: the reads sent beside the round's own at its block (the early fits, the early routes through X's markets)
+  // and its passes read again share it. The hold ends with the round: the next asks the provider again
   const all: Answer[] = new Array(reads.length);
   await Promise.all(
     starts.map(async (c0, n) => {
@@ -743,6 +748,7 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
         undefined,
         true,
         late,
+        down,
       );
       for (const [i, v] of a) all[i] = v;
     }),
@@ -760,7 +766,7 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
   for (const per of again === undefined ? [READ_AGAIN_PER_CALL, 1] : []) {
     const more = reads.flatMap((_, i) => ((size.get(i) ?? 1) > per && (per === 1 || (size.get(i) ?? 1) > READ_AGAIN_PER_CALL) && (all[i] as { gas?: true }).gas === true ? [i] : []));
     if (more.length === 0) continue;
-    const a = await readBoth(rpcs, hash, more.map((i) => reads[i]!), lim, per);
+    const a = await readBoth(rpcs, hash, more.map((i) => reads[i]!), lim, per, down);
     more.forEach((i, k) => {
       all[i] = a[k]!;
       size.set(i, per);
@@ -832,6 +838,10 @@ function agreeing<T>(
   // asks a spare only where `late` gives one (the caller's budget). `one` passes `gate` to the provider's call.
   moving = false,
   late?: () => boolean,
+  // the round's providers that answered HTTP 5xx (readBoth's, shared by every batch of the round; gated adds each): a
+  // request still queued in such a provider's gate moves to the next provider unsent while one is left, and with none
+  // left it is sent, the last one to ask. A 429 keeps its own rule (ask)
+  down?: Set<EvmRpc>,
 ): Promise<{ a: T; b: T; i: number; j: number }> {
   const list = [...rpcs];
   const need = Math.floor(list.length / 2) + 1;
@@ -926,7 +936,23 @@ function agreeing<T>(
       }
       const k = started++;
       t0[k] = performance.now();
-      const gate: Gated = { sent: () => void ((sentK[k] = true), (sentAt[k] = performance.now())), moved: () => movedK[k] === true, spare: () => !done && started < list.length };
+      // read as the request would leave its gate: one whose provider answered 5xx in this round moves to the next now,
+      // or is dropped unsent where its batch is already agreed
+      const moved = () => {
+        if (movedK[k] === true) return true;
+        if (down?.has(list[k]!) !== true) return false;
+        if (done) return (movedK[k] = true);
+        if (started >= list.length) return false;
+        movedK[k] = true;
+        start(true);
+        return true;
+      };
+      const gate: Gated = {
+        sent: () => void ((sentK[k] = true), (sentAt[k] = performance.now())),
+        moved,
+        spare: () => !done && started < list.length,
+        down: () => void down?.add(list[k]!),
+      };
       one(list[k]!, k, gate).then(
         (v) => {
           settled++;
@@ -969,8 +995,9 @@ function agreeing<T>(
 }
 
 /** A request's hooks in its provider's gate (agreeing's `moving`): `sent` as it leaves the gate, and `moved`, read as it
- *  would leave: true, it is not sent (MOVED). `spare`: agreeing has a provider left to ask in this one's place (ask). */
-type Gated = { readonly sent: () => void; readonly moved: () => boolean; readonly spare?: () => boolean };
+ *  would leave: true, it is not sent (MOVED). `spare`: agreeing has a provider left to ask in this one's place (ask).
+ *  `down`: the provider answered HTTP 5xx (gated), held for the rest of the round (agreeing's `down`). */
+type Gated = { readonly sent: () => void; readonly moved: () => boolean; readonly spare?: () => boolean; readonly down?: () => void };
 const MOVED = new Error("moved to the next provider before it was sent");
 // a gated provider's call with a request's hooks, and whether the provider is stalled (gated, ask)
 const GATED = new WeakMap<EvmRpc, (calls: readonly EvmRpcCall[], gate?: Gated) => Promise<readonly unknown[]>>();
@@ -1719,6 +1746,9 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
   let strikes = 0;
   // the cuts so far: a request records the count when it is sent
   let cuts = 0;
+  // the provider answered a request the next could carry HTTP 5xx: every such request after it in this quote goes to
+  // the next unsent, as the quote's reads do (card evm-5xx-holds-the-provider-for-the-round); the gate is the quote's
+  let down = false;
   const waiting: (() => void)[] = [];
   // a wait between tries, never past the bound (the next send then refuses)
   const nap = (ms: number) => new Promise((r) => setTimeout(r, Math.max(0, Math.min(ms, untilMs - performance.now()))));
@@ -1808,14 +1838,18 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
       // request then waiting for a slot behind the gate's 2 at once found the turn spent by those ahead and waited it in
       // the pace (the recorded USDG quote's warm getLogs, 2 of them 1 s each; card
       // robinhood-quote-inside-the-bound-under-the-pace)
+      // a request its 5xx would hand the next (any with a next, up to SCAN_ALONE blocks: below) goes there unsent once
+      // the provider answered 5xx in this quote
       const away = (): ScanRefused | null =>
-        !spare || provider === undefined
-          ? null
-          : (SCAN_HELD.get(provider) ?? 0) > performance.now() || providerHeld(provider)
-            ? new ScanRefused("rpc_error", "the scan provider is held after its throttle")
-            : !providerReady(provider, calls)
-              ? new ScanRefused("rpc_error", "the scan provider's pace has no turn free now")
-              : null;
+        down && spareNext && scanBlocksOf(calls) <= SCAN_ALONE
+          ? new ScanRefused("rpc_error", "the scan provider answered HTTP 5xx in this quote")
+          : !spare || provider === undefined
+            ? null
+            : (SCAN_HELD.get(provider) ?? 0) > performance.now() || providerHeld(provider)
+              ? new ScanRefused("rpc_error", "the scan provider is held after its throttle")
+              : !providerReady(provider, calls)
+                ? new ScanRefused("rpc_error", "the scan provider's pace has no turn free now")
+                : null;
       const before = away();
       if (before !== null) throw before;
       // a throttle holds the provider; such a request goes to the next at once, a longer cold one waits the gate's backoff
@@ -1853,12 +1887,15 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
           // the provider answered: its halves are asked of it (scanPools `short`), at once, never again whole here (one
           // block, which has no halves, is asked again whole there)
           if (e instanceof BadAnswer) throw new ScanAnswered("rpc_error", `the scan provider answered: ${e.message}`);
-          const out5xx = /^the provider answered HTTP 5\d\d$/.test(String((e as Error | null)?.message));
+          const out5xx = serverFault(e);
           // a request of more than SCAN_ALONE blocks (below) that a provider answers 5xx is asked again whole as one with
           // no connection is (card robinhood-quote-answers-cold: as its halves, Robinhood's first two answering 503 handed
           // the third 5,002 getLogs of 2,000 blocks, SL1; test RHC3)
           const deepCall = scanBlocksOf(calls) > SCAN_ALONE;
-          if (spareNext && out5xx && !deepCall) throw new ScanRefused("rpc_error", `the scan provider is out: ${(e as Error).message}`);
+          if (spareNext && out5xx && !deepCall) {
+            down = true;
+            throw new ScanRefused("rpc_error", `the scan provider is out: ${(e as Error).message}`);
+          }
           if (e instanceof Unreachable || (out5xx && deepCall)) {
             // held as a throttle is: a browser reads rpc.mainnet.chain.robinhood.com's 429 as no connection (its answer
             // carries access-control-allow-origin "*,*", which CORS refuses: sign live run 43693987836, 14 of them)
@@ -2469,7 +2506,12 @@ function gated(rpcsIn: readonly EvmRpc[], parallel: number, deadline?: Deadline,
         if (gate?.moved() === true) return Promise.reject(MOVED);
         past();
         gate?.sent();
-        return out(calls);
+        // an HTTP 5xx holds the provider for the round before its slot frees, so the request next in its gate, judged as
+        // it leaves, already moves (agreeing's `down`)
+        return out(calls).catch((e: unknown) => {
+          if (serverFault(e)) gate?.down?.();
+          throw e;
+        });
       }),
     );
     STALLED.set(f as unknown as EvmRpc, () => flying > 0 && performance.now() - lastAt > 4 * EVM_HEDGE_MS);
@@ -2491,8 +2533,8 @@ const DEADLINE = new WeakMap<readonly EvmRpc[], Deadline>();
 
 /** The reads at the agreed block's hash and that block's confirmation in one round; the confirmation is judged first,
  *  so nothing read is used before it passes. */
-async function readAgreed(confirm: () => Promise<void>, rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits): Promise<Answer[]> {
-  const [confirmed, read] = await Promise.allSettled([confirm(), readBoth(rpcs, hash, reads, lim)]);
+async function readAgreed(confirm: () => Promise<void>, rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, down?: Set<EvmRpc>): Promise<Answer[]> {
+  const [confirmed, read] = await Promise.allSettled([confirm(), readBoth(rpcs, hash, reads, lim, undefined, down)]);
   if (confirmed.status === "rejected") throw confirmed.reason;
   if (read.status === "rejected") throw read.reason;
   return read.value;
@@ -2649,7 +2691,7 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
     start,
     ...(pin === null ? {} : { pin }),
     // the route's own swap, at the agreed block (its recipient is the block's), in the first round
-    atBlock: (b) => {
+    atBlock: (b, down) => {
       seen.at = b.hash;
       fitAt = b.hash;
       if (fitOf(route) !== null) ownFit = reads.push(fitOf(route)!) - 1;
@@ -2662,7 +2704,7 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
           sent.add(x.data);
           early.push(x);
         }
-        if (early.length > 0) fitsEarly = readBoth(rpcs, b.hash, early, v.reads).then((a) => ({ reads: early, a }), () => null);
+        if (early.length > 0) fitsEarly = readBoth(rpcs, b.hash, early, v.reads, undefined, down).then((a) => ({ reads: early, a }), () => null);
       }
     },
     beforeFound: () => {
@@ -3082,7 +3124,7 @@ async function routeSetOf(a: {
   /** the caller's reads after the standard pools' (the buy's first-hop reads, in the order its recorded reads hold) */
   beforeFound?: () => void;
   /** called once the block is agreed, before the first round's reads are sent: the caller's reads of that block */
-  atBlock?: (block: Block) => void;
+  atBlock?: (block: Block, down: Set<EvmRpc>) => void;
   /** a follow's block (a buy request's `at`): a block the head watch confirmed, read at in place of a new agreement,
    *  under the same scan-lag rule as any (agreedAt) */
   pin?: Block;
@@ -3284,7 +3326,9 @@ async function routeSetOf(a: {
     [block, confirm] = [spec, async () => {}];
     scanned = scanning === null ? null : { pools: new Map([[lower(token), await keptPoolsOf(chain, lower(token), lower(v.weth), Number(spec.number) - v.scan!.depth + 1)]]), commit: () => {} };
   }
-  a.atBlock?.(block);
+  // one 5xx hold for the first round's reads and the caller's beside them (readBoth's `down`)
+  const firstDown = new Set<EvmRpc>();
+  a.atBlock?.(block, firstDown);
   // a pool's hook is trusted as it is only where the sell builder takes it: a listed launchpad's hook with that
   // launchpad's own fee and tick spacing (evmHookListed, the one rule for both; card evm-route-parity); any other hook
   // is replaced in the reads that price the pool
@@ -3392,7 +3436,7 @@ async function routeSetOf(a: {
     }
   }
   // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
-  const reading = readAgreed(confirm, rpcs, block.hash, reads, v.reads);
+  const reading = readAgreed(confirm, rpcs, block.hash, reads, v.reads, firstDown);
   if (spec !== null) {
     reading.catch(() => {});
     // the scan's own refusal ends the quote as before, whatever the round answered
@@ -3744,7 +3788,9 @@ async function routeSetOf(a: {
   if (third.length === own) await round(third);
   else {
     reads.push(...third);
-    const [main, early] = await Promise.all([own === 0 ? Promise.resolve([] as Answer[]) : readBoth(rpcs, block.hash, third.slice(0, own), v.reads), readBoth(rpcs, block.hash, third.slice(own), v.reads).catch(() => null)]);
+    // one 5xx hold for the round's two reads (readBoth's `down`)
+    const down = new Set<EvmRpc>();
+    const [main, early] = await Promise.all([own === 0 ? Promise.resolve([] as Answer[]) : readBoth(rpcs, block.hash, third.slice(0, own), v.reads, undefined, down), readBoth(rpcs, block.hash, third.slice(own), v.reads, undefined, down).catch(() => null)]);
     // an early read that failed answers nothing any route is priced on: none of its quotes is taken (viaX cleared)
     if (early === null) viaX.clear();
     ans.push(...main, ...(early ?? third.slice(own).map((): Answer => ({ kind: "revert", partial: false }))));
@@ -5069,6 +5115,8 @@ function retryAfterMs(h: string | null, now = Date.now()): number | null {
  *  out of time (TimeoutError) is not one: it may have been served. A browser's fetch names no cause for any failure with
  *  no response (re-review of b282ce0, LOW-B), so there every one is one: each call is a read, safe to send again. */
 class Unreachable extends Error {}
+/** A provider's answer of HTTP 5xx, in evmJsonRpc's words: the request reached it and it failed to serve it. */
+const serverFault = (e: unknown): boolean => /^the provider answered HTTP 5\d\d$/.test(String((e as Error | null)?.message));
 /** A provider's answer that is no batch of answers to read: an HTTP status outside 2xx other than 429 and 5xx, a body
  *  past its size or not JSON, or JSON that is not a batch. It answered, so a scan asks its halves of it (ScanAnswered). */
 class BadAnswer extends Error {}
