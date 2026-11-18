@@ -6,7 +6,7 @@
 // "Token-2022"), and S6's Token-2022 sides of a shared route in src/checks/solana/checks.ts (test/solana-shared-route.test.ts,
 // card solana-shared-2022-side), and the mint's agreement on both providers that S6 and S10 share (solanaMintAgreed,
 // test/solana-quote.test.ts "S10", card solana-mint-supply-moves) and the reference read's (src/trade/solana/pool.ts,
-// test/solana-pool.test.ts), and S10's and the size rule's one Token-2022 walk, S11's hold on the wallet's token accounts
+// test/solana-pool.test.ts; a scanned pool's slot, test/solana-raydium.test.ts), and S10's and the size rule's one Token-2022 walk, S11's hold on the wallet's token accounts
 // and the flow's rent read by that size (test/solana-quote.test.ts "S11 review", test/solana-flow-replay.test.ts, card
 // solana-written-accounts-whole), and the guard on the flow's early [wallet, wSOL] simulation, a dropped leg's build never simulated and an open leg's build held to its own timeout (card solana-quote-under-1s): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
@@ -29,6 +29,7 @@ const S6_TEST = path.join(BASE, "test/solana-shared-route.test.ts");
 const S10_TEST = path.join(BASE, "test/solana-quote.test.ts");
 const POOL = path.join(BASE, "src/trade/solana/pool.ts");
 const POOL_TEST = path.join(BASE, "test/solana-pool.test.ts");
+const SCANNED_TEST = path.join(BASE, "test/solana-raydium.test.ts");
 const FLOW = path.join(BASE, "src/trade/solana/flow.ts");
 const FLOW_TEST = path.join(BASE, "test/solana-flow-replay.test.ts");
 const RVW1 = "S11 review RVW-1";
@@ -232,10 +233,14 @@ export const MUTANTS = [
   [POOL, "/\\bno answer in (\\d{1,7}) ms\\b/", "/\\bno answer in (\\S+) ms/", "card solana-reference-read-holds-a-slot-apart: a failed call's reason is fixed words", POOL_TEST],
   [POOL, "/\\bno answer in (\\d{1,7}) ms\\b/", "/\\bno answer in (\\d+) ms/", "card solana-reference-read-holds-a-slot-apart: a failed call's reason is fixed words", POOL_TEST],
   [POOL, "[quotes[0] + pool.virtualQuoteReserves, quotes[1] + poolB", "[quotes[0] + pool.virtualQuoteReserves, quotes[0] + poolB", "card solana-reference-read-holds-a-slot-apart: each provider's quote reserve is its own vault", POOL_TEST],
-  // the pump-curve and PumpSwap look's slot (the scanned venues' look keeps one the same way; no test names it yet)
+  // the pump-curve and PumpSwap look's slot
   [POOL, "const verdict = judge(v, req, addr, a, b);\n    if (verdict.kind === \"ok\" && a.read && b.read) slots.push(a.read.slot, b.read.slot);", "const verdict = judge(v, req, addr, a, b);\n    if (verdict.kind === \"ok\" && a.read && b.read) slots.push(a.read.slot);", "card solana-reference-read-holds-a-slot-apart: the reference's slot is the lower", POOL_TEST],
   [POOL, "const verdict = judge(v, req, addr, a, b);\n    if (verdict.kind === \"ok\" && a.read && b.read) slots.push(a.read.slot, b.read.slot);", "const verdict = judge(v, req, addr, a, b);\n    if (verdict.kind === \"ok\" && a.read && b.read) slots.push(b.read.slot);", "card solana-reference-read-holds-a-slot-apart: the reference's slot is the lower", POOL_TEST],
   [POOL, "slot: Math.min(...slots)", "slot: Math.max(...slots)", "card solana-reference-read-holds-a-slot-apart: the reference's slot is the lower", POOL_TEST],
+  // the scanned venues' look keeps the slot the same way, a second place of the rule (card second-places-held-by-tests):
+  // the Raydium CPMM and AMM v4 pools' reference read with each provider's slot the lower in turn
+  [POOL, "moved twice` };\n    }\n    if (verdict.kind === \"ok\" && a.read && b.read) slots.push(a.read.slot, b.read.slot);", "moved twice` };\n    }\n    if (verdict.kind === \"ok\" && a.read && b.read) slots.push(a.read.slot);", "card solana-reference-read-holds-a-slot-apart: the reference's slot is the lower of the two providers' slots, for a scanned pool", SCANNED_TEST],
+  [POOL, "moved twice` };\n    }\n    if (verdict.kind === \"ok\" && a.read && b.read) slots.push(a.read.slot, b.read.slot);", "moved twice` };\n    }\n    if (verdict.kind === \"ok\" && a.read && b.read) slots.push(b.read.slot);", "card solana-reference-read-holds-a-slot-apart: the reference's slot is the lower of the two providers' slots, for a scanned pool", SCANNED_TEST],
   [POOL, "  try {\n    m = e instanceof Error ? e.message : e;\n  } catch {\n    return \"the call failed\"; // a getter or a proxy trap that throws: nothing of it is read\n  }\n", "  m = e instanceof Error ? e.message : e;\n", "card solana-reference-read-holds-a-slot-apart: a provider that throws", POOL_TEST],
   [POOL, "  if (typeof m !== \"string\") return \"the call failed\";\n", "", "card solana-reference-read-holds-a-slot-apart: a provider that throws", POOL_TEST],
   [POOL, "    return parseAccounts(answer, n);\n  } catch {\n    return null; // a getter or a proxy trap that throws: no answer, never a throw\n  }\n", "    return parseAccounts(answer, n);\n  } finally {\n  }\n", "card solana-reference-read-holds-a-slot-apart: a provider that throws", POOL_TEST],
