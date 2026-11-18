@@ -39,6 +39,7 @@ import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { named } from "./record-names.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 import { saidOf } from "./vendor-said.mjs";
+import { fetchOrAbort } from "./route-fetch.mjs";
 import { APP_HOST, ASSETS, ASSETS_MS, DRY_MS, EXIT, HELPER_1CLICK, READY_MS, SIGN_URL, dec, headersOf, noLiquidityAsks } from "./kit-deposit-assets-dry.mjs";
 
 const KEY = "deposit-min-floor-signed";
@@ -178,7 +179,8 @@ async function pageRun(browser, { signUrl, dir }) {
   // the attack: a probe's answer as the helper gave it, its unsigned withdrawFee set to "0"; nothing else touched
   await ctx.route(QUOTE, async (route) => {
     if (phase !== "assets") return route.fallback();
-    const res = await route.fetch();
+    const res = await fetchOrAbort(route);
+    if (res === null) return;
     const text = await res.text();
     let body = null;
     try {
