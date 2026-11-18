@@ -22,10 +22,10 @@
 //   into agreement. One operator alone never passes: a side left with no operator refuses the read.
 // - Words: a seat is named by its host, never its URL, in every message (seatWords, card device-evm-read-residuals):
 //   every secret part of a seat's own URL (its user, password, query keys and values as parsed and as written, path
-//   segments and fragment, each of SEAT_SECRET_MIN characters or more and no lowercase word, SEAT_WORD), as written,
-//   percent-decoded, percent-encoded or with JSON's escaped slash, in any case, and any start of one of SEAT_SECRET_MIN
-//   or more (the longest at each place), becomes <key>, wherever it stands (a path alone, an unlisted host, a
-//   backslash path); secretScrubber is that rule, on the kit's public entry for any app or server (card
+//   segments and fragment, each of SEAT_SECRET_MIN characters or more; a path segment or query name that is a
+//   lowercase word, SEAT_WORD, left out), as written, percent-decoded, percent-encoded or with JSON's escaped slash, in
+//   any case, and any start of one of SEAT_SECRET_MIN or more (the longest at each place), becomes <key>, wherever it
+//   stands (a path alone, an unlisted host, a backslash path); secretScrubber is that rule, on the kit's public entry for any app or server (card
 //   helper-scrubber-takes-the-kits-rule). Then any URL of any scheme becomes its host (<url> when it does not parse), and
 //   any listed host followed by a path, a trailing dot or a backslash becomes the host. errors[] and cause carry the
 //   same words: each seat error is a copy of its class with its message, string fields and cause so cleaned.
@@ -86,8 +86,9 @@ export type EvmTwoOperatorsOpts = { callMs?: number; budgetMs?: number; restMs?:
 
 /** A secret part of a seat's URL is one of this many characters or more (a shorter one is a word, "v2" or "rpc"). */
 const SEAT_SECRET_MIN = 8;
-/** A part in lowercase letters alone, its words joined by "-" or "_" (a chain's name in a path, "robinhood" or
- *  "base-mainnet"; a query name, "access_token"), is a word, never a secret: taken as one, every such word in the
+/** A path segment or a query name in lowercase letters alone, its words joined by "-" or "_" (a chain's name in a path,
+ *  "robinhood" or "base-mainnet"; a query name, "access_token"), is a word, never a secret (a username, password, query
+ *  value or fragment always is): taken as one, every such word in the
  *  provider's words, a seat's host and an env name among them, would read <key>. */
 const SEAT_WORD = /^[a-z]+(?:[-_][a-z]+)*$/;
 /** A secret's start matched at most this long (a longer secret is still removed whole where it stands whole). */
@@ -123,10 +124,14 @@ export function secretScrubber(urls: readonly string[], max = SECRET_SCRUB_MAX):
     if (p.hostname !== "") hosts.add(p.hostname.replace(/\.$/, ""));
     // the query's names and values as written too: the parser reads a raw "+" as a space, so a key holding one is no
     // part it lists
-    const raw = p.search.slice(1).split("&").flatMap((kv) => (kv.includes("=") ? [kv.slice(0, kv.indexOf("=")), kv.slice(kv.indexOf("=") + 1)] : [kv]));
-    for (const x of [p.username, p.password, ...[...p.searchParams].flat(), ...raw, ...p.pathname.split("/"), p.hash.slice(1)]) {
+    const raw = p.search.slice(1).split("&").map((kv) => (kv.includes("=") ? [kv.slice(0, kv.indexOf("=")), kv.slice(kv.indexOf("=") + 1)] : [kv, ""]));
+    // a lowercase word is a word only where a URL names things (a path segment, a query name); a password, a query value
+    // and a fragment hold only what was set there, so each is a secret whatever its letters
+    const named = [...p.pathname.split("/"), ...[...p.searchParams.keys()], ...raw.map(([k]) => k!)];
+    const held = [p.username, p.password, ...p.searchParams.values(), ...raw.map(([, v]) => v!), p.hash.slice(1)];
+    for (const [x, word] of [...named.map((x) => [x, true] as const), ...held.map((x) => [x, false] as const)]) {
       for (const f of [x, decodeOr(x), encodeURIComponent(decodeOr(x))]) {
-        if (f.length < SEAT_SECRET_MIN || SEAT_WORD.test(f)) continue;
+        if (f.length < SEAT_SECRET_MIN || (word && SEAT_WORD.test(f))) continue;
         secrets.add(f);
         if (f.includes("/")) secrets.add(f.replaceAll("/", "\\/"));
       }

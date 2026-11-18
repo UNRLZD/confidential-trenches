@@ -337,3 +337,12 @@ test("secretScrubber: a URL that does not parse is passed over; words past SECRE
   assert.ok(out.endsWith("…") && !out.includes("AkEySeCr"));
   assert.equal(secretScrubber(["https://a.example/v2/AkEySeCrEt0123456789"], 10)("0123456789abc"), "0123456789…");
 });
+
+test("secretScrubber: a lowercase word is a word only as a path segment or a query name; as a password, a query value or a fragment it is a secret", () => {
+  const pw = ["correct", "horse", "battery"].join("-");
+  const scrub = secretScrubber([`https://user:${pw}@node.example.com/robinhood?apikey=${"pinkelephantdance"}#${"supersecretfragment"}`]);
+  assert.equal(scrub(`auth failed for user:${pw}`), "auth failed for user:<key>");
+  assert.equal(scrub("bad apikey pinkelephantdance"), "bad apikey <key>");
+  assert.equal(scrub("no route supersecretfragment"), "no route <key>");
+  assert.equal(scrub("robinhood is down"), "robinhood is down");
+});
