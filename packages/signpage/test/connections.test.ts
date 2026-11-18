@@ -159,11 +159,10 @@ test("a sign out clears every approval: an open popup's store reads none next, a
   assert.deepEqual(await connections(idb).list(), [], "the next account on this device starts with none");
 });
 
-test("the clear is bounded: a delete that never answers rejects in time, so a sign out never waits on it", async () => {
+test("the clear is bounded: a delete that never answers rejects in time, so a sign out never waits on it", { timeout: 5_000 }, async () => {
   const hung = { deleteDatabase: () => ({}) } as unknown as IDBFactory;
-  const t = Date.now();
-  await assert.rejects(clearConnections(hung, 20));
-  assert.ok(Date.now() - t < 1_000);
+  // its own bound ends it: with none, the delete never answers and the test's timeout fails it
+  await assert.rejects(clearConnections(hung, 20), /no answer in 20 ms/);
   await clearConnections(undefined); // no IndexedDB: nothing to clear
 });
 
