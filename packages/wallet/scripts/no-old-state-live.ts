@@ -15,9 +15,9 @@
 // provider's hosts as `lagging` (lag-hosts.ts), which the check judges INCONCLUSIVE, never FAIL.
 // No key, no seed, nothing signed or sent. It prints one JSON record on stdout:
 //   node --import ./scripts/net-window.mjs packages/wallet/scripts/no-old-state-live.ts
-import { evmPoolProvidersOf, evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, solanaJsonRpc, type SolanaRpc } from "@blindfill/kit";
+import { evmPoolProvidersOf, evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, type SolanaRpc } from "@blindfill/kit";
 import { evmAgreedBlock, evmEpochBlock, evmPeriodChainFee, evmRetryLag, type EvmNetwork } from "../src/pool/evm.ts";
-import { laggingHosts, walkLag } from "./lag-hosts.ts";
+import { laggingHosts, pageRpc, walkLag } from "./lag-hosts.ts";
 
 const EPOCH_MS = 60_000;
 const TURN_MS = 3_000;
@@ -33,7 +33,7 @@ async function chainRun(chain: "base" | "robinhood") {
   let calls = 0;
   // a seat's client, marking the seats whose eth_call answered and each seat's last eth_call refusal (lag-hosts.ts walkLag)
   const client = (url: string, answered?: Set<string>, refused?: Map<string, string>): SolanaRpc => {
-    const rpc = solanaJsonRpc(url);
+    const rpc = pageRpc(url);
     return Object.assign(async (method: string, params: readonly unknown[]) => {
       if (method === "eth_call") calls++;
       let r;
