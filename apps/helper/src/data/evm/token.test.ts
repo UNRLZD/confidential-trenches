@@ -9,7 +9,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { request } from "node:http";
-import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { ROW_FIELDS } from "../../../../terminal/src/screens/discover/fields.ts";
 import { start } from "../../server.ts";
@@ -19,6 +18,7 @@ import { CG_DAY } from "../coingecko.ts";
 import { DAY_SYNC_MS, PROBE_DAY_SHARE } from "../../limits/limits.ts";
 import type { DayPeers } from "../../limits/day-spend.ts";
 import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
+import { call as bounded, listening } from "../../../test/servers.ts";
 
 /** `p`'s answer once the promise steps queued now have run, with no timer firing; undefined while it waits on one. */
 async function atOnce<T>(p: Promise<T>): Promise<T | undefined> {
@@ -73,18 +73,10 @@ const tokens = (mode: "ok" | "missed" | "unset" = "ok") => ({
 const at = (evmTokens: ReturnType<typeof tokens>) => start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, evmTokens);
 const servers = [at(tokens()), at(tokens("missed")), at(tokens("unset"))];
 const ports: number[] = [];
-before(() => Promise.all(servers.map((s, i) => new Promise<void>((ok) => s.on("listening", () => ((ports[i] = (s.address() as AddressInfo).port), ok()))))));
+before(async () => (await Promise.all(servers.map((s, i) => listening(s, `the helper ${i}`)))).forEach((p, i) => (ports[i] = p)));
 after(() => Promise.all(servers.map((s) => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok()))))));
 
-function call(path: string, to = 0) {
-  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port: ports[to], method: "GET", path }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (d: Buffer) => chunks.push(d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
-    });
-    r.on("error", fail).end();
-  });
-}
+const call = (path: string, to = 0) => bounded(ports[to]!, { path }, `the helper ${to}`);
 
 for (const c of CASES) {
   test(`GET /v1/market/token?chain=${c.chain}: 200 in the frozen fields, the lists' row with its ${c.pad} tag, the keyed info's decimals, holders and top 10`, async () => {

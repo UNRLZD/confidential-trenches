@@ -6,13 +6,13 @@
 // which wait it was.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { b58encode } from "./lists.ts";
 import * as T from "./token.ts";
 import * as R from "../../rpc/rpc.ts";
 import * as server from "../../server.ts";
+import { call, listening } from "../../../test/servers.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/token-page.json", import.meta.url), "utf8"));
 const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
@@ -161,11 +161,9 @@ test("card helper-ready-page-warm: GET /v1/market/token sends the read's entries
   const token = { page: async () => (await sleep(30), { status: 200, body: "{}", src: "jupiter", asOfMs: 1, timing: 'rpc;dur=12;desc="solana"' }) };
   const h = server.start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, token as never);
   t.after(() => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))));
-  await new Promise<void>((done) => h.on("listening", () => done()));
+  await listening(h, "the helper");
   const port = (h.address() as AddressInfo).port;
-  const st = await new Promise<string>((done, fail) =>
-    request({ host: "127.0.0.1", port, path: `/v1/market/token?chain=solana&token=${PUMP}` }, (res) => (res.resume(), done(String(res.headers["server-timing"] ?? "")))).on("error", fail).end(),
-  );
+  const st = String((await call(port, { path: `/v1/market/token?chain=solana&token=${PUMP}` }, "the helper")).headers["server-timing"] ?? "");
   assert.deepEqual(entries(st), ["rpc", "total"], st);
   assert.ok(dur(st, "total") >= 25, st);
 });
@@ -221,14 +219,9 @@ test("card token-page-data-complete-and-fast: GET /v1/market/token sets the row'
   const swaps = { solana: { change4h: (m: string) => (asked.push(m), 1_234) } };
   const h = server.start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, token as never, undefined, undefined, undefined, swaps as never);
   t.after(() => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))));
-  await new Promise<void>((done) => h.on("listening", () => done()));
+  await listening(h, "the helper");
   const port = (h.address() as AddressInfo).port;
-  const body = await new Promise<string>((done, fail) =>
-    request({ host: "127.0.0.1", port, path: `/v1/market/token?chain=solana&token=${PUMP}` }, (res) => {
-      let b = "";
-      res.on("data", (c) => (b += c)).on("end", () => done(b));
-    }).on("error", fail).end(),
-  );
+  const body = (await call(port, { path: `/v1/market/token?chain=solana&token=${PUMP}` }, "the helper")).body;
   assert.deepEqual(JSON.parse(body).row, { chg_4h_bps: 1_234, chg_1h_bps: 5 });
   assert.deepEqual(asked, [PUMP]);
 });

@@ -7,7 +7,7 @@
 // (token.ts state/restore, data/warm.ts), and the new one answers them under the same freshness rules.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { handler } from "../../server.ts";
@@ -15,6 +15,7 @@ import { refusalLog } from "../../limits/limits.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, GT_SERVE_MS, PAGE_RESERVE, REFRESH_SLOT, REFRESH_URGENT_MS } from "../gecko.ts";
 import { pumpCurveAddress } from "./lists.ts";
 import { AHEAD_MS, AHEAD_TICK_MS, createSolanaToken, HOT_MS, TOKEN_2022_PROGRAM } from "./token.ts";
+import { call, listening } from "../../../test/servers.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/token-page.json", import.meta.url), "utf8"));
 const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
@@ -60,15 +61,7 @@ function gecko() {
   const fetch = async (url: string) => (urls.push(url), new Response(JSON.stringify(url.includes("/ohlcv/") ? FX.gt_ohlcv : FX.gt_token), { status: 200, headers: { "content-type": "application/json" } }));
   return { urls, fetch };
 }
-function get(port: number, path: string, ip: string): Promise<{ status: number; body: string }> {
-  return new Promise((done, fail) => {
-    const r = request({ host: "127.0.0.1", port, path, headers: { origin: APP, "x-forwarded-for": ip }, agent: false }, (res) => {
-      let b = "";
-      res.setEncoding("utf8").on("data", (d) => (b += d)).on("end", () => done({ status: res.statusCode!, body: b }));
-    });
-    r.on("error", fail).end();
-  });
-}
+const get = (port: number, path: string, ip: string) => call(port, { path, headers: { origin: APP, "x-forwarded-for": ip }, agent: false }, "the helper");
 type Handover = { state?: () => unknown; restore?: (st: unknown) => void };
 
 /** The old helper serves PUMP's page, holders and 15m chart; its state goes through the warm file (JSON); 20 s later the
@@ -94,7 +87,7 @@ async function swapThenCrowd(handOver = true) {
   const lines: string[] = [];
   const refusals = refusalLog((l) => lines.push(l));
   const h = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, fresh as never, undefined, null, new Map(), new Map(), now, {}, {}, () => true, Promise.resolve(), () => ({}), refusals));
-  await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
+  await listening(h.listen(0, "127.0.0.1"), "the helper");
   const port = (h.address() as AddressInfo).port;
   try {
     const paths = [`/v1/market/token?chain=solana&token=${PUMP}`, `/v1/market/holders?chain=solana&token=${PUMP}`, `/v1/market/candles?chain=solana&token=${PUMP}&tf=15m&limit=500`];
@@ -337,7 +330,7 @@ async function idleThenSwap(idleMs: number, deps: { listed?: () => Promise<{ sta
   const lines: string[] = [];
   const refusals = refusalLog((l) => lines.push(l));
   const h = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, fresh as never, undefined, null, new Map(), new Map(), now, {}, {}, () => true, Promise.resolve(), () => ({}), refusals));
-  await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
+  await listening(h.listen(0, "127.0.0.1"), "the helper");
   const port = (h.address() as AddressInfo).port;
   try {
     const answers = await Promise.all(Array.from({ length: CROWD_429 }, (_, i) => get(port, `/v1/market/candles?chain=solana&token=${PUMP}&tf=15m&limit=500`, `198.18.1.${i + 1}`)));
