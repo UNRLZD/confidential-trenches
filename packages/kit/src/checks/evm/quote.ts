@@ -1500,6 +1500,12 @@ const quiet = (chain: string): Promise<void> =>
     };
     setTimeout(check, 0);
   });
+/** The chain a request names, as quoting counts it: a string, else none (a hostile request's chain is never made a
+ *  string, so its refusal stays the quote's own: TAILF11) */
+const chainKey = (req: unknown): string => {
+  const c = typeof req === "object" && req !== null ? (req as { chain?: unknown }).chain : undefined;
+  return typeof c === "string" ? c : "";
+};
 /** A quote of `chain` starts (`+1`) or ends (`-1`); at none running, what waited for it looks again a turn later. */
 const quoting = (chain: string, d: 1 | -1): void => {
   const n = (QUOTING.get(chain) ?? 0) + d;
@@ -2833,7 +2839,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const seen: { at: string | null } = { at: null };
   // what the quote leaves for after its answer (routeSet `after`): the chain's tail's read
   const after: (() => void)[] = [];
-  const chainOf = String(typeof req === "object" && req !== null ? req.chain : "");
+  const chainOf = chainKey(req);
   quoting(chainOf, 1);
   try {
     return await buyQuoteWith(req, rpcsIn, nowMs, scan, watch, mono, speculate, pin, seen, after).catch((e) => {
@@ -4351,7 +4357,7 @@ export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<Ev
 export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan?: EvmRpc | readonly EvmRpc[], venues?: EvmPoolVenueList, mono: () => number = monotonic, poolRpcs: readonly EvmRpc[] = rpcsIn): Promise<EvmPoolSellQuote> {
   // what the quote leaves for after its answer (routeSet `after`): the chain's tail's read
   const after: (() => void)[] = [];
-  const chainOf = String(typeof req === "object" && req !== null ? req.chain : "");
+  const chainOf = chainKey(req);
   quoting(chainOf, 1);
   try {
     return await sellQuoteWith(req, rpcsIn, nowMs, scan, venues, mono, poolRpcs, after);

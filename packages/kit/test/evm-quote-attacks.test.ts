@@ -10839,3 +10839,13 @@ test("TAILF10 a sell asked right after a buy has answered goes before the chain'
   const first = order.indexOf("tail");
   assert.ok(first > 0 && order.lastIndexOf("read") < first, `the sell's last read at ${order.lastIndexOf("read")}, the tail's first at ${first} of ${order.length}`);
 });
+
+test("TAILF11 a request whose chain is an object that throws when made a string is refused as main refuses it, buy or sell: the count of a chain's quotes reads only a string", async () => {
+  const chainObj = { toString: () => { throw new Error("planted"); } };
+  const token = freshToken();
+  const reads = [chain([], 0), chain([], 1)];
+  const buy = await verdict(evmPoolBuyQuoteWith({ chain: chainObj, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as unknown as EvmPoolBuyQuoteRequest, reads, NOW, scanner(5_000_000, []), undefined, () => 0));
+  assert.deepEqual(buy, { accepted: false, code: "bad_request" });
+  const sell = await sellVerdict(evmPoolSellQuoteWith({ chain: chainObj, token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, sent: [] } as unknown as EvmPoolSellQuoteRequest, reads, NOW, scanner(5_000_000, []), undefined, () => 0));
+  assert.deepEqual(sell, { accepted: false, code: "bad_request" });
+});
