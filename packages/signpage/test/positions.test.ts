@@ -1783,10 +1783,14 @@ test("P2-2 (the load route): the rent backs a load resumes take the Ws through t
   await until(async () => ((await tp.positions()) ?? []).length === 1);
   c.state.fail = true;
   const before = c.calls.finder;
-  // past the load's drawn start of the rent backs (src/pool-testnet.ts BACKS_LOAD_MAX_MS)
+  // a tap on the page (card rent-backs-resume-private: a run before the page's first tap passes no W), then past the
+  // load's drawn start of the rent backs (src/pool-testnet.ts BACKS_LOAD_MAX_MS) and the tap's drawn time (a tap that is
+  // neither a buy nor a sell: the ride's gap, POOL_RENT_BACK_SPACE_MAX_MS at the most)
+  const { POOL_RENT_BACK_SPACE_MAX_MS } = await import("../src/pool-sell.ts");
   const realNow = Date.now;
   const opened = realNow();
-  Date.now = () => opened + BACKS_LOAD_MAX_MS;
+  assert.deepEqual(tp.flow({ kind: "pool.none", chain: "base" } as never, { id: "r1", sha: "00", progress: () => {} } as never), { error: "not_allowed" });
+  Date.now = () => opened + BACKS_LOAD_MAX_MS + POOL_RENT_BACK_SPACE_MAX_MS;
   try {
     await tp.stateRead();
     await until(() => timers.length === 1);

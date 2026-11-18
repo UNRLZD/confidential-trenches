@@ -1858,6 +1858,34 @@ test("a W left under the floor keeps its record through any run of faulted loads
   assert.equal(w.owed.has(W.address), false, "dropped once both RPCs read W empty");
 });
 
+// Card rent-backs-resume-private: a run before the page's first tap (idle) reads W on the helper's seat alone and passes
+// none: nothing named to the public seat, no pass counted, nothing signed, the ride held; the next run that is not idle
+// passes W on both seats.
+test("rent-backs-resume-private: an idle run reads W on the helper's seat alone, passes none and counts none; the next run passes it", async () => {
+  const { amount } = await amountFor(FLOOR_SALE);
+  const plant: Plant = { held: amount, lamports: 1_493_440, ataLamports: TOKEN_RENT };
+  const w = await world(plant, [wallet(amount)]);
+  const a = await runPoolSell(w.host, { ...ASK, amount });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const loaded: PoolSellHost = { ...w.host, wallets: async () => [{ ...wallet(amount), holdings: { native: 1n, tokens: new Map([[MINT, { amount: 0n, frozen: false }]]), unreadable: [] } }] };
+  // W reads otherwise than at its last pass (lamports sent to it): a pass is due
+  w.c.accounts.set(W.address, { ...w.c.accounts.get(W.address)!, lamports: (w.c.accounts.get(W.address)?.lamports ?? 0) + 3_000_000 });
+  const rec = structuredClone(w.owed.get(W.address));
+  const calls = w.c.calls.length;
+  const s0 = sends(w).length;
+  let held = 0;
+  for (let i = 0; i < 3; i++) await resumeRentBacks(loaded, fakeLocks(), { idle: true, ride: true, held: () => void held++ });
+  const naming = w.c.calls.slice(calls).filter((c) => JSON.stringify(c.params).includes(W.address));
+  assert.deepEqual(naming.filter((c) => c.p === 0).map((c) => c.method), [], "nothing named W to the public seat");
+  assert.deepEqual(naming.map((c) => `${c.p} ${c.method}`), ["1 getMultipleAccounts", "1 getMultipleAccounts", "1 getMultipleAccounts"], "the helper's find read alone, once a run");
+  assert.deepEqual(w.owed.get(W.address), rec, "the record as it stood: no pass counted");
+  assert.equal(held, 3, "a ride held, so it stays booked");
+  assert.equal(sends(w).length, s0, "nothing signed");
+  await resumeRentBacks(loaded, fakeLocks());
+  assert.ok(w.c.calls.slice(calls).some((c) => c.p === 0 && JSON.stringify(c.params).includes(W.address)), "the next run's pass reads W on the public seat too");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, "and sweeps W");
+});
+
 // The review of c1fd2d20, probe 1: faults before the first floor end dropped W. Provider B throttled once the sell lands:
 // the sell's own rent back gives up, and four more loads hit the pass bound ("owed no more"), 2,138,680 left on W.
 test("a rent back that faults on every load keeps W's record: no pass bound, W's lamports still owed", async () => {
