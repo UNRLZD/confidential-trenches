@@ -100,19 +100,22 @@ import { withVaultBalance } from "./vault-balance.ts";
 import { returningWallets, withPositions, withReturning } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { CONFIRM_TITLE, CONNECT_PATH, confirmLines, outsideKinds, outsideOrigin, type ConfirmedKind } from "./outside.ts";
-import { connections } from "./connections.ts";
+import { clearConnections, connections } from "./connections.ts";
+import { connectedApps } from "./connected-apps.ts";
+import { dress } from "./sheet.ts";
 import { drawBackdrop, drawSealedGround, groundLogo } from "./backdrop.ts";
 import { GROUND_LOGO_SVG } from "./ground-logo.ts";
 import { SEALED } from "./frame-cover.ts";
+import { joinRunning } from "./dry-join.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { parseAmount, vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm, type GivenWithdraw } from "./withdraw/form.ts";
 import { drawHeldMoveOut, type HeldDeps } from "./withdraw/held.ts";
 import { archivalRpc, heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src/deposit/moveout.ts";
 import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
-import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
+import { FEE_CAP_DRY_KEPT_MS, PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
 import { nearBuyDry, nearBuyKind, nearHoldingsPass, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
-import { dclPoolsKept, rheaPoolsKept } from "./near-pools.ts";
+import { dclPoolsKept, keptDb, rheaPoolsKept, type KeptOptions } from "./near-pools.ts";
 import { nearSeatRpc, paceDb, pacedNearRpc, seatsUp, sharePaces } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm, type GivenPoolWithdraw } from "./withdraw/pool-form.ts";
@@ -640,7 +643,8 @@ else {
     const token = params.token;
     const after = (async () => {
       if (!(await fs.state()).signed_in) return void (answer = { error: "not_funded" });
-      answer = await nearBuyDry(page, token, amount);
+      // a dry's fee takes the device's fee cap read within FEE_CAP_DRY_KEPT_MS (card near-quote-inside-the-kpi)
+      answer = await nearBuyDry({ ...page, fee: (a) => withdrawFormDeps(nearDryVault(), { capKeptMs: FEE_CAP_DRY_KEPT_MS }).fee(a) }, token, amount);
     })().catch(() => void (answer = { error: "failed" }));
     return { running: true, after, answer: () => answer };
   };
@@ -948,9 +952,12 @@ else {
       // no pin, mainnet until its pools deploy, refuses every one not_allowed and makes no read); a sell's decimals read
       // on two providers
       ...poolKindMap,
-      "pool.sell.dry": (params) => poolSellDry(params),
+      // each dry joins a running one with exactly its params (card dry-ask-joins-the-running-quote, src/dry-join.ts): the
+      // box's ask again after the client's 10 s gets the running quote's answer, never a second quote on the same reads;
+      // here, above the routing, so every chain joins in one place
+      "pool.sell.dry": joinRunning((params) => poolSellDry(params)),
       // with_cash (card one-balance-buys-on-every-chain): a tap's most with Cash moved first, on Solana
-      "pool.buy.dry": (params) => dryWithCash(params),
+      "pool.buy.dry": joinRunning((params) => dryWithCash(params)),
       // a move between Cash and a pool (card one-balance-buys-on-every-chain): the same mover a buy's shortfall takes
       ...(prover && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null ? poolMoveKinds(cashMoverNow, toCashNow) : {}),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
@@ -1018,8 +1025,30 @@ let knocked: string | null = null;
 let allowedOrigin: string | null = null;
 const status = document.createElement("p");
 Object.assign(status.style, { margin: "0", padding: "24px 16px", color: "#a3a3a3", font: '14px "Schibsted Grotesk", system-ui, sans-serif', overflowWrap: "anywhere" });
+// card signpage-other-apps-connect (src/connected-apps.ts): on /connect, every app the user connected, each with
+// Disconnect, dressed as the connect sheet is; under the status once connected, on the sheet when not. Disconnect of the
+// bound origin ends its session (src/api.ts reads the store first) and clears what the page shows for it
+const connectedList = document.createElement("main");
+connectedList.id = "connected";
+const dressed = (e: HTMLElement): HTMLElement => (dress(e, false), e);
+dressed(connectedList).style.padding = "0 16px 24px";
+const connectedView =
+  connected &&
+  connectedApps(connectedList, {
+    doc: document,
+    store: connected,
+    text: (tag, text) => dressed(outsideText(tag, text)),
+    origin: originLine,
+    button: (action, label, onClick) => dressed(button(action, label, onClick)),
+    removed: (o) => {
+      if (o !== allowedOrigin) return;
+      allowedOrigin = null;
+      status.textContent = "Not connected";
+    },
+  });
 function notConnected(): void {
-  showOutside([outsideText("p", "Not connected")]);
+  showOutside([outsideText("p", "Not connected"), connectedList]);
+  void connectedView?.refresh();
 }
 function knock(origin: string): void {
   if (knocked !== null || !outsideOrigin(origin, location.origin)) return;
@@ -1036,6 +1065,8 @@ function knock(origin: string): void {
           status.textContent = `Connected ${origin}`;
           if (!status.isConnected) document.body.append(status);
           shell!.allow(origin);
+          document.body.append(connectedList);
+          void connectedView?.refresh();
         },
         notConnected,
       );
@@ -1178,7 +1209,7 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
-const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out", "allow", "confirm"]);
+const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out", "allow", "confirm", "disconnect"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
@@ -1344,6 +1375,15 @@ function withdrawDeps() {
 // Made at its first use (a tap or the load's settle), never while the module is read: it names the sign out's signal
 // and the seed lock, defined further down.
 let nearPageMade: NearBuyPage | null | undefined;
+/** The kept lists' storage (card near-quote-inside-the-kpi): SIGN_HOST's own IndexedDB, one for the page. */
+let keptMade: KeptOptions | undefined;
+function keptStore(): KeptOptions {
+  return (keptMade ??= typeof indexedDB === "undefined" ? {} : { store: keptDb() });
+}
+/** The vault the NEAR dry's fee reads through: the NEAR buy page's (nearBuyPage), made only once that page is. */
+function nearDryVault() {
+  return { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
+}
 function nearBuyPage(): NearBuyPage | null {
   if (nearPageMade !== undefined) return nearPageMade;
   if (!prover) return (nearPageMade = null);
@@ -1364,8 +1404,9 @@ function nearBuyPage(): NearBuyPage | null {
     settle: () => withdrawSettle(vault()),
     rpcs: () => pair,
     signal: () => withdrawWait.signal,
-    pools: rheaPoolsKept(PAGE_NETWORK, () => pair),
-    dclKept: dclPoolsKept(PAGE_NETWORK, () => pair),
+    // kept across asks and page loads in SIGN_HOST's own storage (card near-quote-inside-the-kpi)
+    pools: rheaPoolsKept(PAGE_NETWORK, () => pair, keptStore()),
+    dclKept: dclPoolsKept(PAGE_NETWORK, () => pair, keptStore()),
     log: (line) => console.info(line),
   });
 }
@@ -1562,6 +1603,8 @@ function signedOutElsewhere(): void {
   // reloads signed out
   closeHostLanes();
   quotesSignedOut();
+  // the connected apps go with the account in every tab too, should the signing-out tab's delete not have completed
+  void clearConnections().catch(() => {});
   restore?.signedOut();
   follows?.signedOut();
   poolFollow?.stop();
@@ -1881,6 +1924,9 @@ async function signOut(): Promise<void> {
   }
   store = null;
   seatsUp();
+  // the apps this account connected go with it (src/connections.ts): an open popup's next request is refused, and the
+  // next account on this device starts with none; bounded, so the sign out never waits on it
+  await clearConnections().catch(() => {});
   // after the store signed out: a deposit that landed while it waited cannot open the queue again (no seed)
   await testnet?.signedOut();
   // signed out: the page reloads, and with it the app, which then shows signed out

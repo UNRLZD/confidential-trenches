@@ -101,4 +101,7 @@ test("the facts read from the scripts, each mark its own code", () => {
   assert.equal(facts({ ...app, js: "const k=[`deposit.dry`,`pool.sell.dry`];" }, sign).app.ask, false, "a name in the kit's list is no ask");
   assert.equal(facts(app, { ...sign, js: '"pool.sell.dry":1e4' }).sign.kind, false, "a timeout entry is no kind");
   assert.equal(facts(app, { ...sign, js: '"pool.sell.dry":fl' }).sign.kind, false, "a schema entry is no kind");
+  // card dry-ask-joins-the-running-quote: the kind wrapped by the join is still the kind; a wrapped value is not
+  assert.equal(facts(app, { ...sign, js: sign.js.replace('"pool.sell.dry":e=>d(e)', '"pool.sell.dry":N2(e=>d(e))') }).sign.kind, true, "the joined kind");
+  assert.equal(facts(app, { ...sign, js: '"pool.sell.dry":N2(fl)' }).sign.kind, false, "a wrapped schema entry is no kind");
 });

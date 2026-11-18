@@ -5,7 +5,8 @@
 //   - APP_HOST's asks the signing page's pool.sell.dry for the sell box's preview (src/screens/positions/model.ts
 //     askSellPreview, as minified: `e(`pool.sell.dry`,i.params).outcome`), so the box's You receive, Network and Fee
 //     come from the page, never a dash that stays;
-//   - SIGN_HOST's answers the kind (src/main.ts, as minified: `"pool.sell.dry":e=>d(e)` in the page's kinds);
+//   - SIGN_HOST's answers the kind (src/main.ts, as minified: `"pool.sell.dry":e=>d(e)` in the page's kinds, or that
+//     function wrapped by the join of a running ask, `"pool.sell.dry":N2(e=>d(e))`, card dry-ask-joins-the-running-quote);
 //   - APP_HOST's box asks again each second on busy or not_funded (src/screens/positions/SellBox.tsx NOT_YET, as
 //     minified: `new Set([`busy`,`not_funded`])`), so a preview asked while a buy runs or before the page's read has the
 //     fill's holding comes as soon as the page has it (devnet runs 11 and 12, 11 Nov: the dash for good);
@@ -48,8 +49,9 @@ const N = "[\\w$]+";
 const Q = "[`\"']";
 /** The app's ask: the request call for pool.sell.dry with the tap's own params, its outcome awaited. */
 const ASK = new RegExp(`${N}\\(${Q}pool\\.sell\\.dry${Q},${N}\\.params\\)\\.outcome`);
-/** The page's kind: pool.sell.dry in the kinds the api answers, a function of the request's params. */
-const KIND = new RegExp(`${Q}pool\\.sell\\.dry${Q}:(${N})=>${N}\\(\\1\\)`);
+/** The page's kind: pool.sell.dry in the kinds the api answers, a function of the request's params, bare or in one
+ *  wrapping call (src/dry-join.ts joinRunning). */
+const KIND = new RegExp(`${Q}pool\\.sell\\.dry${Q}:(?:${N}\\()?(${N})=>${N}\\(\\1\\)`);
 /** The box's codes asked again each second: busy and not_funded, in that order, one set. */
 const AGAIN = new RegExp(`new Set\\(\\[${Q}busy${Q},${Q}not_funded${Q}\\]\\)`);
 /** The buy's host given back at its early sent: an optional call of the host's release. */

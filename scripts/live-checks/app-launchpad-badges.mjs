@@ -9,7 +9,8 @@
 //   - with an id, the launchpad badge draws that pad: data-pad is the id, the hover title is the pad's proper name, its
 //     logo loaded; with null (or a pad the table holds no cited logo for, NO_LOGO), no launchpad badge;
 //   - the chain badge always draws: data-chain is the row's chain, the title the chain's name, its mark loaded;
-//   - no element of the row (the avatar's initials aside) has the raw id as its text;
+//   - no element of the row (the avatar's initials aside) has the raw id as its text, beyond the token's own symbol and
+//     name where they spell it (a token whose symbol is "pump.fun");
 //   - each badge lies inside its row's box and is not cut by the column (no clipping at either width).
 // A screenshot of every width is kept.
 // A drawn row is matched to its served row by chain and token, never by the token alone: one address can be listed on
@@ -66,7 +67,15 @@ export function rowFaults(row) {
     if (chain && row.chain.title !== chain.name) bad.push(`chain hover ${JSON.stringify(row.chain.title)}, not ${JSON.stringify(chain.name)}`);
     if (!row.chain.loaded) bad.push("chain mark did not load");
   }
-  if (id !== null && (row.texts ?? []).includes(id)) bad.push(`raw id ${JSON.stringify(id)} drawn as text`);
+  // A token's own symbol or name may spell its launchpad's id: 9DXPjsbi..., symbol "pump.fun", name "pump factory",
+  // made on pump.fun (Jupiter's row), drew its right badge and its own symbol, and live job 130243771314 (11 Nov) failed
+  // it as the raw id. The row draws its symbol and its name once each (Discover.tsx .dsc-sym, .dsc-name), so only a copy
+  // of the id beyond them is the raw id drawn.
+  if (id !== null) {
+    const drawn = (row.texts ?? []).filter((t) => t === id).length;
+    const theirs = [s.symbol, s.name].filter((t) => typeof t === "string" && t.trim() === id).length;
+    if (drawn > theirs) bad.push(`raw id ${JSON.stringify(id)} drawn as text`);
+  }
   if (row.clipped?.length) bad.push(`clipped: ${row.clipped.join(", ")}`);
   return bad;
 }
@@ -116,13 +125,14 @@ export function linkOf(href) {
   }
 }
 
-/** What the lists answers served, by chain and token: [{ url, status, body }] (each chain's own snapshot only, as Discover draws it). */
+/** What the lists answers served, by chain and token: [{ url, status, body }] (each chain's own snapshot only, as Discover
+ *  draws it): the launchpad, the chain, and the symbol and name the row draws as its own words. */
 export function servedMap(answers) {
   const served = new Map();
   for (const a of answers) {
     const body = a.status === 200 ? a.body : null;
     if (!body || body.chain !== new URL(a.url).searchParams.get("chain")) continue;
-    for (const rs of Object.values(body.lists ?? {})) for (const r of Array.isArray(rs) ? rs : []) if (r && typeof r.token === "string" && r.chain === body.chain) served.set(servedKey(r.chain, r.token), { launchpad: r.launchpad ?? null, chain: r.chain });
+    for (const rs of Object.values(body.lists ?? {})) for (const r of Array.isArray(rs) ? rs : []) if (r && typeof r.token === "string" && r.chain === body.chain) served.set(servedKey(r.chain, r.token), { launchpad: r.launchpad ?? null, chain: r.chain, symbol: r.symbol ?? null, name: r.name ?? null });
   }
   return served;
 }

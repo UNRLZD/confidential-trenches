@@ -27,8 +27,7 @@ const PSC = ["wallet", "test/pool-same-chain.test.ts"];
 const RENT_IN = "a.sizes, a.blockhash, a.rent) };";
 const SENT = "precommitments: [...precommitments] };";
 const STRINGS = "precommitments: [...precommitments].map(String) as unknown as bigint[] };";
-// walk.ts names the Worker's message `m` since card restore-walk-rewalks-a-bad-lane (05126029f): these anchors read `a`
-// there and stopped the whole run at NOT ONCE (card vault-late-send-carried)
+// the Worker's check, in matchOf since 7d5ff87fc (answerWalk hands it the ask's precommitments)
 const CHECK = '!m.precommitments.every((p) => typeof p === "bigint")';
 // [name, file, [[the source as written, the plant]...], [package, test file], test name pattern]
 const M = [
@@ -37,11 +36,9 @@ const M = [
   ["the bridge sends the precommitments as strings", WALK, [[SENT, STRINGS]], NR, "Worker bridge"],
   ["the Worker takes precommitments that are not bigints", WALK, [[CHECK, "false"]], NR, "Worker bridge"],
   ["strings sent and taken (round-3 review)", WALK, [[SENT, STRINGS], [CHECK, "false"]], NR, "Worker bridge"],
-  // both Worker paths, the walk's and the bad lane's walk again (05126029f), take the refusal
-  ["a Worker's refusal taken as an empty walk", WALK, [
-    ["a?.ok === true ? resolve(a.walk) : reject(new Error(`lane ${lane}:", "a?.ok !== undefined ? resolve(a.ok ? a.walk : { found: [], last: lane, lastPrecommitment: 0n }) : reject(new Error(`lane ${lane}:"],
-    ["a?.ok === true ? resolve(a.walk) : reject(new Error(`lane ${ask.lane}:", "a?.ok !== undefined ? resolve(a.ok ? a.walk : { found: [], last: ask.lane, lastPrecommitment: 0n }) : reject(new Error(`lane ${ask.lane}:"],
-  ], NR, "Worker bridge"],
+  ["a Worker's refusal taken as an empty walk", WALK, [["a?.ok === true ? resolve(a.walk) : reject(new Error(`lane ${lane}:", "a?.ok !== undefined ? resolve(a.ok ? a.walk : { found: [], last: lane, lastPrecommitment: 0n }) : reject(new Error(`lane ${lane}:"]], NR, "Worker bridge"],
+  // the same rule in the pool walk's bridge (inWorker, walkLanes' Workers)
+  ["inWorker: a Worker's refusal taken as an empty walk", WALK, [["a?.ok === true ? resolve(a.walk) : reject(new Error(`lane ${ask.lane}:", "a?.ok !== undefined ? resolve(a.ok ? a.walk : { found: [], last: ask.lane, lastPrecommitment: 0n }) : reject(new Error(`lane ${ask.lane}:"]], ["wallet", "test/walk-lanes.test.ts"], "a Worker that refuses stops the walk"],
   ["a failed history read taken as no history", WAL, [["        s.failed = true;\n        unread.push({ c: s.c, l: s.l, j: s.j, address: s.address, chain, error: why(e) });\n        continue;", "        continue;"]], RW, "step 4"],
   ["no hop target read after a failed read", WAL, [["slots.some((s) => found(s) || s.failed)", "slots.some((s) => found(s))"]], RW, "step 4"],
   ["an evm wallet read on Base only", WAL, [['  evm: ["base", "robinhood"],', '  evm: ["base"],']], RW, "step 4"],

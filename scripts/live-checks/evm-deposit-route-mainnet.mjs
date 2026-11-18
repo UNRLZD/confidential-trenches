@@ -95,10 +95,11 @@ const ROUTE = (deps) =>
 // main.ts: the route on the page's network, its pools and its wallet reader (none, a call of one function, or its name)
 const ROUTE_CALL = (route) => new RegExp(`[,;](${N})=${esc(route)}\\(\\{network:(${N}),pool:(${N})=>(${N})\\?\\.evmPoolOf\\(\\3\\)\\?\\?null,wallet:(${N}=>void 0|${N}=>${N}\\(${N}\\)|${N}),notes:\\(\\)=>(${N})\\(\\)\\}\\)`);
 /** pool-testnet.ts pageEvmWalletRpc on the mainnet build: no testnet return taken, the helper's route at TRADE_HELPER's
- *  /v1/rpc/{chain} (decision M359); evm-deposit-on-mainnet.mjs reads it by the same two marks. */
+ *  /v1/rpc/{chain} (decision M359), each call's signal handed to the route (card signpage-reads-take-the-call-signal);
+ *  evm-deposit-on-mainnet.mjs reads it by the same two marks. */
 export const READER = (z) =>
   new RegExp(
-    `[,; ]${esc(z)}=\\((${N}),(${N})=!1\\)=>\\{if\\(\\2\\)return;let (${N})=(${N})\\.get\\(\\1\\);if\\(\\3===void 0\\)\\{let (${N})=${N}\\((${N}),\\1\\);\\4\\.set\\(\\1,\\3=Object\\.assign\\(\\((${N}),(${N})\\)=>\\5\\(\\7,\\8\\),\\{url:${Q}\\$\\{\\6\\}/v1/rpc/\\$\\{\\1\\}${Q}\\}\\)\\)\\}return \\3\\}`,
+    `[,; ]${esc(z)}=\\((${N}),(${N})=!1\\)=>\\{if\\(\\2\\)return;let (${N})=(${N})\\.get\\(\\1\\);if\\(\\3===void 0\\)\\{let (${N})=${N}\\((${N}),\\1\\);\\4\\.set\\(\\1,\\3=Object\\.assign\\(\\((${N}),(${N}),(${N})\\)=>\\5\\(\\7,\\8,\\9\\),\\{url:${Q}\\$\\{\\6\\}/v1/rpc/\\$\\{\\1\\}${Q}\\}\\)\\)\\}return \\3\\}`,
   );
 export const HELPER_AT = (h) => new RegExp(`[,; ]${esc(h)}=${Q}https://ct-api\\.unrealized\\.trade${Q}[,;]`);
 const once = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length === 1;

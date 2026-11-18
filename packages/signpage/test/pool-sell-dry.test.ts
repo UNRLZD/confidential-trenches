@@ -423,6 +423,27 @@ test("answered inside the client's 10 s: a read its host holds answers by POOL_S
   }
 });
 
+// card signpage-reads-take-the-call-signal: the bound ends the preview's reads at the provider too, so a held read
+// keeps no host slot or pace token past it
+test("the preview's bound ends every read it still holds at the provider", { timeout: 10_000 }, async (t) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  try {
+    const signals: (AbortSignal | undefined)[] = [];
+    const hold = (url: string) => Object.assign(async (_m: string, _p: readonly unknown[], s?: AbortSignal) => (signals.push(s), new Promise(() => {})), { url });
+    const held = [hold("https://held.example/"), hold("https://held-2.example/")] as unknown as readonly [SolanaRpc, SolanaRpc];
+    let answer: unknown = null;
+    void poolSellDry(deps({ rpcs: () => held }), share(MINT, 5_000)).then((a) => (answer = a));
+    for (let i = 0; i < 5; i++) await null;
+    assert.ok(signals.length > 0 && signals.every((s) => s?.aborted === false), "each read went out with the preview's signal");
+    t.mock.timers.tick(POOL_SELL_DRY_ANSWER_MS);
+    for (let i = 0; i < 20; i++) await null;
+    assert.deepEqual(answer, { error: "busy" });
+    assert.ok(signals.every((s) => s?.aborted === true), "every held read aborted at the bound");
+  } finally {
+    resetTimers(t.mock.timers);
+  }
+});
+
 test("a stopped preview books nothing: N asks with changing shares, then a trade's getMultipleAccounts on the same providers goes out within their answer time (N = 12, 30)", async () => {
   for (const n of [12, 30]) {
     const rec = pair("pump", []);
@@ -506,7 +527,8 @@ test("the kind: a read that runs, its answer once its wait settles; a throw is d
 
 test("the page answers it (src/main.ts): the kind on the trades' paced pair as background reads, the held positions, every pool trade counted from its tap to its run's end, the lanes", () => {
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
-  assert.match(main, /"pool\.sell\.dry": \(params\) => poolSellDry\(params\),/);
+  // joined with a running sell dry of the same params (card dry-ask-joins-the-running-quote, test/dry-join.test.ts)
+  assert.match(main, /"pool\.sell\.dry": joinRunning\(\(params\) => poolSellDry\(params\)\),/);
   assert.match(main, /PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)/, "the trades' own paced pair, each read a background one on its host's lane");
   assert.match(main, /positions: \(\) => testnet\?\.positionsNow\(\) \?\? null, pin: \(\) => PAGE_SOL_PIN \?\? null,/, "the held positions: no pass, no seed read, no write; the page's pool");
   assert.match(main, /bought: \(token\) => testnet\?\.boughtSince\(token\) \?\? Promise\.resolve\(undefined\),/, "the Ws bought since the pass, as the sale finds them");

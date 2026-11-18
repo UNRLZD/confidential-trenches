@@ -1,0 +1,40 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as built at card/signpage-reads-take-the-call-signal (scripts/signpage-built.mjs), read through bundle-checks' buildFetch",
+    "bad": "SIGN_HOST as served 18 Nov before this card (main 30583519e's release): every page wrapper drops the call's signal"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-q/PzHrsu2tkkLQF8DzfbznkVmLRy3kwTJkGiGGi2eeJosgW3LbR73VJL7B6/7e8x\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-q/PzHrsu2tkkLQF8DzfbznkVmLRy3kwTJkGiGGi2eeJosgW3LbR73VJL7B6/7e8x",
+    "laned": true,
+    "seat": true,
+    "watch": true,
+    "kept": true,
+    "young": true,
+    "switched": true,
+    "routes": true,
+    "trade": true,
+    "gated": true,
+    "decimals": true,
+    "fill": true,
+    "dry": true,
+    "timed": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oJm8RtLDhg/7RG+kMipUNMIISF5fRX+5uWB2z1skrC3OKAbwO9a6vnPmgxz1iZiw\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-oJm8RtLDhg/7RG+kMipUNMIISF5fRX+5uWB2z1skrC3OKAbwO9a6vnPmgxz1iZiw",
+    "laned": false,
+    "seat": false,
+    "watch": false,
+    "kept": false,
+    "young": false,
+    "switched": false,
+    "routes": false,
+    "trade": false,
+    "gated": false,
+    "decimals": false,
+    "fill": false,
+    "dry": false,
+    "timed": false
+  }
+}

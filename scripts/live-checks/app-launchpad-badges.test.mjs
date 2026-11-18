@@ -8,6 +8,10 @@
 //   twoChain: 2026-11-10, the real Base and Robinhood lists answers (each cut to two rows), the Robinhood one also listing
 //             the first Base row's token, as live run 42716137594 read one token on both chains (planted copy: the real
 //             one has left the lists).
+//   pumpSymbol: 2026-11-11 ~01:00Z, live job 130243771314's two failed rows on each width, rebuilt (the note in the
+//             answers file): token 9DXPjsbi..., whose own symbol is "pump.fun", drew its pump.fun badge and its symbol;
+//             main's verdict read the symbol as the raw id: PASS now, and the raw id drawn beyond the symbol and the
+//             name still FAILs.
 // Planted on the good answer: a missing badge, a wrong pad, a wrong hover, a logo that did not load, a badge on a
 // row served null, a served id with no table row, a raw id, a missing chain mark, a clipped badge: each FAIL.
 import assert from "node:assert/strict";
@@ -47,6 +51,48 @@ test("recorded bad answer: APP_HOST as deployed from main draws no badge and the
   assert.equal(r.ok, false);
   assert.ok(bad(r.lines).some((l) => /^BAD phone \/discover: \d+ of \d+ rows wrong, first new\/\w+: (no [^;]+ badge; )?no chain badge/.test(l)), r.lines.join("\n"));
   assert.ok(bad(r.lines).some((l) => /^BAD desktop \/discover: .*no pump\.fun badge; no chain badge; raw id "pump\.fun" drawn as text/.test(l)), r.lines.join("\n"));
+});
+
+test("recorded row: a token whose own symbol is its launchpad's id (9DXPjsbi..., symbol \"pump.fun\") drew its badge and its symbol, not the raw id: PASS", () => {
+  const rec = ANSWERS.pumpSymbol;
+  const r = judge(rec);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const w of WIDTHS) assert.ok(r.lines.includes(`ok  ${w.name} /discover: 2 rows, 2 with a launchpad badge (pump.fun), every row its chain mark, no raw id, nothing clipped`), r.lines.join("\n"));
+  for (const l of rec.loads) for (const x of l.rows) {
+    assert.equal(x.served.symbol, "pump.fun");
+    assert.ok(x.texts.includes("pump.fun") && x.pad.id === "pump.fun");
+  }
+});
+
+test("planted on the recorded row: the raw id drawn beyond the token's own symbol and name, or a name that spells it drawn twice: FAIL", () => {
+  const cases = [
+    // a third leaf: the id drawn as a label beside the symbol
+    (x) => x.texts.push("pump.fun"),
+    // the symbol not drawn as itself but the id still drawn once: the token's symbol changed, the id stayed
+    (x) => (x.served.symbol = "PF"),
+    // the name spells the id too: two own copies allowed, a third is the raw id
+    (x) => ((x.served.name = "pump.fun"), x.texts.push("pump.fun", "pump.fun")),
+  ];
+  for (const f of cases) {
+    const rec = structuredClone(ANSWERS.pumpSymbol);
+    const row = rec.loads[1].rows[0];
+    f(row);
+    assert.deepEqual(rowFaults(row), ['raw id "pump.fun" drawn as text'], f.toString());
+    const r = judge(rec);
+    assert.equal(r.ok, false);
+    assert.ok(bad(r.lines).some((l) => /^BAD desktop \/discover: 1 of 2 rows wrong, first new\/9DXPjsbi: raw id "pump\.fun" drawn as text$/.test(l)), r.lines.join("\n"));
+  }
+  // the name spelling the id with the symbol not: one own copy, drawn once: PASS
+  const rec = structuredClone(ANSWERS.pumpSymbol);
+  const row = rec.loads[1].rows[0];
+  row.served = { ...row.served, symbol: "PF", name: "pump.fun" };
+  assert.deepEqual(rowFaults(row), []);
+});
+
+test("servedMap keeps each row's symbol and name beside its launchpad and chain", () => {
+  const served = servedMap(ANSWERS.twoChain.answers.map(read));
+  const first = read(ANSWERS.twoChain.answers[0]).body.lists.new[0];
+  assert.deepEqual(served.get(`base\n${first.token}`), { launchpad: first.launchpad ?? null, chain: "base", symbol: first.symbol, name: first.name });
 });
 
 test("planted on the good answer: each way a badge can be wrong: FAIL", () => {
