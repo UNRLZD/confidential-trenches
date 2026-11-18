@@ -3,12 +3,11 @@
 // rule; gzip when asked; only GET and HEAD; exactly one chain, Solana; 503 when the vendor has never answered.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { request } from "node:http";
-import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { gunzipSync } from "node:zlib";
 import { start } from "../../server.ts";
 import { createSolanaLists, pumpCurveAddress, READS, ROW_FIELDS } from "./lists.ts";
+import { call as bounded, listening } from "../../../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const APP = "https://ct-app.unrealized.trade";
@@ -29,17 +28,12 @@ const down = createSolanaLists({ handle: async () => ({ status: 503, headers: {}
 
 const servers = [start(COMMIT, 0, undefined, undefined, undefined, up), start(COMMIT, 0, undefined, undefined, undefined, down)];
 const ports: number[] = [];
-before(() => Promise.all(servers.map((s, i) => new Promise<void>((ok) => s.on("listening", () => ((ports[i] = (s.address() as AddressInfo).port), ok()))))));
+before(async () => (await Promise.all(servers.map((s, i) => listening(s, `the helper ${i}`)))).forEach((p, i) => (ports[i] = p)));
 after(() => Promise.all(servers.map((s) => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok()))))));
 
-function call(method: string, path: string, headers: Record<string, string> = {}, to = 0) {
-  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port: ports[to], method, path, headers }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (d: Buffer) => chunks.push(d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }));
-    });
-    r.on("error", fail).end();
-  });
+async function call(method: string, path: string, headers: Record<string, string> = {}, to = 0) {
+  const r = await bounded(ports[to]!, { method, path, headers }, `the helper ${to}`);
+  return { status: r.status, headers: r.headers, body: r.raw };
 }
 
 test("GET /v1/market/lists?chain=solana: 200, the snapshot of rows in the field list, the commit, source, read time and CORS echo", async () => {

@@ -435,27 +435,68 @@ export function planCashExact(notes: readonly CashNote[], fee: bigint, usdc: big
  *  least N", 13:0xZ 15 Nov: 75,621 into SOL, 18,533 into Robinhood's ETH). One unit first; where 1Click cannot price so
  *  little it answers "Failed to get quote" (into Base's ETH at one unit, 15 Nov 13:30Z, "try at least 1042" at ten;
  *  into Robinhood's the same by 13:31Z), and the read asks again at ten times as much, up to one USDC (card
- *  cash-buys-spend-every-note-evm). An amount it quotes is one it takes: that amount. Null when an answer names none
- *  and is not that refusal, or the read fails: each part's own quote is still asked before any part is sent. */
-export async function readOneClickLeast(chain: PoolChain, fetchFn: typeof fetch, now: number): Promise<bigint | null> {
-  for (let amount = 1n; amount <= 10n ** BigInt(USDC_DECIMALS); amount *= 10n) {
+ *  cash-buys-spend-every-note-evm). An amount it quotes is one it takes: that amount.
+ *  An answer that is neither (card cash-least-read-again: sign live run 44300899132, 18 Nov 12:09Z, read "Failed to get
+ *  quote" and "No liquidity available" over seconds in which 1Click named its least before and after) is a blip when it
+ *  is "Failed to get quote" at one USDC, "No liquidity available", a 429, a 5xx or no answer: the same amount is asked
+ *  again, LEAST_READ_TRIES tries of it in all. Any other refusal names no least and is never asked again. With no least
+ *  the read throws naming why, so no move is planned without it (cashMover: down). `sleep` and `signal` are the injected
+ *  clock's wait and the read's budget (default: setTimeout, and LEAST_READ_BUDGET_MS from now). */
+export async function readOneClickLeast(chain: PoolChain, fetchFn: typeof fetch, now: number, o: { sleep?: (ms: number) => Promise<void>; signal?: AbortSignal } = {}): Promise<bigint> {
+  const signal = o.signal ?? AbortSignal.timeout(LEAST_READ_BUDGET_MS);
+  const sleep =
+    o.sleep ??
+    ((ms: number) =>
+      new Promise<void>((ok) => {
+        const t = setTimeout(ok, ms);
+        signal.addEventListener("abort", () => (clearTimeout(t), ok()), { once: true });
+      }));
+  const late = () => new Error(`1Click gave no least within ${LEAST_READ_BUDGET_MS} ms`);
+  const top = 10n ** BigInt(USDC_DECIMALS);
+  let amount = 1n;
+  let tries = 0;
+  for (;;) {
+    if (signal.aborted) throw late();
     const body = {
       dry: true, swapType: "EXACT_INPUT", slippageTolerance: 100, originAsset: `nep141:${NEAR_NETWORKS.mainnet.usdc}`, depositType: "INTENTS", destinationAsset: POOL_COIN_ONECLICK[chain],
       amount: amount.toString(), refundTo: DEPOSIT_DRY_PLACEHOLDER, refundType: "INTENTS", recipient: LEAST_RECIPIENT[chain], recipientType: "DESTINATION_CHAIN", deadline: new Date(now + 600_000).toISOString(),
     };
+    let blip: string;
     try {
-      const r = await fetchFn(DEPOSIT_QUOTE_URL, { ...HELPER_FETCH_INIT, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
+      const r = await fetchFn(DEPOSIT_QUOTE_URL, { ...HELPER_FETCH_INIT, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
       const text = (await r.text()).slice(0, 4096);
       const m = /"message"\s*:\s*"Amount is too low for bridge, try at least (\d{1,30})"/.exec(text);
-      if (m !== null) return BigInt(m[1]!);
-      if (r.status === 200 || r.status === 201) return amount;
-      if (!/"message"\s*:\s*"Failed to get quote"/.test(text)) return null;
-    } catch {
-      return null;
+      if (m !== null && BigInt(m[1]!) > 0n) return BigInt(m[1]!);
+      if (m === null && (r.status === 200 || r.status === 201)) return amount;
+      const failed = /"message"\s*:\s*"Failed to get quote"/.test(text);
+      // where 1Click cannot price so little: ten times as much, up to one USDC
+      if (failed && amount < top) {
+        amount *= 10n;
+        continue;
+      }
+      const said = `HTTP ${r.status} ${/"message"\s*:\s*"([^"]{0,120})"/.exec(text)?.[1] ?? text.slice(0, 120).replace(/\s+/g, " ")}`;
+      const again = failed || /"message"\s*:\s*"No liquidity available"/.test(text) || r.status === 429 || r.status >= 500;
+      if (m !== null || !again) throw new LeastRefused(`1Click names no least: ${said}`);
+      blip = said;
+    } catch (e) {
+      if (e instanceof LeastRefused) throw e;
+      if (signal.aborted) throw late();
+      blip = `no answer (${e instanceof Error ? e.name : "failed"})`;
     }
+    if (++tries >= LEAST_READ_TRIES) throw new Error(`1Click gave no least in ${LEAST_READ_TRIES} tries: ${blip}`);
+    await sleep(LEAST_READ_BACKOFF_MS[tries - 1]!);
   }
-  return null;
 }
+/** The least read's bound (card cash-least-read-again): the industry's standard retry (the AWS SDKs' "standard" mode:
+ *  three attempts in all, exponential backoff), its waits short enough that the whole read, every request and wait, ends
+ *  within LEAST_READ_BUDGET_MS: the 10 s the kit gives pool.buy.dry and pool.move.dry an answer (SIGNPAGE_TIMEOUT_MS),
+ *  the reads this one runs beside, so it adds no wait the user sees past theirs. A blip longer than that leaves the move
+ *  down for now, and the next dry or tap reads again (main.ts keeps no failed read). */
+export const LEAST_READ_TRIES = 3;
+export const LEAST_READ_BACKOFF_MS: readonly number[] = Object.freeze([500, 1_500]);
+export const LEAST_READ_BUDGET_MS = 10_000;
+/** 1Click's answer that names no least and is no blip: never asked again. */
+class LeastRefused extends Error {}
 /** Each pool's coin, 1Click's id (as src/pool-to-cash.ts POOL_COIN_ASSET, which imports this module). */
 const POOL_COIN_ONECLICK: Readonly<Record<PoolChain, string>> = { solana: "nep141:sol.omft.near", base: "nep141:base.omft.near", robinhood: "nep141:hood.omft.near" };
 /** A dry read's recipient, an address of no one's: the wrapped-SOL mint (1Click refuses the system program as one: "recipient is not valid", 15 Nov 12:49Z), an EVM address of ones. */
@@ -539,7 +580,7 @@ export type CashMoverDeps = {
    *  none: the one note `cash` names. */
   notes?(): Promise<readonly CashNote[]>;
   /** 1Click's least amount in for a move into `chain`'s pool, read live (readOneClickLeast); none or null: no bound but
-   *  each part's own quote. */
+   *  each part's own quote. A read that throws (no least, card cash-least-read-again): no move is planned, down. */
   least?(chain: PoolChain): Promise<bigint | null>;
   /** The vault's hand-off (withdrawHandoff); null where the network names no vault or relayer. `note`, when given, is the
    *  note the withdrawal spends (a part's, planCashMove); none: the request's own pick. `claim`, when given, is awaited
@@ -823,6 +864,9 @@ export function cashMover(d: CashMoverDeps): CashMover {
     for (const w of ways) if (w.reached === null && !(await d.landed(w.id).catch(() => false))) kept.push(w);
     ways = kept;
   };
+  // 1Click's least read now: null with none given (no bound but each part's own quote), undefined when the read gave
+  // none (readOneClickLeast threw): no plan
+  const leastNow = (chain: PoolChain): Promise<bigint | null | undefined> => (d.least ? d.least(chain).catch(() => undefined) : Promise.resolve(null));
   const start = async (chain: PoolChain, short: bigint): Promise<string | null> => {
     await prune();
     const mine = ways.filter((w) => w.chain === chain);
@@ -833,12 +877,14 @@ export function cashMover(d: CashMoverDeps): CashMover {
     if (p === null || d.handoff === null || d.rails.length === 0) return joined;
     const fee = await d.fee();
     // the shortfall planned over every Cash note (cards cash-buys-spend-every-note, cash-buys-spend-every-note-evm), one
-    // withdrawal a note, each part its own quote held to the pool's quote floor and 1Click's least, read now
+    // withdrawal a note, each part its own quote held to the pool's quote floor and 1Click's least, read now; with no
+    // least read (card cash-least-read-again), no move
     const [notes, floor, leastIn] = await Promise.all([
       d.notes ? d.notes() : d.cash().then((value): CashNote[] => [{ id: "", value }]),
       d.floor ? d.floor(chain).catch(() => null) : Promise.resolve(null),
-      d.least ? d.least(chain).catch(() => null) : Promise.resolve(null),
+      leastNow(chain),
     ]);
+    if (leastIn === undefined) return joined;
     // Solana: what one tap still lacks, the ladder's least rung over each part; Base and Robinhood (card
     // evm-cash-move-brings-its-fee): `short`'s rungs as the tap's own plan sized them on the rungs these parts land
     // (pool-buy-evm.ts evmMoveShort over evmCashPlan's rungs), each note with one deposit's gas (evmMoveOf), so the
@@ -850,7 +896,8 @@ export function cashMover(d: CashMoverDeps): CashMover {
   };
   // the one plan every exact move and its dry share (card move-from-cash-spends-every-note): a price, a hand-off, a
   // rail, then `usdc` over every Cash note at the fee, the pool's floor and 1Click's least, all read now; a floor
-  // given but not read now is down (none given: no floor but each part's own quote)
+  // given but not read now is down (none given: no floor but each part's own quote), and so is a least given but not
+  // read now (card cash-least-read-again)
   const planned = async (chain: PoolChain, usdc: bigint): Promise<Refusal | CashExact> => {
     const p = d.price(chain);
     if (p === null || usdc <= 0n || d.handoff === null || d.rails.length === 0) return { error: "not_allowed" };
@@ -858,9 +905,9 @@ export function cashMover(d: CashMoverDeps): CashMover {
       d.fee(),
       d.notes ? d.notes() : d.cash().then((value): CashNote[] => [{ id: "", value }]),
       d.floor ? d.floor(chain).catch(() => null) : Promise.resolve(0n),
-      d.least ? d.least(chain).catch(() => null) : Promise.resolve(null),
+      leastNow(chain),
     ]);
-    if (typeof floor !== "bigint") return { error: "down" };
+    if (typeof floor !== "bigint" || leastIn === undefined) return { error: "down" };
     return planCashExact(notes, fee, usdc, (u) => cashLamportsFor(u, p, chain), floor, leastIn) ?? { error: "not_allowed" };
   };
   // one at a time: a second need (the tap after the typing), or a move, reads the first's move as on its way
