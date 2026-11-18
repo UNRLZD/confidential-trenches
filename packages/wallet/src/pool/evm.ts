@@ -736,7 +736,8 @@ async function agreedSpan<T>(rpcs: Rpcs, f: () => Promise<T>): Promise<T> {
 async function bothIn<T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> {
   const ac = new AbortController();
   const stop = () => ac.abort(signal!.reason);
-  signal?.addEventListener("abort", stop, { once: true });
+  if (signal?.aborted) stop();
+  else signal?.addEventListener("abort", stop, { once: true });
   let first: { e: unknown } | null = null;
   const side = (k: number) => f(rpcs[k]!, k, ac.signal).catch((e: unknown) => {
     first ??= { e };
@@ -2167,7 +2168,9 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       const confirm = async (f: bigint, t: bigint, mine: Ev[]): Promise<boolean> => {
         const ac = new AbortController();
         const stop = () => ac.abort(signal!.reason);
-        signal?.addEventListener("abort", stop, { once: true });
+        // a run confirmed after the reader's last await: a stop before it never fires again
+        if (signal?.aborted) stop();
+        else signal?.addEventListener("abort", stop, { once: true });
         // each provider's calls of the run one after another, none asked once the run stands: a paced provider's queue
         // (a one-event-a-call read's three calls) never holds the walk's next read behind calls no one waits for
         const gated = (r: EvmRpc): EvmRpc => {
@@ -2236,7 +2239,9 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       const liveAt = new Map<string, bigint>();
       const stop = new AbortController();
       const outer = () => stop.abort(signal!.reason);
-      signal?.addEventListener("abort", outer, { once: true });
+      // the sources are asked after the seats' awaits: a stop before them never fires again
+      if (signal?.aborted) outer();
+      else signal?.addEventListener("abort", outer, { once: true });
       const one = async ({ rpc: src, op }: { rpc: EvmRpc; op: string }, i: number): Promise<void> => {
         const url = (src as { url?: unknown }).url;
         const name = `source ${i} (${op}${typeof url === "string" ? ` ${url}` : ""})`;
@@ -2245,7 +2250,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const start = prior === null ? from : prior.to + 1n;
         const own = new AbortController();
         const end = () => own.abort(stop.signal.reason);
-        stop.signal.addEventListener("abort", end, { once: true });
+        if (stop.signal.aborted) end();
+        else stop.signal.addEventListener("abort", end, { once: true });
         let calls = 0;
         const capped = Object.assign(
           async (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
