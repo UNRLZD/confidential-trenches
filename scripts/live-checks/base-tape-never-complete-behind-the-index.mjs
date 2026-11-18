@@ -18,6 +18,7 @@
 // at FILLED_MS on every coin read: INCONCLUSIVE (it claimed no complete list).
 // Its recorded runs are base-tape-never-complete-behind-the-index.answers.json, replayed by its .test.mjs.
 // After: helper
+// Serial: evm-keyed 220 (its Base and Robinhood tape reads draw the keyed providers)
 //   node scripts/live-checks/base-tape-never-complete-behind-the-index.mjs [--base <url>] [--token <chain>:<0x..>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3.
 import "../net-window.mjs";
