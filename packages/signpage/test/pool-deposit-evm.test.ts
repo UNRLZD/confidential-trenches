@@ -1593,6 +1593,26 @@ test("evm-deposit-route-mainnet: a fixed U_X of another scope, an address that i
   assert.equal(ch.c.sent.length, sent, "nothing sent");
 });
 
+test("notes-plan-at-restored-index: a fixed U^evm_{s,i} whose deposit note a restore wrote (planFound, money both providers read alike) pays the ask from U_X alone; before it is written it signs nothing", async () => {
+  const { ch, ns, next, i1 } = await twoUs();
+  // a lost store's quote in another lane than this store's, far past its counter
+  const i = (((i1 % 8) + 3) % 8) + 8 * 30;
+  const ux = depositIdEvm(SEED, SCOPE, i).address;
+  ch.c.at.set(ux.toLowerCase(), [RUNG + FEE, RUNG + FEE]);
+  const sent = ch.c.sent.length;
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns), ASK, undefined, { s: SCOPE, i, u: ux }), { error: "not_allowed" }, "no note at i yet");
+  assert.equal(ch.c.sent.length, sent, "nothing sent");
+  const found = await ns.planFound(SCOPE, i, (ref) => noteSecrets(SEED, ref).precommitment, { s: SCOPE, i, amounts: [RUNG + FEE, RUNG + FEE] });
+  const f = fromsOf(ch);
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs: f.rpcs }), ASK, undefined, { s: SCOPE, i, u: ux });
+  assert.ok("stage" in a && a.stage === "filled", JSON.stringify(a));
+  assert.deepEqual([...new Set(f.froms)], [ux], "the fixed U_X alone");
+  assert.equal(sentOf(ch.c.sent.at(-1)!).pre, found.precommitment, "its found deposit note");
+  assert.equal((await ns.get(found.id))!.state, "UNSPENT");
+  // the scope's unfunded index is still the one this store planned
+  assert.equal((await ns.planDeposit(SCOPE, (ref) => noteSecrets(SEED, ref).precommitment)).id, next.id);
+});
+
 test("evm-deposit-route-mainnet: a fixed U_X that cannot pay the rung and its fee is not_funded with its own top-up named, never paid from the newest landed U", async () => {
   const { ch, ns, i1, u0, u1 } = await twoUs();
   ch.c.at.set(u1.toLowerCase(), [RUNG / 2n, RUNG / 2n]);

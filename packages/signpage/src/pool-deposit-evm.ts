@@ -707,7 +707,8 @@ async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { f
     if (ladderSplit(EVM_LADDER, ask.amount).notes.length === 0) return { error: "not_allowed" };
     // the fixed source (card evm-deposit-route-mainnet; the Solana runner's rule, review H1): U^evm_{s,i} of the pool's
     // scope whose address is the op's U_X, from its deposit note the store planned (else its next second arrival, as
-    // tryNote picks on U's chain); a U with a note still landing is read again next time; any other U is refused
+    // tryNote picks on U's chain); a U with a note still landing is read again next time; any other U (one the store neither
+    // planned nor wrote for money a restore found there, planFound: card notes-plan-at-restored-index) is refused
     if (fixed !== undefined) {
       if (fixed.s !== scope) return { error: "not_allowed" };
       const id = depositIdEvm(seed, fixed.s, fixed.i);
