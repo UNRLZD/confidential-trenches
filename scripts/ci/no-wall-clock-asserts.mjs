@@ -23,6 +23,15 @@
 // KB4 (a quote over 65,000 made-up pools) refused stale_quote at 37 to 47 s when the packages' tests ran side by side, and
 // the rule above could not see it: the clock is read inside the code under test. A call passes `mono` (a fixed clock when
 // the test is pure work: quoteOnStill) or runs on the test clock; QUOTE_LISTED counts the calls still to convert, never a place for a new one.
+//
+// And a third (card helper-share-tests-on-a-still-clock): a helper unit test that builds a caller's share or a provider's
+// budget on its default clock (apps/helper/src/limits/limits.ts clientWindow and upstreamBudget default to Date.now,
+// providerHolds and rpc.ts createRpc to the performance clock) hands its counts, 429s and holds to the machine's speed: a
+// window that turns inside the test's loop clears the share its 429s assert (PR 979's merge queue run 44243609488,
+// logs-cache.test.ts: 32 answers of 200 where the last two were 429). A call passes a clock: createRpc's deps name `now`
+// (or spread a test's `...testClock()`, its now, pacer and sleep on one clock),
+// clientWindow and upstreamBudget take it second, providerHolds first; or it runs inside onVirtualTime(...) or
+// onTestClock(...), where the clock is the test's. SHARE_LISTED counts the calls still to convert, each with its reason.
 //   node scripts/ci/no-wall-clock-asserts.mjs    lists what it refuses in the tracked unit tests, exit 1 on any
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -109,6 +118,39 @@ export function quoteFindings(text) {
   for (const m of src.matchAll(QUOTE_CALL)) {
     if (m[1] === "evmPoolBuyQuoteWith" && closeOf(src, m.index + m[0].length - 1).commas + 1 >= 6) continue; // `mono` passed
     if (clocks.some(([a, b]) => m.index > a && m.index < b)) continue;
+    const line = src.slice(0, m.index).split("\n").length;
+    out.push({ line, text: text.split("\n")[line - 1].trim().slice(0, 160) });
+  }
+  return out;
+}
+
+// Calls that build a share, a budget or the holds on the helper's default clock, per file (the count still to convert, and
+// why). A file may make no more than its count; a new call passes a clock.
+export const SHARE_LISTED = {};
+const SHARE_CALL = /(?<![\w$.])(createRpc|clientWindow|upstreamBudget|providerHolds)\(/g;
+
+/** True when createRpc's deps are a name (`deps`, `w.deps`) and the file's one object assigned to `deps` names `now`. */
+function depsClocked(src, args) {
+  if (!/,\s*(?:[A-Za-z_$][\w$]*\.)?deps\s*$/.test(args)) return false;
+  const objs = [...src.matchAll(/\bdeps\s*=\s*\{/g)].map((d) => src.slice(d.index, closeOf(src, d.index + d[0].length - 1).end));
+  return objs.length > 0 && objs.every((o) => /(?<![\w$.])now\s*[:(,]/.test(o));
+}
+
+/** Every helper share, budget or holds built on its default clock outside onVirtualTime(...) or onTestClock(...): a
+ *  createRpc whose deps name no `now`, a clientWindow or upstreamBudget with no second argument, a providerHolds with
+ *  none: [{ line, text }]. */
+export function shareFindings(text) {
+  const src = code(text);
+  const clocks = [...src.matchAll(/\b(?:onVirtualTime|onTestClock)\(/g)].map((m) => [m.index, closeOf(src, m.index + m[0].length - 1).end]);
+  const out = [];
+  for (const m of src.matchAll(SHARE_CALL)) {
+    if (/\bfunction\s*$/.test(src.slice(Math.max(0, m.index - 12), m.index))) continue; // a declaration
+    const open = m.index + m[0].length - 1;
+    const { end, commas } = closeOf(src, open);
+    const args = src.slice(open + 1, end - 1);
+    const n = args.trim() === "" ? 0 : commas + 1;
+    const clocked = m[1] === "createRpc" ? n >= 2 && (/(?<![\w$.])now(?![\w$])/.test(args) || /\.\.\.\s*testClock\(\)/.test(args) || depsClocked(src, args)) : m[1] === "providerHolds" ? n >= 1 : n >= 2;
+    if (clocked || clocks.some(([a, b]) => m.index > a && m.index < b)) continue;
     const line = src.slice(0, m.index).split("\n").length;
     out.push({ line, text: text.split("\n")[line - 1].trim().slice(0, 160) });
   }
@@ -210,9 +252,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   for (const x of stale(found)) console.log(`LISTED can be lowered: ${x}`);
   const quote = scan(ROOT, quoteFindings);
   for (const [f, list] of Object.entries(quote)) for (const x of list) console.log(`${f}:${x.line}  (quote on the real clock) ${x.text}`);
-  const bad = [...refusals(found), ...refusals(quote, QUOTE_LISTED, "quote on the real monotonic clock")];
+  const share = scan(ROOT, shareFindings);
+  for (const [f, list] of Object.entries(share)) for (const x of list) console.log(`${f}:${x.line}  (a share on the default clock) ${x.text}`);
+  const bad = [...refusals(found), ...refusals(quote, QUOTE_LISTED, "quote on the real monotonic clock"), ...refusals(share, SHARE_LISTED, "share on the default clock")];
   if (bad.length > 0) {
-    console.error(`\n${bad.join("\n")}\n\nAssert what the time stood for: work counted, waits asked of an injected sleep, an injected clock, t.mock.timers, or the test's own { timeout }.`);
+    console.error(`\n${bad.join("\n")}\n\nAssert what the time stood for: work counted, waits asked of an injected sleep, an injected clock, t.mock.timers, or the test's own { timeout }; build a helper share or budget on a still or test clock.`);
     process.exit(1);
   }
 }

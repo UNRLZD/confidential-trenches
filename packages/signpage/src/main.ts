@@ -425,6 +425,18 @@ else {
     cashMoverOf = { signal, m };
     return m;
   };
+  // every host that shows a deposit address or sends a quote naming one marks its index quoted first (card
+  // restore-shows-a-note-on-a-planned-index; the wallet's markQuoted), under the seed lock shared as a seed write: a
+  // restore then never marks dead an address the user was shown, and a sign out never runs inside the mark
+  const quotedIndex = (scope: bigint, index: number): Promise<void> =>
+    navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+      const notes = await openNoteStore(await open());
+      try {
+        await notes.markQuoted(scope, index);
+      } finally {
+        notes.close();
+      }
+    }) as Promise<void>;
   // a pool's money back to Cash (src/pool-to-cash.ts, card one-balance-buys-on-every-chain): Cash's own deposit quote of
   // the pool's coin to U (a host of its own that prices the pool coins at the device's price: the app's deposit.quote
   // stays as it is), its follow op written before the address is used; then the pool withdraw run pays that address
@@ -432,6 +444,7 @@ else {
     scope: pageScope,
     read: fs.depositRead,
     named: () => namer.named(),
+    quoted: quotedIndex,
     priced: (origin) => pricedPoolCoin(origin, (c) => prices.get(c)),
     checked: async (id, r, u) => {
       // its refund address recorded first, so a refund there is carried (card refunds-land-on-the-devices-own-wallet)
@@ -621,7 +634,8 @@ else {
         const e = testnet?.evmPoolOf(chain) ?? null;
         // the chain's pool index, started by this first coin quote where none runs or is served (card
         // robinhood-quote-answers-cold: from the release's snapshot), its sync waited for at most EVM_DRY_INDEX_WAIT_MS
-        return e === null ? null : evmDryQuote(chain, e.pin, e.rpcs, undefined, () => testnet!.evmIndexReady(chain));
+        // and, on a device that holds nothing, a quote that reads no log (card evm-tree-reads-only-when-needed)
+        return e === null ? null : evmDryQuote(chain, e.pin, e.rpcs, undefined, () => testnet!.evmIndexReady(chain), () => !testnet!.evmMoney());
       },
       // above tap_max (card evm-cash-move-brings-its-fee): the move cashFirst starts, sized at the epoch's relay fee
       // (src/pool-buy-evm.ts evmMoveShort over the rungs its parts land, `rungs`) and priced on the device (card
@@ -826,7 +840,7 @@ else {
   // pool's coin priced at the device's own price of each
   // another pool's coin, which that pool's run pays, refunds back on its own chain at U_{s,i}'s own address there (card
   // refunds-land-on-the-devices-own-wallet), recorded before the address goes out; Cash's NEAR USDC keeps INTENTS
-  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor,
+  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), quoted: quotedIndex, priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor,
     checked: async (id, chain, quote, u) => {
       if (u.refund_to !== undefined) await keepRefund(await open(), { chain: poolCoinChain(quote.origin_asset)!, address: u.refund_to, s: u.scope.toString(), i: u.index, deadline_ms: Date.parse(quote.deadline) });
       await poolFollow!.quoted(id, chain, quote, u);
@@ -936,7 +950,7 @@ else {
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       // money in from an outside wallet (card move-one-confidential-swap, 14 Nov): one confidential swap as a Move, held to
       // 1Click's keyless tell, so the paying wallet is not tied to U on chain
-      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), quoted: quotedIndex, checked: (id, r, u) => follows!.quoted(id, r, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
       ...depositReadHosts({ stop: quotesStopped, poolFloor: pagePoolFloor }),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
@@ -945,7 +959,7 @@ else {
       // move-one-confidential-swap, 14 Nov): every 1Click quote is one confidential swap, held to 1Click's keyless tell
       // on the page's stop, so the paying wallet is not tied to U_X on chain; a plain send of the pool's own coin asks 1Click
       // nothing
-      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
+      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), quoted: quotedIndex, priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with

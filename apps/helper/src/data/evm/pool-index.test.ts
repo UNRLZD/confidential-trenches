@@ -7,6 +7,10 @@ import { join } from "node:path";
 import { BACKFILL_DAY_SHARE, createPoolIndex, INITIALIZE, poolIdOf, POOL_INDEX_SPAN_LOGS, type PoolKey, type PoolIndexConfig } from "./pool-index.ts";
 import { CALLER_ROOM, providerHolds, type Pace } from "../../limits/limits.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 const PM = "0x8366a39cc670b4001a1121b8f6a443a643e40951";
 const URL_A = "https://a.example";
 const URL_B = "https://b.example";
@@ -234,7 +238,7 @@ test("GET /v1/market/pools: one chain the helper indexes and one token address, 
   const asked: string[] = [];
   const answer = (t: string) => ({ chainId: 4663, poolManager: PM, complete: false, through: 99, pools: [{ id: "0x" + "ab".repeat(32), key: keyOf(tok(0), t) }] });
   const ix = { pools: (t: string) => (asked.push(t), answer(t)) };
-  const h = createServer(handler("0123456789abcdef0123456789abcdef01234567", createProxy({}, { fetch: stub }), createRpc({}, { fetch: stub }), undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { robinhood: ix }));
+  const h = createServer(handler("0123456789abcdef0123456789abcdef01234567", createProxy({}, { fetch: stub }), createRpc({}, { now: STILL, fetch: stub }), undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { robinhood: ix }));
   await new Promise<void>((r) => h.listen(0, "127.0.0.1", r));
   const port = (h.address() as { port: number }).port;
   const get = (path: string) =>

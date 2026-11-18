@@ -66,9 +66,8 @@ test("held reads take no GeckoTerminal call: after a stranger's held reads on Ba
   assert.equal(gtByHeld, 0, `held reads made ${gtByHeld} GeckoTerminal calls`);
   assert.equal(gecko.calls().length, 2, "the window holds only the lists' calls");
   // the cold reads a token page and a chart make, as the live suite makes them in the same minute
-  const sleep = async (ms: number) => void (t += ms);
-  const base = createEvmToken("base", { lists: listsOf("base", [LISTED.base]), gecko, fetch, now: clock, sleep });
-  const robinhood = createEvmToken("robinhood", { lists: listsOf("robinhood", [LISTED.robinhood]), gecko, fetch, now: clock, sleep });
+  const base = createEvmToken("base", { lists: listsOf("base", [LISTED.base]), now: clock });
+  const robinhood = createEvmToken("robinhood", { lists: listsOf("robinhood", [LISTED.robinhood]), now: clock });
   assert.equal((await base.holders(LISTED.base)).status, 200, "base holders");
   assert.equal((await robinhood.holders(LISTED.robinhood)).status, 200, "robinhood holders");
   assert.ok(gecko.take("pages"), "a Solana chart's first bars find a call");

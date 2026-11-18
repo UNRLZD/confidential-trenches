@@ -70,6 +70,8 @@ const READ_FN = (w) =>
 const HOST_SRC = (h) =>
   `function ${esc(h)}\\(${N}\\)\\{return\\(${N},(${N})\\)=>\\{let (${N})=\\{error:${Q}(\\w+)${Q}\\}(?:,${N}=${N}\\.stop\\?\\.\\(\\),${N}=\\(\\)=>${N}\\?\\.aborted===!0)?;return\\{after:\\(async\\(\\)=>\\{let (${N})=${N}\\.chain,(${N})=${N}\\.pools\\(\\)\\.find\\(${N}=>${N}\\.chain===\\4\\);if\\(\\5===void 0\\)return;` +
   `let ${N}=${N}\\[\\4\\],(${N})=${N}\\.origin_asset!==void 0\\|\\|${N}\\.amount!==void 0;(?:if\\(await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${N}\\(\\)\\)return void\\(\\2=\\{error:${Q}not_allowed${Q}\\}\\)|await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\));let (${N})=(${N})\\(await ${N}\\.read\\(\\5\\.scope\\),\\4,\\5\\.scope\\);(?:if\\(${N}\\(\\)\\)return void\\(\\2=\\{error:${Q}not_allowed${Q}\\}\\);)?if\\(!\\7\\)return;` +
+  // card restore-shows-a-note-on-a-planned-index: U_X's index marked quoted before anything of it leaves
+  `(?:if\\(await ${N}\\.quoted\\(\\5\\.scope,\\7\\.record\\.index\\),${N}\\(\\)\\)return void\\(\\2=\\{error:${Q}not_allowed${Q}\\}\\);)?` +
   `if\\(!\\6\\)return void\\(\\2=\\{result:\\{chain:\\4,address:\\7\\.wallet,asset:${N}\\}\\}\\);`;
 const HOST = (h) => new RegExp(HOST_SRC(h));
 // ...and then, with no follow (`checked`), no floor read passed or off mainnet, it returns before any quote is asked, a
@@ -88,7 +90,7 @@ function plainGated(js, h) {
 }
 // (card move-one-confidential-swap: the confidential pair, between the follow's quoted and the stop, is required)
 const PAIR = `confidential:!0,hidden:\\((${N}),(${N})\\)=>${N}\\(\\5,fetch,\\6\\),`;
-const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:${N},checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\),${PAIR}stop:${N}\\}\\)`);
+const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),(?:quoted:${N},)?priced:${N},floor:${N},checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\),${PAIR}stop:${N}\\}\\)`);
 // card move-one-confidential-swap: inside the host, after the quote's check, the tell on the stop, the stop checked after
 // it, an address only on "hidden"
 const TELL = (out, stop, deps, stopped) =>

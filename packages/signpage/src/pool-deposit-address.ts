@@ -5,6 +5,9 @@
 //   base58 of the id's 32 bytes (the same ed25519 key); on an EVM chain it is the record's address. A chain the page's
 //   network does not pin, a record of another scope, or an EVM record with no address: not_allowed, nothing sent.
 // - Signed out, or a no-PRF seed whose backup is not saved (backupFirst, OD:20): not_allowed, nothing sent.
+// - Before U_X, a plain send's quote or a 1Click request naming it leaves the device, its index is marked quoted in the
+//   note store (`quoted`, the wallet's markQuoted, card restore-shows-a-note-on-a-planned-index), so a restore that
+//   reads its id as used never marks it dead; a mark refused or failed answers down, nothing sent.
 // - With `origin_asset` and `amount`: a 1Click quote to U_X (../../wallet/src/deposit/quote.ts poolDepositQuoteRequest:
 //   X's coin to U_X on X, the refund under U_{s,i}'s id inside intents.near, the key the refund move signs with), sent
 //   through the helper's proxy and checked by ./pool-deposit-quote.ts before its address goes out, at the device's own
@@ -154,6 +157,9 @@ export interface PoolAddressDeps {
   read(scope: bigint): Promise<DepositPublic | null>;
   /** Settles once the top-level page's naming in flight is done (src/deposit-name.ts named). */
   named?(): Promise<unknown>;
+  /** Marks deposit index `index` of `scope` quoted in the note store, under the seed lock (the wallet's markQuoted),
+   *  before U_X or a quote naming it leaves the device; a throw answers down, nothing sent. */
+  quoted(scope: bigint, index: number): Promise<void>;
   /** The device's own two price reads of `originAsset` and of X's coin; null when it has none. */
   priced?(chain: PoolChain, originAsset: string): PoolQuotePricing | null;
   /** The follow that takes a checked quote under request `id` on into X's pool; none, and no quote is answered. */
@@ -288,6 +294,11 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       const before = usable(await deps.read(pool.scope), chain, pool.scope);
       if (stopped()) return void (out = { error: "not_allowed" });
       if (!before) return;
+      // U_X's index marked quoted before U_X, or a quote naming it, leaves the device (card
+      // restore-shows-a-note-on-a-planned-index): a restore then never marks that index dead. A mark refused (the index
+      // TAKEN) or failed answers down, nothing sent
+      await deps.quoted(pool.scope, before.record.index);
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (!quoted) return void (out = { result: { chain, address: before.wallet, asset } });
 
       // a quote: only under a request id, with a follow to carry the money on, and the device's own price reads
