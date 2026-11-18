@@ -51,6 +51,8 @@
 //                           params, and a method off the list in any request of a batch.
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+  evmBatchFit,
+  evmBatchSizeRefusal,
   evmPoolVenues,
   HELPER_SOLANA_BLOCK_HEADER,
   POOL_USD_FEEDS,
@@ -650,6 +652,12 @@ type Deps = { seatClients?: number; fetch?: Fetch; now?: () => number; sleep?: (
  *  provider's pace) and the send, and a keyed Solana provider's time before the read fell back to the public endpoint.
  *  Every answer handle() gives has them (card solana-quote-under-1s: POST /v1/rpc sends them, 200, 429 and 503 alike). */
 type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string; timing?: string[] };
+/** One upstream's answer to one read as fitPost reads it: its status and headers, and its body (undefined: past
+ *  RPC_ANSWER_MAX). */
+type Sent = { status: number; headers: Headers; text: string | undefined };
+/** The most of an answer read for a batch-size refusal's words: a refusal of RPC_BATCH_MAX calls is under 2 KB (dRPC's,
+ *  one error a call); a larger body is an answer, never a refusal's words. [design: 64 KiB.] */
+const SIZE_WORDS_MAX = 64 * 1024;
 /** One read's waits and sends, as handle() names them in `timing` (card solana-quote-under-1s): `waitMs`, every hold's
  *  and pace's wait before a send (rpc-wait); `keyedMs`, a keyed Solana provider's time before the read fell back
  *  (rpc-keyed); `last`, the last send, the one that answered when the read did: its time and its provider's environment
@@ -1385,6 +1393,75 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     return Buffer.concat(chunks).toString("utf8");
   }
 
+  /** Each upstream URL's most calls a batch, set once it refused one for its size and kept for the process's life
+   *  (card helper-rpc-batch-learns-reader-size); Infinity until then. */
+  const batchMost = new Map<string, number>();
+  const mostOf = (url: string): number => batchMost.get(url) ?? Infinity;
+  /** A caller's read of `n` calls taken from `url`'s pace (limits.ts take) as the posts fitPost sends it in: 0 when every
+   *  part has room, else the first wait (a part drawn before it stays drawn: the pace is spent early, never past). A
+   *  post refused for its size and sent again as parts draws nothing more: once per URL and size, for the process's life. */
+  const takeParts = (url: string, n: number, page: boolean): number => {
+    const most = mostOf(url);
+    for (let i = 0; i < n; i += most) {
+      const w = holdsAll.take(url, Math.min(most, n - i), false, false, false, page);
+      if (w > 0) return w;
+    }
+    return 0;
+  };
+  /**
+   * One read sent to one upstream, fitted to its batch size (card helper-rpc-batch-learns-reader-size), its body read
+   * (readAnswer: undefined past RPC_ANSWER_MAX). A batch past the most the upstream takes (mostOf) leaves as its parts, all
+   * at once, and their answers are joined as one batch in the parts' order, each part's calls as the upstream answered
+   * them. A batch it refuses for its size, by the kit's rule (evmBatchSizeRefusal: an HTTP 413 whatever its body; a 4xx,
+   * a 429 or a 200 whose error names a batch maximum, never a rate limit's words), sets its most (evmBatchFit: half, or
+   * the maximum named where smaller) and is sent again as parts. A post of one call is never a size refusal. Any other
+   * answer of a part (a throttle's 429, a 5xx, a body that is no batch) is this upstream's answer to the read, as one
+   * post's would be. Mainnet's refusals, read 2026-11-18 20:41Z: Pocket's 413 past 5, daybreak's 413 "max 20 calls",
+   * robinhood.drpc.org's 400 code 31 past 3, Sentio's 429 code 8 past 5 (batch-fit.test.ts).
+   */
+  async function fitPost(c: RpcChain, url: string, forward: string, n: number, by: number): Promise<Sent> {
+    const most = mostOf(url);
+    if (n > most) {
+      const reqs = JSON.parse(forward) as unknown[];
+      const parts: unknown[][] = [];
+      for (let i = 0; i < reqs.length; i += most) parts.push(reqs.slice(i, i + most));
+      return joinParts(await Promise.all(parts.map((p) => fitPost(c, url, JSON.stringify(p), p.length, by))), parts);
+    }
+    const r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(sendMs(by - now())) });
+    const text = await readAnswer(r);
+    if (n > 1 && ((r.status >= 400 && r.status < 500) || (r.status === 200 && text !== undefined && text.length <= SIZE_WORDS_MAX && /batch/i.test(text)))) {
+      const said = text === undefined || text.length > SIZE_WORDS_MAX ? undefined : evmBatchSizeRefusal(text);
+      if (r.status === 413 || said !== undefined) {
+        const fit = Math.min(most, evmBatchFit(n, said ?? null));
+        batchMost.set(url, fit);
+        log(`rpc batch ${c} ${companyOf(new URL(url).host)} most ${fit}${shapeTail()}`);
+        return fitPost(c, url, forward, n, by);
+      }
+    }
+    return { status: r.status, headers: r.headers, text };
+  }
+  /** The parts' answers as one batch (fitPost): every part a 200 JSON batch (a part of one call may answer that call
+   *  alone, Pocket's way), joined in the parts' order; else the first part that is not, as the read's answer. */
+  function joinParts(sent: Sent[], parts: unknown[][]): Sent {
+    const inner: string[] = [];
+    for (let i = 0; i < sent.length; i++) {
+      const s = sent[i]!;
+      if (s.status !== 200 || s.text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(s.headers.get("content-type") ?? "")) return s;
+      let a: unknown;
+      try {
+        a = JSON.parse(s.text);
+      } catch {
+        return s;
+      }
+      if (Array.isArray(a)) {
+        if (a.length > 0) inner.push(s.text.trim().slice(1, -1));
+      } else if (parts[i]!.length === 1 && isPlain(a)) inner.push(s.text.trim());
+      else return s;
+    }
+    const text = `[${inner.join(",")}]`;
+    return { status: 200, headers: sent[0]!.headers, text: Buffer.byteLength(text) > RPC_ANSWER_MAX ? undefined : text };
+  }
+
   /**
    * One call: `chain` as the caller wrote it, `contentType` its Content-Type header, `body` the request body, `client`
    * the caller's address (../limits/limits.ts clientOf). The helper's own cached reads (Discover's lists, the token
@@ -1827,19 +1904,20 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           soonestMs = Math.min(soonestMs, gate);
           continue;
         }
-        const room = holds.take(url, methods.length, false, false, false, page);
+        // card helper-rpc-batch-learns-reader-size: a batch past the URL's kept size goes as its parts (fitPost), each
+        // part a post of its pace; a part with no room is the read's wait (the parts drawn before it stay drawn)
+        const room = takeParts(url, methods.length, page);
         if (room > 0) {
           soonestMs = Math.min(soonestMs, room);
           continue;
         }
-        let r: Response;
+        let r: Sent;
         let text: string | undefined;
         sent = true;
         const from = now();
         try {
-          r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(sendMs(by - now())) });
+          r = await fitPost(c, url, forward, methods.length, by);
           if (r.status === 429) {
-            await r.body?.cancel();
             sentTo(url, from);
             const s = upstreamRetryAfterS(r.headers, now());
             holds.hold(url, s);
@@ -1847,7 +1925,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
             soonestMs = Math.min(soonestMs, holds.heldMs(url));
             continue;
           }
-          text = await readAnswer(r);
+          text = r.text;
           sentTo(url, from);
         } catch {
           sentTo(url, from);
@@ -1962,7 +2040,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (!(await holdOver(key, deadline, shared, rest))) return throttled(heldAt(), undefined, `${key} held`);
     const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
-    let r!: Response;
+    let r!: Sent;
     let text: string | undefined;
     let sent = now();
     for (let tries = 0; ; tries++) {
@@ -1995,15 +2073,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       if (by - now() < WALK_SEND_MIN_MS) return UPSTREAM();
       sent = now();
       try {
-        r = await doFetch(url, {
-          method: "POST",
-          headers: { accept: "application/json", "content-type": "application/json" },
-          body: forward,
-          redirect: "error",
-          signal: AbortSignal.timeout(sendMs(by - now())),
-        });
+        // card helper-rpc-batch-learns-reader-size: a batch past the provider's kept size goes as its parts (fitPost)
+        r = await fitPost(c, url, forward, methods.length, by);
         if (r.status === 429) {
-          const body = viaSlot ? ((await readAnswer(r).catch(() => undefined)) ?? "") : (await r.body?.cancel(), "");
+          const body = viaSlot ? (r.text ?? "") : "";
           sentTo(url, sent);
           const waitS = upstreamRetryAfterS(r.headers, now());
           if (viaSlot && (CREDITS.test(body) ? (slot.fail("credits"), true) : slot.throttled(waitS))) return fellBack();
@@ -2020,7 +2093,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           }
           return throttled(Math.max(1, heldAt()), undefined, `${key} provider 429`);
         }
-        text = await readAnswer(r);
+        text = r.text;
         sentTo(url, sent);
       } catch {
         sentTo(url, sent);

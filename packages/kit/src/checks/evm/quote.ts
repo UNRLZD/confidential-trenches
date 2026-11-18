@@ -5181,8 +5181,9 @@ class BatchRefused extends Error {
  *    robinhood.rpc.blxrbdn.com, rpc-robinhood.globalstake.io, rpc.mainnet.chain.robinhood.com; base-rpc.publicnode.com,
  *    base.gateway.tenderly.co and mainnet.base.org answered their rate limits (429, -32005, -32007), never a size.
  *  A message names a size refusal where it holds "batch" and words of a size or a limit, and none of a rate limit's
- *  (`limited`) or a revert's: a throttle is never split, it waits. */
-function sizeRefusal(body: unknown): number | null | undefined {
+ *  (`limited`) or a revert's: a throttle is never split, it waits. The helper's /v1/rpc reads its upstreams' refusals
+ *  by this one rule (the kit's entry, evmBatchSizeRefusal; card helper-rpc-batch-learns-reader-size). */
+export function sizeRefusal(body: unknown): number | null | undefined {
   let parsed = body;
   if (typeof body === "string") {
     try {
