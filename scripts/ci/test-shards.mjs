@@ -78,7 +78,6 @@ export const E2E_SECONDS = {
   "apps/terminal: node test/welcome/run.mjs": 11, // B2 10.5
   "apps/terminal: node test/verify/run.mjs": 17, // C3 16.7
   "apps/terminal: node test/verify-mount/run.mjs": 12, // C1 11.6
-  "apps/terminal: node test/no-blank-pages/run.mjs": 123, // B2 122.0
   "apps/terminal: node ../../scripts/live-checks/app-portfolio-mount.mjs --harness": 29, // C3 28.2
   "apps/terminal: node ../../scripts/live-checks/app-deposit-mount.mjs --harness": 47, // C1 46.6
   "apps/terminal: node ../../scripts/live-checks/app-footer-bar.mjs --harness": 10, // B2 9.1
@@ -91,6 +90,26 @@ export const E2E_SECONDS = {
   "apps/terminal: node ../../scripts/live-checks/app-lock-holds-until-the-layer-closes.mjs --harness": 6, // B2 5.8
   "apps/terminal: node ../../scripts/live-checks/signed-out-portfolio-and-account-say-what-appears.mjs --harness": 34, // C3 33.8
   "apps/terminal: node ../../scripts/live-checks/app-pages-open-right.mjs --harness": 30, // A1 29.3
+  // card app-live-checks-run-on-the-build-before-merge: each app check's own --harness, timed on the heavy box
+  // (unrlzd-pc-ct, job app-harness-18, 19 Nov), whole seconds from start to exit, 1 s at the least, until CI times them;
+  // app-no-blank-pages replaces test/no-blank-pages/run.mjs (the same collect and judge on the same route, B2 122.0)
+  "apps/terminal: node ../../scripts/live-checks/app-export-every-wallet.mjs --harness": 14, // box 14
+  "apps/terminal: node ../../scripts/live-checks/app-hop-sync-lock.mjs --harness": 5, // box 5
+  "apps/terminal: node ../../scripts/live-checks/app-list-age.mjs --harness": 6, // box 6
+  "apps/terminal: node ../../scripts/live-checks/app-no-blank-pages.mjs --harness": 123, // box 120, B2 122.0 as the wrapper
+  "apps/terminal: node ../../scripts/live-checks/app-pool-withdraw.mjs --harness": 44, // box 44
+  "apps/terminal: node ../../scripts/live-checks/app-release-sri.mjs --harness": 1, // box 0
+  "apps/terminal: node ../../scripts/live-checks/app-shell-rpc-outage-judge.mjs --harness": 8, // box 8
+  "apps/terminal: node ../../scripts/live-checks/app-verify-mount.mjs --harness": 8, // box 8
+  "apps/terminal: node ../../scripts/live-checks/balances-per-chain.mjs --harness": 3, // box 3
+  "apps/terminal: node ../../scripts/live-checks/pool-balance-counts-the-remainder.mjs --harness": 22, // box 22
+  "apps/terminal: node ../../scripts/live-checks/portfolio-one-balance.mjs --harness": 11, // box 11
+  "apps/terminal: node ../../scripts/live-checks/signpage-pool-price.mjs --harness": 25, // box 25
+  "apps/terminal: node ../../scripts/live-checks/token-page-fills-after.mjs --harness": 49, // box 49
+  "apps/terminal: node ../../scripts/live-checks/trade-box-bal-cash.mjs --harness": 23, // box 23
+  "apps/terminal: node ../../scripts/live-checks/trade-box-pool.mjs --harness": 11, // box 11
+  "apps/terminal: node ../../scripts/live-checks/verify-pools.mjs --harness": 6, // box 6
+  "apps/terminal: node ../../scripts/live-checks/verify-row-survives-one-provider.mjs --harness": 9, // box 9
   "apps/terminal: node test/withdraw/run.mjs": 14, // B2 14.0
   "apps/terminal: node test/withdraw-form/run.mjs": 5, // C3 4.7
   "apps/terminal: node test/portfolio/run.mjs": 49, // C1 48.9
