@@ -1,0 +1,21 @@
+{
+ "_note": "bad: SIGN_HOST read 2026-11-18 03:5xZ (release 172 live, before this card: no kept NEAR pool lists). good: this tree's build (packages/signpage/scripts/build-app.mjs --out, read with --site), which the deploy serves; re-recorded from SIGN_HOST once this card is deployed.",
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oJm8RtLDhg/7RG+kMipUNMIISF5fRX+5uWB2z1skrC3OKAbwO9a6vnPmgxz1iZiw\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-oJm8RtLDhg/7RG+kMipUNMIISF5fRX+5uWB2z1skrC3OKAbwO9a6vnPmgxz1iZiw",
+   "markers": []
+  }
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-dIyB7zReBpMZzBjcn9rApUJN1DTXgk4d0pbgS+U53gicqzyRbE3p5137c9XeSfpv\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-dIyB7zReBpMZzBjcn9rApUJN1DTXgk4d0pbgS+U53gicqzyRbE3p5137c9XeSfpv",
+   "markers": [
+    "ct-near-kept",
+    "rhea-pools:",
+    "dcl-pools:"
+   ]
+  }
+ }
+}
