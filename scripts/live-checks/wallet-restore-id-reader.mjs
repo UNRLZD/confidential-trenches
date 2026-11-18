@@ -230,17 +230,33 @@ export const ID_SIGNOUT = (text) => {
  *   a-load-proves-first-and-walks-the-restore-once the answered try removes its own run's marker only with no failed
  *   walk and no finding (else it puts it back, its next ask dropped, on the same owedOf and run id), and a try left to
  *   read again writes its next ask the pause after it, never sooner; every part of the line pinned, no gap;
- * - IDS_WALK_END, the walk's end told off its reasons (`let S=f.length>0?`stalled`:`done`;m(S),`);
- * - IDS_TELL, a finding that marks the run and writes a stalled restore op when the newest is not one, under the seed
- *   lock, and the run's last try with nothing to tell after one writing the done op (delta review P3-B); the try's end
- *   removes only its own run's marker (delta review P3-D) (`t.named.length!==0&&(s.finding=!0,await _(async()=>{...!==`stalled`&&await t.put(`ops`,crypto.randomUUID(),
- *   {kind:`restore`,stage:`stalled`,txs:[],created_ms:n()})}))`).
- * The count is 1 when all three hold, else 0.
+ * - IDS_WALK_END, the walk's end told off its reasons, waited for (`let te=m.length>0?`stalled`:`done`;await g(te),`);
+ * - IDS_TELL, a finding that marks the run and writes a stalled restore op (IDS_STALLED_OP), and the run's last try
+ *   with nothing to tell after one writing the done op under the seed lock (delta review P3-B), never over a walk that
+ *   ended stalled (card restore-follow-up-run-op); the try's end removes only its own run's marker (delta review P3-D);
+ * - IDS_STALLED_OP, the newest restore op made stalled when it is not, under the same seed lock
+ *   (`C=()=>x(async()=>{...!==`stalled`&&await t.put(`ops`,crypto.randomUUID(),{kind:`restore`,stage:`stalled`,...})})`);
+ * - IDS_END_OP (card restore-follow-up-run-op), the walk's end: told once, and when no request heard it, it was
+ *   stalled, the run is no load's resume and no sign out stopped it, the same stalled op written
+ *   (`g=async n=>{h||(h=!0,e.ended?.(n,m),a(n)||n!==`stalled`||i||t.aborted||await C().catch(()=>{}))}`).
+ * Each found exactly once and bound to the others by name (the walk's end is IDS_END_OP's, IDS_END_OP's and the
+ * finding's op is IDS_STALLED_OP's, the done op's lock is IDS_STALLED_OP's, and the tell's stalled walk is the walk's
+ * end); the count is 1 when all hold, else 0.
  */
 export const IDS_END_TRY = /\.catch\(([\w$]+)=>\{if\(\1 instanceof ([\w$]+)\|\|([\w$]+)\.aborted\)throw \1;([\w$]+)\.retry\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\}\),\3\.throwIfAborted\(\);let ([\w$]+)=\4\.retry\.length===0&&\4\.held\.length===0,([\w$]+)=\5\|\|([\w$]+)>([\w$]+)\.length;if\(await [\w$]+\(\6\?\{retry:\[\],held:\[\],named:\[\.\.\.\4\.named,\.\.\.\4\.held,\.\.\.\4\.retry\],tries:\7,last:\6\}:\{\.\.\.\4,tries:\7,last:\6\}\),\5\)\{await [\w$]+\(async\(\)=>\{let ([\w$]+)=await [\w$]+\.store\(\),([\w$]+)=([\w$]+)\(await \9\.get\(`meta`,(?:`owed\/restore-ids`|[\w$]+)\)\);if\(\10\?\.run!==([\w$]+)\)return;if\(!([\w$]+)&&\4\.named\.length===0\)return void await \9\.delete\(`meta`,(?:`owed\/restore-ids`|[\w$]+)\);let\{next:[\w$]+,\.\.\.([\w$]+)\}=\10;await \9\.put\(`meta`,(?:`owed\/restore-ids`|[\w$]+),\14\)\}\);return\}if\(await [\w$]+\(async\(\)=>void await\(await [\w$]+\.store\(\)\)\.update\(`meta`,(?:`owed\/restore-ids`|[\w$]+),([\w$]+)=>\{let ([\w$]+)=\11\(\15\);if\(\16===null\|\|\16\.run!==\12\)return;let\{next:[\w$]+,\.\.\.([\w$]+)\}=\16;return \6\?\17:\{\.\.\.\17,next:[\w$.]+\(\)\+\8\[\7-1\]\}\}\)\),\6\)return;await [\w$]+\(\8\[\7-1\],\3\)\}/g;
-export const IDS_WALK_END = /let ([\w$]+)=([\w$]+)\.length>0\?`stalled`:`done`;([\w$]+)\(\1\),/g;
-export const IDS_TELL = /\.named\.length===0\)\{if\(!([\w$]+)\.last\|\|!([\w$]+)\.finding\)return;\2\.finding=!1,await ([\w$]+)\(async\(\)=>\(await [\w$]+\.store\(\)\)\.put\(`ops`,crypto\.randomUUID\(\),\{kind:`restore`,stage:`done`,txs:\[\],created_ms:[\w$]+\(\)\}\)\)\}else \2\.finding=!0,await \3\(async\(\)=>\{[\s\S]{0,400}?!==`stalled`&&await [\w$]+\.put\(`ops`,crypto\.randomUUID\(\),\{kind:`restore`,stage:`stalled`,txs:\[\],created_ms:[\w$]+\(\)\}\)\}\)/g;
-export const IDS_END = (text) => ([IDS_END_TRY, IDS_WALK_END, IDS_TELL].every((re) => [...text.matchAll(re)].length === 1) ? 1 : 0);
+export const IDS_WALK_END = /let ([\w$]+)=([\w$]+)\.length>0\?`stalled`:`done`;await ([\w$]+)\(\1\),/g;
+export const IDS_TELL = /\.named\.length===0\)\{if\(!([\w$]+)\.last\|\|!([\w$]+)\.finding\|\|([\w$]+)===`stalled`\)return;\2\.finding=!1,await ([\w$]+)\(async\(\)=>\(await [\w$]+\.store\(\)\)\.put\(`ops`,crypto\.randomUUID\(\),\{kind:`restore`,stage:`done`,txs:\[\],created_ms:[\w$]+\(\)\}\)\)\}else \2\.finding=!0,await ([\w$]+)\(\)\}/g;
+export const IDS_STALLED_OP = /([\w$]+)=\(\)=>([\w$]+)\(async\(\)=>\{[\s\S]{0,400}?!==`stalled`&&await [\w$]+\.put\(`ops`,crypto\.randomUUID\(\),\{kind:`restore`,stage:`stalled`,txs:\[\],created_ms:[\w$]+\(\)\}\)\}\)/g;
+export const IDS_END_OP = /([\w$]+)=async ([\w$]+)=>\{([\w$]+)\|\|\(\3=!0,[\w$]+\.ended\?\.\(\2,[\w$]+\),[\w$]+\(\2\)\|\|\2!==`stalled`\|\|[\w$]+\|\|[\w$]+\.aborted\|\|await ([\w$]+)\(\)\.catch\(\(\)=>\{\}\)\)\}/g;
+export const IDS_END = (text) => {
+  const one = (re) => {
+    const all = [...text.matchAll(re)];
+    return all.length === 1 ? all[0] : null;
+  };
+  const [tr, w, t, s, e] = [IDS_END_TRY, IDS_WALK_END, IDS_TELL, IDS_STALLED_OP, IDS_END_OP].map(one);
+  if (!tr || !w || !t || !s || !e) return 0;
+  return w[3] === e[1] && e[4] === s[1] && t[5] === s[1] && t[4] === s[2] && t[3] === w[1] ? 1 : 0;
+};
 /** The card's strings in the bundle, as the minifier writes them. The four functions bind the minifier's names. */
 export const MARK = Object.freeze({
   reach_error: "reach: not an index of lane",
