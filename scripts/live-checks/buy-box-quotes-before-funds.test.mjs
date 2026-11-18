@@ -16,6 +16,8 @@
 //     chains, Deposit on, its tap opens the deposit sheet and posts no buy: PASS.
 //   checkBefore: the same hosts read by the check before this card (Buy off asked of the offer, run 43962188152's FAIL):
 //     on every chain the main button was on (ctaOff false), the fact it failed on.
+//   nearLate: release-171 live, each amount ask timed (askedMs from the amount going in, ms to the page's answer): NEAR
+//     drew qtc.omft.near after two coins stayed on Quoting, each answered past the kit client's 10 s.
 // Planted on deposit: each fact taken away FAILs, an enabled Buy on $0 first.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -159,6 +161,20 @@ test("planted (card near-buy-box-draws-every-answer): the BAD line names each an
   assert.equal(answersOf({ dry: mixed }), "61 ms down, 900 ms no out, 11000 ms out");
   // the box drew the out: no BAD, whatever the times
   assert.equal(judge(near({ ...structuredClone(c), dry: late })).verdict, "PASS");
+});
+
+test("recorded nearLate (release-171 live, each ask timed): NEAR ok on qtc; the coins left on Quoting were answered past 10 s", () => {
+  const v = judge(ANSWERS.nearLate);
+  // Base answered no ask on that run (card base-buy-box-answers-a-fresh-account): INCONCLUSIVE, no BAD
+  assert.equal(v.verdict, "INCONCLUSIVE", v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.startsWith("ok near qtc.omft.near: ")));
+  // the coin read before it, judged alone, is the red of run 44201271127 run 2 with its times named
+  const hoot = ANSWERS.nearLate.chains.near.coins.find((c) => c.coin === "hoot-8ecf65.launchpad.justhoot.near");
+  const alone = judge({ chains: { ...ANSWERS.nearLate.chains, near: { coins: [hoot] } } });
+  assert.equal(alone.verdict, "FAIL");
+  assert.deepEqual(alone.lines.filter((l) => l.startsWith("BAD")), [
+    'BAD near hoot-8ecf65.launchpad.justhoot.near: the page answered an out, You receive reads "Quoting"; its answers: 11826 ms out (asked at 221 ms), 10728 ms out (asked at 10227 ms), no answer (asked at 20222 ms)',
+  ]);
 });
 
 test("planted on the reads before 922 (given the offer): quoted coins on every chain PASS; a page refusal FAILs", () => {
