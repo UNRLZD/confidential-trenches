@@ -31,7 +31,9 @@
 // every SIGN_HOST file, every header, the _headers file), so every build SIGN_HOST serves is a release on main. The flow:
 //   1. cut release-<N> on a branch from origin/main's head (git worktree add -b card/<key> ... origin/main, a clean
 //      tree, pnpm install --frozen-lockfile): node packages/signpage/scripts/release-list.mjs release-<N>, N exactly one
-//      past the newest list (it refuses any other N), then add the row it prints (add to RELEASED: "release-<N>":
+//      past the newest list (it refuses any other N, and a list whose Base or Robinhood pool index snapshot is past
+//      SNAPSHOT_BEHIND_MAX behind the lower of two providers' heads: run evm-index-snapshot.mjs for both chains and
+//      commit packages/signpage/data/evm-index first), then add the row it prints (add to RELEASED: "release-<N>":
 //      "<sha256 of the list>",) at the end of RELEASED below, run node --test packages/signpage/scripts/release.test.mjs,
 //      and commit both: git commit -m "Card <key>: signing page release-<N>" -- packages/signpage/releases/release-<N>.json packages/signpage/scripts/release-list.mjs
 //   2. push it with push-card (the team's push script, card/<key>);
@@ -51,6 +53,9 @@ import { build as buildTerminal } from "../../../apps/terminal/scripts/deploy.mj
 import { HOST_ARGS, readList, RELEASES, TAG } from "./check-signpage.mjs";
 import { build as buildSign, checkDir as checkSign } from "./deploy.mjs";
 import { SIGN_BUILD_INPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
+import { EVM_INDEX } from "./build-app.mjs";
+import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { evmPoolIndexFromSnapshot } from "../../kit/src/checks/evm/pool-index.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
@@ -465,6 +470,75 @@ export function headList(names = Object.keys(HOSTS)) {
   }
 }
 
+/** The most blocks each EVM chain's pool index snapshot (data/evm-index/<chain>.json, served at /evm-index/) may be
+ *  behind the lower of two providers' heads when a release is cut (card evm-snapshots-fresh-at-every-cut): 12 hours at
+ *  the chain's measured block rate, so a fresh device starts its index sync from a snapshot hours old, never days.
+ *  - Base: 4.98 blocks a second (block 58,051,548 at 2026-11-16 03:44:45Z, 58,851,461 at 2026-11-18 00:11:07Z, on
+ *    base-rpc.publicnode.com), 5 x 43,200 s = 216,000.
+ *  - Robinhood: 9.50 blocks a second (115,460,916 at 2026-11-16 03:33:37Z, 117,011,529 at 2026-11-18 00:54:08Z, on
+ *    rpc.mainnet.chain.robinhood.com), 9.5 x 43,200 s = 410,400.
+ *  Releases 170 and 171 shipped Base's 16 Nov snapshot, 810k blocks behind on 18 Nov: a fresh account's first Base buy
+ *  quote answered at 73.6 s and the buy box drew none (card base-buy-box-answers-a-fresh-account). */
+export const SNAPSHOT_BEHIND_MAX = Object.freeze({ base: 216_000, robinhood: 410_400 });
+/** The most two providers' heads may differ for the cut to take the lower: two minutes at the same rates (Base 5 x 120,
+ *  Robinhood 9.5 x 120). Wider, one of them is behind or ahead of the chain, and its word decides nothing: a provider far
+ *  behind would make a stale snapshot look fresh. */
+export const SNAPSHOT_HEAD_SPREAD_MAX = Object.freeze({ base: 600, robinhood: 1_140 });
+const SNAPSHOT_HEAD_MS = 10_000;
+const snapshotCommand = (chain) => `node packages/signpage/scripts/evm-index-snapshot.mjs --chain ${chain}`;
+
+/** The refusals of a cut over each chain's snapshot read `read` ({ <chain>: { through, heads } }: the committed
+ *  snapshot's last block, null when it does not read back, and the heads two providers named): none when every chain's
+ *  snapshot is at most SNAPSHOT_BEHIND_MAX behind the lower head and not past it. Fewer than two heads, or two further
+ *  apart than SNAPSHOT_HEAD_SPREAD_MAX, is a refusal: a single provider's word, high or low, never decides the age. */
+export function snapshotProblems(read) {
+  if (read == null) return ["the pool index snapshots' age was not read, so the list is not cut"];
+  const problems = [];
+  for (const [chain, max] of Object.entries(SNAPSHOT_BEHIND_MAX)) {
+    const r = read[chain];
+    const heads = (r?.heads ?? []).filter((h) => Number.isSafeInteger(h) && h > 0);
+    const fix = `run ${snapshotCommand(chain)}, commit packages/signpage/data/evm-index, then cut again`;
+    if (!Number.isSafeInteger(r?.through)) problems.push(`${chain}: its pool index snapshot does not read back: ${fix}`);
+    else if (heads.length < 2) problems.push(`${chain}: the head was read on ${heads.length} of 2 providers, so the snapshot's age is not known: cut again`);
+    else if (Math.max(...heads) - Math.min(...heads) > SNAPSHOT_HEAD_SPREAD_MAX[chain]) problems.push(`${chain}: the providers' heads ${heads[0]} and ${heads[1]} are ${Math.max(...heads) - Math.min(...heads)} blocks apart (at most ${SNAPSHOT_HEAD_SPREAD_MAX[chain]}), so the snapshot's age is not known: cut again`);
+    else {
+      const head = Math.min(...heads);
+      const behind = head - r.through;
+      if (behind < 0) problems.push(`${chain}: its pool index snapshot ends at ${r.through}, past the head ${head}: ${fix}`);
+      else if (behind > max) problems.push(`${chain}: its pool index snapshot is ${behind} blocks behind the head ${head} (at most ${max}, 12 hours): ${fix}`);
+    }
+  }
+  return problems;
+}
+
+/** Each chain's snapshot read for snapshotProblems: its committed file in `dir` through the kit's own check, and
+ *  eth_blockNumber on the chain's quote providers in order until two answer. */
+export async function snapshotFreshness(fetchFn = fetch, dir = EVM_INDEX, venues = evmPoolVenues()) {
+  const read = {};
+  for (const chain of Object.keys(SNAPSHOT_BEHIND_MAX)) {
+    const v = venues[chain];
+    let through = null;
+    try {
+      through = evmPoolIndexFromSnapshot(JSON.parse(readFileSync(join(dir, `${chain}.json`), "utf8")), { chainId: v.chainId, poolManager: v.poolManager, cap: v.index.cap })?.through ?? null;
+    } catch {
+      through = null;
+    }
+    const heads = [];
+    for (const url of v?.providers ?? []) {
+      if (heads.length === 2) break;
+      try {
+        const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }), signal: AbortSignal.timeout(SNAPSHOT_HEAD_MS) });
+        const j = r.ok ? await r.json() : null;
+        if (typeof j?.result === "string" && /^0x[0-9a-f]{1,16}$/i.test(j.result)) heads.push(Number(j.result));
+      } catch {
+        /* the next provider */
+      }
+    }
+    read[chain] = { through, heads };
+  }
+  return read;
+}
+
 const USAGE = [
   "usage: node packages/signpage/scripts/release-list.mjs release-<N>                     write the list",
   "       node packages/signpage/scripts/release-list.mjs --check (release-<N> | --list <file>)",
@@ -472,8 +546,10 @@ const USAGE = [
   "       node packages/signpage/scripts/release-list.mjs --unreleased <dir> --host sign|app [--releases <dir> --ledger <file>]",
 ].join("\n");
 
-/** The command line: { code, out, err } (no process.exit inside, so every build is removed before the process ends). */
-export function main(a, releases = RELEASES) {
+/** The command line: { code, out, err } (no process.exit inside, so every build is removed before the process ends).
+ *  `snapshots`: writing a list, snapshotFreshness()'s read (the command line reads it first); a list is written only
+ *  when snapshotProblems finds none. */
+export function main(a, releases = RELEASES, snapshots = null) {
   const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : undefined);
   const usage = { code: 2, err: [USAGE] };
   if (a[0] === "--print") {
@@ -520,6 +596,9 @@ export function main(a, releases = RELEASES) {
   const newest = newestRelease(releases);
   const want = `release-${newest ? Number(newest.slice(8)) + 1 : 1}`;
   if (a[0] !== want) return { code: 1, err: [`${a[0]} is not the next release: the newest list is ${newest ?? "none"}, so the next is ${want}`] };
+  // each EVM chain's pool index snapshot at most SNAPSHOT_BEHIND_MAX behind its head (card evm-snapshots-fresh-at-every-cut)
+  const stale = snapshotProblems(snapshots);
+  if (stale.length) return { code: 1, err: stale };
   const dirty = uncommitted();
   if (dirty) return { code: 1, err: [`uncommitted changes, so the list could not name its tree:\n${dirty}`] };
   const list = headList();
@@ -531,7 +610,9 @@ export function main(a, releases = RELEASES) {
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const r = main(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  // writing a list: the snapshots' age read first (the heads are a network read; main stays synchronous)
+  const r = main(argv, RELEASES, argv.length === 1 && TAG.test(argv[0]) ? await snapshotFreshness() : null);
   const print = process.argv[2] === "--print";
   for (const l of r.out ?? []) console.log(print ? l : `release-list: ${l}`);
   for (const l of r.err ?? []) console.error(`release-list: ${l}`);
