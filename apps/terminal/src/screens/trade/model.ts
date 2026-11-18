@@ -135,18 +135,19 @@ export function progress(p: Phase, id: string, stage: Stage, now: number): Phase
   // a Filled not yet Final: the stage filled makes it Final with its own time. The page posts a pool buy's final stage
   // as progress (pool-buy.ts poolBuyKind): "sent" is a run that ended not known (a settle never read, a run that threw
   // after its answer), which is Landing again, then Slow, as for any buy whose end is not known; not_landed,
-  // part_filled and refused end it
+  // part_filled, refused and owed_back (card evm-buy-end-carries-its-tx: a Base or Robinhood swap that failed with the
+  // ETH on the buy's wallet, on its way back to the pool) end it
   if (p.k === "filled" && p.provisional && p.id === id) {
     if (stage === "filled") return { k: "filled", id, at: p.at, ms: p.ms };
     if (stage === "sent") return { k: "landing", id, at: p.at };
-    if (stage === "part_filled" || stage === "not_landed" || stage === "refused") return { k: "ended", id, at: p.at, stage };
+    if (stage === "part_filled" || stage === "not_landed" || stage === "refused" || stage === "owed_back") return { k: "ended", id, at: p.at, stage };
     return p;
   }
   if (!busy(p) || p.id !== id) return p;
   if (stage === "signed") return p;
   if (stage === "sent") return p.k === "sending" ? { k: "landing", id, at: p.at } : p;
   if (stage === "filled") return { k: "filled", id, at: p.at, ms: Math.max(0, now - p.at) };
-  if (stage === "part_filled" || stage === "not_landed" || stage === "refused") return { k: "ended", id, at: p.at, stage };
+  if (stage === "part_filled" || stage === "not_landed" || stage === "refused" || stage === "owed_back") return { k: "ended", id, at: p.at, stage };
   return p;
 }
 
@@ -226,9 +227,10 @@ export const reasonOf = (code: ErrorCode | undefined): Reason | null => (code !=
  *  since the same buy would be refused again; a new token page starts ready. */
 export const unavailable = (p: Phase): boolean => p.k === "ended" && p.stage === "refused" && reasonOf(p.code) === "unavailable";
 
-/** How an ended trade is drawn: Failed, Not landed (CH-050: the money never left W), or part filled (CH-045). */
+/** How an ended trade is drawn: Failed, Not landed (CH-050: the money never left W), part filled (CH-045), or owed back
+ *  (card evm-buy-end-carries-its-tx: the swap failed and the money is on its way back to the pool). */
 export interface EndView {
-  k: "failed" | "notLanded" | "partial";
+  k: "failed" | "notLanded" | "partial" | "owedBack";
   reason: Reason | null;
 }
 
@@ -237,12 +239,13 @@ export interface EndView {
  * to its ready label, so any further tap is a new trade of the amount on screen: a retry of the whole amount would
  * trade more than the user asked (a buy), or re-apply a share to the smaller balance (a sell).
  */
-export const showsRetry = (p: Phase): boolean => p.k === "ended" && p.stage !== "part_filled" && !unavailable(p);
+export const showsRetry = (p: Phase): boolean => p.k === "ended" && p.stage !== "part_filled" && p.stage !== "owed_back" && !unavailable(p);
 
 export function endView(p: Phase): EndView | null {
   if (p.k !== "ended") return null;
   if (p.stage === "not_landed") return { k: "notLanded", reason: null };
   if (p.stage === "part_filled") return { k: "partial", reason: null };
+  if (p.stage === "owed_back") return { k: "owedBack", reason: null };
   return { k: "failed", reason: reasonOf(p.code) };
 }
 

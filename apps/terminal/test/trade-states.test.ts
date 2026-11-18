@@ -133,3 +133,18 @@ test("review of 418af7d5: another buy's stage or answer never moves a Filled not
   assert.equal(outcome(f, "b2", { ok: false, error: { code: "failed" } }, T0 + 3_000), f);
   assert.equal(outcome(f, "b2", { ok: true, result: { stage: "filled" } }, T0 + 3_000), f);
 });
+
+// card evm-buy-end-carries-its-tx: a Base or Robinhood buy whose swap failed with the ETH on its one-time wallet ends
+// owed_back: the box says owed back (its own line, the owner's draft), never Failed, and shows no Retry, since the money
+// left the pool and comes back to it on its own (a retry would buy again from what is left).
+test("owed_back ends the buy as owed back: its own line, no Retry, never Failed", () => {
+  const l = progress(tap(READY, "b1", T0), "b1", "sent", T0 + 150);
+  const owed = progress(l, "b1", "owed_back", T0 + 9_000);
+  assert.deepEqual(owed, { k: "ended", id: "b1", at: T0, stage: "owed_back" });
+  assert.deepEqual(endView(owed), { k: "owedBack", reason: null });
+  assert.equal(showsRetry(owed), false);
+  assert.equal(WORDS.owedBack.text, "Owed back");
+  assert.equal(WORDS.owedBack.draft, true, "a new line: the owner's words, marked as a draft until picked");
+  // the answer of owed_back (a run that ended inside the tap's time) ends it the same way
+  assert.deepEqual(outcome(l, "b1", { ok: true, result: { stage: "owed_back" } }, T0 + 9_000), owed);
+});

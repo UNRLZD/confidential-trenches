@@ -34,16 +34,18 @@
 //     filled: both RPCs show one Bought for the nullifier, the same in the same block, paying W the token, out at least
 //       the min out W signed, of the chunk at a fee up to the proof's (the sender picks the fee, at most the relay
 //       data's cap); W's holding is completed with what W received, and filled names that transaction;
-//     refused, with the release's transaction: both show a Withdrawn (the swap failed in the pool's own call and W got
-//       the chunk less the fee charged, in ETH): the holding is marked withdrawn and the page's carry pass starts
-//       (src/pool-carry-evm.ts: W deposits that ETH back into the pool as a note of the user's, found from the chain
-//       alone, again on every load until it lands); the buy did not fill;
+//     owed_back, with the release's transaction (card evm-buy-end-carries-its-tx; "refused" before kit 1.19): both show
+//       a Withdrawn (the swap failed in the pool's own call and W got the chunk less the fee charged, in ETH): the
+//       holding is marked withdrawn and the page's carry pass starts (src/pool-carry-evm.ts: W deposits that ETH back
+//       into the pool as a note of the user's, found from the chain alone, again on every load until it lands); the buy
+//       did not fill, and the money is the user's on its way back;
 //     not_landed: both show another release of the nullifier (the note spent elsewhere), or both RPCs' newest block is
 //       past the proof's deadline with no release of it on either (the pool refuses it from then on: PrivacyPool.sol
 //       reverts a release once block.timestamp is past the relay data's deadline). Never on a revert: the pool has no
 //       sender check, so the public calldata can land until the deadline.
 //   The tap's run reads for EVM_BUY_SETTLE_MS from the send and then answers its last true stage ("sent"); the reads go
-//   on, with no lock held, until an end, which goes to the app as the kind's progress (`late`), so its button never
+//   on, with no lock held, until an end, which goes to the app as the kind's progress (`late`) with its transactions
+//   (the early "sent" answer names none: card evm-buy-end-carries-its-tx), so its button never
 //   stays on "sent": every EVM_BUY_WAIT_MS until EVM_BUY_FOLLOW_MS past the deadline (an end comes by then unless a
 //   pool RPC is down or stuck), then every EVM_BUY_SLOW_WAIT_MS while the page is signed in (`signal`, aborted at sign
 //   out, ends the reads; the settle pass ends the note either way). The proof's deadline is at most EVM_LIFE_MS (210 s) from its epoch's start and at least
@@ -765,13 +767,15 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
 }
 
 /** The legs' ends as one: filled when every leg filled; part_filled when one filled and none is still on its way; sent
- *  while one is (or ended unread); else refused when one was, and not_landed. Every leg's transactions. */
+ *  while one is (or ended unread); else owed_back when one leg's ETH sits on its W (card evm-buy-end-carries-its-tx:
+ *  the user's money on its way back, over a refusal), refused when one was, and not_landed. Every leg's transactions. */
 export function legsEnd(ends: readonly ({ stage: TradeStage; txs: TxRef[] } | null)[]): { stage: TradeStage; txs: TxRef[] } {
   const txs = ends.flatMap((e) => e?.txs ?? []);
   const st = ends.map((e) => e?.stage ?? "sent");
   if (st.every((s) => s === "filled")) return { stage: "filled", txs };
   if (st.some((s) => s === "sent" || s === "signed")) return { stage: "sent", txs };
   if (st.some((s) => s === "filled" || s === "part_filled")) return { stage: "part_filled", txs };
+  if (st.some((s) => s === "owed_back")) return { stage: "owed_back", txs };
   if (st.some((s) => s === "refused")) return { stage: "refused", txs };
   return { stage: "not_landed", txs };
 }
@@ -859,7 +863,7 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
     } catch {
       /* the next state read runs it */
     }
-    return { stage: "refused", txs };
+    return { stage: "owed_back", txs };
   }
   return null;
 }
@@ -1058,12 +1062,13 @@ export function poolBuyEvmKind(host: () => EvmPoolBuyHost & { end?(): void }, lo
               if (!answer) answer = { result: { stage: "sent", txs: [] } };
               give();
             },
-            late: (x) => ctx?.progress(x.stage),
+            // the end with its transactions: the early answer names none (card evm-buy-end-carries-its-tx)
+            late: (x) => ctx?.progress(x.stage, x.txs),
           },
           ask,
         );
         if (!answer) answer = "error" in a ? (a.rule === undefined ? { error: a.error } : { error: a.error, rule: a.rule }) : { result: a };
-        if ("stage" in a) ctx?.progress(a.stage);
+        if ("stage" in a) ctx?.progress(a.stage, a.txs);
       } finally {
         h.end?.();
       }
