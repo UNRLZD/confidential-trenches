@@ -54,6 +54,7 @@ import {
   evmPoolVenues,
   HELPER_SOLANA_BLOCK_HEADER,
   POOL_USD_FEEDS,
+  secretScrubber,
   SOLANA_AMM_V4_PROGRAM,
   SOLANA_CPMM_PROGRAM,
   SOLANA_DLMM_PROGRAM,
@@ -715,6 +716,26 @@ export type Upstream = { url: string; forms: Buffer[]; off?: true; keyed: KeyedU
 const error = (status: number, code: string): RpcAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
 const REFUSED = () => error(400, "method_not_allowed");
 const UPSTREAM = () => error(503, "upstream");
+
+/** The kit's one rule (secretScrubber) for each keyed URL, built once. */
+const ruleOf = new Map<string, (text: string) => string>();
+const keysIn = (s: string): number => s.split("<key>").length - 1;
+/**
+ * Does `url`'s answer hold its key (card helper-scrubber-takes-the-kits-rule)? One of its secret forms exactly, anywhere
+ * in the text; or, in the words of its JSON-RPC errors (`answer` parsed), any secret part of the URL as the kit's one
+ * rule finds it: in another case, cut short, a path key under 16 characters. A result is chain data, never read so (an
+ * 8-character start of a hex key may stand in any long hex). A URL with no secret forms (a public endpoint) holds none.
+ */
+export function answerHoldsKey(url: string, forms: readonly Buffer[], text: string, answer: unknown): boolean {
+  if (forms.length === 0) return false;
+  const b = Buffer.from(text, "utf8");
+  if (forms.some((f) => b.includes(f))) return true;
+  const words = (Array.isArray(answer) ? answer : [answer]).flatMap((a) => (typeof a === "object" && a !== null && "error" in a ? [JSON.stringify((a as { error: unknown }).error) ?? ""] : [])).join(" ");
+  if (words === "") return false;
+  let rule = ruleOf.get(url);
+  if (rule === undefined) ruleOf.set(url, (rule = secretScrubber([url])));
+  return keysIn(rule(words)) > keysIn(words);
+}
 
 /** Every form a secret could leave in: as set, base64, base64url and URL-encoded. */
 function forms(secrets: string[]): Buffer[] {
@@ -1862,7 +1883,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         // largest span named is kept for the caller when every provider caps (card helper-evm-range-cap-walk)
         // an answer that holds this provider's key in any form is that provider down for this read: never kept, so a
         // clean cap or refusal from another still answers (review fold 1)
-        const leaks = secretForms.some((f) => Buffer.from(text, "utf8").includes(f));
+        const leaks = answerHoldsKey(url, secretForms, text, answer);
         const span = evmCapSpan(c, answer);
         if (span !== null) {
           if (leaks) down = true;
@@ -2033,8 +2054,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       if (shared !== undefined) deps.holds?.hold(url, limited);
       return throttled(budget.heldFor(key), undefined, `${key} provider limit`);
     }
-    const b = Buffer.from(text, "utf8");
-    if (secretForms.some((f) => b.includes(f))) return UPSTREAM();
+    if (answerHoldsKey(url, secretForms, text, answer)) return UPSTREAM();
     if (viaSlot) slot.ok();
     return { status: r.status, body: text };
   }
