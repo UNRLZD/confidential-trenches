@@ -1714,7 +1714,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // host's lane (a trade's reads go first); kept in the page's own index store (src/evm-index-store.ts), so a reload
   // serves the kept index at once and syncs only the gap. A sync that ends partial is synced again at the next state
   // read. One sync a chain at once on the device, across its tabs (the Web Lock ct-evm-index/{chain}, if available: a
-  // tab that finds it held syncs none and asks again at its next state read, then from the index the other tab kept;
+  // tab that finds it held is still served the kept index or the snapshot (evmIndexServe, before the lock), syncs none
+  // and asks again at its next state read, then from the index the other tab kept;
   // card signpage-evm-reads-draw-no-refusal: two tabs signed in at once each read the whole cold index, 13 Nov CDP
   // capture); none past a sign out. It names no wallet: every pool of the PoolManager.
   const evmIndex = new Map<"base" | "robinhood", EvmPoolIndexData | null>();
@@ -1747,13 +1748,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return evmPoolIndexFromSnapshot(raw, { chainId: v.chainId, poolManager: v.poolManager, cap: v.index.cap });
   };
   const indexStore: EvmIndexStore | null = over.evmIndexStore !== undefined ? over.evmIndexStore : over.evmIndexSync !== undefined ? null : evmIndexStore();
-  // the index the device already has, served to the kit's quote with no RPC read: the one kept in the page's store,
-  // else the release's snapshot
+  // the index the device already has, served to the kit's quote with no RPC read: the one kept in the page's store, if
+  // newer than this tab's own (another tab's sync kept it), else the release's snapshot. Reads only, run before the
+  // lock ct-evm-index/{chain} (card evm-index-served-before-lock: inside it, a tab that found the lock held by another
+  // was served none, and its quote scanned the chain's Initialize logs from the depth, 71 getLogs below the snapshot's
+  // end on a mainnet Robinhood quote, 18 Nov 18:51Z); the store's one write stays in the sync, under the lock
   const evmIndexServe = async (chain: "base" | "robinhood", network: EvmPoolChain, signal: AbortSignal): Promise<void> => {
-    if (!evmIndex.has(chain)) {
-      const kept = await indexStore?.get(network).catch(() => null);
-      if (kept != null && !signal.aborted && evmPoolIndexUse(network, { index: kept, coversThrough: kept.through, pools: kept.pools })) evmIndex.set(chain, kept);
-    }
+    const own = evmIndex.get(chain) ?? null;
+    const kept = await indexStore?.get(network).catch(() => null);
+    if (kept != null && (own === null || kept.through > own.through) && !signal.aborted && evmPoolIndexUse(network, { index: kept, coversThrough: kept.through, pools: kept.pools })) evmIndex.set(chain, kept);
     if (!evmIndex.has(chain)) {
       const shipped = await snapshotOf(network).catch(() => null);
       if (shipped !== null && !signal.aborted && evmPoolIndexUse(network, { index: shipped, coversThrough: shipped.through, pools: shipped.pools })) evmIndex.set(chain, shipped);
@@ -1771,7 +1774,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // each reader's request waits for a pass's turn on its host, so a trade's reads there go first
     const passFetch = (async (url: string, init?: RequestInit) => (await hostLane(url).turn("pass", signal), laneFetch()(url, init))) as typeof fetch;
     const sync = async (): Promise<void> => {
-      await evmIndexServe(chain, network, signal);
       // a device that holds nothing syncs none past it (evmMoney)
       if (!evmMoney) return;
       const prev = evmIndex.get(chain) ?? null;
@@ -1788,7 +1790,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         await indexStore?.put(network, s.index);
       }
     };
-    const run = (locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync())
+    const run = evmIndexServe(chain, network, signal)
+      .catch(() => {})
+      .then(() => (signal.aborted ? undefined : locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync()))
       .catch(() => {})
       .finally(() => evmIndexing.delete(chain));
     evmIndexing.set(chain, run);
