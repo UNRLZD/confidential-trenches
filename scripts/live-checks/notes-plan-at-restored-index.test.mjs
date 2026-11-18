@@ -48,7 +48,7 @@ test("this tree's build holds every fact; each rule broken in place in it turns 
   assert.equal(mut(/if\(([\w$]+)%8===([\w$]+)\.lane\)\{let ([\w$]+)=await \2\.get\(`counters`/, "if(!1){let $3=await $2.get(`counters`").counter, false, "the counter never read");
   assert.equal(mut(/\|\|!\(([\w$]+)\.next>([\w$]+)\)\)throw Error\(`deposit index/, "||!($1.next>=$2))throw Error(`deposit index").counter, false, "the counter's own index taken");
   // the found mark left out of planDeposit's one unfunded index
-  assert.equal(mut(/&&([\w$]+)\.state===`PLANNED`&&!([\w$]+)\.has\(([\w$]+)\(\1\.ref\)\)\);if/, "&&$1.state===`PLANNED`);if").funded, false, "a found note counted as the unfunded index");
+  assert.equal(mut(/&&([\w$]+)\.state===`PLANNED`&&!([\w$]+)\.has\(([\w$]+)\(\1\.ref\)\)(&&![\w$]+\.has\(\3\(\1\.ref\)\))?\);if/, "&&$1.state===`PLANNED`$4);if").funded, false, "a found note counted as the unfunded index");
   // step 5's found and the carry's hand-off
   assert.equal(mut(/\{s:([\w$]+),i:([\w$]+),amounts:([\w$]+)\}\)\}finally/, "{s:$1,i:$2,amounts:[$3[0],$3[0]]})}finally").wired, false, "one balance handed as both");
   assert.equal(mut(/\.has\(([\w$]+)\.i\)\|\|\(([\w$]+)=>[\w$]+\.found\([^)]*\)\),/, ".has($1.i),").wired, false, "a U_X with no note named, never written");

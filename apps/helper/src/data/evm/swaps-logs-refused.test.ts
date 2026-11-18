@@ -9,6 +9,10 @@ import { createRpc } from "../../rpc/rpc.ts";
 import { fakeChain, ICNT, open, REC, URLS } from "../../../test/evm-swaps/base.ts";
 import { SWAP_RPCS } from "./swaps.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 const BASE_OWN = "https://mainnet.base.org";
 
 test("mainnet.base.org refuses every log read and is one of Base's providers: LOGS_REFUSED names it", () => {
@@ -30,13 +34,13 @@ test("the swap reads send a logs-refusing provider no eth_getLogs and ask it the
 });
 
 test("a /v1/rpc/base caller's eth_getLogs goes to the pinned providers, never to mainnet.base.org; its other reads go there first", async () => {
-  const holds = providerHolds();
+  const holds = providerHolds(STILL);
   const asked: string[] = [];
   const fetch = async (url: string) => {
     asked.push(url);
     return Response.json({ jsonrpc: "2.0", id: 1, result: [] });
   };
-  const rpc = createRpc({}, { holds, fetch: fetch as never, pinned: SWAP_RPCS, log: () => {} });
+  const rpc = createRpc({}, { now: STILL, holds, fetch: fetch as never, pinned: SWAP_RPCS, log: () => {} });
   const body = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
   const logs = await rpc.handle("base", "application/json", body("eth_getLogs", [{ fromBlock: "0x1", toBlock: "0x2" }]), "198.51.100.7");
   assert.equal(logs.status, 200, logs.body);

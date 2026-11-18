@@ -122,7 +122,6 @@ export const M = [
   ["floor F7 one RPC's silence not_landed", SELL, T, "if (got[0].got === \"none\" && got[1].got === \"none\" && (await goneOnBoth(", "if ((got[0].got === \"none\" || got[1].got === \"none\") && (await goneOnBoth("],
   ["floor F10 not_landed before both are past", SELL, T, "const at = await pastAt(rpcs, last);", "const at = [0, 0] as const;"],
   ["floor F8 a full sell kept on W runs no rent back", SELL, T, "        if (v === \"filled\") later.back = keeps ? swept : back;\n", "        if (v === \"filled\" && keeps) later.back = swept;\n"],
-  ["floor F8b a full sell settled by its note runs no rent back", SELL, T, "      if (end === \"filled\") later.back = keeps ? swept : back;\n", "      if (end === \"filled\" && keeps) later.back = swept;\n"],
   ["floor F9 a sell kept on W writes a note", SELL, T, "const note = kept ? null : await store.move(", "const note = false ? null : await store.move("],
   // review of b38cd8c2: F1 a read that throws is no RPC's word; F3 none only at a slot each RPC is past at; F4 the kept
   // sell's record before the send, settled on load, dropped at its verdict

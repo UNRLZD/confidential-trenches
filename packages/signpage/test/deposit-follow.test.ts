@@ -88,7 +88,7 @@ test("the quote host hands the follow U from the record its rule checked, never 
   const reads = [SAVED, SAVED, { ...SAVED, deposit: moved }];
   let r = 0;
   const got: unknown[] = [];
-  const host = depositQuoteHost({ scope: () => 7n, read: async () => reads[Math.min(r++, 2)]!, fetch: h1c({}).fetch, now: () => MOCK_NOW, checked: async (id, res, u) => void got.push({ id, address: res.deposit_address, u }) });
+  const host = depositQuoteHost({ quoted: async () => {}, scope: () => 7n, read: async () => reads[Math.min(r++, 2)]!, fetch: h1c({}).fetch, now: () => MOCK_NOW, checked: async (id, res, u) => void got.push({ id, address: res.deposit_address, u }) });
   const d = host({ origin_asset: SOL_USDC, amount: "25" }, { id: "dq-9" });
   await d.after;
   assert.ok("result" in (d.answer() as object));
@@ -96,7 +96,7 @@ test("the quote host hands the follow U from the record its rule checked, never 
   assert.deepEqual(got, [{ id: "dq-9", address: MOCK_ADDRESS, u: { scope: 7n, index: 3, u: MOCK_U, refund_min: "25000000" } }]);
   assert.equal(r, 2, "two reads, as the rule makes them; no third");
   // the follow's write throws: the answer is down, never an address nothing follows
-  const down = depositQuoteHost({ scope: () => 7n, read: async () => SAVED, fetch: h1c({}).fetch, now: () => MOCK_NOW, checked: async () => { throw new Error("no store"); } });
+  const down = depositQuoteHost({ quoted: async () => {}, scope: () => 7n, read: async () => SAVED, fetch: h1c({}).fetch, now: () => MOCK_NOW, checked: async () => { throw new Error("no store"); } });
   const e = down({ origin_asset: SOL_USDC, amount: "25" }, { id: "dq-10" });
   await e.after;
   assert.deepEqual(e.answer(), { error: "down" });
@@ -192,7 +192,7 @@ test("two ops on one U in one tab: one note store, one follower; each op's stage
 });
 
 test("E7: deposit.quote with no request id to follow it answers no address", async () => {
-  const host = depositQuoteHost({ scope: () => 7n, read: async () => SAVED, fetch: h1c({}).fetch, now: () => MOCK_NOW, checked: async () => assert.fail("no op to follow") });
+  const host = depositQuoteHost({ quoted: async () => {}, scope: () => 7n, read: async () => SAVED, fetch: h1c({}).fetch, now: () => MOCK_NOW, checked: async () => assert.fail("no op to follow") });
   const d = host({ origin_asset: SOL_USDC, amount: "25" });
   await d.after;
   assert.deepEqual(d.answer(), { error: "not_allowed" });

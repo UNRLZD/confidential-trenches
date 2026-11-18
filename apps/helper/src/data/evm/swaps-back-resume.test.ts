@@ -28,7 +28,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fakeChain, open, REC, timeAt } from "../../../test/evm-swaps/robinhood.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
-import { HEADER_TIMED, ROBINHOOD_VENUES, SWAP_RPCS, TOPIC, TRADES_MAX } from "./swaps.ts";
+import { HEADER_TIMED, IDLE_MS, ROBINHOOD_VENUES, SWAP_RPCS, TOPIC, TRADES_MAX } from "./swaps.ts";
 
 const OWN = "https://rpc.mainnet.chain.robinhood.com";
 const POCKET = "https://robinhood.api.pocket.network";
@@ -126,8 +126,8 @@ function rig(o: { ownFrom?: number; ownTo?: number; traderLateMs?: number } = {}
     const mine = q.address === undefined ? undefined : (SWAPS.get(q.address) ?? TRANSFERS.get(q.address));
     if (mine === undefined) return undefined;
     const [from, to] = [parseInt(q.fromBlock, 16), parseInt(q.toBlock, 16)];
-    if (to > HEAD || to - from + 1 > (f.span ?? 100)) return { error: { code: -32602, message: "eth_getLogs block range exceeds 100 blocks" } };
-    if (f.window !== undefined && from < HEAD - f.window) return { error: { code: -32011, message: "block reference is outside the public history window" } };
+    if (to > chain.st.head || to - from + 1 > (f.span ?? 100)) return { error: { code: -32602, message: "eth_getLogs block range exceeds 100 blocks" } };
+    if (f.window !== undefined && from < chain.st.head - f.window) return { error: { code: -32011, message: "block reference is outside the public history window" } };
     if (SWAPS.has(q.address!)) reads.set(url, (reads.get(url) ?? 0) + 1), spans.push(to - from + 1);
     const want = [q.topics?.[0]].flat();
     return { result: mine.filter((l) => l.b >= from && l.b <= to && want.includes(l.t[0])).map((l) => wire(l, f.zeroTime === true)) };
@@ -242,6 +242,90 @@ test("card robinhood-spread-tapes-fill-inside-45s: a coin opened alone, busy (it
     assert.ok(g!.ms !== null && g!.ms <= b.ms, `slower than at cea17ee5f: ${line}`);
     assert.ok(reads <= b.reads, `more pool reads than at cea17ee5f: ${line}`);
     assert.ok(posts <= b.posts, `more posts than at cea17ee5f: ${line}`);
+  }
+});
+
+/** Each coin's reopen past IDLE_MS on this rig at ff65a0403 (main before the book rests): read again from nothing, its
+ *  first answer filling, settled at 3.8 to 6.8 s, with these posts and pool log reads. */
+const REOPEN_MAIN: Record<number, { posts: number; reads: number }> = { 8: { posts: 21, reads: 20 }, 6: { posts: 27, reads: 28 }, 2: { posts: 41, reads: 42 }, 7: { posts: 35, reads: 84 } };
+/** The busy and the quiet coin's reopen on this rig at ff65a0403 with the chain 2,000 and 3,500 blocks on. */
+const REOPEN_WIDE_MAIN: Record<number, { near: { posts: number; reads: number }; wide: { posts: number; reads: number } }> = { 8: { near: { posts: 25, reads: 22 }, wide: { posts: 25, reads: 22 } }, 7: { near: { posts: 37, reads: 85 }, wide: { posts: 37, reads: 85 } } };
+
+/** A coin filled on the rig, left unread past IDLE_MS while the chain moves `gap` blocks on, then opened again: its fill,
+ *  its reopen's first answer and the posts and pool log reads of each. */
+async function reopenAfterIdle(b: (typeof SOLO_MAIN)[number], gap: number) {
+  const sleep = (ms: number) => new Promise((go) => setTimeout(go, ms));
+  const sum = (m: Map<string, number>) => [...m.values()].reduce((x, y) => x + y, 0);
+  const r = rig({});
+  const { token, pool } = TOKENS[b.n]!;
+  const newest = SWAPS.get(pool)!.at(-1)!.tx;
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    r.start();
+    const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
+    let over = false;
+    const ticker = (async () => {
+      while (!over) {
+        await sleep(TICK_EVERY_MS);
+        await s.tick();
+      }
+    })();
+    const read = async () => {
+      const a = await s.trades(token, TRADES_MAX);
+      const j = a.status === 200 ? (JSON.parse(a.body) as { trades: { tx: string }[]; filling?: boolean }) : null;
+      return { n: j?.trades.length ?? -1, filling: j === null || j.filling === true, newest: j?.trades[0]?.tx === newest };
+    };
+    const t0 = clock.t;
+    let fill = await read();
+    while (fill.filling && clock.t - t0 < RUN_MS) {
+      await sleep(3_000);
+      fill = await read();
+    }
+    const fillMs = clock.t - t0;
+    // nobody reads it past IDLE_MS and two ticks more: its book stops being read; the chain moves on meanwhile
+    await sleep(IDLE_MS + 2 * TICK_EVERY_MS);
+    r.chain.st.head = HEAD + gap;
+    const [posts0, reads0] = [sum(r.posts), sum(r.reads)];
+    const t1 = clock.t;
+    const again = await read();
+    const againMs = clock.t - t1;
+    // read on as the page does until it settles, so a reopen that reads the coin again is counted whole
+    let settled = again;
+    while (settled.filling && clock.t - t1 < RUN_MS) {
+      await sleep(3_000);
+      settled = await read();
+    }
+    const settledMs = clock.t - t1;
+    over = true;
+    await ticker;
+    s.stop();
+    return { fill, fillMs, again, againMs, settled, settledMs, posts: [posts0, sum(r.posts) - posts0] as const, reads: [reads0, sum(r.reads) - reads0] as const };
+  });
+  const line = `${b.what} ${SPANS_OF(b.n)} spans, ${gap} blocks since: filled at ${(value.fillMs / 1000).toFixed(1)} s with ${value.posts[0]} posts and ${value.reads[0]} pool reads; reopened past IDLE_MS: ${value.again.n} trades${value.again.filling ? " filling" : ""} in ${value.againMs} ms, settled at ${(value.settledMs / 1000).toFixed(1)} s (${value.settled.n} trades${value.settled.filling ? " filling" : ""}), ${value.posts[1]} posts, ${value.reads[1]} pool reads`;
+  console.log(line);
+  return { line, ...value };
+}
+
+test("card robinhood-spread-tapes-fill-inside-45s: a coin filled, left unread past IDLE_MS (its book stops being read) and opened again answers its whole list at once, filling false, and reads only the blocks since: busy, medium and quiet, each reopen's posts and pool log reads a few, never the fill's again (red at ff65a0403: the idle book was deleted with its read back, and the reopen read the coin from nothing, its first answer filling)", async () => {
+  const got = [];
+  for (const b of SOLO_MAIN) got.push({ b, ...(await reopenAfterIdle(b, 0)) });
+  for (const { b, line, fill, again, posts, reads } of got) {
+    assert.ok(!fill.filling && fill.n === TRADES_MAX, `never filled: ${line}`);
+    assert.ok(!again.filling && again.n === TRADES_MAX && again.newest, `the reopen did not answer the whole list at once: ${line}`);
+    // one read of the blocks since, on the rig's providers as a tick's read of the book is (its head, its pool's filters
+    // agreed), never the read back again; and never more than main's reopen of the same coin
+    assert.ok(reads[1] <= 4 && reads[1] <= REOPEN_MAIN[b.n]!.reads, `the reopen read more than the blocks since: ${line}`);
+    assert.ok(posts[1] <= 8 && posts[1] <= REOPEN_MAIN[b.n]!.posts, `the reopen sent more than the blocks since take: ${line}`);
+  }
+});
+
+test("card robinhood-spread-tapes-fill-inside-45s: a reopen whose blocks since are inside the cold window (2,000) reads those blocks alone and answers the whole list at once; one wider (3,500, past the cold window and with no index to hold it) opens the coin cold as main does and still settles whole, never sending more than main's reopen of the same gap", async () => {
+  const got = [];
+  for (const b of [SOLO_MAIN[0]!, SOLO_MAIN[3]!]) got.push({ b, near: await reopenAfterIdle(b, 2_000), wide: await reopenAfterIdle(b, 3_500) });
+  for (const { b, near, wide } of got) {
+    assert.ok(!near.again.filling && near.again.n === TRADES_MAX && near.again.newest, `the reopen did not answer the whole list at once: ${near.line}`);
+    assert.ok(near.posts[1] <= REOPEN_WIDE_MAIN[b.n]!.near.posts && near.reads[1] <= REOPEN_WIDE_MAIN[b.n]!.near.reads, `the reopen sent more than main's: ${near.line}`);
+    assert.ok(!wide.settled.filling && wide.settled.n === TRADES_MAX && wide.settled.newest, `the wide reopen never settled whole: ${wide.line}`);
+    assert.ok(wide.posts[1] <= REOPEN_WIDE_MAIN[b.n]!.wide.posts && wide.reads[1] <= REOPEN_WIDE_MAIN[b.n]!.wide.reads, `the wide reopen sent more than main's: ${wide.line}`);
   }
 });
 

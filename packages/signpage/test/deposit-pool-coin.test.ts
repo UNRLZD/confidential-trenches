@@ -228,6 +228,7 @@ function page(o: { network?: "mainnet" | "testnet"; moveAfter?: boolean } = {}) 
   const floorsAsked: { chain: string; wallet: string }[] = [];
   let reads = 0;
   const deps: Parameters<typeof poolAddressHost>[0] = {
+    quoted: async () => {},
     pools: () => [{ chain: "solana", scope: SOL_S }, { chain: "base", scope: BASE_S }, { chain: "robinhood", scope: HOOD_S }],
     network: o.network ?? "mainnet",
     read: async (scope) => {

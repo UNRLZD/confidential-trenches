@@ -86,11 +86,12 @@ const esc = (n) => n.replace(/[$]/g, "\\$");
 // broken real one matches twice, or the real one's call site names another function
 const once = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length === 1;
 // step 5's reader of an id, bound to its call site: the U_X reader `R` is the reader argument of the scope's
-// restoreDepositIds call right after it (its lane order after it: card restore-first-sign-in-under-two-minutes), and it notes each id NEAR reads as money (`D`) for the held reads below
+// restoreDepositIds call right after it (its lane order after it: card restore-first-sign-in-under-two-minutes), and it notes each id NEAR reads as money (`D`) for the held reads below;
+// since card restore-shows-a-note-on-a-planned-index `R` may reach the call through its used-id take on the same scope
 const UX_READ = new RegExp(
   `,(${N})=async\\((${N}),(${N})\\)=>\\{if\\(\\3===void 0\\)throw Error\\(${Q}no deposit index for its U_X${Q}\\);let (${N})=await ${N}\\(${N},${N},(${N})\\.scope,\\3,\\2\\),` +
     `\\[(${N}),\\[(${N}),(${N})\\]\\]=await Promise\\.all\\(\\[${N}\\(\\2,\\3\\),(${N})\\.balances\\(\\{u:\\4\\}\\)\\]\\);if\\(\\6===${Q}money${Q}&&(${N})\\.set\\(\\3,\\2\\),\\7!==\\8\\)throw Error\\(${Q}its U_X reads [^${Q}]*${Q}\\);` +
-    `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},\\1,await ${N}\\(\\5\\.scope,\\5\\.notes\\)\\);`,
+    `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},(?:\\1|${N}\\(${N},\\5\\.scope,\\1\\)),await ${N}\\(\\5\\.scope,\\5\\.notes\\)\\);`,
 );
 // (card deposit-takes-each-pools-own-coin, delta review r3 P2-1: what each read leaves at U_X is written as its op's
 // left, `L`: 0 before a deposit is sent, the last read when what is left is under one deposit's floor)
@@ -148,9 +149,10 @@ const MAINNET = (n) => new RegExp(`[,; ]${esc(n)}=${Q}mainnet${Q}[,;]`);
 // since card restore-first-sign-in-under-two-minutes (first in release 115) the reader's opening, the held reader's and
 // each held read are waited on through letGo (`lg`) on the run's own signal, so a sign out lets go of a read in flight;
 // the loop reads through the let-go reader `H`
-// (since card vault-late-send-carried step 5 takes the NEAR vault's reads last, `vault = null`: the head names it, no more)
+// (since card vault-late-send-carried step 5 takes the NEAR vault's reads last, `vault = null`, and since card
+// pool-late-send-carried step 7's window and notes for the pools, `step7 = null`: the head names them, no more)
 const STEP5_HEAD = new RegExp(
-  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N},${N},${N}(?:,${N}=null)?\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await (?<lg>${N})\\(${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),\\k<signal>\\),` +
+  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N},${N},${N}(?:,${N}=null){0,2}\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await (?<lg>${N})\\(${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),\\k<signal>\\),` +
     `(?<H0>${N})=await \\k<lg>\\((?<R>${N})\\(\\k<net>,\\k<pair>,\\k<pass>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),\\k<signal>\\),(?<H>${N})=(?<e>${N})=>\\k<lg>\\(\\k<H0>\\(\\k<e>\\),\\k<signal>\\),`,
 );
 // letGo (src/pool-restore.ts) by its body: a read waited on only while the signal lasts, rejected with its reason at the

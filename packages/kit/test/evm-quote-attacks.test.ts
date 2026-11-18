@@ -739,11 +739,11 @@ const quoteOn = (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmR
 // test of the quote's pool counts and cuts is pure work over tens of thousands of made-up pools, and its quote's block must
 // not age 30 s, nor its scan reach its bound, on a slow or busy runner: under the packages' tests run side by side KB1, KB3 and
 // KB4 refused stale_quote at 37 to 47 s (card ci-fresh-run-ends-with-room)
-const quoteOnStill = async (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmRpc, hints?: EvmPoolKey[], chainName: "base" | "robinhood" = "base", headNo = 5_000_000) => {
+const quoteOnStill = async (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmRpc, hints?: EvmPoolKey[], chainName: "base" | "robinhood" = "base", headNo = 5_000_000, scanless = false) => {
   evmScanBound?.(Number.MAX_SAFE_INTEGER / 4);
   try {
     return await verdict(
-      evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route, ...(hints ? { pools: hints } : {}) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan, undefined, () => 0),
+      evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route, ...(hints ? { pools: hints } : {}), ...(scanless ? { scanless } : {}) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan, undefined, () => 0),
     );
   } finally {
     evmScanBound?.();
@@ -825,6 +825,46 @@ test("card evm-buy-and-sell-on-mainnet: with the device's pool index served, a q
     assert.deepEqual(asked, [[4_999_991, 5_000_000], [4_999_991, 5_000_000]]);
     // an older sync than the one held changes nothing
     assert.equal(evmPoolIndexUse("base", sync({}, 4_999_000)), false);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
+// card evm-tree-reads-only-when-needed: a scanless quote (the page's shown price on a device that holds nothing) reads no
+// log: the served index's pools and the helper's, each read on both providers like any candidate, and no block scanned
+test("SCANLESS a scanless quote asks the scan provider nothing and prices on the served index's pools as a scanned one does", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const token = "0x00000000000000000000000000000000000a66a6";
+  const pools = [seeded(token), real(token)];
+  try {
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 4_999_990, pools: [{ key: real(token).key }] }), true);
+    const asked: [number, number][] = [];
+    assert.deepEqual(await quoteOnStill(pools, token, seededRoute(token), scanner(5_000_000, [], asked), undefined, "base", 5_000_000, true), below);
+    assert.deepEqual(asked, [], "a scanless quote asked the scan provider for logs");
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
+test("SCANLESSH a scanless quote takes the helper's pool only where its key hashes to the id it is served with and both providers hold it; an invented one counts for nothing", async () => {
+  const { evmPoolIndexUse, evmPoolServedUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolServedUse: (c: string, t: string, a: Promise<unknown>) => void; evmPoolIndexReset: () => void };
+  const answer = (pools: unknown[]) => ({ chainId: 8453, poolManager: PM, complete: true, through: 4_999_990, pools });
+  const asked: [number, number][] = [];
+  const run = async (n: number, served: (t: string) => unknown[]) => {
+    const token = "0x00000000000000000000000000000000000c" + n.toString(16).padStart(4, "0");
+    evmPoolServedUse("base", token, Promise.resolve().then(() => answer(served(token))));
+    return quoteOnStill([seeded(token), real(token)], token, seededRoute(token), scanner(5_000_000, [{ key: real(token).key, at: 4_999_995 }], asked), undefined, "base", 5_000_000, true);
+  };
+  try {
+    // the served index holds none of these coins' pools
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 4_999_990, pools: [] }), true);
+    // served right, the real pool is a candidate read on both providers: the seeded route is below it
+    assert.deepEqual(await run(1, (t) => [{ id: "0x" + pidOf(real(t).key), key: real(t).key }]), below);
+    // a key that does not hash to the id it is served with is dropped
+    assert.equal((await run(2, (t) => [{ id: "0x" + "11".repeat(32), key: real(t).key }])).accepted, true);
+    // an invented pool, its hash right, that the PoolManager does not hold counts for nothing
+    assert.equal((await run(3, (t) => [{ id: "0x" + pidOf(keyOf(t, NATIVE, 500, 10, NATIVE)), key: keyOf(t, NATIVE, 500, 10, NATIVE) }])).accepted, true);
+    assert.deepEqual(asked, [], "a scanless quote asked the scan provider for logs");
   } finally {
     evmPoolIndexReset();
   }
@@ -2288,6 +2328,60 @@ test("T7b a request that made no connection (fetch failed, a connect error as it
   assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), other.rpc], NOW)), { accepted: false, code: "rpc_error" });
 }));
 
+// card evm-unreachable-moves-on: a request that made no connection was asked of its provider again 0.5, 1 and 1.5 s on
+// whatever other provider was left (at 51f8f94cc), so an unreachable provider cost each of its requests four failed
+// posts and 3 s. In a browser every failure with no response is one: a reset, a name that did not resolve, and
+// Robinhood's own 429, which CORS refuses ("*,*"). While another provider is left, it goes there at once.
+test("FU1 a provider that cannot be reached, one of three, is sent each request once: the request goes to the next at once", { timeout: 20_000 }, () => onTestClock(async () => {
+  const token = "0x00000000000000000000000000000000000fe8fc";
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) };
+  // the browser's form (no cause) and Node's (a connect error as its cause)
+  const forms: [string, () => Error][] = [
+    ["Failed to fetch", () => new TypeError("Failed to fetch")],
+    ["connect ETIMEDOUT", () => new TypeError("fetch failed", { cause: Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }) })],
+  ];
+  try {
+    for (const [k, [name, fail]] of forms.entries()) {
+      const bodies: string[] = [];
+      const away = evmJsonRpc(`https://away${k}.fu1.test`, (async (_u: string, init: { body: string }) => {
+        bodies.push(init.body);
+        throw fail();
+      }) as unknown as typeof fetch);
+      const v = await verdict(evmPoolBuyQuoteWith(req, [away, chain([best(token)], 0), chain([best(token)], 1)], NOW));
+      assert.equal(v.accepted, true, `${name}: ${String((v as { code?: string }).code)}`);
+      // past every wait a retry would take: nothing more is sent
+      await new Promise((r) => setTimeout(r, 3_500));
+      assert.ok(bodies.length > 0, `${name}: the unreachable provider was asked first`);
+      assert.equal(new Set(bodies).size, bodies.length, `${name}: a request was sent to the unreachable provider ${bodies.length - new Set(bodies).size} times more`);
+    }
+  } finally {
+    evmPaceReset();
+  }
+}));
+
+test("FU2 the last provider left that cannot be reached once is asked the request again, as before: the quote lands", { timeout: 20_000 }, () => onTestClock(async () => {
+  const token = "0x00000000000000000000000000000000000fe8fb";
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) };
+  const inner = chain([best(token)], 1);
+  const bodies: string[] = [];
+  let left = 1;
+  const once = evmJsonRpc("https://once.fu2.test", (async (_u: string, init: { body: string }) => {
+    bodies.push(init.body);
+    if (left-- > 0) throw new TypeError("Failed to fetch");
+    const calls = JSON.parse(init.body) as { id: number; method: string; params: unknown[] }[];
+    const answers = await inner(calls.map((c) => ({ method: c.method, params: c.params })));
+    return new Response(JSON.stringify(answers.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+  }) as unknown as typeof fetch);
+  try {
+    const v = await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), once], NOW));
+    assert.equal(v.accepted, true, String((v as { code?: string }).code));
+    // its first request, refused, was asked of it again: no other provider was left
+    assert.equal(bodies[1], bodies[0], "the request that made no connection was not asked again");
+  } finally {
+    evmPaceReset();
+  }
+}));
+
 test("T8 a quote's reads go to each provider at most the chain's limit at once (Robinhood's own RPC answers 429 to four)", async () => {
   const token = "0x00000000000000000000000000000000000fe9fe";
   const inner = chain([best(token)], 1, 50_000_000);
@@ -3700,6 +3794,46 @@ test("W9 a warm buy whose held head the scan finds more than maxLag behind uses 
   const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(plain, 0, 5_000_100), chain(plain, 1, 5_000_100)], NOW, scanner(5_000_100, logs), watch, () => 0));
   assert.equal(v2.accepted, true, String((v2 as { code?: string }).code));
   assert.equal((v2 as { block: bigint }).block, 5_000_100n);
+});
+
+// Card evm-quote-warm-from-the-coin-page: the coin page's warm quotes the coin before any amount is typed, so the tap's
+// quote is a token's second, at another amount. Its kept reads (PLANS) and kept fits (FITS) were made at the warm's
+// amount: a route's quote at amountIn and twice it, and its swap fit, read again at the same calldata only. At
+// 2a4ac7715 none of those was the tap's own read, so the tap still took the X round and the fits round after its first.
+// Now the kept reads and fits are made again at the tap's amount, and the tap takes one round, deciding as a cold
+// quote of that amount does. Rounds are counted on provider 0, as RX counts them.
+test("WA a warm quote at one amount leaves the token's next quote at another amount one round of reads, with the cold quote's verdict", async () => {
+  const token = "0x000000000000000000000000000000000fa57a0a";
+  const { pools, logs } = warmCase(token, xAt(0x3d00));
+  const plain = pools.filter((p) => p.key.hooks !== UNPINNED);
+  const tap = { ...warmReq(token), amountIn: 3n * AMOUNT };
+  // the tap's amount quoted cold on a device of its own (no plan, no fits): the verdict the warm one must reach
+  quoteMod.evmQuoteWarmReset();
+  const cold = await verdict(evmPoolBuyQuoteWith(tap, [chain(plain, 0), chain(plain, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0));
+  assert.equal(cold.accepted, true, String((cold as { code?: string }).code));
+  quoteMod.evmQuoteWarmReset();
+  let rounds = 0;
+  let open = 0;
+  let counting = false;
+  const counted = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const reads = counting && calls.some((c) => c.method === "eth_call");
+    if (reads && open++ === 0) rounds++;
+    try {
+      await new Promise((go) => setTimeout(go, 5));
+      return await rpc(calls);
+    } finally {
+      if (reads) open--;
+    }
+  };
+  const rpcs = [counted(chain(plain, 0)), chain(plain, 1)];
+  const watch = quoteMod.evmHeadWatch(rpcs, 50n, () => NOW, false, () => 0);
+  // the warm: the coin quoted at AMOUNT
+  const warm = await verdict(evmPoolBuyQuoteWith(warmReq(token), rpcs, NOW, scanner(5_000_000, logs), watch, () => 0));
+  assert.equal(warm.accepted, true, String((warm as { code?: string }).code));
+  counting = true;
+  const v = await verdict(evmPoolBuyQuoteWith(tap, rpcs, NOW, scanner(5_000_000, logs), watch, () => 0));
+  assert.deepEqual(v, cold);
+  assert.equal(rounds, 1, `${rounds} rounds of reads after the warm`);
 });
 
 // ------------------------------------------------------------------ the providers (card evm-quote-warm-round)
