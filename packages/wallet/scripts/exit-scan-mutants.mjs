@@ -25,7 +25,8 @@ const PICK = [
   "        treeHas(commitment, spend.refundLeafIndex, `spend ${spend.index}'s refund note`);",
   "        put(rref, rP, { value: spend.refundValue, label: spend.refundLabel, commitment, leafIndex: spend.refundLeafIndex }, key);",
 ].join("\n");
-const MOVE = '    asDeposit({ kind: "move", l, j });\n';
+// asDeposit is a generator since the restore's walk yields for the seed: its calls are `yield*`
+const MOVE = '    yield* asDeposit({ kind: "move", l, j });\n';
 // the first leaf on R the pages give: a deposit row on R before the spend row's own refund
 const FIRST_ON_R = [
   "        const d = byP.get(rP);",
@@ -42,7 +43,7 @@ const M = [
   ["a deposit row on rP of the refund's value taken as the refund", [[PICK, SAME_VALUE_ON_R]]],
   ["refund_pending taken as settled, from the leaf on R", [[SETTLED, '      if (spend.status === "settled" || (spend.status === "refund_pending" && byP.has(rP))) {\n'], [PICK, FIRST_ON_R]]],
   ["a refund on a precommitment other than rP taken", [[STOP, ""], [PICK, PICK.replaceAll("rP", "spend.refundPrecommitment")]]],
-  ["a deposit row on R taken as a deposit-kind note", [[MOVE, `    asDeposit(rref);\n${MOVE}`]]],
+  ["a deposit row on R taken as a deposit-kind note", [[MOVE, `    yield* asDeposit(rref);\n${MOVE}`]]],
 ];
 
 const src = readFileSync(F, "utf8");
