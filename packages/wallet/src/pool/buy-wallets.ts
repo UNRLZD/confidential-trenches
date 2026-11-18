@@ -367,7 +367,7 @@ function transportOf(e: unknown): SolanaRpcTransportError | null {
 
 // ---------- transport ----------
 /** One JSON-RPC call: resolves the call's `result`. */
-export type JsonRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
+export type JsonRpc = (method: string, params: readonly unknown[], signal?: AbortSignal) => Promise<unknown>;
 /** A call whose failure keeps only its JSON-RPC code or HTTP status: the provider's text never reaches an error. */
 class RpcFailed extends Error {
   readonly code: string | undefined;
@@ -392,7 +392,7 @@ async function call(a: Asker, method: string, params: readonly unknown[], signal
   if (signal !== undefined) stopOf.set(params, signal);
   const sentIn = a.gate.epoch();
   try {
-    return await a.rpc(method, params);
+    return await a.rpc(method, params, signal);
   } catch (e) {
     // only a throttle reaches the gate here; the pause goes back to none once a whole round goes through (the reader's
     // answered), never on one call's answer: a provider that throttles one method answers the others
@@ -634,7 +634,7 @@ const publicHoldings = new WeakMap<Route, SolanaRpc>();
 export function solanaHoldingsAt(url: string, turn: "trade" | "pass" = "pass"): HoldingsReader {
   const r = holdingsRoute((fetch) => solanaJsonRpc(url, { fetch }), "url");
   let rpc = publicHoldings.get(r);
-  if (rpc === undefined) publicHoldings.set(r, (rpc = solanaPacedRpc((method, params) => r.rpc(method, params), HOLDINGS_PUBLIC_RPC_LIMIT)));
+  if (rpc === undefined) publicHoldings.set(r, (rpc = solanaPacedRpc((method, params, signal) => r.rpc(method, params, signal), HOLDINGS_PUBLIC_RPC_LIMIT)));
   return solanaHoldingsReader(rpc, { wait429: r.wait429, gate: r.gate, lane: r.lane, turn });
 }
 

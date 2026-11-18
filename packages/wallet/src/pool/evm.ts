@@ -2170,10 +2170,10 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         // (a one-event-a-call read's three calls) never holds the walk's next read behind calls no one waits for
         const gated = (r: EvmRpc): EvmRpc => {
           let last: Promise<unknown> = Promise.resolve();
-          const call = (method: string, params: readonly unknown[]): Promise<unknown> => {
+          const call = (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
             const go = last.then(() => {
               ac.signal.throwIfAborted();
-              return r(method, params);
+              return r(method, params, signal);
             });
             last = go.catch(() => {});
             return go;
