@@ -1585,10 +1585,16 @@ function storeMoved(e: WalletEvent): void {
 const CEREMONY_ENDS: ReadonlySet<string> = new Set(["cancelled", "no-prf", "error"]);
 let movedInStep = false;
 function landStored(): Promise<void> {
-  return run(async () => {
-    const s = await readSeedSettled();
-    if (s) return landed({ screen: "signed-in", seed: s });
-  }, false);
+  return run(async () => void (await landedStored()), false);
+}
+// The seed stored, landed on when there is one. A ceremony's end with no account reads it before it draws that end
+// (signIn): the other tab's channel event is a task of its own that a slow scheduler delivers after the end is drawn,
+// and "Cancelled" stood beside the account stored until it came (merge queue run 44258172994, 'cancelled' at 374 ms).
+async function landedStored(): Promise<boolean> {
+  const s = await readSeedSettled();
+  if (!s) return false;
+  await landed({ screen: "signed-in", seed: s });
+  return true;
 }
 // Another tab's sign out, heard on the shell's channel (storeMoved) or the store's own (open's onEvent), whichever comes
 // first, each a task of its own: every read of the account stops in the one task that hears it (card
@@ -1797,10 +1803,18 @@ async function signIn(ceremony: () => Promise<PasskeyOutcome>, create: boolean):
   // never replace a seed already stored here, and run no ceremony: sign out first (wallet.md:919)
   const had = await readSeed();
   if (had) return landed({ screen: "signed-in", seed: had });
-  const r = await ceremony();
+  // a sheet that ended with no account (refused, no PRF on Use passkey, or failed): a seed another tab stored while it
+  // was up is the account, read before that end is drawn (landedStored)
+  let r: PasskeyOutcome;
+  try {
+    r = await ceremony();
+  } catch (e) {
+    if (await landedStored()) return;
+    throw e;
+  }
   // ses.4: a random seed, and the backup screen in the same visit; insert-only, so another tab's seed stays
   if (r.kind === "no-prf" && create) return landed(await signInNoPrf(open));
-  if (r.kind !== "prf") return show(r.kind);
+  if (r.kind !== "prf") return void ((await landedStored()) || show(r.kind));
   // insert-only: when another tab stored a seed meanwhile, that one stays and is the account shown; the entropy is
   // zeroed on every path, an open that fails included (words.ts storeSeed)
   await landed(await signInPrf(open, r.entropy));
