@@ -142,3 +142,12 @@ test("the fit read's revert or out of gas is its answer; any other revert, anoth
   assert.deepEqual(refusalsOf({ ...r(fit(pool), reverted), status: 429, errors: [] }), [`429 [eth_blockNumber, eth_call ${pool}:${BUY_SWAP}]`], "the fit read's post answered 429");
   assert.deepEqual(refusalsOf({ ...r(fit(pool), reverted), status: undefined, failed: "net::ERR_FAILED", errors: [] }), [`failed net::ERR_FAILED [eth_blockNumber, eth_call ${pool}:${BUY_SWAP}]`], "the fit read's post that failed");
 });
+
+// card robinhood-reads-draw-no-revert's build (the check's --sign-dir, every other request live, 18 Nov 13:3xZ): PASS,
+// no refused answer on any host.
+test("recorded answer robinhoodNoRevertLocal (this card's SIGN_HOST build): PASS, no provider refusal", () => {
+  const v = judge(ANSWERS.robinhoodNoRevertLocal);
+  assert.equal(v.ok, true, v.lines.join("\n"));
+  assert.deepEqual(ANSWERS.robinhoodNoRevertLocal.refused, {});
+  assert.equal(ANSWERS.robinhoodNoRevertLocal.signDir, "local build");
+});
