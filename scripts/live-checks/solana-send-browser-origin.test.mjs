@@ -9,9 +9,11 @@
 // Planted on good: a send path's preflight or answer unreadable by the page, a 429 (INCONCLUSIVE, never PASS).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { JITO, judge, REFUSED, RPC, SENDER } from "./solana-send-browser-origin.mjs";
-import { SOLANA_JITO_TRANSACTIONS_URL, SOLANA_PUBLIC_RPC_URL, SOLANA_SENDER_FAST_URL } from "../../packages/kit/src/trade/solana/send.ts";
+import { SOLANA_JITO_TRANSACTIONS_URL, SOLANA_PUBLIC_RPC_URL, SOLANA_SENDER_FAST_URL } from "../../packages/kit/src/index.ts";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./solana-send-browser-origin.answers.json", import.meta.url), "utf8"));
 const { good: GOOD, recorded: RECORDED, bad: BAD } = ANSWERS;
@@ -23,7 +25,7 @@ test("the check's send paths are the kit's, and its public path the kit's defaul
 });
 
 test("good is recorded with the committed _headers' connect-src, and nothing else changed", () => {
-  const committed = connectOf(/^\/\*\n(?: {2}[^\n]*\n)*? {2}Content-Security-Policy: ([^\n]*)/m.exec(readFileSync(new URL("../../packages/signpage/public/_headers", import.meta.url), "utf8"))[1]);
+  const committed = connectOf(/^\/\*\n(?: {2}[^\n]*\n)*? {2}Content-Security-Policy: ([^\n]*)/m.exec(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage/public/_headers"), "utf8"))[1]);
   assert.deepEqual(GOOD, { ...RECORDED, csp: RECORDED.csp.replace(connectOf(RECORDED.csp), committed) });
 });
 
