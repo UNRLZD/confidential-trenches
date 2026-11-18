@@ -1,0 +1,20 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage index.html and app.js built at card/restore-shows-a-note-on-a-planned-index (build-app.mjs --out)",
+    "bad": "SIGN_HOST as served 18 Nov 04:57Z (release before this card): no quoted mark, no take: FAIL"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qhSjLGEImF3cXknIWLTGH9jvl1ZpZqay9Fz2vu2KRdwb2ruu7/wUnmb+yO5ZUjC9\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-qhSjLGEImF3cXknIWLTGH9jvl1ZpZqay9Fz2vu2KRdwb2ruu7/wUnmb+yO5ZUjC9",
+    "store": true,
+    "marks": true,
+    "take": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-iyJCJRY07riLD5WionVZDn5KmsI6tTXzapEMw2Rk2QZRwy9luKQ3jL7Jzk7PFO3P\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-iyJCJRY07riLD5WionVZDn5KmsI6tTXzapEMw2Rk2QZRwy9luKQ3jL7Jzk7PFO3P",
+    "store": false,
+    "marks": false,
+    "take": false
+  }
+}

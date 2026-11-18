@@ -1654,6 +1654,36 @@ test("E5: an index the page planned at the sign-in that the walk finds landed (t
   assert.deepEqual(await listed(w.store), [`deposit/${SOL_SCOPE}/${at} UNSPENT`]);
 });
 
+test("Q4 (card restore-shows-a-note-on-a-planned-index): step 5 reads the index the page planned as used: TAKEN when no address or quote of it left, else PLANNED, and a later walk that finds it landed shows it", async () => {
+  for (const quoted of [false, true]) {
+    const base = await world({ pools: () => SOL_ONLY });
+    const ns = await openNoteStore(base.store);
+    let at: number, P: bigint;
+    try {
+      const n = await ns.planDeposit(SOL_SCOPE, (ref) => noteSecrets(SEED(), ref).precommitment);
+      at = (n.ref as { i: number }).i;
+      P = n.precommitment;
+      // the deposit sheet showed its address (pool.address marks it, src/pool-deposit-address.ts)
+      if (quoted) await ns.markQuoted(SOL_SCOPE, at);
+    } finally {
+      ns.close();
+    }
+    // its id used on NEAR (a lost store's quote, or this device's own), U_X empty
+    const near = nearOf(new Map<string, As>([[idOf(SOL_SCOPE, at), "used_storage"]]));
+    const w = await world({ store: async () => base.store, pools: () => SOL_ONLY, solana: emptyWalk, ids: near.ids, ux: () => uxOf(new Map()).reads });
+    assert.equal(await whole(w), "done", JSON.stringify(w.steps));
+    assert.deepEqual(near.found.get(SOL_SCOPE)!.lanes.find((x) => x.lane === base.store.lane)!.used, [at], "the planned index read used");
+    assert.deepEqual(await listed(base.store), [`deposit/${SOL_SCOPE}/${at} ${quoted ? "PLANNED" : "TAKEN"}`], `quoted ${quoted}`);
+    // the send to it lands (its precommitment the seed's): a walk that finds it shows it only where it stayed PLANNED
+    const leaf = { value: 7_000n, label: 9n, commitment: noteCommitment(7_000n, 9n, P), leafIndex: 3n };
+    const x = await world({ store: async () => base.store, pools: () => SOL_ONLY, solana: (async () => ({ notes: [{ ref: { kind: "deposit", s: SOL_SCOPE, i: at }, scope: SOL_SCOPE, precommitment: P, leaf, state: "UNSPENT" }], spends: [] })) as never });
+    // a load's walk (resume): a TAKEN note is not an empty store, so no run starts by itself
+    assert.equal(await x.r.resume(), "done");
+    await x.r.idle();
+    assert.deepEqual(await listed(base.store), [`deposit/${SOL_SCOPE}/${at} ${quoted ? "UNSPENT" : "TAKEN"}`], `quoted ${quoted}: shown`);
+  }
+});
+
 test("E2: a try's retries stop at the run's seed gone: a sign out in the pause, or other words signed in before the next try, and no id is read after it", { timeout: 10_000 }, async () => {
   // signed out in this tab during the pause: the pause ends, nothing more is read
   {

@@ -18,7 +18,7 @@ const SAVED: DepositPublic = { status: { source: "code", code_saved: true }, dep
 const GOOD = { deposit_address: ADDRESS, origin_asset: SOL_USDC, amount_in: "25", min_amount_out: "24.74208", deadline: new Date(NOW + 30 * 60_000 + H72).toISOString(), time_estimate_s: 20 };
 
 /** A page whose deposit.quote reads `reads` in turn (the last one again once they run out) and asks the mock `mocks` in turn. */
-function page(o: { reads?: (DepositPublic | null)[]; mocks?: Mock[]; scope?: bigint | null; named?: () => Promise<unknown> } = {}) {
+function page(o: { reads?: (DepositPublic | null)[]; mocks?: Mock[]; scope?: bigint | null; named?: () => Promise<unknown>; quoted?: DepositWireDeps["quoted"] } = {}) {
   const reads = o.reads ?? [SAVED];
   let r = 0;
   const mocks = (o.mocks ?? [{}]).map((m) => h1c(m));
@@ -30,6 +30,7 @@ function page(o: { reads?: (DepositPublic | null)[]; mocks?: Mock[]; scope?: big
     return m.fetch(url, init);
   }) as typeof fetch;
   const deps: DepositWireDeps = {
+    quoted: o.quoted ?? (async () => {}),
     scope: () => (o.scope === undefined ? SCOPE : o.scope),
     read: async () => reads[Math.min(r++, reads.length - 1)] ?? null,
     named: o.named,
@@ -63,6 +64,26 @@ test("ok: the checked address, to U from the public record, as recipient and ref
   await p.idle();
   assert.deepEqual(p.posted.at(-1), p.posted.at(-2));
   assert.equal(p.sent.length, 1);
+});
+
+test("Q3 (card restore-shows-a-note-on-a-planned-index): U's index is marked quoted before the quote leaves; a mark refused sends nothing", async () => {
+  const marks: { scope: bigint; index: number; sentBefore: number }[] = [];
+  let sent: unknown[] = [];
+  const p = page({ quoted: async (scope, index) => void marks.push({ scope, index, sentBefore: sent.length }) });
+  sent = p.sent;
+  const q = quote();
+  p.send(q);
+  await p.idle();
+  assert.deepEqual(p.posted.at(-1), { v: 1, id: q.id, ok: true, result: GOOD });
+  assert.deepEqual(marks, [{ scope: SCOPE, index: 3, sentBefore: 0 }]);
+  assert.equal(p.sent.length, 1);
+  // the index TAKEN since the record was read: the mark is refused, down, and no quote leaves
+  const x = page({ quoted: async () => { throw new Error("deposit index 3 of scope 7 is TAKEN"); } });
+  const r = quote();
+  x.send(r);
+  await x.idle();
+  assert.deepEqual(x.posted.at(-1), refused(r.id, "down"));
+  assert.equal(x.sent.length, 0);
 });
 
 test("above_max: over the beta cap, refused before anything is sent", async () => {
@@ -170,6 +191,7 @@ test("card pool-read-down: a records read that throws answers down, not kept for
   let throws = true;
   let reads = 0;
   const deps: DepositWireDeps = {
+    quoted: async () => {},
     checked: async () => {},
     scope: () => SCOPE,
     read: async () => {
@@ -203,6 +225,7 @@ test("a sign out in deposit.quote's re-ask pause: the host sends no second quote
   const stop = new AbortController();
   let asks = 0;
   const deps: DepositWireDeps = {
+    quoted: async () => {},
     scope: () => SCOPE,
     read: async () => SAVED,
     fetch: (async () => {
@@ -228,6 +251,7 @@ test("a sign out during deposit.quote's records read: no quote leaves, the answe
   const gate = new Promise<void>((ok) => (release = ok));
   let reading = false;
   const deps: DepositWireDeps = {
+    quoted: async () => {},
     scope: () => SCOPE,
     read: async () => ((reading = true), await gate, SAVED),
     fetch: (async () => (asks++, new Response("{}", { status: 503, headers: { "content-type": "application/json" } }))) as typeof fetch,
@@ -260,6 +284,7 @@ test("a sign out at each of deposit.quote's waits: nothing after it runs (no rec
     };
     const mock = h1c({});
     const d = depositQuoteHost({
+      quoted: async () => {},
       scope: () => SCOPE,
       named: () => hold("named"),
       read: async () => (await hold(steps.includes("read") ? "read again" : "read"), SAVED),
