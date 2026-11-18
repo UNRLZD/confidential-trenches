@@ -506,7 +506,8 @@ test("the kind: a read that runs, its answer once its wait settles; a throw is d
 
 test("the page answers it (src/main.ts): the kind on the trades' paced pair as background reads, the held positions, every pool trade counted from its tap to its run's end, the lanes", () => {
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
-  assert.match(main, /"pool\.sell\.dry": \(params\) => poolSellDry\(params\),/);
+  // joined with a running sell dry of the same params (card dry-ask-joins-the-running-quote, test/dry-join.test.ts)
+  assert.match(main, /"pool\.sell\.dry": joinRunning\(\(params\) => poolSellDry\(params\)\),/);
   assert.match(main, /PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)/, "the trades' own paced pair, each read a background one on its host's lane");
   assert.match(main, /positions: \(\) => testnet\?\.positionsNow\(\) \?\? null, pin: \(\) => PAGE_SOL_PIN \?\? null,/, "the held positions: no pass, no seed read, no write; the page's pool");
   assert.match(main, /bought: \(token\) => testnet\?\.boughtSince\(token\) \?\? Promise\.resolve\(undefined\),/, "the Ws bought since the pass, as the sale finds them");

@@ -106,6 +106,7 @@ import { dress } from "./sheet.ts";
 import { drawBackdrop, drawSealedGround, groundLogo } from "./backdrop.ts";
 import { GROUND_LOGO_SVG } from "./ground-logo.ts";
 import { SEALED } from "./frame-cover.ts";
+import { joinRunning } from "./dry-join.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { parseAmount, vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm, type GivenWithdraw } from "./withdraw/form.ts";
@@ -950,9 +951,12 @@ else {
       // no pin, mainnet until its pools deploy, refuses every one not_allowed and makes no read); a sell's decimals read
       // on two providers
       ...poolKindMap,
-      "pool.sell.dry": (params) => poolSellDry(params),
+      // each dry joins a running one with exactly its params (card dry-ask-joins-the-running-quote, src/dry-join.ts): the
+      // box's ask again after the client's 10 s gets the running quote's answer, never a second quote on the same reads;
+      // here, above the routing, so every chain joins in one place
+      "pool.sell.dry": joinRunning((params) => poolSellDry(params)),
       // with_cash (card one-balance-buys-on-every-chain): a tap's most with Cash moved first, on Solana
-      "pool.buy.dry": (params) => dryWithCash(params),
+      "pool.buy.dry": joinRunning((params) => dryWithCash(params)),
       // a move between Cash and a pool (card one-balance-buys-on-every-chain): the same mover a buy's shortfall takes
       ...(prover && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null ? poolMoveKinds(cashMoverNow, toCashNow) : {}),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
