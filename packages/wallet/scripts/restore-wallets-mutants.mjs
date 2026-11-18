@@ -101,7 +101,7 @@ const M = [
   ["review R1: a restore's pass taken on other provider objects", IDR, [["own[0] === on.rpcs[0] && own[1] === on.rpcs[1]", "true"]], ID, "owned steps take no reader"],
   ["review R1: afterRestore takes a pass openRestorePass never opened", WAL, [["if (!isRestorePass(restored)) throw", "if (false) throw"]], RW, "step 7"],
   ["review R1: the re-reads take a plan of another height", AFT, [["if (plan?.after !== restored.h) throw", "if (false) throw"]], ID, "owned steps take no reader"],
-  ["review R1: the re-reads read on the restore's pass", AFT, [["const read = await nearIdReader(network, rpcs, pass,", "const read = await nearIdReader(network, rpcs, restored,"]], ID, "owned steps take no reader"],
+  ["review R1: the re-reads read on the restore's pass", AFT, [["const read = await nearIdHeldReader(network, rpcs, pass,", "const read = await nearIdHeldReader(network, rpcs, restored,"]], ID, "owned steps take no reader"],
   ["review R1: the second scan's ids read on the restore's pass", AFT, [["notes, await nearIdReader(network, rpcs, pass,", "notes, await nearIdReader(network, rpcs, restored,"]], ID, "second scan:"],
   ["review R1: the second scan's arms read on the restore's pass", AFT, [["await nearBalanceReader(network, rpcs, pass,", "await nearBalanceReader(network, rpcs, restored,"]], ID, "second scan:"],
   ["review R1: the re-reads' clock the higher final", AFT, [["if (Math.min(...now.timesMs) >= restoreMs", "if (Math.max(...now.timesMs) >= restoreMs"]], ID, "step 7's re-reads"],
@@ -138,6 +138,17 @@ const M = [
   ["planDeposit counts a found note as the scope's unfunded index", STORE, [[' && n.state === "PLANNED" && !found.has(refKey(n.ref)));', ' && n.state === "PLANNED");']], FOUND, "notes-plan-at-restored-index"],
   ["the restore names a U_X with no note, never writes its note", PRS, [["has.has(f.i) || ((amounts) => own.found(w.scope, f.i, amounts))", "has.has(f.i)"]], PRT, "notes-plan-at-restored-index"],
   ["carryUx deposits from a U_X with no note written", PRS, [["        await noted([a, b]);", "        void 0;"]], PRT, "notes-plan-at-restored-index"],
+  // card vault-late-send-carried: each refusal of a late send's amount (after.ts lateFound) and the page's vault carry
+  ["late send: two providers apart taken", AFT, [["    if (a !== b) out.push", "    if (false) out.push"]], ID, "step 7's late send"],
+  ["late send: a failed read taken as nothing held", AFT, [['if ("error" in x) return { found: null, why: [{ text: `its read failed (${x.error}): read again`, retry: true }] };', 'if ("error" in x) return { found: null, why: [] };']], ID, "step 7's late send"],
+  ["late send: an intents.near asset taken as the token", AFT, [["    else if (asset !== token) out.push", "    else if (false) out.push"]], ID, "step 7's late send"],
+  ["the restore reads no vault deposit id", PRS, [["  if (vault !== null)\n    await readVaultLate(", "  if (false)\n    await readVaultLate("]], PRT, "vault-late-send-carried"],
+  ["a vault late send carried with no note written", PRS, [["        await own.found(v.scope, x.i, found);", "        void 0;"]], PRT, "vault-late-send-carried"],
+  ["a vault late send taken on one provider's read", PRS, [["const { found, why } = lateFound(x, token);", 'const { found, why } = "error" in x ? { found: null, why: [] } : { found: x.held.find((h) => h.asset === token)?.amounts ?? null, why: [] };']], PRT, "vault-late-send-carried"],
+  ["a vault late send under MIN_DEPOSIT carried", PRS, [["found[0] < VAULT_CONSTANTS.MIN_DEPOSIT", "found[0] < 0n"]], PRT, "vault-late-send-carried"],
+  ["a vault carry refused never named", PRS, [["    if (c !== null) (c.retry ? out.held : out.named).push(`${at} ${c.why}`);", "    void c;"]], PRT, "vault-late-send-carried"],
+  ["step 7's window ended at the first answered try", PRS, [["          if (owed) stays = true;", "          void owed;"]], PRT, "vault-late-send-carried"],
+  ["step 7's window restarted on each load", PRS, [["              if (o.late !== undefined) return void (first = o.late);\n", ""]], PRT, "vault-late-send-carried"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
 const only = process.argv[2];

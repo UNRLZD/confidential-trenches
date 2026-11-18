@@ -30253,5 +30253,163 @@
     }
    }
   ]
+ },
+ "pumpSymbol": {
+  "note": "The two rows live job 130243771314 (11 Nov ~01:00Z, app live run after a deploy) failed on each width: \"new/9DXPjsbi: raw id \\\"pump.fun\\\" drawn as text | graduating/9DXPjsbi: raw id \\\"pump.fun\\\" drawn as text\", the only fault on 355 phone rows and 354 desktop rows, so each drew its pump.fun badge (with its hover and loaded logo) and its Solana mark. The job's log keeps only those lines, so the rows are rebuilt: the token, its symbol \"pump.fun\", its name \"pump factory\" and its launchpad \"pump.fun\" are Jupiter's row for it (GET lite-api.jup.ag/tokens/v2/search?query=pump%20factory, read 2026-11-18 03:2xZ, created 2026-11-11T00:57:26Z); each row's other words are stand-ins in the shape the good answer's rows draw (phone: symbol, name, age, MC, dev, curve; desktop: curve, symbol, name, age, buys/sells, MC label, MC, V 5m).",
+  "url": "https://ct-app.unrealized.trade/discover",
+  "at": "2026-11-11T01:00:00.000Z",
+  "browser": "157.0.8103.50",
+  "loads": [
+   {
+    "width": "phone",
+    "path": "/discover",
+    "state": "ready",
+    "lists": {
+     "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+     "status": 200
+    },
+    "rows": [
+     {
+      "column": "new",
+      "addr": "9DXPjsbiDrHywh9cV4SrH1bJr7DT2zKExkjMw1Twpump",
+      "href": "/token/solana/9DXPjsbiDrHywh9cV4SrH1bJr7DT2zKExkjMw1Twpump",
+      "pad": {
+       "id": "pump.fun",
+       "title": "pump.fun",
+       "loaded": true
+      },
+      "chain": {
+       "id": "solana",
+       "title": "Solana",
+       "loaded": true
+      },
+      "texts": [
+       "pump.fun",
+       "pump factory",
+       "2m",
+       "$4.10K",
+       "dev 0.0%",
+       "3%"
+      ],
+      "clipped": [],
+      "served": {
+       "launchpad": "pump.fun",
+       "chain": "solana",
+       "symbol": "pump.fun",
+       "name": "pump factory"
+      }
+     },
+     {
+      "column": "graduating",
+      "addr": "9DXPjsbiDrHywh9cV4SrH1bJr7DT2zKExkjMw1Twpump",
+      "href": "/token/solana/9DXPjsbiDrHywh9cV4SrH1bJr7DT2zKExkjMw1Twpump",
+      "pad": {
+       "id": "pump.fun",
+       "title": "pump.fun",
+       "loaded": true
+      },
+      "chain": {
+       "id": "solana",
+       "title": "Solana",
+       "loaded": true
+      },
+      "texts": [
+       "pump.fun",
+       "pump factory",
+       "2m",
+       "$4.10K",
+       "dev 0.0%",
+       "3%"
+      ],
+      "clipped": [],
+      "served": {
+       "launchpad": "pump.fun",
+       "chain": "solana",
+       "symbol": "pump.fun",
+       "name": "pump factory"
+      }
+     }
+    ],
+    "shot": "phone-discover.png",
+    "pending": []
+   },
+   {
+    "width": "desktop",
+    "path": "/discover",
+    "state": "ready",
+    "lists": {
+     "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+     "status": 200
+    },
+    "rows": [
+     {
+      "column": "new",
+      "addr": "9DXPjsbiDrHywh9cV4SrH1bJr7DT2zKExkjMw1Twpump",
+      "href": "/token/solana/9DXPjsbiDrHywh9cV4SrH1bJr7DT2zKExkjMw1Twpump",
+      "pad": {
+       "id": "pump.fun",
+       "title": "pump.fun",
+       "loaded": true
+      },
+      "chain": {
+       "id": "solana",
+       "title": "Solana",
+       "loaded": true
+      },
+      "texts": [
+       "3%",
+       "pump.fun",
+       "pump factory",
+       "2m",
+       "9/1",
+       "MC",
+       "$4.10K",
+       "V 5m"
+      ],
+      "clipped": [],
+      "served": {
+       "launchpad": "pump.fun",
+       "chain": "solana",
+       "symbol": "pump.fun",
+       "name": "pump factory"
+      }
+     },
+     {
+      "column": "graduating",
+      "addr": "9DXPjsbiDrHywh9cV4SrH1bJr7DT2zKExkjMw1Twpump",
+      "href": "/token/solana/9DXPjsbiDrHywh9cV4SrH1bJr7DT2zKExkjMw1Twpump",
+      "pad": {
+       "id": "pump.fun",
+       "title": "pump.fun",
+       "loaded": true
+      },
+      "chain": {
+       "id": "solana",
+       "title": "Solana",
+       "loaded": true
+      },
+      "texts": [
+       "3%",
+       "pump.fun",
+       "pump factory",
+       "2m",
+       "9/1",
+       "MC",
+       "$4.10K",
+       "V 5m"
+      ],
+      "clipped": [],
+      "served": {
+       "launchpad": "pump.fun",
+       "chain": "solana",
+       "symbol": "pump.fun",
+       "name": "pump factory"
+      }
+     }
+    ],
+    "shot": "desktop-discover.png",
+    "pending": []
+   }
+  ]
  }
 }

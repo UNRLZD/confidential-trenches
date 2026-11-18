@@ -31,7 +31,8 @@ export const SIGN = "https://confidential.unrealized.trade";
 /** The seat as the page names it (NEAR_NETWORKS.mainnet.seat; the test holds the two equal), and dRPC's NEAR URL. */
 export const SEAT = "https://ct-api.unrealized.trade/v1/rpc/near?keyed=only";
 export const DRPC = "https://near.drpc.org";
-/** One page's busiest 10 s on the seat (RPC_PAGE_NEED near; the test holds the two equal). */
+/** A buy's spread reads on the seat in one 10 s window, inside the helper's share for one page (RPC_PAGE_NEED near, 90 since
+ *  card near-seat-pace-fits-one-quote; the test holds it inside). */
 export const WINDOW = 30;
 export const WINDOW_MS = 10_000;
 const INTO_WINDOW_MS = 1_000;
