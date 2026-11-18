@@ -2399,7 +2399,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // each followed buy's end, from its note as the pass left it: still RESERVED by its attempt, not known yet; out of it
   // and not SPENT, freed (both RPCs read its transaction past its last height, or its deadline, with no spent mark: it
   // can never land), not_landed; SPENT, filled only once both RPCs read the spend as this attempt's (pool-spend.ts
-  // spendOwner, as the run's own spentBy), another's not_landed, a read that fails not known yet
+  // spendOwner, as the run's own spentBy), another's not_landed, a read that fails not known yet.
+  // On both seats at any time (card load-reads-name-no-w-to-the-public-seat): only this page's own buy that ended "sent"
+  // is followed, a trade in flight the user waits on; its end is the verdict the run itself would give, both seats'
+  // word, which one seat's never makes
   const followBuys = async (notes: NoteStore): Promise<void> => {
     for (const [id, b] of lateBuys) {
       const end = await lateBuyEnd(await notes.get(id).catch(() => undefined), b.r.attempt, async () => {
@@ -3066,7 +3069,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   const sell = (over.tradeKinds?.sell ?? poolSellKind)(() => sellHost(true));
   // the sells a closed or reloaded page left INCOMING: each settled by the run's own verdict rules, its ops record's
-  // stage written; under the seed's shared lock, as every pass that writes the store (a sign out waits for it)
+  // stage written; under the seed's shared lock, as every pass that writes the store (a sign out waits for it).
+  // On both seats at a load (card load-reads-name-no-w-to-the-public-seat): a sell in flight, its verdict (filled,
+  // refused, not landed: a not landed one's marks given back) both seats' word, as the run's own. The reads name its
+  // note's mark, the chain's height and, for a sell kept with no deposit back, its own signature; never a W's address
   const settleSells = async (): Promise<void> => {
     if (!locks) return;
     await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
@@ -3218,6 +3224,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // tabs at once send the same balance: the first to land leaves W at 0, and the other cannot pay its fee.
   // The ops are read once per page load (a crash leaves one only across a load), and again after this page's own run
   // left one owed, until none is.
+  // On both seats at a load, before any tap (card load-reads-name-no-w-to-the-public-seat): the user's withdraw in
+  // flight, its money on W; every read gates the send W signs, and that send goes to both seats itself, so the public
+  // seat learns W from the send whenever it goes. Held for a tap, the withdraw would not arrive until one
   const withdrawing = new Set<string>();
   let owedScan = true;
   // a finish that failed (a read, the send) is tried again after a wait that doubles, 2 s up to 60 s: the money is on
