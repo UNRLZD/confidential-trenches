@@ -192,6 +192,9 @@ test("card helper-listed-charts-own-reads: bars of ours with the history before 
   assert.deepEqual(gt, [], "no call while the window is full");
   await tm.run(T1 + WINDOW_MS);
   assert.equal(gt.length, 1, "the queued history read made its call");
+  // the helper's tick, as its timer runs it every TICK_MS (the rig has none): a book no tick read for a minute is behind
+  // the chain and its live chart says filling (card every-tape-and-chart-says-filling-behind-the-head, BEHIND_MAX)
+  await s.tick();
   const b = JSON.parse((await s.candles(ICNT, "1m", null, 500)).body);
   s.stop();
   assert.equal(b.src, "chain,geckoterminal");
