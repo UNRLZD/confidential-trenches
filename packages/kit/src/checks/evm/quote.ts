@@ -5263,7 +5263,8 @@ export const evmRpcHeldMs = (rpc: EvmRpc): number => {
 };
 /** Each JSON-RPC request's time limit (the NEAR client's RPC_TIMEOUT_MS and Solana's SOLANA_CALL_TIMEOUT_MS do the same). */
 export const EVM_RPC_TIMEOUT_MS = 10_000;
-/** A provider from a JSON-RPC URL: one POST per batch, answers matched to calls by id, at most `maxBytes` read;
+/** A provider from a JSON-RPC URL: one POST per batch (its parts, where the provider refused it for its size:
+ *  sizeRefusal, pace.ts evmBatchMost), answers matched to calls by id, at most `maxBytes` read;
  *  `later`: its posts are a background read's, which take their turn at the provider's pace after every trade's
  *  (pace.ts). */
 export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes = 1 << 20, timeoutMs = EVM_RPC_TIMEOUT_MS, later = false): EvmRpc {
