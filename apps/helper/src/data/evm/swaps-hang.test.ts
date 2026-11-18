@@ -117,6 +117,9 @@ test("card token-page-data-complete-and-fast: providers slower than the open's b
       const inBound = !past;
       clearTimeout(bound);
       await new Promise((go) => setTimeout(go, 60_000));
+      // the helper's tick, as its timer runs it every TICK_MS (the rig has none): a book no tick read for 60 s is behind
+      // the chain and answers filling (card base-tape-never-complete-behind-the-index, BEHIND_MAX)
+      await run.s.tick();
       const later = await run.s.trades(MAG, 50);
       const chartLater = await run.s.candles(MAG, "1m", null, 500);
       return { first, chart, inBound, later, chartLater };

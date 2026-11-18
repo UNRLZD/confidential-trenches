@@ -23,6 +23,10 @@ const POOL = "0x9306359433127c4f3be426f6faeb00a3c41f66db";
 const POOLS = { robinhood: { pool: POOL, from: 108_420_674 }, base: { pool: "0xaa080e74ec99cf5c684548c77ca145edfcf899cf", from: 54_325_671 } } as const;
 const TOPICS = [["0x1111111111111111111111111111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222222222222222222222222222"]];
 const hex = (n: number): string => `0x${n.toString(16)}`;
+/** A still clock: the caller's share is a fixed window on the helper's clock (limits.ts clientWindow), so on the
+ *  machine's clock a window's turn inside a test's loop clears the share and the 429s it asserts never come (PR 979's
+ *  merge queue run 44243609488: 32 answers of 200 where the 31st and 32nd were 429). */
+const STILL = (): number => 1_800_000_000_000;
 const logsBody = (id: number, from: string, to: string, address: string = POOL): string => JSON.stringify({ jsonrpc: "2.0", id, method: "eth_getLogs", params: [{ address, topics: TOPICS, fromBlock: from, toBlock: to }] });
 /** A cold walk as the page makes it: from the pool's deploy block, pages of 100,000, 200,000, 400,000 blocks, then
  *  800,000, the last clipped to the round's anchor (unique to the sign-in). */
@@ -53,7 +57,7 @@ function provider() {
 for (const chain of CHAINS) {
   test(`${chain}: one caller walks the pool's 8 finalized pages five times (40 reads, past its share of ${keyedBudget(chain).perClient}): every read answered, the provider asked each page once, the repeats from the cache`, async () => {
     const p = provider();
-    const r = createRpc(ENV, { fetch: p.fetch as never, log: () => undefined });
+    const r = createRpc(ENV, { fetch: p.fetch as never, now: STILL, log: () => undefined });
     const share = keyedBudget(chain).perClient;
     assert.ok(PAGES.length * 5 > share, "the walk asks more than one caller's share");
     const answers: { round: number; i: number; from: string; a: Awaited<ReturnType<typeof r.handle>> }[] = [];
@@ -76,7 +80,7 @@ for (const chain of CHAINS) {
 
   test(`${chain}: a range past the finalized head, or a tag, is never cached and counts in the caller's share as before`, async () => {
     const p = provider();
-    const r = createRpc(ENV, { fetch: p.fetch as never, log: () => undefined });
+    const r = createRpc(ENV, { fetch: p.fetch as never, now: STILL, log: () => undefined });
     const share = keyedBudget(chain).perClient;
     const unfinal = (id: number) => logsBody(id, hex(FINAL - 10), hex(FINAL + 5));
     const tagged = (id: number) => logsBody(id, hex(FINAL - 10), "latest");
@@ -93,7 +97,7 @@ for (const chain of CHAINS) {
 
   test(`${chain}: a finalized page asked without ?keyed=only counts as before`, async () => {
     const p = provider();
-    const r = createRpc(ENV, { fetch: p.fetch as never, log: () => undefined });
+    const r = createRpc(ENV, { fetch: p.fetch as never, now: STILL, log: () => undefined });
     const [from, to] = PAGES[0]!;
     for (let i = 0; i < 3; i++) {
       const a = await r.handle(chain, "application/json", logsBody(i, from, to), "203.0.113.9", false, false);
@@ -108,7 +112,7 @@ const blockNumber = (id: number): string => JSON.stringify({ jsonrpc: "2.0", id,
 for (const chain of CHAINS) {
   test(`${chain}: a cold walk (the cache empty, the helper just started) by a caller whose share is spent: every page of its pool's finalized history answered, the clipped last one too, each sent once, none counted in its share`, async () => {
     const p = provider();
-    const r = createRpc(ENV, { fetch: p.fetch as never, log: () => undefined });
+    const r = createRpc(ENV, { fetch: p.fetch as never, now: STILL, log: () => undefined });
     const share = keyedBudget(chain).perClient;
     const me = "203.0.113.20";
     for (let i = 0; i < share; i++) assert.equal((await r.handle(chain, "application/json", blockNumber(i), me, false, true)).status, 200);
@@ -128,7 +132,7 @@ for (const chain of CHAINS) {
 
   test(`${chain}: the cold walk's allowance is bounded: another address's finalized pages count in the caller's share as before, and the pool's past the chain's page share in one window draw the caller's 429`, async () => {
     const p = provider();
-    const r = createRpc(ENV, { fetch: p.fetch as never, log: () => undefined });
+    const r = createRpc(ENV, { fetch: p.fetch as never, now: STILL, log: () => undefined });
     const share = keyedBudget(chain).perClient;
     const page = (i: number, address: string) => logsBody(i, hex(100_000_000 + i * 10), hex(100_000_000 + i * 10 + 9), address);
     const other: number[] = [];

@@ -482,6 +482,19 @@ export const TICK_MS = 1_000;
 export const HEAD_SHARE_MS = TICK_MS;
 /** A book not read for this long starts a read when asked; it is served as held meanwhile, dated by its last read. */
 export const STALE_MS = 60_000;
+/** How far behind a book's tape may be and still be served as complete (card base-tape-never-complete-behind-the-index):
+ *  more than `blocks` behind the newest head the helper has read, or its head read more than `ms` ago, and the tape
+ *  answers `filling` with no `whole_ms`, never a complete list. Live run 44228233209 (18 Nov 03:21Z) read Base
+ *  0x60858a4b's tape served at 03:21:36.95Z without swap 0x0323e3ae in block 58908377 (03:20:51Z), its newest trade in
+ *  block 58908200, the providers' head 58908608: the book had applied a head read some 46 s before, behind a paced
+ *  queue (11 posts, pace 17290 ms). [design: 15 s on both chains, past the follow loop's real cadence: a book ticks
+ *  every TICK_MS, and the deployed helper's held tape applied at gaps of p50 3.7 s, p95 7.5 s on Base and p50 2.0 s,
+ *  p95 2.3 s on Robinhood, one book open (60 reads 500 ms apart from the Mac, 18 Nov 04:4xZ), while a tick of 12 books
+ *  filling took 5.0 to 13.1 s, median 8.8 s (swaps-back-resume.test.ts TICK_EVERY_MS; at a 5 s bound its 12 tapes
+ *  never settled). Base: 75 of its 200 ms blocks (lists.ts BLOCK_CLOCK), under index-evm-swaps's 120-block (24 s)
+ *  margin with 9 s for its own reads. Robinhood: 150 of its ~100 ms blocks (INDEX_SLACK's 500 blocks in 50 s), three
+ *  INDEX_FOLLOW_MS; index-evm-swaps-2's 60-block (6 s) margin is under the loaded tick itself.] */
+export const BEHIND_MAX: Readonly<Record<EvmChain, { blocks: number; ms: number }>> = { base: { blocks: 75, ms: 15_000 }, robinhood: { blocks: 150, ms: 15_000 } };
 export const OPEN_MAX = 40;
 /** The tf the token page's chart opens on (apps/terminal/src/screens/token/candles.ts DEFAULT_TF): the listed charts
  *  warm() holds ahead. */
@@ -1072,6 +1085,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // shared head, the ETH price read) is lifted to foreground by the join (join), the standard priority inheritance.
   // A lane also counts the ms its reads waited for a pace or a queue, for the answer's Server-Timing (laneTiming).
   type Lane = { fg: boolean; paceMs: number; slotMs: number; posts: number; joined?: Set<Lane> };
+  /** An agreed head (agreedHead): its block, that block's time (s), when it was read (now(), ms), the providers that have it. */
+  type Head = { n: number; t: number; at: number; with: string[] };
   const lanes = new AsyncLocalStorage<Lane>();
   const newLane = (fg: boolean): Lane => ({ fg, paceMs: 0, slotMs: 0, posts: 0 });
   /** The lane a read runs in now: none set is background. */
@@ -1347,8 +1362,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // one agreed head per HEAD_SHARE_MS, shared by every first read and discovery of the chain that asks within it (card
   // helper-robinhood-capacity fold 3: a dozen cold tapes read a dozen heads, two or three providers each); a tick
   // (`fresh`) always reads its own, the newest, and leaves it for them
-  let headShared: { at: number; p: Promise<{ n: number; t: number; with: string[] } | null>; lane: Lane } | null = null;
-  function agreedHead(fresh = false): Promise<{ n: number; t: number; with: string[] } | null> {
+  let headShared: { at: number; p: Promise<Head | null>; lane: Lane } | null = null;
+  function agreedHead(fresh = false): Promise<Head | null> {
     if (!fresh && headShared !== null && now() - headShared.at < HEAD_SHARE_MS) return join(headShared.lane), headShared.p;
     const lane = sharedLane();
     const p = lanes.run(lane, agreedHeadNow);
@@ -1360,7 +1375,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     });
     return p;
   }
-  async function agreedHeadNow(): Promise<{ n: number; t: number; with: string[] } | null> {
+  /** The newest agreed head any reader of the chain has read, and when (behind): a book behind it by more than
+   *  BEHIND_MAX's blocks is no complete tape. */
+  let newest: { n: number; at: number } | null = null;
+  async function agreedHeadNow(): Promise<Head | null> {
     const heads = new Map<string, { n: number; t: number }>();
     const read = async (urls: string[], patient = false) => {
       await Promise.all(
@@ -1405,7 +1423,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (sorted.length < 2) return null;
     const agreed = sorted[1]![1].n; // the newest block at least two providers have
     const withIt = [...heads].filter(([u, h]) => h.n >= agreed && !headerTimed.has(u)).map(([u]) => u);
-    return { n: agreed, t: sorted[1]![1].t, with: withIt };
+    const at = now();
+    if (newest === null || agreed > newest.n) newest = { n: agreed, at };
+    return { n: agreed, t: sorted[1]![1].t, at, with: withIt };
   }
 
   /** The providers to ask, in order (ranked): those of `urls` not held, then any other of ours alike (a provider held
@@ -1656,7 +1676,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** `hint`: taken on the list's word (fromHint), the chain's confirmation that it is the token's, not yet the
    *  discovery's that it is the main pool. */
   /** `swaps`: the discovery's count of its pool's swaps over the blocks it read (findPool), none for a list's pool. */
-  type Found = { pool: Pool; decimals: number; seed?: { from: number; to: number; headN: number; logs: Log[] }; hint?: string; swaps?: number };
+  type Found = { pool: Pool; decimals: number; seed?: { from: number; to: number; head: Head; logs: Log[] }; hint?: string; swaps?: number };
   // a token's main pool, kept; `hint` set while it is the list's pool the discovery has not yet decided on (verify)
   const pools = new Map<string, { found: { pool: Pool; decimals: number } | null; at: number; hint?: string }>();
   // pools known from the start (a test's): kept as if just found
@@ -1951,7 +1971,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const ref = best.c.quote.kind === "eth" ? await readRef(head.with, head.n, from) : true;
     const decimals = decimalsOf(d);
     if (decimals === null) throw new Error("decimals not agreed");
-    return { pool: best.c, decimals, swaps: n, seed: (refOk && ref) || best.c.quote.kind !== "eth" ? { from, to: head.n, headN: head.n, logs } : undefined };
+    return { pool: best.c, decimals, swaps: n, seed: (refOk && ref) || best.c.quote.kind !== "eth" ? { from, to: head.n, head, logs } : undefined };
   }
 
   /** A listed token's main pool, null when our reads find none (served as an empty chart), "unlisted" when no lists
@@ -2076,9 +2096,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // The books
   // -------------------------------------------------------------------------------------------------------------
 
+  /** `headN`: the block its book holds every swap to; `headAt`: when the head it was read up to was read (BEHIND_MAX). */
   /** `marking`: its mark's read in flight (markQuiet); `noMark`: its pool gives none; `offLogged`: its close off the
    *  list's price is logged (offScale). */
-  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; first?: Promise<void>; marking?: Promise<void>; noMark?: boolean; offLogged?: boolean; from?: number; back?: Back; backing?: Promise<void> };
+  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; headAt?: number; first?: Promise<void>; marking?: Promise<void>; noMark?: boolean; offLogged?: boolean; from?: number; back?: Back; backing?: Promise<void> };
   /** A tape's trades before its book's first read (`from`: that read's first block; readBack): the blocks read back to
    *  `lo`, their logs (the pool's and the ETH price's), the book they fold into (only its tape is served: the bars
    *  before ours are CoinGecko's or GeckoTerminal's), and whether the read back is done (TRADES_MAX trades held, or
@@ -2186,9 +2207,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return { from: start, logs };
   }
 
-  /** Folds the logs of blocks `from` to `to` (read up to the agreed block `headN`) into a book; false when a log lies outside them
+  /** Folds the logs of blocks `from` to `to` (read up to the agreed head `head`) into a book; false when a log lies outside them
    *  or an ETH-quoted swap has no ETH price before it yet (the caller reads again). */
-  function apply(e: Entry, from: number, to: number, headN: number, logs: Log[]): boolean {
+  function apply(e: Entry, from: number, to: number, head: { n: number; at: number }, logs: Log[]): boolean {
+    const headN = head.n;
     const events: Event[] = [];
     let last = 0;
     const takes = hookTakes(e.pool, logs, chain);
@@ -2220,12 +2242,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     e.book.ingest(lo, merged.filter((x) => x.block >= lo), Math.max(Math.min(to, headN - REWIND_BLOCKS), e.book.settledTo));
     e.readAt = now();
     e.headN = to;
+    e.headAt = head.at;
     return true;
   }
 
   /** One book's read up to the agreed head: its pool's swaps from where it is settled, folded in once `refReady` says
    *  the ETH price is read to the same block (an ETH-quoted book; read at the same time, so a tick is one round). */
-  async function readBook(e: Entry, urls: readonly string[], head: { n: number; t: number }, refReady: Promise<boolean>): Promise<boolean> {
+  async function readBook(e: Entry, urls: readonly string[], head: Head, refReady: Promise<boolean>): Promise<boolean> {
     const first = e.book.settledTo < 0 && e.readAt === null;
     if (first) {
       // a first read with no discovery's seed: newest first, until the tape's TRADES_MAX swaps or the cold window
@@ -2233,7 +2256,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (w == null) return false;
       tradersAhead(e.pool, w.logs);
       if (e.pool.quote.kind === "eth" && !((await refReady) && (await readRef(urls, head.n, w.from)))) return false;
-      const ok = apply(e, w.from, head.n, head.n, w.logs);
+      const ok = apply(e, w.from, head.n, head, w.logs);
       if (ok) e.from ??= w.from;
       return ok;
     }
@@ -2243,7 +2266,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (from > to) return true;
     const logs = await agreedRange(urls, (lo, hi) => poolFilters(e.pool, lo, hi, chain), from, to);
     if (logs == null || (e.pool.quote.kind === "eth" && !(await refReady))) return false;
-    return apply(e, from, to, head.n, logs);
+    return apply(e, from, to, head, logs);
   }
 
   /** The trades in `logs` (read back, before a book's first read) folded into a book of their own, with the ETH price
@@ -2590,6 +2613,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Whether a book's tape is still reading back (readBack): the answer says `filling`, so the page shows it loading,
    *  not empty, and reads it again every TRADES_POLL_MS (apps/terminal/src/screens/token/trades.ts) until it is done. */
   const backing = (e: Entry): boolean => canBack && e.from !== undefined && e.back?.done !== true && tapeOf(e, TRADES_MAX).length < TRADES_MAX;
+  /** Whether a book is behind the chain (BEHIND_MAX): more than its blocks behind the newest head the helper read, or the
+   *  head it was read up to read more than its ms ago. Its tape is then no complete list: the answer says filling, with
+   *  no whole_ms, so the page reads it again (card base-tape-never-complete-behind-the-index). */
+  const behind = (e: Entry): boolean => (newest !== null && newest.n - e.headN > BEHIND_MAX[chain].blocks) || now() - (e.headAt ?? -Infinity) > BEHIND_MAX[chain].ms;
+  /** The block a book's tape holds every swap to and the newest head read, for the answer's Server-Timing. */
+  const readTo = (e: Entry): string => `evm-read-to;desc="block ${e.headN} of head ${newest?.n ?? e.headN}, read ${Math.max(0, Math.round((now() - (e.headAt ?? now())) / 1_000))} s ago"`;
   /** How far back a settled tape holds every swap of its pool (card token-stats-count-every-trade): the trades answer's
    *  `whole_ms`, from which the page counts its buys, sells and volume for each window inside it. 0 when the read back
    *  reached the pool's birth; on a chain with a fixed block clock (BLOCK_CLOCK: Base) the second after the lowest block
@@ -2735,7 +2764,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         // window): that is the book's first read
         if (found.seed !== undefined) {
           tradersAhead(found.pool, found.seed.logs);
-          if (apply(e, found.seed.from, found.seed.to, found.seed.headN, found.seed.logs)) e.from = found.seed.from;
+          if (apply(e, found.seed.from, found.seed.to, found.seed.head, found.seed.logs)) e.from = found.seed.from;
         }
         books.set(token, e);
         // a short tape it seeded reads back at once, as a first read's does (firstRead), not at the tick after
@@ -3581,13 +3610,17 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // card base-tape-fills-inside-45s: a spread coin's 4 of 5 trades answered not filling)
       const filling = backing(e);
       const reach = wholeOf(e);
+      // a book behind the chain (behind) is no complete list: filling, no reach, as the rows were taken (card
+      // base-tape-never-complete-behind-the-index: live run 44228233209 served a Base tape 46 s behind as complete)
+      const late = behind(e);
+      const timing = readTo(e);
       await within(lanes.run(lane, () => tradersOf(rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
       const at = e.readAt ?? now();
       const waiting = rows.some((r) => unread(r.tx));
       const trades = rows.filter((r) => !unread(r.tx)).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
       // no reach while a row waits: the rows served are not every trade back to it
-      const whole = waiting ? undefined : reach;
-      return timed({ status: 200, body: JSON.stringify({ trades, ...(filling || waiting ? { filling: true } : {}), ...(whole === undefined ? {} : { whole_ms: whole }), src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
+      const whole = waiting || late ? undefined : reach;
+      return timed({ status: 200, body: JSON.stringify({ trades, ...(filling || waiting || late ? { filling: true } : {}), ...(whole === undefined ? {} : { whole_ms: whole }), src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing });
     },
   };
 }
