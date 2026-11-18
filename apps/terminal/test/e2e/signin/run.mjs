@@ -12,9 +12,10 @@
 //   no-prf  branch N (app.md 2.7.3) with hasPrf false: the same up to the create, then FR-N4 the 12 words on SIGN_HOST
 //           (counted, never read; masked in the shot), Saved, FR-N5 back, FR-N6 S1.3 with no backup dot.
 //   wallet  the wallet way as SIGN_HOST builds it today (wallet.md:50, OD:349): FR-W1 the sheet with the wallet second,
-//           the two choices with New account drawn and not offered (data-pending="wallet-signature"), I already have
-//           one, Recovery code, the published all-zero test vector typed (packages/wallet/test/vectors/a8.json), back
-//           to S1.3. The wallet signature itself has no code on SIGN_HOST yet, so FR-W2 to FR-W5 cannot run.
+//           the two choices with New account drawn and not offered, as this browser holds no wallet
+//           (data-pending="no-wallet"), I already have one, Recovery code, the published all-zero test vector typed
+//           (packages/wallet/test/vectors/a8.json), back to S1.3. New account with a wallet (card wallet-signin-wallet)
+//           is run with a stand-in wallet by scripts/live-checks/signpage-signin-kinds.mjs.
 // Each launch runs at 390 x 844 (dpr 2, touch) and 1440 x 900 (dpr 1), each width in a fresh context (a new device).
 //
 // Per step it records (AE-05): a CDP screencast in png (blank frames, white flashes, BAR-03), every layout shift of
@@ -112,7 +113,11 @@ export function judge(rec) {
 
     if (rec.run === "wallet") {
       say((w.creates ?? []).length === 0, `${at} no passkey made on the wallet way (${(w.creates ?? []).length})`);
-      say(w.newAccount === "wallet-signature", `${at} New account drawn and not offered: ${w.newAccount ?? "not drawn"}`);
+      // card wallet-signin-wallet: a launch recorded with it notes the window's wallet (walletInWindow, none on this
+      // harness) and New account is drawn and not offered for that reason; one recorded before it holds no such note and
+      // drew New account with no code behind it (data-pending="wallet-signature")
+      const want = Object.hasOwn(w, "walletInWindow") ? (w.walletInWindow === false ? "no-wallet" : "a launch with no wallet") : "wallet-signature";
+      say(w.newAccount === want, `${at} New account drawn and not offered (${want}): ${w.newAccount ?? "not drawn"}`);
     }
     if (rec.run === "no-prf") say(seen.includes("backup") && w.words === 12 && seen.at(-1) === "signed-in", `${at} SIGN_HOST: ${seen.join(" > ")}, ${w.words ?? 0} words drawn (FR-N4)`);
     if (rec.run === "wallet") say(["choose", "existing", "words"].every((s) => seen.includes(s)) && seen.at(-1) === "signed-in", `${at} SIGN_HOST: ${seen.join(" > ")}`);
@@ -387,6 +392,11 @@ async function oneWidth(h, runName, w, { plant, shotDir, cpu }) {
       arrived();
       await page.waitForTimeout(300);
       out.newAccount = await choose.locator('button[data-action="new-account"]').evaluate((b) => (b.disabled ? b.dataset.pending ?? "disabled" : "offered"));
+      // the wallet the page would ask, read where the page reads it (SIGN_HOST's top window): none on this harness
+      out.walletInWindow = await page.evaluate(() => {
+        const g = globalThis;
+        return typeof g.ethereum?.request === "function" || typeof (g.phantom?.solana ?? g.solana)?.signMessage === "function";
+      });
       await shot("W2-choose");
       mark("have-one");
       await tap(choose.locator('button[data-action="have-one"]'));

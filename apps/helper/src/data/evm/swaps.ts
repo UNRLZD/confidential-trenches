@@ -2075,6 +2075,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const AHEAD_WAIT_MS = 500;
   const roomy = (): boolean => single(usable(rpcs), 2).filter((u) => !LOGS_REFUSED.has(u) && holds.room(u) >= AHEAD_ROOM).length >= 2;
   const aheadQueue = new Set<string>();
+  /** The tokens a search ahead has taken from its queue and not yet done (the tapes read ahead wait for them). */
+  const searching = new Set<string>();
   let aheadRun: Promise<void> | null = null;
   let opening = 0;
   const idle: (() => void)[] = [];
@@ -2100,13 +2102,124 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           if (t === undefined) return;
           aheadQueue.delete(t);
           // a read that fails is no answer: the token is looked for again at its first open or the lists' next load
+          searching.add(t);
           if (!known(t)) await (hinted(t) ? verify(t) : mainPool(t)).catch(() => undefined);
+          searching.delete(t);
         }
       };
       // the helper's own search: background, whatever lane asked for it (a lists answer built inside a caller's read)
       aheadRun = lanes.run(newLane(false), () => Promise.all(Array.from({ length: AHEAD_AT_ONCE }, one))).then(() => undefined).finally(() => (aheadRun = null));
     }
-    return aheadRun ?? Promise.resolve();
+    const tapes = tapesAhead(tokens);
+    return Promise.all([aheadRun ?? Promise.resolve(), tapes]).then(() => undefined);
+  }
+
+  /**
+   * The lists' tapes read ahead (card robinhood-tapes-read-ahead): live helper run 44279880076 (18 Nov 10:17Z, at
+   * ff65a0403) opened 12 listed Robinhood coins nobody had opened, and 10 were "still filling 45xxx ms after its first
+   * read (21 reads), past 45000 ms": each read its whole day back at its first open, a dozen at once. A listed token
+   * whose pool is kept (the search above) and whose tape is neither open nor rested ready (tapeReady) gets a book of its
+   * own here, read as a first open reads it (firstRead) and read back to done (backAll), then rested (rest), so its
+   * first open is a reopen: the blocks since alone (reopen), its whole list at once. A rested one gone stale is read to
+   * the head again the same way, before its gap is wider than a reopen reads. Tokens in the lists' order, each once its
+   * pool is kept (the search above; one with none found is dropped). All of it runs in a background lane of its own,
+   * so every caller's post goes first in each provider's queue (Lane), at the search's gates (no start while a first
+   * open waits for its pool, nor without two roomy providers), and the run stops when any provider of the chain is held
+   * (a refusal it answered, its 429: limits.ts hold): the read ahead spends no refused budget, and the lists' next load
+   * (LIST_MS) asks again. A caller that opens the coin meanwhile takes the book over (open), its lane lifted to the caller's (join).
+   * [design: TAPES_AT_ONCE books at most, never into the last of OPEN_MAX, so a page's open is never refused for a read
+   * ahead; a third of the capacity checks' dozen, so their locates share a post (locatePump) while two thirds of
+   * OPEN_MAX stay the pages'. Stale at half the cold window, so a rested list read on every lists load (a minute) stays
+   * inside the reopen's one read, gapHeld.]
+   */
+  const TAPES_AT_ONCE = 4;
+  const tapeQueue = new Set<string>();
+  let tapeRun: Promise<void> | null = null;
+  function tapesAhead(tokens: readonly string[]): Promise<void> {
+    for (const x of tokens) {
+      const t = evmAddress(x);
+      if (t !== null && !tapeReady(t) && tapeQueue.size < POOLS_MAX) tapeQueue.add(t);
+    }
+    if (tapeRun === null && tapeQueue.size > 0) {
+      const one = async (): Promise<void> => {
+        for (;;) {
+          for (;;) {
+            if (tapeQueue.size === 0) return;
+            if (heldAny()) return tapeQueue.clear();
+            if (opening > 0) await new Promise<void>((go) => idle.push(go));
+            else if (!roomy()) await new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
+            else break;
+          }
+          // the first whose pool is kept; one still searched keeps its place, one the search found none for leaves
+          let t: string | undefined;
+          for (const x of tapeQueue) {
+            if (pools.get(x)?.found != null) {
+              t = x;
+              break;
+            }
+            if (!aheadQueue.has(x) && !searching.has(x) && !resolving.has(x)) tapeQueue.delete(x);
+          }
+          if (t === undefined) {
+            if (tapeQueue.size > 0) await new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
+            continue;
+          }
+          tapeQueue.delete(t);
+          await tapeAhead(t).catch(() => undefined);
+        }
+      };
+      tapeRun = lanes.run(newLane(false), () => Promise.all(Array.from({ length: TAPES_AT_ONCE }, one))).then(() => undefined).finally(() => (tapeRun = null));
+    }
+    return tapeRun ?? Promise.resolve();
+  }
+  const heldAny = (): boolean => rpcs.some((u) => holds.heldFor(u) > 0);
+  const tapeReady = (t: string): boolean => {
+    if (books.has(t)) return true;
+    const r = resting.get(restKey(t));
+    return r !== undefined && !backing(r) && newest !== null && newest.n - r.book.settledTo <= V.cold / 2;
+  };
+  async function tapeAhead(t: string): Promise<void> {
+    const kept = pools.get(t)?.found;
+    if (kept == null || tapeReady(t) || books.size + TAPES_AT_ONCE >= OPEN_MAX) return;
+    const lane = newLane(false);
+    let e = resting.get(restKey(t));
+    resting.delete(restKey(t));
+    // a rested book of another pool (the search replaced it) or past a reopen's one read is read cold
+    if (e !== undefined && (e.pool.id !== kept.pool.id || (newest !== null && !gapHeld(e, newest.n)))) e = undefined;
+    e ??= { pool: kept.pool, decimals: kept.decimals, book: createBook({ decimals: kept.decimals, quote: kept.pool.quote }), touched: now(), readAt: null, headN: 0 };
+    e.ahead = lane;
+    books.set(t, e);
+    try {
+      await lanes.run(lane, async () => {
+        if (e!.readAt !== null) {
+          await reopen(t, e!);
+          // a gap the reopen found too wide put a cold book in its place: that is the one read ahead, unless a caller
+          // took the rested one over meanwhile
+          const now_ = books.get(t);
+          if (now_ !== undefined && now_ !== e && e!.ahead === lane) (e = now_).ahead = lane;
+        }
+        if (e!.readAt === null) await firstRead(e!);
+        // read back to done: a step left to its wait (a fails' backoff, a hold's end: backAll leaves those to the tick,
+        // which reads only open books) is waited here, as long as no provider is held and the book is still ours
+        for (;;) {
+          while (e!.backing !== undefined) await e!.backing;
+          if (!backing(e!) || books.get(t) !== e || e!.ahead !== lane || heldAny()) return;
+          const wait = (e!.back?.until ?? now()) - now();
+          if (wait > BACK_RETRY_MAX_MS) return;
+          if (wait > 0) await new Promise((go) => (setTimeout(go, wait) as { unref?: () => void }).unref?.());
+          const head = await agreedHead();
+          if (head === null) return;
+          backFrom(e!, head.with);
+          if (e!.backing === undefined) return;
+        }
+      });
+    } finally {
+      // read ahead and not taken by a caller: rested, ready for its first open (one never read is dropped)
+      if (books.get(t) === e && e.ahead === lane) {
+        books.delete(t);
+        e.ahead = undefined;
+        rest(t, e);
+      }
+    }
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -2116,7 +2229,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** `headN`: the block its book holds every swap to; `headAt`: when the head it was read up to was read (BEHIND_MAX). */
   /** `marking`: its mark's read in flight (markQuiet); `noMark`: its pool gives none; `offLogged`: its close off the
    *  list's price is logged (offScale). */
-  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; headAt?: number; first?: Promise<void>; marking?: Promise<void>; noMark?: boolean; offLogged?: boolean; from?: number; back?: Back; backing?: Promise<void> };
+  /** `ahead`: the lane of the read ahead building it (tapeAhead), until a caller's open takes it over. */
+  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; headAt?: number; first?: Promise<void>; marking?: Promise<void>; noMark?: boolean; offLogged?: boolean; from?: number; back?: Back; backing?: Promise<void>; ahead?: Lane };
   /** A tape's trades before its book's first read (`from`: that read's first block; readBack): the blocks read back to
    *  `lo`, their logs (the pool's and the ETH price's), the book they fold into (only its tape is served: the bars
    *  before ours are CoinGecko's or GeckoTerminal's), and whether the read back is done (TRADES_MAX trades held, or
@@ -2776,7 +2890,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   let again = false;
   async function tick(): Promise<void> {
     for (const [t, e] of books)
-      if (now() - e.touched > IDLE_MS) {
+      // a book read ahead is the read ahead's to rest (tapeAhead)
+      if (now() - e.touched > IDLE_MS && e.ahead === undefined) {
         books.delete(t);
         rest(t, e);
       }
@@ -2833,6 +2948,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  listed token our reads find no pool of, served as an empty chart and tape from our own reads, never a 404. */
   async function open(token: string, client?: string): Promise<Entry | DataAnswer | "none"> {
     let e = books.get(token);
+    // a book the lists' read ahead is building (tapeAhead): the caller's now, its reads lifted to the caller's lane
+    if (e?.ahead !== undefined) {
+      join(e.ahead);
+      e.ahead = undefined;
+    }
     // a book at rest (rest) opens again as it was: its list at once, the blocks since read before it is served (reopen)
     const kept = e === undefined && books.size < OPEN_MAX ? resting.get(restKey(token)) : undefined;
     if (kept !== undefined) {
@@ -3617,6 +3737,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     tick: start,
     stop(): void {
       aheadQueue.clear();
+      tapeQueue.clear();
       wanted?.stop();
       if (timer !== null) clearInterval(timer);
       timer = null;

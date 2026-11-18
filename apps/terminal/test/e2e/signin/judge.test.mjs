@@ -113,3 +113,29 @@ test("planted: the same shift with no sign-in landing in that step fails", () =>
   for (const w of none.widths) delete swapStep(w).landed;
   assert.equal(bad04(none).length, 2);
 });
+
+// card wallet-signin-wallet: New account is offered only with a wallet in the window. good's wallet launch is a run of
+// this card's page (walletInWindow false on the harness, New account not offered for that: "no-wallet"); a launch
+// recorded before it holds no walletInWindow and drew the old pending marker, and is read at its own era.
+test("New account: good's wallet launch is this card's (no wallet, not offered); any other reading fails at both widths", () => {
+  const wallet = () => structuredClone(answers.good.find((r) => r.run === "wallet"));
+  for (const w of wallet().widths) assert.deepEqual([w.newAccount, w.walletInWindow], ["no-wallet", false], w.width);
+  const NEW = /New account drawn and not offered/;
+  const plants = [
+    ["the old marker on a launch of this card", (w) => (w.newAccount = "wallet-signature")],
+    ["offered with no wallet", (w) => (w.newAccount = "offered")],
+    ["a wallet in the window", (w) => (w.walletInWindow = true)],
+    ["not drawn", (w) => delete w.newAccount],
+  ];
+  for (const [name, plant] of plants) {
+    const rec = wallet();
+    rec.widths.forEach(plant);
+    const bad = judge(rec).lines.filter((l) => l.startsWith("BAD"));
+    for (const width of ["390", "1440"]) assert.ok(bad.some((l) => l.startsWith(`BAD wallet @${width}`) && NEW.test(l)), `${name} @${width}: ${bad.join("\n")}`);
+  }
+  // a launch cut before the card that read "no-wallet" with no walletInWindow is not its era's page
+  const old = structuredClone(answers.goodPageOfItsOwn.find((r) => r.run === "wallet"));
+  assert.ok(old.widths.every((w) => !Object.hasOwn(w, "walletInWindow") && w.newAccount === "wallet-signature"));
+  old.widths.forEach((w) => (w.newAccount = "no-wallet"));
+  assert.equal(judge(old).ok, false);
+});

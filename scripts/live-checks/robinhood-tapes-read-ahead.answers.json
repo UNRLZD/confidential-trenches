@@ -1,0 +1,735 @@
+{
+ "_note": "good: the branch helper at 9a20ca6b8 (card robinhood-tapes-read-ahead) run on the Mac keyless (port 8797, PROXY_BUDGET_* keyless plans, no keyed RPC), its lists loaded at 10:46:29Z, read by robinhood-tapes-read-ahead.mjs --base http://127.0.0.1:8797 --record at 10:51:06Z (18 Nov), no tape opened before: Robinhood 12 of 12 whole at their first answer, Base 12 of 12 whole inside 45 s (4 at the first answer). bad_run: live helper run 44279880076 (helper at ff65a0403), helper-robinhood-capacity at 10:06:20Z, its printed lines as this check records them (ms of the lists not printed: null; no Base read in that check): 9 still filling 45.2 to 45.5 s after their first read, 2 answered CoinGecko rows. bad_deployed: the deployed helper read by this check keyless from the Mac at 10:45Z: Robinhood 3 of 12 whole inside 45 s, Base 10 of 12.",
+ "good": {
+  "base": "http://127.0.0.1:8797",
+  "at": "2026-11-18T10:51:06.448Z",
+  "chains": [
+   {
+    "chain": "robinhood",
+    "lists": {
+     "status": 200,
+     "ms": 23,
+     "tokens": 12
+    },
+    "answers": [
+     {
+      "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+      "status": 200,
+      "ms": 4779,
+      "shape": "tape"
+     },
+     {
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "status": 200,
+      "ms": 1042,
+      "shape": "tape"
+     },
+     {
+      "address": "0x56910d4409f3a0c78c64dd8d0545ff0705389870",
+      "status": 200,
+      "ms": 586,
+      "shape": "tape"
+     },
+     {
+      "address": "0x4db7374e966097be94c6680d49156d580f097bbf",
+      "status": 200,
+      "ms": 4922,
+      "shape": "tape"
+     },
+     {
+      "address": "0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f",
+      "status": 200,
+      "ms": 4777,
+      "shape": "tape"
+     },
+     {
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "status": 200,
+      "ms": 6019,
+      "shape": "tape"
+     },
+     {
+      "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "status": 200,
+      "ms": 4920,
+      "shape": "tape"
+     },
+     {
+      "address": "0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa",
+      "status": 200,
+      "ms": 5473,
+      "shape": "tape"
+     },
+     {
+      "address": "0xded852de9fe9ba9b6f27f39e8e81cf851a5c79cc",
+      "status": 200,
+      "ms": 4090,
+      "shape": "tape"
+     },
+     {
+      "address": "0x6245e67affa44a23077f0ea7f981a8dc743a0c47",
+      "status": 200,
+      "ms": 2051,
+      "shape": "tape"
+     },
+     {
+      "address": "0xd281bf1649c5db6744d23f61bb25b05b4d1dff35",
+      "status": 200,
+      "ms": 5865,
+      "shape": "tape"
+     },
+     {
+      "address": "0xedbf91223639800bcd5756815caf908df3b890be",
+      "status": 200,
+      "ms": 4196,
+      "shape": "tape"
+     }
+    ]
+   },
+   {
+    "chain": "base",
+    "lists": {
+     "status": 200,
+     "ms": 2,
+     "tokens": 12
+    },
+    "answers": [
+     {
+      "address": "0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00",
+      "status": 200,
+      "ms": 3869,
+      "shape": "tape"
+     },
+     {
+      "address": "0xe0cd4cacddcbf4f36e845407ce53e87717b6601d",
+      "status": 200,
+      "ms": 4752,
+      "shape": "tape"
+     },
+     {
+      "address": "0xc0634090f2fe6c6d75e61be2b949464abb498973",
+      "status": 200,
+      "ms": 6464,
+      "shape": "tape"
+     },
+     {
+      "address": "0x3e12b9d6a4d12cd9b4a6d613872d0eb32f68b380",
+      "status": 200,
+      "ms": 492,
+      "shape": "tape"
+     },
+     {
+      "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "status": 200,
+      "ms": 8003,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 30028,
+       "reads": 5
+      }
+     },
+     {
+      "address": "0xb200000000000000000000397293cb8cda9a10c5",
+      "status": 200,
+      "ms": 8003,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 30036,
+       "reads": 7
+      }
+     },
+     {
+      "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+      "status": 200,
+      "ms": 8003,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 30447,
+       "reads": 8
+      }
+     },
+     {
+      "address": "0xbf927b841994731c573bdf09ceb0c6b0aa887cdd",
+      "status": 200,
+      "ms": 8003,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 30225,
+       "reads": 6
+      }
+     },
+     {
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "status": 200,
+      "ms": 8003,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 31266,
+       "reads": 6
+      }
+     },
+     {
+      "address": "0x8b7dde054be9d180c1be7fae0874697374a49832",
+      "status": 200,
+      "ms": 8004,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 32841,
+       "reads": 7
+      }
+     },
+     {
+      "address": "0xef5997c2cf2f6c138196f8a6203afc335206b3c1",
+      "status": 200,
+      "ms": 8003,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 5483,
+       "reads": 1
+      }
+     },
+     {
+      "address": "0x1a44233fae8d50f1aeb3a5d58dd426ff4814cb53",
+      "status": 200,
+      "ms": 8003,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 32261,
+       "reads": 8
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "bad_run": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T10:06:20Z",
+  "chains": [
+   {
+    "chain": "robinhood",
+    "lists": {
+     "status": 200,
+     "ms": null,
+     "tokens": 12
+    },
+    "answers": [
+     {
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "status": 200,
+      "ms": 297,
+      "shape": "tape"
+     },
+     {
+      "address": "0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8",
+      "status": 200,
+      "ms": 3513,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45270,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+      "status": 200,
+      "ms": 3624,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45301,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "status": 200,
+      "ms": 1306,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45455,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "status": 200,
+      "ms": 3616,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45318,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f",
+      "status": 200,
+      "ms": 3613,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45300,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0x4db7374e966097be94c6680d49156d580f097bbf",
+      "status": 200,
+      "ms": 821,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45254,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa",
+      "status": 200,
+      "ms": 880,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45349,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0xb815559286e633a902621c4a5dbf08976092855b",
+      "status": 200,
+      "ms": 863,
+      "shape": "src \"coingecko\""
+     },
+     {
+      "address": "0x57c0e45cb534413d1c20a4240955d6bb250bb4f1",
+      "status": 200,
+      "ms": 866,
+      "shape": "src \"coingecko\""
+     },
+     {
+      "address": "0xfce34d21a92069100e3226638140706cf03a266e",
+      "status": 200,
+      "ms": 1946,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45284,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0x51250b135174ca09450ec01c4aff73cf69dbb590",
+      "status": 200,
+      "ms": 7660,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45270,
+       "reads": 21
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "bad_deployed": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T10:44:19.721Z",
+  "chains": [
+   {
+    "chain": "robinhood",
+    "lists": {
+     "status": 200,
+     "ms": 692,
+     "tokens": 12
+    },
+    "answers": [
+     {
+      "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+      "status": 200,
+      "ms": 338,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 29255,
+       "reads": 13
+      }
+     },
+     {
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "status": 200,
+      "ms": 2033,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 28835,
+       "reads": 13
+      }
+     },
+     {
+      "address": "0x56910d4409f3a0c78c64dd8d0545ff0705389870",
+      "status": 200,
+      "ms": 3987,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 24261,
+       "reads": 11
+      }
+     },
+     {
+      "address": "0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f",
+      "status": 200,
+      "ms": 795,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 46620,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "status": 200,
+      "ms": 1260,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45204,
+       "reads": 20
+      }
+     },
+     {
+      "address": "0x4db7374e966097be94c6680d49156d580f097bbf",
+      "status": 200,
+      "ms": 2905,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45032,
+       "reads": 20
+      }
+     },
+     {
+      "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "status": 200,
+      "ms": 4928,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 46680,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa",
+      "status": 200,
+      "ms": 3819,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45493,
+       "reads": 20
+      }
+     },
+     {
+      "address": "0xded852de9fe9ba9b6f27f39e8e81cf851a5c79cc",
+      "status": 200,
+      "ms": 4433,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 47174,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0x6245e67affa44a23077f0ea7f981a8dc743a0c47",
+      "status": 200,
+      "ms": 772,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 46641,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0xd281bf1649c5db6744d23f61bb25b05b4d1dff35",
+      "status": 200,
+      "ms": 2028,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 46858,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0xedbf91223639800bcd5756815caf908df3b890be",
+      "status": 200,
+      "ms": 3282,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 45700,
+       "reads": 20
+      }
+     }
+    ]
+   },
+   {
+    "chain": "base",
+    "lists": {
+     "status": 200,
+     "ms": 1366,
+     "tokens": 12
+    },
+    "answers": [
+     {
+      "address": "0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00",
+      "status": 200,
+      "ms": 3132,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 47110,
+       "reads": 21
+      }
+     },
+     {
+      "address": "0xe0cd4cacddcbf4f36e845407ce53e87717b6601d",
+      "status": 200,
+      "ms": 1875,
+      "shape": "tape"
+     },
+     {
+      "address": "0x3e12b9d6a4d12cd9b4a6d613872d0eb32f68b380",
+      "status": 200,
+      "ms": 700,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 34961,
+       "reads": 15
+      }
+     },
+     {
+      "address": "0xc0634090f2fe6c6d75e61be2b949464abb498973",
+      "status": 200,
+      "ms": 5231,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": true,
+       "shape": "tape",
+       "ms": 46058,
+       "reads": 20
+      }
+     },
+     {
+      "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "status": 200,
+      "ms": 3580,
+      "shape": "tape"
+     },
+     {
+      "address": "0xb200000000000000000000397293cb8cda9a10c5",
+      "status": 200,
+      "ms": 4964,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 11291,
+       "reads": 5
+      }
+     },
+     {
+      "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+      "status": 200,
+      "ms": 6805,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 37340,
+       "reads": 16
+      }
+     },
+     {
+      "address": "0xbf927b841994731c573bdf09ceb0c6b0aa887cdd",
+      "status": 200,
+      "ms": 6203,
+      "shape": "tape"
+     },
+     {
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "status": 200,
+      "ms": 2007,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 11391,
+       "reads": 5
+      }
+     },
+     {
+      "address": "0x8b7dde054be9d180c1be7fae0874697374a49832",
+      "status": 200,
+      "ms": 7809,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 4885,
+       "reads": 2
+      }
+     },
+     {
+      "address": "0xef5997c2cf2f6c138196f8a6203afc335206b3c1",
+      "status": 200,
+      "ms": 5206,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 13682,
+       "reads": 6
+      }
+     },
+     {
+      "address": "0xb2000000000000000000007b9fcbd005511acbd5",
+      "status": 200,
+      "ms": 4298,
+      "shape": "tape",
+      "filling": true,
+      "filled": {
+       "status": 200,
+       "filling": false,
+       "shape": "tape",
+       "ms": 13434,
+       "reads": 6
+      }
+     }
+    ]
+   }
+  ]
+ }
+}
