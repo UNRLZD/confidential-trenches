@@ -9,125 +9,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as base from "../../../test/evm-swaps/base.ts";
-import { fakeChain, open, REC, timeAt, URLS } from "../../../test/evm-swaps/robinhood.ts";
+import { open } from "../../../test/evm-swaps/robinhood.ts";
+import { LATE_MS, LISTED, PAGE, POCKET, rig, SWAPS, TOKENS } from "../../../test/evm-swaps/spread.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { providerHolds } from "../../limits/limits.ts";
-import { HEADER_TIMED, OPEN_BOUND_MS, ROBINHOOD_VENUES, SWAP_RPCS, TOPIC, type Pool } from "./swaps.ts";
-
-const CHAIN_RPC = "https://rpc.mainnet.chain.robinhood.com";
-const POCKET = "https://robinhood.api.pocket.network";
-const WIDE = ["https://robinhood.daybreak-rpc.network", "https://rpc-robinhood.blockmachine.io", POCKET, CHAIN_RPC];
-/** Each provider's answer, this many virtual ms after its post (swaps-search.test.ts: the live answers under load). */
-const LATE_MS = 700;
-
-const w = (a: string) => `0x${a.slice(2).padStart(64, "0")}`;
-const int = (x: bigint) => (x < 0n ? (1n << 256n) + x : x).toString(16).padStart(64, "0");
-const ROUTER = `0x${"7e".repeat(20)}`;
-const FEE = 3000n;
-/** Thirteen tokens, each traded only on its own Uniswap v3 pool against USDG: 20 swaps, spread over the hour before the
- *  head (a spread coin: its tape is short of TRADES_MAX, so a cold open reads the day back before it is whole). The
- *  first twelve are the lists'; the last is a coin a page opens that no list carries yet. */
-const TOKENS = Array.from({ length: 13 }, (_, i) => ({ token: `0x${(0xa4ead00 + i).toString(16).padStart(40, "0")}`, pool: `0x${(0x9a4ead00 + i).toString(16).padStart(40, "0")}` }));
-const LISTED = TOKENS.slice(0, 12);
-const PAGE = TOKENS[12]!;
-const SWAPS = 20;
-const http429 = (s = 20) => new Response("{}", { status: 429, headers: { "retry-after": String(s) } });
-
-/** The fake chain behind the real Robinhood provider list (swaps-search.test.ts's rig: the wide providers take 1,000
- *  blocks, the chain's own RPC the day in one read), every answer LATE_MS late. Counts each post, each 429 and each
- *  pool's swap reads; `limit` refuses a provider's posts past that many in a second (429, its Retry-After 1 s). */
-function rig(o: { limit?: number } = {}) {
-  const chain = fakeChain();
-  chain.st.head = REC.lastHead;
-  // each provider as live (swaps-back-resume.test.ts): the chain's own RPC the day in one read, untimed; pocket and
-  // daybreak old blocks in their BACK_SPAN; blockmachine the newest 5,000 blocks
-  for (const u of WIDE) chain.st.faults.set(u, { span: 1_000 });
-  chain.st.faults.set(CHAIN_RPC, { zeroTime: true, span: 1_000_000 });
-  chain.st.faults.set(POCKET, { span: 10_000, addressOnly: true });
-  chain.st.faults.set("https://rpc-robinhood.blockmachine.io", { span: 1_000, window: 5_000 });
-  chain.st.faults.set("https://robinhood.daybreak-rpc.network", { span: 2_000 });
-  const head = REC.lastHead;
-  const tHead = timeAt(head);
-  /** A block's time at Robinhood's 10 blocks a second, back from the head. */
-  const at = (b: number) => tHead - Math.ceil((head - b) / 10);
-  type L = { b: number; i: number; tx: string; a: string; t: string[]; d: string };
-  const transfers = new Map<string, L[]>();
-  const swaps = new Map<string, L[]>();
-  TOKENS.forEach(({ token, pool }, n) => {
-    const tl: L[] = [];
-    const sl: L[] = [];
-    for (let k = 0; k < SWAPS; k++) {
-      // one swap every 1,700 blocks (about 3 minutes) back from the head: the newest in the cold window, the rest older
-      const b = head - 100 - k * 1_700 - n;
-      const tx = `0x${"cd".repeat(30)}${n.toString(16).padStart(2, "0")}${k.toString(16).padStart(2, "0")}`;
-      const trader = `0x${tx.slice(26, 66)}`;
-      const amt = 1_000n * 10n ** 18n + BigInt(k);
-      tl.push({ b, i: 0, tx, a: token, t: [TOPIC.transfer, w(pool), w(ROUTER)], d: `0x${int(amt)}` });
-      sl.push({ b, i: 1, tx, a: pool, t: [TOPIC.swap3, w(ROUTER), w(ROUTER)], d: `0x${int(-amt)}${int(5_000_000n + BigInt(k))}${int(1n << 96n)}${int(10n ** 18n)}${int(0n)}` });
-      tl.push({ b, i: 2, tx, a: token, t: [TOPIC.transfer, w(ROUTER), w(trader)], d: `0x${int(amt)}` });
-    }
-    transfers.set(token, tl.reverse());
-    swaps.set(pool, sl.reverse());
-  });
-  const n = { posts: 0, refused: 0, poolReads: new Map<string, number>() };
-  const sent = new Map<string, number[]>();
-  const wire = (l: L, zero: boolean) => ({ address: l.a, topics: l.t, data: l.d, blockNumber: `0x${l.b.toString(16)}`, logIndex: `0x${l.i.toString(16)}`, transactionHash: l.tx, blockTimestamp: `0x${(zero ? 0 : at(l.b)).toString(16)}`, removed: false });
-  const local = (url: string, r: { method: string; params: unknown[] }): unknown => {
-    const f = chain.st.faults.get(url) ?? {};
-    if (r.method === "eth_getBlockByNumber" && r.params[0] !== "latest" && parseInt(r.params[0] as string, 16) < REC.firstHead) {
-      const b = parseInt(r.params[0] as string, 16);
-      return { result: { number: `0x${b.toString(16)}`, timestamp: `0x${at(b).toString(16)}` } };
-    }
-    if (r.method === "eth_getTransactionByHash") return { result: { hash: r.params[0], from: `0x${(r.params[0] as string).slice(26, 66)}` } };
-    if (r.method === "eth_getLogs") {
-      const q = r.params[0] as { address?: string | string[]; topics?: (string | string[])[]; fromBlock: string; toBlock: string };
-      const [from, to] = [parseInt(q.fromBlock, 16), parseInt(q.toBlock, 16)];
-      const addrs = [q.address].flat().filter((a): a is string => typeof a === "string");
-      if (addrs.length === 0 || !addrs.some((a) => transfers.has(a) || swaps.has(a))) return undefined;
-      if (to > head || to - from + 1 > (f.span ?? 100)) return { error: { code: -32602, message: "eth_getLogs block range exceeds 100 blocks" } };
-      if (f.window !== undefined && from < head - f.window) return { error: { code: -32011, message: "block reference is outside the public history window" } };
-      for (const a of addrs) if (swaps.has(a)) n.poolReads.set(a, (n.poolReads.get(a) ?? 0) + 1);
-      const want = (q.topics?.[0] === undefined || q.topics[0] === null ? null : [q.topics[0]].flat());
-      return { result: addrs.flatMap((a) => transfers.get(a) ?? swaps.get(a) ?? []).filter((l) => l.b >= from && l.b <= to && (want === null || want.includes(l.t[0]!))).sort((x, y) => x.b - y.b || x.i - y.i).map((l) => wire(l, f.zeroTime === true)) };
-    }
-    if (r.method !== "eth_call") return undefined;
-    const c = r.params[0] as { to: string; data: string };
-    const p = TOKENS.find((x) => x.pool === c.to);
-    if (p !== undefined) {
-      if (c.data === "0xc45a0155") return { result: w(ROBINHOOD_VENUES.uniswapV3) };
-      if (c.data === "0x0dfe1681") return { result: w(p.token) };
-      if (c.data === "0xd21220a7") return { result: w(ROBINHOOD_VENUES.usdg) };
-      if (c.data === "0xddca3f43") return { result: `0x${int(FEE)}` };
-      return { error: { code: 3, message: "execution reverted" } };
-    }
-    if (c.to === ROBINHOOD_VENUES.uniswapV3 && c.data.startsWith("0x1698ee82")) {
-      const q = TOKENS.find((x) => c.data === `0x1698ee82${w(x.token).slice(2)}${w(ROBINHOOD_VENUES.usdg).slice(2)}${int(FEE)}`);
-      return { result: w(q?.pool ?? `0x${"0".repeat(40)}`) };
-    }
-    return undefined;
-  };
-  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
-    n.posts++;
-    if (o.limit !== undefined) {
-      const t = Date.now();
-      const mine = (sent.get(url) ?? []).filter((x) => t - x < 1_000);
-      mine.push(t);
-      sent.set(url, mine);
-      if (mine.length > o.limit) {
-        n.refused++;
-        return http429(1);
-      }
-    }
-    await new Promise((go) => setTimeout(go, LATE_MS));
-    const reqs = [JSON.parse(String(init.body))].flat() as { id: number; method: string; params: unknown[] }[];
-    const mine = reqs.map((r) => local(url, r));
-    const rest = reqs.filter((_, i) => mine[i] === undefined);
-    const fwd = rest.length === 0 ? [] : ((await (await chain.fetch(url, { ...init, body: JSON.stringify(rest) })).json()) as { id: number }[]);
-    const out = reqs.map((r, i) => (mine[i] !== undefined ? { jsonrpc: "2.0", id: r.id, ...(mine[i] as object) } : fwd.find((x) => x.id === r.id)));
-    return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
-  };
-  return { chain, fetch, n };
-}
+import { LOOP_BUSY_MS } from "../../limits/loop-busy.ts";
+import { HEADER_TIMED, OPEN_BOUND_MS, SWAP_RPCS, type Pool } from "./swaps.ts";
 
 const clock = { get t() { return Date.now(); } };
 const sleep = (ms: number) => new Promise((go) => setTimeout(go, ms));
@@ -312,5 +199,52 @@ test("card robinhood-tapes-read-ahead-bounded: while the helper's loop is busy (
   for (const g of value.got) {
     assert.equal(g.filling, false, `read ahead once the loop was free: ${line(value.got)}`);
     assert.equal(g.n, SWAPS, line(value.got));
+  }
+});
+
+/** The read-ahead answers that may land while a burst holds the loop busy, when none was in flight as it began: none,
+ *  so the read ahead adds no synchronous span to a burst's (its longest span alone, printed below, is measured on this
+ *  machine's clock: a unit test judges no real elapsed time, scripts/ci/no-wall-clock-asserts.mjs). */
+const BURST_ANSWERS_MAX = 0;
+/** How long the burst holds the loop busy here, from the lists' load: most of the read ahead's answers land inside it
+ *  with the loop free (asserted below, else the burst run proves nothing). */
+const BURST_MS = 40_000;
+
+test("card robinhood-tapes-read-ahead-bounded: the 12 listed coins read ahead on the injected clock, each synchronous span of its work timed: while a burst holds the loop busy from the lists' load for BURST_MS the read ahead adds no span to it (BURST_ANSWERS_MAX of its answers land inside it, none was in flight when it began); once the burst ends every first open is whole (red at 6b1926fc9: its answers land inside the burst, their work on top of the burst's)", async () => {
+  const run = async (burst: boolean) => {
+    const r = rig();
+    const loop = { busy: burst };
+    /** Each turn's real ms on a virtual ms a read-ahead answer landed at: the helper's work on that answer. */
+    const spans: { ms: number; at: number }[] = [];
+    const { value } = await onVirtualTime(
+      9_000_000,
+      async () => {
+        const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never, busy: () => loop.busy });
+        const t0 = clock.t;
+        void s.ahead(LISTED.map((x) => x.token));
+        await sleep(BURST_MS);
+        loop.busy = false;
+        await sleep(60_000);
+        const got = await Promise.all(LISTED.map(({ token }) => s.trades(token, 50).then((a) => tapeOf(a, 0))));
+        s.stop();
+        return { t0, got };
+      },
+      (ms, at) => {
+        if (r.n.answeredAt.has(at)) spans.push({ ms, at });
+      },
+    );
+    const inBurst = spans.filter((x) => x.at - value.t0 < BURST_MS);
+    const answersInBurst = [...r.n.answeredAt].filter((at) => at - value.t0 < BURST_MS).length;
+    return { got: value.got, longest: Math.max(0, ...spans.map((x) => x.ms)), burstMs: inBurst.reduce((a, x) => a + x.ms, 0), answersInBurst, answers: r.n.answeredAt.size };
+  };
+  const free = await run(false);
+  const held = await run(true);
+  const f = (x: number) => `${x.toFixed(1)} ms`;
+  console.log(`loop free: longest span ${f(free.longest)}, ${free.answersInBurst} of ${free.answers} answer ms inside the first ${BURST_MS} ms (${f(free.burstMs)}); burst: longest span ${f(held.longest)}, ${held.answersInBurst} answer ms inside it (${f(held.burstMs)}); LOOP_BUSY_MS ${LOOP_BUSY_MS} ms; ${line(held.got)}`);
+  assert.ok(free.answersInBurst * 2 > free.answers, `with the loop free only ${free.answersInBurst} of ${free.answers} answer ms are in the first ${BURST_MS} ms: the burst run proves nothing`);
+  assert.ok(held.answersInBurst <= BURST_ANSWERS_MAX, `read-ahead answers landed at ${held.answersInBurst} virtual ms inside the burst, ${f(held.burstMs)} of loop time on top of it`);
+  for (const g of held.got) {
+    assert.equal(g.filling, false, `read ahead once the burst ended: ${line(held.got)}`);
+    assert.equal(g.n, SWAPS, line(held.got));
   }
 });
