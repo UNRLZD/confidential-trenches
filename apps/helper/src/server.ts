@@ -57,7 +57,7 @@ import { INTENTS_BODY_MAX } from "./intents/carry.ts";
 import { pairNames, statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
 import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./withdraw/fee.ts";
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
-import { POOL_EPOCH_MS } from "./pool/fee.ts";
+import { epochStartOf, POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
 import { POOL_SOLANA_PIECES_BODY_MAX } from "./pool/solana-pieces.ts";
 import { isMainnetEvm, isMainnetSolana } from "./pool/mainnet-only.ts";
@@ -97,6 +97,11 @@ export const NEAR_PAIR_HEADER = "X-Helper-Near-Pair";
 /** GET /v1/health's header naming when this process started, in ms (card helper-evm-tapes-survive-a-restart): the live
  *  check that reads a coin's tape right after a deploy knows the helper it reads is the new one, and how new. */
 export const STARTED_HEADER = "X-Helper-Started";
+/** GET /v1/health's header naming each mainnet EVM pool's fee for the running period (card helper-start-residuals;
+ *  pool/evm.ts feeNow): "<network> <fee in wei>", "<network> reading" while its read ahead is under way, or "<network>
+ *  none", ", "-joined by network; "" with no pool. `ready` is false while one names none. A header, as the near pair:
+ *  the body has 11 B left under the kit's 1 KB at its longest config. */
+export const POOL_FEES_HEADER = "X-Helper-Pool-Fees";
 const STARTED_MS = Date.now();
 const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/", "/v1/market/pools"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind", "/v1/bind/record"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD, LOGO_PREFIX, MARKET_POOLS] = MOUNTED.proxy;
@@ -429,7 +434,11 @@ export function handler(
       }
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        return send(200, health(commit, SERVED, release, ready(), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", "), [STARTED_HEADER]: String(STARTED_MS) });
+        // card helper-start-residuals: never ready while a mainnet pool holds no fee for the running period
+        const period = epochStartOf(now());
+        const fees = [...evmPools.values()].filter((p) => isMainnetEvm(p.network)).map((p) => ({ network: p.network, fee: p.feeNow(period) })).sort((x, y) => (x.network < y.network ? -1 : 1));
+        const named = fees.map((f) => `${f.network} ${f.fee === null ? "none" : String(f.fee)}`).join(", ");
+        return send(200, health(commit, SERVED, release, ready() && fees.every((f) => f.fee !== null), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", "), [STARTED_HEADER]: String(STARTED_MS), [POOL_FEES_HEADER]: named });
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
