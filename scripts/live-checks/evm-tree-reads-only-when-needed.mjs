@@ -23,7 +23,8 @@ import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmIsOutOfGas, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmIsOutOfGas } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 
 const KEY = "evm-tree-reads-only-when-needed";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -113,8 +114,8 @@ const RANGE_CAP = /block range|range (is )?too (wide|large|big)|max(imum)? range
 /** The pool's own buySwap((address,bytes,uint256,address),address,uint256): the buy quote's swap-gas fit read (the kit's
  *  evmBuySwapFitCall, checks/evm/quote.ts fitRead), an eth_call to a pinned pool from the pool. */
 export const BUY_SWAP = "0x25faf2a3";
-/** The pools the fit read asks: each mainnet chain's pinned pool (the kit's venue table). */
-export const FIT_POOLS = Object.freeze(new Set(["base", "robinhood"].map((c) => evmPoolVenues()[c].pool.toLowerCase())));
+/** The pools the fit read asks: each mainnet's pinned pool (the kit's venue table, mainnets alone). */
+export const FIT_POOLS = Object.freeze(new Set(Object.values(mainnetVenues()).flatMap((v) => (typeof v?.pool === "string" ? [v.pool.toLowerCase()] : []))));
 /** Whether a call is the fit read: its revert or its run out of gas is its answer, "the route's swap does not run as
  *  the pool runs it" (the kit reads it so: quote.ts answerOf, code 3 or an out-of-gas error is a revert, the route does
  *  not fit), never a provider's refusal. Release 175: the coin page's warm asked the buy tap's v3 tier of a coin with no
