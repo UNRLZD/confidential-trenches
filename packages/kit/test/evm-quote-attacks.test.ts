@@ -813,7 +813,7 @@ test("N1ar (N1a on Robinhood, card evm-scan-chain-tail: its cold scan of 10M blo
   const pools = [seeded(token), real(token)];
   const asked: [number, number][] = [];
   const m = moving();
-  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), m.to(scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked)), undefined, "robinhood"), below);
+  assert.deepEqual(await quoteOnStill(pools, token, seededRoute(token), m.to(scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked)), undefined, "robinhood"), below);
   assert.ok(asked.length > 0);
 });
 
@@ -1721,12 +1721,12 @@ test("G4r (G4 on Robinhood, card evm-scan-chain-tail: a scan past its tail budge
   const gone = keyOf(token, xAt(0x601), 3000, 60, NATIVE);
   const asked: [number, number][] = [];
   const scan = scanner(5_000_000, [{ key: gone, at: 4_500_000 }], asked);
-  assert.equal((await quoteOn([best(token)], token, bestRoute(token), scan, undefined, "robinhood")).accepted, true);
+  assert.equal((await quoteOnStill([best(token)], token, bestRoute(token), scan, undefined, "robinhood")).accepted, true);
   await new Promise((r) => setTimeout(r, 20));
   asked.length = 0;
   // 4,000,000 blocks on (J5r): past the tail budget again, so scanned per currency, from where each kept scan stopped
   const later = scanner(9_000_000, [{ key: gone, at: 4_500_000 }], asked);
-  assert.equal((await quoteOn([best(token)], token, bestRoute(token), later, undefined, "robinhood", 9_000_000)).accepted, true);
+  assert.equal((await quoteOnStill([best(token)], token, bestRoute(token), later, undefined, "robinhood", 9_000_000)).accepted, true);
   assert.ok(asked.length > 0);
   assert.equal(Math.min(...asked.map(([a]) => a)), 5_000_001, "both scans are kept: only the new blocks are read");
 });
