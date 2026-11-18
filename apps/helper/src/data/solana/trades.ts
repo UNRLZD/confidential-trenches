@@ -53,7 +53,7 @@
 // is the token, bounded books, subscriptions and caches.
 import { change4h, createBook, joinBars, TF_SECONDS, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
 import { address } from "./lists.ts";
-import { HELD_WAIT_MS, type DataAnswer } from "./token.ts";
+import { HELD_WAIT_MS, TAPE_FRESH_MS, type DataAnswer } from "./token.ts";
 import { cutTrades, fromLogs, poolMints, poolPair, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
 import { CREDITS, type Slot } from "../../rpc/slot.ts";
 
@@ -93,6 +93,13 @@ export const SILENT_MS = 30_000;
  *  every ~400 ms (wsSource), so 5 s is about 12 slots unheard; a trade's note arrives p50 1.19 s, p95 1.78 s after its
  *  block (header, measured 3 Nov), under a third of it] */
 export const SOL_BEHIND_MS = 5_000;
+/** How old the vendor's rows a tape serves (poolTape: a token the chain tape does not decode or the lists do not hold)
+ *  may be and the tape still claim them complete (`whole_ms`): the read is renewed each TAPE_FRESH_MS (token.ts tape),
+ *  and a renewal overdue by more than SOL_BEHIND_MS, the bound this chain's own tape holds a silent stream to, ends the
+ *  claim as that one does (card vendor-tapes-name-their-reach-every-chain: a held read whose refresh failed was served
+ *  with its whole_ms whatever its age, as card evm-vendor-tape-names-its-reach found on Base and Robinhood). SOL_BEHIND_MS
+ *  alone is under TAPE_FRESH_MS: every held read in the second half of its fresh window would claim none. */
+export const SOL_VENDOR_REACH_MS = TAPE_FRESH_MS + SOL_BEHIND_MS;
 export const REF_MS = 5_000;
 export const REF_STALE_S = 120;
 export const IDLE_MS = 60_000;
@@ -874,10 +881,14 @@ export function createSolanaTrades(deps: {
       const got = all.slice(0, limit);
       const src = v.src ?? "geckoterminal";
       const at = v.asOfMs ?? now();
-      // the vendor's newest trades of the pool, every one after its oldest (card token-stats-count-every-trade)
+      // the vendor's newest trades of the pool, every one after its oldest (card token-stats-count-every-trade), up to
+      // their read: claimed complete only while that read is within SOL_VENDOR_REACH_MS, its age always named (card
+      // vendor-tapes-name-their-reach-every-chain)
+      const age = Math.max(0, now() - at);
       const oldest = (all.at(-1) as { t_ms?: unknown } | undefined)?.t_ms;
-      const whole = typeof oldest === "number" && Number.isSafeInteger(oldest) ? { whole_ms: oldest + 1_000 } : {};
-      return { status: 200, body: JSON.stringify({ trades: got, ...whole, src, as_of_ms: at }), src, asOfMs: at };
+      const whole = typeof oldest === "number" && Number.isSafeInteger(oldest) && age <= SOL_VENDOR_REACH_MS ? { whole_ms: oldest + 1_000 } : {};
+      const timing = `sol-vendor-read;desc="rows read ${age} ms ago"`;
+      return { status: 200, body: JSON.stringify({ trades: got, ...whole, src, as_of_ms: at }), src, asOfMs: at, timing };
     }
     const at = e?.readAt ?? now();
     return { status: 200, body: JSON.stringify({ trades: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };

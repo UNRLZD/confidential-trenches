@@ -1,78 +1,61 @@
 {
  "_about": {
-  "bad_deployed": "the deployed helper before the card, read 2026-11-16T20:51:09.557Z with --record (main d3ae40db4 code): every settled tape on the four chains claims no reach",
-  "good": "MADE from bad_deployed: each settled tape claims the second after its oldest row (the engine and vendor tapes' rule, and the EVM book's off a fixed clock; swaps.ts wholeOf), as the card's helper answers; re-record it after the helper deploy with --record"
+  "good": "card vendor-tapes-name-their-reach-every-chain's branch (500e5a6c5), recorded 2026-11-18 13:11:30-13:13:06Z on mainnet: GET /v1/market/trades for Solana and NEAR answered in-process by the branch's own modules (Solana: token.ts tape over GeckoTerminal's keyless API served by trades.ts poolTape, every coin taken as one no list holds, a new coin's first read 40 s after the last so the keyless budget never refused it, each read's `at` the time it reached the modules; NEAR: engine.ts over the unrealized.trade engine's public API), every other path (the lists, Base and Robinhood) the deployed helper at 904efb36b; the host given as http://helper.local. Every Solana and NEAR vendor tape claiming a reach names sol-vendor-read or near-vendor-read inside its bound",
+  "bad_vendor": "the deployed helper ct-api.unrealized.trade at 904efb36b, before card vendor-tapes-name-their-reach-every-chain, read 2026-11-18 13:06:51-13:08:30Z with --record: Solana's Bv1a7cEj5a vendor tape (src coingecko) and NEAR's three engine tapes claim a reach naming no read; NEAR's prl.omft.near and token.0xshitzu.near rows read 201 s before their request",
+  "bad_deployed": "the deployed helper before the card, read 2026-11-16T20:51:09.557Z with --record (main d3ae40db4 code): every settled tape on the four chains claims no reach"
  },
  "good": {
-  "base": "https://ct-api.unrealized.trade",
-  "at": "2026-11-16T20:51:09.557Z",
+  "base": "http://helper.local",
+  "at": "2026-11-18T13:13:06.579Z",
   "chains": {
    "solana": {
     "lists_status": 200,
     "tapes": [
      {
-      "coin": "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS",
+      "coin": "Dz9mQ9NzkBcCsuGPFJ3r1bS4wgqKMHBPiVuniW8Mbonk",
       "reads": [
        {
+        "at": 1795007492139,
         "status": 200,
-        "n": 4,
-        "oldest_ms": 1794862218000,
-        "filling": true,
-        "src": "chain",
-        "as_of_ms": 1794862234748
-       },
-       {
-        "status": 200,
-        "n": 4,
-        "oldest_ms": 1794862218000,
+        "timing": "sol-vendor-read;desc=\"rows read 0 ms ago\", total;dur=1162",
+        "n": 50,
+        "oldest_ms": 1795006880000,
         "filling": false,
-        "src": "chain",
-        "as_of_ms": 1794862237758,
-        "whole_ms": 1794862219000
+        "whole_ms": 1795006881000,
+        "src": "geckoterminal",
+        "as_of_ms": 1795007493301
        }
       ]
      },
      {
-      "coin": "98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g",
+      "coin": "Bv1a7cEj5aRnJQhMw4kRQqAFesMSd5LwcDnUzq52BMmr",
       "reads": [
        {
+        "at": 1795007533303,
         "status": 200,
-        "n": 1,
-        "oldest_ms": 1794862229000,
-        "filling": true,
-        "src": "chain",
-        "as_of_ms": 1794862238442
-       },
-       {
-        "status": 200,
-        "n": 3,
-        "oldest_ms": 1794862195000,
+        "timing": "sol-vendor-read;desc=\"rows read 0 ms ago\", total;dur=1096",
+        "n": 50,
+        "oldest_ms": 1795006572000,
         "filling": false,
-        "src": "chain",
-        "as_of_ms": 1794862241760,
-        "whole_ms": 1794862196000
+        "whole_ms": 1795006573000,
+        "src": "geckoterminal",
+        "as_of_ms": 1795007534399
        }
       ]
      },
      {
-      "coin": "SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb",
+      "coin": "DKYcjobF7HPtL9RyQBRdeRQ2iWvizpfbgWwPWNXdpump",
       "reads": [
        {
+        "at": 1795007574402,
         "status": 200,
-        "n": 3,
-        "oldest_ms": 1794862241000,
-        "filling": true,
-        "src": "chain",
-        "as_of_ms": 1794862243688
-       },
-       {
-        "status": 200,
-        "n": 7,
-        "oldest_ms": 1794862241000,
+        "timing": "sol-vendor-read;desc=\"rows read 0 ms ago\", total;dur=2007",
+        "n": 50,
+        "oldest_ms": 1795007301000,
         "filling": false,
-        "src": "chain",
-        "as_of_ms": 1794862246913,
-        "whole_ms": 1794862242000
+        "whole_ms": 1795007302000,
+        "src": "geckoterminal",
+        "as_of_ms": 1795007576409
        }
       ]
      }
@@ -82,44 +65,49 @@
     "lists_status": 200,
     "tapes": [
      {
+      "coin": "0x8888cdad9ef66382f89e68f95ec384d89ec28888",
+      "reads": [
+       {
+        "at": 1795007577757,
+        "status": 200,
+        "timing": "evm-open;dur=5, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 343874 ms ago\", total;dur=6",
+        "n": 18,
+        "oldest_ms": 1794946406000,
+        "filling": false,
+        "src": "coingecko",
+        "as_of_ms": 1795007234125
+       }
+      ]
+     },
+     {
+      "coin": "0xe0cd4cacddcbf4f36e845407ce53e87717b6601d",
+      "reads": [
+       {
+        "at": 1795007578219,
+        "status": 200,
+        "timing": "evm-open;dur=132, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 59086010 of head 59086010, read 1 s ago\", total;dur=502",
+        "n": 50,
+        "oldest_ms": 1795007486000,
+        "filling": false,
+        "whole_ms": 1795006954000,
+        "src": "chain",
+        "as_of_ms": 1795007578584
+       }
+      ]
+     },
+     {
       "coin": "0xb20000000000000000000078ee7ce2fe4908108c",
       "reads": [
        {
+        "at": 1795007579198,
         "status": 200,
+        "timing": "evm-open;dur=403, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 59086019 of head 59086019, read 0 s ago\", total;dur=533",
         "n": 50,
-        "oldest_ms": 1794862113000,
+        "oldest_ms": 1795007288000,
         "filling": false,
+        "whole_ms": 1795006670000,
         "src": "chain",
-        "as_of_ms": 1794862247782,
-        "whole_ms": 1794862114000
-       }
-      ]
-     },
-     {
-      "coin": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
-      "reads": [
-       {
-        "status": 200,
-        "n": 50,
-        "oldest_ms": 1794862111000,
-        "filling": false,
-        "src": "chain",
-        "as_of_ms": 1794862248990,
-        "whole_ms": 1794862112000
-       }
-      ]
-     },
-     {
-      "coin": "0xb200000000000000000000fd2f87532b90095211",
-      "reads": [
-       {
-        "status": 200,
-        "n": 50,
-        "oldest_ms": 1794862050000,
-        "filling": false,
-        "src": "chain",
-        "as_of_ms": 1794862249686,
-        "whole_ms": 1794862051000
+        "as_of_ms": 1795007579808
        }
       ]
      }
@@ -129,84 +117,50 @@
     "lists_status": 200,
     "tapes": [
      {
-      "coin": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
-      "reads": [
-       {
-        "status": 200,
-        "n": 12,
-        "oldest_ms": 1794861948000,
-        "filling": true,
-        "src": "chain",
-        "as_of_ms": 1794862250657
-       },
-       {
-        "status": 200,
-        "n": 12,
-        "oldest_ms": 1794861948000,
-        "filling": true,
-        "src": "chain",
-        "as_of_ms": 1794862253541
-       },
-       {
-        "status": 200,
-        "n": 12,
-        "oldest_ms": 1794861948000,
-        "filling": false,
-        "src": "chain",
-        "as_of_ms": 1794862256552,
-        "whole_ms": 1794861949000
-       }
-      ]
-     },
-     {
-      "coin": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
-      "reads": [
-       {
-        "status": 200,
-        "n": 4,
-        "oldest_ms": 1794862005000,
-        "filling": true,
-        "src": "chain",
-        "as_of_ms": 1794862257446
-       },
-       {
-        "status": 200,
-        "n": 4,
-        "oldest_ms": 1794862005000,
-        "filling": false,
-        "src": "chain",
-        "as_of_ms": 1794862260599,
-        "whole_ms": 1794862006000
-       }
-      ]
-     },
-     {
       "coin": "0x39dbed3a2bd333467115de45665cc57f813c4571",
       "reads": [
        {
+        "at": 1795007580841,
         "status": 200,
-        "n": 40,
-        "oldest_ms": 1794861953000,
-        "filling": true,
-        "src": "chain",
-        "as_of_ms": 1794862260975
-       },
-       {
-        "status": 200,
-        "n": 40,
-        "oldest_ms": 1794861953000,
-        "filling": true,
-        "src": "chain",
-        "as_of_ms": 1794862263582
-       },
-       {
-        "status": 200,
-        "n": 40,
-        "oldest_ms": 1794861953000,
+        "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117422696 of head 117422761, read 6 s ago\", total;dur=53",
+        "n": 50,
+        "oldest_ms": 1795007266000,
         "filling": false,
+        "whole_ms": 1795007267000,
         "src": "chain",
-        "as_of_ms": 1794862267554,
-        "whole_ms": 1794861954000
+        "as_of_ms": 1795007578993
+       }
+      ]
+     },
+     {
+      "coin": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+      "reads": [
+       {
+        "at": 1795007581234,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117422696 of head 117422761, read 6 s ago\", total;dur=27",
+        "n": 50,
+        "oldest_ms": 1795004617000,
+        "filling": false,
+        "whole_ms": 1795004618000,
+        "src": "chain",
+        "as_of_ms": 1795007579713
+       }
+      ]
+     },
+     {
+      "coin": "0xe8ffd7e24187f72afb08d75b1bb13088a989a791",
+      "reads": [
+       {
+        "at": 1795007581599,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117422696 of head 117422761, read 6 s ago\", total;dur=193",
+        "n": 50,
+        "oldest_ms": 1795004788000,
+        "filling": false,
+        "whole_ms": 1795004789000,
+        "src": "chain",
+        "as_of_ms": 1795007579713
        }
       ]
      }
@@ -216,44 +170,397 @@
     "lists_status": 200,
     "tapes": [
      {
-      "coin": "token.rhealab.near",
+      "coin": "prl.omft.near",
       "reads": [
        {
+        "at": 1795007582803,
         "status": 200,
+        "timing": "near-vendor-read;desc=\"rows read 1 ms ago\", total;dur=1285",
         "n": 50,
-        "oldest_ms": 1794859729557,
+        "oldest_ms": 1795004965864,
         "filling": false,
+        "whole_ms": 1795004966864,
         "src": "unrealized",
-        "as_of_ms": 1794862268639,
-        "whole_ms": 1794859730557
+        "as_of_ms": 1795007584088
        }
       ]
      },
      {
-      "coin": "zec.omft.near",
+      "coin": "gta.nearlytrade.near",
       "reads": [
        {
+        "at": 1795007584089,
         "status": 200,
+        "timing": "near-vendor-read;desc=\"rows read 0 ms ago\", total;dur=1773",
         "n": 50,
-        "oldest_ms": 1794861572989,
+        "oldest_ms": 1795004931909,
         "filling": false,
+        "whole_ms": 1795004932909,
         "src": "unrealized",
-        "as_of_ms": 1794862269152,
-        "whole_ms": 1794861573989
+        "as_of_ms": 1795007585862
        }
       ]
      },
      {
-      "coin": "blackdragon.tkn.near",
+      "coin": "token.0xshitzu.near",
       "reads": [
        {
+        "at": 1795007585863,
         "status": 200,
+        "timing": "near-vendor-read;desc=\"rows read 0 ms ago\", total;dur=716",
         "n": 50,
-        "oldest_ms": 1794804995525,
+        "oldest_ms": 1794953806153,
         "filling": false,
+        "whole_ms": 1794953807153,
         "src": "unrealized",
-        "as_of_ms": 1794859143489,
-        "whole_ms": 1794804996525
+        "as_of_ms": 1795007586578
+       }
+      ]
+     }
+    ]
+   }
+  }
+ },
+ "bad_vendor": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T13:08:30.121Z",
+  "chains": {
+   "solana": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g",
+      "reads": [
+       {
+        "at": 1795007213871,
+        "status": 200,
+        "timing": "sol-read-to;desc=\"slot 0 of head 470945519, heard 0 s ago, cold\", total;dur=1047",
+        "n": 1,
+        "oldest_ms": 1795007191000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007215036
+       },
+       {
+        "at": 1795007218263,
+        "status": 200,
+        "timing": "sol-read-to;desc=\"slot 470945491 of head 470945535, heard 0 s ago\", total;dur=0",
+        "n": 1,
+        "oldest_ms": 1795007191000,
+        "filling": false,
+        "whole_ms": 1795007192000,
+        "src": "chain",
+        "as_of_ms": 1795007218233
+       }
+      ]
+     },
+     {
+      "coin": "Dz9mQ9NzkBcCsuGPFJ3r1bS4wgqKMHBPiVuniW8Mbonk",
+      "reads": [
+       {
+        "at": 1795007218600,
+        "status": 200,
+        "timing": "sol-read-to;desc=\"slot 0 of head 470945542, heard 0 s ago, cold\", total;dur=696",
+        "n": 2,
+        "oldest_ms": 1795007153000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007220056
+       },
+       {
+        "at": 1795007223275,
+        "status": 200,
+        "timing": "sol-read-to;desc=\"slot 470945522 of head 470945562, heard 0 s ago\", total;dur=0",
+        "n": 12,
+        "oldest_ms": 1795006911000,
+        "filling": false,
+        "whole_ms": 1795006912000,
+        "src": "chain",
+        "as_of_ms": 1795007223237
+       }
+      ]
+     },
+     {
+      "coin": "Bv1a7cEj5aRnJQhMw4kRQqAFesMSd5LwcDnUzq52BMmr",
+      "reads": [
+       {
+        "at": 1795007224286,
+        "status": 200,
+        "timing": "total;dur=3058",
+        "n": 50,
+        "oldest_ms": 1795006399000,
+        "filling": false,
+        "whole_ms": 1795006400000,
+        "src": "coingecko",
+        "as_of_ms": 1795007227469
+       }
+      ]
+     }
+    ]
+   },
+   "base": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "0x8888cdad9ef66382f89e68f95ec384d89ec28888",
+      "reads": [
+       {
+        "at": 1795007233287,
+        "status": 200,
+        "timing": "evm-open;dur=4, evm-queue;dur=42364;desc=\"48 posts: pace 20843 ms, in flight 21521 ms\", evm-vendor-read;desc=\"rows read 7299 ms ago\", total;dur=8000",
+        "n": 0,
+        "oldest_ms": null,
+        "filling": true,
+        "src": "coingecko",
+        "as_of_ms": 1795007234125
+       },
+       {
+        "at": 1795007244631,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=50092;desc=\"51 posts: pace 18592 ms, in flight 31500 ms\", evm-vendor-read;desc=\"rows read 18635 ms ago\", total;dur=8002",
+        "n": 18,
+        "oldest_ms": 1794946406000,
+        "filling": false,
+        "src": "coingecko",
+        "as_of_ms": 1795007234125
+       }
+      ]
+     },
+     {
+      "coin": "0xe0cd4cacddcbf4f36e845407ce53e87717b6601d",
+      "reads": [
+       {
+        "at": 1795007252978,
+        "status": 200,
+        "timing": "evm-open;dur=890, evm-queue;dur=19956;desc=\"24 posts: pace 17276 ms, in flight 2680 ms\", evm-read-to;desc=\"block 59084387 of head 59084387, read 1 s ago\", total;dur=8000",
+        "n": 22,
+        "oldest_ms": 1795007105000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007257277
+       },
+       {
+        "at": 1795007264325,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=38114;desc=\"58 posts: pace 27933 ms, in flight 10181 ms\", evm-read-to;desc=\"block 59084442 of head 59084442, read 0 s ago\", total;dur=285",
+        "n": 22,
+        "oldest_ms": 1795007111000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007264277
+       },
+       {
+        "at": 1795007267959,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 59084458 of head 59084458, read 1 s ago\", total;dur=399",
+        "n": 50,
+        "oldest_ms": 1795007111000,
+        "filling": false,
+        "whole_ms": 1795006954000,
+        "src": "chain",
+        "as_of_ms": 1795007267980
+       }
+      ]
+     },
+     {
+      "coin": "0xb20000000000000000000078ee7ce2fe4908108c",
+      "reads": [
+       {
+        "at": 1795007268696,
+        "status": 200,
+        "timing": "evm-open;dur=1494, evm-queue;dur=2697;desc=\"4 posts: pace 2697 ms, in flight 0 ms\", evm-read-to;desc=\"block 59084467 of head 59084469, read 1 s ago\", total;dur=1494",
+        "n": 20,
+        "oldest_ms": 1795006987000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007270316
+       },
+       {
+        "at": 1795007273533,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 59084467 of head 59084484, read 4 s ago\", total;dur=0",
+        "n": 20,
+        "oldest_ms": 1795006987000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007270316
+       },
+       {
+        "at": 1795007276873,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 59084493 of head 59084501, read 3 s ago\", total;dur=0",
+        "n": 20,
+        "oldest_ms": 1795006987000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007275756
+       },
+       {
+        "at": 1795007280209,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=30599;desc=\"34 posts: pace 26746 ms, in flight 3853 ms\", evm-read-to;desc=\"block 59084501 of head 59084509, read 4 s ago\", total;dur=8001",
+        "n": 37,
+        "oldest_ms": 1795006816000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007288192
+       },
+       {
+        "at": 1795007291562,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 59084571 of head 59084578, read 2 s ago\", total;dur=548",
+        "n": 50,
+        "oldest_ms": 1795006812000,
+        "filling": false,
+        "whole_ms": 1795006670000,
+        "src": "chain",
+        "as_of_ms": 1795007291348
+       }
+      ]
+     }
+    ]
+   },
+   "robinhood": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "reads": [
+       {
+        "at": 1795007292795,
+        "status": 200,
+        "timing": "evm-open;dur=45, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117419879 of head 117419879, read 1 s ago\", total;dur=329",
+        "n": 50,
+        "oldest_ms": 1795006997000,
+        "filling": false,
+        "whole_ms": 1795006998000,
+        "src": "chain",
+        "as_of_ms": 1795007292971
+       }
+      ]
+     },
+     {
+      "coin": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+      "reads": [
+       {
+        "at": 1795007293485,
+        "status": 200,
+        "timing": "evm-open;dur=130, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117419894 of head 117419894, read 0 s ago\", total;dur=359",
+        "n": 6,
+        "oldest_ms": 1795007019000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007293737
+       },
+       {
+        "at": 1795007297187,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117419894 of head 117419917, read 4 s ago\", total;dur=1",
+        "n": 30,
+        "oldest_ms": 1795005610000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007293737
+       },
+       {
+        "at": 1795007300534,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117419952 of head 117419959, read 1 s ago\", total;dur=1",
+        "n": 50,
+        "oldest_ms": 1795004260000,
+        "filling": false,
+        "whole_ms": 1795004261000,
+        "src": "chain",
+        "as_of_ms": 1795007299704
+       }
+      ]
+     },
+     {
+      "coin": "0xe8ffd7e24187f72afb08d75b1bb13088a989a791",
+      "reads": [
+       {
+        "at": 1795007300883,
+        "status": 200,
+        "timing": "evm-open;dur=99, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117419966 of head 117419966, read 0 s ago\", total;dur=118",
+        "n": 4,
+        "oldest_ms": 1795007025000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007301107
+       },
+       {
+        "at": 1795007304345,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117419980 of head 117419980, read 2 s ago\", total;dur=1",
+        "n": 31,
+        "oldest_ms": 1795005475000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1795007303559
+       },
+       {
+        "at": 1795007307689,
+        "status": 200,
+        "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117420032 of head 117420032, read 0 s ago\", total;dur=1",
+        "n": 50,
+        "oldest_ms": 1795004659000,
+        "filling": false,
+        "whole_ms": 1795004660000,
+        "src": "chain",
+        "as_of_ms": 1795007307669
+       }
+      ]
+     }
+    ]
+   },
+   "near": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "prl.omft.near",
+      "reads": [
+       {
+        "at": 1795007308692,
+        "status": 200,
+        "timing": "total;dur=2",
+        "n": 50,
+        "oldest_ms": 1795004456113,
+        "filling": false,
+        "whole_ms": 1795004457113,
+        "src": "unrealized",
+        "as_of_ms": 1795007107018
+       }
+      ]
+     },
+     {
+      "coin": "gta.nearlytrade.near",
+      "reads": [
+       {
+        "at": 1795007309032,
+        "status": 200,
+        "timing": "total;dur=424",
+        "n": 50,
+        "oldest_ms": 1795004931909,
+        "filling": false,
+        "whole_ms": 1795004932909,
+        "src": "unrealized",
+        "as_of_ms": 1795007309577
+       }
+      ]
+     },
+     {
+      "coin": "token.0xshitzu.near",
+      "reads": [
+       {
+        "at": 1795007309793,
+        "status": 200,
+        "timing": "total;dur=1",
+        "n": 50,
+        "oldest_ms": 1794953805060,
+        "filling": false,
+        "whole_ms": 1794953806060,
+        "src": "unrealized",
+        "as_of_ms": 1795007108020
        }
       ]
      }

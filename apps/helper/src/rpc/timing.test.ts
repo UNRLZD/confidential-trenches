@@ -4,11 +4,12 @@
 // only. A provider-B read that answers slowly can then be told apart from a read that waited for its second's room.
 // No entry ever holds a URL, a host or a key: a key-like path segment is planted and looked for in every header.
 import assert from "node:assert/strict";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { createPacer, createRpc } from "./rpc.ts";
 import { handler } from "../server.ts";
+import { call, listening } from "../../test/servers.ts";
 
 /** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
  *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
@@ -36,15 +37,10 @@ const clean = (where: string, text: string) => {
 
 async function serve(rpc: ReturnType<typeof createRpc>) {
   const h = createServer(handler("a".repeat(40), undefined, rpc, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map()));
-  await new Promise<void>((done) => h.listen(0, "127.0.0.1", () => done()));
+  await listening(h.listen(0, "127.0.0.1"), "the helper");
   const port = (h.address() as AddressInfo).port;
   const post = (ip: string) =>
-    new Promise<{ status: number; headers: Record<string, string | string[] | undefined> }>((done, fail) => {
-      const r = request({ host: "127.0.0.1", port, method: "POST", path: "/v1/rpc/solana", headers: { "content-type": "application/json", origin: "https://other.example", "x-forwarded-for": ip } }, (res) => {
-        res.resume().on("end", () => done({ status: res.statusCode ?? 0, headers: res.headers }));
-      });
-      r.on("error", fail).end(BODY);
-    });
+    call(port, { method: "POST", path: "/v1/rpc/solana", headers: { "content-type": "application/json", origin: "https://other.example", "x-forwarded-for": ip }, body: BODY }, "the helper");
   return { post, close: () => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))) };
 }
 

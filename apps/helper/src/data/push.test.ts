@@ -3,14 +3,14 @@
 // one that differs by case or a slash, and no Origin at all, is answered 403 before the handshake, with no read made.
 // The client below is a bare RFC 6455 upgrade over node:http, so the test runs against any helper, this one's base too.
 import { strict as assert } from "node:assert";
-import { randomBytes } from "node:crypto";
-import { request, type Server } from "node:http";
+import type { Server } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 import { test } from "node:test";
 import { HELPER_CORS } from "@blindfill/kit";
 import { start } from "../server.ts";
 import { rowsOf } from "./push.ts";
 import { createSolanaTrades } from "./solana/trades.ts";
+import { call, listening, opened } from "../../test/servers.ts";
 
 const COMMIT = "a".repeat(40);
 const APP = "https://ct-app.unrealized.trade";
@@ -20,35 +20,27 @@ const MINT = "So11111111111111111111111111111111111111112";
 type Upgrade = { status: number; headers: Record<string, unknown>; frame?: string; socket?: Socket };
 
 /** One WebSocket upgrade of `path` with `origin` (none when undefined): its status, and on a 101 its first text frame. */
-function upgrade(port: number, path: string, origin: string | undefined, waitMs = 3_000): Promise<Upgrade> {
-  return new Promise((ok, fail) => {
-    const headers: Record<string, string> = { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": randomBytes(16).toString("base64") };
-    if (origin !== undefined) headers.Origin = origin;
-    const req = request({ host: "127.0.0.1", port, path, headers });
-    req.on("error", fail);
-    req.on("response", (res) => {
-      res.resume();
-      ok({ status: res.statusCode ?? 0, headers: res.headers });
-    });
-    req.on("upgrade", (res, socket, head) => {
-      let buf = head;
-      const timer = setTimeout(() => (socket.destroy(), ok({ status: 101, headers: res.headers, socket })), waitMs);
-      const read = () => {
-        // a server frame is unmasked: FIN+text, then a 7-bit, 16-bit or 64-bit length
-        if (buf.length < 2) return;
-        let len = buf[1]! & 0x7f;
-        let at = 2;
-        if (len === 126) [len, at] = [buf.length < 4 ? -1 : buf.readUInt16BE(2), 4];
-        else if (len === 127) [len, at] = [buf.length < 10 ? -1 : Number(buf.readBigUInt64BE(2)), 10];
-        if (len < 0 || buf.length < at + len) return;
-        clearTimeout(timer);
-        socket.destroy();
-        ok({ status: 101, headers: res.headers, frame: buf.subarray(at, at + len).toString("utf8"), socket });
-      };
-      socket.on("data", (d: Buffer) => ((buf = Buffer.concat([buf, d])), read()));
-      read();
-    });
-    req.end();
+async function upgrade(port: number, path: string, origin: string | undefined, waitMs = 3_000): Promise<Upgrade> {
+  const o = await opened(port, { path, headers: origin === undefined ? {} : { Origin: origin } }, "the helper");
+  if (o.socket === undefined) return { status: o.status, headers: o.headers };
+  const socket = o.socket;
+  return new Promise((ok) => {
+    let buf = o.head!;
+    const timer = setTimeout(() => (socket.destroy(), ok({ status: 101, headers: o.headers, socket })), waitMs);
+    const read = () => {
+      // a server frame is unmasked: FIN+text, then a 7-bit, 16-bit or 64-bit length
+      if (buf.length < 2) return;
+      let len = buf[1]! & 0x7f;
+      let at = 2;
+      if (len === 126) [len, at] = [buf.length < 4 ? -1 : buf.readUInt16BE(2), 4];
+      else if (len === 127) [len, at] = [buf.length < 10 ? -1 : Number(buf.readBigUInt64BE(2)), 10];
+      if (len < 0 || buf.length < at + len) return;
+      clearTimeout(timer);
+      socket.destroy();
+      ok({ status: 101, headers: o.headers, frame: buf.subarray(at, at + len).toString("utf8"), socket });
+    };
+    socket.on("data", (d: Buffer) => ((buf = Buffer.concat([buf, d])), read()));
+    read();
   });
 }
 
@@ -62,14 +54,13 @@ function helper(reads: string[]): { server: Server; port: () => number; tape: { 
   return { server, port: () => (server.address() as AddressInfo).port, tape };
 }
 
-const listening = (s: Server) => new Promise<void>((ok) => (s.listening ? ok() : s.once("listening", () => ok())));
 const PATH = `/v1/market/push?chain=solana&token=${MINT}`;
 
 test("APP_HOST's Origin is upgraded and receives the token's tape as its first update", async (t) => {
   const reads: string[] = [];
   const h = helper(reads);
   t.after(() => h.server.close());
-  await listening(h.server);
+  await listening(h.server, "the helper");
   const r = await upgrade(h.port(), PATH, APP);
   assert.equal(r.status, 101, "APP_HOST's upgrade is accepted");
   assert.ok(r.frame !== undefined, "APP_HOST receives an update");
@@ -81,7 +72,7 @@ test("every Origin but APP_HOST's, and no Origin, is refused 403 before the hand
   const reads: string[] = [];
   const h = helper(reads);
   t.after(() => h.server.close());
-  await listening(h.server);
+  await listening(h.server, "the helper");
   assert.ok(HELPER_CORS.origins.includes(SIGN), "SIGN_HOST is a CORS origin, so the push rule is narrower than CORS");
   for (const origin of [SIGN, "https://example.com", "*", "null", "", APP.toUpperCase(), `${APP}/`, `${APP}:443`, "http://ct-app.unrealized.trade", `${APP}.example.com`, undefined]) {
     const r = await upgrade(h.port(), PATH, origin);
@@ -97,37 +88,35 @@ test("APP_HOST's socket is pushed each change of the tape, and nothing when it d
   const reads: string[] = [];
   const h = helper(reads);
   t.after(() => h.server.close());
-  await listening(h.server);
+  await listening(h.server, "the helper");
   const frames: string[] = [];
-  const done = new Promise<void>((ok) => {
-    const req = request({ host: "127.0.0.1", port: h.port(), path: PATH, headers: { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": randomBytes(16).toString("base64"), Origin: APP } });
-    req.on("upgrade", (_res, socket, head) => {
-      let buf = head;
-      const take = () => {
-        while (buf.length >= 2) {
-          let len = buf[1]! & 0x7f;
-          let at = 2;
-          if (len === 126) [len, at] = [buf.length < 4 ? Infinity : buf.readUInt16BE(2), 4];
-          if (buf.length < at + len) return;
-          if ((buf[0]! & 0x0f) === 1) frames.push(buf.subarray(at, at + len).toString("utf8"));
-          buf = buf.subarray(at + len);
-        }
-      };
-      socket.on("data", (d: Buffer) => ((buf = Buffer.concat([buf, d])), take()));
-      take();
-      setTimeout(() => (h.tape.n = 2), 700);
-      setTimeout(() => (socket.destroy(), ok()), 2_200);
-    });
-    req.end();
+  const o = await opened(h.port(), { path: PATH, headers: { Origin: APP } }, "the helper");
+  assert.equal(o.status, 101);
+  const socket = o.socket!;
+  await new Promise<void>((ok) => {
+    let buf = o.head!;
+    const take = () => {
+      while (buf.length >= 2) {
+        let len = buf[1]! & 0x7f;
+        let at = 2;
+        if (len === 126) [len, at] = [buf.length < 4 ? Infinity : buf.readUInt16BE(2), 4];
+        if (buf.length < at + len) return;
+        if ((buf[0]! & 0x0f) === 1) frames.push(buf.subarray(at, at + len).toString("utf8"));
+        buf = buf.subarray(at + len);
+      }
+    };
+    socket.on("data", (d: Buffer) => ((buf = Buffer.concat([buf, d])), take()));
+    take();
+    setTimeout(() => (h.tape.n = 2), 700);
+    setTimeout(() => (socket.destroy(), ok()), 2_200);
   });
-  await done;
   assert.deepEqual(frames.map((f) => JSON.parse(f).trades.length), [1, 2], "the first tape, then one update for the one change");
 });
 
 test("an upgrade off the push path, or a token the reads do not know, is not upgraded", async (t) => {
   const h = helper([]);
   t.after(() => h.server.close());
-  await listening(h.server);
+  await listening(h.server, "the helper");
   assert.equal((await upgrade(h.port(), "/v1/health", APP)).status, 404);
   assert.equal((await upgrade(h.port(), "/v1/market/push?chain=solana&token=nope", APP)).status, 404);
   assert.equal((await upgrade(h.port(), `/v1/market/push?chain=ethereum&token=${MINT}`, APP)).status, 404);
@@ -135,40 +124,36 @@ test("an upgrade off the push path, or a token the reads do not know, is not upg
 });
 
 /** An APP_HOST socket held open: its handshake status, and a promise of the close code the server sends (0: none). */
-function hold(port: number): Promise<{ status: number; closed: Promise<number>; end: () => void }> {
-  return new Promise((ok, fail) => {
-    const req = request({ host: "127.0.0.1", port, path: PATH, headers: { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": randomBytes(16).toString("base64"), Origin: APP } });
-    req.on("error", fail);
-    req.on("response", (res) => (res.resume(), ok({ status: res.statusCode ?? 0, closed: Promise.resolve(0), end: () => undefined })));
-    req.on("upgrade", (_res, socket) => {
-      let buf = Buffer.alloc(0);
-      const closed = new Promise<number>((done) => {
-        socket.on("data", (d: Buffer) => {
-          buf = Buffer.concat([buf, d]);
-          // walk the frames for a close (opcode 8), whose first two payload bytes are its code
-          let at = 0;
-          while (buf.length - at >= 2) {
-            const len = buf[at + 1]! & 0x7f;
-            const hdr = len === 126 ? 4 : 2;
-            const size = len === 126 ? (buf.length - at < 4 ? Infinity : buf.readUInt16BE(at + 2)) : len;
-            if (buf.length - at < hdr + size) break;
-            if ((buf[at]! & 0x0f) === 8) return done(buf.readUInt16BE(at + hdr));
-            at += hdr + size;
-          }
-        });
-        socket.on("close", () => done(0));
-      });
-      ok({ status: 101, closed, end: () => socket.destroy() });
-    });
-    req.end();
+async function hold(port: number): Promise<{ status: number; closed: Promise<number>; end: () => void }> {
+  const o = await opened(port, { path: PATH, headers: { Origin: APP } }, "the helper");
+  if (o.socket === undefined) return { status: o.status, closed: Promise.resolve(0), end: () => undefined };
+  const socket = o.socket;
+  let buf = o.head!;
+  const closed = new Promise<number>((done) => {
+    const walk = () => {
+      // walk the frames for a close (opcode 8), whose first two payload bytes are its code
+      let at = 0;
+      while (buf.length - at >= 2) {
+        const len = buf[at + 1]! & 0x7f;
+        const hdr = len === 126 ? 4 : 2;
+        const size = len === 126 ? (buf.length - at < 4 ? Infinity : buf.readUInt16BE(at + 2)) : len;
+        if (buf.length - at < hdr + size) break;
+        if ((buf[at]! & 0x0f) === 8) return done(buf.readUInt16BE(at + hdr));
+        at += hdr + size;
+      }
+    };
+    socket.on("data", (d: Buffer) => ((buf = Buffer.concat([buf, d])), walk()));
+    socket.on("close", () => done(0));
+    walk();
   });
+  return { status: 101, closed, end: () => socket.destroy() };
 }
 
 test("one client holds at most PUSH_CLIENT_MAX sockets; the next is refused 503 and one closed frees its place", async (t) => {
   const { PUSH_CLIENT_MAX } = await import("./push.ts");
   const h = helper([]);
   t.after(() => h.server.close());
-  await listening(h.server);
+  await listening(h.server, "the helper");
   const held = [];
   for (let i = 0; i < PUSH_CLIENT_MAX; i++) held.push(await hold(h.port()));
   assert.deepEqual(held.map((x) => x.status), Array(PUSH_CLIENT_MAX).fill(101));
@@ -185,7 +170,7 @@ test("a stop's drain tells every push socket the helper goes away (1001)", async
   const { drainer } = await import("../server.ts");
   const h = helper([]);
   t.after(() => h.server.close());
-  await listening(h.server);
+  await listening(h.server, "the helper");
   const s = await hold(h.port());
   assert.equal(s.status, 101);
   drainer(h.server)();
@@ -204,46 +189,44 @@ const PING = frame(true, 0x9, Buffer.alloc(0));
 
 /** An APP_HOST socket that `feed` writes to; resolves with the server's close code, "pong" when the server answered the
  *  last ping (so it took every byte before it and is still open), or "cut" when the connection ended with neither. */
-function attack(port: number, feed: (socket: Socket, closed: () => boolean) => Promise<void>): Promise<number | "pong" | "cut"> {
-  return new Promise((ok, fail) => {
-    const req = request({ host: "127.0.0.1", port, path: PATH, headers: { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": randomBytes(16).toString("base64"), Origin: APP } });
-    req.on("error", fail);
-    req.on("response", (res) => fail(new Error(`not upgraded: ${res.statusCode}`)));
-    req.on("upgrade", (_res, socket: Socket, head) => {
-      let buf = head;
-      let end: number | "pong" | "cut" | null = null;
-      const done = (v: number | "pong" | "cut") => {
-        if (end !== null) return;
-        end = v;
-        socket.destroy();
-        ok(v);
-      };
-      socket.setNoDelay(true);
-      socket.on("data", (d: Buffer) => {
-        buf = Buffer.concat([buf, d]);
-        while (buf.length >= 2) {
-          let len = buf[1]! & 0x7f;
-          let at = 2;
-          if (len === 126) [len, at] = [buf.length < 4 ? Infinity : buf.readUInt16BE(2), 4];
-          if (buf.length < at + len) return;
-          const op = buf[0]! & 0x0f;
-          if (op === 0x8) return done(buf.readUInt16BE(at));
-          if (op === 0xa) return done("pong");
-          buf = buf.subarray(at + len);
-        }
-      });
-      socket.on("error", () => done("cut"));
-      socket.on("close", () => done("cut"));
-      void feed(socket, () => end !== null).then(() => end === null && socket.write(PING));
+async function attack(port: number, feed: (socket: Socket, closed: () => boolean) => Promise<void>): Promise<number | "pong" | "cut"> {
+  const o = await opened(port, { path: PATH, headers: { Origin: APP } }, "the helper");
+  if (o.socket === undefined) throw new Error(`not upgraded: ${o.status}`);
+  const socket = o.socket;
+  const head = o.head!;
+  return new Promise((ok) => {
+    let buf = head;
+    let end: number | "pong" | "cut" | null = null;
+    const done = (v: number | "pong" | "cut") => {
+      if (end !== null) return;
+      end = v;
+      socket.destroy();
+      ok(v);
+    };
+    socket.setNoDelay(true);
+    socket.on("data", (d: Buffer) => {
+      buf = Buffer.concat([buf, d]);
+      while (buf.length >= 2) {
+        let len = buf[1]! & 0x7f;
+        let at = 2;
+        if (len === 126) [len, at] = [buf.length < 4 ? Infinity : buf.readUInt16BE(2), 4];
+        if (buf.length < at + len) return;
+        const op = buf[0]! & 0x0f;
+        if (op === 0x8) return done(buf.readUInt16BE(at));
+        if (op === 0xa) return done("pong");
+        buf = buf.subarray(at + len);
+      }
     });
-    req.end();
+    socket.on("error", () => done("cut"));
+    socket.on("close", () => done("cut"));
+    void feed(socket, () => end !== null).then(() => end === null && socket.write(PING));
   });
 }
 
 test("a message in more fragments than PUSH_IN_FRAGMENTS is closed 1008; before, all PUSH_IN_MAX were held", async (t) => {
   const h = helper([]);
   t.after(() => h.server.close());
-  await listening(h.server);
+  await listening(h.server, "the helper");
   const { PUSH_IN_MAX } = await import("./push.ts");
   // one unfinished binary message of PUSH_IN_MAX one-byte fragments, the most maxPayload lets a message carry, then a ping
   const pieces = [frame(false, 0x2, Buffer.from([0]))];
@@ -255,7 +238,7 @@ test("a message in more fragments than PUSH_IN_FRAGMENTS is closed 1008; before,
 test("a frame sent in more data chunks than PUSH_IN_CHUNKS is closed 1008; before, all PUSH_IN_MAX were held", async (t) => {
   const h = helper([]);
   t.after(() => h.server.close());
-  await listening(h.server);
+  await listening(h.server, "the helper");
   const { PUSH_IN_MAX } = await import("./push.ts");
   // a binary frame of PUSH_IN_MAX bytes, its header in one write and its payload one byte a write, each read on its own
   // (the server's read of each byte comes before the next write: setImmediate runs after the loop's I/O poll)
@@ -274,7 +257,7 @@ test("a frame sent in more data chunks than PUSH_IN_CHUNKS is closed 1008; befor
 test("a message within the bounds, and the pongs, keep the socket open and pushed to", async (t) => {
   const h = helper([]);
   t.after(() => h.server.close());
-  await listening(h.server);
+  await listening(h.server, "the helper");
   const { PUSH_IN_FRAGMENTS, PUSH_IN_CHUNKS, PUSH_IN_MAX } = await import("./push.ts");
   assert.ok(Number.isSafeInteger(PUSH_IN_FRAGMENTS) && PUSH_IN_FRAGMENTS >= 2 && PUSH_IN_FRAGMENTS < PUSH_IN_MAX, "PUSH_IN_FRAGMENTS is a bound below what maxPayload alone allows");
   assert.ok(Number.isSafeInteger(PUSH_IN_CHUNKS) && PUSH_IN_CHUNKS >= 2 && PUSH_IN_CHUNKS < PUSH_IN_MAX, "PUSH_IN_CHUNKS is a bound below what maxPayload alone allows");
@@ -297,10 +280,10 @@ test("a plain GET of the push path, with no upgrade, is answered 426 and reads n
   const reads: string[] = [];
   const h = helper(reads);
   t.after(() => h.server.close());
-  await listening(h.server);
-  const r = await fetch(`http://127.0.0.1:${h.port()}${PATH}`, { headers: { origin: APP } });
+  await listening(h.server, "the helper");
+  const r = await call(h.port(), { path: PATH, headers: { origin: APP } }, "the helper");
   assert.equal(r.status, 426);
-  assert.equal(r.headers.get("upgrade"), "websocket");
+  assert.equal(r.headers["upgrade"], "websocket");
   assert.deepEqual(reads, []);
 });
 
@@ -316,14 +299,14 @@ test("card solana-trades-show-on-every-token: a Solana token Discover's lists do
   });
   const server = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { solana: trades } as never);
   t.after(() => (trades.stop(), server.closeAllConnections(), server.close()));
-  await listening(server);
+  await listening(server, "the helper");
   const port = (server.address() as AddressInfo).port;
   const r = await upgrade(port, PATH, APP);
   assert.equal(r.status, 101, "the push socket is upgraded");
   assert.deepEqual(JSON.parse(r.frame!).trades, rows, "and sent the pool's trades");
-  const got = await fetch(`http://127.0.0.1:${port}/v1/market/trades?chain=solana&token=${MINT}`, { headers: { origin: APP } });
+  const got = await call(port, { path: `/v1/market/trades?chain=solana&token=${MINT}`, headers: { origin: APP } }, "the helper");
   assert.equal(got.status, 200);
-  assert.deepEqual(((await got.json()) as { trades: unknown[] }).trades, rows);
+  assert.deepEqual((JSON.parse(got.body) as { trades: unknown[] }).trades, rows);
 });
 
 test("card token-stats-count-every-trade: a tape whose filling ends or whose reach moves is pushed again with the same rows; the same answer is not", () => {

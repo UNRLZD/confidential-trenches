@@ -3,7 +3,6 @@
 // page, the chain's lists and DexScreener's tokens/v1. Red before held.ts exists: the module is missing and the route
 // answers 404 for every request.
 import assert from "node:assert/strict";
-import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
@@ -13,6 +12,7 @@ import { createHeld, DEX_BASE, DEX_LIMITS, HELD_FRESH_MS, HELD_MAX, HELD_SERVE_M
 import { upstreamBudget, type BudgetLimits } from "../limits/limits.ts";
 import { createEvmToken } from "./evm/token.ts";
 import { NOT_FOUND, UPSTREAM, type DataAnswer } from "./solana/token.ts";
+import { call, listening } from "../../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const NOW = Date.parse("2026-11-10T02:00:00Z");
@@ -228,16 +228,9 @@ test("parseHeld: one chain of the three, 1 to HELD_MAX distinct tokens in the ch
 });
 
 // the route, on a real server on a free port
-function get(port: number, path: string, method = "GET"): Promise<{ status: number; headers: Record<string, unknown>; text: string }> {
-  return new Promise((done, fail) => {
-    const r = request({ host: "127.0.0.1", port, path, method, agent: false }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (c: Buffer) => chunks.push(c));
-      res.on("end", () => done({ status: res.statusCode!, headers: res.headers, text: Buffer.concat(chunks).toString("utf8") }));
-    });
-    r.on("error", fail);
-    r.end();
-  });
+async function get(port: number, path: string, method = "GET") {
+  const r = await call(port, { method, path, agent: false }, "the helper");
+  return { status: r.status, headers: r.headers, text: r.body };
 }
 test("server: /v1/market/held is mounted; a bad request answers 404 with no read, a good one the shape", async () => {
   let reads = 0;
@@ -247,7 +240,7 @@ test("server: /v1/market/held is mounted; a bad request answers 404 with no read
     read: (...a: Parameters<typeof counting.read>) => (reads++, counting.read(...a)),
   };
   const s = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, spy);
-  await new Promise<void>((done) => s.on("listening", () => done()));
+  await listening(s, "the helper");
   const port = (s.address() as AddressInfo).port;
   try {
     const many = (n: number) => Array.from({ length: n }, (_, i) => `token=0x${i.toString(16).padStart(40, "0")}`).join("&");
@@ -280,7 +273,7 @@ test("server: /v1/market/held is mounted; a bad request answers 404 with no read
 
 test("server: without a held reader the route answers 404", async () => {
   const s = start(COMMIT, 0);
-  await new Promise<void>((done) => s.on("listening", () => done()));
+  await listening(s, "the helper");
   try {
     assert.equal((await get((s.address() as AddressInfo).port, `/v1/market/held?chain=solana&token=${MINT_A}`)).status, 404);
   } finally {

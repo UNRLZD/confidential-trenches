@@ -5,12 +5,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { request } from "node:http";
-import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { gunzipSync } from "node:zlib";
 import { start } from "../../server.ts";
 // the candles' default limit is the other chains' (server.ts CANDLES_MAX)
 import { CANDLES_MAX as CANDLES_DEFAULT } from "../solana/token.ts";
+import { call as bounded, listening } from "../../../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const APP = "https://ct-app.unrealized.trade";
@@ -36,17 +36,12 @@ const mounted = [...none];
 mounted[20] = near;
 const servers = [start(...(mounted as Parameters<typeof start>)), start(...(none as Parameters<typeof start>))];
 const ports: number[] = [];
-before(() => Promise.all(servers.map((s, i) => new Promise<void>((done) => s.on("listening", () => ((ports[i] = (s.address() as AddressInfo).port), done()))))));
+before(async () => (await Promise.all(servers.map((s, i) => listening(s, `the helper ${i}`)))).forEach((p, i) => (ports[i] = p)));
 after(() => Promise.all(servers.map((s) => new Promise<void>((done) => (s.closeAllConnections(), s.close(() => done()))))));
 
-function call(path: string, to = 0, headers: Record<string, string> = { origin: APP }) {
-  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }>((done, fail) => {
-    const r = request({ host: "127.0.0.1", port: ports[to], method: "GET", path, headers }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (d: Buffer) => chunks.push(d)).on("end", () => done({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }));
-    });
-    r.on("error", fail).end();
-  });
+async function call(path: string, to = 0, headers: Record<string, string> = { origin: APP }) {
+  const r = await bounded(ports[to]!, { path, headers }, `the helper ${to}`);
+  return { status: r.status, headers: r.headers, body: r.raw };
 }
 
 test("GET /v1/market/lists?chain=near: 200, NEAR's snapshot, source chain, its read time and CORS", async () => {

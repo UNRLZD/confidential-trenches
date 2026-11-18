@@ -17,6 +17,7 @@ import { solanaPoolFee } from "@blindfill/kit";
 import { base58 } from "../src/bind/checks.ts";
 import { base58decode } from "../src/bind/send.ts";
 import { feePayerKey, solanaFeePayerLowMark, solanaPoolSendersFromEnv } from "../src/pool/solana.ts";
+import { listening } from "../test/servers.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HELPER = path.join(HERE, "..");
@@ -48,7 +49,7 @@ async function rpcs(t, data = [rentData(5_080, 1), rentData(5_080, 1)]) {
     }).listen(0, "127.0.0.1"),
   );
   t.after(() => servers.forEach((s) => (s.closeAllConnections(), s.close())));
-  await Promise.all(servers.map((s) => new Promise((ok) => (s.listening ? ok() : s.once("listening", ok)))));
+  await Promise.all(servers.map((s, i) => listening(s, `the Solana RPC stub ${i}`)));
   return servers.map((s) => `http://127.0.0.1:${s.address().port}`).join(",");
 }
 
