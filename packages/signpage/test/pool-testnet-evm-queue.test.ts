@@ -19,6 +19,7 @@ import { openNoteStore, readReservedMarks, refKey, type NoteStore } from "../../
 import type { Pool } from "../../wallet/src/pool/pool.ts";
 import type { EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
+import { untilAborted } from "../../kit/src/abort.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { testnetPool, TESTNET_EVM_FEE_RPCS, MAINNET_EVM_FEE_RPCS, TESTNET_RPCS, evmEpochFee, evmPoolRelayFee } = await import("../src/pool-testnet.ts");
@@ -230,7 +231,7 @@ function slowSync() {
     started++;
     return new Promise<typeof FREEING>((resolve, reject) => {
       waiting.push(() => resolve(FREEING));
-      signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      untilAborted(signal).catch(reject);
     });
   };
   return { sync: { events }, started: () => started, go: () => waiting.splice(0).forEach((f) => f()) };

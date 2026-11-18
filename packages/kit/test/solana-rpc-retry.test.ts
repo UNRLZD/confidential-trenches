@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
+import { untilAborted } from "../src/abort.ts";
 import { SOLANA_POOL_QUOTE_MAX_AGE_SLOTS } from "../src/trade/solana/pool-buy.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaJsonRpc, type SolanaRpcRetry } from "../src/trade/solana/send.ts";
 
@@ -19,10 +20,7 @@ function provider(faults: Answer[]) {
     n++;
     if (a.reject) return Promise.reject(new TypeError("fetch failed"));
     if (a.stall)
-      return new Promise((_, rej) => {
-        const s = init.signal!;
-        s.addEventListener("abort", () => rej(s.reason), { once: true });
-      });
+      return untilAborted(init.signal);
     const body = (a.body ?? "").replaceAll("$ID", id);
     return Promise.resolve(new Response(body, { status: a.status ?? 200, headers: a.headers ?? {} }));
   };
@@ -191,6 +189,7 @@ test("with retry, a slow answer inside the deadline lands: an answer at 2.5 s, w
     new Promise((res, rej) => {
       const id = (JSON.parse(String(i.body)) as { id: string }).id;
       const t = setTimeout(() => res(new Response(JSON.stringify({ jsonrpc: "2.0", id, result: 7 }), { status: 200 })), 2_500);
+      if (i.signal?.aborted) return (clearTimeout(t), rej(i.signal.reason));
       i.signal?.addEventListener("abort", () => (clearTimeout(t), rej(i.signal!.reason)), { once: true });
     });
   assert.equal(await solanaJsonRpc("https://rpc.example", { fetch: slow })("getSlot", []), 7);

@@ -8,6 +8,7 @@
 //   node --test test/evm-landing-pass-trade.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
@@ -329,7 +330,7 @@ test("a sign out refused after its tap stopped the history read: the next ask re
           calls.push(`${name}:events`);
           if (name === "deposit") return { fin: { number: 1n }, anchor: {}, events: [] };
           // the first history read ends only at its stop; the one asked again answers after 150 ms
-          if (passes++ === 0) return new Promise((_, rej) => signal?.addEventListener("abort", () => rej(signal.reason), { once: true }));
+          if (passes++ === 0) return untilAborted(signal);
           return new Promise((r) => setTimeout(() => r({ fin: {}, anchor: {}, events: [] }), 150));
         },
       };

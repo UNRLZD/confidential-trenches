@@ -80,3 +80,5 @@ export { NEAR_SWAP_GAS, NEAR_SWAP_STORAGE_MAX, nearSwapCalls, nearSwapCheck, nea
 export * from "./price/pool-usd.ts";
 // the held tokens' market read and the value line (card market-token-reads)
 export * from "./market/held.ts";
+// a wait on an abort that ends at once on a signal aborted before it began (card aborted-signal-waits-end-at-once)
+export { untilAborted } from "./abort.ts";

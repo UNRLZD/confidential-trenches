@@ -734,7 +734,7 @@ const deps = {
   // 60 s once in_pool). A 1 s cap before in_pool (card evm-first-proof-inside-ten-seconds) read the floor's fee oracle
   // and pool every second on the pool's two hosts, twice the page's own rate, so the window before the landing held
   // reads the page never makes
-  sleep: (ms, sg) => (rounds++, new Promise((r) => { const k = setTimeout(r, ms); sg.addEventListener("abort", () => (clearTimeout(k), r()), { once: true }); })),
+  sleep: (ms, sg) => (rounds++, new Promise((r) => { if (sg.aborted) return r(); const k = setTimeout(r, ms); sg.addEventListener("abort", () => (clearTimeout(k), r()), { once: true }); })),
 };
 if (PLAIN) await outsideSend("outside: plain send, one wei under the floor", floor - 1n);
 else await anvil("anvil_setBalance", [ux.evm, hex(floor - 1n)]);

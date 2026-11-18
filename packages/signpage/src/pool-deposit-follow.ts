@@ -1276,6 +1276,8 @@ export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc];
 
 /** The follow's wait between rounds: `ms`, or until the signal (a sign out). */
 const followSleep: PoolFollowDeps["sleep"] = (ms, signal) => new Promise<void>((ok) => {
+  // a signal ended before the wait never fires again: no wait on it
+  if (signal.aborted) return ok();
   const t = setTimeout(done, ms);
   function done() {
     clearTimeout(t);

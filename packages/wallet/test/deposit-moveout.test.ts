@@ -9,6 +9,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
 import { VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { IDBFactory } from "fake-indexeddb";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import type { DepositOp, FollowRecord } from "../src/deposit/follow.ts";
 import { buildMoveOut, buildRegisterOut, buildWithdrawOut, checkMoveCalls, checkRegisterCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, signedBlockHash, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
@@ -1731,12 +1732,10 @@ test("R10-F7J a forgotten landed record of 1 base unit, its op needing none of i
   assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "empty" });
 });
 
-// A stalled read's end, as fetch ends one: rejects with the signal's reason once it aborts, and at once when it already
-// has. A listener added after the abort never fires: R11-BUDGET2's read subscribed after writing op3, and on a starved
-// runner its 50 ms budget ended inside that write, so the read waited 49 min (18 Nov 17:00Z, the whole wallet run)
-function untilAborted(signal: AbortSignal): Promise<never> {
-  return new Promise((_, no) => (signal.aborted ? no(signal.reason) : signal.addEventListener("abort", () => no(signal.reason), { once: true })));
-}
+// A stalled read's end, as fetch ends one, is untilAborted (packages/kit/src/abort.ts): it rejects with the signal's
+// reason once it aborts, and at once when it already has. A listener added after the abort never fires: R11-BUDGET2's
+// read subscribed after writing op3, and on a starved runner its 50 ms budget ended inside that write, so the read
+// waited 49 min (18 Nov 17:00Z, the whole wallet run)
 
 // Delta review 10, F2: the tap's re-reads run at once under one budget, inside U's lock: ten stale ops whose reads stall
 // until their signal aborts (the budget cut to 50 ms here) all end within one budget, each a failed read, and the tap

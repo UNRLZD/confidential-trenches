@@ -7,6 +7,7 @@
 //   node --test test/near-seat-down.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
 import { nearFinal, RheaQuoteRefused } from "../../kit/src/near/rhea.ts";
@@ -27,7 +28,7 @@ const fresh = async () => (await import(new URL(`../../wallet/src/pace.ts?seat-d
 type Seat = "ok" | "deadline" | "busy-once-3s" | "busy" | "503" | "day" | "huge";
 /** The seat's answer by mode: hangs to its deadline, 429 once with Retry-After 3, 429 Retry-After 1 always, or 503. */
 function seatAnswer(mode: Seat, nth: number, signal: AbortSignal | null | undefined): Response | Promise<Response> | null {
-  if (mode === "deadline") return new Promise<Response>((_, no) => signal!.addEventListener("abort", () => no(signal!.reason), { once: true }));
+  if (mode === "deadline") return untilAborted(signal);
   if (mode === "busy-once-3s" && nth === 1) return new Response("{}", { status: 429, headers: { "retry-after": "3" } });
   if (mode === "busy") return new Response("{}", { status: 429, headers: { "retry-after": "1" } });
   if (mode === "503") return new Response(JSON.stringify({ error: { code: "upstream" } }), { status: 503 });

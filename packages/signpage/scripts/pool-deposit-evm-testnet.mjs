@@ -165,7 +165,7 @@ else {
     ...route.deps(CHAIN, deposit, () => undefined), // no refund carry: NEAR Intents has no testnet
     noted: async (g) => uxNoteLanded(await ns.list(), g),
     open: async (g) => uxNoteOpen(await ns.list(), g),
-    sleep: (ms, signal) => new Promise((r) => { const t = setTimeout(r, Math.min(ms, 30_000)); signal?.addEventListener("abort", () => (clearTimeout(t), r())); }),
+    sleep: (ms, signal) => new Promise((r) => { if (signal?.aborted) return r(); const t = setTimeout(r, Math.min(ms, 30_000)); signal?.addEventListener("abort", () => (clearTimeout(t), r())); }),
     status: async () => ({ status: "SUCCESS", delivered: null }),
     stage: async (st) => (shown.push(st), log(`follow stage ${st}`)),
     signal: ac.signal,

@@ -132,6 +132,8 @@ export function depositFollows(h: FollowHost) {
   // a pause the follow's signal ends: a stopped follow lets U's lock go at once, not after its pause
   const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
     new Promise<void>((ok) => {
+      // a follow stopped before its pause never fires again: no pause on it
+      if (signal.aborted) return ok();
       const done = () => (signal.removeEventListener("abort", done), ok());
       signal.addEventListener("abort", done, { once: true });
       sleep0(ms).then(done, done);

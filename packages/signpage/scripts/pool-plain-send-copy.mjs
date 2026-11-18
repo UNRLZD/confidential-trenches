@@ -212,7 +212,7 @@ const deps = {
   txs: async (x) => void carried.push(...x),
   signal: ctl.signal,
   // the page's pace (15 s) capped at 2 s, to read the rounds fast on the copy
-  sleep: (ms, sg) => (rounds++, new Promise((r) => { const k = setTimeout(r, Math.min(ms, 2_000)); sg.addEventListener("abort", () => (clearTimeout(k), r()), { once: true }); })),
+  sleep: (ms, sg) => (rounds++, new Promise((r) => { if (sg.aborted) return r(); const k = setTimeout(r, Math.min(ms, 2_000)); sg.addEventListener("abort", () => (clearTimeout(k), r()), { once: true }); })),
 };
 const under1 = await outsideSend("plain send, one lamport under the floor", floor - 1n);
 phase = "follow";
