@@ -3,8 +3,9 @@
 // page served the device's kept EVM pool index (or the shipped snapshot) to the kit's quote only inside the Web Lock
 // ct-evm-index/{chain} (pool-testnet.ts evmIndexServe), so a tab that found the lock held by another was served none
 // and its quote scanned the chain's Initialize logs from the depth: a mainnet read-only Robinhood quote in such a tab
-// (18 Nov 18:51Z, Node, the page's code with the lock held) read 71 Initialize getLogs below the snapshot's end, from
-// block 107,621,059, where the fixed page's read none, every one from the block past the snapshot's end.
+// (18 Nov 19:01Z, Node, main 2e427f24b's page code with the lock held) read 56 Initialize getLogs below the snapshot's
+// end (117,445,721), from block 107,627,310, and ended stale_quote at 33 s, where the fixed page's read none, every one
+// from block 117,445,722.
 // What it holds, signed out, and only that: the served /app.js is the one index.html pins (its sha384), and in it, as
 // minified, the index sync runs serve, then the lock:
 //   - serve, before the lock: reads the kept index (the store's get) or the snapshot and writes nothing to the store;
