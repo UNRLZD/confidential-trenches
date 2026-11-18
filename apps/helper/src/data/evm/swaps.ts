@@ -2125,8 +2125,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    * pool is kept (the search above; one with none found is dropped). All of it runs in a background lane of its own,
    * so every caller's post goes first in each provider's queue (Lane), at the search's gates (no start while a first
    * open waits for its pool, nor without two roomy providers), and the run stops when any provider of the chain is held
-   * (its 429, or our pace's hold): the read ahead spends no refused budget, and the lists' next load (LIST_MS) asks
-   * again. A caller that opens the coin meanwhile takes the book over (open), its lane lifted to the caller's (join).
+   * (a refusal it answered, its 429: limits.ts hold): the read ahead spends no refused budget, and the lists' next load
+   * (LIST_MS) asks again. A caller that opens the coin meanwhile takes the book over (open), its lane lifted to the caller's (join).
    * [design: TAPES_AT_ONCE books at most, never into the last of OPEN_MAX, so a page's open is never refused for a read
    * ahead; a third of the capacity checks' dozen, so their locates share a post (locatePump) while two thirds of
    * OPEN_MAX stay the pages'. Stale at half the cold window, so a rested list read on every lists load (a minute) stays
