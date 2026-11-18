@@ -4,13 +4,13 @@
 // answers 503 upstream. The allowlist is the kit's, compared through the kit's public entry.
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage } from "node:http";
-import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { HELPER_RPC_BATCH_MAX, HELPER_RPC_METHODS, HELPER_SOLANA_BLOCK_HEADER, HELPER_V1_PATHS } from "../../../../packages/kit/src/index.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS } from "./methods.ts";
 import * as rpcModule from "./rpc.ts";
 import { BLOCK_HEADER, createRpc, readUpstreams, RPC_ANSWER_MAX, RPC_UPSTREAMS } from "./rpc.ts";
 import { providerHolds, RETRY_AFTER_MAX_S } from "../limits/limits.ts";
+import { listening } from "../../test/servers.ts";
 /** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
  *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
  *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
@@ -39,7 +39,7 @@ const stub = createServer((req, res) => {
   });
 });
 let base = "";
-before(() => new Promise<void>((ok) => stub.listen(0, "127.0.0.1", () => ((base = `http://127.0.0.1:${(stub.address() as AddressInfo).port}`), ok()))));
+before(async () => void (base = `http://127.0.0.1:${await listening(stub.listen(0, "127.0.0.1"), "the RPC stub")}`));
 after(() => new Promise<void>((ok) => (stub.closeAllConnections(), stub.close(() => ok()))));
 
 // a JSON-RPC echo: one result per request, the id kept

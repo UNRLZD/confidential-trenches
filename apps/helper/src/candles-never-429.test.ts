@@ -7,13 +7,14 @@
 // chain, and a cached proxy answer is never refused to an address past its share.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, test } from "node:test";
 import { geckoBudget, GT_LIMIT_PER_MIN, WINDOW_MS } from "./data/gecko.ts";
 import { createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { createProxy } from "./proxy/proxy.ts";
 import { handler } from "./server.ts";
+import { call, listening } from "../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const APP = "https://ct-app.unrealized.trade";
@@ -31,18 +32,10 @@ after(() => Promise.all(servers.map((s) => new Promise<void>((ok) => (s.closeAll
 async function listen(h: ReturnType<typeof handler>): Promise<number> {
   const s = createServer(h);
   servers.push(s);
-  await new Promise<void>((ok) => s.listen(0, "127.0.0.1", () => ok()));
+  await listening(s.listen(0, "127.0.0.1"), "the helper");
   return (s.address() as AddressInfo).port;
 }
-function get(port: number, path: string, xff: string) {
-  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port, method: "GET", path, headers: { origin: APP, "x-forwarded-for": xff } }, (res) => {
-      let body = "";
-      res.setEncoding("utf8").on("data", (d) => (body += d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body }));
-    });
-    r.on("error", fail).end();
-  });
-}
+const get = (port: number, path: string, xff: string) => call(port, { path, headers: { origin: APP, "x-forwarded-for": xff } }, "the helper");
 const unused = { async handle(): Promise<never> { throw new Error("no chain or Jupiter read in a chart") } };
 /** Each answer's status, and of the 200s how many are `filling` with no bars and how many carry bars. */
 function shape(as: { status: number; body: string }[]) {

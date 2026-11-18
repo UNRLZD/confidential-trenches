@@ -2,9 +2,8 @@
 // with a fake vendor behind it: the raw path is matched (never a normalised one), only POST, the 64 KB body cap on the
 // wire, the caller's headers never reach the vendor, and every answer has the commit and the CORS rule (H7).
 import assert from "node:assert/strict";
-import { request } from "node:http";
-import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
+import { call as bounded, listening } from "../../test/servers.ts";
 import { start } from "../server.ts";
 import { createProxy } from "./proxy.ts";
 
@@ -23,19 +22,10 @@ const proxy = createProxy(
 );
 let port = 0;
 const server = start(COMMIT, 0, proxy);
-before(() => new Promise<void>((ok) => server.on("listening", () => ((port = (server.address() as AddressInfo).port), ok()))));
+before(async () => void (port = await listening(server, "the helper")));
 after(() => new Promise<void>((ok) => (server.closeAllConnections(), server.close(() => ok()))));
 
-function call(method: string, path: string, headers: Record<string, string> = {}, body?: string | Buffer) {
-  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port, method, path, headers }, (res) => {
-      let b = "";
-      res.setEncoding("utf8").on("data", (d) => (b += d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: b }));
-    });
-    r.on("error", fail);
-    r.end(body);
-  });
-}
+const call = (method: string, path: string, headers: Record<string, string> = {}, body?: string | Buffer) => bounded(port, { method, path, headers, body }, "the helper");
 
 test("a proxied read: 200, the vendor's body, the source, the commit and the CORS echo; no caller header reaches the vendor", async () => {
   seen.length = 0;

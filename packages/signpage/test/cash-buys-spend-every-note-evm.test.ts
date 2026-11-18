@@ -139,11 +139,11 @@ test("1Click's least into Base's ETH is read past its 'Failed to get quote' at o
   // any other answer is no read, and is not asked again
   const other: string[] = [];
   const refuses = (async (_u: unknown, init: RequestInit) => (other.push(String(JSON.parse(String(init.body)).amount)), new Response(JSON.stringify({ message: "recipient is not valid" }), { status: 400 }))) as unknown as typeof fetch;
-  assert.equal(await readOneClickLeast("base", refuses, 0), null);
+  await assert.rejects(readOneClickLeast("base", refuses, 0), /names no least: HTTP 400 recipient is not valid/);
   assert.deepEqual(other, ["1"]);
-  // never past one USDC
+  // never past one USDC; "Failed to get quote" there is a blip, asked again (card cash-least-read-again), then no least
   const always: string[] = [];
   const failed = (async (_u: unknown, init: RequestInit) => (always.push(String(JSON.parse(String(init.body)).amount)), new Response(JSON.stringify({ message: "Failed to get quote" }), { status: 400 }))) as unknown as typeof fetch;
-  assert.equal(await readOneClickLeast("base", failed, 0), null);
-  assert.deepEqual(always, ["1", "10", "100", "1000", "10000", "100000", "1000000"]);
+  await assert.rejects(readOneClickLeast("base", failed, 0, { sleep: async () => {} }), /no least in 3 tries: HTTP 400 Failed to get quote/);
+  assert.deepEqual(always, ["1", "10", "100", "1000", "10000", "100000", "1000000", "1000000", "1000000"]);
 });

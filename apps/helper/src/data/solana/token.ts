@@ -1126,13 +1126,16 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
    *  first: a non-pump coin's tape is held TAPE_FRESH_MS (10 s) and a watched token's tape is read every PUSH_TICK_MS
    *  (data/push.ts), so one open page read the key about 8,640 times a day, its chart's newest bars 1,440 more, and the
    *  ahead lane's seven charts every AHEAD_MS 2,016: the key's day is 3,225 (../coingecko.ts CG_DAY), spent on 15 Nov
-   *  before the 21:20Z helper started ("coingecko calls: day N" each minute after). */
+   *  before the 21:20Z helper started ("coingecko calls: day N" each minute after). One read is let back to the key: a
+   *  held tape's refresh, as background, which stops short of callers' quarter of the day (tapes, card
+   *  sol-vendor-tape-refresh-lands). */
   /** A chart's read (its top pool, its bars): CoinGecko's keyed API first when a key is set (../coingecko.ts), else, or
    *  when it cannot serve the read, GeckoTerminal's keyless one in `lane`, as before (card helper-candles-keyed-gt).
    *  `ok`: the keyed answer is the shape the caller reads. The read ahead is the keyed pace's background. `keyless`: the
-   *  keyless path alone (a listed chart read ahead, card helper-candles-never-refuse-a-listed-coin). */
-  async function chartRead(path: string, lane: "pages" | "stale" | "refresh" | "ahead", what: string, ok: (j: unknown) => boolean, untilMs?: number, client?: string, keyless = false): Promise<{ a: unknown; src: ChartSrc }> {
-    const k = deps.keyed == null || keyless ? undefined : await deps.keyed.read(path, ok, lane === "ahead");
+   *  keyless path alone (a listed chart read ahead, card helper-candles-never-refuse-a-listed-coin). `background`: the
+   *  keyed read draws the pace's background share (a held tape's refresh, tapes below). */
+  async function chartRead(path: string, lane: "pages" | "stale" | "refresh" | "ahead", what: string, ok: (j: unknown) => boolean, untilMs?: number, client?: string, keyless = false, background = lane === "ahead"): Promise<{ a: unknown; src: ChartSrc }> {
+    const k = deps.keyed == null || keyless ? undefined : await deps.keyed.read(path, ok, background);
     if (k !== undefined) return { a: k, src: CG_SRC };
     return { a: await gecko(path, lane, what, untilMs, client), src: "geckoterminal" };
   }
@@ -1202,7 +1205,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   const tapes = cached(
     TAPE_FRESH_MS,
     now,
-    async (mint, client, held) => {
+    async (mint, client, held, waits) => {
       const p = await pools.get(mint, client);
       if (p.status !== 200) {
         if (p.status === 404) return NOT_FOUND;
@@ -1210,12 +1213,25 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         throw new Upstream();
       }
       const ok = (j: unknown) => toTape(j, mint, TAPE_MAX, now()) !== null;
-      const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, p.body)}/trades?token=${mint}`, held === true ? "refresh" : "pages", "sol trades", ok, undefined, client, held === true);
+      // the refresh no caller waits on (the held rows, under STALE_MS, are served meanwhile) is the key's background
+      const background = held === true && waits === false;
+      // card sol-vendor-tape-refresh-lands: a held tape's refresh asks the key first, as the helper's background read
+      // (it stops CALLER_DAY_ROOM short of the key's day, so a cold read always finds the callers' quarter), then the
+      // keyless refresh lane. KEYED_COLD_ONLY sent it keyless only, and the keyless window has no room for it: the
+      // deployed helper's minute lines 18 Nov 12:56-13:48Z stood at 3 of 5 (the lists' 2, the ahead lane's 1), the
+      // refresh lane's cap (perMin - COLD_RESERVE), so no keyless "sol trades" call was made in 52 minutes and a page
+      // was served its coin's rows at any age (BONK 26 s, 13:03Z); 5 calls in 75 s cannot renew even one tape each
+      // SOL_VENDOR_REACH_MS. Its cost: one call a TAPE_FRESH_MS per coin a page holds, about 360 an hour, inside the
+      // background day of 3,225 less PROBE_DAY_SHARE and CALLER_DAY_ROOM (2,387, about 6.6 coin-hours a day); past it
+      // the refresh goes keyless and the tape names its age with no reach claimed (trades.ts SOL_VENDOR_REACH_MS). The
+      // refresh runs behind the held rows (revalidate), so a page never waits on CoinGecko's answer (0.4 to 0.9 s from
+      // the box, up to 3.1 s from a Mac) and a slow one is not cut at CG_TIMEOUT_MS
+      const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, p.body)}/trades?token=${mint}`, held === true ? "refresh" : "pages", "sol trades", ok, undefined, client, false, background);
       const rows = a === null ? [] : toTape(a, mint, TAPE_MAX, now());
       if (rows === null) throw new Upstream();
       return { status: 200, body: JSON.stringify(rows), src, asOfMs: now() };
     },
-    { keepHeld: true },
+    { keepHeld: true, revalidate: true },
   );
 
   const mintKey = (k: string) => address(k) !== null;

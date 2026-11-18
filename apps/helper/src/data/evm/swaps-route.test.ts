@@ -3,11 +3,10 @@
 // the commit, the source ("chain": our own reads), the read time and CORS rule; exactly one chain, token, tf; limits;
 // a token that is not on the Discover lists, a chain this helper has no own reads for, and Solana's candles unchanged.
 import assert from "node:assert/strict";
-import { request } from "node:http";
-import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { start } from "../../server.ts";
 import { fakeChain, ICNT, KNOWN, open, REC, timeOf, VVV } from "../../../test/evm-swaps/base.ts";
+import { call as bounded, listening } from "../../../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const APP = "https://ct-app.unrealized.trade";
@@ -17,19 +16,11 @@ const swaps = open(chain, { t: 1_000_000 }, { listed: async (t) => t === ICNT, p
 const server = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { base: swaps });
 let port = 0;
 before(async () => {
-  await new Promise<void>((ok) => server.on("listening", () => ((port = (server.address() as AddressInfo).port), ok())));
+  port = await listening(server, "the helper");
 });
 after(() => new Promise<void>((ok) => (swaps.stop(), server.closeAllConnections(), server.close(() => ok()))));
 
-function call(method: string, path: string, headers: Record<string, string> = {}) {
-  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port, method, path, headers }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (d: Buffer) => chunks.push(d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
-    });
-    r.on("error", fail).end();
-  });
-}
+const call = (method: string, path: string, headers: Record<string, string> = {}) => bounded(port, { method, path, headers }, "the helper");
 
 test("GET /v1/market/candles?chain=base: 200, the frozen fields, bars from our own reads, source chain, the commit, read time and CORS", async () => {
   const r = await call("GET", `/v1/market/candles?chain=base&token=${ICNT}&tf=1m&limit=50`, { origin: APP });
@@ -123,10 +114,8 @@ test("a read the helper does not serve is a 404: 1s on Base, another tf, a token
 
 test("a server with no own reads: Base candles stay 404 and /v1/market/trades does not exist for any chain", async () => {
   const bare = start(COMMIT, 0);
-  await new Promise<void>((ok) => bare.on("listening", ok));
-  const p = (bare.address() as AddressInfo).port;
-  const get = (path: string) =>
-    new Promise<number>((ok, fail) => request({ host: "127.0.0.1", port: p, path }, (res) => (res.resume(), ok(res.statusCode ?? 0))).on("error", fail).end());
+  const p = await listening(bare, "the bare helper");
+  const get = async (path: string) => (await bounded(p, { path }, "the bare helper")).status;
   try {
     assert.equal(await get(`/v1/market/candles?chain=base&token=${ICNT}&tf=1m`), 404);
     assert.equal(await get(`/v1/market/trades?chain=base&token=${ICNT}`), 404);
@@ -142,15 +131,9 @@ test("no provider can agree: 503 upstream, never an empty chart", async () => {
   for (const u of ["https://a.test", "https://b.test", "https://c.test"]) dead.st.faults.set(u, { down: true });
   const s = open(dead, { t: 1 }, { listed: async () => true });
   const srv = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { base: s });
-  await new Promise<void>((ok) => srv.on("listening", ok));
-  const p = (srv.address() as AddressInfo).port;
+  const p = await listening(srv, "the dead-chain helper");
   try {
-    const r = await new Promise<{ status: number; body: string }>((ok, fail) =>
-      request({ host: "127.0.0.1", port: p, path: `/v1/market/trades?chain=base&token=${ICNT}` }, (res) => {
-        const c: Buffer[] = [];
-        res.on("data", (d: Buffer) => c.push(d)).on("end", () => ok({ status: res.statusCode ?? 0, body: Buffer.concat(c).toString("utf8") }));
-      }).on("error", fail).end(),
-    );
+    const r = await bounded(p, { path: `/v1/market/trades?chain=base&token=${ICNT}` }, "the dead-chain helper");
     assert.equal(r.status, 503);
     assert.deepEqual(JSON.parse(r.body), { error: { code: "upstream" } });
   } finally {

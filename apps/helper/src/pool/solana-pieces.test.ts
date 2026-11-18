@@ -27,6 +27,7 @@ import { base58 } from "../bind/checks.ts";
 import { jitoSender } from "./jito.ts";
 import { poolSendLine } from "./send-log.ts";
 import { LANDED_READ_PACE_MS, POOL_LANDED_READ_MS, solanaPoolSender, type PoolPiecesAnswer, type SolanaPoolSenderDeps } from "./solana.ts";
+import { call, listening } from "../../test/servers.ts";
 
 const testKey = (name: string) => {
   const seed = new Uint8Array(createHash("sha256").update(`helper-pool-senders/test-key/${name}`).digest());
@@ -404,27 +405,26 @@ test("POST /v1/pool/solana/pieces: carried through the server, 404 for a pool it
   const { handler } = await import("../server.ts");
   const { s, sets } = rig("devnet");
   const srv = createServer(handler("a".repeat(40), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 1, new Map([[s.pool, s]]), new Map(), () => 1_800_000_090_000));
-  await new Promise<void>((ok) => srv.listen(0, "127.0.0.1", () => ok()));
-  const base = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
+  const port = await listening(srv.listen(0, "127.0.0.1"), "the helper");
   try {
-    const post = (b: unknown) => fetch(`${base}/v1/pool/solana/pieces`, { method: "POST", body: JSON.stringify(b) });
+    const post = (b: unknown) => call(port, { path: `/v1/pool/solana/pieces`, method: "POST", body: JSON.stringify(b) }, "the helper");
     const ws = two();
     const ok = await post(bodyOf(ws));
     assert.equal(ok.status, 200);
-    assert.deepEqual(await ok.json(), { signatures: ws.map(fpSig) });
+    assert.deepEqual(JSON.parse(ok.body), { signatures: ws.map(fpSig) });
     assert.equal(sets.length, 2);
     assert.equal((await post({ pool: TO, txs: ["AA==", "AA=="] })).status, 404);
     assert.equal((await post({ pool: POOL, txs: ["A".repeat(8_200)] })).status, 413);
     const bad = await post(bodyOf([piece({ tag: 2, nullifier: 7 }), piece({ tag: 3, nullifier: 8, w: W2 })]));
-    assert.deepEqual([bad.status, await bad.json()], [422, { error: { code: "wallets_differ" } }]);
-    assert.equal((await fetch(`${base}/v1/pool/solana/pieces`)).status, 405);
+    assert.deepEqual([bad.status, JSON.parse(bad.body)], [422, { error: { code: "wallets_differ" } }]);
+    assert.equal((await call(port, { path: `/v1/pool/solana/pieces` }, "the helper")).status, 405);
     // one client's pool window is shared with the one-piece route: past POOL_RATE_MAX on /send, /pieces answers 429
     const { POOL_RATE_MAX } = await import("../server.ts");
     const h = { "x-forwarded-for": "198.51.100.7" };
-    for (let i = 0; i < POOL_RATE_MAX; i++) await fetch(`${base}/v1/pool/solana/send`, { method: "POST", headers: h, body: "{}" });
-    const over = await fetch(`${base}/v1/pool/solana/pieces`, { method: "POST", headers: h, body: JSON.stringify(bodyOf(two())) });
+    for (let i = 0; i < POOL_RATE_MAX; i++) await call(port, { path: `/v1/pool/solana/send`, method: "POST", headers: h, body: "{}" }, "the helper");
+    const over = await call(port, { path: `/v1/pool/solana/pieces`, method: "POST", headers: h, body: JSON.stringify(bodyOf(two())) }, "the helper");
     assert.equal(over.status, 429);
-    assert.ok(Number(over.headers.get("retry-after")) > 0, "with its wait");
+    assert.ok(Number(over.headers["retry-after"]) > 0, "with its wait");
     assert.equal(sets.length, 2, "nothing more carried");
   } finally {
     srv.close();

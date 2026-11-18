@@ -30,5 +30,93 @@
     "{\"message\":\"Amount is too low for bridge, try at least 18558\",\"correlationId\":\"803a9702-a01e-4cdc-9dad-e173f527a1d1\",\"timestamp\":\"2026-11-15T13:38:04.670Z\",\"path\":\"/v0/quote\"}"
    ]
   }
+ },
+ "good_live": {
+  "from": "SIGN_HOST live (release 175), 2026-11-18 13:26:3xZ, --record at the card branch cash-least-read-again; 1Click through the helper proxy, with its statuses",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv",
+  "mark": true,
+  "oneclick": {
+   "base": [
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"e9d66655-7409-46e7-8229-35262eb0cf2c\",\"timestamp\":\"2026-11-18T13:26:36.733Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Amount is too low for bridge, try at least 1021\",\"correlationId\":\"69018886-3870-4bdc-8477-19e72f753e75\",\"timestamp\":\"2026-11-18T13:26:39.481Z\",\"path\":\"/v0/quote\"}"
+   ],
+   "robinhood": [
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"8e711863-a00a-4add-ac43-612bfbc342c1\",\"timestamp\":\"2026-11-18T13:26:39.894Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Amount is too low for bridge, try at least 18183\",\"correlationId\":\"2628dac8-7ab9-4275-8657-6954a70cabe7\",\"timestamp\":\"2026-11-18T13:26:41.154Z\",\"path\":\"/v0/quote\"}"
+   ]
+  },
+  "status": {
+   "base": [
+    400,
+    400
+   ],
+   "robinhood": [
+    400,
+    400
+   ]
+  }
+ },
+ "blip_live": {
+  "from": "SIGN_HOST live (release 175) as read 2026-11-18 13:26:3xZ; into Base: the walk of seven, 1Click answering 400 \"Failed to get quote\" at every rung up to one USDC (the 13:26:36Z one-unit answer at each), as during sign live run 44300899132 at 12:09Z, whose record the run kept none of; Robinhood as read",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv",
+  "mark": true,
+  "oneclick": {
+   "base": [
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"e9d66655-7409-46e7-8229-35262eb0cf2c\",\"timestamp\":\"2026-11-18T13:26:36.733Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"e9d66655-7409-46e7-8229-35262eb0cf2c\",\"timestamp\":\"2026-11-18T13:26:36.733Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"e9d66655-7409-46e7-8229-35262eb0cf2c\",\"timestamp\":\"2026-11-18T13:26:36.733Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"e9d66655-7409-46e7-8229-35262eb0cf2c\",\"timestamp\":\"2026-11-18T13:26:36.733Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"e9d66655-7409-46e7-8229-35262eb0cf2c\",\"timestamp\":\"2026-11-18T13:26:36.733Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"e9d66655-7409-46e7-8229-35262eb0cf2c\",\"timestamp\":\"2026-11-18T13:26:36.733Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"e9d66655-7409-46e7-8229-35262eb0cf2c\",\"timestamp\":\"2026-11-18T13:26:36.733Z\",\"path\":\"/v0/quote\"}"
+   ],
+   "robinhood": [
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"8e711863-a00a-4add-ac43-612bfbc342c1\",\"timestamp\":\"2026-11-18T13:26:39.894Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Amount is too low for bridge, try at least 18183\",\"correlationId\":\"2628dac8-7ab9-4275-8657-6954a70cabe7\",\"timestamp\":\"2026-11-18T13:26:41.154Z\",\"path\":\"/v0/quote\"}"
+   ]
+  },
+  "status": {
+   "base": [
+    400,
+    400,
+    400,
+    400,
+    400,
+    400,
+    400
+   ],
+   "robinhood": [
+    400,
+    400
+   ]
+  }
+ },
+ "bad_quote": {
+  "from": "SIGN_HOST live (release 175) as read 2026-11-18 13:26:3xZ; into Base: the 13:26:36Z \"Failed to get quote\" at one unit, then the helper proxy dry-quoting one USDC into Base ETH at 13:28:11Z (HTTP 201, a quote, no least) as the walk next answer: the least read would take no least; Robinhood as read; its 1Click signature field left out (a quote signature has a NEAR secret key shape for gitleaks)",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv",
+  "mark": true,
+  "oneclick": {
+   "base": [
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"e9d66655-7409-46e7-8229-35262eb0cf2c\",\"timestamp\":\"2026-11-18T13:26:36.733Z\",\"path\":\"/v0/quote\"}",
+    "{\"quote\":{\"amountIn\":\"1000000\",\"amountInFormatted\":\"1.0\",\"amountInUsd\":\"0.999555000000\",\"minAmountIn\":\"1000000\",\"amountOut\":\"555080727687548\",\"amountOutFormatted\":\"0.000555080727687548\",\"amountOutUsd\":\"0.995082118911\",\"minAmountOut\":\"549529920410672\",\"timeEstimate\":14,\"refundFee\":\"0\",\"withdrawFee\":\"560000000000\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:base.omft.near\",\"amount\":\"1000000\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"0x1111111111111111111111111111111111111111\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T13:38:07.930Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T13:28:10.728Z\",\"correlationId\":\"7d33de82-c8a7-44f3-a20c-1a93a086255c\"}"
+   ],
+   "robinhood": [
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"8e711863-a00a-4add-ac43-612bfbc342c1\",\"timestamp\":\"2026-11-18T13:26:39.894Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Amount is too low for bridge, try at least 18183\",\"correlationId\":\"2628dac8-7ab9-4275-8657-6954a70cabe7\",\"timestamp\":\"2026-11-18T13:26:41.154Z\",\"path\":\"/v0/quote\"}"
+   ]
+  },
+  "status": {
+   "base": [
+    400,
+    201
+   ],
+   "robinhood": [
+    400,
+    400
+   ]
+  }
  }
 }

@@ -38,8 +38,9 @@ test("planted on the good answer: each mark alone, and the index's pin", () => {
 // the minified code as this card's build writes it (packages/signpage/scripts/build-app.mjs at the branch)
 const PLAN =
   "function XK(e,t,n,r,i,a){if(t<0n||n<=0n)return null;let o=hq(e=>e>t&&e>=(a??0n)&&r(e)>=i);if(o===null)return null;let s=qG(e,t,o),c=e=>e.map(e=>({note:e.noteId,usdc:e.part,least:r(e.part),units:r(e.part)}));if(n>s)return{fee:t,max:s,part:o,parts:null};if(n<o)return{fee:t,max:s,part:o,parts:null,min:o};let l=BN(WG(t,o)),u=[...e].filter(e=>e.value-t>=n&&(e.value-t===n||e.value-t-n>=l)).sort((e,t)=>e.value===t.value?e.id<t.id?-1:1:e.value<t.value?-1:1)[0];if(u!==void 0)return{fee:t,max:s,part:o,parts:c([{noteId:u.id,part:n}])};let d=JG(e,n,t,o);return d===null?{fee:t,max:s,part:o,parts:null,...BW(e,n,WG(t,o))}:{fee:t,max:s,part:o,parts:c(d)}}";
+// (card cash-least-read-again: down with no floor or no least read, as its branch build writes it)
 const PLANNED =
-  "m=async(t,n)=>{let r=e.price(t);if(r===null||n<=0n||e.handoff===null||e.rails.length===0)return{error:`not_allowed`};let[i,a,o,s]=await Promise.all([e.fee(),e.notes?e.notes():e.cash().then(e=>[{id:``,value:e}]),e.floor?e.floor(t).catch(()=>null):Promise.resolve(0n),e.least?e.least(t).catch(()=>null):Promise.resolve(null)]);return typeof o==`bigint`?XK(a,i,n,e=>HK(e,r,t),o,s)??{error:`not_allowed`}:{error:`down`}";
+  "m=async(t,n)=>{let r=e.price(t);if(r===null||n<=0n||e.handoff===null||e.rails.length===0)return{error:`not_allowed`};let[i,a,o,s]=await Promise.all([e.fee(),e.notes?e.notes():e.cash().then(e=>[{id:``,value:e}]),e.floor?e.floor(t).catch(()=>null):Promise.resolve(0n),y(t)]);return typeof o!=`bigint`||s===void 0?{error:`down`}:XK(a,i,n,e=>HK(e,r,t),o,s)??{error:`not_allowed`}";
 const MOVE = "move:(e,t,n)=>h(async()=>{let r=await m(e,t);if(`error`in r)return r;if(r.parts===null)return{error:t>r.max?`not_funded`:r.min===void 0?`not_allowed`:`below_min`};let i=await l(e,r.parts,n,r.fee)";
 const BUY = "let h=await l(n,m,`cash/${n}/${e.now()}`,c)";
 const DRY = "o=await e.plan(t,n.usdc);if(`error`in o)return o;if(o.parts===null)return a(r,o.max,o);let s=o.parts.reduce((e,t)=>e+t.least,0n),c=o.fee*BigInt(o.parts.length);return{result:{out:sq(s,PK[t]),fee:sq(c,cq),steps:r,max:i(o.max)}}";
@@ -67,7 +68,9 @@ test("facts() reads each mark from the minified code as the build writes it, and
       { move: MOVE.replace("if(r.parts===null)return{error:t>r.max?`not_funded`:r.min===void 0?`not_allowed`:`below_min`};", "") },
       { move: MOVE.replace("await m(e,t)", "await g(e,t)") },
       // the plan read with no floor, or held to Cash's largest note
-      { planned: PLANNED.replace("return typeof o==`bigint`?", "return 1?") },
+      { planned: PLANNED.replace("return typeof o!=`bigint`||s===void 0?", "return 0?") },
+      // the plan made with no least read (card cash-least-read-again): a blip plans parts its quotes refuse
+      { planned: PLANNED.replace("||s===void 0?", "?") },
       { planned: PLANNED.replace("XK(a,i,n,", "XK([{id:``,value:a}],i,n,") },
     ],
     dry: [

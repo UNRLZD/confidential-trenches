@@ -889,15 +889,24 @@ test("card helper-listed-charts-own-reads: a Raydium CPMM trade names its own mi
   const FCAT = "2YPWT4QK1Why57mxBZGwBAFckBC4nLwEAL2t6CcCQtvw";
   const WXMR = "WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp";
   let on: SourceEvents | null = null;
-  // the rpc answers the SOL price and the two mints only: a pool read would throw
-  const t = createSolanaTrades({ fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [FCAT]: 6, [WXMR]: 12 }), now: () => TS * 1000, listed: async (m) => m === FCAT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: async (m) => (m === WXMR ? "300" : null), tickMs: 0 });
+  // the rpc answers the SOL price and the two mints only: a CPMM pool read would throw. The route's first hops cross
+  // Meteora DLMM (card index-sol-trades-2), so the transaction is read whole, and its DLMM pool answers no account
+  const DLMM_POOL = "BFKBQT4yFZPtzyttHQayNmjDJYduvFaPXuytMgnaqexV";
+  const chain = rpcFetch({ sigs: () => [], txs: { F1: V.txs["cpmm-buy-fee"]!.result }, price: 9_342_267_796n, pub: TS, slot: 100 }, { [FCAT]: 6, [WXMR]: 12 });
+  const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    if (req.method === "getAccountInfo" && req.params[0] === DLMM_POOL) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: null } }));
+    return chain(url, init);
+  };
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === FCAT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: async (m) => (m === WXMR ? "300" : null), tickMs: 0 });
   assert.equal((await t.trades(FCAT, 50)).status, 200);
   on!.note(FCAT, { sig: "F1", slot: 10, err: false, logs: V.txs["cpmm-buy-fee"]!.result.meta.logMessages });
   await settle();
   const a = JSON.parse((await t.trades(FCAT, 50)).body) as { trades: unknown[]; src: string };
   assert.equal(a.src, "chain");
-  // the pool paid 3,264,281.114937 FCAT for 0.114146586323 of its quote coin at 300 USD; CPMM's event names no trader
-  assert.deepEqual(a.trades, [{ t_ms: TS * 1000, side: "b", usd: "34.2439758969", amt: "3264281.114937", trader: null, tx: "F1" }]);
+  // the pool paid 3,264,281.114937 FCAT for 0.114146586323 of its quote coin at 300 USD; CPMM's event names no trader;
+  // dated by the transaction's block, read whole
+  assert.deepEqual(a.trades, [{ t_ms: 1794785264_000, side: "b", usd: "34.2439758969", amt: "3264281.114937", trader: null, tx: "F1" }]);
   t.stop();
 });
 
@@ -1202,3 +1211,92 @@ test("card sol-tape-trader-is-the-events-user: a swap the venue's own program ma
   assert.deepEqual(one.bars, two.bars);
   assert.notEqual(one.bars[0]![5], "9.18540990521034652", "the own swap's volume is in the bar");
 });
+
+// card index-sol-trades-2: the Meteora venues (fixtures/sol-meteora-txs.json, recorded mainnet). Their events are in the
+// inner instructions only, so a stream transaction whose log names one running is read whole; a walk reads it whole
+// anyway. Each pool is read from its own program (a DBC pool and its config both).
+const MT = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-meteora-txs.json"), "utf8")) as { txs: Record<string, { signature: string; result: Record<string, unknown> & { slot: number; meta: { logMessages: string[] } } }>; pools: Record<string, { owner: string; data: string }> };
+const MTS = 1795011900;
+function meteoraChain(mints: Record<string, number>, opts: { sigs?: (p: Record<string, unknown>) => unknown[]; pools?: Record<string, { owner: string; data: string }>; quoteUsd?: (m: string) => Promise<string | null> } = {}) {
+  const pools = { ...MT.pools, ...opts.pools };
+  const txs = Object.fromEntries(Object.values(MT.txs).map((x) => [x.signature, x.result]));
+  const reads: string[] = [];
+  const inner = rpcFetch({ sigs: opts.sigs ?? (() => []), txs, price: 9_342_267_796n, pub: MTS, slot: 100 }, mints);
+  const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    reads.push(`${req.method} ${req.params[0]}`);
+    const p = pools[req.params[0]];
+    if (req.method === "getAccountInfo" && p !== undefined) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: { owner: p.owner, data: [p.data, "base64"] } } }));
+    // a route's other pools (dlmm-buy's PumpSwap hop) not recorded: no such account
+    if (req.method === "getAccountInfo" && req.params[0] !== PYTH_SOL_USD && !(req.params[0] in mints)) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: null } }));
+    return inner(url, init);
+  };
+  let on: SourceEvents | null = null;
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => MTS * 1000, listed: async (m) => m in mints, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: opts.quoteUsd, tickMs: 0 });
+  const rows = async (m: string) => (JSON.parse((await t.trades(m, 50)).body) as { trades: { t_ms: number; side: string; usd: string; amt: string; trader: string | null; tx: string }[] }).trades;
+  const stream = (m: string, k: string) => on!.note(m, { sig: MT.txs[k]!.signature, slot: MT.txs[k]!.result.slot, err: false, logs: MT.txs[k]!.result.meta.logMessages });
+  return { t, rows, stream, reads };
+}
+const TTW_MINT = "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo";
+const MOON = "8HuYsEpBS2WZACBCbAKcoh8XmbNYYqRjoJrCqC3Cmoon";
+const C467 = "467cTkm8GXBA96QDGG5Spm1WbpVHp2LnPA1VAcrMctem";
+const C26E = "26Ekp9mYjJS3CjFMHKkuTS4uP75oysve4A4c8CPeayBG";
+
+test("card index-sol-trades-2: a Meteora coin's stream trades (DLMM, DBC, DAMM v2) reach its tape and bars from the transaction's inner instructions, each pool read from its own program", async () => {
+  const c = meteoraChain({ [TTW_MINT]: 6, [MOON]: 6, [C467]: 6 });
+  for (const m of [TTW_MINT, MOON, C467]) assert.equal((await c.t.trades(m, 50)).status, 200);
+  c.stream(TTW_MINT, "dlmm-buy");
+  c.stream(MOON, "dbc-buy-usdc");
+  c.stream(C467, "damm-sell");
+  await settle();
+  // DLMM: 0.8 SOL at 93.42267796 USD for 0.276952 TTW (the pool's X), dated by its block (the event has no clock)
+  assert.deepEqual(await c.rows(TTW_MINT), [{ t_ms: 1795011852_000, side: "b", usd: "74.738142368", amt: "0.276952", trader: "GPCp5rTs2j6PQG51cUBRejspiQW3VMY1T4BUDY9vZBPY", tx: MT.txs["dlmm-buy"]!.signature }]);
+  // DBC: 4.846455 USDC (its config's quote) for 140,195.474297 of the pool's base, at the event's clock
+  assert.deepEqual(await c.rows(MOON), [{ t_ms: 1795011854_000, side: "b", usd: "4.846455", amt: "140195.474297", trader: null, tx: MT.txs["dbc-buy-usdc"]!.signature }]);
+  // DAMM v2: the token is the pool's B, so the trade told as SOL (A) sees it is turned round: a sell of 2,340,517.796257
+  // for 0.698738224 SOL
+  assert.deepEqual(await c.rows(C467), [{ t_ms: 1795011890_000, side: "s", usd: "65.27799607909434304", amt: "2340517.796257", trader: null, tx: MT.txs["damm-sell"]!.signature }]);
+  for (const m of [TTW_MINT, MOON, C467]) assert.equal((JSON.parse((await c.t.candles(m, "1s", null, 10)).body) as { candles: unknown[] }).candles.length, 1, m);
+  // each transaction read whole once; each pool (and the DBC pool's config) read once
+  for (const k of ["dlmm-buy", "dbc-buy-usdc", "damm-sell"]) assert.equal(c.reads.filter((r) => r === `getTransaction ${MT.txs[k]!.signature}`).length, 1, k);
+  for (const a of ["E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN", "2vHhAP3Z2uVHvjeSgDPrckXsmYByd7hGzVuK5UQ6ucMV", "FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM", "4Fk2beWHZ3DYn8cLkRs31dP6eTw7Vwpq7kNDSNvW8dWz"]) assert.equal(c.reads.filter((r) => r === `getAccountInfo ${a}`).length, 1, a);
+  c.t.stop();
+});
+
+test("card index-sol-trades-2: a Meteora coin's first walk reads its trades from each transaction's inner instructions", async () => {
+  const sig = MT.txs["damm-buy"]!.signature;
+  const c = meteoraChain({ [C26E]: 6 }, { sigs: () => [{ signature: sig, slot: MT.txs["damm-buy"]!.result.slot, err: null, blockTime: 1795011890 }] });
+  await c.t.trades(C26E, 50);
+  await settle();
+  // 1.37241791 SOL for 164,412.686233 of the pool's A
+  assert.deepEqual(await c.rows(C26E), [{ t_ms: 1795011890_000, side: "b", usd: "128.2149564324662636", amt: "164412.686233", trader: null, tx: sig }]);
+  c.t.stop();
+});
+
+test("card index-sol-trades-2: a Meteora coin quoted in another coin is priced at that coin's USD price; a config another program owns gives no trade", async () => {
+  // the recorded DLMM pool with its Y named another coin (QCOIN, 9 decimals, 2 USD)
+  const QCOIN = "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh";
+  const lb = Buffer.from(MT.pools["E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN"]!.data, "base64");
+  keyInto(QCOIN, lb, 120);
+  const c = meteoraChain({ [TTW_MINT]: 6, [QCOIN]: 9 }, { pools: { E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN: { owner: MT.pools["E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN"]!.owner, data: lb.toString("base64") } }, quoteUsd: async (m) => (m === QCOIN ? "2" : null) });
+  await c.t.trades(TTW_MINT, 50);
+  c.stream(TTW_MINT, "dlmm-buy");
+  await settle();
+  // 0.8 QCOIN at 2 USD for 0.276952 TTW
+  assert.deepEqual((await c.rows(TTW_MINT)).map((r) => [r.side, r.usd, r.amt]), [["b", "1.6", "0.276952"]]);
+  c.t.stop();
+  // the DBC config answered as another program's account: no pair, no trade
+  const cfg = MT.pools["FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM"]!;
+  const f = meteoraChain({ [MOON]: 6 }, { pools: { FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM: { owner: "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", data: cfg.data } } });
+  await f.t.trades(MOON, 50);
+  f.stream(MOON, "dbc-buy-usdc");
+  await settle();
+  assert.deepEqual(await f.rows(MOON), []);
+  f.t.stop();
+});
+/** Writes a base58 key's 32 bytes into `b` at `o`. */
+function keyInto(k: string, b: Buffer, o: number): void {
+  let n = 0n;
+  for (const ch of k) n = n * 58n + BigInt("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".indexOf(ch));
+  Buffer.from(n.toString(16).padStart(64, "0"), "hex").copy(b, o);
+}
