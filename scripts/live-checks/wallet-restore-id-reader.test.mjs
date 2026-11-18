@@ -49,7 +49,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { signBuilt } from "../signpage-built.mjs";
-import { countOf, IDS_END_TRY, IDS_TELL, IDS_WALK_END, judge, judgeBundle, LET_GO, localFetch, MARK, MARKERS, PAIR, PLACES, probe, readBundle, REGISTERED, SIGN_ORIGIN, USDC } from "./wallet-restore-id-reader.mjs";
+import { countOf, IDS_END_OP, IDS_END_TRY, IDS_STALLED_OP, IDS_TELL, IDS_WALK_END, judge, judgeBundle, LET_GO, localFetch, MARK, MARKERS, PAIR, PLACES, probe, readBundle, REGISTERED, SIGN_ORIGIN, USDC } from "./wallet-restore-id-reader.mjs";
 import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -547,7 +547,7 @@ test("busy waited out, the pair's disagreement, the keep and the sign-out drop: 
 // apart left (`held`), drops `held` from the last try's findings, throws a plain Error at the seed lock (which the catch
 // would then retry), or puts the unread pool chain on the retry list, fails on that one marker alone.
 test("a build of this tree whose step 5 end loses a list or retries a seed gone fails, on that marker alone", async () => {
-  const RE = { ids_end: IDS_END_TRY, ids_walk_end: IDS_WALK_END, ids_tell: IDS_TELL };
+  const RE = { ids_end: IDS_END_TRY, ids_walk_end: IDS_WALK_END, ids_tell: IDS_TELL, ids_stalled_op: IDS_STALLED_OP, ids_end_op: IDS_END_OP };
   const within = (marker, from, to) => (js) => {
     const hit = js.match(new RegExp((RE[marker] ?? MARK[marker]).source));
     assert.ok(hit, `${marker} found in the build`);
@@ -565,8 +565,13 @@ test("a build of this tree whose step 5 end loses a list or retries a seed gone 
     ["ids_end", /&&[\w$]+\.named\.length===0\)return void await/, ")return void await"],
     // review P3-5 of 53f5e92f: the walk's end always done, a finding written done, no retry at all
     ["ids_walk_end", /\?`stalled`:`done`/, "?`done`:`done`"],
-    ["ids_tell", /stage:`stalled`,txs/, "stage:`done`,txs"],
-    ["ids_tell", /if\(![\w$]+\.last\|\|![\w$]+\.finding\)return;/, "return;"],
+    ["ids_stalled_op", /stage:`stalled`,txs/, "stage:`done`,txs"],
+    ["ids_tell", /if\(![\w$]+\.last\|\|![\w$]+\.finding\|\|[\w$]+===`stalled`\)return;/, "return;"],
+    // card restore-follow-up-run-op: a done written over a walk that ended stalled; a run no request hears ending
+    // stalled with no op written; a load's resume writing one
+    ["ids_tell", /\|\|[\w$]+===`stalled`\)return;/, ")return;"],
+    ["ids_end_op", /\|\|await [\w$]+\(\)\.catch\(\(\)=>\{\}\)/, ""],
+    ["ids_end_op", /`stalled`\|\|[\w$]+\|\|/, "`stalled`||"],
     ["ids_end", /,([\w$]+)\)return;await [\w$]+\([\w$]+\[[\w$]+-1\],[\w$]+\)\}$/, ",$1)return}"],
     ["seed_per_use_lock", /throw new [\w$]+\(`signed out/, "throw Error(`signed out"],
     ["seed_per_use_lock", /throw new [\w$]+\(`other words/, "throw Error(`other words"],

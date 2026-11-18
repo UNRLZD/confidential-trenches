@@ -104,6 +104,9 @@
 //     the run by name, and that pool's ids are not read on it.
 //   - Each reason a run ends stalled is named (the host's `ended`, told once however the run ends: an abort and a throw
 //     included); the op record holds the kit's stage only.
+//   - The run read again for a request that joined while step 5 read (start's `again`) has no op of its own: its walk's
+//     end, when stalled, leaves the newest restore op stalled (a new stalled op when the newest is not), as step 5's
+//     finding does, so the done that request was told never stands over a walk that failed (card restore-follow-up-run-op).
 // - The NEAR vault's deposit ids (card vault-late-send-carried; docs/plan1/wallet.md §2.3 steps 5 and 7): a lost store's
 //   quote can leave its 1Click delivery waiting under U_{s,i} on the vault's token (§2.4 step 5), with no note on any
 //   device. Once the vault is walked, step 5 reads its ids on the same pass and IdReader as the pools' (readVaultLate),
@@ -1147,9 +1150,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
   // a run started in this page life: a later resume (a landing's, a resync's) walks again only while step 5 is owed
   let started = false;
 
-  // one run: the walk, its notes written (the floor), `first` told; then step 5, tried again by itself on a read that did
-  // not answer. `owed`: a load's resume, which reads nothing when another tab removed the marker meanwhile
-  const read = async (signal: AbortSignal, owed: boolean, first: (stage: RestoreStage) => void, run: RunState): Promise<void> => {
+  // one run: the walk, its notes written (the floor), `first` told (true when a request heard it on an op record of its
+  // own); then step 5, tried again by itself on a read that did not answer. `owed`: a load's resume, which reads nothing
+  // when another tab removed the marker meanwhile
+  const read = async (signal: AbortSignal, owed: boolean, first: (stage: RestoreStage) => boolean, run: RunState): Promise<void> => {
     // a load's resume reads as the page's passes do (behind every trade's read), a run the user waits for as a trade
     const kind: ReadKind = owed ? "pass" : "trade";
     const pools = h.pools ? h.pools(kind) : pagePools(EVM_POOLS, kind);
@@ -1161,11 +1165,22 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
     // included (review of e31892ef, P3-5)
     const why: string[] = [];
     let told = false;
-    const end = (stage: RestoreStage): void => {
+    // a walk's end no request hears (the run read again for a Sync that joined a running id read: start's `again`) is
+    // the newest restore op's, as step 5's finding is: stalled, never a done left standing over a walk that failed (card
+    // restore-follow-up-run-op). A load's resume writes no op (the header); a run a sign out stopped writes nothing
+    const end = async (stage: RestoreStage): Promise<void> => {
       if (told) return;
       told = true;
       h.ended?.(stage, why);
-      first(stage);
+      if (!first(stage) && stage === "stalled" && !owed && !signal.aborted) await stalledOp().catch(() => {});
+    };
+    // a throw ends the run stalled, named once, however many catches it passes (review of e31892ef, P3-5)
+    let stopped = false;
+    const stop = async (e: unknown): Promise<void> => {
+      if (stopped) return;
+      stopped = true;
+      why.push(`the restore stopped: ${e instanceof Error ? e.message : "it threw"}`);
+      await end("stalled");
     };
     // the run's seed: an HMAC of it under a key drawn for this run, taken at its first use and held in memory only
     // (never stored, logged or sent), so a sign out and a sign in with other words in another tab between two uses
@@ -1195,6 +1210,15 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       }) as Promise<T>;
     // the seed for one use
     const seed: SeedUse = (use) => seedHeld(async (s) => use(s));
+    // the newest restore op made stalled (a new stalled op when the newest is not), only while the run's seed is the one
+    // stored, so the app's sheet shows it with Retry (S19.5)
+    const stalledOp = (): Promise<void> =>
+      seedHeld(async () => {
+        const st = await h.store();
+        const ops = await Promise.all((await st.keys("ops")).map(async (k) => (await st.get("ops", k)) as { kind?: unknown; stage?: unknown; created_ms?: unknown } | undefined));
+        const newest = ops.filter((o) => o?.kind === "restore").sort((x, y) => Number(x!.created_ms) - Number(y!.created_ms)).at(-1);
+        if (newest?.stage !== "stalled") await st.put("ops", crypto.randomUUID(), { kind: "restore", stage: "stalled", txs: [], created_ms: now() });
+      });
     // this run's own id on the marker it writes (a lane kept, the marker removed, only on its own: delta review P3-D)
     const runId = crypto.randomUUID();
     // step 5 of this run, set at the walk's end and run after the restore lock is let go
@@ -1392,7 +1416,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // P2: a Sync that joined while this run waited for the lock was told the old walk's end and read for by none)
         if (ids !== null && idsOwed && (walked.length > 0 || vaultIds !== null)) run.reading = true;
         const stage: RestoreStage = why.length > 0 ? "stalled" : "done";
-        end(stage);
+        await end(stage);
         step5 = async (): Promise<void> => {
 
         // step 5, after the walk's end: it holds no lock a money kind takes, and tells the user of a finding about
@@ -1405,19 +1429,15 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           h.step5?.(r);
           if (r.named.length === 0) {
             // the run's last try read every id with nothing to tell after a finding was told: the newest restore op is
-            // done again, so the stalled sheet never stands on nothing (delta review P3-B)
-            if (!r.last || !run.finding) return;
+            // done again, so the stalled sheet never stands on nothing (delta review P3-B); never over a walk that ended
+            // stalled, whose reasons stand (card restore-follow-up-run-op)
+            if (!r.last || !run.finding || stage === "stalled") return;
             run.finding = false;
             await seedHeld(async () => (await h.store()).put("ops", crypto.randomUUID(), { kind: "restore", stage: "done", txs: [], created_ms: now() }));
             return;
           }
           run.finding = true;
-          await seedHeld(async () => {
-            const st = await h.store();
-            const ops = await Promise.all((await st.keys("ops")).map(async (k) => (await st.get("ops", k)) as { kind?: unknown; stage?: unknown; created_ms?: unknown } | undefined));
-            const newest = ops.filter((o) => o?.kind === "restore").sort((x, y) => Number(x!.created_ms) - Number(y!.created_ms)).at(-1);
-            if (newest?.stage !== "stalled") await st.put("ops", crypto.randomUUID(), { kind: "restore", stage: "stalled", txs: [], created_ms: now() });
-          });
+          await stalledOp();
         };
         // the testnet build: named at the walk's end above, nothing for step 5 to read
         if (ids === null) return;
@@ -1598,6 +1618,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         }
         };
       } catch (e) {
+        // the walk's end on its throw, told (and its op written) while the run's key still checks the seed
+        await stop(e);
         runKey.fill(0);
         mark?.fill(0);
         throw e;
@@ -1619,9 +1641,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           mark?.fill(0);
         }
       })
-      .catch((e: unknown): never => {
-      why.push(`the restore stopped: ${e instanceof Error ? e.message : "it threw"}`);
-      end("stalled");
+      .catch(async (e: unknown): Promise<never> => {
+      await stop(e);
       throw e;
     }) as Promise<void>;
   };
@@ -1653,13 +1674,16 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
     }, beat);
     let firstOf: (s: RestoreStage) => void = () => {};
     const first = new Promise<RestoreStage>((r) => (firstOf = r));
-    const post = (s: RestoreStage): void => {
-      if (stage !== null) return;
+    // whether a request heard the end, on its own op record (a run read again for a joined request has none: read's
+    // `end` then writes the op)
+    const post = (s: RestoreStage): boolean => {
+      if (stage !== null) return true;
       stage = s;
       clearInterval(timer);
       for (const f of followers) tell(f, s);
       // the walk's end is its followers' records' end: each one's write landed (or failed)
       void Promise.all(followers.map((f) => f.writes)).then(() => firstOf(s));
+      return followers.length > 0;
     };
     const state: RunState = { finding, reading: false };
     // a request that joined while step 5 read its ids (a Sync, a Retry): read for once this run ends
