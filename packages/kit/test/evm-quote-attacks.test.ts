@@ -1352,6 +1352,31 @@ test("RX the route through X's market rides the market's own round: the X1 world
   assert.equal(rounds, 5, `${rounds} rounds of reads`);
 });
 
+// Review of the card, P3-2: an early read of a route through X's market counts only where the quote takes that route.
+// X has two markets, the real one and one that gives a hundredth; provider 1 fails every request that reads the route
+// through the second, which the quote never takes. At d05d3ceaa that read sat in the round's own reads and the quote
+// refused rpc_error; now the early reads fail alone and the route through the real market is read in the fourth round.
+test("XE a failed early read of a route the quote does not take never ends the quote: held to the route through X's real market", async () => {
+  const token = "0x00000000000000000000000000000000000ff1fd";
+  const x0 = xAt(0x181);
+  const real: ModelPool = { key: keyOf(token, x0, 3000, 60, NATIVE), give: (a) => a };
+  const market = marketOf(x0);
+  const thin: ModelPool = { key: keyOf(x0, NATIVE, 500, 10, NATIVE), give: (a) => a / 100n };
+  const logs = [{ key: real.key, at: 4_000_100 }, { key: market.key, at: 4_050_000 }, { key: thin.key, at: 4_050_001 }];
+  const pools = [seeded(token), real, market, thin];
+  const w = (x: bigint | string) => BigInt(x).toString(16).padStart(64, "0");
+  // a request reading the two-hop route through `thin` (V4Quoter.quoteExactInput naming x0, the token and thin's fee)
+  const viaThin = (calls: readonly EvmRpcCall[]) => {
+    const t = JSON.stringify(calls).toLowerCase();
+    return t.includes("ca253dc9") && t.includes(w(x0)) && t.includes(w(token)) && t.includes(w(500n) + w(10n));
+  };
+  let failed = 0;
+  const p1 = chain(pools, 1);
+  const failing: EvmRpc = async (calls) => (viaThin(calls) ? (failed++, calls.map((_, id) => ({ jsonrpc: "2.0", id, error: { code: -32000, message: "planted" } }))) : p1(calls));
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0), failing], NOW, scanner(5_000_000, logs), undefined, () => 0), heldTo(x0));
+  assert.ok(failed > 0, "no request read the route through the thin market");
+});
+
 test("X2 seventeen currencies, the shallowest by liquidity included: each is priced through its market, and the one that gives most sets R", async () => {
   const token = "0x00000000000000000000000000000000000ff2ff";
   const deeper = Array.from({ length: 16 }, (_, i): ModelPool => ({ key: keyOf(token, xAt(0x200 + i), 3000, 60, NATIVE), give: (a) => a }));

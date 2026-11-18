@@ -3713,13 +3713,24 @@ async function routeSetOf(a: {
   // counted against EVM_QUOTE_MAX_QUOTED only then; the others are never used. Base 0x07b3d9's first quote waited a
   // round for its two routes (about 330 ms at mainnet.base.org, 2026-11-18). Past EVM_X_EARLY the fourth round reads
   // as before, so a token seeded with many pools of X costs no more reads than it did.
+  // The early reads are their own read, beside the round's (review of this card, P3-2): a disagreement or a failure on
+  // one counts only where the quote takes its route, so where they fail none is taken and the fourth round reads the
+  // ones it asks as before, every one judged there
   const viaX = new Map<string, Quote>();
   const earlyKey = (mk: Found, p: Found) => `${mk.id} ${p.id}`;
   const earlyAsk = xs.flatMap((x) => (markets.get(x) ?? []).filter((mk) => marketQuote.has(mk)).flatMap((mk) => (xPools.get(x) ?? []).map((p) => [x, mk, p] as const)));
+  const own = third.length;
   if (earlyAsk.length <= EVM_X_EARLY) {
     for (const [x, mk, p] of earlyAsk) viaX.set(earlyKey(mk, p), quoteAt(third, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key], token, amountIn));
   }
-  await round(third);
+  if (third.length === own) await round(third);
+  else {
+    reads.push(...third);
+    const [main, early] = await Promise.all([own === 0 ? Promise.resolve([] as Answer[]) : readBoth(rpcs, block.hash, third.slice(0, own), v.reads), readBoth(rpcs, block.hash, third.slice(own), v.reads).catch(() => null)]);
+    // an early read that failed answers nothing any route is priced on: none of its quotes is taken (viaX cleared)
+    if (early === null) viaX.clear();
+    ans.push(...main, ...(early ?? third.slice(own).map((): Answer => ({ kind: "revert", partial: false }))));
+  }
   const fourth: Read[] = [];
   const further: string[] = [];
   for (const x of xs) {
