@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { b58encode } from "./lists.ts";
 import { cutTrades, decodeEvent, fromInner, fromLogs, ORCA, poolMints, poolPair, PUMP, PUMP_AMM, RAY_CLMM, RAY_CPMM, RAY_LAUNCHLAB, USDC, WSOL, type RawTrade } from "./decode.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -171,4 +172,66 @@ test("Raydium LaunchLab: a `TradeEvent` is a trade told as the pool's base mint 
   const flipped = Buffer.from(bytes);
   flipped[8 + 136] = 2; // a trade direction past Buy and Sell
   assert.equal(decodeEvent(RAY_LAUNCHLAB, flipped), null);
+});
+
+// card sol-tape-trader-is-the-events-user: a venue program's own swap, made inside another decoded venue's instruction,
+// is marked off the tape (tape false); a trader's route, whose venue swaps sit side by side under the trader's or a
+// router's instruction, is never marked. The own swap copies the recorded pump-buy (router 6Vo3 at [1], the curve at
+// [2], its TradeEvent at log line 31): a sell of the curve made by the curve inside the trader's buy, by its own account.
+const OWN = new Uint8Array(32).fill(7);
+const PUMP_KEY = 21; // the curve's place in pump-buy's account keys (its inner instructions' programIdIndex)
+const ownEvent = (): Buffer => {
+  const b = Buffer.from(logs("pump-buy")[31]!.slice("Program data: ".length), "base64");
+  b.writeBigUInt64LE(b.readBigUInt64LE(8 + 32) / 10n, 8 + 32);
+  b.writeBigUInt64LE(b.readBigUInt64LE(8 + 40) / 10n, 8 + 40);
+  b[8 + 48] = 0;
+  Buffer.from(OWN).copy(b, 8 + 49);
+  return b;
+};
+const ownFrame = (depth: number): string[] => [
+  `Program ${PUMP} invoke [${depth}]`,
+  "Program log: Instruction: Sell",
+  `Program data: ${ownEvent().toString("base64")}`,
+  `Program ${PUMP} invoke [${depth + 1}]`,
+  `Program ${PUMP} success`,
+  `Program ${PUMP} success`,
+];
+
+test("card sol-tape-trader-is-the-events-user: an event logged inside another decoded venue's frame is that venue's own swap (off the tape); a route's swaps side by side are traders'", () => {
+  const l = logs("pump-buy");
+  const nested = fromLogs([...l.slice(0, 35), ...ownFrame(3), ...l.slice(35)]);
+  assert.equal(nested.truncated, false);
+  assert.deepEqual(nested.trades.map((t) => [t.side, t.tape]), [["b", undefined], ["s", false]]);
+  // the same sell as its own instruction, after the router's: a trader's, on the tape
+  const apart = fromLogs([...l.slice(0, 39), ...ownFrame(1), ...l.slice(39)]);
+  assert.deepEqual(apart.trades.map((t) => [t.side, t.tape]), [["b", undefined], ["s", undefined]]);
+  // under a router that is no decoded venue (Jupiter, GMGN's, 6Vo3): a trader's
+  assert.deepEqual(fromLogs(l).trades.map((t) => t.tape), [undefined]);
+  // every recorded mainnet transaction, routes through two venues included: none marked
+  for (const k of Object.keys(F.txs)) for (const t of fromLogs(logs(k)).trades) assert.equal(t.tape, undefined, k);
+});
+
+test("card sol-tape-trader-is-the-events-user: a cut log's inner instructions mark the event CPI of a swap made inside a decoded venue's instruction, by stackHeight; heights that build no stack mark none", () => {
+  const r = structuredClone(F.txs["pump-buy"]!.result) as unknown as { transaction: { message: Record<string, unknown> }; meta: { innerInstructions: { index: number; instructions: Record<string, unknown>[] }[] } };
+  const cpi = (b: Buffer) => b58encode(Uint8Array.from([...Buffer.from("e445a52e51cb9a1d", "hex"), ...b]));
+  const group = r.meta.innerInstructions[0]!;
+  assert.equal(group.instructions[0]!.programIdIndex, PUMP_KEY);
+  // the curve (height 2, under the router's top-level instruction) sells by itself (3) and sends its event to itself (4)
+  group.instructions.push({ programIdIndex: PUMP_KEY, accounts: [], data: "3c5s1W8njd38", stackHeight: 3 }, { programIdIndex: PUMP_KEY, accounts: [], data: cpi(ownEvent()), stackHeight: 4 });
+  assert.deepEqual(fromInner(r).map((t) => [t.side, t.tape]), [["b", undefined], ["s", false]]);
+  // the curve at the top level (height 1): its own sell at 2, the event at 3
+  const top = structuredClone(r);
+  top.transaction.message.instructions = [{}, {}, {}, { programIdIndex: PUMP_KEY, accounts: [], data: "" }];
+  top.meta.innerInstructions[0]!.instructions = [{ programIdIndex: PUMP_KEY, accounts: [], data: "3c5s1W8njd38", stackHeight: 2 }, { programIdIndex: PUMP_KEY, accounts: [], data: cpi(ownEvent()), stackHeight: 3 }];
+  assert.deepEqual(fromInner(top).map((t) => [t.side, t.tape]), [["s", false]]);
+  // the same sell at height 2 under a top-level instruction that is no venue: a trader's
+  top.transaction.message.instructions = [{}, {}, {}, { programIdIndex: 0, accounts: [], data: "" }];
+  assert.deepEqual(fromInner(top).map((t) => [t.side, t.tape]), [["s", undefined]]);
+  // a height that builds no stack (missing, or past the frame under it): nothing marked, the trades still decoded
+  const bad = structuredClone(r);
+  delete bad.meta.innerInstructions[0]!.instructions[5]!.stackHeight;
+  assert.deepEqual(fromInner(bad).map((t) => [t.side, t.tape]), [["b", undefined], ["s", undefined]]);
+  const jump = structuredClone(r);
+  jump.meta.innerInstructions[0]!.instructions.at(-2)!.stackHeight = 9;
+  assert.deepEqual(fromInner(jump).map((t) => [t.side, t.tape]), [["b", undefined], ["s", undefined]]);
 });

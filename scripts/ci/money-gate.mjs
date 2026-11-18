@@ -50,6 +50,8 @@
 // No token and no secret.
 //   node scripts/ci/money-gate.mjs <base sha> <head sha>   the records changed between the two commits
 //   node scripts/ci/money-gate.mjs --all                   every record in scripts/live-checks/
+// Exit 0 PASS, 1 REFUSED, 3 COULD NOT READ: no provider answered enough within the gate's rounds (ROUND_PAUSES), a
+// throttle or a transport error and never an answer, so nothing is refused and nothing passes; run it again.
 import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -270,7 +272,9 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
       return when(j.result.blockTime * 1000, floor);
     }
     const id = await rpc(fetchFn, url, "eth_chainId", [], sleep, rateWait);
-    if (id.result !== CHAIN_ID[chain]) return `wrong chain (${id.result ?? JSON.stringify(id.error)})`;
+    // an error answer to the chain id read (a throttle's -32016, say) is no answer, not a wrong chain
+    if (id.error) return `error ${JSON.stringify(id.error).slice(0, 120)}`;
+    if (id.result !== CHAIN_ID[chain]) return `wrong chain (${id.result})`;
     j = await rpc(fetchFn, url, "eth_getTransactionReceipt", [hash], sleep, rateWait);
     if (j.error) return `error ${JSON.stringify(j.error).slice(0, 120)}`;
     if (!j.result) return "missing";
@@ -591,7 +595,12 @@ export async function findTxBytes(fetchFn, url, id, known, sleep = wait, max = M
   const t = known?.transaction;
   if (t?.hash !== id) throw new Error(`its tx JSON names hash ${String(t?.hash).slice(0, 60)}, not ${id}`);
   const call = async (method, params) => {
-    const j = await rpc(fetchFn, url, method, params, sleep);
+    let j;
+    try {
+      j = await rpc(fetchFn, url, method, params, sleep);
+    } catch (e) {
+      throw Object.assign(new Error(`${hostOf(url) ?? url} ${method}: no answer (${String(e?.message ?? e).slice(0, 80)})`), { unread: true });
+    }
     if (j?.error || !j?.result) throw new Error(`${hostOf(url) ?? url} ${method}: ${JSON.stringify(j?.error ?? "no result").slice(0, 120)}`);
     return j.result;
   };
@@ -642,7 +651,8 @@ export async function proveNearTx(fetchFn, tx, prover, head, known, sleep = wait
     try {
       j = await rpc(fetchFn, url, method, params, sleep);
     } catch (e) {
-      throw new Error(`${hostOf(url) ?? url} ${method}: no answer (${String(e?.message ?? e).slice(0, 80)})`);
+      // no answer (a throttle past rpc()'s bound, a transport error): the gate proves it again next round
+      throw Object.assign(new Error(`${hostOf(url) ?? url} ${method}: no answer (${String(e?.message ?? e).slice(0, 80)})`), { unread: true });
     }
     if (j?.error || !j?.result) throw new Error(`${hostOf(url) ?? url} ${method}: ${JSON.stringify(j?.error ?? "no result").slice(0, 120)}`);
     return j.result;
@@ -718,14 +728,126 @@ export async function proveRead(fetchFn, tx, answers, list, floor = FLOOR, sleep
   return `PROVEN ON ${hostOf(head)}: ${tx.chain} ${tx.hash} (V${facts.version}, ${facts.signer} to ${facts.receiver}): ${p.outcomes} outcome(s) proven by ${hostOf(prover.url)}'s light-client proof against final block ${p.head}; confirmed in block ${p.height}, ${new Date(p.time).toISOString()}; tx bytes ${from}`;
 }
 
+// Card money-gate-rate-limit-is-not-missing: a throttled read is no answer, never an answer that a tx is absent. A host
+// answers a tx read in one of four ways the gate counts: ok, failed, old, or absent (missing: NEAR's UNKNOWN_TRANSACTION,
+// a Solana getTransaction result null, an EVM eth_getTransactionReceipt result null; each read on the mainnet hosts
+// 2026-11-18 at 11:32Z). Anything else is no answer and decides nothing: HTTP 429 (base.drpc.org answered one at 11:32Z,
+// with dRPC's code 15 "You reached Public endpoint rate limit" body; near.org's archive with a Retry-After, rpc-wait.mjs;
+// OnFinality's public devnet endpoint at its daily cap of 1000, x-ratelimit-limit-day, read 2026-11-10 01:25Z), a
+// transport error, mainnet.base.org's -32016 "over rate limit", EIP-1474's -32005 (apps/helper/src/limits/limits.ts
+// cites both), Solana's -32005 (a node behind), a reply with no status. rpc() waits a throttle out within its own bound
+// (rpc-wait.mjs); past it, the host is asked again in the gate's next round, after a pause, up to ROUND_PAUSES.length
+// more rounds, so a minute's rate window passes. Only the hosts that gave no answer are asked again, and never one whose
+// operator already read the tx ok.
+// A tx passes on two operators' ok reads (or a NEAR tx's light-client proof) as before. It is refused on an answer: failed
+// or old on any host, absent on two operators, or every host answered (wrong chain, no meta, absent on one: answers too)
+// and two operators do not read it ok. A tx the rounds leave undecided is "could not read": in refusals and in unread
+// both, so it never passes, for every caller; outcome() gives it its own exit code, 3, apart from a refusal's 1. A swept
+// account (a Deleted line) is read the same way: gone or present is an answer, anything else is not.
+export const ROUND_PAUSES = [30000, 60000, 120000];
+const DECISIVE = /^(failed|old)/;
+// no answer, asked again next round: rpc() gave up (a throttle past its bound, a transport error), a 429 not waited, or
+// an RPC error answer (a throttle's -32016, -32005 or code 15, or any other error: none says a tx is absent; NEAR's
+// UNKNOWN_TRANSACTION is read as missing before it). Every other reply (wrong chain, no meta, not final) is an answer.
+const RETRYABLE = (r) => r === undefined || r === NOT_WAITED || /^(no answer|error) /.test(r);
+const UNREAD = "could not read: ";
+/** The gate's exit code from its result: 0 pass, 1 a refusal (a could-not-read beside it or not), 3 could-not-read alone. */
+export const outcome = ({ refusals = [], unread = [] }) => (refusals.some((x) => !unread.includes(x)) ? 1 : unread.length ? 3 : 0);
+
 // records: the records to read back; every: all records in the repo (for the twice-listed check); money: what
 // moneyCode() found in the change; sleep: how a wait is waited (a test records it)
 export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every = records, floor = FLOOR, money, sleep = wait } = {}) {
+  const lines = () => ({ refusals: [], unread: [], read: [], notes: [], proven: [], gone: [] });
+  // one tx's reads over the rounds: ask() reads the hosts that gave no answer yet, decide(last) settles the tx or leaves
+  // it open for the next round
+  const txJob = (path, tx, bytesOf) => {
+    const urls = rpcs[tx.chain];
+    const answers = new Map();
+    const all = () => urls.filter((u) => answers.has(u)).map((u) => answers.get(u));
+    const okOps = () => okOperators(tx.chain, all());
+    const out = lines();
+    const note = TESTNET.has(tx.chain) ? " (testnet, not real-money proof)" : "";
+    const job = { out, done: false };
+    const settle = (where, text) => {
+      for (const a of all()) if (a.r === "ok") out.read.push(`${tx.chain} ${tx.hash} ok on ${a.url}${note}`);
+      for (const a of all()) if (a.r === NOT_WAITED) out.notes.push(`${tx.chain} ${tx.hash} on ${a.url}: ${NOT_WAITED}`);
+      if (where) out[where].push(text);
+      job.done = true;
+    };
+    job.ask = async () => {
+      for (const url of urls) {
+        // the first round asks every host (a failed answer from any refuses); a later one only a host that gave no
+        // answer and could still add an operator
+        if (answers.has(url) && (!RETRYABLE(answers.get(url).r) || okOps().has(operatorOf(tx.chain, url)))) continue;
+        // in the listed order; a 429 is waited out only while the host could add a second operator
+        const rateWait = okOps().size < 2 && !okOps().has(operatorOf(tx.chain, url));
+        const o = {};
+        const r = await readTx(fetchFn, url, tx, floor, sleep, rateWait, o);
+        answers.set(url, { url, r, result: o.result });
+      }
+    };
+    job.decide = async (last) => {
+      const said = () => all().map((a) => `${a.r} on ${a.url}`).join(", ");
+      if (all().some((a) => DECISIVE.test(a.r))) return settle("refusals", `${path}: ${tx.chain} ${tx.hash}: ${said()}`);
+      if (okOps().size >= 2) return settle();
+      const pending = urls.filter((u) => RETRYABLE(answers.get(u)?.r) && !okOps().has(operatorOf(tx.chain, u)));
+      const missingOps = new Set(all().filter((a) => a.r === "missing").map((a) => operatorOf(tx.chain, a.url)));
+      let why = "";
+      // a NEAR tx one operator read ok is proven once no other host can still answer (or in the last round); FastNEAR
+      // must be the one that read it, unless no host is left to ask, when proveRead refuses it as before
+      const prover = all().some((a) => a.r === "ok" && operatorOf(tx.chain, a.url) === "fastnear" && a.result);
+      if (NEAR.has(tx.chain) && okOps().size === 1 && missingOps.size < 2 && (!pending.length || (last && prover)))
+        try {
+          return settle("proven", `${await proveRead(fetchFn, { ...tx, bytes: bytesOf?.[tx.hash] }, all(), urls, floor, sleep)}${note}`);
+        } catch (e) {
+          why = `; not proven: ${String(e?.message ?? e).slice(0, 300)}`;
+          if (!e?.unread) return settle("refusals", `${path}: ${tx.chain} ${tx.hash}: ${said()}${why}`);
+          if (!last) return; // a proof read that got no answer: proven again next round
+          return settle("unread", `${UNREAD}${path}: ${tx.chain} ${tx.hash}: ${said()}${why}`);
+        }
+      if (missingOps.size >= 2 || !pending.length) return settle("refusals", `${path}: ${tx.chain} ${tx.hash}: ${said()}${why}`);
+      if (last) settle("unread", `${UNREAD}${path}: ${tx.chain} ${tx.hash}: ${said()}${why}`);
+    };
+    return job;
+  };
+  // one swept account's view_account reads over the rounds, as a tx's
+  const goneJob = (path, chain, account) => {
+    const urls = rpcs[chain];
+    const answers = new Map();
+    const all = () => urls.filter((u) => answers.has(u)).map((u) => answers.get(u));
+    const goneOps = () => new Set(all().filter((a) => a.r === "gone").map((a) => operatorOf(chain, a.url)));
+    const out = lines();
+    const note = TESTNET.has(chain) ? " (testnet, not real-money proof)" : "";
+    const job = { out, done: false };
+    const settle = (where, text) => {
+      for (const a of all()) if (a.r === NOT_WAITED) out.notes.push(`${chain} ${account} on ${a.url}: ${NOT_WAITED}`);
+      out[where].push(text);
+      job.done = true;
+    };
+    job.ask = async () => {
+      for (const url of urls) {
+        if (answers.has(url) && (!RETRYABLE(answers.get(url).r) || goneOps().has(operatorOf(chain, url)))) continue;
+        const rateWait = goneOps().size < 2 && !goneOps().has(operatorOf(chain, url));
+        answers.set(url, { url, r: await readGone(fetchFn, url, account, sleep, rateWait) });
+      }
+    };
+    job.decide = async (last) => {
+      const said = () => all().map((a) => `${a.r} on ${a.url}`).join(", ");
+      if (goneOps().size >= 2 && !all().some((a) => a.r.startsWith("present")))
+        return settle("gone", `${chain} ${account} gone (UNKNOWN_ACCOUNT) on ${all().filter((a) => a.r === "gone").map((a) => a.url).join(", ")}${note}`);
+      const pending = urls.filter((u) => RETRYABLE(answers.get(u)?.r) && !goneOps().has(operatorOf(chain, u)));
+      if (all().some((a) => a.r.startsWith("present")) || !pending.length) return settle("refusals", `${path}: ${chain} ${account} is not gone: ${said()}`);
+      if (last) settle("unread", `${UNREAD}${path}: ${chain} ${account} is not gone: ${said()}`);
+    };
+    return job;
+  };
   const refusals = [];
   const read = [];
   const notes = []; // a host's 429 not waited because two operators read it ok
   const proven = []; // a NEAR tx read ok on one operator and proven by its light-client proof on the other
   const gone = []; // a Deleted account read gone on two operators
+  const unread = []; // "could not read: ...": a tx or account no answer decided within ROUND_PAUSES, never a pass
+  const jobs = [];
   for (const f of money?.merged ?? []) refusals.push(`${f} changes money code in a merge commit, outside any card's commit`);
   const byCard = new Map();
   for (const c of money?.commits ?? []) {
@@ -763,48 +885,35 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
     for (const tx of live.txs) {
       const where = seen.get(`${tx.chain} ${tx.hash}`) ?? [];
       if (where.length > 1) refusals.push(`${path}: ${tx.chain} ${tx.hash} is listed ${where.length} times (${where.join(", ")})`);
-      const answers = [];
-      // in the listed order; a 429 is waited out only while the host could add a second operator
-      const okOps = () => okOperators(tx.chain, answers);
-      for (const url of rpcs[tx.chain]) {
-        const rateWait = okOps().size < 2 && !okOps().has(operatorOf(tx.chain, url));
-        const out = {};
-        const r = await readTx(fetchFn, url, tx, floor, sleep, rateWait, out);
-        answers.push({ url, r, result: out.result });
-      }
-      const ok = answers.filter((a) => a.r === "ok");
-      const decisive = answers.filter((a) => /^(failed|old)/.test(a.r));
-      const note = TESTNET.has(tx.chain) ? " (testnet, not real-money proof)" : "";
-      for (const a of ok) read.push(`${tx.chain} ${tx.hash} ok on ${a.url}${note}`);
-      for (const a of answers) if (a.r === NOT_WAITED) notes.push(`${tx.chain} ${tx.hash} on ${a.url}: ${NOT_WAITED}`);
-      let why = "";
-      if (!decisive.length && okOps().size === 1 && NEAR.has(tx.chain))
-        try {
-          proven.push(`${await proveRead(fetchFn, { ...tx, bytes: bytesOf?.[tx.hash] }, answers, rpcs[tx.chain], floor, sleep)}${note}`);
-          continue;
-        } catch (e) {
-          why = `; not proven: ${String(e?.message ?? e).slice(0, 300)}`;
-        }
-      if (decisive.length || okOps().size < 2)
-        refusals.push(`${path}: ${tx.chain} ${tx.hash}: ${answers.map((a) => `${a.r} on ${a.url}`).join(", ")}${why}`);
+      jobs.push(txJob(path, tx, bytesOf));
     }
     // a bad Deleted line is a problem above and reads nothing
     if (live.problems.length) continue;
-    for (const { chain, account } of live.deleted) {
-      const answers = [];
-      const goneOps = () => new Set(answers.filter((a) => a.r === "gone").map((a) => operatorOf(chain, a.url)));
-      for (const url of rpcs[chain]) {
-        const rateWait = goneOps().size < 2 && !goneOps().has(operatorOf(chain, url));
-        answers.push({ url, r: await readGone(fetchFn, url, account, sleep, rateWait) });
-      }
-      for (const a of answers) if (a.r === NOT_WAITED) notes.push(`${chain} ${account} on ${a.url}: ${NOT_WAITED}`);
-      const note = TESTNET.has(chain) ? " (testnet, not real-money proof)" : "";
-      if (goneOps().size >= 2 && !answers.some((a) => a.r.startsWith("present")))
-        gone.push(`${chain} ${account} gone (UNKNOWN_ACCOUNT) on ${answers.filter((a) => a.r === "gone").map((a) => a.url).join(", ")}${note}`);
-      else refusals.push(`${path}: ${chain} ${account} is not gone: ${answers.map((a) => `${a.r} on ${a.url}`).join(", ")}`);
-    }
+    for (const { chain, account } of live.deleted) jobs.push(goneJob(path, chain, account));
   }
-  return { refusals, read, notes, proven, gone };
+  // Rounds: every job reads its hosts; one that no answer decides is read again, on the hosts that gave none, after a
+  // pause, at most ROUND_PAUSES.length more times. Each job's lines land in its own slot, in the record's order.
+  let open = jobs;
+  for (let round = 0; open.length; round++) {
+    const last = round === ROUND_PAUSES.length;
+    for (const j of open) {
+      await j.ask();
+      await j.decide(last);
+    }
+    open = open.filter((j) => !j.done);
+    if (open.length && !last) await sleep(ROUND_PAUSES[round]);
+  }
+  for (const j of jobs) {
+    refusals.push(...j.out.refusals);
+    unread.push(...j.out.unread);
+    read.push(...j.out.read);
+    notes.push(...j.out.notes);
+    proven.push(...j.out.proven);
+    gone.push(...j.out.gone);
+  }
+  // a could-not-read is a refusal too, so a caller that reads refusals alone never passes it; outcome() tells them apart
+  refusals.push(...unread);
+  return { refusals, read, notes, proven, gone, unread };
 }
 
 // a record is read only when it is a regular file: a symlink (to a file anywhere) or anything else is refused, never
@@ -880,14 +989,16 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
   const { records, every, money } = recordsFrom(process.cwd(), args);
-  const { refusals, read, notes, proven, gone } = await moneyGate(records, fetch, RPCS, { every, money });
+  const result = await moneyGate(records, fetch, RPCS, { every, money });
+  const { refusals, read, notes, proven, gone, unread } = result;
   for (const r of read) console.log(`money-gate: ${r}`);
   for (const n of notes) console.log(`money-gate: ${n}`);
   for (const p of proven) console.log(`money-gate: ${p}`);
   for (const g of gone) console.log(`money-gate: ${g}`);
-  if (refusals.length) {
-    for (const r of refusals) console.error(`money-gate: REFUSED: ${r}`);
-    process.exit(1);
-  }
+  for (const r of refusals) if (!unread.includes(r)) console.error(`money-gate: REFUSED: ${r}`);
+  for (const u of unread) console.error(`money-gate: COULD NOT READ: ${u.slice(UNREAD.length)}`);
+  const code = outcome(result);
+  if (code === 3) console.error(`money-gate: COULD NOT READ (${unread.length}): no answer from enough providers within ${ROUND_PAUSES.length + 1} rounds; nothing refused, nothing passed: run it again`);
+  if (code) process.exit(code);
   console.log(`money-gate: PASS (${records.length} record(s) read, ${read.length} tx read(s))`);
 }

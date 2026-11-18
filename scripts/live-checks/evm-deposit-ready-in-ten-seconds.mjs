@@ -30,9 +30,10 @@ const count = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length;
 const once = (re, js) => count(re, js) === 1;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
-/** verdictOf's start: `e.keys.push(a.secretKey);let o=await e.h.round(),s=aF(e.seed,e.scope,o.events,r,o.finalBlock);
- *  if(s.taken.some(e=>MI(e.ref,t.ref))){...return{kind:\`landed\`,...}}if(i===void 0)return{kind:\`dead\`};let c=t.evmSpent!==void 0`. */
-const FIRST = new RegExp(`\\.keys\\.push\\((${N})\\.secretKey\\);let (${N})=await (${N})\\.h\\.round\\(\\),(${N})=${N}\\(\\3\\.seed,\\3\\.scope,\\2\\.events,${N},\\2\\.finalBlock\\);if\\(\\4\\.taken\\.some\\([^]{0,200}?return\\{kind:\`landed\`,[^]{0,120}?\\}\\}if\\((${N})===void 0\\)return\\{kind:\`dead\`\\};let ${N}=(${N})\\.evmSpent!==void 0`);
+/** verdictOf's start (its Deposited by the note's own precommitment since card evm-deposit-pruned-sim-says-why):
+ *  `e.keys.push(a.secretKey);let o=await e.h.round(),s=ZR(e.scope,o.events,t.precommitment);if(s!==null){...
+ *  return{kind:\`landed\`,...}}if(i===void 0)return{kind:\`dead\`};let c=t.evmSpent!==void 0`. */
+const FIRST = new RegExp(`\\.keys\\.push\\((${N})\\.secretKey\\);let (${N})=await (${N})\\.h\\.round\\(\\),(${N})=${N}\\(\\3\\.scope,\\2\\.events,(${N})\\.precommitment\\);if\\(\\4!==null\\)\\{[^]{0,700}?return\\{kind:\`landed\`,[^]{0,120}?\\}\\}if\\((${N})===void 0\\)return\\{kind:\`dead\`\\};let ${N}=\\5\\.evmSpent!==void 0`);
 /** The dead guard: `u!==null&&o.finalBlock>=u)return{kind:\`dead\`}`. */
 const GUARD = new RegExp(`(${N})!==null&&(${N})\\.finalBlock>=\\1\\)return\\{kind:\`dead\`\\}`);
 

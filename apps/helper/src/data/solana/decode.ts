@@ -132,6 +132,10 @@ export type RawTrade = {
   user: string;
   /** The event's own clock, unix seconds; 0 when the event has none (the pair venues: the reader dates it by its block). */
   ts: number;
+  /** false: a venue program's own swap, made while another decoded venue's instruction runs (its event logged with that
+   *  venue lower in the invoke stack): no trader's trade, so off the tape and in the bars (card
+   *  sol-tape-trader-is-the-events-user, as ../candles.ts Swap.tape on Base and Robinhood). */
+  tape?: false;
 };
 
 const key = (b: Buffer, o: number): string => b58encode(b.subarray(o, o + 32));
@@ -237,6 +241,17 @@ export function decodeEvent(program: string, data: Buffer): RawTrade | null {
   return null;
 }
 
+/** The programs whose events this file decodes. A trade's event logged while one of them is lower in the invoke stack
+ *  was made inside that venue's own instruction: the venue program's own swap (its fees sold in a pool, the Solana
+ *  shape of a v4 hook's swap in its own pool, evm/swaps.ts apply), never a trader's. A trader's route calls each venue
+ *  from the trader's own instruction or a router's (Jupiter, GMGN's, ...), never from inside another venue's: every
+ *  recorded transaction in fixtures/sol-trades-txs.json, sol-venue-txs.json and sol-trades-hour.json.gz has its venue
+ *  swaps side by side. A venue's event sent to itself (Anchor's event CPI) is the same venue's frame, not a swap. */
+const VENUES: ReadonlySet<string> = new Set([PUMP, PUMP_AMM, ORCA, RAY_CLMM, RAY_CPMM, RAY_LAUNCHLAB]);
+/** `t` marked the program's own (off the tape) when a decoded venue runs below its frame (`below`: the frames under
+ *  the one that logged it, outermost first). */
+const placed = (t: RawTrade, below: readonly (string | undefined)[]): RawTrade => (below.some((p) => p !== undefined && VENUES.has(p)) ? { ...t, tape: false } : t);
+
 const INVOKE = /^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) invoke \[(\d+)\]$/;
 const END = /^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) (success|failed.*)$/;
 const DATA = /^Program data: ([A-Za-z0-9+/=]+)$/;
@@ -270,13 +285,13 @@ export function fromLogs(logs: unknown): { trades: RawTrade[]; truncated: boolea
     m = DATA.exec(line);
     if (m !== null && stack.length > 0) {
       const t = decodeEvent(stack[stack.length - 1]!, Buffer.from(m[1]!, "base64"));
-      if (t !== null) trades.push(t);
+      if (t !== null) trades.push(placed(t, stack.slice(0, -1)));
     }
   }
   return { trades, truncated: stack.length !== 0 };
 }
 
-type Ix = { programIdIndex?: unknown; data?: unknown };
+type Ix = { programIdIndex?: unknown; data?: unknown; stackHeight?: unknown };
 /**
  * The trades in a transaction's inner instructions (a `getTransaction` answer's `result`, json encoding): each event
  * CPI to a venue program (Anchor's event CPI requires the program's own event-authority signer, so only the program can
@@ -289,16 +304,28 @@ export function fromInner(result: unknown): RawTrade[] {
   const loaded = (meta.loadedAddresses ?? {}) as Record<string, unknown>;
   const keys = [msg?.accountKeys, loaded.writable, loaded.readonly].flatMap((k) => (Array.isArray(k) ? k : []));
   if (!keys.every((k) => typeof k === "string") || !Array.isArray(meta.innerInstructions)) return [];
+  const top = Array.isArray(msg?.instructions) ? (msg.instructions as Ix[]) : [];
   const out: RawTrade[] = [];
-  for (const group of meta.innerInstructions as { instructions?: unknown }[]) {
+  for (const group of meta.innerInstructions as { index?: unknown; instructions?: unknown }[]) {
     if (!Array.isArray(group?.instructions)) continue;
+    // the invoke stack as the group runs (its top-level instruction at height 1, undefined when the answer omits it; each
+    // inner one at its stackHeight); past a height that does not build one stack no trade is marked the program's own
+    const first = typeof group.index === "number" ? top[group.index] : undefined;
+    const frames: (string | undefined)[] = [typeof first?.programIdIndex === "number" ? keys[first.programIdIndex] : undefined];
+    let whole = true;
     for (const ix of group.instructions as Ix[]) {
       const program = typeof ix.programIdIndex === "number" ? keys[ix.programIdIndex] : undefined;
+      const h = ix.stackHeight;
+      if (whole && Number.isSafeInteger(h) && (h as number) >= 2 && (h as number) <= frames.length + 1) {
+        frames.length = (h as number) - 1;
+        frames.push(program);
+      } else whole = false;
       if ((program !== PUMP && program !== PUMP_AMM && program !== RAY_LAUNCHLAB) || typeof ix.data !== "string") continue;
       const bytes = b58data(ix.data);
       if (bytes === null || Buffer.from(bytes.subarray(0, 8)).toString("hex") !== DISC.cpi) continue;
       const t = decodeEvent(program, Buffer.from(bytes.subarray(8)));
-      if (t !== null) out.push(t);
+      // the event CPI's frame is the venue's own; the one under it the swap that sent it; below that, the swap's callers
+      if (t !== null) out.push(whole ? placed(t, frames.slice(0, -2)) : t);
     }
   }
   return out;

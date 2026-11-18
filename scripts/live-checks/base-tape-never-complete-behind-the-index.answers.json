@@ -1,5 +1,5 @@
 {
- "note": "good: this branch (card base-tape-never-complete-behind-the-index) createSwaps in-process on the real Base and Robinhood providers, read through the check read() with a fetch that answers /v1/market/trades from it, 18 Nov 05:1xZ; the helper host given as http://helper.local. bad: the deployed helper ct-api.unrealized.trade before the card (main cea17ee5f era), 18 Nov 05:1xZ: complete tapes naming no block they are read to. behind0321: made from live run 44228233209 (18 Nov 03:21Z), Base 0x60858a4b served complete at 03:21:36.952Z (as_of_ms 1794972096952) read to below block 58908377 (its missing swap 0x0323e3ae), its newest trade block 58908200, the providers head 58908608 read at 03:21:37.386Z; here as the card names it: read to 58908376 of head 58908376 read 0 s ago (a helper whose own heads lag), not filling.",
+ "note": "good: this branch (card base-tape-never-complete-behind-the-index) createSwaps in-process on the real Base and Robinhood providers, read through the check read() with a fetch that answers /v1/market/trades from it, 18 Nov 05:1xZ; the helper host given as http://helper.local. bad: the deployed helper ct-api.unrealized.trade before the card (main cea17ee5f era), 18 Nov 05:1xZ: complete tapes naming no block they are read to. behind0321: made from live run 44228233209 (18 Nov 03:21Z), Base 0x60858a4b served complete at 03:21:36.952Z (as_of_ms 1794972096952) read to below block 58908377 (its missing swap 0x0323e3ae), its newest trade block 58908200, the providers head 58908608 read at 03:21:37.386Z; here as the card names it: read to 58908376 of head 58908376 read 0 s ago (a helper whose own heads lag), not filling. vendorGood: card evm-vendor-tape-names-its-reach's branch, createSwaps in-process on the real Base and Robinhood public providers and GeckoTerminal's keyless API, read through the check read() with --token base:0x1668cd48 (a coin our reads find no pool of) and robinhood:0x79ec28ad, 18 Nov 11:39Z; the helper host given as http://helper.local: Base's vendor tape complete, its rows read 1,449 ms before. vendorStale: the deployed helper ct-api.unrealized.trade at b64f1005e, before that card, 18 Nov 11:38:05Z, the same tokens: Base 0x1668cd48's vendor tape (src coingecko) served complete naming no read, its as_of_ms 1,094 s before its request.",
  "good": {
   "run": {
    "at": "2026-11-18T04:41:21.944Z",
@@ -376,6 +376,179 @@
        "head": {
         "n": 117140561,
         "at": 1794976927889
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "vendorGood": {
+  "run": {
+   "at": "2026-11-18T11:39:11.341Z",
+   "base": "http://helper.local",
+   "chains": {
+    "base": {
+     "tapes": [
+      {
+       "coin": "0x1668cd48f31d869fca21eb826ca60e94cffc018c",
+       "answers": [
+        {
+         "at": 1795001951341,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=1758, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 1449 ms ago\", total;dur=4254",
+         "trades": 3,
+         "newest": {
+          "t_ms": 1795000643000,
+          "tx": "0x2b51d1fa31a8abca329e1c6bf47c210377275f820ea56165e7e163c2439c15cd"
+         },
+         "filling": false,
+         "whole_ms": 1795000605000,
+         "src": "geckoterminal",
+         "as_of_ms": 1795001954146
+        }
+       ],
+       "head": {
+        "n": 59057902,
+        "at": 1795001956133
+       }
+      }
+     ]
+    },
+    "robinhood": {
+     "tapes": [
+      {
+       "coin": "0x79ec28adb615afc049860fb307f97b08df4c4c2a",
+       "answers": [
+        {
+         "at": 1795001956133,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=5720, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117368650 of head 117368650, read 4 s ago\", total;dur=5975",
+         "trades": 7,
+         "newest": {
+          "t_ms": 1795001790000,
+          "tx": "0x60c715f835c9421b684fe4d38c34730e82d6b7ecba86924405a0c97cdd014dab"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1795001961853
+        },
+        {
+         "at": 1795001963109,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117368650 of head 117368687, read 5 s ago\", total;dur=0",
+         "trades": 7,
+         "newest": {
+          "t_ms": 1795001790000,
+          "tx": "0x60c715f835c9421b684fe4d38c34730e82d6b7ecba86924405a0c97cdd014dab"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1795001961853
+        },
+        {
+         "at": 1795001964110,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117368650 of head 117368696, read 6 s ago\", total;dur=0",
+         "trades": 7,
+         "newest": {
+          "t_ms": 1795001790000,
+          "tx": "0x60c715f835c9421b684fe4d38c34730e82d6b7ecba86924405a0c97cdd014dab"
+         },
+         "filling": false,
+         "whole_ms": 1795001783000,
+         "src": "chain",
+         "as_of_ms": 1795001961853
+        }
+       ],
+       "head": {
+        "n": 117368710,
+        "at": 1795001964691
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "vendorStale": {
+  "run": {
+   "at": "2026-11-18T11:38:05.204Z",
+   "base": "https://ct-api.unrealized.trade",
+   "chains": {
+    "base": {
+     "tapes": [
+      {
+       "coin": "0x1668cd48f31d869fca21eb826ca60e94cffc018c",
+       "answers": [
+        {
+         "at": 1795001885205,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=5, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=6",
+         "trades": 3,
+         "newest": {
+          "t_ms": 1795000643000,
+          "tx": "0x2b51d1fa31a8abca329e1c6bf47c210377275f820ea56165e7e163c2439c15cd"
+         },
+         "filling": false,
+         "whole_ms": 1795000605000,
+         "src": "coingecko",
+         "as_of_ms": 1795000790723
+        }
+       ],
+       "head": {
+        "n": 59057554,
+        "at": 1795001886566
+       }
+      }
+     ]
+    },
+    "robinhood": {
+     "tapes": [
+      {
+       "coin": "0x79ec28adb615afc049860fb307f97b08df4c4c2a",
+       "answers": [
+        {
+         "at": 1795001886861,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=11, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117368016 of head 117368016, read 1 s ago\", total;dur=85",
+         "trades": 7,
+         "newest": {
+          "t_ms": 1795001790000,
+          "tx": "0x60c715f835c9421b684fe4d38c34730e82d6b7ecba86924405a0c97cdd014dab"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1795001886976
+        },
+        {
+         "at": 1795001888142,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117368016 of head 117368029, read 2 s ago\", total;dur=0",
+         "trades": 7,
+         "newest": {
+          "t_ms": 1795001790000,
+          "tx": "0x60c715f835c9421b684fe4d38c34730e82d6b7ecba86924405a0c97cdd014dab"
+         },
+         "filling": false,
+         "whole_ms": 1795001783000,
+         "src": "chain",
+         "as_of_ms": 1795001886976
+        }
+       ],
+       "head": {
+        "n": 117368041,
+        "at": 1795001889462
        }
       }
      ]
