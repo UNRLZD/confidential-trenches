@@ -137,7 +137,7 @@ export function lateFound(x: Reread, token: string): { found: readonly [bigint, 
   let found: readonly [bigint, bigint] | null = null;
   const out: { text: string; retry: boolean }[] = [];
   for (const { asset, amounts: [a, b] } of x.held) {
-    if (a !== b) out.push({ text: `holds ${String(a)} and ${String(b)} of ${asset} on NEAR's two RPCs: read again`, retry: true });
+    if (a !== b) out.push({ text: `holds ${String(a)} and ${String(b)} of ${asset} on NEAR's two providers, read apart: read again`, retry: true });
     else if (asset !== token) out.push({ text: `holds ${String(a)} of ${asset} inside intents.near, which a restore does not carry yet; it stays under the 12 words`, retry: false });
     else if (a > 0n) found = [a, b] as const;
   }

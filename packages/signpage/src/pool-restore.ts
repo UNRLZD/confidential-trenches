@@ -462,8 +462,8 @@ async function readDepositIds(
   // own is a read to try again by the vault's label, the pools' reasons kept
   if (vault !== null)
     await readVaultLate(seed, vault.v, ids, keep, signal, out, own, vault.notesAt, vault.carry).catch((e: unknown) => {
-      if (e instanceof SeedGone || signal.aborted) throw e;
-      out.retry.push(`${vault.v.label}: step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`);
+      if (signal.aborted || e instanceof SeedGone) throw e;
+      out.retry.push(`${vault.v.label}: its deposit ids' read did not finish: ${e instanceof Error ? e.message : "it threw"}`);
     });
 }
 

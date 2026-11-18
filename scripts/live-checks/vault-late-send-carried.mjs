@@ -40,14 +40,14 @@ const REREAD = new RegExp(
 // lateFound: a failed read is a reason; each asset's two amounts equal, the token's above 0 the only amount taken
 const RULE = new RegExp(
   `function (${N})\\((${N}),(${N})\\)\\{if\\(${Q}error${Q}in \\2\\)return\\{found:null,why:\\[\\{text:${Q}its read failed \\(\\$\\{\\2\\.error\\}\\): read again${Q},retry:!0\\}\\]\\};` +
-    `let (${N})=null,(${N})=\\[\\];for\\(let\\{asset:(${N}),amounts:\\[(${N}),(${N})\\]\\}of \\2\\.held\\)\\7===\\8\\?\\6===\\3\\?\\7>0n&&\\(\\4=\\[\\7,\\8\\]\\):\\5\\.push\\(\\{text:${Q}[^${Q}]*inside intents\\.near[^${Q}]*${Q},retry:!1\\}\\):\\5\\.push\\(\\{text:${Q}[^${Q}]*on NEAR's two RPCs: read again${Q},retry:!0\\}\\);return\\{found:\\4,why:\\5\\}\\}`,
+    `let (${N})=null,(${N})=\\[\\];for\\(let\\{asset:(${N}),amounts:\\[(${N}),(${N})\\]\\}of \\2\\.held\\)\\7===\\8\\?\\6===\\3\\?\\7>0n&&\\(\\4=\\[\\7,\\8\\]\\):\\5\\.push\\(\\{text:${Q}[^${Q}]*inside intents\\.near[^${Q}]*${Q},retry:!1\\}\\):\\5\\.push\\(\\{text:${Q}[^${Q}]*on NEAR's two providers, read apart: read again${Q},retry:!0\\}\\);return\\{found:\\4,why:\\5\\}\\}`,
 );
 // readVaultLate: the rule's two amounts, MIN_DEPOSIT, then planFound before the carry
 const TAKEN = (rule) => new RegExp(`\\{found:(${N}),why:(${N})\\}=${esc(rule)}\\((${N}),(${N})\\);[^]{0,200}?if\\(\\1===null\\|\\|\\1\\[0\\]<${N}\\.MIN_DEPOSIT\\)continue;`);
 const WRITES = (found) => new RegExp(`try\\{await (${N})\\.found\\((${N})\\.scope,(${N})\\.i,${esc(found)}\\)\\}catch`);
 const CARRIED = new RegExp(`let (${N})=await ${N}\\(\\{scope:${N}\\.scope,i:${N}\\.i,noteId:${N}\\.id,amount:${N}\\[0\\]\\},${N}\\);\\1!==null&&\\(\\1\\.retry\\?`);
 // step 5's try: the vault's ids read after the pools' (readDepositIds' end), a throw a reason by the vault's label
-const STEP5 = new RegExp(`(${N})!==null&&await (${N})\\([^)]*\\1\\.v,[^)]*\\1\\.notesAt,\\1\\.carry\\)\\.catch\\((${N})=>\\{if\\(\\3 instanceof ${N}\\|\\|${N}\\.aborted\\)throw \\3;${N}\\.retry\\.push\\(${Q}\\$\\{\\1\\.v\\.label\\}: step 5 did not finish`);
+const STEP5 = new RegExp(`(${N})!==null&&await (${N})\\([^)]*\\1\\.v,[^)]*\\1\\.notesAt,\\1\\.carry\\)\\.catch\\((${N})=>\\{if\\(${N}\\.aborted\\|\\|\\3 instanceof ${N}\\)throw \\3;${N}\\.retry\\.push\\(${Q}\\$\\{\\1\\.v\\.label\\}: its deposit ids' read did not finish`);
 // the carry: bindDeposit with every wait thrown (the seed phase ends), deposited alone null
 const CARRY = new RegExp(`onWait:\\((${N}),(${N})\\)=>\\{throw new (${N})\\(\\1,\\2\\?\\?1e3\\)\\}\\}\\)\\);return (${N})\\.kind===${Q}deposited${Q}\\?null:`);
 const once = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length === 1;

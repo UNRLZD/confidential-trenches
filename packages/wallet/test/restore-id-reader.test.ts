@@ -514,7 +514,7 @@ test("step 7's late send: an id holding money with no note is found on two agree
   set({ tip: 1200, money: [id(11)] }, { tip: 1200, money: [] });
   const apart = (await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so }) as { ids: Parameters<typeof lateFound>[0][] }).ids.find((y) => y.i === 11)!;
   assert.deepEqual(apart, { lane: 3, i: 11, id: id(11), held: [{ asset: USDC, amounts: [9n, 0n] }] });
-  assert.deepEqual(lateFound(apart, USDC), { found: null, why: [{ text: `holds 9 and 0 of ${USDC} on NEAR's two RPCs: read again`, retry: true }] });
+  assert.deepEqual(lateFound(apart, USDC), { found: null, why: [{ text: `holds 9 and 0 of ${USDC} on NEAR's two providers, read apart: read again`, retry: true }] });
   // one provider's read: dRPC fails every balance read, FastNEAR reads the money: no amount, the id named unread
   set({ tip: 1200, money: [id(11)] });
   const q1 = rpcs[1].query;
