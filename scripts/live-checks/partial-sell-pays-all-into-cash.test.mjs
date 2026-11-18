@@ -65,3 +65,19 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     assert.deepEqual(v.lines.filter((l) => l.startsWith("BAD the served bundle")), [ALL[i]], `${from} -> ${to}`);
   }
 });
+
+// card second-places-held-by-tests: the choice made once (pool-sell.ts onFill) and taken by both verdict paths, as the
+// build at b441f3d3b minifies it (the keep sweep and the rent back inlined into the choice); the old shape above passes too
+const ONCE = "let Ge=[{chain:`solana`,hash:Be}],Ke=ge+_e,qe=he?t=>wK(t,r.address,!1,m,async()=>UG(e)):t=>wK(t,r.address,!1,m,async n=>void await zG(e,n));e.kept?.drop(Be).catch(()=>{}),t===`filled`&&(n.back=qe),{stage:t,txs:Ge};l===`dropped`&&(n.rebuild=!0),l===`filled`&&(n.back=qe),l!==`pending`";
+test("the choice made once and taken by both verdict paths carries the mark; one path without it, two names, or no choice FAILs", () => {
+  const mark = MARKS[Object.keys(MARKS)[0]];
+  assert.equal(mark.test(ONCE), true);
+  for (const [from, to] of [
+    ["l===`filled`&&(n.back=qe)", "l===`filled`&&!1"], // the note-settled path runs nothing after a fill
+    ["l===`filled`&&(n.back=qe)", "l===`filled`&&(n.back=Ye)"], // the two paths take different after-runs
+    ["qe=he?t=>wK(t,r.address,!1,m,async()=>UG(e)):", "qe="], // no choice: the rent back whatever W still holds
+  ]) {
+    assert.ok(ONCE.includes(from), from);
+    assert.equal(mark.test(ONCE.replace(from, to)), false, `${from} -> ${to}`);
+  }
+});

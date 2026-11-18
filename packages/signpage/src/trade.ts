@@ -117,8 +117,9 @@ export function releaseTradeDeps(): TradeHost["deps"] {
     // a provider read that fails past its retry rejects (pageReference), never reads as "no reference pool"
     reference: (q, paced) => pageReference(paced, q),
     // every send path's requests counted on its host's lane, the helper's among them (../../wallet/src/throttle.ts laneFetch);
-    // the public path is provider A, never the kit's default api.mainnet-beta.solana.com, which answers a browser 403
-    // "Access forbidden" (Chrome, 2026-11-11T05:18:53Z; test/trade.test.ts holds the set's hosts)
+    // the public path is provider A, named here though the kit's default is provider A too (card solana-send-browser-origin),
+    // never api.mainnet-beta.solana.com, which answers a browser 403 "Access forbidden" (Chrome, 2026-11-11T05:18:53Z;
+    // the page's Origin, 2026-11-18 12:03Z; test/trade.test.ts holds the set's hosts and that connect-src names it not)
     paths: solanaSendPaths({ helper: solanaHelperRpc(TRADE_HELPER, { fetch: laneFetch() }), rpcUrl: SOLANA_PROVIDER_A, fetch: laneFetch() }),
   };
 }
