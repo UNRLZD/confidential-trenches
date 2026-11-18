@@ -7,6 +7,10 @@ import { test } from "node:test";
 import * as rpcModule from "./rpc.ts";
 import { createRpc } from "./rpc.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 // read off the module, so this file loads at a base without them and fails on the behaviour (red runs)
 const M = rpcModule as unknown as { createPacer: (clock?: () => number) => unknown; KEYED_ROUTE_SHARE?: number };
 const JSON_T = "application/json";
@@ -54,7 +58,7 @@ function client(env: Record<string, string>) {
 
 test("each keyed chain's 10 s total is its first key's plan (RPC_BUDGET_<CHAIN>, else 100) plus half of each company key's 10 s pace, one bucket counted once: Solana 100 + 35, Base and Robinhood 35 + 4 (dRPC's three keys on its one bucket for the helper's IP at 0.8 a second, its free plan's minute budget measured, limits.ts DRPC_IP_PACE) on the deployed lists", () => {
   assert.equal(M.KEYED_ROUTE_SHARE, 0.5);
-  const b = (env: Record<string, string>, chain: string) => (createRpc(env, { log: () => {} }) as unknown as { policyOf: (c: string) => string | undefined }).policyOf(chain);
+  const b = (env: Record<string, string>, chain: string) => (createRpc(env, { now: STILL, log: () => {} }) as unknown as { policyOf: (c: string) => string | undefined }).policyOf(chain);
   const p = (total: number, share: number) => `"chain";q=${total};w=10, "client";q=${share};w=10`;
   assert.deepEqual(["solana", "base", "robinhood", "near"].map((c) => b(DEPLOYED, c)), [p(135, 42), p(39, 30), p(39, 30), p(100, 16)]);
   assert.equal(b({ ...DEPLOYED, RPC_BUDGET_SOLANA: "500,42" }, "solana"), p(535, 42), "Helius Developer's plan, plus QuickNode's half");

@@ -14,6 +14,10 @@ import { createProxy } from "./proxy/proxy.ts";
 import { createRpc } from "./rpc/rpc.ts";
 import { handler, heldFrom, solanaTokenFromEnv } from "./server.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const KEYS = { JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001" };
 const USER = "198.51.100.77";
@@ -68,7 +72,7 @@ test("30 held Solana mints, cold and again: the same address's RPC read, token p
   while (Date.now() % 10_000 > 2_000) await new Promise((r) => setTimeout(r, 50));
   globalThis.fetch = stub;
   const proxy = createProxy(KEYS, { fetch: stub });
-  const rpc = createRpc({}, { fetch: stub });
+  const rpc = createRpc({}, { now: STILL, fetch: stub });
   const lists = createSolanaLists(proxy, rpc);
   const token = solanaTokenFromEnv({}, proxy, lists, rpc);
   const held = heldFrom(token, {});
