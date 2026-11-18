@@ -13,9 +13,10 @@ import { bundle, SERVED, SIGN_BUILD_INPUTS } from "./build-app.mjs";
 import { SIGN_BUILD_CONFIG, SIGN_BUILD_OUTPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 import { build as buildSign } from "./deploy.mjs";
 import { judge, namesOf, onlyHost, read, readList, WEBAUTHN } from "./check-signpage.mjs";
-import { diffLists, headersFor, HOSTS, ledgerProblems, listDir, main as listMain, makeList, matches, newestRelease, newestReleaseOnHead, parseRules, publishedPath, RELEASED, releaseTreeProblems, unreleasedProblems } from "./release-list.mjs";
+import { diffLists, headersFor, HOSTS, ledgerProblems, listDir, main as listMain, makeList, matches, newestRelease, newestReleaseOnHead, parseRules, publishedPath, RELEASED, releaseTreeProblems, SNAPSHOT_BEHIND_MAX, SNAPSHOT_HEAD_SPREAD_MAX, snapshotFreshness, snapshotProblems, unreleasedProblems } from "./release-list.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 import { signBuilt } from "../../../scripts/signpage-built.mjs";
+import { HEAD_SPREAD_MAX as LIVE_HEAD_SPREAD_MAX, MAX_BEHIND as LIVE_MAX_BEHIND } from "../../../scripts/live-checks/base-buy-box-answers-a-fresh-account.mjs";
 
 const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const ZK = "a".repeat(64);
@@ -393,6 +394,75 @@ test("planted: a list not in the ledger, and a ledger entry whose list is gone, 
   } finally {
     rmSync(copy, { recursive: true, force: true });
   }
+});
+
+// card evm-snapshots-fresh-at-every-cut: releases 170 and 171 shipped Base's 16 Nov pool index snapshot, read on 18 Nov
+// 00:42Z 810,234 blocks behind the head (base-buy-box-answers-a-fresh-account's bad run), and Robinhood's 1,550,613
+const STALE_SNAPSHOTS = Object.freeze({ base: { through: 58_051_548, heads: [58_861_782, 58_861_784] }, robinhood: { through: 115_460_916, heads: [117_011_529, 117_011_530] } });
+const FRESH_SNAPSHOTS = Object.freeze({ base: { through: 58_859_903, heads: [58_861_839, 58_861_840] }, robinhood: { through: 117_004_072, heads: [117_011_529, 117_011_531] } });
+
+test("planted: a cut refuses a Base or Robinhood snapshot past its bound behind the lower of two heads, naming the command; a fresh pair passes", () => {
+  assert.deepEqual(SNAPSHOT_BEHIND_MAX, { base: 216_000, robinhood: 410_400 });
+  assert.deepEqual(SNAPSHOT_HEAD_SPREAD_MAX, { base: 600, robinhood: 1_140 });
+  // the live check after every sign deploy judges the same bounds, so a list the cut takes passes there
+  assert.deepEqual({ ...LIVE_MAX_BEHIND }, { ...SNAPSHOT_BEHIND_MAX });
+  assert.deepEqual({ ...LIVE_HEAD_SPREAD_MAX }, { ...SNAPSHOT_HEAD_SPREAD_MAX });
+  assert.deepEqual(snapshotProblems(FRESH_SNAPSHOTS), []);
+  assert.deepEqual(snapshotProblems(STALE_SNAPSHOTS), [
+    "base: its pool index snapshot is 810234 blocks behind the head 58861782 (at most 216000, 12 hours): run node packages/signpage/scripts/evm-index-snapshot.mjs --chain base, commit packages/signpage/data/evm-index, then cut again",
+    "robinhood: its pool index snapshot is 1550613 blocks behind the head 117011529 (at most 410400, 12 hours): run node packages/signpage/scripts/evm-index-snapshot.mjs --chain robinhood, commit packages/signpage/data/evm-index, then cut again",
+  ]);
+  // one stale chain is enough
+  assert.equal(snapshotProblems({ ...FRESH_SNAPSHOTS, robinhood: STALE_SNAPSHOTS.robinhood }).length, 1);
+  // the bound itself passes, one block past it is refused
+  const at = (behind) => ({ ...FRESH_SNAPSHOTS, base: { through: 1_000_000 - behind, heads: [1_000_000, 1_000_005] } });
+  assert.deepEqual(snapshotProblems(at(216_000)), []);
+  assert.match(snapshotProblems(at(216_001))[0], /^base: its pool index snapshot is 216001 blocks behind/);
+  // the lower of two heads within two minutes of each other judges: a provider far behind (a stale one making a stale
+  // snapshot look fresh) or far ahead is refused, never taken
+  assert.match(snapshotProblems({ ...FRESH_SNAPSHOTS, base: { through: 58_051_548, heads: [58_861_782, 58_051_600] } })[0], /^base: the providers' heads 58861782 and 58051600 are 810182 blocks apart \(at most 600\)/);
+  assert.match(snapshotProblems({ ...FRESH_SNAPSHOTS, base: { through: 58_861_000, heads: [58_861_782, 99_000_000] } })[0], /^base: the providers' heads 58861782 and 99000000 are/);
+  assert.deepEqual(snapshotProblems({ ...FRESH_SNAPSHOTS, base: { through: 58_860_000, heads: [58_861_782, 58_862_382] } }), []);
+  assert.match(snapshotProblems({ ...FRESH_SNAPSHOTS, robinhood: { through: 117_004_072, heads: [117_011_529, 117_012_670] } })[0], /are 1141 blocks apart \(at most 1140\)/);
+  // one head, none, a snapshot past the head, one that does not read back, no read at all: refused
+  assert.match(snapshotProblems({ ...FRESH_SNAPSHOTS, base: { through: FRESH_SNAPSHOTS.base.through, heads: [FRESH_SNAPSHOTS.base.heads[0], null] } })[0], /^base: the head was read on 1 of 2 providers/);
+  assert.match(snapshotProblems({ ...FRESH_SNAPSHOTS, robinhood: { through: FRESH_SNAPSHOTS.robinhood.through, heads: [] } })[0], /^robinhood: the head was read on 0 of 2 providers/);
+  assert.match(snapshotProblems({ ...FRESH_SNAPSHOTS, base: { through: 58_861_841, heads: [58_861_839, 58_861_840] } })[0], /^base: its pool index snapshot ends at 58861841, past the head 58861839/);
+  assert.match(snapshotProblems({ ...FRESH_SNAPSHOTS, robinhood: { through: null, heads: FRESH_SNAPSHOTS.robinhood.heads } })[0], /^robinhood: its pool index snapshot does not read back: run node packages\/signpage\/scripts\/evm-index-snapshot\.mjs --chain robinhood/);
+  assert.deepEqual(snapshotProblems(null), ["the pool index snapshots' age was not read, so the list is not cut"]);
+});
+
+test("planted: writing the next list with a stale snapshot, or none read, is refused before any build or write", () => {
+  const copy = releasesCopy();
+  try {
+    const next = `release-${Number(newestRelease(copy).slice("release-".length)) + 1}`;
+    assert.deepEqual(listMain([next], copy, STALE_SNAPSHOTS), { code: 1, err: snapshotProblems(STALE_SNAPSHOTS) });
+    assert.deepEqual(listMain([next], copy, null), { code: 1, err: snapshotProblems(null) });
+    assert.ok(!existsSync(join(copy, `${next}.json`)));
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
+  }
+});
+
+test("snapshotFreshness reads the committed snapshots through the kit's check and two heads, past a provider that fails", async () => {
+  let asked = 0;
+  const fetchFn = async (url) => {
+    asked++;
+    // each chain's first provider fails; the next two name a head 10 and 11 past each committed snapshot's end
+    if (url.includes("base-rpc.publicnode.com") || url.includes("robinhood-rpc.publicnode.com")) throw new Error("planted: down");
+    const through = JSON.parse(readFileSync(join(PKG, "data", "evm-index", `${url.includes("robinhood") ? "robinhood" : "base"}.json`), "utf8")).through;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: `0x${(through + (asked % 2 ? 10 : 11)).toString(16)}` }));
+  };
+  const read = await snapshotFreshness(fetchFn);
+  for (const chain of ["base", "robinhood"]) {
+    assert.ok(Number.isSafeInteger(read[chain].through), `${chain} reads back`);
+    assert.equal(read[chain].heads.length, 2, `${chain}: two heads`);
+  }
+  assert.deepEqual(snapshotProblems(read), []);
+  // a provider answering an error, or no number, is passed over: with none answering there is no head
+  const none = await snapshotFreshness(async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "planted" } })));
+  assert.deepEqual(none.base.heads, []);
+  assert.match(snapshotProblems(none)[0], /^base: the head was read on 0 of 2 providers/);
 });
 
 // ---------- the comparer ----------
