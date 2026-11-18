@@ -44,8 +44,8 @@ const SHAPES = {
   allow_keeps_then_binds: ["c7.add(e).then(()=>{L7=e,R7.textContent=`Connected ${e}`,o7.allow(e)},H7)", "o7.allow(e),c7.add(e).then(()=>{L7=e},H7)"],
   disconnect_removes_then_drops: ["var tme=`Connected apps`,nme=`Disconnect`,rme=`Disconnect failed`;function ime(e,t){let n=new Set,r=r=>{let i=t.doc.createElement(`div`);i.dataset.origin=r;let a=!1,o=null,s=t.button(`disconnect`,nme,()=>{a||(a=!0,t.store.remove(r).then(()=>{i.remove(),", "var tme=`Connected apps`,nme=`Disconnect`,rme=`Disconnect failed`;function ime(e,t){let n=new Set,r=r=>{let i=t.doc.createElement(`div`);i.dataset.origin=r;let a=!1,o=null,s=t.button(`disconnect`,nme,()=>{i.remove(),t.store.remove(r).then(()=>{"],
   signout_clears: [
-    "var v2=`ct-connections`;function w2(e=globalThis.indexedDB,t=b2){return S2(new Promise((t,n)=>{if(e===void 0)return t();let r=e.deleteDatabase(v2);r.onsuccess=()=>t()}),t)}function O9(){r7||(tR(),w2().catch(()=>{}),O7())}_9=null,bA(),await w2().catch(()=>{}),await m7",
-    "var v2=`ct-connections`;function w2(e=globalThis.indexedDB,t=b2){return S2(new Promise((t,n)=>{if(e===void 0)return t();let r=e.deleteDatabase(v2);r.onsuccess=()=>t()}),t)}function O9(){r7||(tR(),w2().catch(()=>{}),O7())}_9=null,bA(),await m7",
+    "var v2=`ct-connections`;function w2(e=globalThis.indexedDB,t=b2){return S2(new Promise((t,n)=>{if(e===void 0)return t();let r=e.deleteDatabase(v2);r.onsuccess=()=>t()}),t)}function O9(){r7||(tR(),O7(),w2().catch(()=>{}),h7?.signedOut())}_9=null,bA(),await w2().catch(()=>{}),await m7",
+    "var v2=`ct-connections`;function w2(e=globalThis.indexedDB,t=b2){return S2(new Promise((t,n)=>{if(e===void 0)return t();let r=e.deleteDatabase(v2);r.onsuccess=()=>t()}),t)}function O9(){r7||(tR(),O7(),h7?.signedOut())}_9=null,bA(),await w2().catch(()=>{}),await m7",
   ],
 };
 

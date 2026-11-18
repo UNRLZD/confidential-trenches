@@ -37,7 +37,8 @@ export const FACTS = {
   allow_keeps_then_binds: /\.add\((\w+)\)\.then\(\(\)=>\{[\s\S]{0,300}?\.allow\(\1\)/,
   disconnect_removes_then_drops: new RegExp(`=${Q}Connected apps${Q},\\w+=${Q}Disconnect${Q}[\\s\\S]{0,400}?\\.button\\(${Q}disconnect${Q},\\w+,\\(\\)=>\\{[\\s\\S]{0,60}?\\.store\\.remove\\((\\w+)\\)\\.then\\(\\(\\)=>\\{\\w+\\.remove\\(\\)`),
   // the function that deletes the ct-connections database, awaited by the sign out once the store is dropped, and called
-  // where another tab's sign out is heard (closeHostLanes first, then it)
+  // where another tab's sign out is heard (closeHostLanes first, then quotesSignedOut, then it: test/quotes-signed-out
+  // holds the quotes' stop right after the gate)
   signout_clears: {
     test(js) {
       const db = new RegExp(`(?:var |,)(\\w+)=${Q}ct-connections${Q}`).exec(js)?.[1];
@@ -45,7 +46,7 @@ export const FACTS = {
       const fn = new RegExp(`function (\\w+)\\([^)]*\\)\\{return \\w+\\(new Promise\\(\\(\\w+,\\w+\\)=>\\{if\\(\\w+===void 0\\)return \\w+\\(\\);let \\w+=\\w+\\.deleteDatabase\\(${db}\\)`).exec(js)?.[1];
       if (!fn) return false;
       const own = new RegExp(`=null,\\w+\\(\\),await ${fn}\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\)`).test(js);
-      const elsewhere = new RegExp(`\\|\\|\\(\\w+\\(\\),${fn}\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\)`).test(js);
+      const elsewhere = new RegExp(`\\|\\|\\(\\w+\\(\\),\\w+\\(\\),${fn}\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\)`).test(js);
       return own && elsewhere;
     },
   },

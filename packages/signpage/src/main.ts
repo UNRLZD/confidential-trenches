@@ -1587,9 +1587,9 @@ function signedOutElsewhere(): void {
   // the gate first: nothing past the page's origin leaves from here on, whatever is still running; then the page
   // reloads signed out
   closeHostLanes();
+  quotesSignedOut();
   // the connected apps go with the account in every tab too, should the signing-out tab's delete not have completed
   void clearConnections().catch(() => {});
-  quotesSignedOut();
   restore?.signedOut();
   follows?.signedOut();
   poolFollow?.stop();
