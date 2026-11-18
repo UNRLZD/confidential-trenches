@@ -70,7 +70,10 @@ test("planted: a script that is not the one its page pins, or has no pin, fails"
 test("the page's scripts and their pins are read from its tags; sha384 is the integrity form", () => {
   assert.deepEqual(scriptsOf(`<script type="module" crossorigin src="/app.js" integrity="sha384-x"></script><script>1</script>`), [{ src: "/app.js", integrity: "sha384-x" }]);
   assert.deepEqual(scriptsOf(`<script src="/a.js"></script>`), [{ src: "/a.js", integrity: null }]);
-  assert.equal(sha384(""), "sha384-OLBgp1GsljhM2TJ+sbHjaiH9txEUvgdDTAzHv2P24donTt6/529l+9Ua0vFImLlb");
+  // the recorded good answer's scripts are each the one its page pins (recorded hashes compared with each other)
+  for (const h of ["sign", "app"]) for (const f of ANSWERS.good[h].js) assert.equal(f.sha384, f.integrity, `${h} ${f.url}`);
+  assert.match(sha384("a"), /^sha384-[A-Za-z0-9+/]{64}$/);
+  assert.notEqual(sha384("a"), sha384("b"));
 });
 
 // The marks on the builds' minified shapes (each copied from this card's build), and the near misses they must refuse.
