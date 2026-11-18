@@ -1557,7 +1557,25 @@ const gapsOf = (spans: Spans, lo: number, hi: number): Spans => {
 // run as it always runs at its own block, asks it again, so every check reads the new block (a pool that vanished is
 // not held, one seeded since is found by the scan and read in a round of its own).
 // `xs`: the currencies X the token's last quote kept past its X prune (card evm-spare-list-green)
-const PLANS = new Map<string, { ts: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[] }>();
+// `amount`: the amount in that quote was asked at (card evm-quote-warm-from-the-coin-page): a kept read made at it, or at
+// twice it, is asked at the next quote's own amount, or twice it (atAmount)
+const PLANS = new Map<string, { ts: bigint; amount: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[] }>();
+/** A kept read of a quote at `from` as the same read at `to` (card evm-quote-warm-from-the-coin-page: the coin page's
+ *  warm quotes the coin before the amount is typed): each 32-byte word of its calldata that is `from` becomes `to`, and
+ *  each that is twice `from` becomes twice `to`, so a route's quote at the amount and at twice it (quoteCall, v4Read,
+ *  sellRead) is the read the quote at `to` makes. Only an early ask: a kept read counts only where the quote asks the
+ *  same read again (readKey), so a word that was not the amount makes a read nothing uses, never an answer to another
+ *  read. Every other field is kept as it is. */
+function atAmount(r: Read, from: bigint, to: bigint): Read {
+  if (from === to || r.data.length < 10 || (r.data.length - 10) % 64 !== 0) return r;
+  const [f1, f2, t1, t2] = [word(from), word(2n * from), word(to), word(2n * to)];
+  let data = r.data.slice(0, 10);
+  for (let i = 10; i < r.data.length; i += 64) {
+    const w = r.data.slice(i, i + 64).toLowerCase();
+    data += w === f1 ? t1 : w === f2 ? t2 : r.data.slice(i, i + 64);
+  }
+  return data === r.data ? r : { ...r, data };
+}
 /** The block time a token's kept reads are asked for (card evm-quote-warm-round: 60 s). */
 export const EVM_WARM_RANGE_S = 60n;
 /** The most tokens whose reads are kept, the oldest dropped first. */
@@ -3385,7 +3403,8 @@ async function routeSetOf(a: {
   if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {
     const own = new Set(reads.map(readKey));
     // the plan holds no read with a state override (below)
-    for (const r of plan.reads) {
+    for (const kept0 of plan.reads) {
+      const r = atAmount(kept0, plan.amount, amountIn);
       const k = readKey(r);
       if (own.has(k) || kept.has(k)) continue;
       kept.set(k, reads.push(r) - 1);
@@ -3837,7 +3856,7 @@ async function routeSetOf(a: {
   PLANS.delete(planKey);
   // never a read with a state override: it is asked only once this quote's own reads find its pool held (review of
   // 5452011, S1), so a pool that vanished since never puts its hook's override into a read
-  PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j)), scans: asked, xs: [...xPools.keys()] });
+  PLANS.set(planKey, { ts: block.timestamp, amount: amountIn, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j)), scans: asked, xs: [...xPools.keys()] });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled, outOfGas: [...outOfGas.values()] };
 }

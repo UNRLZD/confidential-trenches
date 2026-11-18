@@ -3652,6 +3652,46 @@ test("W9 a warm buy whose held head the scan finds more than maxLag behind uses 
   assert.equal((v2 as { block: bigint }).block, 5_000_100n);
 });
 
+// Card evm-quote-warm-from-the-coin-page: the coin page's warm quotes the coin before any amount is typed, so the tap's
+// quote is a token's second, at another amount. Its kept reads (PLANS) and kept fits (FITS) were made at the warm's
+// amount: a route's quote at amountIn and twice it, and its swap fit, read again at the same calldata only. At
+// 2a4ac7715 none of those was the tap's own read, so the tap still took the X round and the fits round after its first.
+// Now the kept reads and fits are made again at the tap's amount, and the tap takes one round, deciding as a cold
+// quote of that amount does. Rounds are counted on provider 0, as RX counts them.
+test("WA a warm quote at one amount leaves the token's next quote at another amount one round of reads, with the cold quote's verdict", async () => {
+  const token = "0x000000000000000000000000000000000fa57a0a";
+  const { pools, logs } = warmCase(token, xAt(0x3d00));
+  const plain = pools.filter((p) => p.key.hooks !== UNPINNED);
+  const tap = { ...warmReq(token), amountIn: 3n * AMOUNT };
+  // the tap's amount quoted cold on a device of its own (no plan, no fits): the verdict the warm one must reach
+  quoteMod.evmQuoteWarmReset();
+  const cold = await verdict(evmPoolBuyQuoteWith(tap, [chain(plain, 0), chain(plain, 1)], NOW, scanner(5_000_000, logs)));
+  assert.equal(cold.accepted, true, String((cold as { code?: string }).code));
+  quoteMod.evmQuoteWarmReset();
+  let rounds = 0;
+  let open = 0;
+  let counting = false;
+  const counted = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const reads = counting && calls.some((c) => c.method === "eth_call");
+    if (reads && open++ === 0) rounds++;
+    try {
+      await new Promise((go) => setTimeout(go, 5));
+      return await rpc(calls);
+    } finally {
+      if (reads) open--;
+    }
+  };
+  const rpcs = [counted(chain(plain, 0)), chain(plain, 1)];
+  const watch = quoteMod.evmHeadWatch(rpcs, 50n, () => NOW, false, () => 0);
+  // the warm: the coin quoted at AMOUNT
+  const warm = await verdict(evmPoolBuyQuoteWith(warmReq(token), rpcs, NOW, scanner(5_000_000, logs), watch, () => 0));
+  assert.equal(warm.accepted, true, String((warm as { code?: string }).code));
+  counting = true;
+  const v = await verdict(evmPoolBuyQuoteWith(tap, rpcs, NOW, scanner(5_000_000, logs), watch, () => 0));
+  assert.deepEqual(v, cold);
+  assert.equal(rounds, 1, `${rounds} rounds of reads after the warm`);
+});
+
 // ------------------------------------------------------------------ the providers (card evm-quote-warm-round)
 // A chain lists more providers than two: a quote asks the first two and one more whenever one fails, is slow or answers
 // differently, so every answer it uses is one two different providers gave, and no provider that dropped out or lags
