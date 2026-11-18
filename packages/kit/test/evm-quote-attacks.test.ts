@@ -6200,6 +6200,22 @@ test("SL6 card base-rpc-list-fix: a warm Base scan with its first two down and i
   }
 }));
 
+test("TAIL4 card evm-scan-chain-tail (independent review of 92717c7, MEDIUM 1): blocks a spare answered no logs of are never kept as read for another coin: a pool of B made there is found by B's quote on the first", { timeout: 60_000 }, () => onTestClock(async () => {
+  const [A, B] = ["0x00000000000000000000000000000000005c4631", "0x00000000000000000000000000000000005c4632"];
+  // the chain's tail up to 5,000,000, on the first
+  const warm = scanner(5_000_000, []);
+  await triQuote(A, [warm, scanner(5_000_000, [])]);
+  // A's warm quote with the first down: the spare's backend, behind its head, answers [] for the newest ten blocks with
+  // a synced block's hash, though B's real pool was made at 5,000,005
+  const down = answering503("one.tail4.test");
+  quoteMod.evmScanTailAlias(down, warm);
+  await triQuote(A, [down, scanner(5_000_010, [])], "base", 5_000_010);
+  // B's quote, the first honest again: it reads those blocks itself and finds the pool, so the seeded route is refused
+  const honest = scanner(5_000_010, realAt(B, 5_000_005));
+  quoteMod.evmScanTailAlias(honest, warm);
+  assert.deepEqual(await triQuote(B, [honest, scanner(5_000_010, realAt(B, 5_000_005))], "base", 5_000_010), below);
+}));
+
 // ------------------------------------------------------------------ a one-block answer (card evm-quote-rides-out-a-one-block-answer)
 // Helper live run 43475337487 (job 132057891754, 13 Nov, GitHub's runner): with Base's first two scan providers held at
 // HTTP 503, a warm base-hook quote ended too_many_pools in 1,239 ms ("the scan provider answers no logs of block

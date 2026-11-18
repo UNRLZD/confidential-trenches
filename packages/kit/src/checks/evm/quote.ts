@@ -2099,7 +2099,7 @@ async function scanPools(
   // has EVM_SCAN_HOLD_MS a request before the next takes it (scanGateOf)
   const fast = second !== undefined && jobs.reduce((n, j) => n + Math.ceil((j.b - j.a + 1) / second.span), 0) <= second.parallel;
   // each request's logs as it comes back
-  const got: { a: number; b: number; logs: unknown[] }[] = [];
+  const got: { a: number; b: number; logs: unknown[]; spare: boolean }[] = [];
   const one = async ({ a, b, on }: Job, splits = SCAN_SPLITS): Promise<void> => {
     const f = (topics: (string | string[] | null)[]) => ({ method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics }] });
     // the event alone, never a currency: one getLogs a request, whose logs serve every currency (card
@@ -2138,7 +2138,7 @@ async function scanPools(
       } else if (top && typeof h?.hash !== "string") return null;
       return out.slice(0, filters.length).map((x) => (x as { result?: unknown } | null)?.result);
     };
-    const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ a, b, logs: r as unknown[] })));
+    const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ a, b, logs: r as unknown[], spare: on !== first })));
     const halves = (left: number) => {
       const mid = a + Math.floor((b - a) / 2);
       return settle([one({ a, b: mid, on }, left), one({ a: mid + 1, b, on }, left)]);
@@ -2284,7 +2284,11 @@ async function scanPools(
     const src = SOURCE_OF.get(by) ?? by;
     const byChain = TAILS.get(src) ?? new Map<EvmPoolChain, Tail>();
     const t = byChain.get(chain) ?? { spans: [], byCurrency: new Map(), ids: new Set() };
-    for (const g of got) t.spans = withSpan(t.spans, g.a, g.b);
+    // the first provider's blocks alone (independent review of 92717c7, MEDIUM 1): a spare's answer counts for this
+    // scan, and its blocks are never kept as read for every currency, so a spare's backend behind its head that answers
+    // [] with a synced block's hash (Pocket's, logsBehind) never hides a pool made there from the next coin's quote;
+    // they are read again on the first. The pools it found are kept: a pool added hides none
+    for (const g of got) if (!g.spare) t.spans = withSpan(t.spans, g.a, g.b);
     for (const ks of e.found.byCurrency.values()) for (const k of ks) tailAdd(t, k);
     byChain.set(chain, t);
     TAILS.set(src, byChain);
