@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { CG_ONCHAIN, coingeckoPace, createKeyed } from "../coingecko.ts";
+import { CG_ONCHAIN, CG_TIMEOUT_MS, coingeckoPace, createKeyed } from "../coingecko.ts";
 import { geckoBudget } from "../gecko.ts";
 import { providerHolds } from "../../limits/limits.ts";
 import { createSolanaToken, GT_BASE, TAPE_FRESH_MS } from "./token.ts";
@@ -28,11 +28,16 @@ const answerFor = (mint: string) => ({
 });
 const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
 
-function harness(perMin = "300") {
+function harness(perMin = "300", down: (url: string, at: number) => boolean = () => false) {
   const t = { t: Date.parse("2026-11-14T17:25:00Z") };
   const calls: { url: string }[] = [];
   const fetch = async (url: string) => {
     calls.push({ url });
+    // CoinGecko slow past its CG_TIMEOUT_MS: the read waits it out and fails
+    if (url.startsWith(CG_ONCHAIN) && down(url, t.t)) {
+      t.t += CG_TIMEOUT_MS;
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    }
     const path = url.startsWith(CG_ONCHAIN) ? url.slice(CG_ONCHAIN.length) : url.startsWith(GT_BASE) ? url.slice(GT_BASE.length) : null;
     if (path === null) throw new Error(`unexpected ${url}`);
     for (const mint of [o.mint, OTHER]) {
@@ -97,4 +102,22 @@ test("past the key's background day the held tape's refresh goes keyless and its
   const cold = await h.tape(OTHER);
   assert.equal(cold.status, 200, cold.body.slice(0, 80));
   assert.equal(cold.src, "coingecko", "a cold tape still finds the key");
+});
+
+test("one CoinGecko timeout on a held tape's refresh: the next read renews it inside SOL_VENDOR_REACH_MS (red: the timeout held the key 30 s and the rows aged to 40 s, a local helper on mainnet reads 18 Nov 14:05:42-14:06:22Z)", async () => {
+  let failed = 0;
+  const start = Date.parse("2026-11-14T17:25:00Z");
+  // the first refresh after 20 s times out, once
+  const h = harness("300", (url, at) => url.includes("/trades") && at - start > 20_000 && failed++ === 0);
+  assert.equal((await h.tape(o.mint)).src, "coingecko");
+  const ages: number[] = [];
+  for (const end = h.t.t + 60_000; h.t.t < end; ) {
+    h.t.t += 2_000;
+    h.fill();
+    const a = await h.tape(o.mint);
+    assert.equal(a.status, 200);
+    ages.push(h.t.t - a.asOfMs!);
+  }
+  assert.equal(failed > 0, true, "the timeout was met");
+  assert.ok(Math.max(...ages) <= SOL_VENDOR_REACH_MS, `oldest rows served ${Math.max(...ages)} ms after their read: ${ages.join(",")}`);
 });

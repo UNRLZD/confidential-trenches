@@ -53,6 +53,16 @@ export const CG_TIMEOUT_MS = 2_000;
 export const CG_KEY_HOLD_S = 75;
 /** How long after a 5xx, a timeout or a failed connection: one read's wait, not every chart's. */
 export const CG_DOWN_HOLD_S = 30;
+/** The 5xx, timeouts and failed connections in a row that hold CoinGecko for CG_DOWN_HOLD_S; an answer between them
+ *  starts the count again, and one alone holds it CG_BLIP_HOLD_S (card sol-vendor-tape-refresh-lands: a single 2 s
+ *  timeout held the key 30 s, and a Solana vendor tape renewed from it each TAPE_FRESH_MS went 40 s unrenewed against
+ *  its 15 s bound, a local helper on mainnet reads 18 Nov 14:05:42-14:06:22Z, "coingecko calls: down 1, held 28").
+ *  [design: 2, the industry's consecutive-failure breaker] */
+export const CG_DOWN_TRIP = 2;
+/** How long one 5xx, timeout or failed connection holds CoinGecko: the rest of the read that met it (a cold chart's
+ *  bars after its top pool go keyless at once, as before), short of a tape's 15 s bound less its 10 s refresh and the
+ *  2 s timeout. [design: 2 s] */
+export const CG_BLIP_HOLD_S = 2;
 /** CoinGecko's 429 with no Retry-After: its minute. */
 export const CG_THROTTLE_HOLD_S = 60;
 /** An answer's size limit (as the keyless reads'). */
@@ -104,6 +114,13 @@ export function createKeyed(env: Record<string, string | undefined>, holds: Prov
   const doFetch = deps.fetch ?? fetch;
   const counts = new Map<string, number>();
   const bump = (k: string) => counts.set(k, (counts.get(k) ?? 0) + 1);
+  /** 5xx, timeouts and failed connections in a row (CG_DOWN_TRIP). */
+  let downs = 0;
+  const down = () => {
+    if (++downs < CG_DOWN_TRIP) return holds.hold(CG_URL, CG_BLIP_HOLD_S);
+    holds.hold(CG_URL, CG_DOWN_HOLD_S);
+    downs = 0;
+  };
   return {
     async read(path, ok, background = false) {
       if (holds.heldMs(CG_URL) > 0) return bump("held"), undefined;
@@ -114,7 +131,7 @@ export function createKeyed(env: Record<string, string | undefined>, holds: Prov
         r = await doFetch(`${CG_ONCHAIN}${path}`, { headers: { accept: "application/json", "x-cg-pro-api-key": key }, signal: AbortSignal.timeout(CG_TIMEOUT_MS), redirect: "error" });
       } catch {
         // a timeout or a failed connection; its text is never kept (it may name the request)
-        holds.hold(CG_URL, CG_DOWN_HOLD_S);
+        down();
         return bump("down"), undefined;
       }
       try {
@@ -124,9 +141,11 @@ export function createKeyed(env: Record<string, string | undefined>, holds: Prov
             const ra = Number(r.headers.get("retry-after"));
             holds.hold(CG_URL, Number.isFinite(ra) && ra > 0 ? ra : CG_THROTTLE_HOLD_S);
           } else if (r.status === 401 || r.status === 403) holds.hold(CG_URL, CG_KEY_HOLD_S);
-          else if (r.status >= 500) holds.hold(CG_URL, CG_DOWN_HOLD_S);
+          if (r.status >= 500) down();
+          else downs = 0;
           return bump(String(r.status)), undefined;
         }
+        downs = 0;
         if (Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) return await r.body?.cancel().catch(() => undefined), bump("large"), undefined;
         const text = await r.text();
         if (text.length > ANSWER_MAX) return bump("large"), undefined;
@@ -136,7 +155,7 @@ export function createKeyed(env: Record<string, string | undefined>, holds: Prov
         return json;
       } catch (e) {
         // the body cut by the timeout is CoinGecko slow, a body that does not parse its answer's shape
-        if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) return holds.hold(CG_URL, CG_DOWN_HOLD_S), bump("down"), undefined;
+        if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) return down(), bump("down"), undefined;
         return bump("shape"), undefined;
       }
     },

@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, test } from "node:test";
-import { CG_DAY, CG_ONCHAIN, CG_URL, coingeckoPace, createKeyed } from "./data/coingecko.ts";
+import { CG_BLIP_HOLD_S, CG_DAY, CG_ONCHAIN, CG_URL, coingeckoPace, createKeyed } from "./data/coingecko.ts";
 import { geckoBudget } from "./data/gecko.ts";
 import { createSolanaToken, GT_BASE } from "./data/solana/token.ts";
 import { providerHolds } from "./limits/limits.ts";
@@ -121,13 +121,20 @@ for (const [name, cg] of [
   });
 }
 
-test("Solana, keyed refused 401 / 429 / 5xx: CoinGecko is not asked again while it holds, so a cold chart waits on no dead read", async () => {
-  for (const [cg, holdS] of [[() => json({}, 401), 75], [() => json({}, 429, { "retry-after": "20" }), 20], [() => json({}, 502), 30]] as [() => Response, number][]) {
+test("Solana, keyed refused 401 / 429 / 5xx: CoinGecko is not asked again while it holds, so a cold chart waits on no dead read (a 5xx, a timeout or a failed connection holds at its CG_DOWN_TRIP'th in a row)", async () => {
+  for (const [cg, holdS, trip] of [[() => json({}, 401), 75, 1], [() => json({}, 429, { "retry-after": "20" }), 20, 1], [() => json({}, 502), 30, 2]] as [() => Response, number, number][]) {
     const v = vendors(cg);
     const { token, holds, t } = solana(ENV, v);
+    // card sol-vendor-tape-refresh-lands: one 5xx holds CG_BLIP_HOLD_S; the next keyed read past it meets the second
+    if (trip === 2) {
+      await token.candles(JUP, "15m", null, 500);
+      assert.equal(Math.round(holds.heldMs(CG_URL) / 1000), CG_BLIP_HOLD_S, "one 5xx: a blip's hold");
+      assert.equal(v.cgCalls().length, 1);
+      t.t += CG_BLIP_HOLD_S * 1000 + 1;
+    }
     await token.candles(BONK, "15m", null, 500);
     const asked = v.cgCalls().length;
-    assert.equal(asked, 1, "the first read refused, the next of the same chart read keyless");
+    assert.equal(asked, trip, "the first read refused, the next of the same chart read keyless");
     assert.equal(Math.round(holds.heldMs(CG_URL) / 1000), holdS);
     await token.candles(DOGE, "15m", null, 500);
     assert.equal(v.cgCalls().length, asked, "held: no keyed call");
@@ -138,6 +145,7 @@ test("Solana, keyed refused 401 / 429 / 5xx: CoinGecko is not asked again while 
 });
 const DOGE = "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr";
 const WIF = "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm";
+const JUP = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 
 test("Solana, keyed budget: past its minute the read goes keyless at once; past its day, keyless until the next UTC day", async () => {
   const v = vendors((url) => json(url.includes("/ohlcv/") ? FX.gt_ohlcv : FX.gt_token));
