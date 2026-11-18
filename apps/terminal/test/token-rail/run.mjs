@@ -9,7 +9,8 @@
 //     and more): the full rail (340 layout px) wherever it fits uncut (1440 as R5's picture), the slim rail (78: the
 //     rings and the expand button) on the fit zoom's floor (1024 and 1060 css px, pages of 1422 and 1472), no rail on a
 //     page under 1180 (1000 css px, drawn unzoomed; and no lists read: / on All reads mihao alone, card
-//     mihao-opens-first); every width from 1100 to 1920 is sweep.mjs's;
+//     mihao-opens-first; there the long symbol ends in its "…" with no rail at all, so only its tiles are held whole);
+//     every width from 1100 to 1920 is sweep.mjs's;
 //   - the full rail's chips as UNRLZD's rail (owner 12 Nov parity): Trending, Watchlist, New, Hot, Graduating (Trending pressed), its rows the Trending column as Discover orders it, each
 //     a link to /token/solana/<mint>, none marked on / (mihao, in no list), the page's own token marked after a hop (aria-current);
 //   - the header's strip whole in every mode (no tile cut, clear of the trade column and the rail: the design's one-row
@@ -257,7 +258,9 @@ try {
       check(p.cut.length === 0, `${tag}: strip tiles cut: ${JSON.stringify(p.cut)}`);
       check(p.stripRight !== null && p.stripRight <= p.tradeLeft + 0.5 && p.stripRight <= p.mainRight + 0.5, `${tag}: the strip runs past the main column (${p.stripRight} > ${p.mainRight}, trade at ${p.tradeLeft})`);
       check(p.stripLeft !== null && p.stripLeft >= p.mainLeft - 0.5 && p.identRight <= p.stripLeft + 0.5, `${tag}: the strip overlaps the identity or leaves the main column (strip ${p.stripLeft}, ident ${p.identRight}, main ${p.mainLeft})`);
-      check(!p.symCut && p.identInk !== null && p.identInk <= p.stripLeft + 0.5, `${tag}: the identity runs under the strip or loses its symbol (content right ${p.identInk}, strip ${p.stripLeft}, symbol cut ${p.symCut}; tiles ${p.tiles.join(" ")})`);
+      // no rail is drawn only on an unzoomed page under 1180 (768 to 1023 css px), whose main column is too narrow for
+      // the long symbol with no rail at all: its "…" there is strip-fit.ts's last resort, the rail's mode no part of it
+      if (w.mode !== "hidden") check(!p.symCut && p.identInk !== null && p.identInk <= p.stripLeft + 0.5, `${tag}: the identity runs under the strip or loses its symbol (content right ${p.identInk}, strip ${p.stripLeft}, symbol cut ${p.symCut}; tiles ${p.tiles.join(" ")})`);
       check(p.scroll <= 0, `${tag}: horizontal scroll ${p.scroll}px`);
       check(p.small.length === 0, `${tag}: text under 11 px: ${JSON.stringify(p.small.slice(0, 4))}`);
       check(p.cls === 0, `${tag}: layout shift ${p.cls} from the first paint, want 0`);
