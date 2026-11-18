@@ -63,10 +63,11 @@ export const E2E_DIR = "apps/terminal";
 // seconds each command took in test-browser, rounded up, the slowest of the three merge queue runs read for this card:
 // A, run 44371886994 (jobs 135040704496 as (1), 135040704826 as (2), 135040704676 as (3)) and B, run 44374813196 (jobs
 // 135051111464, 135051111644, 135051111657), both on main's list, and C, run 44375738505 (jobs 135054404897,
-// 135054404970, 135054405087), the shifted list of PR #1029, so each command ran in two parts at least. A command's
-// time is from the line that ended the command before it (the build's `built in`) to the line that ended it, its
-// PASS or FAIL verdict (`ℹ duration_ms` for the node --test one); each run's commands in order, so lines a runner sent
-// together give a command the next one's few seconds, never fewer seconds in all. Keyed `apps/terminal: <command>`, as
+// 135054404970, 135054405087), the shifted list of PR #1029, so each command ran three times, in two parts at least. A
+// command's time is from the line that ended the command before it (the build's `built in`) to the line that ended it,
+// its PASS or FAIL verdict (`ℹ duration_ms` for the node --test one). A verdict the runner sent in one batch with the
+// next command's lines moves a few seconds from one command to the next, never out of a part's sum. These ran as one
+// `sh -c` chain; e2e-run starts each under its own `pnpm exec`, about a second more each. Keyed `apps/terminal: <command>`, as
 // a part's `== ok in N s:` lines print them; scripts/ci/test-shards.test.mjs fails on a key that names no command of
 // test:e2e, and on a command with no key.
 export const E2E_SECONDS = {
