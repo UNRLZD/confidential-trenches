@@ -88,6 +88,20 @@ test("recorded good answer goodKit118 (card move-sends-or-says-why's build, kit 
   for (const [j, k, l, m, n] of [["1.18", "1.16", "1.15", "1.14", "1.13"], ["1.12", "1.16", "1.15", "1.14", "1.13"], ["1.17", "1.15", "1.15", "1.14", "1.13"], ["1.17", "1.16", "1.15", "1.14", "1.12"]]) assert.equal(facts(g.index, js(j, k, l, m, n)).notice, null, `${j} ${k} ${l} ${m} ${n}`);
 });
 
+test("recorded good answer goodKit119 (card evm-buy-end-carries-its-tx's build, kit 1.19): the notice at the current level, kit-v1.18's, kit-v1.17's, kit-v1.16's, kit-v1.15's, kit-v1.14's or kit-v1.13's, the seven that read it: PASS; that build with kit-v1.12 in kit-v1.18's place (badKit119NoticeLevel): FAIL", () => {
+  const g = ANSWERS.goodKit119;
+  assert.deepEqual(judge(g).lines, []);
+  assert.match(g.notice, /!==`current`&&[\w$]+!==`1\.18`&&[\w$]+!==`1\.17`&&[\w$]+!==`1\.16`&&[\w$]+!==`1\.15`&&[\w$]+!==`1\.14`&&[\w$]+!==`1\.13`\|\|/);
+  assert.notEqual(g.sha384, ANSWERS.goodKit118.sha384, "another build");
+  const bad = ANSWERS.badKit119NoticeLevel;
+  assert.notEqual(bad.sha384, g.sha384, "its own build");
+  assert.deepEqual(judge(bad).lines, [NOTICE]);
+  // the 1.19 shape with any other levels is no notice a kit-v1.13 to kit-v1.18 app reads
+  const js = (i, j, k, l, m, n) => `closed:e=>{!a||r!==\`current\`&&r!==\`${i}\`&&r!==\`${j}\`&&r!==\`${k}\`&&r!==\`${l}\`&&r!==\`${m}\`&&r!==\`${n}\`||o({v:1,type:\`closed\`,id:e})}`;
+  assert.notEqual(facts(g.index, js("1.18", "1.17", "1.16", "1.15", "1.14", "1.13")).notice, null);
+  for (const [i, j, k, l, m, n] of [["1.19", "1.17", "1.16", "1.15", "1.14", "1.13"], ["1.12", "1.17", "1.16", "1.15", "1.14", "1.13"], ["1.18", "1.16", "1.16", "1.15", "1.14", "1.13"], ["1.18", "1.17", "1.16", "1.15", "1.14", "1.12"]]) assert.equal(facts(g.index, js(i, j, k, l, m, n)).notice, null, `${i} ${j} ${k} ${l} ${m} ${n}`);
+});
+
 for (const [k, lines] of [
   ["bad", [NOTICE, TIMER, OPEN, CLOSE, TOLD, RUN, OPENS(0, 2)]],
   ["badBeforeReview", [NOTICE, TIMER, CLOSE, TOLD, RUN]],
