@@ -6,7 +6,7 @@
 // check wanted every chart's src to name "coingecko": the key on every read, which spent its 3,225-call day in hours
 // (15 Nov 21:20Z) and left listed charts empty.
 // From this runner, with Origin APP_HOST, it reads two charts at tf 1m, the newest range: BONK on Solana (a busy pool off
-// the lists) and the first row of Base's Discover lists. Each is read again every READ_EVERY_MS while its answer is not
+// the lists) and the first row of Base's Discover lists that trades every minute (firstListed). Each is read again every READ_EVERY_MS while its answer is not
 // yet full, within SPAN_MS, as the page reads a filling chart again. Want: each chart answered 200, not filling, with at
 // least FULL_BARS bars (both picks trade every minute; live run 43776130630 read Base DRB, 1.7 years old and 1,648
 // trades a day, as 1 bar, src chain, after 9 reads), and a src made of our own reads or CoinGecko's, GeckoTerminal's only
@@ -32,6 +32,8 @@ export const KEYED = "coingecko";
  *  of the newest range's 500: more than an hour and a half of 1m bars]. */
 export const SOURCES = ["chain", "coingecko", "geckoterminal"];
 export const FULL_BARS = 100;
+/** The trades in 5 minutes a Base pick must show to count as trading every minute [design: one a minute on average]. */
+export const ACTIVE_TRADES_5M = 5;
 /** How long a chart is read for a keyed answer [design: a held newest range's 60 s and a page read's wait]. */
 export const SPAN_MS = 90_000;
 export const READ_EVERY_MS = 10_000;
@@ -72,11 +74,20 @@ export const offLists = (src) => ours(src) || src === "geckoterminal";
 /** Whether one read is a full chart; `off`: the chart is the pick off the lists (BONK). */
 export const full = (r, off = false) => r.status === 200 && r.filling !== true && r.bars >= FULL_BARS && (off ? offLists(r.src) : ours(r.src));
 
-/** The first Base token of a lists answer (Trending 1h's first row, else any list's), or null. */
+/** A row's trades in its last 5 minutes (buys_5m + sells_5m), each count a whole number 0 or more, else 0. */
+const trades5m = (r) => [r?.buys_5m, r?.sells_5m].reduce((n, v) => n + (Number.isSafeInteger(v) && v >= 0 ? v : 0), 0);
+
+/** The first Base row of a lists answer that trades every minute: Trending 1h's rows in order, then 5m's, then New's,
+ *  the first with ACTIVE_TRADES_5M trades or more in 5 minutes; as { token, list, row, trades_5m }, or null when none
+ *  is. Card helper-candles-full-after-tape-behind: the first row whatever its trades read Base ANZ 0xeec46833 (0 buys
+ *  and 0 sells in 5m, 858 USD in 24h, about 86 one-minute bars in its whole history) in live run 44249482613, a chart no
+ *  helper can fill to FULL_BARS; the helper's order is GeckoTerminal's, and Discover re-ranks it by 1h volume. */
 export function firstListed(body) {
   try {
     const l = JSON.parse(body).lists;
-    for (const k of ["trending_1h", "trending_5m", "new"]) for (const r of Array.isArray(l?.[k]) ? l[k] : []) if (typeof r?.token === "string" && EVM.test(r.token)) return r.token;
+    for (const k of ["trending_1h", "trending_5m", "new"])
+      for (const [i, r] of (Array.isArray(l?.[k]) ? l[k] : []).entries())
+        if (typeof r?.token === "string" && EVM.test(r.token) && trades5m(r) >= ACTIVE_TRADES_5M) return { token: r.token, list: k, row: i, trades_5m: trades5m(r) };
   } catch {
     // no token
   }
@@ -98,10 +109,10 @@ async function chart(base, chain, token, fetchFn, wait) {
 export async function read(base = BASE, fetchFn = fetch, wait = sleep) {
   const at = new Date().toISOString();
   const lists = await ask(base, "/v1/market/lists?chain=base", fetchFn);
-  const baseToken = lists.status === 200 ? firstListed(lists.body) : null;
-  const picks = [["solana", BONK], ["base", baseToken]];
+  const pick = lists.status === 200 ? firstListed(lists.body) : null;
+  const picks = [["solana", BONK], ["base", pick?.token ?? null]];
   const charts = await Promise.all(picks.map(async ([chain, token]) => ({ chain, address: token, reads: token === null ? [] : await chart(base, chain, token, fetchFn, wait) })));
-  return { base, at, lists: { base: lists.status }, charts };
+  return { base, at, lists: { base: lists.status, pick: pick === null ? null : { list: pick.list, row: pick.row, trades_5m: pick.trades_5m } }, charts };
 }
 
 /** The check on one recorded run. */
@@ -111,10 +122,18 @@ export function judge(run) {
   const charts = run.charts ?? [];
   for (const chain of ["solana", "base"]) {
     const c = charts.find((x) => x.chain === chain);
+    const pick = chain === "base" ? run.lists?.pick : undefined;
+    if (chain === "base" && run.lists?.base === 200 && pick === null) {
+      say(false, `base: no active Base pick (no Trending 1h, 5m or New row with ${ACTIVE_TRADES_5M} or more trades in 5m)`);
+      continue;
+    }
     if (c === undefined || c.address === null || (c.reads ?? []).length === 0) {
       say(false, `${chain}: no chart read (${chain === "base" ? `Base's lists answered ${run.lists?.base}` : "BONK not read"})`);
       continue;
     }
+    // a run recorded before card helper-candles-full-after-tape-behind keeps no pick; every run since names its row
+    if (pick !== undefined && !(Number.isSafeInteger(pick?.trades_5m) && pick.trades_5m >= ACTIVE_TRADES_5M))
+      say(false, `base ${c.address}: picked with ${pick?.trades_5m ?? "no"} trades in 5m (${pick?.list ?? "?"} row ${pick?.row ?? "?"}); want ${ACTIVE_TRADES_5M} or more`);
     if (chain === "solana" && c.address !== BONK) say(false, `solana: ${c.address} read, not BONK`);
     const last = c.reads.at(-1);
     const srcs = [...new Set(c.reads.map((r) => r.src ?? `${r.status}`))].join(" then ");
