@@ -382,9 +382,9 @@ export const MUTANTS = [
   [QUOTE, ": part.length === 1 ? on.span : or;", ": on.span;", R, "B1 "],
   [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X4 "],
   [QUOTE, "[[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]]", "[[e0, null, w(weth), t], [e0, null, t, w(weth)]]", R, "S3 "],
-  [QUOTE, "[e0, null, null, t]", "[e0, t]", R, "N1a "],
+  [QUOTE, "[e0, null, null, t]", "[e0, t]", R, "N1ar "],
   [QUOTE, "const fromScan = scanned?.pools.get(lower(token)) ?? [];", "const fromScan: EvmPoolKey[] = [];", R, "N1a "],
-  [QUOTE, "gaps: gapsOf(spans, floor, head),", "gaps: [[floor, head]] as Spans,", R, "G4 "],
+  [QUOTE, "gaps: gapsOf(spans, floor, head),", "gaps: [[floor, head]] as Spans,", R, "G4r "],
   [QUOTE, "  return {\n    pools: new Map(each.map((e, i) => [e.c, [...new Map(", "  commit();\n  return {\n    pools: new Map(each.map((e, i) => [e.c, [...new Map(", R, "S2b "],
   // card evm-buy-and-sell-on-mainnet: the blocks within maxLag of a kept scan read beside the quote, not before it
   [QUOTE, "    const held = (e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === \"markets\";", "    const held = true;", R, "card evm-buy-and-sell-on-mainnet: a coin the served index holds no pool of"],

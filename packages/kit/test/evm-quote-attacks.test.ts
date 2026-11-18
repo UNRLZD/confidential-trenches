@@ -808,6 +808,15 @@ test("TAIL10 a quote whose new blocks start past maxLag reads them alone before 
   assert.deepEqual(asked, [[5_000_001, 5_000_200], [5_000_000 - TAIL_MARGIN + 1, 5_000_200 - TAIL_MARGIN]]);
 });
 
+test("N1ar (N1a on Robinhood, card evm-scan-chain-tail: its cold scan of 10M blocks is past its tail budget of 3.4M, so each currency is scanned as main scans it, in both topic positions) a seeded standard pool is held to the token's real pool the device's own scan found", async () => {
+  const token = "0x00000000000000000000000000000000000a11a2";
+  const pools = [seeded(token), real(token)];
+  const asked: [number, number][] = [];
+  const m = moving();
+  assert.deepEqual(await quoteOn(pools, token, seededRoute(token), m.to(scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }], asked)), undefined, "robinhood"), below);
+  assert.ok(asked.length > 0);
+});
+
 test("card evm-pool-index-from-the-first-pool: a token whose only real pool is older than the scan's depth is held to it through the helper's served pools, each key hashed to its id and read on both providers", async () => {
   const { evmPoolServedUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolServedUse: (c: string, t: string, a: Promise<unknown>) => void; evmPoolIndexReset: () => void };
   const answer = (token: string, o: Record<string, unknown> = {}, pools: unknown[] = [{ id: "0x" + pidOf(real(token).key), key: real(token).key }]) => ({ chainId: 8453, poolManager: PM, complete: true, through: 4_999_990, pools, ...o });
@@ -1705,6 +1714,21 @@ test("G4 an X scanned for a pool the PoolManager does not hold is kept too: the 
   asked.length = 0;
   assert.equal((await quoteOn([best(token)], token, bestRoute(token), scan)).accepted, true);
   assert.deepEqual(asked, [], "both scans are kept: the head has not moved, so nothing is read again");
+});
+
+test("G4r (G4 on Robinhood, card evm-scan-chain-tail: a scan past its tail budget of 3.4M blocks reads each currency as main does) an X scanned for a pool the PoolManager does not hold is kept too: the next quote reads only new blocks", async () => {
+  const token = "0x00000000000000000000000000000000000ff6f1";
+  const gone = keyOf(token, xAt(0x601), 3000, 60, NATIVE);
+  const asked: [number, number][] = [];
+  const scan = scanner(5_000_000, [{ key: gone, at: 4_500_000 }], asked);
+  assert.equal((await quoteOn([best(token)], token, bestRoute(token), scan, undefined, "robinhood")).accepted, true);
+  await new Promise((r) => setTimeout(r, 20));
+  asked.length = 0;
+  // 4,000,000 blocks on (J5r): past the tail budget again, so scanned per currency, from where each kept scan stopped
+  const later = scanner(9_000_000, [{ key: gone, at: 4_500_000 }], asked);
+  assert.equal((await quoteOn([best(token)], token, bestRoute(token), later, undefined, "robinhood", 9_000_000)).accepted, true);
+  assert.ok(asked.length > 0);
+  assert.equal(Math.min(...asked.map(([a]) => a)), 5_000_001, "both scans are kept: only the new blocks are read");
 });
 
 test("S1e a pool the PoolManager holds whose hook is the V4Quoter is dropped: its override would replace the quoter", async () => {
