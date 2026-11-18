@@ -959,7 +959,7 @@ test("card evm-buy-and-sell-on-mainnet: an asked route that runs out (a thin poo
   assert.deepEqual(await noQuoteOf([thin2], t2, seededRoute(t2), scanner(5_000_000, [])), { code: "partial_fill", reference: null });
 });
 
-test("card evm-buy-and-sell-on-mainnet: a token with no pool at all, or none that fills, still refuses no_quote with no reference", async () => {
+test("card evm-buy-and-sell-on-mainnet: a token with no pool at all, or none that fills, still refuses no_quote: with no reference, or naming the one market it reads but cannot trade through", async () => {
   const token = "0x00000000000000000000000000000000000e05e5";
   assert.deepEqual(await noQuoteOf([], token, seededRoute(token), scanner(5_000_000, [])), { code: "no_quote", reference: null });
   // a pool whose hook reverts every quote as it is: a market the device can read but not trade through, which counts at
@@ -4223,7 +4223,7 @@ test("V9 the pinned quote asks the kit's providers in their measured order: the 
 // J5 deleted (card evm-scan-chain-tail): no scan is started early beside the token's (the warm round's kept scans are
 // gone with the scan kinds); a scan that fails before the block is picked keeps its spans as J1 and S2b hold
 
-test("J6 a scan of two currencies with different blocks left keeps each span only for the currency whose request came back: the next quote asks X2's failed part and finds its market", async () => {
+test("J6 a scan whose request for X2's market block failed keeps no span of it: the next quote asks that part again and finds its market (card evm-scan-chain-tail; main: each span kept only for the currency whose request came back)", async () => {
   const [A, B] = [freshToken(), freshToken()];
   const [x1, x2] = [xAt(0x3d00), xAt(0x3d10)];
   // A's quote scans X1's markets up to 5,000,000
