@@ -5,6 +5,7 @@
 // pool pinned), a page with no flow, or the mainnet tables are refused. Its own file: the network is read once, at
 // import, so this process runs as the testnet build does (test/pool-network.test.ts runs the mainnet one).
 import { after, afterEach, mock, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -979,7 +980,7 @@ test("a pool send still pending at the kind's 10 s, and at 90 s, is not aborted:
       signal = init.signal!;
       return new Promise<Response>((ok, no) => {
         answer = ok;
-        signal.addEventListener("abort", () => no(signal.reason));
+        untilAborted(signal).catch(no);
       });
     }) as unknown as typeof fetch;
     // still pending at the kind's 10 s and at 90 s: then answered, and taken

@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { VaultTree, vaultLabelOf, type VaultProver } from "@blindfill/kit";
@@ -90,6 +91,7 @@ function rounds() {
       r.log.push(`wait ${ms} ms`);
     }
     return new Promise((ok) => {
+      if (signal?.aborted) return ok();
       const t = setTimeout(ok, ms);
       signal?.addEventListener("abort", () => (clearTimeout(t), ok()), { once: true });
     });

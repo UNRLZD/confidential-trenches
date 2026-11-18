@@ -6,6 +6,7 @@
 // answers 503, so the page reads again.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { untilAborted } from "@blindfill/kit";
 import { fakeChain, ICNT, open, REC, URLS } from "../../../test/evm-swaps/base.ts";
 import { STALE_MS } from "./swaps.ts";
 
@@ -18,7 +19,7 @@ function stalling(chain: ReturnType<typeof fakeChain>) {
     st.stalled
       ? new Promise((_, no) => {
           out.push(no);
-          init.signal?.addEventListener("abort", () => no(init.signal!.reason), { once: true });
+          untilAborted(init.signal).catch(no);
         })
       : chain.fetch(url, init);
   const release = () => {

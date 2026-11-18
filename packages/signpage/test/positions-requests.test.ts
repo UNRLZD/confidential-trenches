@@ -9,6 +9,7 @@
 //   node --test test/positions-requests.test.ts
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { base58, base64 } from "@scure/base";
 import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
@@ -714,7 +715,7 @@ test("the buy records' rebuild: the Ws in a shuffled order, a sale's hold stops 
     wallets: async () => ["n", "s"],
     done: async () => new Set(),
     write: async () => true,
-    reader: { read: async (a, signal) => (asked2.push(a), a === "n" ? null : new Promise<never>((_, no) => ((unblock = () => no(new Error("x"))), signal?.addEventListener("abort", () => no(signal.reason))))) },
+    reader: { read: async (a, signal) => (asked2.push(a), a === "n" ? null : new Promise<never>((_, no) => ((unblock = () => no(new Error("x"))), untilAborted(signal).catch(no)))) },
     wrote: () => {},
     pick: (n) => n - 1,
   });
