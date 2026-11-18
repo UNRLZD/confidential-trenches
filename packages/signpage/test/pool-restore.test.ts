@@ -14,6 +14,7 @@ import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { resetPaces } from "../../wallet/src/pace.ts";
 // each test's clock starts at its own zero: one pace per provider URL is shared by every reader (card wallet-id-reader-paced)
@@ -1384,7 +1385,7 @@ test("the run's signal reaches the reader: a sign out ends a view a provider nev
       if (u !== first) return r.query(p);
       reached = true;
       // never answered (only the signal ends it), or busy for good with a Retry-After of 50 s, waited on a real clock
-      if (how === "hangs") return new Promise((_, no) => signal?.addEventListener("abort", () => no(signal.reason), { once: true }));
+      if (how === "hangs") return untilAborted(signal);
       throw Object.assign(new Error("HTTP 429"), { status: 429, retryAfterMs: 50_000 });
     } });
     const ids = { ...n.ids, opts: { tries: 1 }, rpcs: () => n.ids.rpcs().map(gate) as unknown as readonly [NearRpc, NearRpc] };
@@ -2461,7 +2462,7 @@ test("a sign out during the walk ends the run at once: the walk's signal ends it
     had = a.signal;
     entered();
     setTimeout(() => r!.signedOut(), 20);
-    return new Promise((_, no) => a.signal?.addEventListener("abort", () => no(a.signal!.reason), { once: true }));
+    return untilAborted(a.signal);
   }) as never;
   const w = await world({ pools: () => SOL_ONLY, solana: walk, ids: n.ids, pausesMs: [1, 1, 1, 1] });
   r = w.r;

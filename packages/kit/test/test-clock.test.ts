@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { onTestClock } from "./test-clock.ts";
+import { untilAborted } from "../src/abort.ts";
 
 test("a wait is skipped, never shortened: 10 s of timers end at once, in order of time; Date.now stays whole ms, never runs back, and shows each wait at least as long as it was set", async () => {
   const real = process.hrtime.bigint();
@@ -47,7 +48,7 @@ test("AbortSignal.timeout is on the clock: a request's deadline aborts it at its
   const ms = await onTestClock(async () => {
     const t = performance.now();
     const s = AbortSignal.timeout(5_000);
-    await new Promise((r) => s.addEventListener("abort", r));
+    await untilAborted(s).catch(() => {});
     assert.equal((s.reason as DOMException).name, "TimeoutError");
     return performance.now() - t;
   });

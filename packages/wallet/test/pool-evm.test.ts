@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createHash } from "node:crypto";
@@ -1029,6 +1030,7 @@ test("the fee walk's cut ends a hung operator's request at the provider, not onl
       hung++;
       return new Promise<never>((_, rej) => {
         const s = init.signal!;
+        if (s.aborted) return (aborted.push(s.reason), rej(s.reason));
         s.addEventListener("abort", () => (aborted.push(s.reason), rej(s.reason)), { once: true });
       });
     }

@@ -4,6 +4,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { ADDRESS, H72, NOW, COLLECTOR, mockKey, signAnswer, type Answer } from "./oneclick-mock.ts";
 
 const { oneClickFloors } = await import("../../kit/src/checks/oneclick.ts");
@@ -647,7 +648,7 @@ test("a sign out while the Move's keyless tell is in flight: the tell's read is 
   const hidden = (_address: string, signal?: AbortSignal) =>
     new Promise<"hidden">((_ok, no) => {
       told = signal;
-      signal?.addEventListener("abort", () => no(signal.reason), { once: true });
+      untilAborted(signal).catch(no);
     });
   const d = poolAddressHost({ ...w.deps, stop: page.stopped, confidential: true, hidden })({ chain: "base", origin_asset: BASE_USDC, amount: "25" }, { id: "mv-4/pool" });
   while (told === undefined) await new Promise((ok) => setImmediate(ok));
