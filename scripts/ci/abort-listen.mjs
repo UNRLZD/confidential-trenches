@@ -35,13 +35,6 @@ export const SCOPE = [
 ];
 const KIND = { ".js": ts.ScriptKind.JS, ".cjs": ts.ScriptKind.JS, ".mjs": ts.ScriptKind.JS, ".jsx": ts.ScriptKind.JSX, ".ts": ts.ScriptKind.TS, ".cts": ts.ScriptKind.TS, ".mts": ts.ScriptKind.TS, ".tsx": ts.ScriptKind.TSX };
 
-// Files a pull request still open had changed when this rule landed (card test-runs-never-hold-a-slot), with how many
-// listeners each may still hold: converted once it lands. A file may hold no more than its count. Never a place to add one.
-export const LISTED = {
-  "packages/signpage/test/pool-testnet-evm-queue.test.ts": { count: 1, why: "changed by test-runs-never-hold-a-slot, still open" },
-  "packages/signpage/test/withdraw-handoff-relay.test.ts": { count: 2, why: "changed by test-runs-never-hold-a-slot, still open" },
-  "packages/wallet/test/deposit-moveout.test.ts": { count: 1, why: "changed by test-runs-never-hold-a-slot, still open" },
-};
 
 const fnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n) || ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n);
 const loop = (n) => ts.isForStatement(n) || ts.isForOfStatement(n) || ts.isForInStatement(n) || ts.isWhileStatement(n) || ts.isDoStatement(n);
@@ -148,25 +141,14 @@ export function scan(root = ROOT) {
   return out;
 }
 
-/** What the rule refuses: a file outside LISTED with a refused listener, or one holding more than LISTED lists. */
-export function refusals(found, before = LISTED) {
-  const out = [];
-  for (const [f, list] of Object.entries(found)) {
-    const may = before[f]?.count ?? 0;
-    if (list.length > may) out.push(`${f}: ${list.length} listener(s) on an abort with no check first (${may} listed): ${list.map((x) => `line ${x.line}, ${x.why}`).join("; ")}`);
-  }
-  return out;
-}
-
-/** LISTED entries above what their file now holds: lower them. */
-export function stale(found, before = LISTED) {
-  return Object.entries(before).filter(([f, v]) => (found[f]?.length ?? 0) < v.count).map(([f, v]) => `${f}: lists ${v.count}, holds ${found[f]?.length ?? 0}`);
+/** What the rule refuses: every file with a listener on an abort that reads no check first. No file is let off. */
+export function refusals(found) {
+  return Object.entries(found).map(([f, list]) => `${f}: ${list.length} listener(s) on an abort with no check first: ${list.map((x) => `line ${x.line}, ${x.why}`).join("; ")}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const found = scan();
   for (const [f, list] of Object.entries(found)) for (const x of list) console.log(`${f}:${x.line}  ${x.why}  ${x.text}`);
-  for (const x of stale(found)) console.log(`LISTED can be lowered: ${x}`);
   const bad = refusals(found);
   if (bad.length > 0) {
     console.error(`\n${bad.join("\n")}\n\nRead the signal first (if (signal.aborted) ...; or signal.throwIfAborted()), with no await between, or wait with untilAborted(signal).`);

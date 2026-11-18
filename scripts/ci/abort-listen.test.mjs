@@ -1,17 +1,12 @@
-// Every listener on an abort in SCOPE reads its signal first (LISTED holds what an open pull request still changes),
-// and the rule refuses its planted cases and passes the shapes that read the signal first.
+// Every listener on an abort in SCOPE reads its signal first, no file let off, and the rule refuses its planted cases
+// and passes the shapes that read the signal first.
 //   node --test scripts/ci/abort-listen.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { LISTED, findings, refusals, scan, stale } from "./abort-listen.mjs";
+import { findings, refusals, scan } from "./abort-listen.mjs";
 
-test("the tree's listeners on an abort each read their signal first (past LISTED)", () => {
+test("the tree's listeners on an abort each read their signal first", () => {
   assert.deepEqual(refusals(scan()), []);
-});
-
-test("each LISTED entry has a count and the reason it is still there, and none lists more than its file holds", () => {
-  for (const [f, v] of Object.entries(LISTED)) assert.ok(Number.isInteger(v.count) && v.count > 0 && typeof v.why === "string" && v.why.length > 0, f);
-  assert.deepEqual(stale(scan()), []);
 });
 
 const REFUSED = {
@@ -29,6 +24,9 @@ const REFUSED = {
   "a listener in a callback run later (follow.ts's adopt)": "function follow(deps) {\n  deps.signal?.throwIfAborted();\n  const adopt = (id) => { waiters.add(id); deps.signal?.addEventListener('abort', leave, { once: true }); };\n  return run(adopt);\n}",
   "a check in the other branch of ?:": "const p = x ? s.aborted : s.addEventListener('abort', f);",
   "a template literal event name": "s.addEventListener(`abort`, f);",
+  "withdraw-handoff-relay.test.ts:299 as it was: a relay that hangs on its signal": "const relay = async (seed, r, deps) => new Promise((_ok, no) => deps.signal.addEventListener('abort', () => no(deps.signal.reason), { once: true }));",
+  "withdraw-handoff-relay.test.ts:307 as it was: a 500 ms arrival that listens only": "const arrival = async (x) => { await new Promise((ok, no) => { const t = setTimeout(ok, 500); x.signal.addEventListener('abort', () => (clearTimeout(t), no(x.signal.reason)), { once: true }); }); };",
+  "pool-testnet-evm-queue.test.ts:233 as it was: a sync round that waits for go() or the abort": "const events = (signal) => new Promise((resolve, reject) => { waiting.push(() => resolve(1)); signal?.addEventListener('abort', () => reject(signal.reason), { once: true }); });",
 };
 
 const ALLOWED = {
@@ -44,12 +42,15 @@ const ALLOWED = {
   "another event": "s.addEventListener('message', f); w.addEventListener('error', g);",
   "a listener named only in a string or a comment": "const mutant = 'signal?.addEventListener(\"abort\", done, { once: true });';\n// s.addEventListener('abort', f) was the old form",
   "removeEventListener": "s.removeEventListener('abort', f);",
+  "withdraw-handoff-relay.test.ts:299 now": "const relay = async (seed, r, deps) => untilAborted(deps.signal);",
+  "withdraw-handoff-relay.test.ts:307 now": "const arrival = async (x) => { await new Promise((ok, no) => { if (x.signal.aborted) return no(x.signal.reason); const t = setTimeout(ok, 500); x.signal.addEventListener('abort', () => (clearTimeout(t), no(x.signal.reason)), { once: true }); }); };",
+  "pool-testnet-evm-queue.test.ts:233 now": "const events = (signal) => new Promise((resolve, reject) => { waiting.push(() => resolve(1)); untilAborted(signal).catch(reject); });",
 };
 
 for (const [name, text] of Object.entries(REFUSED)) {
   test(`refused: ${name}`, () => {
     assert.equal(findings(text, "planted.ts").length, 1, JSON.stringify(findings(text, "planted.ts")));
-    assert.equal(refusals({ "planted.ts": findings(text, "planted.ts") }, {}).length, 1);
+    assert.equal(refusals({ "planted.ts": findings(text, "planted.ts") }).length, 1);
   });
 }
 for (const [name, text] of Object.entries(ALLOWED)) {
@@ -60,8 +61,8 @@ test("a .mjs file is read as JavaScript", () => {
   assert.equal(findings("export const f = (s) => new Promise((r) => s.addEventListener('abort', r));", "planted.mjs").length, 1);
 });
 
-test("LISTED lets a file hold its count and no more", () => {
-  const two = [{ line: 1, text: "", why: "" }, { line: 2, text: "", why: "" }];
-  assert.deepEqual(refusals({ "a.ts": two }, { "a.ts": { count: 2, why: "x" } }), []);
-  assert.equal(refusals({ "a.ts": [...two, two[0]] }, { "a.ts": { count: 2, why: "x" } }).length, 1);
+test("no file is let off: one refused listener in any file, the four once listed among them, is a refusal", () => {
+  const one = [{ line: 1, text: "", why: "" }];
+  for (const f of ["packages/wallet/test/deposit-moveout.test.ts", "packages/signpage/test/withdraw-handoff-relay.test.ts", "a.ts"]) assert.equal(refusals({ [f]: one }).length, 1, f);
+  assert.deepEqual(refusals({}), []);
 });
