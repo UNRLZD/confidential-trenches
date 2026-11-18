@@ -4,9 +4,10 @@
 // aggregate3 calls of the venue's `reads.perCall` reads (packages/kit/src/checks/evm/quote.ts readBoth), so a pinned
 // provider that cannot answer that batch is dead weight on every one, and a second such would leave a quote with no
 // pair. rpc-robinhood.globalstake.io answered the gas-starve check's call of 64 reads HTTP 500 in eight runs on 10 Nov
-// 04:36-04:55Z (evm-quote-read-gas-starve.answers.json); read again 17 Nov 23:3xZ-00:1xZ it answered every size from 1
-// to 256 real reads and the kit's batch of 3 x 64 in full, as the four others did, so the kit keeps 64 and all five,
-// and this check reads it again after every app deploy.
+// 04:36-04:55Z (evm-quote-read-gas-starve.answers.json); it answered every size from 1 to 256 reads at 17 Nov 23:3xZ, and
+// at 18 Nov 00:4xZ HTTP 500 to any request of more than about 12 reads, so it left the quote list (the kit's comment at
+// Robinhood's `providers`), and the four left answered every shape to 3 x 64. This check reads each pinned provider
+// again after every app deploy.
 // What it reads, read only: on each pinned provider, its latest block, then at that block's hash one batch shaped as
 // the kit sends one, each call EVM_READ_GAS_CODE at Multicall3 with EVM_READ_CALL_GAS (the kit's exports), its reads
 // real exact-in quotes (QuoterV2 quoteExactInputSingle, WETH to the venue's middle USDG, the 0.01% pool, about 105,000
