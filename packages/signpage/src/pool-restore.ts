@@ -365,6 +365,8 @@ async function readDepositIds(
     /** a lane read clean to `readTo`: kept on this run's marker, so a reload goes on past it */
     part(scope: bigint, lane: number, readTo: number, highest: number | null, noteHighest: number | null): Promise<void>;
   },
+  /** the NEAR vault walked, its ids read after the pools' (card vault-late-send-carried), or null */
+  vault: { v: VaultWalked; notesAt: Parameters<typeof readVaultLate>[7]; carry: VaultCarry } | null = null,
 ): Promise<void> {
   const { rpcs, pass, reader } = await letGo(keptIdReader(POOL_DEPOSIT_NETWORK, ids.rpcs, keep, { ...ids.opts, signal }), signal);
   // what an id read as money holds, by asset on both providers at the same pass, opened now beside the id reader on the
@@ -456,6 +458,13 @@ async function readDepositIds(
       for (const y of await nearHeldNamed(heldOf, id)) (y.retry ? out.held : out.named).push(`${w.label}: deposit index ${i}'s id ${id} ${y.why}`);
     }
   }
+  // the vault's deposit ids, step 5 then step 7 (card vault-late-send-carried), on the run's kept pass; a throw of its
+  // own is a read to try again by the vault's label, the pools' reasons kept
+  if (vault !== null)
+    await readVaultLate(seed, vault.v, ids, keep, signal, out, own, vault.notesAt, vault.carry).catch((e: unknown) => {
+      if (e instanceof SeedGone || signal.aborted) throw e;
+      out.retry.push(`${vault.v.label}: step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`);
+    });
 }
 
 /** The NEAR vault walked: its label, scope, network and notes (step 5 and step 7 read its deposit ids: readVaultLate). */
@@ -1330,17 +1339,11 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         if (wait > 0) await pause(wait, signal);
         for (let t = 1; ; t++) {
           const out: Step5Reasons = { retry: [], held: [], named: [] };
-          await readDepositIds(seed, walked, ids, keep, signal, out, noted, own, lanesKept).catch((e: unknown) => {
+          await readDepositIds(seed, walked, ids, keep, signal, out, noted, own, lanesKept, vaultIds === null || carry === null ? null : { v: vaultIds, notesAt, carry }).catch((e: unknown) => {
             // the run's seed gone (a sign out, other words signed in): the run stops, and no try of it reads again
             if (e instanceof SeedGone || signal.aborted) throw e;
             out.retry.push(`step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`);
           });
-          // the vault's deposit ids, step 5 then step 7 (card vault-late-send-carried), on the run's kept pass
-          if (vaultIds !== null && carry !== null)
-            await readVaultLate(seed, vaultIds, ids, keep, signal, out, own, notesAt, carry).catch((e: unknown) => {
-              if (e instanceof SeedGone || signal.aborted) throw e;
-              out.retry.push(`${vaultIds.label}: step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`);
-            });
           signal.throwIfAborted();
           const answered = out.retry.length === 0 && out.held.length === 0;
           const last = answered || t > pauses.length;

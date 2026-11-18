@@ -2,8 +2,8 @@
  "key": "vault-late-send-carried",
  "recorded": "2026-11-18T03:04Z: good, facts() over this card's build (node scripts/live-checks/vault-late-send-carried.mjs --site packages/signpage, branch card/vault-late-send-carried); bad, SIGN_HOST as served at 2026-11-18T03:04Z, before the card",
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-PSD17BFw2sxjZ7zO3VnDrs/izOyk/WnPHsoJMMvtWNMKsFK3vlGURLX9Y/wJjTZx\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-PSD17BFw2sxjZ7zO3VnDrs/izOyk/WnPHsoJMMvtWNMKsFK3vlGURLX9Y/wJjTZx",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-jeX2oaJulqg/N9e1wOpgFyXqULbUnDa7XQf8PJTVMkZU7KO7DVvF2KokxdB9aTtT\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-jeX2oaJulqg/N9e1wOpgFyXqULbUnDa7XQf8PJTVMkZU7KO7DVvF2KokxdB9aTtT",
   "reread": true,
   "rule": true,
   "wired": true,

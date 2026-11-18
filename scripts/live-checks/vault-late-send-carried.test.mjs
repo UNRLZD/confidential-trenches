@@ -49,7 +49,7 @@ test("this tree's build holds every fact; each rule broken in place in it turns 
   assert.equal(mut(/\[0\]<([\w$]+)\.MIN_DEPOSIT\)continue;/, "[0]<0n)continue;").wired, false, "under MIN_DEPOSIT carried");
   assert.equal(mut(/try\{await ([\w$]+)\.found\(([\w$]+)\.scope,([\w$]+)\.i,([\w$]+)\)\}catch/, "try{void 0}catch").wired, false, "carried with no note written");
   assert.equal(mut(/;([\w$]+)!==null&&\(\1\.retry\?([\w$]+)\.held:\2\.named\)\.push\(`\$\{([\w$]+)\} \$\{\1\.why\}`\)\}\}var/, ";void $1}}var").wired, false, "a carry's end dropped");
-  assert.equal(mut(/([\w$]+)!==null&&([\w$]+)!==null&&await ([\w$]+)\(([^)]*)\)\.catch\(([\w$]+)=>\{if\(\5 instanceof/, "!1&&$2!==null&&await $3($4).catch($5=>{if($5 instanceof").wired, false, "the vault's ids never read");
+  assert.equal(mut(/([\w$]+)!==null&&await ([\w$]+)\(([^)]*)\1\.v,/, "!1&&await $2($3$1.v,").wired, false, "the vault's ids never read");
   // the carry: a wait that holds the seed (onWait returns), a carry that did not land taken as done
   assert.equal(mut(/onWait:\(([\w$]+),([\w$]+)\)=>\{throw new ([\w$]+)\(\1,\2\?\?1e3\)\}/, "onWait:($1,$2)=>{}").carry, false, "the seed held across a wait");
   assert.equal(mut(/return ([\w$]+)\.kind===`deposited`\?null:/, "return !0?null:").carry, false, "every end taken as deposited");
