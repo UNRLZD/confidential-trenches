@@ -15,7 +15,7 @@ import { evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexPools, evmPoolIndexReset, 
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import { evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolIndexRefresh } from "../src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, type EvmPoolChain } from "../src/trade/evm/buy-unpinned.ts";
-import { callKey } from "./evm-quote-calls-record.ts";
+import { callKey, withEventOnly } from "./evm-quote-calls-record.ts";
 
 /** The tap's amount: the mainnet check's (scripts/live-checks/evm-buy-and-sell-on-mainnet.mjs QUOTE_AMOUNT). */
 export const TAP_AMOUNT = 980_000_000_000_000n;
@@ -26,7 +26,7 @@ const fixture = (name: string) => JSON.parse(gunzipSync(readFileSync(new URL(`./
 
 // each kit quote of the tap answered from its own recorded calls (the chain's head moved between the two)
 const replayed = (F: { quotes: { calls: [string, unknown][]; own: [string, unknown][] }[] }) => {
-  const quotes = F.quotes.map((q) => ({ answers: new Map<string, unknown>(q.calls), own: new Map<string, unknown>(q.own) }));
+  const quotes = F.quotes.map((q) => ({ answers: new Map<string, unknown>(withEventOnly(q.calls)), own: new Map<string, unknown>(q.own) }));
   const missed: string[] = [];
   let at = -1;
   const fetchFn = (async (url: string | URL, init?: RequestInit) => {
