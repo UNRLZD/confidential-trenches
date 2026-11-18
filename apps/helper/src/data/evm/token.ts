@@ -358,7 +358,7 @@ export function createEvmToken(
     async page(token: string, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null) return NOT_FOUND;
-      const began = performance.now();
+      const began = now();
       const found = await rowOf(t, client);
       if (found === undefined) return UPSTREAM;
       if (found === null) return NOT_FOUND;
@@ -366,7 +366,8 @@ export function createEvmToken(
       const risk = deps.goplus?.risk(chain, t) ?? Promise.resolve(null);
       // the first reads are waited for INFO_WAIT_MS from the request's start, so a coin DexScreener had to name first
       // (rowOf) still answers inside the page's second, its info and tag held for the next read
-      const wait = Math.max(0, INFO_WAIT_MS - (performance.now() - began));
+      // on the part's own clock (`now`), so a test's still clock holds the wait at INFO_WAIT_MS however slow the machine
+      const wait = Math.max(0, INFO_WAIT_MS - (now() - began));
       const [row, info] = await Promise.all([tagged(found, wait), held !== undefined ? usable(held) : read === undefined ? null : within(read, wait).then(usable)]);
       const page = toPage(row, info, deps.kept?.(t), await risk);
       return { status: 200, body: JSON.stringify(page), src: row.src === "dexscreener" ? "dexscreener" : "geckoterminal", asOfMs: row.as_of_ms as number };

@@ -183,6 +183,9 @@ test("a first info read slower than INFO_WAIT_MS: the page answers without it, t
   const tok = createEvmToken("base", {
     lists: listsOf("base"),
     keyed: keyedOf("base", "ok", { gate: () => slow }),
+    // a still clock: the page's wait is INFO_WAIT_MS from the request's start on it, never shortened by a slow machine
+    // (the helper suite on a loaded box answered 1 ms before it, the rows' read having taken real time)
+    now: () => NOW,
   });
   // the page's wait for the info on mocked timers: it answers at INFO_WAIT_MS, not 1 ms before
   enableTimers(t.mock.timers, { apis: ["setTimeout"] });
