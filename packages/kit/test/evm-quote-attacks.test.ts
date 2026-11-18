@@ -4217,30 +4217,8 @@ test("V9 the pinned quote asks the kit's providers in their measured order: the 
   }
 }));
 
-test("J4 a kept scan started early that ends before the token's scan waits for the quote to pick the block: the heads are asked after the token's logs", async () => {
-  const token = freshToken();
-  const x = xAt(0x3c10);
-  const { pools, logs } = warmCase(token, x);
-  await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)));
-  const events: string[] = [];
-  // a hundred blocks on, past Base's maxLag of 50, so both scans are read before the quote answers
-  const inner = scanner(5_000_100, logs);
-  const scan: EvmRpc = async (calls) => {
-    const ls = getLogsOf(calls);
-    const mine = ls.some((f) => ofToken(f, token));
-    if (mine) await pause(300); // the token's own scan is slow
-    const out = await inner(calls);
-    if (ls.length > 0) events.push(mine ? "token" : "X");
-    return out;
-  };
-  const heads = (rpc: EvmRpc): EvmRpc => async (calls) => {
-    if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] === "latest")) events.push("heads");
-    return rpc(calls);
-  };
-  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [heads(chain(pools, 0, 5_000_100)), heads(chain(pools, 1, 5_000_100))], NOW, scan, undefined, () => 0));
-  assert.equal((v as { accepted: boolean }).accepted, true, big(v));
-  assert.ok(events.indexOf("heads") > events.lastIndexOf("token"), events.join(" -> "));
-});
+// J4 deleted (card evm-scan-chain-tail): no scan is started early beside the token's (the warm round's kept scans are
+// gone with the scan kinds), so none waits for the quote to pick the block; the token's scan's own commit is held by S2b
 
 // J5 deleted (card evm-scan-chain-tail): no scan is started early beside the token's (the warm round's kept scans are
 // gone with the scan kinds); a scan that fails before the block is picked keeps its spans as J1 and S2b hold
@@ -5735,7 +5713,8 @@ test("SP429 card evm-taps-meet-no-429: a first scan provider that answers a warm
   // the gap is read once the quote ends (routeSet's `later`; card evm-warm-tap-ends-inside-two-seconds)
   for (let i = 0; i < 400 && second.length === 0; i++) await new Promise((go) => setTimeout(go, 5));
   assert.deepEqual(posts.slice(before), [], "the held first was asked again within its hold");
-  assert.ok(second.length > 0 && second.every(([a, b]) => a === 5_000_011 && b === 5_000_030), `the second read ${JSON.stringify(second)}`);
+  // from 5,000,001: the blocks the second read for the quote before are not kept in the chain's tail (TAIL4)
+  assert.ok(second.length > 0 && second.every(([a, b]) => a === 5_000_001 && b === 5_000_030), `the second read ${JSON.stringify(second)}`);
   // a new token's first quote within the hold, 9,000 blocks to scan (past one round of the second's 4 x 2,000 as one
   // scan, as the gap past an index and its margin is; inside it as each request): the second reads them in its own
   // spans, the first is asked nothing
@@ -8996,14 +8975,26 @@ test("QE7 scan requests that tick past the block's time plus EVM_QUOTE_MAX_AGE_M
   const { pools, logs, req } = qeCase(freshToken(), 0xa00);
   const clock = { ms: 0, ts: 0, past: 0, sent: 0 };
   const rpcs = [ticking(pools, 0, RC_HEAD, clock, 0), ticking(pools, 1, RC_HEAD, clock, 0)];
-  const scan = scanner(RC_HEAD, logs, [], 100_000);
+  // the scan provider's head 1,000 blocks behind the agreed block (past Robinhood's maxLag of 100): the scan goes on up
+  // to it after the block is read, the only scan requests sent after it since card evm-scan-chain-tail (main's X
+  // markets scans asked many after it)
+  const behind = scanner(RC_HEAD - 1_000, logs, [], 100_000);
+  const synced = scanner(RC_HEAD, logs, [], 100_000);
+  const scan: EvmRpc = (calls, sg) => (calls.some((c) => c.method === "eth_getLogs") ? synced : behind)(calls, sg);
   const slow: EvmRpc = async (calls) => {
-    if (clock.ts > 0 && calls.some((c) => c.method === "eth_getLogs")) {
+    const after = clock.ts > 0 && calls.some((c) => c.method === "eth_getLogs");
+    if (after) {
       clock.sent++;
       if (NOW + clock.ms > clock.ts * 1000 + quoteMod.EVM_QUOTE_MAX_AGE_MS) clock.past++;
-      clock.ms += 4_000;
     }
-    return scan(calls);
+    // a request over more than 50 blocks is answered with an error, so the catch-up asks its halves, each after the block;
+    // each takes 4 s to answer (requests sent at once are sent at one time)
+    const out = await scan(calls);
+    if (after) clock.ms += 4_000;
+    return out.map((o, n) => {
+      const f = calls[n]!.method === "eth_getLogs" ? (calls[n]!.params[0] as { fromBlock: string; toBlock: string }) : null;
+      return f !== null && Number(f.toBlock) - Number(f.fromBlock) >= 50 && clock.ts > 0 ? { jsonrpc: "2.0", id: n, error: { code: -32005, message: "query returned more than 10000 results" } } : o;
+    });
   };
   const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, slow, undefined, () => clock.ms));
   assert.ok(clock.sent > 0 && clock.ms >= quoteMod.EVM_QUOTE_MAX_AGE_MS, `${clock.sent} scan requests after the block ran ${clock.ms} ms`);
