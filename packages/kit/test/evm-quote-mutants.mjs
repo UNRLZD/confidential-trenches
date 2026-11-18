@@ -386,7 +386,8 @@ export const MUTANTS = [
   // card evm-buy-and-sell-on-mainnet: the blocks within maxLag of a kept scan read beside the quote, not before it
   [QUOTE, "  if (needs.every((c) => heldOf(chain, c, floor, tail0).length > 0) && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", "  if (e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", R, "card evm-buy-and-sell-on-mainnet: a coin the served index holds no pool of"],
   [QUOTE, "  if (needs.every((c) => heldOf(chain, c, floor, tail0).length > 0) && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", "  if (needs.every((c) => heldOf(chain, c, floor, tail0).length > 0) && e.gaps.length > 0) {", R, "W2g "],
-  [QUOTE, "    e.later = e.gaps;\n    e.gaps = [];\n", "", R, "W2c "],
+  // card evm-scan-chain-tail: W2b holds the deferral (the quote answers before the gap is read); W2c passes either way
+  [QUOTE, "    e.later = e.gaps;\n    e.gaps = [];\n", "", R, "W2b "],
   [QUOTE, "    laterJobs();\n    jobsOf(head + 1, end);", "    jobsOf(head + 1, end);", R, "W2d "],
   [QUOTE, "    await settle(js.map(run));\n    commit();\n", "    await settle(js.map(run));\n", R, "W2b "],
   [QUOTE, "      commit();\n      if (!later) return;", "      commit();\n      return;", R, "W2b "],
@@ -396,7 +397,8 @@ export const MUTANTS = [
   [QUOTE, "b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > maxLag", "b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > 2n * maxLag", R, "W2e "],
   [QUOTE, "    const t = byChain.get(chain) ?? { spans: [], byCurrency: new Map(), ids: new Set() };", "    const t: Tail = { spans: [], byCurrency: new Map(), ids: new Set() };", R, "W2f "],
   [QUOTE, "    for (const g of got) if (!g.spare) t.spans", "    for (const g of got) t.spans", R, "TAIL4 "],
-  [QUOTE, "    const sc = await scanOf(cs, []);", "    const sc = await (scanOf(cs, []) ?? Promise.resolve(null)).catch(() => null);", R, "G2 "],
+  // card evm-scan-chain-tail: G2's swallowed markets scan deleted: X's markets are a lookup of the token's one scan, which
+  // reads their blocks and refuses on its own failure (G2 fails that read); the markets lookup reads no block of its own
   [QUOTE, "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]))", "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [p.key]))", R, "S3c "],
   [QUOTE, "hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)]", "hops: [hopTo(x, via.key), hopTo(lower(token), p.key)]", R, "T5 "],
   [QUOTE, "    if (res.status === 429) {", "    if (false) {", R, "T7 "],
