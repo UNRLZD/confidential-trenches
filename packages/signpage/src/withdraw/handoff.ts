@@ -79,6 +79,9 @@ export type HandoffPage = {
 /** Tests only: the network and its reads. */
 export type HandoffOver = {
   network?: NearNetwork;
+  /** A dry's fee (card near-quote-inside-the-kpi): the device's fee cap read within this many ms is taken again, not
+   *  read anew (FEE_CAP_DRY_KEPT_MS). Never given on a withdrawal or a buy: those read their own cap before any proof. */
+  capKeptMs?: number;
   rpcs?: readonly [RelayRpc, RelayRpc];
   priceRpcs?: readonly [RelayRpc, RelayRpc];
   fetchFn?: typeof fetch;
@@ -164,6 +167,27 @@ const waitSignal = (page: HandoffPage, over: HandoffOver): AbortSignal => {
 };
 
 /**
+ * The fee cap a dry may take again (card near-quote-inside-the-kpi): fee_max (wallet withdraw/feemax.ts) from the gas
+ * price and the NEAR/USDC price pool at one block, about 4 reads of each provider. A dry (pool.buy.dry on NEAR) only
+ * shows what a buy would cost and signs nothing; it uses the cap to refuse a relayer fee above it before drawing that
+ * cost. The withdrawal a buy makes reads its own cap before its proof (this file's fee with no capKeptMs), so a kept cap
+ * never caps what the user pays. [design: 60 s: a minute of gas price and NEAR price moves fee_max by far less than its
+ * margins (G_cap at 1.5x the gas, S_cap at twice the storage); one cap read a minute, not one an ask.]
+ */
+export const FEE_CAP_DRY_KEPT_MS = 60_000;
+const CAPS_KEPT = new Map<string, { at: number; cap: Promise<bigint> }>();
+function keptCap(network: NearNetwork, ms: number, read: () => Promise<bigint>): Promise<bigint> {
+  const was = CAPS_KEPT.get(network);
+  if (was !== undefined && performance.now() - was.at < ms) return was.cap;
+  const cap = read();
+  const entry = { at: performance.now(), cap };
+  CAPS_KEPT.set(network, entry);
+  // a read that failed is not kept
+  cap.catch(() => CAPS_KEPT.get(network) === entry && CAPS_KEPT.delete(network));
+  return cap;
+}
+
+/**
  * The form's reads on the build's network, and the hand-off wherever the release names a vault and a relayer
  * (withdrawHandoff; elsewhere none, and Withdraw is drawn pending, ./form.ts data-pending).
  */
@@ -186,10 +210,8 @@ export function withdrawFormDeps(page: HandoffPage, over: HandoffOver = {}): Wit
       // the quote is asked for the most one withdrawal can carry: askWithdrawFee refuses a fee at or above it; with
       // `amount` (card buy-quote-before-any-note: a preview for a user with no Cash note), for a withdrawal of it
       const most = amount ?? (await available());
-      const [quote, cap] = await Promise.all([
-        askWithdrawFee({ token: net.usdc, relayer, amount: most, fetchFn }),
-        readTokenStorageMin(network, rpcs).then((registerDeposit) => readWithdrawFeeMax({ network, rpcs, priceRpcs, registerDeposit })),
-      ]);
+      const readCap = () => readTokenStorageMin(network, rpcs).then((registerDeposit) => readWithdrawFeeMax({ network, rpcs, priceRpcs, registerDeposit }));
+      const [quote, cap] = await Promise.all([askWithdrawFee({ token: net.usdc, relayer, amount: most, fetchFn }), over.capKeptMs === undefined ? readCap() : keptCap(network, over.capKeptMs, readCap)]);
       if (quote.relayFee > cap) throw new Error("relay_fee: above the device's fee_max");
       return quote.relayFee;
     },

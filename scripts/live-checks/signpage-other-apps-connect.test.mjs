@@ -56,3 +56,15 @@ test("each pattern matches its fact's minified shape and not the same shape with
     assert.equal(FACTS[f].test(broken), false, `${f} refuses the broken shape`);
   }
 });
+
+// card near-quote-inside-the-kpi: a build whose minifier named a function $L (iR in the build before it) failed
+// signout_clears with the sign out unchanged; each shape with its names given a $ still matches, and still refuses broken
+test("each pattern reads names that hold a $, as the minifier gives them", () => {
+  const dollar = (s) => s.replace(/\b(tR|O7|bA|O9|v2|w2|b2|S2|C2|w9|r7|h7|m7|c7|o7|L7|R7|H7)\b/g, (n) => `$${n}`);
+  for (const [f, [good, broken]] of Object.entries(SHAPES)) {
+    assert.equal(FACTS[f].test(dollar(good)), true, `${f} matches its shape with $ names`);
+    assert.equal(FACTS[f].test(dollar(broken)), false, `${f} refuses the broken shape with $ names`);
+  }
+  // the build that failed: tR read as $L
+  assert.equal(FACTS.signout_clears.test(SHAPES.signout_clears[0].replace("tR()", "$L()")), true);
+});
