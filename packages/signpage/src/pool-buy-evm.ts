@@ -483,7 +483,10 @@ export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint)
  *  host (its background reads, the page's quote, venues and index pools), so the reads that do not depend on the amount
  *  are held when one is typed: a fresh account's first quote of a Base coin took 5.2 to 7.7 s cold. Like the dry's own
  *  quote it waits for the chain's index sync it started, at most EVM_DRY_INDEX_WAIT_MS, and reads nothing past it, so
- *  it never starts a scan with no index beside it. Resolves once it ends; never throws. */
+ *  it never starts a scan with no index beside it. Its quotes are the dry's (h.quote): on a device that holds nothing
+ *  they read no log (scanless, card evm-tree-reads-only-when-needed), and none is ever signed: the warm drops every
+ *  answer, and the tap's own quote host takes each quote it signs through signedQuote. Resolves once it ends; never
+ *  throws. */
 export async function evmDryWarm(h: EvmDryQuote, token: string): Promise<void> {
   try {
     if (!(await indexEnded(h))) return;
