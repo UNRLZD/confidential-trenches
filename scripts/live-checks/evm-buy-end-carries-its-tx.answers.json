@@ -1,0 +1,76 @@
+{
+ "_note": "good: this card's builds (packages/signpage/scripts/build-app.mjs bundle(), mainnet; apps/terminal vite build) read through scripts/ci/bundle-checks.mjs buildFetch on 2026-11-18: PASS. bad: SIGN_HOST and APP_HOST as deployed before this card, read over https on 2026-11-18 by --record: FAIL, every mark missing on both hosts.",
+ "good": {
+  "at": "2026-11-18T10:38:24.698Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-Su6XvOQJJbfFunvF+kAsxIbBJDAyr4x/Dv8E6B3EpLedVXgrihh0iAZrpgUWV/Fz",
+     "sha384": "sha384-Su6XvOQJJbfFunvF+kAsxIbBJDAyr4x/Dv8E6B3EpLedVXgrihh0iAZrpgUWV/Fz",
+     "found": [
+      "a stage event names its txs by their own two fields",
+      "the EVM buy's and sale's late end go out with their txs",
+      "a Withdrawn end is owed_back with its release",
+      "the rest leg's reverted buy is owed_back",
+      "the legs' end is owed_back over a refusal",
+      "kit-v1.18 and below are sent owed_back as refused",
+      "the EVM trade's ends wrapper hands on the txs",
+      "the EVM trade's ends include owed_back",
+      "the cash-first trace hands on the txs"
+     ]
+    }
+   ]
+  },
+  "app": {
+   "source": "https://ct-app.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/assets/index-Cmsx_DMe.js",
+     "status": 200,
+     "integrity": "sha384-QqEVUi3A2nFnI6xWq7uLftq7RV2XG7Pasqqrv06tPYc9LAI5NKQ7XoucnpUE9CuS",
+     "sha384": "sha384-QqEVUi3A2nFnI6xWq7uLftq7RV2XG7Pasqqrv06tPYc9LAI5NKQ7XoucnpUE9CuS",
+     "found": [
+      "an end stage's tx fills the toast's link",
+      "owed_back ends a buy as owed back",
+      "a late owed_back moves a refused buy to owed back",
+      "owed back shows no Retry"
+     ]
+    }
+   ]
+  }
+ },
+ "bad": {
+  "at": "2026-11-18T10:27:35.695Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-9zdVRUrbjWKM6PrnlI+5+ozEmNLwcGeoOlOEpV3jDrkI3CU7GEYGQwQrpsDEw+8p",
+     "sha384": "sha384-9zdVRUrbjWKM6PrnlI+5+ozEmNLwcGeoOlOEpV3jDrkI3CU7GEYGQwQrpsDEw+8p",
+     "found": []
+    }
+   ]
+  },
+  "app": {
+   "source": "https://ct-app.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/assets/index-A7r1T-tC.js",
+     "status": 200,
+     "integrity": "sha384-G/yyHXRh/RdDlFyY8cBd3nyD0jGO7MML0sCUU9VW/IJ8gcxYmc0k8QLksUtYM99v",
+     "sha384": "sha384-G/yyHXRh/RdDlFyY8cBd3nyD0jGO7MML0sCUU9VW/IJ8gcxYmc0k8QLksUtYM99v",
+     "found": []
+    }
+   ]
+  }
+ }
+}

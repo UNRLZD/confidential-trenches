@@ -1772,11 +1772,13 @@ test("evm-buy-end-carries-its-tx: a stage event's txs reach onProgress with its 
   const seen = [];
   c.onProgress((id, stage, txs) => seen.push([id, stage, txs]));
   const state = unchanged(c);
-  h.post({ v: 1, type: "progress", id: "x", stage: "filled", txs: [{ chain: "base", hash: BASE_TX }] });
+  const sent = { v: 1, type: "progress", id: "x", stage: "filled", txs: [{ chain: "base", hash: BASE_TX }] };
+  h.post(sent);
   h.post({ v: 1, type: "progress", id: "y", stage: "owed_back", txs: [{ chain: "robinhood", hash: BASE_TX }] });
   h.post({ v: 1, type: "progress", id: "z", stage: "filled" });
   assert.deepEqual(seen, [["x", "filled", [{ chain: "base", hash: BASE_TX }]], ["y", "owed_back", [{ chain: "robinhood", hash: BASE_TX }]], ["z", "filled", undefined]]);
   assert.ok(Object.isFrozen(seen[0][2]) && Object.isFrozen(seen[0][2][0]), "listeners share one txs list: frozen");
+  assert.ok(!Object.isFrozen(sent.txs) && !Object.isFrozen(sent.txs[0]), "a copy is frozen, never the message's own data");
   state.check();
 });
 

@@ -143,6 +143,9 @@ export function progress(p: Phase, id: string, stage: Stage, now: number): Phase
     if (stage === "part_filled" || stage === "not_landed" || stage === "refused" || stage === "owed_back") return { k: "ended", id, at: p.at, stage };
     return p;
   }
+  // a buy answered refused whose bytes landed anyway, its swap failed and its ETH on W: the page's late end owed_back
+  // moves it from Failed to owed back (review of 167d9deea)
+  if (p.k === "ended" && p.stage === "refused" && p.id === id && stage === "owed_back") return { k: "ended", id, at: p.at, stage };
   if (!busy(p) || p.id !== id) return p;
   if (stage === "signed") return p;
   if (stage === "sent") return p.k === "sending" ? { k: "landing", id, at: p.at } : p;

@@ -567,8 +567,9 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       if (signpageStateEventSchema(ev)) return set({ state: ev.state as SignpageState, stale: false });
     }
     if (signpageProgressSchema(m)) {
+      // a copy of each tx's own two fields (never the message's own data, which other listeners of the window share),
       // frozen as a route is: listeners share one list, and a write into it throws
-      const txs = Object.hasOwn(m, "txs") ? (deepFreeze(m.txs) as readonly TxRef[]) : undefined;
+      const txs = Object.hasOwn(m, "txs") ? (deepFreeze((m.txs as TxRef[]).map(({ chain, hash }) => ({ chain, hash }))) as readonly TxRef[]) : undefined;
       tell(progressListeners, m.id as string, m.stage as Stage, txs);
       return;
     }
