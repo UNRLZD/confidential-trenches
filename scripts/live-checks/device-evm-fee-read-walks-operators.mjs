@@ -4,8 +4,8 @@
 // operator that lacks a block's state, hangs or errs is walked past. Read now, for each mainnet:
 //   - every list seat answers eth_chainId with the chain's id, and its CORS preflight admits both pages' origins (the
 //     signing page's and the app's, page-evm-rpc-csp.mjs PAGES), since the device reads from both;
-//   - the bind, as the device runs it (CHILD, packages/wallet/scripts/bind-fee-live.ts): the wallet's own functions in
-//     bind's order (packages/wallet/src/pool/evm.ts:
+//   - the bind, as the device runs it (CHILD, packages/wallet/scripts/bind-fee-live.ts, each seat through the page's
+//     retry, SOLANA_RPC_RETRY): the wallet's own functions in bind's order (packages/wallet/src/pool/evm.ts:
 //     evmEpochBlock on the pool's pair, the tree depth there, evmBindChainFee on the walk), under the wallet's lag
 //     retries (evmRetryLag), at the current period's first block; when that fails, again at the next period's first
 //     block, as the proof queue's next pass does while the period's proof still lives (a proof bound in one period is
