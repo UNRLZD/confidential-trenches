@@ -2993,24 +2993,51 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  receipt is not read by `until` waits (the answer `filling`, read again by the page), one the receipt does not show
    *  is never served. */
   const gtTapes = new Map<string, { at: number; rows: TapeRow[]; src: ChartSrc }>();
+  /** A held vendor tape's answer: its newest `limit` rows as their receipts show them, read within `until`. */
+  async function serveTape(token: string, h: { at: number; rows: TapeRow[]; src: ChartSrc }, limit: number, lane: Lane, until: number): Promise<DataAnswer> {
+    const rows = h.rows.slice(0, limit);
+    await within(lanes.run(lane, () => exacting(token, rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
+    const { trades, waiting } = exactOf(token, rows);
+    // the vendor's newest trades of the pool, every one after its oldest (card token-stats-count-every-trade), up to
+    // their read: claimed complete only while that read is within BEHIND_MAX's ms, the bound a chain tape's complete
+    // list holds to (behind), as the page counts each window up to its own clock (card evm-vendor-tape-names-its-reach:
+    // a held tape whose refresh failed was served with its whole_ms whatever its age); the read's age always named
+    const age = Math.max(0, now() - h.at);
+    const oldest = h.rows.at(-1);
+    const whole = waiting || oldest === undefined || age > BEHIND_MAX[chain].ms ? {} : { whole_ms: oldest.t_ms + 1_000 };
+    const timing = `evm-vendor-read;desc="rows read ${age} ms ago"`;
+    return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at, timing };
+  }
+  /** The refresh behind a held vendor tape's rows: the helper's background read, one per coin however many callers. */
+  function renewTape(token: string): Promise<void> {
+    let renew = tapeRenewing.get(token);
+    if (renew === undefined) {
+      renew = lanes
+        .run(newLane(false), async () => {
+          const h = await readTape(token, true);
+          if (h === undefined || h === "none") return;
+          await exacting(token, h.rows.map((r) => r.tx));
+          keepTape(token, h);
+        })
+        .catch(() => undefined)
+        .finally(() => tapeRenewing.delete(token));
+      tapeRenewing.set(token, renew);
+    }
+    return renew;
+  }
+  /** The vendor's rows held for `token` as the answer of a tape whose open is past its bound or failed with no row of
+   *  ours (trades): dated by their read, renewed behind them once TAPE_FRESH_MS old; null when none is held. */
+  function heldTape(token: string, limit: number, lane: Lane, until: number): Promise<DataAnswer> | null {
+    const h = gtTapes.get(token);
+    if (h === undefined) return null;
+    if (now() - h.at >= TAPE_FRESH_MS) void renewTape(token);
+    return serveTape(token, h, limit, lane, until);
+  }
   async function noneTrades(token: string, limit: number, lane: Lane, until: number): Promise<DataAnswer> {
     const none = empty({ trades: [] });
     if (deps.gecko === undefined) return none;
     const held = gtTapes.get(token);
-    const serve = async (h: { at: number; rows: TapeRow[]; src: ChartSrc }): Promise<DataAnswer> => {
-      const rows = h.rows.slice(0, limit);
-      await within(lanes.run(lane, () => exacting(token, rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
-      const { trades, waiting } = exactOf(token, rows);
-      // the vendor's newest trades of the pool, every one after its oldest (card token-stats-count-every-trade), up to
-      // their read: claimed complete only while that read is within BEHIND_MAX's ms, the bound a chain tape's complete
-      // list holds to (behind), as the page counts each window up to its own clock (card evm-vendor-tape-names-its-reach:
-      // a held tape whose refresh failed was served with its whole_ms whatever its age); the read's age always named
-      const age = Math.max(0, now() - h.at);
-      const oldest = h.rows.at(-1);
-      const whole = waiting || oldest === undefined || age > BEHIND_MAX[chain].ms ? {} : { whole_ms: oldest.t_ms + 1_000 };
-      const timing = `evm-vendor-read;desc="rows read ${age} ms ago"`;
-      return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at, timing };
-    };
+    const serve = (h: { at: number; rows: TapeRow[]; src: ChartSrc }): Promise<DataAnswer> => serveTape(token, h, limit, lane, until);
     const owed = async (): Promise<DataAnswer> => (held !== undefined ? serve(held) : empty({ trades: [], filling: true }));
     if (held !== undefined && now() - held.at < TAPE_FRESH_MS) return serve(held);
     // card evm-vendor-tape-refresh-keyed: a held tape under STALE_MS is renewed as the helper's background read, one
@@ -3021,19 +3048,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // vendor answers (a local helper on mainnet served Base 0x1668cd48's at 18.9 s, held 17 s before by another reader,
     // 18 Nov 15:13:45Z, with the held rows served at once up to STALE_MS). Past STALE_MS the caller's own read
     if (held !== undefined && now() - held.at <= STALE_MS) {
-      let renew = tapeRenewing.get(token);
-      if (renew === undefined) {
-        renew = lanes
-          .run(newLane(false), async () => {
-            const h = await readTape(token, true);
-            if (h === undefined || h === "none") return;
-            await exacting(token, h.rows.map((r) => r.tx));
-            keepTape(token, h);
-          })
-          .catch(() => undefined)
-          .finally(() => tapeRenewing.delete(token));
-        tapeRenewing.set(token, renew);
-      }
+      const renew = renewTape(token);
       if (now() - held.at > BEHIND_MAX[chain].ms) await within(renew, Math.max(0, until - performance.now()));
       return serve(gtTapes.get(token) ?? held);
     }
@@ -3201,12 +3216,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
 
   /** The bars held for `token`'s pool and `tf` (its found pool's, GeckoTerminal's top pool's, or the lists' pool's),
-   *  cut at `to`, as a candles answer dated by their read; null when none are held (card helper-listed-charts-own-reads). */
+   *  cut at `to`, as a candles answer dated by their read; null when none are held (card helper-listed-charts-own-reads).
+   *  A chart before a time is the bars read before it when they are held (noneCandles' read of that range), else the
+   *  newest held cut there (card evm-vendor-tape-late-open-serves-held: a range read before the newest answered no
+   *  bars while the open was past its bound). */
   async function heldChart(token: string, tf: Tf, to: number | null, limit: number): Promise<DataAnswer | null> {
     const hint = await deps.hint?.(token).catch(() => null);
     const ids = [pools.get(token)?.found?.pool.id, gtPools.get(token)?.id, hint].filter((x): x is string => typeof x === "string");
     for (const id of new Set(ids.flatMap((x) => [x, x.toLowerCase()]))) {
-      const h = kept.get(`${id}:${tf}`);
+      const range = to === null ? undefined : history.get(`${id}:${tf}:${to}`);
+      const h = range !== undefined && range.bars.length > 0 ? range : kept.get(`${id}:${tf}`);
       const bars = (h?.bars ?? []).filter((c) => to === null || c[0] < to).slice(-limit);
       if (h === undefined || bars.length === 0) continue;
       const src = h.src ?? "geckoterminal";
@@ -3717,8 +3736,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // card helper-listed-charts-own-reads: a book still opening past its bound, or not opened while OPEN_MAX books are
       // (its 429), is served the bars held for the token's pool (a book's history or GeckoTerminal's, at any age, dated
       // by their read), never an empty chart while they answer: on the live helper at 22:41Z 38 of 45 listed Base coins
-      // and 4 of 36 Robinhood ones answered no bars past the route's 5 s
-      if (e === LATE || (typeof e === "object" && !("book" in e) && e.status === 429)) {
+      // and 4 of 36 Robinhood ones answered no bars past the route's 5 s; an open that failed (the NONE_MS pool search
+      // run again and refused) the same, never its 503 while bars are held (card evm-vendor-tape-late-open-serves-held)
+      if (e === LATE || e === UPSTREAM || (typeof e === "object" && !("book" in e) && e.status === 429)) {
         const h = await heldChart(t, tf as Tf, to, limit);
         if (h !== null) return timed(h);
       }
@@ -3795,15 +3815,21 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const openMs = performance.now() - began;
       // the queue wait counts the traders' lookups below too: the answer waits on them
       const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
-      if (e === LATE && failedLately(t)) return timed(UPSTREAM);
-      if (e === LATE) {
+      if (e === LATE || e === UPSTREAM) {
         // a cold tape past its bound is filling, not failed (card token-page-data-complete-and-fast: ten cold Base opens
         // at once from the Mac on the public providers answered 503 at 12 s in 6 of 10, on the providers' paces alone):
         // 200 with what is held, the discovery's agreed seed or nothing, and `filling` true; the open goes on and the
         // next read gets the rows. 503 is only a read that failed.
         const held = books.get(t);
-        const at = now();
         const trades = (held === undefined ? [] : tapeOf(held, limit)).filter((r) => !unread(r.tx)).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
+        // with no row of ours, the vendor's rows held for the coin answer, dated by their read, as the chart's held bars
+        // do (heldChart): a coin our reads found no pool of has its pool search run again after NONE_MS inside this open,
+        // and a search past the bound or failed answered no rows (card evm-vendor-tape-late-open-serves-held: a local
+        // helper on mainnet served Robinhood fBOMB's tape, held from the vendor, as [] filling at 8 s, 18 Nov 15:19:55Z)
+        const vendor = trades.length === 0 ? heldTape(t, limit, lane, until) : null;
+        if (vendor !== null) return timed(await vendor);
+        if (e === UPSTREAM || failedLately(t)) return timed(UPSTREAM);
+        const at = now();
         return timed({ status: 200, body: JSON.stringify({ trades, filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
       }
       if (e === "none") return timed(await noneTrades(t, limit, lane, until));
