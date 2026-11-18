@@ -11,6 +11,7 @@ import { after, test } from "node:test";
 import { CG_BACKGROUND_TIMEOUT_MS, CG_ONCHAIN, CG_TIMEOUT_MS, coingeckoPace, createKeyed } from "../coingecko.ts";
 import { geckoBudget } from "../gecko.ts";
 import { providerHolds } from "../../limits/limits.ts";
+import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
 import { createSolanaToken, GT_BASE, TAPE_FRESH_MS, TAPE_OPEN_BOUND_MS } from "./token.ts";
 import { SOL_VENDOR_REACH_MS } from "./trades.ts";
 
@@ -179,7 +180,7 @@ test("a refresh that hangs past the reach: the caller is answered the newest hel
   h.t.t += 17_000;
   h.fill();
   hang = true;
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
   let answered = false;
   const p = h.tape(o.mint).then((a) => ((answered = true), a));
   await settle();
@@ -191,4 +192,5 @@ test("a refresh that hangs past the reach: the caller is answered the newest hel
   const a = await p;
   assert.equal(a.status, 200);
   assert.equal(h.t.t - a.asOfMs! >= 17_000, true, "the newest rows held, dated by their read");
+  resetTimers(t.mock.timers);
 });
