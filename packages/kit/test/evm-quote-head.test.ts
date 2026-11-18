@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { EvmQuoteError, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
-import { EVM_HEAD_REUSE_MS, evmHeadWatch, evmPoolBuyQuoteWith, evmReadsPerCall, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
+import { EVM_FOLLOW_MAX_AGE_MS, EVM_HEAD_REUSE_MS, evmHeadWatch, evmPoolBuyQuoteWith, evmReadsPerCall, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import { asRecorded, gasRoundAnswers, withMarker } from "./evm-quote-gas-fx.ts";
 import { onTestClock } from "./test-clock.ts";
 // the recordings (fixtures/evm-quote.json) were made at 6 reads an aggregate3 call, and their exchanges are matched call
@@ -170,4 +170,43 @@ test("held head: a device asleep (its never-stepped-back clock paused) wakes pas
   // the recording holds only that block, so the new read is refused too, but only after the heads are read again
   await assert.rejects(evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch), (e: unknown) => e instanceof EvmQuoteError && e.code === "stale_quote");
   assert.equal(c.heads(), 5, "both heads read again (the stale block is refused before its confirmation)");
+}));
+
+// Card evm-cold-multihop-quote-inside-the-kpi: a follow's block (a request's `at`) is one this watch confirmed, while it
+// is at most EVM_FOLLOW_MAX_AGE_MS old on both clocks (review of the card, P2-1, P2-2).
+test("HELD a confirmed block is handed back by its hash while young on both clocks; one never confirmed, one 15 s past, or one the device's clock was stepped back over is not", () => onTestClock(async () => {
+  const c = chain();
+  let now = C.now;
+  let m = 1_000_000;
+  const watch = evmHeadWatch(c.rpcs, MAX_LAG, () => now, false, () => m);
+  const a = await evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch);
+  assert.equal(watch.held!(a.block.hash, now)?.hash, a.block.hash, "the confirmed block");
+  assert.equal(watch.held!(a.block.hash.toUpperCase().replace("0X", "0x"), now)?.hash, a.block.hash, "its hash in capitals");
+  assert.equal(watch.held!("0x" + "cd".repeat(32), now), null, "a block never confirmed");
+  const age = now - blockMs();
+  // past the bound on the monotonic clock while the device's clock was stepped back to the block's time: null
+  m += EVM_FOLLOW_MAX_AGE_MS + 1;
+  now = blockMs();
+  assert.equal(watch.held!(a.block.hash, now), null, "70 s on mono, 0 s on a clock stepped back");
+  // past the bound on the device's clock alone: null
+  m = 1_000_000;
+  now = blockMs() + EVM_FOLLOW_MAX_AGE_MS + 1;
+  assert.equal(watch.held!(a.block.hash, now), null, "past the bound on the device's clock");
+  // inside both: the block
+  now = C.now + 1_000;
+  m = 1_000_000 + 1_000;
+  assert.ok(age + 1_000 <= EVM_FOLLOW_MAX_AGE_MS, `the recorded block's age ${age} ms`);
+  assert.equal(watch.held!(a.block.hash, now)?.hash, a.block.hash, "young on both clocks");
+}));
+
+test("ATSET a refusal made at a picked block names that block (EvmQuoteError `at`), the block a follow is asked at", () => onTestClock(async () => {
+  const B = F["base-below"]!;
+  assert.equal(B.outcome.code, "below_reference");
+  const seen: [string[], string[]] = [[], []];
+  const lie = { on: false };
+  const rpcs = [provider(B.exchanges[0], seen[0], lie), provider(B.exchanges[1], seen[1], lie)];
+  const { buys, amountIn, ...rest } = B.request;
+  const req = { ...(rest as Omit<EvmPoolBuyQuoteRequest, "token" | "amountIn">), token: buys as string, amountIn: BigInt(amountIn as string) };
+  const head = (B.exchanges[0].find((x) => x.calls[0]!.method === "eth_getBlockByNumber")!.answers[0]!.result as { hash: string }).hash.toLowerCase();
+  await assert.rejects(evmPoolBuyQuoteWith(req, rpcs, B.now), (e) => e instanceof EvmQuoteError && e.code === "below_reference" && (e as { at?: unknown }).at === head);
 }));

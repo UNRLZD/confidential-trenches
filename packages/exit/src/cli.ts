@@ -22,13 +22,24 @@ export type ChainEntry = { run: ExitChain; rpcs: [string, string]; asks: string 
 /** What the command runs on: the prompts, the line writer and the chains it carries. Tests give their own. */
 export type CliIo = {
   argv: readonly string[];
-  /** a prompt whose answer is not echoed */
+  /** a prompt whose answer is not echoed; rejects with InputClosed when the input ends first */
   hidden(prompt: string): Promise<string>;
-  /** a prompt whose answer is echoed */
+  /** a prompt whose answer is echoed; rejects with InputClosed when the input ends first */
   line(prompt: string): Promise<string>;
   say(line: string): void;
   chains: Partial<Record<ChainName, ChainEntry>>;
 };
+
+/** The input ended (a closed pipe, a terminal gone, ^D) before a prompt was answered: thrown by CliIo's readers. */
+export class InputClosed extends Error {
+  constructor() {
+    super("the input closed");
+    this.name = "InputClosed";
+  }
+}
+
+/** What the command says, and exit code 2, when the input ends before the 12 words are read. */
+export const NO_WORDS = "no words were read: the input closed before the 12 words were typed, so nothing was read or sent";
 
 export class CliRefused extends Error {
   constructor(detail: string) {
@@ -75,10 +86,18 @@ export async function runCli(io: CliIo): Promise<number> {
     io.say(USAGE);
     return 0;
   }
-  // every payout address first, so nothing waits on the user once money moves
+  // every payout address first, so nothing waits on the user once money moves; an input that ends before the words is
+  // a refusal, said, never an empty answer taken (card exit-refuses-when-the-words-never-come)
   const to = new Map<ChainName, string>();
-  for (const c of parsed.chains) to.set(c, (await io.line(`Pay ${c} out to (${io.chains[c]!.asks}): `)).trim());
-  const words = await io.hidden("The 12 words (hidden): ");
+  let words: string;
+  try {
+    for (const c of parsed.chains) to.set(c, (await io.line(`Pay ${c} out to (${io.chains[c]!.asks}): `)).trim());
+    words = await io.hidden("The 12 words (hidden): ");
+  } catch (e) {
+    if (!(e instanceof InputClosed)) throw e;
+    io.say(NO_WORDS);
+    return 2;
+  }
   let failed = false;
   try {
     await withSeed64(words, async (seed) => {

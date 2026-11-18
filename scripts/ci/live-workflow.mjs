@@ -349,9 +349,23 @@ export const KEYED_GROUP = "evm-keyed";
  *  such read draws the same few keyed URLs' seconds (rpc.ts pacer: dRPC 8 calls a second a key, QuickNode 7, limits.ts
  *  KEYED_PACE), and a keyed-only read or a tape has no public endpoint to walk on to: run 43683445143 (15 Nov 06:03Z)
  *  read 90 checks at once and the keyed Base route answered 429 while the plain one answered the same reads off its
- *  public list; five of those checks re-run alone read PASS. */
-export const KEYED_READS = /keyed=only|\/v1\/market\/trades\?chain=(?:base|robinhood|\$\{)|\/v1\/rpc\/(?:base|robinhood|\$\{|["'`])/;
+ *  public list; five of those checks re-run alone read PASS.
+ *  Card live-market-checks-not-all-at-once: also a Base or Robinhood chart (/v1/market/candles: apps/helper/src/data/
+ *  candles.ts builds bars and tapes from the same swap reads, keyed URLs first, server.ts evmSwapsFromEnv), and the
+ *  wallet's helper routes (evmHelperRpc, evmHelperShownRpc, evmHelperKeyedRpc: packages/wallet/src/pool/buy-wallets.ts,
+ *  POST <helper>/v1/rpc/{base|robinhood}) named by a wallet script a check runs (checkText follows it). Run 44249482613
+ *  read helper-keyed-logs-serve-a-whole-pool-range's keyed Base answer at 8952 ms (06:14:22Z, limit 5000) while
+ *  helper-live-bars-no-503 and market-token-reads read Base charts and wallet-restore-transfer-rpcs read 150,000 blocks
+ *  of Transfer logs on the helper's Base and Robinhood route, each in a job of its own. */
+export const KEYED_READS = /keyed=only|\/v1\/market\/(?:trades\?chain=(?:base|robinhood|\$\{)|candles\?(?:chain=(?:base|robinhood|\$\{)|\$\{))|\/v1\/rpc\/(?:base|robinhood|\$\{|["'`])|\bevmHelper(?:Shown|Keyed)?Rpc\b/;
 export const KEYED_CHAIN = /["'](?:base|robinhood)["']|chain=(?:base|robinhood)\b|\/v1\/rpc\/(?:base|robinhood)\b|\b(?:base|robinhood): *["']0x/;
+/** The kit's EVM pool quote (evmPoolBuyQuote, evmPoolSellQuote) reads Robinhood's pool index on the helper's keyed route
+ *  (packages/kit/src/trade/evm/buy-unpinned.ts: its readers, Robinhood's own and /v1/rpc/robinhood?keyed=only), and no
+ *  helper route on Base: a check that quotes through it and names Robinhood. evmPoolVenues is a table and reads nothing. */
+export const KIT_KEYED = /\bevmPool(?:Buy|Sell)Quote\b/;
+export const KIT_KEYED_CHAIN = /["']robinhood["']|chain=robinhood\b/;
+/** Whether a check's text (checkText) reads the helper's keyed Base and Robinhood providers. */
+export const readsKeyed = (text) => (KEYED_READS.test(text) && KEYED_CHAIN.test(text)) || (KIT_KEYED.test(text) && KIT_KEYED_CHAIN.test(text));
 
 const filesUnder = (dir, test) => (existsSync(dir) ? readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile() && test(e.name)).map((e) => path.join(e.parentPath ?? e.path, e.name)) : []);
 
@@ -386,20 +400,30 @@ export async function planProblems(host, root = ROOT) {
   return p;
 }
 
-/** A live check's text and that of every script under scripts/ it imports, as one. */
+/** A package script a check runs as a child (the wallet's own code behind the kit's entry, as wallet-restore-transfer-rpcs
+ *  runs packages/wallet/scripts/transfer-rpcs-check.ts), named as one string or as path.join's parts. */
+export const PACKAGE_SCRIPT = /["'](packages\/[a-z0-9-]+\/scripts\/[\w./-]+\.(?:ts|mjs))["']|path\.join\(\s*\w+\s*,\s*"packages"\s*,\s*"([a-z0-9-]+)"\s*,\s*"scripts"\s*,\s*"([\w.-]+\.(?:ts|mjs))"\s*\)/g;
+
+/** A live check's text, that of every script under scripts/ it imports, and that of each package script it runs
+ *  (PACKAGE_SCRIPT, the script's own file: its reads of the helper are named there), as one. */
 export function checkText(k, root = ROOT) {
   const seen = new Set();
   let text = "";
-  const walk = (f) => {
-    const abs = path.resolve(root, f);
-    if (seen.has(abs) || !existsSync(abs)) return;
+  const read = (abs) => {
+    if (seen.has(abs) || !existsSync(abs)) return null;
     seen.add(abs);
     const t = readFileSync(abs, "utf8");
     text += `${t}\n`;
+    return t;
+  };
+  const walk = (f) => {
+    const t = read(path.resolve(root, f));
+    if (t === null) return;
     for (const m of t.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)["'](\.{1,2}\/[^"']+\.mjs)["']/g)) {
       const next = path.join(path.dirname(f), m[1]);
       if (next.startsWith("scripts/")) walk(next);
     }
+    for (const m of t.matchAll(PACKAGE_SCRIPT)) read(path.resolve(root, m[1] ?? `packages/${m[2]}/scripts/${m[3]}`));
   };
   walk(path.join("scripts/live-checks", `${k}.mjs`));
   return text;
@@ -431,7 +455,7 @@ export function budgetProblems(host, plan, root = ROOT) {
     for (const k of keysOf(e)) {
       const text = checkText(k, root);
       const jupiter = BUDGET_READS.test(text) && !Object.hasOwn(list.budgetExempt, k);
-      const keyed = KEYED_READS.test(text) && KEYED_CHAIN.test(text);
+      const keyed = readsKeyed(text);
       const at = groupOf.get(k);
       if (jupiter && keyed) {
         p.push(`${host}: ${k} reads both the helper's Jupiter budget and its keyed Base and Robinhood providers: a check is in one serial group, so split it in two`);

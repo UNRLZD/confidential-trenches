@@ -15,6 +15,7 @@
 // Each first read is read as the token page's first read is (candles-read.mjs): a 429 again at its Retry-After, the
 // tokens side by side within one 75 s span; one still 429 after it, or a 200 with no bars, is a token not held.
 // After: helper
+// Serial: evm-keyed 330 (its Base charts are built from the keyed swap reads)
 //   node scripts/live-checks/helper-live-bars-no-503.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
