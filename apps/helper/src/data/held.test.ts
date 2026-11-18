@@ -320,11 +320,10 @@ test("abuse: a stranger's held reads of random addresses take no GeckoTerminal c
   assert.equal(other.symbol, "DXS", "another device's first read makes its call");
   assert.ok(hits.every((x) => x.url.startsWith(`${DEX_BASE}/tokens/v1/`)));
 
-  // GET /v1/market/token today: an address no list holds is 404 with no GeckoTerminal call
-  const evmHits: Hit[] = [];
-  const page2 = createEvmToken("base", { lists: { get: listsOf("base", []).get, listed: async () => false }, gecko: geckoBudget(clock), fetch: fakeFetch(evmHits, () => []) as never, now: clock, sleep: async () => {} });
+  // GET /v1/market/token today: an address no list holds is 404 (the token page has no GeckoTerminal read since card
+  // evm-token-page-off-the-5-call-window)
+  const page2 = createEvmToken("base", { lists: { get: listsOf("base", []).get, listed: async () => false }, now: clock });
   for (let i = 0; i < 30; i++) assert.equal((await page2.page(rand())).status, 404);
-  assert.equal(evmHits.length, 0);
 });
 
 test("a name read within HELD_SERVE_MS is served, dated, while the budget refuses; past it the entry is null", async () => {
