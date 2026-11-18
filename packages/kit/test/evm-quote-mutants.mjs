@@ -389,7 +389,7 @@ export const MUTANTS = [
   // card evm-buy-and-sell-on-mainnet: the blocks within maxLag of a kept scan read beside the quote, not before it
   [QUOTE, "    if (((e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === \"markets\") && e.gaps.length > 0 && unread.every(([a]) => a > head - lag)) {", "    if (e.gaps.length > 0 && unread.every(([a]) => a > head - lag)) {", R, "card evm-buy-and-sell-on-mainnet: a coin the served index holds no pool of"],
   [QUOTE, "    if (((e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === \"markets\") && e.gaps.length > 0 && unread.every(([a]) => a > head - lag)) {", "    if (((e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === \"markets\") && e.gaps.length > 0) {", R, "W2g "],
-  [QUOTE, "      e.later = e.gaps;\n      e.gaps = [];\n", "", R, "W2c "],
+  [QUOTE, " : e.gaps;\n      e.gaps = [];\n", " : e.gaps;\n      e.later = [];\n", R, "W2c "],
   // card evm-scan-chain-tail: the tail of the chain, read from a near start with the event alone, kept per provider
   [QUOTE, "  for (const c of new Set([k.currency0, k.currency1])) append(t.byCurrency, c, k);", "  for (const c of new Set([k.currency0])) append(t.byCurrency, c, k);", R, "X4 "],
   [QUOTE, "  return other === NATIVE || other === weth;\n};\n", "  return other === weth;\n};\n", R, "S3 "],
@@ -406,6 +406,7 @@ export const MUTANTS = [
   // answers drops the tail for the quote (M3), each tail request a quarter of its budget, no request after it, and the
   // quote scans by currency; the budget of no measured pools is the depth (L2)
   [QUOTE, "        const top = head - tailLag;", "        const top = head;", R, "TAIL7 "],
+  [QUOTE, "(tail0?.band ?? []).filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y])", "([] as Spans)", R, "TAIL2 "],
   [QUOTE, "          if (g.b > top) t.band = withSpan(", "          if (false) t.band = withSpan(", R, "W2b "],
   [QUOTE, "          if (g.spare) continue;\n", "", R, "TAIL4 "],
   [QUOTE, "      if (e.tail && unread.length > 0) e.laterFrom = unread[0]![0];", "", R, "W2b "],

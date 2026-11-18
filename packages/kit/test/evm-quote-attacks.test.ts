@@ -784,7 +784,8 @@ test("N1a a seeded standard pool is held to the token's real pool the device's o
   // the gap past the kept scan is read once the quote ends (routeSet's `later`): a quote with no round left after its
   // set ends before it lands (card evm-warm-tap-ends-inside-two-seconds)
   for (let i = 0; i < 400 && asked.length < 1; i++) await new Promise((go) => setTimeout(go, 5));
-  assert.deepEqual(asked, [[5_000_000 - TAIL_MARGIN + 1, 5_000_010]]);
+  // the new blocks, and the index's margin's blocks now past it (TAIL7)
+  assert.deepEqual(asked, [[5_000_000 - TAIL_MARGIN + 1, 5_000_010 - TAIL_MARGIN], [5_000_001, 5_000_010]]);
   // a scan provider that answers no logs refuses the quote: a source that fails is not skipped
   const broken: EvmRpc = async (calls) => calls.map((c, id) => (c.method === "eth_blockNumber" ? { jsonrpc: "2.0", id, result: "0x4c4b40" } : { jsonrpc: "2.0", id, error: { code: -32701, message: "exceed maximum block range: 50000" } }));
   assert.deepEqual(await quoteOn(pools, "0x00000000000000000000000000000000000a22a2", seededRoute("0x00000000000000000000000000000000000a22a2"), broken), { accepted: false, code: "rpc_error" });
@@ -1568,7 +1569,9 @@ test("TAIL2 a second coin quoted on the same chain and provider reads no block t
   asked.length = 0;
   // the same provider at the same head: b's real pool, read by a's scan, holds b's seeded route with no getLogs
   assert.deepEqual(await quoteOnStill(pools, b, seededRoute(b), m.to(scanner(5_000_000, logs, asked))), below);
-  assert.deepEqual(asked, [[5_000_000 - TAIL_MARGIN + 1, 5_000_000]], "only the index's margin below the head, read again (TAIL7)");
+  // (the index's margin below the head is never kept, TAIL7: b holds a pool, so its blocks count as read for the answer,
+  // and none of them is yet past the margin to be read again after it)
+  assert.deepEqual(asked, []);
 });
 test("TAIL3 a coin with no pool in the index or the chain's tail reads the newest blocks before it answers: a pool made within maxLag still holds its seeded route", async () => {
   const [a, b] = ["0x00000000000000000000000000000000000f5f8a", "0x00000000000000000000000000000000000f5f8b"];
@@ -1684,7 +1687,7 @@ test("G4 an X scanned for a pool the PoolManager does not hold is kept too: the 
   await new Promise((r) => setTimeout(r, 20));
   asked.length = 0;
   assert.equal((await quoteOn([best(token)], token, bestRoute(token), scan)).accepted, true);
-  assert.deepEqual(asked, [[5_000_000 - TAIL_MARGIN + 1, 5_000_000]], "both scans are kept: the head has not moved, so only the index's margin below it is read again (TAIL7)");
+  assert.deepEqual(asked, [], "both scans are kept: the head has not moved, so nothing is read again");
 });
 
 test("S1e a pool the PoolManager holds whose hook is the V4Quoter is dropped: its override would replace the quoter", async () => {
@@ -3525,7 +3528,7 @@ test("W2b a pool made in the last maxLag blocks before the agreed block is misse
   assert.equal(v2.accepted, true, String((v2 as { code?: string }).code));
   await pause(20);
   assert.equal(h.order[0], "answer", h.order.join(" -> "));
-  assert.ok(h.order.includes("gap read") && asked.some(([a, b]) => a === 5_000_000 - TAIL_MARGIN + 1 && b === 5_000_010), JSON.stringify(asked));
+  assert.ok(h.order.includes("gap read") && asked.some(([a, b]) => a === 5_000_001 && b === 5_000_010) && asked.some(([a, b]) => a === 5_000_000 - TAIL_MARGIN + 1 && b === 5_000_010 - TAIL_MARGIN), JSON.stringify(asked));
   assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(now, 0, 5_000_010), chain(now, 1, 5_000_010)], NOW, m.to(scan), undefined, () => 0)), below);
 });
 

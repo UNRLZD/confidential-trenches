@@ -2121,7 +2121,12 @@ async function scanPools(
     // gap reads unread past maxLag or a currency holds no pool, as any gap; otherwise right after it
     const unread = e.tail ? gapsOf((tail0?.band ?? []).reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
     if (((e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === "markets") && e.gaps.length > 0 && unread.every(([a]) => a > head - lag)) {
-      e.later = e.gaps;
+      // read after the answer on the tail: the blocks no provider answered, and those of the band now past the index's
+      // margin below the head (the read that is kept); the band's others give an answer kept for no quote, so they are
+      // read before an answer that needs them and never again after one (a burst of five Robinhood quotes asked 28 to 63
+      // getLogs, 10 to 23 of them 429, where main asked 10)
+      const top = head - tailLag;
+      e.later = e.tail ? gapsOf((tail0?.band ?? []).filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y]).reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
       e.gaps = [];
       // the first block of it no provider answered (P2-1 below counts those alone)
       if (e.tail && unread.length > 0) e.laterFrom = unread[0]![0];
