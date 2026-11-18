@@ -104,6 +104,7 @@ export const E2E_SECONDS = {
   "apps/terminal: node test/token-route/run.mjs": 19, // C3 18.9
   "apps/terminal: node test/chains-evm/run.mjs": 16, // C1 15.3
   "apps/terminal: node test/token-rail/run.mjs": 45, // B2 44.8
+  "apps/terminal: node test/token-rail/sweep.mjs": 60, // C3 59.7 (this card's own command, run C only)
   "apps/terminal: node test/header-search/run.mjs": 51, // C1 50.3
   "apps/terminal: node test/trade-box-mount/run.mjs": 6, // C2 5.4
   "apps/terminal: node test/trade-sheet/run.mjs": 29, // C3 28.7
