@@ -50,7 +50,8 @@
 //   signout (the backup first while the 12 words are the only copy, then Sign out, which closes the layer back to the
 //   app signed out), backup.open (the 12 words, then Saved or Cancel back to the app) and signin.open's wallet way (the
 //   store read first, then the two choices before the wallet is asked anything; I already have one draws Use passkey
-//   and Recovery code). Each opens the layer through openLayer(), which resets the activation guard (guard.shown()).
+//   and Recovery code; New account, card wallet-signin-wallet, asks the window's wallet for one sign-in signature,
+//   checks it on the device and only then makes new random 12 words, the backup first). Each opens the layer through openLayer(), which resets the activation guard (guard.shown()).
 //   Card signpage-withdraw-form adds withdraw.open: with a seed stored it draws the withdraw form (src/withdraw/), where
 //   the user types the address and the amount, refused before any proof when bad; a withdraw.open with a one-time id
 //   draws the held deposit's way out (src/withdraw/held.ts, card held-deposit-way-out) for the held op of that id in
@@ -62,6 +63,7 @@ import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/der
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
 import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLET_CHANNEL, WALLET_SEED_LOCK, walletSeedMoved, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
+import { newAccountByWallet, walletFound } from "@blindfill/wallet/signin/wallet";
 import { activationGuard, type Press } from "./guard.ts";
 import { startApi, type HostAnswer, type HostRefusal, type KindContext, type Running } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
@@ -1285,10 +1287,13 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
     } else if (!framed && state === "choose") {
       // wallet.md:50: the two choices, before the wallet is asked anything or any seed is made. New account asks the
-      // wallet to sign; that request has no code yet, so it is drawn and not offered (data-pending) until it lands.
-      const fresh = button("new-account", WORDS["new-account"], () => {});
-      fresh.disabled = true;
-      fresh.dataset.pending = "wallet-signature";
+      // window's wallet for one sign-in signature, then makes new 12 words (signInByWallet); with no wallet in this
+      // window it is drawn and not offered (data-pending="no-wallet")
+      const fresh = button("new-account", WORDS["new-account"], () => void run(signInByWallet));
+      if (!walletFound()) {
+        fresh.disabled = true;
+        fresh.dataset.pending = "no-wallet";
+      }
       parts.push(fresh);
       parts.push(button("have-one", WORDS["have-one"], () => ((restoreOnly = true), show("existing"))));
     } else if (!framed && state === "withdraw") {
@@ -1820,6 +1825,25 @@ async function signIn(ceremony: () => Promise<PasskeyOutcome>, create: boolean):
   await landed(await signInPrf(open, r.entropy));
   // a passkey that opens an existing account on this browser: its notes are rebuilt from the chain with no tap
   if (!create) void restore?.auto().catch(() => {});
+}
+
+// New account by a wallet (W:50; @blindfill/wallet/signin/wallet): the store read first, so a seed already here is the
+// account and the wallet is never asked; then one sign-in signature of the exact bytes, checked on the device, and only
+// then new random 12 words { source: "wallet", code_saved: false }, insert-only, with the backup first. The wallet's no
+// goes back to the two choices; a refused answer is the error page; neither makes anything.
+async function signInByWallet(): Promise<void> {
+  topLevelOnly();
+  const had = await readSeed();
+  if (had) return landed({ screen: "signed-in", seed: had });
+  let r: Awaited<ReturnType<typeof newAccountByWallet>>;
+  try {
+    r = await newAccountByWallet(open);
+  } catch (e) {
+    if (await landedStored()) return;
+    throw e;
+  }
+  if (r.kind === "landed") return landed(r.landing);
+  if (!(await landedStored())) show(r.kind === "cancelled" ? "choose" : "error");
 }
 
 // ses.10-12: the typed 12 words, checked on the device before anything else; a failure stores nothing
