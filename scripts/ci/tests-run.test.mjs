@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { TEST_MS } from "../test-bound.mjs";
 import { mutantCommands, packageItems, packagesPart } from "./test-shards.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -319,6 +320,60 @@ test("planted: the packages split runs every package's test script but the walle
     assert.deepEqual(unrunWith(ci("1, 2, 3", `echo ${split}`, "pnpm --filter @blindfill/wallet run test")), all);
     assert.deepEqual(unrunWith(ci("1, 2, 3", 'node scripts/ci/test-shards.mjs packages typecheck "$INDEX" "$TOTAL"', "pnpm --filter @blindfill/wallet run test")), all);
     assert.deepEqual(unrunWith(ci("1, 2, 3", 'node scripts/ci/test-shards.mjs mutants "$INDEX" "$TOTAL"', "pnpm --filter @blindfill/wallet run test")), all);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// card test-runs-never-hold-a-slot: every workspace package's `test` script runs each `node --test` under the bound
+// (scripts/test-bound.mjs: --test-timeout cancels a test and names it, the preload stops a file or the run that is still
+// going at its bound), so no suite can hold a CI job or a heavy slot for ever (18 Nov: 49 min in one wallet file)
+export function unbounded(root) {
+  const want = ["--require=../../scripts/test-bound-watch.cjs", `--test-timeout=${TEST_MS}`, "--test-force-exit"];
+  const out = [];
+  const globs = [...readFileSync(path.join(root, "pnpm-workspace.yaml"), "utf8").matchAll(/^\s+-\s+["']?([^"'\s]+)["']?\s*$/gm)].map((m) => m[1]);
+  for (const pkg of globs.flatMap((g) => globSync(`${g}/package.json`, { cwd: root })).sort()) {
+    const test = JSON.parse(readFileSync(path.join(root, pkg), "utf8")).scripts?.test;
+    if (typeof test !== "string") continue;
+    const dir = path.dirname(pkg).split(path.sep).join("/");
+    const runs = test.split(/&&|\|\||[;|\n]/).map((seg) => seg.trim().split(/\s+/)).filter((w) => /(^|\/)node$/.test(w[0]) && w.includes("--test"));
+    if (runs.length === 0) out.push(`${dir}: its test script runs no node --test`);
+    for (const w of runs) {
+      const flags = w.slice(w.indexOf("--test") + 1).filter((x) => x.startsWith("-"));
+      const lacks = want.filter((f) => !flags.includes(f));
+      if (path.resolve(root, dir, "../../scripts/test-bound-watch.cjs") !== path.join(root, "scripts/test-bound-watch.cjs")) out.push(`${dir}: ../../scripts/test-bound-watch.cjs is not the root's from here`);
+      if (lacks.length) out.push(`${dir}: node --test lacks ${lacks.join(" ")}`);
+    }
+  }
+  return out;
+}
+
+test("every package's test script runs node --test under the bound", () => {
+  assert.deepEqual(unbounded(ROOT), []);
+});
+
+test("planted: a test script with no bound, a looser one or no force exit is refused", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "tests-run-bound-"));
+  try {
+    const put = (f, text) => {
+      mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+      writeFileSync(path.join(dir, f), text);
+    };
+    put("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n');
+    const bound = `--require=../../scripts/test-bound-watch.cjs --test-timeout=${TEST_MS} --test-force-exit`;
+    const pkg = (test) => put("packages/w/package.json", JSON.stringify({ scripts: { test } }));
+    pkg(`tsc -p . && node --test ${bound} "test/*.test.ts"`);
+    assert.deepEqual(unbounded(dir), []);
+    pkg('node --test "test/*.test.ts"');
+    assert.deepEqual(unbounded(dir), [`packages/w: node --test lacks ${bound}`]);
+    pkg(`node --test --require=../../scripts/test-bound-watch.cjs --test-timeout=${TEST_MS * 10} --test-force-exit "test/*.test.ts"`);
+    assert.deepEqual(unbounded(dir), [`packages/w: node --test lacks --test-timeout=${TEST_MS}`]);
+    pkg(`node --test --require=../../scripts/test-bound-watch.cjs --test-timeout=${TEST_MS} "test/*.test.ts"`);
+    assert.deepEqual(unbounded(dir), ["packages/w: node --test lacks --test-force-exit"]);
+    pkg(`node --test ${bound} "test/a.test.ts" && node --test "test/b.test.ts"`);
+    assert.deepEqual(unbounded(dir), [`packages/w: node --test lacks ${bound}`], "each node --test of a chain");
+    pkg("tsc -p .");
+    assert.deepEqual(unbounded(dir), ["packages/w: its test script runs no node --test"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
