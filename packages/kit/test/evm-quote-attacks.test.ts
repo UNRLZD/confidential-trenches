@@ -1347,7 +1347,7 @@ test("RX the route through X's market rides the market's own round: the X1 world
       if (reads) open--;
     }
   };
-  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [counted(chain(pools, 0)), chain(pools, 1)], NOW, scanner(5_000_000, logs)), heldTo(x0));
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [counted(chain(pools, 0)), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0), heldTo(x0));
   // at main 6: the X prune, the markets' state, the market quotes, then the routes through them, among the rest
   assert.equal(rounds, 5, `${rounds} rounds of reads`);
 });
