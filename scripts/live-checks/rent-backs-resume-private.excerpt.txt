@@ -1,6 +1,6 @@
-if(v.length===0)return d!==null||h===null;if(n.idle===!0)return n.held?.(),d!==null||h===null;let
+if(v.length===0)return d!==null||h===null;if(n.idle===!0){for(let n of v){let r=h?.get(n)?.lamports;if(r===void 0)continue;let i=p.find(e=>e.address===n);if(!await wK(t,n,!0,c,async()=>{let t=(await e.owed.list()).find(e=>e.address===n)??(i?{address:n,l:i.l.toString(),j:i.j,mints:[],passes:0}:void 0);if(!t)return;let a=nK(t,i!==void 0,m.find(e=>e.address===n)?.evidence,r);a!==void 0&&t.lamports!==a.toString()&&await e.owed.put({...t,lamports:a.toString()})}))return!0}return n.held?.(),d!==null||h===null}
 function Qye(e=()=>Date.now(),t=l8()){let n=!1,r,i=e()+t,a=i,o=s8,s=()=>r!==void 0&&e()>=r,c,l=!1,u=()=>c!==void 0&&e()>=c;return{take(){return n||e()<i||e()<a&&!(u()&&(l||s()))?!1:(n=!0,u()&&(l=!1),!0)},acted:u,act(t=e()+l8()){c===void 0&&(c=t,l=!0)},ended(t){n=!1,t?(a=e()+o,o=Math.min(o*2,Xye)):(a=1/0,o=s8)},again(){a=i,o=s8},
 if(An&&Sn.take()){let n=!Sn.acted(),r=Sn.takeRide(),i=!1,
-await iK(o,An,{...r===void 0?{}:{ride:!0,held:()=>void(i=!0)},...n?{idle:!0}:{}});re
+await iK(o,An,{...r===void 0?{}:{ride:!0,held:()=>void(i=!0)},...n?{idle:!0}:{}})
 flow:(t,i)=>(Sn.act(t.kind===`pool.buy`||t.kind===`pool.sell`?void 0:u8(Date.now())),
  u8=e=>e+oK(),

@@ -8,7 +8,8 @@
 // passes at a time drawn after it, whose reads stay on both seats before anything is signed. What it proves, and only
 // that: the served /app.js is the one index.html pins (its sha384), and its text carries these rules, each found by a
 // mark of the bundle's shape (the minifier renames, never restructures them):
-//   - an idle run stops after the helper's find read, before any pass, a ride held and nothing counted;
+//   - an idle run stops after the helper's find read, before any pass, a ride held and nothing counted, each W's
+//     RETURNING amount taken from that read (display alone);
 //   - the schedule: idle until the first tap's drawn time; that time books one run however the idle runs ended; a ride
 //     waits for it; a later tap moves nothing;
 //   - each run is idle until then, and is handed so to resumeRentBacks;
@@ -42,8 +43,8 @@ const tied = (main, more) => ({
 
 /** Each rule's mark in the bundle, by what it holds. */
 export const MARKS = Object.freeze({
-  "an idle run stops after the helper's find read, before any pass: its ride held, no pass counted": new RegExp(
-    R`if\((?<td>${I})\.length===0\)return (?<f>${I})!==null\|\|(?<rd>${I})===null;if\((?<o>${I})\.idle===!0\)return \k<o>\.held\?\.\(\),\k<f>!==null\|\|\k<rd>===null;`,
+  "an idle run stops after the helper's find read, before any pass: its ride held, no pass counted, each W's RETURNING amount that read's": new RegExp(
+    R`if\((?<td>${I})\.length===0\)return (?<f>${I})!==null\|\|(?<rd>${I})===null;if\((?<o>${I})\.idle===!0\)\{for\(let (?<w>${I}) of \k<td>\)\{let (?<l>${I})=\k<rd>\?\.get\(\k<w>\)\?\.lamports;if\(\k<l>===void 0\)continue;[^]{0,400}?await ${I}\.owed\.put\(\{\.\.\.(?<r>${I}),lamports:(?<s>${I})\.toString\(\)\}\)\}\)\)return!0\}return \k<o>\.held\?\.\(\),\k<f>!==null\|\|\k<rd>===null[;}]`,
   ),
   "the schedule: idle until the page's first tap's drawn time, which books one run however the idle runs ended; a ride waits for it; a later tap moves nothing": tied(
     new RegExp(R`take\(\)\{return (?<n>${I})\|\|(?<e>${I})\(\)<(?<i>${I})\|\|\k<e>\(\)<(?<a>${I})&&!\((?<u>${I})\(\)&&\((?<l>${I})\|\|(?<s>${I})\(\)\)\)\?!1:\(\k<n>=!0,\k<u>\(\)&&\(\k<l>=!1\),!0\)\},acted:\k<u>,act\((?<t>${I})=\k<e>\(\)\+(?<dr>${I})\(\)\)\{(?<c>${I})===void 0&&\(\k<c>=\k<t>,\k<l>=!0\)\}`),

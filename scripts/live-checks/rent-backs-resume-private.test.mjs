@@ -35,9 +35,11 @@ const JS = readFileSync(new URL("./rent-backs-resume-private.excerpt.txt", impor
 test("the good build's lines carry every mark; each with its rule changed FAILs on that mark alone", () => {
   assert.deepEqual(Object.values(facts("", JS).carries), Object.keys(MARKS).map(() => true));
   const planted = [
-    // the idle stop gone, or after the setup's reads, or one that counts a pass
-    ["if(n.idle===!0)return n.held?.(),d!==null||h===null;", "", 0],
-    ["if(n.idle===!0)return n.held?.(),d!==null||h===null;", "if(n.idle===!0)return d!==null||h===null;", 0],
+    // the idle stop gone, its ride let go, its amount write counting a pass, or no amount written
+    ["if(n.idle===!0){", "if(!1){", 0],
+    ["return n.held?.(),d!==null||h===null}", "return d!==null||h===null}", 0],
+    ["await e.owed.put({...t,lamports:a.toString()})", "await e.owed.put({...t,lamports:a.toString(),passes:t.passes+1})", 0],
+    ["a!==void 0&&t.lamports!==a.toString()&&await e.owed.put({...t,lamports:a.toString()})", "void 0", 0],
     // the schedule: a ride due before the first tap; the tap's run not owed; a later tap moving the time
     ["e()<a&&!(u()&&(l||s()))", "e()<a&&!s()", 1],
     ["e()<a&&!(u()&&(l||s()))", "e()<a&&!(u()&&s())", 1],
