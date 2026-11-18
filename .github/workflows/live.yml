@@ -112,8 +112,11 @@ jobs:
     if: needs.plan.outputs.count != '' && needs.plan.outputs.count != '0'
     name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
-    # a serial group runs its checks one after another (about 11 minutes of checks, and the waits for an idle budget)
-    timeout-minutes: ${{ matrix.group != '' && 45 || 20 }}
+    # a serial group runs its checks one after another. The longest is evm-keyed: 20.9, 23.6 and 25.1 minutes for 25 to 26
+    # members (runs 44249482613, 44243409683, 44228233209), and card live-market-checks-not-all-at-once adds six whose own
+    # jobs took 488 s in all (run 44249482613: 23 + 103 + 137 + 107 + 34 + 84 s, setup included), so 25.1 + 8.1 = 33.2
+    # minutes; 60 keeps the 1.8 times margin 45 gave the 25.1 (45 / 25.1), for members still to join
+    timeout-minutes: ${{ matrix.group != '' && 60 || 20 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}

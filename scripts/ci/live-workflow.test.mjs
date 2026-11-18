@@ -5,7 +5,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { BUDGET_READS, KEYED_CHAIN, checkText, KEYED_READS, SUMMARY_LINES, budgetProblems, fileProblems, liveProblems, planProblems, problems } from "./live-workflow.mjs";
+import { BUDGET_READS, KEYED_CHAIN, checkText, KEYED_READS, readsKeyed, SUMMARY_LINES, budgetProblems, fileProblems, liveProblems, planProblems, problems } from "./live-workflow.mjs";
 import { HOSTS, ROOT, commitProblem, enginesFor, keysOf, listOf, missingFor, planFor, reachesLauncher, usagesOf } from "./live-plan.mjs";
 
 const LIVE = readFileSync(path.join(ROOT, ".github/workflows/live.yml"), "utf8");
@@ -578,20 +578,20 @@ test("the helper's plan runs the nine checks that spend the Jupiter budget as ON
 
 // card helper-live-run-holds-its-own-load: the checks that read the helper's keyed Base and Robinhood providers, in order:
 // the RPC routes first, then the tapes and the chain chart
-const KEYED_KEYS = ["helper-rpc-takes-batches", "evm-pool-leaves-any-source", "evm-pool-sync-holds", "helper-base-logs-page", "helper-keyed-logs-serve-a-whole-pool-range", "helper-pool-logs-outside-the-caller-budget", "robinhood-pool-logs-on-keyed-route", "helper-rpc-proxy", "evm-rpc-spare-list", "evm-tape-from-our-index-fast", "evm-chart-opens-without-a-vendor-call", "index-evm-swaps", "helper-base-tape-reads-back", "helper-v4-hook-liquidity", "solana-trades-show-on-every-token", "robinhood-spread-tapes-fill-inside-45s", "robinhood-listed-tape-opens", "helper-tape-4337-trader", "evm-tape-rows-exact", "helper-robinhood-capacity", "helper-robinhood-search-ahead", "base-reads-never-starve-max", "evm-token-page-opens-any-coin", "base-reads-never-throttled", "token-stats-count-every-trade", "evm-pool-search-stable", "base-tape-never-complete-behind-the-index"];
+const KEYED_KEYS = ["helper-rpc-takes-batches", "evm-pool-leaves-any-source", "evm-pool-sync-holds", "helper-base-logs-page", "helper-keyed-logs-serve-a-whole-pool-range", "helper-pool-logs-outside-the-caller-budget", "robinhood-pool-logs-on-keyed-route", "helper-rpc-proxy", "evm-rpc-spare-list", "evm-tape-from-our-index-fast", "evm-chart-opens-without-a-vendor-call", "index-evm-swaps", "helper-base-tape-reads-back", "helper-v4-hook-liquidity", "solana-trades-show-on-every-token", "robinhood-spread-tapes-fill-inside-45s", "robinhood-listed-tape-opens", "helper-tape-4337-trader", "evm-tape-rows-exact", "helper-robinhood-capacity", "helper-robinhood-search-ahead", "base-reads-never-starve-max", "evm-token-page-opens-any-coin", "base-reads-never-throttled", "token-stats-count-every-trade", "evm-pool-search-stable", "base-tape-never-complete-behind-the-index", "wallet-restore-transfer-rpcs", "wallet-per-buy", "market-token-reads", "helper-live-bars-no-503", "chart-candles-never-429", "helper-candles-keyed-gt"];
 
-test("the helper's plan runs the twenty-seven checks that read its keyed Base and Robinhood providers as ONE matrix entry, and KEYED_READS finds exactly them", async () => {
+test("the helper's plan runs the thirty-three checks that read its keyed Base and Robinhood providers as ONE matrix entry, and KEYED_READS finds exactly them", async () => {
   const plan = await planFor("helper", { commit: COMMIT });
   const [g, ...more] = plan.include.filter((e) => e.id === "evm-keyed");
   assert.equal(more.length, 0);
   assert.equal(g.key, "");
   assert.deepEqual(keysOf(g), KEYED_KEYS);
-  assert.match(g.name, /^evm-keyed \(27 checks, one after another\)$/);
+  assert.match(g.name, /^evm-keyed \(33 checks, one after another\)$/);
   for (const k of KEYED_KEYS) assert.ok(!plan.include.some((e) => e.group === "" && e.key === k), `${k} has no job of its own`);
   const list = listOf("helper", ROOT, { commit: COMMIT, network: "mainnet" });
   const found = list.checks.filter((k) => {
     const t = checkText(k);
-    return !list.skipped[k] && KEYED_READS.test(t) && KEYED_CHAIN.test(t);
+    return !list.skipped[k] && readsKeyed(t);
   });
   assert.deepEqual(found.sort(), [...KEYED_KEYS].sort(), "the group is exactly the checks that read a keyed Base or Robinhood route");
 });
@@ -706,6 +706,49 @@ test("planted (card helper-live-run-holds-its-own-load): a check that reads the 
   }
 });
 
+// Card live-market-checks-not-all-at-once: run 44249482613 read helper-keyed-logs-serve-a-whole-pool-range's keyed Base
+// answer at 8952 ms (limit 5000) while three checks in jobs of their own drew the same keyed providers through routes the
+// rule did not name: Base charts (helper-live-bars-no-503, market-token-reads: candles.ts builds bars from the keyed swap
+// reads) and a wallet script on the helper's Base and Robinhood /v1/rpc (wallet-restore-transfer-rpcs). Each such check
+// started beside the group is refused; in it, it passes; the same routes on Solana alone, a kit quote on Base (no helper
+// route) and the venue table stay out.
+test("planted: a Base chart check, a wallet-script check on the helper's Base RPC and a kit quote on Robinhood, each in a job of its own, are refused; in evm-keyed they pass", async () => {
+  const texts = {
+    "evm-a": 'await fetch(`${base}/v1/rpc/base?keyed=only`);\n',
+    "evm-b": 'await fetch(`${base}/v1/market/trades?chain=${"robinhood"}&token=0x1`);\n',
+    "chart-base": 'export const CHAINS = ["base"];\nconst u = (c, t) => `/v1/market/candles?${new URLSearchParams({ chain: c, token: t })}`;\n',
+    "chart-sol": 'export const CHAINS = ["solana"];\nconst u = (c, t) => `/v1/market/candles?${new URLSearchParams({ chain: c, token: t })}`;\n',
+    "wallet-base": 'const REPO = ".";\nexport const CHECK = path.join(REPO, "packages", "wallet", "scripts", "reads-check.ts");\nconst args = { network: "base", helper: HELPER };\n',
+    "quote-rh": 'import { evmPoolBuyQuote } from "../../packages/kit/src/index.ts";\nawait evmPoolBuyQuote({ chain: "robinhood" });\n',
+    "quote-base": 'import { evmPoolBuyQuote, evmPoolVenues } from "../../packages/kit/src/index.ts";\nawait evmPoolBuyQuote({ chain: "base" });\nconst v = evmPoolVenues().robinhood;\n',
+  };
+  const roots = [];
+  const problemsOf = async (checks, serial) => {
+    const r = fixture((root) => {
+      for (const [k, text] of Object.entries(texts)) {
+        writeFileSync(path.join(root, `scripts/live-checks/${k}.mjs`), `//   node scripts/live-checks/${k}.mjs [--base <url>]\n${text}`);
+        writeFileSync(path.join(root, `scripts/live-checks/${k}.test.mjs`), "");
+        writeFileSync(path.join(root, `scripts/live-checks/${k}.answers.json`), "{}");
+      }
+      // the wallet script the check runs names the wallet's helper route (packages/wallet/src/pool/buy-wallets.ts)
+      mkdirSync(path.join(root, "packages/wallet/scripts"), { recursive: true });
+      writeFileSync(path.join(root, "packages/wallet/scripts/reads-check.ts"), "const rpc = evmHelperRpc(a.helper, a.network);\n");
+      writeFileSync(path.join(root, "scripts/ci/helper-live-checks.mjs"), budgetList(checks, { serial }));
+    });
+    roots.push(r);
+    return planProblems("helper", r);
+  };
+  const all = Object.keys(texts);
+  try {
+    const apart = await problemsOf(all, { "evm-keyed": ["evm-a", "evm-b"] });
+    for (const k of ["chart-base", "wallet-base", "quote-rh"]) assert.ok(has(apart, new RegExp(`${k} reads the helper's keyed Base and Robinhood providers .* in a job of its own: give it a \`// Serial: evm-keyed <position>\``)), `${k}:\n${apart.join("\n")}`);
+    for (const k of ["chart-sol", "quote-base"]) assert.ok(!has(apart, new RegExp(`${k} reads`)), `${k} reads no keyed Base or Robinhood route:\n${apart.join("\n")}`);
+    assert.deepEqual(await problemsOf(all, { "evm-keyed": ["evm-a", "evm-b", "chart-base", "wallet-base", "quote-rh"] }), []);
+  } finally {
+    for (const r of roots) rmSync(r, { recursive: true, force: true });
+  }
+});
+
 test("planted: a serial group the job cannot run fails the plan: one member, an unlisted or skipped one, a repeat, two groups, a name that is a check, arguments", async () => {
   const roots = [];
   const plan = async (opts, list = ["jup-a", "jup-b", "calm"]) => {
@@ -742,7 +785,7 @@ test("planted: live.yml that runs a serial group's checks as one single check, d
   assert.ok(has(liveProblems(LIVE.replace("        if: matrix.group == ''\n", "")), /single-check step is not the one the gate holds: .* on `if: matrix\.group == ''`/), "no `if` on the single step: a group job would run no-key twice");
   assert.ok(has(liveProblems(LIVE.replace('node .live-runner/scripts/ci/live-serial.mjs --log "$out/$ID.log" $GROUP', "node scripts/live-checks/$GROUP.mjs")), /serial step is not the one the gate holds/), "a group run as one check");
   assert.ok(has(liveProblems(LIVE.replace("GROUP: ${{ matrix.group }}", "GROUP: ${{ matrix.key }}")), /serial step is not the one the gate holds/), "the group is not the matrix's");
-  assert.ok(has(liveProblems(LIVE.replace("timeout-minutes: ${{ matrix.group != '' && 45 || 20 }}", "timeout-minutes: 20")), /a serial group's job has no longer limit/), "a group of about 11 minutes of checks cannot be held to 20");
+  assert.ok(has(liveProblems(LIVE.replace("timeout-minutes: ${{ matrix.group != '' && 60 || 20 }}", "timeout-minutes: 20")), /a serial group's job has no longer limit/), "a group of about 33 minutes of checks cannot be held to 20");
 });
 
 test("planted (card live-runs-one-per-host): a live.yml whose dispatched runs do not share one queue per host is refused: no concurrency block, a group that names the commit or the run, a group shared by every host, cancel-in-progress true", () => {

@@ -18,6 +18,7 @@
 // helper, apps/helper/src/data/gecko.ts), not a refusal of ours, and a chart still filling at the span's end is the
 // page's loading state, never a failed load.
 // After: helper
+// Serial: evm-keyed 340 (its Base and Robinhood charts are built from the keyed swap reads)
 //   node scripts/live-checks/chart-candles-never-429.mjs [--base <url>] [--charts <chain>:<token>,...] [--record <file>]
 //     --charts: the charts to open in place of BONK and the lists' first rows (a local helper with no vendor key, whose
 //     Solana lists cannot answer)

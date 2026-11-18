@@ -17,6 +17,7 @@
 // which matched GeckoTerminal's keyless minute bars of its pool 5zpyutJu9ee6jFymDGoK7F6S5Kczqtc9FomP3ueKuyA9 in 499 of
 // 500); Base's listed chart keeps the bar.
 // After: helper
+// Serial: evm-keyed 350 (its Base charts are built from the keyed swap reads)
 //   node scripts/live-checks/helper-candles-keyed-gt.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
