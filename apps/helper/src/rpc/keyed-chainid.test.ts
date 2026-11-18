@@ -6,6 +6,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createRpc } from "./rpc.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 const DR = "https://lb.drpc.test/base/plantedBASEdr1key123456789abcd";
 const RH = "https://lb.drpc.test/robinhood/plantedRHdr1key123456789abcd";
 const ENV: Record<string, string> = { BASE_RPC_URL_DRPC_1: DR, ROBINHOOD_RPC_URL_DRPC_1: RH };
@@ -18,7 +22,7 @@ function world() {
     const out = reqs.map((r) => ({ jsonrpc: "2.0", id: r.id, result: r.method === "eth_chainId" ? (url === DR ? "0x2105" : "0x1237") : "0x10" }));
     return new Response(JSON.stringify(Array.isArray(JSON.parse(String(init.body))) ? out : out[0]), { status: 200, headers: { "content-type": "application/json" } });
   };
-  const r = createRpc(ENV, { fetch: fetch as never, log: () => {} });
+  const r = createRpc(ENV, { now: STILL, fetch: fetch as never, log: () => {} });
   return { r, sent };
 }
 const call = (id: unknown, method = "eth_chainId") => ({ jsonrpc: "2.0", id, method, params: [] });
