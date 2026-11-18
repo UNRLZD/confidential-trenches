@@ -134,7 +134,7 @@ const short = (s) => s.split("\n")[0].trim().slice(0, 90);
 
 /** Every sweep file's plants read and counted: { refusals, plants, files }. */
 export async function mutantAnchors(root) {
-  const tracked = execFileSync("git", ["ls-files", "-z", "--", "*mutants.mjs"], { cwd: root, encoding: "utf8" }).split("\0").filter((f) => MUTANT_FILE.test(f));
+  const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8", maxBuffer: 1 << 26 }).split("\0").filter((f) => MUTANT_FILE.test(f));
   const refusals = [];
   const listed = []; // stale plants KNOWN_STALE names
   const anchored = []; // KNOWN_STALE entries no longer stale

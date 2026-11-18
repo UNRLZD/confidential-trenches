@@ -12,6 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { anchorRefusals, KNOWN_STALE, mutantAnchors, NOT_SWEPT, SWEEPS } from "./mutant-anchors.mjs";
+import { mutantCommands } from "./test-shards.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -94,7 +95,7 @@ test("the gate on this tree: every mutant of every nightly sweep has its anchor 
 });
 
 test("every sweep file the nightly sweeps run has a reader, and every sweep file set apart is one no command runs", () => {
-  const shards = execFileSync("node", ["--input-type=module", "-e", `import { mutantCommands } from "./scripts/ci/test-shards.mjs"; console.log(JSON.stringify(mutantCommands(process.cwd())));`], { cwd: ROOT, encoding: "utf8" });
+  const shards = JSON.stringify(mutantCommands(ROOT));
   for (const f of Object.keys(NOT_SWEPT)) assert.ok(!shards.includes(path.basename(f)), `${f} is run by the nightly sweeps: give it a reader in SWEEPS`);
   for (const f of Object.keys(NOT_SWEPT)) assert.ok(!Object.hasOwn(SWEEPS, f), f);
 });
