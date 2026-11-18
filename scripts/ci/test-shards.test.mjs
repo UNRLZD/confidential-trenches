@@ -367,8 +367,9 @@ test("the browser runs' measured times: every command of test:e2e has one, each 
   const stale = (script, seconds) => Object.keys(seconds).filter((k) => !keys(script).includes(k));
   assert.deepEqual(missing(E2E, E2E_SECONDS), [], "a test:e2e command with no E2E_SECONDS time: read it off its test-browser job log and add it");
   assert.deepEqual(stale(E2E, E2E_SECONDS), [], "an E2E_SECONDS key in scripts/ci/test-shards.mjs names no test:e2e command: rename it to the command's new text, or remove it");
-  // planted: PR #1029's new command with no key, and a key whose command is gone
-  assert.deepEqual(missing(PR_1029_E2E, E2E_SECONDS), [`${E2E_DIR}: node test/token-rail/sweep.mjs`]);
+  // planted: a new command with no key (PR #1029's sweep was one until its card listed it), and a key whose command is gone
+  assert.deepEqual(missing(`${E2E} && node test/new-screen/run.mjs`, E2E_SECONDS), [`${E2E_DIR}: node test/new-screen/run.mjs`]);
+  assert.deepEqual(missing(PR_1029_E2E, E2E_SECONDS), []);
   assert.deepEqual(stale(E2E, { ...E2E_SECONDS, [`${E2E_DIR}: node test/gone/run.mjs`]: 10 }), [`${E2E_DIR}: node test/gone/run.mjs`]);
   for (const [k, n] of Object.entries(E2E_SECONDS)) assert.ok(Number.isInteger(n) && n > 0, k);
   assert.equal(NEW_E2E_SECONDS, 37);

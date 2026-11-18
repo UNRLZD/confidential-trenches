@@ -76,8 +76,8 @@ a.tkr-row:hover { background: var(--bg-row-hover); }
 .tkr-board { flex: none; margin: 0 12px 12px; height: 38px; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 10px; background: var(--bg-raised); color: var(--text-2); font: 500 13px var(--font-ui); transition: color 150ms ease, background-color 150ms ease; }
 .tkr-board:hover { color: var(--text-1); background: #1e1e1e; }
 
-/* slim: the expand button and the rings (under 1500, or folded by «); opened under 1500, the full rail takes its own
-   340 column from the main column (token.css .tkp-desk; card rail-open-pushes-the-middle) */
+/* slim: the expand button and the rings (the slim mode, or folded by «); opened in the slim mode, the full rail takes its
+   own 340 column from the main column (token.css .tkp-desk; card rail-open-pushes-the-middle) */
 .tkr-exp { position: relative; display: flex; height: 52px; flex: none; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
 .tkr-exp:hover { color: var(--text-1); }
 .tkr[data-slim="true"] .tkr-a, .tkr[data-slim="true"] .tkr-b { display: none; }
