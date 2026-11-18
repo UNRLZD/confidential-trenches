@@ -20,7 +20,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { CHAINS, judge, quoted } from "./buy-box-quotes-before-funds.mjs";
+import { CHAINS, answersOf, judge, quoted } from "./buy-box-quotes-before-funds.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./buy-box-quotes-before-funds.answers.json", import.meta.url), "utf8"));
 /** A line on the main button or its tap (this card's), not on the quote. */
@@ -31,7 +31,7 @@ const offered = (a) => {
   for (const ch of Object.values(b.chains)) for (const c of ch.coins) if (c.box) Object.assign(c, { box: { ...c.box, cta: { text: "Deposit", offer: "deposit", disabled: false } }, tap: { opened: true, sent: [] } });
   return b;
 };
-const SOL_LATE = "BAD solana 7SL2VnfYsChvog5oQY9Nmtqu1wceaMiQzWoqoLQpump: the page answered an out, You receive reads \"—\"";
+const SOL_LATE = "BAD solana 7SL2VnfYsChvog5oQY9Nmtqu1wceaMiQzWoqoLQpump: the page answered an out, You receive reads \"—\"; its answers: 11139 ms out";
 
 test("recorded before 922 (Buy off, no Deposit offer): FAIL on the offer on every chain, as read", () => {
   for (const k of ["appBefore", "thisBuild", "timeout30", "askAgain"]) {
@@ -67,7 +67,7 @@ test("recorded appBefore (APP_HOST before half 2): FAIL, no quote asked on the p
     "BAD base 0xed664536023d8e4b1640c394777d34abaff1df8f: the box asked no quote of the amount",
     "BAD robinhood 0xedbf91223639800bcd5756815caf908df3b890be: no Fee row",
     "BAD robinhood 0xedbf91223639800bcd5756815caf908df3b890be: the box asked no quote of the amount",
-    'BAD near prl.omft.near: the page answered an out, You receive reads "—"',
+    'BAD near prl.omft.near: the page answered an out, You receive reads "—"; its answers: 3405 ms out',
   ]);
 });
 
@@ -100,6 +100,9 @@ test("recorded timeout30 (experiment): the box draws Solana's quote once the ans
   assert.equal(v.lines.some((l) => l.startsWith("BAD")), false);
 });
 
+/** The deposit read's judged coins: how long the page took to answer each one's amount ask (its recorded ms). */
+const DEPOSIT_MS = { solana: 1421, base: 9383, robinhood: 9004, near: 9873 };
+
 test("planted on deposit: each fact taken away FAILs; an enabled Buy on $0 FAILs", () => {
   const good = ANSWERS.deposit;
   assert.equal(judge(good).verdict, "PASS");
@@ -125,7 +128,7 @@ test("planted on deposit: each fact taken away FAILs; an enabled Buy on $0 FAILs
     // the quote, Bal, Max $0 and the over-max mark, kept
     assert.deepEqual(bads(on(chain, { balance: "$12 available" })), [`BAD ${tag}: Bal reads "$12 available", not a fresh account's "$0 available"`]);
     assert.deepEqual(bads(on(chain, { fee: null })), [`BAD ${tag}: no Fee row`]);
-    assert.deepEqual(bads(on(chain, { receive: "—" })), [`BAD ${tag}: the page answered an out, You receive reads "—"`]);
+    assert.deepEqual(bads(on(chain, { receive: "—" })), [`BAD ${tag}: the page answered an out, You receive reads "—"; its answers: ${DEPOSIT_MS[chain]} ms out`]);
     if (chain !== "near") {
       assert.deepEqual(bads(on(chain, { max: "Max $5" })), [`BAD ${tag}: the line above Buy reads "Max $5", want "Max $0"`]);
       assert.deepEqual(bads(on(chain, { bad: "false" })), [`BAD ${tag}: the amount 5 is not marked over Max`]);
@@ -134,6 +137,28 @@ test("planted on deposit: each fact taken away FAILs; an enabled Buy on $0 FAILs
     const { [chain]: _, ...rest } = good.chains;
     assert.deepEqual(bads({ chains: rest }), [`BAD ${chain}: the box was not read`]);
   }
+});
+
+test("planted (card near-buy-box-draws-every-answer): the BAD line names each answer's ms, so a late page reads apart from a dropped answer", () => {
+  const c = ANSWERS.deposit.chains.near.coins.find((x) => quoted(x.box.receive));
+  // app live run 44201271127 run 2's shape, at the times read on the live hosts 18 Nov 00:0xZ (token.intear.near: the
+  // page answered each ask past the kit client's 10 s, so the box asked again, and drew the third's out at 28.1 s)
+  const late = [
+    { amount: "5.00", askedMs: 251, ok: true, ms: 13467, result: { tap_max: "0", out: "397.16" } },
+    { amount: "5.00", askedMs: 10252, ok: true, ms: 12180, result: { tap_max: "0", out: "397.16" } },
+    { amount: "5.00", askedMs: 20253, ok: false, code: "no answer" },
+  ];
+  const near = (coin) => ({ chains: { ...ANSWERS.deposit.chains, near: { coins: [coin] } } });
+  const v = judge(near({ ...structuredClone(c), box: { ...c.box, receive: "Quoting" }, dry: late }));
+  assert.equal(v.verdict, "FAIL");
+  assert.deepEqual(v.lines.filter((l) => l.startsWith("BAD")), [
+    `BAD near ${c.coin}: the page answered an out, You receive reads "Quoting"; its answers: 13467 ms out (asked at 251 ms), 12180 ms out (asked at 10252 ms), no answer (asked at 20253 ms)`,
+  ]);
+  // a refusal by its code, an answer with no out as "no out"; the ask with no amount (Max's) is not listed
+  const mixed = [{ ok: true, ms: 40, result: { tap_max: "0" } }, { amount: "5.00", ok: false, ms: 61, code: "down" }, { amount: "5.00", ok: true, ms: 900, result: { tap_max: "0" } }, { amount: "5.00", ok: true, ms: 11000, result: { tap_max: "0", out: "1.5" } }];
+  assert.equal(answersOf({ dry: mixed }), "61 ms down, 900 ms no out, 11000 ms out");
+  // the box drew the out: no BAD, whatever the times
+  assert.equal(judge(near({ ...structuredClone(c), dry: late })).verdict, "PASS");
 });
 
 test("planted on the reads before 922 (given the offer): quoted coins on every chain PASS; a page refusal FAILs", () => {
