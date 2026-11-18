@@ -1,6 +1,9 @@
 // node --test scripts/live-checks/index-sol-trades.test.mjs: the live check replays recorded answers
-// (index-sol-trades.answers.json). good: apps/helper at the card branch run on a Mac (Solana lists passed through from the
-// deployed helper, trades read from the public chain endpoints), 2026-11-03 21:00Z: PASS. bad_not_deployed: the deployed
+// (index-sol-trades.answers.json). good: apps/helper's trades.ts run on a Mac, its pump.fun part as recorded before, its
+// Meteora part (card index-sol-trades-2) at that card's 180162ef0, the check's own readMeteora against trades.ts run in
+// process behind its routes (a one-off recorder kept out of the tree: live-checks-provider-answer refuses a new file that
+// imports a check still building its own JSON-RPC; Solana lists passed through from the deployed helper, trades read from
+// the public chain endpoints), 2026-11-18: PASS, one Meteora coin per venue. bad_not_deployed: the deployed
 // helper before this card, 404 on a listed Solana token's trades: FAIL. Made from the good answer: a tape that holds the
 // trade only after 2 s, another trader, another side, no 1s bar at the trade's second, a vendor source, a stale read, no
 // CORS echo, a tape oldest first, an extra field: each FAIL.
@@ -131,4 +134,164 @@ test("the 1s candles: a 200 after a 429 that cleared inside the span passes; a 4
   assert.ok(bad(stood).some((l) => l.endsWith("answers 429 after 75 s of reads at each Retry-After (60, 15 s)")), bad(stood).join("\n"));
   const empty = judge(edit((rec) => body(rec.candles, (b) => (b.candles = []))));
   assert.ok(bad(empty).some((l) => /the 1s candles hold the trade's second/.test(l)), bad(empty).join("\n"));
+});
+
+// card index-sol-trades-2: one listed Meteora coin per venue. good.meteora: the in-process recorder's Meteora part, its
+// signatures read back once that process's helper had stopped (its reads on the same public RPC drew 429s). On 18 Nov the lists held no coin on a DBC curve that traded, so the DBC leg reads "none to read" and its decoding
+// is held by decode.test.ts's recorded DBC trades. bad_meteora_before: the deployed helper before this card read by the
+// check's Meteora part: FAIL.
+const VENUES = ["meteora-dlmm", "meteora-dbc", "meteora-damm2"];
+const READ = VENUES.filter((v) => v in A.good.meteora);
+
+test("card index-sol-trades-2: the good answer holds a fresh trade of a listed coin on each Meteora venue, on its tape, read back on two RPCs", () => {
+  const r = check.judgeMeteora(A.good.meteora);
+  assert.deepEqual(bad(r), []);
+  assert.ok(READ.includes("meteora-dlmm") && READ.includes("meteora-damm2"), READ.join());
+  for (const v of VENUES) assert.ok(r.lines.some((l) => l.startsWith(`ok  ${v}: the trade`) || (v === "meteora-dbc" && l.startsWith(`ok  ${v}: none to read`))), v);
+});
+
+test("card index-sol-trades-2: no DBC trade passes only while the lists hold no coin on a DBC curve that trades", () => {
+  const noDbc = (fn) => edit((rec) => (delete rec.meteora["meteora-dbc"], fn(rec.meteora)));
+  assert.equal(judge(noDbc((m) => (m.dbc_curves = []))).ok, true);
+  assert.equal(judge(noDbc((m) => (m.dbc_curves = ["65iH8k736QNhuUHm1tt8X7yJXpJ517HPPq8BrVdwring"]))).ok, false, "a DBC curve coin listed");
+  assert.equal(judge(noDbc((m) => delete m.dbc_curves)).ok, false, "no DBC curve list");
+  assert.equal(judge(noDbc((m) => (m.dbc_curves = "none"))).ok, false, "a DBC curve list that is not a list");
+  const rows = [
+    { token: "A1", launchpad: "met-dbc", curve_bps: 5_000, vol_24h_usd: 2_000 },
+    { token: "B2", launchpad: "met-dbc", curve_bps: 10_000, vol_24h_usd: 2_000 },
+    { token: "C3", launchpad: "met-dbc", curve_bps: 5_000, vol_24h_usd: 0.99 },
+  ];
+  assert.equal(check.DBC_VOL_USD, 1_000);
+  assert.deepEqual(check.dbcCurves(rows), ["A1"]);
+});
+
+test("card index-sol-trades-2: the deployed helper before this card fails the Meteora part", () => {
+  const r = check.judgeMeteora(A.bad_meteora_before.meteora);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).length > 0);
+  assert.equal(judge({ ...A.good, meteora: A.bad_meteora_before.meteora }).ok, false);
+});
+
+test("card index-sol-trades-2: a venue with no fresh trade, the trade not on the tape, another side or time, a vendor source, or a signature one RPC does not read back succeeded, fails", () => {
+  const onTape = (rec, v, fn) => body(rec.meteora[v].polls.at(-1), (b) => fn(b, b.trades.find((x) => x.tx === rec.meteora[v].sig)));
+  for (const v of READ) {
+    assert.equal(judge(edit((rec) => delete rec.meteora[v])).ok, false, `${v} missing`);
+    assert.equal(judge(edit((rec) => onTape(rec, v, (b) => (b.trades = b.trades.filter((x) => x.tx !== rec.meteora[v].sig))))).ok, false, `${v} not on the tape`);
+    assert.equal(judge(edit((rec) => onTape(rec, v, (b, row) => (row.side = row.side === "b" ? "s" : "b")))).ok, false, `${v} side`);
+    assert.equal(judge(edit((rec) => (rec.meteora[v].ts += 1))).ok, false, `${v} time`);
+    assert.equal(judge(edit((rec) => (rec.meteora[v].polls.at(-1).headers["x-helper-source"] = "vendor"))).ok, false, `${v} source`);
+    assert.equal(judge(edit((rec) => (rec.meteora[v].reads[check.READ_BACK[1]] = { error: "getSignatureStatuses answered 429" }))).ok, false, `${v} read back`);
+    assert.equal(judge(edit((rec) => (rec.meteora[v].reads[check.READ_BACK[0]].value[0].err = { InstructionError: [0, "Custom"] }))).ok, false, `${v} failed`);
+  }
+  assert.equal(judge(edit((rec) => delete rec.meteora)).ok, false, "no Meteora part");
+});
+
+// card sol-meteora-tape-inside-rpc-budget: the helper serves a coin past its whole reads' budget its pool's tape and names
+// it in Server-Timing (sol-whole-cut). good_cut: the check's readMeteora at this card's head against a local helper on
+// mainnet at the head (main with sol-tape-in-order, and this card), 10 busy Solana coins open beside it, 18 Nov 20:21Z:
+// a fresh DLMM and DAMM v2 trade judged on uncut tapes, PASS (no coin of its 20 was cut that run). A cut coin skipped beside
+// a judged one is rolled_try4's DLMM venue (14 cut coins skipped, a trade judged on an uncut tape). bad_all_cut: the
+// check against a scratch build of that head with WHOLE_PER_S 0: every DBC coin it sampled cut, FAIL naming the cut.
+test("card sol-meteora-tape-inside-rpc-budget: a coin past the helper's whole reads' budget is skipped and named, and an uncut one is judged", () => {
+  const g = check.judgeMeteora(A.good_cut.meteora);
+  assert.deepEqual(bad(g), [], g.lines.join("\n"));
+  for (const v of VENUES) if (A.good_cut.meteora[v]) assert.equal(check.cutOf(A.good_cut.meteora[v].polls.at(-1)), null, `${v} judged on an uncut answer`);
+  const m = A.rolled_try4.meteora;
+  const r = check.judgeMeteora(m);
+  const dlmm = "meteora-dlmm";
+  assert.ok(m.cut[dlmm].length > 0, "the recorded run skipped cut DLMM coins");
+  assert.deepEqual(bad(r).filter((l) => l.includes(dlmm)), [], r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith(`ok  ${dlmm}: ${m.cut[dlmm].length} coin(s) past the helper's whole reads' budget skipped`)), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith(`ok  ${dlmm}: the trade `)), "a DLMM trade judged beside the skipped ones");
+  assert.equal(check.cutOf(m[dlmm].polls.at(-1)), null);
+  assert.ok(!m.cut[dlmm].some((c) => c.sig === m[dlmm].sig), "the judged trade is not a skipped one");
+});
+
+test("card sol-meteora-tape-inside-rpc-budget: every sampled coin cut fails, naming the cut; a judged coin served past the budget fails", () => {
+  const r = check.judgeMeteora(A.bad_all_cut.meteora);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => /every sampled coin .* past the helper's whole reads' budget \(sol-whole-cut/.test(l)), bad(r).join("\n"));
+  const m = structuredClone(A.good_cut.meteora);
+  const v = VENUES.find((x) => m[x]?.polls);
+  m[v].polls.at(-1).headers["server-timing"] = `sol-vendor-read;desc="rows read 1 ms ago", sol-whole-cut;desc="a Meteora trade unread 3 s ago", total;dur=4`;
+  assert.ok(bad(check.judgeMeteora(m)).some((l) => l.includes(`${v}: the judged coin`)), "a judged coin past the budget");
+  assert.equal(check.cutOf({ headers: { "server-timing": "sol-vendor-read;desc=\"x\", total;dur=3" } }), null);
+  assert.equal(check.cutOf({ headers: { "server-timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\", total;dur=3" } }), 'sol-whole-cut;desc="a Meteora trade unread 0 s ago"');
+});
+
+// card sol-meteora-tape-inside-rpc-budget: GET /v1/market/trades takes a limit only (at most 50), so a found trade its
+// coin's tape no longer answers for is skipped and named in `rolled`, never judged missing: one older than the 50 rows, or
+// older than the reach the answer names (whole_ms). rolled_try4: the check's readMeteora at 8ddec0fe2 against a local
+// helper at 7239c82e4, 18 Nov 19:51Z: DAMM v2 trade m6AJaXiFvoPs at 1795031220 s, its tape's whole_ms 1795031235000 (50
+// rows, newest 1795031191 s, oldest 1795029860 s), judged "not in its 50 rows" at 8ddec0fe2; no other DAMM v2 trade.
+const DAMM = "meteora-damm2";
+const reachOf = (v) => JSON.parse(v.polls.at(-1).body).whole_ms;
+
+test("card sol-meteora-tape-inside-rpc-budget: a trade older than the reach its tape names is skipped, not judged missing", () => {
+  const m = A.rolled_try4.meteora;
+  assert.ok(m[DAMM].ts * 1000 < reachOf(m[DAMM]), "the recorded trade is older than the tape's named reach");
+  const r = check.judgeMeteora(m);
+  assert.deepEqual(r.lines.filter((l) => /not in its \d+ rows/.test(l)), [], r.lines.join("\n"));
+  // with a judged DAMM v2 trade beside it (the good answer's), the skipped one is not BAD
+  const both = structuredClone(m);
+  both.rolled = { [DAMM]: [{ coin: m[DAMM].coin, sig: m[DAMM].sig, ts: m[DAMM].ts, why: check.outOfSpan(m[DAMM]) }] };
+  both[DAMM] = structuredClone(A.good.meteora[DAMM]);
+  const rb = check.judgeMeteora(both);
+  assert.deepEqual(bad(rb).filter((l) => l.includes(DAMM)), [], rb.lines.join("\n"));
+  assert.ok(rb.lines.some((l) => l.startsWith(`ok  ${DAMM}: 1 trade(s) out of its tape's span skipped: m6AJaXiFvoPs before the tape's named reach`)), rb.lines.join("\n"));
+});
+
+test("card sol-meteora-tape-inside-rpc-budget: a trade older than a full tape's 50 rows is skipped; one missing inside the rows' span and the reach is BAD", () => {
+  const g = A.good.meteora[DAMM];
+  const rows = (b) => JSON.parse(b);
+  // 50 rows all newer than the trade, the trade not among them: rolled past
+  const rolledPast = structuredClone(g);
+  const b = rows(rolledPast.polls.at(-1).body);
+  const newest = (g.ts + 60) * 1000;
+  b.trades = Array.from({ length: 50 }, (_, i) => ({ ...b.trades[0], t_ms: newest - i * 100, tx: `${"1".repeat(80)}${String(i).padStart(8, "0")}`.slice(-88) }));
+  delete b.whole_ms;
+  rolledPast.polls.at(-1).body = JSON.stringify(b);
+  assert.match(check.outOfSpan(rolledPast) ?? "", /^rolled past the tape's 50 rows/);
+  // the trade's row taken out of the good tape: inside its span and its reach, so the tape's fault
+  const missing = structuredClone(g);
+  const mb = rows(missing.polls.at(-1).body);
+  mb.trades = mb.trades.filter((x) => x.tx !== g.sig);
+  missing.polls.at(-1).body = JSON.stringify(mb);
+  assert.equal(check.outOfSpan(missing), null);
+  const r = check.judgeMeteora({ ...A.good.meteora, [DAMM]: missing });
+  assert.ok(bad(r).some((l) => l.startsWith(`BAD ${DAMM}: the trade ${g.sig.slice(0, 12)} is on the coin's tape, not in its`)), r.lines.join("\n"));
+});
+
+test("card sol-meteora-tape-inside-rpc-budget: a venue whose every sampled trade was skipped is BAD, so a run of skips never passes", () => {
+  const r = check.judgeMeteora(A.rolled_try4.meteora);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l.startsWith(`BAD ${DAMM}: every sampled trade was skipped, none judged: 1 out of its tape's span (m6AJaXiFvoPs`)), bad(r).join("\n"));
+  // the same from a recorded `rolled` list with no judged trade
+  const m = structuredClone(A.good.meteora);
+  m.rolled = { [DAMM]: [{ coin: m[DAMM].coin, sig: m[DAMM].sig, ts: m[DAMM].ts, why: "rolled past the tape's 50 rows (oldest 1)" }] };
+  delete m[DAMM];
+  assert.ok(bad(check.judgeMeteora(m)).some((l) => l.startsWith(`BAD ${DAMM}: every sampled trade was skipped`)));
+});
+
+// card sol-meteora-tape-inside-rpc-budget: side_try6, the check's readMeteora at 8ddec0fe2 against a local helper at that
+// head, 18 Nov 20:12Z: DAMM v2 transaction 25KF3ptvBtY1 of E5cbap6o holds two rows of the coin (a sell, then a buy of
+// 26023135.8611); the event found was the buy, judged against the sell row at 8ddec0fe2.
+test("card sol-meteora-tape-inside-rpc-budget: a transaction with several rows of the coin is judged on the row of the trade's side and time", () => {
+  const v = A.side_try6.meteora[DAMM];
+  const rows = JSON.parse(v.polls.at(-1).body).trades.filter((r) => r.tx === v.sig);
+  assert.deepEqual(rows.map((r) => r.side), ["s", "b"], "the recorded tape holds both rows, the sell first");
+  const r = check.judgeMeteora(A.side_try6.meteora);
+  assert.deepEqual(bad(r).filter((l) => l.startsWith(`BAD ${DAMM}`)), [], r.lines.join("\n"));
+  assert.ok(r.lines.includes(`ok  ${DAMM}: its side "b" and time ${v.ts * 1000} are the event's (b, ${v.ts * 1000})`), r.lines.join("\n"));
+  // no row of the trade's side: still BAD
+  const m = structuredClone(A.side_try6.meteora);
+  const b = JSON.parse(m[DAMM].polls.at(-1).body);
+  b.trades = b.trades.filter((x) => !(x.tx === v.sig && x.side === "b"));
+  m[DAMM].polls.at(-1).body = JSON.stringify(b);
+  assert.ok(bad(check.judgeMeteora(m)).some((l) => l.startsWith(`BAD ${DAMM}: its side "s"`)));
+});
+
+test("card sol-meteora-tape-inside-rpc-budget: the check keeps open fewer coins than the helper's walks, room left for the users' pages", async () => {
+  const { OPEN_MAX } = await import("../../apps/helper/src/data/solana/trades.ts");
+  assert.ok(check.METEORA_WATCH + check.OPEN <= OPEN_MAX - 10, `${check.METEORA_WATCH} + ${check.OPEN} of ${OPEN_MAX}`);
 });

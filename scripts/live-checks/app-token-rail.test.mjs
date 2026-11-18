@@ -1,11 +1,13 @@
 // node --test scripts/live-checks/app-token-rail.test.mjs: the live check's verdict replays recorded answers
-// (app-token-rail.answers.json), each read on 2026-11-08 by app-token-rail.mjs collect():
-//   good: HELPER_HOST's lists read (200, Solana, 100 Trending rows traded in the hour, 30 New rows) and this card's
-//         terminal build (vite build, read from disk), whose script and stylesheet hold the rail and its width modes: PASS;
-//   bad:  the same helper read and APP_HOST as deployed before this card, read over https: its script and stylesheet
-//         hold none of them: FAIL.
+// (app-token-rail.answers.json), each read on 2026-11-18 by app-token-rail.mjs collect():
+//   good: HELPER_HOST's lists read (200, Solana, Trending rows traded in the hour, New rows) and this card's terminal
+//         build (vite build, read from disk and drawn at APP_HOST's name in the stand-in shell), whose script and
+//         stylesheet hold the rail and its width modes and whose rail is drawn full at 1440: PASS;
+//   bad:  the same helper read and APP_HOST as deployed before card app-token-rail-r5-fit, read over https and drawn in
+//         SIGN_HOST's shell: its files hold the rail, but its rail is slim at 1440, where the full one fits: FAIL.
 // Planted from the good answer: a 503, another chain, an empty Trending or New list, a script without the expand
-// button, a stylesheet without the hidden mode, a stylesheet the host did not answer: each fails.
+// button, a stylesheet without the hidden mode, a stylesheet the host did not answer, a slim, missing or headless rail
+// or a page not drawn at 1440: each fails.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -22,20 +24,37 @@ const mut = (f) => {
   return judge(rec);
 };
 
-test("recorded good answer: the lists the rail draws and the built page's rail: PASS", () => {
+test("recorded good answer: the lists the rail draws and the built page's rail, full at 1440: PASS", () => {
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.deepEqual(ANSWERS.good.drawn, { state: "ready", mode: "full", width: 340, head: true });
   assert.ok(ANSWERS.good.lists.trending > 0 && ANSWERS.good.lists.new > 0);
   assert.deepEqual(new Set(ANSWERS.good.js.flatMap((f) => f.found)), new Set(JS_MARKERS));
   assert.deepEqual(new Set(ANSWERS.good.css.flatMap((f) => f.found)), new Set(CSS_MARKERS));
 });
 
-test("recorded bad answer: APP_HOST before this card holds no rail: FAIL", () => {
+test("recorded bad answer: APP_HOST before this card draws the slim rail at 1440: FAIL", () => {
   const r = judge(ANSWERS.bad);
   assert.equal(r.ok, false);
   const b = bad(r.lines);
-  assert.ok(b.some((l) => l === `BAD the scripts lack the rail: ${JS_MARKERS.join(", ")}`), r.lines.join("\n"));
-  assert.ok(b.some((l) => l === `BAD the stylesheets lack the rail's rules: ${CSS_MARKERS.join(", ")}`), r.lines.join("\n"));
+  assert.equal(ANSWERS.bad.drawn.mode, "slim");
+  assert.ok(b.includes(`BAD at 1440: the rail is slim (${ANSWERS.bad.drawn.width} layout px, no head); want the full rail (340 with its head), as R5 draws it at 1440`), r.lines.join("\n"));
+  // its files hold the rail and the slim rule at the screen's 1500, not at the page box's 1527
+  assert.deepEqual(b.filter((l) => !l.startsWith("BAD at 1440")), ["BAD the stylesheets lack the rail's rules: 1526.98px"], r.lines.join("\n"));
+});
+
+test("planted: a slim, missing or headless rail, or a page not drawn, at 1440: each fails", () => {
+  const cases = {
+    slim: (d) => Object.assign(d, { mode: "slim", width: 78, head: false }),
+    "slim opened": (d) => (d.mode = "slim"),
+    none: (d) => Object.assign(d, { mode: "none", width: null, head: false }),
+    "no head": (d) => (d.head = false),
+    "a narrower column": (d) => (d.width = 300),
+    "not read": (d) => Object.assign(d, { mode: null, width: null, head: false, state: null }),
+    "an error page": (d) => (d.state = "error"),
+  };
+  for (const [name, f] of Object.entries(cases)) assert.equal(mut((rec) => f(rec.drawn)).ok, false, name);
+  assert.equal(mut((rec) => delete rec.drawn).ok, false, "no drawn read");
 });
 
 test("planted: a 503, another chain, an empty Trending or New list: each fails", () => {

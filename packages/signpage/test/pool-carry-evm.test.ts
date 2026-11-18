@@ -217,6 +217,8 @@ const carries = async (ns: NoteStore, scope: bigint) => (await ns.list()).filter
 const RETURN: NoteRef = { kind: "return", c: "evm", l: LABEL, j: 0 };
 const RETURN_PRE = noteSecrets(SEED, RETURN).precommitment;
 
+const REST = (await import("../src/pool-buy-evm-rest.ts")) as Record<string, unknown>;
+
 for (const name of ["base", "robinhood"] as const) {
   test(`${name}: a refused buy's ETH on W is carried into the pool as one rung by W's own deposit, INCOMING before it leaves, UNSPENT from its final Deposited, W ended carried with its tail written; the seed zeroed`, async () => {
     const ch = chain(name);
@@ -685,7 +687,6 @@ test("every W key the pass derives (the owed list's and the signature's) is zero
 });
 
 // ---- card buy-any-amount-on-every-chain: a buy's rest W's change goes back as rungs ----
-const REST = (await import("../src/pool-buy-evm-rest.ts")) as Record<string, unknown>;
 const WBUY_KEY = REST.EVM_WBUY_KEY as string;
 const RUNG = 2n * CHUNK; // 0.002 ETH, a rung of the ladder
 

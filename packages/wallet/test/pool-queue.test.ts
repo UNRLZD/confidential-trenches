@@ -123,6 +123,11 @@ async function landDeposit(v: Vault, pool: Fake, value: bigint, nonce: bigint): 
   return v.ns.move(n.id, "INCOMING", "UNSPENT", { leaf: { value, label, commitment, leafIndex: BigInt(v.stateLeaves.length - 1) } });
 }
 
+// an empty pool's first deposit is buyable in its first minute. The pool's trees refuse a
+// cut that holds no leaf (the wallet's PoolNoLeafError, a plain Error before it was typed); the queue's epoch read takes
+// that as an epoch tree of no leaf, so the note is proved on the newest root in the same pass.
+const NoLeaf = (((await import("../src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
+
 test("one prover at a time; the ready set min(hardwareConcurrency - 1, 3), at least 1 (card signpage-prover-threads)", () => {
   const hs = [undefined, 0, 1, 2, 3, 4, 8, 16, 2.5];
   assert.deepEqual(hs.map((h) => proofPoolSize(h)), [1, 1, 1, 1, 1, 1, 1, 1, 1]);
@@ -1447,11 +1452,6 @@ test("take writes the last height and nullifier it is handed on the RESERVED not
   assert.equal(rb.state, "RESERVED");
   assert.equal((await v.ns.marks()).has(b!.noteId), false);
 });
-
-// an empty pool's first deposit is buyable in its first minute. The pool's trees refuse a
-// cut that holds no leaf (the wallet's PoolNoLeafError, a plain Error before it was typed); the queue's epoch read takes
-// that as an epoch tree of no leaf, so the note is proved on the newest root in the same pass.
-const NoLeaf = (((await import("../src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
 
 test("the EVM pool's shape: an empty pool whose first leaf lands this epoch: the queue's pass makes its proof on the newest root, one the pool holds (before: the pass failed)", async () => {
   const v = await vaultWith([]);

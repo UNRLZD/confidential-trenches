@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 // @ts-expect-error: a plain .mjs script, no types
-import { runMutant, runTests } from "../scripts/mutant-run.mjs";
+import { runMutant, runTests } from "../../../scripts/mutant-run.mjs";
 
 const alive = (pid: number): boolean => {
   try {
@@ -58,4 +58,15 @@ test("a mutant whose only failures are tests cancelled at their own timeout is r
   assert.deepEqual(pick(verdictOf(`test("fails", () => { throw new Error("told apart"); });`)), { verdict: "killed", runs: 1, fail: 1, cancelled: 0 });
   // a pass: survived at once
   assert.deepEqual(pick(verdictOf(`test("passes", () => {});`)), { verdict: "survived", runs: 1, fail: 0, cancelled: 0 });
+});
+
+test("a run in which no test ran (a name pattern that matches none) has no verdict, never a survivor (card mutant-sweeps-refuse-no-verdict)", { timeout: 30_000 }, () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mutant-run-"));
+  try {
+    writeFileSync(path.join(dir, "case.test.mjs"), `import { test } from "node:test";\ntest("passes", () => {});\n`);
+    const r = runMutant(["--test-name-pattern=^no such test", "case.test.mjs"], { cwd: dir, timeoutMs: 20_000 }) as { verdict: string; runs: number; tests: number };
+    assert.deepEqual({ verdict: r.verdict, runs: r.runs, tests: r.tests }, { verdict: "no test", runs: 1, tests: 0 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

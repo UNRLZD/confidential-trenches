@@ -2,9 +2,9 @@
 // 13898c19; card sol-rent-back-dust-burn): plants
 // one mutant at a time in the signing page's rent back (src/pool-sell.ts) and the kit's teardown plan
 // (packages/kit/src/checks/solana/checks.ts), runs the test that holds it, expects it to fail, puts the source back.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 import { sweepPartOrExit } from "../../../scripts/mutant-part.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const SELL = `${W}/src/pool-sell.ts`;
@@ -121,7 +121,7 @@ export const M = [
   ["floor F6 one RPC's read of the sell filled", SELL, T, "if (got[0].got === \"ok\" && got[1].got === \"ok\") return \"filled\";", "if (got[0].got === \"ok\" || got[1].got === \"ok\") return \"filled\";"],
   ["floor F7 one RPC's silence not_landed", SELL, T, "if (got[0].got === \"none\" && got[1].got === \"none\" && (await goneOnBoth(", "if ((got[0].got === \"none\" || got[1].got === \"none\") && (await goneOnBoth("],
   ["floor F10 not_landed before both are past", SELL, T, "const at = await pastAt(rpcs, last);", "const at = [0, 0] as const;"],
-  ["floor F8 a full sell kept on W runs no rent back", SELL, T, "        if (v === \"filled\") later.back = keeps ? swept : back;\n", "        if (v === \"filled\" && keeps) later.back = swept;\n"],
+  ["floor F8 a full sell runs no rent back (the one rule both of a sale's ends take)", SELL, T, "    const onFill = keeps ? swept : back;\n", "    const onFill = keeps ? swept : undefined;\n"],
   ["floor F9 a sell kept on W writes a note", SELL, T, "const note = kept ? null : await store.move(", "const note = false ? null : await store.move("],
   // review of b38cd8c2: F1 a read that throws is no RPC's word; F3 none only at a slot each RPC is past at; F4 the kept
   // sell's record before the send, settled on load, dropped at its verdict
@@ -233,20 +233,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exitCode = 1;
       continue;
     }
-    writeFileSync(file, pairs.reduce((s, [f, t]) => s.replace(f, t), src));
-    // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
-    let r;
-    try {
-      r = runSync("node", ["--test", "--test-timeout=20000", ...(pattern ? [`--test-name-pattern=${pattern}`] : []), test], { cwd: W, encoding: "utf8", timeoutMs: 180_000 });
-    } finally {
-      writeFileSync(file, src);
+    // a run past 180 s is killed, its process group with it; a run with no verdict is refused (scripts/mutant-run.mjs)
+    const r = withPlant(file, pairs.reduce((s, [f, t]) => s.replace(f, t), src), () => runMutant(["--test-timeout=20000", ...(pattern ? [`--test-name-pattern=${pattern}`] : []), test], { cwd: W, timeoutMs: 180_000 }));
+    if (!refused(name, r)) {
+      const by = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((m) => m[1].slice(0, 70)).filter((v, i, a) => a.indexOf(v) === i);
+      const dead = r.verdict === "killed";
+      if (dead) killed++;
+      console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
     }
-    const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-    const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-    const by = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((m) => m[1].slice(0, 70)).filter((v, i, a) => a.indexOf(v) === i);
-    const dead = r.status !== 0 && Number(fail) > 0;
-    if (dead) killed++;
-    console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
     if (readFileSync(file, "utf8") !== src) {
       console.log("SOURCE NOT RESTORED");
       process.exitCode = 1;

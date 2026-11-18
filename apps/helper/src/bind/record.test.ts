@@ -5,7 +5,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +15,7 @@ import { parseRecordBody, readRecords, RECORD_BODY_MAX, type RecordDeps } from "
 import { accountSlots, encodeAction, encodeTransaction, type Rpc } from "./send.ts";
 import { createTradeReads, createTradeStore, type TradeRecord } from "./trade.ts";
 import { API_RATE_MAX, handler, RECORD_RATE_MAX, RECORD_TOTAL_MAX } from "../server.ts";
+import { call as bounded, listening } from "../../test/servers.ts";
 
 const W1 = "a1".repeat(32);
 const W2 = "b2".repeat(32);
@@ -256,21 +256,14 @@ test("the read never writes the store and never waits on a carry: W's carry slot
 
 // ---- the route ----
 
-function call(port: number, method: string, path: string, body?: string, xff = "203.0.113.7") {
-  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port, method, path, headers: { "content-type": "application/json", origin: "https://ct-app.unrealized.trade", "x-forwarded-for": xff } }, (res) => {
-      let b = "";
-      res.setEncoding("utf8").on("data", (d) => (b += d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: b }));
-    });
-    r.on("error", fail).end(body);
-  });
-}
+const call = (port: number, method: string, path: string, body?: string, xff = "203.0.113.7") =>
+  bounded(port, { method, path, headers: { "content-type": "application/json", origin: "https://ct-app.unrealized.trade", "x-forwarded-for": xff }, body }, "the helper");
 
 async function route(t: { after(fn: () => unknown): void }, record: BindSender["record"]) {
   let clock = NOW;
   const bind: BindSender = { carry: async () => ({ status: 200, body: { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" } }), warm: () => undefined, stop: () => undefined, record };
   const h = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind, null, new Map(), new Map(), () => (clock += 3)));
-  await new Promise<void>((ok) => h.listen(0, "127.0.0.1", () => ok()));
+  await listening(h.listen(0, "127.0.0.1"), "the helper");
   t.after(() => new Promise<void>((ok) => (h.closeAllConnections(), h.close(() => ok()))));
   return { port: (h.address() as AddressInfo).port, jump: (ms: number) => (clock += ms) };
 }

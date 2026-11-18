@@ -497,6 +497,18 @@ test("the mainnet page's send set names no host a browser is refused by: its pub
   assert.equal([...seen].find(([, p]) => p === "rpc")![0], SOLANA_PROVIDER_A);
 });
 
+// Card solana-send-browser-origin: SIGN_HOST's connect-src names no host that refuses the page's Origin. With the
+// page's Origin, 2026-11-18 12:03:10-12:03:40Z, api.mainnet-beta.solana.com answered the preflight 200 but every POST
+// 403 "Access forbidden"; no code on the page reaches it (the kit's send default is publicnode, provider A), so a host
+// the page may reach and is refused by is only room in the policy.
+test("SIGN_HOST's connect-src names no Solana host that refuses the page's Origin", () => {
+  const refused = ["https://api.mainnet-beta.solana.com", "https://api.mainnet.solana.com"];
+  const site = readFileSync(new URL("../public/_headers", import.meta.url), "utf8").split("\n").find((l) => l.trim().startsWith("Content-Security-Policy:"))!;
+  const connect = site.split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "))!.split(/\s+/).slice(1);
+  for (const h of refused) assert.ok(!connect.includes(h), `connect-src names ${h}, which refuses the page's Origin`);
+  for (const h of refused) assert.ok(!CSP.find(([k]) => k === "connect-src")![1].split(/\s+/).includes(h), `the skeleton check's pin names ${h}`);
+});
+
 test("a running trade's wallets are not picked by a second trade; one whose tx is still unknown stays out after it ends", async () => {
   let release!: () => void;
   const hold = new Promise<void>((r) => (release = r));

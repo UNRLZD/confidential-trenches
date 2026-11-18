@@ -1,7 +1,7 @@
 // node packages/wallet/scripts/pool-solana-review-mutants.mjs (card notes-per-pool-sol): the review's 40 mutants of
 // bd8dea0, find strings mapped to fold 3's code; each runs the whole pool-solana.test.ts (any failing test kills it).
-import { readFileSync, writeFileSync } from "node:fs";
-import { runMutant } from "./mutant-run.mjs";
+import { readFileSync } from "node:fs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 import { fileURLToPath } from "node:url";
 const W = process.argv[2] ?? fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, ""); // packages/wallet
 const S = `${W}/src/pool/solana.ts`, R = `${W}/src/pool/solana-restore.ts`, K = `${W}/../kit/src/trade/solana/pool-buy.ts`;
@@ -57,12 +57,11 @@ for (const [id, f, find, repl, equivalent] of M) {
   if (equivalent !== undefined) { console.log(`${id} EQUIVALENT: ${equivalent.replace(/^equivalent: /, "")}`); continue; }
   const src = readFileSync(f, "utf8");
   if (src.split(find).length !== 2) { console.log(`${id} NOT ONCE: ${find.slice(0, 80)}`); continue; }
-  writeFileSync(f, src.replace(find, repl));
-  const r = runMutant(["test/pool-solana.test.ts"], { cwd: W, timeoutMs: 180_000 });
-  writeFileSync(f, src);
+  const r = withPlant(f, src.replace(find, repl), () => runMutant(["test/pool-solana.test.ts"], { cwd: W, timeoutMs: 180_000 }));
   const names = [...r.stdout.matchAll(/^✖ (.+?) \(/gm)].map((m) => m[1].slice(0, 50));
   // HUNG: the whole file runs, so which test hangs is unknown; CANCELLED: only tests stopped at their own timeout, on two
-  // runs: neither is counted as killed
+  // runs; NO TEST: no test ran; each refused, never counted as killed (scripts/mutant-run.mjs)
+  if (refused(id, r)) continue;
   const k = r.verdict === "killed";
   if (k) killed++;
   console.log(`${id} ${r.verdict.toUpperCase()} fail=${r.fail} cancelled=${r.cancelled} runs=${r.runs} ${k ? names.join(" | ") : ""}`);

@@ -10,7 +10,7 @@
 // a crowd opens every listed coin's first chart (15m) at once. Want: no answer a refusal (non-200, or 200 with no bars).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { handler } from "./server.ts";
@@ -19,6 +19,7 @@ import { geckoBudget, GT_LIMIT_PER_MIN, GT_SERVE_MS } from "./data/gecko.ts";
 import { b58encode } from "./data/solana/lists.ts";
 import { AHEAD_TICK_MS, createSolanaToken } from "./data/solana/token.ts";
 import { createSolanaTrades } from "./data/solana/trades.ts";
+import { call, listening } from "../test/servers.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./data/solana/fixtures/token-page.json", import.meta.url), "utf8"));
 const NOW = Date.parse("2026-11-02T13:53:00Z");
@@ -39,15 +40,7 @@ function gecko() {
   return { urls, fetch };
 }
 const silent = { async handle() { return { status: 503, headers: {}, body: "{}" }; } };
-function get(port: number, path: string, ip: string): Promise<{ status: number; body: string }> {
-  return new Promise((done, fail) => {
-    const r = request({ host: "127.0.0.1", port, path, headers: { origin: APP, "x-forwarded-for": ip }, agent: false }, (res) => {
-      let b = "";
-      res.setEncoding("utf8").on("data", (d) => (b += d)).on("end", () => done({ status: res.statusCode!, body: b }));
-    });
-    r.on("error", fail).end();
-  });
-}
+const get = (port: number, path: string, ip: string) => call(port, { path, headers: { origin: APP, "x-forwarded-for": ip }, agent: false }, "the helper");
 type Ahead = { ahead: () => Promise<string | null> };
 
 async function flood() {
@@ -69,7 +62,7 @@ async function flood() {
   const lines: string[] = [];
   const refusals = refusalLog((l) => lines.push(l));
   const h = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, tok as never, undefined, null, new Map(), new Map(), now, {}, {}, () => true, Promise.resolve(), () => ({}), refusals));
-  await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
+  await listening(h.listen(0, "127.0.0.1"), "the helper");
   const port = (h.address() as AddressInfo).port;
   try {
     const reads = MINTS.flatMap((m) => Array.from({ length: CROWD }, (_, i) => ({ m, ip: `198.18.0.${i + 1}` })));

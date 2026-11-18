@@ -59,7 +59,7 @@
 // Nothing here logs.
 import { POOL_ASSET_DECIMALS, type PoolStatePrice, type TradeStage, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { evmPoolBuyQuote, evmPoolIndexPools, EvmQuoteError, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../kit/src/checks/evm/quote.ts";
-import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolBuyWarm } from "../../kit/src/trade/evm/buy-tap.ts";
+import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolBuyWarm, evmPoolV3Tiers } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
@@ -147,6 +147,9 @@ export type EvmPoolBuyHost = {
   quote(req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote>;
   /** The token's v4 pools in the chain's served pool index (the kit's evmPoolIndexPools), or null where none is served. */
   indexPools?(network: EvmPoolChain, token: string): readonly EvmPoolKey[] | null;
+  /** The kit's evmPoolV3Tiers: which v3 fee tiers hold a pool of the token, so the tap asks no tier with none (card
+   *  robinhood-tap-asks-no-missing-v3-tier). None: every tier is asked. */
+  v3Tiers?: (network: EvmPoolChain, token: string, fees: readonly number[]) => Promise<readonly boolean[] | null>;
   /** The kit's evmPoolBuildQuoted. */
   build(adapter: string, q: EvmPoolBuyQuote): EvmPoolBuy;
   /** The token's decimals, the same on both RPCs (rules/pool.ts tokenDecimalsOf, via pool-kinds.ts keptTokenDecimals); throws otherwise. */
@@ -249,9 +252,9 @@ export const evmLastRouteReset = (): void => evmBuyTapReset();
  *  list) or that no pool quotes (no_reference) is one this build does not trade, venue_not_built, as a Solana coin on a
  *  venue not built is (pool-buy.ts), which the app draws Unavailable with no Retry (card
  *  base-coin-quote-check-names-its-cause: the same tap is refused again); any other is quote_check_failed. */
-async function quoteOf(h: Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools">, network: EvmPoolChain, token: string, amountIn: bigint, slippageBps: number): Promise<EvmPoolBuyQuote> {
+async function quoteOf(h: Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "v3Tiers">, network: EvmPoolChain, token: string, amountIn: bigint, slippageBps: number): Promise<EvmPoolBuyQuote> {
   try {
-    return await evmPoolBuyQuoteTap({ chain: network, token, amountIn, slippageBps }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null) });
+    return await evmPoolBuyQuoteTap({ chain: network, token, amountIn, slippageBps }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null), ...(h.v3Tiers === undefined ? {} : { v3Tiers: h.v3Tiers }) });
   } catch (e) {
     if (e instanceof EvmBuyTapRefused) return no(e.code === "quote_check_failed" ? e.code : "venue_not_built", refusalRule(e));
     throw e;
@@ -415,7 +418,7 @@ export function evmMostWithCash(ready: readonly ReadyProof[], fee: bigint, pays:
 
 /** What pool.buy.dry quotes `out` with on Base and Robinhood: the tap's quote path (quoteOf: the page's quote, venues
  *  and index pools) on the pin's network, and the token's decimals as the tap reads them. */
-export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "decimals"> & {
+export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "v3Tiers" | "decimals"> & {
   network: EvmPoolChain;
   /** The chain's pool index for this quote (pool-testnet.ts evmIndexReady): started where none runs or is served, and
    *  settled once its sync ends; the quote waits for it at most EVM_DRY_INDEX_WAIT_MS. None: no wait. */
@@ -451,7 +454,7 @@ const pageDecimals = (chain: Chain, rpcs: readonly [EvmRpc, EvmRpc]) => (token: 
 
 /** The dry's quote host on the page: the buy's own quote and decimals (evmBuyHost) on the chain's pinned pool. */
 export function evmDryQuote(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], fetchFn?: typeof fetch, indexed?: () => Promise<boolean>, scanless?: () => boolean): EvmDryQuote {
-  return { network: pin.network, venues: evmPoolVenues(), quote: pageQuote(fetchFn, true, scanless), indexPools: evmPoolIndexPools, decimals: pageDecimals(chain, rpcs), ...(indexed === undefined ? {} : { indexed }) };
+  return { network: pin.network, venues: evmPoolVenues(), quote: pageQuote(fetchFn, true, scanless), indexPools: evmPoolIndexPools, v3Tiers: evmPoolV3Tiers, decimals: pageDecimals(chain, rpcs), ...(indexed === undefined ? {} : { indexed }) };
 }
 
 /** Whether the chain's index sync the dry's host started (`indexed`) has ended, waiting for it at most
@@ -492,7 +495,7 @@ export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint)
 export async function evmDryWarm(h: EvmDryQuote, token: string): Promise<void> {
   try {
     if (!(await indexEnded(h))) return;
-    await evmPoolBuyWarm({ chain: h.network, token }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null) });
+    await evmPoolBuyWarm({ chain: h.network, token }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null), ...(h.v3Tiers === undefined ? {} : { v3Tiers: h.v3Tiers }) });
   } catch {
     // a warm reads ahead only: what it meets, the tap meets again
   }
@@ -1027,6 +1030,7 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
     // quote asked scanless (a shown price's) is never one a buy signs from (signedQuote)
     quote: (req) => pageQuote(page.fetch)(req).then(signedQuote),
     indexPools: evmPoolIndexPools,
+    v3Tiers: evmPoolV3Tiers,
     build: evmPoolBuildQuoted,
     // the page's kept decimals (pool-kinds.ts keptTokenDecimals: read on both RPCs and kept, so a sell after it reads none);
     // no wait here: this read falls between the buy's quote check and W's signature, and fails fast as the heads read does

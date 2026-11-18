@@ -76,6 +76,10 @@ const pair = (network: "mainnet" | "testnet", a: World, b: World = a, log: strin
   [fake(EXIT_NETWORKS[network].rpcs[0], a, log), fake(EXIT_NETWORKS[network].rpcs[1], b, log)] as const;
 const holdings = (network: "mainnet" | "testnet", ids: string[], a: World, b: World = a, log: string[] = []) => exitHoldings({ network, ids, rpcs: pair(network, a, b, log) }, noSleep);
 
+const named = (network: "mainnet" | "testnet", accounts: readonly string[]) => pair(network, { bal: {}, mt: {}, accounts });
+const R_TEST = await (async () => { const r = await exitRecipient(TYPED, "testnet", named("testnet", [TYPED]), noSleep); assert.ok(r.ok); return r.recipient; })();
+const R_MAIN = await (async () => { const r = await exitRecipient(TYPED_MAIN, "mainnet", named("mainnet", [TYPED_MAIN]), noSleep); assert.ok(r.ok); return r.recipient; })();
+
 // ---------- the reads ----------
 test("a halt on both RPCs reads as halted, never a zero, in either error shape; a true zero reads as a held zero", async () => {
   const [u, r] = [idOf(ACCOUNTS[0]!), idOf(ACCOUNTS[1]!)];
@@ -148,7 +152,6 @@ test("refused before any read: an id that is not a 64-hex implicit account, a pa
 });
 
 // ---------- the typed account ----------
-const named = (network: "mainnet" | "testnet", accounts: readonly string[]) => pair(network, { bal: {}, mt: {}, accounts });
 test("the typed account: a named account that exists on both RPCs passes; one that exists on neither is no-account; a split is unread", async () => {
   const ok = await exitRecipient(` ${TYPED} `, "testnet", named("testnet", [TYPED]), noSleep);
   assert.ok(ok.ok && ok.recipient.account === TYPED && ok.recipient.network === "testnet");
@@ -213,8 +216,6 @@ function decode(m: BuiltMove): Tx {
   return { signer, publicKey, nonce, receiver, actions };
 }
 
-const R_TEST = await (async () => { const r = await exitRecipient(TYPED, "testnet", named("testnet", [TYPED]), noSleep); assert.ok(r.ok); return r.recipient; })();
-const R_MAIN = await (async () => { const r = await exitRecipient(TYPED_MAIN, "mainnet", named("mainnet", [TYPED_MAIN]), noSleep); assert.ok(r.ok); return r.recipient; })();
 const typedOf = (n: "mainnet" | "testnet") => (n === "mainnet" ? TYPED_MAIN : TYPED);
 const tokenRead = (account: ExitAccount, usdc: bigint, registered = true, network: "mainnet" | "testnet" = "testnet", to = typedOf(network)): MoveOutReadFor =>
   ({ height: H, blockHash: BLOCK, nonce: 41n, free: 10n ** 24n, usdc, registered, gasPrice: 100_000_000n, u: idOf(account), to, token: EXIT_TOKENS[network] });

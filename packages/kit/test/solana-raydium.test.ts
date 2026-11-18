@@ -122,6 +122,21 @@ for (const v of VECTORS) {
   });
 }
 
+// card second-places-held-by-tests: a scanned pool's reference keeps both providers' slots as the pump venues' does
+// (pool.ts lookScanned, a second place of the rule), so its slot is the lower one whichever provider read the lower
+test("card solana-reference-read-holds-a-slot-apart: the reference's slot is the lower of the two providers' slots, for a scanned pool too (Raydium CPMM and AMM v4)", async () => {
+  for (const v of VECTORS) {
+    const [pa, pb] = Object.values(v.providers) as [Provider, Provider];
+    const low = Math.min(pa.slot, pb.slot);
+    for (const [sa, sb] of [[low + 1, low], [low, low + 3]] as const) {
+      const r = await readSolanaReferenceWhy([replay({ ...pa, slot: sa }), replay({ ...pb, slot: sb })], req(v, "buy", 100_000_000n));
+      assert.ok("reference" in r, `${v.kind} ${sa}/${sb}: ${"refused" in r ? r.refused : ""}`);
+      assert.deepEqual(r.reference.pools.map((p) => p.venue), [v.kind], `${v.kind}: the scanned pool alone`);
+      assert.equal(r.reference.slot, low, `${v.kind} ${sa}/${sb}`);
+    }
+  }
+});
+
 // Only the scan's first read of a pool lies (the read that names the pool alone, which plans the second read's account
 // list in pool.ts lookScanned); every later read on both providers is honest. Any token account of a mint can be made out
 // to a venue's program-wide authority, so a list naming one passes the vault's mint and owner check: the list must be the

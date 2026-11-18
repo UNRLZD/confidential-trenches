@@ -127,8 +127,8 @@ export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>
 /** One testnet RPC as the page reads it: the helper's route with the kit's HELPER_FETCH_INIT (as pageHelperRpc), any
  *  other directly; both with the page's retry, the helper's route with `helperRetry` when a read names it (a pool
  *  settle's and restore's, pageSolanaSettleRpcs). */
-export const testnetRpc = (url: string, helperRetry: SolanaRpcRetry = SOLANA_RPC_RETRY, kind: ReadKind = "trade"): SolanaRpc =>
-  url.startsWith(`${TRADE_HELPER}/`) ? lanedRpc(url, { kind, retry: helperRetry, init: HELPER_FETCH_INIT }) : pageRpc(url, kind);
+export const testnetRpc = (url: string, helperRetry: SolanaRpcRetry = SOLANA_RPC_RETRY, kind: ReadKind = "trade", spare = false): SolanaRpc =>
+  url.startsWith(`${TRADE_HELPER}/`) ? lanedRpc(url, { kind, retry: helperRetry, init: HELPER_FETCH_INIT }) : pageRpc(url, kind, spare);
 /** How long a state read waits for each queue's open and view turn, and for each chain's positions, before it answers
  *  without it: the kit's state timeout (kit/src/signpage/client.ts SIGNPAGE_TIMEOUT_MS.state), past which the app no
  *  longer waits for this read (card move-sends-or-says-why: one read that never settles stops every later push). */
@@ -323,9 +323,15 @@ export const pageEvmPoolUrls = (chain: "base" | "robinhood"): readonly string[] 
 export const pageEvmPoolRpcs = (chain: "base" | "robinhood", kind: ReadKind = "trade"): readonly EvmRpc[] | null => {
   const urls = pageEvmPoolUrls(chain);
   if (urls.length < 2) return null;
-  const list = urls.map((u) => testnetRpc(u, SOLANA_RPC_RETRY, kind));
-  if (POOL_TESTNET) return list;
-  const spares = MAINNET_POOL_LOGLESS[chain].map((u) => Object.assign(testnetRpc(u, SOLANA_RPC_RETRY, kind), { logs: false }));
+  if (POOL_TESTNET) return urls.map((u) => testnetRpc(u, SOLANA_RPC_RETRY, kind));
+  // a mainnet member with a member after it (card robinhood-reads-draw-no-revert): a provider fault is not asked of it
+  // again by its lane, the pair's seat walks to the next member at once (wallet pool/evm.ts evmPair), as the kit's own
+  // transport moves on (card evm-unreachable-moves-on); release 175's walk asked each of the pool's five views twice of
+  // Robinhood's own inside its throttle. The list's last member has none after it: its lane asks it again as before
+  const logless = MAINNET_POOL_LOGLESS[chain];
+  const lastOf = chain === "robinhood" || logless.length === 0 ? urls.length - 1 : -1;
+  const list = urls.map((u, i) => testnetRpc(u, SOLANA_RPC_RETRY, kind, i !== lastOf));
+  const spares = logless.map((u) => Object.assign(testnetRpc(u, SOLANA_RPC_RETRY, kind, true), { logs: false }));
   // Robinhood's second seat is the helper's keyed-only route (card first-sign-in-reads-fast-on-live): no keyless
   // provider pages the pool's life fast from a page (Pocket's backends 10,001 blocks, GlobalStake 28-42 s, read 14 Nov
   // 16:06-16:42Z), where the route walked it in 1.3 s; its own RPC, device-direct, is the other operator, and every log
@@ -355,8 +361,15 @@ export const MAINNET_EVM_FEE_RPCS: Readonly<Record<"base" | "robinhood", readonl
   base: /* @__PURE__ */ Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.gateway.tenderly.co"]),
   robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com"]),
 });
-/** An EVM chain's fee list as the page reads it (testnetRpc each). */
-export const pageEvmFeeRpcs = (chain: "base" | "robinhood", kind: ReadKind = "trade"): readonly EvmRpc[] => (POOL_TESTNET ? TESTNET_EVM_FEE_RPCS[chain] : MAINNET_EVM_FEE_RPCS[chain]).map((u) => testnetRpc(u, SOLANA_RPC_RETRY, kind));
+/** How far behind the head a fee list member keeps a block's state, for a member that keeps less than a bind may ask
+ *  (the wallet's EvmFeeRpc stateMs; card robinhood-fee-read-old-blocks-own-rpc): a fee read at a block that old or older
+ *  walks the list without it, in the list's order, so Robinhood's own is asked first; a block at the head walks it
+ *  whole. robinhood-rpc.publicnode.com answers HTTP 403 "Archive requests require a personal token" from about 10 s
+ *  back (5 of 5 under 10 s and 12 of 12 from 10 s, 2026-11-10 23:21-23:37Z; at 23 to 383 s back, 2026-11-18 15:36Z),
+ *  where Robinhood's own and dRPC answered to 383 s. Base's four answered at 1 to 244 s back (15:36Z): none listed. */
+export const EVM_FEE_STATE_MS: Readonly<Record<string, number>> = /* @__PURE__ */ Object.freeze({ "https://robinhood-rpc.publicnode.com": 10_000 });
+/** An EVM chain's fee list as the page reads it (testnetRpc each, with its EVM_FEE_STATE_MS). */
+export const pageEvmFeeRpcs = (chain: "base" | "robinhood", kind: ReadKind = "trade"): readonly EvmRpc[] => (POOL_TESTNET ? TESTNET_EVM_FEE_RPCS[chain] : MAINNET_EVM_FEE_RPCS[chain]).map((u) => Object.assign(testnetRpc(u, SOLANA_RPC_RETRY, kind), Object.hasOwn(EVM_FEE_STATE_MS, u) ? { stateMs: EVM_FEE_STATE_MS[u]! } : {}));
 /** The kit's epoch fee rule (../../wallet/src/pool/evm.ts EvmEpochFeeRule): the helper's own (apps/helper pool/evm.ts). */
 export const evmEpochFee = (at: { baseFeePerGas: bigint; depth: number; chainFee: bigint }): bigint => evmPoolFee({ gas: evmPoolGas(at.depth), gasPrice: at.baseFeePerGas, chainFee: at.chainFee });
 /** The Solana pool the page's network pins: SOL_POOLS.devnet in the testnet build, SOL_POOLS.mainnet (card sol-pools-mainnet-pin) on SIGN_HOST's. */
@@ -1701,7 +1714,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // host's lane (a trade's reads go first); kept in the page's own index store (src/evm-index-store.ts), so a reload
   // serves the kept index at once and syncs only the gap. A sync that ends partial is synced again at the next state
   // read. One sync a chain at once on the device, across its tabs (the Web Lock ct-evm-index/{chain}, if available: a
-  // tab that finds it held syncs none and asks again at its next state read, then from the index the other tab kept;
+  // tab that finds it held is still served the kept index or the snapshot (evmIndexServe, before the lock), syncs none
+  // and asks again at its next state read, then from the index the other tab kept;
   // card signpage-evm-reads-draw-no-refusal: two tabs signed in at once each read the whole cold index, 13 Nov CDP
   // capture); none past a sign out. It names no wallet: every pool of the PoolManager.
   const evmIndex = new Map<"base" | "robinhood", EvmPoolIndexData | null>();
@@ -1734,16 +1748,22 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return evmPoolIndexFromSnapshot(raw, { chainId: v.chainId, poolManager: v.poolManager, cap: v.index.cap });
   };
   const indexStore: EvmIndexStore | null = over.evmIndexStore !== undefined ? over.evmIndexStore : over.evmIndexSync !== undefined ? null : evmIndexStore();
-  // the index the device already has, served to the kit's quote with no RPC read: the one kept in the page's store,
-  // else the release's snapshot
+  // the index the device already has, served to the kit's quote with no RPC read. The tab's first serve takes the newer
+  // (by its through) of the one kept in the page's store and the release's snapshot: a device back after days keeps an
+  // older release's index, whose sync would read on from its end, not the snapshot's (a kept index 2.16M blocks behind
+  // on Robinhood ended stale_quote, 18 Nov 18:49Z). A later serve takes the kept one if newer than the tab's own
+  // (another tab's sync kept it). Reads only, run before the lock ct-evm-index/{chain} (card
+  // evm-index-served-before-lock: inside it, a tab that found the lock held by another was served none, and its quote
+  // scanned the chain's Initialize logs from the depth, 56 getLogs below the snapshot's end on a mainnet Robinhood quote,
+  // 18 Nov 19:01Z); the store's one write stays in the sync, under the lock
   const evmIndexServe = async (chain: "base" | "robinhood", network: EvmPoolChain, signal: AbortSignal): Promise<void> => {
-    if (!evmIndex.has(chain)) {
-      const kept = await indexStore?.get(network).catch(() => null);
-      if (kept != null && !signal.aborted && evmPoolIndexUse(network, { index: kept, coversThrough: kept.through, pools: kept.pools })) evmIndex.set(chain, kept);
-    }
-    if (!evmIndex.has(chain)) {
-      const shipped = await snapshotOf(network).catch(() => null);
-      if (shipped !== null && !signal.aborted && evmPoolIndexUse(network, { index: shipped, coversThrough: shipped.through, pools: shipped.pools })) evmIndex.set(chain, shipped);
+    const own = evmIndex.get(chain) ?? null;
+    const kept = (await indexStore?.get(network).catch(() => null)) ?? null;
+    const shipped = own === null ? await snapshotOf(network).catch(() => null) : null;
+    const newer = [kept, shipped].filter((x): x is EvmPoolIndexData => x !== null && (own === null || x.through > own.through)).sort((a, b) => b.through - a.through);
+    for (const ix of newer) {
+      if (signal.aborted) return;
+      if (evmPoolIndexUse(network, { index: ix, coversThrough: ix.through, pools: ix.pools })) return void evmIndex.set(chain, ix);
     }
   };
   const evmIndexOf = (chain: "base" | "robinhood"): Promise<void> | undefined => {
@@ -1758,7 +1778,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // each reader's request waits for a pass's turn on its host, so a trade's reads there go first
     const passFetch = (async (url: string, init?: RequestInit) => (await hostLane(url).turn("pass", signal), laneFetch()(url, init))) as typeof fetch;
     const sync = async (): Promise<void> => {
-      await evmIndexServe(chain, network, signal);
       // a device that holds nothing syncs none past it (evmMoney)
       if (!evmMoney) return;
       const prev = evmIndex.get(chain) ?? null;
@@ -1775,7 +1794,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         await indexStore?.put(network, s.index);
       }
     };
-    const run = (locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync())
+    const run = evmIndexServe(chain, network, signal)
+      .catch(() => {})
+      .then(() => (signal.aborted ? undefined : locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync()))
       .catch(() => {})
       .finally(() => evmIndexing.delete(chain));
     evmIndexing.set(chain, run);
