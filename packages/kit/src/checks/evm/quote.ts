@@ -884,10 +884,13 @@ function agreeing<T>(
       }
       const k = started++;
       t0[k] = performance.now();
-      // read as the request would leave its gate: one whose provider answered 5xx in this round moves to the next now
+      // read as the request would leave its gate: one whose provider answered 5xx in this round moves to the next now,
+      // or is dropped unsent where its batch is already agreed
       const moved = () => {
         if (movedK[k] === true) return true;
-        if (done || down?.has(list[k]!) !== true || started >= list.length) return false;
+        if (down?.has(list[k]!) !== true) return false;
+        if (done) return (movedK[k] = true);
+        if (started >= list.length) return false;
         movedK[k] = true;
         start(true);
         return true;
