@@ -428,6 +428,9 @@ export const MUTANTS = [
   [QUOTE, "({ ...o, rpc: laterOf(o.rpc) ?? o.rpc,", "({ ...o, rpc: o.rpc,", R, "TAILF3 "],
   [QUOTE, "    RPC_TWIN.set(rpc, () => (twin ??= evmJsonRpc(url, fetchFn, maxBytes, timeoutMs, true)));", "", R, "TAILF3 "],
   [QUOTE, "deferTo(kind), a.scanless === true, firstOn.rpc, v.indexMargin, false, later, fillOf);", "deferTo(kind), a.scanless === true, firstOn.rpc, v.indexMargin, false, later);", R, "TAILF1 "],
+  [QUOTE, "    else a.after.push(go);", "    else go();", R, "TAILF7 "],
+  [QUOTE, "    start,\n    after,\n", "    start,\n", R, "TAILF7 "],
+  [QUOTE, "minBlock: boughtBlock, mono, start, after });", "minBlock: boughtBlock, mono, start });", R, "TAILF8 "],
   [QUOTE, " >= floor || asked.has(k.currency0) || asked.has(k.currency1));", " >= floor);", R, "TAIL9 "],
   [QUOTE, "          const left = ks.filter((k: EvmPoolKey) => (t.at.get(poolId(k)) ?? floor) >= floor || asked", "          const left = ks.filter((k: EvmPoolKey) => true || asked", R, "TAIL9 "],
   [QUOTE, "      done = done.then(() => scanOrByCurrency(", "      void done;\n      void Promise.resolve().then(() => scanOrByCurrency(", R, "card robinhood-quotes-inside-provider-limits: a warm Robinhood quote whose scans are of both kinds"],
@@ -578,7 +581,7 @@ export const MUTANTS = [
   [QUOTE, "let pick = best(routes.filter((r) => evmSellExits(chain, t, r.route)));", "let pick = best(routes);", R, "HC4 "],
   [QUOTE, "  if (bought !== null) {\n    const x = bought.route.venue", "  if (false) {\n    const x = bought.route.venue", R, "P3 "],
   [QUOTE, 'if (lower(evmPoolRouteDataQuoted(chain, bought).token) !== lower(token)) return refuse("token_mismatch", "the bought route buys another token");', "", R, "P3 "],
-  [QUOTE, "rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", "rpcs, scan: undefined, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", R, "P1 "],
+  [QUOTE, "rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start, after });", "rpcs, scan: undefined, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start, after });", R, "P1 "],
   // the review of edb4dbb: F1 the sell goes further where the buy does; F2 X's markets at the X the token's pool
   // gives; F5 `bought` kept only where the sell builder takes it; F6 minOut off the reference
   [QUOTE, "if (!trades && markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);", "if (!trades && markets.has(x) && !a.sell) further.push(x);", R, "PA "],
@@ -1009,9 +1012,9 @@ export const MUTANTS = [
   // set at the block's agreement in agreedOnce) refuses stale_quote at the block's confirmation, before any request
   // leaves its gate, wherever the age line would: the same code, and no request sent. LOW-1's tests still hold it.
   [QUOTE, "agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start,", "agreedBlock(on, v.maxLag, a.nowMs, undefined, undefined, undefined,", R, "L5 "],
-  [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, mono, start });", R, "L5 "],
-  [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, minBlock: boughtBlock - 1n, mono, start });", R, "L5 "],
-  [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, minBlock: boughtBlock, start });", R, "M2 "],
+  [QUOTE, "sell: true, minBlock: boughtBlock, mono, start, after });", "sell: true, mono, start, after });", R, "L5 "],
+  [QUOTE, "sell: true, minBlock: boughtBlock, mono, start, after });", "sell: true, minBlock: boughtBlock - 1n, mono, start, after });", R, "L5 "],
+  [QUOTE, "sell: true, minBlock: boughtBlock, mono, start, after });", "sell: true, minBlock: boughtBlock, start, after });", R, "M2 "],
   // the hook data rule on any hop, the first included (review fold 1, L3)
   [QUOTE, 'route.hops.some((h) => h.hookData !== "0x")) return refuse(', 'route.hops.slice(-1).some((h) => h.hookData !== "0x")) return refuse(', R, "HD1 "],
   [QUOTE, 'if (fee !== undefined && (typeof fee !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(fee))) return refuse(', "if (false) return refuse(", R, "R11 "],

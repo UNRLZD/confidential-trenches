@@ -10756,3 +10756,42 @@ test("TAILF6 a cold quote whose first scan provider refused a read its spare ans
   await pause(20);
   assert.equal(firstAsked.filter(ofEvery).length, 0, `${firstAsked.filter(ofEvery).length} reads of every pool on the first`);
 });
+
+test("TAILF7 the chain's tail is read only once the quote has answered: after its last read of the quote's providers, never beside its final round", async () => {
+  const token = freshToken();
+  const pools = [seeded(token), real(token)];
+  const order: string[] = [];
+  const inner = scanner(5_000_000, realAt(token, 4_500_000));
+  const scan = evmScanFillable(async (calls, until) => {
+    for (const f of getLogsOf(calls)) order.push(ofEvery(f) ? "tail" : "scan");
+    return inner(calls, until);
+  });
+  const reads = ([0, 1] as const).map((i): EvmRpc => {
+    const c = chain(pools, i);
+    return async (calls, until) => (order.push("read"), c(calls, until));
+  });
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, reads, NOW, scan, undefined, () => 0)), below);
+  await evmTailFills(scan);
+  const first = order.indexOf("tail");
+  assert.ok(first > 0 && order.lastIndexOf("read") < first, `the quote's last read at ${order.lastIndexOf("read")}, the tail's first at ${first} of ${order.length}`);
+});
+
+test("TAILF8 a sell's quote too: the chain's tail is read only once it has answered, after its last read of the quote's providers", async () => {
+  const token = freshToken();
+  const market: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const order: string[] = [];
+  const inner = scanner(5_000_000, [{ key: market.key, at: 4_500_000 }]);
+  const scan = evmScanFillable(async (calls, until) => {
+    for (const f of getLogsOf(calls)) order.push(ofEvery(f) ? "tail" : "scan");
+    return inner(calls, until);
+  });
+  const reads = ([0, 1] as const).map((i): EvmRpc => {
+    const c = chain([market], i);
+    return async (calls, until) => (order.push("read"), c(calls, until));
+  });
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, sent: [] } as EvmPoolSellQuoteRequest;
+  await sellVerdict(evmPoolSellQuoteWith(req, reads, NOW, scan, undefined, () => 0));
+  await evmTailFills(scan);
+  const first = order.indexOf("tail");
+  assert.ok(first > 0 && order.lastIndexOf("read") < first, `the quote's last read at ${order.lastIndexOf("read")}, the tail's first at ${first} of ${order.length}`);
+});

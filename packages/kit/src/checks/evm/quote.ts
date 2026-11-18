@@ -2807,22 +2807,26 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const pin = typeof at === "string" && /^0x[0-9a-fA-F]{64}$/.test(at) ? (watch?.held?.(at.toLowerCase(), nowMs) ?? null) : null;
   const start = mono();
   const seen: { at: string | null } = { at: null };
+  // what the quote leaves for after its answer (routeSet `after`): the chain's tail's read
+  const after: (() => void)[] = [];
   try {
-    return await buyQuoteWith(req, rpcsIn, nowMs, scan, watch, mono, speculate, pin, seen).catch((e) => {
+    return await buyQuoteWith(req, rpcsIn, nowMs, scan, watch, mono, speculate, pin, seen, after).catch((e) => {
       // a pin the chain no longer holds, or fewer than two providers hold: asked again as a quote with no `at` and
       // no held head, on a block agreed now (the watch may still hold the dropped one; re-review of this card, P1)
       if (pin === null || !PIN_GONE.has(e as object)) throw e;
       seen.at = null;
       const { at: _gone, ...fresh } = req;
-      return buyQuoteWith(fresh, rpcsIn, nowMs + Math.max(0, mono() - start), scan, undefined, mono, speculate, null, seen);
+      return buyQuoteWith(fresh, rpcsIn, nowMs + Math.max(0, mono() - start), scan, undefined, mono, speculate, null, seen, after);
     });
   } catch (e) {
     if (e instanceof EvmQuoteError && e.at === null) e.at = seen.at;
     throw e;
+  } finally {
+    for (const f of after.splice(0)) f();
   }
 }
 
-async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan: EvmRpc | readonly EvmRpc[] | undefined, watch: EvmHeadWatch | undefined, mono: () => number, speculate: boolean, pin: Block | null, seen: { at: string | null }): Promise<EvmPoolBuyQuote> {
+async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan: EvmRpc | readonly EvmRpc[] | undefined, watch: EvmHeadWatch | undefined, mono: () => number, speculate: boolean, pin: Block | null, seen: { at: string | null }, after: (() => void)[]): Promise<EvmPoolBuyQuote> {
   const start = mono();
   if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
   const { chain, token, amountIn, slippageBps } = req;
@@ -2934,6 +2938,7 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
     watch,
     mono,
     start,
+    after,
     ...(pin === null ? {} : { pin }),
     // the route's own swap, at the agreed block (its recipient is the block's), in the first round
     atBlock: (b, down) => {
@@ -3344,6 +3349,9 @@ async function routeSetOf(a: {
   scan: EvmRpc | readonly EvmRpc[] | undefined;
   /** the caller's own reads of the first round, before the set's */
   reads: Read[];
+  /** where given, what the set leaves for after the quote's answer (the chain's tail's read): the quote runs it once it
+   *  has answered or refused, so no read of it goes beside the quote's own last round */
+  after?: (() => void)[] | undefined;
   /** a sell's `bought` route (one the sell builder takes), read like a route the device made from found pools */
   bought?: EvmRoute | undefined;
   /** pool ids the set leaves out */
@@ -3531,7 +3539,9 @@ async function routeSetOf(a: {
     // quote's bound and deadline
     const on = (o: ScanOn): ScanOn => ({ ...o, rpc: laterOf(o.rpc) ?? o.rpc, next: o.next === undefined ? undefined : on(o.next) });
     const from = scanFromOf(firstOn).then(({ head }) => ({ head, first: on(firstOn) }));
-    evmTailFill(chain, firstOn.rpc, () => scanPools(chain, [...toFill], "all", lower(v.weth), v.poolManager!, v.scan!, agreedHead, v.maxLag, from, agreedHead, undefined, false, firstOn.rpc, v.indexMargin, false, undefined, true));
+    const go = () => evmTailFill(chain, firstOn.rpc, () => scanPools(chain, [...toFill], "all", lower(v.weth), v.poolManager!, v.scan!, agreedHead, v.maxLag, from, agreedHead, undefined, false, firstOn.rpc, v.indexMargin, false, undefined, true));
+    if (a.after === undefined) go();
+    else a.after.push(go);
   });
   // one kind after the other, each once the last's reads are kept: on the chain's tail the second reads no block the
   // first did (card evm-scan-chain-tail)
@@ -4312,6 +4322,15 @@ export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<Ev
  *  and `mono`, the monotonic clock of the wait for the buy's block: tests only), and `poolRpcs`, the pool's list W's
  *  releases are read on (by default `rpcsIn`). Not in the index. */
 export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan?: EvmRpc | readonly EvmRpc[], venues?: EvmPoolVenueList, mono: () => number = monotonic, poolRpcs: readonly EvmRpc[] = rpcsIn): Promise<EvmPoolSellQuote> {
+  // what the quote leaves for after its answer (routeSet `after`): the chain's tail's read
+  const after: (() => void)[] = [];
+  try {
+    return await sellQuoteWith(req, rpcsIn, nowMs, scan, venues, mono, poolRpcs, after);
+  } finally {
+    for (const f of after.splice(0)) f();
+  }
+}
+async function sellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan: EvmRpc | readonly EvmRpc[] | undefined, venues: EvmPoolVenueList | undefined, mono: () => number, poolRpcs: readonly EvmRpc[], after: (() => void)[]): Promise<EvmPoolSellQuote> {
   const start = mono();
   if (typeof req !== "object" || req === null) return refuse("bad_request", "a request is an object");
   if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");
@@ -4348,7 +4367,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const reads: Read[] = [];
   const factory = v.v3 !== undefined && router !== undefined ? reads.push({ to: v.v3, data: "0x" + SEL_FACTORY }) - 1 : -1;
   const exits = evmSellExits(chain, t, bought, true) ? bought : undefined;
-  const { block, out, filled: found, outOfGas } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });
+  const { block, out, filled: found, outOfGas } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start, after });
   // W's releases at the agreed block, read beside the rest of the quote and awaited before it is made
   const releasesP = sellReleasesRead(chain, v.pool, lower(w), poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2, DEADLINE.get(rpcs)), block, v.maxLag, sent, { token: t, block: boughtBlock }, () => nowMs + Math.max(0, mono() - start));
   releasesP.catch(() => {});
