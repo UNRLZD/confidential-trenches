@@ -108,11 +108,13 @@ test("1Click's least is read live from its refusal of one unit, never kept in th
   // recorded 15 Nov 13:0xZ on the helper's 1Click proxy: into SOL, into Robinhood's ETH, into Base's ETH
   assert.equal(await readOneClickLeast("solana", answer(400, { message: "Amount is too low for bridge, try at least 75621" }), 0), 75_621n);
   assert.equal(await readOneClickLeast("robinhood", answer(400, { message: "Amount is too low for bridge, try at least 18533" }), 0), 18_533n);
-  assert.equal(await readOneClickLeast("base", answer(400, { message: "Failed to get quote" }), 0), null);
-  assert.equal(await readOneClickLeast("solana", (async () => { throw new Error("down"); }) as unknown as typeof fetch, 0), null);
+  // no least: the read throws, and no move is planned without it (card cash-least-read-again)
+  const sleep = async () => {};
+  await assert.rejects(readOneClickLeast("base", answer(400, { message: "Failed to get quote" }), 0, { sleep }), /no least in 3 tries/);
+  await assert.rejects(readOneClickLeast("solana", (async () => { throw new Error("down"); }) as unknown as typeof fetch, 0, { sleep }), /no least in 3 tries: no answer/);
   // what the read asks: a dry quote of one unit of Cash's USDC, naming no account of the user's
   let sent: Record<string, unknown> = {};
-  await readOneClickLeast("solana", (async (_u: unknown, init: RequestInit) => ((sent = JSON.parse(String(init.body))), new Response("{}", { status: 400 }))) as unknown as typeof fetch, 0);
+  await assert.rejects(readOneClickLeast("solana", (async (_u: unknown, init: RequestInit) => ((sent = JSON.parse(String(init.body))), new Response("{}", { status: 400 }))) as unknown as typeof fetch, 0), /names no least/);
   assert.equal(sent.dry, true);
   assert.equal(sent.amount, "1");
   assert.equal(sent.destinationAsset, "nep141:sol.omft.near");

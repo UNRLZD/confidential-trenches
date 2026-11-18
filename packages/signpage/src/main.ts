@@ -366,14 +366,15 @@ else {
   // with no trade gate, since the tap's own run holds it)
   // one mover per signed-in session (its signal is the sign out's): a move on its way is never counted for another
   // 1Click's least for a move of Cash into a pool (card cash-buys-spend-every-note), read live, kept a minute so a dry
-  // per keystroke asks it once; a read that names none is not kept
-  const leastRead = new Map<PoolChain, { at: number; least: Promise<bigint | null> }>();
-  const oneClickLeastNow = (chain: PoolChain): Promise<bigint | null> => {
+  // per keystroke asks it once; a read that names none (it throws: card cash-least-read-again) is not kept, so the next
+  // dry or tap reads again
+  const leastRead = new Map<PoolChain, { at: number; least: Promise<bigint> }>();
+  const oneClickLeastNow = (chain: PoolChain): Promise<bigint> => {
     const kept = leastRead.get(chain);
     if (kept !== undefined && Date.now() - kept.at < 60_000) return kept.least;
     const least = readOneClickLeast(chain, fetch, Date.now());
     leastRead.set(chain, { at: Date.now(), least });
-    void least.then((x) => x === null && leastRead.delete(chain));
+    least.catch(() => leastRead.get(chain)?.least === least && leastRead.delete(chain));
     return least;
   };
   // the floor a Move's quote into a pool is held to (pool.address's), read for a message by the pool's pinned fee payer on
