@@ -70,6 +70,8 @@ const realRelayLanded = (c: Chain): HandoffOver["relay"] => (seed, req, deps) =>
   return relayWithdraw(seed, req, { ...deps, rpcs: c.rpcs() });
 };
 
+const { withdrawArrival } = await import("../../wallet/src/withdraw/arrival.ts");
+
 test("hand-off with the real relayWithdraw: the seed zeroed after the call, its own spend is still landed with the change note", async () => {
   const v = await world([5_000_000n]);
   const p = page(v, snarkProver); // a real proof, carried the whole way to a landed change note
@@ -177,7 +179,6 @@ test("the settle pass on a ragequit whose SPENT move fails (another tab moved th
 });
 
 // ---------- card wallet-withdraw-move-out: the vault pays the typed account; the arrival read on the pair ----------
-const { withdrawArrival } = await import("../../wallet/src/withdraw/arrival.ts");
 const paidTo = (to: string, status = "paid", refundValue = "0"): Chain => Object.assign(new Chain(), { status, recipient: to, refundValue });
 /** A fetch that counts every POST /v1/withdraw (a send) and answers the fee for anything else. */
 function counting(posts: string[]): typeof fetch {

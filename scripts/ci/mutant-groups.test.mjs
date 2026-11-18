@@ -198,7 +198,7 @@ test("every mutant sweep and its test spawns its test runs only through scripts/
     "packages/signpage/test/pool-price-mutants.test.mjs",
     "packages/signpage/test/rules-pool-mutants.mjs",
     "packages/signpage/test/rules-pool-mutants.test.mjs",
-    "packages/wallet/scripts/mutant-run.mjs",
+    "scripts/mutant-run.mjs",
     "packages/wallet/scripts/pool-evm-restore-mutants.mjs",
   ])
     assert.ok(files.includes(f), `${f} is not in the tree`);

@@ -55,6 +55,11 @@ const TWO: Pick<NoteRestore, "notes" | "spends"> = {
   spends: [spend(L1, 0, dep(0)), spend(L2, 1, ch(L2, 0))],
 };
 
+// the restore's pass (step 7 takes only one openRestorePass opened): a mainnet pair whose finals are both at block 1000
+const PASS_HASH = "H".padEnd(44, "b");
+const passRpc = (name: string) => ({ name, query: async () => ({ jsonrpc: "2.0", result: { amount: "1", block_height: 1000, block_hash: PASS_HASH } }) });
+const RESTORED = await openRestorePass("mainnet", [passRpc(NEAR_NETWORKS.mainnet.fastnear[0]), passRpc(NEAR_NETWORKS.mainnet.drpc)], { tries: 1 });
+
 test("step 4: an arm's sol, evm (Robinhood only) and hop-evm (Base) wallets are found; an arm with none reads no hop target", async () => {
   const { read, log } = reader([`solana ${addr("sol", L1, 0)}`, `robinhood ${addr("evm", L1, 0)}`, `base ${addr("hop-evm", L1, 0)}`]);
   const got = await restoreWallets(SEED, TWO, read);
@@ -151,10 +156,6 @@ const LANES: Pick<NoteRestore, "notes" | "laneHighest" | "laneWalked"> = {
 };
 const ONE = [0, null, null, null, null, null, null, null];
 const at = (lane: number, k: number) => lane + 8 * k;
-// the restore's pass (step 7 takes only one openRestorePass opened): a mainnet pair whose finals are both at block 1000
-const PASS_HASH = "H".padEnd(44, "b");
-const passRpc = (name: string) => ({ name, query: async () => ({ jsonrpc: "2.0", result: { amount: "1", block_height: 1000, block_hash: PASS_HASH } }) });
-const RESTORED = await openRestorePass("mainnet", [passRpc(NEAR_NETWORKS.mainnet.fastnear[0]), passRpc(NEAR_NETWORKS.mainnet.drpc)], { tries: 1 });
 
 test("step 5: every lane's deposit ids are read to 21 past its highest with a note or money (an empty lane: its first 21)", async () => {
   const { holds, log } = idReader([at(5, 10), at(5, 30), at(2, 21), at(6, 0), at(6, 2)]);

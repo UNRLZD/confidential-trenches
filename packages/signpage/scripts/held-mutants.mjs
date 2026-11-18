@@ -2,9 +2,9 @@
 // one mutant at a time in the signing page's held move (src/main.ts heldULock, heldDeps and settleHeld, src/withdraw/held.ts move),
 // runs the test that holds it, expects it to fail, puts the source back. The wallet's own sweep of moveout.ts is
 // packages/wallet/scripts/held-moveout-mutants.mjs.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const MAIN = `${W}/src/main.ts`;
 const HELD = `${W}/src/withdraw/held.ts`;
@@ -26,20 +26,14 @@ for (const [name, file, test, from, to] of M) {
     process.exitCode = 1;
     continue;
   }
-  writeFileSync(file, src.replace(from, to));
-  // a run past 120 s is killed, its process group with it (scripts/group-run.mjs)
-  let r;
-  try {
-    r = runSync("node", ["--test", test], { cwd: W, encoding: "utf8", timeoutMs: 120_000 });
-  } finally {
-    writeFileSync(file, src);
+  // a run past 120 s is killed, its process group with it; a run with no verdict is refused (scripts/mutant-run.mjs)
+  const r = withPlant(file, src.replace(from, to), () => runMutant([test], { cwd: W, timeoutMs: 120_000 }));
+  if (!refused(name, r)) {
+    const by = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((m) => m[1].slice(0, 70)).filter((v, i, a) => a.indexOf(v) === i);
+    const dead = r.verdict === "killed";
+    if (dead) killed++;
+    console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
   }
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const by = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((m) => m[1].slice(0, 70)).filter((v, i, a) => a.indexOf(v) === i);
-  const dead = r.status !== 0 && Number(fail) > 0;
-  if (dead) killed++;
-  console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
   if (readFileSync(file, "utf8") !== src) {
     console.log("SOURCE NOT RESTORED");
     process.exitCode = 1;

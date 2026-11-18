@@ -77,6 +77,8 @@ const DOWN: [string, () => Promise<Response>][] = [
   ["HTTP 401 (a revoked key)", async () => new Response("unauthorized", { status: 401 })],
 ];
 
+const daySpend = (await import("../limits/day-spend.ts").catch(() => ({}))) as { dayFiles?: (dir: string, id: string) => unknown };
+
 for (const chain of Object.keys(LISTS) as Chain[]) {
   for (const [what, down] of DOWN) {
     test(`card rpc-keyed-lists: ${chain} with its first two keyed URLs down (${what}) still answers from the third, and no public spare is asked`, async () => {
@@ -608,7 +610,6 @@ test("owner 09:16Z: /v1/health names each dRPC key as its own entry (key1, key2,
 // ---- the delta review of 424dce1e (H1, M2, M3, L2, L3, L4) ----
 
 /** The keyed accounts' shared daily spend (review H1), read off the module so this file loads at a base without it. */
-const daySpend = (await import("../limits/day-spend.ts").catch(() => ({}))) as { dayFiles?: (dir: string, id: string) => unknown };
 const dayStart = () => Math.ceil((performance.timeOrigin + performance.now()) / 86_400_000) * 86_400_000 + 1_000;
 const holdsOn = (now: () => number, pace: Record<string, Pace>, peers: unknown) => (providerHolds as unknown as (n: () => number, p: Record<string, Pace>, d?: unknown) => ReturnType<typeof providerHolds>)(now, pace, peers);
 
