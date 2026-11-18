@@ -411,8 +411,19 @@ export const evmMainnetVenues = () =>
       // Robinhood's (card evm-quote-warm-round, 2026-11-04 16:5xZ from this Mac): p50/p95 511/1,014 ms, 606/845,
       // 823/1,180, 766/2,801 and 2,349/4,972 ms. Passed over: daybreak (413 on a batch this size), blockvectra (outside
       // its history window), pocket and blockmachine (8 s and more, timeouts), thirdweb (refused requests), tatum,
-      // nodeflare (no head)
-      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com", "https://rpc-robinhood.globalstake.io"]),
+      // nodeflare (no head).
+      // Globalstake (rpc-robinhood.globalstake.io) left this list (card rh-provider-fails-64-read-batch): in some hours it
+      // answers a request of more than about 12 reads HTTP 500, and a quote's batch holds 3 calls of 64. On GitHub's
+      // runners the gas-starve live check read its 500 in 8 of 47 runs, 12-17 Nov, every one 22:28Z to 04:08Z; from
+      // this Mac at 00:43-00:45Z on 18 Nov, 3 rounds, it answered 1 call of 1 to 12 reads and 2 calls of 1 to 4, and HTTP
+      // 500 to 1 call of 16, 1 call of 64 (2 of 3 rounds of 32) and every batch of 2 or 3 calls of 6 to 64 reads, where
+      // the four left answered every shape to 3 calls of 64 (one dRPC 429). Its answers to a batch of 64 came as HTTP
+      // 500 after about 1 s; a real USDG tap at 00:46Z drew 36 of them, beside 41 dRPC 429s, and took 34.8 s, the other
+      // three taps 7.7 to 10.9 s. At 23:3xZ it answered every size from 1 to 256 reads. A per-provider batch would
+      // ask it for 12 reads a request, 16 times the posts, for the slowest operator here (its 64-read batches p50/p95
+      // 916/3,298 ms against publicnode's 466/941, 23:2xZ), so it is not asked; the pool list keeps it for log pages.
+      // Live check rh-provider-fails-64-read-batch reads every one of this list at the batch after each app deploy.
+      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com"]),
       // Robinhood's own is asked last (card robinhood-quotes-inside-provider-limits): it answers 429 past about 1 post a
       // second (apps/helper/src/limits/limits.ts PROVIDER_PACE) and is the scan's and the pool sync's seat, yet ranked in
       // by its speed whenever publicnode was held it carried a warm tap's rounds of reads, FRONG's 35 to 38 posts in one
@@ -427,7 +438,7 @@ export const evmMainnetVenues = () =>
       // publicnode, blxrbdn and globalstake served every post at 8, none refused, and the helper names none of them: 8,
       // the measurement alone. One limit of 2 for every provider (the scan's) held a cold USDG quote's 173 posts in the
       // queue: 12.2 s, against 7.0 s at 6 (05:0xZ the same day)
-      inflight: bare<Record<string, number>>({ "https://robinhood-rpc.publicnode.com": 8, "https://robinhood.drpc.org": 5, "https://rpc.mainnet.chain.robinhood.com": 2, "https://robinhood.rpc.blxrbdn.com": 8, "https://rpc-robinhood.globalstake.io": 8 }),
+      inflight: bare<Record<string, number>>({ "https://robinhood-rpc.publicnode.com": 8, "https://robinhood.drpc.org": 5, "https://rpc.mainnet.chain.robinhood.com": 2, "https://robinhood.rpc.blxrbdn.com": 8 }),
       // 64 reads a call (card evm-buy-quote-in-window): a cold WETH-USDG quote's 2,303 reads at 6 a call were 128 batches,
       // which ran past the 10-13 s that three of these five keep a block's state. Its exact-out reads cost about 100,000
       // gas each, about 6.4M a call against the 50M caps; all five answered 3 calls of 64 alike (review of 2c02f7df) and

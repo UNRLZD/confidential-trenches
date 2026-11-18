@@ -47,9 +47,11 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   const retry = o.retry ?? SOLANA_RPC_RETRY;
   const href = solanaJsonRpc(url).url!;
   const lane = hostLane(href);
-  // one attempt within `ms`, its fault named (a retry whose first wait is past its own bound tries once)
-  const once = (ms: number, method: string, params: readonly unknown[]): Promise<unknown> =>
-    solanaJsonRpc(url, { ...(o.init ? { init: o.init } : {}), ...(o.fetch ? { fetch: o.fetch } : {}), retry: { deadlineMs: ms, backoffMs: ms } })(method, params);
+  // one attempt within `ms`, its fault named (a retry whose first wait is past its own bound tries once); `stop` in its
+  // fetch, so a read the page gave up on (its caller's cut, a sign out) ends at the provider too, never holding the
+  // host's slot or its pace token (card signpage-reads-take-the-call-signal)
+  const once = (ms: number, method: string, params: readonly unknown[], stop: AbortSignal): Promise<unknown> =>
+    solanaJsonRpc(url, { ...(o.init ? { init: o.init } : {}), ...(o.fetch ? { fetch: o.fetch } : {}), retry: { deadlineMs: ms, backoffMs: ms } })(method, params, stop);
   // every outcome reported to the lane: the gate's pause, and the probe's settle when this read was it
   // `stop`: the caller's signal and the page's gate (gateSignal), so an ask after the gate closed during the call is never
   // sent (card sign-out-stops-the-pages-reads); its waits for a turn also end at a sign out's tap (HostLane.turn)
@@ -61,7 +63,7 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
     const give = typeof turn === "function" ? turn : await turn;
     const sentIn = lane.gate.epoch();
     try {
-      const r = await once(Math.max(1, Math.floor(end - performance.now())), method, params);
+      const r = await once(Math.max(1, Math.floor(end - performance.now())), method, params, stop);
       lane.answered(sentIn);
       return r;
     } catch (e) {
@@ -103,9 +105,10 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   };
   // a read whose turn is open now goes out in this tick (a paced queue's slot calls it as its own)
   // (a trade's turn refused past its TRADE_TURN_MAX_MS is the host's throttle, never sent: HostPaused)
-  const rpc = (method: string, params: readonly unknown[]): Promise<unknown> => {
-    // the caller's signal and the page's gate: every ask of this call ends at either
-    const stop = gateSignal(o.signal);
+  const rpc = (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
+    // the reader's signal, this call's own (SolanaRpc's: a walk's cut, a read's bound) and the page's gate: every ask of
+    // this call, and its request in flight, ends at any of them
+    const stop = gateSignal(signal === undefined ? o.signal : o.signal === undefined ? signal : AbortSignal.any([o.signal, signal]));
     // the gate closed (a sign out; throttle.ts): a call made after it, a paced slot's or a seat's failover included, is
     // refused here, never sent or counted
     if (stop.aborted) return Promise.reject(stop.reason);
@@ -145,23 +148,24 @@ export function seatRpc(urls: readonly string[], kind: ReadKind = "trade", retry
   const members = urls.map((u) => ({ lane: hostLane(u), fast: lanedRpc(u, { kind, retry, spare: true }), last: lanedRpc(u, { kind, retry }) }));
   const href = members[0]!.last.url!;
   SEATS.set(href, members.map((m) => m.last.url!));
-  const read = (method: string, params: readonly unknown[], tried: ReadonlySet<number>): Promise<unknown> => {
+  // the call's signal goes to whichever member is asked (an abort is never a member's fault: no failover after it)
+  const read = (method: string, params: readonly unknown[], tried: ReadonlySet<number>, signal?: AbortSignal): Promise<unknown> => {
     const left = members.map((_, i) => i).filter((i) => !tried.has(i));
     const open = left.filter((i) => members[i]!.lane.open(kind));
     if (open.length === 0) {
       // none open: the one whose host opens first, as any page RPC
       const next = left.reduce((a, b) => (members[b]!.lane.wait(kind) < members[a]!.lane.wait(kind) ? b : a));
-      return members[next]!.last(method, params);
+      return members[next]!.last(method, params, signal);
     }
     const i = open[0]!;
     // the last member left is asked as any page RPC; one with members after it fails over on a throttle
-    if (left.length === 1) return members[i]!.last(method, params);
-    return members[i]!.fast(method, params).catch((e: unknown) => {
-      if (!(e instanceof SolanaRpcTransportError)) throw e;
-      return read(method, params, new Set([...tried, i]));
+    if (left.length === 1) return members[i]!.last(method, params, signal);
+    return members[i]!.fast(method, params, signal).catch((e: unknown) => {
+      if (!(e instanceof SolanaRpcTransportError) || signal?.aborted) throw e;
+      return read(method, params, new Set([...tried, i]), signal);
     });
   };
-  return Object.assign((method: string, params: readonly unknown[]) => read(method, params, new Set()), { url: href });
+  return Object.assign((method: string, params: readonly unknown[], signal?: AbortSignal) => read(method, params, new Set(), signal), { url: href });
 }
 
 /** A provider the device reaches directly. */
@@ -284,8 +288,8 @@ export function keptPools(kind: PoolFinderKind, scan: () => readonly [SolanaRpc,
     // provider's own fault is thrown as the kit threw it (card pool-buy-waits-out-a-throttle)
     const w = readWatch("the scan");
     const pair = scan().map((rpc, i) =>
-      w.watch(rpc, async (method, params) => {
-        const answer = await rpc(method, params);
+      w.watch(rpc, async (method, params, signal) => {
+        const answer = await rpc(method, params, signal);
         if (method === "getProgramAccounts" && scannedList(answer) !== null) {
           answers[i]!.set(JSON.stringify(params), answer);
           if (answers[i]!.size === 2) halfOf(i);
@@ -341,17 +345,17 @@ export function pinnedPoolFinders(finders: PoolFinders | null, tables: Readonly<
  *  each provider's calls still in flight. `fault` is the read's own fault once the kit's reader gave up: that provider
  *  fault, else a timeout naming a provider whose call is still unanswered (the kit gave up on it at its own bound,
  *  with a plain error), else null. */
-function readWatch(what: string): { watch: (rpc: SolanaRpc, call?: (method: string, params: readonly unknown[]) => Promise<unknown>) => SolanaRpc; fault: () => SolanaRpcTransportError | null } {
+function readWatch(what: string): { watch: (rpc: SolanaRpc, call?: (method: string, params: readonly unknown[], signal?: AbortSignal) => Promise<unknown>) => SolanaRpc; fault: () => SolanaRpcTransportError | null } {
   let fault: SolanaRpcTransportError | null = null;
   // the calls still in flight, by the provider's host
   const inFlight = new Map<string, number>();
   return {
-    watch: (rpc, call = (method, params) => rpc(method, params)) => {
+    watch: (rpc, call = (method, params, signal) => rpc(method, params, signal)) => {
       const host = rpc.url === undefined ? "a provider" : new URL(rpc.url).host;
-      return solanaWrappedRpc(rpc, async (method, params) => {
+      return solanaWrappedRpc(rpc, async (method, params, signal) => {
         inFlight.set(host, (inFlight.get(host) ?? 0) + 1);
         try {
-          return await call(method, params);
+          return await call(method, params, signal);
         } catch (e) {
           if (e instanceof SolanaRpcTransportError) fault ??= e;
           throw e;

@@ -265,7 +265,7 @@ export const pageEvmWalletRpc = (chain: "base" | "robinhood", testnet: boolean =
   let r = WALLET_RPCS.get(chain);
   if (r === undefined) {
     const route = evmHelperRpc(TRADE_HELPER, chain);
-    WALLET_RPCS.set(chain, (r = Object.assign((method: string, params: readonly unknown[]) => route(method, params), { url: `${TRADE_HELPER}/v1/rpc/${chain}` }) as EvmRpc));
+    WALLET_RPCS.set(chain, (r = Object.assign((method: string, params: readonly unknown[], signal?: AbortSignal) => route(method, params, signal), { url: `${TRADE_HELPER}/v1/rpc/${chain}` }) as EvmRpc));
   }
   return r;
 };
@@ -278,7 +278,7 @@ export const pageEvmShownRpc = (chain: "base" | "robinhood", testnet: boolean = 
   let r = SHOWN_RPCS.get(chain);
   if (r === undefined) {
     const route = evmHelperShownRpc(TRADE_HELPER, chain);
-    SHOWN_RPCS.set(chain, (r = Object.assign((method: string, params: readonly unknown[]) => route(method, params), { url: `${TRADE_HELPER}/v1/rpc/${chain}` }) as EvmRpc));
+    SHOWN_RPCS.set(chain, (r = Object.assign((method: string, params: readonly unknown[], signal?: AbortSignal) => route(method, params, signal), { url: `${TRADE_HELPER}/v1/rpc/${chain}` }) as EvmRpc));
   }
   return r;
 };
@@ -476,7 +476,7 @@ export const PAGE_SOL_CACHE: SolanaPoolCache = {};
  *  sell-right-after-a-buy: a pool buy's reads are a trade's to its early "sent", a background pass's after it). Each seat
  *  stays its provider to the kit (solanaWrappedRpc: its URL, its one queue, solanaSameProvider). */
 export function kindSwitched(of: Readonly<Record<ReadKind, readonly [SolanaRpc, SolanaRpc]>>, kind: () => ReadKind): readonly [SolanaRpc, SolanaRpc] {
-  return [0, 1].map((i) => solanaWrappedRpc(of.trade[i]!, (method, params) => of[kind()][i]!(method, params))) as unknown as readonly [SolanaRpc, SolanaRpc];
+  return [0, 1].map((i) => solanaWrappedRpc(of.trade[i]!, (method, params, signal) => of[kind()][i]!(method, params, signal))) as unknown as readonly [SolanaRpc, SolanaRpc];
 }
 /** A pool buy's reads (card sell-right-after-a-buy): one pair, each call a trade's until its transaction landed (both
  *  RPCs read it back as succeeded, the reads that tell Filled among them: pool-buy.ts landed) and a background pass's
@@ -2767,7 +2767,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // one reader, the helper's route (the positions finder's): no read names a W or a signature to a public provider
     const reader = POOL_TESTNET ? rpcs("pass")[0] : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
     // every reader asks only before the stop (the testnet build's and a test's carry none of their own)
-    const one: SolanaRpc = (method, params) => (signal.throwIfAborted(), reader(method, params));
+    const one: SolanaRpc = (method, params, s) => (signal.throwIfAborted(), reader(method, params, s === undefined ? signal : AbortSignal.any([s, signal])));
     const read = (sig: string): Promise<unknown> => one("getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
     filling = (async () => {
       const store = (await page.store()) as unknown as FillStore;
