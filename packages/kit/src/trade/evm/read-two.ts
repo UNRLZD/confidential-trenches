@@ -174,9 +174,9 @@ export function evmTwoOperators<R>(list: readonly EvmReadSeat<R>[], o: EvmTwoOpe
       const c = Object.create(Object.getPrototypeOf(e) as object) as Error;
       for (const k of Reflect.ownKeys(e)) {
         if (k === "message" || k === "stack" || k === "cause") continue;
-        const d = Object.getOwnPropertyDescriptor(e, k)!;
-        if (typeof d.value === "string") d.value = said(d.value);
-        Object.defineProperty(c, k, d);
+        // each own field as its value (an accessor read once, never carried as a getter), a string's words said()'s
+        const v = (e as unknown as Record<PropertyKey, unknown>)[k];
+        Object.defineProperty(c, k, { value: typeof v === "string" ? said(v) : v, writable: true, configurable: true, enumerable: Object.prototype.propertyIsEnumerable.call(e, k) });
       }
       // a name or code read through the prototype (a DOMException's getters throw on a copy) kept as its own value
       for (const k of ["name", "code"] as const) {
