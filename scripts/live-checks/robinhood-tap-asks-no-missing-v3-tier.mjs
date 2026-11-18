@@ -21,6 +21,7 @@ import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { rpcAnswer } from "./provider-answer.mjs";
 
 const CARD = "robinhood-tap-asks-no-missing-v3-tier";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -59,11 +60,12 @@ export function judge(a) {
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
-/** QuoterV2.factory() (0xc45a0155) on `rpc`, as an address, or the error's words. */
+/** QuoterV2.factory() (0xc45a0155) on `rpc`, read through rpcAnswer, as an address, or the error's words; a provider's
+ *  no-answer (a throttle, a 5xx, no state) ends the check in error (exit 2), never a FAIL. */
 async function factoryOf(rpc, quoter) {
-  const r = await fetch(rpc, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: quoter, data: "0xc45a0155" }, "latest"] }) });
-  const j = await r.json();
-  return typeof j?.result === "string" && /^0x[0-9a-fA-F]{64}$/.test(j.result) ? "0x" + j.result.slice(26).toLowerCase() : `error ${JSON.stringify(j?.error ?? r.status).slice(0, 80)}`;
+  const a = await rpcAnswer(rpc, "eth_call", [{ to: quoter, data: "0xc45a0155" }, "latest"]);
+  if (a.noAnswer !== undefined) throw new Error(a.noAnswer);
+  return typeof a.result === "string" && /^0x[0-9a-fA-F]{64}$/.test(a.result) ? "0x" + a.result.slice(26).toLowerCase() : `error ${JSON.stringify(a.error ?? a.result).slice(0, 80)}`;
 }
 
 async function factories() {
