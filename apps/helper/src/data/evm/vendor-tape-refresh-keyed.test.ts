@@ -128,6 +128,18 @@ test("a held tape's answer never waits on its refresh: the read past TAPE_FRESH_
   assert.deepEqual([d.j.as_of_ms, d.age, d.j.src], [h.clock.t, 0, "coingecko"], "the next read is served the refresh");
 });
 
+test("a tape held past BEHIND_MAX's ms (another reader left it 17 s before): its caller waits for the background refresh and is served its rows, never the held ones past the bound (red: served at once, 18.9 s old, a local helper 18 Nov 15:13:45Z)", async () => {
+  const h = harness();
+  await h.tape();
+  const before = h.cg("/trades");
+  h.clock.t += 17_000;
+  h.fill();
+  const a = await h.tape();
+  assert.deepEqual([a.status, a.age, a.j.src, a.j.trades.length], [200, 0, "coingecko", 6]);
+  assert.equal(h.cg("/trades"), before + 1, "one read");
+  assert.match(h.keyed.minute() ?? "", /served trades background 1/, "a held tape's refresh, the background's share");
+});
+
 test("a tape held past STALE_MS is no held answer: its caller waits for the read, from the callers' share", async () => {
   const h = harness();
   await h.tape();
@@ -155,6 +167,13 @@ test("past the key's background day the held tape's refresh goes keyless (refuse
   assert.equal(held.status, 200);
   assert.equal(h.cg("/trades"), before, "the held refresh took no caller's share of the day");
   assert.ok(held.age > TAPE_FRESH_MS, "its rows served dated by their read");
+  // past the bound the caller waits for the refresh, which still takes no caller's share: the rows served dated
+  h.clock.t += BOUND;
+  h.fill();
+  const past = await h.tape();
+  assert.deepEqual([past.status, h.cg("/trades")], [200, before], "past the bound, still no caller's share");
+  assert.ok(past.age > BOUND, "its rows served dated by their read, no reach claimed");
+  assert.equal(past.j.whole_ms, undefined);
   const cold = await h.tape(h.OTHER);
   assert.equal(cold.status, 200, cold.body.slice(0, 120));
   assert.equal(cold.j.src, "coingecko", "a cold tape still finds the key");

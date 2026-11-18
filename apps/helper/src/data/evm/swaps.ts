@@ -3013,12 +3013,17 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     };
     const owed = async (): Promise<DataAnswer> => (held !== undefined ? serve(held) : empty({ trades: [], filling: true }));
     if (held !== undefined && now() - held.at < TAPE_FRESH_MS) return serve(held);
-    // card evm-vendor-tape-refresh-keyed: a held tape under STALE_MS is served at once and renewed behind its rows, one
+    // card evm-vendor-tape-refresh-keyed: a held tape under STALE_MS is renewed as the helper's background read, one
     // refresh per coin however many callers, as a Solana one is (../solana/token.ts tapes, revalidate); the new rows'
-    // receipts are read before they are held, so no caller waits on the vendor or on them. Past STALE_MS the caller waits
+    // receipts are read before they are held. Inside BEHIND_MAX's ms the held rows are served at once, behind which the
+    // refresh runs; past it the caller waits for that refresh within its bound, then is served the newest rows held, so
+    // a page that opens a coin another reader held up to STALE_MS before is not served rows past the bound while the
+    // vendor answers (a local helper on mainnet served Base 0x1668cd48's at 18.9 s, held 17 s before by another reader,
+    // 18 Nov 15:13:45Z, with the held rows served at once up to STALE_MS). Past STALE_MS the caller's own read
     if (held !== undefined && now() - held.at <= STALE_MS) {
-      if (!tapeRenewing.has(token)) {
-        const renew = lanes
+      let renew = tapeRenewing.get(token);
+      if (renew === undefined) {
+        renew = lanes
           .run(newLane(false), async () => {
             const h = await readTape(token, true);
             if (h === undefined || h === "none") return;
@@ -3029,7 +3034,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           .finally(() => tapeRenewing.delete(token));
         tapeRenewing.set(token, renew);
       }
-      return serve(held);
+      if (now() - held.at > BEHIND_MAX[chain].ms) await within(renew, Math.max(0, until - performance.now()));
+      return serve(gtTapes.get(token) ?? held);
     }
     const h = await readTape(token, false);
     if (h === "none") return none;
