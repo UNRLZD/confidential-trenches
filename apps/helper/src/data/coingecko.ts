@@ -49,6 +49,12 @@ export const CG_MARGIN = 0.1;
  *  answered within 5 s (server.ts CANDLES_ANSWER_MS) and a cold one is two reads, its pool and its bars; the keyless
  *  path's own bound is GeckoTerminal's next free call.] */
 export const CG_TIMEOUT_MS = 2_000;
+/** How long a background read (the read ahead, a held tape's refresh: no caller waits on either) waits for CoinGecko.
+ *  Card sol-vendor-tape-refresh-lands: CoinGecko's /trades answered a pool's trades in 1.6 to 3.1 s from a Mac in
+ *  UTC+7 (12 reads 18 Nov 14:2xZ, one at 37 s) and 0.4 to 0.9 s from the helper's box (12 reads), so CG_TIMEOUT_MS cut
+ *  half the Mac's refreshes as "down" and the breaker held the key. [design: 8 s, the helper's other vendor reads'
+ *  TIMEOUT_MS] */
+export const CG_BACKGROUND_TIMEOUT_MS = 8_000;
 /** How long CoinGecko is not asked after it refused the key (401, 403): a key the plan no longer takes. */
 export const CG_KEY_HOLD_S = 75;
 /** How long after a 5xx, a timeout or a failed connection: one read's wait, not every chart's. */
@@ -128,7 +134,7 @@ export function createKeyed(env: Record<string, string | undefined>, holds: Prov
       if (holds.take(CG_URL, 1, background) > 0) return bump(background ? "minute background" : "minute"), undefined;
       let r: Response;
       try {
-        r = await doFetch(`${CG_ONCHAIN}${path}`, { headers: { accept: "application/json", "x-cg-pro-api-key": key }, signal: AbortSignal.timeout(CG_TIMEOUT_MS), redirect: "error" });
+        r = await doFetch(`${CG_ONCHAIN}${path}`, { headers: { accept: "application/json", "x-cg-pro-api-key": key }, signal: AbortSignal.timeout(background ? CG_BACKGROUND_TIMEOUT_MS : CG_TIMEOUT_MS), redirect: "error" });
       } catch {
         // a timeout or a failed connection; its text is never kept (it may name the request)
         down();

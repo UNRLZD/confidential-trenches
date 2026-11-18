@@ -7,8 +7,8 @@
 // held tape's refresh went keyless only (KEYED_COLD_ONLY) and was refused, its rows aging past the bound.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
-import { CG_ONCHAIN, CG_TIMEOUT_MS, coingeckoPace, createKeyed } from "../coingecko.ts";
+import { after, test } from "node:test";
+import { CG_BACKGROUND_TIMEOUT_MS, CG_ONCHAIN, CG_TIMEOUT_MS, coingeckoPace, createKeyed } from "../coingecko.ts";
 import { geckoBudget } from "../gecko.ts";
 import { providerHolds } from "../../limits/limits.ts";
 import { createSolanaToken, GT_BASE, TAPE_FRESH_MS } from "./token.ts";
@@ -26,6 +26,10 @@ const answerFor = (mint: string) => ({
     return { id, type: "trade", attributes: { ...a, from_token_address: swap(legs.from[0]), from_token_amount: legs.from[1], to_token_address: swap(legs.to[0]), to_token_amount: legs.to[1] } };
   }),
 });
+/** The event loop's turn between two page reads (2 s apart): a refresh behind the held rows lands in it. */
+const settle = async () => {
+  for (let i = 0; i < 5; i++) await new Promise((ok) => setImmediate(ok));
+};
 const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
 
 function harness(perMin = "300", down: (url: string, at: number) => boolean = () => false) {
@@ -61,6 +65,12 @@ function harness(perMin = "300", down: (url: string, at: number) => boolean = ()
 
 test("a held vendor tape read every 2 s for 5 minutes, GeckoTerminal's keyless window full: every answer's rows read under SOL_VENDOR_REACH_MS ago (red: refused keyless, they aged to 5 minutes)", async () => {
   const h = harness();
+  // the timeout each keyed read is sent with: a page's cold read CG_TIMEOUT_MS, a refresh behind held rows
+  // CG_BACKGROUND_TIMEOUT_MS (CoinGecko's /trades took up to 3.1 s from a Mac, 18 Nov 14:2xZ)
+  const timeouts: number[] = [];
+  const timeout = AbortSignal.timeout;
+  AbortSignal.timeout = (ms: number) => (timeouts.push(ms), timeout.call(AbortSignal, ms));
+  after(() => void (AbortSignal.timeout = timeout));
   const first = await h.tape(o.mint);
   assert.equal(first.status, 200, first.body.slice(0, 80));
   assert.equal(first.src, "coingecko", "a cold tape is the key's, as before");
@@ -68,6 +78,7 @@ test("a held vendor tape read every 2 s for 5 minutes, GeckoTerminal's keyless w
   for (const end = h.t.t + 300_000; h.t.t < end; ) {
     h.t.t += 2_000;
     h.fill();
+    await settle();
     const a = await h.tape(o.mint);
     assert.equal(a.status, 200);
     ages.push(h.t.t - a.asOfMs!);
@@ -81,6 +92,9 @@ test("a held vendor tape read every 2 s for 5 minutes, GeckoTerminal's keyless w
   assert.equal(h.gt("/trades"), 0, "no keyless call: the window was full");
   // the refreshes draw the key as the helper's background (limits.ts CALLER_DAY_ROOM): named so in the minute line
   assert.match(h.keyed.minute() ?? "", /served trades background \d+/);
+  AbortSignal.timeout = timeout;
+  assert.deepEqual([...new Set(timeouts.slice(0, 2))], [CG_TIMEOUT_MS], "the cold read's top pool and trades");
+  assert.deepEqual([...new Set(timeouts.slice(2))], [CG_BACKGROUND_TIMEOUT_MS], "every refresh");
 });
 
 test("past the key's background day the held tape's refresh goes keyless and its rows are served dated; a cold tape of another coin still reads the key (callers' quarter of the day)", async () => {
@@ -96,6 +110,7 @@ test("past the key's background day the held tape's refresh goes keyless and its
   h.t.t += TAPE_FRESH_MS + 1;
   h.fill();
   const held = await h.tape(o.mint);
+  await settle();
   assert.equal(held.status, 200);
   assert.equal(h.cg("/trades"), before, "the held refresh took no caller's share of the day");
   assert.ok(h.t.t - held.asOfMs! > TAPE_FRESH_MS, "its rows served dated by their read");
@@ -114,6 +129,7 @@ test("one CoinGecko timeout on a held tape's refresh: the next read renews it in
   for (const end = h.t.t + 60_000; h.t.t < end; ) {
     h.t.t += 2_000;
     h.fill();
+    await settle();
     const a = await h.tape(o.mint);
     assert.equal(a.status, 200);
     ages.push(h.t.t - a.asOfMs!);
