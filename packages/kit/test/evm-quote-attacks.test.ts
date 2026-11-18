@@ -1324,6 +1324,34 @@ test("X1 nine currencies: the real one, oldest, is priced, and eight newer ones 
   await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)), heldTo(x0));
 });
 
+// Card evm-cold-multihop-quote-inside-the-kpi: a route through X's market is read in the market's own round. At main
+// the quote read X's market, waited for its answer, then read the route through it: one round more than now (Base
+// 0x07b3d9's first quote, about 330 ms at mainnet.base.org, 2026-11-18). Rounds are counted on provider 0, each a set of
+// eth_call posts sent once every one before it has answered.
+test("RX the route through X's market rides the market's own round: the X1 world's quote reads one round fewer, held to the same route", async () => {
+  const token = "0x00000000000000000000000000000000000ff1fe";
+  const x0 = xAt(0x180);
+  const real: ModelPool = { key: keyOf(token, x0, 3000, 60, NATIVE), give: (a) => a };
+  const market = marketOf(x0);
+  const logs = [{ key: real.key, at: 4_000_100 }, { key: market.key, at: 4_050_000 }];
+  const pools = [seeded(token), real, market];
+  let rounds = 0;
+  let open = 0;
+  const counted = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const reads = calls.some((c) => c.method === "eth_call");
+    if (reads && open++ === 0) rounds++;
+    try {
+      await new Promise((go) => setTimeout(go, 5));
+      return await rpc(calls);
+    } finally {
+      if (reads) open--;
+    }
+  };
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [counted(chain(pools, 0)), chain(pools, 1)], NOW, scanner(5_000_000, logs)), heldTo(x0));
+  // at main 6: the X prune, the markets' state, the market quotes, then the routes through them, among the rest
+  assert.equal(rounds, 5, `${rounds} rounds of reads`);
+});
+
 test("X2 seventeen currencies, the shallowest by liquidity included: each is priced through its market, and the one that gives most sets R", async () => {
   const token = "0x00000000000000000000000000000000000ff2ff";
   const deeper = Array.from({ length: 16 }, (_, i): ModelPool => ({ key: keyOf(token, xAt(0x200 + i), 3000, 60, NATIVE), give: (a) => a }));

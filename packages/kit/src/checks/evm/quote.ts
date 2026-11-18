@@ -1285,6 +1285,9 @@ export const EVM_QUOTE_MAX_KEYS = 65_536;
 // the quote refuses (too_many_pools), never cuts (review of 13a063e, HIGH).
 export const EVM_QUOTE_MAX_OTHER = 1_024;
 export const EVM_QUOTE_MAX_QUOTED = 1_024;
+/** The most routes through X's markets a quote reads beside the markets' own quotes, before it knows which it asks
+ *  (card evm-cold-multihop-quote-inside-the-kpi, "The routes through X's markets in the markets' own round"). */
+const EVM_X_EARLY = 8;
 /** With no more found pools than this, those of the native asset or WETH whose hook is none or pinned are quoted in
  *  the first round already. */
 const EVM_QUOTE_EARLY = 64;
@@ -3662,6 +3665,21 @@ async function routeSetOf(a: {
   };
   const third: Read[] = [];
   quoteMarkets(xs, third, true);
+  // The routes through X's markets in the markets' own round (card evm-cold-multihop-quote-inside-the-kpi): the fourth
+  // round asks a route through X's market only once that market's quote is in, through the market that gives the most
+  // X (and the one that counts for more, routeMarkets) and to the token's pools with X that the X it gives can carry
+  // past Q. The route's read itself needs neither answer: it is the same read at the same block whichever market wins.
+  // Where every route the fourth round could ask, each quoted market of an X to each of the token's pools with that X,
+  // is at most EVM_X_EARLY routes, each is read here and the fourth round takes the ones it asks from these answers,
+  // counted against EVM_QUOTE_MAX_QUOTED only then; the others are never used. Base 0x07b3d9's first quote waited a
+  // round for its two routes (about 330 ms at mainnet.base.org, 2026-11-18). Past EVM_X_EARLY the fourth round reads
+  // as before, so a token seeded with many pools of X costs no more reads than it did.
+  const viaX = new Map<string, Quote>();
+  const earlyKey = (mk: Found, p: Found) => `${mk.id} ${p.id}`;
+  const earlyAsk = xs.flatMap((x) => (markets.get(x) ?? []).filter((mk) => marketQuote.has(mk)).flatMap((mk) => (xPools.get(x) ?? []).map((p) => [x, mk, p] as const)));
+  if (earlyAsk.length <= EVM_X_EARLY) {
+    for (const [x, mk, p] of earlyAsk) viaX.set(earlyKey(mk, p), quoteAt(third, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key], token, amountIn));
+  }
   await round(third);
   const fourth: Read[] = [];
   const further: string[] = [];
@@ -3675,7 +3693,9 @@ async function routeSetOf(a: {
       const xa = out(marketQuote.get(mk)!.at)!;
       for (const p of xPools.get(x)!) {
         if (!can(p, xa)) continue;
-        p.quotes.push(quoteOf(fourth, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]));
+        const e = viaX.get(earlyKey(mk, p));
+        if (e !== undefined && quotesLeft-- === 0) return refuse("too_many_pools", `more than the ${EVM_QUOTE_MAX_QUOTED} routes a quote reads could beat the route`);
+        p.quotes.push(e ?? quoteOf(fourth, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]));
       }
     }
   }
