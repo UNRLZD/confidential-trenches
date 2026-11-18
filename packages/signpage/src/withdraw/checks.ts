@@ -33,7 +33,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultScopeOf } from "../../../kit/src/vault/shapes.ts";
 import { NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc } from "../../../kit/src/near/networks.ts";
 import type { NoteRecord } from "../../../wallet/src/notes/store.ts";
-import { nearestPlannable, planPoolWithdraw, WITHDRAW_PLAN_NOTES, type WithdrawCosts, type WithdrawPart, type WithdrawSource } from "../pool-withdraw.ts";
+import { nearestPlannable, planPoolWithdraw, WITHDRAW_PLAN_NOTES, type WithdrawCosts, type WithdrawPart, type WithdrawSource, withdrawNoteFloor } from "../pool-withdraw.ts";
 
 /** intents.near: an ft_withdraw out of it may never name it (W:930), and nothing sent to it is the user's. */
 export const INTENTS = "intents.near";
@@ -127,7 +127,10 @@ export function cashSendable(notes: readonly WithdrawSource[], fee: bigint, minP
 
 /**
  * The withdrawals that send `amount` from `notes` at `fee` each, largest note first; null when no plan does. Max
- * (cashSendable) is every giving note whole, at any count of notes. Any other amount is the pool planner's plan
+ * (cashSendable) is every giving note whole, at any count of notes. One note that pays the amount with no change or a
+ * change at the note floor pays it alone, the smallest such (card cash-withdraw-takes-the-smallest-covering-note;
+ * wallet.md §2.5 step 1's rule, W:640): the larger notes stay whole, as withdrawRequest's pick and planCashSpend keep
+ * them; the plan only names that note, the amounts a plan sends are the search's. Any other amount is the pool planner's plan
  * (planPoolWithdraw: the fewest parts, every change 0 or above the note floor), which reads the WITHDRAW_PLAN_NOTES
  * largest notes; past that many, the largest note goes whole and the rest is planned the same way, so a Cash of many
  * small notes still sends what its notes hold. The one planner for every exact Cash spend: the form, and pool.move
@@ -137,6 +140,13 @@ export function planCashWithdraw(notes: readonly WithdrawSource[], amount: bigin
   if (typeof amount !== "bigint" || typeof fee !== "bigint" || typeof minPart !== "bigint" || fee < 0n || minPart <= fee || amount < minPart) return null;
   const all = giving(notes, fee, minPart);
   if (amount === cashSendable(all, fee, minPart)) return all.map((n) => whole(n, fee));
+  const floor = withdrawNoteFloor(cashCosts(fee, minPart));
+  let one: WithdrawSource | undefined;
+  for (const n of all) {
+    const change = n.value - fee - amount;
+    if ((change === 0n || change >= floor) && (one === undefined || n.value < one.value || (n.value === one.value && n.id < one.id))) one = n;
+  }
+  if (one !== undefined) return [{ noteId: one.id, part: amount, chunk: amount + fee }];
   if (all.length <= WITHDRAW_PLAN_NOTES) return planPoolWithdraw(all, amount, cashCosts(fee, minPart));
   const [first, ...rest] = all as [WithdrawSource, ...WithdrawSource[]];
   const tail = amount > first.value - fee ? planCashWithdraw(rest, amount - (first.value - fee), fee, minPart) : null;
