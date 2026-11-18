@@ -97,10 +97,11 @@ const word = (v: unknown): bigint => {
   return BigInt(v);
 };
 
-/** `rpc` with at most `n` of `gate`'s calls in flight at once, each started only while `signal` holds. */
+/** `rpc` with at most `n` of `gate`'s calls in flight at once, each started only while `signal` holds, and ended at
+ *  the provider when `signal` or the call's own stops. */
 function gated(rpc: EvmRpc, gate: { busy: number; queue: (() => void)[]; n: number }, signal: AbortSignal): EvmRpc {
   return Object.assign(
-    async (method: string, params: readonly unknown[]) => {
+    async (method: string, params: readonly unknown[], own?: AbortSignal) => {
       while (gate.busy >= gate.n) await new Promise<void>((go) => gate.queue.push(go));
       // a stopped pass sends nothing more, and wakes the next call in line, which stops too
       if (signal.aborted) {
@@ -109,7 +110,7 @@ function gated(rpc: EvmRpc, gate: { busy: number; queue: (() => void)[]; n: numb
       }
       gate.busy++;
       try {
-        return await rpc(method, params);
+        return await rpc(method, params, own === undefined ? signal : AbortSignal.any([own, signal]));
       } finally {
         gate.busy--;
         gate.queue.shift()?.();
