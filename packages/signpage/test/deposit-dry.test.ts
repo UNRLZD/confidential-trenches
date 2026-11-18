@@ -173,11 +173,13 @@ test("the minimum is the least amount whose floor clears MIN_DEPOSIT at the rout
 test("deposit.assets through the frame, signed out: the three assets as 1Click lists them, each minimum at the fee just quoted, the cap as max_usd", async () => {
   const f = frame();
   const a = await f.ask(ASSETS);
+  // each probe's signed room is W + its 5 bps spread on 10 USDC, 10,538 (card deposit-min-floor-signed): the least A with
+  // ⌈(A − 10,538 − ⌊A × (F + 15) / 10,000⌋) × 0.99⌉ ≥ 1,000,000, F 0 on the same asset and 1 between two USDC assets
   assert.deepEqual(a.result, {
     assets: [
-      { origin_asset: NEAR_USDC, chain: "near", symbol: "USDC", decimals: 6, min: "1.017164", max_usd: "1000" },
-      { origin_asset: SOL_USDC, chain: "solana", symbol: "USDC", decimals: 6, min: "1.017266", max_usd: "1000" },
-      { origin_asset: BASE_USDC, chain: "base", symbol: "USDC", decimals: 6, min: "1.017266", max_usd: "1000" },
+      { origin_asset: NEAR_USDC, chain: "near", symbol: "USDC", decimals: 6, min: "1.022172", max_usd: "1000" },
+      { origin_asset: SOL_USDC, chain: "solana", symbol: "USDC", decimals: 6, min: "1.022274", max_usd: "1000" },
+      { origin_asset: BASE_USDC, chain: "base", symbol: "USDC", decimals: 6, min: "1.022274", max_usd: "1000" },
     ],
   });
   assert.equal(SIGNPAGE_RESULT_SCHEMAS["deposit.assets"](a.result), true, "the kit's client takes it");
@@ -212,11 +214,14 @@ test("deposit.coin through the frame, signed out: the chain's row at its floor, 
   assert.equal(f.sent.filter((s) => s.url !== DEPOSIT_TOKENS_URL).length, 3, "the three USDC probes alone");
 });
 
-test("deposit.assets: the minimum follows 1Click's quoted withdraw fee, per asset", async () => {
-  const f = frame({ by: { [SOL_USDC]: { w: 0n } } });
+test("deposit.assets: the minimum follows the withdraw fee 1Click's signed amounts take, per asset", async () => {
+  // Solana's answer takes no withdraw fee and no spread past its fee: the bound no fee lowers; Base's takes W and none
+  const f = frame({ by: { [SOL_USDC]: { w: 0n, spread: 0 }, [BASE_USDC]: { spread: 0 } } });
   const a = await f.ask(ASSETS);
-  const sol = (a.result!.assets as { origin_asset: string; min: string }[]).find((x) => x.origin_asset === SOL_USDC)!;
-  assert.equal(sol.min, "1.011719");
+  const min = (id: string) => (a.result!.assets as { origin_asset: string; min: string }[]).find((x) => x.origin_asset === id)!.min;
+  assert.equal(min(SOL_USDC), "1.011719");
+  assert.equal(min(BASE_USDC), "1.017266");
+  assert.equal(min(NEAR_USDC), "1.022172");
 });
 
 test("deposit.assets: an asset 1Click does not list as the release has it, or whose quote fails a check, is left out", async () => {
@@ -393,8 +398,8 @@ test("the committed asks end inside the one ask's window, well inside the kit cl
 // ------------------------------------------------------------------------------------------------ deposit.quote
 const RECORD: DepositRecord = { v: 1, scope: "7", index: 3, id: U };
 const SAVED: DepositPublic = { status: { source: "code", code_saved: true }, deposit: RECORD };
-/** deposit.quote's page (src/deposit-wire.ts) with `fetch` as the helper. */
-function quotePage(fetchFn: typeof fetch) {
+/** deposit.quote's page (src/deposit-wire.ts) with `fetch` as the helper, quoting from `origin`. */
+function quotePage(fetchFn: typeof fetch, origin = SOL_USDC) {
   const posted: unknown[] = [];
   const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
   let listener: ((e: IncomingMessage) => void) | null = null;
@@ -402,7 +407,7 @@ function quotePage(fetchFn: typeof fetch) {
     kinds: { "deposit.quote": depositQuoteHost({ quoted: async () => {}, scope: () => 7n, read: async () => SAVED, fetch: fetchFn, now: () => NOW, checked: async () => {} }) } });
   return async (amount: string) => {
     const id = crypto.randomUUID();
-    listener!({ origin: APP_ORIGIN, source: parent, data: { v: 1, id, type: "deposit.quote", origin_asset: SOL_USDC, amount } });
+    listener!({ origin: APP_ORIGIN, source: parent, data: { v: 1, id, type: "deposit.quote", origin_asset: origin, amount } });
     await api.idle();
     return posted.at(-1) as { ok: boolean; error?: { code: string } };
   };
@@ -457,7 +462,8 @@ test("review 2: a withdrawFee rewritten after 1Click signed cannot move the mini
     ((await frame({ quote: q }).ask(ASSETS)).result!.assets as { origin_asset: string; min: string }[]).find((x) => x.origin_asset === SOL_USDC)!.min;
   const honest = await minOf({ spread: 0 });
   assert.equal(honest, "1.017266");
-  for (const w of ["5000000", "9900000"])
+  // up or down (card deposit-min-floor-signed): the unsigned figure is not read
+  for (const w of ["0", "4000", "5537", "5000000", "9900000"])
     assert.equal(await minOf({ spread: 0, after: (x) => void (x.quote.withdrawFee = w) }), honest, `withdrawFee rewritten to ${w}`);
   // one the fees then take the whole probe with: the device's own floor refuses the answer, the asset is left out
   assert.deepEqual((await frame({ quote: { spread: 0, after: (x) => void (x.quote.withdrawFee = "999999999") } }).ask(ASSETS)).error, { code: "not_available" });
@@ -465,18 +471,43 @@ test("review 2: a withdrawFee rewritten after 1Click signed cannot move the mini
   const room = await minOf({ spread: 5, after: (x) => void (x.quote.withdrawFee = "9900000") });
   assert.equal(room, (Number(depositMinimum(SOL_USDC, 5_538n + 5_000n)) / 1e6).toString());
   // the bound itself
-  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 9_993_462n, unsignedDryWithdrawFee: 9_000_000n }, 1), 5_538n);
-  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 9_993_462n, unsignedDryWithdrawFee: 4_000n }, 1), 4_000n);
-  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 10_000_000n, unsignedDryWithdrawFee: 4_000n }, 1), 0n);
+  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 9_993_462n }, 1), 5_538n);
+  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 9_994_462n }, 0), 5_538n, "the same asset, no fee");
+  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 10_000_000n }, 1), 0n);
 });
 
 test("review 3 and L3: at the minimum deposit.assets shows, deposit.dry and the live deposit.quote (each at its floor) both go; one unit under, both are below_min", async () => {
-  const shown = ((await frame().ask(ASSETS)).result!.assets as { origin_asset: string; min: string }[]).find((x) => x.origin_asset === SOL_USDC)!.min;
+  // the probe answered with no spread past 1Click's fee, as its 25 USDC dry read from Solana on 6 Nov (room 4,688 for its
+  // withdrawFee 4,690: kit-deposit-assets-dry.answers.json), so the shown minimum is the tight one
+  const shown = ((await frame({ quote: { spread: 0 } }).ask(ASSETS)).result!.assets as { origin_asset: string; min: string }[]).find((x) => x.origin_asset === SOL_USDC)!.min;
   assert.equal(shown, "1.017266");
   assert.equal((await quotePage(liveFetch([], undefined, 15))(shown)).ok, true, `deposit.quote at the shown ${shown}`);
   assert.equal((await frame({ quote: { spread: 15 } }).ask(dry(shown))).ok, true, `deposit.dry at the shown ${shown}`);
   assert.deepEqual((await quotePage(liveFetch([], undefined, 15))("1.017265")).error, { code: "below_min" });
   assert.deepEqual((await frame({ quote: { spread: 15 } }).ask(dry("1.017265"))).error, { code: "below_min" });
+});
+
+// Card deposit-min-floor-signed: a dry answer's withdrawFee is not signed, so a helper can rewrite it to 0 on every probe
+// (the review of oneclick-partner-fee-live, finding 5: Solana's minimum then read 1.011719, and the live quote at it was
+// below_min). The minimum counts the fee the signed amounts leave room for, never the unsigned figure.
+test("a probe whose unsigned withdrawFee is rewritten to 0: every USDC asset shows the minimum its signed amounts allow, and the live quote at it goes", async () => {
+  const zero = (x: Answer) => void (x.quote.withdrawFee = "0");
+  for (const spread of [0, 5]) {
+    const shown = (await frame({ quote: { spread, after: zero } }).ask(ASSETS)).result!.assets as { origin_asset: string; min: string }[];
+    assert.deepEqual(shown.map((x) => x.origin_asset), [...ONECLICK_USDC_ASSETS], `spread ${spread}`);
+    for (const a of shown) {
+      // by hand, not by the code under test: the probe's signed room is 10,000,000 − amountOut − ⌊10,000,000 × F / 10,000⌋
+      // = W + spread × 1,000 (F 0 on the same asset, 1 bp between two USDC assets), and the minimum is the least A with
+      // ⌈(A − room − ⌊A × (F + 15) / 10,000⌋) × 0.99⌉ ≥ 1,000,000
+      const fs = a.origin_asset === NEAR_USDC ? 15n : 16n;
+      const room = W + BigInt(spread) * 1_000n;
+      let m = 1_000_000n;
+      while (((m - room - (m * fs) / 10_000n) * 9_900n + 9_999n) / 10_000n < 1_000_000n) m++;
+      assert.equal(a.min, dec6(m), `${a.origin_asset} at spread ${spread}`);
+      // the live quote at the shown minimum, 1Click's signed withdrawFee W and its answer at the device's floor, goes
+      assert.equal((await quotePage(liveFetch([], undefined, 15), a.origin_asset)(a.min)).ok, true, `deposit.quote at ${a.min} from ${a.origin_asset}`);
+    }
+  }
 });
 
 // the read's fetch never settles (a deaf one ignores its abort too), so its "down" answer can only come from the page's
