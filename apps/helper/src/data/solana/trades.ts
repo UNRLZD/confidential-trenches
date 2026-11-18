@@ -1271,7 +1271,8 @@ export function createSolanaTrades(deps: {
       const cut = e.cut !== undefined && now() - e.cut.at <= CUT_KEEP_MS;
       if (cut && deps.tape !== undefined) {
         const v = await poolTape(mint, limit, null);
-        if (v.status === 200 && v.src !== "chain") return v;
+        // named in Server-Timing, so a reader can tell this coin's chain tape is past the budget
+        if (v.status === 200 && v.src !== "chain") return { ...v, timing: `${v.timing === undefined ? "" : `${v.timing}, `}sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago"` };
       }
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(`${mint} ${r.tx}`)?.[r.index % 8] ?? null, tx: r.tx }));

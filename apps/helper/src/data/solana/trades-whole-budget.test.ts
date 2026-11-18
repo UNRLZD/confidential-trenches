@@ -105,9 +105,11 @@ test("card sol-meteora-tape-inside-rpc-budget: past the budget a coin's tape nam
   assert.equal((await c.t.trades(TTW, 50)).status, 200);
   for (let i = 0; i < 40; i++) c.stream(TTW);
   await settle();
-  const a = JSON.parse((await c.t.trades(TTW, 50)).body) as { src: string; trades: { tx: string }[] };
+  const va = await c.t.trades(TTW, 50);
+  const a = JSON.parse(va.body) as { src: string; trades: { tx: string }[] };
   assert.equal(a.src, "geckoterminal", "a coin past the budget is served its top pool's trades");
   assert.deepEqual(a.trades.map((r) => r.tx), ["V1"]);
+  assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago"/, "the answer names why");
   // the vendor down: its own rows, whole only from the second after the newest transaction not read
   answers = false;
   c.step(31_000);
