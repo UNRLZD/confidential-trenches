@@ -11,7 +11,7 @@
 // one JSON record on stdout:
 //   node --import ./scripts/net-window.mjs packages/wallet/scripts/buy-wallets-live.ts [--helper <origin>]
 import { readFileSync } from "node:fs";
-import { SOLANA_PUBLIC_RPC_URL, solanaJsonRpc, solanaPacedRpc, type SolanaRpc } from "@blindfill/kit";
+import { solanaJsonRpc, solanaPacedRpc, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { buyWallets, evmHelperHoldings, evmHoldingsReader, HOLDINGS_PUBLIC_RPC_LIMIT, HOLDINGS_RPC_LIMIT, solanaHelperHoldings, solanaHoldingsAt, type HoldingsReader, type SpentNote } from "../src/pool/buy-wallets.ts";
 
@@ -20,8 +20,10 @@ const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(Buffer.from(A8.inpu
 const L = BigInt(`0x${A8.l}`);
 const arg = (k: string, dflt: string): string => (process.argv.includes(k) ? process.argv[process.argv.indexOf(k) + 1]! : dflt);
 const HELPER = arg("--helper", "https://ct-api.unrealized.trade");
-// solana-rpc.publicnode.com refuses getTokenAccountsByOwner (HTTP 403, 2026-11-03 06:10Z): the kit's public RPC instead
-const PUBLIC = { sol: SOLANA_PUBLIC_RPC_URL, base: "https://base-rpc.publicnode.com" };
+// solana-rpc.publicnode.com refuses getTokenAccountsByOwner (HTTP 403, 2026-11-03 06:10Z): Solana's own public RPC
+// instead, named here, since this script runs in Node with no Origin; the kit's send default is publicnode, as
+// api.mainnet-beta refuses a browser (card solana-send-browser-origin)
+const PUBLIC = { sol: "https://api.mainnet-beta.solana.com", base: "https://base-rpc.publicnode.com" };
 const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 // the spent notes whose Ws are j = 0..3: a deposit (j 0) and change notes 0..2 (j 1..3)
 const SPENT: SpentNote[] = [{ ref: { kind: "deposit", s: 1n, i: 0 }, label: L }, ...[0, 1, 2].map((j) => ({ ref: { kind: "change" as const, l: L, j }, label: L }))];
