@@ -7,15 +7,17 @@
 //     base64, confirmed), each its own id: each must answer 200 with its own id and the one account, all the same
 //     result (one read's), and all but one marked a shared answer (Server-Timing rpc-cache;desc="hit");
 //   - two reads of an account off the list (the pool's funder, a plain system account like a user's): neither marked.
-// Before the card (the deployed 27c4d830a, 18 Nov 07:00Z) no answer was marked: 4 reads at once, 2 different results. A read the shared
-// module calls a no-answer (a 429, a 5xx, no answer) is the moment's: INCONCLUSIVE (exit 3).
+// Before the card (the deployed 27c4d830a, 18 Nov 07:00Z) no answer was marked: 4 reads at once, 2 different results.
+// Every read goes through the shared module (provider-answer.mjs rpcAnswer, with its id, the page's Origin and the
+// Server-Timing header kept): a read it calls a no-answer (a 429, a 5xx, no answer), or one answered only on its second
+// try (no longer at the same moment), is the moment's: INCONCLUSIVE (exit 3).
 // After: helper
 //   node scripts/live-checks/helper-rpc-one-read-many-pages.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, so the check's test
 //   can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { classify, EXIT } from "./provider-answer.mjs";
+import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 const KEY = "helper-rpc-one-read-many-pages";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -31,18 +33,8 @@ const config = { encoding: "base64", commitment: "confirmed" };
 
 async function post(base, id, account, fetchFn) {
   const t0 = performance.now();
-  try {
-    const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/rpc/solana`, {
-      method: "POST",
-      redirect: "manual",
-      headers: { origin: SIGN, "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id, method: "getMultipleAccounts", params: [[account], config] }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    return { id, account, status: r.status, timing: r.headers.get("server-timing") ?? "", ms: Math.round(performance.now() - t0), body: (await r.text()).slice(0, 4_000) };
-  } catch (e) {
-    return { id, account, status: 0, timing: "", ms: Math.round(performance.now() - t0), body: String(e?.message ?? e).slice(0, 200) };
-  }
+  const a = await rpcAnswer(`${base.replace(/\/$/, "")}/v1/rpc/solana`, "getMultipleAccounts", [[account], config], { fetchFn, timeoutMs: 20_000, headers: { origin: SIGN }, redirect: "manual", keep: ["server-timing"], id });
+  return { id, account, ms: Math.round(performance.now() - t0), answer: a };
 }
 
 export async function read(base = BASE, fetchFn = fetch) {
@@ -52,16 +44,14 @@ export async function read(base = BASE, fetchFn = fetch) {
   return { base, at, reads };
 }
 
-/** An answer's result as text and its one account, or what is wrong. */
+/** A read's result as text and its one account, or what is wrong. */
 function resultOf(r) {
-  try {
-    const j = JSON.parse(r.body);
-    if (j.id !== r.id) return { bad: `id ${JSON.stringify(j.id)}, not ${r.id}` };
-    if (!Array.isArray(j.result?.value) || j.result.value.length !== 1) return { bad: "not one account's answer" };
-    return { text: JSON.stringify(j.result) };
-  } catch {
-    return { bad: "not JSON" };
-  }
+  const a = r.answer;
+  if (a.status !== 200) return { bad: `HTTP ${a.status} ${JSON.stringify(a.error ?? a.result ?? null).slice(0, 120)}` };
+  if (a.error !== undefined) return { bad: `error ${JSON.stringify(a.error).slice(0, 120)}` };
+  if (a.answerId !== r.id) return { bad: `id ${JSON.stringify(a.answerId)}, not ${r.id}` };
+  if (!Array.isArray(a.result?.value) || a.result.value.length !== 1) return { bad: "not one account's answer" };
+  return { text: JSON.stringify(a.result) };
 }
 
 /** The check on one recorded run. */
@@ -69,21 +59,25 @@ export function judge({ reads }) {
   const lines = [];
   let bad = false, quiet = false;
   const say = (ok, text) => ((bad ||= !ok), lines.push(`${ok ? "ok " : "BAD"} ${text}`));
-  const host = new URL(BASE).host;
   const answered = [];
   for (const r of reads ?? []) {
-    const a = classify(host, r.status, r.body, { page: true });
+    const a = r.answer;
     if (a.noAnswer !== undefined) {
       quiet = true;
       lines.push(`--  ${r.id}: ${a.noAnswer}`);
       continue;
     }
-    const res = r.status === 200 ? resultOf(r) : { bad: `${r.status} ${String(r.body).slice(0, 120)}` };
+    if (a.tries !== 1) {
+      quiet = true;
+      lines.push(`--  ${r.id}: answered on its second try, not at the same moment as the others`);
+      continue;
+    }
+    const res = resultOf(r);
     if (res.bad !== undefined) {
       say(false, `${r.id}: ${res.bad}`);
       continue;
     }
-    answered.push({ ...r, text: res.text, hit: HIT.test(r.timing) });
+    answered.push({ ...r, text: res.text, timing: a.kept?.["server-timing"] ?? "", hit: HIT.test(a.kept?.["server-timing"] ?? "") });
   }
   const price = answered.filter((r) => r.account === PYTH);
   const other = answered.filter((r) => r.account === OTHER);

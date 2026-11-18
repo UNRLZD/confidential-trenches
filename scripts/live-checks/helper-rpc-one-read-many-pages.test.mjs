@@ -35,18 +35,19 @@ test("the recorded bad answer (the deployed helper before this card) fails: no r
 test("planted: an off-list account served a shared answer (a wallet's read joined) fails", () => {
   const r = edit((run) => {
     const o = run.reads.find((x) => x.account === OTHER);
-    o.timing = `rpc-cache;desc="hit", ${o.timing}`;
+    o.answer.kept["server-timing"] = `rpc-cache;desc="hit", ${o.answer.kept["server-timing"]}`;
   });
   assert.equal(r.verdict, "FAIL");
   assert.match(bad(r)[0], /an account off the list\): served a shared answer/);
 });
 
-test("planted: a price answer with another caller's id, or not one account, fails; a 400 fails; a 429 is the moment's", () => {
-  const p = (run) => run.reads.find((x) => x.account === PYTH && /rpc-cache/.test(x.timing));
-  assert.equal(edit((run) => (p(run).body = p(run).body.replace(/"id":"price-\d"/, '"id":"price-9"'))).verdict, "FAIL");
-  assert.equal(edit((run) => (p(run).body = JSON.stringify({ jsonrpc: "2.0", id: p(run).id, result: { context: { slot: 1 }, value: [] } }))).verdict, "FAIL");
-  assert.equal(edit((run) => Object.assign(p(run), { status: 400, body: '{"error":"method_not_allowed"}' })).verdict, "FAIL");
-  assert.equal(edit((run) => Object.assign(p(run), { status: 429, body: "" })).verdict, "INCONCLUSIVE");
+test("planted: a price answer with another caller's id, or not one account, fails; a 400 fails; a 429, or an answer on the second try, is the moment's", () => {
+  const p = (run) => run.reads.find((x) => x.account === PYTH && /rpc-cache/.test(x.answer.kept["server-timing"]));
+  assert.equal(edit((run) => (p(run).answer.answerId = "price-9")).verdict, "FAIL");
+  assert.equal(edit((run) => (p(run).answer.result = { context: { slot: 1 }, value: [] })).verdict, "FAIL");
+  assert.equal(edit((run) => (p(run).answer = { error: "method_not_allowed", status: 400, acao: null, kept: { "server-timing": null }, answerId: undefined, tries: 1 })).verdict, "FAIL");
+  assert.equal(edit((run) => (p(run).answer = { noAnswer: "ct-api.unrealized.trade HTTP 429" })).verdict, "INCONCLUSIVE");
+  assert.equal(edit((run) => (p(run).answer.tries = 2)).verdict, "INCONCLUSIVE");
   assert.equal(edit((run) => (run.reads = run.reads.filter((x) => x.account === PYTH))).verdict, "INCONCLUSIVE");
 });
 
@@ -62,4 +63,6 @@ test("read: the price reads and the off-list reads go out at once, each its own 
   assert.ok(seen.every((s) => s.url === "http://h/v1/rpc/solana" && s.origin === "https://confidential.unrealized.trade"));
   assert.equal(new Set(seen.map((s) => s.id)).size, PAGES + 2);
   assert.equal(run.reads.filter((r) => r.account === OTHER).length, 2);
+  // each read through the shared module, its own id and Server-Timing back beside the answer
+  assert.ok(run.reads.every((r) => r.answer.answerId === r.id && r.answer.tries === 1 && r.answer.kept["server-timing"] === 'rpc-cache;desc="hit"'));
 });

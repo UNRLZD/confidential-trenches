@@ -71,6 +71,18 @@ test("rpcAnswer pauses RETRY.ms before it reads again", async () => {
   }
 });
 
+test("rpcAnswer with an id sends it and gives back the answer's own id and its tries; without one, as before", async () => {
+  const sent = [];
+  const echo = (id) => async (_u, init) => (sent.push(JSON.parse(init.body).id), new Response(JSON.stringify({ jsonrpc: "2.0", id, result: "0x1" }), { status: 200 }));
+  assert.deepEqual(await rpcAnswer("https://p.example/rpc", "eth_chainId", [], { fetchFn: echo("price-0"), id: "price-0" }), { result: "0x1", answerId: "price-0", tries: 1 });
+  assert.deepEqual(await rpcAnswer("https://p.example/rpc", "eth_chainId", [], { fetchFn: echo("price-9"), id: "price-1" }), { result: "0x1", answerId: "price-9", tries: 1 });
+  assert.deepEqual(await rpcAnswer("https://p.example/rpc", "eth_chainId", [], { fetchFn: echo(1) }), { result: "0x1" });
+  assert.deepEqual(sent, ["price-0", "price-1", 1]);
+  let n = 0;
+  const later = await rpcAnswer("https://p.example/rpc", "eth_chainId", [], { id: 7, fetchFn: async () => (n++ === 0 ? new Response("", { status: 429 }) : new Response(JSON.stringify({ jsonrpc: "2.0", id: 7, result: "0x1" }), { status: 200 })) });
+  assert.deepEqual(later, { result: "0x1", answerId: 7, tries: 2 });
+});
+
 test("rpcAnswer reads a no-answer again once, and no more", async () => {
   for (const [name, status, body] of NO_ANSWERS) {
     let n = 0;
