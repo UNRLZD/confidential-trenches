@@ -41,18 +41,38 @@ test("DRYIX1 the dry's quote is asked once the chain's index sync it started end
   assert.ok(by[0] === 0 && by[1]! > 0, `quotes asked by 2,999 and 3,001 ms: ${by.join(", ")} (none before the index is served at 3,000 ms, then the quote)`);
 }));
 
-test("DRYIX2 an index sync that does not end within EVM_DRY_INDEX_WAIT_MS holds the dry no longer: its quote is asked then, as with no index", { timeout: 60_000 }, () => onTestClock(async () => {
+test("DRYIX2 an index sync still running past EVM_DRY_INDEX_WAIT_MS asks no quote beside it: the dry's out is EVM_DRY_SYNCING (card evm-first-quote-inside-the-kpi)", { timeout: 60_000 }, () => onTestClock(async () => {
   const wait = (dry as unknown as { EVM_DRY_INDEX_WAIT_MS?: number }).EVM_DRY_INDEX_WAIT_MS;
   assert.equal(typeof wait, "number", "pool-buy-evm.ts has no EVM_DRY_INDEX_WAIT_MS");
   const q = { asked: 0 };
-  const by = marks(q, [wait! - 1, wait! + 1]);
-  await dry.evmDryOut(hostOf(() => new Promise<boolean>(() => {}), q) as never, TOKEN, 10n ** 15n);
-  await past(10);
-  assert.ok(by[0] === 0 && by[1]! > 0, `quotes asked by ${wait! - 1} and ${wait! + 1} ms: ${by.join(", ")}`);
-  // a sync that fails at once (another tab's, a partial one): asked at once
-  const q2 = { asked: 0 };
-  const by2 = marks(q2, [1]);
-  await dry.evmDryOut(hostOf(() => Promise.reject(new Error("no lock")), q2) as never, TOKEN, 10n ** 15n);
-  await past(10);
-  assert.ok(by2[0]! > 0, "no quote asked by 1 ms");
+  const by = marks(q, [wait! - 1, wait! + 1, wait! * 3]);
+  const out = await dry.evmDryOut(hostOf(() => new Promise<boolean>(() => {}), q) as never, TOKEN, 10n ** 15n);
+  await past(wait! * 3 + 10);
+  // on 18 Nov 00:36Z the no-index scan asked here drew 26 answers of 429 from the index's own first reader and answered at 73.6 s
+  assert.deepEqual(by, [0, 0, 0], `quotes asked by ${wait! - 1}, ${wait! + 1} and ${wait! * 3} ms: ${by.join(", ")} (none while the sync runs)`);
+  assert.equal(out, (dry as unknown as { EVM_DRY_SYNCING?: symbol }).EVM_DRY_SYNCING, "the dry's out names the running sync");
+  // a sync that ends with no index served (false), or fails at once (another tab's, a partial one): the quote asked at once
+  for (const indexed of [() => Promise.resolve(false), () => Promise.reject(new Error("no lock"))]) {
+    const q2 = { asked: 0 };
+    const by2 = marks(q2, [1]);
+    await dry.evmDryOut(hostOf(indexed, q2) as never, TOKEN, 10n ** 15n);
+    await past(10);
+    assert.ok(by2[0]! > 0, "no quote asked by 1 ms");
+  }
+}));
+
+test("DRYIX3 pool.buy.dry answers down while the index sync runs past the wait, so the box asks again (card evm-first-quote-inside-the-kpi)", { timeout: 60_000 }, () => onTestClock(async () => {
+  const q = { asked: 0 };
+  const r = dry.evmBuyDry("base", { token: TOKEN, amount: "0.001" }, {
+    trading: () => false,
+    tap: async () => ({ tapMax: "0", ready: [] }),
+    withCash: async () => null,
+    // above tap_max with no move priced: `out` alone, one quote of the whole ask, asked at once
+    fee: async () => null,
+    moved: async () => null,
+    quote: () => ({ ...hostOf(() => new Promise<boolean>(() => {}), q), network: "base" }) as never,
+  });
+  await r.after;
+  assert.deepEqual(r.answer(), { error: "down" });
+  assert.equal(q.asked, 0, "a quote was asked beside the running sync");
 }));

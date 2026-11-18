@@ -31,7 +31,9 @@ test("the check reads the seat the page names and draws the window the helper pr
   const mainnet = table.slice(table.indexOf("  mainnet: {"), table.indexOf("  testnet: {"));
   assert.ok(mainnet.includes(`    seat: "${SEAT}",`), "the page's mainnet seat");
   assert.ok(table.includes(`"${DRPC}"]`), "the page's mainnet dRPC (NEAR_RPC_URLS[2])");
-  assert.equal(WINDOW, RPC_PAGE_NEED.near);
+  // card near-seat-pace-fits-one-quote: the share rose to 90 (the page's pace of the seat lets out at most 80 a 10 s);
+  // this check's 30 spread reads stay inside it, and near-seat-pace-fits-one-quote reads one quote's burst at once
+  assert.ok(WINDOW <= RPC_PAGE_NEED.near, `${WINDOW} reads against the share ${RPC_PAGE_NEED.near}`);
 });
 
 test("recorded good run: the page names the seat, the seat admits it and agrees with dRPC, one window served: PASS", () => {

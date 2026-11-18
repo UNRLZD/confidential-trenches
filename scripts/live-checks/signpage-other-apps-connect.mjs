@@ -27,26 +27,28 @@ import path from "node:path";
 export const SIGN = "https://confidential.unrealized.trade";
 
 const Q = "[`\"']";
-/** Each fact the served /app.js must hold, as a pattern on the minified bundle. */
+/** Each fact the served /app.js must hold, as a pattern on the minified bundle. A name is [\w$]+: the minifier also gives
+ *  names with a $ (`$L`), and a build that did failed signout_clears with the fact in place (card near-quote-inside-the-kpi). */
 export const FACTS = {
-  gate_before_any_read: new RegExp(`\\.admit&&!await \\w+\\(\\)\\)return \\w+\\(\\{v:1,id:\\w+,ok:!1,error:\\{code:${Q}not_allowed${Q}\\}\\}\\);let \\w+=\\w+\\(await crypto\\.subtle\\.digest\\(`),
-  gate_on_state_push: /===null\|\|\w+\.admit&&!await \w+\(\)\)return;/,
-  gate_fails_closed: /await \w+\.admit\(\w+\(\)\)===!0\}catch\{return!1\}/,
+  gate_before_any_read: new RegExp(`\\.admit&&!await [\\w$]+\\(\\)\\)return [\\w$]+\\(\\{v:1,id:[\\w$]+,ok:!1,error:\\{code:${Q}not_allowed${Q}\\}\\}\\);let [\\w$]+=[\\w$]+\\(await crypto\\.subtle\\.digest\\(`),
+  gate_on_state_push: /===null\|\|[\w$]+\.admit&&!await [\w$]+\(\)\)return;/,
+  gate_fails_closed: /await [\w$]+\.admit\([\w$]+\(\)\)===!0\}catch\{return!1\}/,
   store_own_database: new RegExp(`=${Q}ct-connections${Q}`),
-  store_bare_origins_only: new RegExp(`throw TypeError\\(${Q}not an origin${Q}\\)[\\s\\S]{0,400}?getAllKeys\\(\\)\\),\\w+\\)\\)\\.filter\\(\\w+\\)\\.sort\\(\\)`),
-  allow_keeps_then_binds: /\.add\((\w+)\)\.then\(\(\)=>\{[\s\S]{0,300}?\.allow\(\1\)/,
-  disconnect_removes_then_drops: new RegExp(`=${Q}Connected apps${Q},\\w+=${Q}Disconnect${Q}[\\s\\S]{0,400}?\\.button\\(${Q}disconnect${Q},\\w+,\\(\\)=>\\{[\\s\\S]{0,60}?\\.store\\.remove\\((\\w+)\\)\\.then\\(\\(\\)=>\\{\\w+\\.remove\\(\\)`),
+  store_bare_origins_only: new RegExp(`throw TypeError\\(${Q}not an origin${Q}\\)[\\s\\S]{0,400}?getAllKeys\\(\\)\\),[\\w$]+\\)\\)\\.filter\\([\\w$]+\\)\\.sort\\(\\)`),
+  allow_keeps_then_binds: /\.add\(([\w$]+)\)\.then\(\(\)=>\{[\s\S]{0,300}?\.allow\(\1\)/,
+  disconnect_removes_then_drops: new RegExp(`=${Q}Connected apps${Q},[\\w$]+=${Q}Disconnect${Q}[\\s\\S]{0,400}?\\.button\\(${Q}disconnect${Q},[\\w$]+,\\(\\)=>\\{[\\s\\S]{0,60}?\\.store\\.remove\\(([\\w$]+)\\)\\.then\\(\\(\\)=>\\{[\\w$]+\\.remove\\(\\)`),
   // the function that deletes the ct-connections database, awaited by the sign out once the store is dropped, and called
   // where another tab's sign out is heard (closeHostLanes first, then quotesSignedOut, then it: test/quotes-signed-out
   // holds the quotes' stop right after the gate)
   signout_clears: {
     test(js) {
-      const db = new RegExp(`(?:var |,)(\\w+)=${Q}ct-connections${Q}`).exec(js)?.[1];
+      const name = (n) => n.replaceAll("$", "\\$"); // a name read back into a pattern: its $ literal
+      const db = new RegExp(`(?:var |,)([\\w$]+)=${Q}ct-connections${Q}`).exec(js)?.[1];
       if (!db) return false;
-      const fn = new RegExp(`function (\\w+)\\([^)]*\\)\\{return \\w+\\(new Promise\\(\\(\\w+,\\w+\\)=>\\{if\\(\\w+===void 0\\)return \\w+\\(\\);let \\w+=\\w+\\.deleteDatabase\\(${db}\\)`).exec(js)?.[1];
+      const fn = new RegExp(`function ([\\w$]+)\\([^)]*\\)\\{return [\\w$]+\\(new Promise\\(\\([\\w$]+,[\\w$]+\\)=>\\{if\\([\\w$]+===void 0\\)return [\\w$]+\\(\\);let [\\w$]+=[\\w$]+\\.deleteDatabase\\(${name(db)}\\)`).exec(js)?.[1];
       if (!fn) return false;
-      const own = new RegExp(`=null,\\w+\\(\\),await ${fn}\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\)`).test(js);
-      const elsewhere = new RegExp(`\\|\\|\\(\\w+\\(\\),\\w+\\(\\),${fn}\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\)`).test(js);
+      const own = new RegExp(`=null,[\\w$]+\\(\\),await ${name(fn)}\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\)`).test(js);
+      const elsewhere = new RegExp(`\\|\\|\\([\\w$]+\\(\\),[\\w$]+\\(\\),${name(fn)}\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\)`).test(js);
       return own && elsewhere;
     },
   },

@@ -43,7 +43,7 @@ test("planted on the good answer: each fact taken away FAILs", () => {
 });
 
 test("the facts read from the script, each mark its own code", () => {
-  const js = "a=ke(t,{...n,progress:u,route:e=>(d(e),`out`in e&&s())});return r?.mint===s.mint&&r.received===s.received&&delete t[n.wallet],t;function KG(e,t){return[0,1].map(n=>Lh(e.trade[n],(r,i)=>e[t()][n](r,i)))}function qG(e,t){let n=`trade`;return{rpcs:KG(e,()=>n),kind:()=>n,release:t,landed:()=>{n=`pass`}}}if(!F)return k(P?M:[],j);e.landed?.();let R=f()";
+  const js = "a=ke(t,{...n,progress:u,route:e=>(d(e),`out`in e&&s())});return r?.mint===s.mint&&r.received===s.received&&delete t[n.wallet],t;function KG(e,t){return[0,1].map(n=>Lh(e.trade[n],(r,i,a)=>e[t()][n](r,i,a)))}function qG(e,t){let n=`trade`;return{rpcs:KG(e,()=>n),kind:()=>n,release:t,landed:()=>{n=`pass`}}}if(!F)return k(P?M:[],j);e.landed?.();let R=f()";
   const f = facts({ index: "", js });
   assert.equal(f.early && f.takeBack && f.release && f.pair && f.landed, true);
   assert.equal(facts({ index: "", js: js.replace("route:e=>(d(e),`out`in e&&s())", "route:eP(r,n.route)") }).early, false, "the route into the facts alone is the end-only record");
@@ -51,5 +51,8 @@ test("the facts read from the script, each mark its own code", () => {
   assert.equal(facts({ index: "", js: js.replace("release:t,landed:()=>{n=`pass`}", "release:()=>{n=`pass`,t()},landed:()=>{}") }).release, false, "the kind switched at the release is the review's P2");
   assert.equal(facts({ index: "", js: js.replace("landed:()=>{n=`pass`}", "landed:()=>{}") }).release, false, "a land that switches nothing");
   assert.equal(facts({ index: "", js: js.replace("e.landed?.();", "") }).landed, false, "a run that never tells its land");
-  assert.equal(facts({ index: "", js: js.replace("e[t()][n](r,i)", "e.trade[n](r,i)") }).pair, false, "a pair fixed to the trade's");
+  assert.equal(facts({ index: "", js: js.replace("e[t()][n](r,i,a)", "e.trade[n](r,i,a)") }).pair, false, "a pair fixed to the trade's");
+  // card signpage-reads-take-the-call-signal: each call's signal handed to the kind's seat
+  assert.equal(facts({ index: "", js: js.replace("e[t()][n](r,i,a)", "e[t()][n](r,i)") }).pair, false, "the call's signal dropped");
+  assert.equal(facts({ index: "", js: js.replace("(r,i,a)=>e[t()][n](r,i,a)", "(r,i)=>e[t()][n](r,i)") }).pair, false, "the old shape, no signal");
 });

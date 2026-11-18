@@ -920,7 +920,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // after the page before it): when the round ends over POOL_BUY_SLOT_STALE_MS after the slot was answered, the
       // blockhash and slot are read again, so a slow or lying provider costs a round, never the quote's age bound
       let slotAt = 0;
-      const timed: readonly [SolanaRpc, SolanaRpc] = [((m: string, q: readonly unknown[]) => h.rpcs[0](m, q).then((x) => ((slotAt = nowMs()), x))) as SolanaRpc, h.rpcs[1]];
+      const timed: readonly [SolanaRpc, SolanaRpc] = [((m: string, q: readonly unknown[], s?: AbortSignal) => h.rpcs[0](m, q, s).then((x) => ((slotAt = nowMs()), x))) as SolanaRpc, h.rpcs[1]];
       const [, venue, first] = await Promise.all([Promise.all(lookups), venueRead, blockhashOf(timed)]);
       const bh = nowMs() - slotAt > POOL_BUY_SLOT_STALE_MS ? await blockhashOf(h.rpcs) : first;
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
