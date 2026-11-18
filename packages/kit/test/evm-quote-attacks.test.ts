@@ -3768,9 +3768,11 @@ test("W5 a kept read the quote did not ask again is not kept for the next: a cha
   };
   const quoter = (token: string, x: string) => {
     const { pools, logs } = warmCase(token, x);
+    // one scan provider for every quote of the token (the tail is kept per first scan provider, card evm-scan-chain-tail)
+    const scan = scanner(5_000_000, logs);
     return async (amountIn: bigint) => {
       const s = sized(chain(pools, 0));
-      const v = await verdict(evmPoolBuyQuoteWith({ ...warmReq(token), amountIn }, [s.rpc, chain(pools, 1)], NOW, scanner(5_000_000, logs)));
+      const v = await verdict(evmPoolBuyQuoteWith({ ...warmReq(token), amountIn }, [s.rpc, chain(pools, 1)], NOW, scan));
       assert.equal(v.accepted, true, String((v as { code?: string }).code));
       return s.n.bytes;
     };
