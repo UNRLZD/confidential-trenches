@@ -1,0 +1,29 @@
+{
+ "_note": "bad: SIGN_HOST read 2026-11-18 02:00Z (the deployed page, before this card: each dry ask starts its own quote). good: this branch's build (packages/signpage: index.html and public/app.js, --site) at card dry-ask-joins-the-running-quote, which the deploy serves; re-recorded from SIGN_HOST once deployed.",
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oJm8RtLDhg/7RG+kMipUNMIISF5fRX+5uWB2z1skrC3OKAbwO9a6vnPmgxz1iZiw\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-oJm8RtLDhg/7RG+kMipUNMIISF5fRX+5uWB2z1skrC3OKAbwO9a6vnPmgxz1iZiw",
+   "facts": {
+    "join_answers_from_the_running_quote": false,
+    "key_is_every_field_sorted": false,
+    "fresh_once_it_ends": false,
+    "buy_dry_joins": false,
+    "sell_dry_joins": false
+   }
+  }
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ds62zt5352kZkJwxlZITe5RQlF8d/bJ7Gd56Vf9nJ9b7tFzIsR/24/q2K/OMRsNc\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-ds62zt5352kZkJwxlZITe5RQlF8d/bJ7Gd56Vf9nJ9b7tFzIsR/24/q2K/OMRsNc",
+   "facts": {
+    "join_answers_from_the_running_quote": true,
+    "key_is_every_field_sorted": true,
+    "fresh_once_it_ends": true,
+    "buy_dry_joins": true,
+    "sell_dry_joins": true
+   }
+  }
+ }
+}
