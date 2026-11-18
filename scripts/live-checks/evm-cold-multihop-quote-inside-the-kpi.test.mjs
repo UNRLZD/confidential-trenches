@@ -33,7 +33,8 @@ test("a slow or faulted tap, a follow at another block, reads at two blocks, a c
     "an unnamed end": (x) => (x.coins[0].first = { ...x.coins[0].first, out: undefined, code: undefined }),
     "a follow asked at another block": (x) => (x.coins[0].first.asks[1].at = other),
     "a follow asked at none": (x) => (x.coins[0].first.asks[1].at = null),
-    "reads at two blocks": (x) => x.coins[0].first.blocks.push(other),
+    "a follow's reads at more blocks than kit quotes": (x) => x.coins[0].first.blocks.push(other, "0x" + "3".repeat(64)),
+    "one kit quote's reads at two blocks": (x) => x.coins[0].again.blocks.push(other),
     "a coin short": (x) => x.coins.pop(),
     "another coin": (x) => (x.coins[0].coin = "0x" + "2".repeat(40)),
     "a partial sync": (x) => (x.sync.served = false),
@@ -46,4 +47,11 @@ test("a slow or faulted tap, a follow at another block, reads at two blocks, a c
     assert.equal(check(x).ok, false, what);
   }
   assert.equal(A.good.run.coins.length, COINS.length);
+});
+
+test("a follow whose pin the chain dropped, asked again at a block of its own, passes", () => {
+  const x = structuredClone(A.good.run);
+  x.coins[0].first.blocks.push("0x" + "4".repeat(64));
+  const r = check(x);
+  assert.equal(r.ok, true, r.lines.join("\n"));
 });

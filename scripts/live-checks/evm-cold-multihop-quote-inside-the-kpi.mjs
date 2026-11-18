@@ -59,7 +59,9 @@ export function check(run) {
     const blocks = Array.isArray(q?.blocks) ? q.blocks.filter((b) => HASH.test(b)) : [];
     if (asks.length > 1) {
       const pinned = asks.slice(1).every((a) => typeof a?.at === "string" && HASH.test(a.at));
-      say(pinned && blocks.length === 1 && asks.slice(1).every((a) => a.at === blocks[0]), `[base] ${c.coin} ${which}: ${asks.length} kit quotes, the later ones asked at ${pinned ? "the refused quote's block" : "no block"}, its reads at ${blocks.length} block hash${blocks.length === 1 ? "" : "es"} (one)`);
+      // the later kit quotes asked at the first one's block (the first hash read); a pin the chain dropped, or a first
+      // block the watch does not hold, is read again at one block of its own, so at most one hash per kit quote
+      say(pinned && blocks.length >= 1 && blocks.length <= asks.length && asks.slice(1).every((a) => a.at === blocks[0]), `[base] ${c.coin} ${which}: ${asks.length} kit quotes, the later ones asked at ${pinned ? "the refused quote's block" : "no block"}, its reads at ${blocks.length} block hash${blocks.length === 1 ? "" : "es"} (one)`);
     } else say(asks.length === 1 && blocks.length <= 1, `[base] ${c.coin} ${which}: ${asks.length} kit quote${asks.length === 1 ? "" : "s"}, its reads at ${blocks.length} block hash${blocks.length === 1 ? "" : "es"}`);
   };
   for (const c of coins) {
