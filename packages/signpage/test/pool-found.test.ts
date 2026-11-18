@@ -51,26 +51,11 @@ test("heldWs on the helper's seat: one getMultipleAccounts per FOUND_BATCH Ws, n
     // a W never made reads null; one that holds lamports reads them
     return { context: { slot: 1 }, value: list.map((a) => (lamports(a) > 0 ? { lamports: lamports(a), owner: "11111111111111111111111111111111", data: ["", "base64"] } : null)) };
   }) as SolanaRpc;
-  const one = (async () => assert.fail("the public RPC names no W while a seat batches")) as unknown as SolanaRpc;
   const all = ws(FOUND_BATCH * 2 + 5);
-  const found = await heldWs(all, batch, one);
+  const found = await heldWs(all, batch);
   assert.deepEqual(calls.map((c) => c.length), [FOUND_BATCH, FOUND_BATCH, 5]);
   assert.deepEqual(found, all.filter((w) => lamports(w.address) > 0));
   assert.equal(FOUND_BATCH, 100);
-});
-
-test("heldWs with no seat (the testnet build): one getAccountInfo a W, never two Ws in one request", async () => {
-  const asked: unknown[] = [];
-  const one = (async (method: string, params: readonly unknown[]) => {
-    assert.equal(method, "getAccountInfo");
-    assert.equal(typeof params[0], "string");
-    asked.push(params[0]);
-    const l = lamports(params[0] as string);
-    return { context: { slot: 1 }, value: l > 0 ? { lamports: l } : null };
-  }) as SolanaRpc;
-  const all = ws(12);
-  assert.deepEqual(await heldWs(all, null, one), all.filter((w) => lamports(w.address) > 0));
-  assert.deepEqual(asked, all.map((w) => w.address));
 });
 
 test("heldWs: an answer out of shape throws, so nothing is found on it", async () => {
@@ -83,10 +68,9 @@ test("heldWs: an answer out of shape throws, so nothing is found on it", async (
   ];
   for (const [name, answer] of bad) {
     const batch = (async () => answer) as unknown as SolanaRpc;
-    await assert.rejects(heldWs(ws(2), batch, batch), Error, name);
+    await assert.rejects(heldWs(ws(2), batch), Error, name);
   }
-  await assert.rejects(heldWs(ws(1), null, (async () => null) as unknown as SolanaRpc), /no value/);
-  await assert.rejects(heldWs(ws(1), null, (async () => ({ value: { lamports: 1.5 } })) as unknown as SolanaRpc), /not a count/);
+  await assert.rejects(heldWs(ws(1), (async () => ({ value: [{ lamports: 1.5 }] })) as unknown as SolanaRpc), /not a count/);
 });
 
 // The found W's rule sweeps only a W whose owed record says `found: true` (pool-sell.ts rentBackRun's `bare`): one writer
@@ -114,7 +98,7 @@ test("an owed rent back is written found: true in one place only, pool-testnet.t
   assert.equal(got.length, 1, got.join(", "));
   assert.match(got[0]!, /^signpage\/src\/pool-testnet\.ts:\d+$/);
   const line = files["signpage/src/pool-testnet.ts"]!.split("\n")[Number(got[0]!.split(":")[1]) - 1]!;
-  assert.match(line, /for \(const w of await heldWs\(ws, batch, rpcs\("pass"\)\[0\]\)\) await o\.put\(\{ address: w\.address, l: w\.l\.toString\(\), j: w\.j, mints: \[\], passes: 0, found: true \}\);/);
+  assert.match(line, /for \(const w of await heldWs\(ws, rpcs\("pass"\)\[1\]\)\) await o\.put\(\{ address: w\.address, l: w\.l\.toString\(\), j: w\.j, mints: \[\], passes: 0, found: true \}\);/);
   // planted: a second writer, as written or as minified, is named
   assert.deepEqual(foundWriters({ ...files, "x.ts": "await o.put({ ...r, found: true });\nconst y = { found: !0 };" }).length, 3);
 });

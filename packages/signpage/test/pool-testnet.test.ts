@@ -1043,9 +1043,10 @@ test("card buy-spends-several-pieces: helperPoolSendPieces posts {pool, txs} in 
   assert.match(src, /await followBuys\(notes\);\s*await resumeOwedPieces\(/);
   assert.match(src, /now = new Map\(\(await readNotes\(await page\.store\(\)\)\)[^\n]*\n\s*await resumeOwedPieces\(/);
   // whose spend the buy's own note is: spendOwner on the record's own spend (review P3-4 of c7b85ba3a), on the settle pair
-  assert.match(src, /owner: async \(r\) => \{\s*const rs = settleRpcs\("pass"\);[\s\S]{0,400}?spendOwner\(rs, \{ program: r\.spend\.program, feePayer: r\.spend\.feePayer \}, r\.address, BigInt\(r\.spend\.nullifier\), r\.spend\.context, /);
-  // a restore's scan: the batch on the helper's seat on mainnet, never a public provider; the testnet build one W a request
-  assert.match(src, /const batch = POOL_TESTNET \? null : over\.rpcs \? over\.rpcs\[1\] : solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER,/);
+  // past the page's first tap, the helper's seat alone before it (card load-reads-name-no-w-to-the-public-seat)
+  assert.match(src, /owner: async \(r\) => \{\s*const pair = settleRpcs\("pass"\);\s*const both = backs\.acted\(\);[\s\S]{0,600}?const spend = \{ program: r\.spend\.program, feePayer: r\.spend\.feePayer \};[\s\S]{0,120}?const o = both \? await spendOwner\(pair, spend, r\.address, BigInt\(r\.spend\.nullifier\), r\.spend\.context, minSlot, undefined, places\) : await spendOwnerOne\(pair\[1\], spend, /);
+  // a restore's scan: the batch on the helper's seat, the pair's second, never a public provider (the testnet build's too)
+  assert.match(src, /for \(const w of await heldWs\(ws, rpcs\("pass"\)\[1\]\)\)/);
   // the run's pass with the ride once its drawn time is due, its held passes kept booked (card every-lamport-can-move,
   // review P2-1 and P3 1 of 1d3b96d9c); idle before the page's first tap (card rent-backs-resume-private)
   assert.match(src, /if \(scan\) await findHeldWs\(mine\)\.catch\(\(\) => \{\}\);\s*const more = await resumeRentBacks\(h, locks, \{ \.\.\.\(ride !== undefined \? \{ ride: true as const, held: \(\) => void \(held = true\) \} : \{\}\), \.\.\.\(idle \? \{ idle: true as const \} : \{\}\) \}\);/);
@@ -2547,14 +2548,24 @@ test("the rent backs run on the state reads: again after the wait while a W is l
 // Two owed Ws whose state the helper reads otherwise than their records (a pass is due): the load's runs read them on
 // the helper's seat alone, and pass none of them until the page's first tap, a drawn start after it. Every request is
 // counted by host; a request naming W or one of its token accounts to the public host fails the load.
-const rentBackLoad = async () => {
+// Card load-reads-name-no-w-to-the-public-seat: `extra.setup` writes one more case into the same store (an owed piece, a
+// note whose own W the scan reads, a kept sell, an owed onward send) and names its W and token accounts (`named`, the
+// load's ban) or a trade in flight's (`flight`, named on the public seat only where its read needs two seats);
+// `extra.answer` answers a seat's call the base world does not (undefined: the base world's).
+type LoadExtra = {
+  setup?: (w: WalletStore, ns: NoteStore) => Promise<{ named?: readonly string[]; flight?: readonly string[] }>;
+  answer?: (host: string, method: string, params: readonly unknown[]) => unknown;
+};
+const rentBackLoad = async (extra: LoadExtra = {}) => {
   const { BACKS_LOAD_MAX_MS } = await import("../src/pool-testnet.ts");
   const { SOLANA_RENT_SYSVAR } = await import("../../kit/src/trade/solana/pool-buy.ts");
   const { solanaTeardownAddresses, SOLANA_TOKEN_PROGRAM: TOKEN } = await import("../../kit/src/checks/solana/checks.ts");
-  const { w } = await wallet();
+  const { w, ns } = await wallet();
   const MINT = base58.encode(new Uint8Array(32).fill(41));
   const Ws = [base58.encode(new Uint8Array(32).fill(7)), base58.encode(new Uint8Array(32).fill(8))];
-  const named = new Set(Ws.flatMap((a) => [a, ...solanaTeardownAddresses(a, [{ mint: MINT, program: TOKEN }])]));
+  const more = (await extra.setup?.(w, ns)) ?? {};
+  const named = new Set([...Ws.flatMap((a) => [a, ...solanaTeardownAddresses(a, [{ mint: MINT, program: TOKEN }])]), ...(more.named ?? [])]);
+  const flight = new Set(more.flight ?? []);
   // the first W's buy recorded on this device (meta owed/buy-sol, as the buy host writes it); the second a found W (a
   // restore's scan: SOL on W and no buy of its own)
   await w.put("meta", "owed/rentback-sol", Object.fromEntries(Ws.map((address, k) => [address, { address, l: "1", j: k, mints: [{ mint: MINT, program: TOKEN }], passes: 1, ...(k === 1 ? { found: true } : {}) }])));
@@ -2570,6 +2581,8 @@ const rentBackLoad = async () => {
     Object.assign(
       async (method: string, params: readonly unknown[] = []): Promise<unknown> => {
         byHost.push({ host, method, params: JSON.stringify(params) });
+        const got = extra.answer?.(host, method, params);
+        if (got !== undefined) return got;
         if (method === "getAccountInfo" && params[0] === SOLANA_RENT_SYSVAR) return { context: { slot: 1 }, value: rent };
         if (method === "getMultipleAccounts") return { context: { slot: 1 }, value: (params[0] as string[]).map((a) => (a === SOLANA_RENT_SYSVAR ? rent : Ws.includes(a) ? own : null)) };
         if (method === "getSlot" || method === "getBlockHeight") return 100;
@@ -2600,7 +2613,9 @@ const rentBackLoad = async () => {
   };
   const publicNaming = (): string[] => byHost.filter((c) => c.host === "public" && [...named].some((a) => c.params.includes(a))).map((c) => `${c.method} ${c.params.slice(0, 60)}`);
   const helperNaming = (): number => byHost.filter((c) => c.host === "helper" && Ws.every((a) => c.params.includes(a))).length;
-  return { t, Ws, read, publicNaming, helperNaming, runs, advance: (ms: number) => void (now += ms), restore: () => void ((Date.now = realNow), (g.indexedDB = hadIdb)), BACKS_LOAD_MAX_MS };
+  // the calls naming any of `of` on `host`, as "method params"
+  const naming = (host: string, of: Iterable<string>): string[] => byHost.filter((c) => c.host === host && [...of].some((a) => c.params.includes(a))).map((c) => `${c.method} ${c.params.slice(0, 60)}`);
+  return { t, w, ns, Ws, read, publicNaming, helperNaming, naming, named, flight, runs, advance: (ms: number) => void (now += ms), restore: () => void ((Date.now = realNow), (g.indexedDB = hadIdb)), BACKS_LOAD_MAX_MS };
 };
 test("rent-backs-resume-private: a page load with owed Ws names none of them, nor a token account of one, to the public seat; the helper's seat reads them", async () => {
   const l = await rentBackLoad();
@@ -2660,6 +2675,128 @@ test("rent-backs-resume-private: the page's first tap books the passes at a draw
     for (let i = 0; i < 200 && l.publicNaming().length === 0; i++) await new Promise((r) => REAL_SET(r, 10));
     assert.ok(l.runs.length > idleRuns, "a run past the tap's drawn time");
     assert.ok(l.publicNaming().length > 0, "its passes read W on the public seat too, as every pass that may sign does");
+  } finally {
+    l.restore();
+  }
+});
+
+// Card load-reads-name-no-w-to-the-public-seat: every other read a page load makes of a W, counted on the same harness.
+// A note of the devnet pool's scope landed (UNSPENT, its leaf), as the deposit's finish writes it; `spent` then SPENT.
+const landedNote = async (ns: NoteStore, i: number, label: bigint, spent = false): Promise<NoteRecord> => {
+  const ref: NoteRef = { kind: "deposit", s: SCOPE, i };
+  const pre = noteSecrets(SEED64, ref).precommitment;
+  const n = await ns.add({ ref, scope: SCOPE, precommitment: pre, state: "UNSPENT", leaf: { value: RUNG, label, commitment: noteCommitment(RUNG, label, pre), leafIndex: BigInt(i) } });
+  return spent ? ns.move(n.id, "UNSPENT", "SPENT") : n;
+};
+const ownW = async (n: NoteRecord): Promise<string> => {
+  const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+  const { jOf } = await import("../../wallet/src/pool/queue.ts");
+  const fw = freshWallet(SEED64, "sol", n.leaf!.label, jOf(n.ref));
+  fw.secretKey.fill(0);
+  return fw.address;
+};
+// the page's first tap (a deposit's or a withdraw's ask, refused here at once), then past its drawn time and the ride's gap
+const tapThenPast = async (l: Awaited<ReturnType<typeof rentBackLoad>>): Promise<void> => {
+  const { POOL_RENT_BACK_SPACE_MAX_MS } = await import("../src/pool-sell.ts");
+  assert.deepEqual(l.t.flow({ kind: "pool.none", chain: "base" } as never, ctx as never), { error: "not_allowed" });
+  l.advance(l.BACKS_LOAD_MAX_MS + POOL_RENT_BACK_SPACE_MAX_MS);
+};
+test("load-reads-name-no-w-to-the-public-seat: a buy of several pieces owed its end (its own note SPENT) has W's history read on the helper's seat alone until the page's first tap; past it, on both", async () => {
+  const WP = base58.encode(new Uint8Array(32).fill(9));
+  const l = await rentBackLoad({
+    setup: async (w, ns) => {
+      const own = await landedNote(ns, 0, 501n, true);
+      const piece = await landedNote(ns, 1, 502n, true);
+      await piecesOwedOf(async () => w).put({ address: WP, l: "501", j: 0, primary: own.id, pieces: [piece.id], lastHeight: "10", mint: base58.encode(new Uint8Array(32).fill(42)), program: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", spend: { program: SOL_POOLS.devnet!.program, feePayer: FEE_PAYER, context: "1", nullifier: "2" } });
+      return { named: [WP] };
+    },
+  });
+  try {
+    await l.read();
+    l.advance(l.BACKS_LOAD_MAX_MS);
+    for (let i = 0; i < 3; i++) {
+      await l.read();
+      l.advance(30 * 60_000);
+    }
+    assert.deepEqual(l.naming("public", [WP]), [], "no public request names the owed piece's W before the tap");
+    assert.ok(l.naming("helper", [WP]).length >= 1, "the helper's seat reads W's history");
+    assert.ok((await piecesOwedOf(async () => l.w).list()).some((r) => r.address === WP), "kept: nothing decided on no answer");
+    // past the tap's drawn time: a "mine" (the record dropped, W's SOL its buy's) is taken only on both seats' word
+    await tapThenPast(l);
+    // the state read's own settle steps; the rent backs' run it starts (its gaps, its retries) is not waited for: the
+    // page signs out at the test's end
+    await l.t.stateRead();
+    for (let i = 0; i < 200 && l.naming("public", [WP]).length === 0; i++) await new Promise((r) => REAL_SET(r, 10));
+    assert.ok(l.naming("public", [WP]).length >= 1, "past the tap, both seats read W's history");
+  } finally {
+    l.restore();
+  }
+});
+test("load-reads-name-no-w-to-the-public-seat: the testnet build's scan for a W a landed note paid reads it on the helper's devnet route, never the public devnet RPC", async () => {
+  let W = "";
+  const l = await rentBackLoad({
+    setup: async (_w, ns) => {
+      W = await ownW(await landedNote(ns, 5, 601n));
+      return { named: [W] };
+    },
+  });
+  try {
+    l.advance(l.BACKS_LOAD_MAX_MS);
+    await l.read();
+    assert.ok(l.naming("helper", [W]).length >= 1, "the scan read W on the helper's seat");
+    assert.deepEqual(l.naming("public", [W]), [], "no public request names the scanned W");
+    assert.deepEqual(l.publicNaming(), [], "nor any other W of the load");
+  } finally {
+    l.restore();
+  }
+});
+test("load-reads-name-no-w-to-the-public-seat: a sell in flight a closed page kept settles at the load's first state read, its verdict read on both seats (its signature, no W address)", async (tc) => {
+  const { keptSells } = await import("../src/pool-sell.ts");
+  const S = sig(77);
+  const signed = new Uint8Array(1 + 64 + 8);
+  signed[0] = 1;
+  const landed = signed.slice();
+  landed.set(base58.decode(S), 1);
+  const l = await rentBackLoad({
+    setup: async (w) => {
+      await keptSells(async () => w).put({ signature: S, tx: base64.encode(signed), last: 50 });
+      return { flight: [S] };
+    },
+    answer: (_host, method, params) => (method === "getTransaction" && params[0] === S ? { slot: 5, transaction: [base64.encode(landed), "base64"], meta: { err: null } } : undefined),
+  });
+  try {
+    const t0 = performance.now();
+    await l.read();
+    const ms = performance.now() - t0;
+    assert.deepEqual(await keptSells(async () => l.w).list(), [], "settled (filled) at the first state read");
+    tc.diagnostic(`kept sell settled at the load's first state read in ${ms.toFixed(1)} ms`);
+    // a trade in flight: its verdict (filled, refused, not landed) is both seats' word, as the run's own read back
+    assert.ok(l.naming("public", l.flight).length >= 1 && l.naming("helper", l.flight).length >= 1, "the verdict read on both seats");
+    assert.deepEqual(l.publicNaming(), [], "no W address named to the public seat");
+  } finally {
+    l.restore();
+  }
+});
+test("load-reads-name-no-w-to-the-public-seat: an owed withdraw's send onward (the user's money on W, in flight) reads its W on both seats at the load: the send W signs needs both, and goes to both", async () => {
+  let W = "";
+  const l = await rentBackLoad({
+    setup: async (w, ns) => {
+      const { land } = fakePool();
+      let n = await land(ns, await incoming(ns, null, 7));
+      n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "7" });
+      const attempt = n.attempt!;
+      n = await ns.move(n.id, "HELD", "RESERVED", { attempt });
+      n = await ns.move(n.id, "RESERVED", "SPENT", {});
+      await w.put("ops", "w1", { kind: "withdraw", stage: "in_transit", txs: [], created_ms: 1, owed: n.id });
+      await oweSend(w, "w1", { noteId: n.id, attempt, context: "7", to: "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx", last: true, feeCap: "5000" });
+      W = await ownW(n);
+      return { flight: [W] };
+    },
+  });
+  try {
+    await l.read();
+    assert.ok(l.naming("public", l.flight).length >= 1 && l.naming("helper", l.flight).length >= 1, "the owed send's W read on both seats");
+    assert.deepEqual(l.publicNaming(), [], "no other W named to the public seat");
   } finally {
     l.restore();
   }

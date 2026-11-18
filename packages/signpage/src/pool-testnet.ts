@@ -77,7 +77,7 @@ import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_POOLS, evmFeeHold, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmFeeHold, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleOpen, evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import type { LandedRelease } from "../../wallet/src/pool/balances.ts";
-import { spendOwner } from "./pool-spend.ts";
+import { spendOwner, spendOwnerOne } from "./pool-spend.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import { EVM_POSITION_COSTS_KEY, evmBuyHost, followPendingEvmBuys, poolBuyEvmKind, type EvmBuyPage } from "./pool-buy-evm.ts";
@@ -3121,6 +3121,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const piecesOwed = piecesOwedOf(page.store);
   // W's history places a buy of several pieces' owner read has reached, by W (spendOwner's HistoryPlaces)
   const piecesPlaces = new Map<string, HistoryPlaces>();
+  // and the helper's seat's alone, read before the page's first tap (its keys are by seat index: never a pair's)
+  const piecesHelperPlaces = new Map<string, HistoryPlaces>();
   /** The buys of several pieces owed their end, decided from their notes' states (pool-buy.ts resumePieces): a W whose
    *  pieces paid it and whose buy can no longer land is owed a rent back (merged into W's own record, the buy's mint
    *  among its mints), which this load's background run of resumeRentBacks sweeps into the pool with no tap. Run on each
@@ -3132,16 +3134,25 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       state,
       // a note a tap of this page holds (pool.buy's claim): that tap decides its W
       busy: (id) => claimed.has(id),
-      // whose spend the buy's own note is, on both RPCs at finalized (pool-spend.ts spendOwner, as followBuys reads a
-      // buy's): this buy's tag 3, another's, or not known yet; W's history read on across the state reads from piecesPlaces
+      // whose spend the buy's own note is, at finalized (pool-spend.ts spendOwner, as followBuys reads a buy's): this
+      // buy's tag 3, another's, or not known yet; W's history read on across the state reads from piecesPlaces.
+      // Before the page's first tap (backs.acted, card load-reads-name-no-w-to-the-public-seat) on the helper's seat
+      // alone, so a page load names no W to the public seat: its "other" strands W (a rent back owed, whose pass reads W
+      // on both seats before W signs anything), its "mine" waits for the tap, since it drops the record and with it the
+      // rent back W's SOL would need, which one seat's word never does. Past the tap, both seats, as before
       owner: async (r) => {
-        const rs = settleRpcs("pass");
+        const pair = settleRpcs("pass");
+        const both = backs.acted();
+        const rs = both ? pair : ([pair[1]] as const);
         const slots = await Promise.all(rs.map((rpc) => rpc("getSlot", [{ commitment: "finalized" }])));
         if (!slots.every((x) => Number.isSafeInteger(x))) return null;
-        let places = piecesPlaces.get(r.address);
-        if (!places) piecesPlaces.set(r.address, (places = new Map()));
-        const o = await spendOwner(rs, { program: r.spend.program, feePayer: r.spend.feePayer }, r.address, BigInt(r.spend.nullifier), r.spend.context, Math.max(...(slots as number[])), undefined, places);
-        return o === null ? null : o === "other" ? "other" : "mine";
+        const kept = both ? piecesPlaces : piecesHelperPlaces;
+        let places = kept.get(r.address);
+        if (!places) kept.set(r.address, (places = new Map()));
+        const spend = { program: r.spend.program, feePayer: r.spend.feePayer };
+        const minSlot = Math.max(...(slots as number[]));
+        const o = both ? await spendOwner(pair, spend, r.address, BigInt(r.spend.nullifier), r.spend.context, minSlot, undefined, places) : await spendOwnerOne(pair[1], spend, r.address, BigInt(r.spend.nullifier), r.spend.context, minSlot, places);
+        return o === null ? null : o === "other" ? "other" : both ? "mine" : null;
       },
       strand: async (r) => {
         const o = owedNoted(page.store);
@@ -3166,9 +3177,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       seed64.fill(0);
     }
     if (ws.length === 0) return;
-    // the helper's seat for the batch (never a public provider); the testnet build, with none, one W a request
-    const batch = POOL_TESTNET ? null : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, "pass"));
-    for (const w of await heldWs(ws, batch, rpcs("pass")[0])) await o.put({ address: w.address, l: w.l.toString(), j: w.j, mints: [], passes: 0, found: true });
+    // the helper's seat for the batch, never a public provider: the pair's second, the helper's /v1/rpc/solana on mainnet
+    // and its /v1/rpc/solana-devnet in the testnet build (card load-reads-name-no-w-to-the-public-seat: that build read
+    // one W a request on the public devnet RPC)
+    for (const w of await heldWs(ws, rpcs("pass")[1])) await o.put({ address: w.address, l: w.l.toString(), j: w.j, mints: [], passes: 0, found: true });
   };
   // the RESERVED notes a buy left (filled, refused, never answered, or its page closed mid-send): settled spent, freed
   // once both RPCs' finalized height is past the signed transaction's last height, or their block time past the
