@@ -264,14 +264,16 @@ test("both providers agreeing on what is not the vault's: a state tree longer th
   }
 });
 
-test("the vault's walk owes no deposit id read: no step 5 marker is written for its scope", async () => {
+// card vault-late-send-carried: the vault's walk owes its deposit ids' read (step 5, then step 7's re-reads), so step 5's
+// marker names its scope from the walk's end; here the pair answers no id read, so the marker stays for the next load
+test("the vault's walk owes its deposit ids' read: step 5's marker names its scope and stays while its ids are unread", async () => {
   const { v } = lived();
   const st = await device();
   const r = restoreKind.poolRestore({ ...hostOf(st, () => pair(v), []), ids: { rpcs: () => pair(v) as never } });
   await r.auto();
   await r.idle();
   assert.equal((await notesIn(st)).length, 3);
-  assert.equal(await st.get("meta", restoreKind.RESTORE_IDS_KEY), undefined);
+  assert.deepEqual((await st.get("meta", restoreKind.RESTORE_IDS_KEY) as { scopes: string[] }).scopes, [SCOPE.toString()]);
 });
 
 test("a ragequit (the whole note out, no change) comes back SPENT with no change note, and a ragequit the lost device lands after the restore moves its note SPENT on the next run", async () => {

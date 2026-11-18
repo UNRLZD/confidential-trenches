@@ -85,6 +85,14 @@ export const SETTLE_SLOTS = 150;
 /** A first read answers after its walk, or after this with what it holds by then. */
 export const COLD_WAIT_MS = 3_000;
 export const SILENT_MS = 30_000;
+/** How long the stream may go without a message and a token's tape and chart still be served as current (card
+ *  every-tape-and-chart-says-filling-behind-the-head, the rule ../evm/swaps.ts BEHIND_MAX holds on Base and
+ *  Robinhood): past it, or while a dropped stream's gap is walked (`refilling`), the tape says filling with no whole_ms
+ *  and a live chart says filling. Until this card both were served as current for up to SILENT_MS of silence and through
+ *  the whole refill. [design: 5 s, past the stream's follow cadence: its heartbeat is the slot subscription, a slot
+ *  every ~400 ms (wsSource), so 5 s is about 12 slots unheard; a trade's note arrives p50 1.19 s, p95 1.78 s after its
+ *  block (header, measured 3 Nov), under a third of it] */
+export const SOL_BEHIND_MS = 5_000;
 export const REF_MS = 5_000;
 export const REF_STALE_S = 120;
 export const IDLE_MS = 60_000;
@@ -130,6 +138,9 @@ export type Source = {
   watch(mint: string): Promise<void>;
   unwatch(mint: string): void;
   close(): void;
+  /** The stream's last message, when (now(), ms), and the newest slot its heartbeat named; null while it is not
+   *  connected. A source without it (a test's) is taken as live. */
+  heard?(): { at: number; slot: number | null } | null;
 };
 export type SourceEvents = { note(mint: string, n: Note): void; down(): void; up(): void };
 type WsLike = { send(s: string): void; close(): void; onopen: (() => void) | null; onmessage: ((m: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null };
@@ -183,6 +194,8 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
   let tries = 0;
   let id = 0;
   let lastMsg = now();
+  /** The newest slot the slot subscription named (the heartbeat), for the answers' Server-Timing. */
+  let lastSlot: number | null = null;
   let silence: ReturnType<typeof setInterval> | null = null;
 
   function subscribe(m: string): void {
@@ -264,6 +277,12 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
         }
         return;
       }
+      if (j.method === "slotNotification") {
+        const r = ((j.params ?? {}) as Record<string, unknown>).result as Record<string, unknown> | undefined;
+        const n = r?.slot;
+        if (Number.isSafeInteger(n) && (n as number) > (lastSlot ?? -1)) lastSlot = n as number;
+        return;
+      }
       if (j.method !== "logsNotification") return;
       const p = (j.params ?? {}) as Record<string, unknown>;
       const m = typeof p.subscription === "number" ? subOf.get(p.subscription) : undefined;
@@ -306,6 +325,7 @@ export function wsSource(url: string, on: SourceEvents, deps: { ws?: (url: strin
   }, 5_000);
   silence.unref?.();
   return {
+    heard: () => (ws !== null && live ? { at: lastMsg, slot: lastSlot } : null),
     watch(m) {
       if (subId.has(m)) return Promise.resolve();
       const p = new Promise<void>((resolve, reject) => waiting.set(m, [...(waiting.get(m) ?? []), { resolve, reject }]));
@@ -797,6 +817,20 @@ export function createSolanaTrades(deps: {
   const err = (status: number, code: string): DataAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
+  /** Whether a token's tape is behind the chain (SOL_BEHIND_MS): its dropped stream's gap still walked, or the stream
+   *  silent past the bound or not connected. Its tape is then no complete list and its live chart not current. */
+  const behind = (e: Entry): boolean => {
+    if (e.state === "refilling") return true;
+    if (source.heard === undefined) return false;
+    const h = source.heard();
+    return h === null || now() - h.at > SOL_BEHIND_MS;
+  };
+  /** The slot a token is held to with no gap and the stream's newest slot, for the answer's Server-Timing. */
+  const readTo = (e: Entry): string => {
+    const h = source.heard?.() ?? null;
+    const ago = h === null ? "never" : `${Math.max(0, Math.round((now() - h.at) / 1_000))} s ago`;
+    return `sol-read-to;desc="slot ${e.covered} of head ${h?.slot ?? "none"}, heard ${ago}${e.state === "live" ? "" : `, ${e.state}`}"`;
+  };
 
   /** Each mint's tape the vendor has not answered (poolTape): since when, and its last such read; a read more than
    *  IDLE_MS after the last starts a new wait. At most WAITING_MAX, oldest out first. */
@@ -1120,9 +1154,11 @@ export function createSolanaTrades(deps: {
       const at = e.readAt ?? now();
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
-      if ((short || backing(e)) && bars.length < limit) body.filling = true;
+      // a live chart (no `to`) of a token behind the chain is not current: filling, whatever its bar count (card
+      // every-tape-and-chart-says-filling-behind-the-head)
+      if (((short || backing(e)) && bars.length < limit) || (to === null && behind(e))) body.filling = true;
       body.as_of_ms = at;
-      return { status: 200, body: JSON.stringify(body), src, asOfMs: at };
+      return { status: 200, body: JSON.stringify(body), src, asOfMs: at, timing: readTo(e) };
     },
     /** 06b Trades: the newest `limit` trades, newest first, the trader the event's user. */
     async trades(token: string, limit: number): Promise<DataAnswer> {
@@ -1145,10 +1181,13 @@ export function createSolanaTrades(deps: {
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(r.tx) ?? null, tx: r.tx }));
       // `filling` while the cold walk still reads the token's older trades (first() answered at COLD_WAIT_MS or its first
       // round): the rows so far, more to come; the Base and Robinhood tapes answer the same at their bound (../evm/swaps.ts)
-      const fill = e.state === "cold" && rows.length < limit ? { filling: true } : {};
-      // how far back the tape holds every trade (Entry.whole), only while no gap is being walked
-      const whole = e.state === "live" && e.whole !== undefined ? { whole_ms: e.whole } : {};
-      return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+      // and while the token is behind the chain (behind: a gap walked, the stream silent past SOL_BEHIND_MS): the rows it
+      // holds, never a complete list (card every-tape-and-chart-says-filling-behind-the-head)
+      const late = behind(e);
+      const fill = (e.state === "cold" && rows.length < limit) || late ? { filling: true } : {};
+      // how far back the tape holds every trade (Entry.whole), only while no gap is being walked and the stream is heard
+      const whole = e.state === "live" && !late && e.whole !== undefined ? { whole_ms: e.whole } : {};
+      return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing: readTo(e) };
     },
   };
 

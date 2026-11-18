@@ -371,3 +371,79 @@ test("a Verify read given up on ends every hung request at the provider: each fe
   assert.ok(aborted.every((e) => e === why), "with the page's own reason");
   forgetPoolWalks();
 });
+
+// card device-evm-read-residuals (delta review of 1d895550, item 2): two heads far apart ask a third operator, keep the
+// two that are close and name the seat whose head was off, whichever of the two it was; the pool is read on the kept two
+test("two heads far apart: a third operator is asked, the close two kept and read, the row names the seat that was off", async () => {
+  for (const [name, off] of [
+    ["the first names a head far ahead", (h: number) => h + 1_000_000],
+    ["the first names head 1", () => 1],
+  ] as const) {
+    forgetPoolWalks();
+    const calls: { url: string; method: string }[] = [];
+    const liar = new Set(["base", "robinhood"].map((c) => PINS[c as "base"]!.rpcs[0]!));
+    const v = await livePools(PINS, (async (url: string, init: RequestInit) => {
+      const { method } = JSON.parse(String(init.body));
+      calls.push({ url, method });
+      const c = (Object.keys(PINS) as (keyof typeof REC)[]).find((k) => PINS[k]!.rpcs.includes(url))!;
+      return recorded(url, init, liar.has(url) ? (m) => (m === "eth_blockNumber" ? { jsonrpc: "2.0", id: "verify", result: `0x${off(REC[c].height!).toString(16)}` } : undefined) : undefined);
+    }) as typeof fetch);
+    assert.ok(v.state === "read");
+    for (const r of v.rows.filter((x) => x.chain !== "solana")) {
+      const list = PINS[r.chain]!.rpcs;
+      assert.equal(r.status, "ok", `${name}, ${r.chain}: ${JSON.stringify(r.checks)}`);
+      assert.equal(r.headOff, new URL(list[0]!).host, `${name}, ${r.chain}: the row names the seat whose head was off`);
+      assert.deepEqual(r.rpcs, [list[1], list[2]], `${name}, ${r.chain}: read on the two close heads`);
+      const mine = calls.filter((x) => list.includes(x.url));
+      assert.deepEqual(mine.filter((x) => x.url === list[0]).map((x) => x.method), ["eth_blockNumber"], `${name}, ${r.chain}: the seat that was off is asked its head only`);
+      assert.equal(mine.filter((x) => x.url === list[2] && x.method === "eth_blockNumber").length, 1, `${name}, ${r.chain}: the third asked its head once`);
+      assert.equal(mine.filter((x) => x.url === list[3]).length, 0, `${name}, ${r.chain}: no fourth asked`);
+    }
+  }
+});
+
+test("two heads far apart and a third far from both, or no third that answers: Unverified, never danger, no pool read", async () => {
+  for (const [name, plant] of [
+    ["the third names a head far from both", (i: number, h: number) => (i === 0 ? 1 : i === 2 ? h + 1_000_000 : undefined)],
+    ["no third answers its head", (i: number) => (i === 0 ? 1 : i >= 2 ? null : undefined)],
+  ] as const) {
+    forgetPoolWalks();
+    const calls: { url: string; method: string }[] = [];
+    const v = await livePools(PINS, (async (url: string, init: RequestInit) => {
+      const { method } = JSON.parse(String(init.body));
+      calls.push({ url, method });
+      const c = (Object.keys(PINS) as (keyof typeof REC)[]).find((k) => PINS[k]!.rpcs.includes(url))!;
+      const h = plant(PINS[c]!.rpcs.indexOf(url), REC[c].height!);
+      if (h === null && method === "eth_blockNumber") return new Response("busy", { status: 503 });
+      return recorded(url, init, h === undefined || h === null ? undefined : (m) => (m === "eth_blockNumber" ? { jsonrpc: "2.0", id: "verify", result: `0x${h.toString(16)}` } : undefined));
+    }) as typeof fetch);
+    assert.ok(v.state === "read");
+    for (const r of v.rows.filter((x) => x.chain !== "solana")) {
+      assert.equal(r.status, "warn", `${name}, ${r.chain}`);
+      assert.ok(r.checks.every((c) => c.status !== "danger" && c.word === "unverified"), `${name}, ${r.chain}`);
+      const list = PINS[r.chain]!.rpcs;
+      assert.equal(calls.filter((x) => list.includes(x.url) && x.method !== "eth_blockNumber").length, 0, `${name}, ${r.chain}: no pool read`);
+      assert.ok(calls.some((x) => x.url === list[2] && x.method === "eth_blockNumber"), `${name}, ${r.chain}: the third was asked`);
+    }
+  }
+});
+
+test("a third close to both far-apart heads keeps the closer pair, and names the farther seat", async () => {
+  forgetPoolWalks();
+  const apart = (c: "base" | "robinhood") => Math.ceil(30 / (c === "base" ? 0.2 : 0.1));
+  const v = await livePools(PINS, (async (url: string, init: RequestInit) => {
+    const c = (Object.keys(PINS) as (keyof typeof REC)[]).find((k) => PINS[k]!.rpcs.includes(url))!;
+    const i = PINS[c]!.rpcs.indexOf(url);
+    const h = REC[c].height!;
+    // seat 0 a little more than `apart` above seat 1, seat 2 between them and nearer seat 1
+    const a = c === "solana" ? 0 : apart(c);
+    const head = i === 0 ? h + a + 1 : i === 2 ? h + Math.floor(a / 2) : undefined;
+    return recorded(url, init, head === undefined ? undefined : (m) => (m === "eth_blockNumber" ? { jsonrpc: "2.0", id: "verify", result: `0x${head.toString(16)}` } : undefined));
+  }) as typeof fetch);
+  assert.ok(v.state === "read");
+  for (const r of v.rows.filter((x) => x.chain !== "solana")) {
+    const list = PINS[r.chain]!.rpcs;
+    assert.equal(r.headOff, new URL(list[0]!).host, r.chain);
+    assert.deepEqual(r.rpcs, [list[1], list[2]], r.chain);
+  }
+});

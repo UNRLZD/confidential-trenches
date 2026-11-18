@@ -14,8 +14,12 @@
 //   equal (the pin), in the first read round, or the sync refuses rpc_disagree and nothing it read is kept;
 // - F4a: every span is asked of both readers, each batch holding the span's logs and its last block; a span counts only
 //   when both readers answered it, each with that block (the same hash on both) in the same batch as its logs; a span
-//   either failed is asked again of that reader, at most INDEX_TRIES times, and a span with INDEX_SPAN_LOGS logs or more
-//   on either is asked again as its two halves on both; a batch whose tries are spent on throws (a body past its
+//   either failed is asked again of that reader, at most INDEX_TRIES times; a span a reader answered with an error is
+//   asked again of that reader at once, the same span, and only once its INDEX_TRIES answers are all errors as its two
+//   halves on both (card evm-first-quote-inside-the-kpi: base.api.pocket.network answers about one 10,000-block span in
+//   ten with -32602 "block range exceeds maximum 500" from some of its backends, and the same span asked again answers,
+//   read 2026-11-18 02:4xZ; halving both readers for it took a fresh account's Base sync past 52 s); a span with
+//   INDEX_SPAN_LOGS logs or more on either is asked again as its two halves on both; a batch whose tries are spent on throws (a body past its
 //   size, a 4xx, a timeout) is asked one span a request, then as halves, under one budget of halves;
 // - F2: a pool both readers report is at the same block on both (else the span is asked again, then refused), and one
 //   pool id at two blocks, in two spans or in a span and the stored index is refused rpc_disagree: a pool initializes
@@ -175,9 +179,10 @@ function poolOfLog(l: unknown, pm: string, a: number, b: number): Found | null {
 /** A reader's answer to a span: its last block's hash and its pools; `cut` where its logs were an error or no answer
  *  ("error") or at the cap ("full"), which is asked again as halves. */
 type Answer = { hash: string; pools: Map<string, EvmIndexedPool>; logs: Map<string, Found>; cut: "error" | "full" | null };
-/** `alone`: the reader's batches holding the span spent their tries on throws, so it is asked one span a request. */
-type Job = { a: number; b: number; ans: [Answer | null, Answer | null]; tries: [number, number]; alone: [boolean, boolean]; disagree: number };
-const jobOf = (a: number, b: number): Job => ({ a, b, ans: [null, null], tries: [0, 0], alone: [false, false], disagree: 0 });
+/** `alone`: the reader's batches holding the span spent their tries on throws, so it is asked one span a request.
+ *  `errs`: the reader's answers to the span that were errors, asked again at once until INDEX_TRIES of them. */
+type Job = { a: number; b: number; ans: [Answer | null, Answer | null]; tries: [number, number]; errs: [number, number]; alone: [boolean, boolean]; disagree: number };
+const jobOf = (a: number, b: number): Job => ({ a, b, ans: [null, null], tries: [0, 0], errs: [0, 0], alone: [false, false], disagree: 0 });
 const NO_ANSWER: Answer = Object.freeze({ hash: "", pools: new Map(), logs: new Map(), cut: "error" as const });
 
 /** One sync of `prev` (or a new index) to the readers' agreed head; see the file's head. Refuses (throws) where nothing
@@ -353,6 +358,9 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
         }
         g.forEach((j, i) => {
           const a = answerOf(out, i, j);
+          // an error from one of the reader's backends: the same span asked of it again at once, as halves only once
+          // INDEX_TRIES answers to it were errors
+          if (a === NO_ANSWER && ++j.errs[r] < INDEX_TRIES) return;
           if (a !== null) j.ans[r] = a;
           else if (++j.tries[r] >= INDEX_TRIES) throw new EvmQuoteError("rpc_error", `index reader ${r + 1} did not answer blocks ${j.a}-${j.b}`);
           else missed = Math.max(missed, j.tries[r]);
