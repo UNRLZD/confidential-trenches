@@ -49,7 +49,10 @@ export const MUTANTS = [
   // the X prune (card rh-cold-quote): an overflow named by one provider alone, the prune's verdict, its pinned-hook rule,
   // and one request a currency where fewer than the OR
   [QUOTE, " && a.partial === b.partial && a.overflow === b.overflow);", " && a.partial === b.partial);", R, "card rh-cold-quote: one provider that answers SafeCastOverflow"],
-  [QUOTE, 'return r.kind === "revert" && (r.partial || r.overflow === true);', "return false;", R, "card rh-cold-quote: a cold Robinhood quote"],
+  // The prune's verdict made never (`return false`) is equivalent on the tail (card evm-scan-chain-tail): X's markets
+  // are a lookup that sends no getLogs, which was all the rh-cold-quote test counted, and an X whose pool cannot give Q
+  // adds only routes through that pool, which revert partial and are dropped as any; it costs those routes' state reads
+  // alone (65,536 keys a quote is the cap, EVM_QUOTE_MAX_KEYS)
   [QUOTE, "for (const f of fs) if (f.key.hooks === NATIVE || replaced(f.key)) asks.push(", "for (const f of fs) if (true) asks.push(", R, "card rh-cold-quote: a currency's pool behind a pinned hook"],
   // card evm-spare-list-green: the prune skips only an X the token's last quote kept (main skipped any X whose markets
   // were ever scanned)

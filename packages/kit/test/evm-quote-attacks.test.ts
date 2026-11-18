@@ -6162,14 +6162,16 @@ test("SL5 a lone scan provider whose logs backend lags its head by more than a s
   const token = "0x00000000000000000000000000000000005c4613";
   const pools = [seeded(token), real(token)];
   const lone = (scan: EvmRpc, headNo: number) => verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan));
-  await lone(scanner(5_000_000, []), 5_000_000);
+  // one provider's tail across the three quotes (card evm-scan-chain-tail: each scanner here is a new object)
+  const w = world();
+  await lone(w.warm(scanner(5_000_000, [])), 5_000_000);
   // its head read answers 5,020,000; its getLogs and blocks are a backend at 5,005,000
   const front = scanner(5_020_000, []);
   const back = scanner(5_005_000, []);
-  await lone((calls, signal) => (calls.some((c) => c.method === "eth_blockNumber") ? front(calls, signal) : back(calls, signal)), 5_020_000);
+  await lone(w.on((calls, signal) => (calls.some((c) => c.method === "eth_blockNumber") ? front(calls, signal) : back(calls, signal))), 5_020_000);
   // then one that answers: the token's real pool was made at 5,007,000, in the lower request's blocks
   const asked: [number, number][] = [];
-  assert.deepEqual(await lone(scanner(5_020_010, realAt(token, 5_007_000), asked), 5_020_010), below);
+  assert.deepEqual(await lone(w.on(scanner(5_020_010, realAt(token, 5_007_000), asked)), 5_020_010), below);
   assert.ok(asked.some(([a, b]) => a <= 5_007_000 && b >= 5_007_000), `block 5,007,000 was not asked again: ${JSON.stringify(asked)}`);
 }));
 
