@@ -3848,13 +3848,14 @@ test("W8 a warm buy whose scan finds a pool its kept pools lack uses nothing of 
 test("W9 a warm buy whose held head the scan finds more than maxLag behind uses nothing of the round it sent at that head: it is read at the block agreed again", async () => {
   const token = "0x000000000000000000000000000000000fa57a03";
   const { pools, logs } = warmCase(token, xAt(0x3cf8));
+  const wd = world();
   const plain = pools.filter((p) => p.key.hooks !== UNPINNED);
   const rpcs = [chain(plain, 0), chain(plain, 1)];
   const watch = quoteMod.evmHeadWatch(rpcs, 50n, () => NOW, false, () => 0);
-  const v1 = await verdict(evmPoolBuyQuoteWith(warmReq(token), rpcs, NOW, scanner(5_000_000, logs), watch, () => 0));
+  const v1 = await verdict(evmPoolBuyQuoteWith(warmReq(token), rpcs, NOW, wd.warm(scanner(5_000_000, logs)), watch, () => 0));
   assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
   // a hundred blocks on, past Base's maxLag of 50, while the watch still holds block 5,000,000 as fresh
-  const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(plain, 0, 5_000_100), chain(plain, 1, 5_000_100)], NOW, scanner(5_000_100, logs), watch, () => 0));
+  const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(plain, 0, 5_000_100), chain(plain, 1, 5_000_100)], NOW, wd.on(scanner(5_000_100, logs)), watch, () => 0));
   assert.equal(v2.accepted, true, String((v2 as { code?: string }).code));
   assert.equal((v2 as { block: bigint }).block, 5_000_100n);
 });
