@@ -107,6 +107,12 @@ export type EvmPoolBuyQuoteRequest = {
    *  its provider's turn after every trade's waiting there and leaves that provider's `keep` (pace.ts), so a tap asked
    *  meanwhile never waits behind it. It changes nothing the quote reads or checks. */
   later?: boolean;
+  /** (optional) The block hash an earlier quote of this device read at and refused at (EvmQuoteError `at`): the buy
+   *  tap's follow of that refusal's reference (card evm-cold-multihop-quote-inside-the-kpi). Where the device's head
+   *  watch confirmed that block and it is at most EVM_FOLLOW_MAX_AGE_MS old, the quote reads at it, every read the
+   *  first quote's providers agreed on there answered as they agreed it and only the rest sent; else at its own block,
+   *  as with none. Every check runs as on any block. */
+  at?: string;
 };
 
 /** A v4 pool's key, as the PoolManager's Initialize event gives it (currency0 below currency1). */
@@ -167,6 +173,8 @@ export class EvmQuoteError extends Error {
    *  device's own best route, which the caller may quote instead (null on over_gas_floor and no_quote where no route
    *  fits). */
   readonly reference: { readonly amountOut: bigint; readonly route: EvmRoute } | null;
+  /** A buy quote's refusal made once its block was picked: that block's hash, which a follow may pass as `at`. */
+  at: string | null = null;
   constructor(code: EvmQuoteErrorCode, message: string, reference: EvmQuoteError["reference"] = null) {
     super(`${code}: ${message}`);
     this.code = code;
@@ -591,6 +599,49 @@ const SLOTS_PER_CALL = 500;
  *  override alone, any other read with one in its own call, sent in batches of CALLS_PER_BATCH at once; each call and
  *  each batch kept to the venue's maxBytes (a call holding one read past it is sent alone). */
 async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, again?: number): Promise<Answer[]> {
+  // a read pass of its own (`again`) is never memoized: it exists because a first answer was starved of gas
+  if (again !== undefined) return readBothSent(rpcs, hash, reads, lim, again);
+  const kept = AGREED_USE.has(hash) ? AGREED.get(hash) : undefined;
+  const keys = reads.map(agreedKey);
+  const out: (Answer | undefined)[] = keys.map((k) => kept?.get(k));
+  const miss = reads.flatMap((_, i) => (out[i] === undefined ? [i] : []));
+  if (miss.length > 0) {
+    const a = await readBothSent(rpcs, hash, miss.map((i) => reads[i]!), lim);
+    miss.forEach((i, k) => (out[i] = a[k]!));
+    agreedKeep(hash, miss.flatMap((i) => ((out[i] as { gas?: true }).gas === true ? [] : [[keys[i]!, out[i]!] as const])));
+  }
+  return out as Answer[];
+}
+
+/** The reads two providers agreed on, by the block hash they were read at (card evm-cold-multihop-quote-inside-the-kpi):
+ *  a read is a call at one block hash, and a block's state never changes, so the same read at the same hash has the same
+ *  answer; a quote that reads at a block another quote read (the buy tap's follow of a refusal's reference, at the
+ *  first quote's block, buy-tap.ts) sends only the reads that quote did not. Only agreed answers are kept, never one
+ *  answered out of gas (`gas`: no evidence of anything), so nothing kept was ever one provider's alone. The newest
+ *  AGREED_BLOCKS blocks, AGREED_READS reads each. Every agreed read is kept; one is answered from here only at a block a
+ *  quote reads at by the caller's `at` (AGREED_USE, counted while such quotes run), so every other quote reads as it
+ *  always did. */
+const AGREED = new Map<string, Map<string, Answer>>();
+const AGREED_USE = new Map<string, number>();
+const AGREED_BLOCKS = 4;
+const AGREED_READS = 50_000;
+const agreedKey = (r: Read): string => JSON.stringify([lower(r.to), r.data, r.override ?? null, r.env ?? null, r.group ?? null, r.state ?? null, r.tx ?? null, r.oog ?? null], (_, x) => (typeof x === "bigint" ? String(x) : x));
+function agreedKeep(hash: string, xs: readonly (readonly [string, Answer])[]): void {
+  if (xs.length === 0) return;
+  let m = AGREED.get(hash);
+  if (m === undefined) {
+    AGREED.set(hash, (m = new Map()));
+    while (AGREED.size > AGREED_BLOCKS) AGREED.delete(AGREED.keys().next().value!);
+  }
+  for (const [k, a] of xs) if (m.size < AGREED_READS) m.set(k, a);
+}
+/** Forgets every kept read (tests). Not in the index. */
+export const evmAgreedReset = (): void => (AGREED.clear(), AGREED_USE.clear());
+/** Forgets every token's warm-quote plan and kept fits (PLANS, FITS), so the next quote reads as a cold one does
+ *  (tests). Not in the index. */
+export const evmQuoteWarmReset = (): void => (PLANS.clear(), FITS.clear());
+
+async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, again?: number): Promise<Answer[]> {
   // `again`: reads answered `gas` in a call of more, read again this many to a call (READ_AGAIN_PER_CALL, then 1)
   const perCall = again ?? readsOverride ?? lim.perCall;
   const at = { blockHash: hash, requireCanonical: true };
@@ -1114,7 +1165,15 @@ export type EvmHeadWatch = {
   /** The held block, where head() would hand it on now with no read (card evm-quote-fast-from-asia: a warm buy sends
    *  its read round at it beside its scan), else null; keeps the head fresh as head() does. */
   peek(nowMs: number): Block | null;
+  /** A block this watch confirmed (one of its newest EVM_FOLLOW_BLOCKS), by its hash, while at most
+   *  EVM_FOLLOW_MAX_AGE_MS old on the device's clock (a request's `at`); else null. */
+  held?(hash: string, nowMs: number): Block | null;
 };
+/** The oldest block a follow (a request's `at`) reads at: half of EVM_QUOTE_MAX_AGE_MS, so a buy built from its quote
+ *  has as long again before the 30 s rule (trade/evm/buy.ts) as a quote at a new head would have left after a slow
+ *  first quote. */
+export const EVM_FOLLOW_MAX_AGE_MS = 15_000;
+const EVM_FOLLOW_BLOCKS = 8;
 /** A held head on the providers `rpcs`; `clock` is the device's (Date.now) and `mono` a clock that never steps back
  *  (performance.now), which times the hold, so a device clock stepped back cannot stretch its 5 s or 30 s (review of
  *  4830f1f, L); the tests set both. `background` false reads only when a quote asks (the tests that count reads). */
@@ -1123,10 +1182,15 @@ export function evmHeadWatch(order: readonly EvmRpc[] | (() => readonly EvmRpc[]
   const rpcsNow = () => (Array.isArray(order) ? order : (order as () => readonly EvmRpc[])());
   // `at`: `mono` when the heads were asked; `age`: the block's age on the device's clock then
   let held: { block: Block; at: number; age: number } | null = null;
+  // every block confirmed here, newest last (a follow's `at`)
+  const confirmed = new Map<string, Block>();
   let until = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let refreshing: Promise<void> | null = null;
   const hold = (b: Block, at: number, nowMs: number) => {
+    confirmed.delete(b.hash);
+    confirmed.set(b.hash, b);
+    while (confirmed.size > EVM_FOLLOW_BLOCKS) confirmed.delete(confirmed.keys().next().value!);
     if (held === null || b.number > held.block.number) held = { block: b, at, age: nowMs - Number(b.timestamp) * 1000 };
   };
   const refresh = () =>
@@ -1169,6 +1233,11 @@ export function evmHeadWatch(order: readonly EvmRpc[] | (() => readonly EvmRpc[]
     peek(nowMs) {
       keep();
       return fresh(Math.max(nowMs, clock()), mono());
+    },
+    held(hash, nowMs) {
+      const b = confirmed.get(typeof hash === "string" ? hash.toLowerCase() : "");
+      const age = Math.max(nowMs, clock()) - Number(b?.timestamp ?? 0n) * 1000;
+      return b !== undefined && age >= 0 && age <= EVM_FOLLOW_MAX_AGE_MS ? b : null;
     },
     async head(nowMs) {
       keep();
@@ -2215,7 +2284,8 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   const pools = req.pools;
   const banned = req.banned;
   const later = req.later === true;
-  const asked: EvmPoolBuyQuoteRequest = { chain: req.chain, token: req.token, amountIn: req.amountIn, slippageBps: req.slippageBps, route: req.route, ...(pools === undefined ? {} : { pools }), ...(banned === undefined ? {} : { banned }) };
+  const at = req.at;
+  const asked: EvmPoolBuyQuoteRequest = { ...(typeof at === "string" ? { at } : {}), chain: req.chain, token: req.token, amountIn: req.amountIn, slippageBps: req.slippageBps, route: req.route, ...(pools === undefined ? {} : { pools }), ...(banned === undefined ? {} : { banned }) };
   const { chain } = asked;
   const v = venue(chain);
   const p = v.providers;
@@ -2400,6 +2470,27 @@ const scansOf = (s: EvmPoolVenue["scan"], later = false): EvmRpc[] | undefined =
 /** evmPoolBuyQuote on the providers `rpcs`, with the device's clock at `nowMs`: what the kit's index exports runs this
  *  with the pinned providers and Date.now(); the tests run it on recorded and planted answers. Not in the index. */
 export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan?: EvmRpc | readonly EvmRpc[], watch?: EvmHeadWatch, mono: () => number = monotonic, speculate = true): Promise<EvmPoolBuyQuote> {
+  // a follow's block (`at`, card evm-cold-multihop-quote-inside-the-kpi): one this device's watch confirmed and still
+  // young enough, else none; read once
+  const at = typeof req === "object" && req !== null ? req.at : undefined;
+  const pin = typeof at === "string" && /^0x[0-9a-fA-F]{64}$/.test(at) ? (watch?.held?.(at.toLowerCase(), nowMs) ?? null) : null;
+  const seen: { at: string | null } = { at: null };
+  if (pin !== null) AGREED_USE.set(pin.hash, (AGREED_USE.get(pin.hash) ?? 0) + 1);
+  try {
+    return await buyQuoteWith(req, rpcsIn, nowMs, scan, watch, mono, speculate, pin, seen);
+  } catch (e) {
+    if (e instanceof EvmQuoteError && e.at === null) e.at = seen.at;
+    throw e;
+  } finally {
+    if (pin !== null) {
+      const n = (AGREED_USE.get(pin.hash) ?? 1) - 1;
+      if (n > 0) AGREED_USE.set(pin.hash, n);
+      else AGREED_USE.delete(pin.hash);
+    }
+  }
+}
+
+async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan: EvmRpc | readonly EvmRpc[] | undefined, watch: EvmHeadWatch | undefined, mono: () => number, speculate: boolean, pin: Block | null, seen: { at: string | null }): Promise<EvmPoolBuyQuote> {
   const start = mono();
   if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
   const { chain, token, amountIn, slippageBps } = req;
@@ -2510,8 +2601,10 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     watch,
     mono,
     start,
+    ...(pin === null ? {} : { pin }),
     // the route's own swap, at the agreed block (its recipient is the block's), in the first round
     atBlock: (b) => {
+      seen.at = b.hash;
       fitAt = b.hash;
       if (fitOf(route) !== null) ownFit = reads.push(fitOf(route)!) - 1;
       if (fitsKept !== undefined && b.timestamp >= fitsKept.ts && b.timestamp - fitsKept.ts <= EVM_WARM_RANGE_S) {
@@ -2944,6 +3037,9 @@ async function routeSetOf(a: {
   beforeFound?: () => void;
   /** called once the block is agreed, before the first round's reads are sent: the caller's reads of that block */
   atBlock?: (block: Block) => void;
+  /** a follow's block (a buy request's `at`): a block the head watch confirmed, read at in place of a new agreement,
+   *  under the same scan-lag rule as any (agreedAt) */
+  pin?: Block;
   /** the caller's refusals on the first round's answers, before any later round */
   firstRound?: (out: (i: number) => bigint | null, answer: (i: number) => Answer) => void;
   /** what a route must give to matter, read once the first round is in (the buy's own route's Q): a pool that cannot
@@ -3048,7 +3144,7 @@ async function routeSetOf(a: {
   const agreedAt = async (): Promise<{ block: Block; confirm: () => Promise<void> }> => {
     // a warm buy's read round already sent at the held block (`spec`) is agreed on that same block, never a newer one
     // the watch held meanwhile
-    let got: { block: Block; confirm: () => Promise<void>; low?: EvmRpc } = spec !== null ? { block: spec, confirm: async () => {} } : a.watch === undefined ? await fresh(rpcs) : await a.watch.head(a.nowMs);
+    let got: { block: Block; confirm: () => Promise<void>; low?: EvmRpc } = spec !== null ? { block: spec, confirm: async () => {} } : a.pin !== undefined ? { block: a.pin, confirm: async () => {} } : a.watch === undefined ? await fresh(rpcs) : await a.watch.head(a.nowMs);
     if (!(await behind(got.block))) return got;
     if (got.low === undefined) {
       got = await fresh(rpcs);
@@ -3125,7 +3221,7 @@ async function routeSetOf(a: {
   // scan; else nothing of it is used and the quote runs again, its scan first (RESPEC). A refusal the kept pools raise
   // while the round is built (too_many_pools) the scan's pools raise too: they hold every kept pool
   const spec: Block | null = (() => {
-    if (a.sell || a.minBlock !== undefined || a.speculate === false || plan === undefined || a.watch === undefined) return null;
+    if (a.sell || a.minBlock !== undefined || a.speculate === false || a.pin !== undefined || plan === undefined || a.watch === undefined) return null;
     const b = a.watch.peek(a.nowMs);
     return b !== null && b.timestamp >= plan.ts && b.timestamp - plan.ts <= EVM_WARM_RANGE_S ? b : null;
   })();
