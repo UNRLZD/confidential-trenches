@@ -9,7 +9,7 @@
 //     the keccak256 of eth_getCode is the pinned code hash (scripts/live-checks/pool-evm-deploy.mjs reads the same).
 // Nothing here throws on an RPC's answer.
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { evmTwoOperators, type EvmTwoOperators } from "@blindfill/kit";
+import { EVM_READ_CALL_MS, evmRpcOperator, evmTwoOperators, type EvmTwoOperators } from "@blindfill/kit";
 import { short, type VerifyStatus, type VerifyValue } from "./model.ts";
 
 export type PoolChain = "solana" | "base" | "robinhood";
@@ -34,7 +34,8 @@ export type PoolPins = { readonly [C in PoolChain]: PoolPin<C> | null };
 export type PoolCheckId = "authority" | "owner" | "proxy" | "poolCode";
 export type PoolCheck = { id: PoolCheckId; status: VerifyStatus; word: "unverified" | "disagree" | null; values: VerifyValue[] };
 export type PoolExplorer = { name: "solscan" | "solanaExplorer" | "basescan" | "blockscout" | "rhExplorer" | "hoodscan"; href: string };
-export type PoolRow = { chain: PoolChain; status: VerifyStatus; checks: PoolCheck[]; height: string; rpcs: string[]; explorers: PoolExplorer[] };
+/** `headOff`: the host of the seat whose head was far from two close ones (card device-evm-read-residuals), when one was. */
+export type PoolRow = { chain: PoolChain; status: VerifyStatus; checks: PoolCheck[]; height: string; rpcs: string[]; explorers: PoolExplorer[]; headOff?: string };
 export type PoolsView = { state: "loading" } | { state: "read"; rows: PoolRow[] };
 
 /** Each pool's two explorers, at the address its row reads (the program on Solana, the pool contract on EVM). */
@@ -74,7 +75,7 @@ export type PoolReadId = (typeof SOLANA_READS)[number] | (typeof EVM_READS)[numb
 /** One RPC's answers: each read's whole JSON-RPC answer, or { error } when the call failed. */
 export type PoolRpcReads = { name: string; answers: Partial<Record<PoolReadId, unknown>> };
 /** What a row read: the block both EVM RPCs were asked at (null on Solana, read at finalized), and each RPC's answers. */
-export type PoolReads = { chain: PoolChain; height: number | null; rpcs: [PoolRpcReads, PoolRpcReads] };
+export type PoolReads = { chain: PoolChain; height: number | null; rpcs: [PoolRpcReads, PoolRpcReads]; headOff?: string };
 
 // EIP-1967: bytes32(uint256(keccak256('eip1967.proxy.implementation')) - 1), .admin and .beacon likewise
 export const EIP1967 = {
@@ -115,12 +116,14 @@ const answered = (a: unknown, revertOk = false): unknown => {
  * evmTwoOperators, card device-evm-fee-read-walks-operators): each side's head, then its six reads at the lower of the
  * two heads, a side walking past an operator that fails a read (an HTTP status, no answer, an error that is not the
  * chain's revert, no block at that height). The two answers are judged by poolRow, never by the walk: two that differ
- * are the row's "disagree", and no third operator is asked once two answered.
+ * are the row's "disagree", and no third operator is asked once two answered (a third is asked a head only when the
+ * two heads are far apart, HEAD_APART_S).
  */
 /** How far apart two operators' heads may be, in seconds of the chain's blocks: both are read inside one walk's 8 s
  *  budget (each call cut at 4 s), and an honest operator trails the chain by a few seconds; 30 s is that with room.
- *  Past it the lower head is taken as no answer, never as the height (one operator naming head 1 would read the pool
- *  at block 1 and turn the row red on its word). */
+ *  Past it neither head is taken on its own word (one operator naming head 1 would read the pool at block 1 and turn
+ *  the row red; one naming a head far ahead would make the honest one look behind): a third operator's head decides,
+ *  the two close ones are kept and the row names the seat that was off (card device-evm-read-residuals). */
 export const HEAD_APART_S = 30;
 const BLOCK_S: Readonly<Record<string, number>> = { base: 0.2, robinhood: 0.1 };
 export async function readPool(p: PoolPin, rpc: PoolRpc, signal?: AbortSignal): Promise<PoolReads> {
@@ -165,20 +168,21 @@ export async function readPool(p: PoolPin, rpc: PoolRpc, signal?: AbortSignal): 
       () => true,
       signal,
     );
-  // two heads a few blocks apart are both honest, and the lower is the block both are read at; two far apart: the lower
-  // is walked past (the list without its seat) and the two read then must be close, else the row is Unverified
+  // two heads a few blocks apart are both honest, and the lower is the block both are read at; two far apart: a third
+  // operator is asked its head, the two of the three that are close are kept (the pool is read on them first, the list's
+  // others after, never the seat whose head was off) and the row names the one that was off; no two close, Unverified
   let walk = walkOf(p.rpcs);
   let heads: number[] = [];
+  let headOff: string | undefined;
   try {
-    let two = await headRead(p.rpcs);
+    const two = await headRead(p.rpcs);
     if (Math.abs(two[0].value - two[1].value) > apart) {
-      const low = two[0].value < two[1].value ? two[0].url : two[1].url;
-      const rest = p.rpcs.filter((u) => u !== low);
-      walk = walkOf(rest);
-      two = await headRead(rest);
-      if (Math.abs(two[0].value - two[1].value) > apart) throw new Error(`heads ${two[0].value} and ${two[1].value} are more than ${apart} blocks apart`);
-    }
-    heads = two.map((x) => x.value);
+      const third = await thirdHead(p.rpcs, [two[0].operator, two[1].operator], call, signal);
+      const [keep, off] = closeTwo([two[0], two[1]], third, apart);
+      walk = walkOf([keep[0].url, keep[1].url, ...p.rpcs.filter((u) => u !== off.url && u !== keep[0].url && u !== keep[1].url)]);
+      heads = [keep[0].value, keep[1].value];
+      headOff = off.host;
+    } else heads = two.map((x) => x.value);
   } catch (e) {
     signal?.throwIfAborted();
     fail(`Verify read no head on two of ${p.rpcs.map((u) => new URL(u).host).join(", ")}`, e);
@@ -204,7 +208,38 @@ export async function readPool(p: PoolPin, rpc: PoolRpc, signal?: AbortSignal): 
     () => true,
     signal,
   ).catch((e: unknown) => fail(`Verify read the pool on no two of ${p.rpcs.map((u) => new URL(u).host).join(", ")}`, e));
-  return { chain: p.chain, height, rpcs: [two[0].value, two[1].value] };
+  return { chain: p.chain, height, rpcs: [two[0].value, two[1].value], ...(headOff === undefined ? {} : { headOff }) };
+}
+
+type Head = { value: number; url: string; host: string; operator: string };
+/** The head of the first seat, in the list's order, of an operator neither of `asked`: each call cut at EVM_READ_CALL_MS,
+ *  an error, no answer or no head walking on; none left throws. */
+async function thirdHead(urls: readonly string[], asked: readonly string[], call: (url: string, method: string, params: unknown[], sig: AbortSignal) => Promise<unknown>, signal?: AbortSignal): Promise<Head> {
+  const why: string[] = [];
+  for (const url of urls) {
+    const operator = evmRpcOperator(url);
+    if (operator === null || asked.includes(operator)) continue;
+    signal?.throwIfAborted();
+    try {
+      const h = headOf(answered(await call(url, "eth_blockNumber", [], AbortSignal.timeout(EVM_READ_CALL_MS))));
+      if (h === null) throw new Error("no head");
+      return { value: h, url, host: new URL(url).host, operator };
+    } catch (e) {
+      signal?.throwIfAborted();
+      why.push(`${new URL(url).host}: ${e instanceof Error ? e.message.slice(0, 80) : "no answer"}`);
+    }
+  }
+  throw new Error(`two heads far apart and no third operator answered its head (${why.join("; ") || "none left"})`);
+}
+
+/** Of two heads far apart and a third, the two within `apart` blocks (the closer pair when the third is close to both,
+ *  the higher on a tie) and the one that was off; none close throws. */
+function closeTwo(two: readonly [Head, Head], third: Head, apart: number): [[Head, Head], Head] {
+  const gap = (x: Head) => Math.abs(x.value - third.value);
+  const near = ([0, 1] as const).filter((i) => gap(two[i]) <= apart).sort((i, j) => gap(two[i]) - gap(two[j]) || two[j].value - two[i].value);
+  if (near.length === 0) throw new Error(`heads ${two[0].value}, ${two[1].value} and ${third.value} are each more than ${apart} blocks apart`);
+  const k = near[0]!;
+  return [[two[k], third], two[k === 0 ? 1 : 0]];
 }
 
 // ------------------------------------------------------------------------------------------------ the decode
@@ -357,7 +392,7 @@ export async function poolRow(reads: PoolReads, p: PoolPin): Promise<PoolRow> {
     const values = [a, b].flatMap((x, i) => (x ? judgeOne(id, x, p).values.map((v) => ({ ...v, rpc: reads.rpcs[i]!.name })) : []));
     return { id, status: "warn", word, values };
   });
-  return { chain: p.chain, status: worst(checks.map((c) => c.status)), checks, height, rpcs: reads.rpcs.map((r) => r.name), explorers: poolExplorers(p.chain, addressOfPin(p)) };
+  return { chain: p.chain, status: worst(checks.map((c) => c.status)), checks, height, rpcs: reads.rpcs.map((r) => r.name), explorers: poolExplorers(p.chain, addressOfPin(p)), ...(reads.headOff === undefined ? {} : { headOff: reads.headOff }) };
 }
 
 const addressOfPin = (p: PoolPin) => (p.chain === "solana" ? (p.pin as SolanaPoolPin).program : (p.pin as EvmPoolPin).address);

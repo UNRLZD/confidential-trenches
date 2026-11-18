@@ -148,8 +148,9 @@ const MAINNET = (n) => new RegExp(`[,; ]${esc(n)}=${Q}mainnet${Q}[,;]`);
 // since card restore-first-sign-in-under-two-minutes (first in release 115) the reader's opening, the held reader's and
 // each held read are waited on through letGo (`lg`) on the run's own signal, so a sign out lets go of a read in flight;
 // the loop reads through the let-go reader `H`
+// (since card vault-late-send-carried step 5 takes the NEAR vault's reads last, `vault = null`: the head names it, no more)
 const STEP5_HEAD = new RegExp(
-  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N},${N},${N}\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await (?<lg>${N})\\(${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),\\k<signal>\\),` +
+  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N},${N},${N}(?:,${N}=null)?\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await (?<lg>${N})\\(${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),\\k<signal>\\),` +
     `(?<H0>${N})=await \\k<lg>\\((?<R>${N})\\(\\k<net>,\\k<pair>,\\k<pass>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),\\k<signal>\\),(?<H>${N})=(?<e>${N})=>\\k<lg>\\(\\k<H0>\\(\\k<e>\\),\\k<signal>\\),`,
 );
 // letGo (src/pool-restore.ts) by its body: a read waited on only while the signal lasts, rejected with its reason at the

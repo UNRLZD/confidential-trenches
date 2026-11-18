@@ -5,7 +5,13 @@
 // EVM_LAG_WAIT_MS apart) and, when the provider still lags on the last read, records its hosts as `lagging`, which the
 // check judges INCONCLUSIVE naming them. A provider that knows the block and answers wrong (another hash, another value,
 // a pruned state) is never one of these: its read fails as before.
+import { SOLANA_RPC_RETRY, solanaJsonRpc, type SolanaFetch, type SolanaRpc } from "@blindfill/kit";
 import { EvmLagError } from "../src/pool/evm.ts";
+
+/** A seat's client in these children, as the signing page reads it: the kit's solanaJsonRpc under the page's retry
+ *  (SOLANA_RPC_RETRY, packages/signpage/src/pool-testnet.ts pageEvmFeeRpcs), so a provider's one throttle or stall is
+ *  asked again once, as on the page, never judged a failure the page would not see (card device-evm-read-residuals). */
+export const pageRpc = (url: string, fetch?: SolanaFetch): SolanaRpc => solanaJsonRpc(url, { retry: SOLANA_RPC_RETRY, ...(fetch ? { fetch } : {}) });
 
 /** A provider's words for a block it does not know (the wallet's UNKNOWN_BLOCK, src/pool/evm.ts, module-private there;
  *  test/live-lag-hosts.test.ts fails when the two differ). */

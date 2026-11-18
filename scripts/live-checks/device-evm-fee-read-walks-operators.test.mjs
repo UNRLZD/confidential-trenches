@@ -1,7 +1,9 @@
 // Replays of live check device-evm-fee-read-walks-operators: the recorded good run (10 Nov 21:53Z: Base bound in its
 // period; Robinhood's bind found three of four operators without the state about 40 s back and bound at the next
-// period's first block, as the queue's next pass does) passes; the bad one (every Robinhood seat but one lacking the
-// state, in this period and the next) fails; and each rule alone on the good run.
+// period's first block, as the queue's next pass does) passes; the bad answer is no recording: it is built from the good
+// run (its `note` says so, and its `at` is the good run's), every Robinhood seat but one lacking the state, in this
+// period and the next (the first period's recorded refusal, planted again at the next), and it fails; and each rule
+// alone on the good run.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -22,7 +24,12 @@ test("the recorded good answer passes: the next period's bind named, the seats l
   assert.ok(r.lines.some((l) => /^-- {2}robinhood: 60 s back .* 1 of 4 operators held the state on one ask; lacking: robinhood\.drpc\.org, robinhood\.api\.pocket\.network, robinhood-rpc\.publicnode\.com/.test(l)));
 });
 
-test("the recorded bad answer (no two operators keep the block's state, this period or the next) fails", () => {
+test("the bad answer says it is built from the good run (card device-evm-read-residuals: never passed off as a recording)", () => {
+  assert.match(A.bad.note, /^planted on the good run: /);
+  assert.equal(A.bad.at, A.good.at);
+});
+
+test("the bad answer built from the good run (no two operators keep the block's state, this period or the next) fails", () => {
   const r = judge(A.bad);
   assert.equal(r.verdict, "FAIL");
   assert.ok(r.lines.some((l) => /^BAD robinhood: the bind did not bind in this period or the next \(2 tries\)/.test(l)), r.lines.join("\n"));
