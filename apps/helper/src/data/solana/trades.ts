@@ -57,7 +57,7 @@
 // is the token, bounded books, subscriptions and caches.
 import { change4h, createBook, joinBars, TF_SECONDS, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
 import { address } from "./lists.ts";
-import { HELD_WAIT_MS, TAPE_FRESH_MS, type DataAnswer } from "./token.ts";
+import { HELD_WAIT_MS, SOL_BEHIND_MS, SOL_VENDOR_REACH_MS, type DataAnswer } from "./token.ts";
 import { cutTrades, dbcPair, eventsInInner, fromLogs, poolMints, poolPair, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
 import { CREDITS, type Slot } from "../../rpc/slot.ts";
 
@@ -97,21 +97,9 @@ export const SETTLE_SLOTS = 150;
 /** A first read answers after its walk, or after this with what it holds by then. */
 export const COLD_WAIT_MS = 3_000;
 export const SILENT_MS = 30_000;
-/** How long the stream may go without a message and a token's tape and chart still be served as current (card
- *  every-tape-and-chart-says-filling-behind-the-head, the rule ../evm/swaps.ts BEHIND_MAX holds on Base and
- *  Robinhood): past it, or while a dropped stream's gap is walked (`refilling`), the tape says filling with no whole_ms
- *  and a live chart says filling. Until this card both were served as current for up to SILENT_MS of silence and through
- *  the whole refill. [design: 5 s, past the stream's follow cadence: its heartbeat is the slot subscription, a slot
- *  every ~400 ms (wsSource), so 5 s is about 12 slots unheard; a trade's note arrives p50 1.19 s, p95 1.78 s after its
- *  block (header, measured 3 Nov), under a third of it] */
-export const SOL_BEHIND_MS = 5_000;
-/** How old the vendor's rows a tape serves (poolTape: a token the chain tape does not decode or the lists do not hold)
- *  may be and the tape still claim them complete (`whole_ms`): the read is renewed each TAPE_FRESH_MS (token.ts tape),
- *  and a renewal overdue by more than SOL_BEHIND_MS, the bound this chain's own tape holds a silent stream to, ends the
- *  claim as that one does (card vendor-tapes-name-their-reach-every-chain: a held read whose refresh failed was served
- *  with its whole_ms whatever its age, as card evm-vendor-tape-names-its-reach found on Base and Robinhood). SOL_BEHIND_MS
- *  alone is under TAPE_FRESH_MS: every held read in the second half of its fresh window would claim none. */
-export const SOL_VENDOR_REACH_MS = TAPE_FRESH_MS + SOL_BEHIND_MS;
+/** SOL_BEHIND_MS and SOL_VENDOR_REACH_MS live in token.ts, whose tapes wait past the reach (card
+ *  sol-vendor-tape-waits-past-reach); token.ts cannot import this file, which imports it. */
+export { SOL_BEHIND_MS, SOL_VENDOR_REACH_MS };
 export const REF_MS = 5_000;
 export const REF_STALE_S = 120;
 export const IDLE_MS = 60_000;

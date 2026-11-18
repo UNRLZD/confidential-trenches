@@ -64,6 +64,27 @@ export const POOL_FRESH_MS = 600_000;
 /** A pool-trades tape read (tape below) is fresh this long: a page's tape polls share one read, about 6 a minute per
  *  open token, inside the chart's budget. */
 export const TAPE_FRESH_MS = 10_000;
+/** How long the stream may go without a message and a token's tape and chart still be served as current (card
+ *  every-tape-and-chart-says-filling-behind-the-head, the rule ../evm/swaps.ts BEHIND_MAX holds on Base and
+ *  Robinhood): past it, or while a dropped stream's gap is walked (`refilling`), the tape says filling with no whole_ms
+ *  and a live chart says filling. Until this card both were served as current for up to SILENT_MS of silence and through
+ *  the whole refill. [design: 5 s, past the stream's follow cadence: its heartbeat is the slot subscription, a slot
+ *  every ~400 ms (trades.ts wsSource), so 5 s is about 12 slots unheard; a trade's note arrives p50 1.19 s, p95 1.78 s after its
+ *  block (header, measured 3 Nov), under a third of it] */
+export const SOL_BEHIND_MS = 5_000;
+/** How old the vendor's rows a tape serves (trades.ts poolTape: a token the chain tape does not decode or the lists do not hold)
+ *  may be and the tape still claim them complete (`whole_ms`): the read is renewed each TAPE_FRESH_MS (tapes below),
+ *  and a renewal overdue by more than SOL_BEHIND_MS, the bound this chain's own tape holds a silent stream to, ends the
+ *  claim as that one does (card vendor-tapes-name-their-reach-every-chain: a held read whose refresh failed was served
+ *  with its whole_ms whatever its age, as card evm-vendor-tape-names-its-reach found on Base and Robinhood). SOL_BEHIND_MS
+ *  alone is under TAPE_FRESH_MS: every held read in the second half of its fresh window would claim none. */
+export const SOL_VENDOR_REACH_MS = TAPE_FRESH_MS + SOL_BEHIND_MS;
+/** How long a caller of a tape held past SOL_VENDOR_REACH_MS waits for its refresh before the newest rows held answer
+ *  (tapes below, card sol-vendor-tape-waits-past-reach), the bound ../evm/swaps.ts OPEN_BOUND_MS holds a Base or
+ *  Robinhood tape to. [design: 8 s: the token page aborts its tape read at 10 s (apps/terminal/src/screens/token/trades.ts
+ *  TIMEOUT_MS), less 2 s for the way to it; the refresh's keyed read waits CG_BACKGROUND_TIMEOUT_MS (8 s) at most, and
+ *  answered in 0.4 to 0.9 s from the helper's box (../coingecko.ts)] */
+export const TAPE_OPEN_BOUND_MS = 8_000;
 /** The tape's rows: trades.ts TRADES_MAX. */
 export const TAPE_MAX = 50;
 /** L-05: GeckoTerminal's public API, as measured (../gecko.ts GT_LIMIT_PER_MIN); the server shares one budget with the
@@ -585,8 +606,10 @@ export const HELD_WAIT_MS = 50;
  *  the key (its re-read is a refresh, ../gecko.ts "refresh"); `opts.keepHeld`: a refresh refused by a budget serves
  *  the held answer, dated by its own read, whatever its age (card app-console-429). `read`'s `waits`: the caller waits
  *  for this read, with nothing served meanwhile (card helper-token-page-cold); a joiner that would wait on a read
- *  begun as a refresh waits on it as it is. */
-function cached(freshMs: number | ((key: string) => number), now: () => number, read: (key: string, client?: string, held?: boolean, waits?: boolean) => Promise<DataAnswer>, opts: { revalidate?: boolean; view?: (key: string, a: DataAnswer) => DataAnswer; keepHeld?: boolean } = {}) {
+ *  begun as a refresh waits on it as it is. `opts.reachMs`: a revalidated answer whose data is past it is not answered
+ *  at once; the caller waits for the refresh up to TAPE_OPEN_BOUND_MS, then is answered the newest good answer held
+ *  (card sol-vendor-tape-waits-past-reach). */
+function cached(freshMs: number | ((key: string) => number), now: () => number, read: (key: string, client?: string, held?: boolean, waits?: boolean) => Promise<DataAnswer>, opts: { revalidate?: boolean; view?: (key: string, a: DataAnswer) => DataAnswer; keepHeld?: boolean; reachMs?: number } = {}) {
   // what the next process takes over: answers this one would still serve. keepHeld serves a held answer at any age when
   // a refresh is refused, so it hands over for KEPT_HANDOVER_MS, the rest under STALE_MS (card helper-restart-fresh: a
   // top pool past its 60 s was dropped at a swap, and a chart's first read there cost two GeckoTerminal calls, not one)
@@ -635,9 +658,21 @@ function cached(freshMs: number | ((key: string) => number), now: () => number, 
           .finally(() => running.delete(key));
         running.set(key, p);
       }
-      return usable ? Promise.resolve(held(view(key, hit.a))) : p.then((a) => view(key, a));
+      if (!usable) return p.then((a) => view(key, a));
+      if (opts.reachMs === undefined || now() - (hit.a.asOfMs ?? hit.at) <= opts.reachMs) return Promise.resolve(held(view(key, hit.a)));
+      // past the reach: the refresh's rows when it lands within the bound, else (or refused, or failed) the newest held
+      return within(p, TAPE_OPEN_BOUND_MS).then(() => {
+        const n = last.get(key);
+        return held(view(key, n !== undefined && n.a.status === 200 ? n.a : hit.a));
+      });
     },
   };
+}
+
+/** `p`'s settling, or `ms` passing, whichever is first (`p` goes on). */
+function within(p: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([p.then(() => undefined, () => undefined), new Promise<void>((go) => (timer = setTimeout(go, ms)))]).finally(() => clearTimeout(timer));
 }
 
 /** `why`: what failed, for the refusal log (server.ts counts a 503 that names one), never sent. `metric`: the same
@@ -1213,7 +1248,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         throw new Upstream();
       }
       const ok = (j: unknown) => toTape(j, mint, TAPE_MAX, now()) !== null;
-      // the refresh no caller waits on (the held rows, under STALE_MS, are served meanwhile) is the key's background
+      // the refresh behind held rows under STALE_MS is the key's background (a caller past SOL_VENDOR_REACH_MS waits
+      // for it within TAPE_OPEN_BOUND_MS, cached reachMs)
       const background = held === true && waits === false;
       // card sol-vendor-tape-refresh-lands: a held tape's refresh asks the key first, as the helper's background read
       // (it stops CALLER_DAY_ROOM short of the key's day, so a cold read always finds the callers' quarter), then the
@@ -1224,14 +1260,21 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       // SOL_VENDOR_REACH_MS. Its cost: one call a TAPE_FRESH_MS per coin a page holds, about 360 an hour, inside the
       // background day of 3,225 less PROBE_DAY_SHARE and CALLER_DAY_ROOM (2,387, about 6.6 coin-hours a day); past it
       // the refresh goes keyless and the tape names its age with no reach claimed (trades.ts SOL_VENDOR_REACH_MS). The
-      // refresh runs behind the held rows (revalidate), so a page never waits on CoinGecko's answer (0.4 to 0.9 s from
-      // the box, up to 3.1 s from a Mac) and a slow one is not cut at CG_TIMEOUT_MS
+      // refresh runs behind the held rows (revalidate), so a page inside the reach never waits on CoinGecko's answer
+      // (0.4 to 0.9 s from the box, up to 3.1 s from a Mac), one past it waits within TAPE_OPEN_BOUND_MS, and a slow
+      // one is not cut at CG_TIMEOUT_MS
       const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, p.body)}/trades?token=${mint}`, held === true ? "refresh" : "pages", "sol trades", ok, undefined, client, false, background);
       const rows = a === null ? [] : toTape(a, mint, TAPE_MAX, now());
       if (rows === null) throw new Upstream();
       return { status: 200, body: JSON.stringify(rows), src, asOfMs: now() };
     },
-    { keepHeld: true, revalidate: true },
+    // card sol-vendor-tape-waits-past-reach: held rows are served at once, the refresh behind them, only inside
+    // SOL_VENDOR_REACH_MS; past it, up to STALE_MS, the caller waits for that one refresh within TAPE_OPEN_BOUND_MS and
+    // is served the newest rows held, so a page that opens a coin another reader held 17 s before is not served rows
+    // past the reach while the vendor answers (revalidate served them at once up to STALE_MS: card
+    // evm-vendor-tape-refresh-keyed's live check met it on Base, 0x1668cd48 served 18.9 s old, 18 Nov 15:13:45Z). The
+    // refresh stays the background read (waits false): the caller is bounded here, not by the key's CG_TIMEOUT_MS
+    { keepHeld: true, revalidate: true, reachMs: SOL_VENDOR_REACH_MS },
   );
 
   const mintKey = (k: string) => address(k) !== null;

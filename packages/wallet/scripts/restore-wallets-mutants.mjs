@@ -6,7 +6,7 @@
 // precommitments as strings to a Worker that takes them restores no note with every check on the walk passing.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { runMutant } from "./mutant-run.mjs";
 const P = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const WALK = "wallet/src/restore/walk.ts";
 const WAL = "wallet/src/restore/wallets.ts";
@@ -183,6 +183,7 @@ const only = process.argv[2];
 const RUN = only === undefined ? M : M.filter(([name]) => name.includes(only));
 if (RUN.length === 0) throw new Error(`no plant named ${only}`);
 let ok = 0;
+let none = 0;
 for (const [name, file, edits, [pkg, test], pat] of RUN) {
   const path = `${P}/${file}`;
   const src = readFileSync(path, "utf8");
@@ -195,18 +196,25 @@ for (const [name, file, edits, [pkg, test], pat] of RUN) {
     planted = planted.replace(from, to);
   }
   writeFileSync(path, planted);
-  // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
+  // a run past 180 s is killed, its process group with it (scripts/mutant-run.mjs, scripts/group-run.mjs)
   let r;
   try {
-    r = runSync("node", ["--test", `--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, encoding: "utf8", timeoutMs: 180_000 });
+    r = runMutant([`--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, timeoutMs: 180_000 });
   } finally {
     writeFileSync(path, src);
   }
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const killed = r.status !== 0 && Number(fail) > 0;
-  if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}`);
+  // card restore-sweep-world-tests-exit-alone: a run that ends with no verdict is a refusal, never a survivor: HUNG (killed
+  // at the cap), CANCELLED (its only failures tests stopped at their own timeout, on two runs) or NO TEST (no summary
+  // naming a test that ran). A hung run printed "SURVIVED pass undefined fail undefined" before.
+  const ran = Number((r.stdout.match(/ℹ tests (\d+)/) ?? [])[1] ?? 0);
+  const no = r.verdict === "hung" ? "HUNG" : r.verdict === "cancelled" ? "CANCELLED" : ran === 0 ? "NO TEST" : null;
+  if (no !== null) {
+    none++;
+    console.log(`${no} [${name}] pass ${r.pass} fail ${r.fail} cancelled ${r.cancelled}: no verdict, refused`);
+    continue;
+  }
+  if (r.verdict === "killed") ok++;
+  console.log(`${r.verdict === "killed" ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}`);
 }
-console.log(`${ok}/${RUN.length} killed`);
+console.log(`${ok}/${RUN.length} killed${none > 0 ? `; ${none} with no verdict, refused` : ""}`);
 if (ok !== RUN.length) process.exitCode = 1;
