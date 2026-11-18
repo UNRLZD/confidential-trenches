@@ -214,6 +214,11 @@ export const READ_BACK = ["https://api.mainnet-beta.solana.com", "https://solana
 const METEORA_WAIT_MS = 180_000;
 const METEORA_TAPE_MS = 30_000;
 const METEORA_WATCH = 100;
+/** Card sol-meteora-tape-inside-rpc-budget: a found venue's tape read once a second, so the check stays one caller inside
+ *  the helper's API_RATE_MAX (120 in 10 s): its 100 coins kept open every 20 s (50) and three venues' reads (30). At
+ *  POLL_MS (200 ms) three reads drew 150 in 10 s, and the helper answered the check 429 (a local helper at 7239c82e4,
+ *  18 Nov 19:28Z and 19:34Z: "refused /v1/market/trades client window"). */
+export const METEORA_POLL_MS = 1_000;
 /** The listed coins whose tapes a venue with no fresh trade is looked for in, at most. */
 const METEORA_SCAN = 40;
 /** A DBC curve coin's 24 h volume in USD from which the check needs a DBC trade (the one listed DBC curve coin on 18 Nov
@@ -342,8 +347,8 @@ export async function readBack(sig) {
  *  trade's signature read back on each of READ_BACK. */
 export async function readMeteoraOne(base, f, fetchFn = fetch) {
   const polls = [];
-  // every POLL_MS: a busy coin's 50 newest rows span a few seconds (TTW's 50 spanned 3 s, 18 Nov 15:00Z)
-  for (const t0 = Date.now(); Date.now() - t0 < METEORA_TAPE_MS; await new Promise((r) => setTimeout(r, POLL_MS))) {
+  // every METEORA_POLL_MS: a busy coin's 50 newest rows span a few seconds (TTW's 50 spanned 3 s, 18 Nov 15:00Z)
+  for (const t0 = Date.now(); Date.now() - t0 < METEORA_TAPE_MS; await new Promise((r) => setTimeout(r, METEORA_POLL_MS))) {
     const p = await get(base, TRADES_PATH(f.coin), fetchFn).catch((e) => ({ status: 0, headers: {}, body: e.message }));
     polls.push(p);
     if (p.status === 200 && JSON.parse(p.body).trades?.some((r) => r.tx === f.sig)) break;
