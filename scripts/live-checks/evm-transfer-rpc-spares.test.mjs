@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { evmPoolProvidersOf, evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { LISTS, spares, spoil } from "./evm-transfer-rpc-spares.mjs";
 import { replayer } from "./wallet-restore-transfer-rpcs.mjs";
 
@@ -27,7 +28,7 @@ function good(r) {
       if (m[5] === undefined) assert.ok(m[2] !== m[3] && m[2] !== m[4], c);
     }
   }
-  // Base's pool list holds four providers and Robinhood's five: no case of theirs is skipped
+  // Base's pool list and Robinhood's hold three providers each: no case of theirs is skipped
   assert.ok(r.lines.filter((x) => /^(base|robinhood) pool, /.test(x)).every((x) => !/skipped/.test(x)), r.lines.join("\n"));
 }
 /** The bad run's verdict: a failure on Base's pool list, every other list as the good run's. */
@@ -88,4 +89,20 @@ test("the recorded runs give the same verdicts in another order: the lists and e
     const { order, late } = shuffled(SEED);
     verdict(await spares(late(replayer(run)), { wait: false, order }));
   }
+});
+
+test("each network's pool list is the one the device reads, evmPoolProvidersOf (the page's MAINNET_POOL_RPCS), never the venue's quote list, and the good run asks no provider but those (card rh-provider-fails-64-read-batch: the quote list named as Robinhood's pool list failed this replay once rpc-robinhood.globalstake.io left the quote list)", async () => {
+  const venues = evmPoolVenues();
+  for (const network of ["base", "robinhood"]) {
+    const l = LISTS.find((x) => x.label === `${network} pool`);
+    const pool = [...evmPoolProvidersOf(venues[network])];
+    assert.deepEqual([...l.pool], pool, `${network}: the check reads ${l.pool.join(", ")}`);
+    // the planted case: a quote list that names another provider, so reading it in place of the pool list fails here
+    assert.ok(venues[network].providers.some((u) => !pool.includes(u)), `${network}: the quote list names no provider outside the pool list`);
+  }
+  const asked = new Map();
+  const replay = replayer(A.good);
+  const r = await spares((network, url, ...rest) => (asked.set(network, new Set([...(asked.get(network) ?? []), url])), replay(network, url, ...rest)), { wait: false });
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const network of ["base", "robinhood"]) assert.deepEqual([...asked.get(network)].sort(), [...evmPoolProvidersOf(venues[network])].sort(), network);
 });
