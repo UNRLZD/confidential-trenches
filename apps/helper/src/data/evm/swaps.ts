@@ -1060,8 +1060,10 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null; indexFile?: string; writable?: Promise<unknown>; restMax?: number }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null; indexFile?: string; writable?: Promise<unknown>; restMax?: number; busy?: () => boolean }) {
   const now = deps.now ?? Date.now;
+  /** Whether the helper's event loop is busy now (limits/loop-busy.ts): the reads ahead stand down while it is. */
+  const busy = deps.busy ?? ((): boolean => false);
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
@@ -2095,7 +2097,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         for (;;) {
           for (;;) {
             if (opening > 0) await new Promise<void>((go) => idle.push(go));
-            else if (aheadQueue.size > 0 && !roomy()) await new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
+            else if (aheadQueue.size > 0 && (busy() || !roomy())) await new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
             else break;
           }
           const t = aheadQueue.values().next().value;
@@ -2124,7 +2126,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    * the head again the same way, before its gap is wider than a reopen reads. Tokens in the lists' order, each once its
    * pool is kept (the search above; one with none found is dropped). All of it runs in a background lane of its own,
    * so every caller's post goes first in each provider's queue (Lane), at the search's gates (no start while a first
-   * open waits for its pool, nor without two roomy providers), and the run stops when any provider of the chain is held
+   * open waits for its pool, nor without two roomy providers, nor while the helper's loop is busy: limits/loop-busy.ts,
+   * card robinhood-tapes-read-ahead-bounded, and a tape's read back stops there, rested, to go on at the next lists load),
+   * and the run stops when any provider of the chain is held
    * (a refusal it answered, its 429: limits.ts hold): the read ahead spends no refused budget, and the lists' next load
    * (LIST_MS) asks again. A caller that opens the coin meanwhile takes the book over (open), its lane lifted to the caller's (join).
    * [design: TAPES_AT_ONCE books at most, never into the last of OPEN_MAX, so a page's open is never refused for a read
@@ -2147,7 +2151,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
             if (tapeQueue.size === 0) return;
             if (heldAny()) return tapeQueue.clear();
             if (opening > 0) await new Promise<void>((go) => idle.push(go));
-            else if (!roomy()) await new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
+            else if (busy() || !roomy()) await new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
             else break;
           }
           // the first whose pool is kept; one still searched keeps its place, one the search found none for leaves
@@ -2202,7 +2206,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         // which reads only open books) is waited here, as long as no provider is held and the book is still ours
         for (;;) {
           while (e!.backing !== undefined) await e!.backing;
-          if (!backing(e!) || books.get(t) !== e || e!.ahead !== lane || heldAny()) return;
+          if (!backing(e!) || books.get(t) !== e || e!.ahead !== lane || heldAny() || busy()) return;
           const wait = (e!.back?.until ?? now()) - now();
           if (wait > BACK_RETRY_MAX_MS) return;
           if (wait > 0) await new Promise((go) => (setTimeout(go, wait) as { unref?: () => void }).unref?.());

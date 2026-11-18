@@ -288,3 +288,29 @@ test("card robinhood-tapes-read-ahead: posts and 429s against the base, every pr
     assert.equal(g.filling, false, `a tape still filling at 45 s: ${l}`);
   }
 });
+
+test("card robinhood-tapes-read-ahead-bounded: while the helper's loop is busy (a live run's burst) the lists' tapes are not read ahead; once the loop is free they are read and their first opens are whole (red at 6b1926fc9: the read ahead ran through a busy loop, its reads on top of the burst's)", async () => {
+  const r = rig();
+  const kept = new Map(LISTED.slice(0, 2).map(({ token, pool }) => [token, { pool: { venue: "v3", id: pool, token, tokenIs0: true, quote: { kind: "usd", decimals: 6 } } as Pool, decimals: 18 }]));
+  const loop = { busy: true };
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const s = open(r.chain, clock, { pools: kept, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never, busy: () => loop.busy });
+    void s.ahead(LISTED.slice(0, 2).map((x) => x.token));
+    await sleep(20_000);
+    const busy = LISTED.slice(0, 2).map(({ pool }) => r.n.poolReads.get(pool) ?? 0);
+    loop.busy = false;
+    await sleep(20_000);
+    const free = LISTED.slice(0, 2).map(({ pool }) => r.n.poolReads.get(pool) ?? 0);
+    const t0 = clock.t;
+    const got = await Promise.all(LISTED.slice(0, 2).map(({ token }) => s.trades(token, 50).then((a) => tapeOf(a, clock.t - t0))));
+    s.stop();
+    return { busy, free, got };
+  });
+  console.log(`pool reads while busy ${value.busy.join(", ")}; once free ${value.free.join(", ")}; ${line(value.got)}`);
+  for (const x of value.busy) assert.equal(x, 0, `a tape was read ahead while the loop was busy: ${value.busy.join(", ")}`);
+  for (const x of value.free) assert.ok(x > 0, `no tape was read ahead once the loop was free: ${value.free.join(", ")}`);
+  for (const g of value.got) {
+    assert.equal(g.filling, false, `read ahead once the loop was free: ${line(value.got)}`);
+    assert.equal(g.n, SWAPS, line(value.got));
+  }
+});

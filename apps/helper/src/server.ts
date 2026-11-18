@@ -48,6 +48,7 @@ import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts"
 import { checkPoolRpcOperators, checkSolanaPairOperators } from "./env-check.ts";
 import { callsFiles } from "./proxy/shared-calls.ts";
 import { dayFiles } from "./limits/day-spend.ts";
+import { loopBusy } from "./limits/loop-busy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
@@ -974,6 +975,8 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       // the same rows' price_usd, as the last answer read held it (a token no list carries: its DexScreener row's): a
       // book off it by SCALE_BOUND is not served as ours
       price: (token) => seen?.prices.get(token) ?? named?.price(token) ?? null,
+      // the reads ahead stand down while callers wait on the loop (card robinhood-tapes-read-ahead-bounded)
+      busy: loopBusy,
     });
     out[chain] = swaps;
     // the lists' tokens' pools looked for as each answer loads, not at each token's first open (card
