@@ -80,7 +80,9 @@ export async function firstThenFollow(lie?: (k: string, a: unknown) => unknown, 
   evmQuoteWarmReset();
   const r2 = replay(lie === undefined ? undefined : (k, a) => (k === byNumber ? lie(k, a) : undefined));
   const follow = () => evmPoolBuyQuoteWith({ ...req, at: q1.block.hash }, evmProviders(evmRanked(v.providers!), r2.fetchFn), F.now, scansOf(r2), watch);
+  // the same request with no `at`, its watch's head the first quote's block (as a held head within EVM_HEAD_REUSE_MS)
+  const plain = () => evmPoolBuyQuoteWith(req, evmProviders(evmRanked(v.providers!), r2.fetchFn), F.now, scansOf(r2), watch);
   const scanHosts = new Set([v.scan!.url, ...(v.scan!.spares ?? []).map((s) => s.url)].map((u) => new URL(u).host));
-  return { q1, r1, r2, follow, heads: () => heads, scanHosts };
+  return { q1, r1, r2, follow, plain, heads: () => heads, scanHosts };
 }
 
