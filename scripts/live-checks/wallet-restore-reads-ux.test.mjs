@@ -206,8 +206,10 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(dead(broken(/(ux:[\w$]+=>\{let [\w$]+=[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1(()=>null)({chain:"), `;var __dead_w={signedIn:0,${wired}0}`).ux_wired, false, "dead copy: wired (real deps swapped)");
   assert.equal(dead(js, read).ux_read, false, "a second copy of the reader beside the real one");
   assert.equal(dead(js, ";var __dead_p=Object.freeze([`https://solana-rpc.publicnode.com`,`https://solana.api.pocket.network`])").ux_pair, false, "a second copy of the pair beside the real one");
-  const handed = /(`money`\)\},[\w$]+=await [\w$]+\([\w$]+,([\w$]+)\.scope,\{notes:\[\.\.\.\2\.notes\],\.\.\.[\w$]+\(\2\.notes,\2\.scope\)\},)([\w$]+),await ([\w$]+)\(\2\.scope,\2\.notes\)\)/;
-  assert.equal(mut(handed, "$1l,await $4($2.scope,$2.notes))").ux_read, false, "the U_X reader not handed to restoreDepositIds");
+  // since card restore-shows-a-note-on-a-planned-index the reader goes through the used-id take on the same scope
+  const handed = /(`money`\)\},[\w$]+=await [\w$]+\([\w$]+,([\w$]+)\.scope,\{notes:\[\.\.\.\2\.notes\],\.\.\.[\w$]+\(\2\.notes,\2\.scope\)\},)([\w$]+)\(\2\.scope,([\w$]+)\),await ([\w$]+)\(\2\.scope,\2\.notes\)\)/;
+  assert.equal(mut(handed, "$1$3($2.scope,l),await $5($2.scope,$2.notes))").ux_read, false, "the U_X reader not handed to restoreDepositIds");
+  assert.equal(mut(handed, "$1$3(zz.scope,$4),await $5($2.scope,$2.notes))").ux_read, false, "the reader handed through a take on another scope");
 });
 
 test("the review's two plants, recorded as bad answers, fail on the bundle alone", () => {

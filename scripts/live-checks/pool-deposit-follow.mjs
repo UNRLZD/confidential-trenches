@@ -58,7 +58,7 @@ const QUOTE_FLOOR = new RegExp(
 // main.ts: pool.address with the price, the floor read and the follow's quoted (card move-one-confidential-swap: and
 // the confidential mode with the keyless tell, asked with the page's fetch and the request's stop, before the stop).
 const WIRED = new RegExp(
-  `"pool\\.address":${N}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:(${N}),checked:\\((${N}),(${N}),(${N}),(${N})\\)=>(${N})\\.quoted\\(\\2,\\3,\\4,\\5\\),` +
+  `"pool\\.address":${N}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),(?:quoted:${N},)?priced:${N},floor:(${N}),checked:\\((${N}),(${N}),(${N}),(${N})\\)=>(${N})\\.quoted\\(\\2,\\3,\\4,\\5\\),` +
     `confidential:!0,hidden:\\((${N}),(${N})\\)=>${N}\\(\\7,fetch,\\8\\),stop:${N}\\}\\)`,
 );
 // (card evm-deposit-route-mainnet: Base's and Robinhood's floor goes first, its own check's mark; Solana's as before)
