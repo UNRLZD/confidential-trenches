@@ -1275,7 +1275,7 @@ test("card evm-pool-leaves-any-source: ?keyed=only refuses what the route refuse
   assert.deepEqual(asked, []);
 });
 
-test("card helper-gives-a-trade-its-reads: a route on our keyed providers gives one caller what one signing page draws in its busiest 10 s (RPC_PAGE_NEED: 42 on Solana, 30 on the mark list and the EVM chains), and an RPC_BUDGET_<CHAIN> naming less is refused at the start, naming the variable only", async () => {
+test("card helper-gives-a-trade-its-reads: a route on our keyed providers gives one caller what one signing page draws in its busiest 10 s (RPC_PAGE_NEED: 42 on Solana, 30 on the mark list and the EVM chains, 90 on NEAR), and an RPC_BUDGET_<CHAIN> naming less is refused at the start, naming the variable only", async () => {
   const ok = (async (_u: string, i: RequestInit) => new Response(JSON.stringify({ jsonrpc: "2.0", id: (JSON.parse(String(i.body)) as { id: unknown }).id, result: 1 }), { status: 200, headers: { "content-type": "application/json" } })) as never;
   // one page's window from one address, each read after the last answered, on a planted clock inside one 10 s window;
   // the keyed pace (its second, real time) is planted open: the share is what this holds, the pace has its own tests
@@ -1290,7 +1290,7 @@ test("card helper-gives-a-trade-its-reads: a route on our keyed providers gives 
   };
   assert.equal(await served({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}` }, "solana", "getSlot", 43), 42, "Solana: the page's 42, the 43rd its own 429");
   assert.equal(await served({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}` }, "base", "eth_blockNumber", 31), 30, "Base: the page's 30");
-  for (const [name, bad] of [["RPC_BUDGET_SOLANA", "100,16"], ["RPC_BUDGET_SOLANA", "100,41"], ["RPC_BUDGET_SOLANA_DEVNET", "100,16"], ["RPC_BUDGET_SOLANA_MARKS", "100,29"], ["RPC_BUDGET_BASE", "100,29"], ["RPC_BUDGET_ROBINHOOD", "100,16"], ["RPC_BUDGET_NEAR", "100,29"]] as const)
+  for (const [name, bad] of [["RPC_BUDGET_SOLANA", "100,16"], ["RPC_BUDGET_SOLANA", "100,41"], ["RPC_BUDGET_SOLANA_DEVNET", "100,16"], ["RPC_BUDGET_SOLANA_MARKS", "100,29"], ["RPC_BUDGET_BASE", "100,29"], ["RPC_BUDGET_ROBINHOOD", "100,16"], ["RPC_BUDGET_NEAR", "600,89"]] as const)
     assert.throws(() => createRpc({ [name]: bad }), (e: Error) => e.message.startsWith(`${name} must be`) && !e.message.includes(bad), `${name}=${bad}`);
-  assert.doesNotThrow(() => createRpc({ RPC_BUDGET_SOLANA: "100,42", RPC_BUDGET_SOLANA_DEVNET: "100,42", RPC_BUDGET_SOLANA_MARKS: "100,30", RPC_BUDGET_BASE: "100,30", RPC_BUDGET_ROBINHOOD: "100,30", RPC_BUDGET_NEAR: "100,30" }));
+  assert.doesNotThrow(() => createRpc({ RPC_BUDGET_SOLANA: "100,42", RPC_BUDGET_SOLANA_DEVNET: "100,42", RPC_BUDGET_SOLANA_MARKS: "100,30", RPC_BUDGET_BASE: "100,30", RPC_BUDGET_ROBINHOOD: "100,30", RPC_BUDGET_NEAR: "600,90" }));
 });

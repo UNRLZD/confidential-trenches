@@ -54,7 +54,11 @@ for (const how of ["fail", "stall"] as const) {
       assert.equal(live.asOfMs, readAt, "X-Fetched-At is the last read, never now");
       const t = await s.trades(ICNT, 50);
       assert.equal(t.status, 200, t.body);
-      assert.equal(t.body, tape.body, "the held tape, dated by its last read");
+      // the held rows, dated by their last read, and filling with no reach: a book this far behind is no complete list
+      // (card base-tape-never-complete-behind-the-index, BEHIND_MAX)
+      const { whole_ms: _, ...rest } = JSON.parse(tape.body);
+      const { trades, src, as_of_ms } = rest;
+      assert.deepEqual(JSON.parse(t.body), { trades, filling: true, src, as_of_ms }, "the held tape, dated by its last read, filling");
     }
 
     // the providers answer again: the held answer started a read, and the next one is dated now

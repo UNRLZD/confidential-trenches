@@ -122,5 +122,7 @@ test("each mainnet quote provider has its own in-flight pin, and no pin names an
   assert.equal(evmPoolVenues().robinhood.inflight!["https://rpc.mainnet.chain.robinhood.com"], 2);
   // inside the helper's pace in calls at once (apps/helper/src/limits/limits.ts PROVIDER_PACE), a quote's post up to 3 calls
   assert.equal(evmPoolVenues().robinhood.inflight!["https://robinhood.drpc.org"], 5);
-  assert.equal(evmPoolVenues().base.inflight!["https://base-rpc.publicnode.com"], 2);
+  // Base's publicnode at the 8 at once measured on the device (card evm-first-quote-inside-the-kpi), never the helper's 2:
+  // a cold quote's reads queued behind it at 2 while blastapi answered 8 at once
+  assert.equal(evmPoolVenues().base.inflight!["https://base-rpc.publicnode.com"], 8);
 });

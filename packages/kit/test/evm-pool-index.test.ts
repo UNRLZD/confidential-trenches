@@ -59,6 +59,9 @@ type Reader = {
   state?: Set<string>;
   /** a getLogs over more than this many blocks is answered with an error */
   maxRange?: number;
+  /** getLogs answered -32602 "block range exceeds maximum 500" at these places (counted from 1), as one of
+   *  base.api.pocket.network's backends answers about one 10,000-block span in ten (2026-11-18) */
+  rangeErrorsAt?: Set<number>;
   /** getLogs answered with a rate-limit error inside a 200, this many first */
   limitedInBody?: number;
   /** the 429s' Retry-After, in ms (default 1) */
@@ -86,6 +89,7 @@ type Reader = {
 };
 function reader(r: Reader): EvmRpc {
   let req = 0;
+  let logsAsked = 0;
   return async (calls) => {
     req++;
     r.calls.push([...calls]);
@@ -115,6 +119,8 @@ function reader(r: Reader): EvmRpc {
         const f = c.params[0] as { fromBlock: string; toBlock: string };
         const [a, b] = [Number(f.fromBlock), Number(f.toBlock)];
         if (r.maxRange !== undefined && b - a + 1 > r.maxRange) return { error: { code: -32602, message: "nope" } };
+        logsAsked++;
+        if (r.rangeErrorsAt?.has(logsAsked) && b - a + 1 > 500) return { error: { code: -32602, message: "invalid argument 0: block range exceeds maximum 500" } };
         if (r.limitedInBody !== undefined && r.limitedInBody > 0) {
           r.limitedInBody--;
           return { error: { code: -32005, message: "25/second request limit reached" } };
@@ -298,6 +304,23 @@ test("a span answered with an error is asked as its halves on both, and a 429 wa
   // a reader that answers every span with an error refuses rather than ask halves without end
   // a reader that answers even one block with an error: rpc_disagree at that block, never too_many_pools
   await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [], maxRange: 0 }, { head, pools: ps, calls: [] })), (e: Error & { code?: string }) => e.code === "rpc_disagree" && /with an error/.test(e.message));
+});
+
+test("IDXERR a span one reader's backend answers with an error is asked of it again at once, never as halves on both (card evm-first-quote-inside-the-kpi)", async () => {
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  // four of the flaky reader's getLogs, the pin's (the first) among them, two of them in a row
+  const a: Reader = { head, pools: ps, calls: [], rangeErrorsAt: new Set([1, 4, 7, 8]) };
+  const b: Reader = { head, pools: ps, calls: [] };
+  const naps: number[] = [];
+  const r = await evmPoolIndexSync(null, { ...cfgOf(a, b), nap: async (ms: number) => void naps.push(ms) });
+  assert.equal(r.coversThrough, head);
+  assert.deepEqual(ids(r.pools), new Set(ps.map((p) => evmPoolIdOf(p.key))));
+  const spans = (x: Reader) => x.calls.flat().filter((c) => c.method === "eth_getLogs").map((c) => c.params[0] as { fromBlock: string; toBlock: string });
+  assert.ok([...spans(a), ...spans(b)].every((f) => Number(f.toBlock) - Number(f.fromBlock) + 1 === 10_000), "a span asked as halves");
+  assert.equal(spans(b).length, 10, "the reader that answered every span was asked one again");
+  assert.equal(spans(a).length, 14, "each error asked again once");
+  assert.deepEqual(naps, [], "an error's span waited before it was asked again");
 });
 
 test("a rate limit answered inside a batch is asked again, never as halves", async () => {

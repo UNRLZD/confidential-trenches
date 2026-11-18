@@ -1,0 +1,196 @@
+{
+ "good": {
+  "note": "this branch (card evm-first-quote-inside-the-kpi) at 2026-11-18 02:57Z, the repo's Base snapshot (release 172's) read from a build folder: the sync whole in 4359 ms, its first reader asking 5 getLogs for 6 spans, six coins' first quotes ended inside 3 s, no 429: PASS",
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "helper": "https://ct-api.unrealized.trade",
+   "site": "a build folder at SIGN_HOST's name",
+   "at": "2026-11-18T02:56:50.781Z",
+   "snapshot": {
+    "status": 200,
+    "through": 58859903,
+    "pools": 6148
+   },
+   "sync": {
+    "ms": 4359,
+    "served": true,
+    "coversThrough": 58901177,
+    "span": 10000,
+    "getLogs": [
+     5,
+     5
+    ],
+    "requests": [
+     3,
+     3
+    ]
+   },
+   "coins": [
+    {
+     "coin": "0x68cda1f9bce8e03c374b20c66a8abb6af37fec7b",
+     "first": {
+      "ms": 2984,
+      "code": "not_allowed"
+     },
+     "again": {
+      "ms": 991,
+      "code": "not_allowed"
+     }
+    },
+    {
+     "coin": "0xc17b757b6e7ff85941d51a561b011451a7d92e78",
+     "first": {
+      "ms": 929,
+      "code": "quote_check_failed"
+     },
+     "again": {
+      "ms": 0,
+      "code": "quote_check_failed"
+     }
+    },
+    {
+     "coin": "0x8c07ee37aec6ce1cabfcbebd9b69db4fb4865fbf",
+     "first": {
+      "ms": 1274,
+      "code": "no_reference"
+     },
+     "again": {
+      "ms": 459,
+      "code": "no_reference"
+     }
+    },
+    {
+     "coin": "0xb20000000000000000000064951127bd5154c048",
+     "first": {
+      "ms": 2124,
+      "code": "not_allowed"
+     },
+     "again": {
+      "ms": 673,
+      "code": "not_allowed"
+     }
+    },
+    {
+     "coin": "0xb7853e3ccebdabdb83f7c5ae13f62bd41970d751",
+     "first": {
+      "ms": 1343,
+      "code": "no_reference"
+     },
+     "again": {
+      "ms": 517,
+      "code": "no_reference"
+     }
+    },
+    {
+     "coin": "0x5ee7aa8f2ac604ea9191914d367ab48d97384368",
+     "first": {
+      "ms": 1597,
+      "code": "no_reference"
+     },
+     "again": {
+      "ms": 1032,
+      "code": "no_reference"
+     }
+    }
+   ],
+   "s429": {}
+  }
+ },
+ "bad": {
+  "note": "origin/main 30583519e on SIGN_HOST at release 171 (its 16 Nov Base snapshot, 849,390 blocks behind) at 2026-11-18 02:56Z: every span Pocket refused was asked as halves on both readers, 201 getLogs on the first for 86 spans, the sync 12.7 s: FAIL",
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "helper": "https://ct-api.unrealized.trade",
+   "site": null,
+   "at": "2026-11-18T02:56:02.558Z",
+   "snapshot": {
+    "status": 200,
+    "through": 58051548,
+    "pools": 4320
+   },
+   "sync": {
+    "ms": 12670,
+    "served": true,
+    "coversThrough": 58900938,
+    "span": 10000,
+    "getLogs": [
+     201,
+     201
+    ],
+    "requests": [
+     43,
+     43
+    ]
+   },
+   "coins": [
+    {
+     "coin": "0x68cda1f9bce8e03c374b20c66a8abb6af37fec7b",
+     "first": {
+      "ms": 4471,
+      "code": "not_allowed"
+     },
+     "again": {
+      "ms": 2060,
+      "code": "not_allowed"
+     }
+    },
+    {
+     "coin": "0xc17b757b6e7ff85941d51a561b011451a7d92e78",
+     "first": {
+      "ms": 2339,
+      "code": "quote_check_failed"
+     },
+     "again": {
+      "ms": 1884,
+      "code": "quote_check_failed"
+     }
+    },
+    {
+     "coin": "0x8c07ee37aec6ce1cabfcbebd9b69db4fb4865fbf",
+     "first": {
+      "ms": 1892,
+      "code": "no_reference"
+     },
+     "again": {
+      "ms": 1468,
+      "code": "no_reference"
+     }
+    },
+    {
+     "coin": "0xb20000000000000000000064951127bd5154c048",
+     "first": {
+      "ms": 3443,
+      "code": "not_allowed"
+     },
+     "again": {
+      "ms": 2624,
+      "code": "not_allowed"
+     }
+    },
+    {
+     "coin": "0xb7853e3ccebdabdb83f7c5ae13f62bd41970d751",
+     "first": {
+      "ms": 1898,
+      "code": "no_reference"
+     },
+     "again": {
+      "ms": 1437,
+      "code": "no_reference"
+     }
+    },
+    {
+     "coin": "0x5ee7aa8f2ac604ea9191914d367ab48d97384368",
+     "first": {
+      "ms": 1874,
+      "code": "no_reference"
+     },
+     "again": {
+      "ms": 1464,
+      "code": "no_reference"
+     }
+    }
+   ],
+   "s429": {}
+  }
+ }
+}
