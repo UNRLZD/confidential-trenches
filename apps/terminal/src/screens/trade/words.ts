@@ -60,6 +60,7 @@ export const WORDS = {
   slow: draft("Slow", "09-design-brief S8.11 [draft copy: Slow 6.2s] (the time is data)"),
   failed: draft("Failed", "09-design-brief S8.23 and S8.32 [draft copy: Failed · slippage]; the reason on its own line"),
   retry: draft("Retry", "09-design-brief S8.23 and S8.32 [draft copy: Retry]"),
+  owedBack: draft("Owed back", "card evm-buy-end-carries-its-tx (review of 39c2ab9c, P3-6): a Base or Robinhood buy whose swap failed in the pool, the ETH on the buy's one-time wallet and carried back into the pool; no Retry, never Failed. The brief's words, for the owner's pick"),
   notLanded: draft("Not landed", "09-design-brief S8.36 [draft copy: Not landed]; S8.24's `· refunded` left out: no refund step, the money never left W (app.md CH-050)"),
   priceCheck: draft("Price check failed", "09-design-brief S8.20 [draft copy: Price check failed]; the kit's quote_check_failed"),
   notSent: draft("Not sent", "09-design-brief S8.28 [draft copy: Not sent]; the kit's signpage_down (never posted)"),

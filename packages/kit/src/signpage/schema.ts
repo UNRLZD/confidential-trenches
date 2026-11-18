@@ -139,7 +139,7 @@ const tradeChain = oneOf(TRADE_CHAINS);
 const way = oneOf(["passkey", "words", "wallet"]);
 const DEPOSIT = DEPOSIT_STAGES;
 const WITHDRAW = ["proving", "submitted", "in_transit", "sent", "refunded", "stopped"] as const;
-const TRADE = ["signed", "sent", "filled", "part_filled", "refused", "not_landed"] as const;
+const TRADE = ["signed", "sent", "filled", "part_filled", "refused", "not_landed", "owed_back"] as const;
 const HOP = ["in_flight", "arrived", "refunded", "fallback"] as const;
 const RETURN = ["signed", "sent", "in_transit", "into_vault", "done"] as const;
 const RESTORE = ["started", "reading", "done", "stalled"] as const;
@@ -469,7 +469,8 @@ deepFreeze(SIGNPAGE_PARAM_SCHEMAS);
 /** The handshake, page to app. Any whole `api` passes here; the client refuses one it does not speak. */
 export const signpageReadySchema = obj({ v: lit(1), type: lit("ready"), release: str, api: uint });
 export const signpageStateEventSchema = obj({ v: lit(1), type: lit("state"), state });
-export const signpageProgressSchema = obj({ v: lit(1), type: lit("progress"), id: str, stage: oneOf(STAGES) });
+/** A stage event (messages.ts ProgressEvent), with an end's txs when it names them (kit 1.19). */
+export const signpageProgressSchema = obj({ v: lit(1), type: lit("progress"), id: str, stage: oneOf(STAGES) }, { txs });
 /** The closed notice (messages.ts ClosedEvent): the type and the id, nothing else. */
 export const signpageClosedSchema = obj({ v: lit(1), type: lit("closed"), id: str });
 /** A route event's `out`: a token amount above 0 in whole units, at most 78 digits each side of the point, no leading

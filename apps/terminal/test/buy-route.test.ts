@@ -313,3 +313,22 @@ test("card one-balance-buys-on-every-chain: the kit's route event { move: \"cash
   subs.forEach((f) => f("b1", { move: "cash" }));
   assert.deepEqual(moveView(r, T0 + 1_000), { state: "active", value: "1.0s" });
 });
+
+// card evm-buy-end-carries-its-tx: a Base or Robinhood buy's answer is the early "sent" with no transaction, so its end's
+// stage event carries the transaction: the toast's link reads it (route.tx); an owed_back end fails the pool step and
+// keeps the release's transaction too.
+test("an end stage's transaction fills the route's tx (the toast link); a tx the answer named stays", () => {
+  const TX = `0x${"ab".repeat(32)}`;
+  const sent = fromOutcome(routeTap("b1", 1, 2_500n), "b1", { ok: true, result: { stage: "sent", txs: [] } });
+  assert.equal(sent.tx, null, "the early answer names none");
+  const filled = fromProgress(sent, "b1", "filled", 2, [{ hash: TX }]);
+  assert.equal(filled.k, "done");
+  assert.equal(filled.tx, TX);
+  const owed = fromProgress(sent, "b1", "owed_back", 2, [{ hash: TX }]);
+  assert.equal(owed.k, "failed");
+  assert.equal(owed.st[2], "error", "the pool step: the swap failed there");
+  assert.equal(owed.tx, TX);
+  const named = fromOutcome(routeTap("b1", 1, 2_500n), "b1", { ok: true, result: { stage: "sent", txs: [{ hash: "0xfirst" }] } });
+  assert.equal(fromProgress(named, "b1", "filled", 2, [{ hash: TX }]).tx, "0xfirst");
+  assert.deepEqual(fromProgress(sent, "b2", "filled", 2, [{ hash: TX }]), sent, "another buy's end moves nothing");
+});

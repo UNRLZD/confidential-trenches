@@ -66,7 +66,7 @@ export const SIGN_SITES = {
  *  whose bindings the census follows: node:readline reads the exit command's typed lines, snarkjs makes its proofs. */
 export const ALLOWED = new Set([
   "@blindfill/kit", "@blindfill/kit/core",
-  "@blindfill/wallet/arming/ladder", "@blindfill/wallet/arming/records", "@blindfill/wallet/derive", "@blindfill/wallet/signin/passkey", "@blindfill/wallet/signin/words", "@blindfill/wallet/store",
+  "@blindfill/wallet/arming/ladder", "@blindfill/wallet/arming/records", "@blindfill/wallet/derive", "@blindfill/wallet/signin/passkey", "@blindfill/wallet/signin/wallet", "@blindfill/wallet/signin/words", "@blindfill/wallet/store",
   "@noble/curves/ed25519.js", "@noble/curves/secp256k1.js",
   "@noble/hashes/hkdf.js", "@noble/hashes/hmac.js", "@noble/hashes/sha2.js", "@noble/hashes/sha3.js", "@noble/hashes/utils.js",
   "@scure/base", "@scure/bip32", "@scure/bip39", "@scure/bip39/wordlists/english.js",

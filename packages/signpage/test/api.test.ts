@@ -569,3 +569,41 @@ test("a trade kind's end as progress: refused for a refusal, never for id_reused
   const open = await throughApi("pool.withdraw", running({ error: "failed" }) as never, { return_key: "portfolio", chain: "solana" });
   assert.deepEqual(open.stages, [], "not a trade kind");
 });
+
+// Card evm-buy-end-carries-its-tx: a trade's end stage carries its transactions to a kit that reads them (1.19), held
+// with the stage until the answer, never an empty list, and an end the answer names goes out with the answer's own txs.
+test("a progress stage's txs: held with it until the answer, posted only when there are any; an answer's end goes out with its txs", async () => {
+  const { SIGNPAGE_KIT_VERSION } = await import("../../kit/src/signpage/messages.ts");
+  const posted: unknown[] = [];
+  const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  const TX = [{ chain: "base" as const, hash: `0x${"ef".repeat(32)}` }];
+  const api = startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    state: signedOutState,
+    kinds: {
+      "pool.buy": (p, ctx) => {
+        if (p.amount === "1") {
+          // held before the answer: a stage with its txs and one with an empty list
+          ctx.progress("sent", []);
+          ctx.progress("owed_back", TX);
+          return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent" as const, txs: [] } }) };
+        }
+        return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "filled" as const, txs: TX } }) };
+      },
+    },
+  });
+  const send = (data: unknown) => listener!({ origin: APP_ORIGIN, source: parent, data });
+  send({ v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION });
+  const a = uuid();
+  const b = uuid();
+  const buy = { v: 1, type: "pool.buy", chain: "base", token: `0x${"11".repeat(20)}`, slippage_bps: 300 };
+  send({ ...buy, id: a, amount: "1" });
+  send({ ...buy, id: b, amount: "2" });
+  await until(() => posted.filter((m) => idOf(m) === a || idOf(m) === b).length >= 5, "both answers and their stages");
+  await api.idle();
+  const of = (id: string) => posted.filter((m) => idOf(m) === id && (m as { type?: string }).type === "progress");
+  assert.deepEqual(of(a), [{ v: 1, type: "progress", id: a, stage: "sent" }, { v: 1, type: "progress", id: a, stage: "owed_back", txs: TX }]);
+  assert.deepEqual(of(b), [{ v: 1, type: "progress", id: b, stage: "filled", txs: TX }], "the answer's end with the answer's own txs");
+});
