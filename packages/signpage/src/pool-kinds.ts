@@ -51,8 +51,8 @@ import { TRADE_CHAINS, type TradeChain } from "../../kit/src/signpage/messages.t
 import { checkNearBuyRequest, checkNearSellRequest, NearTradeRefused, type NearBuyAsk, type NearSellAsk } from "./rules/near-trade.ts";
 import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, tokenDecimalsKeptOf, tokenDecimalsOf, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 
-/** One provider's JSON-RPC call: the method's result, or a throw. */
-export type PoolRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
+/** One provider's JSON-RPC call: the method's result, or a throw; `signal` ends it at the provider (SolanaRpc's). */
+export type PoolRpc = (method: string, params: readonly unknown[], signal?: AbortSignal) => Promise<unknown>;
 
 /** ERC-20 decimals(): its selector, keccak256("decimals()")[0..4]. */
 export const ERC20_DECIMALS = "0x313ce567";
@@ -106,8 +106,8 @@ export async function keptTokenDecimals(chain: PoolChain, token: string, rpcs: r
   const waits = o.waits === 0 ? null : (o.waits ?? readWaits());
   const one = (rpc: PoolRpc) =>
     chain === "solana"
-      ? rpc("getAccountInfo", [token, { encoding: "base64", commitment: "confirmed" }])
-      : rpc("eth_call", [{ to: token, data: ERC20_DECIMALS }, "latest"]);
+      ? rpc("getAccountInfo", [token, { encoding: "base64", commitment: "confirmed" }], o.signal)
+      : rpc("eth_call", [{ to: token, data: ERC20_DECIMALS }, "latest"], o.signal);
   const answers: [unknown, unknown] = [undefined, undefined];
   const answered = [false, false];
   for (;;) {

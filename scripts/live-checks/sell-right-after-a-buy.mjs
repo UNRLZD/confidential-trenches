@@ -39,8 +39,9 @@ const TAKE_BACK = new RegExp(`(${N})\\?\\.mint===(${N})\\.mint&&\\1\\.received==
 const RELEASE = new RegExp(`let (${N})=${Q}trade${Q};return\\{rpcs:${N}\\(${N},\\(\\)=>\\1\\),kind:\\(\\)=>\\1,release:${N},landed:\\(\\)=>\\{\\1=${Q}pass${Q}\\}\\}`);
 /** The run's land: told once the read-back loop has landed, right after its not-landed return. */
 const LANDED = new RegExp(`return ${N}\\(${N}\\?${N}:\\[\\],${N}\\);${N}\\.landed\\?\\.\\((?:${N}\\.noteId,${N}\\.attempt,${N}\\.withdrawnValue)?\\)`);
-/** The pair: each seat the trade pair's provider, each call on the kind's pair at that call. */
-const SWITCH = new RegExp(`\\[0,1\\]\\.map\\((${N})=>${N}\\((${N})\\.trade\\[\\1\\],\\((${N}),(${N})\\)=>\\2\\[${N}\\(\\)\\]\\[\\1\\]\\(\\3,\\4\\)\\)\\)`);
+/** The pair: each seat the trade pair's provider, each call on the kind's pair at that call, with the call's signal
+ *  (card signpage-reads-take-the-call-signal). */
+const SWITCH = new RegExp(`\\[0,1\\]\\.map\\((${N})=>${N}\\((${N})\\.trade\\[\\1\\],\\((${N}),(${N}),(${N})\\)=>\\2\\[${N}\\(\\)\\]\\[\\1\\]\\(\\3,\\4,\\5\\)\\)\\)`);
 
 /** The script an index.html pins, and its integrity. */
 const pinned = (index) => {

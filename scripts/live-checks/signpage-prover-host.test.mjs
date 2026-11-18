@@ -16,6 +16,9 @@
 // Card first-sign-in-reads-fast-on-live: Base's pool list seats bloXroute second, so the site's connect-src names the
 // same origins in the kit's new order; the good answers' site CSP has that order, as the build's _headers now serves
 // it; re-recorded at the next sign deploy.
+// Card rh-provider-fails-64-read-batch: rpc-robinhood.globalstake.io left Robinhood's quote list for its pool list, so
+// the site's connect-src names it after Pocket's; the good answers' site CSP has that order, as the build's _headers now
+// serves it; re-recorded at the next sign deploy.
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -101,7 +101,9 @@ test("a read only one operator can answer: the fee route still fails (503 upstre
   const s = evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), undefined, undefined, (l: string) => void lines.push(l)).get(PIN)!;
   await assert.rejects(s.fee(EPOCH + 1), (e: Error) => throttleOf(e) === 0);
   assert.equal(lines.length, 1, lines.join("\n"));
-  assert.match(lines[0]!, /^evm robinhood: fee upstream: .*eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400: RPC error 27[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400[^;]*; rpc-robinhood\.globalstake\.io: HTTP 400/);
+  assert.match(lines[0]!, /^evm robinhood: fee upstream: .*eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400: RPC error 27[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400/);
+  // card rh-provider-fails-64-read-batch: globalstake left the kit's Robinhood quote list, which these seats take
+  assert.ok(!lines[0]!.includes("globalstake"), lines[0]);
   assert.ok(!lines[0]!.includes("rpc.mainnet.chain.robinhood.com"), "the other side's operator is never asked for the first side");
   assert.ok(!lines[0]!.includes(FAKE), lines[0]);
   // the failed read answers its period's callers for EVM_FEE_MISS_MS (review of d190f62f, A-4), then the next caller
@@ -136,7 +138,8 @@ test("(3) one operator alone holds the state a proof's life back: the start asks
   stub(t, (host, method) => (host !== "rpc.mainnet.chain.robinhood.com" && method === "eth_call" ? UNKNOWN_STATE : null));
   const waits: number[] = [];
   await assert.rejects(evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), undefined, undefined, () => {}).get(PIN)!.ready(async (ms) => void waits.push(ms)), (e: Error) => {
-    assert.match(e.message, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state at block 99400, 600 s old \(a proof's fee is read up to 600 s back\), 14 tries over 87 s: HTTP 400: RPC error 27: Unknown state\. First available state is 1 \(eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400[^;]*; rpc-robinhood\.globalstake\.io: HTTP 400/);
+    assert.match(e.message, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state at block 99400, 600 s old \(a proof's fee is read up to 600 s back\), 14 tries over 87 s: HTTP 400: RPC error 27: Unknown state\. First available state is 1 \(eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400/);
+    assert.ok(!e.message.includes("globalstake"), e.message);
     assert.ok(!e.message.includes(FAKE), e.message);
     return true;
   });
@@ -150,7 +153,7 @@ test("one list of seats, each with its operator: the pair, the keyed URLs, the k
   assert.deepEqual(seats([DRPC!, OWN!], [SPARE_QN, ...drpc], evmPoolVenues().robinhood.providers!), [
     "robinhood.drpc.org drpc.org", "rpc.mainnet.chain.robinhood.com robinhood.com", "made-up.robinhood-mainnet.quiknode.pro quiknode.pro",
     "lb.drpc.live drpc.org", "lb.drpc.live drpc.org", "lb.drpc.live drpc.org",
-    "robinhood-rpc.publicnode.com publicnode.com", "robinhood.rpc.blxrbdn.com blxrbdn.com", "rpc-robinhood.globalstake.io globalstake.io",
+    "robinhood-rpc.publicnode.com publicnode.com", "robinhood.rpc.blxrbdn.com blxrbdn.com",
   ]);
   // the pair's own URL set again as a key is no second seat
   assert.deepEqual(seats([DRPC!, OWN!], [`${DRPC}/`, OWN!], []), ["robinhood.drpc.org drpc.org", "rpc.mainnet.chain.robinhood.com robinhood.com"]);
