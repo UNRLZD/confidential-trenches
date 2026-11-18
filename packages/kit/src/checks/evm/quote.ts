@@ -1182,14 +1182,14 @@ export function evmHeadWatch(order: readonly EvmRpc[] | (() => readonly EvmRpc[]
   const rpcsNow = () => (Array.isArray(order) ? order : (order as () => readonly EvmRpc[])());
   // `at`: `mono` when the heads were asked; `age`: the block's age on the device's clock then
   let held: { block: Block; at: number; age: number } | null = null;
-  // every block confirmed here, newest last (a follow's `at`)
-  const confirmed = new Map<string, Block>();
+  // every block confirmed here, newest last (a follow's `at`), with `at` and `age` as `held` has them
+  const confirmed = new Map<string, { block: Block; at: number; age: number }>();
   let until = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let refreshing: Promise<void> | null = null;
   const hold = (b: Block, at: number, nowMs: number) => {
     confirmed.delete(b.hash);
-    confirmed.set(b.hash, b);
+    confirmed.set(b.hash, { block: b, at, age: nowMs - Number(b.timestamp) * 1000 });
     while (confirmed.size > EVM_FOLLOW_BLOCKS) confirmed.delete(confirmed.keys().next().value!);
     if (held === null || b.number > held.block.number) held = { block: b, at, age: nowMs - Number(b.timestamp) * 1000 };
   };
@@ -1234,10 +1234,15 @@ export function evmHeadWatch(order: readonly EvmRpc[] | (() => readonly EvmRpc[]
       keep();
       return fresh(Math.max(nowMs, clock()), mono());
     },
+    // young on both clocks, as `fresh` (review of this card, P2-1: on the device's clock alone, one running 60 s slow
+    // let a block confirmed 70 s before be read as 10 s old): `mono` since it was confirmed, its age then plus that, and
+    // its age on the device's clock now
     held(hash, nowMs) {
-      const b = confirmed.get(typeof hash === "string" ? hash.toLowerCase() : "");
-      const age = Math.max(nowMs, clock()) - Number(b?.timestamp ?? 0n) * 1000;
-      return b !== undefined && age >= 0 && age <= EVM_FOLLOW_MAX_AGE_MS ? b : null;
+      const c = confirmed.get(typeof hash === "string" ? hash.toLowerCase() : "");
+      if (c === undefined) return null;
+      const since = mono() - c.at;
+      const t = Math.max(nowMs, clock());
+      return since >= 0 && since <= EVM_FOLLOW_MAX_AGE_MS && c.age + since <= EVM_FOLLOW_MAX_AGE_MS && t - Number(c.block.timestamp) * 1000 <= EVM_FOLLOW_MAX_AGE_MS ? c.block : null;
     },
     async head(nowMs) {
       keep();

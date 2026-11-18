@@ -59,6 +59,25 @@ test("TAPAT a followed reference is asked at the block its refusal was read at (
   assert.equal(asks[1]!.at, AT, "the reference was not asked at the refusal's block");
 });
 
+test("TAPHELD a refusal read at the held head is held for it; one read at another block (a follow's) is not, so the next tap asks again (card evm-cold-multihop-quote-inside-the-kpi)", async () => {
+  const HEAD = "0x" + "ab".repeat(32);
+  for (const [readAt, held] of [[HEAD, true], ["0x" + "cd".repeat(32), false], [null, true]] as const) {
+    evmBuyTapReset();
+    let n = 0;
+    const quote = async () => {
+      n++;
+      const e = new EvmQuoteError("no_quote", "the route reverts or quotes nothing");
+      (e as { at: string | null }).at = readAt;
+      return Promise.reject(e);
+    };
+    const go = () => evmPoolBuyQuoteTap({ chain: "robinhood", token: TOKEN, amountIn: 10n ** 15n, slippageBps: 300 }, { quote, indexPools: () => spam(1), held: () => HEAD });
+    await assert.rejects(go());
+    const first = n;
+    await assert.rejects(go());
+    assert.equal(n === first, held, `read at ${readAt}: ${first} then ${n} quotes`);
+  }
+});
+
 test("card base-coin-quote-check-names-its-cause: a route refused for another reason than no route anywhere stays quote_check_failed", async () => {
   evmBuyTapReset();
   await assert.rejects(
