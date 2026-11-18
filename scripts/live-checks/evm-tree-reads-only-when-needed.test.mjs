@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { errorsOf, INITIALIZE, judge, LOGS_PER_LOAD, refusalsOf, summarize } from "./evm-tree-reads-only-when-needed.mjs";
+import { callName, callOf, errorsOf, INITIALIZE, judge, LOGS_PER_LOAD, refusalsOf, summarize } from "./evm-tree-reads-only-when-needed.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./evm-tree-reads-only-when-needed.answers.json", import.meta.url), "utf8"));
 
@@ -58,7 +58,7 @@ test("the summary: an Initialize filter alone is the index, one with a currency 
   );
   assert.deepEqual(a.logs, { index: 1, scan: 1, other: 2 });
   assert.deepEqual(a.posts, { "base-rpc.publicnode.com": 1, "base.api.pocket.network": 1, "ct-api.unrealized.trade": 1, "base.rpc.blxrbdn.com": 1, "rpc.mainnet.chain.robinhood.com": 1 });
-  assert.deepEqual(a.refused, { "base.api.pocket.network 429": 1, "rpc.mainnet.chain.robinhood.com failed net::ERR_FAILED": 1 });
+  assert.deepEqual(a.refused, { "base.api.pocket.network 429 [eth_getLogs]": 1, "rpc.mainnet.chain.robinhood.com failed net::ERR_FAILED [eth_chainId]": 1 });
   assert.equal(a.methods.eth_getLogs, 4);
   // by load: the helper's Base route is Base's; a post with no load is the walk's last
   assert.deepEqual(a.byLoad, { base: [1, 3] });
@@ -74,14 +74,47 @@ test("planted refusals: the page's own ERR_ABORTED alone passes; a 429, a 5xx, a
   assert.equal(verdict({ status: undefined, failed: "net::ERR_ABORTED" }).ok, true, "the page's own cancel");
   assert.equal(verdict({ errors: errorsOf('{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"eth_getLogs range too wide, maximum block range: 10000"}}') }).ok, true, "a named range cap");
   const bad = [
-    [{ status: 429 }, "base.rpc.blxrbdn.com 429"],
-    [{ status: 503 }, "base.rpc.blxrbdn.com 503"],
-    [{ status: 403 }, "base.rpc.blxrbdn.com 403"],
-    [{ status: undefined, failed: "net::ERR_FAILED" }, "base.rpc.blxrbdn.com failed net::ERR_FAILED"],
-    [{ status: undefined, failed: "net::ERR_CONNECTION_RESET" }, "base.rpc.blxrbdn.com failed net::ERR_CONNECTION_RESET"],
-    [{ errors: errorsOf('{"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"rate limit exceeded"}}') }, "base.rpc.blxrbdn.com rpc error -32005"],
-    [{ errors: errorsOf('[{"jsonrpc":"2.0","id":1,"result":"0x1"},{"jsonrpc":"2.0","id":2,"error":{"code":429,"message":"Too Many Requests"}}]') }, "base.rpc.blxrbdn.com rpc error 429"],
+    [{ status: 429 }, "base.rpc.blxrbdn.com 429 [eth_blockNumber]"],
+    [{ status: 503 }, "base.rpc.blxrbdn.com 503 [eth_blockNumber]"],
+    [{ status: 403 }, "base.rpc.blxrbdn.com 403 [eth_blockNumber]"],
+    [{ status: undefined, failed: "net::ERR_FAILED" }, "base.rpc.blxrbdn.com failed net::ERR_FAILED [eth_blockNumber]"],
+    [{ status: undefined, failed: "net::ERR_CONNECTION_RESET" }, "base.rpc.blxrbdn.com failed net::ERR_CONNECTION_RESET [eth_blockNumber]"],
+    [{ errors: errorsOf('{"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"rate limit exceeded"}}') }, "base.rpc.blxrbdn.com rpc error -32005 eth_blockNumber"],
+    [{ errors: errorsOf('[{"jsonrpc":"2.0","id":1,"result":"0x1"},{"jsonrpc":"2.0","id":2,"error":{"code":429,"message":"Too Many Requests"}}]') }, "base.rpc.blxrbdn.com rpc error 429 eth_blockNumber"],
   ];
   for (const [extra, key] of bad) assert.deepEqual(verdict(extra).lines, [`BAD ${key}: 1 EVM RPC answers refused`], key);
   assert.deepEqual(refusalsOf({ failed: "net::ERR_ABORTED", status: 502 }), ["502"], "a cancel after a 5xx is the 5xx");
+});
+
+// release 175's sign run 44300899132 failed on "robinhood-rpc.publicnode.com rpc error 3" and "robinhood.drpc.org rpc
+// error 3", one reverted eth_call each, which the answer could not name. A refusal names its call: the method, and for
+// an eth_call the contract it asks and the 4-byte selector, matched by the error's JSON-RPC id inside a batch; never the
+// call's arguments (an address of the account sits there).
+test("a refusal names its call: an eth_call's contract and selector, the batch member its error's id answers, never its arguments", () => {
+  const to = "0x" + "Ab".repeat(20);
+  const account = "1".repeat(40);
+  const data = "0x70a08231" + "0".repeat(24) + account;
+  const shaped = callOf({ jsonrpc: "2.0", id: 7, method: "eth_call", params: [{ to, data }, "latest"] });
+  assert.deepEqual(shaped, { id: 7, to: to.toLowerCase(), sel: "0x70a08231" });
+  assert.equal(JSON.stringify(shaped).includes(account), false, "no argument kept");
+  const calls = [{ method: "eth_blockNumber", params: [], id: 6 }, { method: "eth_call", params: [], ...shaped }];
+  const errors = errorsOf('[{"jsonrpc":"2.0","id":6,"result":"0x1"},{"jsonrpc":"2.0","id":7,"error":{"code":3,"message":"execution reverted","data":"0x"}}]');
+  assert.deepEqual(errors, [{ code: 3, cap: false, id: 7 }]);
+  const r = { url: "https://robinhood.drpc.org/", method: "POST", status: 200, load: 4, calls, errors };
+  assert.deepEqual(refusalsOf(r), [`rpc error 3 eth_call ${to.toLowerCase()}:0x70a08231`]);
+  assert.deepEqual(summarize([r], 6).refused, { [`robinhood.drpc.org rpc error 3 eth_call ${to.toLowerCase()}:0x70a08231`]: 1 });
+  assert.equal(callName({ method: "eth_call" }), "eth_call", "an eth_call with no contract read is its method");
+});
+
+// release 175 (SIGN_HOST live, 18 Nov 13:01Z, this card's naming reader): FAIL, each refusal named. The pool's own
+// buySwap (0x25faf2a3, the quote's swap-gas fit read) answered JSON-RPC error 3 on robinhood-rpc.publicnode.com and
+// robinhood.drpc.org, and the pool sync's first round of views (SCOPE, currentRoot, currentTreeSize, currentLabelRoot,
+// currentLabelTreeSize) failed on Robinhood's own RPC with no response the page could read.
+test("recorded answer release175: FAIL, the reverted buySwap and the views' failed posts named", () => {
+  const v = judge(ANSWERS.release175);
+  assert.equal(v.ok, false);
+  const pool = "0x9306359433127c4f3be426f6faeb00a3c41f66db";
+  for (const host of ["robinhood-rpc.publicnode.com", "robinhood.drpc.org"]) assert.ok(v.lines.includes(`BAD ${host} rpc error 3 eth_call ${pool}:0x25faf2a3: 1 EVM RPC answers refused`), host);
+  for (const sel of ["0x33d09200", "0xfdab463d", "0xa8f0f95a", "0x50f3e219", "0x4181445b"]) assert.ok(v.lines.includes(`BAD rpc.mainnet.chain.robinhood.com failed net::ERR_FAILED [eth_call ${pool}:${sel}]: 2 EVM RPC answers refused`), sel);
+  assert.equal(ANSWERS.release175.signDir, null);
 });

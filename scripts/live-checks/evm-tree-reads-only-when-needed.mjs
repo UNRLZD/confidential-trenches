@@ -10,7 +10,9 @@
 // (WALK), each watched WATCH_MS, typing 5 in each token's buy box, and counts every JSON-RPC post whose body asks an eth_
 // method, with each chain's eth_getLogs by page load (byLoad, printed). An answer counts as refused only as a provider
 // refuses it (refusalsOf): never the page's own cancel. It never presses Buy, Sell, Withdraw or Confirm: the account is new and holds nothing, and the seed stays in
-// the browser's temporary profile, deleted on close. The answer keeps hosts, methods, counts and statuses only.
+// the browser's temporary profile, deleted on close. The answer keeps hosts, methods, counts and statuses only;
+// a refused answer is named by its method and, for an eth_call, the contract it asks and its 4-byte selector (callName),
+// never the call's arguments.
 //   --sign-dir <dir>: SIGN_HOST's files answered from a local build (packages/signpage/scripts/build-app.mjs --out),
 //   every other request live: how the good answer was recorded before the deploy. Its headers are not the host's.
 // After: sign
@@ -107,21 +109,36 @@ const PAGE_CANCEL = "net::ERR_ABORTED";
  *  for by design (evm.ts readLogs, capSpanOf) and pages under, never a refusal of the read. */
 const RANGE_CAP = /block range|range (is )?too (wide|large|big)|max(imum)? range|blocks? range|range limit|range exceed/i;
 
+/** A call's name in a refusal: its JSON-RPC method and, for an eth_call, the contract it asks and the 4-byte selector
+ *  (`eth_call 0x<to>:0x<selector>`). Never the call's arguments: an address of the account sits there. */
+export function callName(c) {
+  if (!c || typeof c.method !== "string") return "?";
+  return c.method === "eth_call" && c.to ? `eth_call ${c.to}:${c.sel ?? "?"}` : c.method;
+}
+
 /** Each provider refusal one request log entry holds: a failure of the network (any but the page's own cancel), an HTTP
- *  4xx or 5xx answer, or a JSON-RPC error that is no range cap (`errors`: each one's { code, cap }). */
+ *  4xx or 5xx answer, or a JSON-RPC error that is no range cap (`errors`: each one's { code, cap, id }). A failure or an
+ *  HTTP refusal names every call of the post; a JSON-RPC error names the call its id answers. */
 export function refusalsOf(r) {
   const out = [];
-  if (r.failed && r.failed !== PAGE_CANCEL) out.push(`failed ${r.failed}`);
-  if (Number.isInteger(r.status) && r.status >= 400) out.push(String(r.status));
-  for (const e of Array.isArray(r.errors) ? r.errors : []) if (!e?.cap) out.push(`rpc error ${Number.isInteger(e?.code) ? e.code : "?"}`);
+  const calls = Array.isArray(r.calls) ? r.calls : [];
+  const all = calls.length > 0 ? ` [${calls.map(callName).join(", ")}]` : "";
+  if (r.failed && r.failed !== PAGE_CANCEL) out.push(`failed ${r.failed}${all}`);
+  if (Number.isInteger(r.status) && r.status >= 400) out.push(`${r.status}${all}`);
+  for (const e of Array.isArray(r.errors) ? r.errors : []) {
+    if (e?.cap) continue;
+    const c = (e?.id !== undefined ? calls.find((x) => x.id === e.id) : undefined) ?? (calls.length === 1 ? calls[0] : undefined);
+    out.push(`rpc error ${Number.isInteger(e?.code) ? e.code : "?"}${c ? ` ${callName(c)}` : all}`);
+  }
   return out;
 }
 
-/** A JSON-RPC answer's errors, shaped to their code and whether they name a block range (no message is kept). */
+/** A JSON-RPC answer's errors, shaped to their code, the id they answer and whether they name a block range (no message
+ *  and no revert data is kept). */
 export function errorsOf(text) {
   try {
     const j = JSON.parse(text ?? "");
-    return (Array.isArray(j) ? j : [j]).filter((x) => x && typeof x === "object" && x.error && typeof x.error === "object").map((x) => ({ code: Number.isInteger(x.error.code) ? x.error.code : null, cap: RANGE_CAP.test(String(x.error.message ?? "")) }));
+    return (Array.isArray(j) ? j : [j]).filter((x) => x && typeof x === "object" && x.error && typeof x.error === "object").map((x) => ({ code: Number.isInteger(x.error.code) ? x.error.code : null, cap: RANGE_CAP.test(String(x.error.message ?? "")), ...(typeof x.id === "number" || typeof x.id === "string" ? { id: x.id } : {}) }));
   } catch {
     return [];
   }
@@ -138,10 +155,24 @@ export function judge(a) {
   return { ok: lines.length === 0, lines };
 }
 
+/** What a call keeps beside its method: its JSON-RPC id (to match an error to it) and, for an eth_call, the contract it
+ *  asks and the 4-byte selector of its data. */
+export function callOf(c) {
+  const out = {};
+  if (typeof c?.id === "number" || typeof c?.id === "string") out.id = c.id;
+  if (c?.method === "eth_call") {
+    const tx = c.params?.[0] ?? {};
+    if (typeof tx.to === "string" && /^0x[0-9a-fA-F]{40}$/.test(tx.to)) out.to = tx.to.toLowerCase();
+    const data = typeof tx.data === "string" ? tx.data : typeof tx.input === "string" ? tx.input : "";
+    if (/^0x[0-9a-fA-F]{8}/.test(data)) out.sel = data.slice(0, 10).toLowerCase();
+  }
+  return out;
+}
+
 const shapeCalls = (body) => {
   try {
     const j = JSON.parse(body ?? "");
-    return (Array.isArray(j) ? j : [j]).filter((c) => c && typeof c.method === "string").map((c) => ({ method: c.method, params: c.method === "eth_getLogs" ? [{ topics: c.params?.[0]?.topics ?? [] }] : [] }));
+    return (Array.isArray(j) ? j : [j]).filter((c) => c && typeof c.method === "string").map((c) => ({ method: c.method, params: c.method === "eth_getLogs" ? [{ topics: c.params?.[0]?.topics ?? [] }] : [], ...callOf(c) }));
   } catch {
     return [];
   }
