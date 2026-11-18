@@ -54,6 +54,10 @@ export type EvmPoolVenue = {
   /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
    *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
   readonly quoters?: Readonly<{ v3?: string; v4?: string }>;
+  /** The v3 factory the v3 quoter reads its pools from (QuoterV2.factory()): the buy tap asks its getPool for each fee
+   *  tier before it asks a tier's route (trade/evm/buy-tap.ts evmPoolV3Tiers, card robinhood-tap-asks-no-missing-v3-tier);
+   *  a chain with none has every tier asked. */
+  readonly v3Factory?: string;
   /** A route starts from the native asset whenever a native v4 pool exists and its route quotes at least as much as the
    *  WETH route (the chain's WETH is behind an upgradeable proxy). */
   readonly nativeFirst?: boolean;
@@ -206,6 +210,8 @@ export const evmMainnetVenues = () =>
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
       quoters: bare({ v3: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", v4: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" }),
+      // QuoterV2.factory() above, on base-rpc.publicnode.com and mainnet.base.org (2026-11-18 15:34Z): the same address
+      v3Factory: "0x33128a8fc17869897dce68ed026d694621f6fdfd",
       // Keyless, of four operators, timed on one warm quote's six eth_call batches (109 kB) at each one's newest block
       // hash, 10 rounds each, every answer equal to publicnode's (card evm-quote-warm-round, 2026-11-04 16:4xZ from this
       // Mac): publicnode (Allnodes) p50/p95 146/207 ms; Blast 315/476, served by Alchemy (its answers carry
@@ -410,6 +416,9 @@ export const evmMainnetVenues = () =>
       // and robinhood.drpc.org, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak 0x3db0868d…96a28, and
       // 6,118 bytes, keccak 0xd707b1da…868f6
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
+      // QuoterV2.factory() above, on robinhood-rpc.publicnode.com, robinhood.drpc.org and rpc.mainnet.chain.robinhood.com
+      // (2026-11-18 15:34Z): the same address
+      v3Factory: "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
       nativeFirst: true,
       // Keyless, of five operators (Allnodes, dRPC, Robinhood, bloXroute, Globalstake), timed on the first five eth_call
       // batches of a USDG quote (1.31 MB) at each one's newest block hash, 10 rounds each, every answer equal to
