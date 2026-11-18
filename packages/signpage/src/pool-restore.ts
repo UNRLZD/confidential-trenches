@@ -407,10 +407,6 @@ async function readDepositIds(
   step7: { notesAt: Parameters<typeof readVaultLate>[7]; late: Parameters<typeof readVaultLate>[9] } | null = null,
 ): Promise<void> {
   const { rpcs, pass, reader } = await letGo(keptIdReader(POOL_DEPOSIT_NETWORK, ids.rpcs, keep, { ...ids.opts, signal }), signal);
-  // step 7's window on the pools' ids counts from the pass's block time, as the vault's. A pass with no time (step 5's
-  // readers a test gives, on providers that read no blocks; pageIdReads' pair reads them, its test says so) holds no
-  // window, so step 7 is not run on it
-  const ms7 = step7 === null ? null : passTimeMs(pass);
   // what an id read as money holds, by asset on both providers at the same pass, opened now beside the id reader on the
   // pass it reads at (the kept one while fresh, else the one just opened): nearIdHeldReader refuses a pass
   // VAULT_SYNC_LAG_MAX blocks old, and step 5 takes minutes
@@ -422,6 +418,10 @@ async function readDepositIds(
     signal.throwIfAborted();
     return letGo(reader(u, i), signal);
   };
+  // step 7's window on the pools' ids counts from the pass's block time, as the vault's. A pass with no time (step 5's
+  // readers a test gives, on providers that read no blocks; pageIdReads' pair reads them, its test says so) holds no
+  // window, so step 7 is not run on it
+  const ms7 = step7 === null ? null : passTimeMs(pass);
   const undone = (label: string, r: DepositIds): void => {
     for (const y of idsUndoneOf(r)) out[y.kind].push(`${label}: ${y.why}`);
   };
@@ -461,6 +461,8 @@ async function readDepositIds(
       out.named.push(`${w.label}: ${POOL_CHAIN_UNREAD}`);
       continue;
     }
+    // step 7's 72 h from the first restore's pass, kept on step 5's marker (card pool-late-send-carried: the vault's late)
+    if (ms7 !== null) await step7!.late(ms7);
     // each id's U_X on the pool's own chain read beside it, on both of its RPCs; any balance there is history of the id
     const chain = w.chain;
     const held = new Map<number, PoolUx>();
@@ -478,10 +480,7 @@ async function readDepositIds(
       held.set(i, { chain, s: w.scope.toString(), i, u, refund_id: id });
       return "money";
     };
-    // step 7's 72 h from the first restore's pass, kept on step 5's marker (card pool-late-send-carried: the vault's late)
-    if (ms7 !== null) await step7!.late(ms7);
-    const ln = await lanes(w.scope, w.notes);
-    const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, skipping(own, w.scope, both), ln);
+    const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, skipping(own, w.scope, both), await lanes(w.scope, w.notes));
     ids.read?.(w.scope, r);
     undone(w.label, r);
     // each U_X found holding a balance, in index order, carried into the pool or named. The page's pool.deposit pays
@@ -505,7 +504,7 @@ async function readDepositIds(
     // step 7 on a complete read (a lane stopped past its walk's end is named above, and afterRestore refuses it); a throw
     // of its own is a read to try again by the pool's label, step 5's reasons kept
     if (ms7 !== null && r.complete)
-      await readPoolLate(seed, { ...w, ux }, r, ln.done, { rpcs, pass, opts: ids.opts ?? {} }, signal, out, own, step7!.notesAt, { ux: new Set(held.keys()), near: new Set(nearMoney.keys()) }).catch((e: unknown) => {
+      await readPoolLate(seed, { ...w, ux }, r, kept, { rpcs, pass, opts: ids.opts ?? {} }, signal, out, own, step7!.notesAt, { ux: new Set(held.keys()), near: new Set(nearMoney.keys()) }).catch((e: unknown) => {
         if (signal.aborted || e instanceof SeedGone) throw e;
         out.retry.push(`${w.label}: step 7's re-read did not finish: ${e instanceof Error ? e.message : "it threw"}`);
       });
@@ -523,9 +522,9 @@ async function readDepositIds(
  * Step 7 on one pool's deposit ids (card pool-late-send-carried; the file's head, "The pools' U_X"), each reason it is
  * not done pushed to `out`, on step 5's complete read `r` of the scope this try:
  * - the plan: afterRestore's re-reads, every id up to each lane's highest with history plus two of the lane that holds no
- *   note of the walk. A lane step 5 skipped as kept on the marker (`kept`: the index each kept lane was read to) was read
- *   whole with nothing to tell, so it is in the plan as read: its highest with history its read's end less the margin
- *   restoreDepositIds read past it (DEPOSIT_ID_MARGIN), or none;
+ *   note of the walk. A lane step 5 skipped as kept on the marker (`kept.of`: the index each kept lane was read to, as
+ *   step 5 took it) was read whole with nothing to tell, so it is in the plan as read: its highest with history its
+ *   read's end less the margin restoreDepositIds read past it (DEPOSIT_ID_MARGIN), or none;
  * - each one's U_X on the pool chain, read and carried as step 5 carries it (carryUx: its deposit note written first by
  *   planFound where the store holds none, two RPCs apart read again, under the floor left, a carry refused or unfilled
  *   named); an index whose U_X step 5 found this try (`skip.ux`) is step 5's, and one whose note this device planned on
@@ -539,7 +538,7 @@ async function readPoolLate(
   seed: SeedUse,
   w: Walked & { ux: PoolUxReads },
   r: DepositIds,
-  kept: ReadonlyMap<number, number>,
+  kept: { of(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>> },
   near: { rpcs: readonly [NearRpc, NearRpc]; pass: RestorePass; opts: NonNullable<Parameters<typeof rereadOnOpen>[0]["opts"]> },
   signal: AbortSignal,
   out: Step5Reasons,
@@ -547,10 +546,11 @@ async function readPoolLate(
   notesAt: Parameters<typeof readVaultLate>[7],
   skip: { ux: ReadonlySet<number>; near: ReadonlySet<number> },
 ): Promise<void> {
+  const done = await kept.of(w.scope, lanesOf(w.notes, w.scope).laneHighest);
   const lanes: LaneIds[] = Array.from({ length: RESTORE_LANES }, (_, lane) => {
     const x = r.lanes.find((y) => y.lane === lane);
     if (x !== undefined) return x;
-    const readTo = kept.get(lane);
+    const readTo = done.get(lane);
     if (readTo === undefined) throw new Error(`lane ${lane} was neither read nor kept`);
     const notes = w.notes.flatMap((n) => (n.ref.kind === "deposit" && n.ref.s === w.scope && n.ref.i % RESTORE_LANES === lane ? [n.ref.i] : [])).sort((a, b) => a - b);
     const top = Math.max(readTo - RESTORE_LANES * DEPOSIT_ID_MARGIN, notes.at(-1) ?? -1);

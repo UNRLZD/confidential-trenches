@@ -156,7 +156,7 @@ const M = [
   ["a pool late send's U_X read that fails never named", PRS, [['      out.retry.push(`${said} was not read (${e instanceof Error ? e.message : "it threw"}): read again`);\n', ""]], PRT, "pool-late-send-carried"],
   ["a pool U_X under a note this device planned carried by step 7", PRS, [["    if (note !== undefined && !note.found) continue;\n    const u = await uxOf(", "    const u = await uxOf("]], PRT, "pool-late-send-carried"],
   ["a pool U_X step 5 found read again by step 7", PRS, [["    if (skip.ux.has(x.i)) continue;\n", ""]], PRT, "pool-late-send-carried"],
-  ["a lane kept on the marker left out of step 7's plan", PRS, [["    if (x !== undefined) return x;\n    const readTo = kept.get(lane);", "    if (x !== undefined) return x;\n    const readTo = undefined as number | undefined;"]], PRT, "pool-late-send-carried"],
+  ["a lane kept on the marker left out of step 7's plan", PRS, [["    if (x !== undefined) return x;\n    const readTo = done.get(lane);", "    if (x !== undefined) return x;\n    const readTo = undefined as number | undefined;"]], PRT, "pool-late-send-carried"],
   ["a kept lane's highest with history dropped from step 7's plan", PRS, [["const top = Math.max(readTo - RESTORE_LANES * DEPOSIT_ID_MARGIN, notes.at(-1) ?? -1);", "const top = notes.at(-1) ?? -1;"]], PRT, "pool-late-send-carried"],
   ["a pool id NEAR re-reads holding money never named", PRS, [['    for (const y of ys) ("error" in x ? out.retry : y.retry ? out.held : out.named).push(', "    for (const y of ys) ([] as string[]).push("]], PRT, "pool-late-send-carried"],
   ["a pool id step 5 named named again by step 7", PRS, [["    if (skip.near.has(x.i)) continue;\n", ""]], PRT, "pool-late-send-carried"],
