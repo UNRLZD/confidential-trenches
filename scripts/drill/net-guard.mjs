@@ -9,6 +9,7 @@
 // ct-api., APP_HOST ct-app., SIGN_HOST confidential.), with no exception: the setup files' mirror on SIGN_HOST
 // (exit-no-server's MIRROR), which the exit tool reads only when the pinned commit on GitHub fails, is off too, so a
 // run that needs it does not pass the drill.
+import "../net-window.mjs";
 import { appendFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";

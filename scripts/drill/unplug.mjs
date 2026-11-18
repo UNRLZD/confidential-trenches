@@ -24,6 +24,7 @@
 // The record: "CARD <key> / live: PASS|FAIL", "Money path: yes", one "Tx: <chain> <id> [<signer>]" line per
 // transaction and one "Deleted: near <A>" per closed A, then one "Step <n> <name>: ok|FAIL <what was read>" line per
 // step and one "Request: <url> ours|public" per request the exit made. PASS only when every step is ok.
+import "../net-window.mjs";
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
