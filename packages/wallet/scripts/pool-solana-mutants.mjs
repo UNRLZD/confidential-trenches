@@ -1,6 +1,6 @@
 // node packages/wallet/scripts/pool-solana-mutants.mjs (card notes-per-pool-sol): plants one mutant at a time in the card's source, runs the named test, expects it to fail, puts the source back.
-import { readFileSync, writeFileSync } from "node:fs";
-import { runMutant, runTests } from "./mutant-run.mjs";
+import { readFileSync } from "node:fs";
+import { refused, runMutant, runTests, withPlant } from "../../../scripts/mutant-run.mjs";
 import { fileURLToPath } from "node:url";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const S = `${W}/src/pool/solana.ts`, R = `${W}/src/pool/solana-restore.ts`;
@@ -126,7 +126,8 @@ for (const file of new Set(M.map((m) => m[3]))) {
   console.log(`unmutated ${file}: ${Date.now() - t0} ms, cap ${cap.get(file)} ms`);
 }
 let ok = 0;
-const hung = [], cancelled = [], equivalent = [];
+let none = 0;
+const equivalent = [];
 for (const [f, find, repl, file, pat, why, pre] of M) {
   // an equivalent mutant (no test can tell it apart: its reason given) is listed, never run or counted
   if (why !== undefined) { equivalent.push(`[${pat}] ${find.slice(0, 70)}: ${why}`); continue; }
@@ -134,20 +135,14 @@ for (const [f, find, repl, file, pat, why, pre] of M) {
   if (src.split(find).length !== 2 || (pre !== undefined && src.split(pre[0]).length !== 2)) { console.log(`NOT ONCE: ${find}`); process.exitCode = 1; continue; }
   // pre: a second edit the mutant needs to type-check (a variable it reads), made beside it
   const out = src.replace(find, () => repl);
-  writeFileSync(f, pre === undefined ? out : out.replace(pre[0], () => pre[1]));
-  const r = runMutant([`--test-name-pattern=${pat}`, file], { cwd: W, timeoutMs: cap.get(file) });
-  writeFileSync(f, src);
-  // HUNG: past the cap, killed by the runner; CANCELLED: only tests stopped at their own timeout, on two runs; both listed
-  // apart, never a kill
-  const at = `[${pat}] ${f.split("/").pop()}: ${find.slice(0, 70)}`;
-  if (r.verdict === "hung") { hung.push(at); continue; }
-  if (r.verdict === "cancelled") { cancelled.push(at); continue; }
+  const r = withPlant(f, pre === undefined ? out : out.replace(pre[0], () => pre[1]), () => runMutant([`--test-name-pattern=${pat}`, file], { cwd: W, timeoutMs: cap.get(file) }));
+  // HUNG: past the cap, killed by the runner; CANCELLED: only tests stopped at their own timeout, on two runs; NO TEST: no
+  // test ran; each refused, never a kill (scripts/mutant-run.mjs)
+  if (refused(`${pat} ${f.split("/").pop()}: ${find.slice(0, 70)}`, r)) { none++; continue; }
   if (r.verdict === "killed") ok++;
   console.log(`${r.verdict === "killed" ? "KILLED" : "SURVIVED"} [${pat}] pass ${r.pass} fail ${r.fail} runs ${r.runs}: ${f.split("/").pop()}: ${find.slice(0, 70)}`);
 }
-for (const h of hung) console.log(`HUNG ${h}`);
-for (const c of cancelled) console.log(`CANCELLED ${c}`);
 for (const e of equivalent) console.log(`EQUIVALENT ${e}`);
 const runs = M.length - equivalent.length;
-console.log(`${ok}/${runs - hung.length - cancelled.length} killed; ${hung.length} hung, ${cancelled.length} cancelled only (not counted); ${equivalent.length} equivalent`);
+console.log(`${ok}/${runs - none} killed; ${none} with no verdict, refused (not counted); ${equivalent.length} equivalent`);
 if (ok !== runs) process.exitCode = 1;

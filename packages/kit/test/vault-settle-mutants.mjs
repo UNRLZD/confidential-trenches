@@ -9,7 +9,7 @@
 // the rows taken again with the leaves.
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant } from "../../../scripts/mutant-run.mjs";
 import { kitCopy } from "./mutant-copy.mjs";
 
 // the pick as settle.ts writes it: the spend row's own leaf, checked against the state tree at its index
@@ -43,9 +43,6 @@ const M = [
   ["sameLeaf ignoring the leaf index", " && h.leafIndex === l.leafIndex;", ";", null],
   ["sameLeaf letting a held note with no leaf pass", "  return h !== undefined && h.value === l.value && h.label === l.label && h.commitment === l.commitment && h.leafIndex === l.leafIndex;", "  return h === undefined || (h.value === l.value && h.label === l.label && h.commitment === l.commitment && h.leafIndex === l.leafIndex);", null],
 ];
-// a sweep run inside node --test (test/mutants/vault-settle-mutants.test.mjs) must not hand its test context on: the
-// child's own runner then reports to its parent, not on stdout
-const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
 const root = kitCopy();
 const F = path.join(root, "src/vault/settle.ts");
 const src = readFileSync(F, "utf8");
@@ -58,20 +55,19 @@ for (const [name, from] of M) {
 let ok = 0;
 for (const [name, from, repl, pat] of M) {
   writeFileSync(F, src.replace(from, repl));
-  // a run past 120 s is killed, its process group with it (scripts/group-run.mjs)
   let r;
   try {
-    r = runSync(process.execPath, ["--test", ...(pat ? [`--test-name-pattern=${pat}`] : []), "test/vault-settle.test.ts"], { cwd: root, encoding: "utf8", env: CHILD_ENV, timeoutMs: 120_000 });
+    // a run past 120 s is killed, its process group with it; a run with no verdict is refused (scripts/mutant-run.mjs)
+    r = runMutant([...(pat ? [`--test-name-pattern=${pat}`] : []), "test/vault-settle.test.ts"], { cwd: root, timeoutMs: 120_000 });
   } finally {
     writeFileSync(F, src);
   }
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const killed = r.status !== 0 && Number(fail) > 0;
+  if (refused(name, r)) continue;
+  const killed = r.verdict === "killed";
   if (killed) ok++;
   // the tests that killed it, each named once (the runner repeats them under "failing tests")
   const by = [...new Set(r.stdout.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("✖ ") && l !== "✖ failing tests:").map((l) => l.slice(2).replace(/ \([\d.]+ms\)$/, "")))];
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}${by.length ? `: ${by.join(" | ")}` : ""}`);
+  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}${by.length ? `: ${by.join(" | ")}` : ""}`);
 }
 console.log(`${ok}/${M.length} killed`);
 if (ok !== M.length) process.exitCode = 1;
