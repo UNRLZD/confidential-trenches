@@ -53,6 +53,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import {
   evmPoolVenues,
   HELPER_SOLANA_BLOCK_HEADER,
+  POOL_USD_FEEDS,
   SOLANA_AMM_V4_PROGRAM,
   SOLANA_CPMM_PROGRAM,
   SOLANA_DLMM_PROGRAM,
@@ -900,6 +901,46 @@ function check(chain: RpcChain, r: unknown, scan: readonly string[] = []): Recor
   return out;
 }
 
+/**
+ * The public accounts whose reads the keyed Solana route holds and shares between callers (card
+ * helper-rpc-one-read-many-pages): a named list, never a rule. Every shown page reads the SOL price in the same seconds
+ * (the signing page's pool-price.ts, every 3 s near the feed's write), and the price fix's review counted 2.5 429s a
+ * minute for 3 pages behind one address. A named list, not a rule such as "not a wallet": a user's one-time account
+ * and a public account look alike in a request (32 bytes either way), and telling them apart by owner is a read of its
+ * own; a list names what is shared and refuses the rest, so a request naming any other account (a wallet's) is never
+ * held or joined. The two: the kit's Pyth SOL/USD account (POOL_USD_FEEDS.solana), and the mainnet pool its deploy
+ * record names (contracts/pool-solana/deployments/mainnet.json `pool`, one-read.test.ts holds the two to them).
+ */
+export const SHARED_ACCOUNTS: ReadonlySet<string> = new Set([POOL_USD_FEEDS.solana.account, "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8"]);
+/** How long a shared read's answer serves the next callers: one Solana slot, 400 ms by its design, so an answer is
+ *  never older than the slot after the one it was read at. */
+export const SHARED_HOLD_MS = 400;
+/** What a caller served a shared answer draws of its own share (none of the provider's total): a quarter of a read
+ *  [design: small, so 3 pages behind one address reading the price every 3 s draw under one read's share between them,
+ *  and never nothing, so one address asking in a loop is still held to its share]. */
+export const SHARED_HIT_DRAW = 0.25;
+/** Shared reads held at once [design: the two accounts' reads in the few configs the pages send, with room]. */
+const SHARED_MAX = 64;
+const SHARED_METHODS: ReadonlySet<string> = new Set(["getMultipleAccounts", "getAccountInfo"]);
+const SHARED_COMMITMENTS: ReadonlySet<unknown> = new Set(["confirmed", "finalized"]);
+/** A checked request's key for sharing (SHARED_ACCOUNTS), or null when it is not one to share: one request (not a
+ *  batch) on mainnet Solana, getMultipleAccounts or getAccountInfo of the named accounts alone, its options base64 at
+ *  confirmed or finalized and a minContextSlot at most. */
+export function sharedKeyOf(chain: RpcChain, req: unknown, keyedOnly: boolean): string | null {
+  if (chain !== "solana" || !isPlain(req) || typeof req.method !== "string" || !SHARED_METHODS.has(req.method)) return null;
+  const p = req.params;
+  if (!Array.isArray(p) || p.length < 1 || p.length > 2) return null;
+  const accounts = req.method === "getMultipleAccounts" ? p[0] : [p[0]];
+  if (!Array.isArray(accounts) || accounts.length === 0 || accounts.length > SHARED_ACCOUNTS.size || !accounts.every((a) => typeof a === "string" && SHARED_ACCOUNTS.has(a))) return null;
+  const o = p[1];
+  if (o !== undefined) {
+    if (!isPlain(o) || !Object.keys(o).every((k) => k === "encoding" || k === "commitment" || k === "minContextSlot")) return null;
+    if (o.encoding !== "base64" || !SHARED_COMMITMENTS.has(o.commitment)) return null;
+    if (Object.hasOwn(o, "minContextSlot") && !(typeof o.minContextSlot === "number" && Number.isSafeInteger(o.minContextSlot) && o.minContextSlot >= 0)) return null;
+  }
+  return `${chain}${keyedOnly ? " keyed" : ""} ${JSON.stringify([req.method, p])}`;
+}
+
 export function createRpc(env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
   // the budgets', holds' and paces' clock: monotonic, in epoch ms (a wall clock that steps back would hold callers
@@ -1379,6 +1420,62 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // card base-reads-never-starve-max: an EVM read's shape (rpcShape) and its mode, for its hold and refusal log lines
     const trace = traces.getStore();
     if (trace !== undefined && EVM_CHAINS.has(c)) trace.shape = `${keyedOnly ? "keyed " : ""}${rpcShape(out)}`;
+    // card helper-rpc-one-read-many-pages: a read of the named public accounts (SHARED_ACCOUNTS) joins the same read in
+    // flight, or is answered from it for SHARED_HOLD_MS after
+    const sk = sharedKeyOf(c, out, keyedOnly);
+    if (sk !== null) return sharedRead(sk, (out as { id: unknown }).id, c, client, () => send(c, out, forward, methods, client, reserved, keyedOnly));
+    return send(c, out, forward, methods, client, reserved, keyedOnly);
+  }
+
+  // the shared reads (sharedKeyOf): each one's result as JSON text, null when it gave none to share, and when its answer
+  // stops serving (Infinity while it is in flight)
+  const sharedReads = new Map<string, { result: Promise<string | null>; until: number }>();
+  /** A shared read: the one in flight or held joined, drawing SHARED_HIT_DRAW of the caller's share and nothing of the
+   *  provider's total, answered with the caller's own id; else the caller's own read, held for the next. A held read
+   *  that gave no result (a refusal, an error) serves no one: each caller then makes its own. */
+  async function sharedRead(key: string, id: unknown, c: RpcChain, client: string | undefined, go: () => Promise<Answer>): Promise<Answer> {
+    const t = now();
+    for (const [k, e] of sharedReads) if (e.until <= t) sharedReads.delete(k);
+    const e = sharedReads.get(key);
+    if (e !== undefined) {
+      // drawn once the answer is in, so callers joining a read in flight never spend its caller's share before it is sent
+      const result = await e.result;
+      if (result === null) return go();
+      const wait = budget.takeEach([[c, SHARED_HIT_DRAW]], client, true);
+      if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
+      const tr = traces.getStore();
+      if (tr !== undefined) tr.cached = true;
+      return { status: 200, body: `{"jsonrpc":"2.0","id":${JSON.stringify(id)},"result":${result}}` };
+    }
+    if (sharedReads.size >= SHARED_MAX) return go();
+    let done!: (r: string | null) => void;
+    const entry = { result: new Promise<string | null>((ok) => (done = ok)), until: Infinity };
+    sharedReads.set(key, entry);
+    let a: Answer | undefined;
+    try {
+      a = await go();
+    } finally {
+      const result = a === undefined ? null : resultOf(a);
+      done(result);
+      if (result === null) {
+        if (sharedReads.get(key) === entry) sharedReads.delete(key);
+      } else entry.until = now() + SHARED_HOLD_MS;
+    }
+    return a;
+  }
+  /** An answer's result as JSON text, when it is a 200 JSON-RPC result. */
+  const resultOf = (a: Answer): string | null => {
+    if (a.status !== 200) return null;
+    try {
+      const j = JSON.parse(a.body) as unknown;
+      return isPlain(j) && !Object.hasOwn(j, "error") && Object.hasOwn(j, "result") ? JSON.stringify(j.result) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** A checked read sent on its route (route). */
+  async function send(c: RpcChain, out: unknown, forward: string, methods: string[], client: string | undefined, reserved: boolean, keyedOnly: boolean): Promise<Answer> {
     // a keyed Solana provider fallen back (rpc/slot.ts): the public endpoint, on its own budget; the key while it serves
     // card rpc-keyed-lists: past the first (fallen back, or held by its 429), its keyed spares on their own budget, then
     // the public endpoint
