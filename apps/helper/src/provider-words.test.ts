@@ -12,7 +12,7 @@ import { nearRpc, RpcError } from "./bind/send.ts";
 import { solanaPoolSender } from "./pool/solana.ts";
 
 const NK = "NeArKeY0123456789abcdefXYZ";
-const NEAR_URL = `https://lb.drpc.live/near/${NK}`;
+const NEAR_URL = `https://rpc.example.com/v1/${NK}`;
 const LEAK = /NeArKeY0|0123456789abcdef/i;
 const answer = (status: number, text: string): typeof fetch => (async () => new Response(text, { status, headers: { "content-type": "application/json" } })) as typeof fetch;
 
@@ -23,7 +23,7 @@ test("the NEAR client's errors carry none of its URL's key: a JSON-RPC error tha
   assert.ok(r instanceof RpcError, "the class a caller reads is kept");
   assert.equal(r.cause_name, "UNKNOWN_BLOCK", "the provider's cause is still read");
   assert.ok(!LEAK.test(r.message) && !LEAK.test(String(r.stack)), r.message);
-  assert.match(r.message, /^query: .*invalid key <key> at lb\.drpc\.live/);
+  assert.match(r.message, /^query: .*invalid key <key> at rpc\.example\.com/);
   // a body that is not JSON: the parser quotes its start
   const p = await said(answer(200, `${NK} is not a valid key for this plan`));
   assert.ok(p instanceof SyntaxError);
