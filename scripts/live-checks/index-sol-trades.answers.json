@@ -287,5 +287,781 @@
     }
    }
   }
+ },
+ "rolled_try4": {
+  "base": "http://localhost:8812",
+  "recorded": "2026-11-18T19:51:25.208Z local helper at 7239c82e4 (main 14ccd9d99 with sol-tape-in-order, and this card), 10 busy Solana coins open beside the check (try 4: DAMM v2 trade m6AJaXiFvoPs older than the tape named whole_ms)",
+  "meteora": {
+   "meteora-damm2": {
+    "coin": "BLVxek8YMXUQhcKmMvrFTrzh5FXg8ec88Crp6otEaCMf",
+    "sig": "m6AJaXiFvoPsXskQmjEbaRDNYyL8d23rs6fLtUUBb2NUDsLsUYjgsvtvDhGbEf1SxG3MSh8ot33cTRSQYjfg5sj",
+    "heldAtMs": 1795031220683,
+    "side": "b",
+    "ts": 1795031220,
+    "polls": [
+     {
+      "atMs": 1795031250896,
+      "answeredMs": 1795031253353,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "9827",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 19:47:33 GMT",
+       "keep-alive": "timeout=65",
+       "server-timing": "sol-read-to;desc=\"slot 471056637 of head 471056712, heard 0 s ago\", total;dur=0",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-18T19:47:32.388Z",
+       "x-helper-commit": "7239c82e41c8073c97388b01dc0e6b63fafbc14b",
+       "x-helper-source": "chain"
+      },
+      "body": "{\"trades\":[{\"t_ms\":1795031191000,\"side\":\"b\",\"usd\":\"44.76085173161055414\",\"amt\":\"23766.12780953\",\"trader\":null,\"tx\":\"3d1chHSq8A2pLi4XZusrYJtvgaNU5VzuXAWCVo6TacKEKBD6P65pvPdKdcDDZ2UzYdN51ZY5asift5WwgHdfVaGw\"},{\"t_ms\":1795031069000,\"side\":\"s\",\"usd\":\"40.25445037961168468\",\"amt\":\"21590.409149927\",\"trader\":null,\"tx\":\"23RSxt7MQQSLvUaCrjHYXw9TuWH2S2Y85XknKZA4Fkmg4yQVk8BPSwaV5wWDc6GUqVGDHEEMhUP35rhy3YTAMFni\"},{\"t_ms\":1795031059000,\"side\":\"s\",\"usd\":\"36.77092752904626296\",\"amt\":\"19695.693018756\",\"trader\":null,\"tx\":\"4DrTLpqxzUvT97bpKcPP4xNPGuxftKyKJAJsNRBJ8Z8dktnknsXxe4egNjFrwS53xmaAajUjVnqFeWhsraQvoK9B\"},{\"t_ms\":1795031053000,\"side\":\"s\",\"usd\":\"73.60646142551226368\",\"amt\":\"39350.784920847\",\"trader\":null,\"tx\":\"2HLyUJTZvbdTFVHEn8CBJCB1dwosUMETYwJ9bgXbQjFMBg2s4fP7WJpsExrxspPaFFMUFyGWUNGAyKn43nwtqB9R\"},{\"t_ms\":1795030873000,\"side\":\"s\",\"usd\":\"36.7806196698496325\",\"amt\":\"19625.781850286\",\"trader\":null,\"tx\":\"4A26zQyhSU737q5zr9gN79YR3htPHYAzCwd3RRiHBy3zDNEpgk6L4dxmhs2z6dY6gBnmwtqiAXSYk75ZAjP6QJcL\"},{\"t_ms\":1795030872000,\"side\":\"s\",\"usd\":\"29.85573192311403504\",\"amt\":\"15912.395097759\",\"trader\":null,\"tx\":\"4UQUPvrjwH1X8DEfX6NBQy7BqEb5c4SVNvLw1u8mbku6YBVvD2seq1TRpyvb6EQJEpP8aMycjB8ohNKGexsGMiS3\"},{\"t_ms\":1795030859000,\"side\":\"s\",\"usd\":\"36.77557946094118578\",\"amt\":\"19577.987486631\",\"trader\":null,\"tx\":\"3zcUL38Q272ABNqemqyMqJPwXd7R6QrnS8egBmN7TTRfQ1EMEQq6KUU7KvCtJxTqBRR5udPRPSHZzJrHaU3kaAe9\"},{\"t_ms\":1795030783000,\"side\":\"s\",\"usd\":\"1.89792922137113068\",\"amt\":\"1009.717877252\",\"trader\":null,\"tx\":\"3M6FN7TV2fRNnbGKTPTmtJ8vkKeuTrzBjPutyKeCKkupdRbp2iudqwm54RWpNWmGRsMcXPumxUU5ck7VLTfHLmcy\"},{\"t_ms\":1795030731000,\"side\":\"b\",\"usd\":\"18.3950685155519209\",\"amt\":\"9691.311277422\",\"trader\":null,\"tx\":\"2FoLFbcZKkwRyBfnhSh6FCJPCH1cT4diSaQntZVysSPBXaC7GdW7nQLs7g1Q74n66zBNbvnoYDHcqqkTn15tCnN9\"},{\"t_ms\":1795030718000,\"side\":\"s\",\"usd\":\"0.36086831590741166\",\"amt\":\"192.100484908\",\"trader\":null,\"tx\":\"4edw7fE4V7VStcMHDJPWqq4SBWRxjZiGYZmCsxWLSk5BxE7UFm4aA1nwMdk8zjua5SYLoTQKHzHZhMT6jhP4smr1\"},{\"t_ms\":1795030718000,\"side\":\"b\",\"usd\":\"77.8057742313473997\",\"amt\":\"41058.053334639\",\"trader\":null,\"tx\":\"FhgVi6T84WFrbvMQLcH4r3zJ2PUktLc1tPuwKUrk22vgYRzFrCnEUkzwMNDA8SeKQVzqAaMSZpx6o9BMv2HfDso\"},{\"t_ms\":1795030693000,\"side\":\"b\",\"usd\":\"42.69360306541205744\",\"amt\":\"22576\",\"trader\":null,\"tx\":\"2ufasCBpFJ4tD1Lx6rZu13aQBp3WyizoKhAwgpNeLb5Bv67FK69GC76G64i8jEhD3GSXdJCBdmhKmmWCqpKoboe3\"},{\"t_ms\":1795030693000,\"side\":\"b\",\"usd\":\"67.2517514102275963\",\"amt\":\"35628.59229361\",\"trader\":null,\"tx\":\"2SA9zPSfZtu1qX2vwTjjaKhp6gGNbzfBPeS13Q4pSfKnZQ3VLbXqzVVYj1J44wNpL5P22oQTDkfgpLTarfdboZy6\"},{\"t_ms\":1795030664000,\"side\":\"b\",\"usd\":\"34.42768233959846466\",\"amt\":\"18271\",\"trader\":null,\"tx\":\"s1UwBoKeukiaREiF9Lvt3LyU8ztt2zJWvhfhZgNDqzXxSGaXM44qvfhvNvNnMoxaCEaFptQYywvT1koEPsR5ZYg\"},{\"t_ms\":1795030663000,\"side\":\"b\",\"usd\":\"30.69768365614334856\",\"amt\":\"16309.748720703\",\"trader\":null,\"tx\":\"4YnBhJVvDYJiLFf67gF4YV8pmHC15i1pteRiSpg7KxJKGU88kk3gsvZTdwJyWNtGzKE6d4pLDx6s2g2XrVLFfsDV\"},{\"t_ms\":1795030655000,\"side\":\"b\",\"usd\":\"49.87121874664889284\",\"amt\":\"26533.529597144\",\"trader\":null,\"tx\":\"469ydySYTsxytmXWdJfZfuxemUh2RM3FTAHUBJAJeHE2L1VQY4joZZo4e5vdYHw1VCNCxBcudTJXEPJDD61D2Q8F\"},{\"t_ms\":1795030653000,\"side\":\"b\",\"usd\":\"23.69747499937466918\",\"amt\":\"12624\",\"trader\":null,\"tx\":\"43sy22Jg2kCwpYsgx6nS6HgpgQ7QatXs6QrVVYWctyBiaatWeuF5JEsSYxN7JKDnQzRF4vVbwCPf3TzcaSTfJMo\"},{\"t_ms\":1795030651000,\"side\":\"b\",\"usd\":\"20.68382859584429172\",\"amt\":\"11027.018322995\",\"trader\":null,\"tx\":\"3gqtaGPJkbwoq6JWR5LRpjMMjVEi54XdzorFzYzhyhsqG7juLdQaV7LMu4gu9P2n7ueeivvNKNKvGnHvcLQLq8Mo\"},{\"t_ms\":1795030646000,\"side\":\"b\",\"usd\":\"49.5853771138953235\",\"amt\":\"26467.163018332\",\"trader\":null,\"tx\":\"3NspuMtceRSqgsmDZd49gcSJHCjPJdi25AFcjGvwSZQ2PsGT8UmrDbx4EivrLFdUvWpto7BEvt4ScK4KZMLsikM9\"},{\"t_ms\":1795030646000,\"side\":\"b\",\"usd\":\"16.96762585944104376\",\"amt\":\"9067.092102125\",\"trader\":null,\"tx\":\"34NtRJnpSCHQYecfyTTe9mrZrp7YvPJ9xRw3UsF3bFJTFHwV4XQzK67bNdVHJDnqsW16bsNfbv18orMAY6VBTWgh\"},{\"t_ms\":1795030628000,\"side\":\"b\",\"usd\":\"56.22246413064436496\",\"amt\":\"30082\",\"trader\":null,\"tx\":\"25Tukcofj7uhMFsGej9ud7WZHhouUmNQLtD4app2YxjA14SXWZir5SKehVYD58Bzo3kpjEeUv5eqgF68pFQ6RvKQ\"},{\"t_ms\":1795030627000,\"side\":\"b\",\"usd\":\"77.75301949828127138\",\"amt\":\"41698.356049551\",\"trader\":null,\"tx\":\"29Yc7ZmuQF29GEatgCbMJLjQXud32EVHuqQWAj6RJURJechyPRuhXytFnh1qPCcFYsz7Qv4tPgWjn6JX1aV6Yd1H\"},{\"t_ms\":1795030627000,\"side\":\"b\",\"usd\":\"80.44825123099404236\",\"amt\":\"43261.705084903\",\"trader\":null,\"tx\":\"7P5FxohSYePSdZKeJ19PouSof7cUbHjrM131xrGP8ervdMbiUumUv7Y9jNDVu1iSZjBfHZLpjud3EGpPXZsxUJi\"},{\"t_ms\":1795030414000,\"side\":\"b\",\"usd\":\"13.7887809439710382\",\"amt\":\"7427.087562001\",\"trader\":null,\"tx\":\"2FX3THFUuBsxe4NqPDJUD2J9kC8nkd8y8AvF7o5g7SBUjwme55H8HXcPkyL5Tpq7ZHCUL5D6uu6Ww23zB61QLumN\"},{\"t_ms\":1795030366000,\"side\":\"s\",\"usd\":\"36.80954070826356558\",\"amt\":\"20018.591894696\",\"trader\":null,\"tx\":\"5jTUwouGYppzJBFNRh7mhX3CN1QaGgLp9ncJ6F5zWftcyDSYERvmNBRtjdV6PKujBQ9fkDYwNVZWMA97dFo9BGeu\"},{\"t_ms\":1795030360000,\"side\":\"s\",\"usd\":\"41.59131895048694996\",\"amt\":\"22588.212085036\",\"trader\":null,\"tx\":\"3n8azhYvhyLfBHEPW3LqWwR8HNLUoTZTGoi7q3kmUJ8PdhuiU1QD1hNSNfgwDYEEJKGA5VNDKa2ZRW2WmGGy7Yqy\"},{\"t_ms\":1795030336000,\"side\":\"s\",\"usd\":\"36.7728753549012887\",\"amt\":\"19944.093185281\",\"trader\":null,\"tx\":\"2WLBusukzhh9CnFCwHb71Vb7FJYbssTighwrg4CMRHcmQk3yaneUbgmr7hAS4zktpN8Xfdx4Ji2AikVucdiRn3Tz\"},{\"t_ms\":1795030331000,\"side\":\"b\",\"usd\":\"49.51683454708118134\",\"amt\":\"26593.529553313\",\"trader\":null,\"tx\":\"4MG33XtHg9FauFf7W5uJzPx9xRKzv8QpjzkZ7Pqfy95Fa8QHbXNsHC5qY4pWJPwttk48FwvoRQmPjWDNExDFuVne\"},{\"t_ms\":1795030314000,\"side\":\"s\",\"usd\":\"36.77695339800016234\",\"amt\":\"19954.87000979\",\"trader\":null,\"tx\":\"3VTJLvVzUCNmiCXvpZYiTjxDSbddfpW8dn1ypQ7wEhuF9qmiHHXLCnZK2cdb1YMebMHAm1yEQiogukuqAhHZkLKM\"},{\"t_ms\":1795030304000,\"side\":\"s\",\"usd\":\"73.60000651228818954\",\"amt\":\"39858.05203534\",\"trader\":null,\"tx\":\"2VCuGoLc3fxQgzFCNjCQaR5XMnoXUxStwEVrTGLi5EYJAVW8ZtVzzTnATKZFXKHxryRM5PNBBRgwHWtXXChRU9Zs\"},{\"t_ms\":1795030239000,\"side\":\"s\",\"usd\":\"73.5589868938762305\",\"amt\":\"39733.953387768\",\"trader\":null,\"tx\":\"3Yr6TK1KxcaJEpZYHQ8HeYL66WPtsTaWNuuYtCLkLhu1qswbf3HAPBW2UtYcFgAcyFVf6KtJ3RWeZ5mgr1Fj9xvr\"},{\"t_ms\":1795030198000,\"side\":\"s\",\"usd\":\"36.76822722892619684\",\"amt\":\"19822.932412006\",\"trader\":null,\"tx\":\"4X1G7J2HDEFLwQzpzFbrb3UWnQUXwTEr3cZuC1sqbz7hVjpiRJnaPC1QBXwU8rcFrjcxL5WvJLNC6pmGLhNaP19Q\"},{\"t_ms\":1795030182000,\"side\":\"s\",\"usd\":\"92.48323913923521544\",\"amt\":\"49748.611144091\",\"trader\":null,\"tx\":\"NcWmNBFE7QEAc8cG8NpmnrTdVoMUEoMePtYx9ZqQ97RuC3BEkXutCRMUCQPLShPUmHBbZA66XLvw1Ua4zzd5Lh6\"},{\"t_ms\":1795030181000,\"side\":\"s\",\"usd\":\"41.7516234154777934\",\"amt\":\"22406.819218438\",\"trader\":null,\"tx\":\"5mwFLTh5f3Le6vRRstzbE9foqiXoBNAU8xrLwKk1YbcFyDZKNtxSf6yiSFDnnmpVQ1B26pFgSoyPXojCLihdyjLP\"},{\"t_ms\":1795030149000,\"side\":\"s\",\"usd\":\"73.60119227588783152\",\"amt\":\"39420.600858369\",\"trader\":null,\"tx\":\"5v7sh5Lt4KupgeFfoTn32aB7byXTYAZVNqhaHurJa3uM9wQ8KEE7U2Sa7qEfmtEzbbpBzNiXxJEWFxzxsxQqGDym\"},{\"t_ms\":1795030131000,\"side\":\"s\",\"usd\":\"36.77154189233589908\",\"amt\":\"19657.387580299\",\"trader\":null,\"tx\":\"55VV2BWBZYZfvFzp3CMfX9jpdrSoSnDXx3ts61o9AyCXxv84uayRom5qAHKGuz1xBFNP8MTpvEZeSu5LQQ1ycPWh\"},{\"t_ms\":1795029927000,\"side\":\"b\",\"usd\":\"49.6401823594611475\",\"amt\":\"26277.126419138\",\"trader\":null,\"tx\":\"4TYH87q4Kxy92afAzupxVt4E7g7ymF1kk5rFPBcJreWR21bWwzuH6FXivDq38VhEM2uLS6gX6kiYHQRtHk8VEJyH\"},{\"t_ms\":1795029926000,\"side\":\"s\",\"usd\":\"0.03274818356702728\",\"amt\":\"17.525141495\",\"trader\":null,\"tx\":\"2azdzGPNXgHpxtCduCDgvunhmKjbNUNjtDpBrmUR6c3NVbZkeuNiK25gNVRMDMQatF1yjzMdKPwzRXruDwsELLpk\"},{\"t_ms\":1795029925000,\"side\":\"s\",\"usd\":\"0.32824097029501736\",\"amt\":\"175.656387971\",\"trader\":null,\"tx\":\"RsSpz2unXTQYyt6gR166SV4JnWGfj4833wfrNY7i6yb5g4oAr1x1tu1DdnTaLhnAnUdx8a5t8jeyNK2na9FqzXR\"},{\"t_ms\":1795029925000,\"side\":\"b\",\"usd\":\"90.54449406254461404\",\"amt\":\"48044.653569232\",\"trader\":null,\"tx\":\"2c93JQJrYZ7vuo42TV6z63nfn8jVvxk3CCQiNJBEJFnwt8WsvLa6kkS3qS6raxkSF8Twt8zPB6J9hhkcCeE4px4z\"},{\"t_ms\":1795029911000,\"side\":\"b\",\"usd\":\"49.3957160522422\",\"amt\":\"26273.162945641\",\"trader\":null,\"tx\":\"3WNxFpDTKCoiezk6GtEPRKR99LAdrhwfUgMhwSDzPwx4g4tjRQFrV7diA6vojFjW2WjPZGz7WexGJsJfKTXa2gAH\"},{\"t_ms\":1795029896000,\"side\":\"s\",\"usd\":\"0.3103969151675614\",\"amt\":\"166.905541972\",\"trader\":null,\"tx\":\"4yrM4vyAdDcobijLdSMmLWcEL42HRSGxmLceuaqEryLFjVs6nYKe4KcBvBxdwz8ZuCdkVU2VMf1FJKk2vKGPsKDw\"},{\"t_ms\":1795029896000,\"side\":\"b\",\"usd\":\"66.90731507999958846\",\"amt\":\"35657.828663761\",\"trader\":null,\"tx\":\"3AxybFLRyF1EE6vr2vUheZ9xaLn7ri3XBi7yn75erB6zvynmgLEGRjA5CsCiMr1wrcvgVtc1SmCDYB2HvMBF9pGc\"},{\"t_ms\":1795029883000,\"side\":\"b\",\"usd\":\"66.75713143412845942\",\"amt\":\"35660\",\"trader\":null,\"tx\":\"5QeFmJdRPBmr9fW4Bj9f9hcHAgAKED8o67hiDjAZY9i8JFkzztingz7BJMHKW9NLiJG2c7JRXWkmmeYbcfqRzfFP\"},{\"t_ms\":1795029882000,\"side\":\"s\",\"usd\":\"0.29355769606624486\",\"amt\":\"158.576525495\",\"trader\":null,\"tx\":\"5FG6pzkiT5yADgd5eFM2YGSMd4wiRFBijP8GadNn4j9VJTE5nZqnxHJY45H4PaEHq7X8dj9D4XAvUgZ3phuDryMv\"},{\"t_ms\":1795029882000,\"side\":\"b\",\"usd\":\"48.01135494480247046\",\"amt\":\"25697.048127039\",\"trader\":null,\"tx\":\"2NXYsBgtyGCWRoVkf44Z3F5coMyEMa5LMpxeJh67ZBg1x34nsdiXbXt4tSkFEFtcra5i7swTn42MspY4YVjEdU5d\"},{\"t_ms\":1795029876000,\"side\":\"b\",\"usd\":\"49.11765013327557988\",\"amt\":\"26332.969774331\",\"trader\":null,\"tx\":\"2sKSWbcTfTYhDCeThvS8bXM2uzfLR8Z1WUDo2FuPfakLRTktqth8Ca2eVoGBjmGt3C9UGLNhMezGFjUwFa5vNTTe\"},{\"t_ms\":1795029861000,\"side\":\"b\",\"usd\":\"27.12968204733312938\",\"amt\":\"14563.958880618\",\"trader\":null,\"tx\":\"4iFqpt7pnwLLR7P1eW3A5khmTXg1wtiy2XVCnZd4wZoV73TC2qYAqq35e4dmQd91B2U3a77uuyMwfyVDK5uXh4zS\"},{\"t_ms\":1795029860000,\"side\":\"s\",\"usd\":\"0.52767636598170594\",\"amt\":\"286.263913782\",\"trader\":null,\"tx\":\"3ZfrcUUxBL32GRupN7xJeU6GXV7wHKCDRUeoDVb4Xi4Zhck9bXy2nL1r4vA1wYvx57jTgyR1Pyifsqeyw7Uw5oYb\"},{\"t_ms\":1795029860000,\"side\":\"b\",\"usd\":\"183.98352680369439274\",\"amt\":\"99127.58281766\",\"trader\":null,\"tx\":\"3NjR2Mbgde1QdKfFqMMEkPjyyN9U6wQbuRAQuoUtkiCR7y1AhYWggfprFYBkk1C3bfaJ94xxJuWxqc8bktjFwRXF\"}],\"whole_ms\":1795031235000,\"src\":\"chain\",\"as_of_ms\":1795031252388}"
+     }
+    ],
+    "reads": {
+     "https://api.mainnet-beta.solana.com": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 471056797
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471056636,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     },
+     "https://solana-rpc.publicnode.com": {
+      "context": {
+       "apiVersion": "4.4.1",
+       "slot": 471056798
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471056636,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     }
+    }
+   },
+   "meteora-dlmm": {
+    "coin": "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN",
+    "sig": "5yZrjZWKuG9sbqmrvmHFo68Az3wCmPiNraYp32N5DtgBgseucafb94Z9Q9LzFu8dReKGbtGtQ85S93faD69SPstt",
+    "heldAtMs": 1795031350832,
+    "side": "s",
+    "ts": 1795031304,
+    "fromTape": true,
+    "polls": [
+     {
+      "atMs": 1795031350832,
+      "answeredMs": 1795031350959,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "1633",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 19:49:10 GMT",
+       "keep-alive": "timeout=65",
+       "server-timing": "sol-read-to;desc=\"slot 0 of head 471057246, heard 0 s ago, cold\", total;dur=0",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-18T19:49:10.518Z",
+       "x-helper-commit": "7239c82e41c8073c97388b01dc0e6b63fafbc14b",
+       "x-helper-source": "chain"
+      },
+      "body": "{\"trades\":[{\"t_ms\":1795031304000,\"side\":\"s\",\"usd\":\"0.194548\",\"amt\":\"0.00068459\",\"trader\":\"DGcyWa3GxL4F4BcqDgHPF49qNYLE3JYocfK3yWTLaoCd\",\"tx\":\"5yZrjZWKuG9sbqmrvmHFo68Az3wCmPiNraYp32N5DtgBgseucafb94Z9Q9LzFu8dReKGbtGtQ85S93faD69SPstt\"},{\"t_ms\":1795031300000,\"side\":\"s\",\"usd\":\"49.658704\",\"amt\":\"0.17493034\",\"trader\":null,\"tx\":\"jY8rGmxTZg6nAb1j5vMxpjiYHUF6c7jmStcthzEpmdHZzUgWxKRQ9ZCs5m25Zvbvg48ZNUWHZYcNQdUDUqdqFaS\"},{\"t_ms\":1795031290000,\"side\":\"s\",\"usd\":\"7.510048\",\"amt\":\"0.02645088\",\"trader\":\"5oRoWGT6SGt2ja9AkJZ16jUiQDD8Khny8a4CXemW5Hfx\",\"tx\":\"5JSmEcWktbYGvvVTM6gu8t8o31KwoFwUczpsDEV9euxX5ievsQ7PdjJtis2LGjyi8R3m2KnhXMybo4xWPycA4k5q\"},{\"t_ms\":1795031290000,\"side\":\"s\",\"usd\":\"37.70385\",\"amt\":\"0.1328017\",\"trader\":null,\"tx\":\"4RrW2myvnf7wsSdW4SCDMWkjo8vEynnocWjbtp3vTCn9V2YvRrsrpn8BCJVRU9eGqvPSoPTWAfoiHJ21jvFj1KT1\"},{\"t_ms\":1795031290000,\"side\":\"s\",\"usd\":\"50.881008\",\"amt\":\"0.1792003\",\"trader\":null,\"tx\":\"5QRqUQXfs2vuhdktsnd9G12tgyDWaKdFu69nJRwYgng6qsMdS2BYA4cvfVfzUSdc8Gm1Cu89nLE9ipXyN2dQTafD\"},{\"t_ms\":1795031290000,\"side\":\"s\",\"usd\":\"8.159106\",\"amt\":\"0.02873185\",\"trader\":\"3U2tSmABCEnt9ePiRf2kyqgja3Bh58gtHjHvdWrZv7QF\",\"tx\":\"2aezxV9jH7Zf7xLx7TmfAVsg3jFaQT9ud5xkxQCn5k3itTcdouMUF21p73Z4iyaBJfWwexpeDrmKCCjS5RXsmyiQ\"},{\"t_ms\":1795031290000,\"side\":\"s\",\"usd\":\"54.562484\",\"amt\":\"0.19214789\",\"trader\":null,\"tx\":\"31gc5cvfgerYDRYCgg9fMnGhV2JNmYuVRrR3Ph7HwFLL8q4DaZyyebUr8c8yHLQqQHsfEX8kwkQ6qFe84o2pvJSa\"},{\"t_ms\":1795031265000,\"side\":\"s\",\"usd\":\"40.641724\",\"amt\":\"0.14311201\",\"trader\":null,\"tx\":\"5sSudsUHRKNNYhcp3J3CoVpYR4Y96qAkd2hU6jhp8VoWkVokWFh6x3NnBCmmiSqK8wnyjgEQ4dKSeuD1aSpPjLZ5\"}],\"filling\":true,\"src\":\"chain\",\"as_of_ms\":1795031350518}"
+     }
+    ],
+    "reads": {
+     "https://api.mainnet-beta.solana.com": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 471057246
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471057034,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     },
+     "https://solana-rpc.publicnode.com": {
+      "context": {
+       "apiVersion": "4.4.1",
+       "slot": 471057247
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471057034,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     }
+    }
+   },
+   "dbc_curves": [],
+   "cut": {
+    "meteora-dlmm": [
+     {
+      "coin": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+      "sig": "3GgYB236fKssMdAjfDSyEhrbzNhVLJ4rYmBn1Hz8ZdeHTEUnNC1VKuoLgpZuEsyaM9CbGmcJqUbPHAguqqzL2R8P",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+      "sig": "4PxAazqWfzDmNgPP3oi3mKiYXjmWEdB565HS9JDEcwkxUbavovEtuuikKSzrwGhSt7UVFEp1hqz2vD9B5JiRfa1E",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+      "sig": "3rcC28pvaDJqrnDTVRGfTLmj3xjzkRCNi29pMznrahTxdRdG3Bg3L4qekGW5WowAqRCqxfcW9Ek7S3Ky3wtfqb5P",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+      "sig": "2cU8z1QhnkTpMwh3XYq3FN6vkpch3CRiASmzGwShkaqgbYfV6VXqTePtAR9652mpXbyN6gR3W1kuhr5U7TjSkxB7",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+      "sig": "47zQJmSaMPp9gk25PHd6BUm6zBttCqdnbTJcN8RAF6p26zVNJS7AXFfPuAFQPELSyqsAPe4KB9CWhByR6XH5gXLq",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+      "sig": "4tEX19dYWGvF5ty8BgUnSgbzcCUT1heZvS5BqLitQcFQNdpU8adjTXXVTmvCwbsvYHsHMHJ146REWx1KdqrUGYY6",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+      "sig": "5w5xkcGgrHBfws8XejqrDEW6G1KVRz6zgFaAK4KTYj9Pe38hFjvxJ22PvjdVbAnaWDB5ok29iJ4z4eSsooPR8d5y",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+      "sig": "3uLhyZyenBBuHjtn7c4VMMwojbg45C5U2tVMDtbuFaxw4We8kifX51F6tH6deeFZWPmawagQa1Se4NtCUdp4G7SS",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+      "sig": "3GP6Vwes9QdFjWTo3eRxBR3BEFEDmGuDPi775c3BA8k2ALyoVBG4KKfy3Cy3FRBkM6DG7wcAV1hFrNWsDN6gdLTA",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "4kjruqGHDsSqkMdFfCjV7Vb62HPFhtXyWc2t6JpQzDnz",
+      "sig": "5tqEfFsAgc4rYqHVs6JpXfnX2at4dGRNM6A85GsqcE7t7cmDa9DiyqkGmtR7YYHkTKPSKTn5hpXb5wH3PgK5tGjw",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 3 s ago\""
+     },
+     {
+      "coin": "4kjruqGHDsSqkMdFfCjV7Vb62HPFhtXyWc2t6JpQzDnz",
+      "sig": "35MtPa197rRuabapgLXNTYWZ891r6YVQujWHAGGouiQocoABdAVrTVxxwrZMBn9ruvJC43XKp3XX5KiK5N1RodEJ",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 3 s ago\""
+     },
+     {
+      "coin": "4kjruqGHDsSqkMdFfCjV7Vb62HPFhtXyWc2t6JpQzDnz",
+      "sig": "2UoKeX6fd7WzeANT5GaxmndSxwfE2whEjWX3quiJ2aJ7pbUpout9bhcM7TG2ikU5nHdiQfQkbLtQdTrwJp5AaKPL",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 3 s ago\""
+     },
+     {
+      "coin": "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS",
+      "sig": "UygJHt8bu3jZp4ZoMF4cdf39YMGr5tqe1KxbEU9AUoJXkHpoGd59sUXMNMYv9p9JswUjq4WV93xjLb47EwaoLcm",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 12 s ago\""
+     },
+     {
+      "coin": "Dz9mQ9NzkBcCsuGPFJ3r1bS4wgqKMHBPiVuniW8Mbonk",
+      "sig": "2vypB1JqWJT7PHet2BMvaLSPd9Zucze6WamP4zPDXWVhu6yCTtNyZGk7AJwigN9LwjJ95TMjjfDuFf4Pu4YadjwM",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 54 s ago\""
+     }
+    ],
+    "meteora-damm2": [
+     {
+      "coin": "Cv4q9qcHapnz3XFm1KrHkXWmbYNKvbwKQsPaJPMt6FNF",
+      "sig": "r8f6izMiwoqnVM9AJy5VYrHSsaChKo8qdsJ7mCw8vuLcMpHuVeHYrMHn1xBT4Svwu6h98KbaGQdv2djWs8AAVfk",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 12 s ago\""
+     },
+     {
+      "coin": "Ai66LHZG9MCzg1WKdawwqduVAXpNDUuV8M3uyq5ppump",
+      "sig": "2Z2KssVPYBjGHTovh8cozPiMPqeboiHgViMdHUKRzX7c9Q2BMnbTeBoHGwS7vtUCHHZQFecko8BQidVAb5oeKeqP",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 9 s ago\""
+     }
+    ]
+   }
+  }
+ },
+ "side_try6": {
+  "base": "http://localhost:8812",
+  "recorded": "2026-11-18T20:12:43.360Z local helper at 8ddec0fe2 (the helper as at 7239c82e4), 10 busy Solana coins open beside the check (try 6: DAMM v2 transaction 25KF3ptvBtY1 holds a sell and a buy of the coin; the check opened 100 coins and its DLMM coin was refused at OPEN_MAX)",
+  "meteora": {
+   "meteora-dlmm": {
+    "coin": "Bv1a7cEj5aRnJQhMw4kRQqAFesMSd5LwcDnUzq52BMmr",
+    "sig": "5w1XHp9jNWRDjA6wDYEUiJ61VQD9y9xJ67FEVfXDChTiKNH2J7JSamhk8u5ZdrCLUPNdL9P25ZWFXP1b55d6p89J",
+    "heldAtMs": 1795032522612,
+    "side": "b",
+    "ts": 1795032522,
+    "polls": [
+     {
+      "atMs": 1795032551493,
+      "answeredMs": 1795032552002,
+      "status": 429,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "33",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 20:09:12 GMT",
+       "keep-alive": "timeout=65",
+       "retry-after": "5",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "8ddec0fe29d85bf5755bb3d98ec91a50cf33d461"
+      },
+      "body": "{\"error\":{\"code\":\"rate_limited\"}}"
+     }
+    ],
+    "reads": {
+     "https://api.mainnet-beta.solana.com": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 471062836
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471062695,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     },
+     "https://solana-rpc.publicnode.com": {
+      "context": {
+       "apiVersion": "4.4.1",
+       "slot": 471062838
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471062695,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     }
+    }
+   },
+   "meteora-damm2": {
+    "coin": "E5cbap6oaYhweAfM44s9WgFtWpRo46E3wSdfsWrcbNm",
+    "sig": "25KF3ptvBtY11j5hnkgV7CE8Gb1H6Nt1ZFyEBrgLvHAhmDn2tkWeEmxEkoFN518q2Cenf7g1m9jhMkWuAwz9bLuV",
+    "heldAtMs": 1795032691065,
+    "side": "b",
+    "ts": 1795032318,
+    "fromTape": true,
+    "polls": [
+     {
+      "atMs": 1795032691065,
+      "answeredMs": 1795032691266,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "5700",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 20:11:31 GMT",
+       "keep-alive": "timeout=65",
+       "server-timing": "sol-read-to;desc=\"slot 471061764 of head 471063472, heard 0 s ago\", total;dur=0",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-18T20:11:31.170Z",
+       "x-helper-commit": "8ddec0fe29d85bf5755bb3d98ec91a50cf33d461",
+       "x-helper-source": "chain"
+      },
+      "body": "{\"trades\":[{\"t_ms\":1795032318000,\"side\":\"s\",\"usd\":\"651.89118362259499807\",\"amt\":\"26023135.8611\",\"trader\":null,\"tx\":\"25KF3ptvBtY11j5hnkgV7CE8Gb1H6Nt1ZFyEBrgLvHAhmDn2tkWeEmxEkoFN518q2Cenf7g1m9jhMkWuAwz9bLuV\"},{\"t_ms\":1795032318000,\"side\":\"b\",\"usd\":\"652.01710420640801237\",\"amt\":\"26023135.8611\",\"trader\":null,\"tx\":\"25KF3ptvBtY11j5hnkgV7CE8Gb1H6Nt1ZFyEBrgLvHAhmDn2tkWeEmxEkoFN518q2Cenf7g1m9jhMkWuAwz9bLuV\"},{\"t_ms\":1795032318000,\"side\":\"b\",\"usd\":\"0.00304499438248808\",\"amt\":\"125.851849\",\"trader\":null,\"tx\":\"4pZSprPCRtCCEj71uFSA4bvccVXcdTpjytfMWRgZs2WKoW8GCkd6brD7T1G2tPySkHbRXLDqrTb5zFvZAGWtxUPN\"},{\"t_ms\":1795032318000,\"side\":\"b\",\"usd\":\"22.79298912886452576\",\"amt\":\"943226.612219\",\"trader\":null,\"tx\":\"4BqAsoRDyxdWPKbeHrck3icJdiP4zPshkCfjFwBCwEfw95DRsWFobTqr5SrUBxEUryC3S1tkszDTAGe1kzKScbUR\"},{\"t_ms\":1795032318000,\"side\":\"s\",\"usd\":\"92.17851150890510188\",\"amt\":\"3800941.008479\",\"trader\":null,\"tx\":\"3mo2H18euWuw29WPmf2fEcHT68aNWL5Wy27bGrH38Y4RQJ7u8ZZTZuBs5Qu4pjW15rsj6vLcGLrPzC8bn8rNfRiy\"},{\"t_ms\":1795032318000,\"side\":\"s\",\"usd\":\"70.63305542270048691\",\"amt\":\"2886860.183545\",\"trader\":null,\"tx\":\"4wYeojMWuoCWxnGSCjaNe48QyHhjHjCQk8TudQBrfVjiodurB2tioWTEzkfRZBKU2hGYgMeNcdrhxNUyGkb9dGhz\"},{\"t_ms\":1795032318000,\"side\":\"b\",\"usd\":\"21.19738661457883868\",\"amt\":\"863869.982332\",\"trader\":null,\"tx\":\"2WVf2rZ9NPzBgsTDqTeWhhFrpNbkQobZB7UhsNq3Zpvmu5emNTn8jDqYKZ5XbxhyW7FcYXCTAp8f9ZfMCATD4Krk\"},{\"t_ms\":1795032318000,\"side\":\"b\",\"usd\":\"0.00079965485284877\",\"amt\":\"32.626248\",\"trader\":null,\"tx\":\"3bZubMijZa2e6WhqtdMsZSzEdPThKujwiRs62oSc4PAky5BNkJvh4f5rC54yM6EQYFaxrfmZ4LZw1tRLX9fMtNzs\"},{\"t_ms\":1795032318000,\"side\":\"s\",\"usd\":\"670.15885395488907512\",\"amt\":\"26389993.63217\",\"trader\":null,\"tx\":\"YB27VcKnoTpCYMFjZ5dEPkvet1ejE8gQgkGBd4VQNvo5YrByZwyEEiNAaC1yfm1WVkcq6vFkxtgRnZ1Jhh2cx6e\"},{\"t_ms\":1795032318000,\"side\":\"b\",\"usd\":\"670.28820805809816087\",\"amt\":\"26389993.63217\",\"trader\":null,\"tx\":\"YB27VcKnoTpCYMFjZ5dEPkvet1ejE8gQgkGBd4VQNvo5YrByZwyEEiNAaC1yfm1WVkcq6vFkxtgRnZ1Jhh2cx6e\"},{\"t_ms\":1795032317000,\"side\":\"s\",\"usd\":\"84.2109707509947243\",\"amt\":\"3420969.171812\",\"trader\":null,\"tx\":\"hn4HybuPTfGfUTZhU1J47FknpxgPDEYMrjyR9ztLDxbedM6PtusAdN8Hq8UsGcKoNhDNSPoxRPmPpznuti2GfDm\"},{\"t_ms\":1795032317000,\"side\":\"b\",\"usd\":\"0.00138277156971434\",\"amt\":\"55.906501\",\"trader\":null,\"tx\":\"5NQQgShYEDRzNRzdatpv2fVXtvsB8DewxbxwqhcTfyxPN7bEvhgqK6144BVoKW8fRaCDZgGX5ce7qREKnwagqmrq\"},{\"t_ms\":1795032317000,\"side\":\"b\",\"usd\":\"122.80817569534125026\",\"amt\":\"4998390.19808\",\"trader\":null,\"tx\":\"62fozoGYtGV1fE9KV8ZN1EeWFp1mxvimwdFdUwXw8X4BpkZSpuaDQYpQ8iRxaEmUWjHL88XdN71aC7L6jn8weBXC\"},{\"t_ms\":1795032317000,\"side\":\"b\",\"usd\":\"0.00312787874332219\",\"amt\":\"128.155987\",\"trader\":null,\"tx\":\"7TJpZ5nvyY8wH9Um7SPMmgpsN3hCo6DCRGd5iUe9xXXAAHxXXaCBzzb3eV9gkcQnHyZNRVEaU69uMdDAfqGrGiE\"},{\"t_ms\":1795032317000,\"side\":\"s\",\"usd\":\"48.75889561654978506\",\"amt\":\"1992882.85625\",\"trader\":null,\"tx\":\"33MbKD36LSBWHNu5qrWNW3GYRnsHSLLBjfjM1DdMkL65kb2RoJWcrDhfJQ21jbc97MyELkvp6wh7TRVyKWRPUSCf\"},{\"t_ms\":1795032317000,\"side\":\"b\",\"usd\":\"76.73084460825156334\",\"amt\":\"3140299.856789\",\"trader\":null,\"tx\":\"aCb6ySpBRNevADwWTAb573xKNiubWGjgZBB8usJ3QCfN9g9rjXQyPizrTzqJbbfrFLGFWfnPH7L6ga6nxReHYtG\"},{\"t_ms\":1795032317000,\"side\":\"b\",\"usd\":\"46.27547313794470336\",\"amt\":\"1906577.987687\",\"trader\":null,\"tx\":\"2WVEG6PvWM6ehfSb6FqyGBR8o2NVaiwR3eYZhsymfstvcjGJircUnQqsAc7s5ot53H2nQb8woebxTs3x7Fdr1Wka\"},{\"t_ms\":1795032317000,\"side\":\"s\",\"usd\":\"123.95195163710855964\",\"amt\":\"5086433.476\",\"trader\":null,\"tx\":\"314owtzJ6HNPcmNFS5Q1q27MvTuYM237kEzicHLjmDEFUBLattTmyBVHyBBpgbQqNx6XUqm8nT2VZYGtAs3DSoHD\"},{\"t_ms\":1795032317000,\"side\":\"b\",\"usd\":\"0.0013219067963569\",\"amt\":\"53.868397\",\"trader\":null,\"tx\":\"2kHiE9CjVkCcPyUJKZi5jwcoyp7qHFFKd3UHk94Wh2Bh2DCv4KKrSFXiWqPU3273H9f5TuBFgiruueehfzi6xmce\"},{\"t_ms\":1795032316000,\"side\":\"s\",\"usd\":\"73.445982885509569\",\"amt\":\"2981806.788997\",\"trader\":null,\"tx\":\"2CNefjSKXcw3vMvMbmdoq2VmHxXFuTkSZuBHCzZVEUhejugsioGQs4DtCMYV7TJaM9RcYQweWE3kkjUFexQCLxgq\"},{\"t_ms\":1795032316000,\"side\":\"b\",\"usd\":\"0.00093967309348115\",\"amt\":\"37.989764\",\"trader\":null,\"tx\":\"59BBeYrs1K6XUVcUDK16YJtFUpxnpxNWLsdftKZ5LMAxjvTinDCjvDpBCiRiYFrYfXSFcn5uZYzReMu1pnKaep4\"},{\"t_ms\":1795032316000,\"side\":\"b\",\"usd\":\"132.019314573683025\",\"amt\":\"5375783.440884\",\"trader\":null,\"tx\":\"4rLioQh84x1kt2dpDTNeF9LhPqU8vr1b84dZRKSnxByR4dpF9SfJWVqejpvDNKn5zBEg9wvJ4foCWL2pmcx58mBQ\"},{\"t_ms\":1795032316000,\"side\":\"s\",\"usd\":\"13.39410290805223622\",\"amt\":\"539635.411665\",\"trader\":null,\"tx\":\"45sygwaFxMdinXEdTffScDE658CSzcg9ZEStneexcxg3UVSbZpoW5U6wE7YFUo95Prwked7yVVc8bFgDD8and2vN\"},{\"t_ms\":1795032316000,\"side\":\"s\",\"usd\":\"101.25057145393409942\",\"amt\":\"4065070.963676\",\"trader\":null,\"tx\":\"5rUoaFynmL7S7wqZdGMtWDYrBbV2FiJjrF8omaVJgJvGhQpDGRusFcnowGp1fWwuNiv7r2F1y2wNd3BQfsZxJrxG\"},{\"t_ms\":1795032316000,\"side\":\"s\",\"usd\":\"162.05875995816723277\",\"amt\":\"6589623.416942\",\"trader\":null,\"tx\":\"3UrGrkmeGvn5QLjA5LDqjCM3cSBrAgDg62QStpP4VKTVq9rifU9Hik9eaozP3q5kcsfU4C6wLzVap97JLWBqNXsz\"},{\"t_ms\":1795032316000,\"side\":\"b\",\"usd\":\"0.00165958924084962\",\"amt\":\"66.878218\",\"trader\":null,\"tx\":\"3kRrvHa4FQLyp8pD9qi1AbauPYCEYvN16Bwgf18j4W8Z115rjNhA2kuDiB64VVFWxqHBQWrUrukrqemu8gPqD4SB\"},{\"t_ms\":1795032316000,\"side\":\"b\",\"usd\":\"2.53006435416720896\",\"amt\":\"101973.07159\",\"trader\":null,\"tx\":\"4uEn3CcEXM2e9bQAa9RGrZTsz3esTLYeFpsziP6PBp1wo1bC4ZAbag8RGD2pN9rpM3AXPcbRB5gEEPyvsqf94cZV\"},{\"t_ms\":1795032316000,\"side\":\"b\",\"usd\":\"24.80303758839673394\",\"amt\":\"999704.7239\",\"trader\":null,\"tx\":\"5uEM5w5DU4eXxkysaCYSPr83exAEgUFcKnvjNUwd5s3dEv9VkmoZ2geqMB1yJYGt66wBAuGRFsp4Hk5tUw8AfmTN\"},{\"t_ms\":1795032316000,\"side\":\"b\",\"usd\":\"17.99682326132987977\",\"amt\":\"719176.622797\",\"trader\":null,\"tx\":\"2g3jbitTVKeawgVr1QSM9YknpfaGzqPqDu99A6nXQxPbcRZ4dYCjzzUhG6TXj44hQi1f75Kg37agnWfeNdmztN7k\"}],\"whole_ms\":1795032317000,\"src\":\"chain\",\"as_of_ms\":1795032691170}"
+     }
+    ],
+    "reads": {
+     "https://api.mainnet-beta.solana.com": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 471063473
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471061753,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     },
+     "https://solana-rpc.publicnode.com": {
+      "context": {
+       "apiVersion": "4.4.1",
+       "slot": 471063473
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471061753,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     }
+    }
+   },
+   "dbc_curves": [],
+   "cut": {
+    "meteora-dlmm": [
+     {
+      "coin": "o4rt4V4goRd8fsqhiXf88gdtHCZnxGKS28awZRjpump",
+      "sig": "2AWsGkSsvoxKqKp4NdTejYLKJui1swsTLh3q3Q8yAPEHvbq23svs32WWmrb8KsaNmiT4ZqnbGp7rwwA8SYF8muiW",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     }
+    ],
+    "meteora-damm2": [
+     {
+      "coin": "4qgnHAPBkjDKianTfF5G3eZ2nLC7GiS4zuxP7uiYk1rF",
+      "sig": "32iKuoQLFrumcr6WNdoKTPnw5peCZeUjGT2iRXkirfgiAE9TRzMc8DYRCrqPjvartEHThwSM2Mbwbo6wCyP3YJe6",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "4qgnHAPBkjDKianTfF5G3eZ2nLC7GiS4zuxP7uiYk1rF",
+      "sig": "3pT7PaTrpKj39CHALEjKwyAVuRZ65H9fEZio1WWQFA6fULh9mZosiJUZVJBas8m1xwEveCoFB7nGpsZPSQkbbkZg",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 1 s ago\""
+     },
+     {
+      "coin": "4qgnHAPBkjDKianTfF5G3eZ2nLC7GiS4zuxP7uiYk1rF",
+      "sig": "5Xn6Q8dRtJtNaLLMRHQm5uk7vPGR11ZWKsQN1XKn2kA5GVR6sks3cq627m81PKzzJABQpZ39VofT9iRVvb5CyvRo",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "4qgnHAPBkjDKianTfF5G3eZ2nLC7GiS4zuxP7uiYk1rF",
+      "sig": "45q1Pphwv4btiTy32Hj2j4qNMmAbKhL2pkWNwvpRpwiQxbh6gi52sgy6GyGaGFg3Cc8nZYEdR2JdvALp2FBbWP9t",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "4qgnHAPBkjDKianTfF5G3eZ2nLC7GiS4zuxP7uiYk1rF",
+      "sig": "4Xvk2gpBfTmKvbGUc3Gx8Puv5tBoZyRF8M9hfZWQgquPAtLq7xBhFKAuYMgpeeGgkJjgExshVRVgPWkNSCXC1kUh",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 1 s ago\""
+     },
+     {
+      "coin": "4qgnHAPBkjDKianTfF5G3eZ2nLC7GiS4zuxP7uiYk1rF",
+      "sig": "jtSjK1znRBaSeqvQsjwnL1occegEn7nEa5nunHEastndL8tB1KvHUZfEjpvsjp6Xf3fBArFmm15WixwCDu96xmE",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     }
+    ]
+   },
+   "rolled": {}
+  }
+ },
+ "good_cut": {
+  "base": "http://localhost:8812",
+  "recorded": "2026-11-18T20:21:42.195Z local helper at 8ddec0fe2 (main 14ccd9d99 with sol-tape-in-order, and this card; the helper unchanged since 7239c82e4), 10 busy Solana coins open beside the check",
+  "meteora": {
+   "meteora-dlmm": {
+    "coin": "4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump",
+    "sig": "3YaLumaAAjswaVGj87RLFDXNgu2BBfHBk8vcku5fJNgJpxCZYWw3ntZPTHRdVeT2NbF7NFwN9oCv2rkBTUv2innn",
+    "heldAtMs": 1795033092179,
+    "side": "s",
+    "ts": 1795033091,
+    "polls": [
+     {
+      "atMs": 1795033093347,
+      "answeredMs": 1795033093348,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "11685",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 20:18:13 GMT",
+       "keep-alive": "timeout=65",
+       "server-timing": "sol-read-to;desc=\"slot 471065331 of head 471065333, heard 0 s ago\", total;dur=0",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-18T20:18:13.308Z",
+       "x-helper-commit": "8ddec0fe29d85bf5755bb3d98ec91a50cf33d461",
+       "x-helper-source": "chain"
+      },
+      "body": "{\"trades\":[{\"t_ms\":1795033091000,\"side\":\"s\",\"usd\":\"2.12486053718123062\",\"amt\":\"284.553602\",\"trader\":\"ARu4n5mFdZogZAravu7CcizaojWnS6oqka37gdLT5SZn\",\"tx\":\"51dBPXsg4uCSCkb2gkciU8rbg8VLjGDXdGva6uFnrxpkV3Q5UvLVnEbJ6efkBkH38CU2AShZiB3cEDbhWMQHGoZW\"},{\"t_ms\":1795033091000,\"side\":\"s\",\"usd\":\"2.98096285787777214\",\"amt\":\"399.2\",\"trader\":\"ARu4n5mFdZogZAravu7CcizaojWnS6oqka37gdLT5SZn\",\"tx\":\"3YaLumaAAjswaVGj87RLFDXNgu2BBfHBk8vcku5fJNgJpxCZYWw3ntZPTHRdVeT2NbF7NFwN9oCv2rkBTUv2innn\"},{\"t_ms\":1795033090000,\"side\":\"s\",\"usd\":\"0.10713718725313156\",\"amt\":\"14.347475\",\"trader\":\"EV2KR62vhUvYmU3Mdfi1wpo5YkzgDQB7LXYRH1Cmvrg2\",\"tx\":\"583veraKkPTritTV5Q31FaaA6QRrDsbt9DU8eSnhaXZ9nyLZRnuFvuwgBN7feYmPxPXbcejQTMGhx5aBgXJZ1nYM\"},{\"t_ms\":1795033084000,\"side\":\"s\",\"usd\":\"95.04276002879114916\",\"amt\":\"13207.622707\",\"trader\":\"AC6jnQBoS68NwdfYNx7Cq8Vhpp5r8ZX4CfzgmxxbPg9T\",\"tx\":\"2eRqPrTbmi4XeyeFtxLE25T6nn8W6DihBnbZfkRN7Q8jTFYoJKCiYQccup1HMFAghGffuF4joTCafXKW4J5DnRfB\"},{\"t_ms\":1795033083000,\"side\":\"b\",\"usd\":\"29.39550580564865136\",\"amt\":\"3924.805594\",\"trader\":\"ARu4n5mFdZogZAravu7CcizaojWnS6oqka37gdLT5SZn\",\"tx\":\"3hGpXoNDFSJfbYyhRkSKGEN8AND8BUyJkq8XXTJ2GPntTueyagYE5wXE5DtP9WhZbzP1Z7f8wRNGzN15G5dJcUtc\"},{\"t_ms\":1795033080000,\"side\":\"s\",\"usd\":\"2.1511900157123957\",\"amt\":\"288.262625\",\"trader\":\"3PWRJaqZQS7piAYGJUGjgtLMcYQ9twLmxZQup4guMKeq\",\"tx\":\"4mWfC88WA2RThJuSknT5heMBRGFoLpHFSkVB6RDHmqEzoKFEn1tvxBkckjG84j2BR3LYVVoMHdGXGmWWry7iayAa\"},{\"t_ms\":1795033075000,\"side\":\"b\",\"usd\":\"0.0944302951829828\",\"amt\":\"12.618235\",\"trader\":\"Fm4SSoKjs8NdWR9Rt4DXEDGGwDmAMToMvNYPMCWXnEGS\",\"tx\":\"5fKV6JG7MYtkRvf8bpPypzYYh3DrYkmHY7cVbKrCPDTyFDTeaxMCdBhY1aBP2CUXvUDjjzz58pVkRLRX9kFBjbeu\"},{\"t_ms\":1795033072000,\"side\":\"b\",\"usd\":\"4.8049937840654908\",\"amt\":\"642.087836\",\"trader\":\"5yr1oxnBJrTLBTNhosFJaZVYa1Tedb6DVPauixrgWQ8E\",\"tx\":\"28sZiwHNbonZLzq9Bk9QPPMs2sKBtj1sKS2itEoCobB5MsoPjC6bTqioZD1V3CEK9jERg2smHM88azJiSVcwCWa4\"},{\"t_ms\":1795033072000,\"side\":\"s\",\"usd\":\"5.5758157955125195\",\"amt\":\"747.167512\",\"trader\":\"kUhU2g4yn9CzwAfhqb4e7Ke5t3PUwwnFpWF4MTQFqwn\",\"tx\":\"2EWfiTXSmqLpywHpz4iwiRoFyFWpVazwAK7vorUQAPeh6rv61vhHwx5c3dbPGA8QQxRaqEJhoBHXNWddn6pA5NpP\"},{\"t_ms\":1795033072000,\"side\":\"s\",\"usd\":\"0.3899011800143308\",\"amt\":\"52.247336\",\"trader\":\"ARu4n5mFdZogZAravu7CcizaojWnS6oqka37gdLT5SZn\",\"tx\":\"41cj8pNRed3JFL6exRAZNRJ6zG73kotEURcUd3a6zcv2owyvDisQx9JLNY1uqE5CwwHNthQeJiHqJP6fgdpbbsHD\"},{\"t_ms\":1795033071000,\"side\":\"b\",\"usd\":\"9.7915242407036415\",\"amt\":\"1308.555977\",\"trader\":\"ARu4n5mFdZogZAravu7CcizaojWnS6oqka37gdLT5SZn\",\"tx\":\"waNRX5Ux4ceKpF7Yug3eJwTbpqGxGSCEZXmmGidX1kHq7QfdV5L8PJFmPFiPQZf7TkvsGAcz5G18LKHzZDVN3Wn\"},{\"t_ms\":1795033066000,\"side\":\"b\",\"usd\":\"72.75753837715\",\"amt\":\"9728.559147\",\"trader\":\"Fx6yA3HgoqHB9kK7MU3VStewUiTJH7EkH34AvhTWDu7B\",\"tx\":\"7iXVXCRzx9oySWENvoqhMAJSWwYuaUQLNZELoeMqLLkEtL2qSzkVsHuooYgANmbrQusDBSzY4w2U3xgMqpnWZye\"},{\"t_ms\":1795033055000,\"side\":\"s\",\"usd\":\"71.9079319012713814\",\"amt\":\"9646.723493\",\"trader\":\"HytZifjwoMUUvL63gWzpcjsiDA78ifvHcfYCVSBNuqCQ\",\"tx\":\"5QRLKumLkEARXyBkNa5JG7Urf69ht9t2osRxg7FcPmBatENPhPsSHmjPM5PsM556rXBDFykiBdH61dzucq7veLd\"},{\"t_ms\":1795033055000,\"side\":\"s\",\"usd\":\"19.6608585575901093\",\"amt\":\"2636.038508\",\"trader\":\"GNoYNXQ66dnTqcR39nKi2QJSizjxvHHAy9GSbNszQuuq\",\"tx\":\"2YnGPatU79qkMxwmmeWRCBMWBHmYRo9wkEaqxVr9XpHEYE1fzcE2s7wkuavAQGxLqH9h3maxqHKAeUo12Ja3R84P\"},{\"t_ms\":1795033055000,\"side\":\"b\",\"usd\":\"73.0864273\",\"amt\":\"9797.537374\",\"trader\":\"HytZifjwoMUUvL63gWzpcjsiDA78ifvHcfYCVSBNuqCQ\",\"tx\":\"34MHNgwXJPtFRXaoMNxFduUZtZ9U17DfdmKz17JoPTjBqBfPfTD8ER9ELdGRXUaHBShia231jjimT4TKFi6WYgVk\"},{\"t_ms\":1795033055000,\"side\":\"b\",\"usd\":\"138.86421187\",\"amt\":\"18640.522589\",\"trader\":\"HrC5wbUdiph349X4KqLJ4iQyFT3DypjyFLTv7uKxqrzx\",\"tx\":\"53i8Uyb265wEqNwsGYRCzy8uxCrVmdSqkKTKwohy6TYawQ5Gzy3gfpa6teqrR2d4LZQsWDXSvnv1HqvoeZS2rvMm\"},{\"t_ms\":1795033055000,\"side\":\"s\",\"usd\":\"0.0038952142293808\",\"amt\":\"0.523611\",\"trader\":\"A8A9GoxfmcjY2QAQ8tYS98SqDBF6hUFDmxAKBsLw29sL\",\"tx\":\"2dAJzVdxcWq7E6CKFixfwcGxnHbHzKaDhTDUkbBmfGicQiGe13C5cr1kNvvhBGzC7nELBdAmXZEeiMQRn5msXvSV\"},{\"t_ms\":1795033055000,\"side\":\"s\",\"usd\":\"0.2504661631471178\",\"amt\":\"33.577825\",\"trader\":\"Jd97uyw9wb6PxV2jawAjS7aU6XUMHbcfn4En8xRP7Mg\",\"tx\":\"3gdGQxveiGnEA6bk2tvEL7v8cVbgZdfrVDHdU57gnC2QBBSUtiDgeXt39gtCpQTHAnjqfWgnWet7Kq3vM9ECQxDi\"},{\"t_ms\":1795033055000,\"side\":\"b\",\"usd\":\"12.6602390870509504\",\"amt\":\"1696.352259\",\"trader\":\"BkbtvEGSyCqChwzwA9KJFWdLd4RwW9Ps78WUgpQ1Qrun\",\"tx\":\"5RXEqzKuqVSs7XA7vwEmEtfvLgjfuT6wMrtnqM71G2J9C9eektUKqQshELdb96aZZi9nVnm9MNNtkmM9G5YsE8Jf\"},{\"t_ms\":1795033055000,\"side\":\"s\",\"usd\":\"71.1576440331792788\",\"amt\":\"9535.228729\",\"trader\":\"CQwT1byuHgjKnL6vzmuNaAywKfDBVxDmFVgsQDBWxcWt\",\"tx\":\"2VWu1rTWWc6YsBAk8Dxea9DpiaWSL2omBbtJapjFwrNwybbDrnt9PiQUuaCAD8pkj85H3Fyzv6HLEoA5yrCAJoQ6\"},{\"t_ms\":1795033055000,\"side\":\"b\",\"usd\":\"71.1254041483687028\",\"amt\":\"9535.228729\",\"trader\":\"CQwT1byuHgjKnL6vzmuNaAywKfDBVxDmFVgsQDBWxcWt\",\"tx\":\"2VWu1rTWWc6YsBAk8Dxea9DpiaWSL2omBbtJapjFwrNwybbDrnt9PiQUuaCAD8pkj85H3Fyzv6HLEoA5yrCAJoQ6\"},{\"t_ms\":1795033055000,\"side\":\"b\",\"usd\":\"55.5538569799549768\",\"amt\":\"7453.692804\",\"trader\":\"DtvmxrTACskMG2W8a6KXgSemUfvyNVeQTgfpJoGvMVKx\",\"tx\":\"2NFHXJyueEnBdSD4uEWQ4WsADhum8q1DArT4FLynTxbPaPPHfLnR7WEfDbRTdav5vTKH86P9eVUd95qV9hgAuo3J\"},{\"t_ms\":1795033055000,\"side\":\"s\",\"usd\":\"276.8450564507586924\",\"amt\":\"37214.337318\",\"trader\":\"G2183s761D6BH9LNTgaWebgM2Gxb6SCvxwxLVLGW7usP\",\"tx\":\"2h7Bs73WqY7c3mBEjxHQy1uvaRKJTLwvRiGFPPmBEZSQpReLQZYiW3ZXyjjXc2jtt675ejsUALi9ZyXdB5N6V6Vr\"},{\"t_ms\":1795033054000,\"side\":\"b\",\"usd\":\"0.1671531905935926\",\"amt\":\"22.418316\",\"trader\":\"GGEZ2xUH1LYH4WUgXNWoxTeUdeJt7iPRB5hdj9t4aDAY\",\"tx\":\"RNa9rhfB6qj4Z68e7byb9JDgGekRubaBKJDRYUEqnubxc1yWZRYwRWfpyiNkUTyAmE9MLtZRGoxugDMZ9yzKRKq\"},{\"t_ms\":1795033054000,\"side\":\"s\",\"usd\":\"25.1877547569400741\",\"amt\":\"3368.423333\",\"trader\":\"4B8srvotmWddTZuMt4RrBQrnx1sQj2Z7FaXgLbWvpVdd\",\"tx\":\"21frF1axb744uJ236HwvaxxqZVkE6AsrvEgHq37LgywMrCg9Qwb3wBWepakBNQKhxwF48mA6KqoUubNHqzJr9HW4\"},{\"t_ms\":1795033054000,\"side\":\"b\",\"usd\":\"25.1815032362945413\",\"amt\":\"3368.423333\",\"trader\":\"4B8srvotmWddTZuMt4RrBQrnx1sQj2Z7FaXgLbWvpVdd\",\"tx\":\"21frF1axb744uJ236HwvaxxqZVkE6AsrvEgHq37LgywMrCg9Qwb3wBWepakBNQKhxwF48mA6KqoUubNHqzJr9HW4\"},{\"t_ms\":1795033054000,\"side\":\"s\",\"usd\":\"137.1184215228158912\",\"amt\":\"18389.127357\",\"trader\":\"HrC5wbUdiph349X4KqLJ4iQyFT3DypjyFLTv7uKxqrzx\",\"tx\":\"5oyYakmPeZX1wSc9T9ADxiviYVSViQcQgp7Ynj4kRAxSuTyAN273KnaCCy7JkuR42DmpruoziKU3M8L6C2QY2eow\"},{\"t_ms\":1795033053000,\"side\":\"s\",\"usd\":\"0.0899785278097125\",\"amt\":\"12.033227\",\"trader\":\"A5vwMZVPTEJ31HHpWRAhKAxyoM2SQqbzAnYHbfsbCm7x\",\"tx\":\"2DM6Tab5bS1eeyGGC9wQ9qcJHeS88hVgi9ieRJYeRtsjAU7QPhdDB8KEBXvYeSDsvd4Jk91Bqa1Gc881MV5P6Nwu\"},{\"t_ms\":1795033053000,\"side\":\"b\",\"usd\":\"0.0894326452842088\",\"amt\":\"11.977437\",\"trader\":\"A5vwMZVPTEJ31HHpWRAhKAxyoM2SQqbzAnYHbfsbCm7x\",\"tx\":\"2DM6Tab5bS1eeyGGC9wQ9qcJHeS88hVgi9ieRJYeRtsjAU7QPhdDB8KEBXvYeSDsvd4Jk91Bqa1Gc881MV5P6Nwu\"},{\"t_ms\":1795033052000,\"side\":\"s\",\"usd\":\"31.5672699816155362\",\"amt\":\"4228.976338\",\"trader\":\"CBgfykCggFx7WjhjfZqZLqCe5varhE5UFUtyroY6fCCM\",\"tx\":\"5u7QpKV4WJ7qHB6zDREjYKbz3spQERg5MvXZRtPBvZwTEF65z7eCRYe62jdaignMqSLDuLxVqz59yVVWzwMwS2KB\"},{\"t_ms\":1795033051000,\"side\":\"b\",\"usd\":\"57.8844504216\",\"amt\":\"7730.401557\",\"trader\":\"HBwydibDW2tkFdX3wUV5mPTeyT9UxBp5dF5WN7UE8J9K\",\"tx\":\"23oqUmswEDw4CjvEzVre1qbzJdGxHWjhCAWbhQH4o7qMALb4BdFL3pUrq1ujMXoX4TCRqQyg5gBChczE3rqVpTzU\"},{\"t_ms\":1795033047000,\"side\":\"s\",\"usd\":\"0.1433086706005403\",\"amt\":\"19.166323\",\"trader\":\"D5YqVMoSxnqeZAKAUUE1Dm3bmjtdxQ5DCF356ozqN9cM\",\"tx\":\"3rPWreZWboEYw8yLFD7A62aTkPmdrvoPaPGT3CiptEohunZxVFN6W3r7eM4qM2enjgUgpRgNW2WGjsVV4R2UCEf9\"},{\"t_ms\":1795033036000,\"side\":\"s\",\"usd\":\"0.1588839729495887\",\"amt\":\"21.253947\",\"trader\":\"GkLLZovX7A8RH8CtoL5JPEeAa7QE75WetyYNH7rxUpAX\",\"tx\":\"613k5KQvScUFfWfj4Pn5SeDpS2XUWwev9KVZhHM7gXAqFLrZHJnfysmf5wAn44XpF13PZW6tZU5xRmnvdUvdrgWt\"},{\"t_ms\":1795033036000,\"side\":\"b\",\"usd\":\"2.8986767733917985\",\"amt\":\"387.264595\",\"trader\":\"ARu4n5mFdZogZAravu7CcizaojWnS6oqka37gdLT5SZn\",\"tx\":\"kUQS18gf9ooa1HTFFQLKCFSsiWgmzzVwDLNr6LbcMW9t1ov2ETHfEAoeXVdVwCo4ERTCZetWyKGDMzrKAevhyrU\"},{\"t_ms\":1795033035000,\"side\":\"s\",\"usd\":\"4.0813566624290513\",\"amt\":\"545.963872\",\"trader\":\"GGztQqQ6pCPaJQnNpXBgELr5cs3WwDakRbh1iEMzjgSJ\",\"tx\":\"4ERMcVqEQ1UsBRYxBrAkB7TFZE7duEyuvnEQv43cWR6ZxWnoiXH5bhixThp5gAma4qdV5z2NEWJ3Gs3SkKqNjiFv\"},{\"t_ms\":1795033035000,\"side\":\"s\",\"usd\":\"22.3816678163189898\",\"amt\":\"2994\",\"trader\":\"HgJqpu49Ysg9BPDc6zpAVBQg7NUqjaa9JZusRXip4MBz\",\"tx\":\"3KnVNfY8St88dzaHvBtPVJB2EiW4A5ohhU8gcKmbwR1iwR3qgEdru2w6evymPSGQq6RhUKcport1W2vNmv2DQyXk\"},{\"t_ms\":1795033034000,\"side\":\"b\",\"usd\":\"9.950664454667344\",\"amt\":\"1333.243265\",\"trader\":\"Ebjop7yA27Y863fuhnV75TBJRA8CHc3bGn82d7vSr9SG\",\"tx\":\"2ppNnYWuo6wtYDGnfGoTMbyQYxjbquy4bJzZg9ifsHCyZS1v6itgrLZpXzzg7Pk8Yyzuukiciaf4WGMWGqZyWsx5\"},{\"t_ms\":1795033029000,\"side\":\"b\",\"usd\":\"9.79106018519768718\",\"amt\":\"1308.757042\",\"trader\":\"ECPD3ckZNwfFkSCGxTVhWKbyVeQXkyKiFnTRyGpeXDFc\",\"tx\":\"2eESzzBPLA39DDuygMo6YqhXv78rSuPDGPucjieeXzGcPbdz3o1mJ2gUJsapdnsKUP63hnaF5QtejEZhgzAS247f\"},{\"t_ms\":1795033027000,\"side\":\"s\",\"usd\":\"5.41979681336472375\",\"amt\":\"725.226061\",\"trader\":\"6MPzHgmCococxmeas1RBsrD3S8nD5vHZ9Rt31ZWuB1Lt\",\"tx\":\"4otvqLrWLVjVM1BanPqyNAQc5gVgL4nFYKyzrS8Yxkwj8ehdGJQSE5Xq16WWwQwpdQMgguB2UudYWJrSwDq1skUM\"},{\"t_ms\":1795033025000,\"side\":\"b\",\"usd\":\"0.10697640500379003\",\"amt\":\"14.347475\",\"trader\":\"EV2KR62vhUvYmU3Mdfi1wpo5YkzgDQB7LXYRH1Cmvrg2\",\"tx\":\"3ckPeqfAJdJALRa67vXNPy3NEbfviiRndhk2FsKLdZQST99HTN2xvwU6pEGyaRvy61wAQNxJNGq9TEY2gFrDSEqG\"},{\"t_ms\":1795033021000,\"side\":\"b\",\"usd\":\"0.02955337177792068\",\"amt\":\"3.950583\",\"trader\":\"9sNsVM8UxAc8memB8GpnUvFAUx2a7kXvQeFNvLF66pqY\",\"tx\":\"dBg6pFmR1qdHXtAzeJQY6n1wJjxFrxyC8S6iPLF42nAPDcB1QnGTQxaw9Vkzxj5puCQPg6jEamxXHhNVfbskeUc\"},{\"t_ms\":1795033018000,\"side\":\"b\",\"usd\":\"8.723886705738\",\"amt\":\"1162.01928\",\"trader\":\"Cr1u7VkwEBWkXnLWWz59iChYUpiKKKiZEerUM3QYUwU9\",\"tx\":\"5qCpcbDW4PPYV4DuzzRd94xP1H8a7kPWzouuiY1wPSkzGznoE7ATK3McFAqFQXiXMy7qFWjSivcS72DNPa6p6Yxc\"},{\"t_ms\":1795033017000,\"side\":\"b\",\"usd\":\"6.46268493574808502\",\"amt\":\"866.799969\",\"trader\":\"H1PuK7RwfhSTsTv1C9HtWsFTT9gB7QLFeNKiaVNHwfFn\",\"tx\":\"9xcjNSJY28TksZwRp5UyrgZ5dzXKa5y2PPQSW9HeELTAkdgHZygPHiDMnJ5EcEhTN9kAqVrXxcmNgV1ZNjgBpJC\"},{\"t_ms\":1795033013000,\"side\":\"b\",\"usd\":\"99.15113956443410418\",\"amt\":\"13218.672593\",\"trader\":\"FnxJfS2G1u78p3zEycuexzdpPQr9E16N7LFf7Lhwo5uy\",\"tx\":\"4PA6EdMBdF464pYXGkkSBUPC7sDHN95amwEcAGUpvDBMd2oiJZR2Q7EKqR62KsN41ffcqQ3UdW8FthkWJDJj2oaf\"},{\"t_ms\":1795033012000,\"side\":\"b\",\"usd\":\"452.546143031826\",\"amt\":\"60471.999623\",\"trader\":\"BmMbeG46HynBfzmLqakrY4nu4yFzbYKhNgMcYvW12bVw\",\"tx\":\"4nSqJ6nu3N8AhRnaKaShkXhZonmviVA4cg15HH1Y8kppcQrivvUi9eXdiKUYMREd3sqYDNVLLFVc3qsyux96LFY5\"},{\"t_ms\":1795033009000,\"side\":\"s\",\"usd\":\"216.50468459536052145\",\"amt\":\"28999.627008\",\"trader\":\"4ETcnpXZ613FqpoaN53n1wS1cMtJcVk7ZShEef6sQdGE\",\"tx\":\"wTavgENQzDe7ECVrMEha5g97wheWfkGQfW3c3FgdMJqbAczJvQpT5KsJFeC44tPyyytuCWWHK6VKsw9cYZnwMjw\"},{\"t_ms\":1795033007000,\"side\":\"s\",\"usd\":\"111.57456629369759547\",\"amt\":\"14913.589806\",\"trader\":\"77H4ozFy3cZT54rsGLebyDB5nHfczakZdSEzF35aqMVX\",\"tx\":\"2zB7xApoJFJVw948vu1KryxvAifZ6mx1GZenuNWj5upSXAB4iWkomQDLEa6q3cJnGz7vXbPApCQq1MhrumzhRtqM\"},{\"t_ms\":1795033007000,\"side\":\"s\",\"usd\":\"109.20017603917712952\",\"amt\":\"14575.720755\",\"trader\":\"Aud2Dfp4x2Dxcbmb6vYiLhSGSrfUZMA4nky1XPtVZmNa\",\"tx\":\"4oD2dPdz5bTK5wJNvjkbhHRfHRZxoAt4GGXWK4UgVnqV2NM8UKVsohZMhNBUX791VFoWtpDoEsigwARuxPLrTdTD\"},{\"t_ms\":1795033007000,\"side\":\"s\",\"usd\":\"119.56920277861280268\",\"amt\":\"15936.54412\",\"trader\":\"HL2kH8yaDDQZxA35uc6TFTBoLpes731WKoPZUM2wUWVA\",\"tx\":\"5vFqDQXBEgBc8z9qehtwyg2mojt1F6CxFmZDbkMS4arhsaJu9NjyJaR7fGj3efjrXeEwqSTHsnXUCvuA3zuyLH3T\"},{\"t_ms\":1795033007000,\"side\":\"s\",\"usd\":\"0.03435180172358766\",\"amt\":\"4.575034\",\"trader\":\"8XoQgr5HvxEcyoP2YLoYHTqcvDADfCBNx9m3gpzY8EUE\",\"tx\":\"5MHnmQU2owbAdMUgYTwufjZicyrfcnrRqMJY7JFzmSafjFZW74GP8oWvUFoXmHeUppzz9BcBzDDK9bcn5PsCFXUJ\"}],\"whole_ms\":1795033029000,\"src\":\"chain\",\"as_of_ms\":1795033093308}"
+     }
+    ],
+    "reads": {
+     "https://api.mainnet-beta.solana.com": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 471065334
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471065324,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     },
+     "https://solana-rpc.publicnode.com": {
+      "context": {
+       "apiVersion": "4.4.1",
+       "slot": 471065335
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471065324,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     }
+    }
+   },
+   "meteora-damm2": {
+    "coin": "DBRiDgJAMsM95moTzJs7M9LnkGErpbv9v6CUR1DXnUu5",
+    "sig": "4giSZVuSncdHaRfz6hyU33PPg15Bjj4rNbTH6Zz6Cb66DVYGdYjevDFRFANye7EbWgSE3fCRMXsRYBm8FZ2dFD27",
+    "heldAtMs": 1795033190591,
+    "side": "b",
+    "ts": 1795033189,
+    "polls": [
+     {
+      "atMs": 1795033191624,
+      "answeredMs": 1795033191625,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "1673",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 20:19:51 GMT",
+       "keep-alive": "timeout=65",
+       "server-timing": "sol-read-to;desc=\"slot 471065783 of head 471065790, heard 0 s ago\", total;dur=0",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-18T20:19:51.068Z",
+       "x-helper-commit": "8ddec0fe29d85bf5755bb3d98ec91a50cf33d461",
+       "x-helper-source": "chain"
+      },
+      "body": "{\"trades\":[{\"t_ms\":1795033189000,\"side\":\"b\",\"usd\":\"0.0063586939866662\",\"amt\":\"0.474873\",\"trader\":null,\"tx\":\"4giSZVuSncdHaRfz6hyU33PPg15Bjj4rNbTH6Zz6Cb66DVYGdYjevDFRFANye7EbWgSE3fCRMXsRYBm8FZ2dFD27\"},{\"t_ms\":1795033037000,\"side\":\"b\",\"usd\":\"0.0066067206822108\",\"amt\":\"0.493348\",\"trader\":null,\"tx\":\"5dVgqnS22HSriQtaQKQfHtWeGV4rpcVNcDqnwqm3gBgneFt3rnND7YwuEfiTpeN5thXTuYTkn619RpK46notAPkX\"},{\"t_ms\":1795032902000,\"side\":\"b\",\"usd\":\"0.00855907618284334\",\"amt\":\"0.640218\",\"trader\":null,\"tx\":\"2xjqhcQMaLz4U32bDnPTz1tSsGSXVhBs4xcygMfSNddimRszNboz8Q5iBToLs7b93t7x3dZhsptNQ3x8VgocVYWC\"},{\"t_ms\":1795032282000,\"side\":\"s\",\"usd\":\"0.14624946123880568\",\"amt\":\"10.67308\",\"trader\":null,\"tx\":\"NkcChoYEQd7w8Z6JAXNTzisjiviTxXwvqXwn69rwtNGsK7Kwch9g13NTopMEnX6P43U46sDxZftXrywR13RxPae\"},{\"t_ms\":1795031468000,\"side\":\"b\",\"usd\":\"24.07500113370999496\",\"amt\":\"1740.125884\",\"trader\":null,\"tx\":\"mmEm8MrogtBQsqMdDYwhh7moaz4id2noowSZUfcnibmYwuUk9LMLgSeAMNZJH1Zib1XYbtxUx7M2HmnWuBg6RpH\"},{\"t_ms\":1795031464000,\"side\":\"s\",\"usd\":\"0.00073257913550047\",\"amt\":\"0.05346\",\"trader\":\"3U2tSmABCEnt9ePiRf2kyqgja3Bh58gtHjHvdWrZv7QF\",\"tx\":\"3EhN8jYFPuCvSUKZJpouZBUoJFmThGRsdm28eXwk5tEKKpdcCjVt2c1WJFpeeo1yuzPjnkCmEuVdTU7eW73rBZas\"},{\"t_ms\":1795031461000,\"side\":\"b\",\"usd\":\"0.08069658912148584\",\"amt\":\"5.863216\",\"trader\":\"ARu4n5mFdZogZAravu7CcizaojWnS6oqka37gdLT5SZn\",\"tx\":\"42oijYCQFcTaN73LabKD8Zpy46pG6bwCbSUpmdpPJQnV3W8qkB1QApgTmm1ArmUEF1fMs46kK9kJ1u2Pq84egNEQ\"},{\"t_ms\":1795031461000,\"side\":\"b\",\"usd\":\"7.74687890813795097\",\"amt\":\"563.048095\",\"trader\":null,\"tx\":\"42oijYCQFcTaN73LabKD8Zpy46pG6bwCbSUpmdpPJQnV3W8qkB1QApgTmm1ArmUEF1fMs46kK9kJ1u2Pq84egNEQ\"}],\"whole_ms\":1795031461000,\"src\":\"chain\",\"as_of_ms\":1795033191068}"
+     }
+    ],
+    "reads": {
+     "https://api.mainnet-beta.solana.com": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 471065791
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471065783,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     },
+     "https://solana-rpc.publicnode.com": {
+      "context": {
+       "apiVersion": "4.4.1",
+       "slot": 471065792
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471065783,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     }
+    }
+   },
+   "dbc_curves": [],
+   "cut": {},
+   "rolled": {}
+  }
+ },
+ "bad_all_cut": {
+  "base": "http://localhost:8805",
+  "recorded": "2026-11-18T19:41:37.267Z local helper at 7239c82e4 with WHOLE_PER_S 0 (a scratch build: every stream whole read past the budget)",
+  "meteora": {
+   "meteora-damm2": {
+    "coin": "9cvGYYrx66gEdUw4dsNdsYNUcb7i8pKpUXP7mT27aiFB",
+    "sig": "4WvNu14RGToQruZqYeCf7rGj9Wd1VVApekqsEnvpfkGatMmFSwaAa9VCLbVJFYoHwyBQzPwzPmtENKvPe2wC3wku",
+    "heldAtMs": 1795030721490,
+    "side": "b",
+    "ts": 1795029982,
+    "fromTape": true,
+    "polls": [
+     {
+      "atMs": 1795030721490,
+      "answeredMs": 1795030721493,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "11951",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 19:38:41 GMT",
+       "keep-alive": "timeout=65",
+       "server-timing": "sol-vendor-read;desc=\"rows read 516 ms ago\", total;dur=0",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-18T19:38:40.976Z",
+       "x-helper-commit": "7239c82e41c8073c97388b01dc0e6b63fafbc14b",
+       "x-helper-source": "coingecko"
+      },
+      "body": "{\"trades\":[{\"t_ms\":1795029982000,\"side\":\"b\",\"usd\":\"260.330689268206905067\",\"amt\":\"6255163.313999\",\"trader\":\"DJ9Q7B7dWBzXBdnoKiyWVY7b7i2BEc1me4HYCaQ3FEyZ\",\"tx\":\"4WvNu14RGToQruZqYeCf7rGj9Wd1VVApekqsEnvpfkGatMmFSwaAa9VCLbVJFYoHwyBQzPwzPmtENKvPe2wC3wku\"},{\"t_ms\":1795029982000,\"side\":\"s\",\"usd\":\"440.253086993949204596\",\"amt\":\"10657104.238457\",\"trader\":\"2scpbbgzCVfEHkxh4DVXscepUNoyepqX7jMqCaJQrBzc\",\"tx\":\"2b5y4uqFtzesjnJFh6g4gQjvdzur25ZnCnhxh3yXVfeemWdNC2L8gRJob6RSVdYynZ8n7Z85zPg221bhGYhiPCdE\"},{\"t_ms\":1795029982000,\"side\":\"b\",\"usd\":\"0.020173798262504994\",\"amt\":\"490.12635\",\"trader\":\"4sAgbWYQ1jQQD1cNutZhpMZdXRt1QdGVCKqrkhmXg7FZ\",\"tx\":\"4X8NvC2Bjcy3Fsz54CLosP4Z6CeWPm2orpHmWxKacyNCF21sm2Sqjs1S4wBxQPw8x5JyE8ANytsta2QAF3WoTzeE\"},{\"t_ms\":1795029982000,\"side\":\"b\",\"usd\":\"0.019166660784163428\",\"amt\":\"447.23389\",\"trader\":\"5Qj5USUJE7PHA3TQrQoMSPmR8PME1fWptTBsTWyH5qh2\",\"tx\":\"uQG2wtwvSJ752mBCUmvHfZmn75dXH91zKXL2kkyJbRkUos9TuTYSDAnWrchH68PD4f3rvGKzrJSqigJwv3GyiK7\"},{\"t_ms\":1795029982000,\"side\":\"s\",\"usd\":\"502.478616151070185619\",\"amt\":\"11965100.97893\",\"trader\":\"6pcNtgsyQCeErW1pJ7Jp2JCjvZDriv6Wcg4A2xyvvzqG\",\"tx\":\"CgcZKgwrPpBgiysYEmadRqmHPJQxYTXSXcZMRADPkruRoRTuTaF3eYXvMywaAwacpgbQqtqLcQKk7FmbEXBMK8r\"},{\"t_ms\":1795029982000,\"side\":\"b\",\"usd\":\"22.833052545493525623\",\"amt\":\"533271.72805\",\"trader\":\"FYRG7MJCQuyhM6yBa5HWcikFGzvLpW94bMkGUyPxkyEd\",\"tx\":\"5xMMf4jxdunh8nAFY4u2AqN4qupDarbbsLp1UfdWJm2cajK4aHxUDBrjE8xRd3jVEQmfSDydZiW46nz34pgAmr5f\"},{\"t_ms\":1795029981000,\"side\":\"s\",\"usd\":\"317.735812234160058384\",\"amt\":\"6995939.150838\",\"trader\":\"4tKfaBbqhrjd76wnnc2WZk2crinWTj9Wz8amTAXCyveX\",\"tx\":\"GUBBPqWLvDtmkeY29zSuHZpSnqPLnwN315PCtLtJRivkxQAJkiAsqgdNBJeoUjBRdJ7TTi8TXKSeYt6oNJQNUHC\"},{\"t_ms\":1795029981000,\"side\":\"b\",\"usd\":\"0.009923691625743243\",\"amt\":\"221.175303\",\"trader\":\"8KZMJmy8bCpTXfPkyfjFhGQSAtvP3HZVtzMU1zMfrm1E\",\"tx\":\"ajWcQood9qqxBYg5XcgkfB3uKY1a6JWvzb95CvMzxUtWLNNnH3ALw1prgd2fCahdn4rBEAb1eyyYdFoYPds9xsR\"},{\"t_ms\":1795029981000,\"side\":\"s\",\"usd\":\"0.217648899175750859\",\"amt\":\"4733.719984\",\"trader\":\"BvLLAYmxDMGBA7e62CjZZ7j72czYqtJTcqNMbfNFKZkZ\",\"tx\":\"5PmY5NB3dw38YzKHMmijzbJxYeFcb5K3Kg34DwzpEYojjSRhmdN3kDtDJghU2x63BawHAbsrTvCB7uFocA6nkFak\"},{\"t_ms\":1795029981000,\"side\":\"s\",\"usd\":\"236.931490722965980873\",\"amt\":\"5484336.370806\",\"trader\":\"CHeoY3es5YpYYbSeswuP5ZJKmVEufivVZZvkehsspPJ2\",\"tx\":\"5L6vkSLwUmHwUvoMBNxo4cvEHArBf8ondcr2uSXbWJ8YqyyZc8ySGq5adpT5QzWf7Wdp6cfUQyUkB7143bdShopa\"},{\"t_ms\":1795029981000,\"side\":\"b\",\"usd\":\"236.954743701267416476\",\"amt\":\"5484336.370806\",\"trader\":\"CHeoY3es5YpYYbSeswuP5ZJKmVEufivVZZvkehsspPJ2\",\"tx\":\"5L6vkSLwUmHwUvoMBNxo4cvEHArBf8ondcr2uSXbWJ8YqyyZc8ySGq5adpT5QzWf7Wdp6cfUQyUkB7143bdShopa\"},{\"t_ms\":1795029981000,\"side\":\"s\",\"usd\":\"611.73447890558410067\",\"amt\":\"13961744.759734\",\"trader\":\"5a5DxYGM2SRVcHJq8VNnu88a2qXa9LxqYLGrDmcAw4bn\",\"tx\":\"5isnYdGi5ExA1KGnt4QYamKbpYguNKUyqomECL3x23XMbvtia3HALPwbfsxVBRYFJBjKQpHT6oZAEFKPqc75uUFk\"},{\"t_ms\":1795029981000,\"side\":\"b\",\"usd\":\"0.014866159529258245\",\"amt\":\"347.519263\",\"trader\":\"2dEHrVYT2ndXLzPzuzPZahtwrRHQaQuhrUngjw6pLpEj\",\"tx\":\"4s5qudSavpHj16dCwAaAHH45xjEwg82N3p73zit2M3FNyKzbc36HJohrt1sWCxTNMFwZjN73ePTHZefoVAFD4ygM\"},{\"t_ms\":1795029981000,\"side\":\"b\",\"usd\":\"5.361065537773414933\",\"amt\":\"119461.215759\",\"trader\":\"44mbBv43fojhHd6s2ydxY5gmoryetu13rHdKwsgvQChc\",\"tx\":\"4pXLuY7ShTsy2bvZL7dHwSnbszC4b8NCFY3orjJ1MLTZ9hAmiRywXK1u3sMW2KqErbnsct9jpoRETYk8MiZD9GS2\"},{\"t_ms\":1795029981000,\"side\":\"b\",\"usd\":\"68.690904235822592017\",\"amt\":\"1497769.199981\",\"trader\":\"CzhPuXv8ZGEZdpCA1i43Yvweqtfa6KEr4DkqMBhfoaEc\",\"tx\":\"2pDk8xqsBaAjSCLTQVnaJz8soxF73ab8PwgoYvJRUteDJd4qQ7shRsubzbr4YUvgj3xZHRdvjDNqxi1EHBLFqdPv\"},{\"t_ms\":1795029980000,\"side\":\"b\",\"usd\":\"0.027475906107729078\",\"amt\":\"600.682527\",\"trader\":\"HMAzYcgGrJvJEPcBN5qZ56F25kecXsMeoaDb75wPjYQf\",\"tx\":\"2YLVamNWKa9rpcBJzudLkRw6DUTuXjhJBC3sa1g9d916iphiPPh1jhrhv95qCUTxwcBmVXCaxuhJodrb5CXKnmYq\"},{\"t_ms\":1795029980000,\"side\":\"b\",\"usd\":\"0.012763001546816088\",\"amt\":\"279.025885\",\"trader\":\"CtPQBX2w8gfSbnsjVhSF99Ho5LA78BV9XnfasZMUGqMp\",\"tx\":\"3CuEMeiMidZSc79X3zVRF71anvhxoJiDrGxp9R3wzxJLZhPi2R8HPCDx2A3akENaRe9PabbXKSUeepaPjbZrZVRM\"},{\"t_ms\":1795029980000,\"side\":\"s\",\"usd\":\"586.316262840504245975\",\"amt\":\"12536518.976396\",\"trader\":\"J19KKhNe96Dk4yqRrGuxegePMAsYqEU6efEMVj1Mr6bj\",\"tx\":\"3qovYznSCVaDSKt5tb9MQ96guG8ufPgL8s3B3GRMQTWo1sNWMDUrH63xmMB1RaH3KXfEzZS8RjcNPLuDKfEat6HD\"},{\"t_ms\":1795029980000,\"side\":\"b\",\"usd\":\"0.031082166608017358\",\"amt\":\"649.861123\",\"trader\":\"768a8H7DJJXWdfEe51tQMu45AUjdsxTPnL1XMdp3h4ke\",\"tx\":\"2r19ogHCBSfDbE227UUivenRj9rYeVeQBvc8w1am1d2JPjEXPR2uMe2voaQyjT8HsnMiu4uUCuxZoF8swubArpm4\"},{\"t_ms\":1795029979000,\"side\":\"b\",\"usd\":\"6.807580822919048693\",\"amt\":\"142368.532874\",\"trader\":\"EFfTX7TCRSLjiY7WZDc4b7QWg2TWbcXWbytcc4bwEPhD\",\"tx\":\"dAjLFe4ENq9hNfQkEcjwJqmTW1vFjzUdyVGksKEwBZBPHKN2k9tFHTuuK5xzQxkcVegMKE1YHkXpbdHLzkpvm15\"},{\"t_ms\":1795029979000,\"side\":\"s\",\"usd\":\"460.964684161875463572\",\"amt\":\"9479172.688503\",\"trader\":\"4w2mdYKpuDBzs7J5sgGGJ5MCtWLYNxpyCndwLbU423HT\",\"tx\":\"5yaF2ehVrT2boxQRPYVi5NQd7ZfTpU7CZmFVsfbvdJhQsC3ZCoBDgQtxkKbE5NEZFuru2TWGGgeBxKbWR4mdhqob\"},{\"t_ms\":1795029979000,\"side\":\"s\",\"usd\":\"371.641349084354063814\",\"amt\":\"7410044.730694\",\"trader\":\"4bzkaWrR6bwdrWWGaHN7VW3Cn9LAy5riHJax7GkCiitk\",\"tx\":\"3Cnbu8fDeiLuiW6Zc3JzzkcHacSXeL58hn5ntfoFVDCuB6mgSoQrC7eGp33MBRNbtq54ig1qjJvAqpPqxmhToxJT\"},{\"t_ms\":1795029979000,\"side\":\"b\",\"usd\":\"371.677508275843466947\",\"amt\":\"7410044.730694\",\"trader\":\"4bzkaWrR6bwdrWWGaHN7VW3Cn9LAy5riHJax7GkCiitk\",\"tx\":\"3Cnbu8fDeiLuiW6Zc3JzzkcHacSXeL58hn5ntfoFVDCuB6mgSoQrC7eGp33MBRNbtq54ig1qjJvAqpPqxmhToxJT\"},{\"t_ms\":1795029979000,\"side\":\"b\",\"usd\":\"0.021849923938653781\",\"amt\":\"441.609482\",\"trader\":\"CnMr5eVhHeZqbyeWADDjdSrHgKo6E7egQ4Kdqomrj3NN\",\"tx\":\"4ZDT19dtPcdDEKPsyyrj3raWhZajg7RRvpkE7Xmr6cnEqdx5Phf7fyvTgE9iRJcPWzu7gQhnXwvQ4cj4vDX6i3yW\"},{\"t_ms\":1795029979000,\"side\":\"b\",\"usd\":\"121.953858510700745323\",\"amt\":\"2475994.23865\",\"trader\":\"2tRhNF3sQ932FpPJA8Uhiz9Vby4xpAbH7eYA56wpS7xe\",\"tx\":\"39BNdXrw43JE9EpxKnkFpFzcmjA43upVkYdLB2YqSQ3R6FkexjqEcMMhjwy8SJ2A5MWBWaDyiYqmmk951ibw98ue\"},{\"t_ms\":1795029979000,\"side\":\"s\",\"usd\":\"150.258507788079734073\",\"amt\":\"3047769.157108\",\"trader\":\"9RiAjZRnv9yyT8uYhXApPsFEvgN5T1PgssnqPsEKtsK2\",\"tx\":\"5n93yoFVSTojyvirob3SH4WN8By8eZkEi72JiBfiXdYb7JVWsgH8HnYAgxVf7xzazkpVmxNCjm1MFXdpX9WmRDk2\"},{\"t_ms\":1795029979000,\"side\":\"b\",\"usd\":\"0.013297362320112735\",\"amt\":\"268.191303\",\"trader\":\"D6CPzRJZUgEC5EYL7BDcn4izbrXRxJBizwVSJjnykjtZ\",\"tx\":\"5A6VJE23stMGzh2diF2JPTZm9ZgvpYdpGfvFQtGW5jdx7oTqFDWFzVMM9JapmBtsGByNLoEWAkXmiAuSDswBaDQU\"},{\"t_ms\":1795029979000,\"side\":\"b\",\"usd\":\"64.714742844446025977\",\"amt\":\"1275879.668371\",\"trader\":\"FUFxPaeLStdKHk4PRQPVKA5urrSjKtRBjaBEpD1bqSq7\",\"tx\":\"or7xEZ8s9mDBifeJrpxp97MixpV1mgkFm3ZB2LBdhac5Zbiiyd7JUpgjkaGu7nXdTbVHMRy3TWCZb511SP5ZMJX\"},{\"t_ms\":1795029979000,\"side\":\"s\",\"usd\":\"341.630000314469733361\",\"amt\":\"6805021.955679\",\"trader\":\"DJ9Q7B7dWBzXBdnoKiyWVY7b7i2BEc1me4HYCaQ3FEyZ\",\"tx\":\"369LxvUiQUfWGPhvP2GsriAwrTHJkspMdz2QsYYBEBq9kDJSCrHnKFk7oPdANV31tQnquKLH2vyXTQ5rwLLyLmyN\"},{\"t_ms\":1795029978000,\"side\":\"b\",\"usd\":\"0.017006839023422171\",\"amt\":\"336.090111\",\"trader\":\"DasdiDzgEKDiepV1dsErUTFEQGuPHWt8r9Jwqu4uxzQb\",\"tx\":\"4nhMzUPKheQ71Am29d7yZUGr4DohRifaqj7mN7ewrfJpf7Hw4tDsaJgjdEPSDcVX7Lh9PNuhZYaPZoisv5yZnd2x\"},{\"t_ms\":1795029978000,\"side\":\"s\",\"usd\":\"412.091622736113671487\",\"amt\":\"8023619.592692\",\"trader\":\"5BEAWtvwiKnJXqW9njefyYDFvMPcnG81UugfVtiNkSQg\",\"tx\":\"2y1KxfsY6AY5ZJNXmHj1GJvRGieuRjvZAvEY2WoNxcNbjVenJV2My6M8gWmEQCuBgVhcZFy7RsC1WyJ238g1NybK\"},{\"t_ms\":1795029978000,\"side\":\"s\",\"usd\":\"510.586798389322052253\",\"amt\":\"9616639.733179\",\"trader\":\"FUFxPaeLStdKHk4PRQPVKA5urrSjKtRBjaBEpD1bqSq7\",\"tx\":\"5SNEKfeTTgiD4cz56mEsmQ49WVdnz61MSXcWjtToduK6kNkepSDmYQeMiE8xCTv9LxKecPtZbNtvcUC1t2NEWniu\"},{\"t_ms\":1795029978000,\"side\":\"b\",\"usd\":\"0.009460240921094114\",\"amt\":\"174.939621\",\"trader\":\"GofVdHrZU2CmesPJ2HPZSfPUaxUThsZZbf9cdeda4D7G\",\"tx\":\"3B2atXAYrvgxCYyhNJ5W31RcabuZkKmUin8QiuzS4Q6K3Dy4XBY2TKHDnSGY249brZyUtUmD9vFGa9LqfNoW2d9m\"},{\"t_ms\":1795029978000,\"side\":\"b\",\"usd\":\"158.751397493015146672\",\"amt\":\"2952256.770092\",\"trader\":\"22Dj6BNgaJ2WSj3zHGJhfNbSCSoBjtyDPRdp2LrFPs3x\",\"tx\":\"2j5yQST5cHBZYmYLWrEJGS7tYEPkWvaQQnzYfDSL3YiPVJnb1hvjkCMZ1fgBerjQSzr6Q4J9dGQEtCNEgZiNcbwb\"},{\"t_ms\":1795029977000,\"side\":\"b\",\"usd\":\"0.00929112454449034\",\"amt\":\"166.532372\",\"trader\":\"25xP4Czuvi3cyRgZGPZbNJ4cWiYuyUEoAcJonS3NneMa\",\"tx\":\"4NATioFH2R3CAkb9kMo3YQe7hRMEYTz2FzknLHDCBcKCXjZdhDLB9gA5YiQL5it5hV4oVrSxovRegmxXTqPFr6zb\"},{\"t_ms\":1795029977000,\"side\":\"s\",\"usd\":\"603.058082486982239356\",\"amt\":\"11042348.745647\",\"trader\":\"8abSKT9wntLL5RbPj1DNyQmzTk1W5ZhCncnH62SNCjaF\",\"tx\":\"3Fkeu1ndJPnV1Ji6bwFu5LDPv3MXhH8Vo4TJpPwdu9jydng6JBBzCQ2FvG14JBuKGbnGA7yKdFW6fixx7JRfV1vE\"},{\"t_ms\":1795029977000,\"side\":\"s\",\"usd\":\"560.152790075648291998\",\"amt\":\"9854775.167382\",\"trader\":\"6J5MHoooRo5N3wP78N2WSztbD3nMp3p6RGfQWHrCQaWJ\",\"tx\":\"zDvjBaJBKVVyLQnDGaFMXkK5kKnFJdmj2YQpWkoCphreWQCr8Z5ZRN61E8FjGmbyy8wgFLeQCJC5bpd4u7EXs6Z\"},{\"t_ms\":1795029977000,\"side\":\"b\",\"usd\":\"560.206665188086047684\",\"amt\":\"9854775.167382\",\"trader\":\"6J5MHoooRo5N3wP78N2WSztbD3nMp3p6RGfQWHrCQaWJ\",\"tx\":\"zDvjBaJBKVVyLQnDGaFMXkK5kKnFJdmj2YQpWkoCphreWQCr8Z5ZRN61E8FjGmbyy8wgFLeQCJC5bpd4u7EXs6Z\"},{\"t_ms\":1795029977000,\"side\":\"s\",\"usd\":\"384.483172752403201227\",\"amt\":\"6621519.415612\",\"trader\":\"45xE9eJfSW3RaKeTyGvtLwRf4UY87e5vRpGYSMWmqrPS\",\"tx\":\"SrdzhiVMRr58ZyVoBnYsWnTjngdaVnXd2vbgKLx8LdGRXbKjVAgLVug1H8Juxe1L7qkXEcV4VrgojWwqepjBG1a\"},{\"t_ms\":1795029977000,\"side\":\"b\",\"usd\":\"181.505303486944270965\",\"amt\":\"3272141.248434\",\"trader\":\"6pcNtgsyQCeErW1pJ7Jp2JCjvZDriv6Wcg4A2xyvvzqG\",\"tx\":\"KBB7gsc4Mszx9NeczP3HngFLycAt1Z5115HtfczpMfnUd3WSKCWjtMy3k5atygH1okDJJpgLA6RuovtcRh4JmRB\"},{\"t_ms\":1795029977000,\"side\":\"b\",\"usd\":\"0.020182285748948149\",\"amt\":\"361.965792\",\"trader\":\"DC4BCevQYJykDqyHnWFYi5fM32XnjETC13pjrWjexGnh\",\"tx\":\"67AgCMBRm3a56she5yDzKfm77fkEQMXccaE4V8jB53oqUkRDtQKmYimUnYNPudNAi3mixAwFBuWMu7omJzdTPz44\"},{\"t_ms\":1795029977000,\"side\":\"s\",\"usd\":\"164.799307155623948816\",\"amt\":\"2972997.983203\",\"trader\":\"856XQiXj9tDZx1mnu5ZfUQ5TEEuL31cYcx6NnQXq5Y3X\",\"tx\":\"3K8fb5ib4yf4L7xyTRkjNatBp9d6Lxjp44vpFczHSChBEovTjALKLMCwHEQY9p2X8eoU1Nwmv7umcgaaWa77oeyE\"},{\"t_ms\":1795029977000,\"side\":\"b\",\"usd\":\"0.01506303288109488\",\"amt\":\"256.003977\",\"trader\":\"2Fe8xVizoQbK1zKbLdTpa8MgbCZSvVXa9jYtmt7V6miu\",\"tx\":\"3cJ4P145jtDhYAqDQDbQRqqMWvprSnziCsLHPMGYBqfts9LjxGWMPZ35atgENGVpCFb7iA36jafpRBuNkuPrmYLu\"},{\"t_ms\":1795029977000,\"side\":\"b\",\"usd\":\"0.030992763557058584\",\"amt\":\"526.738271\",\"trader\":\"AeraPVtb72Sb4rAf7qNvBWhgtXuaZ84Wf1zwyRVq1qQV\",\"tx\":\"2xSPwMFha13BYCB8XnfNX1j6yNfLnrcuAvVCuSU6c1aMdJQ1mEWuWYtsCEXcQ8ZefHdk4Gwy7J4xmsRF6NQxUE7E\"},{\"t_ms\":1795029977000,\"side\":\"s\",\"usd\":\"397.73719411228983317\",\"amt\":\"7036528.388024\",\"trader\":\"3cbnxFHAhj6AQJVbEqPgo2SCttPA8vSwu9uAPYMKeFcE\",\"tx\":\"2JuZysXeJAByYWiNq4inyWZoZrKeJvCvynCDYWYGuaNgQR2kfw1mVcXf2oTe4w6fK9hMde34aMkRQb1DwwhKzZzL\"},{\"t_ms\":1795029976000,\"side\":\"s\",\"usd\":\"581.472476677040474234\",\"amt\":\"9697601.216351\",\"trader\":\"CHeoY3es5YpYYbSeswuP5ZJKmVEufivVZZvkehsspPJ2\",\"tx\":\"5rxdQXcsKoMTWv8VXLTtXaYcNfgCRchbURjTPmgEN8atgZQV8xoeCzHVmULTNKsMMzzFW3EBjMBJL9CBHq3Yq8Qk\"},{\"t_ms\":1795029976000,\"side\":\"b\",\"usd\":\"581.528378019835142838\",\"amt\":\"9697601.216351\",\"trader\":\"CHeoY3es5YpYYbSeswuP5ZJKmVEufivVZZvkehsspPJ2\",\"tx\":\"5rxdQXcsKoMTWv8VXLTtXaYcNfgCRchbURjTPmgEN8atgZQV8xoeCzHVmULTNKsMMzzFW3EBjMBJL9CBHq3Yq8Qk\"},{\"t_ms\":1795029976000,\"side\":\"s\",\"usd\":\"141.442234938656305529\",\"amt\":\"2394016.204467\",\"trader\":\"6pcNtgsyQCeErW1pJ7Jp2JCjvZDriv6Wcg4A2xyvvzqG\",\"tx\":\"5WYrK5QnMyGBZU1EgyZJfWGzAVE16higDfKqzEPLGwPu3GQbvQQF8sZx9z7ktthQJe1eurw2rzVkkxGKA52Fc2Le\"},{\"t_ms\":1795029976000,\"side\":\"b\",\"usd\":\"0.012214474340930669\",\"amt\":\"207.710109\",\"trader\":\"41U3KM7QAxBRykUnBhfjDkoGDUNdzqrEHFxDaNhV61A8\",\"tx\":\"3RXsoi7xeemnWeENTyFeLXLqvy6D44rZBW3mSieNou3xodujNpMLu99pM2DoVZX4cKKuNMWM1LDHjVQSs2JcSzPH\"},{\"t_ms\":1795029975000,\"side\":\"b\",\"usd\":\"7.579554729619922082\",\"amt\":\"127696.528201\",\"trader\":\"H2yMm2cjgmMRqDPRpJqncyr4NMvg4Psco8jJ1DBp59Nj\",\"tx\":\"NECfm9cxzud9DS5jjpBgbSyfti4uukJmugE1rwtTd3M1to9RGH53QvBh1XcG1Xu4uWwwBHkHghXzoqmf8S9q8jk\"}],\"whole_ms\":1795029976000,\"src\":\"coingecko\",\"as_of_ms\":1795030720976}"
+     }
+    ],
+    "reads": {
+     "https://api.mainnet-beta.solana.com": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 471054306
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471050860,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     },
+     "https://solana-rpc.publicnode.com": {
+      "context": {
+       "apiVersion": "4.4.1",
+       "slot": 471054307
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471050860,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     }
+    }
+   },
+   "meteora-dlmm": {
+    "coin": "BPxxfRCXkUVhig4HS1Lh7kZqV6SPJhzfEk4x6fVBjPCy",
+    "sig": "2gA7ZmuqauQFoKVSxhgDTzhZy38CYeLkxhAQExymRU5Q6HRCN9n1YVQg6JZetLda2Ymfem5ycfLPsjyTrFPctjnA",
+    "heldAtMs": 1795030750163,
+    "side": "s",
+    "ts": 1795030567,
+    "fromTape": true,
+    "polls": [
+     {
+      "atMs": 1795030750163,
+      "answeredMs": 1795030750165,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "5449",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Wed, 18 Nov 2026 19:39:10 GMT",
+       "keep-alive": "timeout=65",
+       "server-timing": "sol-read-to;desc=\"slot 471054427 of head 471054435, heard 0 s ago\", total;dur=0",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-18T19:39:09.832Z",
+       "x-helper-commit": "7239c82e41c8073c97388b01dc0e6b63fafbc14b",
+       "x-helper-source": "chain"
+      },
+      "body": "{\"trades\":[{\"t_ms\":1795030748000,\"side\":\"s\",\"usd\":\"2.745826\",\"amt\":\"2.717226924\",\"trader\":\"2MP1Bm8bvH6KHPSFJGMrAXAU4PwaF9JprxDy9fAdD25S\",\"tx\":\"3mjLi5QYt83j97HCM2s5t58E2MhakUQCEGzQSxcwnwheEUq251kiJ583P9QDsxQCmwpYUfC22H4qmYkB2PR59qN6\"},{\"t_ms\":1795030748000,\"side\":\"b\",\"usd\":\"290.622018\",\"amt\":\"287.443883302\",\"trader\":\"ARu4n5mFdZogZAravu7CcizaojWnS6oqka37gdLT5SZn\",\"tx\":\"5Wt6k9cE722hNybWFPbsHTCiiLkkMhP9vdqF6D5D6XxMz5Pp5EaZ5buRjarf9tw5f3yE7q7FHiS9AvTFaoTE8s9F\"},{\"t_ms\":1795030748000,\"side\":\"b\",\"usd\":\"3861.121106\",\"amt\":\"3813.201342795\",\"trader\":\"ARu4n5mFdZogZAravu7CcizaojWnS6oqka37gdLT5SZn\",\"tx\":\"5Wt6k9cE722hNybWFPbsHTCiiLkkMhP9vdqF6D5D6XxMz5Pp5EaZ5buRjarf9tw5f3yE7q7FHiS9AvTFaoTE8s9F\"},{\"t_ms\":1795030567000,\"side\":\"s\",\"usd\":\"22.22651\",\"amt\":\"22.060827444\",\"trader\":\"GGEZ2xUH1LYH4WUgXNWoxTeUdeJt7iPRB5hdj9t4aDAY\",\"tx\":\"2gA7ZmuqauQFoKVSxhgDTzhZy38CYeLkxhAQExymRU5Q6HRCN9n1YVQg6JZetLda2Ymfem5ycfLPsjyTrFPctjnA\"},{\"t_ms\":1795030564000,\"side\":\"s\",\"usd\":\"17.621348\",\"amt\":\"17.48800507\",\"trader\":\"Bq1pvmrs49ks4DTy7ts5HDGoALaGhC81upSyZ9YttMLu\",\"tx\":\"4wNwDeZuzwGn7CEX1DsSAjx1e39VxhwtpnH9gMTiL6KoEbGzgCQQNwkf4MwkNxpi7EnHrMSLzwJ3BhREsKYpDZuE\"},{\"t_ms\":1795030564000,\"side\":\"s\",\"usd\":\"7.164441\",\"amt\":\"7.10932263\",\"trader\":\"29eV5LuZwwVaoufKr5ShBejYVP6N4JZ14U3M5rffXsjp\",\"tx\":\"FgkDGgY42jENieJbd7DSay14qdricMtbGBWLfdtPD5awR8goBdasUeVPSeXVgpjG9dyeQ7tbqyXi8HwTqagGTqJ\"},{\"t_ms\":1795030564000,\"side\":\"s\",\"usd\":\"7.16371\",\"amt\":\"7.108074353\",\"trader\":\"BXEHNbKPGeUHaqpaiHR6hc9mQkTZ2WFCXh6kkHkhFnCY\",\"tx\":\"hJzDCYYb8KviSLx4HdyLpvGyJXiWGi5d4AysquNxWLJQEnAoiqF6N5soyzu9xNLXC4yo9ffW1LnbAZ3p6oRnm4Z\"},{\"t_ms\":1795030563000,\"side\":\"s\",\"usd\":\"11.956125\",\"amt\":\"11.862105751\",\"trader\":\"Bq1pvmrs49ks4DTy7ts5HDGoALaGhC81upSyZ9YttMLu\",\"tx\":\"4v3C5ybwVkJg5b5Nk5fSqC1ocsRoEeNRJEfAaDsPMM7JTz7nc355s2KsCr4MSpomFRcQoc74gZXAu4TzmGj7Mwuh\"},{\"t_ms\":1795030563000,\"side\":\"s\",\"usd\":\"7.16384\",\"amt\":\"7.106808566\",\"trader\":\"BXEHNbKPGeUHaqpaiHR6hc9mQkTZ2WFCXh6kkHkhFnCY\",\"tx\":\"4dgh7FPw5CocET6p3puWo2AehhhaLWju7P12SX1FXL2GDA749VhoQvEC5rnGjr93TTWFDq4kKJ3biSGwj6zMWD8N\"},{\"t_ms\":1795030562000,\"side\":\"s\",\"usd\":\"18.991995\",\"amt\":\"18.838268617\",\"trader\":\"GGEZ2xUH1LYH4WUgXNWoxTeUdeJt7iPRB5hdj9t4aDAY\",\"tx\":\"4FQoMM8B4Q1wtAsj73kqzRh6MA9GhkHy59PKbKMMtJ9zqEMTEJsaMzwoaKZTCk9aKm2icFu7HAwQTgar2GsLGXu5\"},{\"t_ms\":1795030558000,\"side\":\"s\",\"usd\":\"11.830827\",\"amt\":\"11.733209572\",\"trader\":\"8tWhkQfchNW6HgZv1BgABf57NHxdFiFCi7RaEgiUoKtM\",\"tx\":\"8i92soUQ9xF6iWeFgsSSDAPbdW55HijQBktSzeuKaWjvexYTc6N3VqW9wSVciR1yaa7rRJ36p5H2LjuNRRZpQE1\"},{\"t_ms\":1795030557000,\"side\":\"s\",\"usd\":\"11.832264\",\"amt\":\"11.733209499\",\"trader\":\"8tWhkQfchNW6HgZv1BgABf57NHxdFiFCi7RaEgiUoKtM\",\"tx\":\"3WtmEtXXAaqtLMYHGosLJE87byjX1EuvdQsrvbTZqyBnAoB7vsCXw9sptkKLBAmu3ygu4r9CEtyCn4LQCc7utYeN\"},{\"t_ms\":1795030553000,\"side\":\"s\",\"usd\":\"11.314973\",\"amt\":\"11.218916069\",\"trader\":\"3yZVBT1EJdoFJUShFmb1B6cJS1K7x5NpZjjEKGwa6NjL\",\"tx\":\"3zywXsYW9JjvJdyp8UaYcjKbaeDGf7HWsoQXy68je5CLd4uHnPY3WV5Pyf6V7ix4KL4YDFRSvKQcm7H7ewSAiZz8\"},{\"t_ms\":1795030550000,\"side\":\"s\",\"usd\":\"11.835074\",\"amt\":\"11.733208118\",\"trader\":\"8tWhkQfchNW6HgZv1BgABf57NHxdFiFCi7RaEgiUoKtM\",\"tx\":\"28bNPCNxD3SdxUGPk4qpT7Xs8DtQ5byeZZcHtEkYzfsCQZJz7xH1JtPxbpKwGSMt8wKBLvnSkdwneNXtgL2FBWWN\"},{\"t_ms\":1795030549000,\"side\":\"s\",\"usd\":\"6.372538\",\"amt\":\"6.317099151\",\"trader\":\"D5YqVMoSxnqeZAKAUUE1Dm3bmjtdxQ5DCF356ozqN9cM\",\"tx\":\"4pgpnMFCdzcNt9LivdH1R4gP2Mg7acYkdooweNUJUxM1oPcpeshHrxqaoqPqz6JDuFRsybX1Uy5WEjCN9xuuWsTP\"},{\"t_ms\":1795030549000,\"side\":\"s\",\"usd\":\"13.104521\",\"amt\":\"12.989217019\",\"trader\":\"3yZVBT1EJdoFJUShFmb1B6cJS1K7x5NpZjjEKGwa6NjL\",\"tx\":\"3TwTWWM4h21XPZEpNyS5Sc6bi81DCayhkoJ7zzWK5BCpNdpHfqHEhWnkETi4mWbvan9cwAP77UWqnijvhQFXVFiE\"},{\"t_ms\":1795030515000,\"side\":\"s\",\"usd\":\"0.042791\",\"amt\":\"0.042472033\",\"trader\":\"6zU2K11p6Vtywra8GEq5Go2FauUfNQu23hsbCzKBkE3K\",\"tx\":\"5FyCm4HUQ4fY7gc9iwpFt1Hi283Lny5YPkzPFAJUQVQmQj9sZNKeueTpwJCFV7NMB8xbqUXALKDcouHN5etce4j5\"},{\"t_ms\":1795030470000,\"side\":\"s\",\"usd\":\"11.746849\",\"amt\":\"11.642006688\",\"trader\":\"DGcyWa3GxL4F4BcqDgHPF49qNYLE3JYocfK3yWTLaoCd\",\"tx\":\"4YfPQmP5BiBH84P3gn7wWJWwm9NReosmAs684fQrKU3q1LMMhWptHiPt8PGWYAbTtPM78qcQDYskTTFvEYPFx4vU\"},{\"t_ms\":1795030454000,\"side\":\"s\",\"usd\":\"5.899013\",\"amt\":\"5.845330328\",\"trader\":\"DGcyWa3GxL4F4BcqDgHPF49qNYLE3JYocfK3yWTLaoCd\",\"tx\":\"35ipYWMPKLQHvxNh5HgUZ3wckLswgnxxsogmZG8DGbQ7SEnwC4UZESh1pci2wwjKyfzpCod1DkVLCYhCEqdAyGjX\"},{\"t_ms\":1795030443000,\"side\":\"s\",\"usd\":\"1.837817\",\"amt\":\"1.821020494\",\"trader\":\"BULLSyMj9r1nMMeGi4Zk4bV6Cnx3JS8hrBZFiSDypPFk\",\"tx\":\"5HN2HHzNn2XjDCQkWtLCLMqViEyXAGirobt27XpDvifvEzhzCktxojPMSq42qQv34pgUVVJBuMckqu41ouSLms6q\"},{\"t_ms\":1795030435000,\"side\":\"s\",\"usd\":\"7.316462\",\"amt\":\"7.249252\",\"trader\":\"HWGoJ1HaMFUiDgfD7FVxMaYJAE2A5JjF7si6CgWSvRFQ\",\"tx\":\"5bvN2LgnJpj4tot2LcZX77zhvrVLzafY6mFV39GGh9dAjM6kZKD9amgpd3nAAE1d1QCAYKa7DF8cj5bwDDpeeKY8\"},{\"t_ms\":1795030435000,\"side\":\"s\",\"usd\":\"27.212617\",\"amt\":\"26.957862123\",\"trader\":\"xK95GQnx3U4GcvXiShTjhxycJFhtBUz56PgZeoVWjR7\",\"tx\":\"2dKcKp6BrQMuByjw4Bpy1x2J4w3gTsH9bEnedbMWjge3qpLzjPyjqt5nFAx2PZLuV6fzNtZtbDe6StsrfyrJh48F\"},{\"t_ms\":1795030435000,\"side\":\"s\",\"usd\":\"143.419081\",\"amt\":\"141.952203667\",\"trader\":\"F1aeaWYLWG5tn7NxGq7jCUWctTwFgtjuTCVm5WSvesMm\",\"tx\":\"63cSFPnQPbK1VTAzU45roTWQg2M4WUDTGZKKNhhARMpXLSqxze5EBXCjVFgU5uMtft54wf23XYcibzNNpwFKrzeV\"},{\"t_ms\":1795030435000,\"side\":\"b\",\"usd\":\"216\",\"amt\":\"213.442617477\",\"trader\":\"8LMQVYyWx5p6HcHfJ1LmhrZ2PYbAisZwLdHhQWWoMEKP\",\"tx\":\"3gNkfjhCszAMBmGyfyxuD9irQUSnyrE4L31VBKhFMyM4xJTmeKiLYJPtnmh4joshAJi4eRRC5i88FQZnQwinGjiB\"}],\"whole_ms\":1795030436000,\"src\":\"chain\",\"as_of_ms\":1795030749832}"
+     }
+    ],
+    "reads": {
+     "https://api.mainnet-beta.solana.com": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 471054435
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471053588,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     },
+     "https://solana-rpc.publicnode.com": {
+      "context": {
+       "apiVersion": "4.4.1",
+       "slot": 471054436
+      },
+      "value": [
+       {
+        "confirmationStatus": "finalized",
+        "confirmations": null,
+        "err": null,
+        "slot": 471053588,
+        "status": {
+         "Ok": null
+        }
+       }
+      ]
+     }
+    }
+   },
+   "dbc_curves": [
+    "EPYNoYFUVBoEjvoaD3nDXwAVraWA4EeC5CXyyxPXt8Qp"
+   ],
+   "cut": {
+    "meteora-damm2": [
+     {
+      "coin": "8HXsCMy8ma8QP2yVZXG5SZYyaTZw5AUrUDha1G4upump",
+      "sig": "2efiNtWwaFaJcKJ9WpkXMcjNQKpK6MRTEr9PcycqYBwpjrxj7G8B9hE8QnRu2DwGMJeMpx7A8Y33znkghYKzY7fn",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "EPYNoYFUVBoEjvoaD3nDXwAVraWA4EeC5CXyyxPXt8Qp",
+      "sig": "42SQw4WyZq5GMyzqZWpZqoAbEikJh7a1Jcby1XoNwmpksSxS4jqhXMV1eqW1ECSfeF6i6dE1gVfPJMowYmhjyJff",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "EPYNoYFUVBoEjvoaD3nDXwAVraWA4EeC5CXyyxPXt8Qp",
+      "sig": "4dqgeQzSSVxwooKQNEGY3CaqCEuCZqJ7V3aeLTAiN6ZXVVkAHCUZctHqwvG8sthocAwgU7MSt3tFtT9RLH3uWD4b",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "EPYNoYFUVBoEjvoaD3nDXwAVraWA4EeC5CXyyxPXt8Qp",
+      "sig": "M8YBSMYpRakbyBh36QP58C7DrKdCZvDoR68bAmjbWefKN5HF4XyRVn59hrHMrJJHs8q7WuMBB1cJMph6nriGdpH",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "EPYNoYFUVBoEjvoaD3nDXwAVraWA4EeC5CXyyxPXt8Qp",
+      "sig": "5Mvx596mqWMqyFgQThhPKLdyLofWkPycV9opWnVgXRC4m4nmVHwFKJPhUPMr6mekR6PbJNFTAiMmmMVUEPDQsCWn",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     }
+    ],
+    "meteora-dlmm": [
+     {
+      "coin": "98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g",
+      "sig": "5CtGMtQJdmP7rxSGMfkHJKDdunAcrgVB24NNzqJFq8pKZzmUKtEisbNEjyaoH9Gvnt52YBSFUNXtayLrzFLvz3tW",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "8HXsCMy8ma8QP2yVZXG5SZYyaTZw5AUrUDha1G4upump",
+      "sig": "2zsy1soVZB9dS24TT2JQd31QQhCHd3o64HECjQzBcAqKLG8iP5x5iuuDTDH3XsSgcUCEjnFRd4jjAjoEDWVg6Zep",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "GTA6ot7gjnojk8WwAoxKrqDkrLtCPtSfzAikk6zu2koH",
+      "sig": "5APbZCm2US3RySVZR9nBT9rQU3b1vPpZSunUbZ5TyhfVFKvMbAu731BDxXhuDB6xJJ5fhBWy4RUr5TvSMdMKUKMf",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\""
+     },
+     {
+      "coin": "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS",
+      "sig": "4oQHTDNxGPkbGjVikAjtsouH9ysgNW7adRwgogAxKdyBkSAQ9KriNDMiGqLBProCgTjuBp25mQdU4h2NWLuUHkJj",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 26 s ago\""
+     },
+     {
+      "coin": "98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g",
+      "sig": "4wYoodfeCaqNzyBzuhCEGtXtZ8ptNgVzgE7qhh13GGx2xeFwHCNWA7C5AUqhGAQZKDoaSTBoGKRLUChKZyL4xkV3",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 29 s ago\""
+     },
+     {
+      "coin": "DBRiDgJAMsM95moTzJs7M9LnkGErpbv9v6CUR1DXnUu5",
+      "sig": "4kC1hpgGPtp911kRBM8tNAjujRZsVvqmoLWpN6oV6Ee5Xtd16awZDqi4f8nw4rZKDag1FScz6psXkWJDUv1E6gFC",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 61 s ago\""
+     }
+    ],
+    "meteora-dbc": [
+     {
+      "coin": "EPYNoYFUVBoEjvoaD3nDXwAVraWA4EeC5CXyyxPXt8Qp",
+      "sig": "27KRUWiRAW7CdHE2cZn9dU3ePNBAG5eYLuX889wuMiM1iA3LZtiCKcvRAwJ1GeXfAGzBdbXyLpPymWSQVnKw4yg2",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 2 s ago\""
+     },
+     {
+      "coin": "EPYNoYFUVBoEjvoaD3nDXwAVraWA4EeC5CXyyxPXt8Qp",
+      "sig": "5XNJh21oLvot7EikddrKEJJGvDRjcEVff6u6e38p7Pwnwabf8opTCHosK4fJJd67Xt1Yps2A1wLsWaETNqwsWkzk",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 2 s ago\""
+     },
+     {
+      "coin": "EPYNoYFUVBoEjvoaD3nDXwAVraWA4EeC5CXyyxPXt8Qp",
+      "sig": "3qJn7niHZ1wzVHf4cJoJqYhsBTq6PExh4hsmiMcJk86p6jCA3Xgd4vytCNL8eVmixGPeAa9tVigBpZmgFYf7Zjhs",
+      "timing": "sol-whole-cut;desc=\"a Meteora trade unread 2 s ago\""
+     }
+    ]
+   }
+  }
  }
 }
