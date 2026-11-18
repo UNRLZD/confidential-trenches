@@ -2,10 +2,14 @@
 // The token page's left rail (card app-token-rail), from the built app at / inside the stand-in shell (as
 // test/token-page/run.mjs): APP_HOST the build under its _headers, SIGN_HOST the stand-in shell, HELPER_HOST answered
 // from the recorded lists (test/discover-data, as app-in-shell.mjs's harness) and, for any listed mint, a token read of
-// that list row (as test/token-route/run.mjs). Signed in and signed out, at 1600, 1440, 1280, 1180, 1179 and 1024 x 900:
-//   - the width mode, read off the desktop grid's first track and the rail's own box: the full rail (340 layout px) from
-//     1500 css px, the slim rail (78: the rings and the expand button) from 1180, no rail under it (and no lists read:
-//     / on All reads mihao alone, card mihao-opens-first);
+// that list row (as test/token-route/run.mjs). Signed in and signed out, at 1600, 1440, 1280, 1180, 1060, 1024 and 1000
+// x 900:
+//   - the width mode, read off the desktop grid's first track and the rail's own box, set by the page's box in layout px
+//     (card app-token-rail-r5-fit: the page is drawn at --fit-zoom, so 1100 css px and up are pages of 1528 layout px
+//     and more): the full rail (340 layout px) wherever it fits uncut (1440 as R5's picture), the slim rail (78: the
+//     rings and the expand button) on the fit zoom's floor (1024 and 1060 css px, pages of 1422 and 1472), no rail on a
+//     page under 1180 (1000 css px, drawn unzoomed; and no lists read: / on All reads mihao alone, card
+//     mihao-opens-first); every width from 1100 to 1920 is sweep.mjs's;
 //   - the full rail's chips as UNRLZD's rail (owner 12 Nov parity): Trending, Watchlist, New, Hot, Graduating (Trending pressed), its rows the Trending column as Discover orders it, each
 //     a link to /token/solana/<mint>, none marked on / (mihao, in no list), the page's own token marked after a hop (aria-current);
 //   - the header's strip whole in every mode (no tile cut, clear of the trade column and the rail: the design's one-row
@@ -14,10 +18,11 @@
 //     chain's lists since card app-chains-evm-rail, the other chains answered with Solana's recording and so dropped);
 //   - a click on another rail row opens that token's page (its data-token, the frame at /token/solana/<mint>) with the
 //     rail still drawn and no second lists read; New shows the New column and its row opens its token; on the slim rail
-//     (1440 and 1280) the expand button opens the full rail in its own column: the chart's and the orders' left edges
-//     move right by what the rail grew, the rail's box never overlaps them, and it stays open across a hop to its row's
-//     token and a reload; « closes it back to the rings (card rail-open-pushes-the-middle);
-//   - a refresh that lands a new token on top of Trending (signed out, full at 1600 and slim at 1440) shows it in the
+//     (1060 and 1024) the expand button opens the full rail in its own column: the chart's and the orders' left edges
+//     move right by what the rail grew, the rail's box never overlaps them, no tile is cut (the full rail does not fit
+//     there, so the symbol may end in its "…", strip-fit.ts's last resort, its title the full symbol), and it stays open
+//     across a hop to its row's token and a reload; « closes it back to the rings (card rail-open-pushes-the-middle);
+//   - a refresh that lands a new token on top of Trending (signed out, full at 1600 and slim at 1024) shows it in the
 //     first row and moves no row already drawn: each row's element keeps its box, no value is cut, and no element shifts
 //     (text re-aligned inside its own right-aligned cell is named on a NOTE line).
 //   node apps/terminal/test/token-rail/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
@@ -41,11 +46,12 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 // mode: the rail's first grid track in layout px (null: no rail)
 const WIDTHS = [
   { name: "1600", width: 1600, mode: "full", track: 340 },
-  { name: "1440", width: 1440, mode: "slim", track: 78 },
-  { name: "1280", width: 1280, mode: "slim", track: 78 },
-  { name: "1180", width: 1180, mode: "slim", track: 78 },
-  { name: "1179", width: 1179, mode: "hidden", track: null },
-  { name: "1024", width: 1024, mode: "hidden", track: null },
+  { name: "1440", width: 1440, mode: "full", track: 340 },
+  { name: "1280", width: 1280, mode: "full", track: 340 },
+  { name: "1180", width: 1180, mode: "full", track: 340 },
+  { name: "1060", width: 1060, mode: "slim", track: 78 },
+  { name: "1024", width: 1024, mode: "slim", track: 78 },
+  { name: "1000", width: 1000, mode: "hidden", track: null },
 ];
 const KINDS = [
   { name: "in", kind: "signed" },
@@ -186,6 +192,8 @@ const readPage = (f) =>
       identRight: ident?.right ?? null,
       identInk,
       symCut,
+      sym: sym?.textContent ?? null,
+      symTitle: sym?.getAttribute("title") ?? null,
       tiles: [...document.querySelectorAll(".tkp-desk .tkp-strip > [data-k]")].filter((e) => e.getClientRects().length).map((e) => e.getAttribute("data-k")),
       mainLeft: main?.left ?? null,
       mainRight: main?.right ?? null,
@@ -223,7 +231,7 @@ try {
       const tracks = p.tracks ? p.tracks.split(" ").length : 0;
       // the mode
       if (w.mode === "hidden") {
-        check(p.railW === null && tracks === 2, `${tag}: a rail under 1180 (rail ${p.railW}, tracks ${p.tracks})`);
+        check(p.railW === null && tracks === 2, `${tag}: a rail on a page under 1180 layout px (rail ${p.railW}, tracks ${p.tracks})`);
         check(reads.lists === 0, `${tag}: lists reads ${seen()} with no rail drawn: / on All reads mihao alone`);
       } else {
         check(tracks === 3 && Math.abs(first - w.track) < 0.5, `${tag}: the rail's track is ${p.tracks}, want ${w.track}px first`);
@@ -289,7 +297,7 @@ try {
         check(Math.abs(ex.chartLeft - before.chartLeft - grew) < 0.5 && Math.abs(ex.lowerLeft - before.lowerLeft - grew) < 0.5 && Math.abs(ex.mainLeft - before.mainLeft - grew) < 0.5, `${tag}: the chart (${before.chartLeft} -> ${ex.chartLeft}) and the orders (${before.lowerLeft} -> ${ex.lowerLeft}) did not move right by the rail's ${grew}px`);
         check(ex.railRight <= ex.chartLeft + 0.5 && ex.railRight <= ex.lowerLeft + 0.5 && ex.railRight <= ex.mainLeft + 0.5, `${tag}: the open rail (right ${ex.railRight}) overlaps the chart (${ex.chartLeft}) or the orders (${ex.lowerLeft})`);
         check(ex.cut.length === 0 && ex.scroll <= 0 && ex.stripRight <= ex.tradeLeft + 0.5, `${tag}: with the rail open: strip tiles cut ${JSON.stringify(ex.cut)}, scroll ${ex.scroll}, strip ${ex.stripRight} past trade ${ex.tradeLeft}`);
-        check(!ex.symCut && ex.identInk <= ex.stripLeft + 0.5 && ex.tiles[0] === "price", `${tag}: with the rail open the identity runs under the strip or loses its symbol (content right ${ex.identInk}, strip ${ex.stripLeft}, symbol cut ${ex.symCut}; tiles ${ex.tiles.join(" ")})`);
+        check(ex.identRight <= ex.stripLeft + 0.5 && ex.symTitle === ex.sym && ex.tiles[0] === "price", `${tag}: with the rail open the identity runs under the strip or its symbol's title is not the full symbol (identity right ${ex.identRight}, strip ${ex.stripLeft}, title ${ex.symTitle} for ${ex.sym}; tiles ${ex.tiles.join(" ")})`);
         check(JSON.stringify(ex.chips) === JSON.stringify(["Trending:true", "Watchlist:false", "New:false", "Hot:false", "Graduating:false"]) && ex.rows.every((r) => r.sym), `${tag}: the expanded rail: chips ${JSON.stringify(ex.chips)}, rows with text ${ex.rows.filter((r) => r.sym).length}/${ex.rows.length}`);
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `rail-${w.name}-expanded.png`) });
         const next = TRENDING[2];
@@ -308,7 +316,7 @@ try {
         check(shut.open === "false" && Math.abs(shut.railW - 78) <= 1 && Math.abs(shut.chartLeft - before.chartLeft) < 0.5, `${tag}: « left the rail ${shut.railW} wide (open ${shut.open}), chart at ${shut.chartLeft} (closed ${before.chartLeft}): want the rings and the chart back`);
       }
       // a refresh lands a token on top: it is drawn in the first row, and no drawn row moves
-      if (k.name === "out" && (w.name === "1600" || w.name === "1440")) {
+      if (k.name === "out" && (w.name === "1600" || w.name === "1024")) {
         const rowsSel = '.tkp-desk [data-testid="token-rail"] [role="listitem"]';
         const before = await f.evaluate((sel) => [...document.querySelectorAll(sel)].map((e, i) => {
           e.__slot = i;
@@ -352,4 +360,4 @@ if (fails.length) {
   process.exit(1);
 }
 for (const x of notes) console.log(`NOTE ${x}`);
-console.log(`PASS ${n} views (1600, 1440, 1280, 1180, 1179, 1024; signed in and out) from the built app at / inside the stand-in shell, Trending ${TRENDING.length} and New ${NEW.length} rows${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${n} views (1600, 1440, 1280, 1180, 1060, 1024, 1000; signed in and out) from the built app at / inside the stand-in shell, Trending ${TRENDING.length} and New ${NEW.length} rows${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
