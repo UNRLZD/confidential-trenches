@@ -425,6 +425,18 @@ else {
     cashMoverOf = { signal, m };
     return m;
   };
+  // every host that shows a deposit address or sends a quote naming one marks its index quoted first (card
+  // restore-shows-a-note-on-a-planned-index; the wallet's markQuoted), under the seed lock shared as a seed write: a
+  // restore then never marks dead an address the user was shown, and a sign out never runs inside the mark
+  const quotedIndex = (scope: bigint, index: number): Promise<void> =>
+    navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+      const notes = await openNoteStore(await open());
+      try {
+        await notes.markQuoted(scope, index);
+      } finally {
+        notes.close();
+      }
+    }) as Promise<void>;
   // a pool's money back to Cash (src/pool-to-cash.ts, card one-balance-buys-on-every-chain): Cash's own deposit quote of
   // the pool's coin to U (a host of its own that prices the pool coins at the device's price: the app's deposit.quote
   // stays as it is), its follow op written before the address is used; then the pool withdraw run pays that address
@@ -432,6 +444,7 @@ else {
     scope: pageScope,
     read: fs.depositRead,
     named: () => namer.named(),
+    quoted: quotedIndex,
     priced: (origin) => pricedPoolCoin(origin, (c) => prices.get(c)),
     checked: async (id, r, u) => {
       // its refund address recorded first, so a refund there is carried (card refunds-land-on-the-devices-own-wallet)
@@ -621,7 +634,8 @@ else {
         const e = testnet?.evmPoolOf(chain) ?? null;
         // the chain's pool index, started by this first coin quote where none runs or is served (card
         // robinhood-quote-answers-cold: from the release's snapshot), its sync waited for at most EVM_DRY_INDEX_WAIT_MS
-        return e === null ? null : evmDryQuote(chain, e.pin, e.rpcs, undefined, () => testnet!.evmIndexReady(chain));
+        // and, on a device that holds nothing, a quote that reads no log (card evm-tree-reads-only-when-needed)
+        return e === null ? null : evmDryQuote(chain, e.pin, e.rpcs, undefined, () => testnet!.evmIndexReady(chain), () => !testnet!.evmMoney());
       },
       // above tap_max (card evm-cash-move-brings-its-fee): the move cashFirst starts, sized at the epoch's relay fee
       // (src/pool-buy-evm.ts evmMoveShort over the rungs its parts land, `rungs`) and priced on the device (card
@@ -826,7 +840,7 @@ else {
   // pool's coin priced at the device's own price of each
   // another pool's coin, which that pool's run pays, refunds back on its own chain at U_{s,i}'s own address there (card
   // refunds-land-on-the-devices-own-wallet), recorded before the address goes out; Cash's NEAR USDC keeps INTENTS
-  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor,
+  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), quoted: quotedIndex, priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor,
     checked: async (id, chain, quote, u) => {
       if (u.refund_to !== undefined) await keepRefund(await open(), { chain: poolCoinChain(quote.origin_asset)!, address: u.refund_to, s: u.scope.toString(), i: u.index, deadline_ms: Date.parse(quote.deadline) });
       await poolFollow!.quoted(id, chain, quote, u);
@@ -936,7 +950,7 @@ else {
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       // money in from an outside wallet (card move-one-confidential-swap, 14 Nov): one confidential swap as a Move, held to
       // 1Click's keyless tell, so the paying wallet is not tied to U on chain
-      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), quoted: quotedIndex, checked: (id, r, u) => follows!.quoted(id, r, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
       ...depositReadHosts({ stop: quotesStopped, poolFloor: pagePoolFloor }),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
@@ -945,7 +959,7 @@ else {
       // move-one-confidential-swap, 14 Nov): every 1Click quote is one confidential swap, held to 1Click's keyless tell
       // on the page's stop, so the paying wallet is not tied to U_X on chain; a plain send of the pool's own coin asks 1Click
       // nothing
-      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
+      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), quoted: quotedIndex, priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with
@@ -1585,10 +1599,16 @@ function storeMoved(e: WalletEvent): void {
 const CEREMONY_ENDS: ReadonlySet<string> = new Set(["cancelled", "no-prf", "error"]);
 let movedInStep = false;
 function landStored(): Promise<void> {
-  return run(async () => {
-    const s = await readSeedSettled();
-    if (s) return landed({ screen: "signed-in", seed: s });
-  }, false);
+  return run(async () => void (await landedStored()), false);
+}
+// The seed stored, landed on when there is one. A ceremony's end with no account reads it before it draws that end
+// (signIn): the other tab's channel event is a task of its own that a slow scheduler delivers after the end is drawn,
+// and "Cancelled" stood beside the account stored until it came (merge queue run 44258172994, 'cancelled' at 374 ms).
+async function landedStored(): Promise<boolean> {
+  const s = await readSeedSettled();
+  if (!s) return false;
+  await landed({ screen: "signed-in", seed: s });
+  return true;
 }
 // Another tab's sign out, heard on the shell's channel (storeMoved) or the store's own (open's onEvent), whichever comes
 // first, each a task of its own: every read of the account stops in the one task that hears it (card
@@ -1797,10 +1817,18 @@ async function signIn(ceremony: () => Promise<PasskeyOutcome>, create: boolean):
   // never replace a seed already stored here, and run no ceremony: sign out first (wallet.md:919)
   const had = await readSeed();
   if (had) return landed({ screen: "signed-in", seed: had });
-  const r = await ceremony();
+  // a sheet that ended with no account (refused, no PRF on Use passkey, or failed): a seed another tab stored while it
+  // was up is the account, read before that end is drawn (landedStored)
+  let r: PasskeyOutcome;
+  try {
+    r = await ceremony();
+  } catch (e) {
+    if (await landedStored()) return;
+    throw e;
+  }
   // ses.4: a random seed, and the backup screen in the same visit; insert-only, so another tab's seed stays
   if (r.kind === "no-prf" && create) return landed(await signInNoPrf(open));
-  if (r.kind !== "prf") return show(r.kind);
+  if (r.kind !== "prf") return void ((await landedStored()) || show(r.kind));
   // insert-only: when another tab stored a seed meanwhile, that one stays and is the account shown; the entropy is
   // zeroed on every path, an open that fails included (words.ts storeSeed)
   await landed(await signInPrf(open, r.entropy));

@@ -739,11 +739,11 @@ const quoteOn = (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmR
 // test of the quote's pool counts and cuts is pure work over tens of thousands of made-up pools, and its quote's block must
 // not age 30 s, nor its scan reach its bound, on a slow or busy runner: under the packages' tests run side by side KB1, KB3 and
 // KB4 refused stale_quote at 37 to 47 s (card ci-fresh-run-ends-with-room)
-const quoteOnStill = async (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmRpc, hints?: EvmPoolKey[], chainName: "base" | "robinhood" = "base", headNo = 5_000_000) => {
+const quoteOnStill = async (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmRpc, hints?: EvmPoolKey[], chainName: "base" | "robinhood" = "base", headNo = 5_000_000, scanless = false) => {
   evmScanBound?.(Number.MAX_SAFE_INTEGER / 4);
   try {
     return await verdict(
-      evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route, ...(hints ? { pools: hints } : {}) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan, undefined, () => 0),
+      evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route, ...(hints ? { pools: hints } : {}), ...(scanless ? { scanless } : {}) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan, undefined, () => 0),
     );
   } finally {
     evmScanBound?.();
@@ -825,6 +825,46 @@ test("card evm-buy-and-sell-on-mainnet: with the device's pool index served, a q
     assert.deepEqual(asked, [[4_999_991, 5_000_000], [4_999_991, 5_000_000]]);
     // an older sync than the one held changes nothing
     assert.equal(evmPoolIndexUse("base", sync({}, 4_999_000)), false);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
+// card evm-tree-reads-only-when-needed: a scanless quote (the page's shown price on a device that holds nothing) reads no
+// log: the served index's pools and the helper's, each read on both providers like any candidate, and no block scanned
+test("SCANLESS a scanless quote asks the scan provider nothing and prices on the served index's pools as a scanned one does", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const token = "0x00000000000000000000000000000000000a66a6";
+  const pools = [seeded(token), real(token)];
+  try {
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 4_999_990, pools: [{ key: real(token).key }] }), true);
+    const asked: [number, number][] = [];
+    assert.deepEqual(await quoteOnStill(pools, token, seededRoute(token), scanner(5_000_000, [], asked), undefined, "base", 5_000_000, true), below);
+    assert.deepEqual(asked, [], "a scanless quote asked the scan provider for logs");
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
+test("SCANLESSH a scanless quote takes the helper's pool only where its key hashes to the id it is served with and both providers hold it; an invented one counts for nothing", async () => {
+  const { evmPoolIndexUse, evmPoolServedUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolServedUse: (c: string, t: string, a: Promise<unknown>) => void; evmPoolIndexReset: () => void };
+  const answer = (pools: unknown[]) => ({ chainId: 8453, poolManager: PM, complete: true, through: 4_999_990, pools });
+  const asked: [number, number][] = [];
+  const run = async (n: number, served: (t: string) => unknown[]) => {
+    const token = "0x00000000000000000000000000000000000c" + n.toString(16).padStart(4, "0");
+    evmPoolServedUse("base", token, Promise.resolve().then(() => answer(served(token))));
+    return quoteOnStill([seeded(token), real(token)], token, seededRoute(token), scanner(5_000_000, [{ key: real(token).key, at: 4_999_995 }], asked), undefined, "base", 5_000_000, true);
+  };
+  try {
+    // the served index holds none of these coins' pools
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 4_999_990, pools: [] }), true);
+    // served right, the real pool is a candidate read on both providers: the seeded route is below it
+    assert.deepEqual(await run(1, (t) => [{ id: "0x" + pidOf(real(t).key), key: real(t).key }]), below);
+    // a key that does not hash to the id it is served with is dropped
+    assert.equal((await run(2, (t) => [{ id: "0x" + "11".repeat(32), key: real(t).key }])).accepted, true);
+    // an invented pool, its hash right, that the PoolManager does not hold counts for nothing
+    assert.equal((await run(3, (t) => [{ id: "0x" + pidOf(keyOf(t, NATIVE, 500, 10, NATIVE)), key: keyOf(t, NATIVE, 500, 10, NATIVE) }])).accepted, true);
+    assert.deepEqual(asked, [], "a scanless quote asked the scan provider for logs");
   } finally {
     evmPoolIndexReset();
   }
@@ -1381,6 +1421,56 @@ test("XE a failed early read of a route the quote does not take never ends the q
   // the next quote of the token, warm (re-review of this card, P2): the route never taken is not in its plan, so its
   // first round never reads it (at 9338d3b5f it did, and ended rpc_error on it)
   await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0), failing], NOW + 1_000, scanner(5_000_000, logs), undefined, () => 0), heldTo(x0));
+});
+
+// Card evm-5xx-holds-the-provider-for-the-round, with card evm-cold-multihop-quote-inside-the-kpi's early reads: the
+// fourth round reads its own reads and the early routes through X's markets as two reads at once, and a provider that
+// answers HTTP 5xx to one is held in the other. At a87cbd3ff (this card merged with that one) each read held it in its own
+// reads alone, and the early batches queued in its gate behind the round's failed ones were still sent to it (6 of 6).
+test("FH4 a provider that answers HTTP 500 to the fourth round's own reads is sent none of the early X reads queued behind them", { timeout: 20_000 }, async () => {
+  const token = "0x00000000000000000000000000000000000ff1fc";
+  const x0 = xAt(0x182);
+  const real: ModelPool = { key: keyOf(token, x0, 3000, 60, NATIVE), give: (a) => a };
+  // x0's markets, each read one a call: the round's own reads are more batches than the provider's gate sends at once
+  // (2), so the early batches queue behind them
+  const markets = [[2500, 50], [500, 10], [100, 1], [3000, 60], [10000, 200], [1000, 20], [400, 8], [200, 4]].map(([fee, ts], i): ModelPool => ({ key: keyOf(x0, NATIVE, fee!, ts!, NATIVE), give: (a) => a / BigInt(1 + i) }));
+  const logs = [{ key: real.key, at: 4_000_100 }, ...markets.map((m, i) => ({ key: m.key, at: 4_050_000 + i }))];
+  const pools = [seeded(token), real, ...markets];
+  const w = (x: bigint | string) => BigInt(x).toString(16).padStart(64, "0");
+  const quotes = (body: string) => body.toLowerCase().split("ca253dc9").slice(1);
+  // an early read: a two-hop V4Quoter.quoteExactInput (from its selector to the next) through x0 to the token; a
+  // market's quote names x0 and no token
+  const early = (body: string) => quotes(body).some((r) => r.includes(w(x0)) && r.includes(w(token)));
+  const own = (body: string) => !early(body) && quotes(body).some((r) => r.includes(w(x0)));
+  const second = { failed: 0, earlyAfter: 0 };
+  // the early requests the first provider is sent: the round reads them
+  let earlyFirst = 0;
+  const p0 = chain(pools, 0);
+  const first: EvmRpc = async (calls) => (early(JSON.stringify(calls)) && earlyFirst++, p0(calls));
+  const p1 = chain(pools, 1);
+  // the second provider, at a URL with no in-flight pin (Robinhood's gate, 2): every request of the round's own reads
+  // answered HTTP 500 after 200 ms, every other as the chain does; `earlyAfter`: early requests sent once a 500 came back
+  const failing = evmJsonRpc("https://fails.fh4.test", (async (_u: string, init: RequestInit) => {
+    const body = init.body as string;
+    const calls = JSON.parse(body) as { id: number; method: string; params: unknown[] }[];
+    if (early(body) && second.failed > 0) second.earlyAfter++;
+    if (own(body)) {
+      await new Promise((r) => setTimeout(r, 200));
+      second.failed++;
+      return new Response("", { status: 500 });
+    }
+    const answers = await p1(calls.map((c) => ({ method: c.method, params: c.params })));
+    return new Response(JSON.stringify(answers.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+  }) as unknown as typeof fetch);
+  quoteMod.evmReadsPerCall(1);
+  try {
+    await assert.rejects(evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [first, failing, chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0), heldTo(x0));
+  } finally {
+    quoteMod.evmReadsPerCall();
+    evmPaceReset();
+  }
+  assert.ok(second.failed > 0 && earlyFirst > 0, `the second provider answered ${second.failed} HTTP 500s to the round's own reads; ${earlyFirst} early requests`);
+  assert.equal(second.earlyAfter, 0, `${second.earlyAfter} early requests were sent to the provider after its HTTP 500 in the same round`);
 });
 
 test("X2 seventeen currencies, the shallowest by liquidity included: each is priced through its market, and the one that gives most sets R", async () => {
@@ -5576,6 +5666,29 @@ test("SP429 card evm-taps-meet-no-429: a first scan provider that answers a warm
   assert.ok(span2.length > 0 && span2.every(([a, b]) => b - a + 1 <= 2_000), `the second read ${JSON.stringify(span2)}`);
 }));
 
+test("SP5xx card evm-5xx-holds-the-provider-for-the-round: a first scan provider that answers HTTP 503 is sent none of the quote's later requests the next would be handed: they go to the next unsent", { timeout: 60_000 }, () => onTestClock(async () => {
+  // a cold Base scan: 1M blocks in the first's 10,000-block requests, 20 at once. At main (bf32abde9) every one of the
+  // 100 was sent to the first, failed 503, then went to the next
+  const token = "0x00000000000000000000000000000000005c45f1";
+  const inner = scanner(5_000_000, []);
+  const st = { posts: 0, firstFail: -1, sentAfter: 0 };
+  const first = evmJsonRpc("https://fails.sp5xx.test", (async (_u: string, init: RequestInit) => {
+    const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    if (!calls.some((c) => c.method === "eth_getLogs")) return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+    if (st.firstFail >= 0) st.sentAfter++;
+    st.posts++;
+    await new Promise((r) => setTimeout(r, 300));
+    if (st.firstFail < 0) st.firstFail = performance.now();
+    return new Response("No server is available to handle this request", { status: 503 });
+  }) as unknown as typeof fetch);
+  const span: [number, number][] = [];
+  const { v } = await pairQuote(token, first, scanner(5_000_000, realAt(token, 4_500_000), span), "base");
+  assert.deepEqual(v, below);
+  assert.ok(st.posts > 0 && st.firstFail >= 0, "the first answered a getLogs 503");
+  assert.equal(st.sentAfter, 0, `${st.sentAfter} getLogs posts were sent to the first after its 503 (${st.posts} in all)`);
+  assert.ok(span.length > 0, "the next read the blocks");
+}));
+
 test("SP429b card evm-taps-meet-no-429: a first scan provider whose throttle a browser reads as no connection (a 429 CORS refuses) is held too: the next warm quote asks it nothing", { timeout: 30_000 }, () => onTestClock(async () => {
   // rpc.mainnet.chain.robinhood.com answers its 429 with access-control-allow-origin "*,*": Chrome blocks it as CORS
   // and fetch throws "Failed to fetch" (sign live run 43693987836, wallet-passkey-prf: 14 of them)
@@ -8377,6 +8490,46 @@ test("GF12 a second quote of the same token and amount reads the last quote's sw
   assert.ok(rounds1 > reads1 && rounds === reads, `rounds ${rounds1} (reads from ${reads1}) then ${rounds} (reads from ${reads})`);
 }));
 
+// Card evm-5xx-holds-the-provider-for-the-round, with GF12's early fits: a warm quote reads the last quote's swap fits
+// beside its first round, and a provider that answers HTTP 5xx to one is held in the other. At a87cbd3ff
+// each read held it in its own reads alone, and the first round's batches queued in its gate behind the failed fits
+// were still sent to it (34 requests).
+test("FH5 a provider that answers HTTP 500 to a warm quote's early swap fits is sent none of the first round's batches queued behind them", { timeout: 20_000 }, async () => {
+  const token = "0x00000000000000000000000000000000000f1f15";
+  const K = 6;
+  const fakes: ModelPool[] = Array.from({ length: K }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a) => a, gas: 600_000n }));
+  const pools = [{ ...gfMarket(token), give: (a: bigint) => a / 2n }, gfSeeded(token), ...fakes];
+  const logs = fakes.map((p) => ({ key: p.key, at: 4_500_000 }));
+  const datas = (calls: readonly EvmRpcCall[]) => calls.map((c) => String((c.params[0] as { data?: string } | undefined)?.data));
+  const second = { on: false, failed: 0, readsAfter: 0 };
+  const p1 = chain(pools, 1);
+  // the second provider, while `on`: every request of swap fits answered HTTP 500 after 200 ms; `readsAfter`: the
+  // aggregate3 requests (the first round's reads) sent to it once a 500 came back
+  const failing: EvmRpc = async (calls) => {
+    const d = datas(calls);
+    if (second.on && second.failed > 0 && d.some((x) => x.startsWith("0x82ad56cb"))) second.readsAfter++;
+    if (second.on && d.some((x) => x.startsWith("0x" + SEL_BUY_SWAP))) {
+      await new Promise((r) => setTimeout(r, 200));
+      second.failed++;
+      throw new Error("the provider answered HTTP 500");
+    }
+    return p1(calls);
+  };
+  // one read a call, so the first round is more batches than the provider's gate sends at once (Robinhood's, 2)
+  quoteMod.evmReadsPerCall(1);
+  try {
+    const ask = () => evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route: marketRoute(token) }, [chain(pools, 0), failing, chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs));
+    const q1 = await ask();
+    second.on = true;
+    const q2 = await ask();
+    assert.equal(q2.amountOut, q1.amountOut);
+  } finally {
+    quoteMod.evmReadsPerCall();
+  }
+  assert.ok(second.failed > 0, "the second provider answered HTTP 500 to the warm quote's early fits");
+  assert.equal(second.readsAfter, 0, `${second.readsAfter} first-round requests were sent to the provider after its HTTP 500 in the same round`);
+});
+
 test("GF11 out of gas is no fit only for the swap read: the same words to any other read (the hookless read here) refuse rpc_error", async () => {
   const token = "0x00000000000000000000000000000000000f1f11";
   const hooked: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => a };
@@ -8611,6 +8764,109 @@ test("QE6 healthy providers whose exact-out batches wait in their gates: no batc
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
   assert.ok(asks[0]! > 2 * 18, `${asks[0]} exact-out reads: more batches than Robinhood's gate sends at once`);
   assert.equal(asks[2]! + asks[3]!, 0, `the spares are asked ${asks[2]! + asks[3]!} exact-out reads of ${asks[0]}`);
+}));
+
+// Card evm-5xx-holds-the-provider-for-the-round: a provider that answers HTTP 5xx is held for the rest of the round, so
+// the batches queued behind its failed one go to the next provider at once. At main (bf32abde9) each batch queued in its
+// gate was still sent to it and failed in turn: a USDG tap on Robinhood drew 36 HTTP 500s of globalstake, p50 1,057 ms
+// each, and took 34.8 s (card rh-provider-fails-64-read-batch, 2026-11-18).
+const qePer = (calls: readonly EvmRpcCall[]) => (JSON.stringify(calls).match(/58733073/g) ?? []).length;
+// four providers over the case `on.pools` (the first and third answer as chain's 0, the second and fourth as its 1); the
+// second's exact-out batches each answered HTTP 500 after 1,057 ms (globalstake's p50) while `on.failing`, every other
+// request, and every one once it is false, as the chain does. `sentAfter`: the exact-out batches sent to the second after
+// its first 500 came back
+const qeFive = (on: { pools: ModelPool[]; failing: boolean }) => {
+  const asks = [0, 0, 0, 0];
+  const second = { firstFail: -1, sentAfter: 0, other: 0 };
+  const models = new Map<ModelPool[], EvmRpc[]>();
+  const model = (k: number): EvmRpc => {
+    let m = models.get(on.pools);
+    if (m === undefined) models.set(on.pools, (m = [chain(on.pools, 0, RC_HEAD), chain(on.pools, 1, RC_HEAD)]));
+    return m[k % 2]!;
+  };
+  const counted = (k: number): EvmRpc => async (calls) => {
+    const n = qePer(calls);
+    asks[k]! += n;
+    if (k === 1 && n === 0 && second.firstFail >= 0) second.other++;
+    if (k === 1 && n > 0 && on.failing) {
+      if (second.firstFail >= 0) second.sentAfter++;
+      await new Promise((r) => setTimeout(r, 1_057));
+      if (second.firstFail < 0) second.firstFail = performance.now();
+      throw new Error("the provider answered HTTP 500");
+    }
+    return model(k)(calls);
+  };
+  return { asks, second, rpcs: [counted(0), counted(1), counted(2), counted(3)] };
+};
+// the FH cases seed currencies at 0x2000 to 0x2362 (rcAt), which no other case scans: a scan is kept per currency
+// for the module's life, so a shared offset leaves another case nothing to scan (QE7 scan's 0xa00)
+test("FH1 a provider that answers HTTP 500 to its first exact-out batch is asked no further batch of the round: its batches go to the next provider at once", { timeout: 20_000 }, sixACall(async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0x2000);
+  const { asks, second, rpcs } = qeFive({ pools, failing: true });
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  const distinct = asks[0]!;
+  assert.ok(distinct > 4 * 18, `${distinct} exact-out reads: more batches than the provider's gate sends at once`);
+  assert.ok(second.firstFail >= 0, "the second provider answered HTTP 500");
+  // the batches its gate had sent before the first 500 came back (2 at once) fail beside it; none is sent after it
+  assert.equal(second.sentAfter, 0, `${second.sentAfter} exact-out batches were sent to the provider after its HTTP 500`);
+  assert.ok(asks[1]! <= 2 * 18, `the failed provider was sent ${asks[1]} exact-out reads, its gate's 2 batches at most`);
+  // every read is still answered by two providers: the spares carry every batch the failed one was given
+  assert.ok(asks[2]! + asks[3]! >= distinct, `the spares are asked ${asks[2]! + asks[3]!} exact-out reads of ${distinct}`);
+  // the round pays one failed read's time (1,057 ms), never one per batch it was given: counted as the work it stands
+  // for (no batch sent after the 500, at most the gate's 2 in flight beside it), never as the machine's elapsed time
+  // (scripts/ci/no-wall-clock-asserts.mjs)
+}));
+
+test("FH2 a provider that answers 429 to an exact-out batch keeps the throttle's rule: that request moves to the next at once, never asked of it again, and the round's later batches are still sent to it", { timeout: 20_000 }, sixACall(async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0x2100);
+  const asks = [0, 0, 0, 0];
+  const bodies: string[] = [];
+  let throttled = 0;
+  const inner = chain(pools, 1, RC_HEAD);
+  const counted = (rpc: EvmRpc, k: number): EvmRpc => async (calls) => ((asks[k]! += qePer(calls)), rpc(calls));
+  // the second provider over HTTP: its first exact-out post answered 429 with no Retry-After, every other as the chain does
+  const limited = evmJsonRpc("https://throttles.qe8.test", (async (_u: string, init: RequestInit) => {
+    const calls = (JSON.parse(init.body as string) as { id: number; method: string; params: unknown[] }[]);
+    const asked = calls.map((c) => ({ method: c.method, params: c.params }));
+    const n = qePer(asked);
+    if (n > 0) bodies.push(init.body as string);
+    if (n > 0 && throttled++ === 0) return new Response("", { status: 429 });
+    asks[1]! += n;
+    const answers = await inner(asked);
+    return new Response(JSON.stringify(answers.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+  }) as unknown as typeof fetch);
+  try {
+    const rpcs = [counted(chain(pools, 0, RC_HEAD), 0), limited, counted(chain(pools, 0, RC_HEAD), 2), counted(chain(pools, 1, RC_HEAD), 3)];
+    const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
+    assert.equal(v.accepted, true, String((v as { code?: string }).code));
+    assert.equal(throttled > 1, true, "the throttled provider was asked later batches");
+    // the throttled request is not asked of it again 0.5, 1 and 1.5 s on: the next answered in its place
+    await new Promise((r) => setTimeout(r, 3_500));
+    assert.equal(new Set(bodies).size, bodies.length, `a request asked the throttled provider ${bodies.length - new Set(bodies).size} times more`);
+    // a 429 holds nothing for the round: every batch but the throttled one is answered by it
+    assert.ok(asks[1]! >= asks[0]! - 18, `the throttled provider answered ${asks[1]} exact-out reads of ${asks[0]}`);
+  } finally {
+    evmPaceReset();
+  }
+}));
+
+test("FH3 the 5xx hold ends with its round: the next round asks the provider every batch again", { timeout: 30_000 }, sixACall(async () => {
+  const first = qeCase(freshToken(), 0x2200);
+  const on = { pools: first.pools, failing: true };
+  const { asks, second, rpcs } = qeFive(on);
+  const v = await verdict(evmPoolBuyQuoteWith(first.req, rpcs, NOW, scanner(RC_HEAD, first.logs, [], 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.ok(second.firstFail >= 0, "the second provider answered HTTP 500");
+  assert.equal(second.sentAfter, 0, "the provider was held for the round it failed in");
+  // the next round, on the same provider objects: it answers again, and is asked every exact-out read of the round
+  const next = qeCase(freshToken(), 0x2300);
+  Object.assign(on, { pools: next.pools, failing: false });
+  asks.fill(0);
+  const w = await verdict(evmPoolBuyQuoteWith(next.req, rpcs, NOW, scanner(RC_HEAD, next.logs, [], 100_000)));
+  assert.equal(w.accepted, true, String((w as { code?: string }).code));
+  assert.ok(asks[0]! > 2 * 18, `${asks[0]} exact-out reads in the next round`);
+  assert.equal(asks[1], asks[0], "the provider held in the round before is asked every exact-out read of the next");
 }));
 
 // Card evm-buy-quote-ends-on-node (review of 2d9a7bd9): the deadline holds the scan provider too. Once the block is

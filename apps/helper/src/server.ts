@@ -94,6 +94,10 @@ const ONECLICK_QUOTE = "oneclick/v0/quote";
 /** GET /v1/health's header naming mainnet NEAR's agreement pair (card near-pair-on-keyed-providers; token-status/status.ts
  *  pairNames): "<first>, <second>", each "<company's domain>[ key<n>][ keyless]", never a URL or a key. */
 export const NEAR_PAIR_HEADER = "X-Helper-Near-Pair";
+/** GET /v1/health's header naming when this process started, in ms (card helper-evm-tapes-survive-a-restart): the live
+ *  check that reads a coin's tape right after a deploy knows the helper it reads is the new one, and how new. */
+export const STARTED_HEADER = "X-Helper-Started";
+const STARTED_MS = Date.now();
 const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/", "/v1/market/pools"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind", "/v1/bind/record"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD, LOGO_PREFIX, MARKET_POOLS] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL, POOL_SOLANA_PIECES] = MOUNTED.relay;
@@ -425,7 +429,7 @@ export function handler(
       }
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        return send(200, health(commit, SERVED, release, ready(), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", ") });
+        return send(200, health(commit, SERVED, release, ready(), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", "), [STARTED_HEADER]: String(STARTED_MS) });
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
@@ -913,7 +917,9 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
  * The EVM chains' own swap reads (src/data/evm/swaps.ts): Base's and Robinhood's candles and trade tape. A token is
  * served only when its chain's Discover lists hold it. The providers: evmSwapRpcs.
  */
-export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}): Swaps {
+/** `disk` (card helper-evm-tapes-survive-a-restart): each chain's swap index kept in `storeDir` (swap-index-<chain>.sqlite,
+ *  data/evm/index-store.ts), written once `writable` settles (the senders this helper's, as the pool index waits). */
+export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}, disk?: { storeDir: string; writable: Promise<unknown> }): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
@@ -943,6 +949,7 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       rpcs: evmSwapRpcs(env, chain),
       spares: evmSwapSpares(env, chain),
       index: INDEX_RPCS[chain],
+      ...(disk === undefined || disk.storeDir === "" || INDEX_RPCS[chain] === undefined ? {} : { indexFile: join(disk.storeDir, `swap-index-${chain}.sqlite`), writable: disk.writable }),
       // every token an answer of the last SERVED_MS held, not only the newest answer's: a user taps what they read, and a
       // refresh between drops tokens (card robinhood-listed-tape-opens); and any token DexScreener names a pool for, as
       // its page (card evm-token-page-opens-any-coin: a coin no list served answered 404)
@@ -1400,7 +1407,7 @@ if (import.meta.main) {
     // card evm-token-page-opens-any-coin: a token no list carries is named by DexScreener, on the budget held reads draw
     const dex = upstreamBudget(() => DEX_LIMITS, Date.now);
     const evmNamed = evmNamedFrom(SERVED_EVM, dex);
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed, { storeDir, writable: senders.held }), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info on the one
     // GeckoTerminal budget, its pool and decimals the swap reads' when they hold them
     // card every-cell-shows-a-value: and each token's contract checks from GoPlus, one pace for the helper (data/goplus.ts)
