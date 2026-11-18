@@ -2314,6 +2314,28 @@ test("restore-residuals (review of 4f6e75ad9 P3): a step 5 that waited for the i
   }
 });
 
+test("restore-residuals (review of 4f6e75ad9 P3): a sign out while step 5 waits for the ids lock ends the wait at once: no id read after it", async (t) => {
+  usedMap = new Map();
+  const n = nearOf();
+  const w = await vworld(t, { pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
+  let open!: () => void;
+  const held = new Promise<void>((r) => (open = r));
+  void navigator.locks.request(K.RESTORE_IDS_LOCK as string, { mode: "exclusive" }, () => held);
+  let ended = false;
+  try {
+    assert.equal(await w.r.auto(), "done");
+    await until("step 5 waits for the lock", async () => ((await navigator.locks.query()).pending ?? []).some((l) => l.name === K.RESTORE_IDS_LOCK), 5_000);
+    w.r.signedOut();
+    // the run's wait was on its signal: the run ends while the other holder still holds the lock (2 s: a hang bound)
+    ended = await Promise.race([w.r.idle().then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 2_000))]);
+  } finally {
+    open();
+  }
+  await w.r.idle();
+  assert.equal(ended, true, "the wait outlived the sign out");
+  assert.deepEqual(idsAsked(n.log), []);
+});
+
 test("restore-residuals (review of 4f6e75ad9 P3): a step 5 whose marker another run took over during a pause lets the lock go: no try after it", async (t) => {
   usedMap = new Map();
   // try 1 leaves an id unread (a read to try again); while it reads, a later Sync's walk in another tab writes its marker

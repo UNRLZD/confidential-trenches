@@ -171,6 +171,7 @@ const M = [
   ["ze2: a joined request's run started after a sign out", PRS, [["if (again && epoch === e && !ctl.signal.aborted && run === null)", "if (again && run === null)"]], PRT, "review of 4f6e75ad9"],
   ["review of 4f6e75ad9 P3: a marker a closed tab's run wrote skipped, never taken over", PRS, [["            return o.run === runId ? undefined : { scopes, run: runId,", "            if (o.run !== runId) owed = false;\n            return o.run === runId ? undefined : { scopes, run: runId,"]], PRT, "review of 4f6e75ad9 P3"],
   ["review of 4f6e75ad9 P3: a marker taken over keeping its kept lanes", PRS, [["            return o.run === runId ? undefined : { scopes, run: runId,", "            return o.run === runId ? undefined : { ...o, scopes, run: runId,"]], PRT, "review of 4f6e75ad9 P3"],
+  ["review of 4f6e75ad9 P3: the wait for the ids lock not on the run's signal", PRS, [['request(RESTORE_IDS_LOCK, { mode: "exclusive", signal }, async', 'request(RESTORE_IDS_LOCK, { mode: "exclusive" }, async']], PRT, "review of 4f6e75ad9 P3"],
   ["review of 4f6e75ad9 P3: a step 5 read on in its tries on another run's marker", PRS, [["          if (t > 1 && owedOf(await seedHeld(async () => (await h.store()).get(\"meta\", RESTORE_IDS_KEY)))?.run !== runId) return;\n", ""]], PRT, "review of 4f6e75ad9 P3"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
