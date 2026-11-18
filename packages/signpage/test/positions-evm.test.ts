@@ -359,6 +359,22 @@ test("a pass stopped while its calls wait their turn ends, and sends none of the
   assert.ok(c.calls[0]!.length + c.calls[1]!.length <= sent + EVM_POSITIONS_IN_FLIGHT, "only the calls already in flight");
 });
 
+// card signpage-reads-take-the-call-signal: a stop ends the pass's calls in flight at the provider, not only the calls
+// still waiting their turn
+test("a pass's stop reaches every call it sent: each carries the pass's signal to its provider", { timeout: 10_000 }, async () => {
+  const c = fakeChain();
+  c.slow = true;
+  c.set(W1, 1n);
+  const got: (AbortSignal | undefined)[] = [];
+  const kept = (r: EvmRpc): EvmRpc => Object.assign((m: string, p: readonly unknown[], s?: AbortSignal) => (got.push(s), r(m, p)), { url: r.url! }) as EvmRpc;
+  const stop = new AbortController();
+  const p = evmPositionsPass({ ...reads("base", c, { [W1]: rec("base", "filled") }), rpcs: [kept(c.rpcs[0]), kept(c.rpcs[1])], signal: stop.signal }, passMemo());
+  p.catch(() => {});
+  await until(() => got.length > 0);
+  stop.abort(new Error("signed out"));
+  assert.ok(got.every((s) => s?.aborted === true && (s.reason as Error).message === "signed out"), "every call's signal is the pass's");
+});
+
 test("the retries back off 5, 10, 20 s, then 20 s each; a pass under the floor books one; a round spent books none, and spent() says so", async () => {
   assert.deepEqual([0, 1, 2, 3, 11].map(evmPositionsRetryMs), [5_000, 10_000, 20_000, 20_000, 20_000]);
   const c = fakeChain();

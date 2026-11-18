@@ -161,11 +161,11 @@ export async function readsWaited<A>(run: (at: { fault?: unknown }) => Promise<A
 export function keptReads(rpcs: readonly [SolanaRpc, SolanaRpc], stable: (method: string, params: readonly unknown[]) => boolean): readonly [SolanaRpc, SolanaRpc] {
   const keep = (rpc: SolanaRpc): SolanaRpc => {
     const kept = new Map<string, unknown>();
-    return solanaWrappedRpc(rpc, (method, params) => {
-      if (!stable(method, params)) return rpc(method, params);
+    return solanaWrappedRpc(rpc, (method, params, signal) => {
+      if (!stable(method, params)) return rpc(method, params, signal);
       const key = `${method} ${JSON.stringify(params)}`;
       if (kept.has(key)) return Promise.resolve(kept.get(key));
-      return rpc(method, params).then((v) => (kept.set(key, v), v));
+      return rpc(method, params, signal).then((v) => (kept.set(key, v), v));
     });
   };
   return [keep(rpcs[0]), keep(rpcs[1])];
@@ -182,8 +182,10 @@ export function youngReads(rpcs: readonly [SolanaRpc, SolanaRpc], shared: (metho
   const keep = (rpc: SolanaRpc): SolanaRpc => {
     const kept = new Map<string, { at: number; read: Promise<unknown> }>();
     all.push(kept);
-    return solanaWrappedRpc(rpc, (method, params) => {
-      if (!shared(method, params)) return rpc(method, params);
+    // a shared read is every asker's: its request carries no one asker's signal (one asker giving up never ends the
+    // others' read); a read no one shares carries its own
+    return solanaWrappedRpc(rpc, (method, params, signal) => {
+      if (!shared(method, params)) return rpc(method, params, signal);
       const key = `${method} ${JSON.stringify(params)}`;
       const at = now();
       const k = kept.get(key);
