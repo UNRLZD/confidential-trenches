@@ -2197,9 +2197,13 @@ const rcGap = async (coin: string, first: (inner: EvmRpc) => EvmRpc) => {
   const real: ModelPool = { key: keyOf(coin, NATIVE, 2500, 50, NATIVE), give: (a) => a };
   const pools = [seeded(coin), real];
   const req = { chain: "robinhood" as const, token: coin, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(coin) };
-  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, H1), chain(pools, 1, H1)], NOW, [scanner(H1, []), scanner(H1, [])])), { accepted: true, amountOut: AMOUNT / 10n, minOut: (AMOUNT / 10n) * 99n / 100n, block: BigInt(H1) });
+  // the cached scan is the warm quote's first's tail (card evm-scan-chain-tail: kept per first scan provider)
+  const cached = scanner(H1, []);
+  const now = first(scanner(RC_HEAD, [{ key: real.key, at: H1 + 100_000 }]));
+  quoteMod.evmScanTailAlias(now, cached);
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, H1), chain(pools, 1, H1)], NOW, [cached, scanner(H1, [])])), { accepted: true, amountOut: AMOUNT / 10n, minOut: (AMOUNT / 10n) * 99n / 100n, block: BigInt(H1) });
   const spareAsked: [number, number][] = [];
-  const v = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, [first(scanner(RC_HEAD, [{ key: real.key, at: H1 + 100_000 }])), scanner(RC_HEAD, [], spareAsked)]));
+  const v = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, [now, scanner(RC_HEAD, [], spareAsked)]));
   return { v, spared: [...new Set(spareAsked.map(String))].map((r) => r.split(",").map(Number)).reduce((k, [a, b]) => k + b! - a! + 1, 0) };
 };
 
