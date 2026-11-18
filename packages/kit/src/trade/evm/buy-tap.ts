@@ -103,18 +103,23 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
   });
   const held = h.held ?? evmHeldHead;
   const refusedKey = `${known}:${amountIn}:${slippageBps}`;
-  const ask = async (route: EvmRoute) => {
+  // `at`: a follow's, the block the refusal it follows was read at (EvmQuoteError `at`): the kit reads the reference
+  // there, sending only the reads the refused quote did not agree on (card evm-cold-multihop-quote-inside-the-kpi)
+  const ask = async (route: EvmRoute, at: string | null = null) => {
     const k = JSON.stringify(route);
     const pre = held(chain);
     const kept = REFUSED.get(refusedKey);
     if (pre !== null && kept !== undefined && kept.at === pre && kept.routes.has(k)) throw kept.routes.get(k);
     try {
-      const q = await quote({ chain, token, amountIn, slippageBps, route });
+      const q = await quote({ chain, token, amountIn, slippageBps, route, ...(at === null ? {} : { at }) });
       LAST_ROUTE.set(known, q.route);
       return q;
     } catch (e) {
       const code = (e as { code?: unknown })?.code;
-      if (pre !== null && typeof code === "string" && !FAULTS.has(code) && held(chain) === pre) {
+      // held for the block it was read at alone: a refusal that names its block (the kit's `at`) another than the held
+      // head, as a follow's read at the refusal it follows, is not this block's
+      const readAt = (e as { at?: unknown })?.at;
+      if (pre !== null && typeof code === "string" && !FAULTS.has(code) && held(chain) === pre && (typeof readAt !== "string" || readAt === pre)) {
         const at = REFUSED.get(refusedKey);
         const routes = at !== undefined && at.at === pre ? at.routes : new Map<string, unknown>();
         routes.set(k, e);
@@ -142,11 +147,13 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
   for (const first of tries) {
     let route: EvmRoute | null = first;
     let followed = false;
+    // the block the last refusal was read at, which its reference is asked at
+    let at: string | null = null;
     while (route !== null && left > 0 && !asked.has(JSON.stringify(route))) {
       left--;
       asked.add(JSON.stringify(route));
       try {
-        return await ask(route);
+        return await ask(route, followed ? at : null);
       } catch (e) {
         const err = e as { code?: unknown; reference?: { route: EvmRoute } | null };
         if (err?.code === "rpc_error" || err?.code === "rpc_disagree" || err?.code === "stale_quote") throw e;
@@ -164,6 +171,7 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
         if (next === null && followed) throw e;
         if (next === null && err?.code !== "no_quote") refused = true;
         lastErr = e;
+        at = typeof (e as { at?: unknown })?.at === "string" ? ((e as { at: string }).at) : null;
         route = next;
         followed = next !== null;
       }

@@ -30,6 +30,7 @@
 // time waited since its last answer). Run 42146750370's job was cancelled at 20 min with no line: four reads one after
 // another, printed only at the end, the Base one at 78-block pages (EVM_LOG_CEILING_PAGES in the wallet's evm.ts).
 // After: helper
+// Serial: evm-keyed 300 (its Transfer reads on the helper's Base and Robinhood route draw the keyed providers)
 //   node scripts/live-checks/wallet-restore-transfer-rpcs.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer read, as the good run of wallet-restore-transfer-rpcs.answers.json, and its bad run made

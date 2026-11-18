@@ -98,14 +98,17 @@ export function parseRequests(text) {
 }
 
 /** The record's text from a run's reads; `read` is the money gate's read back of the Tx and Deleted lines, or null before it. */
-export function drillRecord({ key, chains, code, exit, requests, read }) {
+export function drillRecord({ key, chains, code, exit, requests, read, said = null }) {
   const steps = [];
   const ours = requests.filter((r) => r.ours);
   steps.push(["servers off", ours.length === 0 && requests.length > 0, ours.length ? `${ours.length} request(s) to a host of ours, refused: ${[...new Set(ours.map((r) => r.url))].join(", ")}` : `${requests.length} request(s), none to a host of ours`]);
   const missing = chains.filter((c) => !exit.ends.has(c));
   const stopped = [...exit.ends].filter(([, e]) => !e.done);
   const exitOk = code === 0 && missing.length === 0 && stopped.length === 0;
-  steps.push(["the exit", exitOk, [`exit code ${code}`, ...chains.map((c) => (exit.ends.has(c) ? `${c} ${exit.ends.get(c).done ? "done" : "stopped"}: ${exit.ends.get(c).why}` : `${c} never ended`))].join("; ")]);
+  // a refusal before any chain ran (code 2: the words refused, or the input closed before them) is named by the exit's
+  // own last line
+  const refused = code !== 0 && exit.ends.size === 0 && said ? [`the exit said: ${said}`] : [];
+  steps.push(["the exit", exitOk, [`exit code ${code}`, ...refused, ...chains.map((c) => (exit.ends.has(c) ? `${c} ${exit.ends.get(c).done ? "done" : "stopped"}: ${exit.ends.get(c).why}` : `${c} never ended`))].join("; ")]);
   steps.push(["what was sent", exit.problems.length === 0 && exit.txs.length > 0, exit.problems.length ? exit.problems.join("; ") : `${exit.txs.length} sent, ${exit.deleted.length} one-use account(s) closed`]);
   if (read !== null) steps.push(["read back", read.refusals.length === 0, read.refusals.length ? read.refusals.join("; ") : `${read.read.length} read(s) ok, ${read.proven.length} proven, ${read.gone.length} account(s) gone`]);
   const pass = read !== null && steps.every(([, ok]) => ok);
@@ -125,11 +128,12 @@ export function drillRecord({ key, chains, code, exit, requests, read }) {
 /** Steps 3 to 4 on a finished run: the record, its parse by the money gate's own parser, then its read back. */
 export async function finish({ key, chains, code, lines, requests, fetchFn = fetch, rpcs = RPCS, sleep }) {
   const exit = parseExit(lines);
-  const first = drillRecord({ key, chains, code, exit, requests, read: null });
+  const said = [...lines].reverse().find((l) => l.trim() !== "")?.trim() ?? null;
+  const first = drillRecord({ key, chains, code, exit, requests, read: null, said });
   const live = parseLive(first, key);
   const parsed = { refusals: live.problems.map((p) => `the record does not parse: ${p}`), read: [], proven: [], gone: [] };
   const read = parsed.refusals.length ? parsed : await moneyGate([{ path: `drill/${key}.md`, key, text: first }], fetchFn, rpcs, sleep ? { sleep } : {});
-  const text = drillRecord({ key, chains, code, exit, requests, read });
+  const text = drillRecord({ key, chains, code, exit, requests, read, said });
   return { text, pass: text.startsWith(`CARD ${key} / live: PASS`) };
 }
 
