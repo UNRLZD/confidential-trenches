@@ -145,8 +145,8 @@ test("card robinhood-tapes-read-ahead: Robinhood, 12 listed spread coins nobody 
     // the lists' answer loads (server.ts evmSwapsFromEnv calls ahead with its tokens), and a minute passes
     void s.ahead(LISTED.map((x) => x.token));
     await sleep(60_000);
-    const t0 = Date.now();
-    const got = await Promise.all(LISTED.map(({ token }) => s.trades(token, 50).then((a) => tapeOf(a, Date.now() - t0))));
+    const t0 = clock.t;
+    const got = await Promise.all(LISTED.map(({ token }) => s.trades(token, 50).then((a) => tapeOf(a, clock.t - t0))));
     s.stop();
     return got;
   });
@@ -207,9 +207,9 @@ test("card robinhood-tapes-read-ahead: a page's open of a coin no list carries, 
         void s.ahead(LISTED.map((x) => x.token));
         await sleep(3_000);
       }
-      const t0 = Date.now();
+      const t0 = clock.t;
       const a = await s.trades(PAGE.token, 50);
-      const got = tapeOf(a, Date.now() - t0);
+      const got = tapeOf(a, clock.t - t0);
       s.stop();
       return got;
     });
@@ -236,8 +236,8 @@ test("card robinhood-tapes-read-ahead: a provider held (its 429) when the lists 
     await sleep(31_000);
     await s.ahead(LISTED.slice(0, 2).map((x) => x.token));
     const after = LISTED.slice(0, 2).map(({ pool }) => r.n.poolReads.get(pool) ?? 0);
-    const t0 = Date.now();
-    const got = await Promise.all(LISTED.slice(0, 2).map(({ token }) => s.trades(token, 50).then((a) => tapeOf(a, Date.now() - t0))));
+    const t0 = clock.t;
+    const got = await Promise.all(LISTED.slice(0, 2).map(({ token }) => s.trades(token, 50).then((a) => tapeOf(a, clock.t - t0))));
     s.stop();
     return { held, after, got };
   });
@@ -257,13 +257,13 @@ test("card robinhood-tapes-read-ahead: posts and 429s against the base, every pr
       await sleep(60_000);
     }
     const before = { posts: r.n.posts, refused: r.n.refused };
-    const t0 = Date.now();
+    const t0 = clock.t;
     let over = false;
     const latest = new Map<string, Tape>();
     const poll = async (token: string) => {
       while (!over) {
         const a = await s.trades(token, 50);
-        const g = tapeOf(a, Date.now() - t0);
+        const g = tapeOf(a, clock.t - t0);
         latest.set(token, g);
         if (g.status === 200 && !g.filling) return;
         await sleep(2_000);
