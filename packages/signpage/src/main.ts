@@ -100,7 +100,9 @@ import { withVaultBalance } from "./vault-balance.ts";
 import { returningWallets, withPositions, withReturning } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { CONFIRM_TITLE, CONNECT_PATH, confirmLines, outsideKinds, outsideOrigin, type ConfirmedKind } from "./outside.ts";
-import { connections } from "./connections.ts";
+import { clearConnections, connections } from "./connections.ts";
+import { connectedApps } from "./connected-apps.ts";
+import { dress } from "./sheet.ts";
 import { drawBackdrop, drawSealedGround, groundLogo } from "./backdrop.ts";
 import { GROUND_LOGO_SVG } from "./ground-logo.ts";
 import { SEALED } from "./frame-cover.ts";
@@ -1018,8 +1020,30 @@ let knocked: string | null = null;
 let allowedOrigin: string | null = null;
 const status = document.createElement("p");
 Object.assign(status.style, { margin: "0", padding: "24px 16px", color: "#a3a3a3", font: '14px "Schibsted Grotesk", system-ui, sans-serif', overflowWrap: "anywhere" });
+// card signpage-other-apps-connect (src/connected-apps.ts): on /connect, every app the user connected, each with
+// Disconnect, dressed as the connect sheet is; under the status once connected, on the sheet when not. Disconnect of the
+// bound origin ends its session (src/api.ts reads the store first) and clears what the page shows for it
+const connectedList = document.createElement("main");
+connectedList.id = "connected";
+const dressed = (e: HTMLElement): HTMLElement => (dress(e, false), e);
+dressed(connectedList).style.padding = "0 16px 24px";
+const connectedView =
+  connected &&
+  connectedApps(connectedList, {
+    doc: document,
+    store: connected,
+    text: (tag, text) => dressed(outsideText(tag, text)),
+    origin: originLine,
+    button: (action, label, onClick) => dressed(button(action, label, onClick)),
+    removed: (o) => {
+      if (o !== allowedOrigin) return;
+      allowedOrigin = null;
+      status.textContent = "Not connected";
+    },
+  });
 function notConnected(): void {
-  showOutside([outsideText("p", "Not connected")]);
+  showOutside([outsideText("p", "Not connected"), connectedList]);
+  void connectedView?.refresh();
 }
 function knock(origin: string): void {
   if (knocked !== null || !outsideOrigin(origin, location.origin)) return;
@@ -1036,6 +1060,8 @@ function knock(origin: string): void {
           status.textContent = `Connected ${origin}`;
           if (!status.isConnected) document.body.append(status);
           shell!.allow(origin);
+          document.body.append(connectedList);
+          void connectedView?.refresh();
         },
         notConnected,
       );
@@ -1178,7 +1204,7 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
-const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out", "allow", "confirm"]);
+const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out", "allow", "confirm", "disconnect"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
@@ -1562,6 +1588,8 @@ function signedOutElsewhere(): void {
   // reloads signed out
   closeHostLanes();
   quotesSignedOut();
+  // the connected apps go with the account in every tab too, should the signing-out tab's delete not have completed
+  void clearConnections().catch(() => {});
   restore?.signedOut();
   follows?.signedOut();
   poolFollow?.stop();
@@ -1881,6 +1909,9 @@ async function signOut(): Promise<void> {
   }
   store = null;
   seatsUp();
+  // the apps this account connected go with it (src/connections.ts): an open popup's next request is refused, and the
+  // next account on this device starts with none; bounded, so the sign out never waits on it
+  await clearConnections().catch(() => {});
   // after the store signed out: a deposit that landed while it waited cannot open the queue again (no seed)
   await testnet?.signedOut();
   // signed out: the page reloads, and with it the app, which then shows signed out
