@@ -448,6 +448,8 @@ export async function readOneClickLeast(chain: PoolChain, fetchFn: typeof fetch,
     o.sleep ??
     ((ms: number) =>
       new Promise<void>((ok) => {
+        // a budget that ended before the wait (inside the read just made) never fires again: no backoff on it
+        if (signal.aborted) return ok();
         const t = setTimeout(ok, ms);
         signal.addEventListener("abort", () => (clearTimeout(t), ok()), { once: true });
       }));
