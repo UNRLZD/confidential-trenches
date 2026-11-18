@@ -49,7 +49,7 @@ async function rpcs(t, data = [rentData(5_080, 1), rentData(5_080, 1)]) {
     }).listen(0, "127.0.0.1"),
   );
   t.after(() => servers.forEach((s) => (s.closeAllConnections(), s.close())));
-  await Promise.all(servers.map((s, i) => listening(s, `the server ${i}`)));
+  await Promise.all(servers.map((s, i) => listening(s, `the Solana RPC stub ${i}`)));
   return servers.map((s) => `http://127.0.0.1:${s.address().port}`).join(",");
 }
 

@@ -652,7 +652,7 @@ test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently sto
     }).listen(0, word === 2 ? "::1" : "127.0.0.1"),
   );
   t.after(() => nodes.forEach((s) => (s.closeAllConnections(), s.close())));
-  await Promise.all(nodes.map((s, i) => listening(s, `the server ${i}`)));
+  await Promise.all(nodes.map((s, i) => listening(s, `the Base RPC stub ${i}`)));
   const urls = nodes.map((s, i) => `http://${i === 0 ? "[::1]" : "127.0.0.1"}:${(s.address() as AddressInfo).port}`);
   const key = `0x${createHashOf("helper-pool-senders/test-key/EVM_SENDER")}`; // pool/evm.test.ts's test key
   const r = await startOnce({ POOL_EVM_ADDRESS_BASE: evmPoolVenues().base.pool!, POOL_EVM_SENDER_KEY_BASE: key, POOL_EVM_RPCS_BASE: urls.join(",") }, 15_000, seen);
@@ -693,7 +693,7 @@ test("MEDIUM-1 a Solana pool whose configured fee is not the kit's stops the sta
     }).listen(0, "127.0.0.1"),
   );
   t.after(() => stubs.forEach((s) => (s.closeAllConnections(), s.close())));
-  await Promise.all(stubs.map((s, i) => listening(s, `the server ${i}`)));
+  await Promise.all(stubs.map((s, i) => listening(s, `the Solana RPC stub ${i}`)));
   const urls = stubs.map((s) => `http://127.0.0.1:${(s.address() as AddressInfo).port}`).join(",");
   const r = await startOnce({ POOL_SOLANA_PROGRAM_MAINNET: program, POOL_SOLANA_FEE_PAYER_KEY_MAINNET: feePayer, POOL_SOLANA_FEE_MAINNET: "1400000", POOL_SOLANA_RPCS_MAINNET: urls }, 15_000, seen); // mainnet: a test network's refusal no longer stops the start (card helper-ready-never-waits-on-a-testnet-pool)
   assert.equal(r.code, 2, `exit ${r.code} after ${reads} rent reads; stderr: ${r.err}`);

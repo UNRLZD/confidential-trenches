@@ -609,7 +609,7 @@ async function nodes(keepFrom: bigint, http429 = 0): Promise<{ urls: [string, st
       });
     }).listen(0, LOOPBACK[i]),
   );
-  await Promise.all(servers.map((s, i) => listening(s, `the server ${i}`)));
+  await Promise.all(servers.map((s, i) => listening(s, `the Base RPC stub ${i}`)));
   const urls = servers.map((s, i) => `http://${URL_HOST[i]}:${(s.address() as { port: number }).port}`) as [string, string];
   return { urls, calls, close: () => servers.forEach((s) => s.close()) };
 }
