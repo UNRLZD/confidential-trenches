@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { callName, callOf, errorsOf, INITIALIZE, judge, LOGS_PER_LOAD, refusalsOf, summarize } from "./evm-tree-reads-only-when-needed.mjs";
+import { BUY_SWAP, callName, callOf, errorsOf, INITIALIZE, isFitRead, judge, LOGS_PER_LOAD, refusalsOf, summarize } from "./evm-tree-reads-only-when-needed.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./evm-tree-reads-only-when-needed.answers.json", import.meta.url), "utf8"));
 
@@ -99,7 +99,7 @@ test("a refusal names its call: an eth_call's contract and selector, the batch m
   assert.equal(JSON.stringify(shaped).includes(account), false, "no argument kept");
   const calls = [{ method: "eth_blockNumber", params: [], id: 6 }, { method: "eth_call", params: [], ...shaped }];
   const errors = errorsOf('[{"jsonrpc":"2.0","id":6,"result":"0x1"},{"jsonrpc":"2.0","id":7,"error":{"code":3,"message":"execution reverted","data":"0x"}}]');
-  assert.deepEqual(errors, [{ code: 3, cap: false, id: 7 }]);
+  assert.deepEqual(errors, [{ code: 3, cap: false, rev: true, id: 7 }]);
   const r = { url: "https://robinhood.drpc.org/", method: "POST", status: 200, load: 4, calls, errors };
   assert.deepEqual(refusalsOf(r), [`rpc error 3 eth_call ${to.toLowerCase()}:0x70a08231`]);
   assert.deepEqual(summarize([r], 6).refused, { [`robinhood.drpc.org rpc error 3 eth_call ${to.toLowerCase()}:0x70a08231`]: 1 });
@@ -117,4 +117,28 @@ test("recorded answer release175: FAIL, the reverted buySwap and the views' fail
   for (const host of ["robinhood-rpc.publicnode.com", "robinhood.drpc.org"]) assert.ok(v.lines.includes(`BAD ${host} rpc error 3 eth_call ${pool}:0x25faf2a3: 1 EVM RPC answers refused`), host);
   for (const sel of ["0x33d09200", "0xfdab463d", "0xa8f0f95a", "0x50f3e219", "0x4181445b"]) assert.ok(v.lines.includes(`BAD rpc.mainnet.chain.robinhood.com failed net::ERR_FAILED [eth_call ${pool}:${sel}]: 2 EVM RPC answers refused`), sel);
   assert.equal(ANSWERS.release175.signDir, null);
+});
+
+// The fit read (the pool's own buySwap from the pool, the kit's evmBuySwapFitCall): a revert or an out-of-gas error is
+// its answer, "the route's swap does not run as the pool runs it", as the kit reads it (quote.ts answerOf). Release
+// 175's two "rpc error 3" were this read of the buy tap's v3 tier for a coin with no v3 pool. Any other call's revert,
+// any other contract's buySwap, and the fit read's provider refusal stay BAD.
+test("the fit read's revert or out of gas is its answer; any other revert, another contract's buySwap, and its provider refusal stay BAD", () => {
+  const pool = "0x9306359433127c4f3be426f6faeb00a3c41f66db";
+  const base = "0xaa080e74ec99cf5c684548c77ca145edfcf899cf";
+  const fit = (to, sel = BUY_SWAP) => ({ method: "eth_call", params: [], id: 1, to, sel });
+  const r = (call, answer) => ({ url: "https://robinhood.drpc.org/", method: "POST", status: 200, load: 4, calls: [{ method: "eth_blockNumber", params: [], id: 0 }, call], errors: errorsOf(answer) });
+  const reverted = '[{"jsonrpc":"2.0","id":0,"result":"0x1"},{"jsonrpc":"2.0","id":1,"error":{"code":3,"message":"execution reverted","data":"0x"}}]';
+  assert.equal(isFitRead(fit(pool)), true);
+  assert.equal(isFitRead(fit(base)), true, "Base's pinned pool");
+  assert.deepEqual(refusalsOf(r(fit(pool), reverted)), [], "the fit read's revert (release 175's)");
+  assert.deepEqual(refusalsOf(r(fit(base), '[{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"execution reverted"}}]')), [], "a revert named by its message");
+  assert.deepEqual(refusalsOf(r(fit(pool), '[{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"out of gas"}}]')), [], "its out of gas (geth)");
+  assert.deepEqual(refusalsOf(r(fit(pool), '[{"jsonrpc":"2.0","id":1,"error":{"code":-32003,"message":"out of gas: gas required exceeds: 476190"}}]')), [], "its out of gas (reth)");
+  assert.deepEqual(refusalsOf(r(fit(pool, "0xfdab463d"), reverted)), [`rpc error 3 eth_call ${pool}:0xfdab463d`], "the pool's currentRoot reverting is no answer");
+  const other = "0x" + "12".repeat(20);
+  assert.deepEqual(refusalsOf(r(fit(other), reverted)), [`rpc error 3 eth_call ${other}:${BUY_SWAP}`], "a buySwap of a contract that is no pinned pool");
+  assert.deepEqual(refusalsOf(r(fit(pool), '[{"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"rate limit exceeded"}}]')), [`rpc error -32005 eth_call ${pool}:${BUY_SWAP}`], "the fit read's rate limit");
+  assert.deepEqual(refusalsOf({ ...r(fit(pool), reverted), status: 429, errors: [] }), [`429 [eth_blockNumber, eth_call ${pool}:${BUY_SWAP}]`], "the fit read's post answered 429");
+  assert.deepEqual(refusalsOf({ ...r(fit(pool), reverted), status: undefined, failed: "net::ERR_FAILED", errors: [] }), [`failed net::ERR_FAILED [eth_blockNumber, eth_call ${pool}:${BUY_SWAP}]`], "the fit read's post that failed");
 });
