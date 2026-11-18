@@ -64,3 +64,28 @@ test("SIGN_HOST's build: the EVM buy and sale reach their runners on a chain who
     await shut.t.signedOut();
   }
 });
+
+// Card evm-buy-end-carries-its-tx (review of 167d9deea, P2): the flow wraps each EVM trade's context (evmEnds, which reads
+// the chain's positions again at an end stage) and must hand the api every stage with its transactions: a wrapper that
+// passed the stage alone left the late filled and owed_back with no tx, so the fill showed no link.
+test("evm-buy-end-carries-its-tx: the flow's EVM buy and sale post each stage to the api with its transactions", async () => {
+  const TX = [{ chain: "base", hash: `0x${"ab".repeat(32)}` }];
+  for (const chain of ["base", "robinhood"] as const) {
+    const posted: unknown[] = [];
+    const c = { id: "r1", sha: "00", progress: (stage: string, txs?: unknown) => void posted.push([stage, txs]) };
+    const posts = (stage: string) => () => (_a: unknown, k: { progress(s: string, t?: unknown): void }) => (k.progress(stage, TX), { error: "not_allowed" as const });
+    const t = testnetPool(
+      { store, seed64: async () => SEED.slice() },
+      {
+        withdrawBuilt: { [chain]: true },
+        evmRpcs: () => [Object.assign(async () => assert.fail("no read"), { url: "https://a.example" }), Object.assign(async () => assert.fail("no read"), { url: "https://b.example" })],
+        evmRound: () => async () => ({ events: [], finalBlock: 100n }),
+        evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+        tradeKinds: { evmBuy: posts("owed_back") as never, evmSell: posts("filled") as never },
+      } as Parameters<typeof testnetPool>[1],
+    );
+    for (const ask of trades(chain)) t.flow(ask, c as never);
+    assert.deepEqual(posted, [["owed_back", TX], ["filled", TX]], chain);
+    await t.signedOut();
+  }
+});

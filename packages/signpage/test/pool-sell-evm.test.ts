@@ -1411,3 +1411,25 @@ test("SellDelegate v2: W's tail after a sale (the ETH it left on W off the rung)
   await host.tail!({ chain: "base", address: W, l: "7", j: 1, amount: "5" });
   assert.deepEqual(await md.get("meta", wTailKeyOf("base", W)), { chain: "base", address: W, l: "7", j: 1, amount: "5" });
 });
+
+// card evm-buy-end-carries-its-tx: the sale's answer is the early "sent" with no transaction once the bytes have left, so
+// its end goes out as progress with the end's transactions (the same fix as the buy's, the same kind wrapper shape)
+test("kind (evm-buy-end-carries-its-tx): a filled sale's end goes out as progress with its transaction", async () => {
+  let x!: World;
+  x = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      x.land(s.minOut - s.fee);
+      return "0x" + "d1".repeat(32);
+    },
+  });
+  const locks = { request: (_name: string, _o: LockOptions, f: () => unknown) => Promise.resolve().then(f) } as unknown as Pick<LockManager, "request">;
+  const posts: [string, unknown][] = [];
+  let done!: () => void;
+  const ended = new Promise<void>((r) => (done = r));
+  const ctx = { id: "r1", sha: "00", progress: (s: string, txs?: unknown) => (posts.push([s, txs]), s !== "sent" && done()) };
+  const r = poolSellEvmKind(() => x.h, locks)(ASK, ctx as never) as { after: Promise<void>; answer(): unknown };
+  await r.after;
+  await ended;
+  assert.deepEqual(posts.at(-1), ["filled", [{ chain: "base", hash: "0x" + "d1".repeat(32) }]]);
+});

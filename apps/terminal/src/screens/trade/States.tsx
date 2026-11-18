@@ -28,6 +28,7 @@ export function stateId(p: Phase, now: number, side: "buy" | "sell"): string | n
   if (!v) return null;
   if (v.k === "failed") return side === "buy" ? "S8.23" : "S8.32";
   if (v.k === "notLanded") return side === "buy" ? "S8.24" : "S8.36";
+  if (v.k === "owedBack") return "owedBack";
   return side === "buy" ? "partial" : "S8.35";
 }
 
@@ -83,6 +84,7 @@ export function EndLine({ phase, side, part }: { phase: Phase; side: "buy" | "se
   let body;
   if (v.k === "failed") body = <W id={v.reason ?? "failed"} />;
   else if (v.k === "notLanded") body = <W id="notLanded" />;
+  else if (v.k === "owedBack") body = <W id="owedBack" />;
   else if (part)
     body = (
       <>

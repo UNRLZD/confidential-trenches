@@ -3,7 +3,9 @@
 // progress after its answer: PASS. bad: main 79701e4's build: FAIL. badM1..badM3: this card's build planted (buy out of
 // the trade set; no refused for a refusal; the Running branch not handing the verdict to give): each FAIL. liveBefore:
 // SIGN_HOST before this card's deploy: FAIL. Planted on the good one: another /app.js, no pin, a kind or an end stage
-// missing, the rule not read: each FAIL.
+// missing, the rule not read: each FAIL. Card evm-buy-end-carries-its-tx (kit 1.19): good re-recorded (give posts the
+// result's end with its txs, owed_back an end stage); goodKit118, the good before it, and badOwedNoEnd, that build with
+// owed_back cut from the end stages: FAIL, owed_back named.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -17,19 +19,24 @@ test("recorded good answer: this card's build posts a trade kind's end as progre
   assert.equal(v.ok, true, v.lines.join("\n"));
   assert.deepEqual(v.lines, []);
   assert.deepEqual(ANSWERS.good.kinds, ["buy", "pool.buy", "pool.sell", "pool.deposit"]);
+  assert.deepEqual(ANSWERS.good.ends, ["filled", "part_filled", "not_landed", "refused", "owed_back"]);
+  assert.match(ANSWERS.good.rule, /\.result\.txs:void 0;/);
 });
 
 for (const [k, line] of [
   ["bad", NONE],
-  ["badM1", "BAD the bundle's trade kinds whose end goes out as progress miss buy"],
+  // badM1's build predates owed_back (kit 1.19): its end stages miss it too
+  ["badM1", ["BAD the bundle's trade kinds whose end goes out as progress miss buy", "BAD the bundle's end stages miss owed_back"]],
   ["badM2", NONE],
   ["badM3", NONE],
   ["liveBefore", NONE],
+  ["goodKit118", "BAD the bundle's end stages miss owed_back"],
+  ["badOwedNoEnd", "BAD the bundle's end stages miss owed_back"],
 ]) {
   test(`recorded bad answer ${k}: FAIL, that fact named`, () => {
     const v = judge(ANSWERS[k]);
     assert.equal(v.ok, false);
-    assert.deepEqual(v.lines, [line]);
+    assert.deepEqual(v.lines, [line].flat());
   });
 }
 
@@ -60,4 +67,20 @@ test("the facts read from a bundle of card kit-frame-version's shape (the kind r
   assert.equal(facts("", js.replace(",h,e))", ",h))")).running, null);
   assert.equal(facts("", js.replace("ks.has(_)", "ks.has(x)")).running, null);
   assert.equal(facts("", js.replace("l(_,f,p,", "l(x,f,p,")).running, null);
+});
+
+test("evm-buy-end-carries-its-tx: the rule read in kit 1.19's shape (the result's txs with its end, the stages posted as {stage, txs}), both or neither", () => {
+  const js = "es=new Set([`filled`,`part_filled`,`not_landed`,`refused`,`owed_back`]);if(c){let e=l?l.result.stage:u===`id_reused`?null:`refused`,t=l?l.result.txs:void 0;typeof e==`string`&&es.has(e)&&!f.some(t=>t.stage===e)&&o(e,Array.isArray(t)?t:void 0)}";
+  assert.deepEqual(facts("", js).ends, ["filled", "part_filled", "not_landed", "refused", "owed_back"]);
+  // the txs read but not posted, posted but not read, the stages read as a list of strings with txs, or posted twice
+  for (const [from, to] of [
+    ["&&o(e,Array.isArray(t)?t:void 0)}", "&&o(e)}"],
+    [",t=l?l.result.txs:void 0;", ";"],
+    ["!f.some(t=>t.stage===e)", "!f.includes(e)"],
+    ["&&!f.some(t=>t.stage===e)", ""],
+    ["Array.isArray(t)?t:void 0", "Array.isArray(x)?x:void 0"],
+  ]) {
+    assert.ok(js.includes(from), from);
+    assert.equal(facts("", js.replace(from, to)).rule, null, `${from} -> ${to}`);
+  }
 });

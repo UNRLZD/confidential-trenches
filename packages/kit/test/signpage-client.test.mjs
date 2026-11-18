@@ -1646,7 +1646,7 @@ test("kit-deposit-calls: deposit.confirm answers the stage with its facts throug
 const HELLO = { v: 1, type: "hello", kit: MSG.SIGNPAGE_KIT_VERSION };
 
 test("kit-frame-version: the kit names its version in a hello to SIGN_HOST's origin, just before each handshake state request", async () => {
-  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.18");
+  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.19");
   const h = makeHost();
   const c = C.createSignpageClient({ url: URL_, host: h.host });
   await flush();
@@ -1758,4 +1758,50 @@ test("pool-deposit-stages: a pool_deposit op at every stage, with its facts, rea
   const { h, c } = await readyClient();
   h.post({ v: 1, type: "state", state: { ...STATE, vault_balance: "7", ops: [depositOp({ stage: "in_pool" })] } });
   assert.deepEqual(c.snapshot().state, { ...STATE, vault_balance: "7", ops: [] }, "in_pool on a vault deposit is dropped");
+});
+
+// ------------------------------------------------------------------------------------------------ card evm-buy-end-carries-its-tx
+// A Base or Robinhood buy's end reaches the app with its transactions and its own stage (review of 39c2ab9c, P3-6): the
+// answer is the early "sent" with no transaction, so a stage event carries the end's `txs`, and a swap that failed with
+// the ETH left on the buy's wallet ends "owed_back", never "refused" (kit 1.19).
+const BASE_TX = `0x${"ab".repeat(32)}`;
+
+test("evm-buy-end-carries-its-tx: a stage event's txs reach onProgress with its stage; one with none gives no txs", async () => {
+  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.19");
+  const { h, c } = await readyClient();
+  const seen = [];
+  c.onProgress((id, stage, txs) => seen.push([id, stage, txs]));
+  const state = unchanged(c);
+  const sent = { v: 1, type: "progress", id: "x", stage: "filled", txs: [{ chain: "base", hash: BASE_TX }] };
+  h.post(sent);
+  h.post({ v: 1, type: "progress", id: "y", stage: "owed_back", txs: [{ chain: "robinhood", hash: BASE_TX }] });
+  h.post({ v: 1, type: "progress", id: "z", stage: "filled" });
+  assert.deepEqual(seen, [["x", "filled", [{ chain: "base", hash: BASE_TX }]], ["y", "owed_back", [{ chain: "robinhood", hash: BASE_TX }]], ["z", "filled", undefined]]);
+  assert.ok(Object.isFrozen(seen[0][2]) && Object.isFrozen(seen[0][2][0]), "listeners share one txs list: frozen");
+  assert.ok(!Object.isFrozen(sent.txs) && !Object.isFrozen(sent.txs[0]), "a copy is frozen, never the message's own data");
+  state.check();
+});
+
+test("evm-buy-end-carries-its-tx: a stage event whose txs is not a list of {chain, hash} is dropped whole", async () => {
+  const { h, c } = await readyClient();
+  const seen = [];
+  c.onProgress((id, stage, txs) => seen.push([id, stage, txs]));
+  const d0 = c.dropped().shape;
+  const bad = [
+    { v: 1, type: "progress", id: "x", stage: "filled", txs: { chain: "base", hash: BASE_TX } },
+    { v: 1, type: "progress", id: "x", stage: "filled", txs: [{ chain: "mars", hash: BASE_TX }] },
+    { v: 1, type: "progress", id: "x", stage: "filled", txs: [{ chain: "base", hash: BASE_TX, key: "00" }] },
+    { v: 1, type: "progress", id: "x", stage: "filled", txs: [{ chain: "base" }] },
+    { v: 1, type: "progress", id: "x", stage: "owed", txs: [] },
+  ];
+  for (const m of bad) h.post(m);
+  assert.equal(c.dropped().shape, d0 + bad.length);
+  assert.deepEqual(seen, []);
+});
+
+test("evm-buy-end-carries-its-tx: owed_back is a trade stage: a progress event, a pool.buy answer and a buy op may carry it", () => {
+  assert.equal(S.signpageProgressSchema({ v: 1, type: "progress", id: "x", stage: "owed_back" }), true);
+  assert.equal(S.signpageProgressSchema({ v: 1, type: "progress", id: "x", stage: "owed_back", txs: [{ chain: "base", hash: BASE_TX }] }), true);
+  assert.equal(S.SIGNPAGE_RESULT_SCHEMAS["pool.buy"]({ stage: "owed_back", txs: [{ chain: "base", hash: BASE_TX }] }), true);
+  assert.equal(S.SIGNPAGE_RESULT_SCHEMAS["pool.sell"]({ stage: "owed_back", txs: [] }), true);
 });
