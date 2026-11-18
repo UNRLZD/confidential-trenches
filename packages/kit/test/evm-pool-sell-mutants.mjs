@@ -147,7 +147,7 @@ export const MUTANTS = [
   [SELL, 'if (collector === undefined) return refuse("not_deployed", `${chain} has no pinned FeeCollector to sign a sell for yet`);', "", SIGNCOLL],
   [SELL, "lower(built.feeRecipient) !== lower(collector)", "built.feeRecipient !== collector", SIGNCOLL],
   // no read of a pin reaches Object.prototype (the review of 8d8675d): the list has no prototype, a pin is an own key
-  [BUY, "(venues ??= bare({", "(venues ??= Object.freeze({", "M370 a polluted Object.prototype names no pool"],
+  [BUY, ": bare({ ...evmMainnetVenues(), ...evmTestnetVenues() })", ": Object.freeze({ ...evmMainnetVenues(), ...evmTestnetVenues() })", "M370 a polluted Object.prototype names no pool"],
   [BUY, "    base: bare({", "    base: Object.freeze({", "M370 a polluted Object.prototype names no pool"],
   [BUY, "    robinhood: bare({", "    robinhood: Object.freeze({", "M370 a polluted Object.prototype names no pool"],
   [BUY, 'pool: ownPin(v, "pool")', "pool: (v as { pool?: string }).pool", "M370 a polluted Object.prototype names no pool"],

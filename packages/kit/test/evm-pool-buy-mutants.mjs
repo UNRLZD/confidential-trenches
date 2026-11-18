@@ -97,7 +97,7 @@ export const MUTANTS = [
   ["const chainId = venueOf(buy.chain).chainId;", "const chainId = 8453;", VECTOR],
   ['if (typeof proof !== "object" || proof === null) return refuse("bad_amount", "the proof\'s values are an object");', "", KEY],
   // the venue list the checks and the signer read is frozen at every level, never a mutable copy (M366 (4))
-  ["(venues ??= bare({", "(venues ??= ({", "V1 "],
+  [": bare({ ...evmMainnetVenues(), ...evmTestnetVenues() })", ": ({ ...evmMainnetVenues(), ...evmTestnetVenues() })", "V1 "],
   ["    base: bare({", "    base: ({", "V1 "],
   ["    robinhood: bare({", "    robinhood: ({", "V1 "],
   ['middles: Object.freeze(["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"])', 'middles: (["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"])', "V1 "],
@@ -117,7 +117,7 @@ export const MUTANTS = [
   ["if (BUILT.has(built) && !((v.v3 !== undefined && samePin(built.adapter, v.v3)) || (v.v4 !== undefined && samePin(built.adapter, v.v4)))) {", "if (false) {", "M370 a pinned signature"],
   // no read of a pin reaches Object.prototype (the review of 8d8675d): the list has no prototype at any level, and a pin
   // is an own key only
-  ["(venues ??= bare({", "(venues ??= Object.freeze({", "M370 a polluted Object.prototype names no adapter"],
+  [": bare({ ...evmMainnetVenues(), ...evmTestnetVenues() })", ": Object.freeze({ ...evmMainnetVenues(), ...evmTestnetVenues() })", "M370 a polluted Object.prototype names no adapter"],
   ["    base: bare({", "    base: Object.freeze({", "M370 a polluted Object.prototype names no adapter"],
   ["    robinhood: bare({", "    robinhood: Object.freeze({", "M370 a polluted Object.prototype names no adapter"],
   ["Object.freeze(Object.assign(Object.create(null) as T, o))", "Object.freeze(Object.assign({} as T, o))", "M370 a polluted Object.prototype names no adapter"],
