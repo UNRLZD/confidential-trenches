@@ -7,7 +7,7 @@
 // never a 404 for a real coin.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { request } from "node:http";
+import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { ROW_FIELDS } from "../../../../terminal/src/screens/discover/fields.ts";
@@ -59,20 +59,72 @@ const tokensWith = (status = 200) =>
     }),
   );
 const at = (evmTokens: ReturnType<typeof tokensWith>) => start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, evmTokens);
-const servers = [at(tokensWith()), at(tokensWith(429)), at(tokensWith(500))];
+/** The bound on a server's start and on a call's answer: each ends inside it or fails naming what it waited on. */
+const WAIT_MS = 10_000;
+// card helper-token-any-coin-test-never-hangs: start() calls listen() at import, so each server may have said
+// 'listening' before before() runs; that event is never said again, and a wait on it alone hung the helper suite for
+// 71 min at 0% CPU (18 Nov). The wait reads the server's own state first. The fourth server's handler never answers
+// (the stalled-call test).
+const servers: [string, Server][] = [
+  ["the DexScreener-up server", at(tokensWith())],
+  ["the DexScreener-429 server", at(tokensWith(429))],
+  ["the DexScreener-500 server", at(tokensWith(500))],
+  ["the stalled server", createServer(() => undefined).listen(0, "127.0.0.1")],
+];
 const ports: number[] = [];
-before(() => Promise.all(servers.map((s, i) => new Promise<void>((ok) => s.on("listening", () => ((ports[i] = (s.address() as AddressInfo).port), ok()))))));
-after(() => Promise.all(servers.map((s) => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok()))))));
+before(async () => {
+  (await Promise.all(servers.map(([name, s]) => listening(s, name)))).forEach((p, i) => (ports[i] = p));
+});
+after(() => Promise.all(servers.map(([, s]) => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok()))))));
 
-function call(path: string, to = 0) {
+/** The server's port once it listens: at once when it already does (its 'listening' event may be past), else on that
+ *  event; a listen error, or no listen within `ms`, fails naming `name`. */
+function listening(s: Server, name: string, ms = WAIT_MS): Promise<number> {
+  return new Promise((ok, fail) => {
+    const port = () => (s.address() as AddressInfo).port;
+    if (s.listening) return ok(port());
+    const done = (e?: Error) => {
+      clearTimeout(t);
+      s.off("listening", up).off("error", down);
+      if (e === undefined) ok(port());
+      else fail(e);
+    };
+    const up = () => done();
+    const down = (e: Error) => done(new Error(`${name} did not start: ${e.message}`));
+    const t = setTimeout(() => done(new Error(`${name} was not listening within ${ms} ms`)), ms);
+    s.once("listening", up).once("error", down);
+  });
+}
+
+/** One GET to server `to`; no answer within `ms` (a stalled handler, a lost connection) fails naming the call. */
+function call(path: string, to = 0, ms = WAIT_MS) {
   return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port: ports[to], method: "GET", path }, (res) => {
+    const r = request({ host: "127.0.0.1", port: ports[to], method: "GET", path, timeout: ms }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (d: Buffer) => chunks.push(d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
     });
+    r.on("timeout", () => r.destroy(new Error(`GET ${path} on ${servers[to]![0]}: no answer within ${ms} ms`)));
     r.on("error", fail).end();
   });
 }
+
+test("a server that said 'listening' before the wait began is taken at once, never waited on again", async () => {
+  const s = createServer().listen(0, "127.0.0.1");
+  await new Promise<void>((ok) => s.once("listening", () => setImmediate(ok)));
+  try {
+    assert.equal(await listening(s, "the late server"), (s.address() as AddressInfo).port);
+  } finally {
+    s.close();
+  }
+});
+
+test("a server that never listens fails inside the bound and names itself", async () => {
+  await assert.rejects(listening(createServer(), "the unstarted server", 50), { message: "the unstarted server was not listening within 50 ms" });
+});
+
+test("a stalled handler fails the call inside the bound and names it", async () => {
+  await assert.rejects(call(`/v1/market/token?chain=base&token=${DEGEN}`, 3, 50), { message: `GET /v1/market/token?chain=base&token=${DEGEN} on the stalled server: no answer within 50 ms` });
+});
 
 for (const c of CASES) {
   test(`GET /v1/market/token?chain=${c.chain} for ${c.symbol}, which no list served: 200, its row DexScreener's, in the frozen fields`, async () => {
