@@ -63,6 +63,27 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 export const STREAM_WS = "wss://api.mainnet-beta.solana.com";
 export const TRADES_RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"] as const;
+/**
+ * Card sol-meteora-tape-inside-rpc-budget: the providers a Meteora stream transaction is read whole on (txTrades), one
+ * the helper's caller, sell and fee routes never send to (rpc.ts: SOLANA_RPC_URL, its keyed spares, then
+ * api.mainnet-beta), so no burst of Meteora trades takes their room. At c775de255 these reads went to the trades list,
+ * whose first provider is the main key: 10 listed Meteora coins open on a local helper on mainnet (18 Nov 17:35-17:44Z)
+ * sent 196 to 307 getTransaction a minute (Helius about 145, publicnode 38 to 105, api.mainnet-beta 25 to 50 with its
+ * 429s) and logged 61 "rpc hold solana-public background" lines, the reads trades.ts's header names the stream as
+ * avoiding. solana-rpc.publicnode.com names no limit (no rate header on its answers); read from the Mac 18 Nov 17:44Z,
+ * getTransaction at 5, 10 and 20 a second for 10 s each answered 350 of 350, none null, p50 130-136 ms, p95 238-462 ms.
+ */
+export const WHOLE_RPCS = ["https://solana-rpc.publicnode.com"] as const;
+/** The whole reads sent a second, every coin together. [design: 10, half the 20 a second publicnode answered whole
+ *  above, so the trade walks' own last fallback (TRADES_RPCS) keeps the other half] */
+export const WHOLE_PER_S = 10;
+/** The whole reads one coin may send a WHOLE_WINDOW_MS, so one busy coin never takes every coin's second. [design: 20,
+ *  two a second: ten coins at it fill WHOLE_PER_S; a coin past it is served its pool's tape (CUT_KEEP_MS)] */
+export const WHOLE_COIN_MAX = 20;
+export const WHOLE_WINDOW_MS = 10_000;
+/** How long a coin whose Meteora trade went unread (past the budget) is served its top pool's tape (trades): a minute,
+ *  so a coin at the budget's edge never flips between the two tapes read to read. */
+export const CUT_KEEP_MS = 60_000;
 export const PYTH_RECEIVER = "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ";
 export const PYTH_SOL_USD = "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE";
 const PYTH_FEED = "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d";
@@ -418,6 +439,11 @@ type Entry = {
    *  oldest it read, or after a transaction a walk could not read, or after the oldest a gap's walk reached at REFILL_MAX
    *  (an unread gap lies below it). Undefined until the first walk ends. */
   whole?: number;
+  /** Card sol-meteora-tape-inside-rpc-budget: when this coin's last WHOLE_WINDOW_MS of whole reads were sent, oldest first. */
+  wholeSent?: number[];
+  /** Its newest stream transaction not read whole (past the budget, or no answer): when (`at`), and the ms after which
+   *  its tape holds every trade again (`to`, the second after it arrived). */
+  cut?: { at: number; to: number };
 };
 type Back = { before: string | null; events: Swap[]; book: Book | null; done: boolean; txs: number; n: number; want: { tf: Tf; limit: number } };
 
@@ -428,6 +454,8 @@ export function createSolanaTrades(deps: {
    *  listed": the tape answers 503, so the page reads again, never a 404 for a listed token (card app-console-429). */
   listed: (mint: string) => Promise<boolean | null>;
   rpcs?: readonly string[];
+  /** The whole reads' providers (WHOLE_RPCS), a test's own. */
+  wholeRpcs?: readonly string[];
   wsUrl?: string;
   source?: (on: SourceEvents) => Source;
   /** The token's top pool's newest trades (token.ts tape: a JSON array of tape rows, newest first), served while this
@@ -471,16 +499,17 @@ export function createSolanaTrades(deps: {
   /** Each other quote coin's decimals and USD price (USD per whole coin times 10^18), read once and every REF_MS. */
   const quotes = new Map<string, { decimals: number | null; usd: bigint | null; at: number; reading: Promise<void> | null }>();
 
-  /** One request, to each provider in turn until one answers a result. */
+  /** One request, to each provider in turn until one answers a result. `lane`: the whole reads' own providers
+   *  (WHOLE_RPCS), outside the shared budget and the keyed slot, whose 429 holds only them. */
   const slot = deps.slot !== undefined && deps.slot.state() !== "public" ? deps.slot : undefined;
-  async function rpc(method: string, params: unknown[]): Promise<unknown> {
-    for (const url of slot !== undefined && !slot.useKeyed() ? rpcs.slice(1) : rpcs) {
-      const key = slot !== undefined && url === rpcs[0] ? slot : undefined;
-      if ((deps.budget?.(url, method) ?? 0) > 0) continue;
+  async function rpc(method: string, params: unknown[], lane?: { urls: readonly string[]; throttled(s: number): void }): Promise<unknown> {
+    for (const url of lane?.urls ?? (slot !== undefined && !slot.useKeyed() ? rpcs.slice(1) : rpcs)) {
+      const key = lane === undefined && slot !== undefined && url === rpcs[0] ? slot : undefined;
+      if (lane === undefined && (deps.budget?.(url, method) ?? 0) > 0) continue;
       const sent = now();
       try {
         const r = await doFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
-        if (r.status === 429) deps.throttled?.(url, r.headers);
+        if (r.status === 429) lane === undefined ? deps.throttled?.(url, r.headers) : lane.throttled(Math.min(60, Math.max(1, Number(r.headers.get("retry-after")) || 10)));
         if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
           const body = key !== undefined && r.status >= 400 && r.status < 500 ? await head(r) : (await r.body?.cancel(), "");
           if (key !== undefined) {
@@ -597,6 +626,26 @@ export function createSolanaTrades(deps: {
     return out;
   }
 
+  /** Card sol-meteora-tape-inside-rpc-budget: the whole reads sent in the last second (every coin), the time before which
+   *  their providers are held (their 429), and the minute's counts for the log. */
+  const wholeSent: number[] = [];
+  let wholeHeldTo = 0;
+  const wholeCount = { sent: 0, over: 0, unread: 0 };
+  const wholeLane = { urls: deps.wholeRpcs ?? WHOLE_RPCS, throttled: (s: number) => void (wholeHeldTo = now() + s * 1_000) };
+  /** Whether a stream transaction of `e` may be read whole now: a place in the second's WHOLE_PER_S (every coin) and in
+   *  the coin's WHOLE_COIN_MAX a WHOLE_WINDOW_MS, taken when there is one. */
+  function wholeTake(e: Entry): boolean {
+    const t = now();
+    if (t < wholeHeldTo) return false;
+    while (wholeSent.length > 0 && wholeSent[0]! <= t - 1_000) wholeSent.shift();
+    const mine = (e.wholeSent ??= []);
+    while (mine.length > 0 && mine[0]! <= t - WHOLE_WINDOW_MS) mine.shift();
+    if (wholeSent.length >= WHOLE_PER_S || mine.length >= WHOLE_COIN_MAX) return false;
+    wholeSent.push(t);
+    mine.push(t);
+    return true;
+  }
+
   /** A transaction's trades: from its log, or its inner instructions when the log was cut. */
   async function txTrades(mint: string, sig: string, logs: unknown): Promise<RawTrade[] | null> {
     const f = fromLogs(logs);
@@ -604,6 +653,20 @@ export function createSolanaTrades(deps: {
     const arrived = Math.floor(now() / 1000);
     // a Meteora venue's events are in the inner instructions only (card index-sol-trades-2): read the transaction whole
     if (!f.truncated && !eventsInInner(logs)) return forMint(mint, f.trades, arrived);
+    // card sol-meteora-tape-inside-rpc-budget: only inside the whole reads' budget, on their own providers; past it, or
+    // unanswered, the log's own trades are held and the coin's tape names its reach from this transaction (cut)
+    if (!f.truncated) {
+      const e = entries.get(mint);
+      const ok = e !== undefined && wholeTake(e);
+      const w = ok ? ((await rpc("getTransaction", [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }], wholeLane).catch(() => null)) as Record<string, unknown> | null) : null;
+      if (ok) wholeCount.sent++;
+      if (w === null || w === undefined) {
+        wholeCount[ok ? "unread" : "over"]++;
+        if (e !== undefined) e.cut = { at: now(), to: Math.max(e.cut?.to ?? 0, (arrived + 1) * 1_000) };
+        return forMint(mint, f.trades, arrived);
+      }
+      return forMint(mint, cutTrades(f, w), blockTime(w) ?? arrived);
+    }
     const r = (await rpc("getTransaction", [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
     if (r === null) return null;
     return forMint(mint, cutTrades(f, r), blockTime(r) ?? arrived);
@@ -820,6 +883,9 @@ export function createSolanaTrades(deps: {
       const unpriced = empty.filter((e) => e.quoteMint !== null && !priced(e.quoteMint)).length;
       const unread = empty.filter((e) => e.quoteMint === null && e.seen > 0 && e.traded === 0).length;
       if (empty.length > 0) deps.log?.(`solana tape: ${entries.size} tokens open, ${empty.length} empty: quote with no price ${unpriced}, no trade of a venue read ${unread}, quiet ${empty.length - unpriced - unread}`);
+      // card sol-meteora-tape-inside-rpc-budget: the minute's whole reads, so their budget can be read back
+      if (wholeCount.sent + wholeCount.over > 0) deps.log?.(`solana whole reads: ${wholeCount.sent} sent, ${wholeCount.unread} unanswered, ${wholeCount.over} past the budget (${WHOLE_PER_S} a second, ${WHOLE_COIN_MAX} a coin in ${WHOLE_WINDOW_MS / 1_000} s)`);
+      wholeCount.sent = wholeCount.over = wholeCount.unread = 0;
     }
     for (const e of entries.values()) {
       if (t - e.touched > IDLE_MS) {
@@ -1200,6 +1266,13 @@ export function createSolanaTrades(deps: {
       // never an empty tape for a token that trades (card solana-trades-show-on-every-token: NEARKAT and BONK answered 0
       // rows, src chain, while their pools traded)
       if (rows.length === 0 && deps.tape !== undefined) return poolTape(mint, limit, e);
+      // card sol-meteora-tape-inside-rpc-budget: a coin whose Meteora trade went unread inside CUT_KEEP_MS is served its top
+      // pool's trades as a venue not decoded is, while the vendor answers them; else its own rows, whole only past the cut
+      const cut = e.cut !== undefined && now() - e.cut.at <= CUT_KEEP_MS;
+      if (cut && deps.tape !== undefined) {
+        const v = await poolTape(mint, limit, null);
+        if (v.status === 200 && v.src !== "chain") return v;
+      }
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(`${mint} ${r.tx}`)?.[r.index % 8] ?? null, tx: r.tx }));
       // `filling` while the cold walk still reads the token's older trades (first() answered at COLD_WAIT_MS or its first
@@ -1209,7 +1282,7 @@ export function createSolanaTrades(deps: {
       const late = behind(e);
       const fill = (e.state === "cold" && rows.length < limit) || late ? { filling: true } : {};
       // how far back the tape holds every trade (Entry.whole), only while no gap is being walked and the stream is heard
-      const whole = e.state === "live" && !late && e.whole !== undefined ? { whole_ms: e.whole } : {};
+      const whole = e.state === "live" && !late && e.whole !== undefined ? { whole_ms: Math.max(e.whole, e.cut?.to ?? 0) } : {};
       return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing: readTo(e) };
     },
   };
