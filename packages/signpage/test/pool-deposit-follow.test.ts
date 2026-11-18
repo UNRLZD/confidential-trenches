@@ -49,6 +49,8 @@ function world(rounds: Round[], o: { refund?: Deps["refund"] } = {}) {
   return { deps, stages, deposits, sleeps };
 }
 
+const { base58: b58 } = await import("@scure/base");
+
 test("askOf: the largest ask U_X pays with each rung's worst-case cost and the rent kept; none under the floor", () => {
   assert.equal(askOf(SOL_LADDER, FLOOR, PER, KEEP), 10_000_000n);
   assert.equal(askOf(SOL_LADDER, FLOOR - 1n, PER, KEEP), 0n);
@@ -477,7 +479,6 @@ test("review P2 with P3 1: a legacy refunded record (the helper's word, no refun
 
 // ------------------------------------------------------------------------------- card pool-deposit-op-txs
 
-const { base58: b58 } = await import("@scure/base");
 const sig = (n: number) => b58.encode(new Uint8Array(64).fill(n));
 const sol = (n: number) => ({ chain: "solana" as const, hash: sig(n) });
 

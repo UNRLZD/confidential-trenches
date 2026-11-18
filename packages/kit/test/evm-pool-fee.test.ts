@@ -9,6 +9,8 @@ const MEASURED: [string, number, bigint][] = [
   ["buy, router one hop", 2, 686_812n], ["buy, router one hop", 32, 1_332_356n],
 ];
 
+const pf = (await import("../src/index.ts")) as unknown as Record<string, unknown>;
+
 test("G(32) for a buy is at least 1,332,356, and G covers every measured release", () => {
   assert.ok(evmPoolGas(32) >= 1_332_356n, `G(32) ${evmPoolGas(32)}`);
   for (const [what, d, gas] of MEASURED) assert.ok(evmPoolGas(d) >= gas, `${what} at depth ${d}: G ${evmPoolGas(d)} < ${gas}`);
@@ -61,7 +63,6 @@ test("a depth outside 0 to 32 is refused", () => {
 
 // Card evm-buy-hookdata-fee, review fold 1 L1: the relay fee rule, the kit's one definition, with the chain fee
 const STEP = 10n ** 13n;
-const pf = (await import("../src/index.ts")) as unknown as Record<string, unknown>;
 test("L1 the relay fee is max(floor, ceilStep(2 x (gas x gas price + the chain fee))), the floor the kit's one (fold 2 LOW-A)", () => {
   const fee = pf.evmPoolFee as (a: { gas: bigint; gasPrice: bigint; chainFee: bigint; floor?: bigint }) => bigint;
   assert.equal(pf.EVM_POOL_FEE_STEP, STEP);

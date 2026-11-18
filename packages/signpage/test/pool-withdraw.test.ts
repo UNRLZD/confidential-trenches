@@ -36,6 +36,8 @@ import { POOL_BUY_READS, POOL_BUY_SETTLE_MS } from "../src/pool-buy.ts";
 import { ASK, C, COST, FEE, FINAL_SLOT, FLOOR, MIN, NOW, SCOPE, SEED64, SIG, TO, W_FEE, closers, lamportsOf, read, world } from "./pool-withdraw-world.ts";
 
 
+const NoLeaf = (((await import("../../wallet/src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
+
 test("the min part: rent(0), and the relay fee less W's fee where that is more (the 2 x fee backstop); no tip cap", () => {
   const r0 = solanaRentMin(rent, 0);
   assert.equal(MIN, FEE - W_FEE > r0 ? FEE - W_FEE : r0);
@@ -1711,7 +1713,6 @@ test("(card move-sends-or-says-why) a note the page's queue holds whose drop nev
   assert.deepEqual([n?.state, n?.attempt], ["HELD", held], "the note as the queue holds it");
 });
 
-const NoLeaf = (((await import("../../wallet/src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
 function cutRefusingEmpty(times: readonly bigint[]) {
   return (state: readonly bigint[], labels: readonly bigint[]): Pool<SolanaReleaseRequest>["trees"] =>
     async (beforeMs) => {

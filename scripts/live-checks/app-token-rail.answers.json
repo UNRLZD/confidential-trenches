@@ -1,7 +1,7 @@
 {
  "good": {
-  "source": "a local build read from atr-dist; https://ct-api.unrealized.trade",
-  "at": "2026-11-08T14:55:54.073Z",
+  "source": "a local build read from dist, drawn at APP_HOST's name in the stand-in shell; https://ct-api.unrealized.trade",
+  "at": "2026-11-18T14:10:23.911Z",
   "lists": {
    "status": 200,
    "chain": "solana",
@@ -11,7 +11,7 @@
   "pageStatus": 200,
   "js": [
    {
-    "url": "/assets/index-Cy73_iqI.js",
+    "url": "/assets/index-9HLNnXCf.js",
     "status": 200,
     "found": [
      "token-rail",
@@ -23,20 +23,26 @@
   ],
   "css": [
    {
-    "url": "/assets/style-DxcxAmCd.css",
+    "url": "/assets/style-GVmhQCaV.css",
     "status": 200,
     "found": [
      ".tkr-row",
      ".tkr-exp",
-     "1499.98px",
+     "1526.98px",
      "1179.98px"
     ]
    }
-  ]
+  ],
+  "drawn": {
+   "state": "ready",
+   "mode": "full",
+   "width": 340,
+   "head": true
+  }
  },
  "bad": {
   "source": "https://ct-app.unrealized.trade/; https://ct-api.unrealized.trade",
-  "at": "2026-11-08T14:55:57.652Z",
+  "at": "2026-11-18T14:10:29.310Z",
   "lists": {
    "status": 200,
    "chain": "solana",
@@ -46,17 +52,32 @@
   "pageStatus": 200,
   "js": [
    {
-    "url": "/assets/index-DZXi0M8L.js",
+    "url": "/assets/index-Cmsx_DMe.js",
     "status": 200,
-    "found": []
+    "found": [
+     "token-rail",
+     "rail-expand",
+     "tkr-row",
+     "tkr-chip"
+    ]
    }
   ],
   "css": [
    {
-    "url": "/assets/style-BtQBZemR.css",
+    "url": "/assets/style-Dw62Epxi.css",
     "status": 200,
-    "found": []
+    "found": [
+     ".tkr-row",
+     ".tkr-exp",
+     "1179.98px"
+    ]
    }
-  ]
+  ],
+  "drawn": {
+   "state": "ready",
+   "mode": "slim",
+   "width": 78,
+   "head": false
+  }
  }
 }
