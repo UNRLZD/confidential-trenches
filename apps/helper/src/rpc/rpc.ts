@@ -99,18 +99,28 @@ export const RPC_CLIENT_MAX = 16;
  *     and 20 plus a trade's 22 helper reads with one: 42.
  *   - solana-marks (the mark lister) and base, robinhood (the EVM pools' holdings and history reads): 30. Only the
  *     page's background passes read them, never a trade's reads, and the page's budget per host holds those to 30.
- *   - near (the page's FastNEAR seat, ?keyed=only, beside dRPC read device-direct; card near-quote-under-the-pace): 30.
- *     The page's busiest 10 s on it is one buy's (packages/signpage/src/near-trade.ts), about 25 reads: the register
- *     round's one-block pair, 10 (one final block, then W's key list, ft_balance_of, storage_balance_of,
- *     storage_balance_bounds, get_lostfound_token, and the quote's metadata, get_frozenlist_tokens, get_pool_by_ids,
- *     view_account); two read-backs of the registration, 2 each (the final block and storage_balance_of); the swap
- *     round's pair and the baseline, 11. One sell's (near-sell.ts) is about the same. Rounded up to the other page
- *     routes' 30.
+ *   - near (the page's FastNEAR seat, ?keyed=only, beside dRPC read device-direct; card near-quote-under-the-pace): 90.
+ *     The most the page's own pace of the seat lets out in any 10 s (packages/wallet/src/pace.ts PACE.seat: 30 at once,
+ *     then 5 a second, 80; card near-seat-pace-fits-one-quote), so one page is never refused here: one quote is about
+ *     29 seat reads at its block (DCL 19, Rhea 4, the final block, decimals, the fee cap about 4; app lead, 18 Nov
+ *     02:39Z), sent in the pace's one burst, and a buy's busiest 10 s was 52 (packages/signpage/test/near-seat-down.test.ts).
+ *     The 10 over 80 for sends the network moves closer together than the page let them out. At 30 a session's first
+ *     buy met this share's 429 once and waited out its seconds.
  * The share of a chain on our keyed providers (keyedBudget) and the least RPC_BUDGET_<CHAIN> may name. Callers at their
  * full share at once: (the total less RPC_RESERVE) / this; on the deployed lists (summedTotal: Helius free's 100 and
  * QuickNode's half, 135) three on Solana.
  */
-export const RPC_PAGE_NEED: Readonly<Partial<Record<RpcChain, number>>> = { solana: 42, "solana-devnet": 42, "solana-marks": 30, base: 30, robinhood: 30, near: 30 };
+export const RPC_PAGE_NEED: Readonly<Partial<Record<RpcChain, number>>> = { solana: 42, "solana-devnet": 42, "solana-marks": 30, base: 30, robinhood: 30, near: 90 };
+/**
+ * A route's 10 s total on its keyed providers where its company's published rate sets it, else RPC_BUDGETS' (keyedBudget):
+ *   - near: 600, FastNEAR's key at its pace (limits.ts KEYED_PACE fastnear: 60 a second, read from Dev's published "up
+ *     to 10,000" requests a minute per key, docs.fastnear.com/pricing, 2026-11-18 02:50Z), so the route's own pacer
+ *     (pacedOf: the total over 10 s, 60 in any PACE_SECOND_MS) sends two callers' quotes of 29 reads in one second, and
+ *     six callers find their full share (RPC_PAGE_NEED near, 90) at once. Before it, the default 100 paced the seat at 10
+ *     a second, so one quote's 29 reads took three seconds of turns (card near-seat-pace-fits-one-quote).
+ * The public fallback keeps RPC_BUDGETS' (a route with no key draws it).
+ */
+export const RPC_KEYED_TOTAL: Readonly<Partial<Record<RpcChain, number>>> = { near: 600 };
 /**
  * Requests of one method the public Solana endpoint takes in 10 s from every caller together: "Maximum number of
  * requests per 10 seconds per IP for a single RPC: 40" (clusters.mdx:154, the same "Mainnet rate limits" list as
@@ -468,7 +478,7 @@ function evmCapSpan(chain: RpcChain, answer: unknown): bigint | null {
 /** A chain's budget on our keyed providers unless RPC_BUDGET_<CHAIN> names the plan's: the chain's total (Helius free's
  *  100 per 10 s on Solana, the rpc.ts header) and one page's share (RPC_PAGE_NEED), no limit per method (a keyed plan
  *  names its own as a third number). Not the public endpoint's share: there 42 of one method would leave others none. */
-export const keyedBudget = (chain: RpcChain): BudgetLimits => ({ total: RPC_BUDGETS[chain].total, perClient: RPC_PAGE_NEED[chain] ?? RPC_CLIENT_MAX });
+export const keyedBudget = (chain: RpcChain): BudgetLimits => ({ total: RPC_KEYED_TOTAL[chain] ?? RPC_BUDGETS[chain].total, perClient: RPC_PAGE_NEED[chain] ?? RPC_CLIENT_MAX });
 /**
  * The part of each company key's 10 s pace (limits.ts KEYED_PACE: QuickNode 7 a second, dRPC's three keys 20 together,
  * one bucket, counted once) a route's total counts (card helper-serves-many-users-at-once). [design: half: the same keys serve the market-data reads (the

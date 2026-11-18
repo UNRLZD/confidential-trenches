@@ -3,7 +3,8 @@
 import assert from "node:assert/strict";
 import type { IncomingMessage } from "node:http";
 import { test } from "node:test";
-import { budgetFromEnv, clientOf, clientWindow, heldPerClient, keyOf, RETRY_AFTER_MAX_S, throttled, throttleOf, upstreamBudget, upstreamRetryAfterS } from "./limits.ts";
+import { budgetFromEnv, clientOf, clientWindow, heldPerClient, KEYED_DAY, KEYED_PACE, keyOf, PROBE_DAY_SHARE, RETRY_AFTER_MAX_S, throttled, throttleOf, upstreamBudget, upstreamRetryAfterS } from "./limits.ts";
+import { RPC_KEYED_TOTAL, RPC_PAGE_NEED } from "../rpc/rpc.ts";
 
 /** A clock that moves `step` ms at every read, from `t0`. */
 const moving = (t0: number, step: number) => {
@@ -246,4 +247,33 @@ test("throttleOf: a provider read that threw for a throttle names 1 s; any other
   assert.equal(throttleOf(new Error("RPC error -32005: project ID request rate exceeded"), true), 1);
   assert.equal(throttleOf(new Error("RPC error -32005: Node is behind by 42 slots")), 0);
   for (const m of ["RPC error -32002: resource unavailable", "RPC error -32004: method not supported", "RPC error -320050: x", "x RPC error -32005: y"]) assert.equal(throttleOf(new Error(m), true), 0, m);
+});
+
+// card near-seat-pace-fits-one-quote: FastNEAR's published numbers (docs.fastnear.com/pricing, read 2026-11-18 02:50Z):
+// "Dev / 10,000,000 per month / up to 10,000" requests per minute, per key; "Every request ... costs one credit"
+const FASTNEAR_DEV_PER_MIN = 10_000;
+const FASTNEAR_DEV_PER_MONTH = 10_000_000;
+/** One NEAR quote's seat reads at its block: 29 with every list kept, 18 after near-quote-inside-the-kpi (18 Nov 02:39Z). */
+const QUOTE_READS = [18, 29];
+
+test("FastNEAR's key is paced from Dev's published rate with headroom: its most in any minute is under 40% of 10,000, and two callers' quotes of 29 reads go out in its one burst", () => {
+  const p = KEYED_PACE.fastnear;
+  const minute = p.burst + p.perS * 60;
+  assert.ok(minute <= 0.4 * FASTNEAR_DEV_PER_MIN, `${minute} in a minute against ${FASTNEAR_DEV_PER_MIN}`);
+  for (const n of QUOTE_READS) assert.ok(p.burst >= 2 * n, `two quotes of ${n} in a burst of ${p.burst}`);
+});
+
+test("NEAR's keyed route takes two callers' quotes in one second (its pacer: the total over 10 s), and one caller's share is the seat's most in any 10 s (the wallet's PACE.seat: 30 at once, then 5 a second, 80) with room", () => {
+  const total = RPC_KEYED_TOTAL.near!;
+  for (const n of QUOTE_READS) assert.ok(total / 10 >= 2 * n, `${total / 10} a second for two quotes of ${n}`);
+  assert.ok(total / 10 <= KEYED_PACE.fastnear.perS, "the route never asks the key past its pace");
+  assert.ok(RPC_PAGE_NEED.near! >= 80, `the share ${RPC_PAGE_NEED.near}`);
+  assert.ok(2 * RPC_PAGE_NEED.near! <= total, "a second caller still finds its full share");
+});
+
+test("KEYED_DAY bounds FastNEAR's month at Dev's 10,000,000 over 31 days: 11,012 quotes a day at 29 reads, 17,741 at 18, after the probes' share", () => {
+  assert.equal(KEYED_DAY.fastnear, Math.floor(FASTNEAR_DEV_PER_MONTH / 31));
+  const reads = KEYED_DAY.fastnear - Math.floor(KEYED_DAY.fastnear * PROBE_DAY_SHARE);
+  assert.deepEqual(QUOTE_READS.map((n) => Math.floor(reads / n)), [17_741, 11_012]);
+  assert.ok(KEYED_DAY.fastnear * 31 <= FASTNEAR_DEV_PER_MONTH);
 });
