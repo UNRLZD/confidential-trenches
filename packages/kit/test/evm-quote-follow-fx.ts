@@ -44,8 +44,9 @@ const replay = (lie?: (k: string, a: unknown) => unknown) => {
   return { fetchFn, missed, sent, methods, posts: () => posts };
 };
 
-export /** The recorded quote, then the device's watch holding its block: `follow(lie)` asks it again at that block. */
-async function firstThenFollow(lie?: (k: string, a: unknown) => unknown) {
+/** The recorded quote, then the device's watch holding its block: `follow()` asks it again at that block;
+ *  `lie` rewrites the by-number answer of that block, `headHeld`: the watch hands it back as its fresh head. */
+export async function firstThenFollow(lie?: (k: string, a: unknown) => unknown, headHeld = false) {
   evmSpeedReset();
   evmPaceReset();
   evmPoolIndexReset();
@@ -70,7 +71,7 @@ async function firstThenFollow(lie?: (k: string, a: unknown) => unknown) {
   const block = { number: q1.block.number, hash: q1.block.hash, timestamp: q1.block.timestamp, baseFeePerGas: head?.baseFeePerGas === undefined ? null : BigInt(head.baseFeePerGas) };
   let heads = 0;
   const watch: EvmHeadWatch = {
-    head: () => (heads++, Promise.reject(new Error("a follow agrees on no new head"))),
+    head: () => (heads++, headHeld ? Promise.resolve({ block, confirm: async () => {} }) : Promise.reject(new Error("a follow agrees on no new head"))),
     keep: () => {},
     peek: () => null,
     held: (h: string) => (h === block.hash ? block : null),

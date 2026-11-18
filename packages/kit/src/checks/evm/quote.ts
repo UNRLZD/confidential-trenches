@@ -601,7 +601,7 @@ const SLOTS_PER_CALL = 500;
 async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, again?: number): Promise<Answer[]> {
   // a read pass of its own (`again`) is never memoized: it exists because a first answer was starved of gas
   if (again !== undefined) return readBothSent(rpcs, hash, reads, lim, again);
-  const kept = AGREED_USE.has(hash) ? AGREED.get(hash) : undefined;
+  const kept = MEMO_FOR.get(rpcs) === hash ? AGREED.get(hash) : undefined;
   const keys = reads.map(agreedKey);
   const out: (Answer | undefined)[] = keys.map((k) => kept?.get(k));
   const miss = reads.flatMap((_, i) => (out[i] === undefined ? [i] : []));
@@ -619,10 +619,11 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
  *  first quote's block, buy-tap.ts) sends only the reads that quote did not. Only agreed answers are kept, never one
  *  answered out of gas (`gas`: no evidence of anything), so nothing kept was ever one provider's alone. The newest
  *  AGREED_BLOCKS blocks, AGREED_READS reads each. Every agreed read is kept; one is answered from here only at a block a
- *  quote reads at by the caller's `at` (AGREED_USE, counted while such quotes run), so every other quote reads as it
- *  always did. */
+ *  quote reads at by the caller's `at`, and to that quote alone (MEMO_FOR: its own providers' list, set once its pinned
+ *  block is picked; re-review of this card, P1: a hash shared by every quote let a quote at a block the chain had dropped
+ *  read it from here with no read that requires it canonical), so every other quote reads as it always did. */
 const AGREED = new Map<string, Map<string, Answer>>();
-const AGREED_USE = new Map<string, number>();
+const MEMO_FOR = new WeakMap<readonly EvmRpc[], string>();
 const AGREED_BLOCKS = 4;
 const AGREED_READS = 50_000;
 const agreedKey = (r: Read): string => JSON.stringify([lower(r.to), r.data, r.override ?? null, r.env ?? null, r.group ?? null, r.state ?? null, r.tx ?? null, r.oog ?? null], (_, x) => (typeof x === "bigint" ? String(x) : x));
@@ -636,7 +637,7 @@ function agreedKeep(hash: string, xs: readonly (readonly [string, Answer])[]): v
   for (const [k, a] of xs) if (m.size < AGREED_READS) m.set(k, a);
 }
 /** Forgets every kept read (tests). Not in the index. */
-export const evmAgreedReset = (): void => (AGREED.clear(), AGREED_USE.clear());
+export const evmAgreedReset = (): void => AGREED.clear();
 /** Forgets every token's warm-quote plan and kept fits (PLANS, FITS), so the next quote reads as a cold one does
  *  (tests). Not in the index. */
 export const evmQuoteWarmReset = (): void => (PLANS.clear(), FITS.clear());
@@ -1135,7 +1136,10 @@ const PIN_GONE = new WeakSet<object>();
  *  evm-cold-multihop-quote-inside-the-kpi, P3-1: a follow answered wholly from the kept agreement sent no read that
  *  requires the block canonical). Two providers in the quote's order must hold it, the first two asked at once and
  *  the rest only where one fails; one that holds another block there refuses the pin (PIN_GONE). */
-function pinConfirm(rpcs: readonly EvmRpc[], pin: Block): () => Promise<void> {
+function pinConfirm(rpcs: readonly EvmRpc[], pin: Block, grant: () => void): () => Promise<void> {
+  // the kept agreement at the pin answers this quote's reads from its first round on (MEMO_FOR), judged by this
+  // confirmation, which readAgreed judges before any answer is used
+  grant();
   return async () => {
     const by = { method: "eth_getBlockByNumber", params: ["0x" + pin.number.toString(16), false] };
     const one = async (k: number) => header((await askAt(rpcs[k]!, [by]))[0], `provider ${k + 1}`);
@@ -1152,7 +1156,12 @@ function pinConfirm(rpcs: readonly EvmRpc[], pin: Block): () => Promise<void> {
     };
     (await Promise.allSettled([0, 1].filter((k) => k < rpcs.length).map(one))).forEach(judge);
     for (let k = 2; k < rpcs.length && holds < 2; k++) judge((await Promise.allSettled([one(k)]))[0]!, k);
-    if (holds < 2) throw failed?.e ?? new EvmQuoteError("rpc_error", `fewer than two providers hold block ${pin.number}`);
+    if (holds < 2) {
+      // fewer than two hold it (one failed, or lags): the pin is not used; the quote is asked again at a block agreed now
+      const e = new EvmQuoteError("rpc_error", `fewer than two providers hold block ${pin.number}: ${String((failed?.e as Error | undefined)?.message ?? "no answer")}`);
+      PIN_GONE.add(e);
+      throw e;
+    }
   };
 }
 /** The oldest block a quote reads, and the oldest quote a buy is built from, behind the device's clock. */
@@ -2512,23 +2521,18 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const pin = typeof at === "string" && /^0x[0-9a-fA-F]{64}$/.test(at) ? (watch?.held?.(at.toLowerCase(), nowMs) ?? null) : null;
   const start = mono();
   const seen: { at: string | null } = { at: null };
-  if (pin !== null) AGREED_USE.set(pin.hash, (AGREED_USE.get(pin.hash) ?? 0) + 1);
   try {
     return await buyQuoteWith(req, rpcsIn, nowMs, scan, watch, mono, speculate, pin, seen).catch((e) => {
-      // a pin the chain no longer holds: asked again at a new head, as a quote with no `at`
+      // a pin the chain no longer holds, or fewer than two providers hold: asked again as a quote with no `at` and
+      // no held head, on a block agreed now (the watch may still hold the dropped one; re-review of this card, P1)
       if (pin === null || !PIN_GONE.has(e as object)) throw e;
       seen.at = null;
-      return buyQuoteWith(req, rpcsIn, nowMs + Math.max(0, mono() - start), scan, watch, mono, speculate, null, seen);
+      const { at: _gone, ...fresh } = req;
+      return buyQuoteWith(fresh, rpcsIn, nowMs + Math.max(0, mono() - start), scan, undefined, mono, speculate, null, seen);
     });
   } catch (e) {
     if (e instanceof EvmQuoteError && e.at === null) e.at = seen.at;
     throw e;
-  } finally {
-    if (pin !== null) {
-      const n = (AGREED_USE.get(pin.hash) ?? 1) - 1;
-      if (n > 0) AGREED_USE.set(pin.hash, n);
-      else AGREED_USE.delete(pin.hash);
-    }
   }
 }
 
@@ -3186,7 +3190,7 @@ async function routeSetOf(a: {
   const agreedAt = async (): Promise<{ block: Block; confirm: () => Promise<void> }> => {
     // a warm buy's read round already sent at the held block (`spec`) is agreed on that same block, never a newer one
     // the watch held meanwhile
-    let got: { block: Block; confirm: () => Promise<void>; low?: EvmRpc } = spec !== null ? { block: spec, confirm: async () => {} } : a.pin !== undefined ? { block: a.pin, confirm: pinConfirm(rpcs, a.pin) } : a.watch === undefined ? await fresh(rpcs) : await a.watch.head(a.nowMs);
+    let got: { block: Block; confirm: () => Promise<void>; low?: EvmRpc } = spec !== null ? { block: spec, confirm: async () => {} } : a.pin !== undefined ? { block: a.pin, confirm: pinConfirm(rpcs, a.pin, () => MEMO_FOR.set(rpcs, a.pin!.hash)) } : a.watch === undefined ? await fresh(rpcs) : await a.watch.head(a.nowMs);
     if (!(await behind(got.block))) return got;
     if (got.low === undefined) {
       got = await fresh(rpcs);
@@ -3720,9 +3724,23 @@ async function routeSetOf(a: {
   const earlyKey = (mk: Found, p: Found) => `${mk.id} ${p.id}`;
   const earlyAsk = xs.flatMap((x) => (markets.get(x) ?? []).filter((mk) => marketQuote.has(mk)).flatMap((mk) => (xPools.get(x) ?? []).map((p) => [x, mk, p] as const)));
   const own = third.length;
+  // the early reads a route the fourth round takes (`taken`) never used stay out of the next quote's plan (PLANS), so
+  // a route never taken is never in a warm first round, where its failure would end the quote (re-review of this card,
+  // P2): their own slots, and the kept reads they hit
+  const earlyFrom = reads.length + own;
+  const hitBefore = new Set(hit);
   if (earlyAsk.length <= EVM_X_EARLY) {
     for (const [x, mk, p] of earlyAsk) viaX.set(earlyKey(mk, p), quoteAt(third, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key], token, amountIn));
   }
+  const untaken = new Set(Array.from({ length: reads.length + third.length - earlyFrom }, (_, k) => earlyFrom + k));
+  const earlyHits = new Set([...hit].filter((i) => !hitBefore.has(i)));
+  for (const i of earlyHits) hit.delete(i);
+  const taken = (q: Quote) => {
+    for (const i of [q.at, q.twice, ...(q.real === undefined ? [] : [q.real.at, q.real.twice]), ...(q.alone ?? [])]) {
+      untaken.delete(i);
+      if (earlyHits.has(i)) hit.add(i);
+    }
+  };
   if (third.length === own) await round(third);
   else {
     reads.push(...third);
@@ -3744,6 +3762,7 @@ async function routeSetOf(a: {
       for (const p of xPools.get(x)!) {
         if (!can(p, xa)) continue;
         const e = viaX.get(earlyKey(mk, p));
+        if (e !== undefined) taken(e);
         if (e !== undefined && quotesLeft-- === 0) return refuse("too_many_pools", `more than the ${EVM_QUOTE_MAX_QUOTED} routes a quote reads could beat the route`);
         p.quotes.push(e ?? quoteOf(fourth, { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]));
       }
@@ -3818,7 +3837,7 @@ async function routeSetOf(a: {
   PLANS.delete(planKey);
   // never a read with a state override: it is asked only once this quote's own reads find its pool held (review of
   // 5452011, S1), so a pool that vanished since never puts its hook's override into a read
-  PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j))), scans: asked, xs: [...xPools.keys()] });
+  PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j)), scans: asked, xs: [...xPools.keys()] });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled, outOfGas: [...outOfGas.values()] };
 }

@@ -1365,16 +1365,22 @@ test("XE a failed early read of a route the quote does not take never ends the q
   const logs = [{ key: real.key, at: 4_000_100 }, { key: market.key, at: 4_050_000 }, { key: thin.key, at: 4_050_001 }];
   const pools = [seeded(token), real, market, thin];
   const w = (x: bigint | string) => BigInt(x).toString(16).padStart(64, "0");
-  // a request reading the two-hop route through `thin` (V4Quoter.quoteExactInput naming x0, the token and thin's fee)
-  const viaThin = (calls: readonly EvmRpcCall[]) => {
-    const t = JSON.stringify(calls).toLowerCase();
-    return t.includes("ca253dc9") && t.includes(w(x0)) && t.includes(w(token)) && t.includes(w(500n) + w(10n));
-  };
+  // a request reading the two-hop route through `thin`: one V4Quoter.quoteExactInput read (from its selector to the
+  // next) naming x0, the token and thin's fee and spacing
+  const viaThin = (calls: readonly EvmRpcCall[]) =>
+    JSON.stringify(calls)
+      .toLowerCase()
+      .split("ca253dc9")
+      .slice(1)
+      .some((r) => r.includes(w(x0)) && r.includes(w(token)) && r.includes(w(500n) + w(10n)));
   let failed = 0;
   const p1 = chain(pools, 1);
   const failing: EvmRpc = async (calls) => (viaThin(calls) ? (failed++, calls.map((_, id) => ({ jsonrpc: "2.0", id, error: { code: -32000, message: "planted" } }))) : p1(calls));
   await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0), failing], NOW, scanner(5_000_000, logs), undefined, () => 0), heldTo(x0));
   assert.ok(failed > 0, "no request read the route through the thin market");
+  // the next quote of the token, warm (re-review of this card, P2): the route never taken is not in its plan, so its
+  // first round never reads it (at 9338d3b5f it did, and ended rpc_error on it)
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0), failing], NOW + 1_000, scanner(5_000_000, logs), undefined, () => 0), heldTo(x0));
 });
 
 test("X2 seventeen currencies, the shallowest by liquidity included: each is priced through its market, and the one that gives most sets R", async () => {
