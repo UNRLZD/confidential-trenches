@@ -399,7 +399,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
   // card evm-token-page-opens-any-coin: a coin no list carries named by DexScreener for the swap reads and the token page,
   // on the one DexScreener budget GET /v1/market/held draws
-  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds, keyed, evmNamed\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
+  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds, keyed, evmNamed, \{ storeDir, writable: senders\.held \}\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
   assert.match(main, /const dex = upstreamBudget\(\(\) => DEX_LIMITS, Date\.now\);\n\s*const evmNamed = evmNamedFrom\(SERVED_EVM, dex\);/);
   // card helper-robinhood-capacity: one hold per provider, the same one handed to /v1/rpc, the EVM lists and the swap reads
   // card rpc-keyed-lists: with every keyed URL's company pace, and every keyed URL probed for /v1/health; each account's

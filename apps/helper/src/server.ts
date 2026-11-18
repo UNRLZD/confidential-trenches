@@ -913,7 +913,9 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
  * The EVM chains' own swap reads (src/data/evm/swaps.ts): Base's and Robinhood's candles and trade tape. A token is
  * served only when its chain's Discover lists hold it. The providers: evmSwapRpcs.
  */
-export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}): Swaps {
+/** `disk` (card helper-evm-tapes-survive-a-restart): each chain's swap index kept in `storeDir` (swap-index-<chain>.sqlite,
+ *  data/evm/index-store.ts), written once `writable` settles (the senders this helper's, as the pool index waits). */
+export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}, disk?: { storeDir: string; writable: Promise<unknown> }): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
@@ -943,6 +945,7 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       rpcs: evmSwapRpcs(env, chain),
       spares: evmSwapSpares(env, chain),
       index: INDEX_RPCS[chain],
+      ...(disk === undefined || disk.storeDir === "" || INDEX_RPCS[chain] === undefined ? {} : { indexFile: join(disk.storeDir, `swap-index-${chain}.sqlite`), writable: disk.writable }),
       // every token an answer of the last SERVED_MS held, not only the newest answer's: a user taps what they read, and a
       // refresh between drops tokens (card robinhood-listed-tape-opens); and any token DexScreener names a pool for, as
       // its page (card evm-token-page-opens-any-coin: a coin no list served answered 404)
@@ -1400,7 +1403,7 @@ if (import.meta.main) {
     // card evm-token-page-opens-any-coin: a token no list carries is named by DexScreener, on the budget held reads draw
     const dex = upstreamBudget(() => DEX_LIMITS, Date.now);
     const evmNamed = evmNamedFrom(SERVED_EVM, dex);
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed, { storeDir, writable: senders.held }), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info on the one
     // GeckoTerminal budget, its pool and decimals the swap reads' when they hold them
     // card every-cell-shows-a-value: and each token's contract checks from GoPlus, one pace for the helper (data/goplus.ts)
