@@ -471,6 +471,8 @@ const CANDIDATES_MAX = 6;
 const V4_TXS = 3;
 /** A token's main pool is looked for again after this. */
 export const POOL_KEEP_MS = 6 * 3_600_000;
+/** A token with no pool read is looked for again after this. */
+export const NONE_MS = 300_000;
 /** The blocks the ETH price's first read goes back, so that a swap in the first step has one before it (Base). */
 export const REF_COLD_BLOCKS = VENUES.base.step + VENUES.base.refBack;
 /** The most blocks one `eth_getLogs` asks on Base, and the most such reads one tick makes for a token past its cold
@@ -1698,7 +1700,6 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const pools = new Map<string, { found: { pool: Pool; decimals: number } | null; at: number; hint?: string }>();
   // pools known from the start (a test's): kept as if just found
   for (const [t, f] of deps.pools ?? []) pools.set(t, { found: f, at: now() });
-  const NONE_MS = 300_000; // a token with no pool read is looked for again after this
   const resolving = new Map<string, Promise<Found | null>>();
   /** Each pool search's lane, which a foreground open that joins it lifts (join). */
   const resolvingLane = new Map<string, Lane>();

@@ -15,12 +15,10 @@ import { CG_ONCHAIN, coingeckoPace, createKeyed } from "../coingecko.ts";
 import { geckoBudget } from "../gecko.ts";
 import { providerHolds } from "../../limits/limits.ts";
 import { GT_BASE } from "./lists.ts";
-import { OPEN_BOUND_MS } from "./swaps.ts";
+import { NONE_MS, OPEN_BOUND_MS } from "./swaps.ts";
 
 /** A planted key: never a real one. */
 const KEY = ["CG", "planted", "evm", "late", "key"].join("-");
-/** swaps.ts NONE_MS: a token with no pool read is looked for again after this. */
-const NONE_MS = 300_000;
 const T0 = Date.parse("2026-11-14T17:30:00Z");
 const Q = Math.floor(T0 / 900_000) * 900;
 /** The vendor's newest 15m bars, and its bars before OLD_TO (a chart scrolled back): none of the newest is before it. */
