@@ -44,6 +44,24 @@ function within<T>(p: Promise<T>, ms: number): Promise<T> {
 const req = <T>(r: IDBRequest<T>): Promise<T> => new Promise((ok, no) => ((r.onsuccess = () => ok(r.result)), (r.onerror = () => no(r.error))));
 const done = (tx: IDBTransaction): Promise<void> => new Promise((ok, no) => ((tx.oncomplete = () => ok()), (tx.onerror = () => no(tx.error)), (tx.onabort = () => no(tx.error))));
 
+/**
+ * Drops every approval on this device at a sign out: the database itself is deleted, so a tab that never opened it
+ * (APP_HOST's shell, where a sign out runs) makes none. A store open in another tab (a /connect popup) closes its
+ * connection on the delete's versionchange and reads a new, empty one next: its origin's next request is refused.
+ * Rejects when the delete does not complete within `ms` (blocked, failed); the caller's sign out never waits longer.
+ */
+export function clearConnections(idb: IDBFactory | undefined = globalThis.indexedDB, ms = CONNECTIONS_STORE_MS): Promise<void> {
+  return within(
+    new Promise<void>((ok, no) => {
+      if (idb === undefined) return ok();
+      const r = idb.deleteDatabase(CONNECTIONS_DB);
+      r.onsuccess = () => ok();
+      r.onerror = () => no(r.error);
+    }),
+    ms,
+  );
+}
+
 /** The approvals store on `idb` (globalThis.indexedDB when none; a page with none approves nothing). */
 export function connections(idb: IDBFactory | undefined = globalThis.indexedDB, ms = CONNECTIONS_STORE_MS): Connections {
   let db: Promise<IDBDatabase> | null = null;

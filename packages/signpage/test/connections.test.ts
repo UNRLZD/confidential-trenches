@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
-import { bareOrigin, connections } from "../src/connections.ts";
+import { bareOrigin, clearConnections, connections } from "../src/connections.ts";
 import { signedOutState, startApi, type ApiHost, type IncomingMessage } from "../src/api.ts";
 
 const OUT = "https://app.example";
@@ -136,11 +136,50 @@ test("the gate is asked with the bound origin, the one the browser checked, neve
   assert.deepEqual(asked, [OUT]);
 });
 
+// card signpage-other-apps-connect slice 2: the approvals go with the account at a sign out, in every tab
+test("a sign out clears every approval: an open popup's store reads none next, and its bound origin's next request is refused with no read and no state event", async () => {
+  const idb = new IDBFactory();
+  const popup = connections(idb); // the /connect popup's own store, its connection open
+  await popup.add(OUT);
+  await popup.add(OTHER);
+  const p = popupApi((o) => popup.has(o));
+  const s1 = state();
+  p.send(s1);
+  await p.idle();
+  assert.equal(p.reads(), 1);
+  await clearConnections(idb); // the tab that signed out (APP_HOST's shell): completes though the popup holds a connection
+  p.change();
+  await p.idle();
+  const s2 = state();
+  p.send(s2);
+  await p.idle();
+  assert.deepEqual(answers(p).slice(1), [refused(s2.id)]);
+  assert.equal(p.reads(), 1, "no wallet read after the sign out: no state answer and no state event");
+  assert.deepEqual(await popup.list(), []);
+  assert.deepEqual(await connections(idb).list(), [], "the next account on this device starts with none");
+});
+
+test("the clear is bounded: a delete that never answers rejects in time, so a sign out never waits on it", async () => {
+  const hung = { deleteDatabase: () => ({}) } as unknown as IDBFactory;
+  const t = Date.now();
+  await assert.rejects(clearConnections(hung, 20));
+  assert.ok(Date.now() - t < 1_000);
+  await clearConnections(undefined); // no IndexedDB: nothing to clear
+});
+
+test("main.ts clears the approvals at its own sign out, once the store signed out, and at another tab's", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  const own = /async function signOut\(\): Promise<void> \{[\s\S]*?\n\}/.exec(src)?.[0] ?? "";
+  assert.ok(/store = null;[\s\S]{0,400}?await clearConnections\(\)\.catch\(/.test(own), "this tab's sign out clears them after the store signed out");
+  const elsewhere = /function signedOutElsewhere\(\): void \{[\s\S]*?\n\}/.exec(src)?.[0] ?? "";
+  assert.ok(/clearConnections\(\)\.catch\(/.test(elsewhere), "another tab's sign out clears them here too");
+});
+
 test("main.ts: the gate is the approvals store's, on /connect only; Connect keeps the approval before it binds the session", () => {
   const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
   assert.ok(/const connected = outside \? connections\(\) : null;/.test(src), "the store is made on /connect only");
   assert.ok(/\.\.\.\(connected \? \{ admit: \(o: string\) => connected\.has\(o\) \} : \{\}\),/.test(src), "the shell's gate is the store's has");
   // the session is bound (shell.allow) only once the approval's write completed; a failed write binds nothing
-  assert.ok(/connected!\s*\.add\(origin\)\s*\.then\(\s*\(\) => \{[\s\S]{0,400}?shell!\.allow\(origin\);\s*\},\s*notConnected,?\s*\)/.test(src), "Connect writes the approval, then binds");
+  assert.ok(/connected!\s*\.add\(origin\)\s*\.then\(\s*\(\) => \{[\s\S]{0,400}?shell!\.allow\(origin\);[\s\S]{0,200}?\},\s*notConnected,?\s*\)/.test(src), "Connect writes the approval, then binds");
   assert.equal((src.match(/shell!\.allow\(/g) ?? []).length, 1, "one place binds a session");
 });
