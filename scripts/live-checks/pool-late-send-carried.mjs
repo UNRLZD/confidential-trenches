@@ -40,11 +40,12 @@ const WINDOW = new RegExp(`(${N})!==null&&await (${N})\\.late\\(\\1\\);let (${N}
 const WIRED = new RegExp(
   `(${N})!==null&&(${N})\\.complete&&await (${N})\\(${N},\\{\\.\\.\\.(${N}),ux:${N}\\},\\2,(${N}),\\{rpcs:${N},pass:${N},opts:${N}\\.opts\\?\\?\\{\\}\\},${N},${N},${N},${N}\\.notesAt,\\{ux:new Set\\(${N}\\.keys\\(\\)\\),near:new Set\\(${N}\\.keys\\(\\)\\)\\}\\)\\.catch\\((${N})=>\\{if\\(${N}\\.aborted\\|\\|\\6 instanceof ${N}\\)throw \\6;${N}\\.retry\\.push\\(${Q}\\$\\{\\4\\.label\\}: step 7's re-read did not finish`,
 );
-// readPoolLate's plan: the lanes the marker keeps, as step 5 took them (kept.of), then each lane read, or kept (its
-// highest the index it was read to less 8 x 21), into afterRestore
+// readPoolLate's plan: the lanes the marker keeps, as step 5 took them (kept.of, on each lane's highest note and its
+// count of notes: card restore-residuals), then each lane read, or kept (its highest the index it was read to less
+// 8 x 21), into afterRestore
 const PLAN = (fn) =>
   new RegExp(
-    `async function ${esc(fn)}\\(${N},(${N}),${N},(${N}),[^)]*\\)\\{let (${N})=await \\2\\.of\\(\\1\\.scope,${N}\\(\\1\\.notes,\\1\\.scope\\)\\.laneHighest\\),(${N})=Array\\.from\\(\\{length:8\\},\\((${N}),(${N})\\)=>\\{let (${N})=${N}\\.lanes\\.find\\(${N}=>${N}\\.lane===\\6\\);if\\(\\7!==void 0\\)return \\7;let (${N})=\\3\\.get\\(\\6\\);if\\(\\8===void 0\\)throw Error\\(${Q}lane \\$\\{\\6\\} was neither read nor kept${Q}\\);` +
+    `async function ${esc(fn)}\\(${N},(${N}),${N},(${N}),[^)]*\\)\\{let (${N})=await \\2\\.of\\(\\1\\.scope,${N}\\(\\1\\.notes,\\1\\.scope\\)\\.laneHighest,${N}\\(\\1\\.notes,\\1\\.scope\\)\\),(${N})=Array\\.from\\(\\{length:8\\},\\((${N}),(${N})\\)=>\\{let (${N})=${N}\\.lanes\\.find\\(${N}=>${N}\\.lane===\\6\\);if\\(\\7!==void 0\\)return \\7;let (${N})=\\3\\.get\\(\\6\\);if\\(\\8===void 0\\)throw Error\\(${Q}lane \\$\\{\\6\\} was neither read nor kept${Q}\\);` +
       `let (${N})=[^;]*,(${N})=Math\\.max\\(\\8-168,\\9\\.at\\(-1\\)\\?\\?-1\\);return\\{lane:\\6,notes:\\9,money:\\[\\],used:\\[\\],unread:\\[\\],highest:\\10>=\\6\\?\\10:null,readTo:\\8,reach:null\\}\\}\\)[^]{0,200}?try\\{(${N})=await ${N}\\(${N},\\{lane:${N}\\.lane,raiseDepositIndex:async\\(${N},(${N})\\)=>\\12\\},\\1\\.scope,\\4,${N}\\.pass\\)\\}finally`,
   );
 // readPoolLate's U_X: a note this device planned skipped, planFound before the carry where none, a failed read named

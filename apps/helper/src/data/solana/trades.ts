@@ -451,7 +451,10 @@ export function createSolanaTrades(deps: {
   const rpcs = deps.rpcs ?? TRADES_RPCS;
   const entries = new Map<string, Entry>();
   const pools = new Map<string, Promise<{ a: string; b: string } | null>>();
-  const traders = new Map<string, string>(); // signature -> the trade's user, kept after the trade settles
+  /** `<mint> <signature>` -> each of the transaction's rows' traders by its place (a row's index % 8, fold), the user its
+   *  own event names (null for an event that names none), kept after the trade settles: a row is named by its own event,
+   *  never by the transaction's first trade (card sol-tape-trader-is-the-events-user, as evm/swaps.ts traderAt). */
+  const traders = new Map<string, (string | null)[]>();
   let seq = 0;
   let solUsd: { slot: number; v: bigint } | null = null;
   let refAt = 0;
@@ -600,11 +603,6 @@ export function createSolanaTrades(deps: {
     if (e.held.has(sig) || (e.book !== null && slot <= e.book.settledTo)) return;
     if (e.held.size >= HELD_MAX) return;
     e.held.set(sig, { slot, seq: order, t: trades });
-    // an event that names no trader (Orca) leaves the row's trader null
-    if (trades[0] !== undefined && trades[0].user !== "") {
-      if (traders.size >= HELD_MAX) traders.delete(traders.keys().next().value!);
-      traders.set(sig, trades[0].user);
-    }
     if (trades.length > 0) e.traded++;
     if (e.book === null) {
       const q = (trades.find((t) => t.quoteMint === WSOL || t.quoteMint === USDC) ?? trades.find((t) => priced(t.quoteMint)))?.quoteMint;
@@ -636,12 +634,22 @@ export function createSolanaTrades(deps: {
     for (const [slot, v] of e.refs) if (slot >= from) events.push({ kind: "ref", block: slot, index: -1, ethUsd: v });
     let i = 0;
     for (const [sig, h] of e.held) {
+      // each row's trader, its own event's user (an event that names no trader, Orca's, leaves the row's null)
+      const users: (string | null)[] = [];
       for (const t of h.t) {
         if (t.quoteMint !== e.quoteMint) continue;
-        const s: Swap = { kind: "swap", block: h.slot, index: h.seq * 8 + Math.min(i++ % 8, 7), tx: sig, t: t.ts, side: t.side, amt: t.amt, quote: t.quote };
+        const at = Math.min(i++ % 8, 7);
+        users[at] ??= t.user === "" ? null : t.user;
+        // a venue program's own swap (decode.ts placed) is in the bars and off the tape (candles.ts Swap.tape)
+        const s: Swap = { kind: "swap", block: h.slot, index: h.seq * 8 + at, tx: sig, t: t.ts, side: t.side, amt: t.amt, quote: t.quote, ...(t.tape === false ? { tape: false as const } : {}) };
         events.push(s);
       }
       i = 0;
+      const k = `${e.mint} ${sig}`;
+      if (users.some((u) => u != null)) {
+        if (!traders.has(k) && traders.size >= HELD_MAX) traders.delete(traders.keys().next().value!);
+        traders.set(k, users);
+      }
     }
     events.sort((a, b) => a.block - b.block || a.index - b.index);
     // a ref with no trade before the next ref is superseded: dropped, so a quiet token's refs stay one
@@ -1178,7 +1186,7 @@ export function createSolanaTrades(deps: {
       // rows, src chain, while their pools traded)
       if (rows.length === 0 && deps.tape !== undefined) return poolTape(mint, limit, e);
       const at = e.readAt ?? now();
-      const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(r.tx) ?? null, tx: r.tx }));
+      const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(`${mint} ${r.tx}`)?.[r.index % 8] ?? null, tx: r.tx }));
       // `filling` while the cold walk still reads the token's older trades (first() answered at COLD_WAIT_MS or its first
       // round): the rows so far, more to come; the Base and Robinhood tapes answer the same at their bound (../evm/swaps.ts)
       // and while the token is behind the chain (behind: a gap walked, the stream silent past SOL_BEHIND_MS): the rows it

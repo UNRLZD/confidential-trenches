@@ -160,6 +160,19 @@ const M = [
   ["a kept lane's highest with history dropped from step 7's plan", PRS, [["const top = Math.max(readTo - RESTORE_LANES * DEPOSIT_ID_MARGIN, notes.at(-1) ?? -1);", "const top = notes.at(-1) ?? -1;"]], PRT, "pool-late-send-carried"],
   ["a pool id NEAR re-reads holding money never named", PRS, [['    for (const y of ys) ("error" in x ? out.retry : y.retry ? out.held : out.named).push(', "    for (const y of ys) ([] as string[]).push("]], PRT, "pool-late-send-carried"],
   ["a pool id step 5 named named again by step 7", PRS, [["    if (skip.near.has(x.i)) continue;\n", ""]], PRT, "pool-late-send-carried"],
+  // card restore-residuals (delta review of c2761c71): the two plants that passed every test, then ze1's and ze2's rules
+  ["another run's kept lanes used", PRS, [["            if (o?.run !== runId) return new Map();\n            return new Map((o.read?.", "            if (o === null) return new Map();\n            return new Map((o.read?."]], PRT, "restore-residuals"],
+  ["a kept lane's readTo taken off its lane", PRS, [["  x[1] % RESTORE_LANES === x[0] &&\n", ""]], PRT, "P3-A"],
+  ["ze1: a kept lane matched on its highest note alone", PRS, [["hi === (laneHighest[l] ?? null) && n === laneCount[l])", "hi === (laneHighest[l] ?? null))"]], PRT, "restore-residuals ze1"],
+  ["ze1: a part lane matched on its highest note alone", PRS, [["nh === (laneHighest[l] ?? null) && nc === laneCount[l])", "nh === (laneHighest[l] ?? null))"]], PRT, "restore-residuals ze1"],
+  ["ze2: a step 5 another tab holds is skipped", PRS, [['{ mode: "exclusive", signal }, async () => {\n              signal.throwIfAborted();', '{ mode: "exclusive", ifAvailable: true }, async (l) => {\n              if (l === null) return;\n              signal.throwIfAborted();']], PRT, "P2-4"],
+  ["ze2: a request joining a running id read not read for again", PRS, [["          if (state.reading) again = true;\n", ""]], PRT, "restore-residuals ze2"],
+  ["ze2 (review of 4f6e75ad9 P2): a run not reading for joined requests until it holds the ids lock", PRS, [["        if (ids !== null && idsOwed && (walked.length > 0 || vaultIds !== null)) run.reading = true;\n", ""]], PRT, "review of 4f6e75ad9"],
+  ["ze2: a joined request's run started after a sign out", PRS, [["if (again && epoch === e && !ctl.signal.aborted && run === null)", "if (again && run === null)"]], PRT, "review of 4f6e75ad9"],
+  ["review of 4f6e75ad9 P3: a marker a closed tab's run wrote skipped, never taken over", PRS, [["            return o.run === runId ? undefined : { scopes, run: runId,", "            if (o.run !== runId) owed = false;\n            return o.run === runId ? undefined : { scopes, run: runId,"]], PRT, "review of 4f6e75ad9 P3"],
+  ["review of 4f6e75ad9 P3: a marker taken over keeping its kept lanes", PRS, [["            return o.run === runId ? undefined : { scopes, run: runId,", "            return o.run === runId ? undefined : { ...o, scopes, run: runId,"]], PRT, "review of 4f6e75ad9 P3"],
+  ["review of 4f6e75ad9 P3: the wait for the ids lock not on the run's signal", PRS, [['request(RESTORE_IDS_LOCK, { mode: "exclusive", signal }, async', 'request(RESTORE_IDS_LOCK, { mode: "exclusive" }, async']], PRT, "review of 4f6e75ad9 P3"],
+  ["review of 4f6e75ad9 P3: a step 5 read on in its tries on another run's marker", PRS, [["          if (t > 1 && owedOf(await seedHeld(async () => (await h.store()).get(\"meta\", RESTORE_IDS_KEY)))?.run !== runId) return;\n", ""]], PRT, "review of 4f6e75ad9 P3"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
 const only = process.argv[2];
