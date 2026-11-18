@@ -2288,6 +2288,60 @@ test("T7b a request that made no connection (fetch failed, a connect error as it
   assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), other.rpc], NOW)), { accepted: false, code: "rpc_error" });
 }));
 
+// card evm-unreachable-moves-on: a request that made no connection was asked of its provider again 0.5, 1 and 1.5 s on
+// whatever other provider was left (at 51f8f94cc), so an unreachable provider cost each of its requests four failed
+// posts and 3 s. In a browser every failure with no response is one: a reset, a name that did not resolve, and
+// Robinhood's own 429, which CORS refuses ("*,*"). While another provider is left, it goes there at once.
+test("FU1 a provider that cannot be reached, one of three, is sent each request once: the request goes to the next at once", { timeout: 20_000 }, () => onTestClock(async () => {
+  const token = "0x00000000000000000000000000000000000fe8fc";
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) };
+  // the browser's form (no cause) and Node's (a connect error as its cause)
+  const forms: [string, () => Error][] = [
+    ["Failed to fetch", () => new TypeError("Failed to fetch")],
+    ["connect ETIMEDOUT", () => new TypeError("fetch failed", { cause: Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }) })],
+  ];
+  try {
+    for (const [k, [name, fail]] of forms.entries()) {
+      const bodies: string[] = [];
+      const away = evmJsonRpc(`https://away${k}.fu1.test`, (async (_u: string, init: { body: string }) => {
+        bodies.push(init.body);
+        throw fail();
+      }) as unknown as typeof fetch);
+      const v = await verdict(evmPoolBuyQuoteWith(req, [away, chain([best(token)], 0), chain([best(token)], 1)], NOW));
+      assert.equal(v.accepted, true, `${name}: ${String((v as { code?: string }).code)}`);
+      // past every wait a retry would take: nothing more is sent
+      await new Promise((r) => setTimeout(r, 3_500));
+      assert.ok(bodies.length > 0, `${name}: the unreachable provider was asked first`);
+      assert.equal(new Set(bodies).size, bodies.length, `${name}: a request was sent to the unreachable provider ${bodies.length - new Set(bodies).size} times more`);
+    }
+  } finally {
+    evmPaceReset();
+  }
+}));
+
+test("FU2 the last provider left that cannot be reached once is asked the request again, as before: the quote lands", { timeout: 20_000 }, () => onTestClock(async () => {
+  const token = "0x00000000000000000000000000000000000fe8fb";
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) };
+  const inner = chain([best(token)], 1);
+  const bodies: string[] = [];
+  let left = 1;
+  const once = evmJsonRpc("https://once.fu2.test", (async (_u: string, init: { body: string }) => {
+    bodies.push(init.body);
+    if (left-- > 0) throw new TypeError("Failed to fetch");
+    const calls = JSON.parse(init.body) as { id: number; method: string; params: unknown[] }[];
+    const answers = await inner(calls.map((c) => ({ method: c.method, params: c.params })));
+    return new Response(JSON.stringify(answers.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+  }) as unknown as typeof fetch);
+  try {
+    const v = await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), once], NOW));
+    assert.equal(v.accepted, true, String((v as { code?: string }).code));
+    // its first request, refused, was asked of it again: no other provider was left
+    assert.equal(bodies[1], bodies[0], "the request that made no connection was not asked again");
+  } finally {
+    evmPaceReset();
+  }
+}));
+
 test("T8 a quote's reads go to each provider at most the chain's limit at once (Robinhood's own RPC answers 429 to four)", async () => {
   const token = "0x00000000000000000000000000000000000fe9fe";
   const inner = chain([best(token)], 1, 50_000_000);

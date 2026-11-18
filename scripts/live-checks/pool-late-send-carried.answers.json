@@ -1,0 +1,22 @@
+{
+ "key": "pool-late-send-carried",
+ "recorded": "2026-11-18T09:04Z: good, facts() over this card's build (node scripts/live-checks/pool-late-send-carried.mjs --site packages/signpage, branch card/pool-late-send-carried); bad, SIGN_HOST as served at 2026-11-18T09:04Z, before the card",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-dgbkxc4ndTZ24mXN9/8JK1RpeLTv9cJ2UUpBbKNltJOrlIzJ3cGmY5CS1EtF4oga\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-dgbkxc4ndTZ24mXN9/8JK1RpeLTv9cJ2UUpBbKNltJOrlIzJ3cGmY5CS1EtF4oga",
+  "window": true,
+  "wired": true,
+  "plan": true,
+  "carry": true,
+  "near": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-9zdVRUrbjWKM6PrnlI+5+ozEmNLwcGeoOlOEpV3jDrkI3CU7GEYGQwQrpsDEw+8p\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-9zdVRUrbjWKM6PrnlI+5+ozEmNLwcGeoOlOEpV3jDrkI3CU7GEYGQwQrpsDEw+8p",
+  "window": false,
+  "wired": false,
+  "plan": false,
+  "carry": false,
+  "near": false
+ }
+}

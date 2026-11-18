@@ -10,6 +10,10 @@ import { HEADER_TIMED } from "../data/evm/swaps.ts";
 import { createRpc } from "../rpc/rpc.ts";
 import { evmThrottleS, providerHolds } from "./limits.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 const CHAIN_RPC = "https://rpc.mainnet.chain.robinhood.com";
 const WIDE = ["https://robinhood.daybreak-rpc.network", "https://rpc-robinhood.blockmachine.io", "https://robinhood.api.pocket.network"];
 const http429 = (s = 30) => new Response("{}", { status: 429, headers: { "retry-after": String(s) } });
@@ -93,8 +97,8 @@ test("card helper-robinhood-capacity: one rule for a refusal: -32005 or a rate o
 
   // a block range limit is passed through and holds nothing
   const rangeAnswer = { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "block range limit exceeded" } };
-  const holds2 = providerHolds();
-  const rpc2 = createRpc({}, { holds: holds2, fetch: (async () => Response.json(rangeAnswer)) as never });
+  const holds2 = providerHolds(STILL);
+  const rpc2 = createRpc({}, { now: STILL, holds: holds2, fetch: (async () => Response.json(rangeAnswer)) as never });
   const a = await rpc2.handle("robinhood", "application/json", body, "198.51.100.5");
   assert.equal(a.status, 200);
   assert.equal(holds2.heldFor(CHAIN_RPC), 0);

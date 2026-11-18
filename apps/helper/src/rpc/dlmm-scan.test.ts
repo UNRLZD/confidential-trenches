@@ -8,6 +8,10 @@ import { test } from "node:test";
 import { SOLANA_SOL_MINT, solanaDlmmPairScan } from "@blindfill/kit";
 import { createRpc } from "./rpc.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 const NEARKAT = "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr";
 const DLMM = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo";
 // made-up hosts and test-only keys: nothing here reaches a network
@@ -28,7 +32,7 @@ const call = (r: ReturnType<typeof createRpc>, chain: string, b: unknown) => r.h
 test("the kit's DLMM pair scan, the coin as X or as Y, goes to route A", async () => {
   for (const params of [solanaDlmmPairScan(NEARKAT, SOLANA_SOL_MINT), solanaDlmmPairScan(SOLANA_SOL_MINT, NEARKAT)]) {
     const { sent, f } = fakeFetch();
-    const r = createRpc(ENV, { fetch: f, log: () => {} });
+    const r = createRpc(ENV, { now: STILL, fetch: f, log: () => {} });
     const a = await call(r, "solana", body(params));
     assert.equal(a.status, 200, a.body);
     assert.deepEqual(sent, [A]);
@@ -53,14 +57,14 @@ test("any wider scan of the DLMM program is refused before any call", async () =
   assert.equal(prog, DLMM);
   for (const params of wider) {
     const { sent, f } = fakeFetch();
-    const r = createRpc(ENV, { fetch: f, log: () => {} });
+    const r = createRpc(ENV, { now: STILL, fetch: f, log: () => {} });
     const a = await call(r, "solana", body(params));
     assert.equal(a.status, 400, JSON.stringify(params));
     assert.equal(sent.length, 0);
   }
   // the marks route carries the marks scan alone, never this one
   const { sent, f } = fakeFetch();
-  const r = createRpc({ ...ENV, SOLANA_RPC_URL_QUICKNODE: "https://x.solana-mainnet.quiknode.example/test-key-qn-not-a-secret/" }, { fetch: f, log: () => {} });
+  const r = createRpc({ ...ENV, SOLANA_RPC_URL_QUICKNODE: "https://x.solana-mainnet.quiknode.example/test-key-qn-not-a-secret/" }, { now: STILL, fetch: f, log: () => {} });
   assert.equal((await call(r, "solana-marks", body(solanaDlmmPairScan(NEARKAT, SOLANA_SOL_MINT)))).status, 400);
   assert.equal(sent.length, 0);
 });

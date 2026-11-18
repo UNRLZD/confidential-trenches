@@ -24,6 +24,10 @@ import { pairNames } from "./token-status/status.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 /** Test values for the vendor keys a start requires (proxy.ts checkVendorPlans); no real key. */
 const TEST_VENDOR_KEYS = { JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001" };
@@ -285,7 +289,7 @@ test("/v1/rpc forwards an allowlisted call to the configured provider and passes
   await new Promise<void>((ok) => stub.listen(0, "127.0.0.1", () => ok()));
   t.after(() => closeServer(stub));
   const up = `http://127.0.0.1:${(stub.address() as AddressInfo).port}`;
-  const helper = start(COMMIT, 0, undefined, createRpc({ SOLANA_RPC_URL: up }));
+  const helper = start(COMMIT, 0, undefined, createRpc({ SOLANA_RPC_URL: up }, { now: STILL }));
   t.after(() => closeServer(helper)); // closed even when an assertion throws before its try
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   try {
@@ -306,8 +310,8 @@ test("card evm-pool-leaves-any-source: POST /v1/rpc/{chain}?keyed=only reads the
   const KEYED = "https://keyed.test/v2/projectsegment0123456789";
   const asked: string[] = [];
   const fetch = async (url: string, init: RequestInit) => (asked.push(url), new Response(JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(String(init.body)).id, result: "0x1" }), { status: 200, headers: { "content-type": "application/json" } }));
-  const bare = own(start(COMMIT, 0, undefined, createRpc({}, { fetch: fetch as never })));
-  const keyed = own(start(COMMIT, 0, undefined, createRpc({ BASE_RPC_URL: KEYED }, { fetch: fetch as never, pinned: { base: ["https://p1.test"] } })));
+  const bare = own(start(COMMIT, 0, undefined, createRpc({}, { now: STILL, fetch: fetch as never })));
+  const keyed = own(start(COMMIT, 0, undefined, createRpc({ BASE_RPC_URL: KEYED }, { now: STILL, fetch: fetch as never, pinned: { base: ["https://p1.test"] } })));
   await Promise.all([bare, keyed].map((s) => new Promise<void>((ok) => (s.listening ? ok() : s.on("listening", () => ok())))));
   const to = (s: ReturnType<typeof createServer>) => (s.address() as AddressInfo).port;
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] });
@@ -910,7 +914,7 @@ test("the RPC route: the caller's address reaches the chain's budget, and a prov
 test("the RPC and proxy routes: past UPSTREAM_ROUTE_MAX a client meets the same 429 before its body is read, a refused request counted too; a second client still goes", async () => {
   const { UPSTREAM_ROUTE_MAX } = (await import("./server.ts")) as unknown as { UPSTREAM_ROUTE_MAX: number };
   let calls = 0;
-  const rpc = createRpc({}, { fetch: async () => (calls++, new Response('{"jsonrpc":"2.0","id":1,"result":1}', { status: 200, headers: { "content-type": "application/json" } })) });
+  const rpc = createRpc({}, { now: STILL, fetch: async () => (calls++, new Response('{"jsonrpc":"2.0","id":1,"result":1}', { status: 200, headers: { "content-type": "application/json" } })) });
   const L = await limited({ rpc });
   try {
     for (let i = 0; i < UPSTREAM_ROUTE_MAX; i++) assert.equal((await call("POST", "/v1/rpc/solana", { ...JSON_H, "x-forwarded-for": IP_A }, rpcBody("notAllowed"), L.to)).status, 400);
@@ -1024,7 +1028,7 @@ test("no IP stored: driving every limit past its edge logs nothing and writes no
   // the provider answers the first RPC_CLIENT_MAX reads, then throttles
   const { RPC_CLIENT_MAX } = (await import("./rpc/rpc.ts")) as unknown as { RPC_CLIENT_MAX: number };
   let n = 0;
-  const rpc = createRpc({}, { fetch: async () => (++n <= RPC_CLIENT_MAX ? new Response('{"jsonrpc":"2.0","id":1,"result":1}', { status: 200, headers: { "content-type": "application/json" } }) : new Response("slow", { status: 429, headers: { "retry-after": "2" } })) });
+  const rpc = createRpc({}, { now: STILL, fetch: async () => (++n <= RPC_CLIENT_MAX ? new Response('{"jsonrpc":"2.0","id":1,"result":1}', { status: 200, headers: { "content-type": "application/json" } }) : new Response("slow", { status: 429, headers: { "retry-after": "2" } })) });
   const L = await limited({ rpc });
   try {
     const { API_RATE_MAX, POOL_RATE_MAX, UPSTREAM_ROUTE_MAX } = (await import("./server.ts")) as unknown as Record<string, number>;
@@ -1040,12 +1044,12 @@ test("no IP stored: driving every limit past its edge logs nothing and writes no
     for (let i = 0; i <= UPSTREAM_ROUTE_MAX!; i++) await call("POST", "/v1/rpc/solana", h, rpcBody("notAllowed"), L.to);
     for (let i = 0; i <= UPSTREAM_ROUTE_MAX!; i++) await call("POST", "/v1/proxy/nope", h, "{}", L.to);
     // and each refusal of the limits themselves, driven directly: a share, a total, a hold, a held-request limit
-    const b = upstreamBudget(() => ({ total: 2, perClient: 1 }));
+    const b = upstreamBudget(() => ({ total: 2, perClient: 1 }), STILL);
     b.take("k", IP);
     b.take("k", IP);
     b.take("k", "a");
     b.take("k", "b");
-    b.hold("k", Date.now() + 1_000);
+    b.hold("k", STILL() + 1_000);
     b.take("k", IP);
     const held = heldPerClient(1);
     held.enter(IP);
@@ -1126,7 +1130,7 @@ async function tokenPagesThen(pages: number, then: (port: number) => Promise<num
   globalThis.fetch = stub;
   try {
     const proxy = createProxy({}, { fetch: stub });
-    const rpc = createRpc({}, { fetch: stub });
+    const rpc = createRpc({}, { now: STILL, fetch: stub });
     const lists = createSolanaLists(proxy, rpc);
     const h = own(createServer(handler(COMMIT, proxy, rpc, undefined, lists, undefined, undefined, undefined, undefined, null, new Map(), new Map())));
     await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));

@@ -37,6 +37,7 @@ const own = async (chain: "solana" | "base" | "robinhood", s: bigint, i: number,
 async function poolLeg(origin: string, chain: "solana" | "base", withRefund: boolean) {
   const sent: Record<string, unknown>[] = [];
   const d = poolAddressHost({
+    quoted: async () => {},
     pools: () => [{ chain: "solana", scope: SOL_S }, { chain: "base", scope: BASE_S }],
     network: "mainnet",
     read: async (scope) => ({ status: STATUS as never, deposit: RECORDS[scope.toString()] as never }),
@@ -61,6 +62,7 @@ async function poolLeg(origin: string, chain: "solana" | "base", withRefund: boo
 async function cashLeg(origin: string, withRefund: boolean) {
   const sent: Record<string, unknown>[] = [];
   const d = depositQuoteHost({
+    quoted: async () => {},
     scope: () => VAULT_S,
     read: async (scope) => ({ status: STATUS as never, deposit: RECORDS[scope.toString()] as never }),
     named: async () => {},

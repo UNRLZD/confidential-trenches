@@ -10,6 +10,10 @@ import { RPC_CHAINS, RPC_METHODS } from "./methods.ts";
 import { createRpc } from "./rpc.ts";
 import { checkMarksRoute } from "../env-check.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 const PROGRAM = "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF";
 // made-up hosts and test-only keys: nothing here reaches a network
 const key = (n: string) => `test-key-${n}-not-a-secret`;
@@ -43,7 +47,7 @@ test("solana-marks is a route of its own whose only method is getProgramAccounts
 
 test("route B forwards the exact scan to the first keyed provider not on route A's company, never SOLANA_RPC_URL", async () => {
   const { sent, f } = fakeFetch();
-  const r = createRpc(ENV, { fetch: f, log: () => {} });
+  const r = createRpc(ENV, { now: STILL, fetch: f, log: () => {} });
   const a = await call(r, "solana-marks", scan());
   assert.equal(a.status, 200);
   assert.deepEqual(sent.map((s) => s.url), [QN]);
@@ -54,7 +58,7 @@ test("route B forwards the exact scan to the first keyed provider not on route A
 // wallet's lister asks for the addresses alone (solana-restore.ts solanaMarksListed: dataSlice { offset: 0, length: 0 })
 test("route B forwards the wallet lister's exact request, the empty dataSlice included", async () => {
   const { sent, f } = fakeFetch();
-  const r = createRpc(ENV, { fetch: f, log: () => {} });
+  const r = createRpc(ENV, { now: STILL, fetch: f, log: () => {} });
   const a = await call(r, "solana-marks", scan(PROGRAM, { ...SPENT, dataSlice: { offset: 0, length: 0 } }));
   assert.equal(a.status, 200);
   assert.deepEqual(sent.map((s) => s.url), [QN]);
@@ -62,7 +66,7 @@ test("route B forwards the wallet lister's exact request, the empty dataSlice in
 
 test("route B refuses every other method and every wider scan, before any call", async () => {
   const { sent, f } = fakeFetch();
-  const r = createRpc(ENV, { fetch: f, log: () => {} });
+  const r = createRpc(ENV, { now: STILL, fetch: f, log: () => {} });
   for (const body of [
     { jsonrpc: "2.0", id: 1, method: "getSlot" },
     { jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [PROGRAM, { encoding: "base64" }] },
@@ -81,36 +85,36 @@ test("route B refuses every other method and every wider scan, before any call",
 test("route B never asks route A's company: a QuickNode name set to A's company is skipped, and with none other left B answers 503 and sends nothing", async () => {
   const same = SAME;
   const { sent, f } = fakeFetch();
-  const r = createRpc({ ...ENV, SOLANA_RPC_URL_QUICKNODE: same }, { fetch: f, log: () => {} });
+  const r = createRpc({ ...ENV, SOLANA_RPC_URL_QUICKNODE: same }, { now: STILL, fetch: f, log: () => {} });
   assert.equal((await call(r, "solana-marks", scan())).status, 200);
   assert.deepEqual(sent.map((s) => s.url), [DRPC]);
   sent.length = 0;
-  const only = createRpc({ SOLANA_RPC_URL: A, SOLANA_RPC_URL_QUICKNODE: same, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, { fetch: f, log: () => {} });
+  const only = createRpc({ SOLANA_RPC_URL: A, SOLANA_RPC_URL_QUICKNODE: same, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, { now: STILL, fetch: f, log: () => {} });
   assert.equal((await call(only, "solana-marks", scan())).status, 503);
   assert.equal(sent.length, 0);
 });
 
 test("route B with no keyed name set answers 503 and sends nothing, never a public endpoint", async () => {
   const { sent, f } = fakeFetch();
-  const r = createRpc({ SOLANA_RPC_URL: A, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, { fetch: f, log: () => {} });
+  const r = createRpc({ SOLANA_RPC_URL: A, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, { now: STILL, fetch: f, log: () => {} });
   assert.equal((await call(r, "solana-marks", scan())).status, 503);
   assert.equal(sent.length, 0);
 });
 
 test("route B walks to its spare when its first provider is down, never to route A's provider", async () => {
   const { sent, f } = fakeFetch((url) => (url === QN ? 503 : 200));
-  const r = createRpc(ENV, { fetch: f, log: () => {} });
+  const r = createRpc(ENV, { now: STILL, fetch: f, log: () => {} });
   assert.equal((await call(r, "solana-marks", scan())).status, 200);
   assert.deepEqual(sent.map((s) => s.url), [QN, DRPC]);
 });
 
 test("route A sends the scan to SOLANA_RPC_URL alone: down, it answers 503, never a keyed spare or the public endpoint", async () => {
   const up = fakeFetch();
-  const r = createRpc(ENV, { fetch: up.f, log: () => {} });
+  const r = createRpc(ENV, { now: STILL, fetch: up.f, log: () => {} });
   assert.equal((await call(r, "solana", scan())).status, 200);
   assert.deepEqual(up.sent.map((s) => s.url), [A]);
   const down = fakeFetch((url) => (url === A ? 503 : 200));
-  const d = createRpc(ENV, { fetch: down.f, log: () => {} });
+  const d = createRpc(ENV, { now: STILL, fetch: down.f, log: () => {} });
   assert.equal((await call(d, "solana", scan())).status, 503);
   assert.deepEqual(down.sent.map((s) => s.url), [A]);
   // other reads keep their failover
@@ -121,7 +125,7 @@ test("route A sends the scan to SOLANA_RPC_URL alone: down, it answers 503, neve
 
 test("route A with no SOLANA_RPC_URL answers the scan 503 and sends nothing", async () => {
   const { sent, f } = fakeFetch();
-  const r = createRpc({ SOLANA_RPC_URL_QUICKNODE: QN, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, { fetch: f, log: () => {} });
+  const r = createRpc({ SOLANA_RPC_URL_QUICKNODE: QN, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, { now: STILL, fetch: f, log: () => {} });
   assert.equal((await call(r, "solana", scan())).status, 503);
   assert.equal(sent.length, 0);
 });
@@ -172,7 +176,7 @@ test("the start check is off with no mainnet pool program: the routes refuse eve
 
 test("?keyed=only keeps both mark routes: the scan on /solana goes to A alone and /solana-marks to B alone (review P3-1)", async () => {
   const { sent, f } = fakeFetch();
-  const r = createRpc(ENV, { fetch: f, log: () => {} });
+  const r = createRpc(ENV, { now: STILL, fetch: f, log: () => {} });
   const keyedOnly = (chain: string) => r.handle(chain, "application/json", JSON.stringify(scan()), undefined, false, true);
   assert.equal((await keyedOnly("solana")).status, 200);
   assert.deepEqual(sent.map((s) => s.url), [A]);
@@ -181,7 +185,7 @@ test("?keyed=only keeps both mark routes: the scan on /solana goes to A alone an
   assert.deepEqual(sent.map((s) => s.url), [QN]);
   // A down: still 503, never a keyed spare
   const down = fakeFetch((url) => (url === A ? 503 : 200));
-  const d = createRpc(ENV, { fetch: down.f, log: () => {} });
+  const d = createRpc(ENV, { now: STILL, fetch: down.f, log: () => {} });
   assert.equal((await d.handle("solana", "application/json", JSON.stringify(scan()), undefined, false, true)).status, 503);
   assert.deepEqual(down.sent.map((s) => s.url), [A]);
 });
@@ -190,7 +194,7 @@ test("route B folds a company's other domain: dRPC's keyed lb.drpc.live is A's c
   const aDrpc = `https://solana.drpc.example.drpc.org/${key("a-drpc")}`;
   const bDrpc = `https://lb.drpc.live/solana/${key("b-drpc")}`;
   const { sent, f } = fakeFetch();
-  const r = createRpc({ SOLANA_RPC_URL: aDrpc, SOLANA_RPC_URL_DRPC_1: bDrpc, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, { fetch: f, log: () => {} });
+  const r = createRpc({ SOLANA_RPC_URL: aDrpc, SOLANA_RPC_URL_DRPC_1: bDrpc, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, { now: STILL, fetch: f, log: () => {} });
   assert.equal((await call(r, "solana-marks", scan())).status, 503);
   assert.equal(sent.length, 0);
   await assert.rejects(checkMarksRoute({ SOLANA_RPC_URL: aDrpc, SOLANA_RPC_URL_DRPC_1: bDrpc, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, f), /SOLANA_RPC_URL_DRPC_1 on SOLANA_RPC_URL's company/);

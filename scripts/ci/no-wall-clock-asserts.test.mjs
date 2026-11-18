@@ -3,7 +3,7 @@
 //   node --test scripts/ci/no-wall-clock-asserts.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { LISTED, QUOTE_LISTED, findings, quoteFindings, refusals, scan, stale } from "./no-wall-clock-asserts.mjs";
+import { LISTED, QUOTE_LISTED, SHARE_LISTED, findings, quoteFindings, refusals, scan, shareFindings, stale } from "./no-wall-clock-asserts.mjs";
 
 test("the tracked unit tests read nothing past LISTED", () => {
   assert.deepEqual(refusals(scan()), []);
@@ -77,4 +77,35 @@ test("refuses a quote on the default clock, lets a fixed clock, the test clock a
     "in a comment or a string": "// evmPoolBuyQuoteWith(req, [a], NOW) was the old form\nconst s = 'quoteOn(x)';",
   };
   for (const [name, src] of Object.entries(ALLOWED_QUOTES)) assert.deepEqual(quoteFindings(src), [], name);
+});
+
+// card helper-share-tests-on-a-still-clock: a caller's share or a provider's budget built on the helper's default clock
+// turns its window with the machine's speed (PR 979's merge queue run 44243609488, logs-cache.test.ts)
+test("the tracked helper tests build no share, budget or holds on the default clock past SHARE_LISTED", () => {
+  assert.deepEqual(refusals(scan(undefined, shareFindings), SHARE_LISTED, "share on the default clock"), []);
+  for (const [f, v] of Object.entries(SHARE_LISTED)) assert.ok(Number.isInteger(v.count) && v.count > 0 && v.why.length > 0, f);
+});
+
+test("refuses a share, a budget or the holds on the default clock, lets a still clock, a test clock and virtual time through", () => {
+  const REFUSED_SHARES = {
+    "createRpc with no deps (logs-cache.test.ts before cc4340ca1's fix)": "const r = createRpc(ENV);",
+    "createRpc whose deps name no now": "const r = createRpc(ENV, { fetch: p.fetch as never, log: () => undefined });",
+    "createRpc on a deps object with no now": "const deps = { fetch, log };\nconst r = createRpc(ENV, deps);",
+    "a now in the env with no deps": "const r = createRpc({ ...ENV, now: \"1\" });",
+    "clientWindow with no clock": "const w = clientWindow(RPC_CLIENT_MAX);",
+    "upstreamBudget with no clock": "const b = upstreamBudget(() => ({ total: 2, perClient: 1 }));",
+    "providerHolds with no clock": "const holds = providerHolds();",
+    "after an onVirtualTime that has ended": "await onVirtualTime(0, async () => x());\nconst r = createRpc(ENV, { fetch });",
+  };
+  for (const [name, src] of Object.entries(REFUSED_SHARES)) assert.equal(shareFindings(src).length, 1, name);
+  const ALLOWED_SHARES = {
+    "a still clock in the deps": "const r = createRpc(ENV, { fetch: p.fetch as never, now: STILL, log: () => undefined });",
+    "a test clock by shorthand": "let clock = 0;\nconst now = () => clock;\nconst r = createRpc(ENV, { fetch, now, sleep });",
+    "a deps object that names its clock": "const deps = {\n  fetch: fetch as never,\n  now: () => clock,\n  sleep: async (ms: number) => { clock += ms; },\n};\nconst r = createRpc(BASE_ENV, w.deps);",
+    "clientWindow and upstreamBudget given a clock": "const w = clientWindow(10, () => t);\nconst b = upstreamBudget(limits, STILL);",
+    "providerHolds given a clock": "const holds = providerHolds(() => clock, PACE);",
+    "inside onVirtualTime": "await onVirtualTime(1_000_000_000, async () => {\n  const r = createRpc(ENV, { fetch });\n  const h = providerHolds();\n});",
+    "the function itself, a comment, a string": "export function createRpc(env, deps = {}) {}\n// createRpc(ENV) was the old form\nconst s = 'providerHolds()';",
+  };
+  for (const [name, src] of Object.entries(ALLOWED_SHARES)) assert.deepEqual(shareFindings(src), [], name);
 });
