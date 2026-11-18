@@ -16,7 +16,7 @@ import { judge, namesOf, onlyHost, read, readList, WEBAUTHN } from "./check-sign
 import { diffLists, headersFor, HOSTS, ledgerProblems, listDir, main as listMain, makeList, matches, newestRelease, newestReleaseOnHead, parseRules, publishedPath, RELEASED, releaseTreeProblems, SNAPSHOT_BEHIND_MAX, SNAPSHOT_HEAD_SPREAD_MAX, snapshotFreshness, snapshotProblems, unreleasedProblems } from "./release-list.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 import { signBuilt } from "../../../scripts/signpage-built.mjs";
-import { HEAD_SPREAD_MAX as LIVE_HEAD_SPREAD_MAX, MAX_BEHIND as LIVE_MAX_BEHIND } from "../../../scripts/live-checks/base-buy-box-answers-a-fresh-account.mjs";
+import { HEAD_SPREAD_MAX as LIVE_HEAD_SPREAD_MAX, MAX_BEHIND as LIVE_MAX_BEHIND } from "../../../scripts/live-checks/evm-snapshots-fresh-at-every-cut.mjs";
 
 const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const ZK = "a".repeat(64);
