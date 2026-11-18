@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { feeProblems, PIN, RECORD, runProblems, vaultReadProblems } from "./mainnet-money.ts";
+import { feeProblems, PIN, RECORD, requestInOrder, runProblems, vaultReadProblems } from "./mainnet-money.ts";
+import { HANDOFF_QUOTE_MARGIN_BLOCKS } from "../../../packages/signpage/src/withdraw/handoff.ts";
 import { NEAR_NETWORKS } from "../../../packages/kit/src/near/networks.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -94,4 +95,65 @@ test("the vault read on two operators as the record says passes; a key, other co
   assert.ok(vaultReadProblems(record, [{ ...READ, config: { ...READ.config, scope: "1" } }, READ]).some((p) => /scope/.test(p)));
   assert.ok(vaultReadProblems(record, [READ]).some((p) => /two/.test(p)));
   assert.ok(vaultReadProblems(record, [READ, null]).some((p) => /two/.test(p)));
+});
+
+// card mainnet-money-fee-after-proof: the withdraw leg in the device's order (signpage withdraw/handoff.ts once). The
+// chain is virtual: each stub moves its height by the blocks its step took, so nothing reads the machine's clock.
+// WINDOW is the helper's quote life (apps/helper/src/withdraw/fee.ts FEE_QUOTE_WINDOW_BLOCKS, 1,200 blocks).
+const WINDOW = 1_200;
+function leg(blocks: { prover: number; trees: number; t: number; proof: number }) {
+  const chain = { h: 1_000 };
+  const asked: string[] = [];
+  const sent: { validUntilBlock: number; at: number }[] = [];
+  const run = () => requestInOrder({
+    fee: async () => {
+      asked.push("fee");
+      return { relayFee: 1n, feeRecipient: "fees.example.near", validUntilBlock: chain.h + WINDOW };
+    },
+    prover: async () => {
+      asked.push("prover");
+      chain.h += blocks.prover;
+      return { times: [] };
+    },
+    trees: async () => {
+      asked.push("trees");
+      chain.h += blocks.trees;
+      return { stateRoot: 1n };
+    },
+    blockNs: async () => {
+      asked.push("T");
+      chain.h += blocks.t;
+      return "1";
+    },
+    height: async () => chain.h,
+    margin: HANDOFF_QUOTE_MARGIN_BLOCKS,
+    // withdrawRequest's part: the proof, then its claim right before the note goes RESERVED, then the request leaves
+    request: async ({ fee, claim }: { fee: { validUntilBlock: number }; claim?: () => Promise<void> }) => {
+      chain.h += blocks.proof;
+      await claim?.();
+      sent.push({ validUntilBlock: fee.validUntilBlock, at: chain.h });
+      return "request";
+    },
+  } as never);
+  return { run, asked, sent };
+}
+
+test("the fee is asked after the prover, the trees and T: a prover load and sync that outlast the window still send on an open quote", async () => {
+  // 900 + 400 blocks of prover load and sync: past the 1,200-block window had the quote been asked first
+  const l = leg({ prover: 900, trees: 400, t: 2, proof: 50 });
+  await l.run();
+  assert.deepEqual(l.asked, ["prover", "trees", "T", "fee"]);
+  assert.equal(l.sent.length, 1);
+  assert.ok(l.sent[0]!.at + HANDOFF_QUOTE_MARGIN_BLOCKS <= l.sent[0]!.validUntilBlock, `sent at ${l.sent[0]!.at} on a quote valid until ${l.sent[0]!.validUntilBlock}`);
+});
+
+test("a quote whose window closes before its request could be sent stops before RESERVED: nothing sent, resume asks again", async () => {
+  // the proof alone runs to within the margin of the window's end: refused, never sent on a quote the helper would price again
+  const late = leg({ prover: 0, trees: 0, t: 0, proof: WINDOW - HANDOFF_QUOTE_MARGIN_BLOCKS + 1 });
+  await assert.rejects(late.run(), /window[^]*nothing sent[^]*resume/);
+  assert.deepEqual(late.sent, []);
+  // open the margin's full width past the final height: sent
+  const edge = leg({ prover: 0, trees: 0, t: 0, proof: WINDOW - HANDOFF_QUOTE_MARGIN_BLOCKS });
+  await edge.run();
+  assert.equal(edge.sent.length, 1);
 });

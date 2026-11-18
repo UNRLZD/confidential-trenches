@@ -524,6 +524,21 @@ export async function nodeProver() {
   };
 }
 
+/** The withdrawal's request from its reads: the fee, the prover, the trees and T, then the proof. */
+export async function requestInOrder<P, T, F, R>(a: {
+  fee: () => Promise<F>;
+  prover: () => Promise<P>;
+  trees: () => Promise<T>;
+  blockNs: () => Promise<string>;
+  request: (x: { prover: P; trees: T; ns: string; fee: F }) => Promise<R>;
+}): Promise<{ prover: P; ns: string; fee: F; req: R }> {
+  const fee = await a.fee();
+  const prover = await a.prover();
+  const trees = await a.trees();
+  const ns = await a.blockNs();
+  return { prover, ns, fee, req: await a.request({ prover, trees, ns, fee }) };
+}
+
 // ---- check: the gate, the vault read and, with --state, the run's U ----
 
 async function check(argv: string[]) {
@@ -768,16 +783,22 @@ async function go(argv: string[], create: boolean) {
   if (pick !== null) {
     // the whole note to `to`, less the fee of this one quote: withdrawn = value, so no change note is left
     const value: bigint = pick.leaf.value;
-    const fee = await feeOf(value);
-    sourceGate("the prover loads and sees the note's secrets");
-    const prover = await nodeProver();
-    const trees = treesOf(await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["leaves", "labels"] }));
-    const ns2 = await lowerFinalTime(rpcs);
-    const before = await balances({ to, F: fee.feeRecipient });
-    const req = await withdrawRequest({
-      seed64, notes: ns, prover, vaultId: vault, token, ...trees, registerDepositOf,
-      feeRecipient: fee.feeRecipient, relayFee: fee.relayFee, network, rpcs, priceRpcs: network === "mainnet" ? rpcs : await opened_mainnet_pair(),
-      amount: value - fee.relayFee, to, deadlineMs: withdrawDeadlineMs(ns2), blockTimestampNanosec: ns2,
+    // F is the release relayer's fee_recipient, the one askWithdrawFee answers with (wallet withdraw/relay.ts)
+    const before = await balances({ to, F: relayers.withdraw.fee_recipient });
+    const priceRpcs = network === "mainnet" ? rpcs : await opened_mainnet_pair();
+    const { prover, fee, req } = await requestInOrder({
+      fee: () => feeOf(value),
+      prover: () => {
+        sourceGate("the prover loads and sees the note's secrets");
+        return nodeProver();
+      },
+      trees: async () => treesOf(await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["leaves", "labels"] })),
+      blockNs: () => lowerFinalTime(rpcs),
+      request: ({ prover, trees, ns: t, fee }) => withdrawRequest({
+        seed64, notes: ns, prover, vaultId: vault, token, ...trees, registerDepositOf,
+        feeRecipient: fee.feeRecipient, relayFee: fee.relayFee, network, rpcs, priceRpcs,
+        amount: value - fee.relayFee, to, deadlineMs: withdrawDeadlineMs(t), blockTimestampNanosec: t,
+      }),
     });
     const rp = requestProblems(req, to, pick.id);
     if (rp.length) throw new Error(`refused, the proof made and nothing sent: ${rp.join("; ")}; the note stays in the vault, and resume makes a new request`);
