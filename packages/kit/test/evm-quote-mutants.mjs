@@ -149,7 +149,9 @@ export const MUTANTS = [
   [QUOTE, "    return u === null || u >= floor;", "    return u !== null && u >= floor;", R, "PROBE C "],
   [QUOTE, "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(", "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn / 1000n)) f.quotes.push(", R, "PROBE D "],
   [QUOTE, "        if (!can(p, xa)) continue;\n        const e = viaX.get(earlyKey(mk, p));", "        if (!can(p, xa / 1000n)) continue;\n        const e = viaX.get(earlyKey(mk, p));", R, "PROBE A "],
-  [QUOTE, "        if (!needs(c, ub)) {", "        if (!needs(c, ubOf(mk, amountIn / 1000n))) {", R, "PROBE A2 "],
+  // since card frong-quotes-through-its-pools a market the prune leaves out may still be quoted (the best one left), so
+  // the dust tick pushes the real market out only with that fallback gone too: both in one plant
+  [QUOTE, "        if (!needs(c, ub)) {\n          // a market left out has a bound (one with none can always give Q); one with no hook first, whose bound is the\n          // pool's own (a hook replaced by one that does nothing may leave a pool whose real price its hook makes: of\n          // USDG's markets for FOBO the largest bound was such a pool's, 2,198,245 against the standard 0.01% pool's\n          // 1,867,080, and its quote did not fill)\n          const plain = mk.key.hooks === NATIVE;\n          if (ub !== null && (left === null || (plain && !left[2]) || (plain === left[2] && ub > left[1]))) left = [mk, ub, plain];\n          continue;\n        }\n        marketQuote.set(mk, leg === null ? quoteOf(into, routeOfKey(mk.key, c), [mk.key]) : quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, leg.amount));\n      }\n      if (priceOf && !a.sell && left !== null) marketQuote.set(left[0], quoteOf(into, routeOfKey(left[0].key, c), [left[0].key]));", "        if (!needs(c, ubOf(mk, amountIn / 1000n))) {\n          // a market left out has a bound (one with none can always give Q); one with no hook first, whose bound is the\n          // pool's own (a hook replaced by one that does nothing may leave a pool whose real price its hook makes: of\n          // USDG's markets for FOBO the largest bound was such a pool's, 2,198,245 against the standard 0.01% pool's\n          // 1,867,080, and its quote did not fill)\n          const plain = mk.key.hooks === NATIVE;\n          if (ub !== null && (left === null || (plain && !left[2]) || (plain === left[2] && ub > left[1]))) left = [mk, ub, plain];\n          continue;\n        }\n        marketQuote.set(mk, leg === null ? quoteOf(into, routeOfKey(mk.key, c), [mk.key]) : quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, leg.amount));\n      }\n      if (false) marketQuote.set(left[0], quoteOf(into, routeOfKey(left[0].key, c), [left[0].key]));", R, "PROBE A2 "],
   [QUOTE, "    (xPools.get(c) ?? []).some((p) => can(p, x)) ||", "    false ||", R, "PROBE A2 "],
   [QUOTE, "    [...vias].some(([x2, fs]) => fs.some((via) => via.other === c && (xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x)))));", "    false;", R, "RK7 "],
   [QUOTE, "(xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x)))", "(xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x === null ? null : x / 1000n)))", R, "PROBE E "],
@@ -209,7 +211,9 @@ export const MUTANTS = [
   // not-yet block is asked again whole; a one-call batch's bare answer is read
   [QUOTE, "      await settle(rest.map(run));", "      await settle(rest.map((r) => one(r)));", R, "SL1 "],
   [QUOTE, "(o.next === undefined ? Promise.reject(e) : headFrom(o.next))", "(o.next === undefined || o !== firstOn ? Promise.reject(e) : headFrom(o.next))", R, "SL1 "],
-  [QUOTE, "          if (spareNext && /^the provider answered HTTP 5", "          if (false && /^the provider answered HTTP 5", R, "SL1 "],
+  // re-anchored (card evm-unreachable-moves-on): the 5xx test is serverFault's since card evm-5xx-holds-the-provider-
+  // for-the-round; SL1 passes on it (the request still reaches the next after its tries), SP5xx does not
+  [QUOTE, "          if (spareNext && out5xx && !deepCall) {", "          if (false && out5xx && !deepCall) {", R, "SP5xx "],
   [QUOTE, "    if (notYet) {", "    if (false) {", R, "SL3 "],
   [QUOTE, "calls.length === 1 && typeof parsed === \"object\" && parsed !== null ? [parsed] : parsed;", "false ? [parsed] : parsed;", R, "SL4 "],
   [QUOTE, "  scanned?.commit();", "", R, "N1a "],
@@ -247,9 +251,9 @@ export const MUTANTS = [
   [QUOTE, "(!kept.has(readKey(r)) || hit.has(first + j))", "(!kept.has(readKey(r)) || true)", R, "W5 "],
   [QUOTE, "filter((r, j) => r.override === undefined && !r.data.startsWith(", "filter((r, j) => !r.data.startsWith(", R, "W6 "],
   [QUOTE, "  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind, true));", "  const early: ReturnType<typeof scanAt>[] = [];", R, "W1b "],
-  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) throw new Unreachable(", "if (false) throw new Unreachable(", R, "T7b "],
-  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) throw new Unreachable(", "if (e instanceof Error) throw new Unreachable(", R, "T7b "],
-  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) throw new Unreachable(", "if (e instanceof TypeError) throw new Unreachable(", R, "T7b "],
+  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (false) {", R, "T7b "],
+  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (e instanceof Error) {", R, "T7b "],
+  [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (e instanceof TypeError) {", R, "T7b "],
   [QUOTE, "!(e instanceof RateLimited || e instanceof Unreachable) || i === 3", "!(e instanceof RateLimited || e instanceof Unreachable) || i === 4", R, "T7b "],
   // the providers (card evm-quote-warm-round): any two that agree decide; a spare is asked when one fails, is slow or
   // differs; the quote's later rounds ask the two that agreed first; the next quote asks the fastest first
@@ -355,7 +359,7 @@ export const MUTANTS = [
   [QUOTE, "    if (sent !== cuts) return false;", "", R, "TH6 "],
   [QUOTE, "      if (now >= untilMs) throw past();", "", R, "TH7 "],
   [QUOTE, "    const wait = Math.max(afterMs ?? 0, Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** Math.max(0, strikes - 1)));", "    const wait = afterMs ?? Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_MS * 2 ** Math.max(0, strikes - 1));", R, "TH8 "],
-  [QUOTE, "          if (e instanceof Unreachable) {", "          if (false) {", R, "TH9 "],
+  [QUOTE, "          if (e instanceof Unreachable || (out5xx && deepCall)) {", "          if (out5xx && deepCall) {", R, "TH9 "],
   // re-review of b282ce0: a request's refusals counted, the fourth in a row refusing it, never its halves (LOW-C); a
   // browser's fetch failure, a TypeError with no cause, asked again whole too (LOW-B); the bound's race and abort, the
   // refusals' backoff and the per-round list, each held by a named test (LOW-A)
@@ -395,8 +399,10 @@ export const MUTANTS = [
   [QUOTE, "    const sc = await scanOf(cs, \"markets\");", "    const sc = await (scanOf(cs, \"markets\") ?? Promise.resolve(null)).catch(() => null);", R, "G2 "],
   [QUOTE, "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]))", "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [p.key]))", R, "S3c "],
   [QUOTE, "hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)]", "hops: [hopTo(x, via.key), hopTo(lower(token), p.key)]", R, "T5 "],
-  [QUOTE, "    if (res.status === 429) throw new RateLimited(", "    if (false) throw new RateLimited(", R, "T7 "],
-  [QUOTE, "      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) {", "      if (true) {", R, "T7 "],
+  [QUOTE, "    if (res.status === 429) {", "    if (false) {", R, "T7 "],
+  [QUOTE, "      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || gate?.spare?.() === true) {", "      if (true) {", R, "T7 "],
+  // card evm-unreachable-moves-on: a request that made no connection goes to the next at once while one is left
+  [QUOTE, " || i === 3 || gate?.spare?.() === true) {", " || i === 3 || (e instanceof RateLimited && gate?.spare?.() === true)) {", R, "FU1 "],
   [QUOTE, "      if (i < 3 && Array.isArray(out) && out.some(limited)) throw", "      if (false) throw", R, "T7 "],
   [QUOTE, "    GATED.set(f as unknown as EvmRpc, (calls, gate) =>\n      g(() => {", "    GATED.set(f as unknown as EvmRpc, (calls, gate) =>\n      ((x: () => Promise<readonly unknown[]>) => x())(() => {", R, "T8 "],
   // each read's own gas (card evm-quote-read-gas-starve): the code at Multicall3 and the call's gas, success word 2,

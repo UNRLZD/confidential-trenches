@@ -10,6 +10,10 @@ import { test } from "node:test";
 import { SOLANA_SOL_MINT } from "@blindfill/kit";
 import { createRpc } from "./rpc.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 const HIGH = "7ymF66Z6VhgNiwadtVhjTtT6U7iQRpSxeiRrhfufhigh";
 const CZLSUJ = "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump";
 const CPMM = "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C";
@@ -51,7 +55,7 @@ for (const kind of ["cpmm", "ammV4"] as const) {
   test(`${kind}: the kit's pool scan, the coin on either side, goes to route A`, async () => {
     for (const params of [scan(coin, SOLANA_SOL_MINT), scan(SOLANA_SOL_MINT, coin)]) {
       const { sent, f } = fakeFetch();
-      const r = createRpc(ENV, { fetch: f, log: () => {} });
+      const r = createRpc(ENV, { now: STILL, fetch: f, log: () => {} });
       const a = await call(r, "solana", body(params));
       assert.equal(a.status, 200, a.body);
       assert.deepEqual(sent, [A]);
@@ -77,14 +81,14 @@ for (const kind of ["cpmm", "ammV4"] as const) {
     ];
     for (const params of wider) {
       const { sent, f } = fakeFetch();
-      const r = createRpc(ENV, { fetch: f, log: () => {} });
+      const r = createRpc(ENV, { now: STILL, fetch: f, log: () => {} });
       const a = await call(r, "solana", body(params));
       assert.equal(a.status, 400, JSON.stringify(params));
       assert.equal(sent.length, 0);
     }
     // the marks route carries the marks scan alone, never this one
     const { sent, f } = fakeFetch();
-    const r = createRpc({ ...ENV, SOLANA_RPC_URL_QUICKNODE: "https://x.solana-mainnet.quiknode.example/test-key-qn-not-a-secret/" }, { fetch: f, log: () => {} });
+    const r = createRpc({ ...ENV, SOLANA_RPC_URL_QUICKNODE: "https://x.solana-mainnet.quiknode.example/test-key-qn-not-a-secret/" }, { now: STILL, fetch: f, log: () => {} });
     assert.equal((await call(r, "solana-marks", body(scan(coin, SOLANA_SOL_MINT)))).status, 400);
     assert.equal(sent.length, 0);
   });

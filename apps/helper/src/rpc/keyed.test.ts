@@ -13,6 +13,10 @@ import { PROVIDER_PACE, providerHolds, type Pace } from "../limits/limits.ts";
 import * as serverModule from "../server.ts";
 import { health, PARTS } from "../health.ts";
 import { HELPER_V1_PATHS } from "../../../../packages/kit/src/index.ts";
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 // read off the modules, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
 const { keyedPaces, keyedSpares } = rpcModule as unknown as { keyedPaces?: (env: Record<string, string>) => Record<string, Pace>; keyedSpares?: (env: Record<string, string>, c: string) => string[] };
 const { evmSwapRpcs, solanaTradesRpcs } = serverModule as unknown as { evmSwapRpcs?: (env: Record<string, string>, c: string) => string[]; solanaTradesRpcs?: (env: Record<string, string>) => string[] };
@@ -195,7 +199,7 @@ test("card rpc-keyed-lists: a key planted in every keyed URL reaches no log line
   // a refused URL names its variable, never its value
   for (const [n, u] of Object.values(LISTS).flat()) {
     try {
-      createRpc({ [n]: `${u}#frag` });
+      createRpc({ [n]: `${u}#frag` }, { now: STILL });
       assert.fail(`${n} with a fragment was taken`);
     } catch (e) {
       out.push((e as Error).message);
@@ -230,7 +234,7 @@ test("card rpc-keyed-lists: /v1/health's rpc lists each chain's keyed companies 
     near: ["fastnear.com answers", "keyed-own.test answers", "keyed-b.test wrong chain"],
   });
   // a host with none set: an empty list, never the public fallback
-  assert.deepEqual((createRpc({}) as Rpc).keyed?.(), { solana: [], base: [], robinhood: [], near: [] });
+  assert.deepEqual((createRpc({}, { now: STILL }) as Rpc).keyed?.(), { solana: [], base: [], robinhood: [], near: [] });
 });
 
 test("card rpc-keyed-lists: /v1/health stays within its 1 KB (the kit's HELPER_V1_PATHS row) with every keyed slot set, every Solana slot named and the longest states", () => {
@@ -239,7 +243,7 @@ test("card rpc-keyed-lists: /v1/health stays within its 1 KB (the kit's HELPER_V
   const real = { SOLANA_RPC_URL: "https://mainnet.helius-rpc.com/?api-key=x", BASE_RPC_URL: "https://base-mainnet.g.alchemy.com/v2/x", ROBINHOOD_RPC_URL: "https://robinhood-mainnet.g.alchemy.com/v2/x", NEAR_RPC_URL: "https://free.rpc.fastnear.com", NEAR_RPC_URL_B: "https://lava-endpoint.example" };
   const env: Record<string, string> = { ...real };
   for (const [n, u] of [...Object.values(LISTS).flat(), ...Object.values(DRPC_MORE).flat()]) if (!(n in real)) env[n] = u.replace(/[a-z-]+\.quiknode\.test/, "sparkling-quiet-sunset-wave.base-mainnet.quiknode.pro").replace("drpc.test", "drpc.live");
-  const listed = (createRpc(env) as Rpc).keyed?.() ?? {};
+  const listed = (createRpc(env, { now: STILL }) as Rpc).keyed?.() ?? {};
   const worst = Object.fromEntries(Object.entries(listed).map(([c, l]) => [c, l.map((e) => e.replace(/ \S+$/, " wrong chain"))]));
   assert.equal(Object.values(worst).flat().length, 18);
   const body = JSON.stringify(health("0123456789abcdef0123456789abcdef01234567", new Set(PARTS), 999_999_999, false, { rpc: "fallback", trades: "fallback", holders: "fallback", stream: "fallback" }, worst as never));
@@ -484,7 +488,7 @@ test("review M2: a keyed URL that answers its chain is probed once in 10 min, on
 
 test("review M3: /v1/health marks a keyed list's URL with no key in it (a company's public endpoint) as keyless", () => {
   const env = { NEAR_RPC_URL_FASTNEAR: LISTS.near[0][1], NEAR_RPC_URL: "https://free.rpc.fastnear.com", NEAR_RPC_URL_B: LISTS.near[2][1] };
-  assert.deepEqual((createRpc(env) as Rpc).keyed?.().near, ["fastnear.com unread", "fastnear.com keyless unread", "keyed-b.test unread"]);
+  assert.deepEqual((createRpc(env, { now: STILL }) as Rpc).keyed?.().near, ["fastnear.com unread", "fastnear.com keyless unread", "keyed-b.test unread"]);
 });
 
 test("review L1: a hold's log line names the company, never the keyed host", async () => {
@@ -598,7 +602,7 @@ test("owner 09:16Z: with dRPC's three keys all held, the public spares serve, on
 
 test("owner 09:16Z: /v1/health names each dRPC key as its own entry (key1, key2, key3), in order after QuickNode", () => {
   const env: Record<string, string> = Object.fromEntries([...LISTS.base.map(([n, u]) => [n, u as string]), ...DRPC_MORE.base]);
-  assert.deepEqual((createRpc(env) as Rpc).keyed?.().base, ["alchemy.test unread", "quiknode.test unread", "drpc.test key1 unread", "drpc.test key2 unread", "drpc.test key3 unread"]);
+  assert.deepEqual((createRpc(env, { now: STILL }) as Rpc).keyed?.().base, ["alchemy.test unread", "quiknode.test unread", "drpc.test key1 unread", "drpc.test key2 unread", "drpc.test key3 unread"]);
 });
 
 // ---- the delta review of 424dce1e (H1, M2, M3, L2, L3, L4) ----
