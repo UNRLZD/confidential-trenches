@@ -8384,7 +8384,7 @@ test("GF5 the read is the pool's own buySwap sent from the pool at the cap, its 
   const pool = builder.evmPoolVenues().base.pool!.toLowerCase();
   const pools = [gfMarket(token), gfSeeded(token)];
   const seen: EvmRpcCall[] = [];
-  const spy = (rpc: EvmRpc, err?: { code: number; message: string }): EvmRpc => async (calls) => {
+  const spy = (rpc: EvmRpc, err?: { code: number; message: string; data?: string }): EvmRpc => async (calls) => {
     const out = (await rpc(calls)) as unknown[];
     return calls.map((c, i) => {
       if (!String((c.params[0] as { data?: string }).data).startsWith("0x" + SEL_BUY_SWAP)) return out[i];
@@ -8392,7 +8392,7 @@ test("GF5 the read is the pool's own buySwap sent from the pool at the cap, its 
       return err === undefined ? out[i] : { jsonrpc: "2.0", id: i, error: err };
     });
   };
-  const run = (err?: { code: number; message: string }) =>
+  const run = (err?: { code: number; message: string; data?: string }) =>
     evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: marketRoute(token) }, [spy(chain(pools, 0), err), spy(chain(pools, 1), err)], NOW, scanner(5_000_000, []));
   const q = await run();
   assert.ok(seen.length >= 2, "both providers ran the swap");
@@ -8411,8 +8411,10 @@ test("GF5 the read is the pool's own buySwap sent from the pool at the cap, its 
     assert.equal(quoteMod.EVM_BUY_SWAP_FIT, GF_FIT);
     assert.equal(quoteMod.EVM_BUY_SWAP_FIT, (quoteMod.EVM_BUY_SWAP_GAS * 100n) / 105n, "500,000 / 1.05, rounded down");
   }
-  // geth's word and reth's four (review of 498eae83, L3)
-  for (const err of [{ code: -32000, message: "out of gas" }, { code: -32003, message: "out of gas: gas required exceeds: 476190" }, { code: -32003, message: "out of gas: gas exhausted during memory expansion: 476190" }, { code: -32003, message: "out of gas: gas exhausted during precompiled contract execution: 476190" }, { code: -32003, message: "out of gas: invalid operand to an opcode: 476190" }]) {
+  // geth's word and reth's four (review of 498eae83, L3); and a revert with no data, as robinhood-rpc.publicnode.com and
+  // robinhood.drpc.org answered release 175's fit read of a v3 route whose pool has no code (card
+  // robinhood-reads-draw-no-revert: SwapRouter02's exactInput reverts empty; the walk's check reads it as this answer too)
+  for (const err of [{ code: 3, message: "execution reverted", data: "0x" }, { code: -32000, message: "out of gas" }, { code: -32003, message: "out of gas: gas required exceeds: 476190" }, { code: -32003, message: "out of gas: gas exhausted during memory expansion: 476190" }, { code: -32003, message: "out of gas: gas exhausted during precompiled contract execution: 476190" }, { code: -32003, message: "out of gas: invalid operand to an opcode: 476190" }]) {
     await assert.rejects(run(err), (e: unknown) => e instanceof EvmQuoteError && e.code === "over_gas_floor" && e.reference === null, err.message);
   }
   for (const err of [{ code: -32000, message: "execution timeout" }, { code: -32000, message: "out of gas or something" }, { code: -32000, message: "out of memory: memory limit exceeded during memory expansion" }, { code: 429, message: "out of gas: rate limited" }]) {

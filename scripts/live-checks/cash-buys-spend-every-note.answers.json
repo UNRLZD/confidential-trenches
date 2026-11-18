@@ -12,5 +12,29 @@
   "sha384": "sha384-MBuhAfm1Oxf8U7Qb3HoDDlepSplEHWbl0A/7ebcAh9npImG2HHzi28scOe5/gQq+",
   "mark": true,
   "oneclick": "{\"message\":\"Amount is too low for bridge, try at least 75582\",\"correlationId\":\"ec5a642a-b4fc-46ed-b6f1-62ccaefb5275\",\"timestamp\":\"2026-11-15T12:50:09.482Z\",\"path\":\"/v0/quote\"}"
+ },
+ "good_live": {
+  "from": "SIGN_HOST live (release 175), 2026-11-18 13:26:31Z, --record at the card branch cash-least-read-again; 1Click through the helper proxy, with its status",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv",
+  "mark": true,
+  "oneclick": "{\"message\":\"Amount is too low for bridge, try at least 76955\",\"correlationId\":\"46bef7f4-3a9a-4da5-9f1e-7309899d90f6\",\"timestamp\":\"2026-11-18T13:26:33.389Z\",\"path\":\"/v0/quote\"}",
+  "status": 400
+ },
+ "blip_live": {
+  "from": "SIGN_HOST live (release 175) as read 2026-11-18 13:26:31Z; 1Click: the 400 \"Failed to get quote\" the helper proxy gave for one unit at 13:26:36Z (the base walk of cash-buys-spend-every-note-evm, same run), the answer its log shows for sign live run 44300899132 at 12:09:36Z, whose record the run kept none of",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv",
+  "mark": true,
+  "oneclick": "{\"message\":\"Failed to get quote\",\"correlationId\":\"e9d66655-7409-46e7-8229-35262eb0cf2c\",\"timestamp\":\"2026-11-18T13:26:36.733Z\",\"path\":\"/v0/quote\"}",
+  "status": 400
+ },
+ "bad_quote": {
+  "from": "SIGN_HOST live (release 175) as read 2026-11-18 13:26:31Z; 1Click: the helper proxy dry-quoting one USDC into SOL at 13:27:25Z (HTTP 201, a quote, no least), as a one-unit answer that is a quote: the least read would take no least; its 1Click signature field left out (a quote signature has a NEAR secret key shape for gitleaks)",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-MzUTYbiGbnO7tVW9IJnJS/WWqBvlhAqmXAUhTZREvqHShNyPNHPHDx20tpRasmmv",
+  "mark": true,
+  "oneclick": "{\"quote\":{\"amountIn\":\"1000000\",\"amountInFormatted\":\"1.0\",\"amountInUsd\":\"0.999555000000\",\"minAmountIn\":\"1000000\",\"amountOut\":\"13299106\",\"amountOutFormatted\":\"0.013299106\",\"amountOutUsd\":\"0.985995718840\",\"minAmountOut\":\"13166114\",\"timeEstimate\":9,\"refundFee\":\"0\",\"withdrawFee\":\"134880\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"depositType\":\"INTENTS\",\"destinationAsset\":\"nep141:sol.omft.near\",\"amount\":\"1000000\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"So11111111111111111111111111111111111111112\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-18T13:37:18.788Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[]},\"timestamp\":\"2026-11-18T13:27:24.795Z\",\"correlationId\":\"9752b1cc-a252-43f3-86e6-ebf3021717b2\"}",
+  "status": 201
  }
 }

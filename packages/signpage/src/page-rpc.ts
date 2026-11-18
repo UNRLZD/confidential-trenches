@@ -26,7 +26,7 @@ import { SOLANA_POOL_BUY_VENUES } from "../../kit/src/trade/solana/pool-buy.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { HostPaused, gateSignal, hostLane } from "../../wallet/src/throttle.ts";
-import { evmPaceTake } from "../../kit/src/checks/evm/pace.ts";
+import { evmPaceTake, evmProviderHold } from "../../kit/src/checks/evm/pace.ts";
 
 /** Whose read it is: a trade's own (first on its host) or a background pass's (on its host's budget). */
 export type ReadKind = "trade" | "pass";
@@ -69,6 +69,10 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
     } catch (e) {
       if (e instanceof SolanaRpcTransportError && throttles(e)) lane.throttled(sentIn, e.afterMs);
       else lane.failed(sentIn);
+      // no connection: in a browser any failure with no response, Robinhood's own 429 among them (its allow-origin "*,*",
+      // which CORS refuses): the provider held for every EVM reader, as the kit's own transport holds it (quote.ts
+      // evmJsonRpc; card robinhood-reads-draw-no-revert), so the kit's quotes ask it after the others meanwhile
+      if (e instanceof SolanaRpcTransportError && e.fault === "network" && !stop.aborted) evmProviderHold(href);
       throw e;
     } finally {
       give();
@@ -169,7 +173,7 @@ export function seatRpc(urls: readonly string[], kind: ReadKind = "trade", retry
 }
 
 /** A provider the device reaches directly. */
-export const pageRpc = (url: string, kind: ReadKind = "trade"): SolanaRpc => lanedRpc(url, { kind });
+export const pageRpc = (url: string, kind: ReadKind = "trade", spare = false): SolanaRpc => lanedRpc(url, spare ? { kind, spare } : { kind });
 /** The helper's POST /v1/rpc/solana, `origin` the helper's origin only; the page's retry unless a read names its own
  *  (a pool settle's and restore's, SOLANA_RPC_WINDOW_RETRY: src/pool-testnet.ts pageSolanaSettleRpcs). */
 export const pageHelperRpc = (origin: string, retry: SolanaRpcRetry = SOLANA_RPC_RETRY, kind: ReadKind = "trade"): SolanaRpc => lanedRpc(solanaHelperRpc(origin).url!, { kind, retry, init: HELPER_FETCH_INIT });
