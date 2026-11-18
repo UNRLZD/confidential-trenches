@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { createPrivateKey, createPublicKey } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { request, type Server } from "node:http";
+import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -19,6 +19,7 @@ import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
 import { createFileStore } from "./bind/send.ts";
 import { createProxy } from "./proxy/proxy.ts";
 import { start } from "./server.ts";
+import { call as bounded, listening } from "../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const ENV = { ONECLICK_JWT: "test-oneclick-0001", RELAY_API_KEY: "test-relay-0001" };
@@ -28,14 +29,9 @@ const UPSTREAM = JSON.stringify(RECORDED.answers.success_usdc);
 const ADDRESS = "a998c6585100ca4bccbc0e0bcceb9abd66e59666e87bd03b1d83bb9544f7ce2f";
 
 type Got = { status: number; body: string; type: string | undefined };
-function call(port: number, path: string, body = ""): Promise<Got> {
-  return new Promise((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port, method: "POST", path, headers: { "content-type": "application/json" } }, (res) => {
-      let b = "";
-      res.setEncoding("utf8").on("data", (d) => (b += d)).on("end", () => ok({ status: res.statusCode ?? 0, body: b, type: res.headers["content-type"] }));
-    });
-    r.on("error", fail).end(body);
-  });
+async function call(port: number, path: string, body = ""): Promise<Got> {
+  const r = await bounded(port, { method: "POST", path, headers: { "content-type": "application/json" }, body }, "the helper");
+  return { status: r.status, body: r.body, type: r.headers["content-type"] };
 }
 const turns = async (n = 20) => {
   for (let i = 0; i < n; i++) await new Promise((ok) => setImmediate(ok));
@@ -48,7 +44,7 @@ async function helper(bind: BindSender, upstream: (url: string) => { status: num
     return new Response(u.body, { status: u.status, headers: { "content-type": "application/json" } });
   };
   const s: Server = start(COMMIT, 0, createProxy(ENV, { fetch: fetchFn }), undefined, undefined, undefined, undefined, undefined, undefined, bind, undefined, undefined, undefined, undefined, senders);
-  await new Promise<void>((ok) => s.on("listening", () => ok()));
+  await listening(s, "the helper");
   return {
     port: (s.address() as AddressInfo).port,
     close: () => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok()))),

@@ -1,12 +1,13 @@
 // card sol-pool-buy-lands-on-mainnet: one log line per pool send, codes and counts only.
 import assert from "node:assert/strict";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { handler } from "../server.ts";
 import type { SolanaPoolSender } from "./solana.ts";
 import type { EvmPoolSender } from "./evm.ts";
 import { poolSendLine, regionName, simErrText } from "./send-log.ts";
+import { call, listening } from "../../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const SIG = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
@@ -58,15 +59,8 @@ test("a region's name is its host's first label", () => {
 });
 
 async function post(port: number, path: string, body: string): Promise<{ status: number; text: string }> {
-  return new Promise((ok, no) => {
-    const r = request({ host: "127.0.0.1", port, path, method: "POST", headers: { "content-type": "application/json" } }, (res) => {
-      let text = "";
-      res.on("data", (c) => (text += c));
-      res.on("end", () => ok({ status: res.statusCode ?? 0, text }));
-    });
-    r.on("error", no);
-    r.end(body);
-  });
+  const r = await call(port, { method: "POST", path, headers: { "content-type": "application/json" }, body }, "the helper");
+  return { status: r.status, text: r.body };
 }
 
 test("each pool send route writes one line when it answers: no signature, address or caller; the note never reaches the caller", async () => {
@@ -75,7 +69,7 @@ test("each pool send route writes one line when it answers: no signature, addres
   const evm = { network: "base", carry: async () => ({ status: 200, body: { hash: `0x${"cd".repeat(32)}` } }), sell: async () => ({ status: 422, body: { error: { code: "simulation_failed", detail: `reverted for ${ADDR}` } } }) } as unknown as EvmPoolSender;
   const h = handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 1, new Map([[ADDR, sol]]), new Map([["0xpool", evm]]), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, (l) => lines.push(l));
   const server = createServer(h).listen(0, "127.0.0.1");
-  await new Promise((ok) => server.once("listening", ok));
+  await listening(server, "the helper");
   const port = (server.address() as AddressInfo).port;
   try {
     const a = await post(port, "/v1/pool/solana/send", JSON.stringify({ pool: ADDR, tx: "AAAA" }));

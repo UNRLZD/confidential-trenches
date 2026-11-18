@@ -453,6 +453,29 @@ test("the default paths: the paper's three keyless URLs and the helper's /v1/rpc
   assert.deepEqual(solanaSendPaths({ fetch: fakeFetch }).map((p) => p.name), ["sender", "jito", "rpc"], "no helper: one path fewer, never a wait");
 });
 
+// Card solana-send-browser-origin: an app on the kit sends from a browser, and Solana's own public RPC refuses a
+// browser. With the signing page's Origin (https://confidential.unrealized.trade), 2026-11-18 12:03:10-12:03:40Z:
+// api.mainnet-beta.solana.com answered the preflight 200 but getHealth and getLatestBlockhash 403 {"code":403,
+// "message":"Access forbidden"} (200 with no Origin); solana-rpc.publicnode.com answered both 200, allow-origin *, and
+// served sendTransaction (a 1-byte payload that is no transaction: "unable to decode tx.Message"). api.mainnet.solana.com
+// refused a page the same way on 2026-11-11 (packages/signpage/src/trade.ts SOLANA_PUBLIC_SEAT).
+test("the default send paths name no host that refuses a browser's Origin: the public path is publicnode", async () => {
+  const refused = new Set(["https://api.mainnet-beta.solana.com", "https://api.mainnet.solana.com"]);
+  const seen = new Map<string, string>();
+  const fakeFetch = (url: string) => {
+    seen.set(new URL(url).origin, "");
+    return Promise.reject(new Error("no network in this test"));
+  };
+  for (const p of solanaSendPaths({ fetch: fakeFetch })) {
+    const before = new Set(seen.keys());
+    await p.send(base64.encode(tx(91).wire)).catch(() => {});
+    for (const o of seen.keys()) if (!before.has(o)) seen.set(o, p.name);
+  }
+  assert.deepEqual([...seen.values()].sort(), ["jito", "rpc", "sender"], "each path sent once");
+  for (const [o, path] of seen) assert.ok(!refused.has(o), `the ${path} path sends to ${o}, which refuses a browser's Origin`);
+  assert.equal(SOLANA_PUBLIC_RPC_URL, "https://solana-rpc.publicnode.com");
+});
+
 test("solanaJsonRpc refuses an answer that is not a JSON-RPC result for its own request", async () => {
   // each answer is built from the request's own id, so only the shape under test is wrong
   const answer = (body: (id: string) => string, status = 200) => (_u: string, init: RequestInit) =>

@@ -4,7 +4,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { request } from "node:http";
-import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
 import { start } from "../../server.ts";
@@ -15,6 +14,7 @@ import { b58decode, pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
   CANDLES_FIELDS, createSolanaToken, GT_PAGE_WAIT_MS, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, JUP_PAGE_WAIT_MS, LAUNCH_WAIT_MS, metadataAddress, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, top10Of, topPool, walletsTop10,
 } from "./token.ts";
+import { call as bounded, listening } from "../../../test/servers.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/token-page.json", import.meta.url), "utf8"));
 const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn"; // Token-2022, graduated long ago, no launchpad curve
@@ -634,18 +634,10 @@ test("toCandles: bars off the grid, from the future, with a zero, negative or no
 const good = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW, fetch: fakeGecko().fetch });
 const servers = [start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, good)];
 const ports: number[] = [];
-before(() => Promise.all(servers.map((s, i) => new Promise<void>((ok) => s.on("listening", () => ((ports[i] = (s.address() as AddressInfo).port), ok()))))));
+before(async () => (await Promise.all(servers.map((s, i) => listening(s, `the helper ${i}`)))).forEach((p, i) => (ports[i] = p)));
 after(() => Promise.all(servers.map((s) => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok()))))));
 
-function call(method: string, path: string, headers: Record<string, string> = {}) {
-  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port: ports[0], method, path, headers }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (d: Buffer) => chunks.push(d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
-    });
-    r.on("error", fail).end();
-  });
-}
+const call = (method: string, path: string, headers: Record<string, string> = {}) => bounded(ports[0]!, { method, path, headers }, "the helper");
 
 test("GET /v1/market/token, /holders and /candles with chain=solana: 200 in the field lists, commit, source, read time, CORS", async () => {
   for (const [path, fields, src] of [
