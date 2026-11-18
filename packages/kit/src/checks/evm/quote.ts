@@ -113,6 +113,11 @@ export type EvmPoolBuyQuoteRequest = {
    *  first quote's providers agreed on there answered as they agreed it and only the rest sent; else at its own block,
    *  as with none. Every check runs as on any block. */
   at?: string;
+  /** (optional) true: the quote reads no log (card evm-tree-reads-only-when-needed): its pools are the served index's
+   *  (evmPoolIndexUse) and the helper's (evmPoolServedUse), each read at the agreed block on both providers like any
+   *  candidate, and no block past the index is scanned or kept. For a shown price that is never signed (the page's
+   *  pool.buy.dry on a device that holds nothing): a pool made past the index that the helper leaves out lowers it. */
+  scanless?: boolean;
 };
 
 /** A v4 pool's key, as the PoolManager's Initialize event gives it (currency0 below currency1). */
@@ -123,6 +128,8 @@ export type EvmPoolKey = { readonly currency0: string; readonly currency1: strin
 export type EvmHookTake = { readonly hookless: bigint | null; readonly take: bigint | null; readonly takeBps: number | null };
 
 export type EvmPoolBuyQuote = {
+  /** true: asked scanless (EvmPoolBuyQuoteRequest.scanless), a price to show that no signature may be made from */
+  readonly scanless?: true;
   readonly chain: EvmPoolChain;
   readonly token: string;
   readonly amountIn: bigint;
@@ -1587,7 +1594,25 @@ const gapsOf = (spans: Spans, lo: number, hi: number): Spans => {
 // run as it always runs at its own block, asks it again, so every check reads the new block (a pool that vanished is
 // not held, one seeded since is found by the scan and read in a round of its own).
 // `xs`: the currencies X the token's last quote kept past its X prune (card evm-spare-list-green)
-const PLANS = new Map<string, { ts: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[] }>();
+// `amount`: the amount in that quote was asked at (card evm-quote-warm-from-the-coin-page): a kept read made at it, or at
+// twice it, is asked at the next quote's own amount, or twice it (atAmount)
+const PLANS = new Map<string, { ts: bigint; amount: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[] }>();
+/** A kept read of a quote at `from` as the same read at `to` (card evm-quote-warm-from-the-coin-page: the coin page's
+ *  warm quotes the coin before the amount is typed): each 32-byte word of its calldata that is `from` becomes `to`, and
+ *  each that is twice `from` becomes twice `to`, so a route's quote at the amount and at twice it (quoteCall, v4Read,
+ *  sellRead) is the read the quote at `to` makes. Only an early ask: a kept read counts only where the quote asks the
+ *  same read again (readKey), so a word that was not the amount makes a read nothing uses, never an answer to another
+ *  read. Every other field is kept as it is. */
+function atAmount(r: Read, from: bigint, to: bigint): Read {
+  if (from === to || r.data.length < 10 || (r.data.length - 10) % 64 !== 0) return r;
+  const [f1, f2, t1, t2] = [word(from), word(2n * from), word(to), word(2n * to)];
+  let data = r.data.slice(0, 10);
+  for (let i = 10; i < r.data.length; i += 64) {
+    const w = r.data.slice(i, i + 64).toLowerCase();
+    data += w === f1 ? t1 : w === f2 ? t2 : r.data.slice(i, i + 64);
+  }
+  return data === r.data ? r : { ...r, data };
+}
 /** The block time a token's kept reads are asked for (card evm-quote-warm-round: 60 s). */
 export const EVM_WARM_RANGE_S = 60n;
 /** The most tokens whose reads are kept, the oldest dropped first. */
@@ -1979,7 +2004,14 @@ async function scanPools(
   from: Promise<ScanFrom>,
   picked: () => Promise<Block> = agreed,
   defer?: (cs: readonly string[]) => void,
+  scanless = false,
 ): Promise<{ pools: Map<string, EvmPoolKey[]>; commit: () => void }> {
+  // a scanless quote: the served index's pools from the depth's floor and the helper's, no log read and nothing kept
+  if (scanless) {
+    const floor = Math.max(0, (INDEXES.get(chain)?.through ?? 0) - s.depth + 1);
+    const all = await Promise.all(cs.map(async (c) => [c, [...new Map([...(indexScanOf(chain, kind, c, weth, floor)?.pools ?? []), ...(await servedOf(chain, kind, c, weth))].map((k) => [poolId(k), k])).values()]] as [string, EvmPoolKey[]]));
+    return { pools: new Map(all), commit: () => {} };
+  }
   const { head: scanHead, first } = await from;
   const second = first.next;
   // the logs up to the scan provider's head are read beside the round before (at most depth / span requests for each
@@ -2369,8 +2401,9 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   const pools = req.pools;
   const banned = req.banned;
   const later = req.later === true;
+  const scanless = req.scanless === true;
   const at = req.at;
-  const asked: EvmPoolBuyQuoteRequest = { ...(typeof at === "string" ? { at } : {}), chain: req.chain, token: req.token, amountIn: req.amountIn, slippageBps: req.slippageBps, route: req.route, ...(pools === undefined ? {} : { pools }), ...(banned === undefined ? {} : { banned }) };
+  const asked: EvmPoolBuyQuoteRequest = { ...(typeof at === "string" ? { at } : {}), chain: req.chain, token: req.token, amountIn: req.amountIn, slippageBps: req.slippageBps, route: req.route, ...(pools === undefined ? {} : { pools }), ...(banned === undefined ? {} : { banned }), ...(scanless ? { scanless } : {}) };
   const { chain } = asked;
   const v = venue(chain);
   const p = v.providers;
@@ -2378,7 +2411,8 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   let watch = WATCHES.get(chain);
   if (watch === undefined) WATCHES.set(chain, (watch = evmHeadWatch(() => evmProviders(evmRanked(p), fetch), v.maxLag)));
   // a scan's answer is a list of logs, bounded by the scan provider's own cap per request (16 MiB read at most)
-  return evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch, later), Date.now(), scansOf(v.scan, later), watch);
+  const q = await evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch, later), Date.now(), scansOf(v.scan, later), watch);
+  return scanless ? { ...q, scanless: true } : q;
 }
 
 // Each pinned provider's measured speed (card evm-quote-warm-round): its time to answer a batch, an average that weighs
@@ -2689,6 +2723,7 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
     banned,
     hints: req.pools,
     sell: false,
+    scanless: req.scanless === true,
     watch,
     mono,
     start,
@@ -3114,6 +3149,8 @@ async function routeSetOf(a: {
   hints: unknown;
   /** quote each route backwards, from the token */
   sell: boolean;
+  /** read no log: the scans answer the served index's and the helper's pools alone (EvmPoolBuyQuoteRequest.scanless) */
+  scanless?: boolean;
   /** the chain's held head (card evm-quote-head-watch) */
   watch?: EvmHeadWatch | undefined;
   /** the lowest block the set reads at (a sell's buy's block; agreedBlock waits for it); a held head (the buy's) has none */
@@ -3286,7 +3323,7 @@ async function routeSetOf(a: {
   const scanAt = (cs: readonly string[], kind: ScanKind, early = false) => {
     if (firstOn === undefined || v.poolManager === undefined || v.scan === undefined || cs.length === 0) return null;
     const at = early ? () => picked : agreedHead;
-    return scanPools(chain, cs, kind, lower(v.weth), v.poolManager, v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind));
+    return scanPools(chain, cs, kind, lower(v.weth), v.poolManager, v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true);
   };
   // the warm round: the token's kept reads and scans; a scan asked again in this quote is the one started here
   const planKey = `${chain}:${a.sell ? "sell" : "buy"}:${lower(token)}`;
@@ -3432,7 +3469,8 @@ async function routeSetOf(a: {
   if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {
     const own = new Set(reads.map(readKey));
     // the plan holds no read with a state override (below)
-    for (const r of plan.reads) {
+    for (const kept0 of plan.reads) {
+      const r = atAmount(kept0, plan.amount, amountIn);
       const k = readKey(r);
       if (own.has(k) || kept.has(k)) continue;
       kept.set(k, reads.push(r) - 1);
@@ -3886,7 +3924,7 @@ async function routeSetOf(a: {
   PLANS.delete(planKey);
   // never a read with a state override: it is asked only once this quote's own reads find its pool held (review of
   // 5452011, S1), so a pool that vanished since never puts its hook's override into a read
-  PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j)), scans: asked, xs: [...xPools.keys()] });
+  PLANS.set(planKey, { ts: block.timestamp, amount: amountIn, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j)), scans: asked, xs: [...xPools.keys()] });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled, outOfGas: [...outOfGas.values()] };
 }

@@ -23,6 +23,15 @@
 //     wallet request made and no seed stored; I already have one draws Use passkey and Recovery code, still with no
 //     wallet request and no seed; Use passkey with a passkey that has no PRF there makes nothing and offers the 12 words
 //     and the passkey again, never Create passkey (W:932: before any seed is made).
+//   New account with a wallet (card wallet-signin-wallet; two more fresh contexts, no passkey): a stand-in EVM wallet in
+//     SIGN_HOST's top window names a published test key's address and answers personal_sign with a signature made in
+//     this process (never in the page), counting every request and every personal_sign. fresh: signin.open {way:
+//     wallet}, New account offered on the two choices, a press with a wallet that signs by the address it named draws
+//     the backup (12 words, code_saved false) over a stored seed after exactly one personal_sign. freshBad: the same
+//     with a wallet whose signature is another published key's: the error page, no seed, no words, after one
+//     personal_sign. freshNo: the same with a wallet that says no to personal_sign (EIP-1193 4001): back on the two
+//     choices, no seed, no words, after one personal_sign. Each press waits out the guard (New account is a guarded
+//     control). A record cut before the card holds none of the three steps and is read on its other lines.
 //   two tabs: tab A loaded signed out, tab B signs in; A's read of the new seed is held 2.5 s (a hook on the seed's
 //     decrypt), and a backup.open A's app sends while that read runs waits for it, then is taken and draws the 12
 //     words, never refused for coming at that moment.
@@ -46,6 +55,7 @@
 import "../net-window.mjs";
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,6 +84,78 @@ const WALLET_STUB = () => {
   Object.defineProperty(window, "solana", { value: sol, configurable: true });
   Object.defineProperty(window, "phantom", { value: { solana: sol, ethereum: evm }, configurable: true });
 };
+
+// ------------------------------------------------------------------------------------------------ the stand-in wallets
+// (card wallet-signin-wallet) Two published test keys, never money: the web3.js docs' example account signs for the
+// address it names (good), and secp256k1's key 1 signs in its place (bad: the wrong signer). The EIP-191 digest is this
+// check's own (a second reading of the standard beside packages/wallet/src/signin/wallet.ts eip191Digest, which a file
+// outside packages/ may not import: .dependency-cruiser.cjs kit-public-entry-only); @noble/* from the helper's own
+// dependencies (apps/ is outside Blindfill), as relayer-withdraw-send.mjs loads them.
+const helperRequire = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
+const { secp256k1 } = helperRequire("@noble/curves/secp256k1.js");
+const { keccak_256 } = helperRequire("@noble/hashes/sha3.js");
+const hexOf = (b) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+const bytesOf = (h) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16));
+const utf8 = (s) => new TextEncoder().encode(s);
+/** EIP-191 version 0x45 (personal_sign): keccak256("\x19Ethereum Signed Message:\n" ‖ decimal length ‖ message). */
+export function eip191(message) {
+  const prefix = utf8(`\x19Ethereum Signed Message:\n${message.length}`);
+  const all = new Uint8Array(prefix.length + message.length);
+  all.set(prefix);
+  all.set(message, prefix.length);
+  return keccak_256(all);
+}
+/** A secret key's address in EIP-55 form. */
+export function evmAddressOf(secret) {
+  const lower = hexOf(keccak_256(secp256k1.getPublicKey(secret, false).slice(1)).slice(12));
+  const h = hexOf(keccak_256(utf8(lower)));
+  return `0x${[...lower].map((c, i) => (parseInt(h[i], 16) >= 8 ? c.toUpperCase() : c)).join("")}`;
+}
+/** personal_sign of `message` by `secret`: 0x r ‖ s ‖ v, v 27/28, s low. */
+export function personalSign(secret, message) {
+  const sig = secp256k1.sign(eip191(message), secret, { prehash: false, format: "recovered" }); // recovery ‖ r ‖ s
+  return `0x${hexOf(sig.slice(1, 65))}${(27 + sig[0]).toString(16)}`;
+}
+const GOOD_SIGNER = bytesOf("4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318"); // gitleaks:allow (web3.js docs example key)
+const BAD_SIGNER = bytesOf((1n).toString(16).padStart(64, "0")); // secp256k1's key 1
+export const WALLET_ADDRESS = "0x2c7536E3605D9C16a7a3D7b1898e529396a65c23"; // GOOD_SIGNER's, as the web3.js docs print it
+export const WRONG_SIGNER_ADDRESS = "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"; // key 1's
+if (evmAddressOf(GOOD_SIGNER) !== WALLET_ADDRESS || evmAddressOf(BAD_SIGNER) !== WRONG_SIGNER_ADDRESS) throw new Error("the stand-in keys' addresses are not the published ones");
+const SIGN_MAX = 4_096; // hex characters a personal_sign may carry here: the sign-in bytes are a few hundred
+
+// Before SIGN_HOST's own scripts, in its top window only: an EVM wallet naming `address`, whose personal_sign is
+// answered by the check's binding (__ctWalletSign, in Node), or with `refuse` the user's no (EIP-1193 4001). Every
+// request is counted, and every personal_sign apart.
+const WALLET_STAND_IN = ({ address, refuse }) => {
+  if (location.hostname !== "confidential.unrealized.trade" || window.top !== window) return;
+  globalThis.__ctWalletAsks = 0;
+  globalThis.__ctWalletSigns = 0;
+  const request = async (args) => {
+    globalThis.__ctWalletAsks += 1;
+    const method = args?.method;
+    if (method === "eth_requestAccounts" || method === "eth_accounts") return [address];
+    if (method === "personal_sign") {
+      globalThis.__ctWalletSigns += 1;
+      if (refuse) throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+      return globalThis.__ctWalletSign(args?.params?.[0]);
+    }
+    throw Object.assign(new Error(`stand-in wallet: ${String(method)} unsupported`), { code: 4200 });
+  };
+  Object.defineProperty(window, "ethereum", { value: { isMetaMask: true, request, on() {}, removeListener() {} }, configurable: true });
+};
+
+// The binding behind the stand-in: signs only for SIGN_HOST's top window, only 0x-hex bytes of a bounded length. With
+// no secret the stand-in refuses every personal_sign (4001) and no binding is exposed.
+async function standInWallet(ctx, secret) {
+  await ctx.addInitScript(WALLET_STAND_IN, { address: WALLET_ADDRESS, refuse: !secret });
+  if (!secret) return;
+  await ctx.exposeBinding("__ctWalletSign", (source, data) => {
+    const top = source.frame === source.page.mainFrame() && new URL(source.frame.url()).hostname === SIGN_HOST;
+    if (!top) throw new Error("the stand-in signs for SIGN_HOST's top window only");
+    if (typeof data !== "string" || data.length > SIGN_MAX || !/^0x(?:[0-9a-fA-F]{2})*$/.test(data)) throw new Error("not 0x-hex bytes");
+    return personalSign(secret, bytesOf(data.slice(2)));
+  });
+}
 
 // Before SIGN_HOST's own scripts: once a test sets __ctHoldSeed, the page's next decrypt of the seed record waits that
 // long (__ctHolding true meanwhile), so a step can be sent while the page reads its store.
@@ -291,6 +373,22 @@ export function judge(rec, era = SIGN_OUT_NOW) {
   const ex = w.existingUse;
   say(inLayer(ex, "no-prf") && ex?.create === 0 && ex?.use === 1 && ex?.recovery === 1 && ex?.seed === false,
     `wallet: Use passkey there with no PRF makes nothing and offers the passkey and the 12 words, never Create passkey (${ex?.state ?? "no step"}, ${ex?.create ?? "?"} Create passkey)`);
+  // card wallet-signin-wallet: New account with a stand-in wallet, read on a record that holds either step (one cut
+  // before the card holds neither and keeps its verdict); a run of this check always records both
+  if (["fresh", "freshBad", "freshNo"].some((k) => Object.hasOwn(w, k))) {
+    const offered = (f) => pending(f?.answer) && inLayer(f?.choose, "choose") && f?.offer?.disabled === false && f?.offer?.pending === null;
+    const offerText = (f) => (!f?.offer ? "New account not drawn" : offered(f) ? "New account offered" : `New account not offered${f.offer.pending ? ` (${f.offer.pending})` : ""}`);
+    const signs = (a) => `${a?.signs ?? "?"} personal_sign, ${a?.walletAsks ?? "?"} request(s)`;
+    const f = w.fresh?.after;
+    say(offered(w.fresh) && inLayer(f, "backup") && f?.words === 12 && f?.codeSaved === "false" && f?.seed === true && HEX64.test(f?.account ?? "") && f?.signs === 1,
+      `wallet: New account with a wallet that signs for its address makes a seed and draws the backup first, after one personal_sign (${offerText(w.fresh)}, ${f?.state ?? "no step"}, ${f?.words ?? 0} words, code_saved ${f?.codeSaved ?? "none"}, seed ${f?.seed ? "made" : "none"}, ${signs(f)})`);
+    const b = w.freshBad?.after;
+    say(offered(w.freshBad) && b?.state === "error" && b?.seed === false && b?.words === 0 && !b?.account && b?.signs === 1,
+      `wallet: New account with a wallet whose signature is another key's draws the error page and makes nothing (${offerText(w.freshBad)}, ${b?.state ?? "no step"}, seed ${b?.seed ? "made" : "none"}, ${b?.words ?? 0} words, ${signs(b)})`);
+    const c = w.freshNo?.after;
+    say(offered(w.freshNo) && inLayer(c, "choose") && c?.newAccount === 1 && c?.seed === false && c?.words === 0 && !c?.account && c?.signs === 1,
+      `wallet: New account with a wallet that answers 4001, the user's no, goes back to the two choices and makes nothing (${offerText(w.freshNo)}, ${c?.state ?? "no step"}, seed ${c?.seed ? "made" : "none"}, ${c?.words ?? 0} words, ${signs(c)})`);
+  }
   const t = rec.twoTabs ?? {};
   say(t.aLoaded?.state === "signed-out" && HEX64.test(t.bCreate?.account ?? "") && t.heldAtSend === true && pending(t.backup?.answer)
     && inLayer(t.backup?.page, "backup") && t.backup?.page?.words === 12 && t.backup?.page?.account === t.bCreate?.account,
@@ -621,6 +719,27 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       w.choose = await read(page, ["signed-out", "unsupported"]);
       w.existing = await press(page, "have-one", ["choose"]);
       w.existingUse = await press(page, "use", ["existing"]);
+      await ctx.close();
+    }
+    // New account with a stand-in wallet (card wallet-signin-wallet): the good signer, the wrong one, and the user's no,
+    // each in a fresh context (an empty store, no passkey). freshNo's press waits the full WAIT_MS for a state past
+    // choose, so a page that leaves choose late is still read leaving it.
+    for (const [step, secret] of [["fresh", GOOD_SIGNER], ["freshBad", BAD_SIGNER], ["freshNo", null]]) {
+      const ctx = await h.browser.newContext();
+      await standInWallet(ctx, secret);
+      const page = await ctx.newPage();
+      watch(page, errors);
+      await page.goto(url);
+      await read(page);
+      const f = (record.wallet[step] = {});
+      f.answer = await send(page, "signin.open", { way: "wallet", return_key: "settings" });
+      f.choose = await read(page, ["signed-out", "unsupported"]);
+      f.offer = await page.evaluate(() => {
+        const b = document.querySelector('[data-action="new-account"]');
+        return b ? { disabled: b.disabled === true, pending: b.dataset.pending ?? null } : null;
+      });
+      f.after = await press(page, "new-account", ["choose"]);
+      f.after.signs = await page.evaluate(() => globalThis.__ctWalletSigns ?? null);
       await ctx.close();
     }
     // two tabs

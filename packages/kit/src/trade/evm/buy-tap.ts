@@ -60,7 +60,7 @@ const LAST_ROUTE = new Map<string, EvmRoute>();
 const REFUSED = new Map<string, { readonly at: string; readonly routes: Map<string, unknown> }>();
 const REFUSED_KEPT = 256;
 /** Forgets every token's last route and held refusals (tests). */
-export const evmBuyTapReset = (): void => (LAST_ROUTE.clear(), REFUSED.clear());
+export const evmBuyTapReset = (): void => (LAST_ROUTE.clear(), REFUSED.clear(), WARMS.clear());
 const FAULTS = new Set(["rpc_error", "rpc_disagree", "stale_quote"]);
 
 /** A buy tap's quote, EVM_BUY_TAP_QUOTES kit quotes at most:
@@ -183,6 +183,40 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
   LAST_ROUTE.delete(known);
   const hookOnly = !refused && indexed !== null && indexed.length > 0 && v4.length === 0;
   throw new EvmBuyTapRefused(untakeable || hookOnly ? "not_allowed" : none ? "no_reference" : "quote_check_failed", lastErr);
+}
+
+/** The amount a coin page's warm quotes at, wei: 0.001 ETH, a small tap's. The tap's own amount is read in the tap. */
+export const EVM_BUY_WARM_IN = 10n ** 15n;
+/** The least time between two warms of one coin, ms: within it the kit still holds the first warm's reads (the token's
+ *  plan, EVM_WARM_RANGE_S of block time), so a second warm would only load the providers. */
+export const EVM_BUY_WARM_EVERY_MS = 30_000;
+const WARMS = new Map<string, { at: number; run: Promise<void> }>();
+const WARMS_KEPT = 64;
+
+/** A coin page's warm (card evm-quote-warm-from-the-coin-page): one buy tap quote of the coin at EVM_BUY_WARM_IN, its
+ *  answer and any refusal dropped, so the reads that do not depend on the amount (the agreed head, the coin's pools
+ *  from the index and its scans, X's markets and every pool's state) are held by the kit when the amount is typed: the
+ *  tap's own quote asks them in its first round with its amount-dependent reads (the token's plan, made again at the
+ *  tap's amount), and takes one round where nothing changed. Every read is the tap's own, on the same providers, under
+ *  every check; nothing here is signed, kept for a buy or shown. One warm a coin at a time, and none within
+ *  EVM_BUY_WARM_EVERY_MS of the last (`now`: a clock that never steps back), so a page that asks again while it sits
+ *  idle reads nothing more. Resolves once the warm ends, whatever it ends in. */
+export function evmPoolBuyWarm(req: { readonly chain: EvmPoolChain; readonly token: string }, h: EvmBuyTapHost = {}, now: () => number = () => performance.now()): Promise<void> {
+  const chain = req?.chain;
+  const token = req?.token;
+  if (typeof chain !== "string" || typeof token !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(token)) return Promise.resolve();
+  const k = `${chain}:${lower(token)}`;
+  const t = now();
+  const last = WARMS.get(k);
+  if (last !== undefined && t - last.at >= 0 && t - last.at < EVM_BUY_WARM_EVERY_MS) return last.run;
+  const run = evmPoolBuyQuoteTap({ chain, token, amountIn: EVM_BUY_WARM_IN, slippageBps: 100 }, h).then(
+    () => {},
+    () => {},
+  );
+  WARMS.delete(k);
+  WARMS.set(k, { at: t, run });
+  while (WARMS.size > WARMS_KEPT) WARMS.delete(WARMS.keys().next().value!);
+  return run;
 }
 
 /** One sync of the chain's pool index from `prev` (none: cold) on the venue's two index readers through `fetchFn`, and a

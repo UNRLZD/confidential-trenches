@@ -1,0 +1,83 @@
+{
+ "good": {
+  "note": "Made from the bad run below (its first read, from the Mac at 2026-11-18T09:53:04.292Z): the same health answer with the X-Helper-Pool-Fees header the card adds, each fee the one GET /v1/pool/fee answered for that pool at 2026-11-18T09:54:25Z (Base 20000000000000 wei, Robinhood 60000000000000 wei, period 1794995640000), a helper ready with both pools holding the running minute fee. Judged for the commit it runs.",
+  "commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+  "run": {
+   "base": "https://ct-api.unrealized.trade",
+   "reads": [
+    {
+     "at": "2026-11-18T09:53:04.292Z",
+     "status": 200,
+     "commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+     "fees": "base 20000000000000, robinhood 60000000000000",
+     "body": "{\"ok\":true,\"commit\":\"ff65a04030cd233ae5fbdc56500bf236ac4fed4c\",\"release\":191,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+    }
+   ]
+  }
+ },
+ "bad": {
+  "note": "Recorded from the Mac at 2026-11-18T09:53:04.292Z to 2026-11-18T09:54:18.889Z against the deployed helper before the card (commit ff65a04030cd233ae5fbdc56500bf236ac4fed4c): ready true on every read, and /v1/health names no pool fee (X-Helper-Pool-Fees absent), so no read can tell a helper ready with a pool holding none.",
+  "commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+  "run": {
+   "base": "https://ct-api.unrealized.trade",
+   "reads": [
+    {
+     "at": "2026-11-18T09:53:04.292Z",
+     "status": 200,
+     "commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+     "fees": null,
+     "body": "{\"ok\":true,\"commit\":\"ff65a04030cd233ae5fbdc56500bf236ac4fed4c\",\"release\":191,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+    },
+    {
+     "at": "2026-11-18T09:53:14.909Z",
+     "status": 200,
+     "commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+     "fees": null,
+     "body": "{\"ok\":true,\"commit\":\"ff65a04030cd233ae5fbdc56500bf236ac4fed4c\",\"release\":191,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+    },
+    {
+     "at": "2026-11-18T09:53:25.639Z",
+     "status": 200,
+     "commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+     "fees": null,
+     "body": "{\"ok\":true,\"commit\":\"ff65a04030cd233ae5fbdc56500bf236ac4fed4c\",\"release\":191,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+    },
+    {
+     "at": "2026-11-18T09:53:36.230Z",
+     "status": 200,
+     "commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+     "fees": null,
+     "body": "{\"ok\":true,\"commit\":\"ff65a04030cd233ae5fbdc56500bf236ac4fed4c\",\"release\":191,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+    },
+    {
+     "at": "2026-11-18T09:53:46.918Z",
+     "status": 200,
+     "commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+     "fees": null,
+     "body": "{\"ok\":true,\"commit\":\"ff65a04030cd233ae5fbdc56500bf236ac4fed4c\",\"release\":191,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+    },
+    {
+     "at": "2026-11-18T09:53:57.544Z",
+     "status": 200,
+     "commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+     "fees": null,
+     "body": "{\"ok\":true,\"commit\":\"ff65a04030cd233ae5fbdc56500bf236ac4fed4c\",\"release\":191,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+    },
+    {
+     "at": "2026-11-18T09:54:08.200Z",
+     "status": 200,
+     "commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+     "fees": null,
+     "body": "{\"ok\":true,\"commit\":\"ff65a04030cd233ae5fbdc56500bf236ac4fed4c\",\"release\":191,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+    },
+    {
+     "at": "2026-11-18T09:54:18.889Z",
+     "status": 200,
+     "commit": "ff65a04030cd233ae5fbdc56500bf236ac4fed4c",
+     "fees": null,
+     "body": "{\"ok\":true,\"commit\":\"ff65a04030cd233ae5fbdc56500bf236ac4fed4c\",\"release\":191,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+    }
+   ]
+  }
+ }
+}

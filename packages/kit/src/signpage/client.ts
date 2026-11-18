@@ -42,7 +42,7 @@
 // onClosed(id) hears it. A notice counts only for an id whose ok answer said so, and once.
 
 import { OPEN_KINDS, SIGNPAGE_KIT_VERSION } from "./messages.ts";
-import type { BuyRoute, HelloMessage, PaintedMessage, ErrorCode, SignpageKind, SignpageParams, SignpageRequest, SignpageResults, SignpageState, Stage } from "./messages.ts";
+import type { BuyRoute, HelloMessage, PaintedMessage, ErrorCode, SignpageKind, SignpageParams, SignpageRequest, SignpageResults, SignpageState, Stage, TxRef } from "./messages.ts";
 import {
   SIGNPAGE_MAX_REQUEST_BYTES,
   SIGNPAGE_PARAM_SCHEMAS,
@@ -196,8 +196,9 @@ export interface SignpageClient {
   snapshot(): SignpageClientSnapshot;
   /** Called on every change of the snapshot; returns the unsubscribe. */
   subscribe(fn: (s: SignpageClientSnapshot) => void): () => void;
-  /** Called on every `progress` event; returns the unsubscribe. */
-  onProgress(fn: (id: string, stage: Stage) => void): () => void;
+  /** Called on every `progress` event, with the end's transactions when the event names them (kit 1.19, card
+   *  evm-buy-end-carries-its-tx; frozen, shared by every listener); returns the unsubscribe. */
+  onProgress(fn: (id: string, stage: Stage, txs?: readonly TxRef[]) => void): () => void;
   /** Called on every route event of a running buy (messages.ts BuyRoute), by the request's id; returns the unsubscribe.
    *  A page of an earlier release sends none. */
   onRoute(fn: (id: string, route: BuyRoute) => void): () => void;
@@ -284,7 +285,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
 
   let snap: SignpageClientSnapshot = { status: "connecting", release: null, state: null, stale: false };
   const listeners = new Set<(s: SignpageClientSnapshot) => void>();
-  const progressListeners = new Set<(id: string, stage: Stage) => void>();
+  const progressListeners = new Set<(id: string, stage: Stage, txs?: readonly TxRef[]) => void>();
   const routeListeners = new Set<(id: string, route: BuyRoute) => void>();
   /** The open kinds answered ok with `closes`, by id: who waits for the closed notice, and whether it came. */
   const closing = new Map<string, { fns: Set<() => void>; closed: boolean }>();
@@ -566,7 +567,10 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       if (signpageStateEventSchema(ev)) return set({ state: ev.state as SignpageState, stale: false });
     }
     if (signpageProgressSchema(m)) {
-      tell(progressListeners, m.id as string, m.stage as Stage);
+      // a copy of each tx's own two fields (never the message's own data, which other listeners of the window share),
+      // frozen as a route is: listeners share one list, and a write into it throws
+      const txs = Object.hasOwn(m, "txs") ? (deepFreeze((m.txs as TxRef[]).map(({ chain, hash }) => ({ chain, hash }))) as readonly TxRef[]) : undefined;
+      tell(progressListeners, m.id as string, m.stage as Stage, txs);
       return;
     }
     if (signpageProgressRouteSchema(m)) {

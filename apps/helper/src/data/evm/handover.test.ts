@@ -26,17 +26,19 @@ const LISTS = (() => {
   return { get: async () => ({ status: 200, body: FX.lists_body, asOfMs: snap.as_of_ms }), listed: async (t: string) => tokens.has(t) };
 })();
 
-/** A helper's EVM token part on its own clock and budget; `calls` counts GeckoTerminal's. */
+/** A helper's EVM token part on its own clock and key (card evm-token-page-off-the-5-call-window: the info is CoinGecko's
+ *  keyed read); `spent`: the key's minute and day spent, each read missed; `calls` counts the key's reads. */
 function tokenPart(clock: { t: number }, spent = false) {
-  const gecko = geckoBudget(() => clock.t);
-  if (spent) gecko.seed(Array.from({ length: GT_LIMIT_PER_MIN }, () => clock.t - 1_000));
   let calls = 0;
-  const fetch = async (url: string): Promise<Response> => {
-    calls++;
-    const a = FX.info[/tokens\/(0x[0-9a-f]{40})\/info$/.exec(url)![1]!];
-    return new Response(JSON.stringify(a), { status: 200 });
+  const keyed = {
+    read: async (path: string, ok: (json: unknown) => boolean) => {
+      calls++;
+      if (spent) return undefined;
+      const a = FX.info[/tokens\/(0x[0-9a-f]{40})\/info$/.exec(path)![1]!];
+      return ok(a) ? a : undefined;
+    },
   };
-  const part = createEvmToken("base", { lists: LISTS, gecko, fetch: fetch as never, now: () => clock.t, sleep: async () => undefined });
+  const part = createEvmToken("base", { lists: LISTS, keyed, now: () => clock.t, later: () => {} });
   return { part, calls: () => calls };
 }
 
@@ -53,7 +55,7 @@ test("a holders read the old helper served is served by the next one on a spent 
   assert.equal(h.status, 200, h.body);
   assert.equal(JSON.parse(h.body).as_of_ms, JSON.parse(first.body).as_of_ms, "the old read's time, never now");
   assert.equal(h.asOfMs, first.asOfMs);
-  assert.equal(next.calls(), 0, "no GeckoTerminal call");
+  assert.equal(next.calls(), 0, "no call");
 });
 
 test("a handed-over info state that fails any check restores nothing: a read time ahead, past INFO_SERVE_MS, a value out of range, a bad address, too many entries", async () => {
@@ -124,7 +126,7 @@ test("a chart the old helper read from GeckoTerminal is served by the next one o
   assert.equal(c.status, 200, c.body);
   assert.deepEqual(JSON.parse(c.body).candles, JSON.parse(first.body).candles);
   assert.equal(JSON.parse(c.body).as_of_ms, JSON.parse(first.body).as_of_ms, "the old read's time");
-  assert.equal(next.calls(), 0, "no GeckoTerminal call");
+  assert.equal(next.calls(), 0, "no call");
   next.s.stop();
   clock.t += GT_SERVE_MS;
   const late = swapsPart(clock, true);

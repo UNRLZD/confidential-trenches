@@ -315,7 +315,7 @@ export const MUTANTS = [
   [QUOTE, "        against.push(others[n]!);\n      } else holds++;", "        return refuse(\"rpc_disagree\", \"another block\");\n      } else holds++;", R, "V7 "],
   [QUOTE, "            first = performance.now() - (sentAt[k] ?? t0[k]!);", "            first = performance.now() - (sentAt[0] ?? t0[0]!);", R, "V8 "],
   [QUOTE, "      if (started >= 2) arm();\n", "", R, "V8 "],
-  [QUOTE, "return evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch, later),", "return evmPoolBuyQuoteWith(asked, evmProviders(p, fetch, later),", R, "V9 "],
+  [QUOTE, "const q = await evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch, later),", "const q = await evmPoolBuyQuoteWith(asked, evmProviders(p, fetch, later),", R, "V9 "],
   // the re-review of fd9dd16: no confirm from the other head's provider asks a majority (MEDIUM-1); a head is held only
   // more than maxLag below the pair, and heads are no vote (LOW-1, U6); a contested round out of reach ends at once
   // (U1), and so does a confirm (U5)
@@ -339,8 +339,8 @@ export const MUTANTS = [
   [QUOTE, "      if (scanHead - b.number <= maxLag) commit();", "      commit();", R, "J3 "],
   // the review of bc189de: a kept scan started early waits for the quote's pick when it ends (L-3) and when it fails
   // (M12); a span is kept only for the currencies of the request that came back (M20)
-  [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind));", "v.scan, agreedHead, v.maxLag, scanFromOf(firstOn), at, deferTo(kind));", R, "J4 "],
-  [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind));", "v.scan, at, v.maxLag, scanFromOf(firstOn), agreedHead, deferTo(kind));", R, "J5 "],
+  [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true);", "v.scan, agreedHead, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true);", R, "J4 "],
+  [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true);", "v.scan, at, v.maxLag, scanFromOf(firstOn), agreedHead, deferTo(kind), a.scanless === true);", R, "J5 "],
   [QUOTE, "for (const g of got) if (g.part.includes(e)) e.spans", "for (const g of got) e.spans", R, "J6 "],
   // fold 5: the scan's gate, per quote: a 429, a named limit or a timeout halves its parallelism (to 1), answers raise
   // it again; a throttle holds the next requests for its Retry-After or a doubling backoff, spends no try, and past

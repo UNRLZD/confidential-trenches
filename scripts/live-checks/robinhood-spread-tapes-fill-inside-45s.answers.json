@@ -1,6 +1,276 @@
 {
- "_note": "good: the branch helper at c8b2708fa (card robinhood-spread-tapes-fill-inside-45s) run on the Mac (port 8797, keyless vendor plans), read by robinhood-spread-tapes-fill-inside-45s.mjs --base http://127.0.0.1:8797 --address 0x000de658... --record at 2026-11-18 04:48Z: FOBO, its 50 trades over 5.5 h, filled 10.4 s after its first read; good_long: the same helper at 04:49Z, AUTONOMO, 50 trades over 12.1 h, filled 18.6 s after its first read. bad_deployed: the deployed helper (bf32abde9) at 04:44Z, FOBO read alone from the Mac: still filling 45.2 s after its first read (20 reads). bad_busy_only: the deployed helper at 04:43Z, PONS read alone: filled 4.5 s after its first read, but its 50 trades span 0.2 h, so no spread coin was judged. Each tape names its token as \"address\", never \"token\" (gitleaks generic-api-key reads a 40-hex value beside that key).",
+ "_note": "good: the branch helper at 61bf856cb (card robinhood-spread-tapes-fill-inside-45s, the idle book rests) run on the Mac (port 8797, keyless vendor plans), read by robinhood-spread-tapes-fill-inside-45s.mjs --base http://127.0.0.1:8797 --address 0x000de658... --record at 2026-11-18 09:5xZ: FOBO, 50 trades over 6.7 h, filled 11.7 s after its first read, and read again 75 s on answered whole at once in 959 ms, its newest trade held; good_long: the same helper at 10:0xZ, AUTONOMO, 50 trades over 9.6 h, filled 30.9 s after its first read, read again 75 s on whole at once in 1,222 ms. bad_listed_deployed: the deployed helper (main before the rest, deployed 07:56Z) at 09:5xZ, the 12 listed coins at once from the Mac: 10 still filling 45.1 to 47.2 s after their first read, and 0x18e67423 (whole in 512 ms) read again 75 s on answered filling, read from nothing, filled 44.4 s on. bad_no_reopen: the first slice's good run (c8b2708fa), recorded before the reopen pass existed. Earlier records: good: the branch helper at c8b2708fa (card robinhood-spread-tapes-fill-inside-45s) run on the Mac (port 8797, keyless vendor plans), read by robinhood-spread-tapes-fill-inside-45s.mjs --base http://127.0.0.1:8797 --address 0x000de658... --record at 2026-11-18 04:48Z: FOBO, its 50 trades over 5.5 h, filled 10.4 s after its first read; good_long: the same helper at 04:49Z, AUTONOMO, 50 trades over 12.1 h, filled 18.6 s after its first read. bad_deployed: the deployed helper (bf32abde9) at 04:44Z, FOBO read alone from the Mac: still filling 45.2 s after its first read (20 reads). bad_busy_only: the deployed helper at 04:43Z, PONS read alone: filled 4.5 s after its first read, but its 50 trades span 0.2 h, so no spread coin was judged. Each tape names its token as \"address\", never \"token\" (gitleaks generic-api-key reads a 40-hex value beside that key).",
  "good": {
+  "base": "http://127.0.0.1:8797",
+  "at": "2026-11-18T09:56:54.265Z",
+  "address": "0x000de658153f47f23e92973c8eb1e89762703676",
+  "answers": [
+   {
+    "address": "0x000de658153f47f23e92973c8eb1e89762703676",
+    "status": 200,
+    "ms": 6784,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 11674,
+     "reads": 4
+    },
+    "n": 50,
+    "span_ms": 24152000
+   }
+  ],
+  "reopen_after_ms": 75000,
+  "reopen": [
+   {
+    "address": "0x000de658153f47f23e92973c8eb1e89762703676",
+    "status": 200,
+    "ms": 959,
+    "shape": "tape",
+    "n": 50,
+    "kept": true
+   }
+  ]
+ },
+ "good_long": {
+  "base": "http://127.0.0.1:8797",
+  "at": "2026-11-18T10:01:30.536Z",
+  "address": "0xe83c85e1ead16fcfe85401e2b337fb4fb5b5cc96",
+  "answers": [
+   {
+    "address": "0xe83c85e1ead16fcfe85401e2b337fb4fb5b5cc96",
+    "status": 200,
+    "ms": 6362,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 30911,
+     "reads": 15
+    },
+    "n": 50,
+    "span_ms": 34572000
+   }
+  ],
+  "reopen_after_ms": 75000,
+  "reopen": [
+   {
+    "address": "0xe83c85e1ead16fcfe85401e2b337fb4fb5b5cc96",
+    "status": 200,
+    "ms": 1222,
+    "shape": "tape",
+    "n": 50,
+    "kept": true
+   }
+  ]
+ },
+ "bad_listed_deployed": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T09:55:44.878Z",
+  "lists": {
+   "status": 200,
+   "ms": 656,
+   "tokens": 12
+  },
+  "answers": [
+   {
+    "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+    "status": 200,
+    "ms": 512,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 331000
+   },
+   {
+    "address": "0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8",
+    "status": 200,
+    "ms": 6435,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 47155,
+     "reads": 21
+    }
+   },
+   {
+    "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "status": 200,
+    "ms": 7609,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 4192,
+     "reads": 1
+    },
+    "n": 50,
+    "span_ms": 173000
+   },
+   {
+    "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+    "status": 200,
+    "ms": 4472,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 46858,
+     "reads": 21
+    }
+   },
+   {
+    "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+    "status": 200,
+    "ms": 3305,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 45917,
+     "reads": 20
+    }
+   },
+   {
+    "address": "0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f",
+    "status": 200,
+    "ms": 897,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 45079,
+     "reads": 20
+    }
+   },
+   {
+    "address": "0x56910d4409f3a0c78c64dd8d0545ff0705389870",
+    "status": 200,
+    "ms": 3093,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 46657,
+     "reads": 21
+    }
+   },
+   {
+    "address": "0xded852de9fe9ba9b6f27f39e8e81cf851a5c79cc",
+    "status": 200,
+    "ms": 7436,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 46701,
+     "reads": 21
+    }
+   },
+   {
+    "address": "0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa",
+    "status": 200,
+    "ms": 8679,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 46399,
+     "reads": 20
+    }
+   },
+   {
+    "address": "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111",
+    "status": 200,
+    "ms": 8652,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 47181,
+     "reads": 21
+    }
+   },
+   {
+    "address": "0x4db7374e966097be94c6680d49156d580f097bbf",
+    "status": 200,
+    "ms": 8698,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 46479,
+     "reads": 20
+    }
+   },
+   {
+    "address": "0xd281bf1649c5db6744d23f61bb25b05b4d1dff35",
+    "status": 200,
+    "ms": 3302,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 47057,
+     "reads": 21
+    }
+   }
+  ],
+  "reopen_after_ms": 75000,
+  "reopen": [
+   {
+    "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+    "status": 200,
+    "ms": 774,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 44415,
+     "reads": 20
+    },
+    "n": 50,
+    "kept": true
+   },
+   {
+    "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "status": 200,
+    "ms": 782,
+    "shape": "tape",
+    "n": 50,
+    "kept": true
+   }
+  ]
+ },
+ "bad_no_reopen": {
   "base": "http://127.0.0.1:8797",
   "at": "2026-11-18T04:48:24.678Z",
   "address": "0x000de658153f47f23e92973c8eb1e89762703676",
@@ -20,29 +290,6 @@
     },
     "n": 50,
     "span_ms": 19822000
-   }
-  ]
- },
- "good_long": {
-  "base": "http://127.0.0.1:8797",
-  "at": "2026-11-18T04:48:55.043Z",
-  "address": "0xe83c85e1ead16fcfe85401e2b337fb4fb5b5cc96",
-  "answers": [
-   {
-    "address": "0xe83c85e1ead16fcfe85401e2b337fb4fb5b5cc96",
-    "status": 200,
-    "ms": 4537,
-    "shape": "tape",
-    "filling": true,
-    "filled": {
-     "status": 200,
-     "filling": false,
-     "shape": "tape",
-     "ms": 18552,
-     "reads": 9
-    },
-    "n": 50,
-    "span_ms": 43718000
    }
   ]
  },

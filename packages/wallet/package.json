@@ -19,6 +19,10 @@
       "types": "./src/signin/words.ts",
       "default": "./src/signin/words.ts"
     },
+    "./signin/wallet": {
+      "types": "./src/signin/wallet.ts",
+      "default": "./src/signin/wallet.ts"
+    },
     "./arming/records": {
       "types": "./src/arming/records.ts",
       "default": "./src/arming/records.ts"
