@@ -27,7 +27,9 @@ const PSC = ["wallet", "test/pool-same-chain.test.ts"];
 const RENT_IN = "a.sizes, a.blockhash, a.rent) };";
 const SENT = "precommitments: [...precommitments] };";
 const STRINGS = "precommitments: [...precommitments].map(String) as unknown as bigint[] };";
-const CHECK = '!a.precommitments.every((p) => typeof p === "bigint")';
+// walk.ts names the Worker's message `m` since card restore-walk-rewalks-a-bad-lane (05126029f): these anchors read `a`
+// there and stopped the whole run at NOT ONCE (card vault-late-send-carried)
+const CHECK = '!m.precommitments.every((p) => typeof p === "bigint")';
 // [name, file, [[the source as written, the plant]...], [package, test file], test name pattern]
 const M = [
   ["S-01 review: the same-chain deposit builds at a rent of 0, not the rent read", SC, [[RENT_IN, "a.sizes, a.blockhash, { lamportsPerByte: 0n, factor: 1n }) };"]], PSC, "S-01 review"],
@@ -35,7 +37,11 @@ const M = [
   ["the bridge sends the precommitments as strings", WALK, [[SENT, STRINGS]], NR, "Worker bridge"],
   ["the Worker takes precommitments that are not bigints", WALK, [[CHECK, "false"]], NR, "Worker bridge"],
   ["strings sent and taken (round-3 review)", WALK, [[SENT, STRINGS], [CHECK, "false"]], NR, "Worker bridge"],
-  ["a Worker's refusal taken as an empty walk", WALK, [["a?.ok === true ? resolve(a.walk)", "a?.ok !== undefined ? resolve(a.ok ? a.walk : { found: [], last: lane, lastPrecommitment: 0n })"]], NR, "Worker bridge"],
+  // both Worker paths, the walk's and the bad lane's walk again (05126029f), take the refusal
+  ["a Worker's refusal taken as an empty walk", WALK, [
+    ["a?.ok === true ? resolve(a.walk) : reject(new Error(`lane ${lane}:", "a?.ok !== undefined ? resolve(a.ok ? a.walk : { found: [], last: lane, lastPrecommitment: 0n }) : reject(new Error(`lane ${lane}:"],
+    ["a?.ok === true ? resolve(a.walk) : reject(new Error(`lane ${ask.lane}:", "a?.ok !== undefined ? resolve(a.ok ? a.walk : { found: [], last: ask.lane, lastPrecommitment: 0n }) : reject(new Error(`lane ${ask.lane}:"],
+  ], NR, "Worker bridge"],
   ["a failed history read taken as no history", WAL, [["        s.failed = true;\n        unread.push({ c: s.c, l: s.l, j: s.j, address: s.address, chain, error: why(e) });\n        continue;", "        continue;"]], RW, "step 4"],
   ["no hop target read after a failed read", WAL, [["slots.some((s) => found(s) || s.failed)", "slots.some((s) => found(s))"]], RW, "step 4"],
   ["an evm wallet read on Base only", WAL, [['  evm: ["base", "robinhood"],', '  evm: ["base"],']], RW, "step 4"],
