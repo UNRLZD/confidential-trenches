@@ -108,7 +108,7 @@ export type EvmPoolVenue = {
    *  (checks/evm/quote.ts scanPools; cards evm-scan-second-provider, evm-rpc-spare-list), each with its own span and
    *  requests at once over the same depth. */
   readonly poolManager?: string;
-  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; spares?: readonly EvmScanSpare[] }>;
+  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; orSpan?: number; initialized?: Readonly<{ pools: number; blocks: number }>; spares?: readonly EvmScanSpare[] }>;
   /** The device's index of every pool of the PoolManager (checks/evm/pool-index.ts, card evm-pool-index): its two
    *  readers, each of another operator, the first always one the device reaches directly, the second at most the
    *  helper's keyed route (POST /v1/rpc/{chain}?keyed=only, as the NEAR seat: the helper can make the sync refuse,
@@ -118,7 +118,7 @@ export type EvmPoolVenue = {
    *  it refuses too_many_pools. */
   readonly index?: Readonly<{ readers: readonly [string, string]; span: number; perBatch: number; parallel: number; margin: number; cap: number; batchMax?: number }>;
 };
-export type EvmScanSpare = Readonly<{ url: string; span: number; parallel: number }>;
+export type EvmScanSpare = Readonly<{ url: string; span: number; parallel: number; orSpan?: number }>;
 export type EvmHookedPool = { readonly pad: string; readonly from: "native" | "weth"; readonly fee: number; readonly tickSpacing: number; readonly hooks: string };
 
 /** The chains the EVM pool runs on and their venues (the venue list). The builder's checks and the signer's chain id
@@ -369,6 +369,10 @@ export const evmMainnetVenues = () =>
         url: "https://base-rpc.publicnode.com",
         span: 10_000,
         depth: 1_000_000,
+        // the PoolManager's Initialize logs a block (checks/evm/quote.ts tailBudgetOf, card evm-scan-chain-tail): 8,003
+        // pools in the 1,000,000 blocks to 59,100,991 (release 176's snapshot), so one event-alone request holds about
+        // 1.25M blocks of them, past the depth: the tail always reads the event alone here
+        initialized: { pools: 8_003, blocks: 1_000_000 },
         parallel: 20,
         spares: Object.freeze([
           bare({ url: "https://base.gateway.tenderly.co", span: 1_000, parallel: 3 }),
@@ -534,8 +538,7 @@ export const evmMainnetVenues = () =>
       poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
       // (it answers 429 to 4 at once, 2026-11-03 20:27Z); a request with more than one value in a topic position spans
       // at most 100,000 blocks ("query spans 1000000 blocks …, but only 100000 are allowed for this request; narrow the
-      // block range, or send one value per position", 2026-11-04 06:55Z), so the scan names no currency (card
-      // evm-scan-chain-tail: the event alone over 2,938,078 blocks, 8,702 logs, 8.3 MB in 1,629 ms, 18 Nov 13:4xZ)
+      // block range, or send one value per position", 2026-11-04 06:55Z): `orSpan`
       // The second: daybreak (robinhood.daybreak-rpc.network; card evm-scan-second-provider, 2026-11-05 17:18-17:4xZ from
       // this Mac). Its preflight from the app's origin answers 204, access-control-allow-origin *; its getLogs span at
       // most 2,000 blocks (-32602 "query exceeds max block range 2000"), the scan's own batch (both topic positions and
@@ -560,7 +563,13 @@ export const evmMainnetVenues = () =>
         url: "https://rpc.mainnet.chain.robinhood.com",
         span: 10_000_000,
         depth: 10_000_000,
+        // the PoolManager's Initialize logs a block (checks/evm/quote.ts tailBudgetOf, card evm-scan-chain-tail): 8,804
+        // pools in the 3,000,000 blocks to 117,445,721 (release 176's snapshot; 145 in the 53,872 blocks after it, read
+        // on this provider 18 Nov 15:3xZ), so one event-alone request holds about 3.4M blocks of them; a start further
+        // back, or none, scans by currency
+        initialized: { pools: 8_804, blocks: 3_000_000 },
         parallel: 2,
+        orSpan: 100_000,
         spares: Object.freeze([bare({ url: "https://robinhood.daybreak-rpc.network", span: 2_000, parallel: 4 }), bare({ url: "https://robinhood.api.pocket.network", span: 2_000, parallel: 4 })]),
       }),
       // The index's readers (card evm-pool-index): Robinhood's own and Pocket, two operators, each a 10,000-block span

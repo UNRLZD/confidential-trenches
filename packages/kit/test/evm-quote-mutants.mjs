@@ -49,15 +49,12 @@ export const MUTANTS = [
   // the X prune (card rh-cold-quote): an overflow named by one provider alone, the prune's verdict, its pinned-hook rule,
   // and one request a currency where fewer than the OR
   [QUOTE, " && a.partial === b.partial && a.overflow === b.overflow);", " && a.partial === b.partial);", R, "card rh-cold-quote: one provider that answers SafeCastOverflow"],
-  // The prune's verdict made never (`return false`) is equivalent on the tail (card evm-scan-chain-tail): X's markets
-  // are a lookup that sends no getLogs, which was all the rh-cold-quote test counted, and an X whose pool cannot give Q
-  // adds only routes through that pool, which revert partial and are dropped as any; it costs those routes' state reads
-  // alone (65,536 keys a quote is the cap, EVM_QUOTE_MAX_KEYS)
+  [QUOTE, 'return r.kind === "revert" && (r.partial || r.overflow === true);', "return false;", R, "card rh-cold-quote: a cold Robinhood quote"],
   [QUOTE, "for (const f of fs) if (f.key.hooks === NATIVE || replaced(f.key)) asks.push(", "for (const f of fs) if (true) asks.push(", R, "card rh-cold-quote: a currency's pool behind a pinned hook"],
   // card evm-spare-list-green: the prune skips only an X the token's last quote kept (main skipped any X whose markets
   // were ever scanned)
   [QUOTE, "const unsure = (x: string) => !keptBefore.has(x);", "const unsure = (x: string) => !SCANS.has(`${chain}:markets:${x}`);", R, "card evm-spare-list-green: a quote prunes a currency the quote before scanned"],
-  // card evm-scan-chain-tail: rh-cold-quote's orSpan step deleted with SCAN_OR (one getLogs of the event alone a request)
+  [QUOTE, "const step = or < on.span && ", "const step = false && ", R, "card rh-cold-quote: a cold Robinhood quote"],
   // the prune's direction (the token out), a plain revert kept, and a cold request the first failed at once: asked as
   // its halves on the first, its newest blocks a request of their own (review of 9c962b6d)
   [QUOTE, "word(lower(k.currency1) === token ? 1n : 0n)", "word(lower(k.currency1) === token ? 0n : 1n)", R, "card rh-cold-quote: the prune reads the token out"],
@@ -170,7 +167,7 @@ export const MUTANTS = [
   [QUOTE, "  const asked: EvmPoolSellQuoteRequest = { ...req };", "  const asked: EvmPoolSellQuoteRequest = req;", S, "the sell quote reads each field"],
   [QUOTE, "if (rs !== null && fine(rs)) return void keep(rs);", "if (rs !== null) return void keep(rs);", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
   [QUOTE, "  if (b - scanHead > maxLag) {", "  if (false) {", R, "card evm-quote-head-watch: a scan that ends more than maxLag"],
-  [QUOTE, "  const scanning = scanOf([lower(token)], [lower(token)]);", "  void agreedOnce();\n  const scanning = scanOf([lower(token)], [lower(token)]);", R, "card evm-quote-head-watch: the agreed block is picked once"],
+  [QUOTE, '  const scanning = scanOf([lower(token)], "all");', '  void agreedOnce();\n  const scanning = scanOf([lower(token)], "all");', R, "card evm-quote-head-watch: the agreed block is picked once"],
   // card evm-quote-fast-from-asia: a warm buy's round beside its scan, used only where the scan agrees its block and pools
   [QUOTE, "    if (a.sell || a.minBlock !== undefined || a.speculate === false || ", "    if (true || ", R, "W7 "],
   [QUOTE, "  return a.size === b.size && [...a].every((id) => b.has(id));", "  return true;", R, "W8 "],
@@ -253,7 +250,7 @@ export const MUTANTS = [
   [QUOTE, "  PLANS.set(planKey, {", "  if (false) PLANS.set(planKey, {", R, "W1 "],
   [QUOTE, "(!kept.has(readKey(r)) || hit.has(first + j))", "(!kept.has(readKey(r)) || true)", R, "W5 "],
   [QUOTE, "filter((r, j) => r.override === undefined && !r.data.startsWith(", "filter((r, j) => !r.data.startsWith(", R, "W6 "],
-  // card evm-scan-chain-tail: W1b's early kept scans deleted (X's markets are a lookup of the token's one scan; TAIL1)
+  [QUOTE, "  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind, true));", "  const early: ReturnType<typeof scanAt>[] = [];", R, "W1b "],
   [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (false) {", R, "T7b "],
   [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (e instanceof Error) {", R, "T7b "],
   [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (e instanceof TypeError) {", R, "T7b "],
@@ -342,8 +339,9 @@ export const MUTANTS = [
   [QUOTE, "      if (scanHead - b.number <= maxLag) commit();", "      commit();", R, "J3 "],
   // the review of bc189de: a kept scan started early waits for the quote's pick when it ends (L-3) and when it fails
   // (M12); a span is kept only for the currencies of the request that came back (M20)
-  // card evm-scan-chain-tail: J4 and J5 (a kept scan started early, `at` the picked block) deleted with the early scans
-  // card evm-scan-chain-tail: J6's per-currency spans deleted (one tail a chain; TAIL4 holds that a spare's blocks are not kept)
+  [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true, firstOn.rpc);", "v.scan, agreedHead, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true, firstOn.rpc);", R, "J4 "],
+  [QUOTE, "v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true, firstOn.rpc);", "v.scan, at, v.maxLag, scanFromOf(firstOn), agreedHead, deferTo(kind), a.scanless === true, firstOn.rpc);", R, "J5 "],
+  [QUOTE, "for (const g of got) if (g.part.includes(e)) e.spans", "for (const g of got) e.spans", R, "J6 "],
   // fold 5: the scan's gate, per quote: a 429, a named limit or a timeout halves its parallelism (to 1), answers raise
   // it again; a throttle holds the next requests for its Retry-After or a doubling backoff, spends no try, and past
   // the quote's bound refuses (re-review of 037627c, MEDIUM-1; GitHub's runner at 7d6ec94: the cold quote's getLogs
@@ -379,29 +377,39 @@ export const MUTANTS = [
   [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "X3 "],
   [QUOTE, "    if (hooks.some(replaced)) c.real =", "    if (false) c.real =", R, "H2 "],
   [QUOTE, "    let m = out(c.at)! < out(c.real.at)! ? out(c.at)! : out(c.real.at)!;", "    let m = out(c.at)!;", R, "H2 "],
-  // card evm-scan-chain-tail: B1's OR span deleted with SCAN_OR
-  [QUOTE, "  for (const c of new Set([k.currency0, k.currency1])) append(t.byCurrency, c, k);", "  for (const c of new Set([k.currency0])) append(t.byCurrency, c, k);", R, "X4 "],
-  [QUOTE, "  return other === NATIVE || other === weth;", "  return other === weth;", R, "S3 "],
-  [QUOTE, "    const filters = [[\"0x\" + INITIALIZE]];", "    const filters = [[\"0x\" + INITIALIZE, null, \"0x\" + \"0\".repeat(64)]];", R, "TAIL1 "],
+  [QUOTE, "      const span = part.length === 1 ? on.span : or;", "      const span = on.span;", R, "B1 "],
+  [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X4 "],
+  [QUOTE, "[[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]]", "[[e0, null, w(weth), t], [e0, null, t, w(weth)]]", R, "S3 "],
+  [QUOTE, "[e0, null, null, t]", "[e0, t]", R, "N1a "],
   [QUOTE, "const fromScan = scanned?.pools.get(lower(token)) ?? [];", "const fromScan: EvmPoolKey[] = [];", R, "N1a "],
   [QUOTE, "gaps: gapsOf(spans, floor, head),", "gaps: [[floor, head]] as Spans,", R, "G4 "],
-  [QUOTE, "  return {\n    pools: await lookups(floor, e.found),", "  commit();\n  return {\n    pools: await lookups(floor, e.found),", R, "S2b "],
+  [QUOTE, "  return {\n    pools: new Map(each.map((e, i) => [e.c, [...new Map(", "  commit();\n  return {\n    pools: new Map(each.map((e, i) => [e.c, [...new Map(", R, "S2b "],
   // card evm-buy-and-sell-on-mainnet: the blocks within maxLag of a kept scan read beside the quote, not before it
-  [QUOTE, "  if (needs.every((c) => heldOf(chain, c, floor, tail0).length > 0) && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", "  if (e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", R, "card evm-buy-and-sell-on-mainnet: a coin the served index holds no pool of"],
-  [QUOTE, "  if (needs.every((c) => heldOf(chain, c, floor, tail0).length > 0) && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", "  if (needs.every((c) => heldOf(chain, c, floor, tail0).length > 0) && e.gaps.length > 0) {", R, "W2g "],
-  // card evm-scan-chain-tail: W2b holds the deferral (the quote answers before the gap is read); W2c passes either way
-  [QUOTE, "    e.later = e.gaps;\n    e.gaps = [];\n", "", R, "W2b "],
-  [QUOTE, "    laterJobs();\n    jobsOf(head + 1, end);", "    jobsOf(head + 1, end);", R, "W2d "],
+  [QUOTE, "    if (((e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === \"markets\") && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", "    if (e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", R, "card evm-buy-and-sell-on-mainnet: a coin the served index holds no pool of"],
+  [QUOTE, "    if (((e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === \"markets\") && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", "    if (((e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === \"markets\") && e.gaps.length > 0) {", R, "W2g "],
+  [QUOTE, "      e.later = e.gaps;\n      e.gaps = [];\n", "", R, "W2c "],
+  // card evm-scan-chain-tail: the tail of the chain, read from a near start with the event alone, kept per provider
+  [QUOTE, "  for (const c of new Set([k.currency0, k.currency1])) append(t.byCurrency, c, k);", "  for (const c of new Set([k.currency0])) append(t.byCurrency, c, k);", R, "X4 "],
+  [QUOTE, "  return other === NATIVE || other === weth;\n};\n", "  return other === weth;\n};\n", R, "S3 "],
+  [QUOTE, "    const filters = part[0]!.tail ? [[e0]] : ", "    const filters = part[0]!.tail ? [[e0, null, \"0x\" + \"0\".repeat(64)]] : ", R, "TAIL1 "],
+  [QUOTE, "(e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0)", "(e.tail ? true : e.pools.length > 0)", R, "TAIL3 "],
+  [QUOTE, "        const t = byChain.get(chain) ?? { spans: [], byCurrency: new Map(), ids: new Set() };", "        const t: Tail = { spans: [], byCurrency: new Map(), ids: new Set() };", R, "W2f "],
+  [QUOTE, "        for (const g of got) if (!g.spare && g.part.includes(e)) t.spans", "        for (const g of got) if (g.part.includes(e)) t.spans", R, "TAIL4 "],
+  [QUOTE, "  const near = head - start <= tailBudgetOf(s);", "  const near = true;", R, "TAIL5 "],
+  [QUOTE, "  const near = head - start <= tailBudgetOf(s);", "  const near = false;", R, "TAIL1 "],
+  [QUOTE, "Math.floor((SCAN_MAX_LOGS * s.initialized.blocks) / s.initialized.pools)", "Math.floor((2 * SCAN_MAX_LOGS * s.initialized.blocks) / s.initialized.pools)", R, "TAIL5 "],
+  [QUOTE, "const tailHolds: Spans = start >= floor ? withSpan(tail0?.spans ?? [], floor, start) : (tail0?.spans ?? []);", "const tailHolds: Spans = tail0?.spans ?? [];", R, "TAIL5 "],
+  [QUOTE, "        if (k !== null) tailAdd(tailFound, k);", "        if (k !== null && false) tailAdd(tailFound, k);", R, "TAIL1 "],
+  [QUOTE, "      done = done.then(() => scanPools(", "      void done;\n      void Promise.resolve().then(() => scanPools(", R, "card robinhood-quotes-inside-provider-limits: a warm Robinhood quote whose scans are of both kinds"],
+  [QUOTE, "    laterJobs(scans);\n", "", R, "W2d "],
   [QUOTE, "    await settle(js.map(run));\n    commit();\n", "    await settle(js.map(run));\n", R, "W2b "],
-  [QUOTE, "      commit();\n      if (!later) return;", "      commit();\n      return;", R, "W2b "],
+  [QUOTE, "      commit();\n      if (later.length === 0) return;", "      commit();\n      return;", R, "W2b "],
   // review of 98a87843b: a gap left for later that starts more than maxLag before the agreed block is read before the
   // answer (P2-1), and a later commit keeps what a newer quote kept (P3)
-  [QUOTE, "    if (e.later.length > 0 && b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > maxLag) laterJobs();\n", "", R, "W2e "],
+  [QUOTE, "    laterJobs(scans.filter((e) => e.later.length > 0 && b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > maxLag));\n", "", R, "W2e "],
   [QUOTE, "b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > maxLag", "b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > 2n * maxLag", R, "W2e "],
-  [QUOTE, "    const t = byChain.get(chain) ?? { spans: [], byCurrency: new Map(), ids: new Set() };", "    const t: Tail = { spans: [], byCurrency: new Map(), ids: new Set() };", R, "W2f "],
-  [QUOTE, "    for (const g of got) if (!g.spare) t.spans", "    for (const g of got) t.spans", R, "TAIL4 "],
-  // card evm-scan-chain-tail: G2's swallowed markets scan deleted: X's markets are a lookup of the token's one scan, which
-  // reads their blocks and refuses on its own failure (G2 fails that read); the markets lookup reads no block of its own
+  [QUOTE, "now === undefined ? { spans: e.spans, pools: e.pools } :", "true ? { spans: e.spans, pools: e.pools } :", R, "W2f "],
+  [QUOTE, "    const sc = await scanOf(cs, \"markets\");", "    const sc = await (scanOf(cs, \"markets\") ?? Promise.resolve(null)).catch(() => null);", R, "G2 "],
   [QUOTE, "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]))", "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [p.key]))", R, "S3c "],
   [QUOTE, "hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)]", "hops: [hopTo(x, via.key), hopTo(lower(token), p.key)]", R, "T5 "],
   [QUOTE, "    if (res.status === 429) {", "    if (false) {", R, "T7 "],
