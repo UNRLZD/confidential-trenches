@@ -1,7 +1,8 @@
 // Two devices buying at one moment on the helper's FastNEAR seat (card near-quote-under-the-pace): each device paces
-// its seat at the key's 5 a second (the wallet's nearSeatRpc, its own pace per page: here two copies of the pace
-// module), and their reads interleave on one key that the helper holds at 5 a second, 5 at once, answering 429 with
-// Retry-After 1 past it. Each device reads its swap's pair (the kit's readNearSwapPair: one final height on both seats,
+// its seat (the wallet's nearSeatRpc, its own pace per page: here two copies of the pace module), and their reads
+// interleave on one key that the helper holds at 60 a second, 120 at once (apps/helper/src/limits/limits.ts KEYED_PACE
+// fastnear, from FastNEAR's published Dev rate; card near-seat-pace-fits-one-quote), answering 429 with Retry-After 1
+// past it. Each device reads its swap's pair (the kit's readNearSwapPair: one final height on both seats,
 // then W, the quote and the baseline at that block) on its seat and dRPC, on the test clock (onTestClock: every wait set
 // and ended in its turn, the idle time skipped); the chain moves a block
 // every 600 ms. Both pairs complete, each of one block, within the signer's NEAR_SWAP_READ_AGE_MAX, and no read falls
@@ -20,19 +21,20 @@ const NET = NEAR_NETWORKS.mainnet;
 // one copy of the pace module per device: a page's paces are its own
 const device = async (n: number) => (await import(new URL(`../../wallet/src/pace.ts?device=${n}`, import.meta.url).href)) as typeof Pace;
 
-test("two devices' pairs interleaved on one 5/s key: both complete at one block, within the signer's age, none on the keyless seat", { timeout: 60_000 }, () => onTestClock(async () => {
+test("two devices' pairs interleaved on one key at the helper's pace: both complete at one block, within the signer's age, the key refuses neither, none on the keyless seat", { timeout: 60_000 }, () => onTestClock(async () => {
   const k = chain();
   k.c.exists = true;
   const t0 = performance.now();
   const H0 = k.c.height;
   const at = () => (k.c.height = H0 + Math.floor((performance.now() - t0) / 600));
-  // the helper's pace for the key: GCRA, 5 a second, 5 at once
+  // the helper's pace for the key: GCRA, 60 a second, 120 at once
+  const every = 1000 / 60;
   let tat = 0;
   const take = () => {
     const now = performance.now();
     const t = Math.max(tat, now);
-    if (t - now > 4 * 200 + 2) return false;
-    tat = t + 200;
+    if (t - now > 119 * every + 2) return false;
+    tat = t + every;
     return true;
   };
   const asked = { seat: 0, refused: 0, keyless: 0, drpc: 0 };
@@ -65,7 +67,9 @@ test("two devices' pairs interleaved on one 5/s key: both complete at one block,
     assert.equal(typeof p.baseline, "bigint");
     assert.ok(head - p.state.height <= NEAR_SWAP_READ_AGE_MAX, `the pair is ${head - p.state.height} blocks old when it comes back`);
   }
-  assert.ok(asked.refused > 0, `the two devices met the key's pace (${JSON.stringify(asked)})`);
+  // card near-seat-pace-fits-one-quote: each device's burst (PACE.seat, 30) fits the key's with the other's (before it,
+  // at 5 a second, 5 at once, the two met the key's 429 and waited it out)
+  assert.equal(asked.refused, 0, `the key refused a device (${JSON.stringify(asked)})`);
   assert.equal(asked.keyless, 0, JSON.stringify(asked));
   console.log("two devices:", JSON.stringify(asked), `${Math.round(performance.now() - t0)} ms`);
 }));

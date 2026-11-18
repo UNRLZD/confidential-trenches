@@ -445,7 +445,9 @@ const PLANTS = [
   ["busy_wait", "PACE: FastNEAR at 2.5 a second (the rate that earned its 3-minute block)", () => swap("fastnear:Object\\.freeze\\(\\{perSec:\\.39,burst:8\\}\\)", "perSec:.39", "perSec:2.5")],
   ["busy_wait", "PACE: FastNEAR's burst 8 -> 1000", () => swap("fastnear:Object\\.freeze\\(\\{perSec:\\.39,burst:8\\}\\)", "burst:8", "burst:1000")],
   ["busy_wait", "PACE: dRPC at 35 a second", () => swap("drpc:Object\\.freeze\\(\\{perSec:10,burst:20\\}\\)", "perSec:10", "perSec:35")],
-  ["busy_wait", "PACE: the helper's seat at 50 a second", () => swap("seat:Object\\.freeze\\(\\{perSec:5,burst:5\\}\\)", "perSec:5", "perSec:50")],
+  ["busy_wait", "PACE: the helper's seat at 50 a second", () => swap("seat:Object\\.freeze\\(\\{perSec:5,burst:30\\}\\)", "perSec:5", "perSec:50")],
+  // card near-seat-pace-fits-one-quote: the seat's burst is one quote's 30, never more
+  ["busy_wait", "PACE: the helper's seat's burst 30 -> 300", () => swap("seat:Object\\.freeze\\(\\{perSec:5,burst:30\\}\\)", "burst:30", "burst:300")],
   ["busy_wait", "paceOf: the helper's seat paced as dRPC", () => swap("\\?`fastnear`:§\\.seat===§\\?`seat`:`drpc`\\]", "`seat`:", "`drpc`:")],
   ["busy_wait", "paceOf: no pace for any provider", () => swap("\\?\\{tat:0,every:0,burst:1,floor:0,holes:\\[\\]\\}:\\{tat:0,every:1e3/§\\.perSec,burst:§\\.burst,floor:0,holes:\\[\\]\\}", "every:1e3/", "every:0*")],
   ["busy_wait", "the slot never waits", () => plant(String.raw`function (?<f>§)\((?<a>§),(?<b>§)\)\{let §=\k<a>\.floor-[^}]*\}`, (_, g) => `function ${g.f}(${g.a},${g.b}){return ${g.b}}`)],

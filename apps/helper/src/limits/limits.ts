@@ -265,15 +265,23 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
  *     which dRPC may count with them (review L2 of 424dce1e; no page says either way). Read again 2026-11-16 04:35Z, the
  *     page names 25 RPS for the free tier, and the keys' 429s live show it binds them together (DRPC_IP_PACE): the three
  *     keys draw that one bucket, 3 a post, each key's day its own account's.
- *   - FastNear: the paid plans name requests a month only, "Dev Plan $69 /month 10M RPC requests/month", Pro 36M,
- *     Business 100M, and no rate (fastnear.com, read 2026-11-07 07:29Z; docs.fastnear.com/auth names none). Paced at
- *     5 calls a second, 5 at once (10 in any second, the chain's RPC_CHAIN_MAX 100 per 10 s). That pace all month long
- *     would be 13M requests, over Dev's 10M: the month is bounded by KEYED_DAY, not by the pace.
+ *   - FastNear: its pricing page now names a rate per key: "Dev / 10,000,000 per month / up to 10,000" requests per
+ *     minute, per key, "Pro / 36,000,000 per month / up to 20,000", "Business / 100,000,000 per month / up to 50,000";
+ *     "Over the rate limit: requests return HTTP `429`"; "Out of credits: requests return HTTP `402` with `"error":
+ *     "quota_exceeded"`"; "Every request to the FastNear RPC and REST APIs costs one credit" (docs.fastnear.com/pricing,
+ *     read 2026-11-18 02:50Z; on 11-07 fastnear.com and docs.fastnear.com/auth named no rate). The key is on Dev, the
+ *     plan this repo budgets (KEYED_DAY fastnear: Dev's 10M over 31 days). Card near-seat-pace-fits-one-quote: paced at
+ *     60 calls a second, 120 at once: at most 120 + 60 x 60 = 3,720 in any minute, 37% of Dev's 10,000, so two callers'
+ *     quotes of up to 29 reads each (the NEAR buy box's at-block reads, 18 Nov 02:39Z) go out at once with the bucket's
+ *     other 62 left, and no minute nears the rate whose 429 would hold every caller at once. Before it, 5 a second, 5 at
+ *     once held one quote's 29 reads about 5 s. The pace never bounds the month: 60 a second all day would be 5.2M,
+ *     KEYED_DAY's 322,580 stops the day first (a quote of 29 reads: 11,123 a day; of 18: 17,921).
  */
 export const KEYED_PACE = {
   quicknode: { perS: 7, burst: 7, unit: "call", group: "quicknode" },
   drpc: { ...DRPC_IP_PACE, group: "drpc", batch: 3 },
-  fastnear: { perS: 5, burst: 5, unit: "call", group: "fastnear" },
+  // docs.fastnear.com/pricing (read 2026-11-18 02:50Z): Dev "up to 10,000" requests a minute per key; 3,720 at most here
+  fastnear: { perS: 60, burst: 120, unit: "call", group: "fastnear" },
 } as const satisfies Readonly<Record<string, Pace>>;
 export type KeyedProvider = keyof typeof KEYED_PACE;
 /**
@@ -285,8 +293,10 @@ export type KeyedProvider = keyof typeof KEYED_PACE;
  *   - dRPC, compute units: the free plan "210 million Compute Units (CU) per 30-day period"
  *     (drpc.org/docs/howitworks/ratelimiting, read 09:15Z): 210,000,000 / 30 = 7,000,000 a day per key, each key its own
  *     account (rpc.ts keyedAccountOf), every chain's URL of that key drawing on it.
- *   - FastNear, requests: the smallest paid plan, Dev's "10M RPC requests/month" (fastnear.com, read 07:29Z):
- *     10,000,000 / 31 = 322,580 a day.
+ *   - FastNear, requests: the smallest paid plan, Dev's "10M RPC requests/month" (fastnear.com, read 07:29Z; again
+ *     "Dev / 10,000,000 per month", one credit a request, docs.fastnear.com/pricing, read 2026-11-18 02:50Z):
+ *     10,000,000 / 31 = 322,580 a day. Less the probes' 1% (PROBE_DAY_SHARE), 319,355 for reads: a NEAR quote of 29 seat
+ *     reads is 11,012 quotes a day, of 18 reads 17,741 (card near-seat-pace-fits-one-quote).
  */
 export const KEYED_DAY: Readonly<Record<KeyedProvider, number>> = { quicknode: 322_580, drpc: 7_000_000, fastnear: 322_580 };
 /** The units one call spends at each company, by chain family: QuickNode's "All methods" 20 credits on Base (and every

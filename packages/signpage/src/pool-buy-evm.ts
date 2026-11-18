@@ -422,9 +422,15 @@ export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools"
 /** The longest a dry's quote waits for the chain's index sync it started (card robinhood-quote-answers-cold): the sync
  *  from the release's snapshot reads only the blocks past it, two to six 500,000-block spans on Robinhood's two index
  *  readers, where a cold quote with no index sent 20 to 100+ deep getLogs posts to rpc.mainnet.chain.robinhood.com at
- *  about one a second and ended stale_quote (box run 2026-11-16 03:24Z, 6 of 8 coins). Past it the quote runs as it did
- *  with no index. */
+ *  about one a second and ended stale_quote (box run 2026-11-16 03:24Z, 6 of 8 coins). A sync still running past it
+ *  answers the dry EVM_DRY_SYNCING (down: the box asks again), never a quote with no index beside it (card
+ *  evm-first-quote-inside-the-kpi: on 18 Nov 00:36Z a fresh account's Base dry started its no-index scan at 20 s while
+ *  the index synced, 223 getLogs posts and 26 answers of 429 on base-rpc.publicnode.com, the index's own first reader,
+ *  and answered at 73.6 s). Only a sync that ended with no index served (failed, partial, another tab's) leaves the
+ *  quote to its own scan. */
 export const EVM_DRY_INDEX_WAIT_MS = 20_000;
+/** evmDryOut's answer while the chain's index sync still runs past EVM_DRY_INDEX_WAIT_MS: no quote was asked. */
+export const EVM_DRY_SYNCING = Symbol("evm-dry-syncing");
 
 /** The page's kit quote of a buy (evmBuyHost's and the dry's): the helper's pools of the token from the PoolManager's
  *  first block asked beside it (evm-served.ts), then the kit's evmPoolBuyQuote; `later`, the dry's: a background read,
@@ -440,12 +446,14 @@ export function evmDryQuote(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRp
 
 /** pool.buy.dry's `out` on Base and Robinhood: one tap quote (quoteOf, three kit quotes at most, no retry) of `amountIn`
  *  wei, its expected out before slippage in whole units of the token at its decimals as the tap reads them, read beside
- *  the quote. Null when either read fails, or the quote is not of this token, chain and amount, or gives nothing. */
-export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint): Promise<string | null> {
+ *  the quote. Null when either read fails, or the quote is not of this token, chain and amount, or gives nothing;
+ *  EVM_DRY_SYNCING, with no quote asked, while the chain's index sync still runs past EVM_DRY_INDEX_WAIT_MS. */
+export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint): Promise<string | null | typeof EVM_DRY_SYNCING> {
   if (h.indexed !== undefined) {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([h.indexed().catch(() => false), new Promise((r) => (timer = setTimeout(r, EVM_DRY_INDEX_WAIT_MS)))]);
+    const ended = await Promise.race([h.indexed().then(() => true, () => true), new Promise<false>((r) => (timer = setTimeout(() => r(false), EVM_DRY_INDEX_WAIT_MS)))]);
     clearTimeout(timer);
+    if (!ended) return EVM_DRY_SYNCING;
   }
   try {
     const [q, decimals] = await Promise.all([quoteOf(h, h.network, token, amountIn, 0), h.decimals(token)]);
@@ -533,6 +541,8 @@ export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmB
     const most = await d.withCash(got.tapMax, got.ready);
     const moved = await sized;
     const o = await out;
+    // the chain's index still syncing past the dry's wait: down, so the box asks again, never a scan beside the sync
+    if (o === EVM_DRY_SYNCING) return void (answer = { error: "down" });
     const buys = plan !== null && amount !== null && plan.amount < amount ? poolUnits(plan.amount, ETH_DECIMALS) : null;
     const cost = plan !== null ? evmDryCost(plan) : (moved?.cost ?? null);
     answer = { result: { tap_max: got.tapMax, ...(most === null ? {} : { with_cash: most }), ...(buys === null ? {} : { buys }), ...(cost === null ? {} : { cost: poolUnits(cost, ETH_DECIMALS) }), ...(o === null ? {} : { out: o }) } };
