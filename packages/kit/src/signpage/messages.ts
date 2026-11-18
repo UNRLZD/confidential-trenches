@@ -484,7 +484,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.18";
+export const SIGNPAGE_KIT_VERSION = "1.19";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -536,12 +536,19 @@ export interface StateEvent {
  */
 export type BuyRoute = { wallet: string } | { venue: string; pool: string } | { out: string } | { tx: string } | { move: "cash"; op?: string };
 
-/** The stage of a request still running, by its id. */
+/**
+ * The stage of a request still running, by its id. `txs` (kit 1.19, card evm-buy-end-carries-its-tx): the transactions
+ * of a trade's end, on an end stage the page read on the chain (a Base or Robinhood buy's filled or owed_back names its
+ * release's transaction), so an app that has only the early "sent" answer, which names none, links the end it is told.
+ * Absent when the stage names none; a page of an earlier release sends none, and a client of an earlier kit is sent none
+ * (it checks a progress event with exact keys and would drop the stage with it).
+ */
 export interface ProgressEvent {
   v: 1;
   type: "progress";
   id: string;
   stage: Stage;
+  txs?: TxRef[];
 }
 
 /**
@@ -651,7 +658,11 @@ export interface PoolDepositFacts {
   readonly since_ms?: number;
 }
 export type WithdrawStage = "proving" | "submitted" | "in_transit" | "sent" | "refunded" | "stopped";
-export type TradeStage = "signed" | "sent" | "filled" | "part_filled" | "refused" | "not_landed";
+/** A trade's stages. owed_back (kit 1.19, card evm-buy-end-carries-its-tx): a Base or Robinhood buy whose swap failed in
+ *  the pool's own call, so the chunk less the fee went to the buy's one-time wallet in ETH and the device puts it back
+ *  into the pool (packages/signpage/src/pool-carry-evm.ts); nothing was bought, and the money is the user's on its way
+ *  back, never a refusal. A client of an earlier kit is sent "refused" for it, as it was before. */
+export type TradeStage = "signed" | "sent" | "filled" | "part_filled" | "refused" | "not_landed" | "owed_back";
 export type HopStage = "in_flight" | "arrived" | "refunded" | "fallback";
 export type ReturnStage = "signed" | "sent" | "in_transit" | "into_vault" | "done";
 export type RestoreStage = "started" | "reading" | "done" | "stalled";

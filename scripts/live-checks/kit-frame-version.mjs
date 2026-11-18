@@ -60,6 +60,15 @@
 //     it too (`if(e===\`current\`)return t;let n=M(t);if(e===\`1.17\`||...)return n;`, M being NO_MOVE_CODE), every
 //     level below built on that; the route function tells it the move event: its reader drops the whole move op for code,
 //     and it reads everything else as the current level does;
+//   - (card evm-buy-end-carries-its-tx) kit-v1.18 is a level of its own below kit 1.19: the answer shaper first sends a
+//     trade kind's (buy, pool.buy, pool.sell, pool.deposit) result whose stage is owed_back as refused (`let r=O(t,n);
+//     if(e===\`1.18\`)return r;`, O being OWED_FOR), the move code strip, kit-v1.17's level and every lower stage built on
+//     that; the state shaper sends it the state in full and the route function tells it the move event; and the shaper
+//     sends every stage event through the progress function (progressHead, PROGRESS_TAIL; the shaper one expression,
+//     SHAPER_119, read back in its kit 1.18 form): the current level as it is, every level below
+//     with no txs and its stage through the stage function, which first maps owed_back to refused below the current level
+//     (`let n=e!==\`current\`&&t===\`owed_back\`?\`refused\`:t;`): kit-v1.18 checks a progress event with exact keys and
+//     has no owed_back, so it drops the whole event for either, and refuses a trade's answer for owed_back;
 //   - (card pool-deposit-op-txs) a kit-v1.7+ app's pool_deposit op carries the txs that moved its money, each shown only
 //     on the device's own reads: the follow's Solana read lists U_X's finalized signatures (getSignaturesForAddress,
 //     finalized, limit 1e3) and keeps a tx only when every RPC's finalized getTransaction reads it a deposit (`.every(`);
@@ -82,8 +91,8 @@ import { fileURLToPath } from "node:url";
 const KEY = "kit-frame-version";
 /** The kit version the page reads every app at in full (packages/kit/src/signpage/messages.ts SIGNPAGE_KIT_VERSION), and
  *  its levels below that, newest first, down to kit-v1.4's (packages/signpage/src/kit-version.ts KitLevel). */
-export const KIT = "1.18";
-export const LEVELS = ["1.17", "1.16", "1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
+export const KIT = "1.19";
+export const LEVELS = ["1.18", "1.17", "1.16", "1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
 export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
@@ -173,6 +182,33 @@ const MOVE_CODE_FOR = /(?:^|[^\w$])([\w$]+)=\(([\w$]+),([\w$]+)\)=>\2===`state`\
 const CODE_STAGE = /(function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+)\)\{if\(\3===`current`\)return \5;)let ([\w$]+)=([\w$]+)\(\4,\5\);if\(\3===`1\.17`\)return \6;let ([\w$]+)=([\w$]+)\(\4,\6\);/;
 const STATE_117 = /(function ([\w$]+)\(([\w$]+),([\w$]+)\)\{if\(\3===`current`)\)return \4;let ([\w$]+)=([\w$]+)\(\4\);if\(\3===`1\.17`((?:\|\|\3===`1\.\d{1,4}`)*)\)return \5;let ([\w$]+)=([\w$]+)\(\5\);/;
 const ROUTE_117 = /function ([\w$]+)\(([\w$]+),([\w$]+)\)\{return \2!==`current`&&\2!==`1\.17`&&\2!==`1\.16`&&\2!==`1\.15`&&Object\.hasOwn\(\3,`move`\)\?null:\3\}/;
+/** The trade kinds whose answer is a stage and its txs (packages/signpage/src/kit-version.ts TRADE_KINDS). */
+export const TRADE_KINDS = ["buy", "pool.buy", "pool.sell", "pool.deposit"];
+/** A trade's answer with owed_back as refused (card evm-buy-end-carries-its-tx), as minified: any other kind's result,
+ *  and one that is no object or names another stage, as it is (groups: its name, the kind set it reads). */
+const OWED_FOR = /(?:^|[^\w$])([\w$]+)=\(([\w$]+),([\w$]+)\)=>([\w$]+)\.has\(\2\)&&typeof \3==`object`&&\3&&\3\.stage===`owed_back`\?\{\.\.\.\3,stage:`refused`\}:\3(?![\w$])/;
+/** kit-v1.18's own level (card evm-buy-end-carries-its-tx), as minified: the answer shaper's first stage, the owed_back
+ *  answer (`let r=O(t,n);if(e===\`1.18\`)return r;`) with the move code strip built on what it returns; the state
+ *  shaper's full-state branch naming kit-v1.18 first after the current level; the route function letting kit-v1.18 have
+ *  the move event. Each is read and taken out of the text before kit-v1.17's are, so each check below reads the form it
+ *  was written for. */
+const OWED_STAGE = /(function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+)\)\{if\(\3===`current`\)return \5;)let ([\w$]+)=([\w$]+)\(\4,\5\);if\(\3===`1\.18`\)return \6;let ([\w$]+)=([\w$]+)\(\4,\6\);/;
+const STATE_118 = /(function ([\w$]+)\(([\w$]+),([\w$]+)\)\{if\(\3===`current`)\|\|\3===`1\.18`(\)return \4;let [\w$]+=[\w$]+\(\4\);if\(\3===`1\.17`)/;
+const ROUTE_118 = /function ([\w$]+)\(([\w$]+),([\w$]+)\)\{return \2!==`current`&&\2!==`1\.18`&&\2!==`1\.17`&&\2!==`1\.16`&&\2!==`1\.15`&&Object\.hasOwn\(\3,`move`\)\?null:\3\}/;
+/** The shaper as kit 1.19 minifies it (card evm-buy-end-carries-its-tx), one expression: an answer through the answer
+ *  shaper, a state through the state shaper, a stage event through the progress function, a route event (no stage) to
+ *  every level but kit-v1.4 through the route function, anything else as it is (groups: its name, the message, the kind,
+ *  the answer's expression, the level, the state's expression, the progress function, the route function). */
+const SHAPER_119 = /([\w$]+)=\(([\w$]+),([\w$]+)\)=>`ok`in \2\?(\2\.ok&&\3!==void 0\?\{\.\.\.\2,result:[\w$]+\(([\w$]+),\3,\2\.result\)\}:\2):\2\.type===`state`\?(\{\.\.\.\2,state:[\w$]+\(\5,\2\.state\)\}):\2\.type===`progress`\?`stage`in \2\?([\w$]+)\(\5,\2\):\5===`1\.4`\?null:([\w$]+)\(\5,\2\):\2(?=[,;}])/;
+/** The progress function's head (packages/signpage/src/kit-version.ts progressFor): the current level the event as it
+ *  is, every other its stage through the stage function, none when that gives null (groups: the level, the event, the
+ *  stage, the stage function). Its tail sends the event with no txs and that stage (PROGRESS_TAIL). */
+const progressHead = (name) => new RegExp(`function ${esc(name)}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;let ([\\w$]+)=([\\w$]+)\\(\\1,\\2\\.stage\\);if\\(\\3===null\\)return null;`);
+const PROGRESS_TAIL = (e, n) => new RegExp(`^let\\{txs:[\\w$]+,\\.\\.\\.([\\w$]+)\\}=${esc(e)};return\\{\\.\\.\\.\\1,stage:${esc(n)}\\}\\}`);
+/** The stage function as kit 1.19 minifies it: its stage first set (`let n=<expr>;`), then the kit-v1.4 mapping on that
+ *  as before (groups: its name, the level, the given stage, the set stage, its expression, then the rest). The set must be
+ *  owed_back to refused below the current level (`e!==\`current\`&&t===\`owed_back\`?\`refused\`:t`). */
+const STAGE_119 = /function ([\w$]+)\(([\w$]+),([\w$]+)\)\{let ([\w$]+)=([^;{}]*);return \2!==`1\.4`\|\|([\w$]+)\.has\(\4\)\?\4:([\w$]+)\(([\w$]+),\4\)\?\8\[\4\]:null\}/;
 /** The open kinds (packages/kit/src/signpage/messages.ts OPEN_KINDS): each one's ok answer carries closes from kit 1.13. */
 export const OPEN_KINDS = ["withdraw.open", "signin.open", "backup.open", "export.open", "signout", "pool.withdraw"];
 
@@ -186,6 +222,33 @@ function helloPath(given) {
   // card move-sends-what-it-shows: kit-v1.15's level read and taken out first (MAX_STAGE, STATE_115, ROUTE_115); `js` is
   // the text with it out, which a build before kit 1.16 already is
   let js = given;
+  // card evm-buy-end-carries-its-tx: kit-v1.18's level read and taken out before kit-v1.17's (OWED_STAGE, STATE_118,
+  // ROUTE_118), and the one-expression shaper, the progress function and the stage function read (SHAPER_119,
+  // progressHead, STAGE_119) and written back in their kit 1.18 form, leaving the text a kit 1.18 build is: the move code
+  // strip on the given answer, the state shaper's full-state branch from kit-v1.17 up, the route function from kit-v1.17
+  // up, the shaper's own progress branch through the stage function and the stage function on the given stage
+  const owedAt = OWED_STAGE.exec(js);
+  if (owedAt) js = js.replace(owedAt[0], () => `${owedAt[1]}let ${owedAt[8]}=${owedAt[9]}(${owedAt[4]},${owedAt[5]});`);
+  const state118At = STATE_118.exec(js);
+  if (state118At) js = js.replace(state118At[0], () => `${state118At[1]}${state118At[5]}`);
+  const route118At = ROUTE_118.exec(js);
+  if (route118At) js = js.replace(route118At[0], () => `function ${route118At[1]}(${route118At[2]},${route118At[3]}){return ${route118At[2]}!==\`current\`&&${route118At[2]}!==\`1.17\`&&${route118At[2]}!==\`1.16\`&&${route118At[2]}!==\`1.15\`&&Object.hasOwn(${route118At[3]},\`move\`)?null:${route118At[3]}}`);
+  const shaper119At = SHAPER_119.exec(js);
+  const head119 = shaper119At ? progressHead(shaper119At[7]).exec(js) : null;
+  const tail119 = head119 ? PROGRESS_TAIL(head119[2], head119[3]).exec(js.slice(head119.index + head119[0].length)) : null;
+  if (shaper119At) {
+    const [, name, m, k, answer, lv, state, , routeFn] = shaper119At;
+    // a progress function with no stage function call in its head is written as a stage sent unmapped, which the
+    // progress check below reads as no progress path
+    const n = head119?.[3] ?? "n";
+    const staged = head119 ? `${head119[4]}(${lv},${m}.stage)` : `${m}.stage`;
+    js = js.replace(shaper119At[0], () => `${name}=(${m},${k})=>{if(\`ok\`in ${m})return ${answer};if(${m}.type===\`state\`)return${state};if(${m}.type!==\`progress\`)return ${m};if(!(\`stage\`in ${m}))return ${lv}===\`1.4\`?null:${routeFn}(${lv},${m});let ${n}=${staged};return ${n}===null?null:${n}===${m}.stage?${m}:{...${m},stage:${n}}}`);
+  }
+  const stage119At = STAGE_119.exec(js);
+  if (stage119At) {
+    const [, fn, l, s, , , has, own, mapped] = stage119At;
+    js = js.replace(stage119At[0], () => `function ${fn}(${l},${s}){return ${l}!==\`1.4\`||${has}.has(${s})?${s}:${own}(${mapped},${s})?${mapped}[${s}]:null}`);
+  }
   // card move-sends-or-says-why: kit-v1.17's level read and taken out before kit-v1.16's (CODE_STAGE, STATE_117,
   // ROUTE_117), leaving the text a kit 1.17 build is: the buys strip on the given answer, the state shaper's full-state
   // branch on the given state, the route function from kit-v1.16 up
@@ -366,6 +429,21 @@ function helloPath(given) {
   const code = codeAt && buys && codeAt[2] === shaper[4] && codeFor && codeAt[7] === codeFor[1] && codeFor[4] === noCode && codeAt[9] === noBuys ? codeAt[0] : null;
   const state117 = state117At && state116 && state117At[2] === shaper[5] && state117At[6] === noCode ? state117At[0] : null;
   const route117 = route117At && route116 && route117At[1] === route116At[1] ? route117At[0] : null;
+  // card evm-buy-end-carries-its-tx: kit-v1.18 is sent a trade kind's answer with owed_back as refused (the answer
+  // shaper's first stage, OWED_FOR over the four trade kinds, kit-v1.18 its own level on it, the move code strip and every
+  // lower stage built on what it returns), the state in full, the move event, and each stage event through the progress
+  // function the shaper calls: below the current level with no txs and its stage through the stage function the shaper's
+  // progress branch is read on, which maps owed_back to refused below the current level
+  const owedFor = OWED_FOR.exec(given);
+  const kindsOf = owedFor ? new RegExp(`(?:^|[^\\w$.])${esc(owedFor[4])}=new Set\\(\\[((?:\`[a-z.]+\`,)*\`[a-z.]+\`)\\]\\)`).exec(given) : null;
+  const owedKinds = kindsOf ? kindsOf[1].split(",").map((x) => x.slice(1, -1)) : null;
+  const owed = owedAt && code && owedAt[2] === shaper[4] && owedAt[7] === owedFor?.[1] && same(owedKinds, TRADE_KINDS) && owedAt[9] === codeFor[1] ? owedAt[0] : null;
+  const state118 = state118At && state117 && state118At[2] === shaper[5] ? state118At[0] : null;
+  const route118 = route118At && route117 && route118At[1] === route117At[1] ? route118At[0] : null;
+  const owedStage = stage119At && head119 && stage119At[1] === head119[4] ? `${stage119At[2]}!==\`current\`&&${stage119At[3]}===\`owed_back\`?\`refused\`:${stage119At[3]}` : null;
+  const progress119 = shaper119At && shaper && shaper119At[1] === shaper[1] && branch && stage && head119 && tail119 && owedStage !== null && stage119At[5] === owedStage
+    ? `${shaper119At[0]} ${head119[0]}${tail119[0]} ${stage119At[0]}`
+    : null;
   return {
     assign: assign?.[0] ?? null,
     shaper: shaper?.[0] ?? null,
@@ -404,6 +482,10 @@ function helloPath(given) {
     code,
     state117,
     route117,
+    owed,
+    state118,
+    route118,
+    progress119,
   };
 }
 
@@ -454,7 +536,7 @@ export function judge(a, era = ERA) {
   else if (!sameMap(h.progressMap, MAP)) bad(`the progress stage function reads a map other than kit-v1.4's (${JSON.stringify(h.progressMap)})`);
   // card pool-deposit-stages: the version read in full, the levels below it, the pool deposit's op left out below it
   if (typeof h?.assign === "string" && typeof h?.shaper === "string" && typeof h?.post === "string") {
-    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : era.kit === "1.8" ? "position decimals" : era.kit === "1.9" ? "op detail" : era.kit === "1.10" ? "op pool_amount" : era.kit === "1.11" ? "position asset_held" : era.kit === "1.12" ? "pool making" : era.kit === "1.13" ? "open answer's closes" : era.kit === "1.14" ? "dry buy's out" : era.kit === "1.15" ? "dry buy's with_cash and move route event" : era.kit === "1.16" ? "dry move's max" : era.kit === "1.17" ? "dry buy's buys" : "move op's code"} has no level of its own`);
+    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : era.kit === "1.8" ? "position decimals" : era.kit === "1.9" ? "op detail" : era.kit === "1.10" ? "op pool_amount" : era.kit === "1.11" ? "position asset_held" : era.kit === "1.12" ? "pool making" : era.kit === "1.13" ? "open answer's closes" : era.kit === "1.14" ? "dry buy's out" : era.kit === "1.15" ? "dry buy's with_cash and move route event" : era.kit === "1.16" ? "dry move's max" : era.kit === "1.17" ? "dry buy's buys" : era.kit === "1.18" ? "move op's code" : "stage event's txs and owed_back"} has no level of its own`);
     if (!same(h.levels, era.levels)) bad(`the page's levels below the current one are ${JSON.stringify(h.levels)}, not ${JSON.stringify(era.levels)}: an older kit's app is sent what it cannot read`);
     if (era.kit !== "1.7" && typeof h.decimals !== "string") bad("the state sent below the current level keeps each position's decimals, which kit-v1.7 refuses the whole state for");
     if (typeof h.poolOps !== "string") bad("the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out");
@@ -495,6 +577,11 @@ export function judge(a, era = ERA) {
     if (!before117 && typeof h.code !== "string") bad("the state answer sent below the current level keeps each move op's code, for which a kit-v1.17 app drops the move op");
     if (!before117 && typeof h.state117 !== "string") bad("the state events sent below the current level keep each move op's code, for which a kit-v1.17 app drops the move op");
     if (!before117 && typeof h.route117 !== "string") bad("kit-v1.17 is not told the move event, which it reads: its buy loses the Cash move it waits on");
+    const before118 = before117 || era.kit === "1.18";
+    if (!before118 && typeof h.owed !== "string") bad("a trade's answer sent below the current level keeps the stage owed_back, which kit-v1.18 refuses the whole answer for");
+    if (!before118 && typeof h.state118 !== "string") bad("kit-v1.18 is not sent the state in full: it loses a field it reads");
+    if (!before118 && typeof h.route118 !== "string") bad("kit-v1.18 is not told the move event, which it reads: its buy loses the Cash move it waits on");
+    if (!before118 && typeof h.progress119 !== "string") bad("a stage event sent below the current level keeps its txs or the stage owed_back, for which kit-v1.18 drops the whole event");
   }
   if (a?.posts !== 1)
     bad(`the bundle holds ${Number.isInteger(a?.posts) ? a.posts : "no count of"} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`);

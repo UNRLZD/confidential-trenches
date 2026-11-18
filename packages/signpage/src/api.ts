@@ -28,10 +28,10 @@
 //
 // src/main.ts starts it when the page runs inside APP_HOST's frame; scripts/build-app.mjs bundles both into public/app.js.
 
-import type { BuyRoute, ClosedEvent, ErrorCode, ProgressEvent, ProgressRouteEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent } from "../../kit/src/signpage/messages.ts";
-import { SIGNPAGE_PARAM_SCHEMAS, signpageProgressRouteSchema } from "../../kit/src/signpage/schema.ts";
+import type { BuyRoute, ClosedEvent, ErrorCode, ProgressEvent, ProgressRouteEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent, TxRef } from "../../kit/src/signpage/messages.ts";
+import { SIGNPAGE_PARAM_SCHEMAS, signpageProgressRouteSchema, signpageProgressSchema } from "../../kit/src/signpage/schema.ts";
 import { SIGNPAGE_TIMEOUT_MS } from "../../kit/src/signpage/client.ts";
-import { KIT_DEFAULT, helloKit, kitLevel, resultFor, routeFor, stageFor, stateFor, type KitLevel } from "./kit-version.ts";
+import { KIT_DEFAULT, helloKit, kitLevel, progressFor, resultFor, routeFor, stateFor, type KitLevel } from "./kit-version.ts";
 
 /** APP_HOST: the one origin this page reads from and posts to. */
 export const APP_ORIGIN = "https://ct-app.unrealized.trade";
@@ -63,7 +63,7 @@ export const RETRY_CODES: ReadonlySet<ErrorCode> = new Set(["busy", "down"]);
  *  as itself; never twice (card signpage-error-after-timeout). */
 export const ENDS_AS_PROGRESS: ReadonlySet<SignpageKind> = new Set(["buy", "pool.buy", "pool.sell", "pool.deposit"]);
 /** The stages that end a trade in the app (model.ts progress, route.ts fromStage). */
-const END_STAGES: ReadonlySet<Stage> = new Set(["filled", "part_filled", "not_landed", "refused"]);
+const END_STAGES: ReadonlySet<Stage> = new Set(["filled", "part_filled", "not_landed", "refused", "owed_back"]);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATE: SignpageKind = "state";
@@ -141,7 +141,8 @@ export interface KindContext {
   id: string;
   /** The SHA-256 (hex) of the request's JSON: a kind that keeps its id past a reload keeps it too (wallet.md §7 item 4). */
   sha: string;
-  progress(stage: Stage): void;
+  /** `txs`: the end's transactions (card evm-buy-end-carries-its-tx, kit 1.19), posted on the event when there are any. */
+  progress(stage: Stage, txs?: readonly TxRef[]): void;
   /** Posts one route event (messages.ts BuyRoute) for the id, queued in order with the id's stage events once they are
    *  posted; not held for the answer, which is posted on its own, so a route event may follow it (card
    *  signpage-buy-route-events). One the kit's client would refuse is not posted. */
@@ -275,7 +276,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
   const appOrigin = (): string => host.origin ?? APP_ORIGIN;
   // answer null: a Running kind's id whose answer is not posted yet; `held` keeps its progress events until it is
   const answered = new Map<string, { sha: string; kind: SignpageKind; answer: SignpageAnswer | null }>();
-  const held = new Map<string, Stage[]>();
+  const held = new Map<string, { stage: Stage; txs?: readonly TxRef[] }[]>();
   // the app's kit version, as a hello named it (src/kit-version.ts)
   let level: KitLevel = KIT_DEFAULT;
   // a hello read since the last ready: `level` names the frame's own document, never the one a ready said went (its reset
@@ -289,8 +290,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     if (msg.type === "state") return { ...msg, state: stateFor(level, msg.state) };
     if (msg.type !== "progress") return msg;
     if (!("stage" in msg)) return level !== "1.4" ? routeFor(level, msg) : null;
-    const stage = stageFor(level, msg.stage);
-    return stage === null ? null : stage === msg.stage ? msg : { ...msg, stage };
+    return progressFor(level, msg);
   };
   const post = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent | ClosedEvent, kind?: SignpageKind) => {
     const out = shaped(msg, kind);
@@ -343,10 +343,15 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
       return;
     }
     // a Deferred is answered once its wait settles, either way; a plain answer is used as it is, in this task
-    const progress = (stage: Stage): void => {
+    // `txs` (card evm-buy-end-carries-its-tx): each named by its own two fields, on the event only when there are any
+    // and the kit's client takes it (signpageProgressSchema); otherwise the stage goes alone, never lost for its txs
+    const progress = (stage: Stage, txs?: readonly TxRef[]): void => {
       const waiting = held.get(id);
-      if (waiting) return void waiting.push(stage);
-      queue = queue.then(() => post({ v: 1, type: "progress", id, stage })).catch(() => {});
+      if (waiting) return void waiting.push(txs === undefined ? { stage } : { stage, txs });
+      const plain: ProgressEvent = { v: 1, type: "progress", id, stage };
+      const told: ProgressEvent | null = Array.isArray(txs) && txs.length > 0 ? { ...plain, txs: txs.map((t) => ({ chain: t?.chain, hash: t?.hash }) as TxRef) } : null;
+      const msg = told !== null && signpageProgressSchema(told) ? told : plain;
+      queue = queue.then(() => post(msg)).catch(() => {});
     };
     // the event names each field itself from the object's own keys, so nothing but the route's own fields is ever
     // posted, and only an event the kit's client takes (signpageProgressRouteSchema): anything else is not told
@@ -376,7 +381,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
   };
   // posts a host kind's answer (null: not_allowed), keeps it for a retry, then the id's progress events held for it,
   // then, for a trade kind (`ends`), its end as a progress stage unless one of those was it
-  const give = (kind: SignpageKind, id: string, sha: string, own: HostAnswer<SignpageKind> | HostRefusal | null, progress: (stage: Stage) => void, ends = false): void => {
+  const give = (kind: SignpageKind, id: string, sha: string, own: HostAnswer<SignpageKind> | HostRefusal | null, progress: (stage: Stage, txs?: readonly TxRef[]) => void, ends = false): void => {
     const ok = own !== null && "result" in own ? own : null;
     const code: ErrorCode = own !== null && "error" in own && typeof own.error === "string" ? own.error : "not_allowed";
     const answer: SignpageAnswer = ok ? { v: 1, id, ok: true, result: ok.result } : { v: 1, id, ok: false, error: { code } };
@@ -389,10 +394,12 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     post(answer, kind);
     const stages = held.get(id) ?? [];
     held.delete(id);
-    for (const stage of stages) progress(stage);
+    for (const s of stages) progress(s.stage, s.txs);
     if (ends) {
       const end = ok ? (ok.result as { stage?: unknown }).stage : code === "id_reused" ? null : "refused";
-      if (typeof end === "string" && END_STAGES.has(end as Stage) && !stages.includes(end as Stage)) progress(end as Stage);
+      // a result's end with the result's own transactions (card evm-buy-end-carries-its-tx)
+      const txs = ok ? (ok.result as { txs?: unknown }).txs : undefined;
+      if (typeof end === "string" && END_STAGES.has(end as Stage) && !stages.some((s) => s.stage === end)) progress(end as Stage, Array.isArray(txs) ? (txs as TxRef[]) : undefined);
     }
     if (own && "then" in own) own.then?.();
   };
@@ -433,10 +440,10 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
   if (!host.readyOnLoad) ready();
   // the shell posts `ready` on each load of its frame instead: each APP_HOST document needs its own, once
   // the notice that an open's layer has closed: the type and the id alone, to an app at kit-v1.13's level or above only
-  // (kit 1.13 reads it; kit 1.14, 1.15, 1.16 and 1.17 too), as the hello of the frame's document since its ready named it (a ready's
+  // (kit 1.13 reads it; kit 1.14 to 1.18 too), as the hello of the frame's document since its ready named it (a ready's
   // reset still in the queue: none)
   const closed = (id: string): void => {
-    if (!hello || (level !== "current" && level !== "1.17" && level !== "1.16" && level !== "1.15" && level !== "1.14" && level !== "1.13")) return;
+    if (!hello || (level !== "current" && level !== "1.18" && level !== "1.17" && level !== "1.16" && level !== "1.15" && level !== "1.14" && level !== "1.13")) return;
     const msg: ClosedEvent = { v: 1, type: "closed", id };
     post(msg);
   };
