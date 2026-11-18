@@ -1,0 +1,176 @@
+{
+ "good": {
+  "note": "Made from the bad run below (the same tape answers, read from the Mac at 2026-11-18T08:27:09.825Z): its health with the X-Helper-Started header the card adds, set to 120 s before the health read, a helper just deployed. Each chain has a tape served complete within FILLED_MS.",
+  "run": {
+   "at": "2026-11-18T08:27:09.825Z",
+   "base": "https://ct-api.unrealized.trade",
+   "health": {
+    "at": 1794990429137,
+    "status": 200,
+    "error": null,
+    "started": "1794990309137",
+    "commit": "7249e15d4705669e1f2bef7d4ddc4219f93d042f"
+   },
+   "chains": {
+    "base": {
+     "lists": {
+      "status": 200,
+      "error": null
+     },
+     "tapes": [
+      {
+       "coin": "0xf6377915d072d25c9ba2dfb0776f10c06c197f0d",
+       "answers": [
+        {
+         "at": 1794990430096,
+         "status": 200,
+         "error": null,
+         "trades": 5,
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain"
+        },
+        {
+         "at": 1794990431854,
+         "status": 200,
+         "error": null,
+         "trades": 5,
+         "filling": false,
+         "whole_ms": 0,
+         "src": "chain"
+        }
+       ]
+      }
+     ]
+    },
+    "robinhood": {
+     "lists": {
+      "status": 200,
+      "error": null
+     },
+     "tapes": [
+      {
+       "coin": "0x300dcabd342896be5c22f54bc619439ec5604433",
+       "answers": [
+        {
+         "at": 1794990432260,
+         "status": 200,
+         "error": null,
+         "trades": 0,
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain"
+        },
+        {
+         "at": 1794990433569,
+         "status": 200,
+         "error": null,
+         "trades": 0,
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain"
+        },
+        {
+         "at": 1794990434765,
+         "status": 200,
+         "error": null,
+         "trades": 50,
+         "filling": false,
+         "whole_ms": 1794989967000,
+         "src": "chain"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  }
+ },
+ "bad": {
+  "note": "Recorded from the Mac at 2026-11-18T08:27:09.825Z against the deployed helper before the card (commit 7249e15d4705669e1f2bef7d4ddc4219f93d042f): /v1/health names no start (X-Helper-Started absent), so no read can tell a restart.",
+  "run": {
+   "at": "2026-11-18T08:27:09.825Z",
+   "base": "https://ct-api.unrealized.trade",
+   "health": {
+    "at": 1794990429137,
+    "status": 200,
+    "error": null,
+    "started": null,
+    "commit": "7249e15d4705669e1f2bef7d4ddc4219f93d042f"
+   },
+   "chains": {
+    "base": {
+     "lists": {
+      "status": 200,
+      "error": null
+     },
+     "tapes": [
+      {
+       "coin": "0xf6377915d072d25c9ba2dfb0776f10c06c197f0d",
+       "answers": [
+        {
+         "at": 1794990430096,
+         "status": 200,
+         "error": null,
+         "trades": 5,
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain"
+        },
+        {
+         "at": 1794990431854,
+         "status": 200,
+         "error": null,
+         "trades": 5,
+         "filling": false,
+         "whole_ms": 0,
+         "src": "chain"
+        }
+       ]
+      }
+     ]
+    },
+    "robinhood": {
+     "lists": {
+      "status": 200,
+      "error": null
+     },
+     "tapes": [
+      {
+       "coin": "0x300dcabd342896be5c22f54bc619439ec5604433",
+       "answers": [
+        {
+         "at": 1794990432260,
+         "status": 200,
+         "error": null,
+         "trades": 0,
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain"
+        },
+        {
+         "at": 1794990433569,
+         "status": 200,
+         "error": null,
+         "trades": 0,
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain"
+        },
+        {
+         "at": 1794990434765,
+         "status": 200,
+         "error": null,
+         "trades": 50,
+         "filling": false,
+         "whole_ms": 1794989967000,
+         "src": "chain"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  }
+ }
+}
