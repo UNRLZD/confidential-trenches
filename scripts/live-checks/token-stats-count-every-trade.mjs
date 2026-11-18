@@ -7,13 +7,24 @@
 //   - every answer is 200;
 //   - a filling tape claims no reach (whole_ms absent);
 //   - a settled tape's whole_ms, when present, is a whole ms from 0 to its as_of_ms plus a minute;
-//   - on each chain at least MIN_CLAIMED of the COINS settled tapes claim a reach.
+//   - on each chain at least MIN_CLAIMED of the COINS settled tapes claim a reach;
+//   - on Solana and NEAR (VENDOR) a tape served from the vendor's rows (src not the chain's own: Solana's pool trades
+//     from GeckoTerminal or CoinGecko, apps/helper/src/data/solana/trades.ts poolTape; NEAR's from the unrealized.trade
+//     engine, apps/helper/src/data/near/engine.ts trades) that claims a reach names how long before its rows were read
+//     in Server-Timing (sol-vendor-read or near-vendor-read;desc="rows read A ms ago"), A at most the chain's bound
+//     (SOL_VENDOR_REACH_MS 15 s, NEAR_VENDOR_REACH_MS 10 s), and its as_of_ms is at most that before its request was
+//     sent, but for SKEW_MS (the two clocks apart). Card vendor-tapes-name-their-reach-every-chain: the deployed helper
+//     at 904efb36b served BONK's Solana vendor tape complete with its rows read 26 s before (18 Nov 13:03Z), and NEAR's
+//     prl.omft.near and token.0xshitzu.near complete with theirs read 201 s before (13:07Z, this check's run).
 // After: helper
 // Serial: evm-keyed 200 (its Base and Robinhood tape reads draw the keyed providers)
 //   node scripts/live-checks/token-stats-count-every-trade.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
+import { NEAR_VENDOR_REACH_MS } from "../../apps/helper/src/data/near/engine.ts";
+import { SOL_VENDOR_REACH_MS } from "../../apps/helper/src/data/solana/trades.ts";
+import { SKEW_MS } from "./index-evm-swaps.mjs";
 
 const KEY = "token-stats-count-every-trade";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -23,40 +34,55 @@ export const COINS = 3;
 export const MIN_CLAIMED = 2;
 export const READ_MS = 45_000;
 export const POLL_MS = 3_000;
+/** The chains whose tape may be the vendor's rows: the src the chain's own reads give, the Server-Timing entry a vendor
+ *  tape names its read in, and the bound a reach is claimed within. */
+export const VENDOR = {
+  solana: { own: "chain", entry: "sol-vendor-read", ms: SOL_VENDOR_REACH_MS },
+  near: { own: "fastnear", entry: "near-vendor-read", ms: NEAR_VENDOR_REACH_MS },
+};
+
+/** The age in ms a Server-Timing names for `entry` (`<entry>;desc="rows read A ms ago"`), or null when it names none. */
+export function vendorReadOf(entry, timing) {
+  const m = new RegExp(`(?:^|,)\\s*${entry};desc="rows read (\\d+) ms ago"`).exec(String(timing ?? ""));
+  return m === null ? null : Number(m[1]);
+}
 
 const obj = (v) => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : {});
 const arr = (v) => (Array.isArray(v) ? v : []);
 
-/** The run: each chain's first COINS Trending (1h) coins, and each one's trades answers until settled or READ_MS. */
+/** The run: each chain's first COINS Trending (1h) coins, and each one's trades answers until settled or READ_MS, each
+ *  with the time its request was sent and its Server-Timing. */
 export async function read(base = BASE, fetchFn = fetch, wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), now = Date.now) {
   const b = base.replace(/\/$/, "");
   const get = async (p) => {
+    const at = now();
     const r = await fetchFn(`${b}${p}`, { headers: { origin: APP } });
     const text = await r.text();
     let body = null;
     try {
       body = JSON.parse(text);
     } catch {}
-    return { status: r.status, body };
+    return { at, status: r.status, timing: r.headers.get("server-timing") ?? "", body };
+  };
+  const tapeOf = async (chain, coin) => {
+    const end = now() + READ_MS;
+    const reads = [];
+    for (;;) {
+      const t = await get(`/v1/market/trades?chain=${chain}&token=${encodeURIComponent(coin)}&limit=50`);
+      const a = obj(t.body);
+      const rows = arr(a.trades);
+      reads.push({ at: t.at, status: t.status, timing: t.timing, n: rows.length, oldest_ms: rows.length ? Math.min(...rows.map((x) => obj(x).t_ms)) : null, filling: a.filling === true, ...(Object.hasOwn(a, "whole_ms") ? { whole_ms: a.whole_ms } : {}), src: a.src ?? null, as_of_ms: a.as_of_ms ?? null });
+      if (t.status !== 200 || a.filling !== true || now() + POLL_MS > end) break;
+      await wait(POLL_MS);
+    }
+    return { coin, reads };
   };
   const chains = {};
   for (const chain of CHAINS) {
     const l = await get(`/v1/market/lists?chain=${chain}`);
     const coins = arr(obj(obj(l.body).lists).trending_1h).map((r) => obj(r).token).filter((t) => typeof t === "string").slice(0, COINS);
     const tapes = [];
-    for (const coin of coins) {
-      const end = now() + READ_MS;
-      const reads = [];
-      for (;;) {
-        const t = await get(`/v1/market/trades?chain=${chain}&token=${encodeURIComponent(coin)}&limit=50`);
-        const a = obj(t.body);
-        const rows = arr(a.trades);
-        reads.push({ status: t.status, n: rows.length, oldest_ms: rows.length ? Math.min(...rows.map((x) => obj(x).t_ms)) : null, filling: a.filling === true, ...(Object.hasOwn(a, "whole_ms") ? { whole_ms: a.whole_ms } : {}), src: a.src ?? null, as_of_ms: a.as_of_ms ?? null });
-        if (t.status !== 200 || a.filling !== true || now() + POLL_MS > end) break;
-        await wait(POLL_MS);
-      }
-      tapes.push({ coin, reads });
-    }
+    for (const coin of coins) tapes.push(await tapeOf(chain, coin));
     chains[chain] = { lists_status: l.status, tapes };
   }
   return { base: b, at: new Date(now()).toISOString(), chains };
@@ -80,6 +106,21 @@ export function judge(r) {
     say(badReach.length === 0, `${chain}: every reach a whole ms from 0 to its read: ${badReach.length ? JSON.stringify(badReach[0]) : "yes"}`);
     const claimed = settled.filter((x) => x.whole_ms !== undefined);
     say(claimed.length >= MIN_CLAIMED, `${chain}: ${claimed.length} of ${settled.length} settled tapes claim a reach (at least ${MIN_CLAIMED}): ${tapes.map((t) => { const x = arr(t.reads).at(-1); return `${String(t.coin).slice(0, 10)} ${x?.src} n${x?.n} ${x?.filling ? "filling" : x?.whole_ms === undefined ? "none" : x.whole_ms === 0 ? "0" : `${Math.round((x.as_of_ms - x.whole_ms) / 60_000)}m`}`; }).join("; ")}`);
+    // a vendor tape claims a reach only up to its read, named, within the chain's bound
+    const v = VENDOR[chain];
+    if (v === undefined) continue;
+    let judged = 0;
+    for (const t of tapes)
+      for (const x of arr(t.reads)) {
+        if (x.status !== 200 || x.whole_ms === undefined || x.src === v.own) continue;
+        judged++;
+        const what = `${chain}: ${String(t.coin).slice(0, 10)}'s vendor tape (src ${x.src}, ${x.n} trades) claims a reach`;
+        const named = vendorReadOf(v.entry, x.timing);
+        say(named !== null && named <= v.ms, `${what}, ${named === null ? `naming no read (${v.entry}) in Server-Timing ${JSON.stringify(x.timing ?? null)}` : `its rows read ${named} ms before by the helper's word`} (at most ${v.ms})`);
+        const age = Number.isSafeInteger(x.as_of_ms) && Number.isSafeInteger(x.at) ? x.at - x.as_of_ms : null;
+        say(age !== null && age <= v.ms + SKEW_MS, `${what}, its as_of_ms ${age === null ? `${x.as_of_ms} against no request time` : `${age} ms before its request`} (at most ${v.ms} + ${SKEW_MS} for the clocks)`);
+      }
+    if (judged === 0) lines.push(`--  ${chain}: no vendor tape claimed a reach, none to judge by its read`);
   }
   return { ok: lines.every((l) => !l.startsWith("BAD")), lines };
 }
