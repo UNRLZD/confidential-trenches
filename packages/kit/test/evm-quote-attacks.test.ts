@@ -1383,6 +1383,56 @@ test("XE a failed early read of a route the quote does not take never ends the q
   await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0), failing], NOW + 1_000, scanner(5_000_000, logs), undefined, () => 0), heldTo(x0));
 });
 
+// Card evm-5xx-holds-the-provider-for-the-round, with card evm-cold-multihop-quote-inside-the-kpi's early reads: the
+// fourth round reads its own reads and the early routes through X's markets as two reads at once, and a provider that
+// answers HTTP 5xx to one is held in the other. At a87cbd3ff (this card merged with that one) each read held it in its own
+// reads alone, and the early batches queued in its gate behind the round's failed ones were still sent to it (6 of 6).
+test("FH4 a provider that answers HTTP 500 to the fourth round's own reads is sent none of the early X reads queued behind them", { timeout: 20_000 }, async () => {
+  const token = "0x00000000000000000000000000000000000ff1fc";
+  const x0 = xAt(0x182);
+  const real: ModelPool = { key: keyOf(token, x0, 3000, 60, NATIVE), give: (a) => a };
+  // x0's markets, each read one a call: the round's own reads are more batches than the provider's gate sends at once
+  // (2), so the early batches queue behind them
+  const markets = [[2500, 50], [500, 10], [100, 1], [3000, 60], [10000, 200], [1000, 20], [400, 8], [200, 4]].map(([fee, ts], i): ModelPool => ({ key: keyOf(x0, NATIVE, fee!, ts!, NATIVE), give: (a) => a / BigInt(1 + i) }));
+  const logs = [{ key: real.key, at: 4_000_100 }, ...markets.map((m, i) => ({ key: m.key, at: 4_050_000 + i }))];
+  const pools = [seeded(token), real, ...markets];
+  const w = (x: bigint | string) => BigInt(x).toString(16).padStart(64, "0");
+  const quotes = (body: string) => body.toLowerCase().split("ca253dc9").slice(1);
+  // an early read: a two-hop V4Quoter.quoteExactInput (from its selector to the next) through x0 to the token; a
+  // market's quote names x0 and no token
+  const early = (body: string) => quotes(body).some((r) => r.includes(w(x0)) && r.includes(w(token)));
+  const own = (body: string) => !early(body) && quotes(body).some((r) => r.includes(w(x0)));
+  const second = { failed: 0, earlyAfter: 0 };
+  // the early requests the first provider is sent: the round reads them
+  let earlyFirst = 0;
+  const p0 = chain(pools, 0);
+  const first: EvmRpc = async (calls) => (early(JSON.stringify(calls)) && earlyFirst++, p0(calls));
+  const p1 = chain(pools, 1);
+  // the second provider, at a URL with no in-flight pin (Robinhood's gate, 2): every request of the round's own reads
+  // answered HTTP 500 after 200 ms, every other as the chain does; `earlyAfter`: early requests sent once a 500 came back
+  const failing = evmJsonRpc("https://fails.fh4.test", (async (_u: string, init: RequestInit) => {
+    const body = init.body as string;
+    const calls = JSON.parse(body) as { id: number; method: string; params: unknown[] }[];
+    if (early(body) && second.failed > 0) second.earlyAfter++;
+    if (own(body)) {
+      await new Promise((r) => setTimeout(r, 200));
+      second.failed++;
+      return new Response("", { status: 500 });
+    }
+    const answers = await p1(calls.map((c) => ({ method: c.method, params: c.params })));
+    return new Response(JSON.stringify(answers.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+  }) as unknown as typeof fetch);
+  quoteMod.evmReadsPerCall(1);
+  try {
+    await assert.rejects(evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [first, failing, chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0), heldTo(x0));
+  } finally {
+    quoteMod.evmReadsPerCall();
+    evmPaceReset();
+  }
+  assert.ok(second.failed > 0 && earlyFirst > 0, `the second provider answered ${second.failed} HTTP 500s to the round's own reads; ${earlyFirst} early requests`);
+  assert.equal(second.earlyAfter, 0, `${second.earlyAfter} early requests were sent to the provider after its HTTP 500 in the same round`);
+});
+
 test("X2 seventeen currencies, the shallowest by liquidity included: each is priced through its market, and the one that gives most sets R", async () => {
   const token = "0x00000000000000000000000000000000000ff2ff";
   const deeper = Array.from({ length: 16 }, (_, i): ModelPool => ({ key: keyOf(token, xAt(0x200 + i), 3000, 60, NATIVE), give: (a) => a }));
