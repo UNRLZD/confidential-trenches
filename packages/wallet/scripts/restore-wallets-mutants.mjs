@@ -149,6 +149,17 @@ const M = [
   ["a vault carry refused never named", PRS, [["    if (c !== null) (c.retry ? out.held : out.named).push(`${at} ${c.why}`);", "    void c;"]], PRT, "vault-late-send-carried"],
   ["step 7's window ended at the first answered try", PRS, [["          if (owed) stays = true;", "          void owed;"]], PRT, "vault-late-send-carried"],
   ["step 7's window restarted on each load", PRS, [["              if (o.late !== undefined) return void (first = o.late);\n", ""]], PRT, "vault-late-send-carried"],
+  // card pool-late-send-carried: step 7 on the pools' ids and U_X (readPoolLate), each rule its own plant
+  ["the pools' U_X get no step 7", PRS, [["    if (ms7 !== null && r.complete)\n      await readPoolLate(", "    if (false)\n      await readPoolLate("]], PRT, "pool-late-send-carried"],
+  ["step 7's window not kept for the pools", PRS, [["    if (ms7 !== null) await step7!.late(ms7);\n", ""]], PRT, "pool-late-send-carried"],
+  ["a pool late send carried with no note written", PRS, [["note !== undefined || ((amounts) => own.found(w.scope, x.i, amounts))", "true"]], PRT, "pool-late-send-carried"],
+  ["a pool late send's U_X read that fails never named", PRS, [['      out.retry.push(`${said} was not read (${e instanceof Error ? e.message : "it threw"}): read again`);\n', ""]], PRT, "pool-late-send-carried"],
+  ["a pool U_X under a note this device planned carried by step 7", PRS, [["    if (note !== undefined && !note.found) continue;\n    const u = await uxOf(", "    const u = await uxOf("]], PRT, "pool-late-send-carried"],
+  ["a pool U_X step 5 found read again by step 7", PRS, [["    if (skip.ux.has(x.i)) continue;\n", ""]], PRT, "pool-late-send-carried"],
+  ["a lane kept on the marker left out of step 7's plan", PRS, [["    if (x !== undefined) return x;\n    const readTo = kept.get(lane);", "    if (x !== undefined) return x;\n    const readTo = undefined as number | undefined;"]], PRT, "pool-late-send-carried"],
+  ["a kept lane's highest with history dropped from step 7's plan", PRS, [["const top = Math.max(readTo - RESTORE_LANES * DEPOSIT_ID_MARGIN, notes.at(-1) ?? -1);", "const top = notes.at(-1) ?? -1;"]], PRT, "pool-late-send-carried"],
+  ["a pool id NEAR re-reads holding money never named", PRS, [['    for (const y of ys) ("error" in x ? out.retry : y.retry ? out.held : out.named).push(', "    for (const y of ys) ([] as string[]).push("]], PRT, "pool-late-send-carried"],
+  ["a pool id step 5 named named again by step 7", PRS, [["    if (skip.near.has(x.i)) continue;\n", ""]], PRT, "pool-late-send-carried"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
 const only = process.argv[2];

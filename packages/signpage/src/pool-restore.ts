@@ -121,8 +121,17 @@
 //   Step 7 runs on each load for 72 h of block time (REREAD_MS) past the first restore's pass: that pass's time, both
 //   providers' agreed header time (passTimeMs), is kept on step 5's marker (`late`), and an answered try leaves the
 //   marker in place while a try's own pass is inside the window, so the next load's resume reads the vault's ids again
-//   (a Sync keeps the window, never restarts it). The pools' U_X have no such re-read yet: a send to a pool deposit's
-//   U_X that lands after step 5 read it waits for the next Sync (card restore-carries-pool-refund's lane).
+//   (a Sync keeps the window, never restarts it).
+// - The pools' U_X and ids get the same step 7 in the same window (card pool-late-send-carried, readPoolLate), so a send
+//   to a pool deposit's U_X that lands after step 5 read it is carried on the next load, not the next Sync: on a pool
+//   whose U_X this page reads, once step 5 has read its scope complete, afterRestore's re-reads are read again on each
+//   load while the marker owes step 5. A lane the marker keeps read whole (skipped by step 5) is in the plan as it was
+//   read. Each re-read id's U_X is read on both of its chain's RPCs and carried as step 5 carries one (carryUx: planFound
+//   first where the store holds no note, two RPCs apart read again, under the floor left, a refused or unfilled carry
+//   named), but for an index step 5 found this try and one whose note this device planned on its own (its deposit
+//   follow's). Each one's NEAR id is read by asset on step 7's own pass and named as step 5 names an id holding money;
+//   nothing is carried from NEAR here (card restore-carries-pool-refund). A pass with no block time (a test's readers)
+//   holds no window: step 7 is not run on it.
 // - No request names a note: each restore reads its pool's whole public set and finds the seed's own notes on the
 //   device (solana-restore.ts, evm-restore.ts headers). The seed is opened only for one use at a time (a SeedUse,
 //   ../../wallet/src/notes/restore.ts): under the store's seed lock, shared, after a check that it is still stored and
@@ -169,9 +178,9 @@ import { TRADE_HELPER } from "./trade.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { solanaRestoreNotes, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
-import { idReadKeep, keptIdReader, nearIdHeldReader, passTimeMs, type IdHeld, type IdReaderOpts, type IdReadKeep, type PassOpts } from "../../wallet/src/restore/id-reader.ts";
+import { idReadKeep, keptIdReader, nearIdHeldReader, passTimeMs, type IdHeld, type IdReaderOpts, type IdReadKeep, type PassOpts, type RestorePass } from "../../wallet/src/restore/id-reader.ts";
 import { ID_KEEP } from "../../wallet/src/deposit/moveout.ts";
-import { afterRestore, coverTo, REREAD_MS, restoreDepositIds, type DepositIds, type IdReader, type LaneIds } from "../../wallet/src/restore/wallets.ts";
+import { afterRestore, coverTo, DEPOSIT_ID_MARGIN, REREAD_MS, restoreDepositIds, type DepositIds, type IdReader, type LaneIds } from "../../wallet/src/restore/wallets.ts";
 import { lateFound, rereadOnOpen, type AfterRpc } from "../../wallet/src/restore/after.ts";
 import { bindDeposit, bindRpc, POLL_MS, type BindRpc } from "../../wallet/src/deposit/bind.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
@@ -393,8 +402,15 @@ async function readDepositIds(
   },
   /** the NEAR vault walked, its ids read after the pools' (card vault-late-send-carried), or null */
   vault: { v: VaultWalked; notesAt: Parameters<typeof readVaultLate>[7]; carry: VaultCarry; late: Parameters<typeof readVaultLate>[9] } | null = null,
+  /** step 7 on the pools' ids and U_X (card pool-late-send-carried): the store's deposit notes by index and the window
+   *  across loads, the vault's own (readVaultLate's notesAt and late), or null */
+  step7: { notesAt: Parameters<typeof readVaultLate>[7]; late: Parameters<typeof readVaultLate>[9] } | null = null,
 ): Promise<void> {
   const { rpcs, pass, reader } = await letGo(keptIdReader(POOL_DEPOSIT_NETWORK, ids.rpcs, keep, { ...ids.opts, signal }), signal);
+  // step 7's window on the pools' ids counts from the pass's block time, as the vault's. A pass with no time (step 5's
+  // readers a test gives, on providers that read no blocks; pageIdReads' pair reads them, its test says so) holds no
+  // window, so step 7 is not run on it
+  const ms7 = step7 === null ? null : passTimeMs(pass);
   // what an id read as money holds, by asset on both providers at the same pass, opened now beside the id reader on the
   // pass it reads at (the kept one while fresh, else the one just opened): nearIdHeldReader refuses a pass
   // VAULT_SYNC_LAG_MAX blocks old, and step 5 takes minutes
@@ -462,7 +478,10 @@ async function readDepositIds(
       held.set(i, { chain, s: w.scope.toString(), i, u, refund_id: id });
       return "money";
     };
-    const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, skipping(own, w.scope, both), await lanes(w.scope, w.notes));
+    // step 7's 72 h from the first restore's pass, kept on step 5's marker (card pool-late-send-carried: the vault's late)
+    if (ms7 !== null) await step7!.late(ms7);
+    const ln = await lanes(w.scope, w.notes);
+    const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, skipping(own, w.scope, both), ln);
     ids.read?.(w.scope, r);
     undone(w.label, r);
     // each U_X found holding a balance, in index order, carried into the pool or named. The page's pool.deposit pays
@@ -483,6 +502,13 @@ async function readDepositIds(
       signal.throwIfAborted();
       for (const y of await nearHeldNamed(heldOf, id)) (y.retry ? out.held : out.named).push(`${w.label}: deposit index ${i}'s id ${id} ${y.why}`);
     }
+    // step 7 on a complete read (a lane stopped past its walk's end is named above, and afterRestore refuses it); a throw
+    // of its own is a read to try again by the pool's label, step 5's reasons kept
+    if (ms7 !== null && r.complete)
+      await readPoolLate(seed, { ...w, ux }, r, ln.done, { rpcs, pass, opts: ids.opts ?? {} }, signal, out, own, step7!.notesAt, { ux: new Set(held.keys()), near: new Set(nearMoney.keys()) }).catch((e: unknown) => {
+        if (signal.aborted || e instanceof SeedGone) throw e;
+        out.retry.push(`${w.label}: step 7's re-read did not finish: ${e instanceof Error ? e.message : "it threw"}`);
+      });
   }
   // the vault's deposit ids, step 5 then step 7 (card vault-late-send-carried), on the run's kept pass; a throw of its
   // own is a read to try again by the vault's label, the pools' reasons kept
@@ -491,6 +517,80 @@ async function readDepositIds(
       if (signal.aborted || e instanceof SeedGone) throw e;
       out.retry.push(`${vault.v.label}: its deposit ids' read did not finish: ${e instanceof Error ? e.message : "it threw"}`);
     });
+}
+
+/**
+ * Step 7 on one pool's deposit ids (card pool-late-send-carried; the file's head, "The pools' U_X"), each reason it is
+ * not done pushed to `out`, on step 5's complete read `r` of the scope this try:
+ * - the plan: afterRestore's re-reads, every id up to each lane's highest with history plus two of the lane that holds no
+ *   note of the walk. A lane step 5 skipped as kept on the marker (`kept`: the index each kept lane was read to) was read
+ *   whole with nothing to tell, so it is in the plan as read: its highest with history its read's end less the margin
+ *   restoreDepositIds read past it (DEPOSIT_ID_MARGIN), or none;
+ * - each one's U_X on the pool chain, read and carried as step 5 carries it (carryUx: its deposit note written first by
+ *   planFound where the store holds none, two RPCs apart read again, under the floor left, a carry refused or unfilled
+ *   named); an index whose U_X step 5 found this try (`skip.ux`) is step 5's, and one whose note this device planned on
+ *   its own (no restore's read wrote it) is its deposit follow's: neither is read here;
+ * - each one's NEAR id read by asset on both providers on a pass of step 7's own (rereadOnOpen) and named as step 5 names
+ *   an id read as money (nearHeldNamed: above the kept unit, an asset that is not a fungible token, two providers apart):
+ *   nothing is carried from NEAR here (card restore-carries-pool-refund), and an id step 5 named this try (`skip.near`)
+ *   is not named again.
+ */
+async function readPoolLate(
+  seed: SeedUse,
+  w: Walked & { ux: PoolUxReads },
+  r: DepositIds,
+  kept: ReadonlyMap<number, number>,
+  near: { rpcs: readonly [NearRpc, NearRpc]; pass: RestorePass; opts: NonNullable<Parameters<typeof rereadOnOpen>[0]["opts"]> },
+  signal: AbortSignal,
+  out: Step5Reasons,
+  own: Own,
+  notesAt: Parameters<typeof readVaultLate>[7],
+  skip: { ux: ReadonlySet<number>; near: ReadonlySet<number> },
+): Promise<void> {
+  const lanes: LaneIds[] = Array.from({ length: RESTORE_LANES }, (_, lane) => {
+    const x = r.lanes.find((y) => y.lane === lane);
+    if (x !== undefined) return x;
+    const readTo = kept.get(lane);
+    if (readTo === undefined) throw new Error(`lane ${lane} was neither read nor kept`);
+    const notes = w.notes.flatMap((n) => (n.ref.kind === "deposit" && n.ref.s === w.scope && n.ref.i % RESTORE_LANES === lane ? [n.ref.i] : [])).sort((a, b) => a - b);
+    const top = Math.max(readTo - RESTORE_LANES * DEPOSIT_ID_MARGIN, notes.at(-1) ?? -1);
+    return { lane, notes, money: [], used: [], unread: [], highest: top >= lane ? top : null, readTo, reach: null };
+  });
+  // afterRestore awaits nothing but its counter's raise (step 5's laneRead raised it already: the same index again), so
+  // the seed's copy for it lives through no read and no wait, and is zeroed at its end
+  const s64 = await seed((s) => s.slice());
+  let plan: Awaited<ReturnType<typeof afterRestore>>;
+  try {
+    plan = await afterRestore(s64, { lane: own.lane, raiseDepositIndex: async (_s, min) => min }, w.scope, lanes, near.pass);
+  } finally {
+    s64.fill(0);
+  }
+  const at = await notesAt(w.scope);
+  for (const x of plan.rereads) {
+    signal.throwIfAborted();
+    if (skip.ux.has(x.i)) continue;
+    const note = at.get(x.i);
+    // a note this device planned on its own (no restore's read wrote it) is its deposit follow's, never carried here
+    if (note !== undefined && !note.found) continue;
+    const u = await uxOf(seed, w.chain, w.scope, x.i, x.id);
+    const said = `${w.label}: deposit index ${x.i}'s one-time wallet ${u}`;
+    let c: Awaited<ReturnType<typeof carryUx>>;
+    try {
+      c = await carryUx(w.ux, { chain: w.chain, s: w.scope.toString(), i: x.i, u, refund_id: x.id }, note !== undefined || ((amounts) => own.found(w.scope, x.i, amounts)), signal);
+    } catch (e) {
+      if (signal.aborted || e instanceof SeedGone) throw e;
+      out.retry.push(`${said} was not read (${e instanceof Error ? e.message : "it threw"}): read again`);
+      continue;
+    }
+    if (c !== null) (c.retry ? out.held : out.named).push(`${said} ${c.why}`);
+  }
+  const rr = await letGo(rereadOnOpen({ network: POOL_DEPOSIT_NETWORK, rpcs: near.rpcs as readonly [AfterRpc, AfterRpc], restored: near.pass, plan, opts: near.opts }), signal);
+  if (!rr.due) return;
+  for (const x of rr.ids) {
+    if (skip.near.has(x.i)) continue;
+    const ys = "error" in x ? [{ why: `was not read on NEAR (${x.error}): read again`, retry: true }] : await nearHeldNamed(async () => x.held, x.id);
+    for (const y of ys) ("error" in x ? out.retry : y.retry ? out.held : out.named).push(`${w.label}: deposit index ${x.i}'s id ${x.id} ${y.why}`);
+  }
 }
 
 /** The NEAR vault walked: its label, scope, network and notes (step 5 and step 7 read its deposit ids: readVaultLate). */
@@ -1414,7 +1514,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         for (let t = 1; ; t++) {
           const out: Step5Reasons = { retry: [], held: [], named: [] };
           stays = walkFailed;
-          await readDepositIds(seed, walked, ids, keep, signal, out, noted, own, lanesKept, vaultIds === null || carry === null ? null : { v: vaultIds, notesAt, carry, late }).catch((e: unknown) => {
+          await readDepositIds(seed, walked, ids, keep, signal, out, noted, own, lanesKept, vaultIds === null || carry === null ? null : { v: vaultIds, notesAt, carry, late }, { notesAt, late }).catch((e: unknown) => {
             // the run's seed gone (a sign out, other words signed in): the run stops, and no try of it reads again
             if (e instanceof SeedGone || signal.aborted) throw e;
             out.retry.push(`step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`);

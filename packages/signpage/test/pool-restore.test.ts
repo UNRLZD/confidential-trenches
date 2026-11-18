@@ -2786,7 +2786,7 @@ test("card vault-late-send-carried: step 7 holds for 72 h of block time past the
 // index: in step 7's re-reads (afterRestore: up to the lane's highest plus two of the lane, an empty lane's second).
 // `money` and `used`: the first load's NEAR ids (vaultChain's), read at the first load's queries, so a test fills them once
 // the store's lane is known
-async function lateWorld(t: { after(fn: () => void): void }, over: { costs?: typeof COSTS; deposit?: Parameters<typeof uxOf>[1]["deposit"] } = {}) {
+async function lateWorld(t: { after(fn: () => void): void }, over: { costs?: typeof COSTS; deposit?: NonNullable<Parameters<typeof uxOf>[1]>["deposit"] } = {}) {
   const planted = new Map<string, UxAs>();
   const money = new Map<string, readonly [bigint, bigint]>();
   const used = new Set<string>();
