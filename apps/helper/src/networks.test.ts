@@ -11,7 +11,6 @@
 import assert from "node:assert/strict";
 import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
-import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +23,7 @@ import { start } from "./server.ts";
 import { statusesOf, TESTNET_TOKEN, USDC, USDC_CODE_HASH, type HoldAt, type TokenStatus, type TokenWatches } from "./token-status/status.ts";
 import type { FeeQuoter } from "./withdraw/fee.ts";
 import { A_STORE_YOCTO, idKeyOf, withdrawSenderFromEnv } from "./withdraw/send.ts";
+import { call as bounded, listening } from "../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const fixture = JSON.parse(readFileSync(join(import.meta.dirname, "withdraw/fixtures/withdraw-request.json"), "utf8")) as {
@@ -122,15 +122,7 @@ function watches(m: "open" | "held", t: "open" | "held"): TokenWatches {
 
 const quoter: FeeQuoter = { networkOf: () => null, quote: async () => { throw new Error("no quote"); }, reads: () => ({ feeMin: async () => BigInt(W.relay_fee) }) } as unknown as FeeQuoter;
 
-function call(port: number, method: string, path: string, body?: string) {
-  return new Promise<{ status: number; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port, method, path, headers: { "content-type": "application/json" } }, (res) => {
-      let b = "";
-      res.setEncoding("utf8").on("data", (d) => (b += d)).on("end", () => ok({ status: res.statusCode ?? 0, body: b }));
-    });
-    r.on("error", fail).end(body);
-  });
-}
+const call = (port: number, method: string, path: string, body?: string) => bounded(port, { method, path, headers: { "content-type": "application/json" }, body }, "the helper");
 
 /** The helper as server.ts composes it from `env`, with the watches stubbed; the calls run, then it closes. */
 async function withHelper(env: Record<string, string>, w: TokenWatches, run: (port: number, near: ReturnType<typeof fakeNear>) => Promise<void>) {
@@ -147,7 +139,7 @@ async function withHelper(env: Record<string, string>, w: TokenWatches, run: (po
   const bind = { ...bindSenderFromEnv(process.env, w, near.fetchFn, fixture.vault), warm: () => undefined };
   const server = start(COMMIT, 0, undefined, undefined, w, undefined, quoter, withdraw, undefined, bind);
   try {
-    await new Promise<void>((ok) => server.on("listening", () => ok()));
+    await listening(server, "the helper");
     await run((server.address() as AddressInfo).port, near);
   } finally {
     server.closeAllConnections();

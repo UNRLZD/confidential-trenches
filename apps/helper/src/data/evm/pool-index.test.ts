@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKFILL_DAY_SHARE, createPoolIndex, INITIALIZE, poolIdOf, POOL_INDEX_SPAN_LOGS, type PoolKey, type PoolIndexConfig } from "./pool-index.ts";
 import { CALLER_ROOM, providerHolds, type Pace } from "../../limits/limits.ts";
+import { call, listening } from "../../../test/servers.ts";
 
 /** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
  *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
@@ -239,18 +240,12 @@ test("GET /v1/market/pools: one chain the helper indexes and one token address, 
   const answer = (t: string) => ({ chainId: 4663, poolManager: PM, complete: false, through: 99, pools: [{ id: "0x" + "ab".repeat(32), key: keyOf(tok(0), t) }] });
   const ix = { pools: (t: string) => (asked.push(t), answer(t)) };
   const h = createServer(handler("0123456789abcdef0123456789abcdef01234567", createProxy({}, { fetch: stub }), createRpc({}, { now: STILL, fetch: stub }), undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { robinhood: ix }));
-  await new Promise<void>((r) => h.listen(0, "127.0.0.1", r));
+  await listening(h.listen(0, "127.0.0.1"), "the helper");
   const port = (h.address() as { port: number }).port;
-  const get = (path: string) =>
-    new Promise<{ status: number; text: string }>((ok, no) => {
-      const q = request({ host: "127.0.0.1", port, method: "GET", path }, (res) => {
-        let text = "";
-        res.on("data", (c) => (text += c));
-        res.on("end", () => ok({ status: res.statusCode ?? 0, text }));
-      });
-      q.on("error", no);
-      q.end();
-    });
+  const get = async (path: string) => {
+    const r = await call(port, { path }, "the helper");
+    return { status: r.status, text: r.body };
+  };
   try {
     const T = "0x00000000000000000000000000000000000ABCde";
     const ok = await get(`/v1/market/pools?chain=robinhood&token=${T}`);

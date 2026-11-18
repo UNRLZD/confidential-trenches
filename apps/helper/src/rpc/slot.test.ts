@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as rpcMod from "./rpc.ts";
 import { createRpc } from "./rpc.ts";
+import { call, listening } from "../../test/servers.ts";
 
 /** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
  *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
@@ -126,17 +127,13 @@ test("a public SOLANA_RPC_URL (unset) is the public endpoint from the start: its
 });
 
 test("GET /v1/health names each Solana slot keyed, fallback or public, never a URL or a key", async () => {
-  const { createServer, request } = await import("node:http");
+  const { createServer } = await import("node:http");
   const { handler } = await import("../server.ts");
   const r = createRpc({ SOLANA_RPC_URL: KEYED }, { now: STILL, fetch: (async (u: string) => (u === PUBLIC ? ok(u) : new Response("x", { status: 401 }))) as never, log: () => undefined });
   const h = createServer(handler("0123456789abcdef0123456789abcdef01234567", undefined, r as never));
-  await new Promise<void>((done) => h.listen(0, "127.0.0.1", () => done()));
+  await listening(h.listen(0, "127.0.0.1"), "the helper");
   const port = (h.address() as { port: number }).port;
-  const get = () =>
-    new Promise<string>((done, fail) => request({ host: "127.0.0.1", port, path: "/v1/health" }, (res) => {
-      let b = "";
-      res.setEncoding("utf8").on("data", (d) => (b += d)).on("end", () => done(b));
-    }).on("error", fail).end());
+  const get = async () => (await call(port, { path: "/v1/health" }, "the helper")).body;
   try {
     assert.deepEqual(JSON.parse(await get()).solana, { rpc: "keyed" });
     await r.handle("solana", JSON_T, read);

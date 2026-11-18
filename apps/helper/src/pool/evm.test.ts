@@ -13,6 +13,7 @@ import { evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
 import { providerHolds, type ProviderHolds } from "../limits/limits.ts";
 import { signRelease, W } from "../../test/pool-evm/release-sign.ts";
 import { EVM_FEE_STEP, EVM_GAS_MAX, evmAddressOf, evmFirstBlockAtOrAfter, evmReadPair, evmPoolSender, evmPoolSendersFromEnv, pacedEvmRpc, evmReadWithdraw, POOL_EVM_ENV, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, WITHDRAW_SIGNATURE, type EvmRpc } from "./evm.ts";
+import { listening } from "../../test/servers.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const POOL = "0x00000000000000000000000000000000b1f1f001";
@@ -608,7 +609,7 @@ async function nodes(keepFrom: bigint, http429 = 0): Promise<{ urls: [string, st
       });
     }).listen(0, LOOPBACK[i]),
   );
-  await Promise.all(servers.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
+  await Promise.all(servers.map((s, i) => listening(s, `the server ${i}`)));
   const urls = servers.map((s, i) => `http://${URL_HOST[i]}:${(s.address() as { port: number }).port}`) as [string, string];
   return { urls, calls, close: () => servers.forEach((s) => s.close()) };
 }

@@ -5,9 +5,10 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 import { test } from "node:test";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
-import { call, listening, type Timer } from "./servers.ts";
+import { call, listening, opened, type Timer } from "./servers.ts";
 
 /** A timer the test fires itself: what each wait asked for, and `fire` to end the bound now. */
 function heldTimer() {
@@ -139,5 +140,47 @@ test("a test that mocks setTimeout cannot hold the bound: it runs on the timer r
     await assert.rejects(listening(createServer(), "the unstarted server", { ms: 20 }), { message: "the unstarted server was not listening within 20 ms" });
   } finally {
     resetTimers(t.mock.timers);
+  }
+});
+
+test("a stalled WebSocket handshake fails inside the bound and names it", BACKSTOP, async () => {
+  const s = createServer().listen(0, "127.0.0.1");
+  const taken: Duplex[] = [];
+  s.on("upgrade", (_req, socket: Duplex) => taken.push(socket)); // takes the upgrade, never answers it
+  const port = await listening(s, "the stalled push server");
+  try {
+    const t = heldTimer();
+    const handshake = opened(port, { path: "/v1/market/push" }, "the stalled push server", { ms: 50, timer: t.timer });
+    await new Promise((ok) => s.once("upgrade", ok));
+    t.fire();
+    await assert.rejects(handshake, { message: "/v1/market/push upgrade on the stalled push server: no answer within 50 ms" });
+  } finally {
+    for (const k of taken) k.destroy(); // an upgraded socket is the taker's: the server's close does not end it
+    await close(s);
+  }
+});
+
+test("a handshake answered 101 hands over the socket and the bytes past the head; one refused gives its status", BACKSTOP, async () => {
+  const s = createServer((_req, res) => res.writeHead(404).end("no")).listen(0, "127.0.0.1");
+  s.on("upgrade", (_req, socket) => socket.end(Buffer.concat([Buffer.from("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"), Buffer.from([0x81, 0x01, 0x61])])));
+  const port = await listening(s, "the push server");
+  try {
+    const t = heldTimer();
+    const up = await opened(port, { path: "/v1/market/push", headers: { Origin: "https://app.test" } }, "the push server", { timer: t.timer });
+    assert.equal(up.status, 101);
+    assert.ok(up.socket !== undefined && up.head !== undefined);
+    let got = up.head; // the frame's bytes: in the head, or on the socket next when TCP split them
+    while (got.length < 3) got = Buffer.concat([got, await new Promise<Buffer>((ok) => up.socket!.once("data", ok))]);
+    up.socket.destroy();
+    assert.deepEqual([...got], [0x81, 0x01, 0x61]);
+    t.fire(); // cleared: nothing to end
+    const plain = createServer((_req, res) => res.writeHead(404).end("no")).listen(0, "127.0.0.1");
+    try {
+      assert.equal((await opened(await listening(plain, "the plain server"), { path: "/v1/health" }, "the plain server")).status, 404);
+    } finally {
+      await close(plain);
+    }
+  } finally {
+    await close(s);
   }
 });

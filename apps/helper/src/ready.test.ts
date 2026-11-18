@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { Agent, createServer, request, type IncomingHttpHeaders } from "node:http";
+import { Agent, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,7 @@ import * as server from "./server.ts";
 import * as gk from "./data/gecko.ts";
 import { createEvmLists, FACTORIES } from "./data/evm/lists.ts";
 import { openDurableDir } from "./store/durable.ts";
+import { call, listening } from "../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const createHashOf = (label: string) => createHash("sha256").update(label).digest("hex");
@@ -28,15 +29,8 @@ const ok = (body: unknown) => ({ status: 200, body: JSON.stringify(body), asOfMs
 const down = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
 const MINT = "4Tdj8MDuQ7Nx1drP1fkf1H4FVvUDrgZ3kbgQpHWXpump";
 
-function get(port: number, method: string, path: string, body?: string, agent?: Agent): Promise<{ status: number; body: string; headers: IncomingHttpHeaders }> {
-  return new Promise((done, fail) => {
-    const r = request({ host: "127.0.0.1", port, method, path, agent, headers: body === undefined ? {} : { "content-type": "application/json" } }, (res) => {
-      let b = "";
-      res.setEncoding("utf8").on("data", (d) => (b += d)).on("end", () => done({ status: res.statusCode ?? 0, body: b, headers: res.headers }));
-    });
-    r.on("error", fail).end(body);
-  });
-}
+const get = (port: number, method: string, path: string, body?: string, agent?: Agent) =>
+  call(port, { method, path, agent, headers: body === undefined ? {} : { "content-type": "application/json" }, body }, "the helper");
 
 test("ready only once the Solana and EVM lists, a Solana token page and its holders answer 200", async () => {
   assert.equal(typeof S.isReady, "function", "server.ts isReady");
@@ -62,7 +56,7 @@ test("GET /v1/health carries ready: false while warming, true once ready", async
   let ready = false;
   const h = server.start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, ...([() => ready] as never[]));
   t.after(() => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))));
-  await new Promise<void>((done) => h.on("listening", () => done()));
+  await listening(h, "the helper");
   const port = (h.address() as AddressInfo).port;
   assert.equal(JSON.parse((await get(port, "GET", "/v1/health")).body).ready, false);
   ready = true;
@@ -82,7 +76,7 @@ test("a replacing helper takes the senders only once the old one lets their stor
   const withdraw = { carry: async () => (carried++, { status: 200, body: { ok: true } }), warm: () => undefined, stop: () => undefined };
   const h = server.start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, withdraw as never, undefined, undefined, undefined, undefined, undefined, ...([() => true, s.held] as never[]));
   t.after(() => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))));
-  await new Promise<void>((done) => h.on("listening", () => done()));
+  await listening(h, "the helper");
   const port = (h.address() as AddressInfo).port;
   const sent = get(port, "POST", "/v1/withdraw", JSON.stringify({ token: "x" }));
   await new Promise((r) => setTimeout(r, 300));
@@ -255,7 +249,7 @@ test("a stopping helper drains: the answer in flight closes its connection, and 
     const h = server.start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, withdraw as never);
     const stop = stopOf(h); // set up at the start, as main does
     t.after(() => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))));
-    await new Promise<void>((done) => h.on("listening", () => done()));
+    await listening(h, "the helper");
     const port = (h.address() as AddressInfo).port;
     const agent = new Agent({ keepAlive: true, maxSockets: 1 });
     t.after(() => agent.destroy());
@@ -283,7 +277,7 @@ test("a stopping helper drains: the answer in flight closes its connection, and 
 async function listenOn(t: { after(f: () => unknown): void }, parts: { bind?: unknown; pools?: unknown; evmPools?: unknown; fee?: unknown; withdraw?: unknown }, held: Promise<unknown>, now: () => number): Promise<number> {
   const h = createServer(server.handler(COMMIT, undefined, undefined, undefined, undefined, parts.fee as never, parts.withdraw as never, undefined, parts.bind as never, null, parts.pools as never, parts.evmPools as never, now, {}, {}, () => true, held));
   t.after(() => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))));
-  await new Promise<void>((done) => h.listen(0, "127.0.0.1", () => done()));
+  await listening(h.listen(0, "127.0.0.1"), "the helper");
   return (h.address() as AddressInfo).port;
 }
 const pending = () => {
@@ -549,7 +543,7 @@ test("the helper is never ready before every pool's start check: with the warm-u
   const health = async (ready: () => boolean) => {
     const h = server.start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, ...([ready] as never[]));
     t.after(() => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))));
-    await new Promise<void>((done) => h.on("listening", () => done()));
+    await listening(h, "the helper");
     const port = (h.address() as AddressInfo).port;
     return async () => (JSON.parse((await get(port, "GET", "/v1/health")).body) as { ready: unknown }).ready;
   };
@@ -603,7 +597,7 @@ test("the helper is never ready before every pool's start check: with the warm-u
 async function startOnce(env: Record<string, string>, boundMs: number, readies: unknown[] = []): Promise<{ code: number | string; err: string; readies: unknown[] }> {
   const { spawn } = await import("node:child_process");
   const free = createServer().listen(0, "127.0.0.1");
-  await new Promise((ok) => free.on("listening", ok));
+  await listening(free, "the port holder");
   const port = (free.address() as AddressInfo).port;
   await new Promise((ok) => free.close(ok));
   const dir = mkdtempSync(join(tmpdir(), "pools-checked-"));
@@ -658,7 +652,7 @@ test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently sto
     }).listen(0, word === 2 ? "::1" : "127.0.0.1"),
   );
   t.after(() => nodes.forEach((s) => (s.closeAllConnections(), s.close())));
-  await Promise.all(nodes.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
+  await Promise.all(nodes.map((s, i) => listening(s, `the server ${i}`)));
   const urls = nodes.map((s, i) => `http://${i === 0 ? "[::1]" : "127.0.0.1"}:${(s.address() as AddressInfo).port}`);
   const key = `0x${createHashOf("helper-pool-senders/test-key/EVM_SENDER")}`; // pool/evm.test.ts's test key
   const r = await startOnce({ POOL_EVM_ADDRESS_BASE: evmPoolVenues().base.pool!, POOL_EVM_SENDER_KEY_BASE: key, POOL_EVM_RPCS_BASE: urls.join(",") }, 15_000, seen);
@@ -699,7 +693,7 @@ test("MEDIUM-1 a Solana pool whose configured fee is not the kit's stops the sta
     }).listen(0, "127.0.0.1"),
   );
   t.after(() => stubs.forEach((s) => (s.closeAllConnections(), s.close())));
-  await Promise.all(stubs.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
+  await Promise.all(stubs.map((s, i) => listening(s, `the server ${i}`)));
   const urls = stubs.map((s) => `http://127.0.0.1:${(s.address() as AddressInfo).port}`).join(",");
   const r = await startOnce({ POOL_SOLANA_PROGRAM_MAINNET: program, POOL_SOLANA_FEE_PAYER_KEY_MAINNET: feePayer, POOL_SOLANA_FEE_MAINNET: "1400000", POOL_SOLANA_RPCS_MAINNET: urls }, 15_000, seen); // mainnet: a test network's refusal no longer stops the start (card helper-ready-never-waits-on-a-testnet-pool)
   assert.equal(r.code, 2, `exit ${r.code} after ${reads} rent reads; stderr: ${r.err}`);
