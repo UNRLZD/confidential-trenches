@@ -78,6 +78,8 @@ function prEnv(env, base, head, event = "pull_request") {
     else if (event === "pull_request") out[k] = /pull_request\.base\.sha/.test(v) ? base : /pull_request\.head\.sha/.test(v) ? head : "";
     else if (/merge_group\.head_sha|\|\| github\.sha/.test(v)) out[k] = head;
     else if (/merge_group\.base_ref/.test(v)) out[k] = "refs/heads/main";
+    // the group's parent: main itself for the first entry (a test of a later entry passes its own in extra)
+    else if (/merge_group\.base_sha/.test(v)) out[k] = base;
     else out[k] = "";
   }
   return out;
@@ -265,6 +267,86 @@ test("planted: a group judged from base_sha, the queue entry ahead, runs that en
   assert.match(`${r.stdout}${r.stderr}`, /TAMPERED/);
   const verify = baseGateSteps(readFileSync(CI, "utf8")).find((s) => s.gate === "verify-gate");
   assert.doesNotMatch(verify.run.join("\n"), /base_sha|MQ_BASE\b/, "the group's main is the merge base of main and its head");
+});
+
+// Card quote-speed-measures-its-own-change: a group decides whether to measure the quote on the queued pull request's own
+// files, its head against base_sha (the group's parent, which holds the entries ahead), while the gate and CHECK still
+// come from main. PR 979's group (run 44246114264, helper only) re-measured PR 978's quote files, which 978's own group
+// had measured, and lost its round to a noisy RPC. Here main's CHECK is a stub that prints MEASURED and writes a passing
+// record, so no test reaches a network, and both entries tamper their own quote-speed.mjs, so a step that took the gate
+// from either shows TAMPERED.
+const STUB_CHECK = `import { writeFileSync } from "node:fs";
+export const check = (r) => ({ ok: r?.ok === true, lines: ["stub check"] });
+if (import.meta.url === \`file://\${process.argv[1]}\`) {
+  console.log("MEASURED");
+  writeFileSync(process.argv[process.argv.indexOf("--record") + 1], JSON.stringify({ ok: true }));
+}
+`;
+// main (ROOT's HEAD with the stub CHECK) and two queued pull requests merged onto it as the queue merges them, the first
+// touching `ahead`, the second `own`: { dir, repo, base: main, parent: the first entry's group head, head: the second's }
+function queuedGroup(ahead, own) {
+  const dir = mkdtempSync(path.join(tmpdir(), "base-gate-queue-"));
+  const repo = path.join(dir, "repo");
+  const id = ["-c", "user.name=ci", "-c", "user.email=ci@example.invalid"];
+  git(dir, ["clone", "--quiet", "--shared", "--no-checkout", "-c", "maintenance.auto=false", ROOT, repo]);
+  git(repo, ["checkout", "--quiet", "--detach", git(ROOT, ["rev-parse", "HEAD"])]);
+  writeFileSync(path.join(repo, "scripts/live-checks/evm-quote-warm-round.mjs"), STUB_CHECK);
+  git(repo, ["add", "--", "scripts/live-checks/evm-quote-warm-round.mjs"]);
+  git(repo, [...id, "commit", "--quiet", "--no-verify", "-m", "Card main: stub check"]);
+  const main = git(repo, ["rev-parse", "HEAD"]);
+  git(repo, ["update-ref", "refs/remotes/origin/main", main]);
+  const heads = [];
+  for (const [n, files] of [["ahead", ahead], ["own", own]]) {
+    git(repo, ["checkout", "--quiet", "-b", n, main]);
+    for (const f of files) writeFileSync(path.join(repo, f), `${readFileSync(path.join(repo, f), "utf8")}// ${n}\n`);
+    const gate = path.join(repo, "scripts/ci/quote-speed.mjs");
+    writeFileSync(gate, readFileSync(gate, "utf8").replace(/\n/, `\n${TAMPER}`));
+    git(repo, ["add", "--", ...files, "scripts/ci/quote-speed.mjs"]);
+    git(repo, [...id, "commit", "--quiet", "--no-verify", "-m", `Card ${n}: change`]);
+    git(repo, ["checkout", "--quiet", "--detach", heads.at(-1) ?? main]);
+    git(repo, [...id, "merge", "--quiet", "--no-ff", "-m", `Card ${n}: merge (#${heads.length + 1})`, n]);
+    heads.push(git(repo, ["rev-parse", "HEAD"]));
+  }
+  return { dir, repo, base: main, parent: heads[0], head: heads[1] };
+}
+const QUOTE_A = "packages/kit/src/trade/evm/buy-unpinned.ts";
+const QUOTE_B = "packages/kit/src/checks/evm/pool-index.ts";
+const HELPER = "apps/helper/src/data/evm/swaps.ts";
+const quoteStep = () => baseGateSteps(readFileSync(CI, "utf8")).find((s) => s.gate === "quote-speed");
+
+test("planted: a group whose own change is helper only, queued behind a quote change, skips the measure", (t) => {
+  const g = queuedGroup([QUOTE_A, QUOTE_B], [HELPER]);
+  t.after(() => rmSync(g.dir, { recursive: true, force: true }));
+  const step = quoteStep();
+  const { status, out } = replay(g, step.run, step.env, "merge_group", { MQ_BASE_SHA: g.parent });
+  assert.doesNotMatch(out, /TAMPERED/, out);
+  assert.doesNotMatch(out, /MEASURED/, `the entry ahead's quote change was measured again in this group:\n${out}`);
+  assert.match(out, /quote-speed: PASS \(skip: none of \d+ changed file\(s\)/, out);
+  assert.equal(status, 0, out);
+});
+
+test("planted: a group whose own change touches the quote measures it, on its own quote files alone, with main's gate", (t) => {
+  const g = queuedGroup([QUOTE_A, HELPER], [QUOTE_B]);
+  t.after(() => rmSync(g.dir, { recursive: true, force: true }));
+  const step = quoteStep();
+  const { status, out } = replay(g, step.run, step.env, "merge_group", { MQ_BASE_SHA: g.parent });
+  assert.doesNotMatch(out, /TAMPERED/, out);
+  assert.match(out, /MEASURED/, out);
+  assert.match(out, new RegExp(`quote-speed: 1 changed file\\(s\\) the quote reads: ${QUOTE_B}\\n`), out);
+  assert.match(out, /quote-speed: PASS \(try 1 of 2\)/, out);
+  assert.equal(status, 0, out);
+});
+
+test("planted: a group whose head is not one merge onto the base_sha it names, or names none, stops before any gate", (t) => {
+  const g = queuedGroup([QUOTE_A], [HELPER]);
+  t.after(() => rmSync(g.dir, { recursive: true, force: true }));
+  const step = quoteStep();
+  for (const parent of [g.base, g.head, ""]) {
+    const { status, out } = replay(g, step.run, step.env, "merge_group", { MQ_BASE_SHA: parent });
+    assert.doesNotMatch(out, /TAMPERED|MEASURED|PASS/, `base_sha ${parent}: ${out}`);
+    assert.match(out, /is not one merge onto its parent/, `base_sha ${parent}: ${out}`);
+    assert.notEqual(status, 0, out);
+  }
 });
 
 // planted case: 03cb57f's step copied the base's money-gate.mjs alone, so its import of ../net-window.mjs failed

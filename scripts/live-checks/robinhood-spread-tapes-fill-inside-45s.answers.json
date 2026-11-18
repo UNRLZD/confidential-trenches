@@ -1,0 +1,93 @@
+{
+ "_note": "good: the branch helper at c8b2708fa (card robinhood-spread-tapes-fill-inside-45s) run on the Mac (port 8797, keyless vendor plans), read by robinhood-spread-tapes-fill-inside-45s.mjs --base http://127.0.0.1:8797 --address 0x000de658... --record at 2026-11-18 04:48Z: FOBO, its 50 trades over 5.5 h, filled 10.4 s after its first read; good_long: the same helper at 04:49Z, AUTONOMO, 50 trades over 12.1 h, filled 18.6 s after its first read. bad_deployed: the deployed helper (bf32abde9) at 04:44Z, FOBO read alone from the Mac: still filling 45.2 s after its first read (20 reads). bad_busy_only: the deployed helper at 04:43Z, PONS read alone: filled 4.5 s after its first read, but its 50 trades span 0.2 h, so no spread coin was judged. Each tape names its token as \"address\", never \"token\" (gitleaks generic-api-key reads a 40-hex value beside that key).",
+ "good": {
+  "base": "http://127.0.0.1:8797",
+  "at": "2026-11-18T04:48:24.678Z",
+  "address": "0x000de658153f47f23e92973c8eb1e89762703676",
+  "answers": [
+   {
+    "address": "0x000de658153f47f23e92973c8eb1e89762703676",
+    "status": 200,
+    "ms": 4890,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 10434,
+     "reads": 5
+    },
+    "n": 50,
+    "span_ms": 19822000
+   }
+  ]
+ },
+ "good_long": {
+  "base": "http://127.0.0.1:8797",
+  "at": "2026-11-18T04:48:55.043Z",
+  "address": "0xe83c85e1ead16fcfe85401e2b337fb4fb5b5cc96",
+  "answers": [
+   {
+    "address": "0xe83c85e1ead16fcfe85401e2b337fb4fb5b5cc96",
+    "status": 200,
+    "ms": 4537,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 18552,
+     "reads": 9
+    },
+    "n": 50,
+    "span_ms": 43718000
+   }
+  ]
+ },
+ "bad_deployed": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T04:44:20.709Z",
+  "address": "0x000de658153f47f23e92973c8eb1e89762703676",
+  "answers": [
+   {
+    "address": "0x000de658153f47f23e92973c8eb1e89762703676",
+    "status": 200,
+    "ms": 890,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 45160,
+     "reads": 20
+    }
+   }
+  ]
+ },
+ "bad_busy_only": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T04:43:51.756Z",
+  "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+  "answers": [
+   {
+    "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "status": 200,
+    "ms": 2332,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 4479,
+     "reads": 2
+    },
+    "n": 50,
+    "span_ms": 656000
+   }
+  ]
+ }
+}
