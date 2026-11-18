@@ -1,0 +1,386 @@
+{
+ "note": "good: this branch (card base-tape-never-complete-behind-the-index) createSwaps in-process on the real Base and Robinhood providers, read through the check read() with a fetch that answers /v1/market/trades from it, 18 Nov 05:1xZ; the helper host given as http://helper.local. bad: the deployed helper ct-api.unrealized.trade before the card (main cea17ee5f era), 18 Nov 05:1xZ: complete tapes naming no block they are read to. behind0321: made from live run 44228233209 (18 Nov 03:21Z), Base 0x60858a4b served complete at 03:21:36.952Z (as_of_ms 1794972096952) read to below block 58908377 (its missing swap 0x0323e3ae), its newest trade block 58908200, the providers head 58908608 read at 03:21:37.386Z; here as the card names it: read to 58908376 of head 58908376 read 0 s ago (a helper whose own heads lag), not filling.",
+ "good": {
+  "run": {
+   "at": "2026-11-18T04:41:21.944Z",
+   "base": "http://helper.local",
+   "chains": {
+    "base": {
+     "tapes": [
+      {
+       "coin": "0xb2000000000000000000000d12d9d004218d70e0",
+       "answers": [
+        {
+         "at": 1794976881945,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=3208, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 58932533 of head 58932533, read 3 s ago\"",
+         "trades": 11,
+         "newest": {
+          "t_ms": 1794976865000,
+          "tx": "0x66452d1fd72307f5a4f8b4e1c2297c87ff7089111574f59d8431209ab2af3424"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976885153
+        },
+        {
+         "at": 1794976886668,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 58932533 of head 58932553, read 4 s ago\"",
+         "trades": 11,
+         "newest": {
+          "t_ms": 1794976865000,
+          "tx": "0x66452d1fd72307f5a4f8b4e1c2297c87ff7089111574f59d8431209ab2af3424"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976885153
+        },
+        {
+         "at": 1794976887671,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 58932533 of head 58932553, read 5 s ago\"",
+         "trades": 20,
+         "newest": {
+          "t_ms": 1794976865000,
+          "tx": "0x66452d1fd72307f5a4f8b4e1c2297c87ff7089111574f59d8431209ab2af3424"
+         },
+         "filling": false,
+         "whole_ms": 0,
+         "src": "chain",
+         "as_of_ms": 1794976885153
+        }
+       ],
+       "head": {
+        "n": 58932563,
+        "at": 1794976888445
+       }
+      }
+     ]
+    },
+    "robinhood": {
+     "tapes": [
+      {
+       "coin": "0x7441c3fcf8d39cf574530794976d1a3fc6197777",
+       "answers": [
+        {
+         "at": 1794976888445,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=3757, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117140225 of head 117140225, read 4 s ago\"",
+         "trades": 17,
+         "newest": {
+          "t_ms": 1794976663000,
+          "tx": "0xefe531a78764a63a1b662a4a90e8ec8c201b56f717555767d115e9816e341206"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976892201
+        },
+        {
+         "at": 1794976893607,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117140225 of head 117140262, read 5 s ago\"",
+         "trades": 17,
+         "newest": {
+          "t_ms": 1794976663000,
+          "tx": "0xefe531a78764a63a1b662a4a90e8ec8c201b56f717555767d115e9816e341206"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976892201
+        },
+        {
+         "at": 1794976894607,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117140262 of head 117140270, read 1 s ago\"",
+         "trades": 17,
+         "newest": {
+          "t_ms": 1794976663000,
+          "tx": "0xefe531a78764a63a1b662a4a90e8ec8c201b56f717555767d115e9816e341206"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976893811
+        },
+        {
+         "at": 1794976895610,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-read-to;desc=\"block 117140270 of head 117140280, read 1 s ago\"",
+         "trades": 50,
+         "newest": {
+          "t_ms": 1794976663000,
+          "tx": "0xefe531a78764a63a1b662a4a90e8ec8c201b56f717555767d115e9816e341206"
+         },
+         "filling": false,
+         "whole_ms": 1794976403000,
+         "src": "chain",
+         "as_of_ms": 1794976894800
+        }
+       ],
+       "head": {
+        "n": 117140290,
+        "at": 1794976896601
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "bad": {
+  "run": {
+   "at": "2026-11-18T04:41:46.870Z",
+   "base": "https://ct-api.unrealized.trade",
+   "chains": {
+    "base": {
+     "tapes": [
+      {
+       "coin": "0xb2000000000000000000000d12d9d004218d70e0",
+       "answers": [
+        {
+         "at": 1794976906871,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=2228, evm-queue;dur=1265;desc=\"2 posts: pace 1265 ms, in flight 0 ms\", total;dur=2228",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976909789
+        },
+        {
+         "at": 1794976910944,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976910859
+        },
+        {
+         "at": 1794976912203,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976910859
+        },
+        {
+         "at": 1794976913466,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976910859
+        },
+        {
+         "at": 1794976914726,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976914619
+        },
+        {
+         "at": 1794976915987,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976915813
+        },
+        {
+         "at": 1794976917250,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976915813
+        },
+        {
+         "at": 1794976918520,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976918568
+        },
+        {
+         "at": 1794976919783,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976919522
+        },
+        {
+         "at": 1794976921047,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976919950
+        },
+        {
+         "at": 1794976922310,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976922202
+        },
+        {
+         "at": 1794976923574,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+         "trades": 10,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": true,
+         "whole_ms": null,
+         "src": "chain",
+         "as_of_ms": 1794976923037
+        },
+        {
+         "at": 1794976924835,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=0, evm-queue;dur=1954;desc=\"2 posts: pace 1954 ms, in flight 0 ms\", total;dur=594",
+         "trades": 21,
+         "newest": {
+          "t_ms": 1794976895000,
+          "tx": "0x2a0d1615ad6503368d92bfdac02660b1016eea227853c76b70fc871d29145f3b"
+         },
+         "filling": false,
+         "whole_ms": 0,
+         "src": "chain",
+         "as_of_ms": 1794976923037
+        }
+       ],
+       "head": {
+        "n": 58932753,
+        "at": 1794976926441
+       }
+      }
+     ]
+    },
+    "robinhood": {
+     "tapes": [
+      {
+       "coin": "0xe3b54937dc8b3c29434d3a17d504182174737777",
+       "answers": [
+        {
+         "at": 1794976926707,
+         "status": 200,
+         "error": null,
+         "timing": "evm-open;dur=140, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=171",
+         "trades": 50,
+         "newest": {
+          "t_ms": 1794976924000,
+          "tx": "0x5512d20a4872048da5539df3b9e4c308d4b5be578087ef1113e1f6c51cc59650"
+         },
+         "filling": false,
+         "whole_ms": 1794976831000,
+         "src": "chain",
+         "as_of_ms": 1794976926964
+        }
+       ],
+       "head": {
+        "n": 117140561,
+        "at": 1794976927889
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}
