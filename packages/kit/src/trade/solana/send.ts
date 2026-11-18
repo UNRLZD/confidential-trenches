@@ -45,9 +45,12 @@ export const SOLANA_SENDER_FAST_URL = "https://sender.helius-rpc.com/fast?swqos_
 // skip_preflight=true"; its examples send params [tx, { encoding }] only). Its preflight from the app's origin answered
 // that origin between 2026-11-02 01:54Z and 01:57Z (date -u before and after the read).
 export const SOLANA_JITO_TRANSACTIONS_URL = "https://mainnet.block-engine.jito.wtf/api/v1/transactions";
-// The public mainnet RPC: https://solana.com/docs/references/clusters (100 requests per 10 s per IP). Its preflight
-// from the app's origin answered that origin between 2026-11-02 01:54Z and 01:57Z (date -u before and after the read).
-export const SOLANA_PUBLIC_RPC_URL = "https://api.mainnet-beta.solana.com";
+// The keyless public RPC a browser's send reaches: PublicNode's (https://solana-rpc.publicnode.com), the signing page's
+// provider A. Solana's own api.mainnet-beta.solana.com refuses a browser: with the signing page's Origin, 2026-11-18
+// 12:03:10-12:03:40Z, its preflight answered 200 but every POST 403 {"code":403,"message":"Access forbidden"} (200 with
+// no Origin), while publicnode answered getHealth and getLatestBlockhash 200 with allow-origin * and served
+// sendTransaction (a 1-byte payload that is no transaction answered "unable to decode tx.Message").
+export const SOLANA_PUBLIC_RPC_URL = "https://solana-rpc.publicnode.com";
 
 /** The paper's rebroadcast interval (T2.1, DESIGN from P4S). */
 export const SOLANA_REBROADCAST_MS = 2_000;
