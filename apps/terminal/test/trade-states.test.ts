@@ -144,7 +144,7 @@ test("owed_back ends the buy as owed back: its own line, no Retry, never Failed"
   assert.deepEqual(endView(owed), { k: "owedBack", reason: null });
   assert.equal(showsRetry(owed), false);
   assert.equal(WORDS.owedBack.text, "Owed back");
-  assert.equal(WORDS.owedBack.draft, true, "a new line: the owner's words, marked as a draft until picked");
+  assert.equal(WORDS.owedBack.draft, true, "a new line, marked as a draft until picked");
   // the answer of owed_back (a run that ended inside the tap's time) ends it the same way
   assert.deepEqual(outcome(l, "b1", { ok: true, result: { stage: "owed_back" } }, T0 + 9_000), owed);
 });
