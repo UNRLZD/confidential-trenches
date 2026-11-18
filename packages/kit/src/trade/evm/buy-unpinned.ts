@@ -372,7 +372,7 @@ export const evmMainnetVenues = () =>
         // the PoolManager's Initialize logs a block (checks/evm/quote.ts tailBudgetOf, card evm-scan-chain-tail): 8,003
         // pools in the 1,000,000 blocks to 59,100,991 (release 176's snapshot), so one event-alone request holds about
         // 1.25M blocks of them, past the depth: the tail always reads the event alone here
-        initialized: { pools: 8_003, blocks: 1_000_000 },
+        initialized: bare({ pools: 8_003, blocks: 1_000_000 }),
         parallel: 20,
         spares: Object.freeze([
           bare({ url: "https://base.gateway.tenderly.co", span: 1_000, parallel: 3 }),
@@ -567,7 +567,7 @@ export const evmMainnetVenues = () =>
         // pools in the 3,000,000 blocks to 117,445,721 (release 176's snapshot; 145 in the 53,872 blocks after it, read
         // on this provider 18 Nov 15:3xZ), so one event-alone request holds about 3.4M blocks of them; a start further
         // back, or none, scans by currency
-        initialized: { pools: 8_804, blocks: 3_000_000 },
+        initialized: bare({ pools: 8_804, blocks: 3_000_000 }),
         parallel: 2,
         orSpan: 100_000,
         spares: Object.freeze([bare({ url: "https://robinhood.daybreak-rpc.network", span: 2_000, parallel: 4 }), bare({ url: "https://robinhood.api.pocket.network", span: 2_000, parallel: 4 })]),

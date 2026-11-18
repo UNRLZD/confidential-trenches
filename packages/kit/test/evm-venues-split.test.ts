@@ -27,10 +27,11 @@ import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/
  *  it, e50afe03bdf2d0f151b32bda6f2a8bf1550ce7dd5a6edc807152dca6d6fdeab7, so nothing else moved. Then Base
  *  publicnode's in-flight pin went from 2 to 8 (card evm-first-quote-inside-the-kpi, same length): the list with its 2
  *  put back hashes to the pin before it, 335426e132ba2336276daf62450687750e090d388bab4c0cbcea4e0e15aec395, so nothing
- *  else moved. Then Robinhood's scan lost its orSpan (card evm-scan-chain-tail: a scan request names the event alone, no
- *  currency; 6,536 characters before it): the list with "orSpan":100000 put back after its parallel hashes to the pin
- *  before it, aaca27e76a69e65f0793ccd60e1759d25f0ecda7c44d8c8b73c58016fb7456f0, so nothing else moved. */
-const BEFORE = "b6160d304bb9840f1a591214523cc3a960360f1388e1c9ca506a447e12db206a";
+ *  else moved. Then each mainnet's scan
+ *  gained its measured Initialize rate, `initialized` (card evm-scan-chain-tail: the chain's tail spans and its flood
+ *  bound; 6,536 characters before it): the list with those two taken out hashes to the pin before it,
+ *  aaca27e76a69e65f0793ccd60e1759d25f0ecda7c44d8c8b73c58016fb7456f0, so nothing else moved. */
+const BEFORE = "9733121081eaa3907bfbf28b2e55da69b63a2640214f02f6b192bc7202394902";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
   const all = evmPoolVenues();
@@ -39,7 +40,7 @@ test("the two halves together are the venue list before the split, entry for ent
   assert.deepEqual(Object.keys(evmTestnetVenues()), ["base-sepolia", "robinhood-testnet"]);
   assert.deepEqual({ ...all }, { ...evmMainnetVenues(), ...evmTestnetVenues() });
   const json = JSON.stringify(all);
-  assert.equal(json.length, 6_520);
+  assert.equal(json.length, 6_628);
   assert.equal(createHash("sha256").update(json).digest("hex"), BEFORE);
 });
 
