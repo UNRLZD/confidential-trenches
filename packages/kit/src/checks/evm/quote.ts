@@ -1011,7 +1011,10 @@ const STALLED = new WeakMap<EvmRpc, () => boolean>();
  *  gate's `spare`): with one left the throttle refuses at once, so agreeing asks the next, and the throttled provider,
  *  held (timed), is asked after the rest by every quote until its hold ends (card base-quotes-inside-provider-limits: a
  *  throttled Base or Robinhood provider asked again 0.5, 1 and 1.5 s later drew up to 4 answers of 429 a request and
- *  warm taps of 3 to 7 s, sign live run 43546443270, 2026-11-14 02:38Z). */
+ *  warm taps of 3 to 7 s, sign live run 43546443270, 2026-11-14 02:38Z). A request that made no connection follows the
+ *  same rule (card evm-unreachable-moves-on): in a browser every failure with no response is one (a reset, a name that
+ *  did not resolve, Robinhood's own 429 that CORS refuses, "*,*"), so while another provider is left it goes there at
+ *  once, never asked of this one again 0.5, 1 and 1.5 s on; the last provider left is asked again as before. */
 async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Promise<readonly unknown[]> {
   let out: unknown;
   for (let i = 0; ; i++) {
@@ -1025,7 +1028,7 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Pro
     } catch (e) {
       // moved, or the quote's deadline passed in the gate (gated): nothing was sent
       if (e === MOVED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;
-      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || (e instanceof RateLimited && gate?.spare?.() === true)) {
+      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || gate?.spare?.() === true) {
         throw new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
       }
       await new Promise((r) => setTimeout(r, 500 * (i + 1)));
