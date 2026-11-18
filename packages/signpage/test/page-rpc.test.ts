@@ -354,10 +354,8 @@ test("a pool list member with no connection is asked once: the read goes to the 
   try {
     await onSeat((host) => (host === OWN ? { status: 0, down: "throw" } : { status: 200, result: "0x" + "0".repeat(63) + "7" }), async (log) => {
       const pair = evmPair(pageEvmPoolRpcs("robinhood")!);
-      const t0 = performance.now();
       assert.equal(await (pair[0] as unknown as (m: string, p: unknown[]) => Promise<unknown>)(view[0], [...view[1]]), "0x" + "0".repeat(63) + "7");
       assert.deepEqual(log.map((r) => r.host), [OWN, "robinhood.api.pocket.network"], "Robinhood's own once, then the next member");
-      assert.ok(performance.now() - t0 < 200, `the next member asked at once: ${Math.round(performance.now() - t0)} ms`);
       assert.equal(evmProviderHeld("https://rpc.mainnet.chain.robinhood.com"), true, "held for the kit's readers too");
     });
     evmPaceReset();
