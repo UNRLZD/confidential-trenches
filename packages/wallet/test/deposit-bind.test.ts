@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, beforeEach, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, vaultSyncStart } from "@blindfill/kit";
 import { base58 } from "@scure/base";
 import { IDBFactory } from "fake-indexeddb";
@@ -1953,7 +1954,7 @@ test("carry wait: the bind's stop reaches the send: an abort while the carry is 
   const stop = new AbortController();
   const silent = (async (_: unknown, init?: RequestInit) => {
     queueMicrotask(() => stop.abort(new Error("caller stopped")));
-    return new Promise<Response>((_ok, fail) => init?.signal?.addEventListener("abort", () => fail(init.signal!.reason)));
+    return untilAborted(init?.signal);
   }) as unknown as typeof fetch;
   const run = withSendClock(() => bindDeposit(SEED, t.args, { ...t.deps, fetchFn: silent, signal: stop.signal }));
   const ended = await Promise.race([run.then(() => "answered", (e: unknown) => (e as Error).message), new Promise<string>((ok) => setTimeout(() => ok("still waiting"), 2_000))]);

@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { HELPER_RPC_METHODS, VAULT_CONSTANTS } from "@blindfill/kit";
 import * as near from "../src/near/networks.ts";
+import { untilAborted } from "../src/abort.ts";
 
 test("mainnet's usdc is the kit's VAULT_CONSTANTS.TOKEN, and nearRpc's method is on the kit's NEAR list", () => {
   assert.equal(near.NEAR_NETWORKS.mainnet.usdc, VAULT_CONSTANTS.TOKEN);
@@ -93,7 +94,7 @@ test("nearRpc's HTTP failures keep their status and Retry-After; the caller's si
   assert.equal(near.rpcHttpError(res("Mon, 09 Nov 2026 02:00:05 GMT"), at).retryAfterMs, 5000);
   for (const bad of ["soon", "-1", "1.5", "Mon, 09 Nov 2026 01:59:00 GMT"]) assert.equal(near.rpcHttpError(res(bad), at).retryAfterMs, undefined, bad);
   // the signal reaches fetch: an abort rejects the request at once
-  const hangs = ((_u: string, init: RequestInit) => new Promise((_res, rej) => init.signal!.addEventListener("abort", () => rej(init.signal!.reason)))) as unknown as typeof fetch;
+  const hangs = ((_u: string, init: RequestInit) => untilAborted(init.signal)) as unknown as typeof fetch;
   const c = new AbortController();
   const p = near.nearRpc(drpc, hangs, 60_000).query({}, c.signal);
   c.abort(new Error("signed out"));

@@ -11,6 +11,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { HELPER_BIND_ANSWER_MS, HELPER_BIND_DEPOSIT_CAP, VAULT_CONSTANTS, VAULT_FIELD_P } from "@blindfill/kit";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -610,7 +611,7 @@ test("send: the caller's stop ends the wait at once, with the carry still out", 
     // a helper that never answers: only an abort of the request's own signal ends it
     const silent = (async (_: unknown, init?: RequestInit) => {
       asked++;
-      return new Promise<Response>((_ok, fail) => init?.signal?.addEventListener("abort", () => fail(init.signal!.reason)));
+      return untilAborted(init?.signal);
     }) as typeof fetch;
     const sent = sendDepositDelegate(OUT, silent, stop.signal);
     stop.abort();

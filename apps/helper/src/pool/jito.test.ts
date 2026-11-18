@@ -57,7 +57,9 @@ test("an answer over 16 KB or a timeout is a transport failure: every region is 
   const slow = (_u: string, init: RequestInit) =>
     new Promise<Response>((_, no) => {
       const later = setTimeout(() => order.push("1 s timer"), 1_000);
-      init.signal!.addEventListener("abort", () => (clearTimeout(later), order.push("abort"), no(new Error("timeout"))));
+      const cut = () => (clearTimeout(later), order.push("abort"), no(new Error("timeout")));
+      if (init.signal!.aborted) return cut();
+      init.signal!.addEventListener("abort", cut);
     });
   assert.equal((await jitoSender({ fetch: slow, timeoutMs: 20 }).send("AA==", SIG)).kind, "transport");
   assert.deepEqual(order, Array(8).fill("abort"), "every region aborted on timeoutMs, before a 1 s timer");
@@ -220,7 +222,9 @@ test("a default sender gives up on a hung region at about JITO_TIMEOUT_MS (2 s):
   const hung = (_u: string, init: RequestInit) =>
     new Promise<Response>((_, no) => {
       after = setTimeout(() => order.push("3 s timer"), 3_000);
-      init.signal!.addEventListener("abort", () => (order.push("abort"), no(new Error("timeout"))));
+      const cut = () => (order.push("abort"), no(new Error("timeout")));
+      if (init.signal!.aborted) return cut();
+      init.signal!.addEventListener("abort", cut);
     });
   const j = jitoSender({ fetch: hung, regions: [SOLANA_JITO_BLOCK_ENGINES[0]!] });
   const r = await j.send("AA==", SIG);

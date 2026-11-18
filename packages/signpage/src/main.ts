@@ -570,6 +570,8 @@ else {
       const ms = r?.end === "pending" ? CARRY_FOLLOW_MS : r?.end === "landed" ? POOL_RENT_BACK_SPACE_MIN_MS + Math.floor(Math.random() * (POOL_RENT_BACK_SPACE_MAX_MS - POOL_RENT_BACK_SPACE_MIN_MS)) : CARRY_PASS_MS;
       // a wait that never holds a process open (Node's unref; a browser's timer has none)
       await new Promise<void>((ok) => {
+        // a sign out during the pass above never fires again: the loop ends at once, not after the wait
+        if (signal.aborted) return ok();
         const t = setTimeout(ok, ms);
         (t as unknown as { unref?: () => void }).unref?.();
         signal.addEventListener("abort", () => (clearTimeout(t), ok()), { once: true });

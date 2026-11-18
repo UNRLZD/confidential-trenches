@@ -5,6 +5,7 @@
 //   node --test test/positions.test.ts
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { readFileSync, writeFileSync } from "node:fs";
 import { base58, base64 } from "@scure/base";
 import { IDBFactory } from "fake-indexeddb";
@@ -918,6 +919,7 @@ test("card wallets-found-in-one-read, the page: a sale tapped while a pass reads
             const a = amounts.get(address);
             done({ native: 0n, tokens: a == null ? new Map() : new Map([[MINT, { amount: a, frozen: false }]]), unreadable: [] });
           } };
+          if (signal?.aborted) return fail(signal.reason);
           queue.push(q);
           signal?.addEventListener("abort", () => (queue.splice(queue.indexOf(q) >>> 0, queue.includes(q) ? 1 : 0), fail(signal.reason)));
         }),
@@ -1005,7 +1007,7 @@ test("card wallets-found-in-one-read, the page: a sign out stops the sale's find
   // no buy record: the sale's list reads both Ws on the finder
   const w = await spentWallet(2);
   const signals: (AbortSignal | undefined)[] = [];
-  const stalls: HoldingsReader = { chain: "sol", read: (_a, signal) => (signals.push(signal), new Promise((_, fail) => signal?.addEventListener("abort", () => fail(signal.reason)))) };
+  const stalls: HoldingsReader = { chain: "sol", read: (_a, signal) => (signals.push(signal), untilAborted(signal)) };
   let list: Promise<unknown> | null = null;
   const sell = (host: () => { wallets(): Promise<unknown> }) => () => {
     list = host().wallets();
@@ -1361,7 +1363,9 @@ const heldCache = (answer: (run: PassRun, n: number) => PassResult | Promise<Pas
 };
 
 test("P2-2 (PROBE A): a sell's read that fails ends its hold: the next pass reads the finder, its retries counted from 0", async () => {
-  const h = heldCache((run) => new Promise<PassResult>((_r, rej) => run.signal.addEventListener("abort", () => rej(new Error("stopped")))));
+  const h = heldCache((run) => untilAborted(run.signal).catch(() => {
+    throw new Error("stopped");
+  }));
   h.c.first();
   const hold = h.c.preempt();
   assert.equal(h.runs[0]!.signal.aborted, true);
@@ -1783,10 +1787,14 @@ test("P2-2 (the load route): the rent backs a load resumes take the Ws through t
   await until(async () => ((await tp.positions()) ?? []).length === 1);
   c.state.fail = true;
   const before = c.calls.finder;
-  // past the load's drawn start of the rent backs (src/pool-testnet.ts BACKS_LOAD_MAX_MS)
+  // a tap on the page (card rent-backs-resume-private: a run before the page's first tap passes no W), then past the
+  // load's drawn start of the rent backs (src/pool-testnet.ts BACKS_LOAD_MAX_MS) and the tap's drawn time (a tap that is
+  // neither a buy nor a sell: the ride's gap, POOL_RENT_BACK_SPACE_MAX_MS at the most)
+  const { POOL_RENT_BACK_SPACE_MAX_MS } = await import("../src/pool-sell.ts");
   const realNow = Date.now;
   const opened = realNow();
-  Date.now = () => opened + BACKS_LOAD_MAX_MS;
+  assert.deepEqual(tp.flow({ kind: "pool.none", chain: "base" } as never, { id: "r1", sha: "00", progress: () => {} } as never), { error: "not_allowed" });
+  Date.now = () => opened + BACKS_LOAD_MAX_MS + POOL_RENT_BACK_SPACE_MAX_MS;
   try {
     await tp.stateRead();
     await until(() => timers.length === 1);
@@ -1839,7 +1847,7 @@ test("w04: a pass waiting for the seed's lock stops waiting when a sell's read s
       if (name !== WALLET_SEED_LOCK) return Promise.resolve(fn({ name }));
       const s = opts.signal;
       if (s) waits.push(s);
-      return new Promise((_r, rej) => s?.addEventListener("abort", () => rej(s.reason)));
+      return untilAborted(s);
     },
   };
   const sell = (host: () => { wallets(): Promise<unknown> }) => () => {

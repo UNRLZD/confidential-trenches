@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { beforeEach, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { resetPaces } from "../src/pace.ts";
 import * as P from "../src/pace.ts";
@@ -910,7 +911,7 @@ test("the two providers of an id are read at once", async () => {
 test("the signal aborts the view in flight and the busy wait: the read throws its reason at once", async () => {
   const hangs = (url: string): NearRpc => {
     const honest = provider(url, W({}));
-    return { name: url, query: (p, signal) => (isIdView(p) ? new Promise((_r, rej) => signal?.addEventListener("abort", () => rej(signal.reason))) : honest.query(p)) };
+    return { name: url, query: (p, signal) => (isIdView(p) ? untilAborted(signal) : honest.query(p)) };
   };
   const guard = (p: Promise<unknown>) => Promise.race([p, new Promise((_r, rej) => setTimeout(() => rej(new Error("still reading 1 s after the abort")), 1_000))]);
   const c = new AbortController();

@@ -2592,11 +2592,12 @@ export const READS_NONE = (): boolean => false;
  * other W gets its pass, the public seat's requests naming it alone, the Ws apart by POOL_RENT_BACK_GAP_MS or more; with
  * no answer from the helper, only the records not settled at their last pass. Its own buy proof is one more read on the
  * public seat, once (provenBuy).
+ * A run before the page's first tap (`opts.idle`, card rent-backs-resume-private) stops after that helper read: no pass.
  * True when a W's pass is to be tried again (rentBackOwed: a fault, a sweep sent, a claim owed, its buy not proven yet),
  * the helper's read failed, or the list stopped for a sell: the caller runs it again later, on its backoff
  * (pool-testnet.ts); false when nothing is left to try before W itself changes (read again at the next load).
  */
-export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = globalThis.navigator?.locks ?? null, opts: { ride?: true; held?: () => void } = {}): Promise<boolean> {
+export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = globalThis.navigator?.locks ?? null, opts: { ride?: true; held?: () => void; idle?: true } = {}): Promise<boolean> {
   if (!locks || !h.owed) return false;
   const owed = await h.owed.list();
   const program = h.pin.program;
@@ -2650,6 +2651,30 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
     todo.push(address);
   }
   if (todo.length === 0) return fault !== null || read === null;
+  // a run before the page's first tap (`opts.idle`; card rent-backs-resume-private): no W is passed, so a page load names
+  // no W, and no token account of one, to the public seat; the helper's find read above is the run's one read of them,
+  // the one the positions' pass already makes of every W. Each W waits as its record stands (no pass counted, a ride
+  // kept booked: held) for a run after the tap, whose pass reads W on both seats before it signs anything. Its RETURNING
+  // row takes W's lamports from that helper read, as a held W's does (heldListing): display alone, never signed on; the
+  // record is written only when the amount changed, its pass count and `seen` as they stood
+  if (opts.idle === true) {
+    for (const address of todo) {
+      const lamports = read?.get(address)?.lamports;
+      if (lamports === undefined) continue;
+      const f = found.find((x) => x.address === address);
+      const go = await withHolds(locks, address, true, wait, async () => {
+        const o = (await h.owed!.list()).find((r) => r.address === address) ?? (f ? { address, l: f.l.toString(), j: f.j, mints: [], passes: 0 } : undefined);
+        if (!o) return;
+        const shown = heldListing(o, f !== undefined, listed.find((x) => x.address === address)?.evidence, lamports);
+        if (shown === undefined || o.lamports === shown.toString()) return;
+        await h.owed!.put({ ...o, lamports: shown.toString() });
+      });
+      // a sell holds the sell lock: the rest wait for the next run
+      if (!go) return true;
+    }
+    opts.held?.();
+    return fault !== null || read === null;
+  }
   // spaced (review 2 P3-e of c0dd55d02): one leftover W's pass that sends a transaction a load, none before the gap after
   // the device's last rent-back send has passed, so no two of the device's Ws close or sweep close together
   // (RentBackSpacing): a pass held so (`quiet`) reads and settles as any, and ends before it would send (HELD)

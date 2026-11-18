@@ -8,6 +8,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { IDBFactory } from "fake-indexeddb";
 import type { DepositRecord } from "@blindfill/wallet/store";
 import type { OneClickRequest } from "../../kit/src/checks/oneclick.ts";
@@ -76,7 +77,7 @@ function helper(net: Net = {}) {
     if (net.hang) {
       sent.push({ url: u, method });
       return new Promise<Response>((_ok, no) => {
-        if (net.hang === "heard") init?.signal?.addEventListener("abort", () => no(init.signal!.reason), { once: true });
+        if (net.hang === "heard") untilAborted(init?.signal).catch(no);
       });
     }
     if (u === DEPOSIT_TOKENS_URL) {

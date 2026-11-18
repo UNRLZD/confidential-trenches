@@ -3,13 +3,14 @@
 // operator, two answers that differ, one operator alone.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { untilAborted } from "../src/abort.ts";
 import { EVM_READ_BUDGET_MS, EVM_READ_CALL_MS, EVM_READ_REST_MS, EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, secretScrubber, SECRET_SCRUB_MAX, type EvmReadSeat } from "../src/index.ts";
 
 type Fake = { calls: number; answer: (signal: AbortSignal) => Promise<string> };
 const ok = (v: string): Fake => ({ calls: 0, answer: async () => v });
 const refuses = (m: string): Fake => ({ calls: 0, answer: async () => Promise.reject(new Error(m)) });
 // a seat that never answers until its call is cut
-const hangs = (): Fake => ({ calls: 0, answer: (signal) => new Promise((_, no) => signal.addEventListener("abort", () => no(signal.reason), { once: true })) });
+const hangs = (): Fake => ({ calls: 0, answer: (signal) => untilAborted(signal) });
 const seats = (list: [string, Fake][]): EvmReadSeat<Fake>[] => list.map(([url, rpc]) => ({ url, rpc }));
 const f = (rpc: Fake, signal: AbortSignal) => (rpc.calls++, rpc.answer(signal));
 const eq = (a: string, b: string) => a === b;

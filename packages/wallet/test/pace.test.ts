@@ -5,6 +5,7 @@
 // pacedFetch by default.
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import * as P from "../src/pace.ts";
 import { bindRpc } from "../src/deposit/bind.ts";
@@ -53,7 +54,7 @@ test("a wait its caller ends gives its slot back, sends nothing and throws the c
 });
 
 test("the deadline starts at the slot and still bounds the request", async () => {
-  const f = P.pacedFetch(FAST, (_u, init) => new Promise((_r, rej) => init?.signal?.addEventListener("abort", () => rej(init.signal!.reason))), 100);
+  const f = P.pacedFetch(FAST, (_u, init) => untilAborted(init?.signal), 100);
   const t = performance.now();
   await assert.rejects(f(FAST), (e: Error) => e.name === "TimeoutError");
   assert.ok(performance.now() - t < 2_000);
