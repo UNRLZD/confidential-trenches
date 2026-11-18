@@ -7,8 +7,9 @@
 // the device's price). What it holds:
 //   - the served /app.js is the one index.html pins (its sha384), and in it the read's mark, the words its refusal of an
 //     answer it cannot check names (MARK), as the minifier keeps them;
-//   - on mainnet 1Click now, through the helper's proxy, the page's own read (readOneClickLeast, run here on this
-//     checkout's code, 1Click's signatures checked under the kit's pinned keys) ends, into SOL, Base's ETH and
+//   - on mainnet 1Click now, through the helper's proxy, the page's own read (readOneClickLeast, run on this checkout's
+//     code by packages/signpage/scripts/least-read.mjs as a child, since a check may import no Blindfill code past the
+//     kit's entry; 1Click's signatures checked under the kit's pinned keys) ends, into SOL, Base's ETH and
 //     Robinhood's ETH, at a least, and that least is the amount of the last answer 1Click quoted. It names each least
 //     beside 1Click's own N, unchanged or raised and why. The price the floors are held at is 1Click's own /v0/tokens
 //     price of the pool's coin (the page uses its own pool price reads, which this check does not make). A read refused
@@ -26,11 +27,11 @@
 // PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. Reads only: dry quotes name no account of anyone's, no
 // deposit address is made and nothing is sent.
 import "../net-window.mjs";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readOneClickLeast } from "../../packages/signpage/src/cash-to-pool.ts";
 
 const KEY = "cash-to-pool-least-signed";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -45,6 +46,9 @@ export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
 const BLIPS = /no least in \d+ tries|no least within \d+ ms/;
 const N = /"message"\s*:\s*"Amount is too low for bridge, try at least (\d{1,30})"/;
 const AMOUNT = /^(0|[1-9][0-9]{0,29})$/;
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+/** The page's own read, run as a child on this checkout (packages/signpage/scripts/least-read.mjs). */
+const READ = path.join(REPO, "packages/signpage/scripts/least-read.mjs");
 
 /** 1Click's decimal USD price as the page's { price, expo }; null when it is not one. */
 export function priceOf(usd) {
@@ -140,30 +144,20 @@ export async function read({ fetchFn = fetch, local } = {}) {
   const index = await get("/");
   const js = await get("/app.js");
   const tokens = await (await fetchFn(TOKENS, { signal: AbortSignal.timeout(15_000) })).json();
-  const chains = {};
+  const prices = {};
+  const usds = {};
   for (const [chain, asset] of Object.entries(CHAINS)) {
-    const usd = Array.isArray(tokens) ? tokens.find((t) => t?.assetId === asset)?.price : undefined;
-    const asks = [];
-    const recording = async (u, init) => {
-      const amount = JSON.parse(String(init.body)).amount;
-      try {
-        const r = await fetchFn(u, init);
-        const text = await r.text();
-        asks.push({ amount, status: r.status, text: unsigned(text).slice(0, 4096) });
-        return new Response(text, { status: r.status });
-      } catch (e) {
-        asks.push({ amount, status: 0, text: `no answer: ${e?.name ?? "failed"}` });
-        throw e;
-      }
-    };
-    const price = priceOf(usd);
+    usds[chain] = Array.isArray(tokens) ? tokens.find((t) => t?.assetId === asset)?.price : undefined;
+    prices[chain] = priceOf(usds[chain]);
     // no price to hold the floors at is this check's gap, never the page's verdict
-    if (price === null) throw new Error(`1Click's /v0/tokens gives no USD price of ${asset}`);
-    const verdict = await readOneClickLeast(chain, recording, Date.now(), { price: () => price }).then(
-      (least) => ({ least: least.toString() }),
-      (e) => ({ error: String(e?.message ?? e) }),
-    );
-    chains[chain] = { usd: String(usd), asks, ...verdict };
+    if (prices[chain] === null) throw new Error(`1Click's /v0/tokens gives no USD price of ${asset}`);
+  }
+  const ran = JSON.parse(execFileSync(process.execPath, [READ, JSON.stringify(prices)], { cwd: REPO, encoding: "utf8", timeout: 120_000, maxBuffer: 8 << 20 }));
+  const chains = {};
+  for (const chain of Object.keys(CHAINS)) {
+    const r = ran[chain] ?? {};
+    const asks = (Array.isArray(r.asks) ? r.asks : []).map((x) => ({ amount: x.amount, status: x.status, text: unsigned(String(x.text)).slice(0, 4096) }));
+    chains[chain] = { usd: String(usds[chain]), asks, ...("least" in r ? { least: r.least } : { error: String(r.error ?? "the read gave no verdict") }) };
   }
   return { index, sha384: sha384(js), mark: js.includes(MARK), chains };
 }

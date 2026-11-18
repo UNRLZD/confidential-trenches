@@ -1,10 +1,10 @@
 // node --test scripts/live-checks/cash-to-pool-least-signed.test.mjs: the live check cash-to-pool-least-signed, replayed.
-// cash-to-pool-least-signed.answers.json holds two real runs, 2026-11-18 23:20Z, read only (a `from` field added), each
+// cash-to-pool-least-signed.answers.json holds two real runs, 2026-11-18 23:53Z, read only (a `from` field added), each
 // with mainnet 1Click's answers through the helper's proxy (signatures left out, as recorded) and the verdict of the
 // page's own read over them, signatures checked in the run:
 // - good_built: the card branch's build (build-app.mjs --out, --local): PASS, a least on every chain from a signed quote
-//   the kit's check passed (into SOL 1Click refused its own N 75,864 and quoted a hundredth more, 76,622; into Base's and
-//   Robinhood's ETH the signed quote at 1Click's N fails the kit's floor, and twice it passes: 2,006 and 35,756);
+//   the kit's check passed (into SOL 1Click refused its own N 76,520 and quoted a hundredth more, 77,285; into Base's and
+//   Robinhood's ETH the signed quote at 1Click's N fails the kit's floor, and twice it passes: 2,024 and 36,028);
 // - bad_live_before: SIGN_HOST as served before the card: FAIL, its bundle sets the least from no checked answer.
 // And plants on the good run, each failing on its own line: the read refused for an answer that fails the check (a
 // signature broken), a least that is no amount 1Click quoted, 1Click's blips alone (INCONCLUSIVE), and no record.
@@ -22,9 +22,9 @@ test("the card's build, with the page's read over 1Click's signed answers, passe
   assert.equal(v.verdict, "PASS", v.lines.join("\n"));
   assert.equal(EXIT[v.verdict], 0);
   assert.deepEqual(bad(v), []);
-  assert.ok(v.lines.some((l) => /^ok solana: the page's least 76622 .*raised from 1Click's N 75864 \(75864: 1Click refused it\)/.test(l)), v.lines.join("\n"));
-  assert.ok(v.lines.some((l) => /^ok base: the page's least 2006 .*\(1003: its signed quote fails the kit's floor\)/.test(l)), v.lines.join("\n"));
-  assert.ok(v.lines.some((l) => /^ok robinhood: the page's least 35756 .*\(17878: its signed quote fails the kit's floor\)/.test(l)), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => /^ok solana: the page's least 77285 .*raised from 1Click's N 76520 \(76520: 1Click refused it\)/.test(l)), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => /^ok base: the page's least 2024 .*\(1012: its signed quote fails the kit's floor\)/.test(l)), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => /^ok robinhood: the page's least 36028 .*\(18014: its signed quote fails the kit's floor\)/.test(l)), v.lines.join("\n"));
 });
 
 test("SIGN_HOST before the card fails: its bundle sets the least from no checked answer", () => {
@@ -37,7 +37,7 @@ test("SIGN_HOST before the card fails: its bundle sets the least from no checked
 test("a read refused for an answer that fails the check fails: the device would plan no move", () => {
   const a = copy(A.good_built);
   delete a.chains.solana.least;
-  a.chains.solana.error = "1Click's answer at 76622 fails the device's check: quote check failed (signature): the signature does not verify under the pinned 1Click keys";
+  a.chains.solana.error = "1Click's answer at 77285 fails the device's check: quote check failed (signature): the signature does not verify under the pinned 1Click keys";
   const v = judge(a);
   assert.equal(v.verdict, "FAIL");
   assert.deepEqual(bad(v).length, 1, v.lines.join("\n"));
@@ -50,11 +50,11 @@ test("a read refused for an answer that fails the check fails: the device would 
 
 test("a least that is not the amount of the last answer 1Click quoted fails: N read off a 400, or a quote under it", () => {
   const a = copy(A.good_built);
-  a.chains.solana.least = "75864"; // 1Click's unsigned N, which it refused
-  assert.match(bad(judge(a))[0], /^BAD solana: the page's least 75864 is not the amount of the last answer 1Click quoted \(76622, HTTP 201\)/);
+  a.chains.solana.least = "76520"; // 1Click's unsigned N, which it refused
+  assert.match(bad(judge(a))[0], /^BAD solana: the page's least 76520 is not the amount of the last answer 1Click quoted \(77285, HTTP 201\)/);
   const b = copy(A.good_built);
   b.chains.robinhood.asks = b.chains.robinhood.asks.slice(0, 2); // the 400s alone
-  assert.match(bad(judge(b))[0], /^BAD robinhood: the page's least 35756 is not the amount of the last answer 1Click quoted \(10, HTTP 400\)/);
+  assert.match(bad(judge(b))[0], /^BAD robinhood: the page's least 36028 is not the amount of the last answer 1Click quoted \(10, HTTP 400\)/);
 });
 
 test("1Click's blips alone are INCONCLUSIVE (exit 3, read again), never PASS or FAIL", () => {
