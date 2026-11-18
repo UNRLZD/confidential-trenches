@@ -81,9 +81,10 @@ const INTURN = (h) => new RegExp(String.raw`async function (?<t>${I})\((${I}),($
 // caller gives one: the route's 30 s in doubt in held bounds it), a whole round answered
 const READS = (m, t) => new RegExp(String.raw`async read\((${I}),(${I}),(${I})=1\/0\)\{[^]{0,600}?await ${esc(t)}\((${I})\.gate,\3,(${I}),\2,async (${I})=>\{try\{(${I})=await (${I})\((${I})\)`);
 const ANSWERED = (m, t) => new RegExp(READS(m, t).source + String.raw`,\4\.gate\.answered\(\6\)`);
-// a call: `let e = x.gate.epoch(); try { return await x.rpc(m, p) } catch (n) { let f = failure(m, n); throw f.http ===
-// 429 && x.gate.throttled(e, Math.max(f.afterMs ?? 0, x.hint?.() ?? 0)), ...`
-const THROTTLED = new RegExp(String.raw`let (${I})=(${I})\.gate\.epoch\(\);try\{return await \2\.rpc\((${I}),(${I})\)\}catch\((${I})\)\{let (${I})=${I}\(\3,\5\);throw \6\.http===429&&\2\.gate\.throttled\(\1,Math\.max\(\6\.afterMs\?\?0,\2\.hint\?\.\(\)\?\?0\)\)`);
+// a call: `let e = x.gate.epoch(); try { return await x.rpc(m, p, signal) } catch (n) { let f = failure(m, n); throw
+// f.http === 429 && x.gate.throttled(e, Math.max(f.afterMs ?? 0, x.hint?.() ?? 0)), ...`; the read's signal handed to
+// the provider (card kit-rpc-client-takes-a-signal)
+const THROTTLED = new RegExp(String.raw`let (${I})=(${I})\.gate\.epoch\(\);try\{return await \2\.rpc\((${I}),(${I}),(${I})\)\}catch\((${I})\)\{let (${I})=${I}\(\3,\6\);throw \7\.http===429&&\2\.gate\.throttled\(\1,Math\.max\(\7\.afterMs\?\?0,\2\.hint\?\.\(\)\?\?0\)\)`);
 // the list: `u = 1/0; ...; x.holdings = await pools[p].reader.read(address, opts.signal, u)`: no bound from the list's
 // start, so a long list is not refused for its length; the route's own bound (held's doubt) ends one throttled for good
 const BY = () => new RegExp(String.raw`[,\s;](${I})=1\/0;[^]{0,800}?\.reader\.read\(${I},${I}\.signal,\1\)`);

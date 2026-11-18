@@ -100,6 +100,8 @@ test("planted in the bundle's excerpt: each rule broken in place FAILs", () => {
     "the gate waited once, not until it opens": [at(/for\(let ([\w$]+)=([\w$]+)\.left\(\);\1>0;\1=\2\.left\(\)\)/), (s) => s.replace(/for\(let ([\w$]+)=([\w$]+)\.left\(\);\1>0;\1=\2\.left\(\)\)/, "for(let $1=$2.left();$1>0;$1=0)"), "held"],
     "no turn taken": [at(/let [\w$]+=await [\w$]+\.turn\([\w$]+\);/), () => "", "turn"],
     "the turn never given back": [at(/finally\{[\w$]+\(\)\}\}/), () => "finally{}}", "turn"],
+    // card kit-rpc-client-takes-a-signal (its piece re-cut from that build: the read's signal handed to the provider)
+    "a call that hands the provider no signal": [at(/return await e\.rpc\(t,n,r\)/), (s) => s.replace("e.rpc(t,n,r)", "e.rpc(t,n)"), "throttled"],
     "a call's 429 never told to the gate": [at(/[\w$]+\.gate\.throttled\([\w$]+,Math\.max\([\w$]+\.afterMs\?\?0,[\w$]+\.hint\?\.\(\)\?\?0\)\)/), () => "void 0", "throttled"],
     "a whole round never told to the gate": [at(/,[\w$]+\.gate\.answered\([\w$]+\)/), () => "", "answered"],
     "a bound from the list's start": [at(/[,\s;][\w$]+=1\/0;/), (s) => s.replace("1/0", "Date.now()+3e4"), "by"],

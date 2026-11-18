@@ -58,8 +58,9 @@ test("the facts read from a bundle", () => {
     "catch(e){if(e instanceof FN)return e.code===`not_landed`?{stage:`not_landed`,txs:l}:c?{stage:`part_filled`,txs:s}:e.code===`failed`&&d().length?{stage:`sent`,txs:d()}:{error:e.code};" +
     "if(e instanceof Qv)return c?{stage:`part_filled`,txs:s}:d().length?{stage:`sent`,txs:d()}:{error:`failed`};" +
     "if(c)return{stage:`part_filled`,txs:s};if(d().length)return{stage:`sent`,txs:d()};if(e instanceof mm)return{error:`down`};throw e}" +
-    "function $p(e,t,n){let r=Qp(e,t),i=Jp();let a={t:i,started:!1},s=t=>{a.t=Jp(),a.started=!0;let c=Kp;Kp=r;try{return e(n,t)}finally{Kp=c,a.t=Jp()}};return{run:s,wait:null}}" +
-    "function sm(e,t=Vp){let n=Gp.get(e)??e,r=Qp(n,t),i=(n,i)=>{if(Kp===r)return e(n,i);let a=$p(e,t,n);return a.wait?a.wait.then(()=>a.run(i)):a.run(i)};return Gp.set(i,n),i}";
+    "function $p(e,t,n){let r=Qp(e,t),i=Jp();let a={t:i,started:!1},s=(t,o)=>{a.t=Jp(),a.started=!0;let c=Kp;Kp=r;try{return e(n,t,o)}finally{Kp=c,a.t=Jp()}};return{run:s,wait:null}}" +
+    // card kit-rpc-client-takes-a-signal: the paced wrapper and its slot take the call's signal and hand it on
+    "function sm(e,t=Vp){let n=Gp.get(e)??e,r=Qp(n,t),i=(n,i,o)=>{if(Kp===r)return e(n,i,o);let a=$p(e,t,n);return a.wait?a.wait.then(()=>a.run(i,o)):a.run(i,o)};return Gp.set(i,n),i}";
   const f = facts("", js);
   assert.deepEqual({ ...f, sha384: null }, { index: "", sha384: null, unread: true, one: true, pick: true, record: true, landed: true, paced: true });
   // each mark changed in place, once (a mark found twice or not at all is a broken test, never a pass)
@@ -91,10 +92,13 @@ test("the facts read from a bundle", () => {
   assert.equal(planted("&&c===0?{error:`not_funded`}", "&&s.length===0?{error:`not_funded`}").landed, false, "the no-ask pass, on the list");
   // the slot calls the bare provider (d57ecfb9: try{return n(...)} with no queue marked), or the paced wrapper never
   // sees its own slot: FAIL
-  assert.equal(planted("let c=Kp;Kp=r;try{return e(n,t)}finally{Kp=c,", "try{return e(n,t)}finally{").paced, false);
-  assert.equal(planted("{if(Kp===r)return e(n,i);let a", "{let a").paced, false);
+  assert.equal(planted("let c=Kp;Kp=r;try{return e(n,t,o)}finally{Kp=c,", "try{return e(n,t,o)}finally{").paced, false);
+  assert.equal(planted("{if(Kp===r)return e(n,i,o);let a", "{let a").paced, false);
+  // card kit-rpc-client-takes-a-signal: the slot's call, or the wrapper's own call inside its slot, drops the signal: FAIL
+  assert.equal(planted("try{return e(n,t,o)}", "try{return e(n,t)}").paced, false, "the slot drops the signal");
+  assert.equal(planted("return e(n,i,o);let a", "return e(n,i);let a").paced, false, "the wrapper drops the signal");
   // B1: the paced wrapper hands rpcSlot the bare provider under the wrapper it was given, the guard kept: FAIL
-  assert.equal(planted("i=(n,i)=>{if(Kp===r)return e(n,i);let a=$p(e,t,n);", "i=(m,i)=>{if(Kp===r)return e(m,i);let a=$p(n,t,m);").paced, false, "B1");
+  assert.equal(planted("i=(n,i,o)=>{if(Kp===r)return e(n,i,o);let a=$p(e,t,n);", "i=(m,i,o)=>{if(Kp===r)return e(m,i,o);let a=$p(n,t,m);").paced, false, "B1");
   // B2': rpcSlot calls the bare provider it takes at its top (as 4c38ff10 minified it), the queue mark kept: FAIL
-  assert.equal(planted("function $p(e,t,n){let r=Qp(e,t),i=Jp();", "function $p(e,t,n){let r=Qp(e,t),b=Gp.get(e)??e,i=Jp();", "try{return e(n,t)}", "try{return b(n,t)}").paced, false, "B2'");
+  assert.equal(planted("function $p(e,t,n){let r=Qp(e,t),i=Jp();", "function $p(e,t,n){let r=Qp(e,t),b=Gp.get(e)??e,i=Jp();", "try{return e(n,t,o)}", "try{return b(n,t,o)}").paced, false, "B2'");
 });
