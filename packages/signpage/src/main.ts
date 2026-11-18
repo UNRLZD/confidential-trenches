@@ -34,6 +34,8 @@
 //   Sign out; the backup's Saved, which opens the deposit gate of a seed whose 12 words are the only copy (W:888), so a
 //   lined-up click cannot mark words saved that the user never saw; Backup, which draws the 12 words; and Copy, which
 //   puts them on the clipboard, so a lined-up burst cannot draw the words and copy them for a paste the page asks for.
+//   New account (card wallet-signin-wallet): it opens a wallet's prompt, not the browser's own sheet, and makes a seed
+//   and its 12 words once the wallet signs, so a lined-up click cannot raise that prompt.
 //   Create passkey and Use passkey open the browser's own passkey sheet, which carries the browser's protection.
 // - The page shows public values only, but for the backup screen's 12 words: the account's profile key T_0 (wallet.md:68,
 //   a public key, never a NEAR account or money), in data-account, so a check can compare it. The entropy and seed64
@@ -1211,7 +1213,7 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
-const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out", "allow", "confirm", "disconnect"]);
+const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out", "allow", "confirm", "disconnect", "new-account"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
