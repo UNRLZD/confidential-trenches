@@ -127,8 +127,8 @@ export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>
 /** One testnet RPC as the page reads it: the helper's route with the kit's HELPER_FETCH_INIT (as pageHelperRpc), any
  *  other directly; both with the page's retry, the helper's route with `helperRetry` when a read names it (a pool
  *  settle's and restore's, pageSolanaSettleRpcs). */
-export const testnetRpc = (url: string, helperRetry: SolanaRpcRetry = SOLANA_RPC_RETRY, kind: ReadKind = "trade"): SolanaRpc =>
-  url.startsWith(`${TRADE_HELPER}/`) ? lanedRpc(url, { kind, retry: helperRetry, init: HELPER_FETCH_INIT }) : pageRpc(url, kind);
+export const testnetRpc = (url: string, helperRetry: SolanaRpcRetry = SOLANA_RPC_RETRY, kind: ReadKind = "trade", spare = false): SolanaRpc =>
+  url.startsWith(`${TRADE_HELPER}/`) ? lanedRpc(url, { kind, retry: helperRetry, init: HELPER_FETCH_INIT }) : pageRpc(url, kind, spare);
 /** How long a state read waits for each queue's open and view turn, and for each chain's positions, before it answers
  *  without it: the kit's state timeout (kit/src/signpage/client.ts SIGNPAGE_TIMEOUT_MS.state), past which the app no
  *  longer waits for this read (card move-sends-or-says-why: one read that never settles stops every later push). */
@@ -323,9 +323,15 @@ export const pageEvmPoolUrls = (chain: "base" | "robinhood"): readonly string[] 
 export const pageEvmPoolRpcs = (chain: "base" | "robinhood", kind: ReadKind = "trade"): readonly EvmRpc[] | null => {
   const urls = pageEvmPoolUrls(chain);
   if (urls.length < 2) return null;
-  const list = urls.map((u) => testnetRpc(u, SOLANA_RPC_RETRY, kind));
-  if (POOL_TESTNET) return list;
-  const spares = MAINNET_POOL_LOGLESS[chain].map((u) => Object.assign(testnetRpc(u, SOLANA_RPC_RETRY, kind), { logs: false }));
+  if (POOL_TESTNET) return urls.map((u) => testnetRpc(u, SOLANA_RPC_RETRY, kind));
+  // a mainnet member with a member after it (card robinhood-reads-draw-no-revert): a provider fault is not asked of it
+  // again by its lane, the pair's seat walks to the next member at once (wallet pool/evm.ts evmPair), as the kit's own
+  // transport moves on (card evm-unreachable-moves-on); release 175's walk asked each of the pool's five views twice of
+  // Robinhood's own inside its throttle. The list's last member has none after it: its lane asks it again as before
+  const logless = MAINNET_POOL_LOGLESS[chain];
+  const lastOf = chain === "robinhood" || logless.length === 0 ? urls.length - 1 : -1;
+  const list = urls.map((u, i) => testnetRpc(u, SOLANA_RPC_RETRY, kind, i !== lastOf));
+  const spares = logless.map((u) => Object.assign(testnetRpc(u, SOLANA_RPC_RETRY, kind, true), { logs: false }));
   // Robinhood's second seat is the helper's keyed-only route (card first-sign-in-reads-fast-on-live): no keyless
   // provider pages the pool's life fast from a page (Pocket's backends 10,001 blocks, GlobalStake 28-42 s, read 14 Nov
   // 16:06-16:42Z), where the route walked it in 1.3 s; its own RPC, device-direct, is the other operator, and every log

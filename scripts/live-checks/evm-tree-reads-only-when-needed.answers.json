@@ -119,5 +119,116 @@
         14
       ]
     }
+  },
+  "release175": {
+    "at": "2026-11-18T13:01:47.141Z",
+    "browser": "Chrome 157.0.8103.79, sandbox on",
+    "signDir": null,
+    "ms": 170015,
+    "loads": 6,
+    "posts": {
+      "base.rpc.blxrbdn.com": 246,
+      "ct-api.unrealized.trade": 155,
+      "base-rpc.publicnode.com": 300,
+      "rpc.mainnet.chain.robinhood.com": 168,
+      "base.gateway.tenderly.co": 2,
+      "base-mainnet.public.blastapi.io": 16,
+      "mainnet.base.org": 30,
+      "base.api.pocket.network": 2,
+      "robinhood-rpc.publicnode.com": 50,
+      "robinhood.drpc.org": 42,
+      "robinhood.rpc.blxrbdn.com": 6,
+      "robinhood.api.pocket.network": 31
+    },
+    "methods": {
+      "eth_chainId": 109,
+      "eth_blockNumber": 80,
+      "eth_getBlockByNumber": 350,
+      "eth_call": 583,
+      "eth_getLogs": 44
+    },
+    "logs": {
+      "index": 0,
+      "scan": 0,
+      "other": 44
+    },
+    "refused": {
+      "robinhood.drpc.org rpc error 3 eth_call 0x9306359433127c4f3be426f6faeb00a3c41f66db:0x25faf2a3": 1,
+      "robinhood-rpc.publicnode.com rpc error 3 eth_call 0x9306359433127c4f3be426f6faeb00a3c41f66db:0x25faf2a3": 1,
+      "rpc.mainnet.chain.robinhood.com failed net::ERR_FAILED [eth_call 0x9306359433127c4f3be426f6faeb00a3c41f66db:0x33d09200]": 2,
+      "rpc.mainnet.chain.robinhood.com failed net::ERR_FAILED [eth_call 0x9306359433127c4f3be426f6faeb00a3c41f66db:0xfdab463d]": 2,
+      "rpc.mainnet.chain.robinhood.com failed net::ERR_FAILED [eth_call 0x9306359433127c4f3be426f6faeb00a3c41f66db:0xa8f0f95a]": 2,
+      "rpc.mainnet.chain.robinhood.com failed net::ERR_FAILED [eth_call 0x9306359433127c4f3be426f6faeb00a3c41f66db:0x50f3e219]": 2,
+      "rpc.mainnet.chain.robinhood.com failed net::ERR_FAILED [eth_call 0x9306359433127c4f3be426f6faeb00a3c41f66db:0x4181445b]": 2
+    },
+    "byLoad": {
+      "base": [
+        0,
+        1,
+        7,
+        8,
+        3,
+        7
+      ],
+      "robinhood": [
+        0,
+        0,
+        0,
+        0,
+        10,
+        8
+      ]
+    }
+  },
+  "robinhoodNoRevertLocal": {
+    "at": "2026-11-18T13:37:46.425Z",
+    "browser": "Chrome 157.0.8103.79, sandbox on",
+    "signDir": "local build",
+    "ms": 173932,
+    "loads": 6,
+    "posts": {
+      "base.rpc.blxrbdn.com": 221,
+      "ct-api.unrealized.trade": 125,
+      "base-rpc.publicnode.com": 279,
+      "rpc.mainnet.chain.robinhood.com": 142,
+      "robinhood.api.pocket.network": 3,
+      "rpc-robinhood.globalstake.io": 4,
+      "base.gateway.tenderly.co": 2,
+      "base-mainnet.public.blastapi.io": 35,
+      "mainnet.base.org": 6,
+      "robinhood-rpc.publicnode.com": 27,
+      "robinhood.drpc.org": 19
+    },
+    "methods": {
+      "eth_chainId": 93,
+      "eth_blockNumber": 68,
+      "eth_getBlockByNumber": 300,
+      "eth_call": 412,
+      "eth_getLogs": 44
+    },
+    "logs": {
+      "index": 0,
+      "scan": 0,
+      "other": 44
+    },
+    "refused": {},
+    "byLoad": {
+      "base": [
+        0,
+        1,
+        7,
+        6,
+        3,
+        8
+      ],
+      "robinhood": [
+        0,
+        0,
+        0,
+        0,
+        7,
+        12
+      ]
+    }
   }
 }
