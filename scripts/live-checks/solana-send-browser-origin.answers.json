@@ -1,0 +1,156 @@
+{
+ "_note": "recorded: SIGN_HOST and the send paths read with the page Origin at readAt (the CSP still names api.mainnet-beta: FAIL on that line alone). good: recorded with its connect-src the committed packages/signpage/public/_headers one, until the first sign deploy of this card is recorded. bad: read with --rpc https://api.mainnet-beta.solana.com, the kit default before this card: FAIL on its 403 and the CSP.",
+ "good": {
+  "readAt": "2026-11-18T12:10:25.853Z",
+  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://solana.api.pocket.network https://public.rpc.solanavibestation.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://base.rpc.blxrbdn.com https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://robinhood.api.pocket.network https://rpc-robinhood.globalstake.io https://robinhood.daybreak-rpc.network; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker walk-worker",
+  "rpc": {
+   "url": "https://solana-rpc.publicnode.com",
+   "preflight": {
+    "status": 204,
+    "acao": "*",
+    "allowHeaders": "content-type"
+   },
+   "post": {
+    "result": {
+     "context": {
+      "apiVersion": "4.4.1",
+      "slot": 470929765
+     },
+     "value": {
+      "blockhash": "DRVLvFuzFoSxpVEqJikUVasDntzjZJfzmBMYEEvSGwyY",
+      "lastValidBlockHeight": 448944511
+     }
+    },
+    "status": 200,
+    "acao": "*"
+   }
+  },
+  "jito": {
+   "preflight": {
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "allowHeaders": "content-type, x-grpc-web, x-user-agent, x-requested-with, accept, origin, authorization, Access-Control-Allow-Origin, Solana-Client"
+   },
+   "post": {
+    "error": {
+     "code": -32601,
+     "message": "Invalid method",
+     "data": null
+    },
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade"
+   }
+  },
+  "sender": {
+   "preflight": {
+    "status": 200,
+    "acao": "*",
+    "allowHeaders": "Content-Type, Authorization"
+   },
+   "ping": {
+    "status": 200,
+    "acao": "*"
+   }
+  }
+ },
+ "recorded": {
+  "readAt": "2026-11-18T12:10:25.853Z",
+  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://solana.api.pocket.network https://public.rpc.solanavibestation.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://base.rpc.blxrbdn.com https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://robinhood.api.pocket.network https://rpc-robinhood.globalstake.io https://robinhood.daybreak-rpc.network; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker walk-worker",
+  "rpc": {
+   "url": "https://solana-rpc.publicnode.com",
+   "preflight": {
+    "status": 204,
+    "acao": "*",
+    "allowHeaders": "content-type"
+   },
+   "post": {
+    "result": {
+     "context": {
+      "apiVersion": "4.4.1",
+      "slot": 470929765
+     },
+     "value": {
+      "blockhash": "DRVLvFuzFoSxpVEqJikUVasDntzjZJfzmBMYEEvSGwyY",
+      "lastValidBlockHeight": 448944511
+     }
+    },
+    "status": 200,
+    "acao": "*"
+   }
+  },
+  "jito": {
+   "preflight": {
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "allowHeaders": "content-type, x-grpc-web, x-user-agent, x-requested-with, accept, origin, authorization, Access-Control-Allow-Origin, Solana-Client"
+   },
+   "post": {
+    "error": {
+     "code": -32601,
+     "message": "Invalid method",
+     "data": null
+    },
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade"
+   }
+  },
+  "sender": {
+   "preflight": {
+    "status": 200,
+    "acao": "*",
+    "allowHeaders": "Content-Type, Authorization"
+   },
+   "ping": {
+    "status": 200,
+    "acao": "*"
+   }
+  }
+ },
+ "bad": {
+  "readAt": "2026-11-18T12:10:33.135Z",
+  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://solana.api.pocket.network https://public.rpc.solanavibestation.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://base.rpc.blxrbdn.com https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://robinhood.api.pocket.network https://rpc-robinhood.globalstake.io https://robinhood.daybreak-rpc.network; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker walk-worker",
+  "rpc": {
+   "url": "https://api.mainnet-beta.solana.com",
+   "preflight": {
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "allowHeaders": "authorization, content-type"
+   },
+   "post": {
+    "error": {
+     "code": 403,
+     "message": "Access forbidden"
+    },
+    "status": 403,
+    "acao": "*"
+   }
+  },
+  "jito": {
+   "preflight": {
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "allowHeaders": "content-type, x-grpc-web, x-user-agent, x-requested-with, accept, origin, authorization, Access-Control-Allow-Origin, Solana-Client"
+   },
+   "post": {
+    "error": {
+     "code": -32601,
+     "message": "Invalid method",
+     "data": null
+    },
+    "status": 400,
+    "acao": "https://confidential.unrealized.trade"
+   }
+  },
+  "sender": {
+   "preflight": {
+    "status": 200,
+    "acao": "*",
+    "allowHeaders": "Content-Type, Authorization"
+   },
+   "ping": {
+    "status": 200,
+    "acao": "*"
+   }
+  }
+ }
+}

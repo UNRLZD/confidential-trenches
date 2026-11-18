@@ -3,7 +3,8 @@
 // SIGN_HOST serves and, after the owner's run, the run's transactions:
 //   - the page's CSP connect-src lets the page reach every host the trade uses: the helper (the Jupiter build, LD1's
 //     provider B and the helper's send path), provider A device-direct (solana-rpc.publicnode.com) and the kit's three
-//     keyless send paths (Helius Sender, Jito, the public RPC); the hosts are written out here, not read from the repo;
+//     keyless send paths (Helius Sender, Jito, the public RPC, which is provider A since card solana-send-browser-origin:
+//     api.mainnet-beta 403s the page's Origin); the hosts are written out here, not read from the repo;
 //   - the served /app.js is the one index.html pins (its sha384) and holds the trade kind (its own refusal codes
 //     no_ready_set and over_held, which no other kind has);
 //   - with --record-file <run.md>: every "Tx: solana <signature>" line of the run record is a landed transaction with no
@@ -22,7 +23,6 @@ export const TRADE_HOSTS = [
   "https://solana-rpc.publicnode.com",
   "https://sender.helius-rpc.com",
   "https://mainnet.block-engine.jito.wtf",
-  "https://api.mainnet-beta.solana.com",
 ];
 export const TX_RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
 const MARKERS = ["no_ready_set", "over_held"];
