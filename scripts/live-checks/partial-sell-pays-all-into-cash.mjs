@@ -6,7 +6,8 @@
 // What it proves, and only that: the served /app.js is the one index.html pins (its sha384), and its text carries the
 // card's rules, each found by a mark of the bundle's shape (the minifier renames, never restructures them):
 //   - a sell that filled runs, after its answer, the keep sweep when W still holds tokens and the rent back when it
-//     holds none, on both of the sale's verdict paths (its note's mark, and a sale with no deposit back);
+//     holds none, on both of the sale's verdict paths (its note's mark, and a sale with no deposit back), the choice
+//     made at each path or once for both (card second-places-held-by-tests);
 //   - the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, on the grid, none under the
 //     sweep's floor, checked by the keep sweep's rule with the keep as its hold;
 //   - the keep sweep's rule (its own, so the full sell's sweep rule is as before): the deposit alone, W left at the hold
@@ -39,14 +40,23 @@ const tied = (main, more) => ({
     return Boolean(g) && more(g).every((p) => new RegExp(p).test(js));
   },
 });
+/** A mark any one of `marks` finds. */
+const either = (...marks) => ({ test: (js) => marks.some((m) => m.test(js)) });
 /** A mark found at least `n` times. */
 const times = (re, n) => ({ test: (js) => [...js.matchAll(new RegExp(re, "g"))].length >= n });
 
 /** Each rule's mark in the bundle, by what it holds. */
 export const MARKS = Object.freeze({
-  "a filled sell runs the keep sweep while W holds tokens, the rent back when it holds none, on both verdict paths": times(
-    R`filled${BT}&&\((${I})\.back=(${I})\?(${I}):(${I})\)`,
-    2,
+  // the choice at each verdict path (as built before card second-places-held-by-tests), or made once (onFill) and taken
+  // by both paths: the same name at both, that name a choice
+  "a filled sell runs the keep sweep while W holds tokens, the rent back when it holds none, on both verdict paths": either(
+    times(R`filled${BT}&&\((${I})\.back=(${I})\?(${I}):(${I})\)`, 2),
+    {
+      test(js) {
+        const at = [...js.matchAll(new RegExp(R`filled${BT}&&\((?:${I})\.back=(${I})\)`, "g"))].map((m) => m[1]);
+        return at.length >= 2 && at.every((k) => k === at[0]) && new RegExp(R`[,; ]${esc(at[0])}=${I}\?`).test(js);
+      },
+    },
   ),
   "the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, the rules' note of it (a rung), none under the floor, checked with the keep as its rule's hold": tied(
     new RegExp(R`let (?<rest>${I})=(?<lam>${I})-(?<fee>${I})-(?<rents>${I})\((?<rent>${I}),(?<sz>${I}),(?<dep>${I})\.held\)-(?<x>${I})\.keep,(?<v>${I})=(?<note>${I})\(\k<rest>\),(?<fl>${I})=[^;]{0,60};if\(\k<v><\k<fl>\)return ${I}\(${BT}floor${BT}`),
