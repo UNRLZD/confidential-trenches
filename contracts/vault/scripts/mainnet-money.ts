@@ -524,19 +524,33 @@ export async function nodeProver() {
   };
 }
 
-/** The withdrawal's request from its reads: the fee, the prover, the trees and T, then the proof. */
-export async function requestInOrder<P, T, F, R>(a: {
-  fee: () => Promise<F>;
+/**
+ * The withdrawal's request in the device's order (signpage withdraw/handoff.ts once, card near-buy-works-on-live): the
+ * prover, the trees and T first, the fee quote last, right before the proof; then, once the proof is made and right before
+ * the note goes RESERVED (withdrawRequest's claim), the quote must still be open `margin` blocks past the pair's higher
+ * final height (handoff.ts's HANDOFF_QUOTE_MARGIN_BLOCKS and upperFinalHeight). Past its window the helper prices at the
+ * fee now and refuses a lower one (fee_too_low), so a late quote is let go: the note back UNSPENT, nothing sent.
+ */
+export async function requestInOrder<P, T, F extends { validUntilBlock: number }, R>(a: {
   prover: () => Promise<P>;
   trees: () => Promise<T>;
   blockNs: () => Promise<string>;
-  request: (x: { prover: P; trees: T; ns: string; fee: F }) => Promise<R>;
+  fee: () => Promise<F>;
+  height: () => Promise<number>;
+  margin: number;
+  request: (x: { prover: P; trees: T; ns: string; fee: F; claim: () => Promise<void> }) => Promise<R>;
 }): Promise<{ prover: P; ns: string; fee: F; req: R }> {
-  const fee = await a.fee();
   const prover = await a.prover();
   const trees = await a.trees();
   const ns = await a.blockNs();
-  return { prover, ns, fee, req: await a.request({ prover, trees, ns, fee }) };
+  const fee = await a.fee();
+  const claim = async (): Promise<void> => {
+    const h = await a.height();
+    if (h + a.margin > fee.validUntilBlock) {
+      throw new Error(`refused, the proof made and nothing sent: the fee quote's window (to block ${fee.validUntilBlock}) closes within ${a.margin} blocks of the final height ${h}; the note stays in the vault, and resume makes a new request`);
+    }
+  };
+  return { prover, ns, fee, req: await a.request({ prover, trees, ns, fee, claim }) };
 }
 
 // ---- check: the gate, the vault read and, with --state, the run's U ----
@@ -626,7 +640,7 @@ async function go(argv: string[], create: boolean) {
   const { depositAccount } = await wallet("deposit/account.ts");
   const { restoreNotes, writeRestored } = await wallet("notes/restore.ts");
   const { withdrawRequest, withdrawDeadlineMs } = await wallet("withdraw/request.ts");
-  const { lowerFinalTime, treesOf } = await import(pathToFileURL(path.join(ROOT, "packages/signpage/src/withdraw/handoff.ts")).href);
+  const { HANDOFF_QUOTE_MARGIN_BLOCKS, lowerFinalTime, treesOf, upperFinalHeight } = await import(pathToFileURL(path.join(ROOT, "packages/signpage/src/withdraw/handoff.ts")).href);
   const { vaultSync, vaultSyncStart } = await import(pathToFileURL(path.join(ROOT, "packages/kit/src/vault/sync.ts")).href);
   // what a wait or a resume reads txs with (readBackBoth, recordRead), loaded here under the start's gate, before the
   // seed: no code loads later with seed64 in memory but the prover's, which has its own gate
@@ -634,13 +648,14 @@ async function go(argv: string[], create: boolean) {
   await import("../../../scripts/ci/money-gate.mjs");
 
   // the fee, before any money moves: held to the device's own fee_max at the token's storage minimum (the register
-  // deposit every withdrawal carries, arming/accounts.ts), on the smallest note the vault takes
+  // deposit every withdrawal carries, arming/accounts.ts), on the smallest note the vault takes; the cap read first and
+  // the quote last, so its window (validUntilBlock) starts as late as it can
   const feeOf = async (note: bigint) => {
-    const quote = await askWithdrawFee({ token, relayer: relayers.withdraw, amount: note });
     const feeMax: bigint = await readWithdrawFeeMax({ network, rpcs, priceRpcs: network === "mainnet" ? rpcs : (await opened_mainnet_pair()), registerDeposit: await readTokenStorageMin(network, rpcs) });
+    const quote = await askWithdrawFee({ token, relayer: relayers.withdraw, amount: note });
     const fp = feeProblems({ relayFee: quote.relayFee, feeMax, note });
     if (fp.length) throw new Error(`refused: ${fp.join("; ")}`);
-    return { relayFee: quote.relayFee as bigint, feeMax, feeRecipient: quote.feeRecipient as string };
+    return { relayFee: quote.relayFee as bigint, feeMax, feeRecipient: quote.feeRecipient as string, validUntilBlock: quote.validUntilBlock as number };
   };
   const fee0 = await feeOf(minDeposit);
   log(`fee now: ${fee0.relayFee} to ${fee0.feeRecipient}, at most the device's fee_max ${fee0.feeMax}`);
@@ -787,17 +802,19 @@ async function go(argv: string[], create: boolean) {
     const before = await balances({ to, F: relayers.withdraw.fee_recipient });
     const priceRpcs = network === "mainnet" ? rpcs : await opened_mainnet_pair();
     const { prover, fee, req } = await requestInOrder({
-      fee: () => feeOf(value),
       prover: () => {
         sourceGate("the prover loads and sees the note's secrets");
         return nodeProver();
       },
       trees: async () => treesOf(await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["leaves", "labels"] })),
       blockNs: () => lowerFinalTime(rpcs),
-      request: ({ prover, trees, ns: t, fee }) => withdrawRequest({
+      fee: () => feeOf(value),
+      height: () => upperFinalHeight(rpcs),
+      margin: HANDOFF_QUOTE_MARGIN_BLOCKS,
+      request: ({ prover, trees, ns: t, fee, claim }) => withdrawRequest({
         seed64, notes: ns, prover, vaultId: vault, token, ...trees, registerDepositOf,
         feeRecipient: fee.feeRecipient, relayFee: fee.relayFee, network, rpcs, priceRpcs,
-        amount: value - fee.relayFee, to, deadlineMs: withdrawDeadlineMs(t), blockTimestampNanosec: t,
+        amount: value - fee.relayFee, to, deadlineMs: withdrawDeadlineMs(t), blockTimestampNanosec: t, claim,
       }),
     });
     const rp = requestProblems(req, to, pick.id);

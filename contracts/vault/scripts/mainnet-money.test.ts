@@ -150,7 +150,7 @@ test("the fee is asked after the prover, the trees and T: a prover load and sync
 test("a quote whose window closes before its request could be sent stops before RESERVED: nothing sent, resume asks again", async () => {
   // the proof alone runs to within the margin of the window's end: refused, never sent on a quote the helper would price again
   const late = leg({ prover: 0, trees: 0, t: 0, proof: WINDOW - HANDOFF_QUOTE_MARGIN_BLOCKS + 1 });
-  await assert.rejects(late.run(), /window[^]*nothing sent[^]*resume/);
+  await assert.rejects(late.run(), /nothing sent[^]*window[^]*resume/);
   assert.deepEqual(late.sent, []);
   // open the margin's full width past the final height: sent
   const edge = leg({ prover: 0, trees: 0, t: 0, proof: WINDOW - HANDOFF_QUOTE_MARGIN_BLOCKS });
