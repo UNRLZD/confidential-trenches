@@ -5,9 +5,14 @@
 // refusal. Now an answer that is neither a least nor a quote is asked again, LEAST_READ_TRIES tries in all on the
 // injected sleep, the whole read within LEAST_READ_BUDGET_MS; with every try spent the read throws naming the last
 // answer, and the mover plans nothing (down), never a plan without the least. Red at a2d7d828b.
+// Card cash-to-pool-least-signed: the least 1Click names is then asked itself, and set only by its signed quote, which
+// the kit's check passes (./oneclick-least-mock.ts signs it with a key this process alone trusts).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cashMover, LEAST_READ_BACKOFF_MS, LEAST_READ_BUDGET_MS, LEAST_READ_TRIES, readOneClickLeast, type CashMoverDeps, type CashNote } from "../src/cash-to-pool.ts";
+import { LEAST_NOW, dryAnswer } from "./oneclick-least-mock.ts";
+import type { CashMoverDeps, CashNote } from "../src/cash-to-pool.ts";
+
+const { cashMover, LEAST_READ_BACKOFF_MS, LEAST_READ_BUDGET_MS, LEAST_READ_TRIES, readOneClickLeast } = await import("../src/cash-to-pool.ts");
 
 const PRICE = { price: "8000000000", expo: -8 }; // SOL at 80 USD
 const FEE = 50_000n; // the vault withdraw's relay fee, 0.05 USDC
@@ -21,15 +26,20 @@ const LEAST_ANSWER = () => new Response(body(`Amount is too low for bridge, try 
 const FAILED = () => new Response(body("Failed to get quote"), { status: 400 });
 const NO_LIQUIDITY = () => new Response(body("No liquidity available"), { status: 400 });
 
-/** 1Click as a script of answers, one a request, the last kept; every amount asked recorded. */
+/** 1Click as a script of answers, one a request, the last kept; every amount asked recorded. An ask of the least
+ *  itself answers 1Click's signed dry quote of it. */
 function oneClick(script: readonly (() => Response | Promise<Response>)[]) {
   const asked: string[] = [];
+  let n = 0;
   const fetchFn = (async (_u: unknown, init: RequestInit) => {
-    asked.push(String(JSON.parse(String(init.body)).amount));
-    return script[Math.min(asked.length, script.length) - 1]!();
+    const req = JSON.parse(String(init.body));
+    asked.push(String(req.amount));
+    if (BigInt(req.amount) === LEAST) return new Response(JSON.stringify(dryAnswer(req, PRICE)), { status: 201 });
+    return script[Math.min(++n, script.length) - 1]!();
   }) as unknown as typeof fetch;
   return { fetchFn, asked };
 }
+const price = () => PRICE;
 /** The injected clock's sleep: every wait asked, none taken. */
 function clock() {
   const waits: number[] = [];
@@ -63,15 +73,17 @@ test("the bound: three tries, waits of 500 ms then 1,500 ms, the whole read with
 });
 
 test("1Click fails a quote, then names its least: the move is planned to the least", async () => {
-  // "Failed to get quote" up the whole ladder (one unit to one USDC), then the least at one USDC asked again
-  const blip = oneClick([FAILED, FAILED, FAILED, FAILED, FAILED, FAILED, FAILED, LEAST_ANSWER]);
+  // "Failed to get quote" up the ladder, then "No liquidity available" at 0.01 USDC, under the least, asked again: the
+  // least named (card cash-to-pool-least-signed: a 400's N is asked only above the amount just asked, as 1Click names
+  // one only for an amount under it; "Failed to get quote" at one USDC, a blip, is test/cash-to-pool-least-signed's)
+  const blip = oneClick([FAILED, FAILED, FAILED, FAILED, NO_LIQUIDITY, LEAST_ANSWER]);
   const c = clock();
-  const t = mover((chain) => readOneClickLeast(chain, blip.fetchFn, 0, { sleep: c.sleep }));
+  const t = mover((chain) => readOneClickLeast(chain, blip.fetchFn, LEAST_NOW, { price, sleep: c.sleep }));
   const r = await t.m.plan("solana", 1_000_000n);
   assert.ok(!("error" in r), JSON.stringify(r, (_k, v) => (typeof v === "bigint" ? String(v) : v)));
   assert.equal(r.part, LEAST, "the least part is 1Click's least");
   assert.ok(r.parts !== null && r.parts.every((p) => p.usdc >= LEAST));
-  assert.deepEqual(blip.asked, ["1", "10", "100", "1000", "10000", "100000", "1000000", "1000000"]);
+  assert.deepEqual(blip.asked, ["1", "10", "100", "1000", "10000", "10000", String(LEAST)]);
   assert.deepEqual(c.waits, [500], "one wait, on the injected clock");
 });
 
@@ -86,8 +98,8 @@ test("every blip 1Click gave or may give is asked again: No liquidity, a 5xx, a 
   for (const [why, blip] of cases) {
     const o = oneClick([blip, blip, LEAST_ANSWER]);
     const c = clock();
-    assert.equal(await readOneClickLeast("solana", o.fetchFn, 0, { sleep: c.sleep }), LEAST, why);
-    assert.deepEqual(o.asked, ["1", "1", "1"], `${why}: the same amount asked again`);
+    assert.equal(await readOneClickLeast("solana", o.fetchFn, LEAST_NOW, { price, sleep: c.sleep }), LEAST, why);
+    assert.deepEqual(o.asked, ["1", "1", "1", String(LEAST)], `${why}: the same amount asked again, then the least named`);
     assert.deepEqual(c.waits, [500, 1_500], why);
   }
 });
@@ -95,11 +107,11 @@ test("every blip 1Click gave or may give is asked again: No liquidity, a 5xx, a 
 test("every try fails: the read names the failure and the move plans nothing, never a plan without the least", async () => {
   const down = oneClick([NO_LIQUIDITY]);
   const c = clock();
-  await assert.rejects(readOneClickLeast("solana", down.fetchFn, 0, { sleep: c.sleep }), /no least in 3 tries: .*No liquidity available/);
+  await assert.rejects(readOneClickLeast("solana", down.fetchFn, LEAST_NOW, { price, sleep: c.sleep }), /no least in 3 tries: .*No liquidity available/);
   assert.equal(down.asked.length, LEAST_READ_TRIES);
   assert.deepEqual(c.waits, [500, 1_500]);
   // the Move screen's plan and its move: down, no quote asked, no note leaves Cash
-  const t = mover((chain) => readOneClickLeast(chain, oneClick([FAILED]).fetchFn, 0, { sleep: async () => {} }));
+  const t = mover((chain) => readOneClickLeast(chain, oneClick([FAILED]).fetchFn, LEAST_NOW, { price, sleep: async () => {} }));
   assert.deepEqual(await t.m.plan("solana", 1_000_000n), { error: "down" });
   assert.deepEqual(await t.m.move("solana", 1_000_000n, "op-1"), { error: "down" });
   // a buy's shortfall: no move started
@@ -111,21 +123,21 @@ test("every try fails: the read names the failure and the move plans nothing, ne
 test("a refusal that names no least is no blip: never asked again, and no plan", async () => {
   const o = oneClick([() => new Response(body("recipient is not valid"), { status: 400 })]);
   const c = clock();
-  await assert.rejects(readOneClickLeast("solana", o.fetchFn, 0, { sleep: c.sleep }), /names no least: HTTP 400 recipient is not valid/);
+  await assert.rejects(readOneClickLeast("solana", o.fetchFn, LEAST_NOW, { price, sleep: c.sleep }), /names no least: HTTP 400 recipient is not valid/);
   assert.deepEqual(o.asked, ["1"]);
   assert.deepEqual(c.waits, []);
   // a least of none is no least
-  await assert.rejects(readOneClickLeast("solana", oneClick([() => new Response(body("Amount is too low for bridge, try at least 0"), { status: 400 })]).fetchFn, 0, { sleep: c.sleep }), /names no least/);
+  await assert.rejects(readOneClickLeast("solana", oneClick([() => new Response(body("Amount is too low for bridge, try at least 0"), { status: 400 })]).fetchFn, LEAST_NOW, { price, sleep: c.sleep }), /names no least/);
 });
 
 test("the budget: a read past it asks nothing more and names it", async () => {
   const o = oneClick([LEAST_ANSWER]);
-  await assert.rejects(readOneClickLeast("solana", o.fetchFn, 0, { signal: AbortSignal.abort(), sleep: async () => {} }), /no least within 10000 ms/);
+  await assert.rejects(readOneClickLeast("solana", o.fetchFn, LEAST_NOW, { price, signal: AbortSignal.abort(), sleep: async () => {} }), /no least within 10000 ms/);
   assert.deepEqual(o.asked, []);
   // a budget that ends during a wait: no try after it
   const ac = new AbortController();
   const late = oneClick([NO_LIQUIDITY, LEAST_ANSWER]);
-  await assert.rejects(readOneClickLeast("solana", late.fetchFn, 0, { signal: ac.signal, sleep: async () => ac.abort() }), /no least within 10000 ms/);
+  await assert.rejects(readOneClickLeast("solana", late.fetchFn, LEAST_NOW, { price, signal: ac.signal, sleep: async () => ac.abort() }), /no least within 10000 ms/);
   assert.deepEqual(late.asked, ["1"]);
 });
 

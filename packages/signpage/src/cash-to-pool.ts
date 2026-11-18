@@ -38,6 +38,7 @@
 // writes the same op under its own id (cash/<chain>/<ms>).
 // Nothing here logs but the trace (./trace.ts, card buy-shows-every-step): one line per step of a move and of a buy
 // that waits on one, public ids and the error's words only, its last step and error kept in the move's record (`last`).
+import { checkOneClickQuote, OneClickQuoteError, type OneClickRequest } from "../../kit/src/checks/oneclick.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
 import { DEPOSIT_QUOTE_DEADLINE_MS, DEPOSIT_QUOTE_URL } from "../../wallet/src/deposit/quote.ts";
@@ -54,6 +55,7 @@ import type { PoolToCash } from "./pool-to-cash.ts";
 import { nearestPlannable, withdrawNoteFloor } from "./pool-withdraw.ts";
 import { cashCosts, cashSendable, planCashWithdraw } from "./withdraw/checks.ts";
 import type { HandoffMark } from "./withdraw/handoff.ts";
+import { DEPOSIT_QUOTE_PATH } from "./rules/deposit-dry.ts";
 import { errorText, trace, traceAlias, traceBegin, type TraceFields, type TraceLast, type TraceStep } from "./trace.ts";
 
 /** How often a moved tap reads whether one tap now spends the ask. */
@@ -430,19 +432,27 @@ export function planCashExact(notes: readonly CashNote[], fee: bigint, usdc: big
   if (plan !== null) return { fee, max, part, parts: of(plan) };
   return { fee, max, part, parts: null, ...nearestPlannable(notes, usdc, cashCosts(fee, part)) };
 }
-/** 1Click's least amount in (USDC base units) for a move of Cash into `chain`'s pool, read live: a dry quote through the
- *  helper's 1Click proxy (nothing is made, nothing sent), whose refusal names it ("Amount is too low for bridge, try at
- *  least N", 13:0xZ 15 Nov: 75,621 into SOL, 18,533 into Robinhood's ETH). One unit first; where 1Click cannot price so
- *  little it answers "Failed to get quote" (into Base's ETH at one unit, 15 Nov 13:30Z, "try at least 1042" at ten;
- *  into Robinhood's the same by 13:31Z), and the read asks again at ten times as much, up to one USDC (card
- *  cash-buys-spend-every-note-evm). An amount it quotes is one it takes: that amount.
+/** 1Click's least amount in (USDC base units) for a move of Cash into `chain`'s pool, read live: dry quotes through the
+ *  helper's 1Click proxy (nothing is made, nothing sent). The least is an amount whose dry quote 1Click signed and the
+ *  kit's check passes (card cash-to-pool-least-signed: checkOneClickQuote, the signature under the pinned keys, every
+ *  signed field the device's own request, the floors at the device's `price` of the pool's coin, as the Move's own
+ *  quote is checked, pool-deposit-address.ts poolQuotePricing); nothing the helper could write after 1Click signed sets
+ *  it. One unit first. A refusal that names an amount ("Amount is too low for bridge, try at least N", 13:0xZ 15 Nov:
+ *  75,621 into SOL, 18,533 into Robinhood's ETH) is unsigned, so N says only where to ask next, and only above the
+ *  amount just asked; a quote at N is what sets it. Before any N, where 1Click cannot price so little it answers "Failed
+ *  to get quote" (into Base's ETH at one unit, 15 Nov 13:30Z, "try at least 1042" at ten; into Robinhood's the same by
+ *  13:31Z), and the read asks again at ten times as much, up to one USDC (card cash-buys-spend-every-note-evm). A
+ *  signed answer whose fees take all that so little brings (the kit's floor: into Base's and Robinhood's ETH at
+ *  1Click's own N, 1,000 and 17,840, read 18 Nov 23:04Z) is asked again at twice as much, up to one USDC: a part under it
+ *  would be refused at its own quote. Any other answer that fails the check sets nothing and is never asked again.
  *  An answer that is neither (card cash-least-read-again: sign live run 44300899132, 18 Nov 12:09Z, read "Failed to get
  *  quote" and "No liquidity available" over seconds in which 1Click named its least before and after) is a blip when it
- *  is "Failed to get quote" at one USDC, "No liquidity available", a 429, a 5xx or no answer: the same amount is asked
- *  again, LEAST_READ_TRIES tries of it in all. Any other refusal names no least and is never asked again. With no least
- *  the read throws naming why, so no move is planned without it (cashMover: down). `sleep` and `signal` are the injected
- *  clock's wait and the read's budget (default: setTimeout, and LEAST_READ_BUDGET_MS from now). */
-export async function readOneClickLeast(chain: PoolChain, fetchFn: typeof fetch, now: number, o: { sleep?: (ms: number) => Promise<void>; signal?: AbortSignal } = {}): Promise<bigint> {
+ *  is "Failed to get quote" at one USDC or after an N, "No liquidity available", a 429, a 5xx or no answer: the same
+ *  amount is asked again, LEAST_READ_TRIES tries of it in all. Any other refusal names no least and is never asked
+ *  again. LEAST_READ_ASKS asks at most. With no least the read throws naming why, so no move is planned without it
+ *  (cashMover: down). `sleep` and `signal` are the injected clock's wait and the read's budget (default: setTimeout,
+ *  and LEAST_READ_BUDGET_MS from now); `now` is the clock the answers are checked at. */
+export async function readOneClickLeast(chain: PoolChain, fetchFn: typeof fetch, now: number, o: { price: () => Pick<PoolStatePrice, "price" | "expo"> | null; sleep?: (ms: number) => Promise<void>; signal?: AbortSignal }): Promise<bigint> {
   const signal = o.signal ?? AbortSignal.timeout(LEAST_READ_BUDGET_MS);
   const sleep =
     o.sleep ??
@@ -456,29 +466,56 @@ export async function readOneClickLeast(chain: PoolChain, fetchFn: typeof fetch,
   const late = () => new Error(`1Click gave no least within ${LEAST_READ_BUDGET_MS} ms`);
   const top = 10n ** BigInt(USDC_DECIMALS);
   let amount = 1n;
+  // an N read: the one-unit ladder is over, and "Failed to get quote" is a blip
+  let named = false;
   let tries = 0;
+  let asks = 0;
   for (;;) {
     if (signal.aborted) throw late();
-    const body = {
+    if (++asks > LEAST_READ_ASKS) throw new Error(`1Click gave no least in ${LEAST_READ_ASKS} asks`);
+    const request: OneClickRequest = {
       dry: true, swapType: "EXACT_INPUT", slippageTolerance: 100, originAsset: `nep141:${NEAR_NETWORKS.mainnet.usdc}`, depositType: "INTENTS", destinationAsset: POOL_COIN_ONECLICK[chain],
       amount: amount.toString(), refundTo: DEPOSIT_DRY_PLACEHOLDER, refundType: "INTENTS", recipient: LEAST_RECIPIENT[chain], recipientType: "DESTINATION_CHAIN", deadline: new Date(now + 600_000).toISOString(),
     };
     let blip: string;
     try {
-      const r = await fetchFn(DEPOSIT_QUOTE_URL, { ...HELPER_FETCH_INIT, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
-      const text = (await r.text()).slice(0, 4096);
-      const m = /"message"\s*:\s*"Amount is too low for bridge, try at least (\d{1,30})"/.exec(text);
-      if (m !== null && BigInt(m[1]!) > 0n) return BigInt(m[1]!);
-      if (m === null && (r.status === 200 || r.status === 201)) return amount;
-      const failed = /"message"\s*:\s*"Failed to get quote"/.test(text);
+      const r = await fetchFn(DEPOSIT_QUOTE_URL, { ...HELPER_FETCH_INIT, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request), signal });
+      const text = await r.text();
+      if (r.status === 200 || r.status === 201) {
+        const p = o.price();
+        if (p === null || priceOf(p) === null) throw new LeastRefused(`1Click's answer at ${amount} fails the device's check: no price of the pool's coin to check it at`);
+        const usd = usdOf(p);
+        try {
+          checkOneClickQuote(request, JSON.parse(text), { path: DEPOSIT_QUOTE_PATH, pricing: { in: ["1", "1"], out: [usd, usd] }, decimalsIn: USDC_DECIMALS, decimalsOut: POOL_DECIMALS[chain], intoVault: false, now });
+          return amount;
+        } catch (e) {
+          // a verified answer whose fees take what so little brings: twice as much, up to one USDC
+          if (e instanceof OneClickQuoteError && e.check === "floor" && amount < top) {
+            amount *= 2n;
+            continue;
+          }
+          throw new LeastRefused(`1Click's answer at ${amount} fails the device's check: ${e instanceof Error ? e.message : "not JSON"}`);
+        }
+      }
+      const head = text.slice(0, 4096);
+      const m = /"message"\s*:\s*"Amount is too low for bridge, try at least (\d{1,30})"/.exec(head);
+      const said = `HTTP ${r.status} ${/"message"\s*:\s*"([^"]{0,120})"/.exec(head)?.[1] ?? head.slice(0, 120).replace(/\s+/g, " ")}`;
+      if (m !== null) {
+        // unsigned: where to ask next, never the least, and only above the amount just asked
+        const n = BigInt(m[1]!);
+        if (n <= amount) throw new LeastRefused(`1Click names no least: ${said} at ${amount}`);
+        amount = n;
+        named = true;
+        continue;
+      }
+      const failed = /"message"\s*:\s*"Failed to get quote"/.test(head);
       // where 1Click cannot price so little: ten times as much, up to one USDC
-      if (failed && amount < top) {
+      if (failed && !named && amount < top) {
         amount *= 10n;
         continue;
       }
-      const said = `HTTP ${r.status} ${/"message"\s*:\s*"([^"]{0,120})"/.exec(text)?.[1] ?? text.slice(0, 120).replace(/\s+/g, " ")}`;
-      const again = failed || /"message"\s*:\s*"No liquidity available"/.test(text) || r.status === 429 || r.status >= 500;
-      if (m !== null || !again) throw new LeastRefused(`1Click names no least: ${said}`);
+      const again = failed || /"message"\s*:\s*"No liquidity available"/.test(head) || r.status === 429 || r.status >= 500;
+      if (!again) throw new LeastRefused(`1Click names no least: ${said}`);
       blip = said;
     } catch (e) {
       if (e instanceof LeastRefused) throw e;
@@ -495,6 +532,10 @@ export async function readOneClickLeast(chain: PoolChain, fetchFn: typeof fetch,
  *  the reads this one runs beside, so it adds no wait the user sees past theirs. A blip longer than that leaves the move
  *  down for now, and the next dry or tap reads again (main.ts keeps no failed read). */
 export const LEAST_READ_TRIES = 3;
+/** The most asks one least read makes (card cash-to-pool-least-signed), every try included: the one-unit ladder to one
+ *  USDC (7), an N and its quote, the floor's doublings and the blips' tries, with room; the helper's N's, each only
+ *  above the last, end here. */
+export const LEAST_READ_ASKS = 16;
 export const LEAST_READ_BACKOFF_MS: readonly number[] = Object.freeze([500, 1_500]);
 export const LEAST_READ_BUDGET_MS = 10_000;
 /** 1Click's answer that names no least and is no blip: never asked again. */
@@ -503,6 +544,13 @@ class LeastRefused extends Error {}
 const POOL_COIN_ONECLICK: Readonly<Record<PoolChain, string>> = { solana: "nep141:sol.omft.near", base: "nep141:base.omft.near", robinhood: "nep141:hood.omft.near" };
 /** A dry read's recipient, an address of no one's: the wrapped-SOL mint (1Click refuses the system program as one: "recipient is not valid", 15 Nov 12:49Z), an EVM address of ones. */
 const LEAST_RECIPIENT: Readonly<Record<PoolChain, string>> = { solana: "So11111111111111111111111111111111111111112", base: "0x1111111111111111111111111111111111111111", robinhood: "0x1111111111111111111111111111111111111111" };
+/** A price as the decimal the kit's 1Click check reads (pool-deposit-address.ts usdOf, which the page's Move quote is
+ *  checked at); `p` already read by priceOf. */
+const usdOf = (p: Pick<PoolStatePrice, "price" | "expo">): string => {
+  const d = -p.expo;
+  const digits = p.price.padStart(d + 1, "0");
+  return d === 0 ? digits : `${digits.slice(0, digits.length - d)}.${digits.slice(digits.length - d)}`;
+};
 const priceOf = (p: Pick<PoolStatePrice, "price" | "expo">): { n: bigint; d: bigint } | null => {
   if (typeof p.price !== "string" || !/^[1-9][0-9]{0,30}$/.test(p.price) || !Number.isInteger(p.expo) || p.expo > 0 || p.expo < -30) return null;
   return { n: BigInt(p.price), d: 10n ** BigInt(-p.expo) };
