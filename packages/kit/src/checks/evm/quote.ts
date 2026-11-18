@@ -1455,7 +1455,7 @@ function keyOfRoute(r: EvmV4Route): EvmPoolKey {
 const INITIALIZE = "dd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"; // Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)
 type Spans = [number, number][];
 type Tail = { spans: Spans; byCurrency: Map<string, EvmPoolKey[]>; ids: Set<string> };
-let TAILS = new WeakMap<object, Map<EvmPoolChain, Tail>>();
+const TAILS = new WeakMap<object, Map<EvmPoolChain, Tail>>();
 /** The kit's scan rpcs' source: one object per URL (scanRpcOf). */
 const SCAN_SOURCE = new Map<string, object>();
 const SOURCE_OF = new WeakMap<EvmRpc, object>();
@@ -1507,9 +1507,7 @@ export function evmPoolIndexPools(chain: EvmPoolChain, token: string): readonly 
 }
 /** For the tests: forgets every chain's index (not in the kit's index). */
 export const evmPoolIndexReset = (): void => (INDEXES.clear(), SERVED.clear());
-/** For the tests: forgets every chain's scanned tail (not in the kit's index): each test's chain is its own. */
-export const evmScanTailReset = (): void => void (TAILS = new WeakMap());
-/** Tests: `rpc` reads and keeps the tail `as` does (one chain's history behind two rpc objects, a provider that turns
+/** For the tests (not in the kit's index): `rpc` reads and keeps the tail `as` does (one chain's history behind two rpc objects, a provider that turns
  *  hostile between two quotes). */
 export const evmScanTailAlias = (rpc: EvmRpc, as: EvmRpc): void => void SOURCE_OF.set(rpc, SOURCE_OF.get(as) ?? as);
 // The helper's pools of a currency (card evm-pool-index-from-the-first-pool): the helper keeps every Initialize log of
