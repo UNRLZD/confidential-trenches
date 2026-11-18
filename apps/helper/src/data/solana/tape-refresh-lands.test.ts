@@ -11,7 +11,7 @@ import { after, test } from "node:test";
 import { CG_BACKGROUND_TIMEOUT_MS, CG_ONCHAIN, CG_TIMEOUT_MS, coingeckoPace, createKeyed } from "../coingecko.ts";
 import { geckoBudget } from "../gecko.ts";
 import { providerHolds } from "../../limits/limits.ts";
-import { createSolanaToken, GT_BASE, TAPE_FRESH_MS } from "./token.ts";
+import { createSolanaToken, GT_BASE, TAPE_FRESH_MS, TAPE_OPEN_BOUND_MS } from "./token.ts";
 import { SOL_VENDOR_REACH_MS } from "./trades.ts";
 
 /** A planted key: never a real one. */
@@ -32,11 +32,13 @@ const settle = async () => {
 };
 const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
 
-function harness(perMin = "300", down: (url: string, at: number) => boolean = () => false) {
+function harness(perMin = "300", down: (url: string, at: number) => boolean = () => false, hang: (url: string) => boolean = () => false) {
   const t = { t: Date.parse("2026-11-14T17:25:00Z") };
   const calls: { url: string }[] = [];
   const fetch = async (url: string) => {
     calls.push({ url });
+    // CoinGecko never answering (a hung connection)
+    if (url.startsWith(CG_ONCHAIN) && hang(url)) return new Promise<never>(() => undefined);
     // CoinGecko slow past its CG_TIMEOUT_MS: the read waits it out and fails
     if (url.startsWith(CG_ONCHAIN) && down(url, t.t)) {
       t.t += CG_TIMEOUT_MS;
@@ -136,4 +138,57 @@ test("one CoinGecko timeout on a held tape's refresh: the next read renews it in
   }
   assert.equal(failed > 0, true, "the timeout was met");
   assert.ok(Math.max(...ages) <= SOL_VENDOR_REACH_MS, `oldest rows served ${Math.max(...ages)} ms after their read: ${ages.join(",")}`);
+});
+
+// card sol-vendor-tape-waits-past-reach: a page opening a coin another reader held 17 s before (no read between, so no
+// refresh ran) was served the held rows at once, 17 s old, past SOL_VENDOR_REACH_MS, while the refresh ran behind them
+// (revalidate served held rows at once up to STALE_MS); card evm-vendor-tape-refresh-keyed's live check met the same on
+// Base (0x1668cd48 served 18.9 s old, 18 Nov 15:13:45Z). Red at 576a3baef: the second reader's rows 17,000 ms old.
+test("a 17 s gap between two readers of a held tape: the second waits for the one refresh and is served rows under SOL_VENDOR_REACH_MS old (red: the held rows at once, 17 s old)", async () => {
+  const h = harness();
+  assert.equal((await h.tape(o.mint)).src, "coingecko");
+  const before = h.cg("/trades");
+  h.t.t += 17_000;
+  h.fill();
+  // two readers at once: one refresh, both served its rows
+  const [a, b] = await Promise.all([h.tape(o.mint), h.tape(o.mint)]);
+  for (const x of [a, b]) {
+    assert.equal(x.status, 200, x.body.slice(0, 80));
+    assert.ok(h.t.t - x.asOfMs! <= SOL_VENDOR_REACH_MS, `rows served ${h.t.t - x.asOfMs!} ms after their read (bound ${SOL_VENDOR_REACH_MS})`);
+  }
+  assert.equal(h.cg("/trades") - before, 1, "one refresh for both readers");
+  assert.match(h.keyed.minute() ?? "", /served trades background \d+/, "the refresh stays the helper's background read");
+});
+
+test("inside SOL_VENDOR_REACH_MS a held tape is served at once and its refresh runs behind it, as before", async () => {
+  const h = harness();
+  const first = await h.tape(o.mint);
+  h.t.t += 12_000;
+  h.fill();
+  const a = await h.tape(o.mint);
+  assert.equal(a.asOfMs, first.asOfMs, "the held rows, not the refresh's");
+  await settle();
+  const b = await h.tape(o.mint);
+  assert.ok(b.asOfMs! > first.asOfMs!, "the refresh behind them landed");
+});
+
+test("a refresh that hangs past the reach: the caller is answered the newest held rows at TAPE_OPEN_BOUND_MS, never left waiting on the vendor", async (t) => {
+  let hang = false;
+  const h = harness("300", () => false, (url) => hang && url.includes("/trades"));
+  assert.equal((await h.tape(o.mint)).src, "coingecko");
+  h.t.t += 17_000;
+  h.fill();
+  hang = true;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let answered = false;
+  const p = h.tape(o.mint).then((a) => ((answered = true), a));
+  await settle();
+  assert.equal(answered, false, "waits for the refresh");
+  t.mock.timers.tick(TAPE_OPEN_BOUND_MS - 1);
+  await settle();
+  assert.equal(answered, false, "still within the bound");
+  t.mock.timers.tick(1);
+  const a = await p;
+  assert.equal(a.status, 200);
+  assert.equal(h.t.t - a.asOfMs! >= 17_000, true, "the newest rows held, dated by their read");
 });
