@@ -224,10 +224,10 @@ const PLANTED = {
   "a browser part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: node scripts\/ci\/test-shards\.mjs e2e-run)/, "$1TOTAL: 2$2", "test-browser does not take its part"],
   // card ci-e2e-shards-by-time: each way a browser part can be planned past its job's limit, or run outside the split
   "the browser runs as one chain again, untimed": ['        run: node scripts/ci/test-shards.mjs e2e-run "$INDEX" "$TOTAL"\n', '        run: |\n          cmd="$(node scripts/ci/test-shards.mjs e2e "$INDEX" "$TOTAL")"\n          cd apps/terminal && pnpm exec sh -c "$cmd"\n', "test-browser does not run scripts/ci/test-shards.mjs e2e-run"],
-  "one browser part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1]", "test-browser part 1 of 1 is planned at"],
-  "two browser parts": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1, 2]", "test-browser part 1 of 2 is planned at"],
-  "a browser matrix that skips a part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1, 3]", "test-browser has no matrix part"],
-  "a browser timeout cut to 10 minutes": [/(\n {2}test-browser:\n(?:.*\n){3} {4}timeout-minutes: )15\n/, "$110\n", "test-browser part 1 of 3 is planned at"],
+  "one browser part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1]", "test-browser part 1 of 1 is planned at"],
+  "two browser parts": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1, 2]", "test-browser part 1 of 2 is planned at"],
+  "a browser matrix that skips a part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1, 3]", "test-browser has no matrix part"],
+  "a browser timeout cut to 10 minutes": [/(\n {2}test-browser:\n(?:.*\n){3} {4}timeout-minutes: )15\n/, "$110\n", "test-browser part 1 of 4 is planned at"],
   "the prover moved to the second part": ["        if: strategy.job-index == 0\n        run: KIT_PROVER_E2E=1", "        if: strategy.job-index == 1\n        run: KIT_PROVER_E2E=1", "test-browser runs the prover in Chromium in a part but the first"],
   "the prover in every part": ["        if: strategy.job-index == 0\n        run: KIT_PROVER_E2E=1", "        run: KIT_PROVER_E2E=1", "test-browser runs the prover in Chromium in a part but the first"],
   "a mutant part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: node)/, "$1TOTAL: 4$2", "test-mutants does not take its part"],
@@ -357,10 +357,13 @@ test("the browser parts: main's list and PR #1029's each plan every part of ci.y
 });
 
 test("planted: the round-robin deal takes PR #1029's list past test-browser (1)'s timeout, as run 44375738505 did", () => {
-  const found = browserBudgetProblems(CI, PR_1029_E2E, (s, n) => roundRobin(s, n, PR_1029_SECONDS));
+  // on the matrix of three parts that run had (card app-live-checks-run-on-the-build-before-merge added the fourth)
+  const ci3 = CI.replace(/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1, 2, 3]");
+  assert.notEqual(ci3, CI);
+  const found = browserBudgetProblems(ci3, PR_1029_E2E, (s, n) => roundRobin(s, n, PR_1029_SECONDS));
   assert.ok(found.some((f) => f.startsWith("test-browser part 1 of 3 is planned at")), JSON.stringify(found));
   // the deal by time, on the same list and the same matrix, does not
-  assert.deepEqual(browserBudgetProblems(CI, PR_1029_E2E, (s, n) => e2eParts(s, n, PR_1029_SECONDS)), []);
+  assert.deepEqual(browserBudgetProblems(ci3, PR_1029_E2E, (s, n) => e2eParts(s, n, PR_1029_SECONDS)), []);
 });
 
 test("the browser runs' measured times: every command of test:e2e has one, each names a command, and a stale one fails", () => {
