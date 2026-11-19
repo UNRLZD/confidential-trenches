@@ -4,12 +4,13 @@
 // A buy of several pieces pays W, the own W of its buy's note, from other notes' releases (tag 2s), then spends that
 // note in its buy (tag 3). When the releases land and the buy never does, the buy's note stays unspent and its own W
 // holds what the releases paid. So the device derives the own W of each of the pool's UNSPENT and HELD notes and reads
-// how much SOL each holds: on mainnet in one getMultipleAccounts on the helper's seat per 100 Ws (never on a public
-// provider: one public request that names several Ws links them for that provider), in the testnet build, which has no
-// helper seat, one W a request. A W that holds SOL gets a rent back owed (pool-sell.ts OwedRentBack `found`), which
-// reads W alone on both RPCs: once past its latest transaction's blockhash life (foundPast, read before anything is
-// signed for W: no buy signed before it can still land) it closes to W each token account both list it owning that holds
-// none, sweeps W when it then owns none, and keeps W as it is while one holds tokens.
+// how much SOL each holds in one getMultipleAccounts on the helper's seat per 100 Ws, on mainnet and in the testnet build
+// alike (never on a public provider: a public request that names a W ties it to the device, and several Ws to each
+// other; card load-reads-name-no-w-to-the-public-seat). A W that holds SOL gets a rent back owed (pool-sell.ts
+// OwedRentBack `found`), which reads W alone on both RPCs: once past its latest transaction's blockhash life
+// (foundPast, read before anything is signed for W: no buy signed before it can still land) it closes to W each token
+// account both list it owning that holds none, sweeps W when it then owns none, and keeps W as it is while one holds
+// tokens.
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
@@ -34,9 +35,9 @@ export function ownWs(seed64: Uint8Array, notes: readonly NoteRecord[], scope: b
   return [...out.values()];
 }
 
-/** The Ws of `ws` that hold any lamports: read in batches of FOUND_BATCH on `batch` (the helper's seat), or, with no
- *  such seat, one W a request on `one`. A read that fails or answers out of shape throws: nothing is found on it. */
-export async function heldWs(ws: readonly FoundW[], batch: SolanaRpc | null, one: SolanaRpc): Promise<FoundW[]> {
+/** The Ws of `ws` that hold any lamports: read in batches of FOUND_BATCH on `batch` (the helper's seat). A read that
+ *  fails or answers out of shape throws: nothing is found on it. */
+export async function heldWs(ws: readonly FoundW[], batch: SolanaRpc): Promise<FoundW[]> {
   const lamportsOf = (v: unknown): bigint | null => {
     if (v === null) return 0n;
     const l = (v as { lamports?: unknown } | undefined)?.lamports;
@@ -44,21 +45,13 @@ export async function heldWs(ws: readonly FoundW[], batch: SolanaRpc | null, one
     return BigInt(l);
   };
   const out: FoundW[] = [];
-  if (batch !== null) {
-    for (let i = 0; i < ws.length; i += FOUND_BATCH) {
-      const part = ws.slice(i, i + FOUND_BATCH);
-      const r = (await batch("getMultipleAccounts", [part.map((w) => w.address), { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 0 } }])) as { value?: unknown };
-      if (!Array.isArray(r?.value) || r.value.length !== part.length) throw new Error("getMultipleAccounts: not one answer a W");
-      part.forEach((w, k) => {
-        if (lamportsOf((r.value as unknown[])[k])! > 0n) out.push(w);
-      });
-    }
-    return out;
-  }
-  for (const w of ws) {
-    const r = (await one("getAccountInfo", [w.address, { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 0 } }])) as { value?: unknown };
-    if (r === null || typeof r !== "object" || !("value" in r)) throw new Error("getAccountInfo: no value");
-    if (lamportsOf(r.value)! > 0n) out.push(w);
+  for (let i = 0; i < ws.length; i += FOUND_BATCH) {
+    const part = ws.slice(i, i + FOUND_BATCH);
+    const r = (await batch("getMultipleAccounts", [part.map((w) => w.address), { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 0 } }])) as { value?: unknown };
+    if (!Array.isArray(r?.value) || r.value.length !== part.length) throw new Error("getMultipleAccounts: not one answer a W");
+    part.forEach((w, k) => {
+      if (lamportsOf((r.value as unknown[])[k])! > 0n) out.push(w);
+    });
   }
   return out;
 }

@@ -372,7 +372,8 @@ else {
   const oneClickLeastNow = (chain: PoolChain): Promise<bigint> => {
     const kept = leastRead.get(chain);
     if (kept !== undefined && Date.now() - kept.at < 60_000) return kept.least;
-    const least = readOneClickLeast(chain, fetch, Date.now());
+    // its answers checked at the page's own price of the pool's coin, read as each answers (card cash-to-pool-least-signed)
+    const least = readOneClickLeast(chain, fetch, Date.now(), { price: () => prices.get(chain) });
     leastRead.set(chain, { at: Date.now(), least });
     least.catch(() => leastRead.get(chain)?.least === least && leastRead.delete(chain));
     return least;

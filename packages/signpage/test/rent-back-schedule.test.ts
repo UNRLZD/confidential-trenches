@@ -78,6 +78,8 @@ test("a load's first run waits its drawn start, 15 to 60 s, a full sell's again 
 test("a tap's ride never runs before a gap drawn after the tap: none at the next state read, none a minute under the least gap, then the run rides", () => {
   let t = 1_000;
   const s = backsSchedule(() => t, BACKS_LOAD_MIN_MS);
+  // a tap earlier on the page (card rent-backs-resume-private: a ride waits for the page's first tap)
+  s.act(t);
   t += BACKS_LOAD_MAX_MS;
   assert.equal(s.take(), true, "the load's first run");
   assert.equal(s.takeRide(), undefined, "a plain load never rides");
@@ -109,6 +111,7 @@ test("the ride's time is drawn after the tap, within the spacing's gap, and not 
 test("a held ride stays booked; rode ends it; a second tap moves it later, never earlier", () => {
   let t = 1_000;
   const s = backsSchedule(() => t, 0);
+  s.act(t);
   assert.equal(s.take(), true);
   s.ended(false);
   s.ride(t + 600_000);
@@ -151,4 +154,41 @@ test("the ride's booking on the record: read back, kept at the latest, ended by 
   assert.equal(await owed.rideAt!(), 2_000, "rode of another time keeps it");
   await owed.rode!(2_000);
   assert.equal(await owed.rideAt!(), undefined);
+});
+
+// Card rent-backs-resume-private: a run before the page's first tap is idle (resumeRentBacks reads the Ws on the helper's
+// seat alone and passes none), so a page load names no W to the public seat. The first tap books one run at its drawn
+// time, whatever the idle runs before it ended; a ride waits for it; a later tap changes nothing.
+test("before the page's first tap every run is idle and no ride runs; the first tap books one run at its time; a later tap moves nothing", () => {
+  let t = 1_000;
+  const s = backsSchedule(() => t, 0);
+  assert.equal(s.take(), true, "the load's first run");
+  assert.equal(s.acted(), false, "idle: no tap yet");
+  s.ended(false);
+  s.ride(t + 600_000);
+  t += 3_600_000;
+  assert.equal(s.take(), false, "a ride booked before the page's first tap does not run");
+  s.act(t + 20_000);
+  t += 19_999;
+  assert.equal(s.take(), false, "not before the tap's drawn time");
+  t += 1;
+  assert.equal(s.take(), true, "the tap's run, past the idle run that left nothing");
+  assert.equal(s.acted(), true, "it passes the Ws");
+  assert.ok(s.takeRide() !== undefined, "and rides the booked ride");
+  s.ended(false);
+  s.rode(s.takeRide()!);
+  s.act(t + 10 * BACKS_MAX_MS);
+  t += 1;
+  assert.equal(s.take(), false, "a later tap books no run of its own");
+  assert.equal(s.acted(), true, "nor moves the first tap's time");
+  // the default draw: a load's start window after the tap
+  for (let i = 0; i < 100; i++) {
+    let u = 0;
+    const d = backsSchedule(() => u, 0);
+    d.act();
+    u = BACKS_LOAD_MIN_MS - 1;
+    assert.equal(d.acted(), false, "before 15 s");
+    u = BACKS_LOAD_MAX_MS;
+    assert.equal(d.acted(), true, "by 60 s");
+  }
 });
