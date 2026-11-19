@@ -283,8 +283,9 @@ const laterReal = (fn: () => void, ms: number): (() => void) => {
  * failed or refused read keeps the bars drawn and waits longer each time (doubling from LIVE_MS, a 429's Retry-After,
  * at most LIVE_BACKOFF_MAX_MS). An answer with none of the helper's own bars (a helper just restarted or deployed has
  * not read the token's book yet; its newest bars would be GeckoTerminal's) is folded like any other and the next read
- * is a full one AWAY_MS later, or sooner when a full read is due sooner (the helper keeps GeckoTerminal's newest range a minute, so it reads GeckoTerminal at
- * most once a minute for it), and live reads resume once the helper's own bars are back. A chart whose first answer
+ * is a full one AWAY_MS later, or sooner when a full read is due sooner (the helper keeps GeckoTerminal's newest range
+ * a minute, so it reads GeckoTerminal at most once a minute for it), and live reads resume once the helper's own bars
+ * are back. A chart whose first answer
  * names none of them starts that way: its first read is a full one AWAY_MS later. While the last full answer (or the
  * first one) says `filling`, its bars are the helper's so far and more are being read (the helper's held bars or a
  * history read still owed, apps/helper/src/data/evm/swaps.ts and solana/trades.ts candles): the full read is due AWAY_MS
