@@ -46,6 +46,31 @@ test("a real Robinhood quote whose call of 64 starves reads behind honest heavy 
   let last = new Map<string, string>();
   const any = new Map<string, string>();
   for (const x of F.exchanges) any.set(key(x.body), x.answer);
+  // the scan's batches as the recording sent them, by their getLogs' block ranges: their logs and their block read. The
+  // recording (9 Nov) named the coin in two topic positions; since card evm-scan-chain-tail a request names the event
+  // alone, answered here with the union of the recorded logs of the same blocks (the pools are the same, so the reads
+  // this replays are)
+  const range = (c: Call) => { const f = c.params[0] as unknown as { fromBlock: string; toBlock: string }; return `${f.fromBlock}-${f.toBlock}`; };
+  const scans = new Map<string, { q: number; logs: unknown[]; block: unknown }>();
+  for (const x of F.exchanges) {
+    const cs = callsOf(x.body);
+    const ls = cs.filter((c) => c.method === "eth_getLogs");
+    if (ls.length === 0 || ls.some((c) => range(c) !== range(ls[0]!))) continue;
+    const a = JSON.parse(x.answer) as { id: number; result?: unknown }[];
+    const of = (c: Call) => a.find((y) => y.id === c.id)?.result;
+    const blk = cs.find((c) => c.method === "eth_getBlockByNumber");
+    scans.set(`${x.q}:${range(ls[0]!)}`, { q: x.q, logs: ls.flatMap((c) => (of(c) as unknown[] | undefined) ?? []), block: blk === undefined ? undefined : of(blk) });
+  }
+  const scanAnswer = (q: number, calls: Call[]): string | undefined => {
+    const ls = calls.filter((c) => c.method === "eth_getLogs");
+    if (ls.length !== 1 || (ls[0]!.params[0] as unknown as { topics: unknown[] }).topics.length !== 1) return undefined;
+    const r = scans.get(`${q}:${range(ls[0]!)}`) ?? [...scans.entries()].find(([k]) => k.endsWith(`:${range(ls[0]!)}`))?.[1];
+    if (r === undefined) return undefined;
+    const seen = new Set<string>();
+    const logs = r.logs.filter((l) => { const k = JSON.stringify(l); return !seen.has(k) && (seen.add(k), true); });
+    return JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, result: c.method === "eth_getLogs" ? logs : r.block })));
+  };
+  let atQ = 0;
   const load = (q: number) => {
     queue = new Map();
     last = new Map();
@@ -65,7 +90,7 @@ test("a real Robinhood quote whose call of 64 starves reads behind honest heavy 
     const calls = callsOf(body);
     const k = key(body);
     const q = queue.get(k);
-    const answer = q !== undefined && q.length > 0 ? q.shift()! : (last.get(k) ?? any.get(k));
+    const answer = q !== undefined && q.length > 0 ? q.shift()! : (last.get(k) ?? any.get(k) ?? scanAnswer(atQ, calls));
     if (answer === undefined) {
       missed.push(calls.map((c) => (readsOf(c) !== undefined ? `aggregate3 of ${readsOf(c)}` : c.method)).join(", "));
       return new Response("upstream unavailable", { status: 503 });
@@ -83,6 +108,7 @@ test("a real Robinhood quote whose call of 64 starves reads behind honest heavy 
     const per: { outcome: string; sizes: number[]; words: number[][] }[] = [];
     for (const [q, { now }] of F.quotes.entries()) {
       load(q);
+      atQ = q;
       sizes = [];
       words = [];
       const t0 = realNow();

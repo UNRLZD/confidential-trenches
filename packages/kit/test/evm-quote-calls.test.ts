@@ -19,7 +19,7 @@ import { gunzipSync } from "node:zlib";
 import { evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolIndexUse, evmProviders, evmRanked, evmSpeedReset, type EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
-import { callKey } from "./evm-quote-calls-record.ts";
+import { callKey, withEventOnly } from "./evm-quote-calls-record.ts";
 import { onTestClock } from "./test-clock.ts";
 
 const F = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/evm-quote-calls.json.gz", import.meta.url))).toString("utf8"));
@@ -30,7 +30,7 @@ const POST_MS = 200;
 const BOUND_MS = 8_000;
 
 const replay = () => {
-  const answers = new Map<string, unknown>(F.calls);
+  const answers = new Map<string, unknown>(withEventOnly(F.calls));
   const own = new Map<string, unknown>(F.own);
   const missed: string[] = [];
   const flying = new Map<string, number>();

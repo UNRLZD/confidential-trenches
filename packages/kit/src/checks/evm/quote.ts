@@ -267,6 +267,8 @@ function venue(chain: EvmPoolChain, all: EvmPoolVenueList = evmPoolVenues()) {
     // and its v3 adapter: a buy's swap is run through the route's own adapter to read its gas (card evm-buy-gas-floor)
     adapterV3: isAddress(adapters[0]) ? lower(adapters[0]) : undefined,
     scan: Object.hasOwn(v, "scan") ? v.scan : undefined,
+    // the blocks below its head the pool index stores to (a reorg's reach): the chain's tail keeps none above them
+    indexMargin: Object.hasOwn(v, "index") && Number.isSafeInteger(v.index?.margin) ? v.index!.margin : undefined,
     inflight: Object.hasOwn(v, "inflight") ? v.inflight : undefined,
     called: new Set(called.filter(isAddress).map(lower)),
   };
@@ -1449,6 +1451,91 @@ function keyOfRoute(r: EvmV4Route): EvmPoolKey {
 const INITIALIZE = "dd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"; // Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)
 type Spans = [number, number][];
 const SCANS = new Map<string, { spans: Spans; pools: EvmPoolKey[] }>();
+// The chain's tail (card evm-scan-chain-tail): blocks read with requests that name the Initialize event alone, so one
+// read of a block serves every currency of every later quote; kept per chain and per first scan provider (`by`): the
+// kit's own providers by URL (scanRpcOf, a quote's and a later quote's one tail), a caller's own scan rpc as itself, so
+// blocks a caller's provider answered empty never stand in for the pinned providers' reads. A quote reads the tail only
+// from a near start (scanPools): an event-alone request returns every pool made in its blocks, about 2,900 a day on
+// Robinhood, so from a start further back than SCAN_MAX_LOGS of them it asks a currency's pools as an OR, as before.
+type Tail = { spans: Spans; byCurrency: Map<string, EvmPoolKey[]>; ids: Set<string>; at: Map<string, number>; own?: { quote: object; spans: Spans } | undefined; band?: Spans; asked?: Set<string> };
+const TAILS = new WeakMap<object, Map<EvmPoolChain, Tail>>();
+/** The kit's scan rpcs' source: one object per URL (scanRpcOf). */
+const SCAN_SOURCE = new Map<string, object>();
+const SOURCE_OF = new WeakMap<EvmRpc, object>();
+/** The tail of `chain` read through the first scan provider `by`, if any. */
+const tailOf = (chain: EvmPoolChain, by: EvmRpc | undefined): Tail | undefined => (by === undefined ? undefined : TAILS.get(SOURCE_OF.get(by) ?? by)?.get(chain));
+// the chain's tail being read after a quote's answer, per first scan provider (`by`) and chain: a quote that finds it
+// running answers by currency as the first did and starts no second read of it (card evm-scan-chain-tail)
+const FILLS = new WeakMap<object, Set<EvmPoolChain>>();
+/** Reads the chain's tail with `read` and keeps it, unless a read of it is running already; nothing of a failed read is
+ *  kept, and the next quote that finds the tail with no block read starts another. */
+function evmTailFill(chain: EvmPoolChain, by: EvmRpc, read: () => ReturnType<typeof scanPools>): void {
+  const src = SOURCE_OF.get(by) ?? by;
+  const running = FILLS.get(src) ?? new Set<EvmPoolChain>();
+  FILLS.set(src, running);
+  if (running.has(chain) || FLOODED.get(src)?.has(chain) === true) return;
+  running.add(chain);
+  const p = quiet(chain)
+    .then(read)
+    .then((sc) => sc.commit())
+    // a tail that answered a flood of pools (TailFlood) is never read again for this provider: each quote scans by
+    // currency, as main does (TAIL8)
+    .catch((e) => void (e instanceof TailFlood && FLOODED.set(src, (FLOODED.get(src) ?? new Set<EvmPoolChain>()).add(chain))))
+    .finally(() => (running.delete(chain), RUNNING_FILLS.get(src)?.delete(p)));
+  const ps = RUNNING_FILLS.get(src) ?? new Set<Promise<unknown>>();
+  RUNNING_FILLS.set(src, ps.add(p));
+}
+const RUNNING_FILLS = new WeakMap<object, Set<Promise<unknown>>>();
+// the quotes of each chain running now, and what waits for none to run (quiet)
+const QUOTING = new Map<string, number>();
+const QUIET = new Map<string, (() => void)[]>();
+/** Settles once no quote of `chain` runs, a turn of the event loop after the last ended: the chain's tail is read
+ *  after the answer of the quote that starts it (TAILF7, TAILF8), and a tap's next quote, asked right after its last
+ *  answered, goes before it (TAILF9, TAILF10; a Base tap of two quotes at 0b37db8a1 sent its second beside the tail's
+ *  16 reads, 11.5 and 13.6 s against main's 7.0) */
+const quiet = (chain: string): Promise<void> =>
+  new Promise((go) => {
+    const check = (): void => {
+      if ((QUOTING.get(chain) ?? 0) > 0) QUIET.set(chain, [...(QUIET.get(chain) ?? []), check]);
+      else go();
+    };
+    check();
+  });
+/** The chain a request names, as quoting counts it: a string, else none (a hostile request's chain is never made a
+ *  string, so its refusal stays the quote's own: TAILF11) */
+const chainKey = (req: unknown): string => {
+  const c = typeof req === "object" && req !== null ? (req as { chain?: unknown }).chain : undefined;
+  return typeof c === "string" ? c : "";
+};
+/** A quote of `chain` starts (`+1`) or ends (`-1`); at none running, what waited for it looks again a turn later. */
+const quoting = (chain: string, d: 1 | -1): void => {
+  const n = (QUOTING.get(chain) ?? 0) + d;
+  QUOTING.set(chain, n);
+  if (n > 0) return;
+  QUOTING.delete(chain);
+  for (const f of QUIET.get(chain) ?? []) setTimeout(f, 0);
+  QUIET.delete(chain);
+};
+const FLOODED = new WeakMap<object, Set<EvmPoolChain>>();
+/** For the tests: settles once every read of a chain's tail started so far on `by`'s first scan provider has ended.
+ *  Not in the kit's index. */
+export const evmTailFills = async (by: EvmRpc): Promise<void> => {
+  const ps = RUNNING_FILLS.get(SOURCE_OF.get(by) ?? by);
+  while (ps !== undefined && ps.size > 0) await Promise.all([...ps]);
+};
+/** `k`, made at block `n`, added to `t` under both its currencies, once. */
+const tailAdd = (t: Tail, k: EvmPoolKey, n: number): void => {
+  const id = poolId(k);
+  if (t.ids.has(id)) return;
+  t.ids.add(id);
+  t.at.set(id, n);
+  for (const c of new Set([k.currency0, k.currency1])) append(t.byCurrency, c, k);
+};
+/** True where `k` is a market of `c`: its other currency the native asset or WETH. */
+const isMarketOf = (k: EvmPoolKey, c: string, weth: string): boolean => {
+  const other = k.currency0 === c ? k.currency1 : k.currency0;
+  return other === NATIVE || other === weth;
+};
 // The device's pool index of a chain (pool-index.ts evmPoolIndexSync: every Initialize log of the PoolManager, each span
 // proven on two readers of two operators), as its last whole sync served it: every pool to `through` (its N). A scan of a
 // currency that has no kept scan starts from it: the index's blocks from its first to N count as read, with the
@@ -1488,6 +1575,9 @@ export function evmPoolIndexPools(chain: EvmPoolChain, token: string): readonly 
 }
 /** For the tests: forgets every chain's index (not in the kit's index). */
 export const evmPoolIndexReset = (): void => (INDEXES.clear(), SERVED.clear());
+/** For the tests (not in the kit's index): `rpc` reads and keeps the tail `as` does (one chain's history behind two rpc
+ *  objects, a provider that turns hostile between two quotes). */
+export const evmScanTailAlias = (rpc: EvmRpc, as: EvmRpc): void => void SOURCE_OF.set(rpc, SOURCE_OF.get(as) ?? as);
 // The helper's pools of a currency (card evm-pool-index-from-the-first-pool): the helper keeps every Initialize log of
 // the PoolManager from its first block, and answers a currency's pools, so a pool older than the scan's depth (NOVAAI's
 // native pool on Robinhood: block 40,138,722, the depth's 10M blocks back from 113,982,434) is still a candidate. Never
@@ -1550,11 +1640,11 @@ const indexScanOf = (chain: EvmPoolChain, kind: ScanKind, c: string, weth: strin
 /** The pools of currency `c` (every kind) a scan of it hands a quote where its logs find none it did not hold: the
  *  device's kept scan's, the index's from `floor` and the helper's (scanPools `cached` and `served`); a warm buy reads
  *  them beside its scan (card evm-quote-fast-from-asia). */
-const keptPoolsOf = async (chain: EvmPoolChain, c: string, weth: string, floor: number): Promise<EvmPoolKey[]> => {
+const keptPoolsOf = async (chain: EvmPoolChain, c: string, weth: string, floor: number, by?: EvmRpc): Promise<EvmPoolKey[]> => {
   const own = SCANS.get(`${chain}:all:${c}`);
   const ixs = indexScanOf(chain, "all", c, weth, Math.max(0, floor));
   const served = await servedOf(chain, "all", c, weth);
-  return [...new Map([...(own?.pools ?? []), ...(ixs?.pools ?? []), ...served].map((k) => [poolId(k), k])).values()];
+  return [...new Map([...(own?.pools ?? []), ...(ixs?.pools ?? []), ...(tailOf(chain, by)?.byCurrency.get(c) ?? []), ...served].map((k) => [poolId(k), k])).values()];
 };
 /** True where two lists hold the same pools. */
 const samePools = (x: readonly EvmPoolKey[] | undefined, y: readonly EvmPoolKey[] | undefined): boolean => {
@@ -1625,6 +1715,12 @@ const EVM_FITS_KEPT = 32;
 const readKey = (r: Read) => JSON.stringify([r.to, r.data, r.override ?? null, r.group ?? null, r.state ?? null, r.tx ?? null], (_, x) => (typeof x === "bigint" ? String(x) : x));
 const SCAN_TOKENS = 4096;
 const SCAN_MAX_LOGS = 10_000;
+/** The blocks one event-alone request of the chain's tail spans at most, from the venue's measured Initialize count
+ *  (`initialized`: that many pools in that many blocks): SCAN_MAX_LOGS of them; none measured, the whole depth. */
+/** A tail request answering more than this many times the pools its venue's rate makes of its blocks is a flood. */
+const TAIL_FLOOD = 4;
+const tailBudgetOf = (s: { depth: number; initialized?: { pools: number; blocks: number } | undefined }): number =>
+  s.initialized === undefined || !(s.initialized.pools > 0) || !(s.initialized.blocks > 0) ? s.depth : Math.floor((SCAN_MAX_LOGS * s.initialized.blocks) / s.initialized.pools);
 /** A scan request that fails or answers SCAN_MAX_LOGS logs or more is asked again as its two halves, at most
  *  SCAN_SPLITS times over (card evm-quote-head-watch): base-rpc.publicnode.com took 3.6 to 10.8 s for a 50,000-block
  *  span of USDC's Initialize logs with 20 at once, past the 10 s timeout, and 0.9 to 2.4 s for 10,000 (2026-11-04
@@ -1747,6 +1843,8 @@ class NotHeldYet extends EvmQuoteError {}
  *    alone (one 429 with a Retry-After of 120 s handed Robinhood's spare the whole cold depth);
  *  - one block whose logs its provider does not answer (too_many_pools; `short` in scanPools). */
 class ScanStop extends EvmQuoteError {}
+/** The chain's tail answered a flood of pools: its quote scans by currency instead (scanPools, scanOrByCurrency). */
+class TailFlood extends ScanStop {}
 /** The scan provider answered, short of the logs: an error in the answer, an HTTP status other than 429 or 5xx, a body
  *  that is not a batch or past its size (BadAnswer). The scan asks its halves on the same provider, never the next. */
 class ScanAnswered extends EvmQuoteError {}
@@ -1992,24 +2090,40 @@ type ScanFrom = { head: bigint; first: ScanOn };
  *  those blocks, for this quote only; one further behind (the scan outlasted maxLag blocks) is scanned on up to the
  *  agreed block. The currencies that scan from the same block share each request, as an OR of topics. `commit` keeps
  *  what it read; the quote calls it only once its block is confirmed on both providers. */
+/** scanPools, asked again by currency where the chain's tail answered a flood of pools (TailFlood). */
+const scanOrByCurrency = (...args: Parameters<typeof scanPools>): ReturnType<typeof scanPools> =>
+  scanPools(...args).catch((e) => {
+    if (!(e instanceof TailFlood)) throw e;
+    const again = [...args] as Parameters<typeof scanPools>;
+    again[14] = true;
+    return scanPools(...again);
+  });
 async function scanPools(
   chain: EvmPoolChain,
   cs: readonly string[],
   kind: ScanKind,
   weth: string,
   pm: string,
-  s: { span: number; depth: number },
+  s: { span: number; depth: number; initialized?: { pools: number; blocks: number } | undefined },
   agreed: () => Promise<Block>,
   maxLag: bigint,
   from: Promise<ScanFrom>,
   picked: () => Promise<Block> = agreed,
   defer?: (cs: readonly string[]) => void,
   scanless = false,
-): Promise<{ pools: Map<string, EvmPoolKey[]>; commit: () => void }> {
+  by?: EvmRpc,
+  tailLag = Number(maxLag),
+  byCurrency = false,
+  quote?: object,
+  fill?: ((cs: readonly string[]) => void) | true,
+): Promise<{ pools: Map<string, EvmPoolKey[]>; commit: () => Promise<void> | void }> {
+  // a currency's pools of this kind, of any list
+  const ofKind = (c: string) => (k: EvmPoolKey) => kind === "all" || isMarketOf(k, c, weth);
+  const tail0 = tailOf(chain, by);
   // a scanless quote: the served index's pools from the depth's floor and the helper's, no log read and nothing kept
   if (scanless) {
     const floor = Math.max(0, (INDEXES.get(chain)?.through ?? 0) - s.depth + 1);
-    const all = await Promise.all(cs.map(async (c) => [c, [...new Map([...(indexScanOf(chain, kind, c, weth, floor)?.pools ?? []), ...(await servedOf(chain, kind, c, weth))].map((k) => [poolId(k), k])).values()]] as [string, EvmPoolKey[]]));
+    const all = await Promise.all(cs.map(async (c) => [c, [...new Map([...(indexScanOf(chain, kind, c, weth, floor)?.pools ?? []), ...(tail0?.byCurrency.get(c) ?? []).filter(ofKind(c)), ...(await servedOf(chain, kind, c, weth))].map((k) => [poolId(k), k])).values()]] as [string, EvmPoolKey[]]));
     return { pools: new Map(all), commit: () => {} };
   }
   const { head: scanHead, first } = await from;
@@ -2024,12 +2138,41 @@ async function scanPools(
     const own = SCANS.get(key);
     const ixs = indexScanOf(chain, kind, c, weth, floor);
     const cached = own === undefined || ixs === undefined ? (own ?? ixs) : { spans: withSpan(own.spans, ...ixs.spans[0]!), pools: [...new Map([...own.pools, ...ixs.pools].map((k) => [poolId(k), k])).values()] };
-    const pools = cached === undefined ? [] : [...cached.pools];
+    // and the chain's tail's (card evm-scan-chain-tail), its blocks read for every currency
+    const pools = [...new Map([...(cached?.pools ?? []), ...(tail0?.byCurrency.get(c) ?? []).filter(ofKind(c))].map((k) => [poolId(k), k])).values()];
     // the blocks read before, those still within the depth
-    const spans: Spans = (cached?.spans ?? []).filter(([, b]) => b >= floor).map(([a, b]) => [Math.max(a, floor), b]);
-    return { c, key, spans, gaps: gapsOf(spans, floor, head), pools, ids: new Set(pools.map(poolId)), later: [] as Spans };
+    const spans: Spans = (tail0?.spans ?? []).reduce<Spans>((x, [a, b]) => withSpan(x, a, b), cached?.spans ?? []).filter(([, b]) => b >= floor).map(([a, b]) => [Math.max(a, floor), b]);
+    return { c, key, spans, ix: ixs?.spans ?? [], gaps: gapsOf(spans, floor, head), pools, ids: new Set(pools.map(poolId)), later: [] as Spans, laterFrom: undefined as number | undefined, tail: false };
   });
   type Each = (typeof each)[number];
+  // The chain's tail (card evm-scan-chain-tail) reads from the block every currency of the scan holds read up to from
+  // the floor, its start, where that start is within tailBudgetOf blocks of the head: one request of the event alone
+  // then serves every currency, its blocks kept for every later quote. A start further back, or none (no index, no
+  // scan), is the currencies' own scan below, an OR of them (on 18 Nov with no index a cold Robinhood quote read the
+  // event alone over 10M blocks in 23.1 s against 5.6 s by currency: past SCAN_MAX_LOGS logs each request was halved)
+  const reach = (sp: Spans) => sp.reduce((k, [a, b]) => (a <= k + 1 ? Math.max(k, b) : k), floor - 1);
+  // the tail's fill reads from where the index leaves off, as a quote's first tail read did: the blocks the quote that
+  // asked for it read by currency are not the tail's (its commit keeps only the blocks it read itself)
+  const start = Math.min(head, ...each.map((e) => reach(fill === true ? e.ix : e.spans)));
+  // A chain's tail with no block read yet (card evm-scan-chain-tail): the quote answers from its currencies' own scan,
+  // the same requests as main, and the tail is read once it has answered, as a background read (`fill`, evmTailFill).
+  // Read before the answer, the first Base quote's 14 requests of every pool came back 1,620,418 bytes against 1,064
+  // by currency, the last of them 410-919 ms against 316-440 (read-only from the Mac, 2026-11-18 21:2xZ), and the
+  // quote 2,878 ms against main's 2,436 (median of 7 a side)
+  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0;
+  const near = !byCurrency && !cold && head - start <= tailBudgetOf(s);
+  // asked for once this scan's reads are kept (commit): a scan that failed, or a quote that refused, starts none
+  const wantFill = cold && !byCurrency && typeof fill === "function" && head - start <= tailBudgetOf(s);
+  // the blocks within the margin a scan of this same quote read count for its other scans (`own`), never another quote's
+  const kept0 = (tail0?.own !== undefined && quote !== undefined && tail0.own.quote === quote ? tail0.own.spans : []).reduce((sp, [x, y]) => withSpan(sp, x, y), tail0?.spans ?? []);
+  const tailHolds: Spans = start >= floor ? withSpan(kept0, floor, start) : kept0;
+  const tailSpans: Spans = tailHolds.filter(([, b]) => b >= floor).map(([a, b]) => [Math.max(a, floor), b]);
+  const scans: Each[] = near ? [{ c: "", key: "", spans: tailSpans, ix: [], gaps: gapsOf(tailSpans, floor, head), pools: [], ids: new Set(), later: [], laterFrom: undefined, tail: true }] : each;
+  // the tail's pools this scan's logs find (kept in the chain's tail at commit)
+  const tailFound: Tail = { spans: [], byCurrency: new Map(), ids: new Set(), at: new Map() };
+  // of them, those the first provider answered: the only ones kept for the chain's other coins (independent review of
+  // 266cca1b4, M2: a spare's made-up pools of coin B, kept for every coin, refused B's later quote too_many_pools)
+  const tailKept: Tail = { spans: [], byCurrency: new Map(), ids: new Set(), at: new Map() };
   // a currency whose kept or index scan already holds pools and reads to within maxLag of the scan provider's head is
   // not scanned for those last blocks before this quote (card evm-buy-and-sell-on-mainnet: the round cost a warm Base
   // quote 280-520 ms): the kit accepts the same blocks unread where the scan provider's head is behind the agreed block
@@ -2042,15 +2185,35 @@ async function scanPools(
   // missed as a pool made in them is, its price and nothing more, while X with no market read again before every warm
   // quote cost one post of Robinhood's scan provider's 1 a second.
   const lag = Number(maxLag);
-  for (const e of each) {
-    if ((e.pools.length > 0 || kind === "markets") && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {
-      e.later = e.gaps;
+  for (const e of scans) {
+    // on the chain's tail, the blocks a first provider answered within the index's margin of its head (`band`, kept for
+    // no quote: TAIL7) count as read for this rule alone: they are read again, before the answer where any block of the
+    // gap reads unread past maxLag or a currency holds no pool, as any gap; otherwise right after it
+    const unread = e.tail ? gapsOf((tail0?.band ?? []).reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
+    const held = (e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === "markets";
+    // read to be kept on the tail: the blocks no provider answered, and those of the band now past the index's margin
+    // below the head; the band's others give an answer kept for no quote, so they are read before an answer that needs
+    // them and never again after one (a burst of five Robinhood quotes asked 28 to 63 getLogs, 10 to 23 of them 429,
+    // where main asked 10)
+    const top = head - tailLag;
+    const kept = e.tail ? gapsOf((tail0?.band ?? []).filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y]).reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
+    if (held && e.gaps.length > 0 && unread.every(([a]) => a > head - lag)) {
+      e.later = kept;
       e.gaps = [];
+      // the first block of it no provider answered (P2-1 below counts those alone)
+      if (e.tail && unread.length > 0) e.laterFrom = unread[0]![0];
+    } else if (e.tail && held && unread.length > 0) {
+      // unread past maxLag: those blocks alone before the answer (the band counts as read here as above), the band's past
+      // the margin right after it, and no block up to the head is left unanswered for P2-1 (a Robinhood quote 31 s after
+      // the last read the margin's 7,119 blocks with the 547 new ones before its answer, where main read the 547)
+      e.later = gapsOf(unread.reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(kept, floor, head)), floor, head);
+      e.gaps = unread;
+      e.laterFrom = head + 1;
     }
   }
   // the currencies with the same blocks left share each request
   const groups = new Map<string, Each[]>();
-  for (const e of each) append(groups, JSON.stringify(e.gaps), e);
+  for (const e of scans) append(groups, JSON.stringify(e.gaps), e);
   const w = (c: string) => "0x" + word(BigInt(c));
   // `pin`: a catch-up request also asks its provider for the agreed block by number, in the same batch, and its logs
   // count only where that answer is the agreed block's hash (review of c71a4d0..a9f1d32, MEDIUM: a head read on one
@@ -2082,7 +2245,9 @@ async function scanPools(
     const step = or < on.span && g.length * Math.ceil(n / on.span) <= Math.ceil(g.length / SCAN_OR) * Math.ceil(n / or) ? 1 : SCAN_OR;
     for (let i = 0; i < g.length; i += step) {
       const part = g.slice(i, i + step);
-      const span = part.length === 1 ? on.span : or;
+      // a tail request spans at most a quarter of the tail's budget (TAIL_FLOOD), so an answer past the provider's cap is
+      // past 4 times the pools the venue's rate makes of its blocks
+      const span = part[0]!.tail ? Math.max(1, Math.min(on.span, Math.floor(tailBudgetOf(s) / TAIL_FLOOD))) : part.length === 1 ? on.span : or;
       for (let a = from; a <= to; a += span) into.push({ part, a, b: Math.min(to, a + span - 1), on });
     }
   };
@@ -2105,15 +2270,19 @@ async function scanPools(
   // has EVM_SCAN_HOLD_MS a request before the next takes it (scanGateOf)
   const fast = second !== undefined && jobs.reduce((n, j) => n + Math.ceil((j.b - j.a + 1) / second.span), 0) <= second.parallel;
   // each request's logs as it comes back
-  const got: { part: Each[]; a: number; b: number; logs: unknown[] }[] = [];
+  const got: { part: Each[]; a: number; b: number; logs: unknown[]; spare: boolean }[] = [];
+  // the tail answered a flood (TailFlood): no request of this scan is sent after it, its halves included
+  let flooded = false;
   const one = async ({ part, a, b, on }: Job, splits = SCAN_SPLITS): Promise<void> => {
+    if (flooded) throw new TailFlood("rpc_error", "the chain's tail answered a flood of pools");
     const f = (topics: (string | string[] | null)[]) => ({ method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics }] });
     const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));
     // Initialize's topics are the event, the pool id, currency0 and currency1 (a log read on base-rpc.publicnode.com,
     // block 0x32fd7c9, 2026-11-03 20:40Z): the currency as currency0, then as currency1; a market's other currency is
     // the native asset (address 0, always currency0) or WETH, one value a position
     const e0 = "0x" + INITIALIZE;
-    const filters = kind === "all" ? [[e0, null, t], [e0, null, null, t]] : [[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]];
+    // the tail's: the event alone, every currency's pools in one getLogs
+    const filters = part[0]!.tail ? [[e0]] : kind === "all" ? [[e0, null, t], [e0, null, null, t]] : [[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]];
     // an answer at the cap may be one the provider cut there (review of 4830f1f, L)
     const fine = (rs: unknown[]) => rs.every((r) => Array.isArray(r) && r.length < SCAN_MAX_LOGS);
     const p = pin;
@@ -2147,7 +2316,7 @@ async function scanPools(
       } else if (top && typeof h?.hash !== "string") return null;
       return out.slice(0, filters.length).map((x) => (x as { result?: unknown } | null)?.result);
     };
-    const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ part, a, b, logs: r as unknown[] })));
+    const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ part, a, b, logs: r as unknown[], spare: on !== first })));
     const halves = (left: number) => {
       const mid = a + Math.floor((b - a) / 2);
       return settle([one({ part, a, b: mid, on }, left), one({ part, a: mid + 1, b, on }, left)]);
@@ -2217,6 +2386,18 @@ async function scanPools(
       notYet = e instanceof NotHeldYet;
       return null;
     });
+    // the tail's answer past 4 times the pools the venue's measured rate makes of its blocks (and past one): a flood of
+    // pools (independent review of 266cca1b4, M3: 50,000 made-up pools of other currencies in the tail's blocks cost a
+    // quote 15 getLogs and 50,001 logs where main asked 2), so this quote drops the tail and scans by currency, as main
+    // (TailFlood, scanOrByCurrency), and keeps none of the tail's reads
+    // Its requests span a quarter of the budget at most, so an answer cut at the cap is one too; an error answer (Robinhood
+    // answers one past its cap, "logs matched by query exceeds limit of 10000") is asked as its halves, as any, and their
+    // counted answer names the flood.
+    if (part[0]!.tail && s.initialized !== undefined && s.initialized.pools > 0 && s.initialized.blocks > 0) {
+      const n = rs?.[0];
+      const flood = Array.isArray(n) && (n.length >= SCAN_MAX_LOGS || n.length > Math.max(1, (TAIL_FLOOD * (b - a + 1) * s.initialized.pools) / s.initialized.blocks));
+      if (flood) throw ((flooded = true), new TailFlood("rpc_error", `the tail's blocks ${a} to ${b} answered a flood of pools`));
+    }
     if (rs !== null && fine(rs)) return void keep(rs);
     // a warm scan's request one failed in any way goes to the next whole, as before: halves help a span too long for
     // its time or its logs, never a warm one (card evm-scan-second-provider: Robinhood's first answering no logs held a
@@ -2287,7 +2468,50 @@ async function scanPools(
   // past it never keeps a span, review of 5452011, S2)
   const commit = () => {
     take();
-    for (const e of each) {
+    for (const e of scans) {
+      if (e.tail) {
+        // into the chain's tail as it is now, with what a quote after this one kept meanwhile (review of 98a87843b, P3):
+        // only the blocks this scan read, never the index's or the start's; the first provider's alone (independent
+        // review of 92717c7, MEDIUM 1: a spare's backend behind its head that answers [] with a synced block's hash,
+        // Pocket's, logsBehind, never hides a pool made there from the next coin's quote). The pools it found are kept
+        const src = by === undefined ? undefined : (SOURCE_OF.get(by) ?? by);
+        if (src === undefined) continue;
+        const byChain = TAILS.get(src) ?? new Map<EvmPoolChain, Tail>();
+        const t: Tail = byChain.get(chain) ?? { spans: [], byCurrency: new Map(), ids: new Set(), at: new Map() };
+        // and only up to `tailLag` blocks below the scan head (the index's margin; independent review of 266cca1b4, M1): a
+        // first provider whose logs backend silently lags its newest blocks, or a reorg there, hides a pool made in them
+        // from this quote alone; the next reads them again
+        const top = head - tailLag;
+        if (t.own?.quote !== quote) t.own = quote === undefined ? undefined : { quote, spans: [] };
+        for (const g of got) {
+          if (!g.part.includes(e)) continue;
+          // a spare's answer within the margin counts for the deferral rule too (its re-read goes after the answer, and
+          // it keeps nothing: a Robinhood quote's newest span the spare carried made each warm quote read the margin on
+          // the first, 1 a second, before it answered, 2.9 s against main's 0.5 s)
+          if (g.b > top) t.band = withSpan(t.band ?? [], Math.max(g.a, top + 1), g.b);
+          if (g.spare) continue;
+          if (g.a <= top) t.spans = withSpan(t.spans, g.a, Math.min(g.b, top));
+          if (g.b > top && t.own !== undefined) t.own.spans = withSpan(t.own.spans, Math.max(g.a, top + 1), g.b);
+        }
+        for (const ks of tailKept.byCurrency.values()) for (const k of ks) tailAdd(t, k, tailKept.at.get(poolId(k))!);
+        // no block below the depth's floor is kept, nor a pool made there of a currency no scan asked for (M3: a tail of
+        // every pool of the chain, never pruned, grew for the page's life); a pool of one a scan asked for stays, as main
+        // keeps a currency's pools past the floor (its kept scan's)
+        t.spans = t.spans.filter(([, y]) => y >= floor).map(([x, y]) => [Math.max(x, floor), y]);
+        t.band = (t.band ?? []).filter(([, y]) => y >= floor).map(([x, y]) => [Math.max(x, floor), y]);
+        const asked = (t.asked ??= new Set());
+        for (const x of each) asked.add(x.c);
+        for (const [c, ks] of t.byCurrency) {
+          const left = ks.filter((k: EvmPoolKey) => (t.at.get(poolId(k)) ?? floor) >= floor || asked.has(k.currency0) || asked.has(k.currency1));
+          if (left.length === 0) t.byCurrency.delete(c);
+          else if (left.length < ks.length) t.byCurrency.set(c, left);
+        }
+        const held = new Set([...t.byCurrency.values()].flat().map(poolId));
+        for (const id of t.ids) if (!held.has(id)) (t.ids.delete(id), t.at.delete(id));
+        byChain.set(chain, t);
+        TAILS.set(src, byChain);
+        continue;
+      }
       for (const g of got) if (g.part.includes(e)) e.spans = withSpan(e.spans, g.a, g.b);
       if (!SCANS.has(e.key) && SCANS.size >= SCAN_TOKENS) SCANS.delete(SCANS.keys().next().value!);
       // with what a quote after this one kept meanwhile (review of 98a87843b, P3: a gap read later committed over a
@@ -2302,7 +2526,7 @@ async function scanPools(
   const failing = async (e: unknown, at?: Block): Promise<never> => {
     try {
       const b = at ?? (await picked());
-      if (scanHead - b.number <= maxLag) commit();
+      if (!(e instanceof TailFlood) && scanHead - b.number <= maxLag) commit();
     } catch {
       // no agreed block: nothing is kept
     }
@@ -2317,7 +2541,7 @@ async function scanPools(
   // blocks unread on Base): a gap left for later that starts further back is read now, before the answer
   if (b - scanHead <= maxLag) {
     jobs.length = 0;
-    laterJobs(each.filter((e) => e.later.length > 0 && b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > maxLag));
+    laterJobs(scans.filter((e) => e.later.length > 0 && b - BigInt(e.laterFrom ?? Math.min(...e.later.map(([x]) => x))) + 1n > maxLag));
     if (jobs.length > 0) {
       shortMax += 2 * jobs.length;
       await settle(jobs.map(run)).catch((e) => failing(e, agreedAt));
@@ -2334,12 +2558,12 @@ async function scanPools(
     pin = agreedAt;
     jobs.length = 0;
     // a gap left for later is no longer within maxLag of the agreed block: read now
-    laterJobs(each);
-    jobsOf(each, head + 1, end);
+    laterJobs(scans);
+    jobsOf(scans, head + 1, end);
     shortMax += 2 * jobs.length;
     await settle(jobs.map(run)).catch((e) => failing(e, agreedAt));
   }
-  function found({ part, a, b, logs }: (typeof got)[number]) {
+  function found({ part, a, b, logs, spare }: (typeof got)[number]) {
     for (const l of logs) {
       const o = l as { address?: unknown; topics?: unknown; data?: unknown; blockNumber?: unknown };
       const topics = o?.topics;
@@ -2350,6 +2574,12 @@ async function scanPools(
       const addr = (x: string) => "0x" + x.slice(24);
       const tick = BigInt.asIntN(256, BigInt("0x" + d.slice(64, 128)));
       const raw = { currency0: addr(topics[2].slice(2)), currency1: addr(topics[3].slice(2)), fee: Number(BigInt("0x" + d.slice(0, 64)) & 0xffffffn), tickSpacing: Number(tick), hooks: addr(d.slice(128, 192)) };
+      if (part[0]!.tail) {
+        const k = keyOf(raw, raw.currency0);
+        if (k !== null) tailAdd(tailFound, k, n);
+        if (k !== null && !spare) tailAdd(tailKept, k, n);
+        continue;
+      }
       for (const e of part) {
         const k = keyOf(raw, e.c);
         if (k === null || e.ids.has(poolId(k))) continue;
@@ -2363,7 +2593,7 @@ async function scanPools(
   take();
   // the gaps left for later, read once the quote keeps what it read (commit) and kept for the next quote; a failure
   // keeps nothing of them
-  const later = each.filter((e) => e.later.length > 0);
+  const later = scans.filter((e) => e.later.length > 0);
   const rest = async (): Promise<void> => {
     const js: Job[] = [];
     laterJobs(later, js);
@@ -2378,14 +2608,17 @@ async function scanPools(
   // found for this quote only, never kept as scanned blocks
   const served = await Promise.all(each.map((e) => servedOf(chain, kind, e.c, weth)));
   return {
-    pools: new Map(each.map((e, i) => [e.c, served[i]!.length === 0 ? e.pools : [...new Map([...e.pools, ...served[i]!].map((k) => [poolId(k), k])).values()]])),
+    pools: new Map(each.map((e, i) => [e.c, [...new Map([...e.pools, ...(tailFound.byCurrency.get(e.c) ?? []).filter(ofKind(e.c)), ...served[i]!].map((k) => [poolId(k), k])).values()]])),
     commit: () => {
       commit();
+      // and only where the first scan provider answered every read: the tail keeps no spare's answer, so a fill past a
+      // first that refused would ask it again for nothing (SP1)
+      if (wantFill && !got.some((g) => g.spare)) (fill as (cs: readonly string[]) => void)(cs);
       if (later.length === 0) return;
-      if (defer === undefined) void rest().catch(() => {});
+      if (defer === undefined) return rest().catch(() => {});
       else if (!deferred) {
         deferred = true;
-        defer(later.map((e) => e.c));
+        defer(later.some((e) => e.tail) ? [...cs] : later.map((e) => e.c));
       }
     },
   };
@@ -2587,6 +2820,9 @@ const scanRpcOf = (u: string, later = false): EvmRpc => {
   const k = later ? `later ${u}` : u;
   let r = SCAN_RPCS.get(k);
   if (r === undefined) SCAN_RPCS.set(k, (r = evmJsonRpc(u, ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init)) as typeof fetch, 16 << 20, undefined, later)));
+  // a quote's and a later quote's rpc of one URL read one tail
+  if (!SCAN_SOURCE.has(u)) SCAN_SOURCE.set(u, {});
+  SOURCE_OF.set(r, SCAN_SOURCE.get(u)!);
   return r;
 };
 const scansOf = (s: EvmPoolVenue["scan"], later = false): EvmRpc[] | undefined => (s === undefined ? undefined : [s.url, ...(s.spares ?? []).map((x) => x.url)].map((u) => scanRpcOf(u, later)));
@@ -2600,6 +2836,9 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const pin = typeof at === "string" && /^0x[0-9a-fA-F]{64}$/.test(at) ? (watch?.held?.(at.toLowerCase(), nowMs) ?? null) : null;
   const start = mono();
   const seen: { at: string | null } = { at: null };
+  // the chain's quotes running now: the chain's tail is read once none runs (quiet)
+  const chainOf = chainKey(req);
+  quoting(chainOf, 1);
   try {
     return await buyQuoteWith(req, rpcsIn, nowMs, scan, watch, mono, speculate, pin, seen).catch((e) => {
       // a pin the chain no longer holds, or fewer than two providers hold: asked again as a quote with no `at` and
@@ -2612,6 +2851,8 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   } catch (e) {
     if (e instanceof EvmQuoteError && e.at === null) e.at = seen.at;
     throw e;
+  } finally {
+    quoting(chainOf, -1);
   }
 }
 
@@ -3312,18 +3553,34 @@ async function routeSetOf(a: {
     later.set(kind, set);
     for (const c of cs) set.add(c);
   };
+  // the currencies of a scan that found the chain's tail with no block read yet: once the quote ends, the tail is read
+  // from them as a background read (evmTailFill)
+  const toFill = new Set<string>();
+  const fillOf = (cs: readonly string[]) => cs.forEach((c) => toFill.add(c));
   end.push(() => {
+    // only on a first scan provider with a background twin: a read no pace orders after a trade's is never sent beside one
+    if (toFill.size === 0 || firstOn === undefined || v.poolManager === undefined || v.scan === undefined || laterOf(firstOn.rpc) === undefined) return;
+    // each scan provider's background twin (pace.ts `later`): a trade's post never waits behind the fill's. Through the
+    // quote's own gates: a provider the quote found down or throttled is passed over, and nothing is sent past the
+    // quote's bound and deadline
+    const on = (o: ScanOn): ScanOn => ({ ...o, rpc: laterOf(o.rpc) ?? o.rpc, next: o.next === undefined ? undefined : on(o.next) });
+    const from = scanFromOf(firstOn).then(({ head }) => ({ head, first: on(firstOn) }));
+    const go = () => evmTailFill(chain, firstOn.rpc, () => scanPools(chain, [...toFill], "all", lower(v.weth), v.poolManager!, v.scan!, agreedHead, v.maxLag, from, agreedHead, undefined, false, firstOn.rpc, v.indexMargin, false, undefined, true));
+    go();
+  });
+  // one kind after the other, each once the last's reads are kept: on the chain's tail the second reads no block the
+  // first did (card evm-scan-chain-tail)
+  end.push(() => {
+    let done: Promise<unknown> = Promise.resolve();
     for (const [kind, cs] of later) {
       if (firstOn === undefined || v.poolManager === undefined || v.scan === undefined) break;
-      void scanPools(chain, [...cs], kind, lower(v.weth), v.poolManager, v.scan, agreedHead, v.maxLag, scanFromOf(firstOn))
-        .then((sc) => sc.commit())
-        .catch(() => {});
+      done = done.then(() => scanOrByCurrency(chain, [...cs], kind, lower(v.weth), v.poolManager!, v.scan!, agreedHead, v.maxLag, scanFromOf(firstOn), agreedHead, undefined, false, firstOn.rpc, v.indexMargin, false, later).then((sc) => sc.commit())).catch(() => {});
     }
   });
   const scanAt = (cs: readonly string[], kind: ScanKind, early = false) => {
     if (firstOn === undefined || v.poolManager === undefined || v.scan === undefined || cs.length === 0) return null;
     const at = early ? () => picked : agreedHead;
-    return scanPools(chain, cs, kind, lower(v.weth), v.poolManager, v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true);
+    return scanOrByCurrency(chain, cs, kind, lower(v.weth), v.poolManager, v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind), a.scanless === true, firstOn.rpc, v.indexMargin, false, later, fillOf);
   };
   // the warm round: the token's kept reads and scans; a scan asked again in this quote is the one started here
   const planKey = `${chain}:${a.sell ? "sell" : "buy"}:${lower(token)}`;
@@ -3364,7 +3621,7 @@ async function routeSetOf(a: {
   } else {
     scanning?.catch(() => {});
     [block, confirm] = [spec, async () => {}];
-    scanned = scanning === null ? null : { pools: new Map([[lower(token), await keptPoolsOf(chain, lower(token), lower(v.weth), Number(spec.number) - v.scan!.depth + 1)]]), commit: () => {} };
+    scanned = scanning === null ? null : { pools: new Map([[lower(token), await keptPoolsOf(chain, lower(token), lower(v.weth), Number(spec.number) - v.scan!.depth + 1, firstOn?.rpc)]]), commit: () => {} };
   }
   // one 5xx hold for the first round's reads and the caller's beside them (readBoth's `down`)
   const firstDown = new Set<EvmRpc>();
@@ -4090,6 +4347,16 @@ export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<Ev
  *  and `mono`, the monotonic clock of the wait for the buy's block: tests only), and `poolRpcs`, the pool's list W's
  *  releases are read on (by default `rpcsIn`). Not in the index. */
 export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan?: EvmRpc | readonly EvmRpc[], venues?: EvmPoolVenueList, mono: () => number = monotonic, poolRpcs: readonly EvmRpc[] = rpcsIn): Promise<EvmPoolSellQuote> {
+  // the chain's quotes running now: the chain's tail is read once none runs (quiet)
+  const chainOf = chainKey(req);
+  quoting(chainOf, 1);
+  try {
+    return await sellQuoteWith(req, rpcsIn, nowMs, scan, venues, mono, poolRpcs);
+  } finally {
+    quoting(chainOf, -1);
+  }
+}
+async function sellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan: EvmRpc | readonly EvmRpc[] | undefined, venues: EvmPoolVenueList | undefined, mono: () => number, poolRpcs: readonly EvmRpc[]): Promise<EvmPoolSellQuote> {
   const start = mono();
   if (typeof req !== "object" || req === null) return refuse("bad_request", "a request is an object");
   if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");
@@ -5245,6 +5512,14 @@ const CONNECT_ERRORS = new Set(["ETIMEDOUT", "ECONNREFUSED", "ENETUNREACH", "EHO
 const RPC_URL = new WeakMap<EvmRpc, string>();
 /** The evmJsonRpc providers whose posts are a background read's (pace.ts `later`). */
 const RPC_LATER = new WeakSet<EvmRpc>();
+/** Each evmJsonRpc provider's background twin: the same URL, its posts a background read's (pace.ts `later`). */
+const RPC_TWIN = new WeakMap<EvmRpc, () => EvmRpc>();
+/** `rpc`'s background twin (itself where it is one); none for a provider that is not an evmJsonRpc's, whose posts no
+ *  pace orders after a trade's. */
+const laterOf = (rpc: EvmRpc): EvmRpc | undefined => (RPC_LATER.has(rpc) ? rpc : RPC_TWIN.get(rpc)?.());
+/** For the tests: `rpc`, a provider of their own, is its own background twin, so a quote on it reads the chain's tail
+ *  after its answer (evmTailFill) as one on an evmJsonRpc does. Not in the kit's index. */
+export const evmScanFillable = (rpc: EvmRpc): EvmRpc => (RPC_TWIN.set(rpc, () => rpc), rpc);
 /** Whether `rpc`'s provider is held for every reader (a 429, a named rate limit or a refused connection, any reader's). */
 const providerHeld = (rpc: EvmRpc): boolean => {
   const u = RPC_URL.get(rpc);
@@ -5297,6 +5572,10 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
   };
   RPC_URL.set(rpc, url);
   if (later) RPC_LATER.add(rpc);
+  else {
+    let twin: EvmRpc | undefined;
+    RPC_TWIN.set(rpc, () => (twin ??= evmJsonRpc(url, fetchFn, maxBytes, timeoutMs, true)));
+  }
   return rpc;
   async function post(calls: readonly EvmRpcCall[], until?: AbortSignal): Promise<unknown[]> {
     const body = JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params })));
