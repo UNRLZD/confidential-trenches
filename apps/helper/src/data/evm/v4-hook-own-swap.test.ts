@@ -20,7 +20,10 @@ type RLog = { address: string; topics: string[]; data: string; logIndex: string 
 type Fix = { coin: string; decimals: number; pool: string; key: string; rows: { tx: string; side: "b" | "s"; amt: string }[]; tx: { hash: string; from: string; to: string }; receipt: { transactionHash: string; status: string; from: string; to: string; blockNumber: string; logs: RLog[] } };
 const F = JSON.parse(readFileSync(new URL("./fixtures/v4-hook-own-swap.json", import.meta.url), "utf8")) as Fix;
 /** The proof the vendor rows take (named off the import, so the file loads where it is missing and its tests fail). */
-const provenHooks = (f: Parameters<typeof exactRow>[3], token: string): Promise<Parameters<typeof exactRow>[3]> => (swaps as unknown as Record<string, (f: unknown, t: string) => Promise<Parameters<typeof exactRow>[3]>>).provenHooks!(f, token);
+/** Its pool's key as createSwaps poolKeyOf reads it once a pool (the recorded key, F.key; card
+ *  helper-vendor-tapes-refresh-inside-15s), any other pool none. */
+const provenHooks = (f: Parameters<typeof exactRow>[3], token: string): Promise<Parameters<typeof exactRow>[3]> =>
+  (swaps as unknown as Record<string, (f: unknown, t: string, keyOf: (id: string) => Promise<string | null>) => Promise<Parameters<typeof exactRow>[3]>>).provenHooks!(f, token, async (id) => (id === F.pool ? F.key : null));
 const HOOK = "0x0469a4bd3724dc86c9542f4694c976da13c450c0";
 const ROUTER = "0x8f10b468b06c6fd214b65f87778827f7d113f996";
 /** The user operation's account (the bundle went to EntryPoint v0.6): the trader every row names. */
