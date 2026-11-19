@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card robinhood-tapes-read-ahead: a listed Robinhood or Base coin's whole trade list inside FILLED_MS of its
+// Live check of card robinhood-tapes-read-ahead-bounded: a listed Robinhood or Base coin's whole trade list inside FILLED_MS of its
 // first open, because the helper read it ahead (apps/helper/src/data/evm/swaps.ts tapesAhead: the lists' coins' tapes
 // read in the helper's background lane as the lists load, rested ready, so a first open is a reopen). Live helper run
 // 44279880076 (18 Nov 10:17Z, helper at ff65a0403): helper-robinhood-capacity opened 12 listed Robinhood coins and 10
@@ -12,13 +12,13 @@
 // answers were whole at once is printed: the read ahead's own mark.
 // After: helper
 // Serial: evm-keyed 165
-//   node scripts/live-checks/robinhood-tapes-read-ahead.mjs [--base <url>] [--record <file>]
+//   node scripts/live-checks/robinhood-tapes-read-ahead-bounded.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { fillingOf, filledVerdict, readFilled } from "./tape-read.mjs";
 
-const KEY = "robinhood-tapes-read-ahead";
+const KEY = "robinhood-tapes-read-ahead-bounded";
 export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
 export const CHAINS = ["robinhood", "base"];

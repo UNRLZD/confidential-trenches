@@ -1,5 +1,5 @@
-// node --test scripts/live-checks/robinhood-tapes-read-ahead.test.mjs: the live check's verdict replays recorded runs
-// (robinhood-tapes-read-ahead.answers.json):
+// node --test scripts/live-checks/robinhood-tapes-read-ahead-bounded.test.mjs: the live check's verdict replays recorded runs
+// (robinhood-tapes-read-ahead-bounded.answers.json):
 //   good:        the branch helper (card robinhood-tapes-read-ahead, the lists' tapes read ahead) run on the Mac, keyless,
 //                the 12 listed coins of each chain opened at once after its lists loaded: every tape whole inside 45 s: PASS;
 //   bad_run:     live helper run 44279880076 (18 Nov 10:07Z, helper at ff65a0403), helper-robinhood-capacity's printed
@@ -10,10 +10,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, read, TOKENS, tokensOf } from "./robinhood-tapes-read-ahead.mjs";
+import { judge, read, TOKENS, tokensOf } from "./robinhood-tapes-read-ahead-bounded.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const A = JSON.parse(readFileSync(path.join(HERE, "robinhood-tapes-read-ahead.answers.json"), "utf8"));
+const A = JSON.parse(readFileSync(path.join(HERE, "robinhood-tapes-read-ahead-bounded.answers.json"), "utf8"));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 
 test("the recorded good answer passes: both chains' listed coins opened at once on the branch helper, every tape whole inside 45 s", () => {
