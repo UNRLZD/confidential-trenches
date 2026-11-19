@@ -1343,20 +1343,25 @@ test("S2b a scan is kept only once the quote's block is confirmed on both provid
 });
 
 test("S3c a market whose hook is not pinned is quoted only once it exists, with its hook and the pool's replaced in one read", async () => {
-  const token = "0x00000000000000000000000000000000000ab1ab";
-  const x = "0x0000000000000000000000000000000000003333";
-  const [MH, H2, GH] = ["0x00000000000000000000000000000000000050cc", "0x00000000000000000000000000000000000060cc", "0x00000000000000000000000000000000000070cc"];
-  const market: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, MH), give: (a) => a };
-  const real: ModelPool = { key: keyOf(token, x, 3000, 60, H2), give: (a) => a };
-  // a market in x's scan that the PoolManager does not hold
-  const ghost = keyOf(x, WETH, 500, 10, GH);
-  const logs = [{ key: real.key, at: 4_500_000 }, { key: market.key, at: 4_100_000 }, { key: ghost, at: 4_000_500 }];
-  const pools = [seeded(token), real, market];
-  const seen: Overridden[] = [];
-  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0, 5_000_000, seen), chain(pools, 1, 5_000_000, seen)], NOW, scanner(5_000_000, logs)), heldTo(x));
-  assert.ok(seen.some((o) => o.replaces.length === 2 && o.replaces.includes(MH) && o.replaces.includes(H2)), JSON.stringify(seen));
-  assert.ok(!seen.some((o) => o.replaces.includes(GH)), "no override for the market the PoolManager does not hold");
-  for (const o of seen) for (const hs of o.hooks) for (const r of o.replaces) assert.ok(hs.includes(r), `a read of hooks ${hs} under an override of ${r}`);
+  // with 8 more hookless pools of the token with x, the routes through x's market pass EVM_X_EARLY (8): the fourth round
+  // reads them itself, not the third's early reads, and each still replaces the market's hook beside the pool's (card
+  // mutants-killed-on-main, the quote sweep's mutant 310)
+  for (const [token, more] of [["0x00000000000000000000000000000000000ab1ab", 0], ["0x00000000000000000000000000000000000ab1ac", 8]] as const) {
+    const x = "0x0000000000000000000000000000000000003333";
+    const [MH, H2, GH] = ["0x00000000000000000000000000000000000050cc", "0x00000000000000000000000000000000000060cc", "0x00000000000000000000000000000000000070cc"];
+    const market: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, MH), give: (a) => a };
+    const real: ModelPool = { key: keyOf(token, x, 3000, 60, H2), give: (a) => a };
+    const plain = Array.from({ length: more }, (_, i): ModelPool => ({ key: keyOf(token, x, 3001 + i, 60, NATIVE), give: (a) => a }));
+    // a market in x's scan that the PoolManager does not hold
+    const ghost = keyOf(x, WETH, 500, 10, GH);
+    const logs = [{ key: real.key, at: 4_500_000 }, { key: market.key, at: 4_100_000 }, { key: ghost, at: 4_000_500 }, ...plain.map((p, i) => ({ key: p.key, at: 4_500_001 + i }))];
+    const pools = [seeded(token), real, market, ...plain];
+    const seen: Overridden[] = [];
+    await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0, 5_000_000, seen), chain(pools, 1, 5_000_000, seen)], NOW, scanner(5_000_000, logs)), heldTo(x));
+    assert.ok(seen.some((o) => o.replaces.length === 2 && o.replaces.includes(MH) && o.replaces.includes(H2)), `${more} more: ${JSON.stringify(seen)}`);
+    assert.ok(!seen.some((o) => o.replaces.includes(GH)), "no override for the market the PoolManager does not hold");
+    for (const o of seen) for (const hs of o.hooks) for (const r of o.replaces) assert.ok(hs.includes(r), `a read of hooks ${hs} under an override of ${r}`);
+  }
 });
 
 test("L1 a buy through a pool behind an unpinned hook that keeps a tenth is bought at the nine tenths it pays, never at its hookless price (card evm-buy-hook-converge: before it, refused no_exit)", async () => {
@@ -2151,6 +2156,24 @@ test("card rh-cold-quote: a first that answers HTTP 503 to every request over 10
   });
   const v = (await c.run()) as { code?: string };
   assert.equal(v.code, "rpc_error", JSON.stringify(v));
+  assert.equal(c.spared(), 0);
+});
+
+// card mutants-killed-on-main (mutants 11 and 16 of the quote's sweep): a cold request over SCAN_ALONE blocks whose
+// failure is neither a 5xx nor a refused connection (a timeout spends its one try) is asked as its halves on the first,
+// its splits kept as they were, until a half fits SCAN_ALONE; were each halving to spend a split, the third would hand
+// the spare a span of over a million blocks, the real pool's among them, which the spare hides
+test("card rh-cold-quote: a first whose cold requests over 100,000 blocks holding the real pool's block run out of time is asked their halves, its splits kept, down to 100,000: the spare reads none of the depth and the seeded route is refused", async () => {
+  const at = RC_HEAD - 500_000;
+  let timedOut = 0;
+  const c = rcFirst("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f16", (inner) => async (calls, s) => {
+    const f = calls.find((x) => x.method === "eth_getLogs")?.params[0] as { fromBlock: string; toBlock: string } | undefined;
+    if (f !== undefined && Number(f.fromBlock) <= at && Number(f.toBlock) >= at && Number(f.toBlock) - Number(f.fromBlock) + 1 > 100_000 && ++timedOut) throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    return inner(calls, s);
+  });
+  const v = (await c.run()) as { code?: string; accepted?: boolean };
+  assert.equal(v.code, "below_reference", `accepted ${v.accepted}`);
+  assert.ok(timedOut > 0);
   assert.equal(c.spared(), 0);
 });
 
@@ -3938,6 +3961,27 @@ test("W5 a kept read the quote did not ask again is not kept for the next: a cha
   await q(AMOUNT);
   await q(AMOUNT / 2n);
   assert.equal(await q(AMOUNT / 2n), warmHalf);
+  // card mutants-killed-on-main (the quote sweep's mutant 147): a kept read of a route the quote no longer asks (x's
+  // market gone, W3) is not kept for the next either, whose first round then asks what a warm quote of the pools left asks
+  const vanishing = (token: string, x: string) => {
+    const { pools, logs } = warmCase(token, x);
+    const market = JSON.stringify(marketOf(x).key);
+    const left = pools.filter((p) => JSON.stringify(p.key) !== market);
+    const scan = scanner(5_000_000, logs);
+    const at = async (ps: ModelPool[]) => {
+      const s = sized(chain(ps, 0));
+      await verdict(evmPoolBuyQuoteWith(warmReq(token), [s.rpc, chain(ps, 1)], NOW, scan));
+      return s.n.bytes;
+    };
+    return { all: () => at(pools), left: () => at(left) };
+  };
+  const plainLeft = vanishing("0x00000000000000000000000000000000000ee0e9", xAt(0x3a80));
+  await plainLeft.left();
+  const warmLeft = await plainLeft.left();
+  const v = vanishing("0x00000000000000000000000000000000000ee0e8", xAt(0x3a70));
+  await v.all();
+  await v.left();
+  assert.equal(await v.left(), warmLeft);
 });
 
 test("W6 a warm quote puts no hook's override into a read before its own reads find the pool held: a hooked pool that vanished inside the range is never overridden (review of 5452011, S1)", async () => {
@@ -4120,7 +4164,9 @@ test("V3 a provider whose head lags past maxLag is passed over for the next: the
 
 test("V4 the providers are asked fastest first by measured time; one with a request out past EVM_HEDGE_MS goes after them, and one held (it failed) last until EVM_HOLD_MS pass", async () => {
   assert.equal(typeof evmRanked, "function", "the kit ranks its providers");
-  const urls = ["https://slow.p4.test", "https://fast.p4.test", "https://limited.p4.test", "https://new.p4.test", "https://stuck.p4.test", "https://capped.p4.test"];
+  // down: an HTTP 503, which holds no provider for every reader (pace.ts holds a 429 and a refused connection): held here
+  // by the ranking's own measure (card mutants-killed-on-main, the quote sweep's mutant 190)
+  const urls = ["https://slow.p4.test", "https://fast.p4.test", "https://limited.p4.test", "https://new.p4.test", "https://stuck.p4.test", "https://capped.p4.test", "https://down.p4.test"];
   // capped: an answer whose call's error names the rate limit (mainnet.base.org's "request limit reached")
   const answer = (body: string, capped: boolean) =>
     JSON.stringify((JSON.parse(body) as { id: number }[]).map((c) => (capped ? { jsonrpc: "2.0", id: c.id, error: { code: -32016, message: "25/second request limit reached" } } : { jsonrpc: "2.0", id: c.id, result: "0x1" })));
@@ -4128,20 +4174,21 @@ test("V4 the providers are asked fastest first by measured time; one with a requ
     const h = new URL(u).hostname;
     if (h.startsWith("stuck")) return new Promise(() => {});
     await new Promise((r) => setTimeout(r, h.startsWith("slow") ? 60 : 5));
-    return new Response(h.startsWith("limited") ? "" : answer(init.body as string, h.startsWith("capped")), { status: h.startsWith("limited") ? 429 : 200 });
+    return new Response(h.startsWith("limited") || h.startsWith("down") ? "" : answer(init.body as string, h.startsWith("capped")), { status: h.startsWith("limited") ? 429 : h.startsWith("down") ? 503 : 200 });
   }) as unknown as typeof fetch;
   const rpcs = quoteMod.evmProviders(urls, f);
   const call = [{ method: "eth_blockNumber", params: [] }];
-  await Promise.allSettled([rpcs[0]!(call), rpcs[1]!(call), rpcs[2]!(call), rpcs[5]!(call)]);
+  await Promise.allSettled([rpcs[0]!(call), rpcs[1]!(call), rpcs[2]!(call), rpcs[5]!(call), rpcs[6]!(call)]);
   void rpcs[4]!(call);
-  const [slow, fast, limited, fresh, stuck, capped] = urls as [string, string, string, string, string, string];
-  // measured first, fastest first, then the unmeasured in the list's order; the two that named their limit last
-  assert.deepEqual(evmRanked!(urls), [fast, slow, fresh, stuck, limited, capped]);
+  const [slow, fast, limited, fresh, stuck, capped, down] = urls as [string, string, string, string, string, string, string];
+  // measured first, fastest first, then the unmeasured in the list's order; the two that named their limit and the one
+  // that failed last
+  assert.deepEqual(evmRanked!(urls), [fast, slow, fresh, stuck, limited, capped, down]);
   // the one with a request out past EVM_HEDGE_MS goes after the rest, before the held
   const t = performance.now();
-  assert.deepEqual(evmRanked!(urls, t + EVM_HEDGE_MS! + 1), [fast, slow, fresh, stuck, limited, capped]);
-  // past the hold the limits are forgiven; the request still out is not
-  assert.deepEqual(evmRanked!(urls, t + EVM_HOLD_MS! + 1), [fast, slow, limited, fresh, capped, stuck]);
+  assert.deepEqual(evmRanked!(urls, t + EVM_HEDGE_MS! + 1), [fast, slow, fresh, stuck, limited, capped, down]);
+  // past the hold the limits and the failure are forgiven; the request still out is not
+  assert.deepEqual(evmRanked!(urls, t + EVM_HOLD_MS! + 1), [fast, slow, limited, fresh, capped, down, stuck]);
 });
 
 // ------------------------------------------------------------------ the scan's spans (card evm-quote-warm-round)
@@ -4856,11 +4903,16 @@ test("TH7 a scan provider that times out or fails every getLogs refuses rpc_erro
   try {
     for (const how of ["timeout", "error"] as const) {
       const { rpc, st } = faultScan([], () => how, 100);
+      // the sends by the bound, read on the test clock's own timer at 1,000 ms, set before the quote's: it fires before
+      // any request the bound's own timers start there
+      let byBound = -1;
+      setTimeout(() => (byBound = st.sent.length), 1_000);
       const r = await coldQuote(rpc, how === "timeout" ? 0x3f00 : 0x3f10);
       assert.equal(r.code, "rpc_error", `${how}: ${r.message}`);
       assert.ok(r.ms < 1_000 + 100 + 400, `${how}: refused after ${Math.round(r.ms)} ms and ${st.logs} getLogs`);
-      // nothing is sent past the bound
-      assert.ok(st.sent.every((t) => t - st.sent[0]! < 1_000 + 50), `${how}: a getLogs sent ${Math.round(Math.max(...st.sent) - st.sent[0]!)} ms in`);
+      // nothing is sent at or past the bound (card mutants-killed-on-main: with the gate's check of the bound gone, each
+      // request that reached it was still sent, 141 and 1,600 of them at 1,000 ms, and aborted there)
+      assert.equal(st.sent.length, byBound, `${how}: ${st.sent.length - byBound} getLogs sent at or past the bound`);
     }
   } finally {
     evmScanBound?.();

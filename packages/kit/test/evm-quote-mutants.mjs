@@ -59,14 +59,17 @@ export const MUTANTS = [
   // its halves on the first, its newest blocks a request of their own (review of 9c962b6d)
   [QUOTE, "word(lower(k.currency1) === token ? 1n : 0n)", "word(lower(k.currency1) === token ? 0n : 1n)", R, "card rh-cold-quote: the prune reads the token out"],
   [QUOTE, 'return r.kind === "revert" && (r.partial || r.overflow === true);', 'return r.kind === "revert";', R, "card rh-cold-quote: a currency's pool whose exact-output read reverts with no data"],
-  [QUOTE, "const alone = !fast && on.next !== undefined && b - a + 1 > SCAN_ALONE;", "const alone = false;", R, "card rh-cold-quote: one HTTP 503 from the first"],
+  [QUOTE, "const alone = !fast && on.next !== undefined && b - a + 1 > SCAN_ALONE;", "const alone = false;", R, "card rh-cold-quote: a first whose cold requests over 100,000 blocks holding the real pool's block run out of time"],
   [QUOTE, "    if (on.next !== undefined && to === head && to - from + 1 > on.next.span) {", "    if (false && on.next !== undefined && to === head && to - from + 1 > on.next.span) {", R, "card rh-cold-quote: a first whose backend is a block behind"],
   [QUOTE, "const SCAN_ALONE = 100_000;", "const SCAN_ALONE = 1_000_000;", R, "card rh-cold-quote: a cached scan's 500,000-block gap with one 503"],
   // a cold scan's first throttled past the bound, any failure over SCAN_ALONE blocks, and a flood at the smallest span
   // (review of 8fd51265)
   [QUOTE, "if (next === undefined || e instanceof ScanStop) throw e;", "if (next === undefined) throw e;", R, "card rh-cold-quote: a cold scan's first throttled past"],
   [QUOTE, "throw fast ? new EvmQuoteError(\"rpc_error\", m) : new ScanStop(\"rpc_error\", m);", "throw new EvmQuoteError(\"rpc_error\", m);", R, "card rh-cold-quote: a cold scan's first throttled past"],
-  [QUOTE, "    if (alone) return halves(splits);\n", "", R, "card rh-cold-quote: a first that answers HTTP 503 to every request over 100,000"],
+  // a 503 over SCAN_ALONE is asked again whole by the gate since card robinhood-quote-answers-cold, so neither 503 test
+  // reaches the halving these two plant (nightly run 44385000155); a timeout, which spends its one try, does (card
+  // mutants-killed-on-main)
+  [QUOTE, "    if (alone) return halves(splits);\n", "", R, "card rh-cold-quote: a first whose cold requests over 100,000 blocks holding the real pool's block run out of time"],
   [QUOTE, "    if (answered || behind || rs !== null) return short();\n", "", R, "card rh-cold-quote: 12,000 made-up pools past the first's cap, answered in rpc.mainnet"],
   // card evm-quote-rides-out-a-one-block-answer: one block answered short is asked again of the same provider, never
   // the next, rpc_error where the last ask was not answered; logs behind a block the provider holds are asked again
@@ -152,7 +155,10 @@ export const MUTANTS = [
   // since card frong-quotes-through-its-pools a market the prune leaves out may still be quoted (the best one left), so
   // the dust tick pushes the real market out only with that fallback gone too: both in one plant
   [QUOTE, "        if (!needs(c, ub)) {\n          // a market left out has a bound (one with none can always give Q); one with no hook first, whose bound is the\n          // pool's own (a hook replaced by one that does nothing may leave a pool whose real price its hook makes: of\n          // USDG's markets for FOBO the largest bound was such a pool's, 2,198,245 against the standard 0.01% pool's\n          // 1,867,080, and its quote did not fill)\n          const plain = mk.key.hooks === NATIVE;\n          if (ub !== null && (left === null || (plain && !left[2]) || (plain === left[2] && ub > left[1]))) left = [mk, ub, plain];\n          continue;\n        }\n        marketQuote.set(mk, leg === null ? quoteOf(into, routeOfKey(mk.key, c), [mk.key]) : quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, leg.amount));\n      }\n      if (priceOf && !a.sell && left !== null) marketQuote.set(left[0], quoteOf(into, routeOfKey(left[0].key, c), [left[0].key]));", "        if (!needs(c, ubOf(mk, amountIn / 1000n))) {\n          // a market left out has a bound (one with none can always give Q); one with no hook first, whose bound is the\n          // pool's own (a hook replaced by one that does nothing may leave a pool whose real price its hook makes: of\n          // USDG's markets for FOBO the largest bound was such a pool's, 2,198,245 against the standard 0.01% pool's\n          // 1,867,080, and its quote did not fill)\n          const plain = mk.key.hooks === NATIVE;\n          if (ub !== null && (left === null || (plain && !left[2]) || (plain === left[2] && ub > left[1]))) left = [mk, ub, plain];\n          continue;\n        }\n        marketQuote.set(mk, leg === null ? quoteOf(into, routeOfKey(mk.key, c), [mk.key]) : quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, leg.amount));\n      }\n      if (false) marketQuote.set(left[0], quoteOf(into, routeOfKey(left[0].key, c), [left[0].key]));", R, "PROBE A2 "],
-  [QUOTE, "    (xPools.get(c) ?? []).some((p) => can(p, x)) ||", "    false ||", R, "PROBE A2 "],
+  // the direct clause alone: PROBE A2's best market left out is still quoted by that fallback, so it passed this mutant
+  // (nightly run 44385000155); RK5's narrow markets out-bound the real one, so the fallback quotes a narrow one and the
+  // real market is quoted only through this clause (card mutants-killed-on-main)
+  [QUOTE, "    (xPools.get(c) ?? []).some((p) => can(p, x)) ||", "    false ||", R, "RK5 "],
   [QUOTE, "    [...vias].some(([x2, fs]) => fs.some((via) => via.other === c && (xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x)))));", "    false;", R, "RK7 "],
   [QUOTE, "(xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x)))", "(xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x === null ? null : x / 1000n)))", R, "PROBE E "],
   [QUOTE, "      const xa = ubOf(via, out(marketQuote.get(mk)!.at)!);", "      const xa = out(marketQuote.get(mk)!.at)! / 1000n;", R, "PROBE E "],

@@ -323,6 +323,19 @@ test("Base: a provider's -32000 'historical state … is not available' is that 
   assert.ok(lines.length > 0 && lines.every((l) => /failed at base-rpc\.publicnode\.com: RPC error -32000: historical state [0-9a-f]+ is not available.* answered$/.test(l)), lines.join("\n"));
 });
 
+// card mutants-killed-on-main (the release sweep's mutants 107 and 108): mainnet reads past its pair and the helper's
+// keyed URLs to the kit's quote providers for the network (Base's: publicnode, Bware's blastapi, Coinbase's and Pocket),
+// as the test network did before the helper loaded mainnet pools only (card helper-mainnet-pools-only)
+test("Base reads past its pair to the kit's listed providers: with no keyed URL, Coinbase's mainnet.base.org refusing the state, the fee is answered by publicnode and a listed operator", async (t) => {
+  const calls = chainStub(t, (host, method) => (host === "mainnet.base.org" && method === "eth_call" ? UNKNOWN_STATE : null));
+  const lines: string[] = [];
+  const env = { POOL_EVM_ADDRESS_BASE: evmPoolVenues().base.pool!, POOL_EVM_SENDER_KEY_BASE: KEY };
+  const f = await sendersOf(env, lines).get(BASE_PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, opFee("base").toString());
+  assert.ok(stateReads(calls, "base-rpc.publicnode.com") > 0, "publicnode answered");
+  assert.ok(stateReads(calls, "base-mainnet.public.blastapi.io") + stateReads(calls, "base.api.pocket.network") > 0, "a listed operator answered");
+});
+
 test("a read each side fails, one side on a throttle: the answer stays a throttle (429 with its wait), never the other side's 503", async (t) => {
   chainStub(t, (host, method) => (method !== "eth_call" ? null : host === "rpc.mainnet.chain.robinhood.com" ? { status: 429, body: { code: -32005, message: "too many requests" } } : { status: 502, body: { code: -32603, message: "bad gateway" } }));
   await assert.rejects(sendersOf(ENV3, []).get(PIN)!.fee(EPOCH + 1), (e: Error) => throttleOf(e) > 0);

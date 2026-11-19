@@ -185,8 +185,8 @@ export const MUTANTS = [
   [EVM, "    const words = (await two(\"eth_call\", [{ to, data }, { blockHash: hash }])).map((v) => {", "    const words = (await Promise.all([a(\"eth_call\", [{ to, data }, { blockHash: hash }]), a(\"eth_call\", [{ to, data }, { blockHash: hash }])])).map((v) => {", T4, "two operators that both answered and differ on a state word"],
   [EVM, "    throw errs.find((e) => !evmChainAnswered(e) && throttleOf(e, true) > 0) ?? errs[0];", "    throw errs[0];", T4, "a read each side fails, one side on a throttle"],
   [EVM, "  for (const k of keyed) add(k.url, k.name);", "", T4, "every seat of one operator refuses the state"],
-  [EVM, "  for (const u of listed) add(u, new URL(u).host);", "", T4, "a test network reads past its pair too"],
-  [EVM, '    const listed = v !== undefined && Object.hasOwn(v, "providers") && v.providers !== undefined ? v.providers : [];', "    const listed: readonly string[] = [];", T4, "a test network reads past its pair too"],
+  [EVM, "  for (const u of listed) add(u, new URL(u).host);", "", T4, "Base reads past its pair to the kit's listed providers"],
+  [EVM, '    const listed = v !== undefined && Object.hasOwn(v, "providers") && v.providers !== undefined ? v.providers : [];', "    const listed: readonly string[] = [];", T4, "Base reads past its pair to the kit's listed providers"],
   [EVM, "  if (reserve) holds.reserve(url);", "  holds.reserve(url);", T2, "review L-3"],
   // a sale's receipts count as two only from two operators, whichever side each came on
   [EVM, "        seen.delete(x.operator);\n        seen.set(x.operator, x.value as Record<string, unknown>);", "        seen.set(`${seen.size}`, x.value as Record<string, unknown>);", T5, "one operator's receipt on both sides"],
