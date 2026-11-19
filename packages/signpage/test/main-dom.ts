@@ -246,4 +246,4 @@ async function told(id: string, n: number, what: string): Promise<void> {
 export const reloadCount = (): number => reloads;
 /** Holds the next request's hash (src/api.ts handle) until the promise settles: set before the send, cleared after. */
 export const holdDigest = (p: Promise<void> | null): void => void (digestHold = p);
-export { answer, doc, esc, find, frameIn, inertAt, opened, posted, press, root, send, sendRaw, shown, tap, tapSheet, told, notices, until };
+export { answer, clip, doc, esc, find, frameIn, inertAt, opened, posted, press, root, send, sendRaw, shown, tap, tapSheet, told, notices, until };
