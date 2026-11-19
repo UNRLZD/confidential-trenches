@@ -6,6 +6,8 @@
 # and the kernel's overflow and drop counts), and the helper's own event loop and refusal lines. Linux, node and curl;
 # no Docker, so the one hop it lacks is compose's name lookup of `helper` (the copy dials 127.0.0.1). No deploy .env:
 #   bash apps/helper/deploy/burst-proof.sh [<pages at once, 300; a comma list runs each in turn>] [<out dir>]
+# A size written <pages>x<coins> spreads its pages over that many of the Solana lists' coins (burst.mjs --coins), as the
+# test browsers' shards open many token pages, each cold the first time; a plain size opens one coin.
 # For the run only, a copy of the Caddyfile serves plain http on a local port, dials the local helper, maps each page's
 # X-Burst-Client to X-Forwarded-For (each page its own client, as each live run job is) and, when the real file names
 # none, logs Caddy's upstream failures without their request. Nothing here writes a client IP.
@@ -61,8 +63,11 @@ A=$(overflows)
 sleep 15
 echo "idle 15 s (the box's own drops): $A-> $(overflows)"
 LC="$ROOT/scripts/live-checks/helper-answers-through-a-burst.mjs"
-for N in ${SESSIONS//,/ }; do
-  echo "== $N pages at once"
+for SIZE in ${SESSIONS//,/ }; do
+  N=${SIZE%x*}
+  COINS=1
+  [ "$SIZE" != "$N" ] && COINS=${SIZE#*x}
+  echo "== $N pages at once, over $COINS coins"
   echo "before: $(overflows)"
   touch "$OUT/sampling"
   # the helper's listen socket, every 200 ms: its accept queue now and its bound (ss: Recv-Q, Send-Q), its connections
@@ -71,26 +76,26 @@ for N in ${SESSIONS//,/ }; do
       echo "$(ss -Hltn "sport = :$HP" | awk '{ print $2, $3 }' | head -1) est $(ss -Htn state established "sport = :$HP" | wc -l)"
       sleep 0.2
     done
-  ) >"$OUT/listen-$N.txt" &
+  ) >"$OUT/listen-$SIZE.txt" &
   SAMPLER=$!
   # the card's live check, run as the burst starts against the same Caddy, its answer recorded (live-<pages>.json)
   LCPID=
   if [ -f "$LC" ]; then
-    (sleep 0.3 && node "$LC" --base "http://127.0.0.1:$CP" --record "$OUT/live-$N.json" >"$OUT/live-$N.txt" 2>&1) &
+    (sleep 0.3 && node "$LC" --base "http://127.0.0.1:$CP" --record "$OUT/live-$SIZE.json" >"$OUT/live-$SIZE.txt" 2>&1) &
     LCPID=$!
   fi
-  node "$DEPLOY/burst.mjs" --base "http://127.0.0.1:$CP" --sessions "$N" --client-header X-Burst-Client | tee "$OUT/burst-$N.json"
+  node "$DEPLOY/burst.mjs" --base "http://127.0.0.1:$CP" --sessions "$N" --coins "$COINS" --client-header X-Burst-Client | tee "$OUT/burst-$SIZE.json"
   rm -f "$OUT/sampling"
   wait $SAMPLER 2>/dev/null
   echo "after: $(overflows)"
   # the connections Caddy closed to the helper in the last minute (TIME_WAIT, Caddy's side): each one a connect the next
   # request paid for
   echo "caddy's closed connections to the helper (time-wait): $(ss -Htn state time-wait "dport = :$HP" | wc -l)"
-  echo "listen queue: longest $(awk '{ if ($1 > m) m = $1; b = $2 } END { printf "%d of %d", m, b }' "$OUT/listen-$N.txt"), connections to the helper at most $(awk '{ if ($4 > m) m = $4 } END { print m + 0 }' "$OUT/listen-$N.txt")"
+  echo "listen queue: longest $(awk '{ if ($1 > m) m = $1; b = $2 } END { printf "%d of %d", m, b }' "$OUT/listen-$SIZE.txt"), connections to the helper at most $(awk '{ if ($4 > m) m = $4 } END { print m + 0 }' "$OUT/listen-$SIZE.txt")"
   if [ -n "$LCPID" ]; then
     wait "$LCPID" 2>/dev/null
     echo "-- the live check in the burst:"
-    cat "$OUT/live-$N.txt"
+    cat "$OUT/live-$SIZE.txt"
   fi
   sleep 20
 done

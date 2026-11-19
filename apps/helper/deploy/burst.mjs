@@ -2,12 +2,14 @@
 // A burst of page opens against a helper (card helper-answers-through-a-burst): `--sessions` pages open the terminal's
 // first screen at once, each making the helper reads that screen makes in its first `--seconds` (apps/terminal/src: the
 // four chains' lists, screens/discover/data.ts; the token, screens/token/source.ts; its tape, trades.ts; its push
-// socket; its chart, candles.ts, 500 bars then 2 every second; its logo), each page its own client. A probe reads GET
+// socket; its chart, candles.ts, 500 bars then 2 every second; its logo), each page its own client. `--coins` spreads the
+// pages over that many of the Solana lists' coins (page i opens coin i mod n), as the test browsers' shards open many
+// token pages, each a cold chart and tape the first time; 1 (the default) opens the first coin only. A probe reads GET
 // /v1/health every 100 ms all along. It prints one JSON line: the answers by status (and how many lacked the CORS
 // header the page needs), the failures by cause, the answer times' p50/p95/p99/max, the longest stretch in which no
 // answer came back (`stallMs`) and the probe's slowest read.
 //   node apps/helper/deploy/burst.mjs --base http://127.0.0.1:18080 [--sessions 300] [--seconds 10]
-//     [--client-header X-Forwarded-For] [--origin https://ct-app.unrealized.trade] [--timeout-ms 30000]
+//     [--client-header X-Forwarded-For] [--origin https://ct-app.unrealized.trade] [--timeout-ms 30000] [--coins 1]
 // --client-header: the header each page's own address goes in (X-Forwarded-For with the helper reached directly; the
 // proof's test Caddyfile maps X-Burst-Client to it). Never against the live host with a large --sessions: the live check
 // (scripts/live-checks/helper-answers-through-a-burst.mjs) is the bounded one.
@@ -23,6 +25,7 @@ const { values: a } = parseArgs({
     "client-header": { type: "string", default: "" },
     origin: { type: "string", default: "https://ct-app.unrealized.trade" },
     "timeout-ms": { type: "string", default: "30000" },
+    coins: { type: "string", default: "1" },
   },
 });
 async function main() {
@@ -61,16 +64,16 @@ async function main() {
     }
   }
 
-  // the coin the page opens: the first of the Solana lists, from one read made before the burst
+  // the coins the pages open: the first --coins of the Solana lists, from one read made before the burst
   const warm = await get("/v1/market/lists?chain=solana", "10.255.255.254");
-  let token = "";
+  let coins = [];
   try {
     const s = JSON.parse(new TextDecoder().decode(warm?.body ?? new ArrayBuffer(0)));
-    token = Object.values(s.lists ?? {}).flat().map((r) => r?.token).find((t) => typeof t === "string") ?? "";
+    coins = [...new Set(Object.values(s.lists ?? {}).flat().map((r) => r?.token).filter((t) => typeof t === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t)))].slice(0, Math.max(1, Number(a.coins)));
   } catch {
-    token = "";
+    coins = [];
   }
-  if (token === "") throw new Error("the helper's Solana lists named no token: is it ready?");
+  if (coins.length === 0) throw new Error("the helper's Solana lists named no token: is it ready?");
   times.length = 0;
   doneAt.length = 0;
   for (const k of Object.keys(status)) delete status[k];
@@ -87,7 +90,7 @@ async function main() {
   })();
 
   const push = { opened: 0, failed: 0 };
-  function socket(client) {
+  function socket(client, token) {
     return new Promise((ok) => {
       const ws = new WebSocket(`${BASE.replace(/^http/, "ws")}/v1/market/push?chain=solana&token=${token}`, { headers: { Origin: a.origin, ...clientHeaders(client) } });
       const timer = setTimeout(() => (push.failed++, ws.terminate(), ok()), TIMEOUT_MS);
@@ -98,8 +101,9 @@ async function main() {
 
   async function page(i) {
     const client = `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`;
+    const token = coins[i % coins.length];
     const q = `chain=solana&token=${token}`;
-    const reads = [...CHAINS.map((c) => get(`/v1/market/lists?chain=${c}`, client)), get(`/v1/market/token?${q}`, client), get(`/v1/market/trades?${q}&limit=50`, client), get(`/v1/logo/solana/${token}`, client), socket(client)];
+    const reads = [...CHAINS.map((c) => get(`/v1/market/lists?chain=${c}`, client)), get(`/v1/market/token?${q}`, client), get(`/v1/market/trades?${q}&limit=50`, client), get(`/v1/logo/solana/${token}`, client), socket(client, token)];
     // the chart: 500 bars, then the last 2 every second (candles.ts LIVE_MS), each after the one before answers
     reads.push(
       (async () => {
@@ -131,6 +135,7 @@ async function main() {
     JSON.stringify({
       base: BASE,
       sessions: SESSIONS,
+      coins: coins.length,
       requests: times.length,
       status,
       errors,
