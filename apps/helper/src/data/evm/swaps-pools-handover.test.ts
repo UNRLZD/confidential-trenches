@@ -59,6 +59,25 @@ test("planted: a torn warm file is dropped whole, and the helper starts with no 
   assert.equal(next.kept(ICNT), undefined);
 });
 
+test("card helper-v4-hook-trade-is-what-its-trader-paid: an older helper's v4 pool with no hook is found again (it kept a hook only when it could change a swapper's amounts), its others restored; this helper's state restores it", () => {
+  const clock = { t: 1_000_000 };
+  const st = handed(open(fakeChain(), clock));
+  assert.equal(st.v4Hooks, "any");
+  const coin = "0x5084b9421250ecc822e3648a81cac23ab65eb54c";
+  const hooked = "0x1111111111166b7fe7bd91427724b487980afc69";
+  const v4 = (token: string, hook?: string) => [token, { pool: { venue: "v4", id: `0x${"27".repeat(32)}`, token, tokenIs0: false, quote: { kind: "eth", decimals: 18 }, ...(hook === undefined ? {} : { hook }) }, decimals: 18, at: clock.t - 1 }] as [string, Record<string, unknown>];
+  st.found!.push(v4(coin), v4(hooked, "0x0469a4bd3724dc86c9542f4694c976da13c450c0"));
+  const { v4Hooks: _, ...older } = st;
+  const next = open(fakeChain(), clock, { pools: new Map() });
+  assert.equal(next.restore(older), true);
+  assert.equal(next.kept(coin), undefined, "no hook kept by an older helper: found again");
+  assert.deepEqual(next.kept(hooked), { pool: `0x${"27".repeat(32)}`, decimals: 18 });
+  assert.deepEqual(next.kept(ICNT), { pool: POOL_ICNT.id, decimals: 18 });
+  const same = open(fakeChain(), clock, { pools: new Map() });
+  assert.equal(same.restore(st), true);
+  assert.deepEqual(same.kept(coin), { pool: `0x${"27".repeat(32)}`, decimals: 18 }, "this helper's state: a v4 pool with no hook has none");
+});
+
 test("planted: a handed-over pool that fails any check restores nothing", () => {
   const clock = { t: 1_000_000 };
   const good = handed(open(fakeChain(), clock));

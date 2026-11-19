@@ -290,3 +290,16 @@ test("the token's decimals met by fewer than two providers: the trade is not jud
 test("card evm-tape-rows-exact: a trade is judged only when no other venue's swap moves the token, every venue the helper reads (written out in the check; Uniswap v2's and PancakeSwap v3's were missing)", () => {
   assert.deepEqual([TOPIC.swap4, ...OTHER_SWAPS].sort(), [...HELPER_SWAP_TOPICS].sort());
 });
+
+test("card helper-v4-hook-trade-is-what-its-trader-paid: live run 44489623436's fault on its recorded receipt (Base tx 0xb4503a57, coin 0x5084b942): the tape at c0d9d08c7, the pool's hook's own 12.39 sell beside the trader's 1,548.21, FAIL; the tape the fix serves, the trader's sell alone, PASS", () => {
+  const F = JSON.parse(readFileSync(path.join(HERE, "../../apps/helper/src/data/evm/fixtures/v4-hook-own-swap.json"), "utf8"));
+  const receipt = { status: F.receipt.status, logs: F.receipt.logs.map((l) => ({ address: l.address, topics: l.topics, data: l.data })) };
+  const row = (amt) => ({ side: "s", amt, trader: "0x26d7c9620185a972e35c79f94ef0be4a8ba2faa1", tx: F.receipt.transactionHash });
+  const run = (trades) => ({ base: "https://helper.test", chain: "base", at: 0, coins: [F.coin], tapes: { [F.coin]: { status: 200, trades } }, decimals: { [F.coin]: F.decimals }, receipts: { [F.receipt.transactionHash]: receipt } });
+  const before = judge(run([row("12.385647098245463604"), row("1548.205887280682950584")]));
+  assert.equal(before.verdict, "FAIL");
+  assert.deepEqual(bad(before), [`BAD ${F.coin} trade ${F.receipt.transactionHash}: amt 12.385647098245463604 is not the 1548205887280682950584 its trader 0x8f10b468b06c6fd214b65f87778827f7d113f996 paid (12385647098245463604)`]);
+  const after = judge(run([row("1548.205887280682950584")]));
+  assert.equal(after.verdict, "PASS", after.lines.join("\n"));
+  assert.equal(judgedOf(after), 1);
+});
