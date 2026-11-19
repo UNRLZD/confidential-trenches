@@ -132,6 +132,23 @@ test("comments are blanked without moving a line, and a // in a string stays", (
   assert.ok(out.includes('"http://x"') && !/cargo|rustc|rustup/.test(out));
 });
 
+test("a regex literal is read as one: its braces, quotes and slashes move no block, open no string and start no comment", () => {
+  const imports = (mod) => run("node --test t.test.mjs", { "t.test.mjs": `${TEST}import "./m.mjs";\ntest("x", () => {});\n`, "m.mjs": mod });
+  // a function body holding a regex with an unbalanced } stays a body: the launch it defines does not run
+  assert.deepEqual(imports('export function open() { const r = /\\}/; return launchBrowser("chromium"); }\n'), []);
+  // a top-level launch right after a body whose regex holds an unbalanced { is still caught
+  assert.match(imports('export function open() { return /\\{/; }\nconst b = await launchBrowser("chromium");\n')[0], /m\.mjs:2 \(imported from packages\/a\/t\.test\.mjs\): a browser launch: launchBrowser$/);
+  // division is no regex: a / b and x / c hold no literal between them, so the braces of open() still count
+  assert.deepEqual(imports('const x = a / b; function open() { return launchBrowser("chromium"); } const y = x / c;\n'), []);
+  assert.deepEqual(imports('const x = (a) / b / c; function open() { return launchBrowser("chromium"); }\n'), []);
+  // a regex holding a " starts no string: the body after it is a body, and a top-level key read after it is caught
+  assert.deepEqual(imports('const q = /"/; export function open() { return launchBrowser("chromium"); }\n'), []);
+  assert.match(imports('const q = /"/; export function open() { return 1; }\nprocess.env.RELAY_API_KEY;\n')[0], /m\.mjs:2 .*a key read with no default: process\.env\.RELAY_API_KEY$/);
+  // a // inside a regex starts no comment, and a / inside a [...] class ends no regex
+  assert.ok(stripComments('const r = /https?:\\/\\//; launchBrowser("x");\n').includes('launchBrowser("x")'));
+  assert.match(imports('const r = /[/{]/;\nconst b = await launchBrowser("chromium");\n')[0], /m\.mjs:2 .*a browser launch/);
+});
+
 test("a hit is guarded by the nearest test call only", () => {
   const t = `test("a", { skip: process.env.X === "1" ? false : "x" }, () => { HIT });\ntest("b", () => { HIT });\n`;
   assert.equal(guarded(t, t.indexOf("HIT") + 3), true);

@@ -11,8 +11,7 @@ import path from "node:path";
  * every local module it imports, statically or by import(), that does.
  */
 export function harnessProblem(file, rel, read = (f) => readFileSync(f, "utf8")) {
-  // braces as \x7b \x7d: the default-tests scan counts a brace in a pattern as a block
-  const importsHarness = /^import \x7b[^\x7d]*\blaunchHarnessBrowser\b[^\x7d]*\x7d from "\.\.\/harness-sockets\.mjs";$/m;
+  const importsHarness = /^import \{[^}]*\blaunchHarnessBrowser\b[^}]*\} from "\.\.\/harness-sockets\.mjs";$/m;
   const launches = /\blaunch(?:Harness)?Browser\b|from "(?:\.\.\/browsers\.mjs|playwright[^"]*)"/;
   const localImport = /(?:\bfrom\s+|\bimport\s*\(?\s*)"(\.\.?\/[^"]+\.mjs)"/g;
   const text = read(file);
