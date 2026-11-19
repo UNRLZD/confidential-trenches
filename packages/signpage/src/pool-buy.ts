@@ -863,7 +863,6 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     // not awaited here: the buy waits on its own venue's reads only (below, once the reference names the venue), so a
     // slow or hung read of another venue's table never holds it; a rejection no buy awaits is marked handled
     for (const r of tableReads.values()) r.catch(() => {});
-    const venuesPinned: ReadonlySet<string> = new Set(tableReads.keys());
     // the tag 3's tip for a set of k pieces (the kit's solanaPoolBuyTip): on mainnet the helper sends every tag 3 to
     // Jito as its own bundle (several pieces' once the tag 2s landed), so it tips enough to win the auction
     // (SOLANA_POOL_JITO_TIP); devnet has no block engine, so no tip
@@ -889,7 +888,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // held to the best of every venue read (solanaBuyVenue, the decision pool.buy.dry takes too); a reference with no
       // pinned pool, or one below the market, is refused as soon as the reference is read, before the venue's own
       // accounts are read and before the pick, so no note is claimed
-      const pick = solanaBuyVenue(ref, venuesPinned, ask.slippageBps);
+      const pick = solanaBuyVenue(ref, new Set(tableReads.keys()), ask.slippageBps);
       if ("error" in pick) return no(pick.error);
       const best = pick.pool;
       const kind = best.venue;

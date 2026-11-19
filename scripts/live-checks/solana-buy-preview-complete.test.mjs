@@ -122,3 +122,35 @@ test("the shared read and the awaited out (card you-receive-on-every-chain): PAS
     assert.ok(r.lines.includes(`BAD ${SAYS[mark]}`), `${mark}: ${r.lines.join(" | ")}`);
   }
 });
+
+// card sol-buy-takes-the-best-venue-it-can-trade: out from the tap's own venue decision (page-rpc.ts solanaBuyVenue),
+// a failed quote read still no quote, the minified lines as that card's build spells them
+const DECIDED = [
+  'var xp=1024,Sp={"pump-curve":3e5,pumpswap:4e5,dlmm:45e4,"raydium-cpmm":3e5,"raydium-amm-v4":3e5};Uo(Sp);',
+  "}var wm=Object.freeze(Object.keys(Sp));",
+  "function yV(e,t,n){if(!Number.isInteger(n)||n<0||n>=1e4)return{error:`quote_check_failed`};let r=[...e?.pools??[],...e?.shallow??[]].filter(e=>wm.includes(e.venue));if(r.length===0)return{error:`quote_check_failed`};return{pool:r[0]}}",
+  "if(e.trading())return{error:`busy`};let c=t.token,l=i!==null&&i>0n?gV(s,{side:`buy`,token:c,amount:i},void 0,{early:e.early===!0}).then(e=>({ref:e}),()=>null):null,u=await a(s,c,r);if(`error`in u&&u.error===`not_funded`)return u;let d=l===null?null:await l,f=d===null?null:yV(d.ref,vV(e.tables??pk.mainnet??{}),o);if(f!==null&&`error`in f)return f;if(`error`in u)return u;",
+  "let y=async()=>{let e=f?.pool;return e!==void 0&&h.decimals!==void 0&&e.expectedOut>0n?XU(e.expectedOut,h.decimals):void 0};if(i<=m){let e=x0(_,v,h,g,n,i);if(e===null)return{result:{tap_max:p}};let t=await y();return{result:{tap_max:p,...e.pieces===void 0?{}:{pieces:e.pieces},cost:b0(e.cost),...t===void 0?{}:{out:t}}}}",
+  "if(i.data.length<82)throw Error(`the mint is shorter than a mint`);let s=i.data[44],c=Tf(t);return{kind:e,mint:t,decimals:s,tokenProgram:i.owner};return{kind:e,mint:t,decimals:s,tokenProgram:i.owner}",
+  "return i(13,0)?`current`:i(1,13)?`1.13`:i(1,12)?`1.12`:`1.4`}",
+  "o_=(e,t)=>{if(typeof t!=`object`||!t||e!==`pool.buy.dry`)return t;let{out:n,...r}=t;return r};function f_(e,t,n){if(e===`current`)return n;let r=o_(t,n);if(e===`1.13`)return r;let i=c_(t,r)}",
+  "x=`1.14`",
+].join("");
+
+test("out from the tap's venue decision (card sol-buy-takes-the-best-venue-it-can-trade): PASS; a failed read rejecting, the refusal dropped, another pick, no decimals, off another quote, a decision on another venue list, or no out: FAIL, that mark named", () => {
+  assert.deepEqual(judge(facts(INDEX(DECIDED), DECIDED)).lines, []);
+  const cuts = [
+    ["quote", DECIDED.replace(".then(e=>({ref:e}),()=>null)", "")],
+    ["out", DECIDED.replace("if(f!==null&&`error`in f)return f;", "")],
+    ["out", DECIDED.replace("let e=f?.pool;", "let e=z?.pool;")],
+    ["out", DECIDED.replace("XU(e.expectedOut,h.decimals)", "String(e.expectedOut)")],
+    ["out", DECIDED.replace("f=d===null?null:yV(d.ref,", "f=d===null?null:yV(q.ref,")],
+    ["out", DECIDED.replace(".filter(e=>wm.includes(e.venue))", ".filter(e=>vm.includes(e.venue))")],
+    ["out", DECIDED.replace(",...t===void 0?{}:{out:t}", "")],
+  ];
+  for (const [mark, js] of cuts) {
+    assert.notEqual(js, DECIDED, mark);
+    const want = mark === "quote" ? [mark, "out"] : [mark];
+    assert.deepEqual(judge(facts(INDEX(js), js)).lines, want.map((m) => `BAD ${SAYS[m]}`), `${mark}: ${js.slice(0, 80)}`);
+  }
+});
