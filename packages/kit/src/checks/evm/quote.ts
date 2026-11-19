@@ -1563,10 +1563,21 @@ const isMarketOf = (k: EvmPoolKey, c: string, weth: string): boolean => {
 // currency's pools in them, so a quote asks the scan provider only the blocks past N (card evm-buy-and-sell-on-mainnet:
 // a cold quote of Base's 1M blocks on one public provider asked 101 to 129 log batches at the tap, ran past 30 s on
 // its 429s and refused). An index proves more than the scan it replaces, which one provider answers alone.
-const INDEXES = new Map<EvmPoolChain, { from: number; through: number; byCurrency: Map<string, EvmPoolKey[]> }>();
+// `count` and `ids`: the served sync's pools, each by its id (pool-index.ts gives every pool one) or else its key's
+// fields, so a later sync with the very same pools is known without reading them again
+const INDEXES = new Map<EvmPoolChain, { from: number; through: number; byCurrency: Map<string, EvmPoolKey[]>; count: number; ids: Set<string> }>();
+/** A served pool's name in `ids`: its id where it has one, else its key's fields as given. */
+const indexedName = (p: { readonly key: EvmPoolKey; readonly id?: unknown } | null | undefined): string => {
+  if (typeof p?.id === "string") return p.id;
+  const k = (p?.key ?? {}) as Partial<EvmPoolKey>;
+  return `${k.currency0}/${k.currency1}/${k.fee}/${k.tickSpacing}/${k.hooks}`;
+};
 /** Serves `sync`, a whole sync of `chain`'s pool index (evmPoolIndexSync: coversThrough N and every pool to N), to this
  *  module's scans; one that is not whole, of another chain or PoolManager, or not newer than the one held changes
- *  nothing. Returns whether it is now the one held. */
+ *  nothing. Returns whether it is now the one held. A newer sync from the same first block with the same pools as the
+ *  one held (card evm-index-kept-at-the-head: the page syncs the gap every EVM_INDEX_KEEP_MS, and most gaps make no
+ *  pool) moves the held index's N alone: it is not rebuilt (Robinhood's 34,142 pools took 26-56 ms a rebuild on the page's
+ *  main thread from this Mac, 19 Nov 10:2xZ, every gap sync). */
 export function evmPoolIndexUse(chain: EvmPoolChain, sync: { readonly index: { readonly chainId: number; readonly poolManager: string; readonly from: number } | null; readonly coversThrough: number | null; readonly pools: readonly { readonly key: EvmPoolKey }[] | null }): boolean {
   const all = evmPoolVenues();
   const pinned = typeof chain === "string" && Object.hasOwn(all, chain) ? all[chain] : undefined;
@@ -1577,14 +1588,20 @@ export function evmPoolIndexUse(chain: EvmPoolChain, sync: { readonly index: { r
   if (ix.chainId !== pinned.chainId || typeof ix.poolManager !== "string" || lower(ix.poolManager) !== pm || !Number.isSafeInteger(ix.from) || !Number.isSafeInteger(n) || ix.from < 0 || n < ix.from) return false;
   const held = INDEXES.get(chain);
   if (held !== undefined && held.through >= n) return held.through === n && held.from === ix.from;
+  if (held !== undefined && held.from === ix.from && held.count === sync.pools.length && sync.pools.every((p) => held.ids.has(indexedName(p)))) {
+    held.through = n;
+    return true;
+  }
   const byCurrency = new Map<string, EvmPoolKey[]>();
+  const ids = new Set<string>();
   for (const p of sync.pools) {
+    ids.add(indexedName(p));
     const c0 = (p?.key as { currency0?: unknown } | undefined)?.currency0;
     const k = typeof c0 === "string" ? keyOf(p.key, c0) : null;
     if (k === null) continue;
     for (const c of new Set([k.currency0, k.currency1])) append(byCurrency, c, k);
   }
-  INDEXES.set(chain, { from: ix.from, through: n, byCurrency });
+  INDEXES.set(chain, { from: ix.from, through: n, byCurrency, count: sync.pools.length, ids });
   return true;
 }
 /** The pools of `token` the chain's served index holds (every pool of the PoolManager to its N that pairs the token),
@@ -1594,6 +1611,8 @@ export function evmPoolIndexPools(chain: EvmPoolChain, token: string): readonly 
   const ix = INDEXES.get(chain);
   return ix === undefined || typeof token !== "string" ? null : [...(ix.byCurrency.get(lower(token)) ?? [])];
 }
+/** For the tests (not in the kit's index): the chain's served index as held, or undefined. */
+export const evmPoolIndexHeld = (chain: EvmPoolChain): { readonly from: number; readonly through: number } | undefined => INDEXES.get(chain);
 /** For the tests: forgets every chain's index (not in the kit's index). */
 export const evmPoolIndexReset = (): void => (INDEXES.clear(), SERVED.clear());
 /** For the tests (not in the kit's index): `rpc` reads and keeps the tail `as` does (one chain's history behind two rpc

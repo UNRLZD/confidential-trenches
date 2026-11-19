@@ -13,7 +13,7 @@ import { VaultTree } from "../../kit/src/vault/inputs.ts";
 import { VAULT_FIELD_P, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { evmPoolVenues, evmReadProvidersOf } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
-import { evmPoolIndexPools, evmPoolIndexReset } from "../../kit/src/checks/evm/quote.ts";
+import { evmPoolIndexHeld, evmPoolIndexPools, evmPoolIndexReset } from "../../kit/src/checks/evm/quote.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, readReservedMarks, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
@@ -1541,9 +1541,13 @@ test("a served index is kept at the head: EVM_INDEX_KEEP_MS after each sync a ga
     assert.deepEqual(evmPoolIndexPools("base-sepolia", COIN), [fresh.key], "the new blocks' pool is served to the quote");
     assert.deepEqual(puts, [60], "a gap sync within a minute of the last write is not stored");
     assert.equal(keeps.length, 1, "each gap sync arms the next");
+    const served = evmPoolIndexHeld("base-sepolia");
+    assert.equal(served?.through, 74);
     o.now += EVM_INDEX_PUT_MS;
     await tick();
     assert.deepEqual(calls, [50, 60, 70]);
+    assert.equal(evmPoolIndexHeld("base-sepolia"), served, "a gap sync that adds no pool leaves the served index the same object");
+    assert.equal(served?.through, 84, "and moves its coversThrough on");
     assert.deepEqual(puts, [60, 80], "a minute on, the kept index is stored again");
     assert.deepEqual(keeps.map((k) => k.ms), [EVM_INDEX_KEEP_MS]);
     // a sync that takes longer than the keep's wait ended with N that far behind: the next starts at once

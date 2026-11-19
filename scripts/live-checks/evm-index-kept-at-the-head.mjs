@@ -19,7 +19,6 @@
 // real mainnet providers, not a deployed build (the page's keep itself is held by packages/signpage/test/
 // pool-testnet-evm-queue.test.ts, "a served index is kept at the head", and the quote's half by packages/kit/test/
 // evm-quote-attacks.test.ts F10k)
-// Bundle: out the kit's quotes on real mainnet providers, which a build cannot hold
 //   node scripts/live-checks/evm-index-kept-at-the-head.mjs [--record <file>] [--no-index | --no-keep]
 //   node scripts/live-checks/evm-index-kept-at-the-head.mjs --answer <file>     judge a recorded run
 // --no-index quotes with no index served (the bad answer: the quote's bounded scan alone); --no-keep syncs the index once
