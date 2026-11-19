@@ -624,15 +624,16 @@ export function solanaHelperHoldings(origin: string, turn: "trade" | "pass" = "p
   const r = holdingsRoute((fetch) => solanaHelperRpc(origin, { fetch }));
   return solanaHoldingsReader(r.rpc, { wait429: r.wait429, gate: r.gate, lane: r.lane, turn });
 }
-/** The Solana reader on a provider the device reaches directly (the testnet build's devnet RPC): one try a call and the
+/** The Solana reader on a URL the device reaches directly (the testnet build's: the helper's devnet route, with `init`
+ *  its fetch init, card evm-load-reads-name-no-w-to-the-public-seat; it read the public devnet RPC before): one try a call and the
  *  route's gate, as the helper's, never the trade pair's client, whose retry asks a throttled provider up to four times
  *  a call; paced in the URL's one queue, the pair's own, so the host's calls never rise past that one budget, and its
  *  rounds on a queue of their own at HOLDINGS_PUBLIC_RPC_LIMIT, so the host's getTokenAccountsByOwner stays under the
  *  10 in 10 s it names (the URL's keyless limit is 40 a method). The route's other readers (solanaBuysAt) ask no
  *  getTokenAccountsByOwner and keep the URL's pace. */
 const publicHoldings = new WeakMap<Route, SolanaRpc>();
-export function solanaHoldingsAt(url: string, turn: "trade" | "pass" = "pass"): HoldingsReader {
-  const r = holdingsRoute((fetch) => solanaJsonRpc(url, { fetch }), "url");
+export function solanaHoldingsAt(url: string, turn: "trade" | "pass" = "pass", init?: RequestInit): HoldingsReader {
+  const r = holdingsRoute((fetch) => solanaJsonRpc(url, { fetch, ...(init === undefined ? {} : { init }) }), "url");
   let rpc = publicHoldings.get(r);
   if (rpc === undefined) publicHoldings.set(r, (rpc = solanaPacedRpc((method, params, signal) => r.rpc(method, params, signal), HOLDINGS_PUBLIC_RPC_LIMIT)));
   return solanaHoldingsReader(rpc, { wait429: r.wait429, gate: r.gate, lane: r.lane, turn });
@@ -1089,8 +1090,9 @@ export function solanaHelperBuys(origin: string, pool: string): SolanaBuyReader 
   const r = holdingsRoute((fetch) => solanaHelperRpc(origin, { fetch }));
   return solanaBuyReader(r.rpc, pool, { wait429: r.wait429, gate: buyGateOf(r), lane: r.lane });
 }
-/** W's buy on a provider the device reaches directly (the testnet build's devnet RPC), on the holdings readers' route. */
-export function solanaBuysAt(url: string, pool: string): SolanaBuyReader {
-  const r = holdingsRoute((fetch) => solanaJsonRpc(url, { fetch }), "url");
+/** W's buy on a URL the device reaches directly (the testnet build's helper devnet route, `init` its fetch init), on the
+ *  holdings readers' route. */
+export function solanaBuysAt(url: string, pool: string, init?: RequestInit): SolanaBuyReader {
+  const r = holdingsRoute((fetch) => solanaJsonRpc(url, { fetch, ...(init === undefined ? {} : { init }) }), "url");
   return solanaBuyReader(r.rpc, pool, { wait429: r.wait429, gate: buyGateOf(r), lane: r.lane });
 }
