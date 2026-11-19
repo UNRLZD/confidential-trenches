@@ -101,7 +101,7 @@ import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { withVaultBalance } from "./vault-balance.ts";
-import { returningWallets, withPositions, withReturning } from "./positions.ts";
+import { evmReturningWallets, returningWallets, withPositions, withReturning } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { CONFIRM_TITLE, CONNECT_PATH, confirmLines, outsideKinds, outsideOrigin, type ConfirmedKind } from "./outside.ts";
 import { clearConnections, connections } from "./connections.ts";
@@ -932,11 +932,14 @@ else {
         const nearPage = s.signed_in ? nearBuyPage() : null;
         const near = nearPage ? await nearPositions(nearPage).catch(() => []) : [];
         const positioned = withPositions(pooled, sol === null && near.length === 0 ? null : [...(sol ?? []), ...near]);
+        // the EVM Ws a refused buy left ETH on, read on the helper's route before the page's first tap
+        const evmOwed = s.signed_in && testnet ? evmReturningWallets(testnet.evmReturning(), (c) => prices.get(c)) : [];
+        const listed = withReturning(positioned, evmOwed);
         // the Ws whose money waits for its rent back, on their way (src/positions.ts returningWallets): a store read
         const owed = s.signed_in && testnet ? await testnet.returning().catch(() => []) : [];
         // the notes the balance counted, so a W whose sweep's note is counted is not listed too
         const counted = owed.some((o) => o.sweep !== undefined) ? await shared().catch(() => null) : [];
-        return withReturning(positioned, returningWallets(owed, prices.get("solana"), counted));
+        return withReturning(listed, returningWallets(owed, prices.get("solana"), counted));
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {
