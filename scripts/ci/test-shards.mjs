@@ -90,44 +90,44 @@ export const E2E_SECONDS = {
   "apps/terminal: node ../../scripts/live-checks/app-lock-holds-until-the-layer-closes.mjs --harness": 6, // B2 5.8
   "apps/terminal: node ../../scripts/live-checks/signed-out-portfolio-and-account-say-what-appears.mjs --harness": 34, // C3 33.8
   "apps/terminal: node ../../scripts/live-checks/app-pages-open-right.mjs --harness": 30, // A1 29.3
-  // card app-live-checks-run-on-the-build-before-merge: each app check's own --harness, timed on the heavy box
-  // (unrlzd-pc-ct, job app-harness-18, 19 Nov), whole seconds from start to exit, 1 s at the least, until CI times them;
+  // card app-live-checks-run-on-the-build-before-merge: each app check's own --harness, measured on a local run
+  // (19 Nov), whole seconds from start to exit, 1 s at the least, until CI times them;
   // app-no-blank-pages replaces test/no-blank-pages/run.mjs (the same collect and judge on the same route, B2 122.0)
-  "apps/terminal: node ../../scripts/live-checks/app-export-every-wallet.mjs --harness": 14, // box 14
-  "apps/terminal: node ../../scripts/live-checks/app-hop-sync-lock.mjs --harness": 5, // box 5
-  "apps/terminal: node ../../scripts/live-checks/app-list-age.mjs --harness": 6, // box 6
-  "apps/terminal: node ../../scripts/live-checks/app-no-blank-pages.mjs --harness": 123, // box 120, B2 122.0 as the wrapper
-  "apps/terminal: node ../../scripts/live-checks/app-pool-withdraw.mjs --harness": 44, // box 44
-  "apps/terminal: node ../../scripts/live-checks/app-release-sri.mjs --harness": 1, // box 0
-  "apps/terminal: node ../../scripts/live-checks/app-shell-rpc-outage-judge.mjs --harness": 8, // box 8
-  "apps/terminal: node ../../scripts/live-checks/app-verify-mount.mjs --harness": 8, // box 8
-  "apps/terminal: node ../../scripts/live-checks/balances-per-chain.mjs --harness": 3, // box 3
-  "apps/terminal: node ../../scripts/live-checks/pool-balance-counts-the-remainder.mjs --harness": 22, // box 22
-  "apps/terminal: node ../../scripts/live-checks/portfolio-one-balance.mjs --harness": 11, // box 11
-  "apps/terminal: node ../../scripts/live-checks/signpage-pool-price.mjs --harness": 25, // box 25
-  "apps/terminal: node ../../scripts/live-checks/token-page-fills-after.mjs --harness": 49, // box 49
-  "apps/terminal: node ../../scripts/live-checks/trade-box-bal-cash.mjs --harness": 23, // box 23
-  "apps/terminal: node ../../scripts/live-checks/trade-box-pool.mjs --harness": 11, // box 11
-  // verify-pools (box 6) and verify-row-survives-one-provider (box 9) join with card e2e-reads-no-public-host (PENDING);
-  // the same card's app checks that take --build, timed in the Mac queue (job app-build-18, 19 Nov 00:55Z; the box was
-  // reserved), whole seconds, 1 s at the least; app-shell (box 105), app-legend-holds-still (mac 70) and
-  // rail-open-pushes-the-middle (mac 16) join with the cards their PENDING entries name (scripts/ci/app-harness-in-e2e.mjs)
-  "apps/terminal: node ../../scripts/live-checks/app-chains-evm-rail.mjs --build dist": 9, // mac 9
-  "apps/terminal: node ../../scripts/live-checks/app-chains-evm.mjs --build dist": 27, // mac 27
-  "apps/terminal: node ../../scripts/live-checks/app-chart-fills-in-its-history.mjs --build dist": 58, // mac 58
-  "apps/terminal: node ../../scripts/live-checks/app-chart-live.mjs --build dist": 52, // mac 52
-  "apps/terminal: node ../../scripts/live-checks/app-discover-live.mjs --build dist": 7, // mac 7
-  "apps/terminal: node ../../scripts/live-checks/app-discover-rows-hold.mjs --build dist": 85, // mac 85
-  "apps/terminal: node ../../scripts/live-checks/app-discover-toolbar.mjs --build dist": 21, // mac 21
-  "apps/terminal: node ../../scripts/live-checks/app-launchpad-badges.mjs --build dist": 9, // mac 9
-  "apps/terminal: node ../../scripts/live-checks/app-near-trading.mjs --build dist": 6, // mac 6
-  "apps/terminal: node ../../scripts/live-checks/app-no-test-token.mjs --build dist": 8, // mac 8
-  "apps/terminal: node ../../scripts/live-checks/app-token-chart.mjs --build dist": 9, // mac 9
-  "apps/terminal: node ../../scripts/live-checks/app-token-rail.mjs --build dist": 4, // mac 4
-  "apps/terminal: node ../../scripts/live-checks/app-token-route.mjs --build dist": 21, // mac 21
-  "apps/terminal: node ../../scripts/live-checks/app-trade-box-mount.mjs --build dist": 6, // mac 6
-  "apps/terminal: node ../../scripts/live-checks/discover-matches-the-main-app.mjs --build dist": 13, // mac 13
-  "apps/terminal: node ../../scripts/live-checks/words-nov8-final.mjs --local --host app --build dist": 1, // mac 0
+  "apps/terminal: node ../../scripts/live-checks/app-export-every-wallet.mjs --harness": 14, // 14 s
+  "apps/terminal: node ../../scripts/live-checks/app-hop-sync-lock.mjs --harness": 5, // 5 s
+  "apps/terminal: node ../../scripts/live-checks/app-list-age.mjs --harness": 6, // 6 s
+  "apps/terminal: node ../../scripts/live-checks/app-no-blank-pages.mjs --harness": 123, // 120 s, 122.0 s as the wrapper
+  "apps/terminal: node ../../scripts/live-checks/app-pool-withdraw.mjs --harness": 44, // 44 s
+  "apps/terminal: node ../../scripts/live-checks/app-release-sri.mjs --harness": 1, // 0 s
+  "apps/terminal: node ../../scripts/live-checks/app-shell-rpc-outage-judge.mjs --harness": 8, // 8 s
+  "apps/terminal: node ../../scripts/live-checks/app-verify-mount.mjs --harness": 8, // 8 s
+  "apps/terminal: node ../../scripts/live-checks/balances-per-chain.mjs --harness": 3, // 3 s
+  "apps/terminal: node ../../scripts/live-checks/pool-balance-counts-the-remainder.mjs --harness": 22, // 22 s
+  "apps/terminal: node ../../scripts/live-checks/portfolio-one-balance.mjs --harness": 11, // 11 s
+  "apps/terminal: node ../../scripts/live-checks/signpage-pool-price.mjs --harness": 25, // 25 s
+  "apps/terminal: node ../../scripts/live-checks/token-page-fills-after.mjs --harness": 49, // 49 s
+  "apps/terminal: node ../../scripts/live-checks/trade-box-bal-cash.mjs --harness": 23, // 23 s
+  "apps/terminal: node ../../scripts/live-checks/trade-box-pool.mjs --harness": 11, // 11 s
+  // verify-pools (6 s) and verify-row-survives-one-provider (9 s) join with card e2e-reads-no-public-host (PENDING);
+  // the same card's app checks that take --build, measured on a local run (19 Nov 00:55Z),
+  // whole seconds, 1 s at the least; app-shell (105 s), app-legend-holds-still (70 s) and
+  // rail-open-pushes-the-middle (16 s) join with the cards their PENDING entries name (scripts/ci/app-harness-in-e2e.mjs)
+  "apps/terminal: node ../../scripts/live-checks/app-chains-evm-rail.mjs --build dist": 9, // 9 s
+  "apps/terminal: node ../../scripts/live-checks/app-chains-evm.mjs --build dist": 27, // 27 s
+  "apps/terminal: node ../../scripts/live-checks/app-chart-fills-in-its-history.mjs --build dist": 58, // 58 s
+  "apps/terminal: node ../../scripts/live-checks/app-chart-live.mjs --build dist": 52, // 52 s
+  "apps/terminal: node ../../scripts/live-checks/app-discover-live.mjs --build dist": 7, // 7 s
+  "apps/terminal: node ../../scripts/live-checks/app-discover-rows-hold.mjs --build dist": 85, // 85 s
+  "apps/terminal: node ../../scripts/live-checks/app-discover-toolbar.mjs --build dist": 21, // 21 s
+  "apps/terminal: node ../../scripts/live-checks/app-launchpad-badges.mjs --build dist": 9, // 9 s
+  "apps/terminal: node ../../scripts/live-checks/app-near-trading.mjs --build dist": 6, // 6 s
+  "apps/terminal: node ../../scripts/live-checks/app-no-test-token.mjs --build dist": 8, // 8 s
+  "apps/terminal: node ../../scripts/live-checks/app-token-chart.mjs --build dist": 9, // 9 s
+  "apps/terminal: node ../../scripts/live-checks/app-token-rail.mjs --build dist": 4, // 4 s
+  "apps/terminal: node ../../scripts/live-checks/app-token-route.mjs --build dist": 21, // 21 s
+  "apps/terminal: node ../../scripts/live-checks/app-trade-box-mount.mjs --build dist": 6, // 6 s
+  "apps/terminal: node ../../scripts/live-checks/discover-matches-the-main-app.mjs --build dist": 13, // 13 s
+  "apps/terminal: node ../../scripts/live-checks/words-nov8-final.mjs --local --host app --build dist": 1, // 0 s
   "apps/terminal: node test/withdraw/run.mjs": 14, // B2 14.0
   "apps/terminal: node test/withdraw-form/run.mjs": 5, // C3 4.7
   "apps/terminal: node test/portfolio/run.mjs": 49, // C1 48.9
