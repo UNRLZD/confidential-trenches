@@ -603,7 +603,7 @@ test("the real helper plan has no budget check outside the group, and every chec
   const list = listOf("helper", ROOT, { commit: COMMIT, network: "mainnet" });
   const found = list.checks.filter((k) => !list.skipped[k] && BUDGET_READS.test(readFileSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`), "utf8"))).sort();
   assert.deepEqual(found, [...BUDGET_KEYS, ...Object.keys(list.budgetExempt)].sort(), "the group and the exempt are exactly the checks that name a Jupiter route");
-  assert.deepEqual(Object.keys(list.budgetExempt), ["app-console-429"]);
+  assert.deepEqual(Object.keys(list.budgetExempt).sort(), ["app-console-429", "helper-answers-through-a-burst"]);
 });
 
 // a list with a serial group and an exempt list, for the fixtures below
