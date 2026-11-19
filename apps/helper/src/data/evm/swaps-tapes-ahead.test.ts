@@ -14,7 +14,7 @@ import { LATE_MS, LISTED, PAGE, POCKET, rig, SWAPS, TOKENS } from "../../../test
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { providerHolds } from "../../limits/limits.ts";
 import { LOOP_BUSY_MS } from "../../limits/loop-busy.ts";
-import { HEADER_TIMED, OPEN_BOUND_MS, SWAP_RPCS, type Pool } from "./swaps.ts";
+import { AHEAD_WAIT_MS, HEADER_TIMED, OPEN_BOUND_MS, SWAP_RPCS, type Pool } from "./swaps.ts";
 
 const clock = { get t() { return Date.now(); } };
 const sleep = (ms: number) => new Promise((go) => setTimeout(go, ms));
@@ -247,4 +247,28 @@ test("card robinhood-tapes-read-ahead-bounded: the 12 listed coins read ahead on
     assert.equal(g.filling, false, `read ahead once the burst ended: ${line(held.got)}`);
     assert.equal(g.n, SWAPS, line(held.got));
   }
+});
+
+test("card robinhood-tapes-read-ahead-bounded: the read ahead's minute line, at the lists' load a minute on: the listed tapes ready out of those listed and each cause that stood it down, with its waits (here the loop busy for the first 10 s), no address (red at 61e321fd1: no such line, so a stalled read ahead said nothing)", async () => {
+  const r = rig();
+  const kept = new Map(LISTED.map(({ token, pool }) => [token, { pool: { venue: "v3", id: pool, token, tokenIs0: true, quote: { kind: "usd", decimals: 6 } } as Pool, decimals: 18 }]));
+  const lines: string[] = [];
+  const loop = { busy: true };
+  await onVirtualTime(9_000_000, async () => {
+    const s = open(r.chain, clock, { pools: kept, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never, busy: () => loop.busy, log: (l) => lines.push(l) });
+    void s.ahead(LISTED.map((x) => x.token));
+    await sleep(10_000);
+    loop.busy = false;
+    await sleep(51_000);
+    await s.ahead(LISTED.map((x) => x.token));
+    s.stop();
+  });
+  const minute = lines.filter((l) => l.includes("read ahead:"));
+  console.log(`lines: ${minute.join(" | ")}`);
+  assert.equal(minute.length, 1, "one line a minute");
+  const m = /^robinhood read ahead: (\d+) of 12 listed tapes ready; stood down (\d+) s: opening (\d+), no room (\d+), held (\d+), busy (\d+)$/.exec(minute[0]!);
+  assert.ok(m !== null, minute[0]);
+  assert.equal(Number(m[1]), 12, "every listed tape read ahead once the loop was free");
+  assert.ok(Number(m[6]) >= 10_000 / AHEAD_WAIT_MS, `the loop's 10 s busy counted in waits: ${m[6]}`);
+  assert.doesNotMatch(minute[0]!, /0x[0-9a-f]/i, "no address in the line");
 });

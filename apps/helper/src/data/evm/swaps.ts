@@ -438,6 +438,9 @@ const BATCH_SIZE: Readonly<Record<string, number>> = {
 
 /** Requests out to one provider at once (swaps.ts batchTo). */
 export const INFLIGHT_MAX = 4;
+/** A read ahead's wait while it stands down (a provider short of room, the helper's loop busy) before it looks again:
+ *  the turn a stood-down read ahead resumes on (card robinhood-tapes-read-ahead-bounded). */
+export const AHEAD_WAIT_MS = 500;
 /** A provider's answer time before its first answer, and the weight of each new one in its moving average (waitOf).
  *  [design: 500 ms, about a wide 1,000-block read's (WIDE_SPAN: 0.6 to 1.9 s; heads and calls under 0.3 s), and 0.3, so
  *  three slow answers in a row move the rank.] */
@@ -2075,9 +2078,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  half a bucket more; read again every AHEAD_WAIT_MS.] */
   const AHEAD_AT_ONCE = 2;
   const AHEAD_ROOM = 0.75;
-  const AHEAD_WAIT_MS = 500;
   const roomy = (): boolean => single(usable(rpcs), 2).filter((u) => !LOGS_REFUSED.has(u) && holds.room(u) >= AHEAD_ROOM).length >= 2;
   const aheadQueue = new Set<string>();
+  /** What stood the reads ahead down since the last minute's line (aheadLine): each wait a worker made, by its cause. */
+  const stood = { opening: 0, room: 0, held: 0, busy: 0 };
+  /** The lists' tokens as the last lists answer named them, and when the last minute's line was written. */
+  let listedNow: string[] = [];
+  let lineAt = now();
+  const standDown = (): Promise<unknown> => {
+    if (busy()) stood.busy++;
+    else stood.room++;
+    return new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
+  };
   /** The tokens a search ahead has taken from its queue and not yet done (the tapes read ahead wait for them). */
   const searching = new Set<string>();
   let aheadRun: Promise<void> | null = null;
@@ -2088,7 +2100,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const kept = pools.get(t);
     return kept !== undefined && kept.hint === undefined && now() - kept.at < (kept.found === null ? NONE_MS : POOL_KEEP_MS);
   };
+  /** Once a minute, at a lists answer: the listed tapes ready (tapeReady) and what stood the reads ahead down since the
+   *  last line, each cause's waits counted (stood); no address in it. */
+  function aheadLine(): void {
+    if (now() - lineAt < 60_000) return;
+    const ready = listedNow.filter((t) => tapeReady(t)).length;
+    log(`${chain} read ahead: ${ready} of ${listedNow.length} listed tapes ready; stood down ${Math.round((now() - lineAt) / 1000)} s: opening ${stood.opening}, no room ${stood.room}, held ${stood.held}, busy ${stood.busy}`);
+    lineAt = now();
+    stood.opening = stood.room = stood.held = stood.busy = 0;
+  }
   function ahead(tokens: readonly string[]): Promise<void> {
+    aheadLine();
+    listedNow = [...new Set(tokens.map((x) => evmAddress(x)).filter((t): t is string => t !== null))];
     for (const x of tokens) {
       const t = evmAddress(x);
       if (t !== null && !known(t) && !resolving.has(t) && aheadQueue.size < POOLS_MAX) aheadQueue.add(t);
@@ -2097,8 +2120,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const one = async (): Promise<void> => {
         for (;;) {
           for (;;) {
-            if (opening > 0) await new Promise<void>((go) => idle.push(go));
-            else if (aheadQueue.size > 0 && (busy() || !roomy())) await new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
+            if (opening > 0) {
+              stood.opening++;
+              await new Promise<void>((go) => idle.push(go));
+            } else if (aheadQueue.size > 0 && (busy() || !roomy())) await standDown();
             else break;
           }
           const t = aheadQueue.values().next().value;
@@ -2150,9 +2175,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         for (;;) {
           for (;;) {
             if (tapeQueue.size === 0) return;
-            if (heldAny()) return tapeQueue.clear();
-            if (opening > 0) await new Promise<void>((go) => idle.push(go));
-            else if (busy() || !roomy()) await new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
+            if (heldAny()) {
+              stood.held++;
+              return tapeQueue.clear();
+            }
+            if (opening > 0) {
+              stood.opening++;
+              await new Promise<void>((go) => idle.push(go));
+            } else if (busy() || !roomy()) await standDown();
             else break;
           }
           // the first whose pool is kept; one still searched keeps its place, one the search found none for leaves
@@ -2207,7 +2237,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         // which reads only open books) is waited here, as long as no provider is held and the book is still ours
         for (;;) {
           while (e!.backing !== undefined) await e!.backing;
-          if (!backing(e!) || books.get(t) !== e || e!.ahead !== lane || heldAny() || busy()) return;
+          if (!backing(e!) || books.get(t) !== e || e!.ahead !== lane) return;
+          if (heldAny()) {
+            stood.held++;
+            return;
+          }
+          // a busy loop stands the read back down, rested where it got to, its tape back in the queue: the run takes it
+          // up again on the first turn the loop is free (AHEAD_WAIT_MS), not at the lists' next load a minute on
+          if (busy()) {
+            stood.busy++;
+            tapeQueue.add(t);
+            return;
+          }
           const wait = (e!.back?.until ?? now()) - now();
           if (wait > BACK_RETRY_MAX_MS) return;
           if (wait > 0) await new Promise((go) => (setTimeout(go, wait) as { unref?: () => void }).unref?.());
