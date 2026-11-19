@@ -4903,14 +4903,16 @@ test("TH7 a scan provider that times out or fails every getLogs refuses rpc_erro
   try {
     for (const how of ["timeout", "error"] as const) {
       const { rpc, st } = faultScan([], () => how, 100);
-      const t0 = performance.now();
+      // the sends by the bound, read on the test clock's own timer at 1,000 ms, set before the quote's: it fires before
+      // any request the bound's own timers start there
+      let byBound = -1;
+      setTimeout(() => (byBound = st.sent.length), 1_000);
       const r = await coldQuote(rpc, how === "timeout" ? 0x3f00 : 0x3f10);
       assert.equal(r.code, "rpc_error", `${how}: ${r.message}`);
       assert.ok(r.ms < 1_000 + 100 + 400, `${how}: refused after ${Math.round(r.ms)} ms and ${st.logs} getLogs`);
-      // nothing is sent at or past the bound, on the test clock from the quote's start (card mutants-killed-on-main: with
-      // the gate's check of the bound gone, each request that reached it was still sent, 141 and 1,600 of them at 1,000 ms,
-      // and aborted there)
-      assert.ok(st.sent.every((t) => t - t0 < 1_000), `${how}: ${st.sent.filter((t) => t - t0 >= 1_000).length} getLogs sent at or past the bound`);
+      // nothing is sent at or past the bound (card mutants-killed-on-main: with the gate's check of the bound gone, each
+      // request that reached it was still sent, 141 and 1,600 of them at 1,000 ms, and aborted there)
+      assert.equal(st.sent.length, byBound, `${how}: ${st.sent.length - byBound} getLogs sent at or past the bound`);
     }
   } finally {
     evmScanBound?.();
