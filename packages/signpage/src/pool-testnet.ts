@@ -929,6 +929,9 @@ export type TestnetPool = {
   positionsNow(): readonly Position[] | null;
   /** The Ws whose rent back is owed, as their records stand (src/positions.ts returningWallets). */
   returning(): Promise<OwedRentBack[]>;
+  /** The EVM Ws a refused buy left ETH on, as the helper's route read them before the page's first tap (card
+   *  evm-load-reads-name-no-w-to-the-public-seat; src/positions.ts evmReturningWallets): display alone, never signed on. */
+  evmReturning(): { chain: "base" | "robinhood"; address: string; wei: bigint }[];
   /** The Ws bought since the last whole pass that name `token` (pool-sell-dry.ts boughtSincePass: W's buy mint, the kept
    *  pass, W's buy record, the full sells noted) and each W's amount as the kept pass holds it (keptHeldOf: the order a
    *  sale takes them in), from the store alone: no read, no seed; the store as held (page.held),
@@ -1175,6 +1178,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     stopSolana();
     evmStop.abort();
     evmStop = new AbortController();
+    // a signed-out account's Ws are shown no more
+    evmShown.clear();
   }
   const signedOut = async (): Promise<void> => {
     stopReads();
@@ -1673,7 +1678,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the helper's route), with no tap: at a refusal (the buy's carry) and at each state read; one pass per chain in this
   // tab and across tabs (one Web Lock a chain, taken if free: a second request in this tab finds it held as another
   // tab's does), under the seed's shared lock; a sign out ends it (evmStop) with nothing signed or written after it
-  const evmCarry = (chain: "base" | "robinhood"): void => {
+  // the Ws a pass before the page's first tap read on the helper's route, by chain and W (lowercase), until a pass after
+  // it reads that W on both RPCs (card evm-load-reads-name-no-w-to-the-public-seat)
+  const evmShown = new Map<string, { chain: "base" | "robinhood"; address: string; wei: bigint }>();
+  const evmCarry = (chain: "base" | "robinhood", idle = false): void => {
     // only where the build carries the chain's withdraw (poolWayOut), as the buy
     if (!wayOut(chain)) return;
     const e = evmPool(chain);
@@ -1687,7 +1695,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         await locks.request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () => {
           const notes = await openNoteStore(await page.store());
           try {
-            await carryEvmOwed({
+            const ends = await carryEvmOwed({
               chain,
               testnet: POOL_TESTNET,
               pin: e.pin,
@@ -1701,7 +1709,17 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               // a carried note is a landing too: its pass is the landing's, one a tick (evmLanded)
               landed: evmLanded(chain),
               signal,
+              ...(idle ? { idle: helper } : {}),
             });
+            if (signal.aborted) return;
+            // an idle pass's reads are what is shown, each chain's whole; a pass after the tap read its W on both RPCs,
+            // whose own end (a note INCOMING, then landed) takes the amount over
+            if (idle) for (const k of [...evmShown.keys()]) if (k.startsWith(`${chain}:`)) evmShown.delete(k);
+            for (const r of ends) {
+              if (r.end === "idle" && r.balance !== undefined) evmShown.set(`${chain}:${r.w}`, { chain, address: r.w, wei: r.balance });
+              else evmShown.delete(`${chain}:${r.w}`);
+            }
+            if (ends.length > 0) for (const f of watchers) f();
           } finally {
             notes.close();
           }
@@ -2088,7 +2106,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // and each chain's sales whose tab ended before their end, from their open records (never awaited)
     for (const chain of chains) evmSellFollow(chain);
     // and each chain's refused buys' ETH on W, carried back into the pool (never awaited)
-    for (const chain of chains) evmCarry(chain);
+    // before the page's first tap's drawn time (backs.acted, card evm-load-reads-name-no-w-to-the-public-seat) the pass is
+    // idle: each W's balance read on the helper's route alone and shown (evmReturning), no W named to the pool's RPCs,
+    // both public providers; past it the pass reads its one W on both before W signs. A refusal in this page's own buy
+    // carries at once (evmBuyPage's carry: the trade in flight)
+    for (const chain of chains) evmCarry(chain, !backs.acted());
     // and each chain's buy records a device that never made the buy lacks, from the chain (never awaited)
     for (const chain of chains) evmHoldings(chain);
     await Promise.all(
@@ -3832,6 +3854,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // the Ws whose rent back is owed, as their records stand (src/positions.ts returningWallets: those a pass read listed
     // returning); a store read, never a chain read
     returning: () => owedRentBacks(page.store).list(),
+    evmReturning: () => [...evmShown.values()],
     // a restore wrote buy records of `chain` (src/pool-restore.ts, restoreEvmHoldings): its positions read again
     evmHoldingsRestored: (chain: "base" | "robinhood") => void evmPositions(chain)?.refresh(),
     positionsNow: () => positions.get(),
