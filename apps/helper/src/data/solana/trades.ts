@@ -55,9 +55,9 @@
 // Display only: nothing here feeds a signature. Every provider value is hostile: bounded answers, decoders that check
 // every byte they read (decode.ts), PumpSwap pools taken only when the PumpSwap program owns them and their base mint
 // is the token, bounded books, subscriptions and caches.
-import { change4h, createBook, joinBars, TF_SECONDS, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
-import { address } from "./lists.ts";
-import { HELD_WAIT_MS, SOL_BEHIND_MS, SOL_VENDOR_REACH_MS, type DataAnswer } from "./token.ts";
+import { change4h, createBook, fixed, joinBars, TF_SECONDS, TFS, VALUE_SCALE, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
+import { address, b58decode } from "./lists.ts";
+import { HELD_WAIT_MS, SOL_BEHIND_MS, SOL_VENDOR_REACH_MS, TAPE_OPEN_BOUND_MS, type DataAnswer, type TapeRow } from "./token.ts";
 import { cutTrades, dbcPair, eventsInInner, fromLogs, poolMints, poolPair, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
 import { CREDITS, type Slot } from "../../rpc/slot.ts";
 
@@ -436,6 +436,83 @@ export function usdScaled(v: unknown): bigint | null {
   const [w, f = ""] = v.split(".");
   const n = BigInt(w!) * 10n ** 18n + BigInt((f + "0".repeat(18)).slice(0, 18));
   return n > 0n ? n : null;
+}
+
+/** Card sol-vendor-tape-refresh-from-our-reads: a tape the vendor names a pool for (poolTape) is renewed from our own
+ *  reads of that pool once its rows are this old, at a page's read [design: half TAPE_FRESH_MS, so a page reading every
+ *  2 s is served rows under SOL_VENDOR_REACH_MS with room for a round's calls]. */
+export const FOLLOW_MS = 5_000;
+/** A round's signatures, newest first: a page this full leaves a gap below it. */
+export const FOLLOW_SIGS = 100;
+/** A round's transactions read at most, its newest successful ones; past it the tape holds only those (a gap below).
+ *  [design: 20, a pool's 4 trades a second between two rounds; the tape shows TRADES_MAX] */
+export const FOLLOW_TX_MAX = 20;
+/** After a failed round, the next is this much later (a page's reads in between are served what is held). */
+export const FOLLOW_RETRY_MS = 2_000;
+const FOLLOWS_MAX = 300;
+const SIG_TEXT = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+const AMOUNT = /^\d{1,30}$/;
+
+/** One pool trade as a transaction's token balances show it: the pool's two vaults, the token accounts the pool
+ *  account's own data names (`poolData`) that the transaction's balances list, one holding `mint`, one another coin.
+ *  The pool gave `mint` out (its vault fell, the other rose): a buy; took it in: a sell; anything else (a deposit, a
+ *  withdrawal, a transaction that moves no vault, more than one vault of a side) is no trade (null). Amounts are the
+ *  vaults' own changes in base units (a coin with a transfer fee: what reached the pool), the trader the transaction's
+ *  fee payer. Every field is the RPC's, hostile: bounded and checked. */
+export type PoolLeg = { side: "b" | "s"; amt: bigint; decimals: number; quote: bigint; quoteMint: string; quoteDecimals: number; trader: string | null; ts: number };
+export function poolLeg(tx: unknown, mint: string, poolData: Uint8Array): PoolLeg | null {
+  const r = tx as Record<string, unknown> | null;
+  const meta = r?.meta as Record<string, unknown> | null | undefined;
+  const msg = (r?.transaction as Record<string, unknown> | undefined)?.message as Record<string, unknown> | undefined;
+  if (meta == null || meta.err !== null || !Array.isArray(msg?.accountKeys) || !Array.isArray(meta.preTokenBalances) || !Array.isArray(meta.postTokenBalances)) return null;
+  const loaded = (meta.loadedAddresses ?? {}) as Record<string, unknown>;
+  const keys = [...(msg.accountKeys as unknown[]), ...(Array.isArray(loaded.writable) ? loaded.writable : []), ...(Array.isArray(loaded.readonly) ? loaded.readonly : [])].slice(0, 512);
+  const ts = Number.isSafeInteger(r!.blockTime) && (r!.blockTime as number) > 0 ? (r!.blockTime as number) : null;
+  if (ts === null) return null;
+  const data = Buffer.from(poolData);
+  type Bal = { i: number; mint: string; amount: bigint; decimals: number };
+  const bal = (v: unknown): Bal | null => {
+    const b = v as Record<string, unknown> | null;
+    const u = b?.uiTokenAmount as Record<string, unknown> | undefined;
+    const m = address(b?.mint);
+    if (!Number.isSafeInteger(b?.accountIndex) || m === null || typeof u?.amount !== "string" || !AMOUNT.test(u.amount) || !Number.isSafeInteger(u.decimals) || (u.decimals as number) < 0 || (u.decimals as number) > 30) return null;
+    return { i: b!.accountIndex as number, mint: m, amount: BigInt(u.amount), decimals: u.decimals as number };
+  };
+  const pre = new Map<number, Bal>();
+  for (const v of (meta.preTokenBalances as unknown[]).slice(0, 512)) {
+    const b = bal(v);
+    if (b !== null) pre.set(b.i, b);
+  }
+  // the vaults: token accounts whose 32-byte address the pool's own data holds
+  const vaults: (Bal & { d: bigint })[] = [];
+  for (const v of (meta.postTokenBalances as unknown[]).slice(0, 512)) {
+    const b = bal(v);
+    const key = b === null ? null : address(keys[b.i]);
+    const bytes = key === null ? null : b58decode(key);
+    if (b === null || bytes === null || data.indexOf(Buffer.from(bytes)) < 0) continue;
+    const p = pre.get(b.i);
+    if (p !== undefined && p.mint !== b.mint) return null;
+    vaults.push({ ...b, d: b.amount - (p?.amount ?? 0n) });
+  }
+  const mine = vaults.filter((v) => v.mint === mint);
+  const other = vaults.filter((v) => v.mint !== mint);
+  if (mine.length !== 1 || other.length !== 1) return null;
+  const [t, q] = [mine[0]!, other[0]!];
+  const side = t.d < 0n && q.d > 0n ? "b" : t.d > 0n && q.d < 0n ? "s" : null;
+  if (side === null) return null;
+  return { side, amt: t.d < 0n ? -t.d : t.d, decimals: t.decimals, quote: q.d < 0n ? -q.d : q.d, quoteMint: q.mint, quoteDecimals: q.decimals, trader: address(keys[0]), ts };
+}
+
+/** A vendor-named pool's tape renewed from our own reads (poolTape): the rows (newest first, at most TRADES_MAX) as of
+ *  `at` (the vendor's read, then each round's start), the newest signature read (`lastSig`), the pool account's data
+ *  (read once), whether a round ever found a trade in it (`placed`) or read trades it could not (`unplaced`: the vendor
+ *  serves this coin, as before), the round in flight, and the failed round's retry time. */
+type Follow = { pool: string; rows: TapeRow[]; src: string; at: number; lastSig: string | null; data: Uint8Array | null; placed: boolean; misses: number; unplaced: boolean; reading: Promise<void> | null; retryAt: number; touched: number };
+
+/** `p`'s settling, or `ms` passing, whichever is first (`p` goes on). */
+function within(p: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([p.then(() => undefined, () => undefined), new Promise<void>((go) => (timer = setTimeout(go, ms)))]).finally(() => clearTimeout(timer));
 }
 
 type Held = { slot: number; seq: number; t: RawTrade[] };
@@ -968,6 +1045,9 @@ export function createSolanaTrades(deps: {
       // card sol-meteora-tape-inside-rpc-budget: the minute's whole reads, so their budget can be read back
       if (wholeCount.sent + wholeCount.over > 0) deps.log?.(`solana whole reads: ${wholeCount.sent} sent, ${wholeCount.unread} unanswered, ${wholeCount.over} past the budget (${WHOLE_PER_S} a second, ${WHOLE_COIN_MAX} a coin in ${WHOLE_WINDOW_MS / 1_000} s)`);
       wholeCount.sent = wholeCount.over = wholeCount.unread = 0;
+      // card sol-vendor-tape-refresh-from-our-reads: the minute's rounds of vendor-named pools, read back on the host
+      if (followCount.rounds > 0) deps.log?.(`solana pool tapes: ${follows.size} held, ${followCount.rounds} rounds, ${followCount.calls} calls, ${followCount.failed} failed`);
+      followCount.rounds = followCount.calls = followCount.failed = 0;
     }
     for (const e of entries.values()) {
       if (t - e.touched > IDLE_MS) {
@@ -1005,8 +1085,9 @@ export function createSolanaTrades(deps: {
   /** The token's top pool's newest `limit` trades (deps.tape), src theirs, dated by their read. Refused or down, the
    *  empty tape with `filling`, so the page reads again, for VENDOR_WAIT_MS at most; then, and at once for a vendor that
    *  names no pool (404), the token's own empty tape (filling only while its walk reads), or for a token with no open
-   *  walk (`e` null) the vendor's refusal, and a mint no pool names is the 404 it was. */
-  async function poolTape(mint: string, limit: number, e: Entry | null): Promise<DataAnswer> {
+   *  walk (`e` null) the vendor's refusal, and a mint no pool names is the 404 it was. A good answer that names its pool
+   *  starts that pool's follow (seed), which renews the rows from our own reads (poolTape). */
+  async function vendorTape(mint: string, limit: number, e: Entry | null): Promise<DataAnswer> {
     const v = await deps.tape!(mint).catch(() => null);
     if (v === null || v.status !== 200) {
       // card solana-dropped-tape-settles: a tape waits for the vendor VENDOR_WAIT_MS at most, filling, then answers what
@@ -1030,20 +1111,156 @@ export function createSolanaTrades(deps: {
     } else waiting.delete(mint);
     if (v !== null && v.status === 200) {
       const all = JSON.parse(v.body) as unknown[];
-      const got = all.slice(0, limit);
       const src = v.src ?? "geckoterminal";
       const at = v.asOfMs ?? now();
-      // the vendor's newest trades of the pool, every one after its oldest (card token-stats-count-every-trade), up to
-      // their read: claimed complete only while that read is within SOL_VENDOR_REACH_MS, its age always named (card
-      // vendor-tapes-name-their-reach-every-chain)
-      const age = Math.max(0, now() - at);
-      const oldest = (all.at(-1) as { t_ms?: unknown } | undefined)?.t_ms;
-      const whole = typeof oldest === "number" && Number.isSafeInteger(oldest) && age <= SOL_VENDOR_REACH_MS ? { whole_ms: oldest + 1_000 } : {};
-      const timing = `sol-vendor-read;desc="rows read ${age} ms ago"`;
-      return { status: 200, body: JSON.stringify({ trades: got, ...whole, src, as_of_ms: at }), src, asOfMs: at, timing };
+      seed(mint, v.pool, all, src, at);
+      return rowsAnswer(all, src, at, limit);
     }
     const at = e?.readAt ?? now();
     return { status: 200, body: JSON.stringify({ trades: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+  }
+  /** A pool's newest trades (newest first), read at `at`, as the trades answer: the newest `limit`, every one after the
+   *  oldest (card token-stats-count-every-trade) claimed complete only while that read is within SOL_VENDOR_REACH_MS,
+   *  its age always named (card vendor-tapes-name-their-reach-every-chain), the vendor's rows and ours alike. */
+  function rowsAnswer(all: unknown[], src: string, at: number, limit: number): DataAnswer {
+    const age = Math.max(0, now() - at);
+    const oldest = (all.at(-1) as { t_ms?: unknown } | undefined)?.t_ms;
+    const whole = typeof oldest === "number" && Number.isSafeInteger(oldest) && age <= SOL_VENDOR_REACH_MS ? { whole_ms: oldest + 1_000 } : {};
+    const timing = `sol-vendor-read;desc="rows read ${age} ms ago"`;
+    return { status: 200, body: JSON.stringify({ trades: all.slice(0, limit), ...whole, src, as_of_ms: at }), src, asOfMs: at, timing };
+  }
+
+  // Card sol-vendor-tape-refresh-from-our-reads: the vendor names a coin's pool once (its first answer); while a page
+  // holds the tape it is renewed from our own reads of that pool, on this file's RPC lane (the keyed provider first, the
+  // callers' budget before each request, rpc), never the vendor's again. Each read of rows FOLLOW_MS old starts one
+  // round: the pool's signatures since the newest read (getSignaturesForAddress until it), each new successful
+  // transaction (getTransaction, FOLLOW_TX_MAX at most), and a row from its pool vaults' balance changes (poolLeg), any
+  // venue. Before it a held tape's refresh was the vendor's, a call each TAPE_FRESH_MS per held coin (8,640 a day for one
+  // page held) against CoinGecko's 3,225-call day: the helper's background share was spent at about 10:2xZ on 19 Nov
+  // and every refresh since refused (keyless window full), JUP's rows served 39.8 s old (live job 135508383528). A
+  // round that fails refreshes from the vendor, as before; a pool whose transactions show no trade we can read
+  // (`unplaced`) stays the vendor's, its age named.
+  const follows = new Map<string, Follow>();
+  const followCount = { rounds: 0, calls: 0, failed: 0 };
+  /** Starts (or renews from the vendor) `mint`'s follow of `pool` from the vendor's rows read at `at`. */
+  function seed(mint: string, pool: string | undefined, all: unknown[], src: string, at: number): void {
+    if (pool === undefined || address(pool) === null) return;
+    const f = follows.get(mint);
+    if (f !== undefined && f.pool === pool && (f.reading !== null || f.at >= at)) return;
+    const rows = all.slice(0, TRADES_MAX) as TapeRow[];
+    const lastSig = typeof rows[0]?.tx === "string" && SIG_TEXT.test(rows[0].tx) ? rows[0].tx : null;
+    if (f !== undefined && f.pool === pool) return void Object.assign(f, { rows, src, at, lastSig });
+    follows.delete(mint);
+    follows.set(mint, { pool, rows, src, at, lastSig, data: null, placed: false, misses: 0, unplaced: false, reading: null, retryAt: 0, touched: now() });
+    if (follows.size > FOLLOWS_MAX) follows.delete(follows.keys().next().value!);
+  }
+  /** A quote coin's USD price per whole coin times 10^18, or null: USDC one dollar, SOL Pyth's (readRef), another coin
+   *  its own row (readQuote), each read again past REF_MS. */
+  async function usdOf(q: string): Promise<bigint | null> {
+    if (q === USDC) return 10n ** 18n;
+    if (q === WSOL) {
+      if (solUsd === null || now() - refAt >= REF_MS) await readRef().catch(() => undefined);
+      return solUsd?.v ?? null;
+    }
+    if (deps.quoteUsd === undefined) return null;
+    if (!priced(q) || now() - (quotes.get(q)?.at ?? 0) >= REF_MS) await readQuote(q);
+    return quotes.get(q)?.usd ?? null;
+  }
+  /** One round of `f`'s pool: its account once, its signatures since the newest read, each new successful transaction,
+   *  the rows they hold put on top (a page of FOLLOW_SIGS or more than FOLLOW_TX_MAX successful: the new rows alone, a
+   *  gap below them). Throws when a read fails or a trade has no price, leaving `f` as it was. */
+  async function round(mint: string, f: Follow): Promise<void> {
+    const started = now();
+    followCount.rounds++;
+    const call = (method: string, params: unknown[]) => (followCount.calls++, rpc(method, params));
+    if (f.data === null) {
+      const a = (await call("getAccountInfo", [f.pool, { encoding: "base64", commitment: "confirmed" }])) as Record<string, unknown> | null;
+      const v = a?.value as Record<string, unknown> | null | undefined;
+      if (v == null || !Array.isArray(v.data) || typeof v.data[0] !== "string") return void (f.unplaced = true);
+      f.data = Buffer.from(v.data[0], "base64");
+    }
+    const page = await call("getSignaturesForAddress", [f.pool, { limit: FOLLOW_SIGS, commitment: "confirmed", ...(f.lastSig === null ? {} : { until: f.lastSig }) }]);
+    if (!Array.isArray(page)) throw new Error("signatures");
+    const sigs = (page as Record<string, unknown>[]).slice(0, FOLLOW_SIGS).filter((s) => typeof s?.signature === "string" && SIG_TEXT.test(s.signature) && Number.isSafeInteger(s.slot)) as { signature: string; err?: unknown; blockTime?: unknown }[];
+    const good = sigs.filter((s) => s.err === null || s.err === undefined);
+    const todo = good.slice(0, FOLLOW_TX_MAX);
+    const gap = f.lastSig === null || page.length >= FOLLOW_SIGS || good.length > todo.length;
+    const read: { s: (typeof sigs)[number]; r: unknown }[] = [];
+    for (let k = 0; k < todo.length; k += TX_PARALLEL) {
+      read.push(...(await Promise.all(todo.slice(k, k + TX_PARALLEL).map(async (s) => ({ s, r: await call("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]) })))));
+    }
+    // a transaction the provider does not serve yet (listed a moment before, by another of its nodes): the round reaches
+    // only to the signature below the oldest such one, dated by that one's block, and the next round lists it again
+    let newest = sigs[0]?.signature ?? f.lastSig;
+    let at = started;
+    let kept = read;
+    const lost = read.findLastIndex((x) => x.r == null);
+    if (lost >= 0) {
+      const s = read[lost]!.s;
+      const below = sigs[sigs.indexOf(s) + 1];
+      if (below === undefined) throw new Error("transaction unread");
+      kept = read.slice(lost + 1);
+      newest = below.signature;
+      at = Number.isSafeInteger(s.blockTime) ? Math.max(f.at, Math.min(started, (s.blockTime as number) * 1_000)) : f.at;
+    }
+    const legs: { tx: string; leg: PoolLeg }[] = [];
+    for (const { s, r } of kept) {
+      const leg = poolLeg(r, mint, f.data!);
+      if (leg !== null) legs.push({ tx: s.signature, leg });
+    }
+    const rows: TapeRow[] = [];
+    for (const { tx, leg } of legs) {
+      const p = await usdOf(leg.quoteMint);
+      if (p === null) throw new Error("quote unpriced");
+      const usd = (leg.quote * p) / 10n ** BigInt(leg.quoteDecimals);
+      if (usd > 0n) rows.push({ t_ms: leg.ts * 1_000, side: leg.side, usd: fixed(usd, VALUE_SCALE), amt: fixed(leg.amt, leg.decimals), trader: leg.trader, tx });
+    }
+    // a pool none of whose first few transactions shows a trade we can read is not ours to follow
+    if (legs.length > 0) f.placed = true;
+    else if (!f.placed && (f.misses += kept.length) >= 3) return void (f.unplaced = true);
+    const fresh = new Set(rows.map((r) => r.tx));
+    f.rows = gap ? rows.slice(0, TRADES_MAX) : [...rows, ...f.rows.filter((r) => !fresh.has(r.tx))].slice(0, TRADES_MAX);
+    f.lastSig = newest;
+    f.at = at;
+    if (!f.src.startsWith("chain,")) f.src = `chain,${f.src}`;
+  }
+  /** A failed round: the vendor's rows when they are newer than what is held (its age named, as before), the next round
+   *  FOLLOW_RETRY_MS later. */
+  async function fromVendor(mint: string, f: Follow): Promise<void> {
+    followCount.failed++;
+    f.retryAt = now() + FOLLOW_RETRY_MS;
+    const v = await deps.tape!(mint).catch(() => null);
+    if (v === null || v.status !== 200 || (v.asOfMs ?? 0) <= f.at) return;
+    const all = (JSON.parse(v.body) as TapeRow[]).slice(0, TRADES_MAX);
+    Object.assign(f, { rows: all, src: v.src ?? "geckoterminal", at: v.asOfMs!, lastSig: typeof all[0]?.tx === "string" && SIG_TEXT.test(all[0].tx) ? all[0].tx : f.lastSig });
+  }
+  /** The tape of a pool the vendor names: its follow's rows, renewed by a round once FOLLOW_MS old, a caller past
+   *  SOL_VENDOR_REACH_MS waiting for that round within TAPE_OPEN_BOUND_MS (card sol-vendor-tape-waits-past-reach);
+   *  with no follow (none started, idle past IDLE_MS) or an unplaced one, the vendor's (vendorTape). */
+  async function poolTape(mint: string, limit: number, e: Entry | null): Promise<DataAnswer> {
+    let f = follows.get(mint);
+    if (f !== undefined && now() - f.touched > IDLE_MS) {
+      follows.delete(mint);
+      f = undefined;
+    }
+    if (f === undefined || f.unplaced) {
+      const v = await vendorTape(mint, limit, e);
+      const g = follows.get(mint);
+      if (g !== undefined) g.touched = now();
+      if (g === undefined || g.unplaced || now() - g.at < FOLLOW_MS) return v;
+      f = g;
+    }
+    f.touched = now();
+    if (now() - f.at >= FOLLOW_MS && f.reading === null && now() >= f.retryAt) {
+      const g = f;
+      g.reading = round(mint, g)
+        .catch(() => fromVendor(mint, g))
+        .catch(() => undefined)
+        .finally(() => (g.reading = null));
+    }
+    if (now() - f.at > SOL_VENDOR_REACH_MS && f.reading !== null) await within(f.reading, TAPE_OPEN_BOUND_MS);
+    if (f.unplaced) return vendorTape(mint, limit, e);
+    return rowsAnswer(f.rows, f.src, f.at, limit);
   }
 
   /** A first read: the token's decimals, its subscription in force, then its newest COLD_SIGS signatures walked. */
