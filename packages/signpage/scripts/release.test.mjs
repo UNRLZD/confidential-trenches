@@ -168,11 +168,14 @@ test("the committed release-1 names both hosts' pages and scripts, the worker an
   assert.equal(sign["/prover-worker.js"].headers["content-security-policy"].split(", default-src").length, 2, "the worker's two policies");
   // the list's page is this tree's index.html with the release's own /app.js pinned in it: a page change after the
   // release (a new app.js, so a new integrity) is the next release's, while any other change to the page fails here; the
-  // one change since is the tab's title, the framed app's name (card signpage-tab-title-and-origin, its line exactly once)
+  // two changes since: the tab's title, the framed app's name (card signpage-tab-title-and-origin, its line exactly once),
+  // and the root's translate="no" (card signpage-backup-export: no page translation reads the 12 words or a key)
   const TITLE = "    <title>Confidential Trenches</title>\n";
+  const ROOT = '<html lang="en" translate="no">';
   const tree = readFileSync(join(PKG, "index.html"), "utf8");
   assert.equal(tree.split(TITLE).length, 2, "the page holds the title line once");
-  const page = tree.replace(TITLE, "").replace(/(src="\/app\.js" integrity=")[^"]+(")/, `$1${sign["/app.js"].sha384}$2`);
+  assert.equal(tree.split(ROOT).length, 2, "the page's root says translate=\"no\" once");
+  const page = tree.replace(TITLE, "").replace(ROOT, '<html lang="en">').replace(/(src="\/app\.js" integrity=")[^"]+(")/, `$1${sign["/app.js"].sha384}$2`);
   assert.equal(sign["/"].sha256, createHash("sha256").update(page).digest("hex"));
   const app = list.hosts.APP_HOST.files;
   assert.ok(app.some((f) => f.path === "/") && app.some((f) => /^\/assets\/index-[\w-]+\.js$/.test(f.path)));

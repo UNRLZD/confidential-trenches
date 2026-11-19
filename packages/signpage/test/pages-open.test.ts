@@ -78,3 +78,15 @@ test("withdraw.open with a one-time id draws the held deposit's way out (card he
   assert.equal(takes("signin.open", "held", false), false);
   for (const k of ["signin.open", "signout", "backup.open"] as const) assert.equal(takesParams(k, { return_key: "k" }), true);
 });
+
+test("export.open (card signpage-backup-export): only with a seed, and it draws the export screen; no kind is taken while it shows", () => {
+  assert.equal(takes("export.open", "signed-in", false), true);
+  for (const st of ["signed-out", "unsupported", "words", "choose", "existing", "backup", "signout", "withdraw", "held", "export", "loading"])
+    assert.equal(takes("export.open", st, false), false, st);
+  assert.equal(takes("export.open", "signed-in", true), false);
+  for (const s of [PRF, SAVED, UNSAVED, TYPED]) assert.equal(pageFor("export.open", undefined, s, true), "export");
+  assert.equal(pageFor("export.open", undefined, undefined, true), "signed-out");
+  // a seed is stored while it shows: sign-in never replaces it
+  assert.equal(takes("signin.open", "export", false), false);
+  assert.equal(takesParams("export.open", { return_key: "k", chain: "solana", address: "a" }), true);
+});

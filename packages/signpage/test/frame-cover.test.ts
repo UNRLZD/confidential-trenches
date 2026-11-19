@@ -1,5 +1,5 @@
 // The screens the frame leaves the page before (src/frame-cover.ts SEALED): every screen src/main.ts draws a field on,
-// and the 12 words shown. Each State of main.ts is named here as sealed or not, so a new screen fails this test until it
+// the 12 words shown, and one exported key (card signpage-backup-export). Each State of main.ts is named here as sealed or not, so a new screen fails this test until it
 // is placed; a screen drawn with a field that is not sealed fails it.
 //   node --test test/frame-cover.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
@@ -22,8 +22,8 @@ test("every screen of main.ts is placed: sealed or kept, none left out", () => {
   for (const s of KEPT) assert.ok(!SEALED.has(s), s);
 });
 
-test("sealed: the screens with a field typed into, and the 12 words shown", () => {
-  assert.deepEqual([...SEALED].sort(), ["backup", "held", "invalid-code", "pool-withdraw", "withdraw", "words"]);
+test("sealed: the screens with a field typed into, the 12 words shown and one exported key", () => {
+  assert.deepEqual([...SEALED].sort(), ["backup", "export", "held", "invalid-code", "pool-withdraw", "withdraw", "words"]);
   // the field each typed screen draws: the 12 words' textarea in main.ts, To and the amount in the two withdraw forms,
   // the account in the held deposit's way out
   assert.match(main, /state === "words" \|\| state === "invalid-code"\)\) \{\s*const box = document\.createElement\("textarea"\)/);
