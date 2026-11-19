@@ -397,6 +397,8 @@ const utf8 = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v))
  * whose queue runs (src/pool-testnet.ts readyWith); a chain with none of them has no `ready` (poolBalances). `landed`:
  * the RESERVED notes whose release this page read landed (src/pool-testnet.ts readyWith), each counted as its change.
  * `making`: the notes whose first proof the queue makes now (src/pool-testnet.ts readyWith), each entry's making.
+ * `kept`: the proofs kept on the device (../../wallet/src/pool/kept-proofs.ts, every pool's), each entry's spendable
+ * (card taps-wait-inside-the-page: from the first answer after a load, before any queue opens).
  */
 export async function withPools(
   state: SignpageState,
@@ -407,11 +409,12 @@ export async function withPools(
   open?: ReadonlySet<string>,
   landed?: ReadonlyMap<string, LandedRelease>,
   making?: ReadonlySet<string>,
+  kept?: readonly BalanceProof[],
 ): Promise<SignpageState> {
   if (!state.signed_in) return state;
   try {
     const notes = pools.length === 0 ? [] : await readNotes();
-    const sums = poolBalances(notes, pools, ready, open, landed, making).map((e) => {
+    const sums = poolBalances(notes, pools, ready, open, landed, making, kept).map((e) => {
       const p = price?.(e.chain) ?? null;
       return p === null ? e : { ...e, price: p };
     });

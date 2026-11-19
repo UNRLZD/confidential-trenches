@@ -33,6 +33,16 @@
 //   with ready, and only when every pool on the chain gives a spendOf; "0" when no proof is counted.
 // - making: with `making` (the notes the queue is making a proof for, ./queue.ts readyWith), the value of those HELD
 //   notes `ready` does not count, so ready + making never counts a note twice.
+// - spendable (card taps-wait-inside-the-page): with `kept` (the proofs kept on the device, ./kept-proofs.ts, which a
+//   queue opened later adopts at its first pass instead of proving again), the most one tap can spend once the device's
+//   prepared spends stand: tap_max as above over the ready proofs and the kept ones whose note is still UNSPENT (its
+//   adoption's own first rule) or HELD by that kept proof's attempt, every queue counted as open, at least tap_max. So
+//   it stands from the first answer after a load, before any queue opens, and a buy tapped at it waits inside the page
+//   for the pass that adopts them (signpage src/tap-prepare.ts). A note with no kept or ready proof (a deposit landed
+//   since) counts once its proof is made, never before. A kept proof counts at its own fee cap: one too old to adopt
+//   (two epochs past) is proved again at its epoch's fee, so on EVM, whose fee follows the chain's, spendable can differ
+//   from the tap's by that fee's change until the pass, which state events then tell. Present only with `kept` and only
+//   where tap_max can be (every pool on the chain gives a spendOf), whether or not a queue runs.
 // - One entry per chain, in the order the chain first appears in the pool table, carrying the chain's pool asset; pools
 //   on one chain sum into it. Two assets on one chain are refused: the kit's state keeps one entry per chain.
 // - Amounts: exact decimals of base units / the asset's 1.0, 10^POOL_ASSET_DECIMALS[asset] from the kit's one table
@@ -69,7 +79,7 @@ export type TapSpendOf = (pieces: readonly TapPiece[]) => bigint;
 export type BalancePool = { id: string; chain: Chain; scope: bigint; asset: PoolAsset; spendOf?: TapSpendOf; carry?: PieceRule };
 /** What poolBalances reads of a ready proof. */
 export type BalanceProof = Pick<ReadyProof, "noteId" | "attempt" | "poolId" | "chunk"> & { wallet: Pick<ReadyProof["wallet"], "l" | "j" | "address">; binding: Pick<ReadyProof["binding"], "feeCap"> & { request?: unknown } };
-export type PoolBalance = { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; making?: string };
+export type PoolBalance = { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; making?: string; spendable?: string };
 /** A RESERVED note's release the device read landed, by note id: the attempt that sent it and the value it withdrew. */
 export type LandedRelease = { attempt: string; withdrawn: bigint };
 
@@ -247,7 +257,48 @@ function decimal(units: bigint, d: number): string {
 /** Each chain's pool balance from the device's notes (see PoolBalance and the kit's SignpageState.pools). `making`: the
  *  notes the queue is making a proof for now (queue.ts readyWith); each HELD one that `ready` does not count counts its
  *  value in the chain's `making`, given beside `ready` (card buy-spends-several-pieces). */
-export function poolBalances(notes: readonly NoteRecord[], pools: readonly BalancePool[], ready?: readonly BalanceProof[], open?: ReadonlySet<string>, landed?: ReadonlyMap<string, LandedRelease>, making?: ReadonlySet<string>): PoolBalance[] {
+export function poolBalances(notes: readonly NoteRecord[], pools: readonly BalancePool[], ready?: readonly BalanceProof[], open?: ReadonlySet<string>, landed?: ReadonlyMap<string, LandedRelease>, making?: ReadonlySet<string>, kept?: readonly BalanceProof[]): PoolBalance[] {
+  const out = balancesOf(notes, pools, ready, open, landed, making);
+  if (kept === undefined) return out;
+  // the kept proofs a queue would adopt: each one's note UNSPENT (read as HELD by it, as the adoption's store move makes
+  // it) or HELD by its attempt already; a live proof of the same attempt counts once
+  const live = ready ?? [];
+  const seen = new Set(live.map((r) => `${r.noteId}\n${r.attempt}`));
+  const byId = new Map(notes.map((n) => [n.id, n]));
+  const asHeld = new Map<string, NoteRecord>();
+  const adopted: BalanceProof[] = [];
+  for (const r of kept) {
+    if (r === null || typeof r !== "object" || typeof r.noteId !== "string" || typeof r.attempt !== "string" || seen.has(`${r.noteId}\n${r.attempt}`)) continue;
+    const n = byId.get(r.noteId);
+    if (n === undefined) continue;
+    const was = asHeld.get(n.id);
+    if (was !== undefined) {
+      // the note's other tier's kept proof: its second attempt, as a note held by two proofs is
+      if (was.second !== undefined) continue;
+      asHeld.set(n.id, { ...was, second: { attempt: r.attempt, deadlineMs: 0n, context: "" } });
+    } else if (n.state === "UNSPENT") asHeld.set(n.id, { ...n, state: "HELD", attempt: r.attempt });
+    else if (!heldBy(n, r.attempt)) continue;
+    seen.add(`${r.noteId}\n${r.attempt}`);
+    adopted.push(r);
+  }
+  const then = balancesOf(notes.map((n) => asHeld.get(n.id) ?? n), pools, [...live, ...adopted]);
+  return out.map((e, i) => {
+    const t = then[i]?.tap_max;
+    if (t === undefined) return e;
+    const d = POOL_ASSET_DECIMALS[e.asset];
+    const now = e.tap_max === undefined ? 0n : unitsOf(e.tap_max, d);
+    const later = unitsOf(t, d);
+    return { ...e, spendable: decimal(later > now ? later : now, d) };
+  });
+}
+
+/** A decimal this file wrote (decimal) back in base units. */
+function unitsOf(s: string, d: number): bigint {
+  const [int, frac = ""] = s.split(".");
+  return BigInt(int!) * 10n ** BigInt(d) + BigInt(frac.padEnd(d, "0") || "0");
+}
+
+function balancesOf(notes: readonly NoteRecord[], pools: readonly BalancePool[], ready?: readonly BalanceProof[], open?: ReadonlySet<string>, landed?: ReadonlyMap<string, LandedRelease>, making?: ReadonlySet<string>): PoolBalance[] {
   const ids = new Set<string>();
   const scopes = new Set<bigint>();
   // per chain, in table order: its asset's decimals, then the sums in base units
