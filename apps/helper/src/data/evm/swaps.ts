@@ -3366,8 +3366,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // a held tape whose refresh failed was served with its whole_ms whatever its age); the read's age always named
     const age = Math.max(0, now() - h.at);
     const oldest = h.rows.at(-1);
-    // a first round of our reads that reached back short of the vendor's newest row may have missed trades between
-    const whole = waiting || oldest === undefined || age > BEHIND_MAX[chain].ms || layouts.get(token)?.short === true ? {} : { whole_ms: oldest.t_ms + 1_000 };
+    // blocks our rounds have not read yet since the held newest (Layout gaps): the rows are no complete list across them
+    const whole = waiting || oldest === undefined || age > BEHIND_MAX[chain].ms || (layouts.get(token)?.gaps.length ?? 0) > 0 ? {} : { whole_ms: oldest.t_ms + 1_000 };
     // rows of ours priced at the vendor's rate for their quote name that rate's age (card helper-vendor-tapes-refresh-inside-15s)
     const priced = rows.map((r) => rated.get(`${token} ${r.tx}`)).filter((x): x is number => x !== undefined);
     const timing = `evm-vendor-read;desc="rows read ${age} ms ago"${priced.length > 0 ? `, evm-vendor-price;desc="usd read ${Math.max(0, now() - Math.min(...priced))} ms ago"` : ""}`;
@@ -3402,7 +3402,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // USD per unit the vendor's own rows paid for it (their USD over the quote leg their receipts show), named with that
   // price's age (evm-vendor-price). A coin whose pool or price our reads cannot place keeps the vendor's refresh.
   /** A held coin's pool as our reads follow it, learned from the vendor's rows and their receipts (layoutOf). */
-  type Layout = HeldPool & { /** USD per raw unit of the quote, and when the vendor read it; null for an exact quote. */ rate: { usd: number; at: number } | null; /** the next block to read */ next: number | null; asked: number; from: number; /** the first round reached back short of the vendor's newest row */ short: boolean };
+  type Layout = HeldPool & { /** USD per raw unit of the quote, and when the vendor read it; null for an exact quote. */ rate: { usd: number; at: number } | null; /** the next block to read */ next: number | null; asked: number; from: number; /** blocks since the held newest not read yet, newest first: a round reads a coin's newest ROUND_MS of blocks, and the
+   *  older rest in later rounds, its whole list withheld meanwhile */ gaps: [number, number][] };
   const layouts = new Map<string, Layout>();
   /** Rows of ours priced at the vendor's rate, by "token tx": their answer names the rate's age. */
   const rated = new Map<string, number>();
@@ -3451,16 +3452,21 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     // none placed yet: a coin whose top pool moved keeps its last pool followed until the new one's rows place it
     if (found === null || !Number.isFinite(found.rate) || found.rate <= 0) return had ?? null;
-    const l: Layout = { token, pool: p, v4, ...(found.coinLeg === undefined ? {} : { coinLeg: found.coinLeg }), ...(found.quote === undefined ? {} : { quote: found.quote }), rate: !v4 && exactQuote(found.quote) ? null : { usd: found.rate, at: va }, next: had?.pool === p ? had.next : null, asked: had?.asked ?? now(), from: va, short: had?.short ?? false };
+    const l: Layout = { token, pool: p, v4, ...(found.coinLeg === undefined ? {} : { coinLeg: found.coinLeg }), ...(found.quote === undefined ? {} : { quote: found.quote }), rate: !v4 && exactQuote(found.quote) ? null : { usd: found.rate, at: va }, next: had?.pool === p ? had.next : null, asked: had?.asked ?? now(), from: va, gaps: had?.pool === p ? had.gaps : [] };
     if (!layouts.has(token) && layouts.size >= POOLS_MAX) layouts.delete(layouts.keys().next().value!);
     layouts.set(token, l);
     return l;
   }
   /** Rows our round made, by "token tx" (their pool is the layout's: never a vendor row to learn a rate from). */
   const ours = new Set<string>();
-  /** How far back a coin's first round reads: the vendor's newest row, at most this long before the head. [design:
-   *  STALE_MS, the oldest held rows a refresh renews, and the vendor's lag behind the chain, a minute] */
-  const FIRST_BACK_MS = STALE_MS + 60_000;
+  /** The most blocks one round reads for a coin, its newest: a coin whose unread blocks since the held newest are more
+   *  (rounds that failed, a first round behind a vendor read this old) has the older rest read in later rounds, one span
+   *  of it a round, newest first (Layout gaps). [design: STALE_MS and a minute, the oldest held rows a refresh renews and
+   *  the vendor's lag behind the chain] */
+  const ROUND_MS = STALE_MS + 60_000;
+  /** How far behind the chain the vendor's rows may be at its read: a coin's first round reads from its read less this.
+   *  [design: a minute, GeckoTerminal's trades a few blocks to tens of seconds behind the head in the live runs] */
+  const VENDOR_LAG_MS = 60_000;
   const blockMsOf = (): number => BLOCK_CLOCK[chain]?.at(-1)?.blockMs ?? Math.floor(BEHIND_MAX[chain].ms / BEHIND_MAX[chain].blocks);
   /** The round running, one a chain for every held coin; its answer: each coin it renewed (true) or could not (false). */
   let round: Promise<Map<string, boolean>> | null = null;
@@ -3484,30 +3490,40 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const held = [...layouts.values()].filter((l) => now() - l.asked <= STALE_MS && gtTapes.has(l.token) && vendorDecimals.has(l.token));
     if (held.length === 0) return done;
     for (const l of held) renamePool(l.token);
-    const floor = head.n - Math.ceil(FIRST_BACK_MS / bms);
-    const starts = held.map((l) => {
-      if (l.next !== null) return Math.max(l.next, floor);
-      const newest = Math.max(0, ...gtTapes.get(l.token)!.rows.map((r) => r.t_ms));
-      // the head's block at least: a vendor row timed past our head is read from it
-      const back = Math.max(0, Math.ceil((head.t * 1_000 - newest) / bms)) + 1;
-      l.short = back > head.n - floor;
-      return Math.max(head.n - back, floor);
+    const W = Math.ceil(ROUND_MS / bms);
+    // each coin's unread blocks: from its next block (a first round: the vendor's read less its lag) to the head; the
+    // newest W this round, the older rest a gap read in later rounds (one span a round, newest first)
+    const plan = held.map((l) => {
+      const next = l.next ?? Math.max(0, head.n - Math.max(0, Math.ceil((head.t * 1_000 - ((vendorAt.get(l.token) ?? now()) - VENDOR_LAG_MS)) / bms)));
+      const lo = Math.max(next, head.n - W + 1);
+      const gaps: [number, number][] = [...(lo > next ? [[next, lo - 1] as [number, number]] : []), ...l.gaps];
+      return { l, lo, gaps };
     });
-    const from = Math.min(...starts);
+    const from = Math.min(...plan.map((x) => x.lo));
     const logs = from > head.n ? [] : await agreedRange(head.with, (lo, hi) => heldFilters(held, lo, hi, V.poolManager), from, head.n);
     if (logs == null) {
       for (const l of held) done.set(l.token, false);
       return done;
     }
+    // one gap span a round, the first coin's with one, newest first
+    const g = plan.find((x) => x.gaps.length > 0);
+    const span = g === undefined ? null : ([Math.max(g.gaps[0]![0], g.gaps[0]![1] - W + 1), g.gaps[0]![1]] as const);
+    const back = g === undefined || span === null ? [] : await agreedRange(head.with, (lo, hi) => heldFilters([g.l], lo, hi, V.poolManager), span[0], span[1]);
+    if (g !== undefined && span !== null && back != null) {
+      const [lo0] = g.gaps[0]!;
+      g.gaps = span[0] > lo0 ? [[lo0, span[0] - 1], ...g.gaps.slice(1)] : g.gaps.slice(1);
+    }
+    if (back != null) logs.push(...back);
     const trades = poolTrades(logs, held, V.poolManager);
     // WETH-quoted pairs are priced at the ETH price the chain tape reads to the same head
-    const eth = held.some((l) => !l.v4 && l.quote === V.weth) && trades.some((t) => layouts.get(t.token)?.quote === V.weth) ? await readRef(head.with, head.n, from) : true;
+    const eth = held.some((l) => !l.v4 && l.quote === V.weth) && trades.some((t) => layouts.get(t.token)?.quote === V.weth) ? await readRef(head.with, head.n, Math.min(from, ...trades.map((t) => t.block))) : true;
     for (const [i, l] of held.entries()) {
+      const gaps = plan[i]!.gaps;
       const h = gtTapes.get(l.token);
       const d = vendorDecimals.get(l.token);
       if (h === undefined || d === undefined) continue;
       const have = new Set(h.rows.map((r) => r.tx));
-      const mine = trades.filter((t) => t.token === l.token && t.block >= starts[i]! && !have.has(t.tx));
+      const mine = trades.filter((t) => t.token === l.token && !have.has(t.tx));
       const rows: TapeRow[] = [];
       let placed = true;
       for (const t of mine) {
@@ -3535,7 +3551,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       while (rated.size > TRADERS_MAX) rated.delete(rated.keys().next().value!);
       const merged = [...fresh, ...h.rows].sort((a, b) => b.t_ms - a.t_ms).slice(0, TAPE_MAX);
       keepTape(l.token, { at: head.at, rows: merged, src: h.src }, true);
+      // read to the head, the blocks still unread its gaps: a coin not placed keeps its last next and gaps, read again
       l.next = head.n + 1;
+      l.gaps = gaps;
       done.set(l.token, true);
     }
     return done;

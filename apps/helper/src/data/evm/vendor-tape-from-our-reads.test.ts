@@ -31,21 +31,25 @@ const RECEIPTS = (JSON.parse(readFileSync(new URL("./fixtures/vendor-rows-receip
  *  on `chain` (its reads answered by the recorded Robinhood providers, test/evm-swaps/robinhood.ts, whose other reads
  *  find SOGNI no pool on either chain, so it is a vendor coin on both): the vendor's first answer holds every row but the newest, then the vendor refuses every call (429), and
  *  the newest trade is on chain: its receipt's logs, at the head, are the answer of our reads of the pool. */
-function harness(chain: "base" | "robinhood") {
+function harness(chain: "base" | "robinhood", o: { vendorRows?: number } = {}) {
   const c = fakeChain();
   const head = REC.lastHead;
   c.st.head = head;
   // Base's swap reads ask 1,000 blocks a log read (VENUES step): its providers take them
   if (chain === "base") for (const u of URLS) c.st.faults.set(u, { span: 1_000 });
   const clock = { t: Date.parse("2026-11-14T17:27:00Z") };
-  const [newest, ...older] = SOGNI.trades;
+  const [newest, ...rest] = SOGNI.trades;
+  // the vendor's first answer: every row but the newest, or its oldest `vendorRows`
+  const older = o.vendorRows === undefined ? rest : SOGNI.trades.slice(-o.vendorRows);
   const answer = (rows: R["trades"]) => ({ data: rows.map(({ id, legs, ...a }) => ({ id, type: "trade", attributes: { ...a, from_token_address: legs.from[0], from_token_amount: legs.from[1], to_token_address: legs.to[0], to_token_amount: legs.to[1] } })) });
   let refuse = false;
   let top = SOGNI.pool;
   const vendorCalls: string[] = [];
   const logReads: unknown[] = [];
-  // the newest trade's logs touching the pool, logged at the head with their block's time
-  const newLogs: Record<string, unknown>[] = RECEIPTS[newest!.tx_hash]!.logs.map((l) => ({ ...l, transactionHash: newest!.tx_hash, blockNumber: `0x${head.toString(16)}`, blockTimestamp: `0x${Math.floor(Date.parse(String(newest!.block_timestamp)) / 1000).toString(16)}`, removed: false }));
+  // a trade's logs touching the pool, logged at `block` with their block's time; the newest at the head unless placed
+  const newLogs: Record<string, unknown>[] = [];
+  const place = (t: R["trades"][number], block: number) => newLogs.push(...RECEIPTS[t.tx_hash]!.logs.map((l) => ({ ...l, transactionHash: t.tx_hash, blockNumber: `0x${block.toString(16)}`, blockTimestamp: `0x${Math.floor(Date.parse(String(t.block_timestamp)) / 1000).toString(16)}`, removed: false })));
+  if (o.vendorRows === undefined) place(newest!, head);
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     if (url.startsWith(CG_ONCHAIN) || url.startsWith(GT_BASE)) {
       vendorCalls.push(url);
@@ -68,7 +72,7 @@ function harness(chain: "base" | "robinhood") {
             const [lo, hi] = [parseInt(String(f.fromBlock), 16), parseInt(String(f.toBlock), 16)];
             const t = f.topics as (string | string[] | null)[];
             const at = (v: unknown, x: string) => v == null || (Array.isArray(v) ? v.includes(x) : v === x);
-            return { jsonrpc: "2.0", id: r.id, result: newLogs.filter((l) => head >= lo && head <= hi && (f.address as string[]).includes(String(l.address)) && (l.topics as string[]).length === 3 && (l.topics as string[]).every((x, i) => i >= t.length || at(t[i], x))) };
+            return { jsonrpc: "2.0", id: r.id, result: newLogs.filter((l) => parseInt(String(l.blockNumber), 16) >= lo && parseInt(String(l.blockNumber), 16) <= hi && (f.address as string[]).includes(String(l.address)) && (l.topics as string[]).length === 3 && (l.topics as string[]).every((x, i) => i >= t.length || at(t[i], x))) };
           }),
         ),
         { status: 200 },
@@ -85,9 +89,9 @@ function harness(chain: "base" | "robinhood") {
   const tape = async () => {
     const a = await s.trades(SOGNI.coin, 50);
     const named = VENDOR_READ.exec(a.timing ?? "")?.[1];
-    return { ...a, j: JSON.parse(a.body) as { trades: { tx: string; side: string; amt: string; usd: string; trader: string | null }[]; src: string }, age: named === undefined ? NaN : Number(named), price: PRICE_READ.exec(a.timing ?? "")?.[1] };
+    return { ...a, j: JSON.parse(a.body) as { trades: { tx: string; side: string; amt: string; usd: string; trader: string | null; t_ms: number }[]; src: string; whole_ms?: number }, age: named === undefined ? NaN : Number(named), price: PRICE_READ.exec(a.timing ?? "")?.[1] };
   };
-  return { clock, tape, newest: newest!, refuse: () => void (refuse = true), moveTo: (p: string) => void (top = p), vendorCalls, logReads };
+  return { clock, tape, newest: newest!, refuse: () => void (refuse = true), moveTo: (p: string) => void (top = p), vendorCalls, logReads, head, place, setHead: (n: number) => void (c.st.head = n) };
 }
 
 for (const chain of ["base", "robinhood"] as const)
@@ -122,6 +126,51 @@ for (const chain of ["base", "robinhood"] as const)
     assert.equal(last.j.trades.length, 6);
     // one log read a round, at most three filters (two per five pairs, one for the v4 pools)
     for (const r of h.logReads as unknown[][]) assert.ok(r.length <= 3, `a round's post asked ${r.length} filters`);
+  });
+
+for (const chain of ["base", "robinhood"] as const)
+  test(`${chain}: a burst our round cannot read in one (the head 3,000 blocks on, past a round's ROUND_MS of blocks; trades at its far end, middle and newest) is served with no whole_ms until every block since the held newest is read, newest first, then whole and in order (red at d8b68dcb0: a round read the newest FIRST_BACK_MS of blocks only, the blocks before skipped and the list claimed whole)`, async () => {
+    const h = harness(chain, { vendorRows: 3 });
+    await h.tape();
+    await settle();
+    const cold = await h.tape();
+    assert.deepEqual(cold.j.trades.map((t) => t.tx), SOGNI.trades.slice(-3).map((t) => t.tx_hash), "the vendor's first answer: its three oldest rows");
+    h.refuse();
+    // the coin's first round of our reads, to the head
+    for (let i = 0; i < 10 && h.logReads.length === 0; i++) {
+      h.clock.t += 2_000;
+      await settle();
+      await h.tape();
+    }
+    assert.ok(h.logReads.length > 0, "our round read the pool");
+    h.clock.t += 2_000;
+    await settle();
+    assert.ok((await h.tape()).j.whole_ms !== undefined, "read to the head: whole");
+    // the burst: three trades the vendor never named, spread over 3,000 blocks the head moves on at once
+    const [t0, t1, t2] = SOGNI.trades;
+    h.place(t2!, h.head + 50);
+    h.place(t1!, h.head + 1_500);
+    h.place(t0!, h.head + 2_990);
+    h.setHead(h.head + 3_000);
+    const seen: { txs: string[]; whole: boolean }[] = [];
+    for (let i = 0; i < 40; i++) {
+      h.clock.t += 2_000;
+      await settle();
+      const a = await h.tape();
+      assert.equal(a.status, 200);
+      seen.push({ txs: a.j.trades.map((t) => t.tx), whole: a.j.whole_ms !== undefined });
+      if (a.j.trades.length === 6 && a.j.whole_ms !== undefined) break;
+    }
+    const all = SOGNI.trades.map((t) => t.tx_hash);
+    const runs = JSON.stringify(seen.map((y) => [y.txs.length, y.whole]));
+    // the answers before a round reads the moved head hold the last read's rows (whole to that read, its age named);
+    // from the first round after it, never whole while a burst trade is missing
+    const first = seen.findIndex((x) => x.txs.length > 3);
+    assert.ok(first >= 0, `a round read the burst's newest: ${runs}`);
+    assert.deepEqual(seen[first]!.txs[0], t0!.tx_hash, "the newest blocks read first");
+    for (const x of seen.slice(first)) if (x.whole) assert.deepEqual(x.txs, all, `whole_ms claimed with ${x.txs.length} of 6 rows: ${runs}`);
+    assert.equal(seen[first]!.whole, false, `the first answer after the burst is not whole: ${runs}`);
+    assert.deepEqual(seen.at(-1), { txs: all, whole: true }, `every row read, newest first, then whole: ${JSON.stringify(seen.map((y) => [y.txs.length, y.whole]))}`);
   });
 
 test("a held coin's pool name is asked again once GT_POOL_FRESH_MS (10 min) old, never more often: 21 minutes held, the vendor answering, 2 pool calls and no trades call; a top pool that moved is named at the next period and its rows read once from the vendor, the tape kept fresh on the last pool until the new one's rows place it", async () => {
