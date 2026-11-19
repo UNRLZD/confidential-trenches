@@ -178,6 +178,21 @@ export function evmPaceReady(url: string, calls: EvmPaceCalls, now: number = per
   return l.queue.length === 0 && (!later || l.later.length === 0) && (p.inflight === undefined || l.out < p.inflight) && tokens >= (later ? laterNeed(p, need) : need);
 }
 
+/** How long a trade's post of `calls` to `url` would wait for its turn, in ms, if sent now after the trade's posts
+ *  already waiting and the posts `before` it that its caller sends first (0: an unpaced provider, or one with its units
+ *  free); a provider's in-flight cap (`inflight`) is not counted. The quote's read round asks each batch's two
+ *  providers by it (quote.ts pairOrders, card evm-warm-quote-inside-the-kpi-with-room). */
+export function evmPaceWaitMs(url: string, calls: EvmPaceCalls, before: readonly EvmPaceCalls[] = [], now: number = performance.now()): number {
+  const key = evmProviderKey(url);
+  const p = EVM_PACE[key];
+  if (p === undefined) return 0;
+  const l = LANES.get(key);
+  const tokens = l === undefined ? p.burst : Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS);
+  const queued = (l?.queue ?? []).reduce((n, a) => n + a.need, 0);
+  const short = queued + before.reduce((n, c) => n + needOf(p, c), 0) + needOf(p, calls) - tokens;
+  return short <= 0 ? 0 : (short / p.perS) * 1000;
+}
+
 /** Waits for `url`'s turn for a post of `calls` at its pace (an unpaced provider: at once), first come first
  *  served among its kind, a trade's before any background read's (`later`); the answer gives the post's place back
  *  once it settles. A post of more units than the burst waits for a full bucket and spends it. `signal` ends the wait
