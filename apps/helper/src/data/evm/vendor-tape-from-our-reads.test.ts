@@ -116,7 +116,12 @@ for (const chain of ["base", "robinhood"] as const)
     assert.ok(ages.every(Number.isFinite), "every answer names its rows' age");
     const max = Math.max(...ages);
     assert.ok(max <= BEHIND_MAX[chain].ms, `oldest rows served ${max} ms after their read (bound ${BEHIND_MAX[chain].ms}): ${ages.join(",")}`);
-    assert.equal(h.vendorCalls.length, calls, `no vendor call while held: ${h.vendorCalls.slice(calls).join(" ")}`);
+    // none but the list of the quote token's pools (USDT, a third token), which its route is picked from: once a STALE_MS
+    // while the vendor refuses it, on the key and keyless (card evm-quote-token-priced-from-our-reads)
+    const quoteList = `/tokens/0xfde4c96c8593536e31f229ea8f37b2ada2699bb2/pools?page=1`;
+    const held = h.vendorCalls.slice(calls);
+    assert.deepEqual(held.filter((u) => !u.endsWith(quoteList)), [], `no vendor call while held but the quote's pools: ${held.join(" ")}`);
+    assert.ok(held.length <= 2 * Math.ceil(120_000 / 60_000 + 1), `the quote's pools asked ${held.length} times in 2 minutes`);
     // the newest trade, made exact from its receipt as the vendor's row is (its amount and its trader)
     const top = last.j.trades[0]!;
     assert.deepEqual([top.tx, top.side, top.amt, top.trader], [h.newest.tx_hash, "s", "49434.974158618859129157", h.newest.tx_from_address], "the receipt's exact amount the vendor printed as 49434.9741586189");
@@ -186,7 +191,7 @@ test("a held coin's pool name is asked again once GT_POOL_FRESH_MS (10 min) old,
     ages.push((await h.tape()).age);
   }
   const held = h.vendorCalls.slice(from);
-  assert.equal(held.filter((u) => u.includes("/pools?page=1")).length, 2, held.join(" "));
+  assert.equal(held.filter((u) => u.includes(`/tokens/${SOGNI.coin}/pools?page=1`)).length, 2, held.join(" "));
   assert.equal(held.filter((u) => u.includes("/trades")).length, 0, "no vendor trades call while our reads renew the tape");
   assert.ok(Math.max(...ages) <= BEHIND_MAX.base.ms, `max age ${Math.max(...ages)}`);
   // the vendor's top pool moves: its name is read at the next period and the new pool's rows once
@@ -200,7 +205,7 @@ test("a held coin's pool name is asked again once GT_POOL_FRESH_MS (10 min) old,
     assert.ok(a.age <= BEHIND_MAX.base.ms, `age ${a.age} after the move`);
   }
   const after = h.vendorCalls.slice(at);
-  assert.equal(after.filter((u) => u.includes("/pools?page=1")).length, 1, after.join(" "));
+  assert.equal(after.filter((u) => u.includes(`/tokens/${SOGNI.coin}/pools?page=1`)).length, 1, after.join(" "));
   assert.equal(after.filter((u) => u.includes(`/pools/${moved}/trades`)).length, 1, "the new pool's rows read once from the vendor");
 });
 
