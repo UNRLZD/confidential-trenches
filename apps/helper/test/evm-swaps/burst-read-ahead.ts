@@ -7,7 +7,7 @@
 //
 //   node apps/helper/test/evm-swaps/burst-read-ahead.ts [--s 60] [--callers 24] [--others 28]
 //
-// Not a test: a measurement, run through heavy.sh. One mode after another, each in its own reader process.
+// Not a test: a measurement, run by hand on a quiet machine. One mode after another, each in its own reader process.
 import { spawn } from "node:child_process";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
