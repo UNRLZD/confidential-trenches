@@ -1,7 +1,7 @@
 // node --test scripts/live-checks/signing-views-open-over-the-app.test.mjs: the live check's verdict replays recorded
 // answers (signing-views-open-over-the-app.answers.json), each read on 2026-11-11 by the check's collect():
 //   good: this card's checkout (--local): the signing page's fresh build holds every one of the sheet's markers, and its
-//         _headers deny picture-in-picture and fullscreen: PASS (read again 12 Nov with backup in the set);
+//         _headers deny picture-in-picture and fullscreen: PASS (read again 12 Nov with backup in the set, 19 Nov with export);
 //   bad:  SIGN_HOST as deployed before this card (release 116), read over https: its screens draw as a page of their
 //         own, and its script holds none of the markers: FAIL.
 // Planted from the good answer: a marker lost, a script the host did not answer, a page naming no script, a page that did
@@ -49,8 +49,9 @@ test("planted: a marker lost, a script not answered, no script, no page: each FA
 test("the markers on this checkout's build, and on minified snippets", () => {
   const dir = signBuilt();
   assert.deepEqual(found(readFileSync(path.join(dir, "public/app.js"), "utf8")), MARKERS);
-  assert.ok(found('e.dataset.sheet="scrim";const T=new Set(["words","invalid-code","withdraw","pool-withdraw","held","backup"])').includes("typed screens set"));
-  assert.ok(!found('new Set(["words","invalid-code","withdraw","pool-withdraw","held"])').includes("typed screens set"), "the set without the 12 words shown (backup)");
+  assert.ok(found('e.dataset.sheet="scrim";const T=new Set(["words","invalid-code","withdraw","pool-withdraw","held","backup","export"])').includes("typed screens set"));
+  assert.ok(!found('new Set(["words","invalid-code","withdraw","pool-withdraw","held","export"])').includes("typed screens set"), "the set without the 12 words shown (backup)");
+  assert.ok(!found('new Set(["words","invalid-code","withdraw","pool-withdraw","held","backup"])').includes("typed screens set"), "the set without a wallet's key shown (export)");
   assert.ok(!found('new Set(["words","withdraw"])').includes("typed screens set"), "a set missing a typed screen");
   assert.deepEqual(found("nothing here"), []);
 });
