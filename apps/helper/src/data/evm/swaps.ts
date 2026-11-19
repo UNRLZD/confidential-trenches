@@ -3678,12 +3678,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // card evm-quote-token-priced-from-our-reads: a held pool quoted in a third token (USEF/ZORA on Base's v4, fBOMB/r33
   // on Robinhood's Ramses Legacy) prices its rows through that token's own pool, read at each row's block on two
   // agreeing providers, never at the vendor's last rate (two pools deep at most: pickRoute). The pool is the deepest of
-  // the token's pools against the
-  // chain's USD token or WETH that the vendor names (each confirmed on chain as the chain tape's pools are, fromHint: its
-  // factory names it, or its key hashes to its id) or our own discovery finds (findPool, no vendor call, so a pick is
-  // made while the vendor refuses), its depth its quote side as it holds it (quoteSideUsd), one under
-  // LIQ_MIN_USD never pricing (a pool of a few dollars can be pushed to any price: ../near/lists.ts); picked once a
-  // token and held GT_POOL_FRESH_MS, as a pool name is. A token with no such pool keeps the vendor's rate, its age named.
+  // the token's pools against the chain's USD token or WETH that the vendor names (each confirmed on chain as the chain
+  // tape's pools are, fromHint: its factory names it, or its key hashes to its id) or our own discovery finds (findPool,
+  // no vendor call, so a pick is made while the vendor refuses), its depth its quote side as it holds it (quoteSideUsd),
+  // one under LIQ_MIN_USD never pricing (a pool of a few dollars can be pushed to any price: ../near/lists.ts); picked
+  // once a token and held GT_POOL_FRESH_MS, as a pool name is. A token with no such route keeps the vendor's rate, its
+  // age named. A row's block older than a provider keeps state for (Robinhood's: rpc.mainnet.chain.robinhood.com and
+  // robinhood.daybreak-rpc.network refused slot0 3,000 and 600 blocks back, 19 Nov 14:1xZ) is read on the others or, not
+  // agreed, priced at that rate too.
   // ---------------------------------------------------------------------------------------------------------------
   /** A third quote token's route: `end`, a pool of a token against the chain's USD token or WETH (the quote token's
    *  own, or, `hop` set, the token the hop pairs it with). */
