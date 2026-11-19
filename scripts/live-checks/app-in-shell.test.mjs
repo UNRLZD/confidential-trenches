@@ -163,6 +163,66 @@ test("harness: GET /v1/market/lists and /v1/market/token are answered from the r
   }
 });
 
+// The token page's tape (card app-harness-serves-a-recorded-tape): live's list lands after first paint and holds every
+// trade back past 5 minutes (whole_ms), so About's 5m Buys and Sells switch from the row's counts to the list's; an empty
+// tape never switched them, and a shift only that landing causes never showed on a build.
+test("harness: GET /v1/market/trades answers the recorded tape after TAPE_MS, moved once to its first read, with its reach; About's 5m counts switch to it", async () => {
+  const { mkdtempSync, copyFileSync, rmSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { harnessRoute, TAPE_MS } = await import("./app-in-shell.mjs");
+  const { toTrades, TRADES_URL } = await import("../../apps/terminal/src/screens/token/trades.ts");
+  const { aboutView } = await import("../../apps/terminal/src/screens/token/lower.ts");
+  const { OPEN_TOKEN } = await import("../../apps/terminal/src/routes/routes.ts");
+  const rec = (f) => JSON.parse(readFileSync(path.join(HERE, "../../apps/terminal/test/token-source", f), "utf8"));
+  const dir = mkdtempSync(path.join(tmpdir(), "app-in-shell-harness-"));
+  copyFileSync(path.join(HERE, "../../apps/terminal/public/_headers"), path.join(dir, "_headers"));
+  try {
+    const route = await harnessRoute(dir, "signed");
+    const ask = async (url) => {
+      let out = null;
+      const t0 = Date.now();
+      await route({ request: () => ({ url: () => url }), fulfill: async (a) => void (out = { kind: "fulfill", ms: Date.now() - t0, ...a }), abort: async (e) => void (out = { kind: "abort", error: e }) });
+      return { ...out, t0 };
+    };
+    const recorded = rec("helper-trades-mihao-2026-11-19.json").body;
+    assert.equal(recorded.trades.length, 50, "the recording holds the page's limit");
+    const a = await ask(TRADES_URL(OPEN_TOKEN.chain, OPEN_TOKEN.id));
+    assert.equal(a.kind, "fulfill");
+    assert.equal(a.status, 200);
+    assert.equal(a.headers["access-control-allow-origin"], APP_HOST);
+    assert.ok(a.ms >= TAPE_MS - 5, `the tape lands after TAPE_MS (${a.ms} ms)`);
+    const body = JSON.parse(a.body);
+    const trades = toTrades(body);
+    assert.ok(trades && trades.length === 50, "every row is of the page's shape");
+    const shift = body.as_of_ms - recorded.as_of_ms;
+    assert.ok(Math.abs(body.as_of_ms - a.t0) < 1_000, "moved to its first read's clock");
+    assert.equal(body.whole_ms, recorded.whole_ms + shift, "the reach is set and moved with the rows");
+    assert.deepEqual(body.trades.map((t) => t.t_ms - shift), recorded.trades.map((t) => t.t_ms), "every row moved by the one shift");
+    const b = await ask(TRADES_URL(OPEN_TOKEN.chain, OPEN_TOKEN.id));
+    assert.equal(b.body, a.body, "a later read answers the same rows");
+    // About on the token's recorded row: the row's 5m counts before the list, the list's once it lands
+    const OPEN_READ = rec("helper-token-mihao-2026-11-14.json");
+    const row = Object.fromEntries(OPEN_READ.fields.map((k, i) => [k, OPEN_READ.row[i]]));
+    const now = body.as_of_ms;
+    const before = aboutView(row, { trades: [], status: "loading" }, now).five;
+    const after = aboutView(row, { trades, status: "ready", whole_ms: body.whole_ms }, now).five;
+    const inFive = trades.filter((t) => t.t_ms >= now - 300_000);
+    assert.equal(after.buys, String(inFive.filter((t) => t.side === "buy").length));
+    assert.equal(after.sells, String(inFive.filter((t) => t.side === "sell").length));
+    assert.notEqual(after.buys, before.buys, "the 5m Buys switch when the list lands");
+    assert.notEqual(after.sells, before.sells, "the 5m Sells switch when the list lands");
+    // the Trending top's tape is its own recording; a token the recordings do not hold reads an empty tape
+    const top = rec("helper-token-2026-11-03.json");
+    const djt = JSON.parse((await ask(TRADES_URL("solana", top.row[top.fields.indexOf("token")]))).body);
+    assert.equal(djt.trades.length, rec("helper-trades-djt-2026-11-19.json").body.trades.length);
+    const none = await ask(TRADES_URL("solana", "So11111111111111111111111111111111111111112"));
+    assert.equal(none.status, 200);
+    assert.deepEqual(JSON.parse(none.body).trades, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // Verify on mainnet reads the release's two NEAR RPCs; the harness answers them from a recorded real read of the mainnet
 // vault (apps/terminal/test/verify-mount/answers-mainnet.json), by RPC and params, so the panel draws its true state and
 // no console error comes of an aborted read. A read the recording does not hold, another RPC and any other origin stay
