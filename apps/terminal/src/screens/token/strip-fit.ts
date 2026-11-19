@@ -1,14 +1,15 @@
 // The desktop header keeps its symbol whole (card rail-open-keeps-the-symbol-whole): token.css's container steps drop
 // the strip's last tiles for a narrow main column on a short symbol's budget; a longer symbol (Anthropic, live 13 Nov
 // with the rail opened at 1440 and 1280) still ran into "…". Here the same tiles give way from the end, Holders, then
-// Liquidity, 24h vol and Tax (each also in the trade column's stats), one at a time until the symbol is drawn whole,
-// and come back when it has room. The MC, Price and Change stay; past them the symbol's own "…" (its title the full
-// text) is the last resort.
+// Liquidity, 24h vol and Tax (each also in the trade column's stats), then the 24h change (also the About's 1D; card
+// rail-and-legend-hold-on-r5: at a 1024 screen the slim rail opened by » left a ~610 main column and cut "mihao" to
+// "m"), one at a time until the symbol is drawn whole, and come back when it has room. The MC and Price stay; past
+// them the symbol's own "…" (its title the full text) is the last resort.
 import { useLayoutEffect } from "react";
 import type { RefObject } from "react";
 
 /** The tiles that give way, the first to go first. */
-export const STRIP_DROPS = ["holders", "liq", "vol", "tax"] as const;
+export const STRIP_DROPS = ["holders", "liq", "vol", "tax", "change"] as const;
 
 /** Every tile back, then each of STRIP_DROPS hidden in turn while the header's symbol is cut. */
 export function fitStrip(head: HTMLElement): void {

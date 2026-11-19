@@ -27,6 +27,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fakeChain, open, REC, timeAt } from "../../../test/evm-swaps/robinhood.ts";
+import { callsIn, pocketRefusal } from "../../../test/pocket.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { HEADER_TIMED, IDLE_MS, ROBINHOOD_VENUES, SWAP_RPCS, TOPIC, TRADES_MAX } from "./swaps.ts";
 
@@ -141,6 +142,9 @@ function rig(o: { ownFrom?: number; ownTo?: number; traderLateMs?: number } = {}
     if (f.down) return new Response("down", { status: 503 });
     const no = refused(url);
     if (no) return no;
+    // a Pocket host answers 413 past 5 calls, as mainnet does (test/pocket.ts)
+    const pocket = pocketRefusal(url, callsIn(init.body));
+    if (pocket) return pocket;
     const reqs = [JSON.parse(String(init.body))].flat() as { id: number; method: string; params: unknown[] }[];
     const mine = reqs.map((r) => local(url, r));
     const rest = reqs.filter((_, i) => mine[i] === undefined);
@@ -223,25 +227,28 @@ test("card robinhood-trades-finish-filling: a coin whose locate the chain's own 
 
 /** Each coin opened alone on this rig at cea17ee5f (main before card robinhood-spread-tapes-fill-inside-45s): its time to
  *  its newest 50 trades, its posts and its pool log reads (at 909222c27, #943: busy 11.8 s 56 posts 30 reads, medium
- *  12.0 s 68/40 and 14.8 s 83/54, quiet 17.8 s 152/122). */
+ *  12.0 s 68/40 and 14.8 s 83/54, quiet 17.8 s 152/122). `posts` is main's at e202edec4 on this rig with Pocket answering
+ *  413 past 5 calls as mainnet does (test/pocket.ts; card helper-rpc-batch-learns-reader-size): busy 7.1 s 74 posts 30
+ *  reads, medium 10.0 s 85/40 and 9.2 s 98/54, quiet 12.2 s 93/96. The rig's Pocket took batches of 10 before, which
+ *  mainnet refuses, and cea17ee5f's posts (54, 69, 87, 169) were counted on it. */
 const SOLO_MAIN = [
-  { what: "busy", n: 8, ms: 5_800, posts: 54, reads: 28 },
-  { what: "medium", n: 6, ms: 8_800, posts: 69, reads: 40 },
-  { what: "medium", n: 2, ms: 8_800, posts: 87, reads: 54 },
-  { what: "quiet", n: 7, ms: 15_200, posts: 169, reads: 120 },
+  { what: "busy", n: 8, ms: 5_800, posts: 74, reads: 28 },
+  { what: "medium", n: 6, ms: 8_800, posts: 85, reads: 40 },
+  { what: "medium", n: 2, ms: 8_800, posts: 98, reads: 54 },
+  { what: "quiet", n: 7, ms: 15_200, posts: 93, reads: 120 },
 ];
 
-test("card robinhood-spread-tapes-fill-inside-45s: a coin opened alone, busy (its newest 50 trades in 6 spans), medium (13 and 18 spans) or quiet (50 spans), fills no later than at cea17ee5f and sends no more posts and no more pool log reads (cea17ee5f: busy 5.8 s 54 posts 28 reads, medium 8.8 s 69/40 and 8.8 s 87/54, quiet 15.2 s 169/120; now the same for busy and medium, quiet 8.8 s 82/96: its single-block spans asked six a round, a batch a seat)", async () => {
+test("card robinhood-spread-tapes-fill-inside-45s: a coin opened alone, busy (its newest 50 trades in 6 spans), medium (13 and 18 spans) or quiet (50 spans), fills no later than at cea17ee5f, with no more pool log reads than then and no more posts than main at e202edec4 on a Pocket that refuses past 5 (cea17ee5f: busy 5.8 s 28 reads, medium 8.8 s 40 and 8.8 s 54, quiet 15.2 s 120; e202edec4's posts 74, 85, 98, 93; now busy 5.8 s 60 posts, medium 8.8 s 74 and 94, quiet 8.8 s 89/96: its single-block spans asked six a round, a batch a seat)", async () => {
   for (const b of SOLO_MAIN) {
     const r = rig({});
     const [g] = await fillTimes(r, [b.n], 120_000);
     const posts = [...r.posts.values()].reduce((x, y) => x + y, 0);
     const reads = [...r.reads.values()].reduce((x, y) => x + y, 0);
-    const line = `${b.what} ${SPANS_OF(b.n)} spans: ${g!.ms === null ? "not filled" : `${(g!.ms / 1000).toFixed(1)} s`}, ${posts} posts, ${reads} pool reads (cea17ee5f: ${(b.ms / 1000).toFixed(1)} s, ${b.posts}, ${b.reads})`;
+    const line = `${b.what} ${SPANS_OF(b.n)} spans: ${g!.ms === null ? "not filled" : `${(g!.ms / 1000).toFixed(1)} s`}, ${posts} posts, ${reads} pool reads (cea17ee5f: ${(b.ms / 1000).toFixed(1)} s, ${b.reads} reads; e202edec4: ${b.posts} posts)`;
     console.log(line);
     assert.ok(g!.ms !== null && g!.ms <= b.ms, `slower than at cea17ee5f: ${line}`);
     assert.ok(reads <= b.reads, `more pool reads than at cea17ee5f: ${line}`);
-    assert.ok(posts <= b.posts, `more posts than at cea17ee5f: ${line}`);
+    assert.ok(posts <= b.posts, `more posts than main at e202edec4: ${line}`);
   }
 });
 

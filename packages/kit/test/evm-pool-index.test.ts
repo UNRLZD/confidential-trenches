@@ -327,10 +327,14 @@ test("a rate limit answered inside a batch is asked again, never as halves", asy
   const head = 1_000_000;
   const ps = pools(10, head);
   const a: Reader = { head, pools: ps, calls: [], limitedInBody: 2 };
-  const r = await evmPoolIndexSync(null, cfgOf(a, { head, pools: ps, calls: [] }));
+  // card mutants-killed-on-main (the index sweep's mutant 31): the limited span waits the backoff before it is asked
+  // again, as a limit is, never at once, as a reader's error is (above: an error's span waits nothing)
+  const naps: number[] = [];
+  const r = await evmPoolIndexSync(null, cfgOf(a, { head, pools: ps, calls: [] }, { nap: async (ms) => void naps.push(ms) }));
   assert.equal(r.coversThrough, head);
   const spans = a.calls.flat().filter((c) => c.method === "eth_getLogs").map((c) => c.params[0] as { fromBlock: string; toBlock: string });
   assert.ok(spans.every((f) => Number(f.toBlock) - Number(f.fromBlock) + 1 === 10_000), "no span asked as halves");
+  assert.deepEqual(naps, [1_000, 2_000], "each limited answer waited the backoff before the span was asked again");
 });
 
 test("a sync whose readers lag the last sync's head keeps what that sync stored", async () => {
@@ -493,6 +497,13 @@ test("Q1: a 429 whose Retry-After is 0 or a past date waits at least the backoff
     assert.ok(asked < 20, `${retry}: ${asked} requests`);
     assert.ok(slept >= INDEX_LIMITED_WAIT_MS!, `${retry}: slept ${slept} ms`);
   }
+  // card mutants-killed-on-main (the index sweep's mutant 37): a reader the pace holds nothing for (any EvmRpc of the
+  // caller's, not evmJsonRpc's, whose 429 holds its provider) that names no wait still waits at least the backoff, each
+  // 429 double the last, never asks again at once
+  const naps: number[] = [];
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [], limited: 3, limitedAfterMs: 0 }, { head, pools: ps, calls: [] }, { nap: async (ms) => void naps.push(ms) }));
+  assert.equal(r.coversThrough, head);
+  assert.deepEqual(naps.slice(0, 3), [500, 1_000, 2_000], `naps ${naps.join(", ")}`);
 });
 
 // card evm-taps-meet-no-429: a throttle or a refused connection any reader meets holds the provider for every reader

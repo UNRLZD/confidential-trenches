@@ -36,6 +36,10 @@ export { EVM_BUY_TAP_QUOTES, EVM_BUY_WARM_EVERY_MS, EVM_BUY_WARM_IN, EvmBuyTapRe
 export type { EvmPoolIndexData, EvmPoolIndexSync } from "./checks/evm/pool-index.ts";
 // a shipped pool index snapshot read through the kit's own shape check, so an app starts its sync from one as the page does
 export { evmPoolIndexFromSnapshot } from "./checks/evm/pool-index.ts";
+// a JSON-RPC batch refused for its size and the size to send it at after (card evm-batch-fits-each-reader), one rule
+// for the device's EVM reads and the helper's /v1/rpc upstreams (card helper-rpc-batch-learns-reader-size)
+export { sizeRefusal as evmBatchSizeRefusal } from "./checks/evm/quote.ts";
+export { evmBatchFit } from "./checks/evm/pace.ts";
 export * from "./signpage/client.ts";
 export * from "./signpage/wallets.ts";
 export * from "./vault/messages.ts";

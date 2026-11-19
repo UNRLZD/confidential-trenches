@@ -811,6 +811,20 @@ export function returningWallets(owed: readonly { address: string; lamports?: st
   return out;
 }
 
+/** The EVM Ws a refused buy left ETH on, as the helper's route read them before the page's first tap (card
+ *  evm-load-reads-name-no-w-to-the-public-seat; pool-testnet.ts evmReturning), as returningWallets lists Solana's: each
+ *  RETURNING at its amount in USD at its chain's price; none where the chain has no price yet. Display alone. */
+export function evmReturningWallets(shown: readonly { chain: "base" | "robinhood"; address: string; wei: bigint }[], price: (chain: "base" | "robinhood") => PoolStatePrice | null): SignpageState["wallets"][number][] {
+  const out: SignpageState["wallets"][number][] = [];
+  for (const r of shown) {
+    const p = price(r.chain);
+    if (p === null || r.wei <= 0n) continue;
+    const size = usdOf(r.wei, 18, p);
+    if (size !== null) out.push({ chain: r.chain, address: r.address, role: "fresh", size, state: "RETURNING" });
+  }
+  return out;
+}
+
 /** `state` with `wallets` added when signed in; a state they cannot fit, or that the kit's schema refuses with them, goes
  *  as it was. */
 export function withReturning(state: SignpageState, wallets: readonly SignpageState["wallets"][number][]): SignpageState {

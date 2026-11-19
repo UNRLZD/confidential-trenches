@@ -11,8 +11,10 @@ import { enableTimers, resetTimers } from "../mock-timers.ts";
 const DRAIN = 8;
 
 /** Runs `work` with setTimeout, Date and performance.now on one virtual clock from `start` (ms); its value and the
- *  virtual ms it took. Real timers and I/O are not stopped: the fakes it runs against must use neither. */
-export async function onVirtualTime<T>(start: number, work: () => Promise<T>): Promise<{ value: T; ms: number }> {
+ *  virtual ms it took. Real timers and I/O are not stopped: the fakes it runs against must use neither. `turn`, when
+ *  given, is told each turn's real ms (the synchronous span from one turn of the loop to the next, a tick's timers and
+ *  their microtasks in it) and the virtual ms it ran at (card robinhood-tapes-read-ahead-bounded). */
+export async function onVirtualTime<T>(start: number, work: () => Promise<T>, turn?: (realMs: number, at: number) => void): Promise<{ value: T; ms: number }> {
   const immediate = globalThis.setImmediate;
   const perf = Object.getOwnPropertyDescriptor(performance, "now");
   enableTimers(mock.timers, { apis: ["setTimeout", "Date"], now: start });
@@ -27,8 +29,16 @@ export async function onVirtualTime<T>(start: number, work: () => Promise<T>): P
   );
   let ms = 0;
   try {
+    let last = process.hrtime.bigint();
     while (!done) {
-      for (let i = 0; i < DRAIN && !done; i++) await new Promise((go) => immediate(go));
+      for (let i = 0; i < DRAIN && !done; i++) {
+        await new Promise((go) => immediate(go));
+        if (turn !== undefined) {
+          const t = process.hrtime.bigint();
+          turn(Number(t - last) / 1e6, Date.now());
+          last = t;
+        }
+      }
       if (!done) mock.timers.tick(1);
     }
     ms = Date.now() - start;

@@ -50,6 +50,7 @@
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
 import { AsyncLocalStorage } from "node:async_hooks";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
   evmPoolVenues,
   HELPER_SOLANA_BLOCK_HEADER,
@@ -67,6 +68,7 @@ import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, 
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 import { companyOf, isKeyless, keyTag, operatorOf, providerName } from "./operator.ts";
+import { BATCH_SIZES, batchRefusal, type BatchSizes } from "./batch-sizes.ts";
 import { emptyStore, POOL_LOGS_FROM, poolFile, poolPage, type PoolLog, type PoolStore, storeAppend, storeLogs, topicsOf } from "./pool-logs.ts";
 // re-exported: the names other modules import from here (operator.ts is the leaf the token watch imports alone)
 export { companyOf, operatorOf, providerName };
@@ -644,12 +646,15 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `pacer`: another client's, when this one sends to the same keyed URL (card helper-crowd-429); else its own. */
 /** `sleep`: the waits' timer (card helper-rpc-wait-timing), a test's clock beside `now`. */
 /** `seatClients`: how many callers the NEAR seat's day map holds (LIMIT_CLIENTS); smaller only in a test. */
-type Deps = { seatClients?: number; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer };
+type Deps = { seatClients?: number; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer; batch?: BatchSizes };
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
 /** `timing` (card helper-ready-page-warm): this read's Server-Timing entries, the wait before its send (a hold or the
  *  provider's pace) and the send, and a keyed Solana provider's time before the read fell back to the public endpoint.
  *  Every answer handle() gives has them (card solana-quote-under-1s: POST /v1/rpc sends them, 200, 429 and 503 alike). */
 type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string; timing?: string[] };
+/** One upstream's answer to one read as fitPost reads it: its status and headers, and its body (undefined: past
+ *  RPC_ANSWER_MAX). */
+type Sent = { status: number; headers: Headers; text: string | undefined };
 /** One read's waits and sends, as handle() names them in `timing` (card solana-quote-under-1s): `waitMs`, every hold's
  *  and pace's wait before a send (rpc-wait); `keyedMs`, a keyed Solana provider's time before the read fell back
  *  (rpc-keyed); `last`, the last send, the one that answered when the read did: its time and its provider's environment
@@ -788,6 +793,50 @@ function parse(text: string): unknown {
 }
 
 const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+
+/**
+ * Past records an upstream may have dropped (card helper-receipts-past-retention): a receipt or a transaction by its hash,
+ * a block by its number. An upstream that no longer keeps one answers it null, as one behind /v1/rpc/robinhood?keyed=only
+ * did on 19 Nov 02:20Z for 10 of 10 Initialize receipts of blocks 116376549 on (a run of evm-pool-index.mjs at
+ * f1bb364ad), while rpc.mainnet.chain.robinhood.com and alchemy.com's answered every one. Such a null is no answer
+ * while another upstream keeps the record: callList asks the next, at most PAST_NULL_TRIES more upstreams, and passes
+ * the answer with the fewest nulls when none keeps it (a transaction still pending, a block not made yet). A transaction
+ * the same client sent through the route within SENT_KEEP_MS is pending, not past: its null is passed on at once, so a
+ * page's poll of its own buy (signpage pool-withdraw-evm.ts onwardReceipt, which waits for every reader) costs one send,
+ * as before (measured on Base's public upstreams, 19 Nov 02:52Z: a pending poll p50 278 ms with one send, 1029 ms with three).
+ * [design: 2, so a receipt polled while pending costs at most 3 sends; the route's next two upstreams, the read of 02:20Z
+ * had alchemy.com's and four more keyed behind the one that forgot.]
+ */
+export const PAST_NULL_TRIES = 2;
+/** How long a transaction sent through the route stays pending for its sender's reads, and how many are kept (the
+ *  oldest dropped first). [design: 10 min, past a Base or Robinhood buy's whole wait; 10,000 sends of 32 bytes.] */
+export const SENT_KEEP_MS = 10 * 60 * 1000;
+export const SENT_KEEP_MAX = 10_000;
+/** A signed transaction's hash: keccak-256 of its raw bytes (a typed one's whole envelope), or null for no raw hex. */
+export function sentHash(raw: unknown): string | null {
+  if (typeof raw !== "string" || !/^0x([0-9a-fA-F]{2})+$/.test(raw)) return null;
+  return `0x${Buffer.from(keccak_256(Buffer.from(raw.slice(2), "hex"))).toString("hex")}`;
+}
+const PAST_METHODS: ReadonlySet<string> = new Set(["eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getBlockByNumber"]);
+/** The ids of a read's calls that ask a past record (a block asked by a number, never by a tag; a transaction `pending`
+ *  does not name), or null when none does. */
+export function pastAsks(req: unknown, pending: (hash: string) => boolean = () => false): ReadonlySet<unknown> | null {
+  const ids = new Set<unknown>();
+  for (const r of Array.isArray(req) ? req : [req]) {
+    if (!isPlain(r) || typeof r.method !== "string" || !PAST_METHODS.has(r.method)) continue;
+    const p0 = Array.isArray(r.params) ? r.params[0] : undefined;
+    if (r.method === "eth_getBlockByNumber" && !(typeof p0 === "string" && /^0x[0-9a-fA-F]{1,16}$/.test(p0))) continue;
+    if (r.method !== "eth_getBlockByNumber" && typeof p0 === "string" && pending(p0.toLowerCase())) continue;
+    ids.add(r.id);
+  }
+  return ids.size === 0 ? null : ids;
+}
+/** How many of the calls `asked` names an answer (one, or a batch) answers null. */
+export function pastNullsIn(asked: ReadonlySet<unknown>, answer: unknown): number {
+  let n = 0;
+  for (const a of Array.isArray(answer) ? answer : [answer]) if (isPlain(a) && asked.has(a.id) && Object.hasOwn(a, "result") && a.result === null) n++;
+  return n;
+}
 
 /** The pool programs each Solana route may scan with getProgramAccounts: the helper's own pinned pool programs for that
  *  cluster (mainnet's: apps/helper/src/pool/solana.ts POOL_SOLANA_ENV, which refuses a bad one at start; devnet's a list,
@@ -1385,6 +1434,73 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     return Buffer.concat(chunks).toString("utf8");
   }
 
+  /** Each upstream URL's most calls a batch, set once it refused one for its size and kept for the process's life
+   *  (card helper-rpc-batch-learns-reader-size): the helper's one map (batch-sizes.ts BATCH_SIZES), which the maker
+   *  reads and the tapes keep too; Infinity until then. */
+  const sizes = deps.batch ?? BATCH_SIZES;
+  const mostOf = (url: string): number => sizes.most(url);
+  /** A caller's read of `n` calls taken from `url`'s pace (limits.ts take) as the posts fitPost sends it in: 0 when every
+   *  part has room, else the first wait (a part drawn before it stays drawn: the pace is spent early, never past). A
+   *  post refused for its size and sent again as parts draws nothing more: once per URL and size, for the process's life. */
+  const takeParts = (url: string, n: number, page: boolean): number => {
+    const most = mostOf(url);
+    for (let i = 0; i < n; i += most) {
+      const w = holdsAll.take(url, Math.min(most, n - i), false, false, false, page);
+      if (w > 0) return w;
+    }
+    return 0;
+  };
+  /**
+   * One read sent to one upstream, fitted to its batch size (card helper-rpc-batch-learns-reader-size), its body read
+   * (readAnswer: undefined past RPC_ANSWER_MAX). A batch past the most the upstream takes (mostOf) leaves as its parts, all
+   * at once, and their answers are joined as one batch in the parts' order, each part's calls as the upstream answered
+   * them. A batch it refuses for its size (batch-sizes.ts batchRefusal, the kit's rule: an HTTP 413 whatever its body; a
+   * 4xx, a 429 or a 200 whose error names a batch maximum, never a rate limit's words) sets its most (the kit's
+   * evmBatchFit: half, or the maximum named where smaller) and is sent again as parts. A post of one call is never a size refusal. Any other
+   * answer of a part (a throttle's 429, a 5xx, a body that is no batch) is this upstream's answer to the read, as one
+   * post's would be. Mainnet's refusals, read 2026-11-18 20:41Z: Pocket's 413 past 5, daybreak's 413 "max 20 calls",
+   * robinhood.drpc.org's 400 code 31 past 3, Sentio's 429 code 8 past 5 (batch-fit.test.ts).
+   */
+  async function fitPost(c: RpcChain, url: string, forward: string, n: number, by: number): Promise<Sent> {
+    const most = mostOf(url);
+    if (n > most) {
+      const reqs = JSON.parse(forward) as unknown[];
+      const parts: unknown[][] = [];
+      for (let i = 0; i < reqs.length; i += most) parts.push(reqs.slice(i, i + most));
+      return joinParts(await Promise.all(parts.map((p) => fitPost(c, url, JSON.stringify(p), p.length, by))), parts);
+    }
+    const r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(sendMs(by - now())) });
+    const text = await readAnswer(r);
+    const said = batchRefusal(r.status, text, n);
+    if (said !== undefined) {
+      const fit = sizes.refused(url, n, said);
+      log(`rpc batch ${c} ${companyOf(new URL(url).host)} most ${fit}${shapeTail()}`);
+      return fitPost(c, url, forward, n, by);
+    }
+    return { status: r.status, headers: r.headers, text };
+  }
+  /** The parts' answers as one batch (fitPost): every part a 200 JSON batch (a part of one call may answer that call
+   *  alone, Pocket's way), joined in the parts' order; else the first part that is not, as the read's answer. */
+  function joinParts(sent: Sent[], parts: unknown[][]): Sent {
+    const inner: string[] = [];
+    for (let i = 0; i < sent.length; i++) {
+      const s = sent[i]!;
+      if (s.status !== 200 || s.text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(s.headers.get("content-type") ?? "")) return s;
+      let a: unknown;
+      try {
+        a = JSON.parse(s.text);
+      } catch {
+        return s;
+      }
+      if (Array.isArray(a)) {
+        if (a.length > 0) inner.push(s.text.trim().slice(1, -1));
+      } else if (parts[i]!.length === 1 && isPlain(a)) inner.push(s.text.trim());
+      else return s;
+    }
+    const text = `[${inner.join(",")}]`;
+    return { status: 200, headers: sent[0]!.headers, text: Buffer.byteLength(text) > RPC_ANSWER_MAX ? undefined : text };
+  }
+
   /**
    * One call: `chain` as the caller wrote it, `contentType` its Content-Type header, `body` the request body, `client`
    * the caller's address (../limits/limits.ts clientOf). The helper's own cached reads (Discover's lists, the token
@@ -1441,6 +1557,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // card base-reads-never-starve-max: an EVM read's shape (rpcShape) and its mode, for its hold and refusal log lines
     const trace = traces.getStore();
     if (trace !== undefined && EVM_CHAINS.has(c)) trace.shape = `${keyedOnly ? "keyed " : ""}${rpcShape(out)}`;
+    // card helper-receipts-past-retention: a transaction sent here is pending for its sender's reads (sentLately)
+    if (EVM_CHAINS.has(c) && methods.includes("eth_sendRawTransaction")) noteSent(c, client, out);
     // card helper-rpc-one-read-many-pages: a read of the named public accounts (SHARED_ACCOUNTS) joins the same read in
     // flight, or is answered from it for SHARED_HOLD_MS after
     const sk = sharedKeyOf(c, out, keyedOnly);
@@ -1493,6 +1611,26 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     } catch {
       return null;
     }
+  };
+
+  // card helper-receipts-past-retention: each client's transactions sent through the route lately, by chain and hash,
+  // the time of the send; a past null for one is its pending answer (SENT_KEEP_MS), never asked again
+  const sentAt = new Map<string, number>();
+  const sentKey = (c: RpcChain, client: string | undefined, hash: string) => `${c} ${client ?? ""} ${hash}`;
+  const noteSent = (c: RpcChain, client: string | undefined, out: unknown): void => {
+    for (const r of Array.isArray(out) ? out : [out]) {
+      if (!isPlain(r) || r.method !== "eth_sendRawTransaction" || !Array.isArray(r.params)) continue;
+      const h = sentHash(r.params[0]);
+      if (h === null) continue;
+      const k = sentKey(c, client, h);
+      sentAt.delete(k);
+      sentAt.set(k, now());
+      while (sentAt.size > SENT_KEEP_MAX) sentAt.delete(sentAt.keys().next().value!);
+    }
+  };
+  const sentLately = (c: RpcChain, client: string | undefined, hash: string): boolean => {
+    const at = sentAt.get(sentKey(c, client, hash));
+    return at !== undefined && now() - at < SENT_KEEP_MS;
   };
 
   /** A checked read sent on its route (route). */
@@ -1787,6 +1925,19 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // a log read is never sent to a provider that refuses every one (LOGS_REFUSED): its 429 would hold it for the reads
     // it does answer
     const list = providers.filter((u) => !(methods.includes("eth_getLogs") && LOGS_REFUSED.has(u)));
+    // card helper-receipts-past-retention: a past record answered null is asked of the next upstream (PAST_NULL_TRIES);
+    // `nulled` the answer with the fewest such nulls, the read's when none keeps them; `forgot` the upstreams that
+    // answered so, never asked again in this read
+    let asked: unknown;
+    try {
+      asked = EVM_CHAINS.has(c) && methods.some((m) => PAST_METHODS.has(m)) ? JSON.parse(forward) : undefined;
+    } catch {
+      asked = undefined;
+    }
+    const past = asked === undefined ? null : pastAsks(asked, (h) => sentLately(c, client, h));
+    let nulled: { status: number; body: string; n: number } | undefined;
+    let nullTries = 0;
+    const forgot = new Set<string>();
     for (let tries = 0; ; tries++) {
       let soonestMs = Infinity;
       let down = false;
@@ -1796,6 +1947,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       let shaped: { status: number; body: string } | undefined;
       let capped: { span: bigint; status: number; body: string } | undefined;
       for (const url of list) {
+        if (forgot.has(url)) continue;
         // review L4: no send starts once the walk's time is nearly spent; the read is answered inside the server's timeout
         if (by - now() < WALK_SEND_MIN_MS) {
           down = true;
@@ -1827,19 +1979,20 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           soonestMs = Math.min(soonestMs, gate);
           continue;
         }
-        const room = holds.take(url, methods.length, false, false, false, page);
+        // card helper-rpc-batch-learns-reader-size: a batch past the URL's kept size goes as its parts (fitPost), each
+        // part a post of its pace; a part with no room is the read's wait (the parts drawn before it stay drawn)
+        const room = takeParts(url, methods.length, page);
         if (room > 0) {
           soonestMs = Math.min(soonestMs, room);
           continue;
         }
-        let r: Response;
+        let r: Sent;
         let text: string | undefined;
         sent = true;
         const from = now();
         try {
-          r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(sendMs(by - now())) });
+          r = await fitPost(c, url, forward, methods.length, by);
           if (r.status === 429) {
-            await r.body?.cancel();
             sentTo(url, from);
             const s = upstreamRetryAfterS(r.headers, now());
             holds.hold(url, s);
@@ -1847,7 +2000,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
             soonestMs = Math.min(soonestMs, holds.heldMs(url));
             continue;
           }
-          text = await readAnswer(r);
+          text = r.text;
           sentTo(url, from);
         } catch {
           sentTo(url, from);
@@ -1902,8 +2055,18 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           down = true;
           continue;
         }
+        const nulls = past === null ? 0 : pastNullsIn(past, answer);
+        if (nulls > 0) {
+          if (nulled === undefined || nulls < nulled.n) nulled = { status: r.status, body: text, n: nulls };
+          forgot.add(url);
+          log(`rpc past null ${c} ${companyOf(new URL(url).host)} ${nulls} of ${past!.size}${shapeTail()}`);
+          if (nullTries++ < PAST_NULL_TRIES) continue;
+          return { status: nulled.status, body: nulled.body };
+        }
         return { status: r.status, body: text };
       }
+      // the past nulls' answer when no other upstream is left to ask now (card helper-receipts-past-retention)
+      if (nulled !== undefined && soonestMs === Infinity) return { status: nulled.status, body: nulled.body };
       // none could take it: the soonest provider's short hold or pace wait is waited out, and the read asked again (a
       // read sent and refused draws on the budget once more, as any send does)
       const waitMs = soonestMs + HOLD_MARGIN_MS;
@@ -1920,6 +2083,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       // 4: a read with no spare, the mainnet W Transfer read, would otherwise end unread under repeated holds); a shape
       // refusal only when no provider is held, else the caller's wait below (the device would take the refusal as the
       // read's answer)
+      if (nulled !== undefined) return { status: nulled.status, body: nulled.body };
       if (capped !== undefined) return { status: capped.status, body: capped.body };
       if (shaped !== undefined && soonestMs === Infinity) return { status: shaped.status, body: shaped.body };
       // every provider failed (none held or out of room; a company past its day's budget is down, review M3): upstream,
@@ -1962,7 +2126,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (!(await holdOver(key, deadline, shared, rest))) return throttled(heldAt(), undefined, `${key} held`);
     const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
-    let r!: Response;
+    let r!: Sent;
     let text: string | undefined;
     let sent = now();
     for (let tries = 0; ; tries++) {
@@ -1995,15 +2159,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       if (by - now() < WALK_SEND_MIN_MS) return UPSTREAM();
       sent = now();
       try {
-        r = await doFetch(url, {
-          method: "POST",
-          headers: { accept: "application/json", "content-type": "application/json" },
-          body: forward,
-          redirect: "error",
-          signal: AbortSignal.timeout(sendMs(by - now())),
-        });
+        // card helper-rpc-batch-learns-reader-size: a batch past the provider's kept size goes as its parts (fitPost)
+        r = await fitPost(c, url, forward, methods.length, by);
         if (r.status === 429) {
-          const body = viaSlot ? ((await readAnswer(r).catch(() => undefined)) ?? "") : (await r.body?.cancel(), "");
+          const body = viaSlot ? (r.text ?? "") : "";
           sentTo(url, sent);
           const waitS = upstreamRetryAfterS(r.headers, now());
           if (viaSlot && (CREDITS.test(body) ? (slot.fail("credits"), true) : slot.throttled(waitS))) return fellBack();
@@ -2020,7 +2179,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           }
           return throttled(Math.max(1, heldAt()), undefined, `${key} provider 429`);
         }
-        text = await readAnswer(r);
+        text = r.text;
         sentTo(url, sent);
       } catch {
         sentTo(url, sent);

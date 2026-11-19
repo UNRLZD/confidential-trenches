@@ -74,8 +74,8 @@ function Row({ r, nowMs }: { r: MarketRow; nowMs: number }) {
         <span className="ptr-price">{v.price}</span>
       </span>
       <span className="ptr-side">
-        <span className="ptr-mc">{v.mc}</span>
-        <span className="ptr-chg" data-tone={typeof c !== "number" ? "none" : c >= 0 ? "up" : "down"}>{changeText(c)}</span>
+        <span key={v.mc} className="ptr-mc">{v.mc}</span>
+        <span key={changeText(c)} className="ptr-chg" data-tone={typeof c !== "number" ? "none" : c >= 0 ? "up" : "down"}>{changeText(c)}</span>
       </span>
     </Link>
   );

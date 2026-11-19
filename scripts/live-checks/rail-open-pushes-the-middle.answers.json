@@ -1,34 +1,36 @@
 {
  "good": {
-  "note": "card rail-open-keeps-the-symbol-whole: this card tree (base bd3fb3097 plus this card change, uncommitted at record time): apps/terminal built fresh (vite build) and served at APP_HOST under its _headers inside the stand-in shell (app-in-shell.mjs harnessRoute, tap), HELPER_HOST answered live with Anthropic on top of Trending: opened, Holders gives way at 1440, Holders and Liquidity at 1280, and the symbol is whole",
-  "source": "harness: the build dist-fix at APP_HOST's name in the stand-in shell, HELPER_HOST live",
-  "at": "2026-11-13T15:39:54.441Z",
-  "browser": "157.0.8103.51",
+  "note": "card rail-and-legend-hold-on-r5 at 436f7cb2c, 19 Nov: slim at 1024 and 1099 (pages of 1422.2 and 1526.4) the opened rail pushes the middle, the symbol whole (at 1024 the 24h change gives way) and « gives it back; full at 1440 and 1280 in its own 340 column, no »",
+  "source": "harness: the build build-branch2 at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-19T02:42:23.414Z",
+  "browser": "157.0.8103.79",
   "views": [
    {
-    "width": 1440,
+    "width": 1024,
+    "want": "slim",
     "state": "ready",
     "closed": {
      "state": "ready",
      "rail": "ready",
      "open": "false",
      "slim": "true",
+     "mode": "slim",
+     "expand": true,
+     "page": 1422,
      "railW": 78,
-     "track": 78,
-     "railRight": 64.5,
-     "chartLeft": 70.5,
-     "lowerLeft": 70.5,
+     "track": 77.9948,
+     "railRight": 61.90625,
+     "chartLeft": 67.65625,
+     "lowerLeft": 67.65625,
      "scroll": 0,
-     "identInk": 482.984375,
-     "stripLeft": 493.484375,
+     "identInk": 258.03125,
+     "stripLeft": 268.109375,
      "symCut": false,
      "tiles": [
       "price",
       "change",
       "tax",
-      "vol",
-      "liq",
-      "holders"
+      "vol"
      ]
     },
     "open": {
@@ -36,14 +38,72 @@
      "rail": "ready",
      "open": "true",
      "slim": "false",
+     "mode": "slim",
+     "expand": false,
+     "page": 1422,
      "railW": 340,
-     "track": 340,
-     "railRight": 261,
-     "chartLeft": 267,
-     "lowerLeft": 267,
+     "track": 339.996,
+     "railRight": 250.546875,
+     "chartLeft": 256.296875,
+     "lowerLeft": 256.296875,
      "scroll": 0,
-     "identInk": 562.484375,
-     "stripLeft": 572.984375,
+     "identInk": 499.890625,
+     "stripLeft": 509.96875,
+     "symCut": false,
+     "tiles": [
+      "price"
+     ]
+    },
+    "shut": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "true",
+     "mode": "slim",
+     "expand": true,
+     "page": 1422,
+     "railW": 78,
+     "track": 77.9948,
+     "railRight": 61.90625,
+     "chartLeft": 67.65625,
+     "lowerLeft": 67.65625,
+     "scroll": 0,
+     "identInk": 258.03125,
+     "stripLeft": 268.109375,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol"
+     ]
+    },
+    "shots": [
+     "1024-closed.png",
+     "1024-open.png",
+     "1024-shut.png"
+    ]
+   },
+   {
+    "width": 1099,
+    "want": "slim",
+    "state": "ready",
+    "closed": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "true",
+     "mode": "slim",
+     "expand": true,
+     "page": 1526,
+     "railW": 78,
+     "track": 77.9948,
+     "railRight": 61.90625,
+     "chartLeft": 67.65625,
+     "lowerLeft": 67.65625,
+     "scroll": 0,
+     "identInk": 256.734375,
+     "stripLeft": 266.8125,
      "symCut": false,
      "tiles": [
       "price",
@@ -53,19 +113,79 @@
       "liq"
      ]
     },
+    "open": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "true",
+     "slim": "false",
+     "mode": "slim",
+     "expand": false,
+     "page": 1526,
+     "railW": 340,
+     "track": 339.996,
+     "railRight": 250.546875,
+     "chartLeft": 256.296875,
+     "lowerLeft": 256.296875,
+     "scroll": 0,
+     "identInk": 485.625,
+     "stripLeft": 495.703125,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change"
+     ]
+    },
     "shut": {
      "state": "ready",
      "rail": "ready",
      "open": "false",
      "slim": "true",
+     "mode": "slim",
+     "expand": true,
+     "page": 1526,
      "railW": 78,
-     "track": 78,
-     "railRight": 64.5,
-     "chartLeft": 70.5,
-     "lowerLeft": 70.5,
+     "track": 77.9948,
+     "railRight": 61.90625,
+     "chartLeft": 67.65625,
+     "lowerLeft": 67.65625,
      "scroll": 0,
-     "identInk": 482.984375,
-     "stripLeft": 493.484375,
+     "identInk": 256.734375,
+     "stripLeft": 266.8125,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol",
+      "liq"
+     ]
+    },
+    "shots": [
+     "1099-closed.png",
+     "1099-open.png",
+     "1099-shut.png"
+    ]
+   },
+   {
+    "width": 1440,
+    "want": "full",
+    "state": "ready",
+    "closed": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "false",
+     "mode": "full",
+     "expand": false,
+     "page": 1920,
+     "railW": 340,
+     "track": 340,
+     "railRight": 261,
+     "chartLeft": 267,
+     "lowerLeft": 267,
+     "scroll": 0,
+     "identInk": 483,
+     "stripLeft": 493.5,
      "symCut": false,
      "tiles": [
       "price",
@@ -76,10 +196,84 @@
       "holders"
      ]
     },
+    "open": null,
+    "shut": null,
     "shots": [
-     "1440-closed.png",
-     "1440-open.png",
-     "1440-shut.png"
+     "1440-closed.png"
+    ]
+   },
+   {
+    "width": 1280,
+    "want": "full",
+    "state": "ready",
+    "closed": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "false",
+     "mode": "full",
+     "expand": false,
+     "page": 1778,
+     "railW": 340,
+     "track": 339.996,
+     "railRight": 250.546875,
+     "chartLeft": 256.296875,
+     "lowerLeft": 256.296875,
+     "scroll": 0,
+     "identInk": 514.03125,
+     "stripLeft": 524.109375,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol"
+     ]
+    },
+    "open": null,
+    "shut": null,
+    "shots": [
+     "1280-closed.png"
+    ]
+   }
+  ]
+ },
+ "bad_178": {
+  "note": "the build of main at 2c400ebcb (release 178) read by the check as main had it (WIDTHS 1440 and 1280, taken to be slim): the full rail is drawn there, no » to click, no state read (as live run 44429326442)",
+  "source": "harness: the build build-main at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-19T01:53:01.294Z",
+  "browser": "157.0.8103.79",
+  "views": [
+   {
+    "width": 1440,
+    "state": "ready",
+    "closed": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "false",
+     "railW": 340,
+     "track": 340,
+     "railRight": 261,
+     "chartLeft": 267,
+     "lowerLeft": 267,
+     "scroll": 0,
+     "identInk": 483,
+     "stripLeft": 493.5,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol",
+      "liq",
+      "holders"
+     ]
+    },
+    "open": null,
+    "shut": null,
+    "shots": [
+     "1440-closed.png"
     ]
    },
    {
@@ -89,29 +283,6 @@
      "state": "ready",
      "rail": "ready",
      "open": "false",
-     "slim": "true",
-     "railW": 78,
-     "track": 77.9948,
-     "railRight": 61.90625,
-     "chartLeft": 67.65625,
-     "lowerLeft": 67.65625,
-     "scroll": 0,
-     "identInk": 361.4375,
-     "stripLeft": 371.515625,
-     "symCut": false,
-     "tiles": [
-      "price",
-      "change",
-      "tax",
-      "vol",
-      "liq",
-      "holders"
-     ]
-    },
-    "open": {
-     "state": "ready",
-     "rail": "ready",
-     "open": "true",
      "slim": "false",
      "railW": 340,
      "track": 339.996,
@@ -129,19 +300,202 @@
       "vol"
      ]
     },
-    "shut": {
+    "open": null,
+    "shut": null,
+    "shots": [
+     "1280-closed.png"
+    ]
+   }
+  ]
+ },
+ "bad_1024_open": {
+  "note": "the build of main at 2c400ebcb (release 178; main f1bb364ad draws the same terminal), 19 Nov: at 1024 (a 1422.2 page, the narrowest slim screen) the opened rail leaves a ~610 main column and the header cuts the symbol (mihao drawn as m) with Price and 24h change left in the strip; 1099, 1440 and 1280 hold",
+  "source": "harness: the build build-main at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-19T01:54:29.628Z",
+  "browser": "157.0.8103.79",
+  "views": [
+   {
+    "width": 1024,
+    "want": "slim",
+    "state": "ready",
+    "closed": {
      "state": "ready",
      "rail": "ready",
      "open": "false",
      "slim": "true",
+     "mode": "slim",
+     "expand": true,
+     "page": 1422,
      "railW": 78,
      "track": 77.9948,
      "railRight": 61.90625,
      "chartLeft": 67.65625,
      "lowerLeft": 67.65625,
      "scroll": 0,
-     "identInk": 361.4375,
-     "stripLeft": 371.515625,
+     "identInk": 258.03125,
+     "stripLeft": 268.109375,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol"
+     ]
+    },
+    "open": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "true",
+     "slim": "false",
+     "mode": "slim",
+     "expand": false,
+     "page": 1422,
+     "railW": 340,
+     "track": 339.996,
+     "railRight": 250.546875,
+     "chartLeft": 256.296875,
+     "lowerLeft": 256.296875,
+     "scroll": 0,
+     "identInk": 410.625,
+     "stripLeft": 420.703125,
+     "symCut": true,
+     "tiles": [
+      "price",
+      "change"
+     ]
+    },
+    "shut": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "true",
+     "mode": "slim",
+     "expand": true,
+     "page": 1422,
+     "railW": 78,
+     "track": 77.9948,
+     "railRight": 61.90625,
+     "chartLeft": 67.65625,
+     "lowerLeft": 67.65625,
+     "scroll": 0,
+     "identInk": 258.03125,
+     "stripLeft": 268.109375,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol"
+     ]
+    },
+    "shots": [
+     "1024-closed.png",
+     "1024-open.png",
+     "1024-shut.png"
+    ]
+   },
+   {
+    "width": 1099,
+    "want": "slim",
+    "state": "ready",
+    "closed": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "true",
+     "mode": "slim",
+     "expand": true,
+     "page": 1526,
+     "railW": 78,
+     "track": 77.9948,
+     "railRight": 61.90625,
+     "chartLeft": 67.65625,
+     "lowerLeft": 67.65625,
+     "scroll": 0,
+     "identInk": 256.734375,
+     "stripLeft": 266.8125,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol",
+      "liq"
+     ]
+    },
+    "open": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "true",
+     "slim": "false",
+     "mode": "slim",
+     "expand": false,
+     "page": 1526,
+     "railW": 340,
+     "track": 339.996,
+     "railRight": 250.546875,
+     "chartLeft": 256.296875,
+     "lowerLeft": 256.296875,
+     "scroll": 0,
+     "identInk": 485.625,
+     "stripLeft": 495.703125,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change"
+     ]
+    },
+    "shut": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "true",
+     "mode": "slim",
+     "expand": true,
+     "page": 1526,
+     "railW": 78,
+     "track": 77.9948,
+     "railRight": 61.90625,
+     "chartLeft": 67.65625,
+     "lowerLeft": 67.65625,
+     "scroll": 0,
+     "identInk": 256.734375,
+     "stripLeft": 266.8125,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol",
+      "liq"
+     ]
+    },
+    "shots": [
+     "1099-closed.png",
+     "1099-open.png",
+     "1099-shut.png"
+    ]
+   },
+   {
+    "width": 1440,
+    "want": "full",
+    "state": "ready",
+    "closed": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "false",
+     "mode": "full",
+     "expand": false,
+     "page": 1920,
+     "railW": 340,
+     "track": 340,
+     "railRight": 261,
+     "chartLeft": 267,
+     "lowerLeft": 267,
+     "scroll": 0,
+     "identInk": 483,
+     "stripLeft": 493.5,
      "symCut": false,
      "tiles": [
       "price",
@@ -152,10 +506,44 @@
       "holders"
      ]
     },
+    "open": null,
+    "shut": null,
     "shots": [
-     "1280-closed.png",
-     "1280-open.png",
-     "1280-shut.png"
+     "1440-closed.png"
+    ]
+   },
+   {
+    "width": 1280,
+    "want": "full",
+    "state": "ready",
+    "closed": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "false",
+     "mode": "full",
+     "expand": false,
+     "page": 1778,
+     "railW": 340,
+     "track": 339.996,
+     "railRight": 250.546875,
+     "chartLeft": 256.296875,
+     "lowerLeft": 256.296875,
+     "scroll": 0,
+     "identInk": 514.03125,
+     "stripLeft": 524.109375,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol"
+     ]
+    },
+    "open": null,
+    "shut": null,
+    "shots": [
+     "1280-closed.png"
     ]
    }
   ]

@@ -1,0 +1,7 @@
+for(let e of o)Fe(e,!Cn.acted());
+Fe=(n,i=!1)=>{if(!r(n))return;let a=H(n),o=t.evmHelper?t.evmHelper(n):g8(n);if(a===null||o===void 0||!jn)return;let s=rt.signal;jn.request(`ct-evm-carry/${n}`,{ifAvailable:!0},async t=>{t!==null&&await jn.request(Xa,{mode:`shared`,signal:s},async()=>{let t=await UP(await e.store());try{let r=await Bhe({chain:n,testnet:!1,pin:a.pin,scope:a.scope,rpcs:a.rpcs,helper:o,round:()=>a.sync.events(s),notes:async()=>t,seed64:e.seed64,held:()=>e.held?e.held():Promise.reject(Error(`no wallet store is open`)),landed:ye(n),signal:s,...i?{idle:o}:{}})
+if(e.idle!==void 0)return await Vhe(e,e.idle,f);let p=$1(f,e.random)[0]
+async function Vhe(e,t,n){let r=[];for(let i of $1(n,e.random)){if(e.signal?.aborted)break;try{if(!i.rest&&await h0(e.helper,e.pin.pool,i.release)!==`buy`)continue;let n=u0(await t(`eth_getBalance`,[i.w,`latest`],e.signal),`the helper's balance`);n>0n&&r.push({w:i.w,end:`idle`,balance:n})}catch{}}return r}
+function Tme(e,t){let n=[];for(let r of e){let e=t(r.chain);if(e===null||r.wei<=0n)continue;let i=f$(r.wei,18,e);i!==null&&n.push({chain:r.chain,address:r.address,role:`fresh`,size:i,state:`RETURNING`})}return n}
+g=e.signed_in&&f7?Tme(f7.evmReturning(),e=>i.get(e)):[]
+evmReturning:()=>[...Pe.values()]

@@ -6,9 +6,12 @@
 //     ($0.0₃12 to $1,234.50, $12.30K to $1.23T), then the crosshair crosses every bar and leaves;
 //   - a resync replaces the bars with fewer, shorter ones (the slot keeps its width);
 //   - on the desktop, the footer's SOL and ETH prices tick through every length under $100,000;
+//   - on the desktop, the token rail's rows (Rail.tsx Row, keyed by slot as the rail keys them) take MCs and 24h changes
+//     of every length in their right-aligned column, as a list refresh hands each slot another token's values (card
+//     rail-and-legend-hold-on-r5: release 178's full rail at 1440 moved that text, live run 44429326442);
 //   - the trade box's Slow counter counts past 10 s inside its centred label.
 // A run passes with zero shifts after the legend's first paint, and only if the values it fed did change length (the
-// close took at least four lengths, SOL at least three), so it cannot pass on values that never moved. A FAIL names
+// close took at least four lengths, SOL at least three, the rail's first MC at least four), so it cannot pass on values that never moved. A FAIL names
 // each shift's element and its rects before and after.
 //   node apps/terminal/test/holds-still/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
@@ -42,6 +45,9 @@ const history = (f) => Array.from({ length: 40 }, (_, i) => bar(i, PRICES[i % PR
 const TICKS = [3, 9, 0, 6, 1, 8, 2, 7, 4, 5, 9, 1, 0, 6];
 const SOL = [151.23, 9.87, 99.87, 1234.5, 23456.78, 0.5, 151.2];
 const ETH = [3456.1, 98.76, 0.99, 34567.8, 3456.1];
+// the rail's MCs ($7 to $999.9M) and 24h changes (▲ 0.12% to ▼ 1234.56%), out of order
+const RAIL_MC = ["1234", "999900000", "45600", "8540000", "136500", "200500000", "7", "33910000", "394200", "2530000"];
+const RAIL_CHG = [12, -123456, 2524, -7, 99999, 350, -1200];
 
 async function build() {
   const { build } = await import("vite");
@@ -133,6 +139,21 @@ try {
       if (log.length) fails.push(`@${w.name} footer: ${log.length} layout shift(s) while SOL and ETH ticked [${shiftsOf(log)}]`);
       if (solLengths.size < 3) fails.push(`@${w.name} footer: SOL took ${solLengths.size} length(s), not every length fed`);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${w.name}-footer.png`) });
+      // the rail's rows (card rail-and-legend-hold-on-r5): each slot takes MCs and changes of every length, as a refresh
+      // that re-orders the list hands a slot another token's values; the right-aligned lines must not move their text
+      await fx({ rail: RAIL_MC.slice(0, 4).map((mc, i) => ({ mc, chg: RAIL_CHG[i] })) });
+      await settle(page);
+      const railBefore = await page.evaluate(() => window.__ct.shiftLog.length);
+      const mcLengths = new Set();
+      for (let s = 1; s < RAIL_MC.length; s++) {
+        await fx({ rail: [0, 1, 2, 3].map((i) => ({ mc: RAIL_MC[(s + i * 3) % RAIL_MC.length], chg: RAIL_CHG[(s + i) % RAIL_CHG.length] })) });
+        await settle(page);
+        mcLengths.add([...((await page.locator(".tkr-mc").first().textContent()) ?? "")].length);
+      }
+      const railLog = await page.evaluate((n) => window.__ct.shiftLog.slice(n), railBefore);
+      if (railLog.length) fails.push(`@${w.name} rail: ${railLog.length} layout shift(s) while the rows' MC and change took values of every length [${shiftsOf(railLog)}]`);
+      if (mcLengths.size < 4) fails.push(`@${w.name} rail: the first row's MC took ${mcLengths.size} length(s), not every length fed`);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${w.name}-rail.png`) });
     }
     // the trade box's Slow counter, 6.0s to 12.0s: its label is centred, so a longer counter would move it
     {
@@ -158,4 +179,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} check(s): the legend and the footer did not hold still`);
   process.exit(1);
 }
-console.log(`PASS the legend (Price and MCap, ticks, crosshair, resync) and the footer held still at 390 and 1440, zero layout shifts${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS the legend (Price and MCap, ticks, crosshair, resync), the footer and the rail's rows held still at 390 and 1440, zero layout shifts${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

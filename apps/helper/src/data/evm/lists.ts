@@ -30,6 +30,7 @@ import { LOGOS } from "../logo.ts";
 import { dec, LIST_MAX, ROW_FIELDS, SERVED_MAX, SERVED_MS, servedTokens, text, type ListsAnswer, type Row } from "../solana/lists.ts";
 import { LIST_FLOOR, throttledUntil, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
 import { evmThrottleS, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
+import { BATCH_SIZES, batchRefusal, readWords, type BatchSizes } from "../../rpc/batch-sizes.ts";
 
 export const EVM_CHAINS = ["base", "robinhood"] as const;
 export type EvmChain = (typeof EVM_CHAINS)[number];
@@ -138,7 +139,11 @@ async function agreedOnList<T>(urls: readonly string[], n: number, ask: (url: st
  *  post, three posts out at once (limits.ts PROVIDER_PACE). */
 /** rpc.sentio.xyz/base takes 5 (card evm-spare-list-green: a batch of 10 answered HTTP 429 code 8 "JSON-RPC batch exceeds
  *  the maximum of 5 requests", batches of 5 answered, 2026-11-06 22:45Z from the Mac). */
-export const BATCH_MAX: Readonly<Record<string, number>> = { "https://base.drpc.org": 3, "https://robinhood.drpc.org": 3, "https://robinhood.daybreak-rpc.network": 1, "https://rpc.sentio.xyz/base": 5 };
+/** base.api.pocket.network and robinhood.api.pocket.network take 5 (card helper-rpc-batch-learns-reader-size: a batch of 6
+ *  to 1,000 eth_chainId answered HTTP 413 "request entity too large: the batch has more items than this window allows",
+ *  2026-11-18 20:41Z and 23:20Z from the Mac), so their first batch is no refusal; any other size a provider refuses is
+ *  kept in the helper's one map (rpc/batch-sizes.ts) as batch() reads it. */
+export const BATCH_MAX: Readonly<Record<string, number>> = { "https://base.drpc.org": 3, "https://robinhood.drpc.org": 3, "https://robinhood.daybreak-rpc.network": 1, "https://rpc.sentio.xyz/base": 5, "https://base.api.pocket.network": 5, "https://robinhood.api.pocket.network": 5 };
 
 /** One stretch of a chain's fixed block clock: from block `fromBlock`, made at `atMs`, a block every `blockMs`. */
 export type ClockEra = { fromBlock: number; atMs: number; blockMs: number };
@@ -498,8 +503,12 @@ export function heldFetch(doFetch: Fetch, holds: ProviderHolds, now: () => numbe
     }
     const r = await doFetch(url, init);
     if (r.status === 429) {
+      // a batch refused for its size (Sentio's 429 code 8, card helper-rpc-batch-learns-reader-size) is no throttle: it
+      // holds nothing, and batch() sends it again in parts
+      const text = calls > 1 ? await readWords(r) : undefined;
+      if (batchRefusal(429, text, calls) !== undefined) return new Response(text, { status: 429, headers: r.headers });
       holds.hold(url, upstreamRetryAfterS(r.headers, now()));
-      return r;
+      return text === undefined ? r : new Response(text, { status: 429, headers: r.headers });
     }
     if (r.status !== 200) return r;
     const text = await r.text();
@@ -514,29 +523,39 @@ export function heldFetch(doFetch: Fetch, holds: ProviderHolds, now: () => numbe
   };
 }
 
-/** JSON-RPC batches to one provider (BATCH_MAX calls each, one after another): each call's `result`, by position;
- *  undefined for any that failed. A provider that refuses a batch (its HTTP 429, a JSON-RPC -32005 or limit message) is
+/** JSON-RPC batches to one provider (BATCH_MAX calls each, or fewer where it refused a batch for its size: the helper's
+ *  one map, rpc/batch-sizes.ts; one after another): each call's `result`, by position; undefined for any that failed. A
+ *  batch refused for its size (batchRefusal, the kit's rule) is sent again as parts of the size kept from then on (card
+ *  helper-rpc-batch-learns-reader-size). A provider that refuses a batch (its HTTP 429, a JSON-RPC -32005 or limit message) is
  *  sent none of the batches after it: they fail as refused reads, so the caller's third provider answers (card
  *  helper-rpc-hold-queued: the chain's own Robinhood RPC, the first of MAKER_RPCS, answered the helper box's address
  *  429 on 10 of 10 probes at 2026-11-04 18:53Z, and another address 200 on 6 of 6). */
-export async function batch(doFetch: Fetch, url: string, calls: { method: string; params: unknown[] }[]): Promise<unknown[]> {
-  const max = BATCH_MAX[url] ?? 10;
+export async function batch(doFetch: Fetch, url: string, calls: { method: string; params: unknown[] }[], sizes: BatchSizes = BATCH_SIZES): Promise<unknown[]> {
   const out: unknown[] = [];
   let refused = false;
-  for (let i = 0; i < calls.length; i += max) {
-    const part = calls.slice(i, i + max);
+  for (let i = 0; i < calls.length; ) {
+    const part = calls.slice(i, i + Math.min(BATCH_MAX[url] ?? 10, sizes.most(url)));
     if (refused) {
       out.push(...part.map(() => undefined));
+      i += part.length;
       continue;
     }
     const got = await batchOnce(doFetch, url, part);
+    // refused for its size: the same calls again, in the smaller parts kept from now (a part of one call never is one)
+    if (got.size !== undefined) {
+      sizes.refused(url, part.length, got.size);
+      continue;
+    }
     refused = got.refused;
     out.push(...got.out);
+    i += part.length;
   }
   return out;
 }
 
-async function batchOnce(doFetch: Fetch, url: string, calls: { method: string; params: unknown[] }[]): Promise<{ out: unknown[]; refused: boolean }> {
+/** One post of `calls`: each call's result by position, `refused` for a throttle, `size` (the maximum named, or null)
+ *  where the provider refused the post for its size (batchRefusal). */
+async function batchOnce(doFetch: Fetch, url: string, calls: { method: string; params: unknown[] }[]): Promise<{ out: unknown[]; refused: boolean; size?: number | null }> {
   const none = { out: calls.map(() => undefined), refused: false };
   if (calls.length === 0) return none;
   try {
@@ -547,12 +566,18 @@ async function batchOnce(doFetch: Fetch, url: string, calls: { method: string; p
       redirect: "error",
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
+    if (calls.length > 1 && r.status >= 400 && r.status < 500) {
+      const said = batchRefusal(r.status, await readWords(r), calls.length);
+      return said === undefined ? { ...none, refused: r.status === 429 } : { ...none, size: said };
+    }
     if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
       await r.body?.cancel();
       return { ...none, refused: r.status === 429 };
     }
     const body = await r.text();
     if (body.length > ANSWER_MAX) return none;
+    const said = batchRefusal(200, body, calls.length);
+    if (said !== undefined) return { ...none, size: said };
     const parsed: unknown = JSON.parse(body);
     const answers = Array.isArray(parsed) ? parsed : [parsed];
     const out: unknown[] = [...none.out];
