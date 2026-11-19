@@ -1647,14 +1647,33 @@ test("P3-7 (w12): a run that ended sent lets go of the decimals it told: the sam
     ctx.route({ out: "1" });
     return { running: true as const, after: Promise.resolve(), answer: () => ({ result: { stage: first ? "sent" : "filled", txs: [] } }) };
   };
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, evmPin: NO_EVM, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
+  // the store as the page sees it, counting its writes of the buy records in flight
+  const costWrites = { now: 0, most: 0 };
+  const watched = new Proxy(w, {
+    get: (t, k) =>
+      k !== "update"
+        ? Reflect.get(t, k)
+        : async (s: "meta", key: string, f: (v: unknown) => unknown) => {
+            if (key !== POSITION_COSTS_KEY) return t.update(s, key, f);
+            costWrites.most = Math.max(costWrites.most, ++costWrites.now);
+            try {
+              return await t.update(s, key, f);
+            } finally {
+              costWrites.now--;
+            }
+          },
+  });
+  const tp = testnetPool({ store: async () => watched, seed64: async () => SEED64.slice() }, { pin: PIN, evmPin: NO_EVM, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b1", sha: "00", progress: () => {}, route: () => {} } as never);
   progresses[0]!("sent");
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b2", sha: "00", progress: () => {}, route: () => {} } as never);
   // the second run's end: its ops record, written after its own early write of W's record (pool-testnet.ts recordedBuy).
   // The first run's early write (its own told decimals, 9) lands before it, so a wait for "a record of W" alone could read
-  // that one (merge queue run 43943288785, 17.6 ms); the record to judge is the one the second run left
+  // that one (merge queue run 43943288785, 17.6 ms); the record to judge is the one the second run left. The page writes
+  // W's record one write at a time in the order asked (pool-testnet.ts inTurn): two in flight, the store's compare-and-set
+  // let the first run's early write, its encrypt ending last, land over the second run's (merge queue run 44467580079)
   await until(async () => (await w.get("ops", "b2")) !== undefined);
+  assert.equal(costWrites.most, 1, "one write of W's record in flight at a time");
   assert.deepEqual(await w.get("meta", POSITION_COSTS_KEY), { [solanaWallet()]: { mint: MINT, received: "1" } }, "no decimals 9 carried from the sent run");
 });
 
