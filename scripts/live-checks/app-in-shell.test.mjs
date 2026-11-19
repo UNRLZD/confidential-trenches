@@ -166,7 +166,7 @@ test("harness: GET /v1/market/lists and /v1/market/token are answered from the r
 // The token page's tape (card app-harness-serves-a-recorded-tape): live's list lands after first paint and holds every
 // trade back past 5 minutes (whole_ms), so About's 5m Buys and Sells switch from the row's counts to the list's; an empty
 // tape never switched them, and a shift only that landing causes never showed on a build.
-test("harness: GET /v1/market/trades answers the recorded tape after TAPE_MS, moved once to its first read, with its reach; About's 5m counts switch to it", async () => {
+test("harness: GET /v1/market/trades answers the recorded tape after TAPE_MS, moved once to its first read, with its reach; About's 5m counts switch to it", async (t) => {
   const { mkdtempSync, copyFileSync, rmSync, readFileSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { harnessRoute, TAPE_MS } = await import("./app-in-shell.mjs");
@@ -178,11 +178,18 @@ test("harness: GET /v1/market/trades answers the recorded tape after TAPE_MS, mo
   copyFileSync(path.join(HERE, "../../apps/terminal/public/_headers"), path.join(dir, "_headers"));
   try {
     const route = await harnessRoute(dir, "signed");
+    // the test's clock: the tape's wait and its move are read on it, never the machine's
+    const NOW = 1_800_000_000_000;
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
     const ask = async (url) => {
       let out = null;
-      const t0 = Date.now();
-      await route({ request: () => ({ url: () => url }), fulfill: async (a) => void (out = { kind: "fulfill", ms: Date.now() - t0, ...a }), abort: async (e) => void (out = { kind: "abort", error: e }) });
-      return { ...out, t0 };
+      const done = route({ request: () => ({ url: () => url }), fulfill: async (a) => void (out = { kind: "fulfill", ...a }), abort: async (e) => void (out = { kind: "abort", error: e }) });
+      t.mock.timers.tick(TAPE_MS - 1);
+      await new Promise((ok) => setImmediate(ok));
+      assert.equal(out, null, "no answer before TAPE_MS");
+      t.mock.timers.tick(1);
+      await done;
+      return out;
     };
     const recorded = rec("helper-trades-mihao-2026-11-19.json").body;
     assert.equal(recorded.trades.length, 50, "the recording holds the page's limit");
@@ -190,12 +197,11 @@ test("harness: GET /v1/market/trades answers the recorded tape after TAPE_MS, mo
     assert.equal(a.kind, "fulfill");
     assert.equal(a.status, 200);
     assert.equal(a.headers["access-control-allow-origin"], APP_HOST);
-    assert.ok(a.ms >= TAPE_MS - 5, `the tape lands after TAPE_MS (${a.ms} ms)`);
     const body = JSON.parse(a.body);
     const trades = toTrades(body);
     assert.ok(trades && trades.length === 50, "every row is of the page's shape");
     const shift = body.as_of_ms - recorded.as_of_ms;
-    assert.ok(Math.abs(body.as_of_ms - a.t0) < 1_000, "moved to its first read's clock");
+    assert.equal(body.as_of_ms, NOW, "moved to its first read's clock");
     assert.equal(body.whole_ms, recorded.whole_ms + shift, "the reach is set and moved with the rows");
     assert.deepEqual(body.trades.map((t) => t.t_ms - shift), recorded.trades.map((t) => t.t_ms), "every row moved by the one shift");
     const b = await ask(TRADES_URL(OPEN_TOKEN.chain, OPEN_TOKEN.id));
