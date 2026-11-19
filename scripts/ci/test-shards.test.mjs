@@ -16,7 +16,9 @@ import {
   e2ePart, e2eParts, listedSeconds, mutantCommands, mutantParts, mutantsPart, packageItems, packageKey, packageParts, packagesPart, runPart, selectedPackages, staleWarning,
   testFilters, typecheckArgs, unnamedMutantFiles, MAX_SWEEP_SECONDS, MUTANT_SECONDS, NEW_PACKAGE_SECONDS, NEW_SWEEP_SECONDS, PACKAGE_PART_BUDGET_SECONDS,
   PACKAGE_SECONDS, PART_BUDGET_SECONDS, STALE_FACTOR, E2E_DIR, E2E_FIXED_SECONDS, E2E_PROVER_SECONDS, E2E_SECONDS, NEW_E2E_SECONDS,
+  E2E_RERUN_BUDGET_S, helperLiveKey, ownHelperRoutes, runE2ePart, runBounded, boundOf, stoppedCode, E2E_BOUND, E2E_BUILD_BOUND_S,
 } from "./test-shards.mjs";
+import { RERUN, pauseMs } from "./live-rerun.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const CI = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
@@ -227,7 +229,7 @@ const PLANTED = {
   "one browser part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1]", "test-browser part 1 of 1 is planned at"],
   "two browser parts": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1, 2]", "test-browser part 1 of 2 is planned at"],
   "a browser matrix that skips a part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1, 3]", "test-browser has no matrix part"],
-  "a browser timeout cut to 10 minutes": [/(\n {2}test-browser:\n(?:.*\n){3} {4}timeout-minutes: )15\n/, "$110\n", "test-browser part 1 of 4 is planned at"],
+  "a browser timeout cut to 10 minutes": [/(\n {2}test-browser:\n(?:.*\n){3} {4}timeout-minutes: )20\n/, "$110\n", "test-browser part 1 of 4 is planned at"],
   "the prover moved to the second part": ["        if: strategy.job-index == 0\n        run: KIT_PROVER_E2E=1", "        if: strategy.job-index == 1\n        run: KIT_PROVER_E2E=1", "test-browser runs the prover in Chromium in a part but the first"],
   "the prover in every part": ["        if: strategy.job-index == 0\n        run: KIT_PROVER_E2E=1", "        run: KIT_PROVER_E2E=1", "test-browser runs the prover in Chromium in a part but the first"],
   "a mutant part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: node)/, "$1TOTAL: 4$2", "test-mutants does not take its part"],
@@ -358,7 +360,8 @@ test("the browser parts: main's list and PR #1029's each plan every part of ci.y
 
 test("planted: the round-robin deal takes PR #1029's list past test-browser (1)'s timeout, as run 44375738505 did", () => {
   // on the matrix of three parts that run had (card app-live-checks-run-on-the-build-before-merge added the fourth)
-  const ci3 = CI.replace(/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1, 2, 3]");
+  // and the 15 minutes it had (card queue-browser-checks-tell-a-helper-miss-from-a-page-fault gave the reruns 20)
+  const ci3 = CI.replace(/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1, 2, 3]").replace(/(\n {2}test-browser:\n(?:.*\n)*? {4}timeout-minutes: )20\n/, "$115\n");
   assert.notEqual(ci3, CI);
   const found = browserBudgetProblems(ci3, PR_1029_E2E, (s, n) => roundRobin(s, n, PR_1029_SECONDS));
   assert.ok(found.some((f) => f.startsWith("test-browser part 1 of 3 is planned at")), JSON.stringify(found));
@@ -924,4 +927,189 @@ test("the packages command line: plan names each of the three steps in exactly o
 test("listedSeconds: a listed time, or NEW_SWEEP_SECONDS for a sweep that has none", () => {
   assert.equal(listedSeconds({ dir: "a", command: "x" }, { "a: x": 7 }), 7);
   assert.equal(listedSeconds({ dir: "a", command: "y" }, { "a: x": 7 }), NEW_SWEEP_SECONDS);
+});
+
+// ---- card queue-browser-checks-tell-a-helper-miss-from-a-page-fault: merge queue group 44547353452 (19 Nov 14:46Z)
+// refused app-trade-box-mount on main's build while the live helper's vendor answered 503. Every test:e2e check that reads
+// the live helper on the build runs through live-rerun's rerun rule; a FAIL fails at once.
+const CHECKS = path.join(ROOT, "scripts/live-checks");
+const checkFiles = () =>
+  execFileSync("git", ["ls-files", "-z", "--", "scripts/live-checks/*.mjs"], { cwd: ROOT, encoding: "utf8" })
+    .split("\0").filter((f) => f && !/\.test\.mjs$/.test(f)).map((file) => ({ file, text: readFileSync(path.join(ROOT, file), "utf8") }));
+const e2eCommands = () => E2E.split("&&").map((c) => c.trim()).slice(1).map((command) => ({ dir: E2E_DIR, name: "terminal", command }));
+/** The test:e2e checks that read the live helper: each was a --build run whose helper went live (r.continue()). */
+const READS_LIVE = ["app-chains-evm-rail", "app-chains-evm", "app-chart-fills-in-its-history", "app-chart-live", "app-discover-live", "app-discover-rows-hold", "app-discover-toolbar", "app-launchpad-badges", "app-near-trading", "app-no-test-token", "app-token-chart", "app-token-rail", "app-token-route", "app-trade-box-mount", "discover-matches-the-main-app"];
+
+test("every test:e2e check that reads the live helper runs through the rerun rule, and no other", () => {
+  const keyed = e2eCommands().map((c) => helperLiveKey(c.command)).filter(Boolean);
+  assert.deepEqual(keyed.toSorted(), READS_LIVE.toSorted());
+  // the checks that read a recorded helper on the build (the harness answers it) run once, as before
+  for (const k of ["app-legend-holds-still", "rail-open-pushes-the-middle", "words-nov8-final", "app-in-shell"]) assert.equal(helperLiveKey(`node ../../scripts/live-checks/${k}.mjs --build dist`), null, k);
+  assert.equal(helperLiveKey("node test/bar10/run.mjs"), null);
+});
+
+test("no live check routes the live helper past helper-misses.mjs; planted: the route this card replaced is refused", () => {
+  assert.deepEqual(ownHelperRoutes(checkFiles()), []);
+  const planted = `if (harness) await ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));`;
+  assert.deepEqual(ownHelperRoutes([{ file: "scripts/live-checks/x.mjs", text: planted }, { file: "y", text: "await liveHelper(ctx, harness);" }]), ["scripts/live-checks/x.mjs"]);
+  assert.deepEqual(ownHelperRoutes([{ file: "z", text: planted.replace("HELPER_HOST", "HELPER_URL") }]), ["z"]);
+  // each check that imports helper-misses.mjs and routes a context routes it through liveHelper
+  for (const f of checkFiles().filter((f) => READS_LIVE.includes(path.basename(f.file, ".mjs")))) assert.match(f.text, /from "\.\/helper-misses\.mjs"/, f.file);
+});
+
+test("the reruns and one bounded stall stay inside test-browser's timeout", () => {
+  const minutes = Number(/\n {2}test-browser:\n(?:.*\n)*? {4}timeout-minutes:\s*(\d+)\s*\n/.exec(CI)?.[1]);
+  const helperBound = Math.max(...e2eCommands().filter((c) => helperLiveKey(c.command)).map((c) => boundOf(c)));
+  const lastPause = Math.min(RERUN.capMs, RERUN.baseMs * 2 ** (RERUN.runs - 2)) / 1000;
+  // a rerun starts only inside the budget, and runs at most its bound after its last pause
+  assert.ok(E2E_RERUN_BUDGET_S + lastPause + helperBound + E2E_FIXED_SECONDS + E2E_PROVER_SECONDS <= minutes * 60, `${E2E_RERUN_BUDGET_S} + ${lastPause} + ${helperBound} + ${E2E_FIXED_SECONDS} + ${E2E_PROVER_SECONDS} > ${minutes * 60}`);
+  for (const [i, p] of e2eParts(E2E, 4).entries()) {
+    // every part's plan fits inside the budget, so a first run is never cut by it
+    assert.ok(p.seconds <= E2E_RERUN_BUDGET_S, `part ${i + 1} planned at ${p.seconds} s`);
+    // the plan and one command stopped at its bound (the 16:06Z stall) fit the job
+    const stall = Math.max(...p.commands.map((c) => boundOf(c) - listedSeconds(c, E2E_SECONDS, NEW_E2E_SECONDS)));
+    assert.ok(p.seconds + stall + E2E_FIXED_SECONDS <= minutes * 60, `part ${i + 1}: ${p.seconds} + ${stall} + ${E2E_FIXED_SECONDS} > ${minutes * 60}`);
+  }
+  assert.ok(pauseMs(RERUN.runs - 2, RERUN, () => 0.999) <= lastPause * 1000);
+  // a bound is never under twice the listed time, nor under the listed time and the floor
+  for (const c of e2eCommands()) assert.ok(boundOf(c) >= E2E_BOUND.factor * listedSeconds(c, E2E_SECONDS, NEW_E2E_SECONDS) && boundOf(c) >= listedSeconds(c, E2E_SECONDS, NEW_E2E_SECONDS) + E2E_BOUND.floorS, c.command);
+  assert.ok(E2E_BUILD_BOUND_S >= 60);
+});
+
+const TRADE_BOX = { dir: E2E_DIR, name: "terminal", command: "node ../../scripts/live-checks/app-trade-box-mount.mjs --build dist" };
+const readLive = (k) => (k === "app-trade-box-mount" ? 'import { liveHelper } from "./helper-misses.mjs";' : null);
+
+test("the 14:46Z case in test-browser: app-trade-box-mount INCONCLUSIVE (the helper's 503) runs again and the part passes on its PASS", async () => {
+  const codes = [3, 0];
+  const asked = [];
+  const out = [];
+  const ran = await runE2ePart([TRADE_BOX], ROOT, (l) => out.push(l), { run: async (c) => (asked.push(c.command), { code: codes.shift(), output: "-- ct-api.unrealized.trade: no answer (/v1/market/token not answered 25.0 s after it was asked)\nINCONCLUSIVE the helper missed 1 answer" }), sleep: async () => {}, read: readLive, seconds: E2E_SECONDS });
+  assert.deepEqual(asked, [TRADE_BOX.command, TRADE_BOX.command]);
+  assert.equal(ran.length, 1);
+  assert.equal(ran[0].ok, true);
+  assert.ok(out.some((l) => /^live-rerun app-trade-box-mount: run 1 of 3 INCONCLUSIVE \(no answer from: ct-api\.unrealized\.trade\)/.test(l)), out.join("\n"));
+  assert.ok(out.some((l) => /^live-rerun app-trade-box-mount: run 2 of 3 ended exit 0 PASS/.test(l)), out.join("\n"));
+});
+
+test("planted: a page fault (exit 1, every helper answer 200) fails the part on the first try, never run again", async () => {
+  let n = 0;
+  const ran = await runE2ePart([TRADE_BOX], ROOT, () => {}, { run: async () => (n++, { code: 1, output: "BAD desktop /desktop: no trade box on the page" }), sleep: async () => assert.fail("never run again"), read: readLive, seconds: E2E_SECONDS });
+  assert.equal(n, 1);
+  assert.equal(ran[0].ok, false);
+  // a crash (exit 2) too
+  const crashed = await runE2ePart([TRADE_BOX], ROOT, () => {}, { run: async () => ({ code: 2, output: "" }), sleep: async () => assert.fail("never run again"), read: readLive, seconds: E2E_SECONDS });
+  assert.equal(crashed[0].ok, false);
+});
+
+test("an INCONCLUSIVE past the part's budget is not run again; three INCONCLUSIVE runs end with a notice, as live-rerun's do", async () => {
+  let t = 0;
+  let n = 0;
+  const out = [];
+  const ran = await runE2ePart([TRADE_BOX], ROOT, (l) => out.push(l), { clock: () => t, run: async () => ((t += (E2E_RERUN_BUDGET_S + 1) * 1000), n++, { code: 3, output: "" }), sleep: async () => {}, read: readLive, seconds: E2E_SECONDS });
+  assert.equal(n, 1);
+  assert.ok(out.some((l) => l.startsWith("::notice title=inconclusive app-trade-box-mount::") && l.includes("no rerun past the part's budget")), out.join("\n"));
+  assert.equal(ran[0].ok, true);
+  let m = 0;
+  const all = [];
+  await runE2ePart([TRADE_BOX], ROOT, (l) => all.push(l), { run: async () => (m++, { code: 3, output: "" }), sleep: async () => {}, read: readLive, seconds: E2E_SECONDS });
+  assert.equal(m, RERUN.runs);
+  assert.ok(all.some((l) => l.startsWith("::notice title=inconclusive app-trade-box-mount::")));
+});
+
+// ---- round 2: merge queue group 44559433373 (PR 1086), test-browser (4) job 135684403606: app-chart-fills-in-its-history
+// started at 15:56:04Z, printed nothing, and the job was cancelled at its 15 minutes at 16:06:26Z, no verdict read.
+// A fixture check in a temp tree: its first run sees the helper's 503 on the token read (helper-misses.mjs watchContext
+// on a stand-in context) and never ends; its next run passes. `miss: false` sees every answer 200 and never ends.
+const MISSES_URL = new URL("../live-checks/helper-misses.mjs", import.meta.url).href;
+function stallTree({ miss }) {
+  const dir = realpath(mkdtempSync(path.join(tmpdir(), "test-shards-stall-")));
+  mkdirSync(path.join(dir, "scripts/live-checks"), { recursive: true });
+  mkdirSync(path.join(dir, E2E_DIR), { recursive: true });
+  writeFileSync(path.join(dir, E2E_DIR, "package.json"), JSON.stringify({ name: "terminal" }));
+  writeFileSync(
+    path.join(dir, "scripts/live-checks/stall-x.mjs"),
+    `import { EventEmitter } from "node:events";
+import { existsSync, writeFileSync } from "node:fs";
+import { watchContext } from ${JSON.stringify(MISSES_URL)};
+const once = ${JSON.stringify(path.join(dir, "ran-once"))};
+if (existsSync(once)) { console.log("live-check stall-x: PASS"); process.exit(0); }
+writeFileSync(once, "");
+const ctx = new EventEmitter();
+ctx.close = async () => {};
+watchContext(ctx);
+const req = { url: () => "https://ct-api.unrealized.trade/v1/market/token?chain=solana", resourceType: () => "fetch", failure: () => null };
+ctx.emit("request", req);
+ctx.emit("response", { request: () => req, status: () => ${miss ? 503 : 200}, headers: () => ({ "access-control-allow-origin": "https://ct-app.unrealized.trade" }) });
+console.log("watching");
+setInterval(() => {}, 1000);
+`,
+  );
+  return dir;
+}
+const STALL = { dir: E2E_DIR, name: "terminal", command: "node ../../scripts/live-checks/stall-x.mjs" };
+const readStall = (k) => (k === "stall-x" ? 'import { watchContext } from "./helper-misses.mjs";' : null);
+
+test("the 16:06Z shape: a check that never ends is stopped at its bound, reads INCONCLUSIVE on the helper's miss, runs again and passes", async () => {
+  const dir = stallTree({ miss: true });
+  try {
+    const out = [];
+    const ran = await runE2ePart([STALL], dir, (l) => out.push(l), { bound: () => 3, read: readStall, sleep: async () => {}, seconds: E2E_SECONDS });
+    assert.equal(ran[0].ok, true, out.join("\n"));
+    assert.ok(out.some((l) => l.startsWith("== past its bound of 3 s: apps/terminal: node ../../scripts/live-checks/stall-x.mjs")), out.join("\n"));
+    assert.ok(out.some((l) => /^live-rerun stall-x: run 1 of 3 INCONCLUSIVE \(no answer from: ct-api\.unrealized\.trade\)/.test(l)), out.join("\n"));
+    assert.ok(out.some((l) => /^live-rerun stall-x: run 2 of 3 ended exit 0 PASS/.test(l)), out.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the 16:06Z shape with every helper answer 200: stopped at its bound, it FAILs at once and is never run again", async () => {
+  const dir = stallTree({ miss: false });
+  try {
+    const out = [];
+    const ran = await runE2ePart([STALL], dir, (l) => out.push(l), { bound: () => 3, read: readStall, sleep: async () => assert.fail("never run again"), seconds: E2E_SECONDS });
+    assert.equal(ran[0].ok, false);
+    assert.ok(out.some((l) => /^live-rerun stall-x: exit 1 FAIL, never run again/.test(l)), out.join("\n"));
+    assert.ok(out.some((l) => /^== failed \(fail, exit 1\) in [\d.]+ s after 1 run: /.test(l)), out.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("any other command that never ends is stopped at its bound with its process group and fails", async () => {
+  const dir = stallTree({ miss: false });
+  try {
+    const pidFile = path.join(dir, "child.pid");
+    // a shell that starts a child of its own, both in the group the bound stops
+    const c = { dir: E2E_DIR, name: "terminal", command: `node -e "require('fs').writeFileSync('${pidFile}', String(process.pid)); setInterval(() => {}, 1000)"` };
+    const out = [];
+    const ran = await runE2ePart([c], dir, (l) => out.push(l), { bound: () => 2, read: () => null, seconds: E2E_SECONDS });
+    assert.equal(ran[0].ok, false);
+    assert.ok(out.some((l) => /^== failed \(stopped at its bound of 2 s\) in [\d.]+ s: /.test(l)), out.join("\n"));
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    assert.throws(() => process.kill(pid, 0), /ESRCH/, "the command's process outlived its bound");
+    // a command inside its bound is untouched
+    const quick = await runBounded({ dir: E2E_DIR, command: "node -e \"console.log('x')\"" }, dir, 30, { capture: true, write: () => {} });
+    assert.deepEqual([quick.code, quick.stopped, quick.output.trim()], [0, false, "x"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a stopped command's code: INCONCLUSIVE only on helper-misses.mjs's stopped line", () => {
+  assert.equal(stoppedCode("-- ct-api.unrealized.trade HTTP 503: /v1/market/token\nINCONCLUSIVE stopped at its bound; the helper missed 1 answer"), 3);
+  assert.equal(stoppedCode("BAD stopped at its bound with no helper miss seen"), 1);
+  assert.equal(stoppedCode("INCONCLUSIVE no load in 6 picks was first drawn filling"), 1);
+  assert.equal(stoppedCode(""), 1);
+});
+
+// card app-chart-check-inside-its-bound: merge group 44571987928, test-browser (1) job 135729331112, 19 Nov 17:01-17:05Z:
+// app-chart-fills-in-its-history ran past its bound of 238 s while the helper said filling (TRIES picks with no deadline
+// of their own). A check whose walk has its own deadline (an exported RUN_MS) ends it with 30 s of its bound left for its
+// browser's launch, the build's serving and its close.
+test("a check's own run deadline (RUN_MS) ends inside its bound with 30 s to spare: app-chart-fills-in-its-history", async () => {
+  const c = { dir: E2E_DIR, command: "node ../../scripts/live-checks/app-chart-fills-in-its-history.mjs --build dist" };
+  const { RUN_MS } = await import("../live-checks/app-chart-fills-in-its-history.mjs");
+  assert.equal(boundOf(c), 238, "the bound the check's RUN_MS note cites");
+  assert.ok(RUN_MS / 1000 + 30 <= boundOf(c), `RUN_MS ${RUN_MS / 1000} s against the bound ${boundOf(c)} s`);
 });

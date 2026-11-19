@@ -11,7 +11,7 @@ import { fromLogs } from "./decode.ts";
 import { joinBars } from "../candles.ts";
 import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, SYSVAR_CLOCK, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
 import { createRpc } from "../../rpc/rpc.ts";
-import { b58encode } from "./lists.ts";
+import { b58decode, b58encode } from "./lists.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"), "utf8")) as {
@@ -51,6 +51,13 @@ const rpcFetch = (c: Chain, mints: Record<string, number>) => async (_url: strin
   throw new Error(`unexpected ${req.method} ${String(req.params[0])}`);
 };
 const settle = () => new Promise((r) => setTimeout(r, 20));
+/** Card app-chart-check-inside-its-bound: `n` successful signatures older than `slot` whose transactions hold no trade,
+ *  and their bodies: a first walk's page made full by them has not reached the mint's first signature (a page shorter
+ *  than its limit says the list ran out, and its tape is then whole from the first signature). */
+const noTrades = (n: number, slot: number, tag: string) => {
+  const list = Array.from({ length: n }, (_, i) => ({ signature: `${tag}${String(i).padStart(4, "0")}${"1".repeat(80 - tag.length)}`.slice(0, 88), slot: slot - 1 - i, err: null }));
+  return { list, txs: Object.fromEntries(list.map((x) => [x.signature, { slot: x.slot, meta: { logMessages: [] } }])) };
+};
 
 test("Pyth's SOL/USD account is taken only whole: owner, full verification, feed, exponent, price, fresh", () => {
   assert.equal(pythSolUsd(PYTH_RECEIVER, pyth(9_342_267_796n, 1_000), 1_010), 93_422_677_960_000_000_000n);
@@ -976,6 +983,131 @@ test("card helper-listed-charts-own-reads: bars of ours with the history before 
   assert.deepEqual([full.candles.length, full.src, full.filling], [3, "chain,geckoterminal", undefined]);
 });
 
+// card app-chart-check-inside-its-bound: live helper 207, 19 Nov 17:26-17:30Z, EHFrCL6p...pump had 7 signatures on
+// public RPC and its trades answered whole_ms 0, yet its 1m chart (limit 300) said filling for 4 min 21 s: a tape that
+// holds every trade from the mint's first signature asked the history anyway (its refusal said filling) and queued a read
+// back of nothing behind other coins' (filling until its turn). The same coin with its read back to the first signature
+// done is whole too, whatever the history answers.
+test("card app-chart-check-inside-its-bound: a chart whose tape holds every trade from the mint's first signature is the coin's whole chart: no history asked, no read back, never filling, whatever the history answers (red at 0092e5692: filling while the history refused)", async () => {
+  // its whole life: 3 signatures, every one read by the first walk
+  const f = botFlood(3, () => true);
+  let asked = 0;
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: f.sigs, txs: f.txs, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 }),
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async () => (asked++, { status: 429, body: '{"error":{"code":"rate_limited"}}', retryAfterS: 30 }),
+    tickMs: 0,
+  });
+  const tape = JSON.parse((await t.trades(MINT, 50)).body);
+  await settle();
+  assert.equal(JSON.parse((await t.trades(MINT, 50)).body).whole_ms, 0, "the tape: every trade from the first signature");
+  asked = 0;
+  const a = JSON.parse((await t.candles(MINT, "1m", null, 300)).body);
+  await settle();
+  const b = JSON.parse((await t.candles(MINT, "1m", null, 300)).body);
+  t.stop();
+  assert.ok(tape.trades.length > 0);
+  assert.ok(a.candles.length > 0, "its bars");
+  assert.deepEqual([a.filling, a.src, b.filling, asked], [undefined, "chain", undefined, 0], "whole: not filling, src chain, no history asked");
+  assert.equal(f.asked.filter((l) => l === 1_000).length, 0, "no read back page asked");
+});
+
+test("card app-chart-check-inside-its-bound: a read back that reaches the mint's first signature leaves a whole chart: not filling once done, whatever the history answers; a walk that left a transaction unread is no whole chart (filling while the history refuses)", async () => {
+  for (const unread of [false, true]) {
+    // 40 successful signatures: the walk reads the newest 30, the read back the 10 before them, to the first
+    const f = botFlood(40, () => true);
+    const missing = f.list[5]!.signature;
+    const txs = unread ? { ...f.txs, [missing]: null } : f.txs;
+    const t = createSolanaTrades({
+      fetch: rpcFetch({ sigs: f.sigs, txs, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 }),
+      now: () => TS * 1000,
+      listed: async (m) => m === MINT,
+      rpcs: ["https://rpc.test"],
+      source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+      history: async () => ({ status: 429, body: '{"error":{"code":"rate_limited"}}', retryAfterS: 30 }),
+      tickMs: 0,
+    });
+    await t.trades(MINT, 50);
+    await settle();
+    let a = JSON.parse((await t.candles(MINT, "1m", null, 300)).body);
+    assert.equal(a.filling, true, "reading back: filling");
+    for (let i = 0; i < 50 && f.asked.filter((l) => l === 1_000).length === 0; i++) await settle();
+    for (let i = 0; i < 10; i++) await settle();
+    a = JSON.parse((await t.candles(MINT, "1m", null, 300)).body);
+    t.stop();
+    assert.equal(a.filling, unread ? true : undefined, unread ? "a transaction the walk left unread: still short while the history refuses" : "read back to the first signature: whole");
+  }
+});
+
+// card app-chart-check-inside-its-bound: live helper 207, 19 Nov 17:26-17:30Z, ygq5gP...pump (10 trades before the
+// walk's newest 30) said filling 3 min 18 s and EHFrCL...pump (an empty page to read back) 4 min 21 s: the read backs ran
+// BACK_PARALLEL at once, each to its end (up to BACK_TX_MAX transactions), the rest queued behind them. Their lanes are
+// now taken a step at a time (a signature page, a TX_PARALLEL chunk), in the order asked.
+test("card app-chart-check-inside-its-bound: a small read back asked behind BACK_PARALLEL large ones is done while they still read: their lanes go a step at a time, in turn (red at 0092e5692: queued until one large read back ended)", async () => {
+  const remint = (body: typeof BUY.result, mint: Buffer) => {
+    const m = Buffer.from(b58decode(MINT)!);
+    const logMessages = body.meta.logMessages.map((l) => {
+      if (!l.startsWith("Program data: ")) return l;
+      const b = Buffer.from(l.slice(14), "base64");
+      const i = b.indexOf(m);
+      if (i >= 0) mint.copy(b, i);
+      return `Program data: ${b.toString("base64")}`;
+    });
+    return { ...body, meta: { ...body.meta, logMessages } };
+  };
+  const coin = (n: number, tag: string, body: unknown) => {
+    const list = Array.from({ length: n }, (_, i) => ({ signature: `${tag}${String(i).padStart(5, "0")}`, slot: 465_000_000 - i, err: null }));
+    return { list, txs: Object.fromEntries(list.map((x) => [x.signature, body])) };
+  };
+  const big = [1, 2].map((k) => {
+    const bytes = Buffer.alloc(32, k + 10);
+    return { mint: b58encode(bytes), ...coin(1_030, `big${k}`, remint(BUY.result, bytes)) };
+  });
+  const small = { mint: MINT, ...coin(31, "small", BUY.result) };
+  const coins = [...big, small];
+  const by = new Map(coins.map((c) => [c.mint, c]));
+  const txs = Object.assign({}, ...coins.map((c) => c.txs)) as Record<string, unknown>;
+  const base = rpcFetch({ sigs: () => [], txs, price: 9_342_267_796n, pub: TS, slot: 100 }, Object.fromEntries(coins.map((c) => [c.mint, 6])));
+  const t = createSolanaTrades({
+    fetch: async (url: string, init: RequestInit) => {
+      const req = JSON.parse(String(init.body)) as { method: string; params: [string, Record<string, unknown>] };
+      if (req.method === "getSignaturesForAddress") {
+        const c = by.get(req.params[0])!;
+        const q = req.params[1];
+        const from = q.before === undefined ? 0 : c.list.findIndex((s) => s.signature === q.before) + 1;
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: c.list.slice(from, from + (q.limit as number)) }), { status: 200 });
+      }
+      // a large coin's transaction takes a few ms, as an RPC's does
+      if (req.method === "getTransaction" && String(req.params[0]).startsWith("big")) await new Promise((r) => setTimeout(r, 3));
+      return base(url, init);
+    },
+    now: () => TS * 1000,
+    listed: async (m) => by.has(m),
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async () => ({ status: 404, body: '{"error":{"code":"not_found"}}' }),
+    tickMs: 0,
+  });
+  const chart = async (m: string) => JSON.parse((await t.candles(m, "1m", null, 300)).body) as { filling?: boolean };
+  for (const c of coins) await t.trades(c.mint, 50);
+  await settle();
+  // the two large read backs asked first, then the small one
+  for (const c of big) assert.equal((await chart(c.mint)).filling, true);
+  await settle();
+  let s = await chart(small.mint);
+  for (let i = 0; i < 100 && s.filling === true; i++) {
+    await settle();
+    s = await chart(small.mint);
+  }
+  const bigs = await Promise.all(big.map((c) => chart(c.mint)));
+  t.stop();
+  assert.equal(s.filling, undefined, "the small read back done");
+  assert.deepEqual(bigs.map((x) => x.filling), [true, true], "while both large ones still read");
+});
+
 // card helper-listed-charts-own-reads round 3: a listed coin with no vendor bars charts from its own signatures read back.
 // GTA6 (2gVNeu8d...pump), read 16 Nov 00:37Z: a month old, 1,557 trades a day on PumpSwap, GeckoTerminal names no top
 // pool and its pool's OHLCV is empty, and the deployed helper answered 1 bar, src chain, not filling: our walk reads the
@@ -1112,7 +1244,9 @@ test("card helper-listed-charts-own-reads: a listed coin's first chart read with
   let walked = false;
   let release = () => undefined as void;
   const gate = new Promise<void>((r) => (release = r));
-  const fast = rpcFetch({ sigs: () => [{ signature: BUY.signature, slot: 465_000_000, err: null }], txs: { [BUY.signature]: BUY.result }, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  // a coin older than the walk: its newest COLD_SIGS signatures, the buy and 29 with no trade, not its first
+  const older = noTrades(COLD_SIGS - 1, 465_000_000, "older");
+  const fast = rpcFetch({ sigs: (p) => (p.before === undefined ? [{ signature: BUY.signature, slot: 465_000_000, err: null }, ...older.list] : []), txs: { [BUY.signature]: BUY.result, ...older.txs }, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
   const held = [[TS - 7_200, "1", "1", "1", "1", "5"], [TS - 3_600, "1", "1", "1", "1", "5"]];
   const t = createSolanaTrades({
     fetch: async (url, init) => {
@@ -1387,10 +1521,13 @@ test("card sol-tape-in-order: a walk's transaction answered with no block time, 
 test("card sol-tape-in-order: a read back's transaction answered with no block time, its signature listed with none, is dated by its slot's block time: its bar is its own minute, never the read's (red at c775de255: the minute it was read)", async () => {
   const orca = TO.txs["orca-older"]!;
   const dlmm = TO.txs["dlmm-newer"]!;
-  // the walk holds the DLMM trade; the read back before it finds the Orca one, answered with no block time
+  // the walk holds the DLMM trade (its page full with 29 that hold no trade, so not the mint's first); the read back
+  // before them finds the Orca one, answered with no block time
+  const older = noTrades(COLD_SIGS - 1, TO_SLOT + 1, "quiet");
+  const oldest = older.list.at(-1)!.signature;
   const c = orderChain({
-    sigs: (p) => (p.before === undefined ? [{ signature: dlmm.signature, slot: TO_SLOT, err: null, blockTime: TO_BLOCK }] : p.before === dlmm.signature ? [{ signature: orca.signature, slot: TO_SLOT, err: null }] : []),
-    txs: { [orca.signature]: { ...orca.result, blockTime: null } },
+    sigs: (p) => (p.before === undefined ? [{ signature: dlmm.signature, slot: TO_SLOT, err: null, blockTime: TO_BLOCK }, ...older.list.map((x) => ({ ...x, slot: TO_SLOT, blockTime: TO_BLOCK }))] : p.before === oldest ? [{ signature: orca.signature, slot: TO_SLOT, err: null }] : []),
+    txs: { [orca.signature]: { ...orca.result, blockTime: null }, ...Object.fromEntries(Object.entries(older.txs).map(([k, v]) => [k, { ...v, slot: TO_SLOT }])) },
     blockTimes: { [TO_SLOT]: TO_BLOCK },
     noHistory: true,
   });

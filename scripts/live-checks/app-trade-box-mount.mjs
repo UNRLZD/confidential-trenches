@@ -15,7 +15,7 @@
 // After: app
 // Bundle: out a browser
 //   node scripts/live-checks/app-trade-box-mount.mjs [--build <dir>] [--shots <dir>] [--record <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (--build: a FAIL while the helper missed an answer, helper-misses.mjs)
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell, signed out (app-in-shell.mjs harnessRoute
 // "tap"), the helper still answered live; --record writes what the run read, so the check's test can replay it through judge().
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
@@ -27,6 +27,7 @@ import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { PATH } from "./app-sell-mount.mjs";
 import { count, usd } from "../../apps/terminal/src/screens/discover/format.ts";
 import { named } from "./record-names.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
 
 const KEY = "app-trade-box-mount";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -247,7 +248,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
     for (const [i, w] of LOADS.entries()) {
       const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark" });
       // the harness answers APP_HOST's own files and the shell; the helper is the live one
-      if (harness) await ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
+      if (harness) await liveHelper(ctx, harness);
       const page = await ctx.newPage();
       // the page reads its token again while the row is filling (and on its own poll): the grid is held to the last
       // answer the page had when it was measured (`seen`), not to the first
@@ -339,11 +340,14 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
-    const { ok, lines } = judge(rec);
+    const { ok: judged, lines } = judge(rec);
     for (const l of lines) console.log(l);
+    // a FAIL in a run where the helper missed an answer the page asked for is INCONCLUSIVE (helper-misses.mjs)
+    const miss = helperVerdict(judged ? "PASS" : "FAIL");
+    for (const l of miss.lines) console.log(l);
     console.log(`screenshots: ${rec.shots}`);
-    console.log(`CARD ${KEY} / live: ${ok ? "PASS" : "FAIL"}`);
-    process.exit(ok ? 0 : 1);
+    console.log(`CARD ${KEY} / live: ${miss.verdict}`);
+    process.exit(HELPER_EXIT[miss.verdict]);
   } catch (e) {
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);
     process.exit(2);
