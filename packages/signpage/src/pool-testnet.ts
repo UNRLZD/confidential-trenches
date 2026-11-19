@@ -2412,6 +2412,21 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // each buy's W and the decimals of the token it received, told by the run (pool-buy.ts outDecimals) until its records
   // are written; a W takes one buy only
   const boughtDecimals = new Map<string, number>();
+  // each W's buy record writes on this page, one at a time in the order they were asked (card
+  // signpage-sent-run-lets-go-every-time): the store's update is a compare-and-set loop on an encrypted value, so of two
+  // writes in flight the one whose encrypt ends last commits last, and it sets W's record from its own run's facts. An
+  // earlier run's early write (a run that ended "sent", with the decimals it told) could so land over the next run's
+  // records on that W; queued, it never does. A write that fails lets the next one go
+  const wWrites = new Map<string, Promise<void>>();
+  const inTurn = (w: string | undefined, write: () => Promise<void>): Promise<void> => {
+    if (w === undefined) return write().catch(() => {});
+    const before = wWrites.get(w);
+    // none in flight: the write starts now, as an unqueued one does
+    const p = (before === undefined ? write() : before.then(write)).catch(() => {});
+    wWrites.set(w, p);
+    void p.then(() => wWrites.get(w) === p && wWrites.delete(w));
+    return p;
+  };
   // each W a buy on this page is running for, from its route's W to its records written (card
   // closed-positions-show-every-trade): the rebuild of trades reads no such W, so it never writes an op beside the one the
   // run is about to write
@@ -2889,9 +2904,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (done || facts.wallet === undefined || facts.out === undefined) return;
       facts.decimals ??= boughtDecimals.get(facts.wallet);
       const f = { ...facts };
-      early = (async () => recordBoughtOut((await page.store()) as unknown as BuyRecordStore, f))()
-        .catch(() => {})
-        .finally(() => positions.refresh());
+      early = inTurn(f.wallet, async () => recordBoughtOut((await page.store()) as unknown as BuyRecordStore, f)).finally(() => positions.refresh());
     };
     const finish = (end: Parameters<typeof recordPoolBuy>[3]): void => {
       if (done) return;
@@ -2902,10 +2915,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (end !== null && "result" in end && end.result.stage !== "not_landed") awaited.set(facts.wallet, ctx.id);
       }
       const ran = facts.wallet;
-      void early
-        .then(async () => recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end))
-        .catch(() => {})
-        .finally(() => (ran !== undefined && runningBuys.delete(ran), positions.refresh(), fillTrades()));
+      // after this run's early write (in W's turn before it), and every earlier write on W
+      void inTurn(ran, async () => {
+        await early;
+        await recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end);
+      }).finally(() => (ran !== undefined && runningBuys.delete(ran), positions.refresh(), fillTrades()));
     };
     const txsOf = (): TxRef[] => {
       const a = r && "answer" in r ? (r.answer() as { result?: { txs?: TxRef[] } }) : null;
