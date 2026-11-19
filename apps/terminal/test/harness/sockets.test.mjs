@@ -8,6 +8,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { harnessProblem } from "./held.mjs";
 
 const TERMINAL = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const REPO = path.resolve(TERMINAL, "../..");
@@ -22,42 +23,19 @@ function e2eFiles() {
     .map((w) => path.resolve(TERMINAL, w[1]));
 }
 
-const IMPORTS_HARNESS = /^import \{[^}]*\blaunchHarnessBrowser\b[^}]*\} from "\.\.\/harness-sockets\.mjs";$/m;
-const LAUNCHES = /\blaunch(?:Harness)?Browser\b|from "(?:\.\.\/browsers\.mjs|playwright[^"]*)"/;
-const LOCAL_IMPORT = /(?:\bfrom\s+|\bimport\s*\(?\s*)"(\.\.?\/[^"]+\.mjs)"/g;
-
-/**
- * Why a live check the e2e list runs could open a browser that routes no socket, or null. A check that launches a
- * browser imports the harness one; a check that launches none of its own (app-release-sri, words-nov8-final read files,
- * app-chains-evm runs two other checks' collects) is held through every local module it imports that does.
- */
-function harnessProblem(file, read = (f) => readFileSync(f, "utf8")) {
-  const rel = path.relative(REPO, file);
-  const text = read(file);
-  if (LAUNCHES.test(text)) return IMPORTS_HARNESS.test(text) ? null : `${rel} runs with --harness and never starts the harness browser`;
-  for (const [, dep] of text.matchAll(LOCAL_IMPORT)) {
-    const d = path.resolve(path.dirname(file), dep);
-    const t = read(d);
-    if (LAUNCHES.test(t) && !IMPORTS_HARNESS.test(t)) return `${rel} runs with --harness and imports ${path.relative(REPO, d)}, which launches a browser and never starts the harness browser`;
-  }
-  return null;
-}
+// the planted live checks: test/harness/planted/<name>.txt read as <name>.mjs, text a default test never imports
+const PLANTED = path.join(TERMINAL, "test/harness/planted");
+const rel = (f) => path.relative(REPO, f);
 
 test("harnessProblem: refuses a check that launches a bare browser, itself or through a module it imports", () => {
-  const at = (n) => path.join(REPO, "scripts/live-checks", n);
-  const BARE = 'import { launchBrowser } from "../browsers.mjs";\nawait launchBrowser("chromium");\n';
-  const HELD = 'import { launchBrowser } from "../browsers.mjs";\nimport { launchHarnessBrowser } from "../harness-sockets.mjs";\nawait (build ? launchHarnessBrowser : launchBrowser)("chromium");\n';
-  const tree = (files) => (f) => {
-    const t = files[path.basename(f)];
-    if (t === undefined) throw new Error(`no ${f}`);
-    return t;
-  };
-  assert.equal(harnessProblem(at("a.mjs"), tree({ "a.mjs": HELD })), null);
-  assert.match(harnessProblem(at("a.mjs"), tree({ "a.mjs": BARE })), /a\.mjs runs with --harness and never starts the harness browser/);
-  assert.equal(harnessProblem(at("a.mjs"), tree({ "a.mjs": 'import { readFileSync } from "node:fs";\n' })), null);
-  assert.equal(harnessProblem(at("a.mjs"), tree({ "a.mjs": 'import * as d from "./d.mjs";\n', "d.mjs": HELD })), null);
-  assert.match(harnessProblem(at("a.mjs"), tree({ "a.mjs": 'import * as d from "./d.mjs";\n', "d.mjs": BARE })), /imports scripts\/live-checks\/d\.mjs, which launches a browser/);
-  assert.match(harnessProblem(at("a.mjs"), tree({ "a.mjs": 'const d = await import("./d.mjs");\n', "d.mjs": BARE })), /imports scripts\/live-checks\/d\.mjs/);
+  const at = (n) => path.join(PLANTED, `${n}.mjs`);
+  const read = (f) => readFileSync(path.join(PLANTED, path.basename(f, ".mjs") + ".txt"), "utf8");
+  assert.equal(harnessProblem(at("held"), rel, read), null);
+  assert.equal(harnessProblem(at("bare"), rel, read), "apps/terminal/test/harness/planted/bare.mjs runs with --harness and never starts the harness browser");
+  assert.equal(harnessProblem(at("none"), rel, read), null);
+  assert.equal(harnessProblem(at("via-held"), rel, read), null);
+  assert.match(harnessProblem(at("via-bare"), rel, read), /via-bare\.mjs runs with --harness and imports apps\/terminal\/test\/harness\/planted\/bare\.mjs, which launches a browser/);
+  assert.match(harnessProblem(at("via-bare-dynamic"), rel, read), /via-bare-dynamic\.mjs runs with --harness and imports apps\/terminal\/test\/harness\/planted\/bare\.mjs/);
 });
 
 test("every harness run starts the harness browser: no bare launchBrowser in a run, and every --harness check can", () => {
@@ -77,7 +55,7 @@ test("every harness run starts the harness browser: no bare launchBrowser in a r
   assert.deepEqual(bare.map((f) => path.relative(REPO, f)), [], "a terminal test run launches a browser that routes no socket");
   for (const f of files) {
     assert.ok(existsSync(f), f);
-    if (!f.startsWith(path.join(TERMINAL, "test"))) assert.equal(harnessProblem(f), null);
+    if (!f.startsWith(path.join(TERMINAL, "test"))) assert.equal(harnessProblem(f, rel), null);
   }
   // the shared collectors the runs call with a route
   for (const m of ["app-shell", "app-verify-mount", "app-no-blank-pages"]) {
