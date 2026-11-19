@@ -627,7 +627,9 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
   if (miss.length > 0) {
     const a = await readBothSent(rpcs, hash, miss.map((i) => reads[i]!), lim, undefined, down);
     miss.forEach((i, k) => (out[i] = a[k]!));
-    agreedKeep(hash, miss.flatMap((i) => ((out[i] as { gas?: true }).gas === true ? [] : [[keys[i]!, out[i]!] as const])));
+    // every answer readBothSent hands back is final: one answered 2 was read again alone by its last pass, so it ran out
+    // of a whole call's gas alone, an answer of the block as any other is (card evm-tap-never-restarts-after-the-fit)
+    agreedKeep(hash, miss.map((i) => [keys[i]!, out[i]!] as const));
   }
   return out as Answer[];
 }
@@ -635,8 +637,12 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
 /** The reads two providers agreed on, by the block hash they were read at (card evm-cold-multihop-quote-inside-the-kpi):
  *  a read is a call at one block hash, and a block's state never changes, so the same read at the same hash has the same
  *  answer; a quote that reads at a block another quote read (the buy tap's follow of a refusal's reference, at the
- *  first quote's block, buy-tap.ts) sends only the reads that quote did not. Only agreed answers are kept, never one
- *  answered out of gas (`gas`: no evidence of anything), so nothing kept was ever one provider's alone. The newest
+ *  first quote's block, buy-tap.ts) sends only the reads that quote did not. Only agreed answers are kept, so nothing
+ *  kept was ever one provider's alone; one answered out of gas (`gas`) is kept only as readBoth's final answer, read
+ *  alone with a whole call's gas and the same gas used on both providers: the follow of a refusal at its block sent
+ *  again alone every quote that ran out of its gas alone, 12 of Base 0x07b3d9's, 860 to 1,325 ms of a 3.0 to 3.6 s
+ *  tap (card evm-tap-never-restarts-after-the-fit, from the Mac 2026-11-19 04:0xZ), and read again they answer the
+ *  same at the same block. The newest
  *  AGREED_BLOCKS blocks, AGREED_READS reads each. Every agreed read is kept; one is answered from here only at a block a
  *  quote reads at by the caller's `at`, and to that quote alone (MEMO_FOR: its own providers' list, set once its pinned
  *  block is picked; re-review of this card, P1: a hash shared by every quote let a quote at a block the chain had dropped

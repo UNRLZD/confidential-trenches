@@ -9795,6 +9795,36 @@ test("GS23 card evm-warm-tap-reads-in-one-round: a tap at another amount than th
   }
 });
 
+test("GS24 card evm-tap-never-restarts-after-the-fit: a follow of a refusal's reference at its block sends no read the refused quote read, one that ran out of its gas alone too", async () => {
+  // 2 of 15 warm taps of Base 0x07b3d9 quoted twice (rs8, rs12 and rs28 from the Mac, 2026-11-19 04:0xZ): the warm's
+  // route was refused below_reference by 0.003% and the tap followed the reference at the refusal's block, which sent
+  // again alone the 12 quotes that had run out of their gas alone (never kept), 860 to 1,325 ms of a 3.0 to 3.6 s tap
+  const token = "0x00000000000000000000000000000000000a5a6f";
+  // every model block has the hash NEW: the agreed reads the tests before kept there (AGREED_READS a block) are let go
+  quoteMod.evmAgreedReset();
+  const pools = [seeded(token), betterAt(token, 1_000_000), spamAt(token)];
+  const rpcs: [EvmRpc, EvmRpc] = [chain(pools, 0), chain(pools, 1)];
+  const req = { chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as const;
+  const refused = await evmPoolBuyQuoteWith(req, rpcs, NOW).then(
+    () => assert.fail("the seeded route is refused"),
+    (e: unknown) => e as EvmQuoteError & { at: string; reference: { route: EvmRoute } },
+  );
+  assert.equal(refused.code, "below_reference");
+  // the block the device's head watch confirmed: the model's head, at the hash the refusal names
+  const h = head("0x" + (5_000_000).toString(16), refused.at);
+  const block = { number: BigInt(h.number), hash: h.hash, timestamp: BigInt(h.timestamp), baseFeePerGas: BigInt(h.baseFeePerGas!) };
+  const watch: quoteMod.EvmHeadWatch = { head: () => Promise.reject(new Error("a follow agrees on no new head")), keep: () => {}, peek: () => null, held: (x) => (x === block.hash ? block : null) };
+  // every read the follow sends, by provider
+  const sent: number[] = [0, 0];
+  const counted = (k: 0 | 1): EvmRpc => async (calls) => {
+    for (const c of calls) if (c.method === "eth_call" && (c.params[0] as { to?: string }).to?.toLowerCase() === MC3) sent[k]! += Number(BigInt("0x" + (c.params[0] as { data: string }).data.slice(74, 138)));
+    return rpcs[k](calls);
+  };
+  const q = await verdict(evmPoolBuyQuoteWith({ ...req, route: refused.reference.route, at: refused.at }, [counted(0), counted(1)], NOW, undefined, watch));
+  assert.deepEqual(q, { accepted: true, amountOut: AMOUNT, minOut: (AMOUNT * 99n) / 100n, block: 5_000_000n });
+  assert.deepEqual(sent, [0, 0], `the follow sent ${sent.join(" and ")} reads again`);
+});
+
 test("GS13 a route above the hidden two-hop whose swap does not fit hides it from no verdict: the buy is refused by name", async () => {
   // delta review of 7904e159 (RV1): the two-hop through USDC gives 3 a wei and its read at twice runs out of gas alone;
   // a direct 1% pool gives 4 but its swap does not run (a free seeded pool behind a hook that lets only the quoter

@@ -1180,6 +1180,8 @@ export const MUTANTS = [
   [QUOTE, "    routeSizes.set(route, n);", "", R, "GS23 "],
   [QUOTE, "    for (const kept0 of plan.early) {", "    for (const kept0 of [] as Read[]) {", R, "RX2 "],
   [QUOTE, "  if (earlyAns !== null) {", "  if (false) {", R, "RX2 "],
+  // card evm-tap-never-restarts-after-the-fit: a follow at the refusal's block sends no read the refused quote read
+  [QUOTE, "    agreedKeep(hash, miss.map((i) => [keys[i]!, out[i]!] as const));", "    agreedKeep(hash, miss.flatMap((i) => ((out[i] as { gas?: true }).gas === true ? [] : [[keys[i]!, out[i]!] as const])));", R, "GS24 "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
