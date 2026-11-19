@@ -655,6 +655,16 @@ test("planted: one budget check left out of the group is refused by name, and th
     assert.ok(has(await planProblems("helper", root({ serial: { "jupiter-budget": ["jup-a", "calm"] }, budgetExempt: { "jup-b": "short" } })), /jup-b is exempt from the Jupiter budget group with no reason/));
     assert.ok(has(await planProblems("helper", root({ serial: { "jupiter-budget": ["jup-a", "jup-b"] }, budgetExempt: { "jup-b": reason } })), /jup-b is both in a serial group and exempt from it/));
     assert.ok(has(await planProblems("helper", root({ serial: { "jupiter-budget": ["jup-a", "jup-b"] }, budgetExempt: { "no-such": reason } })), /no-such is exempt from the Jupiter budget group but is no listed check/));
+    // a check that reads only a Solana token page (helper-answers-through-a-burst's shape), in no group and with no
+    // Budget-exempt line, is refused by name; its exempt line with the reason is what lets it run on its own
+    const page = (opts) => {
+      const r = root(opts);
+      writeFileSync(path.join(r, "scripts/live-checks/calm.mjs"), `//   node scripts/live-checks/calm.mjs [--base <url>]\nconst r = await fetch("/v1/market/token?chain=solana&token=" + coin);\n`);
+      return r;
+    };
+    const bare = await planProblems("helper", page({ serial: { "jupiter-budget": ["jup-a", "jup-b"] } }));
+    assert.ok(has(bare, /calm reads the helper's Jupiter budget/), bare.join("\n"));
+    assert.deepEqual(await planProblems("helper", page({ serial: { "jupiter-budget": ["jup-a", "jup-b"] }, budgetExempt: { calm: reason } })), [], "the page check with its exempt reason");
   } finally {
     for (const r of roots) rmSync(r, { recursive: true, force: true });
   }
