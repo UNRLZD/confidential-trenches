@@ -268,9 +268,10 @@ export const pageEvmHistory = (pin: EvmPoolPin, kind: ReadKind = "trade"): reado
 /** The read of each W's asset_held (card portfolio-counts-money-an-open-buy-holds) on the finder's own route, never a
  *  public provider: on mainnet the helper's keyed route with the pass's stop in its every fetch, so nothing of a
  *  signed-out account's is sent after the sign out, queued or tried again (as the pass's decimals read); in the testnet
- *  build the devnet RPC the finder reads (POOL_TESTNET folded at build time, so SIGN_HOST's bundle names no devnet RPC). */
+ *  build the helper's devnet route the finder reads (card evm-load-reads-name-no-w-to-the-public-seat; POOL_TESTNET folded
+ *  at build time, so SIGN_HOST's bundle names no devnet RPC). */
 export const pageAssetHeldRpc = (signal: AbortSignal): SolanaRpc =>
-  solanaPacedRpc(POOL_TESTNET ? testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, "pass") : pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
+  solanaPacedRpc(POOL_TESTNET ? testnetRpc(TESTNET_RPCS.solana[1], SOLANA_RPC_RETRY, "pass") : pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
 
 /** Where a mainnet W's balance is read for its positions (decision M359): the helper's route alone (POST
  *  /v1/rpc/{chain}, the wallet's evmHelperRpc, the holdings readers' one paced queue, which the restore's W reads share),
@@ -2509,9 +2510,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
   // the pool's Ws with their holdings, the one finder a sell and the positions use: on mainnet through the helper's keyed
-  // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read. `turn`: the host's
+  // route, in the testnet build on the helper's devnet route (card evm-load-reads-name-no-w-to-the-public-seat: the public
+  // devnet RPC before, named every W); none: no read. `turn`: the host's
   // turn its rounds take, a pass's but at a sale's tap, which holds what a trade waits for (buy-wallets.ts ReaderOpts)
-  const finderOf = (r: readonly [SolanaRpc, SolanaRpc], turn: "trade" | "pass" = "pass"): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsAt(TESTNET_RPCS.solana[0], turn) : solanaHelperHoldings(TRADE_HELPER, turn));
+  const finderOf = (r: readonly [SolanaRpc, SolanaRpc], turn: "trade" | "pass" = "pass"): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsAt(TESTNET_RPCS.solana[1], turn, HELPER_FETCH_INIT) : solanaHelperHoldings(TRADE_HELPER, turn));
   // a sell's list: every W derived, the finder reading only those `read` asks for (buy-wallets.ts wantedBuyWallets), at
   // `turn` on the host
   const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], read: (address: string) => boolean | Promise<boolean> = () => true, signal?: AbortSignal, turn: "trade" | "pass" = "pass"): Promise<ListedBuyWallet[]> => {
@@ -2572,12 +2574,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         },
         kept: async () => st.get("meta", POSITIONS_KEPT_KEY),
         keep: async (k) => void (await st.put("meta", POSITIONS_KEPT_KEY, k)),
-        // one read on the finder's own route (pageSolanaRpcs: the helper's keyed route is the second on mainnet, the
-        // testnet finder's devnet RPC the first), never a public provider: a display's, never a sell's. On mainnet it
+        // one read on the finder's own route (pageSolanaRpcs' second: the helper's keyed route on mainnet, its devnet route
+        // in the testnet build), never a public provider: a display's, never a sell's. On mainnet it
         // carries the pass's stop in its every fetch, in the helper route's own queue: nothing of a signed-out account's
         // is sent after the sign out, queued or tried again
         decimals: async (mint) => {
-          const rpc = POOL_TESTNET ? r[0] : over.rpcs ? r[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, run.signal, "pass"));
+          const rpc = POOL_TESTNET || over.rpcs ? r[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, run.signal, "pass"));
           run.signal.throwIfAborted();
           return tokenDecimalsShown("solana", await rpc("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }]));
         },
@@ -2825,7 +2827,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       return wrote;
     },
     reader: {
-      read: (address, signal, from) => (POOL_TESTNET ? solanaBuysAt(TESTNET_RPCS.solana[0], pin!.program) : solanaHelperBuys(TRADE_HELPER, pin!.program)).read(address, signal, from),
+      read: (address, signal, from) => (POOL_TESTNET ? solanaBuysAt(TESTNET_RPCS.solana[1], pin!.program, HELPER_FETCH_INIT) : solanaHelperBuys(TRADE_HELPER, pin!.program)).read(address, signal, from),
     },
     wrote: () => positions.refresh(),
   });
@@ -2844,7 +2846,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (filling) return void (fillAgain = true);
     const signal = fillStop.signal;
     // one reader, the helper's route (the positions finder's): no read names a W or a signature to a public provider
-    const reader = POOL_TESTNET ? rpcs("pass")[0] : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
+    const reader = POOL_TESTNET ? rpcs("pass")[1] : over.rpcs ? over.rpcs[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, signal, "pass"));
     // every reader asks only before the stop (the testnet build's and a test's carry none of their own)
     const one: SolanaRpc = (method, params, s) => (signal.throwIfAborted(), reader(method, params, s === undefined ? signal : AbortSignal.any([s, signal])));
     const read = (sig: string): Promise<unknown> => one("getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
