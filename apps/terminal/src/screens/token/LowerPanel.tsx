@@ -204,7 +204,9 @@ export function About({ row, tape, links = {} }: { row: MarketRow; tape: Tape; l
   // a centred tile or at a right-aligned or centred place in its line: a value that kept its node would move, and the
   // browser counts it as a layout shift (card app-chart-bar-holds-still-on-desktop: the 5m Buys and Sells, 1.4 s after
   // load, at live run 44480394487). Each value is keyed by what it says, so a new value is a new node, never moved; each
-  // tile's value fills its tile (lower.css .tkl-change), so the slot is sized before the value lands.
+  // tile's value fills its tile (lower.css .tkl-change), so the slot is sized before the value lands. A flow line's buys
+  // and sells are siblings, so each key names its side: equal counts (both the dash on a row with none) would share a key,
+  // and React then draws a fourth item that wraps the line onto a second row.
   return (
     <section className="tkl-about" data-testid="ticket-about">
       <div className="tkl-ahead">
@@ -246,9 +248,9 @@ export function About({ row, tape, links = {} }: { row: MarketRow; tape: Tape; l
       {a.flows.map((f) => (
         <div key={f.win} className="tkl-flow" data-testid={f.win === "24h" ? "about-flow" : `about-flow-${f.win}`}>
           <div>
-            <span key={f.buys}><span className="tkl-mono">{f.buys}</span> <span className="tkl-flowlbl"><W id="flowBuys" /></span></span>
+            <span key={`buys ${f.buys}`}><span className="tkl-mono">{f.buys}</span> <span className="tkl-flowlbl"><W id="flowBuys" /></span></span>
             <span className="tkl-flowwin">{f.win}</span>
-            <span key={f.sells}><span className="tkl-mono">{f.sells}</span> <span className="tkl-flowlbl"><W id="flowSells" /></span></span>
+            <span key={`sells ${f.sells}`}><span className="tkl-mono">{f.sells}</span> <span className="tkl-flowlbl"><W id="flowSells" /></span></span>
           </div>
           <div className="tkl-flowbar" data-unknown={f.buyPct === null}>
             <div style={{ width: `${f.buyPct ?? 50}%` }} />
