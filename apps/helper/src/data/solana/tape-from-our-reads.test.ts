@@ -34,13 +34,14 @@ type Tape = { trades: TapeRow[]; whole_ms?: number; src: string; as_of_ms: numbe
 /** The vendor (GeckoTerminal): the coin's top pool, and its trades once; then, with `up` false, every call refused. */
 function vendor() {
   const answer = { data: V.trades.slice(SEEDED).map(({ legs, ...a }) => ({ id: a.tx_hash, type: "trade", attributes: { ...a, from_token_address: legs.from[0], from_token_amount: legs.from[1], to_token_address: legs.to[0], to_token_amount: legs.to[1] } })) };
-  // `slowMs`: each call answered that many ms later (real time), as a vendor at its page wait
-  const gt = { up: true, calls: 0, log: [] as string[], slowMs: 0 };
+  // `wait`: run at each call before it is answered (a test moves its clock: a vendor at its page wait); `throttle`: a
+  // refusal is the budget's 429, never a 500
+  const gt = { up: true, calls: 0, log: [] as string[], wait: undefined as (() => void) | undefined, throttle: false };
   const fetch = async (url: string): Promise<Response> => {
     gt.calls++;
     gt.log.push(url);
-    if (gt.slowMs > 0) await new Promise((ok) => setTimeout(ok, gt.slowMs));
-    if (!gt.up && gt.slowMs > 0) return new Response("{}", { status: 429, headers: { "retry-after": "60" } });
+    gt.wait?.();
+    if (!gt.up && gt.throttle) return new Response("{}", { status: 429, headers: { "retry-after": "60" } });
     if (!gt.up) return new Response("{}", { status: 500 });
     if (url.endsWith(`/networks/solana/tokens/${V.mint}`)) return new Response(JSON.stringify({ data: { relationships: { top_pools: { data: [{ id: `solana_${V.pool}`, type: "pool" }] } } } }), { status: 200 });
     if (url.includes(`/networks/solana/pools/${V.pool}/trades`)) return new Response(JSON.stringify(answer), { status: 200 });
@@ -359,18 +360,26 @@ test("the top pool is asked of the vendor at POOL_FRESH_MS while a page holds th
   }
 });
 
-test("a page opening a coin whose follow went idle is answered within one TAPE_OPEN_BOUND_MS in all, the vendor's wait and the round's together: the vendor slow and refusing, our provider holding every call open (card helper-tapes-refresh-holds-live; red at 0092e5692: the vendor's wait and then the round's own TAPE_OPEN_BOUND_MS, 13 s here, past the 15 s a page and sol-tape-in-order give a read once the vendor waits its page wait)", async () => {
+// the bound is judged by the test's own timeout, never the machine's clock (scripts/ci/no-wall-clock-asserts.mjs): the
+// vendor's wait is 5 s on the helper's clock, so the round may hold the answer 3 s more; a round's own full
+// TAPE_OPEN_BOUND_MS after it (8 s) is past the test's 7 s
+test("a page opening a coin whose follow went idle is answered within one TAPE_OPEN_BOUND_MS in all, the vendor's wait and the round's together: the vendor slow and refusing, our provider holding every call open (card helper-tapes-refresh-holds-live; red at 0092e5692: the vendor's wait and then the round's own TAPE_OPEN_BOUND_MS, past the 15 s a page and sol-tape-in-order give a read once the vendor waits its page wait)", { timeout: 7_000 }, async () => {
   const h = harness();
   const first = await h.read();
   assert.equal(first.a.status, 200);
   // the follow idles out; the vendor now answers 5 s late and refuses, our provider never answers
   h.clock.t += IDLE_MS + 1_000;
   h.v.gt.up = false;
-  h.v.gt.slowMs = 5_000;
+  h.v.gt.throttle = true;
+  // 5 s of vendor wait in all, on the helper's clock
+  let waited = 0;
+  h.v.gt.wait = () => {
+    const step = 5_000 - waited;
+    waited += step;
+    h.clock.t += step;
+  };
   h.c.net.hang = true;
-  const began = performance.now();
   const late = await h.read();
-  const took = performance.now() - began;
   assert.equal(late.a.status, 200, late.a.body.slice(0, 160));
-  assert.ok(took <= TAPE_OPEN_BOUND_MS + 1_000, `answered in ${Math.round(took)} ms (bound ${TAPE_OPEN_BOUND_MS} in all)`);
+  assert.equal(waited, 5_000, "the vendor was asked and waited");
 });
