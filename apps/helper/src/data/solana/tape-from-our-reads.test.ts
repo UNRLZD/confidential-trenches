@@ -246,3 +246,20 @@ test("a transaction the provider does not serve yet: the round holds the trades 
     h.trades.stop();
   }
 });
+
+test("a pool account past POOL_DATA_MAX is no pool we read: one account read, no signature list, the vendor's tape", async () => {
+  const h = harness(Buffer.alloc(10_241, 1));
+  try {
+    await h.read();
+    h.clock.t += FOLLOW_MS;
+    await h.read();
+    await settle();
+    h.clock.t += FOLLOW_MS;
+    const a = await h.read();
+    await settle();
+    assert.deepEqual(h.c.calls, ["getAccountInfo"]);
+    assert.equal(a.j.src, "geckoterminal");
+  } finally {
+    h.trades.stop();
+  }
+});

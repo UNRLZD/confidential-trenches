@@ -450,6 +450,9 @@ export const FOLLOW_TX_MAX = 20;
 /** After a failed round, the next is this much later (a page's reads in between are served what is held). */
 export const FOLLOW_RETRY_MS = 2_000;
 const FOLLOWS_MAX = 300;
+/** A pool account's data kept at most: an AMM pool is under 2 KB (Raydium CPMM 637 bytes, Meteora DLMM 904, Raydium
+ *  CLMM 1,544); a bigger account is no pool we read (unplaced). */
+const POOL_DATA_MAX = 10_240;
 const SIG_TEXT = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 const AMOUNT = /^\d{1,30}$/;
 
@@ -1176,8 +1179,9 @@ export function createSolanaTrades(deps: {
     if (f.data === null) {
       const a = (await call("getAccountInfo", [f.pool, { encoding: "base64", commitment: "confirmed" }])) as Record<string, unknown> | null;
       const v = a?.value as Record<string, unknown> | null | undefined;
-      if (v == null || !Array.isArray(v.data) || typeof v.data[0] !== "string") return void (f.unplaced = true);
-      f.data = Buffer.from(v.data[0], "base64");
+      const data = v == null || !Array.isArray(v.data) || typeof v.data[0] !== "string" ? null : Buffer.from(v.data[0], "base64");
+      if (data === null || data.length === 0 || data.length > POOL_DATA_MAX) return void (f.unplaced = true);
+      f.data = data;
     }
     const page = await call("getSignaturesForAddress", [f.pool, { limit: FOLLOW_SIGS, commitment: "confirmed", ...(f.lastSig === null ? {} : { until: f.lastSig }) }]);
     if (!Array.isArray(page)) throw new Error("signatures");
