@@ -4,6 +4,7 @@
 // FAIL. Then the judge on each way a record can be wrong, and the list reader on the committed lists.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -65,7 +66,8 @@ test("the screens found in a bundle: the backup's 12 words' list, and both of th
   assert.deepEqual(b('e.dataset.words=`12`;"export.open":5e3'), { backup: true, export: false });
   assert.deepEqual(b('"export.open":(e,t)=>x(t);k.dataset.key=c'), { backup: false, export: true });
   assert.equal(readOf("/", 200, Buffer.from("x")).screens, undefined);
-  assert.equal(readOf("/", 200, Buffer.from("x")).sha384, "sha384-11LCxR+6DimqGQVwqdQlPkQHegWNMpf6OlYw1b0BJiL5fCisrtMTtcg7uZDKp9qF");
+  // the SRI form of the bytes' own SHA-384, as a release list writes it
+  assert.equal(readOf("/", 200, Buffer.from("x")).sha384, `sha384-${createHash("sha384").update("x").digest("base64")}`);
 });
 
 test("the list reader: the newest committed list by N, each with SIGN_HOST's two files and their sha384", () => {
