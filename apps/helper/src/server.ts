@@ -320,8 +320,9 @@ export function handler(
   // card evm-pool-index-from-the-first-pool: GET /v1/market/pools, each EVM chain's PoolManager pools from its first
   // block (src/data/evm/pool-index.ts); a chain with none answers 404
   poolIndexes: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>> = {},
-  // card helper-answers-through-a-burst: whether the loop is past its capacity now, when market data is shed
-  shed: () => boolean = loopShed,
+  // card helper-answers-through-a-burst: whether the loop is past its capacity now, when market data is shed; start()
+  // passes the process's own (limits/loop-busy.ts loopShed), so a test's handler sheds only when it asks to
+  shed: () => boolean = () => false,
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
@@ -1298,12 +1299,12 @@ export function listenAt(port: number): { port: number; host?: string; backlog: 
  * The connections the kernel holds for this server before it takes them (listen(2)'s backlog; card
  * helper-answers-through-a-burst). Caddy opens one connection to the helper for each request in flight that finds no
  * idle one, so a burst of page opens is a burst of connects: past the queue the kernel drops the SYN, the dial waits
- * for its resend (1 s, then 3 s) and Caddy's 3 s dial gives up with a 502 that has no CORS header, while the helper
+ * for its resends (at 1 s and 3 s) and Caddy's 3 s dial gives up with a 502 that has no CORS header, while the helper
  * itself still answers (19 Nov 14:30-14:33Z: every 502 in 3.6 s, the container healthy). Node's default is 511; 300
  * page opens through Caddy on a copy pinned to 2 CPUs held up to 894 connections to the helper at once, filled its
- * queue (512 of 511) and met 9 dial timeouts (deploy/burst-proof.sh, 19 Nov 16:2xZ). [design: 4096, the kernel's own somaxconn default since Linux 5.4, which compose.yaml sets in the helper's
- * network so the kernel honours it; over four times the connections 300 pages held, at about 200 bytes a waiting
- * connection]
+ * queue (512 of 511) and met 9 dial timeouts (deploy/burst-proof.sh, 19 Nov 16:2xZ). [design: 4096, the kernel's own
+ * somaxconn default since Linux 5.4, which compose.yaml sets in the helper's network so the kernel honours it; over four
+ * times the connections 300 pages held, at about 200 bytes a waiting connection]
  */
 export const LISTEN_BACKLOG = 4_096;
 
@@ -1312,7 +1313,7 @@ export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, wa
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes, loopShed),
   );
   // card market-data-push: the push socket, upgraded for APP_HOST's Origin only, in its own window per client
   attachPush(server, { commit, readers: pushReaders(evmSwaps, near), allowed: (req) => originIn(req, PUSH_ORIGINS) !== null, client: clientOf, take: clientWindow(API_RATE_MAX).take });

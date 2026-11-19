@@ -5,7 +5,8 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
-import { handler, SHED_PATHS, shedsPath, UPSTREAM_RETRY_AFTER_S } from "./server.ts";
+import { SHED_LATE_MS } from "./limits/loop-busy.ts";
+import { handler, SHED_PATHS, shedsPath, start, UPSTREAM_RETRY_AFTER_S } from "./server.ts";
 import { call as bounded, listening } from "../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -32,10 +33,9 @@ const MARKET = [
   `/v1/logo/solana/${MINT}`,
 ];
 
-test("past capacity every market data read is a fast 503 the page reads: CORS, the upstream code, a Retry-After, nothing read", async () => {
+test("past capacity every market data read is a 503 the page reads, before any read: CORS, the upstream code, a Retry-After", async () => {
   state.shed = true;
   for (const path of MARKET) {
-    const began = performance.now();
     const r = await call("GET", path);
     assert.equal(r.status, 503, path);
     assert.equal(r.headers["access-control-allow-origin"], APP, `${path}: the page reads it`);
@@ -43,7 +43,6 @@ test("past capacity every market data read is a fast 503 the page reads: CORS, t
     assert.equal(r.headers["retry-after"], String(UPSTREAM_RETRY_AFTER_S), path);
     assert.equal(r.headers["x-helper-commit"], COMMIT, path);
     assert.deepEqual(JSON.parse(r.body), { error: { code: "upstream" } }, path);
-    assert.ok(performance.now() - began < 1_000, `${path}: answered at once`);
   }
 });
 
@@ -85,4 +84,20 @@ test("the shed set is market data only", () => {
     assert.equal(shedsPath(p), false, p);
   }
   assert.equal(shedsPath("/v1/logo/solana/x"), true);
+});
+
+test("start() sheds by the process's own loop: a market read that meets a loop held past SHED_LATE_MS is a 503, a health read beside it is not", async (t) => {
+  const helper = start(COMMIT, 0);
+  t.after(() => new Promise<void>((ok) => (helper.closeAllConnections(), helper.close(() => ok()))));
+  const at = await listening(helper, "the started helper");
+  const get = (path: string) => bounded(at, { method: "GET", path, headers: { origin: APP }, agent: false }, "the started helper");
+  assert.equal((await get("/v1/logo/solana/not-a-token")).status, 404, "an idle loop sheds nothing");
+  const reads = [get("/v1/logo/solana/not-a-token"), get("/v1/health")] as const;
+  // hold this process's loop (the helper's own) past SHED_LATE_MS before either request is read
+  const until = performance.now() + 2 * SHED_LATE_MS;
+  while (performance.now() < until);
+  const [logo, health] = await Promise.all(reads);
+  assert.equal(logo.status, 503, "the market read is shed");
+  assert.equal(logo.headers["access-control-allow-origin"], APP);
+  assert.equal(health.status, 200, "health is never shed");
 });

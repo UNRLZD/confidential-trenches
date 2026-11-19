@@ -33,7 +33,7 @@ test("the good answer with one fault planted: FAIL", () => {
     "one unanswered": (r) => Object.assign(r.answers[5], { status: null, error: "ConnectTimeoutError" }),
     "a p99 past the bound": (r) => r.answers.forEach((a, i) => i % 50 === 0 && (a.ms = P99_MAX_MS + 1)),
     "a page short": (r) => r.answers.splice(0, READS),
-    "no coin read": (r) => ((r.token = null), (r.answers = [])),
+    "no coin read": (r) => ((r.coin = null), (r.answers = [])),
   };
   for (const [name, f] of Object.entries(plant)) {
     const r = copy(A.good);
@@ -43,19 +43,19 @@ test("the good answer with one fault planted: FAIL", () => {
 });
 
 test("the check sends PAGES pages of the first screen's reads at once, with Origin APP_HOST, for the coin the Solana lists name first", async () => {
-  const token = A.good.token;
+  const coin = A.good.coin;
   const seen = [];
   const fetchFn = async (url, init) => {
     assert.equal(init.headers.origin, APP);
     const u = new URL(url);
     seen.push(u.pathname + u.search);
-    if (seen.length === 1) return new Response(JSON.stringify({ lists: { trending: [{ token }] } }), { status: 200, headers: { "access-control-allow-origin": APP } });
+    if (seen.length === 1) return new Response(JSON.stringify({ lists: { trending: [{ token: coin }] } }), { status: 200, headers: { "access-control-allow-origin": APP } });
     return new Response("{}", { status: 200, headers: { "access-control-allow-origin": APP } });
   };
   const got = await read("https://ct-api.unrealized.trade", fetchFn, () => 0);
-  assert.equal(got.token, token);
+  assert.equal(got.coin, coin);
   assert.equal(seen.length, 1 + PAGES * READS);
-  assert.deepEqual(seen.slice(1), Array.from({ length: PAGES }, () => pagePaths(token)).flat());
+  assert.deepEqual(seen.slice(1), Array.from({ length: PAGES }, () => pagePaths(coin)).flat());
   assert.equal(judge(got).ok, true, judge(got).lines.join("\n"));
   assert.ok(PAGES * READS < 120, "under one client's API window (the helper's API_RATE_MAX)");
 });
