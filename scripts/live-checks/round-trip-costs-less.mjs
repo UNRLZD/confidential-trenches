@@ -178,7 +178,7 @@ export const MARKS = Object.freeze({
     ],
   ),
   "a load's first leftover pass waits a start drawn from 15 to 60 s from the device's random source, a full sell's new record included": tied(
-    re(R`(?<mn>${I})=15e3,(?<dr>${I})=\(\)=>\{let (${I})=new Uint32Array\(1\);do globalThis\.crypto\.getRandomValues\(\3\);while\(\3\[0\]>=4294940441\);return \k<mn>\+\3\[0\]%45001\};function (?<bs>${I})\((${I})=\(\)=>Date\.now\(\),(${I})=\k<dr>\(\)\)\{let (${I})=!1,(?:(?:${I}=!1|${I}),)?(${I})=\5\(\)\+\6,(${I})=\8,(${I})=${I}(?:,${I}=\(\)=>[^;{}]+)?;return\{take\(\)\{return \7\|\|\5\(\)<(?:\8\|\|\5\(\)<\9&&!${I}\(\)|\9)\?!1:\(\7=!0,!0\)\}[^]{0,120}?again\(\)\{\9=\8,`),
+    re(R`(?<mn>${I})=15e3,(?<dr>${I})=\(\)=>\{let (${I})=new Uint32Array\(1\);do globalThis\.crypto\.getRandomValues\(\3\);while\(\3\[0\]>=4294940441\);return \k<mn>\+\3\[0\]%45001\};function (?<bs>${I})\((${I})=\(\)=>Date\.now\(\),(${I})=\k<dr>\(\)\)\{let (${I})=!1,(?:(?:${I}=!1|${I}),)?(${I})=\5\(\)\+\6,(${I})=\8,(${I})=${I}(?:,${I}(?:=[^,;{}]+)?)*;return\{take\(\)\{return \7\|\|\5\(\)<(?:\8\|\|\5\(\)<\9&&!(?:\(${I}\(\)&&\(${I}\|\|${I}\(\)\)\)|${I}\(\))|\9)\?!1:\(\7=!0,(?:${I}\(\)&&\(${I}=!1\),)?!0\)\}[^]{0,300}?again\(\)\{\9=\8,`),
     (g) => [R`[,; ](${I})=${esc(g.bs)}\(\)[,;]`],
   ),
 });

@@ -1,0 +1,506 @@
+{
+ "_note": "bad: node scripts/live-checks/deposit-min-floor-signed.mjs --record, SIGN_HOST live 18 Nov 22:06Z (release-172, main b82022875): FAIL. good: the same with --local, packages/signpage built from card/deposit-min-floor-signed 8d183beb1, 18 Nov 22:06Z: PASS. Both under the run's rewrite of each probe's withdrawFee to 0 (1Click's own: 4065 on each).",
+ "bad": {
+  "source": "live",
+  "at": "2026-11-18T22:06:50.978Z",
+  "browser": "157.0.8103.79",
+  "signUrl": "https://confidential.unrealized.trade/",
+  "ready": true,
+  "ids": {
+   "assets": "0981f8a9-1b49-4efc-8ad1-8cbc4eca38e9",
+   "dry": {
+    "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": {
+     "id": "77d549fc-1d14-4c0a-bee1-d45c3d0ec9f1",
+     "amount": "1.011618"
+    },
+    "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near": {
+     "id": "569c354b-a989-4b4b-b0fa-14dd7b441d05",
+     "amount": "1.011719"
+    },
+    "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near": {
+     "id": "0b968021-c9c2-4780-b4a8-31cfbf7a8679",
+     "amount": "1.011719"
+    }
+   }
+  },
+  "log": [
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "type": "ready",
+     "release": "unreleased",
+     "api": 1
+    }
+   },
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "0981f8a9-1b49-4efc-8ad1-8cbc4eca38e9",
+     "ok": true,
+     "result": {
+      "assets": [
+       {
+        "origin_asset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "chain": "near",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.011618",
+        "max_usd": "1000"
+       },
+       {
+        "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+        "chain": "solana",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.011719",
+        "max_usd": "1000"
+       },
+       {
+        "origin_asset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+        "chain": "base",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.011719",
+        "max_usd": "1000"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "77d549fc-1d14-4c0a-bee1-d45c3d0ec9f1",
+     "ok": false,
+     "error": {
+      "code": "below_min"
+     }
+    }
+   },
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "569c354b-a989-4b4b-b0fa-14dd7b441d05",
+     "ok": false,
+     "error": {
+      "code": "below_min"
+     }
+    }
+   },
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "0b968021-c9c2-4780-b4a8-31cfbf7a8679",
+     "ok": false,
+     "error": {
+      "code": "below_min"
+     }
+    }
+   }
+  ],
+  "helper": [
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/tokens",
+    "method": "POST",
+    "body": null,
+    "status": 200
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:46.285Z"
+    },
+    "status": 201,
+    "rewrittenFrom": "4065"
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:46.286Z"
+    },
+    "status": 201,
+    "rewrittenFrom": "4065"
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:46.286Z"
+    },
+    "status": 201,
+    "rewrittenFrom": "4065"
+   },
+   {
+    "phase": "dry",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "1011618",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:47.920Z"
+    },
+    "status": 201
+   },
+   {
+    "phase": "dry",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "1011719",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:48.330Z"
+    },
+    "status": 201
+   },
+   {
+    "phase": "dry",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "1011719",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:49.148Z"
+    },
+    "status": 201
+   }
+  ],
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-rL1CKtvfREBqVE1EpMEbHyg42I0P6cMGRC+pwmysPeSXyOXCfsijnQ+BWMCTlGxZ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "appJs": {
+   "status": 200,
+   "sha384": "sha384-rL1CKtvfREBqVE1EpMEbHyg42I0P6cMGRC+pwmysPeSXyOXCfsijnQ+BWMCTlGxZ"
+  },
+  "errors": []
+ },
+ "good": {
+  "source": "local, SIGN_HOST answered from packages/signpage's build (index.html and public/ copied)",
+  "at": "2026-11-18T22:06:57.176Z",
+  "browser": "157.0.8103.79",
+  "signUrl": "https://confidential.unrealized.trade/",
+  "ready": true,
+  "ids": {
+   "assets": "2a1c5f65-78bd-4e67-bb7c-198aeaa94b3b",
+   "dry": {
+    "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": {
+     "id": "1c6c4370-7be6-46f7-b84c-7e9da503c4ac",
+     "amount": "1.015689"
+    },
+    "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near": {
+     "id": "acff27b5-76df-4dd5-b957-2d2707dfaad9",
+     "amount": "1.017607"
+    },
+    "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near": {
+     "id": "f431b3d8-7755-47a1-8c3d-2c2f99de91ec",
+     "amount": "1.016967"
+    }
+   }
+  },
+  "log": [
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "type": "ready",
+     "release": "unreleased",
+     "api": 1
+    }
+   },
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "2a1c5f65-78bd-4e67-bb7c-198aeaa94b3b",
+     "ok": true,
+     "result": {
+      "assets": [
+       {
+        "origin_asset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "chain": "near",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.015689",
+        "max_usd": "1000"
+       },
+       {
+        "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+        "chain": "solana",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.017607",
+        "max_usd": "1000"
+       },
+       {
+        "origin_asset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+        "chain": "base",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.016967",
+        "max_usd": "1000"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "1c6c4370-7be6-46f7-b84c-7e9da503c4ac",
+     "ok": true,
+     "result": {
+      "amount_out_usd": "1.011624",
+      "min_amount_out_usd": "1.001507",
+      "fee_usd": "0.004065",
+      "time_estimate_s": 20
+     }
+    }
+   },
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "acff27b5-76df-4dd5-b957-2d2707dfaad9",
+     "ok": true,
+     "result": {
+      "amount_out_usd": "1.013301",
+      "min_amount_out_usd": "1.003167",
+      "fee_usd": "0.004306",
+      "time_estimate_s": 20
+     }
+    }
+   },
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "f431b3d8-7755-47a1-8c3d-2c2f99de91ec",
+     "ok": true,
+     "result": {
+      "amount_out_usd": "1.012695",
+      "min_amount_out_usd": "1.002568",
+      "fee_usd": "0.004272",
+      "time_estimate_s": 35
+     }
+    }
+   }
+  ],
+  "helper": [
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/tokens",
+    "method": "POST",
+    "body": null,
+    "status": 200
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:52.679Z"
+    },
+    "status": 201,
+    "rewrittenFrom": "4065"
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:52.679Z"
+    },
+    "status": 201,
+    "rewrittenFrom": "4065"
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:52.679Z"
+    },
+    "status": 201,
+    "rewrittenFrom": "4065"
+   },
+   {
+    "phase": "dry",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "1015689",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:54.015Z"
+    },
+    "status": 201
+   },
+   {
+    "phase": "dry",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "1017607",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:54.425Z"
+    },
+    "status": 201
+   },
+   {
+    "phase": "dry",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "1016967",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-18T22:36:55.246Z"
+    },
+    "status": 201
+   }
+  ],
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-6aVZMQslNuE73e1FMt8iLWRopdUVrD05qpaxVW8jIwIzFOtEML3qYKBsfd4uZ8Jj\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "appJs": {
+   "status": 200,
+   "sha384": "sha384-6aVZMQslNuE73e1FMt8iLWRopdUVrD05qpaxVW8jIwIzFOtEML3qYKBsfd4uZ8Jj"
+  },
+  "errors": []
+ }
+}

@@ -8,11 +8,15 @@
 // again, as the index asks it); one that stays behind past TRIES FAILS; a receipt answered null or with a rate limit
 // once, then present, PASSES (reviews 3 and 4), one null past TRIES FAILS, and any other answer is final and FAILS; the
 // receipts are asked in one batch of at most RECEIPTS.
+// Card evm-batch-fits-each-reader: `good` is now its run (2026-11-18 20:53Z from this Mac, base.api.pocket.network's
+// receipts asked as parts of 5 after its 413), and `bad413` the run of the check before it (20:51Z), Base's reader 2
+// answering 0 of 10 receipts in every span, each batch of 10 refused 413; a reader that refuses a batch past 5 PASSES
+// replayed, one that refuses every batch, one call included, FAILS.
 //   node --test scripts/live-checks/evm-pool-index.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { RECEIPTS, TRIES, judge, read } from "./evm-pool-index.mjs";
+import { MOST, RECEIPTS, TRIES, judge, read, sizeRefusal } from "./evm-pool-index.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-pool-index.answers.json", import.meta.url), "utf8"));
 const bad = (run, re) => {
@@ -33,6 +37,11 @@ test("the recorded good run passes", () => {
 
 test("the recorded bad run, the kit before this card, fails: Robinhood's 10,000-block spans on Pocket", () => {
   bad(A.bad, /robinhood: span 10000 \(the card's 500000\)/);
+});
+
+test("the recorded 413 run, the check before card evm-batch-fits-each-reader, fails: Base's reader 2 answers 0 of 10 receipts", () => {
+  bad(A.bad413, /base .*reader 2 answered 0 of 10 receipts/);
+  assert.deepEqual(A.good.chains.base.most, { "https://base.api.pocket.network": 5 }, "the good run split Pocket's batches at 5");
 });
 
 test("the good run with one thing changed fails", () => {
@@ -157,4 +166,39 @@ test("the waits are the kit's (1, 2 then 4 s): a receipt null on tries 1-3, then
   const caught = await read(venuesOf(A.good), replayFetch(A.good, (url, x) => url === r && x === b && behind++ < 3), async (ms) => void spanWaits.push(ms));
   assert.equal(judge(caught).pass, true);
   assert.deepEqual(spanWaits, [1_000, 2_000, 4_000]);
+});
+
+/** `inner` with `url`'s batches past `max` calls answered 413 with base.api.pocket.network's own body (2026-11-18). */
+const sizes = [];
+const capped = (inner, url, max) => async (u, init) => {
+  const body = init.method === "POST" ? JSON.parse(init.body) : null;
+  if (u === url && Array.isArray(body)) sizes.push(body.length);
+  if (u === url && Array.isArray(body) && body.length > max) return { status: 413, ok: false, headers: { get: () => null }, json: async () => JSON.parse("request entity too large"), text: async () => "request entity too large: the batch has more items than this window allows\n" };
+  return inner(u, init);
+};
+
+test("a reader that refuses a batch past 5 calls 413 answers every receipt as parts of 5, the size kept; one that refuses every batch fails", async () => {
+  const u = A.good.chains.base.index.readers[1];
+  MOST.clear();
+  sizes.length = 0;
+  const fit = await read(venuesOf(A.good), capped(replayFetch(A.good), u, 5), async () => {});
+  const v = judge(fit);
+  assert.equal(v.pass, true, v.lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  assert.deepEqual(fit.chains.base.most, { [u]: 5 });
+  assert.equal(sizes.filter((n) => n > 5).length, 1, `one batch past 5 meets the 413, the later ones start at 5: ${sizes.join(",")}`);
+  MOST.clear();
+  const none = await read(venuesOf(A.good), capped(replayFetch(A.good), u, 0), async () => {}).catch((e) => e);
+  MOST.clear();
+  assert.ok(none instanceof Error || judge(none).pass === false, "a reader that answers no batch is no reader");
+});
+
+test("sizeRefusal reads each mainnet reader's refusal as the kit does, and never a throttle, a 5xx or a revert", () => {
+  assert.equal(sizeRefusal(413, "request entity too large: the batch has more items than this window allows"), null);
+  assert.equal(sizeRefusal(413, JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "batch too large: max 20 calls" } })), 20);
+  assert.equal(sizeRefusal(400, JSON.stringify([{ id: 0, error: { code: 31, message: "Batch of more than 3 requests are not allowed on free plan" } }])), 3);
+  assert.equal(sizeRefusal(429, JSON.stringify({ code: 8, message: "JSON-RPC batch exceeds the maximum of 5 requests" })), 5);
+  assert.equal(sizeRefusal(429, JSON.stringify({ id: 0, error: { code: -32005, message: "rate limit exceeded" } })), undefined);
+  assert.equal(sizeRefusal(200, JSON.stringify([{ id: 0, error: { code: -32007, message: "25/second request limit reached" } }])), undefined);
+  assert.equal(sizeRefusal(502, "batch too large"), undefined);
+  assert.equal(sizeRefusal(200, JSON.stringify([{ id: 0, error: { code: 3, message: "execution reverted: batch too large" } }])), undefined);
 });

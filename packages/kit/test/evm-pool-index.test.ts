@@ -656,6 +656,60 @@ test("R2: one-reader pools' receipts are asked in batches small enough for evmJs
   assert.equal(gaps.filter((g) => ids(r.pools).has(evmPoolIdOf(g.key))).length, 60);
 });
 
+/** A reader behind evmJsonRpc's fetch that answers a batch of more than `max` calls HTTP 413 with
+ *  base.api.pocket.network's own body (read 2026-11-18 20:41Z: 5 calls answer 200, 6 to 1,000 answer 413); `sizes`
+ *  holds each post's calls and `refused` counts the 413s. */
+const capped = (inner: EvmRpc, max: number, log: { sizes: number[]; refused: number }) =>
+  (async (_u: string, init?: RequestInit) => {
+    const sent = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] }[];
+    log.sizes.push(sent.length);
+    if (sent.length > max) return log.refused++, new Response("request entity too large: the batch has more items than this window allows\n", { status: 413 });
+    const out = await inner(sent.map((c) => ({ method: c.method, params: c.params })));
+    return new Response(JSON.stringify(out.map((o, i) => ({ jsonrpc: "2.0", id: sent[i]!.id, ...(o as object) }))), { status: 200 });
+  }) as unknown as typeof fetch;
+
+test("BF1: a reader that answers a batch past 5 calls 413 still answers every receipt, its batches halved and kept (card evm-batch-fits-each-reader)", async () => {
+  // release 177's app live run 44388203690: base.api.pocket.network, Base's second index reader, answered 0 of 10
+  // receipts in every span, each batch of 10 answered 413
+  const head = 1_000_000;
+  const gaps = Array.from({ length: 12 }, (_, i) => ({ key: key(200 + i), block: 940_000 + i * 100 }));
+  const st = new Set([real, ...gaps].map((p) => evmPoolIdOf(p.key)));
+  const log = { sizes: [] as number[], refused: 0 };
+  const b = capped(reader({ head, pools: [real], receipts: [real, ...gaps], state: st, calls: [] }), 5, log);
+  const cfg = cfgOf({ head, pools: [real, ...gaps], state: st, calls: [] }, { head, pools: [], calls: [] });
+  evmPaceReset();
+  // batchMax 5: the state reads fit, so only the receipts' batches of 10 meet the 413, as on mainnet
+  const r = await evmPoolIndexSync(null, { ...cfg, batchMax: 5, readers: [cfg.readers[0], evmJsonRpc("https://pocket-cap.example", b)] });
+  evmPaceReset();
+  assert.equal(r.error?.message ?? null, null);
+  assert.equal(r.coversThrough, head);
+  assert.equal(gaps.filter((g) => ids(r.pools).has(evmPoolIdOf(g.key))).length, 12, "every one-reader pool's receipt is answered");
+  // only the batches in flight at once (parallel 2) when the first refusal comes back meet it; every later post fits
+  assert.ok(log.refused >= 1 && log.refused <= cfg.parallel, `refused ${log.refused}: ${log.sizes.join(",")}`);
+  const last = log.sizes.length - 1 - [...log.sizes].reverse().findIndex((n) => n > 5);
+  assert.ok(log.sizes.slice(last + 1).every((n) => n <= 5) && log.sizes.length - last > 10, log.sizes.join(","));
+});
+
+test("BF2: the state reads (batchMax unset, 500 a batch) split on the same 413, and a later reader object of the same URL starts at the kept size", async () => {
+  const head = 1_000_000;
+  const gaps = Array.from({ length: 12 }, (_, i) => ({ key: key(300 + i), block: 940_000 + i * 100 }));
+  const st = new Set([real, ...gaps].map((p) => evmPoolIdOf(p.key)));
+  const log = { sizes: [] as number[], refused: 0 };
+  const inner = { head, pools: [real], receipts: [real, ...gaps], state: st, calls: [] };
+  const cfg = cfgOf({ head, pools: [real, ...gaps], state: st, calls: [] }, { head, pools: [], calls: [] });
+  evmPaceReset();
+  const r = await evmPoolIndexSync(null, { ...cfg, readers: [cfg.readers[0], evmJsonRpc("https://pocket-cap.example", capped(reader(inner), 5, log))] });
+  assert.equal(r.error?.message ?? null, null);
+  assert.equal(r.coversThrough, head);
+  assert.equal(gaps.filter((g) => ids(r.pools).has(evmPoolIdOf(g.key))).length, 12);
+  // the page's next sync makes a new provider object of the same URL: its first batch is already at most 5
+  const again = { sizes: [] as number[], refused: 0 };
+  const r2 = await evmPoolIndexSync(null, { ...cfg, readers: [cfg.readers[0], evmJsonRpc("https://pocket-cap.example/", capped(reader(inner), 5, again))] });
+  evmPaceReset();
+  assert.equal(r2.coversThrough, head);
+  assert.equal(again.refused, 0, `kept for the page's life: ${again.sizes.join(",")}`);
+});
+
 test("R3: a receipt answer that is not a receipt (a number, a string, an array) is unread, never a TypeError or a refusal", async () => {
   const head = 1_000_000;
   for (const odd of [(_x: unknown) => 7, (_x: unknown) => ({ result: "0x01" }), (_x: unknown) => ({ result: [] }), (_x: unknown) => ({ result: 5 })]) {

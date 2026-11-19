@@ -75,7 +75,7 @@ import {
 import { EVM_POOL_MIN_DEPOSIT, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads } from "../../trade/evm/pool-fee.ts";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmPoolSellFeeMax, evmPoolSellTip, evmSellCallData, evmSellRouteCheck, evmSellRouteOf as evmSignedSellRouteOf, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { evmSellReleasesAt, evmSellSentOf, type EvmReleaseLog, type EvmSellReleases, type EvmSellSent } from "../../trade/evm/sell-releases.ts";
-import { EVM_PROVIDER_HOLD_MS, evmPaceReady, evmPaceTake, evmProviderHeld, evmProviderHeldMs, evmProviderHold } from "./pace.ts";
+import { EVM_PROVIDER_HOLD_MS, evmBatchMost, evmBatchRefused, evmPaceReady, evmPaceTake, evmProviderHeld, evmProviderHeldMs, evmProviderHold } from "./pace.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -5158,6 +5158,52 @@ function retryAfterMs(h: string | null, now = Date.now()): number | null {
 class Unreachable extends Error {}
 /** A provider's answer of HTTP 5xx, in evmJsonRpc's words: the request reached it and it failed to serve it. */
 const serverFault = (e: unknown): boolean => /^the provider answered HTTP 5\d\d$/.test(String((e as Error | null)?.message));
+/** A batch its provider refused for its size (card evm-batch-fits-each-reader): evmJsonRpc asks it again as parts.
+ *  `said`: the most calls a batch the refusal named, if it named one. */
+class BatchRefused extends Error {
+  readonly said: number | null;
+  constructor(said: number | null) {
+    super("the provider refused the batch for its size");
+    this.said = said;
+  }
+}
+/** Whether a provider's answer to a batch refuses it for its size, and the maximum it names (null: none named;
+ *  undefined: no size refusal). Each mainnet EVM reader's own refusal, to batches of 5 to 1,000 eth_chainId, read from
+ *  the Mac 2026-11-18 20:41Z:
+ *  - base.api.pocket.network and robinhood.api.pocket.network: HTTP 413 "request entity too large: the batch has more
+ *    items than this window allows" (plain text) past 5 calls (read evmJsonRpc as a 413, whatever its body);
+ *  - robinhood.daybreak-rpc.network: HTTP 413, {"error":{"code":-32600,"message":"batch too large: max 20 calls"}};
+ *  - robinhood.drpc.org: HTTP 400, every call's error {"message":"Batch of more than 3 requests are not allowed on free
+ *    plan…","code":31};
+ *  - rpc.sentio.xyz/base: HTTP 429, {"code":8,"message":"JSON-RPC batch exceeds the maximum of 5 requests"}, which is
+ *    no throttle: a batch of 5 answered 200 at once;
+ *  - none past 1,000: base-mainnet.public.blastapi.io, base.rpc.blxrbdn.com, robinhood-rpc.publicnode.com,
+ *    robinhood.rpc.blxrbdn.com, rpc-robinhood.globalstake.io, rpc.mainnet.chain.robinhood.com; base-rpc.publicnode.com,
+ *    base.gateway.tenderly.co and mainnet.base.org answered their rate limits (429, -32005, -32007), never a size.
+ *  A message names a size refusal where it holds "batch" and words of a size or a limit, and none of a rate limit's
+ *  (`limited`) or a revert's: a throttle is never split, it waits. */
+function sizeRefusal(body: unknown): number | null | undefined {
+  let parsed = body;
+  if (typeof body === "string") {
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      parsed = { message: body };
+    }
+  }
+  const msgs: string[] = [];
+  const add = (a: unknown) => {
+    if (typeof a !== "object" || a === null || reverted(a)) return;
+    const o = a as { message?: unknown; error?: { message?: unknown } | null };
+    for (const m of [o.message, o.error?.message]) if (typeof m === "string") msgs.push(m.slice(0, 500));
+  };
+  if (Array.isArray(parsed)) parsed.slice(0, 1_000).forEach(add);
+  else add(parsed);
+  const m = msgs.find((x) => /\bbatch\b/i.test(x) && /too large|too big|exceed|more than|more items|maximum|\bmax\b|\blimit\b|\bsize\b/i.test(x) && !limited({ error: { message: x } }));
+  if (m === undefined) return undefined;
+  const n = /\b(\d{1,9})\b/.exec(m);
+  return n === null ? null : Number(n[1]);
+}
 /** A provider's answer that is no batch of answers to read: an HTTP status outside 2xx other than 429 and 5xx, a body
  *  past its size or not JSON, or JSON that is not a batch. It answered, so a scan asks its halves of it (ScanAnswered). */
 class BadAnswer extends Error {}
@@ -5217,20 +5263,37 @@ export const evmRpcHeldMs = (rpc: EvmRpc): number => {
 };
 /** Each JSON-RPC request's time limit (the NEAR client's RPC_TIMEOUT_MS and Solana's SOLANA_CALL_TIMEOUT_MS do the same). */
 export const EVM_RPC_TIMEOUT_MS = 10_000;
-/** A provider from a JSON-RPC URL: one POST per batch, answers matched to calls by id, at most `maxBytes` read;
+/** A provider from a JSON-RPC URL: one POST per batch (its parts, where the provider refused it for its size:
+ *  sizeRefusal, pace.ts evmBatchMost), answers matched to calls by id, at most `maxBytes` read;
  *  `later`: its posts are a background read's, which take their turn at the provider's pace after every trade's
  *  (pace.ts). */
 export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes = 1 << 20, timeoutMs = EVM_RPC_TIMEOUT_MS, later = false): EvmRpc {
   if (typeof url !== "string" || !/^https:\/\//.test(url)) return refuse("bad_request", "a provider URL is https");
   const rpc: EvmRpc = async (calls, until) => {
+    // a batch past the most calls the provider takes (one it refused for its size, any reader's, kept for the page's
+    // life: pace.ts evmBatchMost) leaves as its parts, all at once, each its own post at the provider's pace; the
+    // answers come back in the calls' order, so every caller reads the same calls of the same provider
+    const most = evmBatchMost(url);
+    if (calls.length > most) {
+      const parts: (readonly EvmRpcCall[])[] = [];
+      for (let i = 0; i < calls.length; i += most) parts.push(calls.slice(i, i + most));
+      return (await Promise.all(parts.map((p) => rpc(p, until)))).flat();
+    }
     // the provider's turn at its pace, shared by every reader on the device (pace.ts); its time is not the request's
     const turn = evmPaceTake(url, calls, until, later);
     const give = typeof turn === "function" ? turn : await turn;
+    let refused: BatchRefused;
     try {
       return await post(calls, until);
+    } catch (e) {
+      if (!(e instanceof BatchRefused)) throw e;
+      refused = e;
     } finally {
       give();
     }
+    // refused for its size: asked again as parts of at most half (or the maximum the refusal named), never a call more
+    evmBatchRefused(url, calls.length, refused.said);
+    return rpc(calls, until);
   };
   RPC_URL.set(rpc, url);
   if (later) RPC_LATER.add(rpc);
@@ -5256,6 +5319,15 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
       }
       throw e;
     }
+    // a batch refused for its size (card evm-batch-fits-each-reader): HTTP 413 whatever its body, or a 429, another 4xx or
+    // a 200 whose error names a batch maximum (sizeRefusal); never a batch of one call, which no split makes smaller
+    if (calls.length > 1 && res.status >= 400 && res.status < 500) {
+      const text = await res.text().catch(() => "");
+      const said = sizeRefusal(text.length > maxBytes ? "" : text);
+      if (res.status === 413 || said !== undefined) throw new BatchRefused(said ?? null);
+      // not a size refusal: the status is read as before, the body already read
+      if (res.status !== 429) throw new BadAnswer(`the provider answered HTTP ${res.status}`);
+    }
     if (res.status === 429) {
       const after = retryAfterMs(res.headers.get("retry-after"));
       evmProviderHold(url, Math.max(EVM_PROVIDER_HOLD_MS, after ?? 0));
@@ -5280,6 +5352,10 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     // a batch of one call answered as that call's answer alone, not in a batch: Pocket's way on Base and Robinhood
     // (robinhood.api.pocket.network and base.api.pocket.network, every try, 2026-11-05 19:49Z): it still counts only
     // with this call's id. Any other answer that is not a batch is refused.
+    if (calls.length > 1) {
+      const said = sizeRefusal(parsed);
+      if (said !== undefined) throw new BatchRefused(said);
+    }
     const arr: unknown = !Array.isArray(parsed) && calls.length === 1 && typeof parsed === "object" && parsed !== null ? [parsed] : parsed;
     if (!Array.isArray(arr)) throw new BadAnswer("the answer is not a batch");
     const byId = new Map<number, unknown>();

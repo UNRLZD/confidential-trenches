@@ -100,11 +100,28 @@ const laneOf = (key: string): Lane => {
  *  burst (a post of the whole burst waits for a full bucket, as a trade's does). */
 const laterNeed = (p: EvmPace, need: number): number => Math.min(p.burst, need + (p.keep ?? 0));
 
-/** For the tests: forgets every provider's pace and hold (not in the kit's index). */
+/** Each provider's most calls a batch, where it refused a batch for its size (card evm-batch-fits-each-reader): kept
+ *  for the page's life, so every later batch to it, any reader's, leaves at most this many calls a post. */
+const MOST = new Map<string, number>();
+
+/** For the tests: forgets every provider's pace, hold and most calls a batch (not in the kit's index). */
 export const evmPaceReset = (): void => {
   for (const l of LANES.values()) if (l.timer !== null) clearTimeout(l.timer);
   LANES.clear();
+  MOST.clear();
 };
+
+/** The most calls `url`'s provider takes in one batch: Infinity until it refused one for its size. */
+export const evmBatchMost = (url: string): number => MOST.get(evmProviderKey(url)) ?? Infinity;
+/** `url`'s provider refused a batch of `n` calls (n > 1) for its size: from now its batches are at most half of n, or
+ *  the maximum its refusal named (`said`) where that is smaller and at least 1, never more than an earlier refusal set.
+ *  A refusal's number is the provider's word, so it may only lower a batch: a lie costs only its own posts. */
+export function evmBatchRefused(url: string, n: number, said: number | null): void {
+  const k = evmProviderKey(url);
+  const half = Math.max(1, Math.floor(n / 2));
+  const most = said !== null && Number.isSafeInteger(said) && said >= 1 ? Math.min(half, said) : half;
+  MOST.set(k, Math.min(MOST.get(k) ?? Infinity, most));
+}
 
 /** Holds `url`'s provider for every reader until `ms` from now (a later hold is never shortened). */
 export function evmProviderHold(url: string, ms = EVM_PROVIDER_HOLD_MS): void {
