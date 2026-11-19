@@ -15,6 +15,7 @@
 // It reads the helper as the app does (Origin APP_HOST), so it runs after each helper deploy and each app deploy.
 // After: helper
 // After: app
+// Bundle: out the helper's live answers (its lists, tapes and charts)
 //   node scripts/live-checks/app-chart-check-inside-its-bound.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read (per coin, each
 //   pair's whole_ms, the chart's status, bar count and filling; the token as <token>), for the test's replay.
