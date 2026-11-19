@@ -366,6 +366,7 @@ export const RELEASED = Object.freeze({
   "release-177": "75142cfbaa8ad697adba32c01fc12cd534842f16791a28e2a17fe1c3f986c426",
   "release-178": "9357683e3dd08757f2727476102a5a1b7a932ddd0880ef3cfea3990897f25db1",
   "release-179": "82c29559b246ab8c70976ec51d051cd870368952f2599cd77c7281021c41e82a",
+  "release-180": "73c75e48bdf92ba2b98a9921acef9945245006bdb09f3df4ef9b85aa4210249e",
 });
 
 const tagsIn = (dir) => readdirSync(dir).map((f) => /^(release-[1-9][0-9]*)\.json$/.exec(f)?.[1]).filter(Boolean);

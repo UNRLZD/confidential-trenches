@@ -199,7 +199,9 @@ export const MUTANTS = [
   // once a refused connection and a throttle held past 2 s; the newest request asks its head block in its batch
   [QUOTE, "      if (next === undefined || e instanceof ScanStop) throw e;", "      throw e;", R, "SP1 "],
   [QUOTE, "            if (spareNext && !deep) throw new ScanRefused(", "            if (false) throw new ScanRefused(", R, "SP1 "],
-  [QUOTE, "      if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw", "      if (false) throw", R, "SP4 "],
+  // a fast request held at a slot when another request's Retry-After lands (the chain's tail read beside a `later` one,
+  // after the answer): SP4's warm request is refused by its hold before it reaches the gate's slot
+  [QUOTE, "      if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw", "      if (false) throw", R, "SP4b "],
   [QUOTE, "    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP2 "],
   [QUOTE, "  const fast = second !== undefined && jobs.reduce(", "  const fast = second !== undefined && 0 * jobs.reduce(", R, "SP2 "],
   [QUOTE, "    const top = p === null;", "    const top = false;", R, "SP3 "],

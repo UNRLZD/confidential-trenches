@@ -48,6 +48,7 @@ import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts"
 import { checkPoolRpcOperators, checkSolanaPairOperators } from "./env-check.ts";
 import { callsFiles } from "./proxy/shared-calls.ts";
 import { dayFiles } from "./limits/day-spend.ts";
+import { loopBusy } from "./limits/loop-busy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
@@ -941,7 +942,9 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       if (a.status !== 200 || a.asOfMs === undefined) return null;
       if (seen === null || seen.asOfMs !== a.asOfMs) {
         const snap = JSON.parse(a.body) as { lists: Record<string, { token: string; price_usd?: string | null }[]>; pools?: Record<string, string> };
-        const rows = Object.values(snap.lists).flat();
+        // Trending 1h, then 5m, then New first, the order the tapes are read ahead in (swaps.ts ahead; card
+        // robinhood-tapes-read-ahead): the trending coins are the ones opened most (helper-robinhood-capacity's tokensOf)
+        const rows = [...(["trending_1h", "trending_5m", "new"] as const).flatMap((k) => snap.lists[k] ?? []), ...Object.values(snap.lists).flat()];
         const prices = new Map<string, number>();
         for (const r of rows) {
           const p = typeof r.price_usd === "string" ? Number(r.price_usd) : NaN;
@@ -972,6 +975,8 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       // the same rows' price_usd, as the last answer read held it (a token no list carries: its DexScreener row's): a
       // book off it by SCALE_BOUND is not served as ours
       price: (token) => seen?.prices.get(token) ?? named?.price(token) ?? null,
+      // the reads ahead stand down while callers wait on the loop (card robinhood-tapes-read-ahead-bounded)
+      busy: loopBusy,
     });
     out[chain] = swaps;
     // the lists' tokens' pools looked for as each answer loads, not at each token's first open (card
