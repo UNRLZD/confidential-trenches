@@ -75,7 +75,7 @@ import {
 import { EVM_POOL_MIN_DEPOSIT, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads } from "../../trade/evm/pool-fee.ts";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmPoolSellFeeMax, evmPoolSellTip, evmSellCallData, evmSellRouteCheck, evmSellRouteOf as evmSignedSellRouteOf, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { evmSellReleasesAt, evmSellSentOf, type EvmReleaseLog, type EvmSellReleases, type EvmSellSent } from "../../trade/evm/sell-releases.ts";
-import { EVM_PROVIDER_HOLD_MS, evmBatchMost, evmBatchRefused, evmPaceReady, evmPaceTake, evmPaceWaitMs, evmProviderHeld, evmProviderHeldMs, evmProviderHold } from "./pace.ts";
+import { EVM_PROVIDER_HOLD_MS, evmBatchMost, evmBatchRefused, evmPaceAdvised, evmPaceReady, evmPaceTake, evmPaceWaitMs, evmProviderHeld, evmProviderHeldMs, evmProviderHold } from "./pace.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -5783,6 +5783,9 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
       }
       throw e;
     }
+    // the provider's own count of what this address has left, where it names one (pace.ts evmPaceAdvised)
+    const left = Number(res.headers.get("x-ratelimit-remaining") ?? res.headers.get("ratelimit-remaining") ?? NaN);
+    if (Number.isFinite(left)) evmPaceAdvised(url, left);
     // a batch refused for its size (card evm-batch-fits-each-reader): HTTP 413 whatever its body, or a 429, another 4xx or
     // a 200 whose error names a batch maximum (sizeRefusal); never a batch of one call, which no split makes smaller
     if (calls.length > 1 && res.status >= 400 && res.status < 500) {
