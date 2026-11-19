@@ -353,7 +353,7 @@ export function evmBuySwapFitCall(chain: EvmPoolChain, route: EvmRoute, amount: 
 // `state`: a PoolManager.extsload read, one storage word, sent STATE_READS_PER_CALL to a call
 // `tx`: the transaction fields of a read sent alone (one with an override and no group), as the sim of a sale sends them
 // `oog`: an out-of-gas error answers as a revert (a read capped at a gas, card evm-buy-gas-floor), not a refusal
-type Read = { to: string; data: string; override?: Record<string, Override> | undefined; env?: Record<string, string>; group?: string; state?: true; tx?: SimTx; oog?: true };
+type Read = { to: string; data: string; override?: Record<string, Override> | undefined; env?: Record<string, string>; group?: string; state?: true; tx?: SimTx; oog?: true; size?: string };
 // a call's sender and gas, with the sale's fees (a sim) or none (tx.gasprice 0: a gas check)
 type SimTx = { from: string; gas: string; maxFeePerGas?: string; maxPriorityFeePerGas?: string };
 // `overflow`: the revert is SafeCastOverflow (card rh-cold-quote, the X prune)
@@ -495,6 +495,16 @@ const READ_AGAIN_PER_CALL = 6;
 const readSizes = new Map<string, number>();
 const READ_SIZES_KEPT = 4_096;
 const sizeKey = (r: Read) => lower(r.to) + r.data;
+// And by its route (card evm-warm-tap-reads-in-one-round): a buy's quote of a route at the quote's amount or at twice
+// it (`Read.size`, the calldata less its amount word), whatever that amount. The coin page warms a coin at
+// EVM_BUY_WARM_IN and the tap quotes the typed amount, so by calldata alone nothing the warm kept held for the tap: every
+// warm tap of Base 0x07b3d9 read the same 12 quotes again alone, a round of its own of about 1.1 s in taps of 2.7 and
+// 2.8 s (from the Mac, 2026-11-19 03:2xZ). Asked only where a read's own calldata has no size kept. A size is only how
+// many reads share a call: a read whose gas at the new amount passes it still answers 2 and is read again, as at main
+const routeSizes = new Map<string, number>();
+// the word of each quoter's calldata that holds the amount: quoteExactInput(bytes,uint256)'s amountIn, and the tuple's
+// exactAmount after currencyIn and the path's offset (quoteCall, v4Read)
+const AMOUNT_WORD: Record<string, number> = { [SEL_V3]: 1, [SEL_V4]: 3 };
 /** The reads a call a plain read to `to` with calldata `data` is kept at (readSizes), or undefined: for the tests that pin
  *  what the next quote sends it in (review of baac0ecb, P3-2; not in the index). */
 export const evmReadSizeKept = (to: string, data: string): number | undefined => readSizes.get(lower(to) + data);
@@ -687,7 +697,7 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
   };
   // a plain read kept with fewer a call goes in calls of that many (readSizes), in the first pass only
   const bySize = new Map<number, number[]>();
-  for (const i of plain) append(bySize, again === undefined ? Math.min(readSizes.get(sizeKey(reads[i]!)) ?? perCall, perCall) : perCall, i);
+  for (const i of plain) append(bySize, again === undefined ? Math.min(readSizes.get(sizeKey(reads[i]!)) ?? routeSizes.get(reads[i]!.size ?? "") ?? perCall, perCall) : perCall, i);
   for (const [n, g] of bySize) for (let k = 0; k < g.length; k += n) fit(g.slice(k, k + n));
   const statePer = Math.min(again ?? STATE_READS_PER_CALL, STATE_READS_PER_CALL);
   for (let k = 0; k < state.length; k += statePer) fit(state.slice(k, k + statePer));
@@ -813,6 +823,11 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
     readSizes.delete(key);
     readSizes.set(key, n);
     if (readSizes.size > READ_SIZES_KEPT) readSizes.delete(readSizes.keys().next().value!);
+    const route = reads[i]!.size;
+    if (route === undefined) continue;
+    routeSizes.delete(route);
+    routeSizes.set(route, n);
+    if (routeSizes.size > READ_SIZES_KEPT) routeSizes.delete(routeSizes.keys().next().value!);
   }
   return all;
 }
@@ -1686,7 +1701,9 @@ const gapsOf = (spans: Spans, lo: number, hi: number): Spans => {
 // `xs`: the currencies X the token's last quote kept past its X prune (card evm-spare-list-green)
 // `amount`: the amount in that quote was asked at (card evm-quote-warm-from-the-coin-page): a kept read made at it, or at
 // twice it, is asked at the next quote's own amount, or twice it (atAmount)
-const PLANS = new Map<string, { ts: bigint; amount: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[] }>();
+// `early`: the reads of its routes through X's markets that its fourth round did not take (card
+// evm-warm-tap-reads-in-one-round), asked beside the next quote's first round as their own read (earlyFirst)
+const PLANS = new Map<string, { ts: bigint; amount: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[]; early: Read[] }>();
 /** A kept read of a quote at `from` as the same read at `to` (card evm-quote-warm-from-the-coin-page: the coin page's
  *  warm quotes the coin before the amount is typed): each 32-byte word of its calldata that is `from` becomes `to`, and
  *  each that is twice `from` becomes twice `to`, so a route's quote at the amount and at twice it (quoteCall, v4Read,
@@ -3420,8 +3437,15 @@ async function routeSetOf(a: {
   const isBanned = (k: EvmPoolKey) => a.banned !== undefined && a.banned.has("0x" + poolId(k));
   // a route's read at an amount: the buy's forwards, the sell's backwards from `from` (the token, or for part of a
   // route, the currency it starts that part from)
-  const readOf = (r: EvmRoute, amount: bigint, found: boolean, from = token) =>
-    a.sell ? sellRead(v, from, r, amount) : found ? v4Read(v.v4!, r as EvmV4Route, amount) : quoteCall(chain, v, r, amount);
+  const readOf = (r: EvmRoute, amount: bigint, found: boolean, from = token): Read => {
+    const x = a.sell ? sellRead(v, from, r, amount) : found ? v4Read(v.v4!, r as EvmV4Route, amount) : quoteCall(chain, v, r, amount);
+    // a buy's quote of the route at the amount or at twice it: its size is kept for the route (routeSizes)
+    const role = a.sell || from !== token ? undefined : amount === amountIn ? "1" : amount === 2n * amountIn ? "2" : undefined;
+    const w = AMOUNT_WORD[x.data.slice(2, 10)];
+    if (role === undefined || w === undefined) return x;
+    const at = 10 + 64 * w;
+    return { ...x, size: `${role} ${lower(x.to)} ${x.data.slice(0, at)}${x.data.slice(at + 64)}` };
+  };
   const at = (r: EvmRoute, amount: bigint) => reads.push(readOf(r, amount, false)) - 1;
   // a sell through v3 needs the chain's router, and through v4 its PoolManager
   const v3 = v.v3 !== undefined && (!a.sell || evmPoolVenues()[chain].routers.length > 0);
@@ -3723,6 +3747,12 @@ async function routeSetOf(a: {
 
   // the kept reads of the token's last quote within EVM_WARM_RANGE_S of block time, after this quote's own
   const first = reads.length;
+  // The kept routes through X's markets that the last quote did not take (card evm-warm-tap-reads-in-one-round): read
+  // beside the first round, as the third round reads them, their own read, so a disagreement or a failure on one ends
+  // nothing and the third round asks them as before; agreed, they are kept reads the third round takes from here. A
+  // warm tap of Base 0x07b3d9 read its two in a round of their own after its second (about 0.3 s from the Mac,
+  // 2026-11-19 03:2xZ)
+  const earlyFirst: Read[] = [];
   if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {
     const own = new Set(reads.map(readKey));
     // the plan holds no read with a state override (below)
@@ -3732,7 +3762,13 @@ async function routeSetOf(a: {
       if (own.has(k) || kept.has(k)) continue;
       kept.set(k, reads.push(r) - 1);
     }
+    for (const kept0 of plan.early) {
+      const r = atAmount(kept0, plan.amount, amountIn);
+      const k = readKey(r);
+      if (!own.has(k) && !kept.has(k) && !earlyFirst.some((e) => readKey(e) === k)) earlyFirst.push(r);
+    }
   }
+  const earlyReading = earlyFirst.length === 0 ? Promise.resolve(null) : readBoth(rpcs, block.hash, earlyFirst, v.reads, undefined, firstDown).catch(() => null);
   // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
   const reading = readAgreed(confirm, rpcs, block.hash, reads, v.reads, firstDown);
   if (spec !== null) {
@@ -3744,6 +3780,14 @@ async function routeSetOf(a: {
     scanned = real;
   }
   const ans = await reading;
+  // the early reads the providers agreed on, after the round's own
+  const earlyAns = await earlyReading;
+  if (earlyAns !== null) {
+    earlyFirst.forEach((r, i) => {
+      kept.set(readKey(r), reads.push(r) - 1);
+      ans.push(earlyAns[i]!);
+    });
+  }
   // the block is the same on both providers: the scan keeps what it read up to it
   scanned?.commit();
   const out = (i: number) => (ans[i]!.kind === "out" ? (ans[i] as { amountOut: bigint }).amountOut : null);
@@ -4093,6 +4137,8 @@ async function routeSetOf(a: {
     if (early === null) viaX.clear();
     ans.push(...main, ...(early ?? third.slice(own).map((): Answer => ({ kind: "revert", partial: false }))));
   }
+  // every read of the early routes the providers agreed on, sent here or kept from the first round (the plan's `early`)
+  const earlyRead = [...viaX.values()].flatMap((q) => [q.at, q.twice, ...(q.real === undefined ? [] : [q.real.at, q.real.twice]), ...(q.alone ?? [])]);
   const fourth: Read[] = [];
   const further: string[] = [];
   for (const x of xs) {
@@ -4181,7 +4227,11 @@ async function routeSetOf(a: {
   PLANS.delete(planKey);
   // never a read with a state override: it is asked only once this quote's own reads find its pool held (review of
   // 5452011, S1), so a pool that vanished since never puts its hook's override into a read
-  PLANS.set(planKey, { ts: block.timestamp, amount: amountIn, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j)), scans: asked, xs: [...xPools.keys()] });
+  const planReads = reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j));
+  const inPlan = new Set(planReads.map(readKey));
+  // the early reads not in the first round's reads: never one with a state override, as above
+  const planEarly = earlyRead.flatMap((i) => (reads[i] === undefined ? [] : [reads[i]!])).filter((r) => r.override === undefined && !inPlan.has(readKey(r)));
+  PLANS.set(planKey, { ts: block.timestamp, amount: amountIn, reads: planReads, scans: asked, xs: [...xPools.keys()], early: planEarly });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled, outOfGas: [...outOfGas.values()] };
 }

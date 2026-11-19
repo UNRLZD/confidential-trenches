@@ -44,6 +44,10 @@ test("planted on the good run: a slow warm, a slow tap, a provider's fault, a se
     assert.equal(r.ok, false, String(want));
     assert.ok(bad(r).some((l) => want.test(l)), `${want}: ${bad(r).join(" | ")}`);
   }
+  // each 429 is printed with its step, and a sync's fails the run as a tap's does (card evm-warm-tap-reads-in-one-round)
+  const sync = edit((run) => ((run.s429 = { "base.api.pocket.network": 1 }), (run.s429At = { "sync, base.api.pocket.network": 1 })));
+  assert.equal(sync.ok, false);
+  assert.ok(sync.lines.includes("    429 in the sync, base.api.pocket.network: 1"), sync.lines.join("\n"));
   // a named refusal that is no provider's fault ends the tap
   const r = edit((run) => (run.coins[0].tap = { ms: 400, code: "not_allowed", asks: 1 }));
   assert.equal(r.ok, true, r.lines.join("\n"));
