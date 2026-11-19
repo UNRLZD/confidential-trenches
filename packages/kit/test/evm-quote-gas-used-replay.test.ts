@@ -70,6 +70,53 @@ test("a real Robinhood quote whose call of 64 starves reads behind honest heavy 
     const logs = r.logs.filter((l) => { const k = JSON.stringify(l); return !seen.has(k) && (seen.add(k), true); });
     return JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, result: c.method === "eth_getLogs" ? logs : r.block })));
   };
+  // A scan batch the recording never sent whole (card evm-warm-quote-inside-the-kpi-with-room: a warm quote's scan reads
+  // up to its held head, where the recording's read up to its scan provider's head, so its gaps end a few blocks sooner):
+  // each getLogs answered with the logs of the recorded getLogs of the same filter whose blocks together hold its own,
+  // end to end, those inside its range (a block's logs never change), and its block read by number with that block's
+  // recorded header; a call of it none answers leaves the batch unanswered, named as before
+  const recorded: { f: string; a: bigint; b: bigint; logs: unknown[] }[] = [];
+  const headers = new Map<bigint, unknown>();
+  for (const x of F.exchanges) {
+    const cs = callsOf(x.body);
+    const as = [JSON.parse(x.answer)].flat() as { id: number; result?: unknown }[];
+    for (const c of cs) {
+      const r = as.find((y) => y.id === c.id)?.result;
+      if (c.method === "eth_getLogs" && Array.isArray(r)) {
+        const { fromBlock, toBlock, ...f } = c.params[0] as unknown as { fromBlock: string; toBlock: string };
+        recorded.push({ f: JSON.stringify(f), a: BigInt(fromBlock), b: BigInt(toBlock), logs: r });
+      }
+      const h = r as { number?: unknown } | null | undefined;
+      // by the number it holds, a read of "latest" (the head watch's) included
+      if (c.method === "eth_getBlockByNumber" && typeof h?.number === "string" && /^0x[0-9a-f]+$/i.test(h.number)) headers.set(BigInt(h.number), h);
+    }
+  }
+  const within = (calls: Call[]): string | undefined => {
+    if (!calls.some((c) => c.method === "eth_getLogs") || calls.some((c) => c.method !== "eth_getLogs" && c.method !== "eth_getBlockByNumber")) return undefined;
+    const out: unknown[] = [];
+    for (const c of calls) {
+      if (c.method === "eth_getBlockByNumber") {
+        const h = /^0x[0-9a-f]+$/i.test(String(c.params[0])) ? headers.get(BigInt(String(c.params[0]))) : undefined;
+        if (h === undefined) return undefined;
+        out.push({ jsonrpc: "2.0", id: c.id, result: h });
+        continue;
+      }
+      const { fromBlock, toBlock, ...f } = c.params[0] as unknown as { fromBlock: string; toBlock: string };
+      const [a, b] = [BigInt(fromBlock), BigInt(toBlock)];
+      const same = recorded.filter((x) => x.f === JSON.stringify(f) && x.b >= a && x.a <= b).sort((x, y) => (x.a < y.a ? -1 : 1));
+      let reach = a - 1n;
+      for (const x of same) if (x.a <= reach + 1n && x.b > reach) reach = x.b;
+      if (reach < b) return undefined;
+      const seen = new Set<string>();
+      const logs = same.flatMap((x) => x.logs).filter((l) => {
+        const n = BigInt((l as { blockNumber: string }).blockNumber);
+        const k = JSON.stringify(l);
+        return a <= n && n <= b && !seen.has(k) && (seen.add(k), true);
+      });
+      out.push({ jsonrpc: "2.0", id: c.id, result: logs });
+    }
+    return JSON.stringify(out);
+  };
   let atQ = 0;
   const load = (q: number) => {
     queue = new Map();
@@ -90,7 +137,7 @@ test("a real Robinhood quote whose call of 64 starves reads behind honest heavy 
     const calls = callsOf(body);
     const k = key(body);
     const q = queue.get(k);
-    const answer = q !== undefined && q.length > 0 ? q.shift()! : (last.get(k) ?? any.get(k) ?? scanAnswer(atQ, calls));
+    const answer = q !== undefined && q.length > 0 ? q.shift()! : (last.get(k) ?? any.get(k) ?? scanAnswer(atQ, calls) ?? within(calls));
     if (answer === undefined) {
       missed.push(calls.map((c) => (readsOf(c) !== undefined ? `aggregate3 of ${readsOf(c)}` : c.method)).join(", "));
       return new Response("upstream unavailable", { status: 503 });

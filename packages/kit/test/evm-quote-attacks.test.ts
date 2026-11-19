@@ -4186,8 +4186,10 @@ test("WS1 a warm buy whose blocks since its kept scan are read before its answer
   const scanLog: string[] = [];
   const asked: [number, number][] = [];
   const t0 = performance.now();
-  const v2 = await verdict(evmPoolBuyQuoteWith(req, on, NOW, late(scanner(5_000_010, [], asked), scanLog), watch, () => m));
-  const ms = performance.now() - t0;
+  // the bound's mark: a timer of the clock at 2 x POST_MS that fires only if the quote has not ended by then
+  let past = false;
+  const mark = setTimeout(() => (past = true), 2 * POST_MS);
+  const v2 = await verdict(evmPoolBuyQuoteWith(req, on, NOW, late(scanner(5_000_010, [], asked), scanLog), watch, () => m)).finally(() => clearTimeout(mark));
   // the first's verdict, at the held head
   assert.deepEqual(v2, { ...v1, block: 5_000_010n });
   // the blocks since the kept scan, up to the held head, were read (the coin holds no pool kept)
@@ -4195,7 +4197,7 @@ test("WS1 a warm buy whose blocks since its kept scan are read before its answer
   // the scan provider's head still read, beside the logs: both sent at the quote's start
   assert.ok(scanLog.some((l) => l.startsWith("eth_blockNumber at ")), scanLog.join(" | "));
   assert.ok(scanLog.every((l) => l.endsWith(` at ${Math.round(t0)}`)), scanLog.join(" | "));
-  assert.ok(ms < 2 * POST_MS, `the warm quote took ${Math.round(ms)} ms of the clock, ${(ms / POST_MS).toFixed(1)} posts one after the other: ${scanLog.join(" | ")}`);
+  assert.equal(past, false, `the warm quote ran past 2 posts one after the other: ${scanLog.join(" | ")}`);
 }));
 
 // Card evm-warm-quote-inside-the-kpi-with-room: a warm round of more calls than a provider of its pair takes at once at
@@ -4236,16 +4238,17 @@ test("WS2 a warm round of more calls than a provider of its pair takes at its pa
     await ps[2]!([{ method: "eth_getBlockByNumber", params: ["latest", false] }]);
     await pause(2_000);
     posts.length = 0;
-    const t0 = performance.now();
-    const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [...ps], NOW, scanner(5_000_000, logs), watch, () => 0));
-    const ms = performance.now() - t0;
+    // the bound's mark: a timer of the clock at 2 x POST_MS that fires only if the round has not ended by then
+    let past = false;
+    const mark = setTimeout(() => (past = true), 2 * POST_MS);
+    const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [...ps], NOW, scanner(5_000_000, logs), watch, () => 0)).finally(() => clearTimeout(mark));
     assert.deepEqual(v2, v1);
     // the first provider carries every batch of the round: more calls than mainnet.base.org takes at once, in posts its
     // inflight pin takes at once
     const first = posts.filter((p) => p.startsWith("base-mainnet.public.blastapi.io "));
     const calls = first.reduce((n, p) => n + Number(p.split(" ")[1]), 0);
     assert.ok(calls > 12 && first.length <= 8, `the round: ${calls} calls in ${first.length} posts`);
-    assert.ok(ms < 2 * POST_MS, `the warm round took ${Math.round(ms)} ms of the clock, ${(ms / POST_MS).toFixed(1)} posts: ${posts.join(" | ")}`);
+    assert.equal(past, false, `the warm round ran past 2 posts: ${posts.join(" | ")}`);
   } finally {
     quoteMod.evmReadsPerCall();
     quoteMod.evmSpeedReset();
