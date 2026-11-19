@@ -1859,23 +1859,28 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // index readers' own head, not beside a quote: a quote's reads hold none of the sync's, and not on the quote's head
     // watch, which stops a minute after the last quote, so a coin opened after it would scan first. No store read here:
     // this tab's index is the newest it serves. Ends at a sign out; a device that holds nothing syncs none (sync above)
-    // (one keep a chain: evmIndexOf runs no more once the chain is indexed, so only this chain of timers syncs it)
-    const keep = (): void => {
+    // (one keep a chain: evmIndexOf runs no more once the chain is indexed, so only this chain of timers syncs it). A sync
+    // that took longer than EVM_INDEX_KEEP_MS (a cold or catch-up one, or one held on 429s) ended with N that much behind
+    // the head, past maxLag where it took over 10 s (a catch-up of 59,000 Base blocks from the snapshot took 28.6 s, its
+    // first coin's quote then scanned 147 blocks by currency, 19 Nov 10:4xZ), so the next starts at once
+    const keep = (took: number): void => {
       if (signal.aborted || !evmIndexed.has(chain)) return;
       keepSet(() => {
         if (signal.aborted) return;
+        const at = turnNow();
         const again = Promise.resolve()
           .then(locked)
           .catch(() => {})
-          .finally(() => (evmIndexing.delete(chain), keep()));
+          .finally(() => (evmIndexing.delete(chain), keep(turnNow() - at)));
         evmIndexing.set(chain, again);
-      }, EVM_INDEX_KEEP_MS);
+      }, took > EVM_INDEX_KEEP_MS ? 0 : EVM_INDEX_KEEP_MS);
     };
+    const t0 = turnNow();
     const run = evmIndexServe(chain, network, signal)
       .catch(() => {})
       .then(() => (signal.aborted ? undefined : locked()))
       .catch(() => {})
-      .finally(() => (evmIndexing.delete(chain), keep()));
+      .finally(() => (evmIndexing.delete(chain), keep(turnNow() - t0)));
     evmIndexing.set(chain, run);
     return run;
   };

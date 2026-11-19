@@ -1501,6 +1501,8 @@ test("a served index is kept at the head: EVM_INDEX_KEEP_MS after each sync a ga
   const puts: number[] = [];
   const calls: (number | null)[] = [];
   const keeps: { f: () => void; ms: number }[] = [];
+  // the time the next sync takes, ms on the page's clock
+  let takes = 0;
   const t = testnetPool({ ...page(w), held: async () => w }, {
     prover: { vault: signalsProver(), stop: () => {} },
     evmPin: (c: string) => (c === "base" ? PIN : undefined),
@@ -1513,6 +1515,7 @@ test("a served index is kept at the head: EVM_INDEX_KEEP_MS after each sync a ga
     evmIndexKeep: (f: () => void, ms: number) => void keeps.push({ f, ms }),
     evmIndexSync: async (_chain: string, prev: { through: number; pools: unknown[] } | null) => {
       calls.push(prev?.through ?? null);
+      o.now += takes;
       // a whole sync, as the kit answers it (pool-index.ts F4d): proven to N = through + 10 + 4, kept to N less a margin
       const n = (prev?.through ?? 0) + 10;
       const pools = [...(prev?.pools ?? []), ...(n + 4 >= fresh.block ? [fresh] : [])];
@@ -1542,13 +1545,22 @@ test("a served index is kept at the head: EVM_INDEX_KEEP_MS after each sync a ga
     await tick();
     assert.deepEqual(calls, [50, 60, 70]);
     assert.deepEqual(puts, [60, 80], "a minute on, the kept index is stored again");
+    assert.deepEqual(keeps.map((k) => k.ms), [EVM_INDEX_KEEP_MS]);
+    // a sync that takes longer than the keep's wait ended with N that far behind: the next starts at once
+    takes = EVM_INDEX_KEEP_MS + 1;
+    await tick();
+    assert.deepEqual(keeps.map((k) => k.ms), [0], "a sync that took longer than EVM_INDEX_KEEP_MS is followed at once");
+    takes = 0;
+    await tick();
+    assert.deepEqual(calls, [50, 60, 70, 80, 90]);
+    assert.deepEqual(keeps.map((k) => k.ms), [EVM_INDEX_KEEP_MS], "and one that did not, EVM_INDEX_KEEP_MS after it");
     await t.stateRead();
     await settle();
-    assert.deepEqual(calls, [50, 60, 70], "a state read starts no second keep");
+    assert.deepEqual(calls, [50, 60, 70, 80, 90], "a state read starts no second keep");
     assert.equal(keeps.length, 1, "one keep a chain");
     await t.signedOut();
     await tick();
-    assert.deepEqual(calls, [50, 60, 70], "no gap sync past a sign out");
+    assert.deepEqual(calls, [50, 60, 70, 80, 90], "no gap sync past a sign out");
     assert.equal(keeps.length, 0, "and none armed");
   } finally {
     evmPoolIndexReset();
