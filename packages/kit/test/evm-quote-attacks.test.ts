@@ -4256,6 +4256,56 @@ test("WS2 a warm round of more calls than a provider of its pair takes at its pa
   }
 }));
 
+// Card evm-warm-quote-inside-the-kpi-with-room, the second cut: a warm Base round sent 90 reads as 15 aggregate3 calls of
+// the venue's 6 and one or two alone, 16 to 17 eth_calls a provider against mainnet.base.org's 12 at once (pace.ts), so
+// with no spare to take them its 5th to 7th posts waited 87, 339 and 421 ms (2026-11-19 13:41Z from the Mac). The reads
+// a warm quote has measured go in calls filled to a gas budget (gasParts), so the round fits the pace's burst.
+test("WG1 a warm round on a pair with no spare sends its measured reads in calls filled to their gas: no post waits a turn of mainnet.base.org's pace", () => onTestClock(async () => {
+  const POST_MS = 100;
+  const urls = ["https://base-mainnet.public.blastapi.io", "https://mainnet.base.org"];
+  const token = "0x000000000000000000000000000000000fa57a0d";
+  const { pools, logs } = warmCase(token, xAt(0x3d02));
+  const plain = pools.filter((p) => p.key.hooks !== UNPINNED);
+  const models = [chain(plain, 0), chain(plain, 1)];
+  const posts: { host: string; calls: number; at: number }[] = [];
+  const fetchFn = (async (url: string | URL, init?: RequestInit) => {
+    const k = urls.indexOf(String(url));
+    const body = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] }[];
+    const at = performance.now();
+    await pause(POST_MS);
+    if (body.some((c) => c.method === "eth_call")) posts.push({ host: new URL(String(url)).host, calls: body.length, at });
+    const out = await models[k]!(body.map((c) => ({ method: c.method, params: c.params })));
+    return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  quoteMod.evmSpeedReset();
+  evmPaceReset();
+  // the venue's own reads a call (Base's 6), whatever another test left
+  quoteMod.evmReadsPerCall();
+  try {
+    const ps = quoteMod.evmProviders(urls, fetchFn);
+    const watch = quoteMod.evmHeadWatch(() => ps, 50n, () => NOW, false, () => 0);
+    const v1 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [...ps], NOW, scanner(5_000_000, logs), watch, () => 0));
+    assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
+    // the cold quote's own round holds more calls than the pace's burst (the control: at 6 a call the warm one would too)
+    const cold = posts.filter((p) => p.host === "mainnet.base.org").reduce((n, p) => n + p.calls, 0);
+    assert.ok(cold > 12, `the cold quote sent ${cold} calls to mainnet.base.org`);
+    // every pace's turns back
+    await pause(2_000);
+    posts.length = 0;
+    const t0 = performance.now();
+    const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [...ps], NOW, scanner(5_000_000, logs), watch, () => 0));
+    assert.deepEqual(v2, v1);
+    const org = posts.filter((p) => p.host === "mainnet.base.org");
+    const show = org.map((p) => `${p.calls} at +${Math.round(p.at - t0)}`).join(" | ");
+    assert.ok(org.length > 0, "the warm round asked mainnet.base.org nothing");
+    assert.ok(org.reduce((n, p) => n + p.calls, 0) <= 12, `the warm round sent mainnet.base.org more calls than its burst: ${show}`);
+    assert.ok(org.every((p) => p.at === org[0]!.at), `a post of the warm round waited on mainnet.base.org's pace: ${show}`);
+  } finally {
+    quoteMod.evmSpeedReset();
+    evmPaceReset();
+  }
+}));
+
 test("W9 a warm buy whose held head the scan finds more than maxLag behind uses nothing of the round it sent at that head: it is read at the block agreed again", async () => {
   const token = "0x000000000000000000000000000000000fa57a03";
   const { pools, logs } = warmCase(token, xAt(0x3cf8));
@@ -6475,6 +6525,46 @@ test("PACE6 card evm-warm-tap-ends-inside-two-seconds: a page dry's cold scan an
   assert.ok(dryBy[0]! <= 128 && dryBy[1]! < 137, `the dry's scan sent ${dryBy[0]} posts by 1 s and ${dryBy[1]} by 5 s, past what the provider holds`);
   // every post of the tap left as it asked, none behind the dry's
   assert.deepEqual(tapBy, [10], "the tap's posts sent 1 ms after it asked");
+}));
+
+// Card evm-warm-quote-inside-the-kpi-with-room: at 20 a getLogs post the pace gave base-rpc.publicnode.com 125 scan
+// posts at once and 1.8 a second back, past the 1.7 the probe read it give back (pace.ts): a cold quote's scan and the
+// tail read after it met 4 to 8 answers of 429 from the Mac, each holding the provider 30 s for every reader.
+test("PACE7 scan posts sent to base-rpc.publicnode.com as fast as its pace gives them for 2 minutes never empty the bucket the provider was read to hold", { timeout: 60_000 }, () => onTestClock(async () => {
+  evmPaceReset();
+  const url = "https://base-rpc.publicnode.com";
+  // the provider as the probe read it (2026-11-16 00:57-01:04Z): 128 scan posts at once, 1.7 a second back
+  const CAP = 128;
+  const BACK = 1.7;
+  let tokens = CAP;
+  let at = performance.now();
+  let sent = 0;
+  let refused = 0;
+  const f = (async (_u: string, init: RequestInit) => {
+    const now = performance.now();
+    tokens = Math.min(CAP, tokens + ((now - at) / 1000) * BACK);
+    at = now;
+    const calls = JSON.parse(init.body as string) as { id: number }[];
+    sent++;
+    if (tokens < 1) {
+      refused++;
+      return new Response("", { status: 429 });
+    }
+    tokens -= 1;
+    await new Promise((r) => setTimeout(r, 300));
+    return new Response(JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, result: [] }))));
+  }) as unknown as typeof fetch;
+  // a trade's scan (a cold quote's), 20 at once as the scan's gate sends them, for 2 minutes of the clock
+  const rpc = evmJsonRpc(url, f);
+  const scan = [{ method: "eth_getLogs", params: [] }, { method: "eth_getLogs", params: [] }, { method: "eth_getBlockByNumber", params: [] }];
+  let open = true;
+  setTimeout(() => (open = false), 120_000);
+  await Promise.all(Array.from({ length: 20 }, async () => {
+    while (open) await rpc(scan).catch(() => {});
+  }));
+  evmPaceReset();
+  assert.ok(sent > 150, `the scan sent ${sent} posts in 2 minutes`);
+  assert.equal(refused, 0, `${refused} of ${sent} scan posts answered 429`);
 }));
 
 test("SP5 a first scan provider that answers a warm scan with no logs: the request goes to the second whole, never asked of the first as halves", { timeout: 30_000 }, async () => {
@@ -11159,7 +11249,9 @@ test("TAILF3 a trade's read sent while the chain's tail is being read leaves at 
     }) as unknown as typeof fetch;
     const scan = evmJsonRpc(url, f, 16 << 20);
     assert.deepEqual(await quoteOnStill([seeded(token), real(token)], token, seededRoute(token), scan), below);
-    await pause(50);
+    // the quote's own scan left the bucket under a background post's need and keep (a getLogs post 24 since card
+    // evm-warm-quote-inside-the-kpi-with-room, 20 before): the tail's first reads leave once it is back, about 1 s on
+    await pause(2_000);
     // the tail's 100 reads wait their turns at the provider's pace, its keep left for trades
     assert.ok(tail > 0 && tail < 100, `${tail} of the tail's reads sent`);
     const trade = evmJsonRpc(url, f);

@@ -494,6 +494,16 @@ const READ_AGAIN_PER_CALL = 6;
 // its call, at 1.66M), never its final one
 const readSizes = new Map<string, number>();
 const READ_SIZES_KEPT = 4_096;
+// Each plain read's gas used at its last answer two providers agreed on, a read answered 2 aside (card
+// evm-warm-quote-inside-the-kpi-with-room), READ_SIZES_KEPT of them, oldest out first. A chain whose venue sends fewer
+// reads a call than STATE_READS_PER_CALL for gas alone (Base's 6: 64 heavy exact-out reads needed 77.3M) sends the
+// reads it has measured in calls filled to a gas budget instead (gasParts), as Uniswap's interface multicall chunks its
+// calls by each call's gasRequired: a warm Base round of 90 reads sent 15 calls of 6 and one or two alone, 16 to 17
+// eth_calls a provider against mainnet.base.org's 12 at once (pace.ts), so its 5th to 7th posts waited 87, 339 and
+// 421 ms (warm base-hook quotes ending at 735 ms, the reads' own gas 0.01-0.31M each, 2026-11-19 13:41Z from the Mac).
+// A packed read answered 2 is read again as any is (READ_AGAIN_PER_CALL, then alone), so the budget only sets how many
+// share a call, never an answer
+const readGas = new Map<string, number>();
 const sizeKey = (r: Read) => lower(r.to) + r.data;
 // And by its route (card evm-warm-tap-reads-in-one-round): a buy's quote of a route at the quote's amount or at twice
 // it (`Read.size`, the calldata less its amount word), whatever that amount. The coin page warms a coin at
@@ -701,10 +711,21 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
       fit(part.slice(mid));
     } else parts.push(part);
   };
-  // a plain read kept with fewer a call goes in calls of that many (readSizes), in the first pass only
+  // a plain read kept with fewer a call goes in calls of that many (readSizes), in the first pass only; one with its gas
+  // measured and no size kept, on a chain whose reads a call are the gas bound, in calls filled to the gas budget
   const bySize = new Map<number, number[]>();
-  for (const i of plain) append(bySize, again === undefined ? Math.min(readSizes.get(sizeKey(reads[i]!)) ?? routeSizes.get(reads[i]!.size ?? "") ?? perCall, perCall) : perCall, i);
+  const measured: number[] = [];
+  for (const i of plain) {
+    const kept = readSizes.get(sizeKey(reads[i]!)) ?? routeSizes.get(reads[i]!.size ?? "");
+    // (a test's reads a call, evmReadsPerCall, is a count: its recordings are matched call for call)
+    if (again === undefined && readsOverride === undefined && kept === undefined && perCall < STATE_READS_PER_CALL && readGas.has(sizeKey(reads[i]!))) measured.push(i);
+    else append(bySize, again === undefined ? Math.min(kept ?? perCall, perCall) : perCall, i);
+  }
   for (const [n, g] of bySize) for (let k = 0; k < g.length; k += n) fit(g.slice(k, k + n));
+  // each such call also filled to the venue's maxBytes as a request of its own, so the round's posts are as few as its
+  // bytes allow (halved, a call past it left posts half full: 10 calls in 9 posts, past Base's 8 at once)
+  const measuredOk = (ks: readonly number[]) => bytesOf(callOf(ks.map((k) => measured[k]!))) + BATCH_BYTES <= lim.maxBytes;
+  for (const part of gasParts(measured.map((i) => readGas.get(sizeKey(reads[i]!))!), measuredOk)) fit(part.map((k) => measured[k]!));
   const statePer = Math.min(again ?? STATE_READS_PER_CALL, STATE_READS_PER_CALL);
   for (let k = 0; k < state.length; k += statePer) fit(state.slice(k, k + statePer));
   for (const g of groups.values()) for (let k = 0; k < g.length; k += perCall) fit(g.slice(k, k + perCall));
@@ -822,6 +843,15 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
       } else for (const j of users) keepAt(j, firstUsed[j]! > share(READ_AGAIN_PER_CALL) ? 1 : READ_AGAIN_PER_CALL);
     });
   }
+  // each plain read's gas used at its final answer, where two providers agreed it and it was not answered 2
+  for (const i of plain) {
+    const a = all[i]!;
+    if ((a as { gas?: true }).gas === true || a.used === undefined) continue;
+    const key = sizeKey(reads[i]!);
+    readGas.delete(key);
+    readGas.set(key, a.used);
+    if (readGas.size > READ_SIZES_KEPT) readGas.delete(readGas.keys().next().value!);
+  }
   // a plain read kept here keeps that size, newest; one kept before and not here keeps its size, newest
   for (const i of again === undefined ? plain : []) {
     const key = sizeKey(reads[i]!);
@@ -837,6 +867,40 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
     if (routeSizes.size > READ_SIZES_KEPT) routeSizes.delete(routeSizes.keys().next().value!);
   }
   return all;
+}
+
+/** The reads of gas used `used`, in order, as calls (lists of their indices) each filled while every read in it would be
+ *  given, by EVM_READ_GAS_CODE's own rule, twice GAS_PACK_MARGIN times its gas used at least (its L, after the reads
+ *  before it took GAS_PACK_MARGIN times theirs and with a quarter share kept for each read after it), so an honest
+ *  revert stays under L/2 and answers 0, never 2; at most STATE_READS_PER_CALL a call, and each call `ok` (card
+ *  evm-warm-quote-inside-the-kpi-with-room). A read's gas at a later block can differ, so the margin: one that passes
+ *  it answers 2 and is read again (readBothSent). Not in the index. */
+const GAS_PACK_MARGIN = 2;
+export function gasParts(used: readonly number[], ok: (ks: readonly number[]) => boolean = () => true): number[][] {
+  const G = Number(EVM_READ_CALL_GAS) - 100_000;
+  const fits = (us: readonly number[]): boolean => {
+    const S = G / us.length;
+    if (S < 30_000) return false;
+    let left = G;
+    for (let k = 0; k < us.length; k++) {
+      const L = ((left - ((us.length - k - 1) * S) / 4 - 140_000 + 10_000) * 63) / 64;
+      if (L < 2 * GAS_PACK_MARGIN * us[k]!) return false;
+      // the read's own gas, and its frame's (the call, its calldata copy and its answer's 224 bytes)
+      left -= GAS_PACK_MARGIN * us[k]! + 20_000;
+    }
+    return true;
+  };
+  const out: number[][] = [];
+  let cur: number[] = [];
+  for (let k = 0; k < used.length; k++) {
+    const next = [...cur, k];
+    if (cur.length > 0 && (next.length > STATE_READS_PER_CALL || !fits(next.map((j) => used[j]!)) || !ok(next))) {
+      out.push(cur);
+      cur = [k];
+    } else cur = next;
+  }
+  if (cur.length > 0) out.push(cur);
+  return out;
 }
 
 /** Each batch's providers in the order it asks them (card evm-warm-quote-inside-the-kpi-with-room): the quote's own

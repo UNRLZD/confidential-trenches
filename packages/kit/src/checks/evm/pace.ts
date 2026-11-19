@@ -61,10 +61,15 @@ const needOf = (p: EvmPace, calls: EvmPaceCalls): number =>
  *    such posts, about 1.7 a second back (the helper's 3 single getLogs a second none refused, 5 refused, 2026-11-05).
  *    The same burst 16 s and then 34 s after one that met 429 answered 36 and 74 (01:16Z): about 2 a second back.
  *    eth_call alone: 36 calls a second for 25 s, 900 calls, none refused. So 36 calls a second and a getLogs post at
- *    20 (1.8 a second), 2,500 at once (125 scan posts: a cold scan of 1M blocks is 100); a background read leaves 120
- *    (3 s of calls: a tap's first rounds). Unpaced, SIGN_HOST's walk drew its 41 answers of 429 (above). */
+ *    24 (1.5 a second, under the 1.7 measured back), 2,500 at once (104 scan posts, under the 128 it holds: a cold scan
+ *    of 1M blocks is 100); a background read leaves 120 (3 s of calls: a tap's first rounds). Unpaced, SIGN_HOST's walk
+ *    drew its 41 answers of 429 (above). At 20 a post (1.8 a second back, 125 at once: at the bucket's edge, past its
+ *    refill) a cold Base quote's scan and the tail read after it drew 4 to 8 answers of 429 in a quote's 116 to 172
+ *    posts (2026-11-19 13:41Z and 14:01Z from the Mac), each holding the provider 30 s for every reader, so the warm
+ *    quotes after it scanned on the slower spares (Pocket 300 to 990 ms a post; card
+ *    evm-warm-quote-inside-the-kpi-with-room, PACE7). */
 export const EVM_PACE: Readonly<Record<string, EvmPace>> = Object.freeze({
-  "https://base-rpc.publicnode.com": Object.freeze({ perS: 36, burst: 2_500, unit: "call", logs: 20, keep: 120 }),
+  "https://base-rpc.publicnode.com": Object.freeze({ perS: 36, burst: 2_500, unit: "call", logs: 24, keep: 120 }),
   "https://rpc.mainnet.chain.robinhood.com": Object.freeze({ perS: 6, burst: 18, unit: "call", logs: 8 }),
   "https://robinhood.daybreak-rpc.network": Object.freeze({ perS: 7, burst: 7, unit: "post", inflight: 3 }),
   "https://robinhood.api.pocket.network": Object.freeze({ perS: 15, burst: 200, unit: "call" }),
