@@ -1478,6 +1478,84 @@ test("the pool index syncs once a sign-in, after the state read's proof pass end
   }
 });
 
+// Card evm-index-kept-at-the-head: the index was synced once a sign-in, so it fell past the quote's maxLag within seconds
+// and every new coin's first quote scanned the blocks past it by currency before its answer (Robinhood 2, 10 and 5 getLogs,
+// Base 6, 19 Nov). A served index is kept at the head: EVM_INDEX_KEEP_MS after each sync ends, a gap sync from the index
+// it kept, whose new pools a quote reads from the index; the store takes one a minute at most; none past a sign out.
+test("a served index is kept at the head: EVM_INDEX_KEEP_MS after each sync a gap sync from the kept index serves the new blocks' pools, stored once a minute, none past a sign out", async () => {
+  const { EVM_INDEX_KEEP_MS } = await import("../../kit/src/trade/evm/buy-tap.ts");
+  const { EVM_INDEX_PUT_MS } = await import("../src/pool-testnet.ts");
+  const { w, ns } = await wallet();
+  await landed(ns);
+  evmPoolIndexReset();
+  const o = { now: 1_800_000_000_000 + 20_000 };
+  const tt = turnTimers(o);
+  const PM = evmPoolVenues()["base-sepolia"].poolManager!;
+  const ZERO = "0x" + "0".repeat(40);
+  // a coin whose only pool is made in the blocks past the first sync's head
+  const COIN = "0x00000000000000000000000000000000000000c7";
+  const fresh = { id: "0x" + "c7".repeat(32), key: { currency0: ZERO, currency1: COIN, fee: 3000, tickSpacing: 60, hooks: ZERO }, block: 72 };
+  const ix = (through: number, pools: unknown[] = []) => ({ v: 1, chainId: 84532, poolManager: PM, from: 1, through, head: { number: through, hash: "0x" + "0".repeat(64) }, spans: [[1, through]], pools });
+  const stats = { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 };
+  const kept = new Map<string, unknown>([["base-sepolia", ix(50)]]);
+  const puts: number[] = [];
+  const calls: (number | null)[] = [];
+  const keeps: { f: () => void; ms: number }[] = [];
+  const t = testnetPool({ ...page(w), held: async () => w }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c: string) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    evmHelper: (c: string) => (c === "base" ? (async () => null) as EvmRpc : undefined),
+    evmTurn: tt.evmTurn,
+    evmIndexStore: { get: async (c: string) => (kept.get(c) ?? null) as never, put: async (c: string, i: unknown) => void (kept.set(c, i), puts.push((i as { through: number }).through)) },
+    evmIndexKeep: (f: () => void, ms: number) => void keeps.push({ f, ms }),
+    evmIndexSync: async (_chain: string, prev: { through: number; pools: unknown[] } | null) => {
+      calls.push(prev?.through ?? null);
+      // a whole sync, as the kit answers it (pool-index.ts F4d): proven to N = through + 10 + 4, kept to N less a margin
+      const n = (prev?.through ?? 0) + 10;
+      const pools = [...(prev?.pools ?? []), ...(n + 4 >= fresh.block ? [fresh] : [])];
+      return { index: ix(n, pools.filter((p) => (p as { block: number }).block <= n)), coversThrough: n + 4, pools, error: null, stats };
+    },
+  } as unknown as Parameters<typeof testnetPool>[1]);
+  const settle = async () => {
+    for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 5));
+  };
+  const tick = async () => {
+    keeps.shift()?.f();
+    await settle();
+  };
+  try {
+    await t.stateRead();
+    await settle();
+    assert.deepEqual(calls, [50], "the first sync reads on from the kept index");
+    assert.deepEqual(puts, [60], "the first whole sync is stored");
+    assert.deepEqual(evmPoolIndexPools("base-sepolia", COIN), [], "the coin's pool is past the first sync's head");
+    assert.deepEqual(keeps.map((k) => k.ms), [EVM_INDEX_KEEP_MS], "a whole sync arms the next gap sync");
+    await tick();
+    assert.deepEqual(calls, [50, 60], "the gap sync reads on from the index the last sync kept, never from none");
+    assert.deepEqual(evmPoolIndexPools("base-sepolia", COIN), [fresh.key], "the new blocks' pool is served to the quote");
+    assert.deepEqual(puts, [60], "a gap sync within a minute of the last write is not stored");
+    assert.equal(keeps.length, 1, "each gap sync arms the next");
+    o.now += EVM_INDEX_PUT_MS;
+    await tick();
+    assert.deepEqual(calls, [50, 60, 70]);
+    assert.deepEqual(puts, [60, 80], "a minute on, the kept index is stored again");
+    await t.stateRead();
+    await settle();
+    assert.deepEqual(calls, [50, 60, 70], "a state read starts no second keep");
+    assert.equal(keeps.length, 1, "one keep a chain");
+    await t.signedOut();
+    await tick();
+    assert.deepEqual(calls, [50, 60, 70], "no gap sync past a sign out");
+    assert.equal(keeps.length, 0, "and none armed");
+  } finally {
+    evmPoolIndexReset();
+    await t.signedOut();
+  }
+});
+
 // Card signpage-evm-reads-draw-no-refusal: two tabs signed in at once each synced the whole cold index (release 130,
 // Chrome CDP capture 13 Nov: two pages' Robinhood index reads at 29.1 s each, one answered 429). One sync a chain on the
 // device at once (the Web Lock ct-evm-index/{chain}): the tab that finds it held syncs none, and at its next state

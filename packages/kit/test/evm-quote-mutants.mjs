@@ -180,6 +180,9 @@ export const MUTANTS = [
   [QUOTE, "    const ixs = indexScanOf(chain, kind, c, weth, floor);\n", "    const ixs = undefined as ReturnType<typeof indexScanOf>;\n", R, "F10w "],
   [QUOTE, "if (ix === undefined || ix.through < floor) return undefined;", "if (ix === undefined || ix.through < floor || kind === \"markets\") return undefined;", R, "F10 "],
   [QUOTE, "  const n = sync?.coversThrough;", "  const n = sync?.coversThrough ?? 5_000_000;", R, "F10p "],
+  // card evm-index-kept-at-the-head: an index synced on to the head serves a new coin's cold buy with no getLogs
+  [QUOTE, "    const ixs = indexScanOf(chain, kind, c, weth, floor);\n", "    const ixs = undefined as ReturnType<typeof indexScanOf>;\n", R, "F10k "],
+  [QUOTE, "  if (held !== undefined && held.through >= n) return held.through === n && held.from === ix.from;", "  if (held !== undefined) return held.through === n && held.from === ix.from;", R, "F10k "],
   // card evm-quote-fast-from-asia: a warm buy's round beside its scan, used only where the scan agrees its block and pools
   [QUOTE, "    if (a.sell || a.minBlock !== undefined || a.speculate === false || ", "    if (true || ", R, "W7 "],
   [QUOTE, "  return a.size === b.size && [...a].every((id) => b.has(id));", "  return true;", R, "W8 "],

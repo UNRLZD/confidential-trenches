@@ -391,7 +391,16 @@ export const evmMainnetVenues = () =>
       // A cold index of the scan's 1M blocks: 100 spans, 4,701 pools, 25 batches on each, no 429, 10.8 s; the gap a
       // minute on, one batch each, 1.7 s (18:33Z). Some of Pocket's backends refuse 1,000 blocks (above), so a span it
       // answers with an error is asked as its halves on both. The margin: 474 blocks; the cap: 131,072 pools.
-      index: bare({ readers: Object.freeze(["https://base-rpc.publicnode.com", "https://base.api.pocket.network"] as const), span: 10_000, perBatch: 5, parallel: 4, margin: 474, cap: 131_072 }),
+      // The second reader is bloXroute's base.rpc.blxrbdn.com since card evm-index-kept-at-the-head (the index is synced
+      // again every EVM_INDEX_KEEP_MS): read from this Mac 2026-11-19 10:12-10:17Z, at the gap sync's rate (every 3 s a
+      // head post and a batch of the margin's 494 blocks' Initialize logs and their last block, 3 minutes) it answered
+      // 100 of 100 posts 200, every tick whole, p50/p95 579/1,168 ms, where Pocket answered 7 of 101 429 (and the index's
+      // cold sync on it 33 of 106, 19 Nov 09:0xZ); at the cold sync's rate (4 batches at once of 5 spans of 10,000
+      // blocks, 4 rounds) 16 of 16 200, 8,620 logs, no error, where Pocket answered 15 of 16 413 and one 429. Preflight
+      // 204, allow-origin *. Its operator is not publicnode's; its history starts at block 52,500,000 (above), under the
+      // depth's floor. Passed over for this seat: base-mainnet.public.blastapi.io (getLogs of 10 blocks at most) and
+      // mainnet.base.org (-32011 "request limit reached" to 50 of 51 batches), both read in the same 3 minutes.
+      index: bare({ readers: Object.freeze(["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com"] as const), span: 10_000, perBatch: 5, parallel: 4, margin: 474, cap: 131_072 }),
     }),
     robinhood: bare({
       chainId: 4663,

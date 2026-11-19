@@ -98,7 +98,7 @@ import { evmPoolSend } from "./evm-send.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolIndexFromSnapshot, type EvmPoolIndexData, type EvmPoolIndexSync } from "../../kit/src/checks/evm/pool-index.ts";
 import { evmPoolIndexUse } from "../../kit/src/checks/evm/quote.ts";
-import { evmPoolIndexRefresh } from "../../kit/src/trade/evm/buy-tap.ts";
+import { EVM_INDEX_KEEP_MS, evmPoolIndexRefresh } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmIndexStore, type EvmIndexStore } from "./evm-index-store.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
@@ -249,6 +249,10 @@ export const EVM_HOLDINGS_RETRY_MAX_MS = 600_000;
  *  Base's 0.67 MB (2026-11-16); a file past this many bytes is no snapshot, and one not read within the time a cold sync. */
 export const EVM_INDEX_SNAPSHOT_MAX = 32 << 20;
 export const EVM_INDEX_SNAPSHOT_MS = 30_000;
+/** The least time between two writes of a kept index to the page's store, ms (card evm-index-kept-at-the-head): a
+ *  served index is synced again every EVM_INDEX_KEEP_MS, and Robinhood's 34,142 pools are about 11 MB as stored, so the
+ *  store takes one a minute; a reload syncs that minute's gap from it. */
+export const EVM_INDEX_PUT_MS = 60_000;
 export const MAINNET_POOL_HISTORY: Readonly<Record<"base" | "robinhood", readonly string[]>> = EVM_POOL_HISTORY;
 const HISTORY = new Map<string, readonly EvmRpc[]>();
 /** Where else an EVM pool's logs are read when its seats cannot give them (evm.ts EvmSyncArgs history): on mainnet the
@@ -788,6 +792,8 @@ export type TestnetOver = {
   /** The page's pool index store (src/evm-index-store.ts on the page's IndexedDB otherwise; none with a planted sync;
    *  tests). */
   evmIndexStore?: EvmIndexStore | null;
+  /** The timer of a served index's next gap sync (an unref'd setTimeout otherwise; tests). */
+  evmIndexKeep?: (f: () => void, ms: number) => unknown;
   /** A chain's shipped index snapshot (SIGN_HOST's /evm-index/<chain>.json otherwise; tests). */
   evmIndexSnapshot?: (network: EvmPoolChain) => Promise<unknown>;
 };
@@ -1746,7 +1752,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // each span proven on two readers of two operators), served to the kit's quote (evmPoolIndexUse), so a buy's quote at
   // the tap asks the scan provider only the blocks past the index's N, not the venue's 1M (Base) of Initialize logs. Read
   // on Base mainnet 13 Nov 04:51-05:17Z, nothing signed: a cold sync 11.2-28.5 s, 4,586-4,591 pools, no 429; the gap a
-  // moment on 526-563 ms. Synced once a sign-in, after the state read's proof passes end, each read a "pass" turn on its
+  // moment on 526-563 ms. Synced first after the state read's proof passes end, then kept at the head (evmIndexOf's
+  // keep, card evm-index-kept-at-the-head), each read a "pass" turn on its
   // host's lane (a trade's reads go first); kept in the page's own index store (src/evm-index-store.ts), so a reload
   // serves the kept index at once and syncs only the gap. A sync that ends partial is synced again at the next state
   // read. One sync a chain at once on the device, across its tabs (the Web Lock ct-evm-index/{chain}, if available: a
@@ -1757,6 +1764,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const evmIndex = new Map<"base" | "robinhood", EvmPoolIndexData | null>();
   const evmIndexed = new Set<"base" | "robinhood">();
   const evmIndexing = new Map<"base" | "robinhood", Promise<void>>();
+  // when each chain's index was last written to the store (evmIndexOf's keep)
+  const evmIndexPut = new Map<"base" | "robinhood", number>();
+  const keepSet = over.evmIndexKeep ?? ((f: () => void, ms: number) => {
+    const t = setTimeout(f, ms) as unknown as { unref?: () => void };
+    t.unref?.();
+    return t;
+  });
   // whether the device holds money anywhere (any `held` note of any scope, or a buy or sale record), as the last state
   // read found it: only then is a chain's index synced past what the device already has. A fresh account's coin quote
   // is served the kept index or the release's snapshot alone, read from this origin, and its quote's own scan reads the
@@ -1827,14 +1841,41 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // (a whole sync is proven to its head; the index it keeps ends the margin below, read again by the next gap)
       if (s.index !== null && s.coversThrough !== null && evmPoolIndexUse(network, s)) {
         evmIndexed.add(chain);
-        await indexStore?.put(network, s.index);
+        // the store takes one a minute at most (EVM_INDEX_PUT_MS): the keep below syncs every EVM_INDEX_KEEP_MS
+        const t = turnNow();
+        if (indexStore && !(t - (evmIndexPut.get(chain) ?? -Infinity) < EVM_INDEX_PUT_MS)) {
+          evmIndexPut.set(chain, t);
+          await indexStore.put(network, s.index);
+        }
       }
+    };
+    const locked = (): Promise<void> | void => (locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync());
+    // Card evm-index-kept-at-the-head: a served index is kept at the head, so a coin's first quote reads its pools from
+    // it and asks no scan by currency before its answer (the quote reads the blocks past N unread only while they start
+    // within maxLag of the head, 10 s on both chains; synced once a sign-in, the index fell past it within seconds and
+    // every new coin's first quote sent 5 getLogs by currency over the same blocks, 19 Nov). EVM_INDEX_KEEP_MS after each
+    // sync ends, a gap sync from the index it kept (its margin and the new blocks: a head post and one batch on each
+    // reader), never a full one, under the same lock; a tab that finds it held syncs at its next keep. The keep is on the
+    // index readers' own head, not beside a quote: a quote's reads hold none of the sync's, and not on the quote's head
+    // watch, which stops a minute after the last quote, so a coin opened after it would scan first. No store read here:
+    // this tab's index is the newest it serves. Ends at a sign out; a device that holds nothing syncs none (sync above)
+    // (one keep a chain: evmIndexOf runs no more once the chain is indexed, so only this chain of timers syncs it)
+    const keep = (): void => {
+      if (signal.aborted || !evmIndexed.has(chain)) return;
+      keepSet(() => {
+        if (signal.aborted) return;
+        const again = Promise.resolve()
+          .then(locked)
+          .catch(() => {})
+          .finally(() => (evmIndexing.delete(chain), keep()));
+        evmIndexing.set(chain, again);
+      }, EVM_INDEX_KEEP_MS);
     };
     const run = evmIndexServe(chain, network, signal)
       .catch(() => {})
-      .then(() => (signal.aborted ? undefined : locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync()))
+      .then(() => (signal.aborted ? undefined : locked()))
       .catch(() => {})
-      .finally(() => evmIndexing.delete(chain));
+      .finally(() => (evmIndexing.delete(chain), keep()));
     evmIndexing.set(chain, run);
     return run;
   };
