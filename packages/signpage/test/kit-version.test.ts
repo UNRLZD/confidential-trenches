@@ -1551,3 +1551,28 @@ test("taps-wait-inside-the-page: the kit's schema bounds spendable: at most the 
   assert.equal(at({ chain: "solana", asset: "SOL", balance: "2", spendable: "1.9" }), true, "before any queue runs: no ready, a spendable");
   assert.equal(at({ ...entry, spendable: "1.0000000001" }), false, "more fraction digits than SOL has");
 });
+
+// kit-v1.19 reads everything kit 1.20 sends but a pool entry's spendable: a move op's code, a trade's owed_back with its
+// txs, a stage event in full, the move event and the closed notice (the kit-version mutant sweep's five kit-v1.19
+// mutants, each taking one of them from kit-v1.19, live at 359c2be58 without this test)
+test("taps-wait-inside-the-page: kit-v1.19 is sent every field and event kit 1.20 is, the pool spendable alone left out", async () => {
+  const v119 = kitLevel("1.19");
+  assert.deepEqual(stateFor(v119, WITH_CODE), WITH_CODE, "a move op's code, in a state event");
+  assert.deepEqual(resultFor(v119, "state", WITH_CODE), WITH_CODE, "and in a state answer");
+  assert.ok(V119.SIGNPAGE_RESULT_SCHEMAS.state(WITH_CODE));
+  const owed = { stage: "owed_back", txs: EVM_TX };
+  for (const kind of ["pool.buy", "pool.sell", "buy", "pool.deposit"] as const) {
+    assert.deepEqual(resultFor(v119, kind, owed), owed, kind);
+    assert.ok(V119.SIGNPAGE_RESULT_SCHEMAS[kind]?.(owed) ?? true, `kit-v1.19 reads ${kind}'s`);
+  }
+  const posts = await endPosts("1.19", "owed_back");
+  assert.deepEqual(posts, [{ v: 1, type: "progress", id: "x", stage: "owed_back", txs: EVM_TX }], "a stage event in full");
+  assert.ok(posts.every((m) => V119.signpageProgressSchema(m)));
+  const now = await routesTo(SIGNPAGE_KIT_VERSION, [{ move: "cash" }, { out: "1.5" }]);
+  assert.deepEqual(await routesTo("1.19", [{ move: "cash" }, { out: "1.5" }]), now, "kit 1.19 reads the move event");
+  const p = page();
+  p.send(hello("1.19"));
+  await p.api.idle();
+  p.api.closed("open-1");
+  assert.equal(p.posted.filter((m) => (m as { type?: string }).type === "closed").length, 1, "the closed notice");
+});
