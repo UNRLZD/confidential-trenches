@@ -1102,3 +1102,14 @@ test("a stopped command's code: INCONCLUSIVE only on helper-misses.mjs's stopped
   assert.equal(stoppedCode("INCONCLUSIVE no load in 6 picks was first drawn filling"), 1);
   assert.equal(stoppedCode(""), 1);
 });
+
+// card app-chart-check-inside-its-bound: merge group 44571987928, test-browser (1) job 135729331112, 19 Nov 17:01-17:05Z:
+// app-chart-fills-in-its-history ran past its bound of 238 s while the helper said filling (TRIES picks with no deadline
+// of their own). A check whose walk has its own deadline (an exported RUN_MS) ends it with 30 s of its bound left for its
+// browser's launch, the build's serving and its close.
+test("a check's own run deadline (RUN_MS) ends inside its bound with 30 s to spare: app-chart-fills-in-its-history", async () => {
+  const c = { dir: E2E_DIR, command: "node ../../scripts/live-checks/app-chart-fills-in-its-history.mjs --build dist" };
+  const { RUN_MS } = await import("../live-checks/app-chart-fills-in-its-history.mjs");
+  assert.equal(boundOf(c), 238, "the bound the check's RUN_MS note cites");
+  assert.ok(RUN_MS / 1000 + 30 <= boundOf(c), `RUN_MS ${RUN_MS / 1000} s against the bound ${boundOf(c)} s`);
+});
