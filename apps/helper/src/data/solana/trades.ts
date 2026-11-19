@@ -459,9 +459,15 @@ const AMOUNT = /^\d{1,30}$/;
 /** One pool trade as a transaction's token balances show it: the pool's two vaults, the token accounts the pool
  *  account's own data names (`poolData`) that the transaction's balances list, one holding `mint`, one another coin.
  *  The pool gave `mint` out (its vault fell, the other rose): a buy; took it in: a sell; anything else (a deposit, a
- *  withdrawal, a transaction that moves no vault, more than one vault of a side) is no trade (null). Amounts are the
- *  vaults' own changes in base units (a coin with a transfer fee: what reached the pool), the trader the transaction's
- *  fee payer. Every field is the RPC's, hostile: bounded and checked. */
+ *  withdrawal, a transaction that moves no vault, more than one vault of a side) is no trade (null). The coin amount is
+ *  what the token transfers into (a sell) or out of (a buy) its vault moved, the sum of the token programs' Transfer and
+ *  TransferChecked instructions (outer and inner) naming it, so a sell of a coin with a transfer fee shows what the
+ *  trader sent, not what reached the pool after the fee (card sol-vendor-tape-refresh-from-our-reads: NEARKAT's sell
+ *  26FmJUjr sent 11,490.514848, its vault rose 11,145.799402, the vendor names the first); the vault's own change when
+ *  no such transfer is read, or transfers ran both ways. The trader's own balance is no measure: in the recorded
+ *  NEARKAT trades the coin left or reached an account the fee payer does not own (26FmJUjr, C4c5gcJq), or the payer's
+ *  change held a platform fee beside the pool's transfer (My1mjXoq: 653,864.627 left, 648,306.778 to the pool). Quote
+ *  amounts are the vault's change, the trader the fee payer. Every field is the RPC's, hostile: bounded and checked. */
 export type PoolLeg = { side: "b" | "s"; amt: bigint; decimals: number; quote: bigint; quoteMint: string; quoteDecimals: number; trader: string | null; ts: number };
 export function poolLeg(tx: unknown, mint: string, poolData: Uint8Array): PoolLeg | null {
   const r = tx as Record<string, unknown> | null;
@@ -487,7 +493,7 @@ export function poolLeg(tx: unknown, mint: string, poolData: Uint8Array): PoolLe
     if (b !== null) pre.set(b.i, b);
   }
   // the vaults: token accounts whose 32-byte address the pool's own data holds
-  const vaults: (Bal & { d: bigint })[] = [];
+  const vaults: (Bal & { d: bigint; key: string })[] = [];
   for (const v of (meta.postTokenBalances as unknown[]).slice(0, 512)) {
     const b = bal(v);
     const key = b === null ? null : address(keys[b.i]);
@@ -495,7 +501,7 @@ export function poolLeg(tx: unknown, mint: string, poolData: Uint8Array): PoolLe
     if (b === null || bytes === null || data.indexOf(Buffer.from(bytes)) < 0) continue;
     const p = pre.get(b.i);
     if (p !== undefined && p.mint !== b.mint) return null;
-    vaults.push({ ...b, d: b.amount - (p?.amount ?? 0n) });
+    vaults.push({ ...b, d: b.amount - (p?.amount ?? 0n), key: key! });
   }
   const mine = vaults.filter((v) => v.mint === mint);
   const other = vaults.filter((v) => v.mint !== mint);
@@ -503,14 +509,47 @@ export function poolLeg(tx: unknown, mint: string, poolData: Uint8Array): PoolLe
   const [t, q] = [mine[0]!, other[0]!];
   const side = t.d < 0n && q.d > 0n ? "b" : t.d > 0n && q.d < 0n ? "s" : null;
   if (side === null) return null;
-  return { side, amt: t.d < 0n ? -t.d : t.d, decimals: t.decimals, quote: q.d < 0n ? -q.d : q.d, quoteMint: q.mint, quoteDecimals: q.decimals, trader: address(keys[0]), ts };
+  const moved = t.d < 0n ? -t.d : t.d;
+  const x = transfersOf(r!, keys, t.key);
+  const sent = side === "s" ? (x.out === 0n && x.in >= moved ? x.in : moved) : x.in === 0n && x.out >= moved ? x.out : moved;
+  return { side, amt: sent, decimals: t.decimals, quote: q.d < 0n ? -q.d : q.d, quoteMint: q.mint, quoteDecimals: q.decimals, trader: address(keys[0]), ts };
+}
+
+/** The token programs' transfers into (`in`) and out of (`out`) the account `key` in a transaction's instructions,
+ *  outer and inner, in base units: Transfer (3: amount; source, destination) and TransferChecked (12: amount,
+ *  decimals; source, mint, destination). Any other instruction, or one out of shape, counts nothing. */
+function transfersOf(r: Record<string, unknown>, keys: unknown[], key: string): { in: bigint; out: bigint } {
+  const msg = (r.transaction as Record<string, unknown>).message as Record<string, unknown>;
+  const meta = r.meta as Record<string, unknown>;
+  const all: unknown[] = Array.isArray(msg.instructions) ? msg.instructions.slice(0, 256) : [];
+  for (const g of Array.isArray(meta.innerInstructions) ? meta.innerInstructions.slice(0, 256) : []) {
+    const inner = (g as Record<string, unknown> | null)?.instructions;
+    if (Array.isArray(inner)) all.push(...inner.slice(0, 256));
+  }
+  const t = { in: 0n, out: 0n };
+  for (const v of all.slice(0, 2_048)) {
+    const ix = v as Record<string, unknown> | null;
+    const acc = ix?.accounts;
+    if (!Number.isSafeInteger(ix?.programIdIndex) || !TOKEN_PROGRAMS.includes(keys[ix!.programIdIndex as number] as string) || !Array.isArray(acc) || typeof ix!.data !== "string") continue;
+    const d = b58decode(ix!.data);
+    if (d === null || d.length < 9 || (d[0] !== 3 && d[0] !== 12)) continue;
+    const [src, dst] = d[0] === 3 ? [acc[0], acc[1]] : [acc[0], acc[2]];
+    if (!Number.isSafeInteger(src) || !Number.isSafeInteger(dst)) continue;
+    const amount = Buffer.from(d).readBigUInt64LE(1);
+    if (keys[dst as number] === key) t.in += amount;
+    if (keys[src as number] === key) t.out += amount;
+  }
+  return t;
 }
 
 /** A vendor-named pool's tape renewed from our own reads (poolTape): the rows (newest first, at most TRADES_MAX) as of
  *  `at` (the vendor's read, then each round's start), the newest signature read (`lastSig`), the pool account's data
  *  (read once), whether a round ever found a trade in it (`placed`) or read trades it could not (`unplaced`: the vendor
  *  serves this coin, as before), the round in flight, and the failed round's retry time. */
-type Follow = { pool: string; rows: TapeRow[]; src: string; at: number; lastSig: string | null; data: Uint8Array | null; placed: boolean; misses: number; unplaced: boolean; reading: Promise<void> | null; retryAt: number; touched: number };
+/** `hole`: a round cut short (FOLLOW_SIGS listed, or more than FOLLOW_TX_MAX successful) left signatures unread between
+ *  `before` (the oldest it covered) and `until` (the newest held before it); the first `above` rows are above it, the
+ *  rest below, and no complete list is claimed until later rounds have read down to `until`. */
+type Follow = { pool: string; rows: TapeRow[]; src: string; at: number; lastSig: string | null; data: Uint8Array | null; placed: boolean; misses: number; unplaced: boolean; reading: Promise<void> | null; retryAt: number; touched: number; hole: { before: string; until: string } | null; above: number };
 
 /** `p`'s settling, or `ms` passing, whichever is first (`p` goes on). */
 function within(p: Promise<unknown>, ms: number): Promise<void> {
@@ -574,6 +613,9 @@ export function createSolanaTrades(deps: {
   /** The token's top pool's newest trades (token.ts tape: a JSON array of tape rows, newest first), served while this
    *  tape holds no row: a token whose venue is not decoded here. */
   tape?: (mint: string) => Promise<DataAnswer>;
+  /** The pool the vendor names for the token's tape now (token.ts tapePool, held POOL_FRESH_MS), or null: a followed
+   *  tape moves to a new top pool (card sol-vendor-tape-refresh-from-our-reads). */
+  pool?: (mint: string) => Promise<string | null>;
   /** Bars before our first, GeckoTerminal's (token.ts candles), or none. */
   history?: (mint: string, tf: string, to: number | null, limit: number, client?: string) => Promise<DataAnswer>;
   /** A quote coin's USD price per whole coin as decimal text (its Discover or Jupiter row), or null. */
@@ -1125,10 +1167,10 @@ export function createSolanaTrades(deps: {
   /** A pool's newest trades (newest first), read at `at`, as the trades answer: the newest `limit`, every one after the
    *  oldest (card token-stats-count-every-trade) claimed complete only while that read is within SOL_VENDOR_REACH_MS,
    *  its age always named (card vendor-tapes-name-their-reach-every-chain), the vendor's rows and ours alike. */
-  function rowsAnswer(all: unknown[], src: string, at: number, limit: number): DataAnswer {
+  function rowsAnswer(all: unknown[], src: string, at: number, limit: number, holed = false): DataAnswer {
     const age = Math.max(0, now() - at);
     const oldest = (all.at(-1) as { t_ms?: unknown } | undefined)?.t_ms;
-    const whole = typeof oldest === "number" && Number.isSafeInteger(oldest) && age <= SOL_VENDOR_REACH_MS ? { whole_ms: oldest + 1_000 } : {};
+    const whole = typeof oldest === "number" && Number.isSafeInteger(oldest) && age <= SOL_VENDOR_REACH_MS && !holed ? { whole_ms: oldest + 1_000 } : {};
     const timing = `sol-vendor-read;desc="rows read ${age} ms ago"`;
     return { status: 200, body: JSON.stringify({ trades: all.slice(0, limit), ...whole, src, as_of_ms: at }), src, asOfMs: at, timing };
   }
@@ -1152,9 +1194,9 @@ export function createSolanaTrades(deps: {
     if (f !== undefined && f.pool === pool && (f.reading !== null || f.at >= at)) return;
     const rows = all.slice(0, TRADES_MAX) as TapeRow[];
     const lastSig = typeof rows[0]?.tx === "string" && SIG_TEXT.test(rows[0].tx) ? rows[0].tx : null;
-    if (f !== undefined && f.pool === pool) return void Object.assign(f, { rows, src, at, lastSig });
+    if (f !== undefined && f.pool === pool) return void Object.assign(f, { rows, src, at, lastSig, hole: null, above: 0 });
     follows.delete(mint);
-    follows.set(mint, { pool, rows, src, at, lastSig, data: null, placed: false, misses: 0, unplaced: false, reading: null, retryAt: 0, touched: now() });
+    follows.set(mint, { pool, rows, src, at, lastSig, data: null, placed: false, misses: 0, unplaced: false, reading: null, retryAt: 0, touched: now(), hole: null, above: 0 });
     if (follows.size > FOLLOWS_MAX) follows.delete(follows.keys().next().value!);
   }
   /** A quote coin's USD price per whole coin times 10^18, or null: USDC one dollar, SOL Pyth's (readRef), another coin
@@ -1169,13 +1211,55 @@ export function createSolanaTrades(deps: {
     if (!priced(q) || now() - (quotes.get(q)?.at ?? 0) >= REF_MS) await readQuote(q);
     return quotes.get(q)?.usd ?? null;
   }
-  /** One round of `f`'s pool: its account once, its signatures since the newest read, each new successful transaction,
-   *  the rows they hold put on top (a page of FOLLOW_SIGS or more than FOLLOW_TX_MAX successful: the new rows alone, a
-   *  gap below them). Throws when a read fails or a trade has no price, leaving `f` as it was. */
+  type Sig = { signature: string; err?: unknown; blockTime?: unknown };
+  /** One page of `pool`'s signatures (`opts`: until, before) and its newest FOLLOW_TX_MAX successful transactions read:
+   *  `cut` when signatures below the page's covered part are unread (a full page, or more successful than read), and
+   *  `bottom` the oldest signature it covered. */
+  async function page(f: Follow, opts: Record<string, string>, call: (m: string, p: unknown[]) => Promise<unknown>) {
+    const got = await call("getSignaturesForAddress", [f.pool, { limit: FOLLOW_SIGS, commitment: "confirmed", ...opts }]);
+    if (!Array.isArray(got)) throw new Error("signatures");
+    const sigs = (got as Record<string, unknown>[]).slice(0, FOLLOW_SIGS).filter((x) => typeof x?.signature === "string" && SIG_TEXT.test(x.signature) && Number.isSafeInteger(x.slot)) as Sig[];
+    const good = sigs.filter((x) => x.err === null || x.err === undefined);
+    const todo = good.slice(0, FOLLOW_TX_MAX);
+    const cut = got.length >= FOLLOW_SIGS || good.length > todo.length;
+    const bottom = (good.length > todo.length ? todo.at(-1) : sigs.at(-1))?.signature ?? null;
+    const read: { s: Sig; r: unknown }[] = [];
+    for (let k = 0; k < todo.length; k += TX_PARALLEL) {
+      read.push(...(await Promise.all(todo.slice(k, k + TX_PARALLEL).map(async (x) => ({ s: x, r: await call("getTransaction", [x.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]) })))));
+    }
+    return { sigs, cut, bottom, read };
+  }
+  /** The tape rows of transactions read (newest first), and how many showed a trade; throws for a trade with no price. */
+  async function rowsOf(mint: string, f: Follow, read: { s: Sig; r: unknown }[]): Promise<{ rows: TapeRow[]; legs: number }> {
+    const rows: TapeRow[] = [];
+    let legs = 0;
+    for (const { s: x, r } of read) {
+      const leg = poolLeg(r, mint, f.data!);
+      if (leg === null) continue;
+      legs++;
+      const p = await usdOf(leg.quoteMint);
+      if (p === null) throw new Error("quote unpriced");
+      const usd = (leg.quote * p) / 10n ** BigInt(leg.quoteDecimals);
+      if (usd > 0n) rows.push({ t_ms: leg.ts * 1_000, side: leg.side, usd: fixed(usd, VALUE_SCALE), amt: fixed(leg.amt, leg.decimals), trader: leg.trader, tx: x.signature });
+    }
+    return { rows, legs };
+  }
+  /** Rows above a hole that fill the tape alone: the hole and what is below it go, the tape whole again. */
+  function capped(f: Follow): void {
+    if (f.hole !== null && f.above >= TRADES_MAX) f.hole = null;
+    if (f.hole === null) f.above = 0;
+    f.rows = f.rows.slice(0, TRADES_MAX);
+  }
+  /** One round of `f`'s pool: the pool the vendor names now (deps.pool, its own freshness: a new top pool is followed
+   *  from its newest trades), its account once, then a page of a hole a round before left (signatures before its
+   *  `before` and after its `until`, the rows put in their place), then its signatures since the newest read, each new
+   *  successful transaction, and the rows they hold put on top. Throws when a read fails or a trade has no price. */
   async function round(mint: string, f: Follow): Promise<void> {
     const started = now();
     followCount.rounds++;
     const call = (method: string, params: unknown[]) => (followCount.calls++, rpc(method, params));
+    const named = deps.pool === undefined ? null : await deps.pool(mint).catch(() => null);
+    if (named != null && address(named) !== null && named !== f.pool) Object.assign(f, { pool: named, data: null, rows: [], lastSig: null, hole: null, above: 0, placed: false, misses: 0 });
     if (f.data === null) {
       const a = (await call("getAccountInfo", [f.pool, { encoding: "base64", commitment: "confirmed" }])) as Record<string, unknown> | null;
       const v = a?.value as Record<string, unknown> | null | undefined;
@@ -1183,47 +1267,55 @@ export function createSolanaTrades(deps: {
       if (data === null || data.length === 0 || data.length > POOL_DATA_MAX) return void (f.unplaced = true);
       f.data = data;
     }
-    const page = await call("getSignaturesForAddress", [f.pool, { limit: FOLLOW_SIGS, commitment: "confirmed", ...(f.lastSig === null ? {} : { until: f.lastSig }) }]);
-    if (!Array.isArray(page)) throw new Error("signatures");
-    const sigs = (page as Record<string, unknown>[]).slice(0, FOLLOW_SIGS).filter((s) => typeof s?.signature === "string" && SIG_TEXT.test(s.signature) && Number.isSafeInteger(s.slot)) as { signature: string; err?: unknown; blockTime?: unknown }[];
-    const good = sigs.filter((s) => s.err === null || s.err === undefined);
-    const todo = good.slice(0, FOLLOW_TX_MAX);
-    const gap = f.lastSig === null || page.length >= FOLLOW_SIGS || good.length > todo.length;
-    const read: { s: (typeof sigs)[number]; r: unknown }[] = [];
-    for (let k = 0; k < todo.length; k += TX_PARALLEL) {
-      read.push(...(await Promise.all(todo.slice(k, k + TX_PARALLEL).map(async (s) => ({ s, r: await call("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]) })))));
+    // the hole a cut round left, one page a round, while its rows still reach the tape
+    if (f.hole !== null) {
+      const h = f.hole;
+      const g = await page(f, { before: h.before, until: h.until }, call);
+      // a transaction not served yet: the hole stays as it is for the next round
+      if (g.read.every((x) => x.r != null) && f.hole === h) {
+        const { rows } = await rowsOf(mint, f, g.read);
+        f.rows = [...f.rows.slice(0, f.above), ...rows, ...f.rows.slice(f.above)];
+        f.above += rows.length;
+        f.hole = g.cut && g.bottom !== null ? { before: g.bottom, until: h.until } : null;
+        capped(f);
+      }
     }
+    const top = await page(f, f.lastSig === null ? {} : { until: f.lastSig }, call);
     // a transaction the provider does not serve yet (listed a moment before, by another of its nodes): the round reaches
     // only to the signature below the oldest such one, dated by that one's block, and the next round lists it again
-    let newest = sigs[0]?.signature ?? f.lastSig;
+    let newest = top.sigs[0]?.signature ?? f.lastSig;
     let at = started;
-    let kept = read;
-    const lost = read.findLastIndex((x) => x.r == null);
+    let kept = top.read;
+    const lost = top.read.findLastIndex((x) => x.r == null);
     if (lost >= 0) {
-      const s = read[lost]!.s;
-      const below = sigs[sigs.indexOf(s) + 1];
+      const x = top.read[lost]!.s;
+      const below = top.sigs[top.sigs.indexOf(x) + 1];
       if (below === undefined) throw new Error("transaction unread");
-      kept = read.slice(lost + 1);
+      kept = top.read.slice(lost + 1);
       newest = below.signature;
-      at = Number.isSafeInteger(s.blockTime) ? Math.max(f.at, Math.min(started, (s.blockTime as number) * 1_000)) : f.at;
+      at = Number.isSafeInteger(x.blockTime) ? Math.max(f.at, Math.min(started, (x.blockTime as number) * 1_000)) : f.at;
     }
-    const legs: { tx: string; leg: PoolLeg }[] = [];
-    for (const { s, r } of kept) {
-      const leg = poolLeg(r, mint, f.data!);
-      if (leg !== null) legs.push({ tx: s.signature, leg });
-    }
-    const rows: TapeRow[] = [];
-    for (const { tx, leg } of legs) {
-      const p = await usdOf(leg.quoteMint);
-      if (p === null) throw new Error("quote unpriced");
-      const usd = (leg.quote * p) / 10n ** BigInt(leg.quoteDecimals);
-      if (usd > 0n) rows.push({ t_ms: leg.ts * 1_000, side: leg.side, usd: fixed(usd, VALUE_SCALE), amt: fixed(leg.amt, leg.decimals), trader: leg.trader, tx });
-    }
+    const { rows, legs } = await rowsOf(mint, f, kept);
     // a pool none of whose first few transactions shows a trade we can read is not ours to follow
-    if (legs.length > 0) f.placed = true;
+    if (legs > 0) f.placed = true;
     else if (!f.placed && (f.misses += kept.length) >= 3) return void (f.unplaced = true);
     const fresh = new Set(rows.map((r) => r.tx));
-    f.rows = gap ? rows.slice(0, TRADES_MAX) : [...rows, ...f.rows.filter((r) => !fresh.has(r.tx))].slice(0, TRADES_MAX);
+    const held = f.rows.filter((r) => !fresh.has(r.tx));
+    if (f.lastSig === null) {
+      // nothing held to reach: the newest read are the tape, every trade after the oldest of them read
+      f.rows = rows;
+      f.hole = null;
+    } else if (!top.cut || top.bottom === null) {
+      f.rows = [...rows, ...held];
+      if (f.hole !== null) f.above += rows.length;
+    } else {
+      // cut short: the rows held below an older hole go (one hole at a time); the new hole is from this page's oldest
+      // covered signature to the newest held
+      f.rows = [...rows, ...(f.hole === null ? held : held.slice(0, f.above))];
+      f.hole = { before: top.bottom, until: f.lastSig };
+      f.above = rows.length;
+    }
+    capped(f);
     f.lastSig = newest;
     f.at = at;
     if (!f.src.startsWith("chain,")) f.src = `chain,${f.src}`;
@@ -1236,7 +1328,7 @@ export function createSolanaTrades(deps: {
     const v = await deps.tape!(mint).catch(() => null);
     if (v === null || v.status !== 200 || (v.asOfMs ?? 0) <= f.at) return;
     const all = (JSON.parse(v.body) as TapeRow[]).slice(0, TRADES_MAX);
-    Object.assign(f, { rows: all, src: v.src ?? "geckoterminal", at: v.asOfMs!, lastSig: typeof all[0]?.tx === "string" && SIG_TEXT.test(all[0].tx) ? all[0].tx : f.lastSig });
+    Object.assign(f, { rows: all, src: v.src ?? "geckoterminal", at: v.asOfMs!, lastSig: typeof all[0]?.tx === "string" && SIG_TEXT.test(all[0].tx) ? all[0].tx : f.lastSig, hole: null, above: 0 });
   }
   /** The tape of a pool the vendor names: its follow's rows, renewed by a round once FOLLOW_MS old, a caller past
    *  SOL_VENDOR_REACH_MS waiting for that round within TAPE_OPEN_BOUND_MS (card sol-vendor-tape-waits-past-reach);
@@ -1264,7 +1356,7 @@ export function createSolanaTrades(deps: {
     }
     if (now() - f.at > SOL_VENDOR_REACH_MS && f.reading !== null) await within(f.reading, TAPE_OPEN_BOUND_MS);
     if (f.unplaced) return vendorTape(mint, limit, e);
-    return rowsAnswer(f.rows, f.src, f.at, limit);
+    return rowsAnswer(f.rows, f.src, f.at, limit, f.hole !== null);
   }
 
   /** A first read: the token's decimals, its subscription in force, then its newest COLD_SIGS signatures walked. */

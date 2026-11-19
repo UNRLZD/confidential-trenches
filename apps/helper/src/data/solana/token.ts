@@ -1518,6 +1518,14 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
      *  in `src`: the tape of a token whose venue the chain tape does not decode (trades.ts). A good answer names the pool
      *  its rows are of (`pool`), so trades.ts renews them from its own chain reads of that pool, never this vendor's (card
      *  sol-vendor-tape-refresh-from-our-reads). */
+    /** The pool a tape's rows are of now (its top pool, chartPool), read as a chart's is: held POOL_FRESH_MS from our own
+     *  read, then one refresh, a refused one serving what is held; null when none is named or read (card
+     *  sol-vendor-tape-refresh-from-our-reads: trades.ts follows a new top pool). */
+    tapePool: async (mint: string): Promise<string | null> => {
+      if (address(mint) === null) return null;
+      const p = await pools.get(mint);
+      return p.status === 200 && address(p.body) !== null ? chartPool(mint, p.body) : null;
+    },
     tape: async (mint: string, client?: string): Promise<DataAnswer> => {
       if (address(mint) === null) return NOT_FOUND;
       const a = await tapes.get(mint, client);
