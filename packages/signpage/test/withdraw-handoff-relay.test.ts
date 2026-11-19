@@ -9,6 +9,7 @@ import { RELAY_FEE, T, bytes, expired, handoffOf, helper, leftReserved, openNote
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import type { RelayOutcome, RelayRpc } from "../../wallet/src/withdraw/relay.ts";
+import { untilAborted } from "../../kit/src/abort.ts";
 import type { WithdrawRequest } from "../../wallet/src/withdraw/request.ts";
 import type { HandoffOver, HandoffPage } from "../src/withdraw/handoff.ts";
 
@@ -296,13 +297,14 @@ test("the settle pass: a note held to the bound never ends a later note's arriva
     relay: async (seed, r, deps) => {
       relaySignals.set(r.noteId, deps.signal!);
       // A: a pair that never settles, held until its bound
-      if (r.noteId === a.noteId) return new Promise((_ok, no) => deps.signal!.addEventListener("abort", () => no(deps.signal!.reason), { once: true }));
+      if (r.noteId === a.noteId) return untilAborted(deps.signal!);
       return landed(seed, r, deps);
     },
     // B's payout runs 500 ms after its landing: the arrival waits for it under its signal, as the pair's rounds do
     arrival: async (x) => {
       arrivalSignals.push(x.signal!);
       await new Promise<void>((ok, no) => {
+        if (x.signal!.aborted) return no(x.signal!.reason);
         const t = setTimeout(ok, 500);
         x.signal!.addEventListener("abort", () => (clearTimeout(t), no(x.signal!.reason)), { once: true });
       });

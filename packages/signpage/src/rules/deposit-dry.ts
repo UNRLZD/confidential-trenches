@@ -9,8 +9,8 @@
 // quote whose min out is under it. So an asset's minimum is the least amount whose floor (oneClickFloors, the device's
 // own: amountOut ≥ in − withdrawFee − in × (F + S), min out ≥ that × (1 − slippage)) is at least MIN_DEPOSIT, found on
 // that very function. The floor takes 1Click's withdraw fee, which is the registration of the one-time id on the vault's
-// USDC (wallet.md D51, D52: 0.00125 N at NEAR's price) and so moves with NEAR's price; deposit.assets reads it from one
-// dry quote per asset. Before any request (deposit.quote, deposit.dry) the device refuses below_min under the bound a
+// USDC (wallet.md D51, D52: 0.00125 N at NEAR's price) and so moves with NEAR's price (no pinned figure holds it);
+// deposit.assets reads it off the signed amounts of one dry quote per asset (signedWithdrawFee). Before any request (deposit.quote, deposit.dry) the device refuses below_min under the bound a
 // zero fee gives, which no fee lowers; an amount above that bound whose checked answer clears every floor but
 // MIN_DEPOSIT is refused below_min too, never quote_check_failed: the device read the reason off a verified answer.
 //
@@ -181,15 +181,16 @@ const statusCode = (status: number): DepositRefusal | null =>
   DEPOSIT_ANSWERED.includes(status) ? null : status === 429 ? "busy" : status === 503 ? "down" : "not_available";
 
 /**
- * The withdraw fee a checked dry answer may stand for, bounded by its signed amounts: a dry answer's withdrawFee is not
- * signed (src/checks/oneclick.ts), so a helper could rewrite it after 1Click signed. 1Click's amountOut is at most
- * amountIn less its fee and its withdraw fee, so amountIn − amountOut − ⌊amountIn × F / 10,000⌋ (F the route's fee,
- * the one the kit's check held the entry to) is at least the withdraw fee 1Click took: the figure counts up to that and no more, never below 0.
+ * The withdraw fee a checked dry answer stands for, from its signed amounts alone: a dry answer's withdrawFee is not
+ * signed (src/checks/oneclick.ts), so a helper can rewrite it after 1Click signed, down to 0 as well as up (card
+ * deposit-min-floor-signed: a 0 showed Solana's minimum at 1.011719, which the live quote then refused below_min). 1Click's
+ * amountOut is at most amountIn less its fee and its withdraw fee, so amountIn − amountOut − ⌊amountIn × F / 10,000⌋ (F
+ * the route's fee, the one the kit's check held the entry to) is at least the withdraw fee 1Click took, and the minimum
+ * counts all of it: never less, so no figure the helper sends lowers it; never below 0. The unsigned figure is not read.
  */
-export function signedWithdrawFee(q: Pick<OneClickChecked, "amountIn" | "amountOut" | "unsignedDryWithdrawFee">, feeBps: number): bigint {
+export function signedWithdrawFee(q: Pick<OneClickChecked, "amountIn" | "amountOut">, feeBps: number): bigint {
   const room = q.amountIn - q.amountOut - (q.amountIn * BigInt(feeBps)) / 10_000n;
-  const w = q.unsignedDryWithdrawFee ?? 0n;
-  return room <= 0n ? 0n : w < room ? w : room;
+  return room <= 0n ? 0n : room;
 }
 
 /** One dry quote of `amount` from `origin`, asked and checked on DEPOSIT_QUOTE_PATH: the checked quote and the route's
@@ -299,7 +300,7 @@ export async function depositAssetsKind(ctx: DepositReadContext = {}): Promise<D
   kept.forEach(({ a }, i) => {
     const p = probes[i]!;
     if (!p.ok) return;
-    // the withdraw fee no higher than the signed amounts allow, the minimum at the live quote's fee
+    // the withdraw fee the signed amounts leave room for, the minimum at the live quote's fee
     const min = depositMinimum(a.id, signedWithdrawFee(p.result, p.result.feeBps));
     if (min === null) return;
     assets.push({ origin_asset: a.id, chain: a.chain, symbol: "USDC", decimals: USDC_DECIMALS, min: decimal(min, USDC_DECIMALS),

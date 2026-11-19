@@ -29,7 +29,7 @@ import {
 import { base58 } from "../bind/checks.ts";
 import { POOL_EPOCH_MS } from "./fee.ts";
 import { enableTimers, resetTimers } from "../../test/mock-timers.ts";
-import { solanaPoolPriorityBudget, type SolanaRent } from "@blindfill/kit";
+import { solanaPoolPriorityBudget, untilAborted, type SolanaRent } from "@blindfill/kit";
 import { checkSolanaPoolTx, solanaPoolSender, type PoolSendAnswer } from "./solana.ts";
 import { JITO_TICK_SLACK_MS, jitoSender, SOLANA_JITO_BLOCK_ENGINES, type JitoFetch, type JitoSleep } from "./jito.ts";
 
@@ -1056,7 +1056,7 @@ test("the line's reads: the engine's word about 3 s after the first send, how lo
     wait: (ms, signal) => {
       waited.push(ms);
       if (ms === 3_000 || waited.filter((x) => x === 5_000).length === 1) return ((t += ms), Promise.resolve(true));
-      return new Promise((done) => signal.addEventListener("abort", () => done(false), { once: true }));
+      return untilAborted(signal).catch(() => false);
     },
     done: async (x) => {
       await ended;
@@ -1085,7 +1085,7 @@ test("a fill answers at once: a line read still in flight when the send ends (th
   const s = mainnet({
     engine: e,
     providers: [a as SolanaRpc, stub([])],
-    wait: (ms, signal) => (ms === 3_000 || ms === 5_000 ? Promise.resolve(!signal.aborted) : new Promise((done) => signal.addEventListener("abort", () => done(false), { once: true }))),
+    wait: (ms, signal) => (ms === 3_000 || ms === 5_000 ? Promise.resolve(!signal.aborted) : untilAborted(signal).catch(() => false)),
     done: (x) => new Promise((ok) => (fill = () => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] }))),
   });
   const p = s.carry(body(tipped({ r: { existingNullifierHash: f32(132) } })));
@@ -1142,7 +1142,7 @@ test("R4: engine3 is not read while another bundle carry is in flight", async ()
   const fills: (() => void)[] = [];
   const s = mainnet({
     engine: e,
-    wait: (ms, signal) => (ms === 3_000 ? Promise.resolve(!signal.aborted) : new Promise((done) => signal.addEventListener("abort", () => done(false), { once: true }))),
+    wait: (ms, signal) => (ms === 3_000 ? Promise.resolve(!signal.aborted) : untilAborted(signal).catch(() => false)),
     done: (x) => new Promise((ok) => fills.push(() => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] }))) as never,
   });
   const p1 = s.carry(body(tipped({ r: { existingNullifierHash: f32(160) } })), "a");
@@ -1234,7 +1234,7 @@ test("P3 (3c, 3a): the engine3 read never runs once another carry is in flight, 
     const s = mainnet({
       engine: e,
       // only the first carry's 3 s passes (at once); every other wait ends with its send
-      wait: (ms, signal) => (ms === 3_000 && threes++ === 0 ? Promise.resolve(!signal.aborted) : new Promise((done) => signal.addEventListener("abort", () => done(false), { once: true }))),
+      wait: (ms, signal) => (ms === 3_000 && threes++ === 0 ? Promise.resolve(!signal.aborted) : untilAborted(signal).catch(() => false)),
       done: (x) => new Promise((ok) => fills.push(() => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] }))) as never,
     });
     const p1 = s.carry(body(tipped({ r: { existingNullifierHash: f32(180) } })), "a");
@@ -1262,7 +1262,7 @@ test("P3 (3b): an engine3 read waiting for its region's second is dropped unread
     intervalMs: 1_000,
     jitoClock: time.clock,
     jitoSleep: time.sleep,
-    wait: (ms, signal) => (ms === 3_000 ? Promise.resolve(!signal.aborted) : new Promise((done) => signal.addEventListener("abort", () => done(false), { once: true }))),
+    wait: (ms, signal) => (ms === 3_000 ? Promise.resolve(!signal.aborted) : untilAborted(signal).catch(() => false)),
     done: (x) => new Promise((ok) => (fill = () => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] }))) as never,
   });
   const p = s.carry(body(tipped({ r: { existingNullifierHash: f32(190) } })));

@@ -2,6 +2,7 @@
 // helper's send and each of its answers (busy, refused, no answer), the buy's calldata signature length, the head read,
 // the pool's release read on one RPC (what it asks and what it keeps), and the verdict on two RPCs' reads.
 import { test, mock } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import assert from "node:assert/strict";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
@@ -158,7 +159,7 @@ test("send: a helper that never answers is no answer at EVM_SEND_TIMEOUT_MS", as
   try {
     // a fetch that settles only when its signal aborts, as fetch does
     const hang = ((_url: string, init: RequestInit) =>
-      new Promise<Response>((_, reject) => init.signal!.addEventListener("abort", () => reject(init.signal!.reason)))) as unknown as typeof fetch;
+      untilAborted(init.signal)) as unknown as typeof fetch;
     let settled = false;
     const p = evmPoolSend(HELPER, BODY, hang).finally(() => (settled = true));
     p.catch(() => {});

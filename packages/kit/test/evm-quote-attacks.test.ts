@@ -10,6 +10,7 @@ import { codeAnswer, codeResult } from "./evm-quote-gas-fx.ts";
 import { onTestClock } from "./test-clock.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import assert from "node:assert/strict";
+import { untilAborted } from "../src/abort.ts";
 import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap } from "../src/index.ts";
 import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolSellQuoteRequest, type EvmPoolKey, type EvmRoute, type EvmV4Route } from "../src/index.ts";
 import { EVM_QUOTE_MAX_KEYS, evmBuyRevertedPoolsWith, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolSellQuoteWith, evmSellRevertedPoolsWith, type EvmPoolSellQuote, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
@@ -1686,7 +1687,7 @@ test("T4 a provider that never answers is a refusal (rpc_error) once the request
   // a fetch that answers only when its request is aborted, as a hung connection does
   const hung = ((_: string, init?: RequestInit) => {
     signal = init?.signal ?? undefined;
-    return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)));
+    return untilAborted(init?.signal);
   }) as typeof fetch;
   await assert.rejects(evmJsonRpc("https://a.example", hung, 1 << 20, 50)([{ method: "eth_blockNumber", params: [] }]));
   // the request's limit is 50 ms: a request with none, or with the default EVM_RPC_TIMEOUT_MS (10 s), runs past the
@@ -4553,12 +4554,14 @@ test("TH5 a scan provider that slows past the deadline with more than 5 requests
       await new Promise<void>((ok, no) => {
         let over = false;
         const t = setTimeout(() => ((over = true), ok()), flying > K ? 1_000 : 10);
-        init.signal?.addEventListener("abort", () => {
+        const cut = () => {
           if (over) return;
           clearTimeout(t);
           if (timedOut++ === 0) firstTimeout = arrivals.length;
           no(init.signal!.reason);
-        });
+        };
+        if (init.signal?.aborted) return cut();
+        init.signal?.addEventListener("abort", cut);
       });
       return new Response(JSON.stringify(await inner(calls)), { status: 200 });
     } finally {
@@ -4602,7 +4605,7 @@ function faultScan(logs: { key: EvmPoolKey; at: number }[], fault: (a: number, b
       const n = nth.get(`${a}-${b}`) ?? 0;
       nth.set(`${a}-${b}`, n + 1);
       const x = fault(a, b, n);
-      if (x === "timeout") return await new Promise<Response>((_, no) => init.signal?.addEventListener("abort", () => no(init.signal!.reason)));
+      if (x === "timeout") return await untilAborted(init.signal);
       if (x === "error") throw new Error("socket hang up");
       if (x === "unreach") throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
       // a browser's fetch with no response: a TypeError that names no cause
@@ -5021,7 +5024,7 @@ test("B2a every getLogs hangs until aborted (bound 3 s): the verdict comes at th
       const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
       if (calls.some((c) => c.method === "eth_getLogs")) {
         st.sent++;
-        await new Promise<void>((r) => init.signal?.addEventListener("abort", () => r()));
+        await untilAborted(init.signal).catch(() => {});
         st.aborted++;
         throw init.signal!.reason;
       }
@@ -5493,12 +5496,14 @@ test("SP2 a first scan provider that does not answer a warm scan: the second has
   const why: string[] = [];
   const hangs: EvmRpc = (calls, signal) =>
     calls.some((c) => c.method === "eth_getLogs")
-      ? new Promise((_, no) =>
-          signal?.addEventListener("abort", () => {
-            why.push(String((signal.reason as Error | undefined)?.message ?? signal.reason));
-            no(signal.reason);
-          }),
-        )
+      ? new Promise((_, no) => {
+          const cut = () => {
+            why.push(String((signal!.reason as Error | undefined)?.message ?? signal!.reason));
+            no(signal!.reason);
+          };
+          if (signal?.aborted) return cut();
+          signal?.addEventListener("abort", cut);
+        })
       : head(calls);
   const { v, asked } = await warmPair(token, hangs);
   assert.deepEqual(v, below);
@@ -9033,7 +9038,7 @@ test("QE12 a scan held past its bound stops whole: no halves and no spare's span
   const first: EvmRpc = (calls, signal) => {
     if (!calls.some((c) => c.method === "eth_getLogs")) return base(calls);
     held++;
-    return new Promise((_, no) => signal?.addEventListener("abort", () => no(signal.reason)));
+    return untilAborted(signal);
   };
   const second: EvmRpc = async (calls) => {
     if (calls.some((c) => c.method === "eth_getLogs")) spare++;
@@ -9066,7 +9071,7 @@ test("QE13 a Base cold scan held past its bound: the requests queued at its gate
   const first: EvmRpc = (calls, signal) => {
     if (!calls.some((c) => c.method === "eth_getLogs")) return base(calls);
     held++;
-    return new Promise((_, no) => signal?.addEventListener("abort", () => no(signal.reason)));
+    return untilAborted(signal);
   };
   evmScanBound?.(1_000);
   const asks0 = evmScanAsks();

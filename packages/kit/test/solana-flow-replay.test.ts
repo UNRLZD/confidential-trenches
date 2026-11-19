@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { base58, base64 } from "@scure/base";
+import { untilAborted } from "../src/abort.ts";
 import {
   SOLANA_PUMP_AMM_PROGRAM,
   SOLANA_PUMP_PROGRAM,
@@ -424,6 +425,7 @@ test("card solana-quote-under-1s review: no reference pool while every build is 
   const aborted: string[] = [];
   const fetch = (url: string, init: RequestInit) => new Promise<Response>((_ok, no) => {
     const s = init.signal!;
+    if (s.aborted) return (aborted.push(url), no(s.reason));
     s.addEventListener("abort", () => { aborted.push(url); no(s.reason); });
   });
   const run = runSolanaTrade(request(SELL), { ...deps(SELL), fetch, reference: async () => null });
@@ -450,7 +452,7 @@ test("card solana-quote-under-1s review: an open leg's build that never answers 
     const fetch = (_url: string, init: RequestInit) => new Promise<Response>((_ok, no) => {
       asked++;
       const s = init.signal!;
-      s.addEventListener("abort", () => no(s.reason));
+      void untilAborted(s).catch(no);
       // the build's 5 s, run out once the leg's gate has opened (the reference answers at once)
       setTimeout(() => { for (const t of timers) t.c.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")); }, 100);
     });

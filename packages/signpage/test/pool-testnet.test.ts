@@ -5,6 +5,7 @@
 // pool pinned), a page with no flow, or the mainnet tables are refused. Its own file: the network is read once, at
 // import, so this process runs as the testnet build does (test/pool-network.test.ts runs the mainnet one).
 import { after, afterEach, mock, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -979,7 +980,7 @@ test("a pool send still pending at the kind's 10 s, and at 90 s, is not aborted:
       signal = init.signal!;
       return new Promise<Response>((ok, no) => {
         answer = ok;
-        signal.addEventListener("abort", () => no(signal.reason));
+        untilAborted(signal).catch(no);
       });
     }) as unknown as typeof fetch;
     // still pending at the kind's 10 s and at 90 s: then answered, and taken
@@ -1046,8 +1047,8 @@ test("card buy-spends-several-pieces: helperPoolSendPieces posts {pool, txs} in 
   // a restore's scan: the batch on the helper's seat on mainnet, never a public provider; the testnet build one W a request
   assert.match(src, /const batch = POOL_TESTNET \? null : over\.rpcs \? over\.rpcs\[1\] : solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER,/);
   // the run's pass with the ride once its drawn time is due, its held passes kept booked (card every-lamport-can-move,
-  // review P2-1 and P3 1 of 1d3b96d9c)
-  assert.match(src, /if \(scan\) await findHeldWs\(mine\)\.catch\(\(\) => \{\}\);\s*const more = await resumeRentBacks\(h, locks, ride !== undefined \? \{ ride: true, held: \(\) => void \(held = true\) \} : \{\}\);/);
+  // review P2-1 and P3 1 of 1d3b96d9c); idle before the page's first tap (card rent-backs-resume-private)
+  assert.match(src, /if \(scan\) await findHeldWs\(mine\)\.catch\(\(\) => \{\}\);\s*const more = await resumeRentBacks\(h, locks, \{ \.\.\.\(ride !== undefined \? \{ ride: true as const, held: \(\) => void \(held = true\) \} : \{\}\), \.\.\.\(idle \? \{ idle: true as const \} : \{\}\) \}\);/);
 });
 
 test("card buy-spends-several-pieces: piecesOwedOf keeps one record a W in the store's meta/owed/pieces-sol, put over and dropped by W", async () => {
@@ -2539,6 +2540,128 @@ test("the rent backs run on the state reads: again after the wait while a W is l
     assert.deepEqual([runs.length, finds.length], [4, 3], "a new owed record: run at the next read (P16)");
   } finally {
     Date.now = realNow;
+  }
+});
+
+// Card rent-backs-resume-private: a page load names no buy wallet, and no token account of one, to the public seat.
+// Two owed Ws whose state the helper reads otherwise than their records (a pass is due): the load's runs read them on
+// the helper's seat alone, and pass none of them until the page's first tap, a drawn start after it. Every request is
+// counted by host; a request naming W or one of its token accounts to the public host fails the load.
+const rentBackLoad = async () => {
+  const { BACKS_LOAD_MAX_MS } = await import("../src/pool-testnet.ts");
+  const { SOLANA_RENT_SYSVAR } = await import("../../kit/src/trade/solana/pool-buy.ts");
+  const { solanaTeardownAddresses, SOLANA_TOKEN_PROGRAM: TOKEN } = await import("../../kit/src/checks/solana/checks.ts");
+  const { w } = await wallet();
+  const MINT = base58.encode(new Uint8Array(32).fill(41));
+  const Ws = [base58.encode(new Uint8Array(32).fill(7)), base58.encode(new Uint8Array(32).fill(8))];
+  const named = new Set(Ws.flatMap((a) => [a, ...solanaTeardownAddresses(a, [{ mint: MINT, program: TOKEN }])]));
+  // the first W's buy recorded on this device (meta owed/buy-sol, as the buy host writes it); the second a found W (a
+  // restore's scan: SOL on W and no buy of its own)
+  await w.put("meta", "owed/rentback-sol", Object.fromEntries(Ws.map((address, k) => [address, { address, l: "1", j: k, mints: [{ mint: MINT, program: TOKEN }], passes: 1, ...(k === 1 ? { found: true } : {}) }])));
+  await w.put("meta", "owed/buy-sol", { [Ws[0]!]: { mint: MINT, program: TOKEN } });
+  // the Rent sysvar as mainnet holds it (3480 lamports a byte-year, factor 2)
+  const rentData = new Uint8Array(17);
+  new DataView(rentData.buffer).setBigUint64(0, 3480n, true);
+  new DataView(rentData.buffer).setFloat64(8, 2, true);
+  const rent = { owner: "Sysvar1111111111111111111111111111111111111", lamports: 1_009_200, data: [base64.encode(rentData), "base64"], executable: false, rentEpoch: 0 };
+  const own = { owner: "11111111111111111111111111111111", lamports: 5_000_000, data: ["", "base64"], executable: false, rentEpoch: 0 };
+  const byHost: { host: string; method: string; params: string }[] = [];
+  const seat = (host: string) =>
+    Object.assign(
+      async (method: string, params: readonly unknown[] = []): Promise<unknown> => {
+        byHost.push({ host, method, params: JSON.stringify(params) });
+        if (method === "getAccountInfo" && params[0] === SOLANA_RENT_SYSVAR) return { context: { slot: 1 }, value: rent };
+        if (method === "getMultipleAccounts") return { context: { slot: 1 }, value: (params[0] as string[]).map((a) => (a === SOLANA_RENT_SYSVAR ? rent : Ws.includes(a) ? own : null)) };
+        if (method === "getSlot" || method === "getBlockHeight") return 100;
+        throw new Error(`${host}: no ${method}`);
+      },
+      { url: `https://${host}.invalid` },
+    );
+  const runs: Promise<unknown>[] = [];
+  const locks = {
+    request: ((name: string, opts: LockOptions, cb: LockGrantedCallback<unknown>) => {
+      const r = navigator.locks.request(name, opts, cb);
+      if (name === "ct-wallet/seed" && opts?.mode === "shared") runs.push(r);
+      return r;
+    }) as LockManager["request"],
+    query: () => navigator.locks.query(),
+  };
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  // the device's rent-back spacing in its own IndexedDB, as a browser page has it (src/device-spacing.ts)
+  const g = globalThis as { indexedDB?: IDBFactory };
+  const hadIdb = g.indexedDB;
+  g.indexedDB = new IDBFactory();
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [seat("public"), seat("helper")], prover: { vault: signalsProver(), stop: () => {} }, locks });
+  const read = async (): Promise<void> => {
+    await t.stateRead();
+    await Promise.all(runs);
+  };
+  const publicNaming = (): string[] => byHost.filter((c) => c.host === "public" && [...named].some((a) => c.params.includes(a))).map((c) => `${c.method} ${c.params.slice(0, 60)}`);
+  const helperNaming = (): number => byHost.filter((c) => c.host === "helper" && Ws.every((a) => c.params.includes(a))).length;
+  return { t, Ws, read, publicNaming, helperNaming, runs, advance: (ms: number) => void (now += ms), restore: () => void ((Date.now = realNow), (g.indexedDB = hadIdb)), BACKS_LOAD_MAX_MS };
+};
+test("rent-backs-resume-private: a page load with owed Ws names none of them, nor a token account of one, to the public seat; the helper's seat reads them", async () => {
+  const l = await rentBackLoad();
+  try {
+    l.advance(l.BACKS_LOAD_MAX_MS);
+    await l.read();
+    assert.ok(l.runs.length >= 1, "the load's run ran");
+    assert.ok(l.helperNaming() >= 1, "the helper's seat read the owed Ws");
+    // the load's later runs, however long the page stays open with no tap
+    for (let i = 0; i < 4; i++) {
+      l.advance(30 * 60_000);
+      await l.read();
+    }
+    assert.deepEqual(l.publicNaming(), [], "no request named a W or its token account to the public seat");
+  } finally {
+    l.restore();
+  }
+});
+test("rent-backs-resume-private: a load with a found W shows its amount with no tap, from the helper's read, and no public request names it", async () => {
+  const { returningWallets } = await import("../src/positions.ts");
+  const l = await rentBackLoad();
+  try {
+    const found = l.Ws[1]!;
+    assert.equal((await l.t.returning()).find((r) => r.address === found)?.lamports, undefined, "no amount before the load's run");
+    l.advance(l.BACKS_LOAD_MAX_MS);
+    await l.read();
+    const rec = (await l.t.returning()).find((r) => r.address === found);
+    assert.equal(rec?.lamports, "5000000", "W's lamports as the helper's seat read them");
+    assert.equal(rec?.passes, 1, "no pass counted");
+    assert.equal(rec?.seen, undefined, "nothing settled: the pass after the tap still runs");
+    // 150 USD a SOL, as test/positions.test.ts prices it
+    const rows = returningWallets(await l.t.returning(), { price: "15000000000", expo: -8, published_s: 1, read_ms: 1 }, []);
+    assert.ok(rows.some((r) => r.address === found && r.state === "RETURNING" && r.size === "0.75"), JSON.stringify(rows));
+    assert.deepEqual(l.publicNaming(), [], "no request named a W or its token account to the public seat");
+  } finally {
+    l.restore();
+  }
+});
+test("rent-backs-resume-private: the page's first tap books the passes at a drawn time after it; past it they read each W on both seats", async () => {
+  const { POOL_RENT_BACK_SPACE_MAX_MS } = await import("../src/pool-sell.ts");
+  const l = await rentBackLoad();
+  try {
+    l.advance(l.BACKS_LOAD_MAX_MS);
+    await l.read();
+    const idleRuns = l.runs.length;
+    // a tap (an ask of the flow that is neither a buy nor a sell, as a deposit or a withdraw is: refused at once here)
+    assert.deepEqual(l.t.flow({ kind: "pool.none", chain: "base" } as never, ctx as never), { error: "not_allowed" });
+    await l.read();
+    assert.deepEqual(l.publicNaming(), [], "none at the tap's own read: the passes wait the drawn time");
+    l.advance(l.BACKS_LOAD_MAX_MS);
+    await l.read();
+    assert.deepEqual(l.publicNaming(), [], "none a load's start after it: a deposit's or withdraw's tap waits the ride's gap");
+    l.advance(POOL_RENT_BACK_SPACE_MAX_MS);
+    // the run's first pass reads W on both seats at once; the rest of the run (its gaps, its retries) is not waited for:
+    // the page signs out at the test's end
+    await l.t.stateRead();
+    for (let i = 0; i < 200 && l.publicNaming().length === 0; i++) await new Promise((r) => REAL_SET(r, 10));
+    assert.ok(l.runs.length > idleRuns, "a run past the tap's drawn time");
+    assert.ok(l.publicNaming().length > 0, "its passes read W on the public seat too, as every pass that may sign does");
+  } finally {
+    l.restore();
   }
 });
 

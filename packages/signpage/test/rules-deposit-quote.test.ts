@@ -8,6 +8,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import type { DepositQuoteKindAnswer, DepositQuoteKindContext } from "../src/rules/deposit-quote.ts";
 import { U, ATTACKER, SOL_USDC, NEAR_USDC, ADDRESS, NOW, H72, mockKey, otherKey, signAnswer, COLLECTOR, FLOOR_OUT, FLOOR_MIN, liveAnswer, h1c, type Answer, type Mock } from "./oneclick-mock.ts";
 // after the mock, so the check loads the mock's keys (a static import would load the kit's first)
@@ -304,7 +305,7 @@ test("a Move into Cash: the keyless tell reads on the kind's own signal (deposit
   const hidden = (_addr: string, signal?: AbortSignal) =>
     new Promise<"hidden">((_ok, no) => {
       told = signal;
-      signal?.addEventListener("abort", () => no(signal.reason), { once: true });
+      untilAborted(signal).catch(no);
     });
   const a = depositQuoteKind(PARAMS, ctx(m.fetch, { confidential: true, hidden, signal: c.signal }));
   while (told === undefined) await new Promise((ok) => setImmediate(ok));

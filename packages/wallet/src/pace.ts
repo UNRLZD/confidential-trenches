@@ -471,6 +471,8 @@ async function sharedTurn(s: PaceShare, p: Pace, signal?: AbortSignal): Promise<
     }
     if (wait <= 0) return;
     await new Promise<void>((res, rej) => {
+      // a stop that came while the lock was held (after its request's signal stopped counting) never fires again
+      if (signal?.aborted) return rej(signal.reason);
       const k = setTimeout(() => {
         signal?.removeEventListener("abort", stop);
         res();
