@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { providerHolds } from "../../limits/limits.ts";
+import { BATCH_SIZES } from "../../rpc/batch-sizes.ts";
 import { fakeChain, ICNT, open, REC } from "../../../test/evm-swaps/base.ts";
 
 const POCKET = "https://base.api.pocket.network";
@@ -65,4 +66,27 @@ test("a throttle's 429 on a batch (Retry-After, Too Many Requests) still holds t
   const { body, holds } = await tape([T, "https://b-ok.test", "https://c-ok.test"], (u, n) => (u === T && n > 1 ? new Response("Too Many Requests", { status: 429, headers: { "retry-after": "20" } }) : null));
   assert.ok(body.trades.length > 0, JSON.stringify(body));
   assert.ok(holds.heldFor(T) > 0, "held");
+});
+
+test("a post-paced provider that learned a size draws one pace unit per post it is sent: the tape's parts are cut at the learned size (batchOf), never one draw for two posts", async () => {
+  const P = "https://post-paced-413.test";
+  BATCH_SIZES.refused(P, 10, 5);
+  // the other two answer the heads and logs, and are down for the traders' lookups, so those go to the paced one
+  const { chain, posts } = chainWith((u, n) => (u === P ? (n > 5 ? tooLarge() : null) : n > 2 ? new Response("down", { status: 503 }) : null));
+  const h = providerHolds(() => 1_000_000, { [P]: { perS: 1000, burst: 1000, unit: "post" } });
+  let drawn = 0;
+  const holds = { ...h, take: (url: string, ...rest: Parameters<typeof h.take> extends [string, ...infer R] ? R : never) => {
+    const w = h.take(url, ...rest);
+    if (url === P && w === 0) drawn += 1;
+    return w;
+  } };
+  const s = open(chain, undefined, { rpcs: [P, "https://pp-b.test", "https://pp-c.test"], holds });
+  chain.st.head = REC.firstHead + 100;
+  const t = await s.trades(ICNT, 50);
+  s.stop();
+  assert.equal(t.status, 200, t.body);
+  const sent = posts.filter((p) => p.url === P);
+  assert.ok(sent.length > 0, "the provider was asked");
+  assert.ok(sent.every((p) => !p.refused && p.n <= 5), `no post past its size: ${sent.map((p) => p.n).join(",")}`);
+  assert.equal(drawn, sent.length, `one unit a post: drawn ${drawn}, sent ${sent.map((p) => p.n).join(",")}`);
 });

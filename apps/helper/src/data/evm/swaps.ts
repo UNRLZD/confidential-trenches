@@ -1092,7 +1092,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  rpc-keyed-lists: a keyed URL is in no list here, its company's pace names it, limits.ts KEYED_PACE). */
   const batchOf = (u: string): number => {
     const p = holds.paceOf(u);
-    return Math.min(BATCH_SIZE[u] ?? 10, p?.batch ?? Infinity, p?.unit === "call" ? Math.max(1, Math.floor(p.burst)) : Infinity);
+    // a size the provider refused a batch past (the helper's one map, card helper-rpc-batch-learns-reader-size): each part
+    // is a post, drawn from the pace as one
+    return Math.min(BATCH_SIZE[u] ?? 10, BATCH_SIZES.most(u), p?.batch ?? Infinity, p?.unit === "call" ? Math.max(1, Math.floor(p.burst)) : Infinity);
   };
 
   // Two lanes on every provider's pace and in-flight queue (card helper-deploy-reads-fast): a read a caller waits on (a
