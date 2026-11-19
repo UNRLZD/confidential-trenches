@@ -5905,6 +5905,44 @@ test("SP4 a first scan provider whose rate limit would hold a warm scan's reques
   assert.ok(throttled === 1 && asked.length > 0, `${throttled} throttled, ${asked.length} on the second`);
 });
 
+test("SP4b a warm request waiting for the first scan provider's slot behind the chain's tail's reads, when one of them meets a Retry-After past 2 s, goes to the second at once, never waits the Retry-After out", { timeout: 30_000 }, () => onTestClock(async () => {
+  // the quote's one gate after its answer (card quote-mutant-116-settled): the chain's tail read (evmTailFill, 1M blocks
+  // in 10,000-block requests, 20 at once) beside the deferred `later` reads of the gaps past the kept scans, fast ones
+  const token = freshToken();
+  const [x, y] = [xAt(0x5800), xAt(0x5801)];
+  const pools = [best(token), { key: keyOf(token, x, 3000, 60, NATIVE), give: (a: bigint) => 10n * a }, { key: keyOf(x, y, 2500, 50, NATIVE), give: (a: bigint) => a }, marketOf(y)] as ModelPool[];
+  const logs = pools.map((p, i) => ({ key: p.key, at: 4_100_000 + i }));
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) };
+  // the token's and X's own scans kept to 5,000,000 on a provider whose chain's tail is never read
+  const cold = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, [scanner(5_000_000, logs), scanner(5_000_000, logs)], undefined, () => 0));
+  assert.equal(cold.accepted, true, String((cold as { code?: string }).code));
+  // ten blocks on, a first with no block of the chain's tail read: the quote answers from the kept scans, then reads the
+  // ten blocks of each kind (fast: one request the second carries) beside the tail; the tail's requests answer in 1 s,
+  // the first of them 429 with Retry-After 5 at 500 ms, and the first `later` read in 200 ms, so the second `later`
+  // read waits behind the tail's 20 for a slot
+  const inner = scanner(5_000_010, logs);
+  let throttled = 0;
+  const first = evmJsonRpc("https://throttles.sp4b.test", (async (_u: string, init: RequestInit) => {
+    const sent = JSON.parse(init.body as string) as { id: number; method: string; params: unknown[] }[];
+    const fs = getLogsOf(sent);
+    if (fs.some(ofEvery) && throttled++ === 0) {
+      await pause(500);
+      return new Response("", { status: 429, headers: { "retry-after": "5" } });
+    }
+    if (fs.length > 0) await pause(fs.some(ofEvery) ? 1_000 : 200);
+    const answers = await inner(sent.map((c) => ({ method: c.method, params: c.params })));
+    return new Response(JSON.stringify(answers.map((a, i) => ({ ...(a as object), id: sent[i]!.id }))));
+  }) as unknown as typeof fetch);
+  const asked: [number, number][] = [];
+  const warm = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, 5_000_010), chain(pools, 1, 5_000_010)], NOW, [first, scanner(5_000_010, logs, asked)], undefined, () => 0));
+  assert.equal(warm.accepted, true, String((warm as { code?: string }).code));
+  // on the test clock's own timer: what the second had been asked 1.5 s after the answer
+  const by = await new Promise<[number, number][]>((r) => setTimeout(() => r([...asked]), 1_500));
+  await evmTailFills(first);
+  assert.ok(throttled > 0, "no request of the chain's tail was sent");
+  assert.ok(by.some(([a, b]) => a === 5_000_001 && b === 5_000_010), `the second had not been asked the ten blocks 1.5 s after the answer: ${JSON.stringify(by)}`);
+}));
+
 // card evm-taps-meet-no-429: one pace and one hold per provider for every reader (src/checks/evm/pace.ts)
 test("PACE1 posts to a paced provider leave at its pace across every reader: mainnet.base.org takes 12 calls at once, then 12 a second, so no second holds more than 24 (its error names 25)", { timeout: 30_000 }, () => onTestClock(async () => {
   evmPaceReset();
