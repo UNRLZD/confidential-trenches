@@ -31,7 +31,7 @@ const RECEIPTS = (JSON.parse(readFileSync(new URL("./fixtures/vendor-rows-receip
  *  on `chain` (its reads answered by the recorded Robinhood providers, test/evm-swaps/robinhood.ts, whose other reads
  *  find SOGNI no pool on either chain, so it is a vendor coin on both): the vendor's first answer holds every row but the newest, then the vendor refuses every call (429), and
  *  the newest trade is on chain: its receipt's logs, at the head, are the answer of our reads of the pool. */
-function harness(chain: "base" | "robinhood", o: { vendorRows?: number } = {}) {
+function harness(chain: "base" | "robinhood", o: { vendorRows?: number; busy?: boolean } = {}) {
   const c = fakeChain();
   const head = REC.lastHead;
   c.st.head = head;
@@ -84,7 +84,12 @@ function harness(chain: "base" | "robinhood", o: { vendorRows?: number } = {}) {
   const holds = providerHolds(() => clock.t, coingeckoPace(env));
   const keyed = createKeyed(env, holds, { fetch: fetch as never })!;
   const gecko = geckoBudget(() => clock.t);
-  const s = createSwaps(chain, { fetch, now: () => clock.t, listed: async () => true, rpcs: URLS, pools: new Map(), tickMs: 0, gecko, keyed, sleep: async (ms: number) => void (clock.t += ms) });
+  // `busy`: the providers' paces full to the room they keep for callers, as under a deploy's crowd of pages (the
+  // deployed helper at 0092e5692, 19 Nov 15:29Z: Robinhood opens 214 s in the queue): a background post never goes, a
+  // caller's does
+  const real = providerHolds(() => clock.t);
+  const rpcHolds = o.busy ? { ...real, take: (u: string, n: number, background: boolean) => (background ? 60_000 : real.take(u, n, background)) } : undefined;
+  const s = createSwaps(chain, { fetch, now: () => clock.t, listed: async () => true, rpcs: URLS, pools: new Map(), tickMs: 0, gecko, keyed, sleep: async (ms: number) => void (clock.t += ms), ...(rpcHolds === undefined ? {} : { holds: rpcHolds }) });
   after(() => s.stop());
   const tape = async () => {
     const a = await s.trades(SOGNI.coin, 50);
@@ -126,6 +131,28 @@ for (const chain of ["base", "robinhood"] as const)
     assert.equal(last.j.trades.length, 6);
     // one log read a round, at most three filters (two per five pairs, one for the v4 pools)
     for (const r of h.logReads as unknown[][]) assert.ok(r.length <= 3, `a round's post asked ${r.length} filters`);
+  });
+
+for (const chain of ["base", "robinhood"] as const)
+  test(`${chain}: a held vendor tape a page reads while the providers' paces have room for callers only (a deploy's crowd): its refresh is the caller's read, so every answer names its rows read inside BEHIND_MAX's ms and the newest trade on chain is served (card helper-tapes-refresh-holds-live; red at 0092e5692: the refresh ran in a background lane no caller lifted, never sent, and SOGNI's rows were served 950 s old on the deployed helper, live run 44555332180)`, async () => {
+    const h = harness(chain, { busy: true });
+    await h.tape();
+    await settle();
+    const cold = await h.tape();
+    assert.equal(cold.j.trades.length, 5, "the vendor's first answer: every row but the newest");
+    h.refuse();
+    const ages: number[] = [];
+    let last = cold;
+    for (const end = h.clock.t + 60_000; h.clock.t < end; ) {
+      h.clock.t += 2_000;
+      await settle();
+      last = await h.tape();
+      assert.equal(last.status, 200);
+      ages.push(last.age);
+    }
+    const max = Math.max(...ages);
+    assert.ok(ages.every(Number.isFinite) && max <= BEHIND_MAX[chain].ms, `oldest rows served ${max} ms after their read (bound ${BEHIND_MAX[chain].ms}): ${ages.join(",")}`);
+    assert.equal(last.j.trades[0]?.tx, h.newest.tx_hash, "the newest trade, read from the pool on our providers");
   });
 
 for (const chain of ["base", "robinhood"] as const)
