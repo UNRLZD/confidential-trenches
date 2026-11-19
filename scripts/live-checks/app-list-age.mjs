@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { listAge } from "../../apps/terminal/src/screens/discover/model.ts";
 import { ageLine } from "../../apps/terminal/src/screens/discover/words.ts";
@@ -156,7 +157,7 @@ export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()
   mkdirSync(shots, { recursive: true });
   const entry = await entryOf(build);
   const shell = await harnessRoute(build ?? path.join(REPO, "apps/terminal/public"), "signed");
-  const browser = await launchBrowser("chromium");
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   try {
     const runs = [];
     for (const kind of KINDS) {

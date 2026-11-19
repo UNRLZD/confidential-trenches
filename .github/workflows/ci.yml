@@ -566,7 +566,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3]
+        part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -685,7 +685,7 @@ jobs:
   # The signing page's browser runs (card e2e-runs-once-in-the-queue): live.yml ran them, with the terminal's browser
   # chain, on every pull request (about 27 minutes, 25.5 of them the terminal's chain: runs 43440753733 and 43440138300),
   # and no required check read them, so every pull request waited on them before it could queue and the queue never ran
-  # them. They run here, once, on the queue's group and by hand; the terminal's chain is test-browser's (its three parts
+  # them. They run here, once, on the queue's group and by hand; the terminal's chain is test-browser's (its four parts
   # run every command of apps/terminal's test:e2e), so it is not run twice. A shard of test: a failed or skipped one fails
   # the required check, so a screen break stays off main (scripts/ci/test-shards.test.mjs plants each way it could not).
   browser-e2e:

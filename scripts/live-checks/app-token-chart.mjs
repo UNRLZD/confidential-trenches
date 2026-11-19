@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { isGecko, toCandleData } from "../../apps/terminal/src/screens/token/candles.ts";
 import { HELPER_HOST, LISTS_URL, pickOf } from "./app-token-route.mjs";
 import { named } from "./record-names.mjs";
@@ -123,7 +124,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
     const { harnessRoute } = await import("./app-in-shell.mjs");
     harness = await harnessRoute(path.resolve(build), "signed");
   }
-  const browser = await launchBrowser("chromium");
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   rec.browser = browser.version();
   try {
     for (const [i, w] of LOADS.entries()) {

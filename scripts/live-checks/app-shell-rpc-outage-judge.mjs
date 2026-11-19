@@ -34,6 +34,7 @@ import { harnessRoute } from "./app-in-shell.mjs";
 import { open, watch, WIDTHS, withOutage } from "./app-shell.mjs";
 import { footerEvidence, outages, rpcRows, verifyEvidence } from "./rpc-outage.mjs";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-shell-rpc-outage-judge";
@@ -74,7 +75,7 @@ export function judge(rec) {
 export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), route = null, source = "live", network = "mainnet" } = {}) {
   const origin = new URL(url).origin;
   mkdirSync(shots, { recursive: true });
-  const browser = await launchBrowser("chromium");
+  const browser = await (route ? launchHarnessBrowser : launchBrowser)("chromium");
   const rec = { url: origin, network, source, at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const w of WIDTHS) {

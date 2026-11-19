@@ -224,10 +224,10 @@ const PLANTED = {
   "a browser part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: node scripts\/ci\/test-shards\.mjs e2e-run)/, "$1TOTAL: 2$2", "test-browser does not take its part"],
   // card ci-e2e-shards-by-time: each way a browser part can be planned past its job's limit, or run outside the split
   "the browser runs as one chain again, untimed": ['        run: node scripts/ci/test-shards.mjs e2e-run "$INDEX" "$TOTAL"\n', '        run: |\n          cmd="$(node scripts/ci/test-shards.mjs e2e "$INDEX" "$TOTAL")"\n          cd apps/terminal && pnpm exec sh -c "$cmd"\n', "test-browser does not run scripts/ci/test-shards.mjs e2e-run"],
-  "one browser part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1]", "test-browser part 1 of 1 is planned at"],
-  "two browser parts": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1, 2]", "test-browser part 1 of 2 is planned at"],
-  "a browser matrix that skips a part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1, 3]", "test-browser has no matrix part"],
-  "a browser timeout cut to 10 minutes": [/(\n {2}test-browser:\n(?:.*\n){3} {4}timeout-minutes: )15\n/, "$110\n", "test-browser part 1 of 3 is planned at"],
+  "one browser part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1]", "test-browser part 1 of 1 is planned at"],
+  "two browser parts": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1, 2]", "test-browser part 1 of 2 is planned at"],
+  "a browser matrix that skips a part": [/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1, 3]", "test-browser has no matrix part"],
+  "a browser timeout cut to 10 minutes": [/(\n {2}test-browser:\n(?:.*\n){3} {4}timeout-minutes: )15\n/, "$110\n", "test-browser part 1 of 4 is planned at"],
   "the prover moved to the second part": ["        if: strategy.job-index == 0\n        run: KIT_PROVER_E2E=1", "        if: strategy.job-index == 1\n        run: KIT_PROVER_E2E=1", "test-browser runs the prover in Chromium in a part but the first"],
   "the prover in every part": ["        if: strategy.job-index == 0\n        run: KIT_PROVER_E2E=1", "        run: KIT_PROVER_E2E=1", "test-browser runs the prover in Chromium in a part but the first"],
   "a mutant part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: node)/, "$1TOTAL: 4$2", "test-mutants does not take its part"],
@@ -335,7 +335,9 @@ test("planted: a deal that drops, doubles or moves a command, or leaves a part o
 // list with node test/token-rail/sweep.mjs after node test/token-rail/run.mjs. Its sweep took 59.7 s on run 44375738505
 // (job 135054405087, part 3)
 const PR_1029_E2E = "vite build && node ../../scripts/live-checks/app-in-shell.mjs --harness --engines chromium && node test/bar10/run.mjs && node test/harness-sockets/run.mjs && node test/deposit-sheet/run.mjs && node test/welcome/run.mjs && node test/verify/run.mjs && node test/verify-mount/run.mjs && node test/no-blank-pages/run.mjs && node ../../scripts/live-checks/app-portfolio-mount.mjs --harness && node ../../scripts/live-checks/app-deposit-mount.mjs --harness && node ../../scripts/live-checks/app-footer-bar.mjs --harness && node ../../scripts/live-checks/deposit-to-pool.mjs --harness && node ../../scripts/live-checks/app-faults-seen-on-122.mjs --harness && node ../../scripts/live-checks/app-faults-seen-on-124.mjs --harness && node ../../scripts/live-checks/app-faults-seen-on-126.mjs --harness && node ../../scripts/live-checks/screens-never-say-proof.mjs --harness && node ../../scripts/live-checks/app-lock-holds-until-the-layer-closes.mjs --harness && node ../../scripts/live-checks/signed-out-portfolio-and-account-say-what-appears.mjs --harness && node ../../scripts/live-checks/app-pages-open-right.mjs --harness && node test/withdraw/run.mjs && node test/withdraw-form/run.mjs && node test/portfolio/run.mjs && node test/trade-box/run.mjs && node test/trade-pool/run.mjs && node test/trade-reads-after-buy/run.mjs && node test/buy-route/run.mjs && node test/holds-still/run.mjs && node test/token-page/run.mjs && node test/chart-pointer/run.mjs && node test/token-route/run.mjs && node test/chains-evm/run.mjs && node test/token-rail/run.mjs && node test/token-rail/sweep.mjs && node test/header-search/run.mjs && node test/trade-box-mount/run.mjs && node test/trade-sheet/run.mjs && node test/quick-buy/run.mjs && node test/signin-screens/run.mjs && node test/discover-screens/run.mjs && node test/discover-logos/run.mjs && node test/sell-positions/run.mjs && node test/near-trade/run.mjs && node test/orders-soon/run.mjs && node ../../scripts/live-checks/app-sell-mount.mjs --harness && node test/e2e/signin/run.mjs && node test/e2e/signing-sheet/run.mjs && node ../../scripts/live-checks/signpage-shell.mjs --engine chromium --width phone && node ../../scripts/live-checks/deposit-quote-no-liquidity.mjs --local && node ../../scripts/live-checks/sign-out-stops-the-pages-reads.mjs --engine chromium --width phone";
-const PR_1029_SECONDS = { ...E2E_SECONDS, [`${E2E_DIR}: node test/token-rail/sweep.mjs`]: 60 };
+// test/no-blank-pages/run.mjs was on that list at its B2 122.0 s; card app-live-checks-run-on-the-build-before-merge ran the
+// check it wrapped (app-no-blank-pages --harness) in its place and dropped it from E2E_SECONDS
+const PR_1029_SECONDS = { ...E2E_SECONDS, [`${E2E_DIR}: node test/token-rail/sweep.mjs`]: 60, [`${E2E_DIR}: node test/no-blank-pages/run.mjs`]: 123 };
 
 // the deal before this card: command i after the build in part (i - 1) % total, the first part with the prover
 function roundRobin(script, total, seconds = E2E_SECONDS) {
@@ -355,10 +357,13 @@ test("the browser parts: main's list and PR #1029's each plan every part of ci.y
 });
 
 test("planted: the round-robin deal takes PR #1029's list past test-browser (1)'s timeout, as run 44375738505 did", () => {
-  const found = browserBudgetProblems(CI, PR_1029_E2E, (s, n) => roundRobin(s, n, PR_1029_SECONDS));
+  // on the matrix of three parts that run had (card app-live-checks-run-on-the-build-before-merge added the fourth)
+  const ci3 = CI.replace(/(\n {2}test-browser:\n(?:.*\n)*? {8}part: )\[1, 2, 3, 4\]/, "$1[1, 2, 3]");
+  assert.notEqual(ci3, CI);
+  const found = browserBudgetProblems(ci3, PR_1029_E2E, (s, n) => roundRobin(s, n, PR_1029_SECONDS));
   assert.ok(found.some((f) => f.startsWith("test-browser part 1 of 3 is planned at")), JSON.stringify(found));
   // the deal by time, on the same list and the same matrix, does not
-  assert.deepEqual(browserBudgetProblems(CI, PR_1029_E2E, (s, n) => e2eParts(s, n, PR_1029_SECONDS)), []);
+  assert.deepEqual(browserBudgetProblems(ci3, PR_1029_E2E, (s, n) => e2eParts(s, n, PR_1029_SECONDS)), []);
 });
 
 test("the browser runs' measured times: every command of test:e2e has one, each names a command, and a stale one fails", () => {
@@ -369,7 +374,7 @@ test("the browser runs' measured times: every command of test:e2e has one, each 
   assert.deepEqual(stale(E2E, E2E_SECONDS), [], "an E2E_SECONDS key in scripts/ci/test-shards.mjs names no test:e2e command: rename it to the command's new text, or remove it");
   // planted: a new command with no key (PR #1029's sweep was one until its card listed it), and a key whose command is gone
   assert.deepEqual(missing(`${E2E} && node test/new-screen/run.mjs`, E2E_SECONDS), [`${E2E_DIR}: node test/new-screen/run.mjs`]);
-  assert.deepEqual(missing(PR_1029_E2E, E2E_SECONDS), []);
+  assert.deepEqual(missing(PR_1029_E2E, PR_1029_SECONDS), []);
   assert.deepEqual(stale(E2E, { ...E2E_SECONDS, [`${E2E_DIR}: node test/gone/run.mjs`]: 10 }), [`${E2E_DIR}: node test/gone/run.mjs`]);
   for (const [k, n] of Object.entries(E2E_SECONDS)) assert.ok(Number.isInteger(n) && n > 0, k);
   assert.equal(NEW_E2E_SECONDS, 37);

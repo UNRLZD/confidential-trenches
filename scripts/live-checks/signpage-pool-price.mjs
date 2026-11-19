@@ -46,6 +46,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { POOL_USD_FEEDS, poolUsdPrice, SOLANA_RPC_RETRY, solanaHelperRpc, solanaJsonRpc, solanaSameProvider } from "../../packages/kit/src/index.ts";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { harnessRoute } from "./app-in-shell.mjs";
 import { MINT, PATH } from "./app-sell-mount.mjs";
 import { POOL } from "./trade-box-pool.mjs";
@@ -272,7 +273,7 @@ export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()
     const res = await fetch(`${SIGN_HOST}/app.js`, { signal: AbortSignal.timeout(15_000) });
     signBundle = { status: res.status, sha384: sha384(new Uint8Array(await res.arrayBuffer())) };
   }
-  const browser = await launchBrowser("chromium");
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   try {
     const runs = [];
     for (const price of PRICES) {

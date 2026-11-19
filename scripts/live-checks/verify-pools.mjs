@@ -348,13 +348,28 @@ export async function collect({ shots, route = null, network, source }) {
   }
 }
 
-/** A route that answers the Solana programdata read with an upgrade authority named (the bad recording's plant). */
-const plantAuthority = (pass) => async (route) => {
+/** What `inner` would answer `route` with, captured, never sent: { status, headers, body } or { abort }. */
+const answerOf = (inner, route) => new Promise((resolve) => inner({ request: () => route.request(), fulfill: (o) => resolve(o), abort: (why) => resolve({ abort: why }) }));
+
+/** A route that answers the Solana programdata read with an upgrade authority named (the bad recording's plant), on
+ *  the recorded answer (`inner`, the harness's recordings) or, with no `inner`, the live one. */
+const plantAuthority = (pass) => async (route, inner) => {
   const body = route.request().postData() ?? "";
-  if (!body.includes('"getMultipleAccounts"')) return pass(route);
+  if (!body.includes('"getMultipleAccounts"')) return pass(route, inner);
+  if (inner) {
+    const a = await answerOf(inner, route);
+    if (a.abort !== undefined) return route.abort(a.abort);
+    const j = JSON.parse(a.body);
+    planted(j);
+    return route.fulfill({ ...a, body: JSON.stringify(j) });
+  }
   const res = await fetchOrAbort(route);
   if (!res) return;
   const j = await res.json();
+  planted(j);
+  return route.fulfill({ response: res, body: JSON.stringify(j) });
+};
+const planted = (j) => {
   const v = j?.result?.value?.[1];
   if (v?.data?.[0]) {
     const b = Buffer.from(v.data[0], "base64");
@@ -362,7 +377,6 @@ const plantAuthority = (pass) => async (route) => {
     b.fill(7, 13, 45);
     v.data[0] = b.toString("base64");
   }
-  return route.fulfill({ response: res, body: JSON.stringify(j) });
 };
 
 // ------------------------------------------------------------------------------------------------ main
@@ -382,9 +396,11 @@ async function main() {
   if (!release) throw new Error(`--network takes ${Object.keys(VERIFY_RELEASES).join(", ")}`);
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
   const poolRpcs = CHAINS.flatMap((c) => release.pools[c]?.rpcs ?? []);
-  const pass = (route) => route.continue();
+  // the harness reads no public host (card app-live-checks-run-on-the-build-before-merge: test:e2e runs it before the
+  // merge): every NEAR and pool read is answered from its recording (`inner`); the live run reads them live
+  const pass = (route, inner) => inner(route);
   const route = harness ? await harnessRoute(build, [...release.rpcs, ...poolRpcs], plant ? plantAuthority(pass) : pass) : null;
-  const source = harness ? `harness, terminal build, the release's ${network} NEAR and pool RPCs live${plant ? `, Solana ${plant} planted` : ""}` : `live ${APP_HOST}`;
+  const source = harness ? `harness, terminal build, the release's ${network} NEAR and pool reads recorded${plant ? `, Solana ${plant} planted` : ""}` : `live ${APP_HOST}`;
   const rec = await collect({ shots, route, network, source });
   const record = opt("--record");
   // each URL's token query written as <mint> (app-verify-mount.mjs recorded), so no long base58 reads as a key

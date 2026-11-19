@@ -17,20 +17,21 @@
 // Bundle: out a browser and the helper
 //   node scripts/live-checks/rail-open-pushes-the-middle.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
-// --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the
-// helper still answered live; --record writes what the run read (boxes only, no ids), so the check's test can replay it
-// through judge().
+// --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute) and
+// reads no public host: the harness answers the helper from its recordings (/ opens its recorded open token; any read it
+// holds no answer for is refused) and its browser mocks the push socket (scripts/harness-sockets.mjs); --record writes
+// what the run read (boxes only, no ids), so the check's test can replay it through judge().
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { fitScale } from "../../apps/terminal/src/shell/fit.ts";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "rail-open-pushes-the-middle";
 export const APP_HOST = "https://ct-app.unrealized.trade";
-const HELPER_HOST = "https://ct-api.unrealized.trade";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** The page widths in layout px each mode ends at, from token.css's @container tkp-page rules that name --tkr-mode. */
@@ -141,14 +142,14 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
     const { harnessRoute } = await import("./app-in-shell.mjs");
     harness = await harnessRoute(path.resolve(build), "tap");
   }
-  const browser = await launchBrowser("chromium");
-  const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), browser: browser.version(), views: [] };
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
+  const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, the helper recorded` : "live", at: new Date().toISOString(), browser: browser.version(), views: [] };
   try {
     for (const width of WIDTHS) {
       const view = { width, want: modeAt(width), state: null, closed: null, open: null, shut: null, shots: [] };
       rec.views.push(view);
       const ctx = await browser.newContext({ viewport: { width, height: 900 }, deviceScaleFactor: 1, colorScheme: "dark", reducedMotion: "reduce" });
-      if (harness) await ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
+      if (harness) await ctx.route("**/*", harness);
       const page = await ctx.newPage();
       await page.goto(`${APP_HOST}/`, { waitUntil: "load" });
       let app = null;

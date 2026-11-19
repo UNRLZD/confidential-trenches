@@ -30,6 +30,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 
 const KEY = "app-token-rail";
 export const APP_URL = "https://ct-app.unrealized.trade/";
@@ -124,7 +125,7 @@ export async function drawn({ url = APP_URL, build = null, shots = path.join(tmp
     const { harnessRoute } = await import("./app-in-shell.mjs");
     harness = await harnessRoute(path.resolve(build), "tap");
   }
-  const browser = await launchBrowser("chromium");
+  const browser = await (harness ? launchHarnessBrowser : launchBrowser)("chromium");
   try {
     const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, colorScheme: "dark" });
     if (harness) await ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_URL ? r.continue() : harness(r)));
