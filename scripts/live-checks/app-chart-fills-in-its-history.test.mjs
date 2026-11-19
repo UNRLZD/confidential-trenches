@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { AWAY_MS, EXIT, FULL, judge, loadVerdict, RESYNC_MS, SLACK_MS, trim } from "./app-chart-fills-in-its-history.mjs";
+import { AWAY_MS, EXIT, FIRST_MS, FULL, judge, loadVerdict, PICK_MIN_MS, pickFits, RESYNC_MS, RUN_MS, SLACK_MS, TRIES, trim, WATCH_MAX_MS } from "./app-chart-fills-in-its-history.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-chart-fills-in-its-history.answers.json"), "utf8"));
@@ -130,6 +130,19 @@ test("planted: the helper still filling at the end of the watch, the page's read
     for (const a of l.answers) if (a.limit === FULL && a.status === 200) a.filling = true;
   });
   assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+});
+
+// card app-chart-check-inside-its-bound: merge group 44571987928, test-browser (1) job 135729331112, 19 Nov 17:01-17:05Z:
+// the walk ran past its bound of 238 s while the helper said filling; TRIES picks of FIRST_MS and WATCH_MAX_MS each had
+// no deadline
+test("the walk ends by RUN_MS: with less than PICK_MIN_MS left no pick starts (a pick started ends its waits at the deadline)", () => {
+  assert.ok(TRIES * (FIRST_MS + WATCH_MAX_MS) > RUN_MS, "the picks alone would run past the deadline (why it is needed)");
+  assert.ok(PICK_MIN_MS >= AWAY_MS + SLACK_MS, "a pick started has room for the page's next full read");
+  const deadline = 1_000_000;
+  assert.equal(pickFits(deadline - PICK_MIN_MS, deadline), true);
+  assert.equal(pickFits(deadline - PICK_MIN_MS + 1, deadline), false, "too little left: no pick");
+  assert.equal(pickFits(deadline + 1, deadline), false);
+  assert.ok(RUN_MS / 1000 + 30 <= 238, "inside the queue's bound of 238 s (2 x 58 s listed, or 180 s more), 30 s left for launch and close");
 });
 
 test("the recorded answers are as trim() keeps a record: no coin names, no address, no live read that answered", () => {

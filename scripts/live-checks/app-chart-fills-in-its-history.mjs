@@ -22,6 +22,8 @@
 //        fold rule, test/chart-live.test.ts).
 //   PASS: no BAD line and a load filled. INCONCLUSIVE: no BAD line, and no candidate in TRIES picks gave a filling
 //   first answer, or none stopped filling within the watch. FAIL: any BAD line.
+//   The whole walk ends by RUN_MS from its start: no pick starts with less than PICK_MIN_MS left, and a load's waits stop
+//   at it, so the run ends inside the bound the merge queue gives it (card app-chart-check-inside-its-bound).
 // A screenshot of every load is kept.
 // After: app
 // Bundle: out a browser and the helper's cold coins
@@ -60,9 +62,20 @@ export const RESYNC_MS = 60_000;
 /** Room past AWAY_MS for the page's 1 s live tick and the live read out when the full one comes due. */
 export const SLACK_MS = 7_000;
 /** The longest a load waits for the page's first full answer (a 429's waits included, candles.ts THROTTLE_SPAN_S). */
-const FIRST_MS = 80_000;
+export const FIRST_MS = 80_000;
 export const WATCH_MAX_MS = 150_000;
 export const TRIES = 6;
+/** The whole walk's deadline from its start: candidates, every pick's loads and their waits (card
+ *  app-chart-check-inside-its-bound: merge group 44571987928, test-browser (1) job 135729331112, 19 Nov 17:01-17:05Z, ran
+ *  past its bound of 238 s, two times its listed 58 s or 180 s more, scripts/ci/test-shards.mjs boundOf, while the
+ *  helper said filling: TRIES picks of FIRST_MS and WATCH_MAX_MS each had no deadline). It leaves 38 s of that bound for
+ *  the browser's launch, the build's serving, the last screenshots and the close. */
+export const RUN_MS = 200_000;
+/** The least a pick needs to give a verdict: its first answer, the page's full read AWAY_MS on with SLACK_MS, and the 3 s
+ *  the drawing is given. With less left no pick starts. */
+export const PICK_MIN_MS = AWAY_MS + SLACK_MS + 10_000;
+/** Whether a pick may start at `now` within a walk that ends at `deadline`. */
+export const pickFits = (now, deadline) => deadline - now >= PICK_MIN_MS;
 export const FULL = "500";
 
 // ------------------------------------------------------------------------------------------------ the verdict
@@ -178,7 +191,7 @@ export async function candidates() {
   for (const chain of CHAINS) {
     const out = [];
     try {
-      const r = await fetch(`${HELPER_HOST}/v1/market/lists?chain=${chain}`, { headers });
+      const r = await fetch(`${HELPER_HOST}/v1/market/lists?chain=${chain}`, { headers, signal: AbortSignal.timeout(15_000) });
       const body = await r.json();
       const seen = new Set();
       for (const column of ["new", "trending_5m", "trending_1h", "trending"]) {
@@ -202,7 +215,7 @@ const MEASURE = () => {
   return { route: root?.dataset.route ?? null, chart: c?.getAttribute("data-chart") ?? null, last: c?.querySelector("[data-testid=chart-canvas]")?.getAttribute("data-last") || null };
 };
 
-async function watchLoad(browser, w, i, pick, harness, shots, n) {
+async function watchLoad(browser, w, i, pick, harness, shots, n, deadline) {
   const opened = `${APP_HOST}/token/${pick.chain}/${pick.token}`;
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark" });
   if (harness) await liveHelper(ctx, harness);
@@ -236,11 +249,11 @@ async function watchLoad(browser, w, i, pick, harness, shots, n) {
   const t0 = Date.now();
   await page.goto(opened, { waitUntil: "load" });
   const fullAnswers = () => answers.filter((a) => a.limit === FULL && (a.status !== 200 || a.filling !== undefined));
-  while (Date.now() - t0 < FIRST_MS && !fullAnswers().some((a) => a.status === 200 && a.bars > 0)) await page.waitForTimeout(250);
+  while (Date.now() - t0 < FIRST_MS && Date.now() < deadline && !fullAnswers().some((a) => a.status === 200 && a.bars > 0)) await page.waitForTimeout(250);
   const first = fullAnswers().find((a) => a.status === 200 && a.bars > 0);
   if (first?.filling) {
     let doneAt = null;
-    for (const s = Date.now(); Date.now() - s < WATCH_MAX_MS; await page.waitForTimeout(250)) {
+    for (const s = Date.now(); Date.now() - s < WATCH_MAX_MS && Date.now() < deadline; await page.waitForTimeout(250)) {
       if (doneAt === null && fullAnswers().some((a) => a.status === 200 && a.filling === false && a.at_ms > first.at_ms)) doneAt = Date.now();
       if (doneAt !== null && Date.now() - doneAt > 3_000) break;
     }
@@ -269,6 +282,7 @@ async function watchLoad(browser, w, i, pick, harness, shots, n) {
 
 export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
   mkdirSync(shots, { recursive: true });
+  const deadline = Date.now() + RUN_MS;
   const cands = await candidates();
   const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), candidates: cands.map((c) => ({ chain: c.chain, symbol: c.symbol })), picks: [], shots };
   let harness = null;
@@ -279,9 +293,9 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
   const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   rec.browser = browser.version();
   try {
-    for (let n = 0; n < TRIES && n < cands.length; n++) {
+    for (let n = 0; n < TRIES && n < cands.length && pickFits(Date.now(), deadline); n++) {
       const pick = cands[n];
-      const loads = await Promise.all(LOADS.map((w, i) => watchLoad(browser, w, i, pick, harness, shots, n)));
+      const loads = await Promise.all(LOADS.map((w, i) => watchLoad(browser, w, i, pick, harness, shots, n, deadline)));
       rec.picks.push({ ...pick, loads });
       if (loads.some((l) => loadVerdict(l).kind === "filled")) break;
     }
