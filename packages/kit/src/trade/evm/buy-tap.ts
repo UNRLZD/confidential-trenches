@@ -308,6 +308,15 @@ export function evmPoolBuyWarm(req: { readonly chain: EvmPoolChain; readonly tok
   return run;
 }
 
+/** The wait between a whole sync's end and the next gap sync of a served index, ms (card evm-index-kept-at-the-head): a
+ *  quote reads the blocks past the index's N unread before its answer only while they start within the chain's maxLag of
+ *  the scan provider's head (checks/evm/quote.ts scanPools), 50 Base blocks and 100 Robinhood ones, about 10 s each; an
+ *  index synced once a sign-in fell past it within seconds, and every new coin's first quote then sent 5 getLogs by
+ *  currency over the same blocks before its answer (Robinhood 2, 10 and 5, Base 6, 19 Nov). A gap sync from the kept
+ *  index reads its margin and the new blocks: one span, a head post and one batch on each reader (Base 0.5-1.7 s,
+ *  Robinhood 2.2 s), so 3 s keeps N within about 7 s of the head. */
+export const EVM_INDEX_KEEP_MS = 3_000;
+
 /** One sync of the chain's pool index from `prev` (none: cold) on the venue's two index readers through `fetchFn`, and a
  *  whole one served to the kit's quote (evmPoolIndexUse). `served` is false where the sync ended partial or the chain
  *  has no index. Its reads are a background read's (pace.ts `later`): a tap's posts go before them. */

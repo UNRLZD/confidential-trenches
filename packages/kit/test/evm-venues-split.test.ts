@@ -32,8 +32,12 @@ import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/
  *  aaca27e76a69e65f0793ccd60e1759d25f0ecda7c44d8c8b73c58016fb7456f0, so nothing else moved. Then each mainnet's scan
  *  gained its measured Initialize rate, `initialized` (card evm-scan-chain-tail: the chain's tail spans and its flood
  *  bound; 6,650 characters before it): the list with those two taken out hashes to the pin before it,
- *  b0239a3ac9c10f43a2db48ea15f4ed26f3fce85189c257f98ac061724d7fed23, so nothing else moved. */
-const BEFORE = "cec5fcd8ee010c5043cac23cb21ee3ff6d9ba3195f542c19ca62b89726849760";
+ *  b0239a3ac9c10f43a2db48ea15f4ed26f3fce85189c257f98ac061724d7fed23, so nothing else moved. Then Base's second index
+ *  reader went from Pocket to bloXroute's base.rpc.blxrbdn.com (card evm-index-kept-at-the-head: 100 of 100 posts
+ *  answered at the gap sync's rate where Pocket answered 7 of 101 429; 6,742 characters before it): the list with
+ *  Pocket put back hashes to the pin before it, cec5fcd8ee010c5043cac23cb21ee3ff6d9ba3195f542c19ca62b89726849760, so
+ *  nothing else moved. */
+const BEFORE = "d913eec85caaec57b2db40fd469a9d2772a19385e8bf3118c217a684a9e20023";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
   const all = evmPoolVenues();
@@ -42,7 +46,7 @@ test("the two halves together are the venue list before the split, entry for ent
   assert.deepEqual(Object.keys(evmTestnetVenues()), ["base-sepolia", "robinhood-testnet"]);
   assert.deepEqual({ ...all }, { ...evmMainnetVenues(), ...evmTestnetVenues() });
   const json = JSON.stringify(all);
-  assert.equal(json.length, 6_742);
+  assert.equal(json.length, 6_739);
   assert.equal(createHash("sha256").update(json).digest("hex"), BEFORE);
 });
 

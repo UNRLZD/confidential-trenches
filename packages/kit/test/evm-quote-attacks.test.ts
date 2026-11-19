@@ -964,6 +964,84 @@ test("F10w a warm buy with a held head (its first round sent beside its scan) on
   }
 });
 
+// card evm-index-kept-at-the-head: an index synced once falls past maxLag of the head, and a new coin's cold buy then
+// scans the blocks past its N by currency before its answer (Robinhood 2, 10 and 5 getLogs, Base 6, 19 Nov); the same
+// index synced on to the head (the page's keep, a gap sync from the kept index) serves the next new coin's cold buy whole
+test("F10k an index left 100 blocks behind the head has a new coin's cold buy scan by currency before its answer; synced on to the head, the next new coin's cold buy asks no getLogs", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const coins = [0, 1].map((i) => {
+    const t = "0x" + (0xf1a00 + i).toString(16).padStart(40, "0");
+    return { t, pools: [seeded(t), real(t)] };
+  });
+  const index = { chainId: 8453, poolManager: PM, from: 4_000_001 };
+  const pools = coins.map((c) => ({ key: real(c.t).key }));
+  const asks: { a: number; currency: boolean }[] = [];
+  let answered = false;
+  const empty = scanner(5_000_000, []);
+  const scan: EvmRpc = async (calls, signal) => {
+    for (const f of getLogsOf(calls)) if (!answered) asks.push({ a: Number(f.fromBlock), currency: f.topics.slice(1).some((x) => x !== null && x !== undefined) });
+    return empty(calls, signal);
+  };
+  const buy = async (c: (typeof coins)[number]) => {
+    answered = false;
+    const v = await verdict(evmPoolBuyQuoteWith({ chain: "base", token: c.t, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(c.t) }, [chain(c.pools, 0), chain(c.pools, 1)], NOW, scan, undefined, () => 0));
+    answered = true;
+    await pause(20);
+    return v;
+  };
+  evmPoolIndexReset();
+  try {
+    // N 100 blocks below the scan provider's head (maxLag 50)
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 4_999_900, pools }), true);
+    assert.deepEqual(await buy(coins[0]!), below);
+    assert.ok(asks.some((x) => x.currency && x.a === 4_999_901), `the index behind the head: getLogs by currency past N before the answer, ${JSON.stringify(asks)}`);
+    asks.length = 0;
+    // the gap synced: N at the head
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 5_000_000, pools }), true);
+    assert.deepEqual(await buy(coins[1]!), below);
+    assert.deepEqual(asks, [], "the index at the head: no getLogs before the answer");
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
+// card evm-index-kept-at-the-head: the page syncs the gap every EVM_INDEX_KEEP_MS and most gaps make no pool; a sync
+// with the very pools held moves the served index's N alone, the same object, never a rebuild of every pool
+test("F10s a gap sync that adds no pool leaves the served index the same object with its N moved on; one that adds a pool, or swaps one, serves a new index with it", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset, evmPoolIndexHeld, evmPoolIndexPools } = quoteMod as unknown as {
+    evmPoolIndexUse: (c: string, s: unknown) => boolean;
+    evmPoolIndexReset: () => void;
+    evmPoolIndexHeld: (c: string) => { from: number; through: number } | undefined;
+    evmPoolIndexPools: (c: string, t: string) => readonly unknown[] | null;
+  };
+  const [a, b, c] = [0, 1, 2].map((i) => "0x" + (0xf1b00 + i).toString(16).padStart(40, "0"));
+  const pool = (t: string, i: number) => ({ id: "0x" + (0xa00 + i).toString(16).padStart(64, "0"), key: real(t).key, block: 4_000_100 + i });
+  const index = { chainId: 8453, poolManager: PM, from: 4_000_001 };
+  evmPoolIndexReset();
+  try {
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 4_999_000, pools: [pool(a!, 0), pool(b!, 1)] }), true);
+    const held = evmPoolIndexHeld("base");
+    assert.equal(held?.through, 4_999_000);
+    // the gap synced to 4,999,015 with no new pool (fresh pool objects of the same pools, as a sync answers them)
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 4_999_015, pools: [pool(a!, 0), pool(b!, 1)] }), true);
+    assert.equal(evmPoolIndexHeld("base"), held, "a gap sync that adds no pool leaves the served index the same object");
+    assert.equal(held?.through, 4_999_015, "and moves its N on");
+    assert.deepEqual(evmPoolIndexPools("base", a!), [real(a!).key], "its pools still served");
+    // a gap with a new pool serves a new index that holds it
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 4_999_030, pools: [pool(a!, 0), pool(b!, 1), pool(c!, 2)] }), true);
+    const grown = evmPoolIndexHeld("base");
+    assert.notEqual(grown, held, "a gap sync that adds a pool serves a new index");
+    assert.equal(grown?.through, 4_999_030);
+    assert.deepEqual(evmPoolIndexPools("base", c!), [real(c!).key], "with the new pool");
+    // as many pools but one swapped (a margin pool a reorg took, another made): a new index, the gone pool not served
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 4_999_045, pools: [pool(a!, 0), pool(b!, 1), pool(a!, 3)] }), true);
+    assert.notEqual(evmPoolIndexHeld("base"), grown, "a gap sync that swaps a pool serves a new index");
+    assert.deepEqual(evmPoolIndexPools("base", c!), [], "the swapped-out pool is no longer served");
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
 // card evm-tree-reads-only-when-needed: a scanless quote (the page's shown price on a device that holds nothing) reads no
 // log: the served index's pools and the helper's, each read on both providers like any candidate, and no block scanned
 test("SCANLESS a scanless quote asks the scan provider nothing and prices on the served index's pools as a scanned one does", async () => {
