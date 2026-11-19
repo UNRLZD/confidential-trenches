@@ -233,6 +233,40 @@ export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: 
 export const bestVenuePool = (ref: SolanaReference | null | undefined): SolanaReference["pools"][number] | undefined =>
   ref?.pools.filter((p) => SOLANA_POOL_BUY_VENUES.includes(p.venue)).sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
 
+/** The venues a page's tables pin a buy on: each the kit builds with a non-empty list of table addresses. */
+export const pinnedBuyVenues = (tables: Readonly<Partial<Record<string, readonly string[] | undefined>>>): ReadonlySet<SolanaReference["pools"][number]["venue"]> =>
+  new Set(SOLANA_POOL_BUY_VENUES.filter((v) => Object.hasOwn(tables, v) && Array.isArray(tables[v]) && tables[v]!.length > 0));
+
+/** A Solana buy's venue, or why there is none (solanaBuyVenue). */
+export type SolanaBuyVenue = { readonly pool: SolanaReference["pools"][number] } | { readonly error: "quote_check_failed" | "venue_not_pinned" | "below_reference" };
+
+/**
+ * The one venue decision of a Solana buy (card sol-buy-takes-the-best-venue-it-can-trade), which the tap (src/pool-buy.ts)
+ * and pool.buy.dry (src/pools.ts) both take on the same reference: among the reference's pools on a venue the kit builds
+ * and the page pins a table for (`pinned`, pinnedBuyVenues), the one that gives the most. Its expected out is held to
+ * the market M, the kit's E: the best pool of the reference's set on any venue, pinned or not: the EVM rule of card
+ * evm-buy-never-below-a-hidden-market (kit checks/evm/quote.ts `near` and `underHooked`), where a market the device
+ * can read but not trade through still sets the price a buy must meet, and a buy within the ask's slippage of it is
+ * taken at its own min out. So a coin whose larger pool sits on a venue the page cannot trade (a DLMM pair or a Raydium
+ * pool beside its pump venue) fills on its pinned venue, and a thin pinned pool seeded beside the coin's real market
+ * is refused. Refusals, in this order: quote_check_failed (no reference, no pool on a venue the kit builds, or a
+ * slippage outside 0 to 9,999 bps, as the kit's QUOTE check refuses it), venue_not_pinned (no such pool on a pinned
+ * venue), below_reference (the best pinned pool's out under M less the slippage: x * 10000 < M * (10000 - bps)).
+ */
+export function solanaBuyVenue(ref: SolanaReference | null | undefined, pinned: ReadonlySet<string>, slippageBps: number): SolanaBuyVenue {
+  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10_000) return { error: "quote_check_failed" };
+  // the set's pools and those under its depth cutoff (the kit's `shallow`): a pinned venue's pool may be either
+  const built = [...(ref?.pools ?? []), ...(ref?.shallow ?? [])].filter((p) => SOLANA_POOL_BUY_VENUES.includes(p.venue));
+  if (built.length === 0) return { error: "quote_check_failed" };
+  const most = (xs: readonly SolanaReference["pools"][number][]) => xs.reduce<SolanaReference["pools"][number] | null>((m, p) => (m === null || p.expectedOut > m.expectedOut ? p : m), null);
+  const pool = most(built.filter((p) => pinned.has(p.venue)));
+  if (pool === null) return { error: "venue_not_pinned" };
+  // M: the kit's E, the best pool of the set over every venue read (a pool under the depth cutoff never raises it)
+  const market = ref!.expectedOut;
+  if (pool.expectedOut * 10_000n < market * BigInt(10_000 - slippageBps)) return { error: "below_reference" };
+  return { pool };
+}
+
 /** Finds a coin's SOL pools of one venue for a reference (the kit's readSolanaDlmmPairs, readSolanaCpmmPools or
  *  readSolanaAmmV4Pools on the page's providers): both providers' scans, their union (a tap's reference waits for it).
  *  `early` (card solana-quote-reads-found-pools-once), for a preview: the same scan's list as soon as one provider's

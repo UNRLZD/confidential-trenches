@@ -104,6 +104,7 @@ import { poolBalances } from "../../wallet/src/pool/balances.ts";
 import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { unitsOf } from "./pool-buy.ts";
 import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { withVaultBalance } from "./vault-balance.ts";
@@ -704,8 +705,9 @@ else {
     },
     // Solana: the dry's tap_max on the coin's venue, a throw when that venue is not read (no move from Cash); Base and
     // Robinhood: state.pools' tap_max, the largest ready note
-    tapMax: async (chain, token) => {
-      if (chain === "solana") return solanaTapMaxOf(tapDry({ chain: "solana", token }));
+    tapMax: async (chain, token, ask) => {
+      // with the ask: the tap's own venue decision (pools.ts poolBuyDryKind), a refusal thrown before any move
+      if (chain === "solana") return solanaTapMaxOf(tapDry({ chain: "solana", token, ...(ask === undefined ? {} : { amount: unitsOf(ask.amount, 9), slippage_bps: ask.slippageBps }) }));
       if (!testnet) return 0n;
       const both = await testnet.readyWith(pageNotes);
       const tap = poolBalances(both.value, PAGE_POOLS.filter((p) => p.chain === chain), both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
@@ -787,6 +789,8 @@ else {
   const poolBuyDry = poolBuyDryKind({
     pools: PAGE_POOLS,
     finders: dryFinders,
+    // the tap's own pins: an ask with an amount answers the tap's venue decision (page-rpc.ts solanaBuyVenue)
+    tables: PAGE_TABLES,
     // a preview: each kind's pools as soon as one provider's scan names them (card solana-quote-reads-found-pools-once);
     // tapDry below, the tap's own, waits for both providers' scans
     early: true,
@@ -823,6 +827,7 @@ else {
   const tapDry = poolBuyDryKind({
     pools: PAGE_POOLS,
     finders: dryFinders,
+    tables: PAGE_TABLES,
     rpcs: dryPair,
     rent: () => (hasSolana ? rent.get() : null),
     ready: async () => {
