@@ -2420,7 +2420,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const wWrites = new Map<string, Promise<void>>();
   const inTurn = (w: string | undefined, write: () => Promise<void>): Promise<void> => {
     if (w === undefined) return write().catch(() => {});
-    const p = (wWrites.get(w) ?? Promise.resolve()).then(write).catch(() => {});
+    const before = wWrites.get(w);
+    // none in flight: the write starts now, as an unqueued one does
+    const p = (before === undefined ? write() : before.then(write)).catch(() => {});
     wWrites.set(w, p);
     void p.then(() => wWrites.get(w) === p && wWrites.delete(w));
     return p;
