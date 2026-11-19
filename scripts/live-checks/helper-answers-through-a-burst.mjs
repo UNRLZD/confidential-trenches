@@ -3,10 +3,13 @@
 // within the bound and readable by the page, never a 502 from Caddy with no CORS header (19 Nov 14:30-14:33Z: every
 // answer a 502 in 3.6 s while 300 live run jobs opened pages at once). It reads the Solana lists once for the coin the
 // first screen opens, then PAGES pages' first reads all at once (apps/terminal/src: the four chains' lists, the token,
-// its tape and its chart; apps/helper/deploy/burst.mjs is the same page at any size, for a copy of the helper only).
-// The burst is bounded so the check can never make an outage of its own: PAGES * READS requests, all cached reads,
-// under one client's window (the helper's API_RATE_MAX, 120 in 10 s), once. It passes only when:
-//   - every request is answered (no connection error, no timeout at TIMEOUT_MS);
+// its tape and its chart; apps/helper/deploy/burst.mjs is the same page at any size, for a copy of the helper only),
+// and SOCKETS of the pages' push sockets with them (each a fresh connection Caddy must dial: on a copy of main, 112 of
+// 600 pages' sockets failed while every plain read got through). The burst is bounded so the check can never make an
+// outage of its own: PAGES * READS requests, all cached reads, under one client's window (the helper's API_RATE_MAX,
+// 120 in 10 s), and SOCKETS sockets under one client's PUSH_CLIENT_MAX (8), each closed once upgraded, once. It passes
+// only when:
+//   - every request is answered (no connection error, no timeout at TIMEOUT_MS) and every socket is upgraded (101);
 //   - no answer is a 502, 504 or 500, and every answer carries Access-Control-Allow-Origin APP_HOST, so the page reads
 //     it (a 503 the helper sheds with, a 429, a 200);
 //   - the answers' p99 is within P99_MAX_MS.
@@ -14,16 +17,22 @@
 //   node scripts/live-checks/helper-answers-through-a-burst.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
+import { randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
 
 const KEY = "helper-answers-through-a-burst";
 export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
-/** Pages opened at once [design: 12 pages of READS each, 96 requests, under API_RATE_MAX's 120 a client in 10 s with
+/** Pages opened at once [design: 12 pages of READS each, 84 requests, under API_RATE_MAX's 120 a client in 10 s with
  *  the lists read for the coin, so a pass is never a 429 of the check's own making]. */
 export const PAGES = 12;
 /** The first screen's reads of one page (the four lists, the token, its tape, its chart). */
 export const READS = 7;
+/** The pages' push sockets opened with them [design: 6, under the helper's PUSH_CLIENT_MAX of 8 a client]. */
+export const SOCKETS = 6;
+export const PUSH = "/v1/market/push";
 /** The p99 bound on one answer, the card's [design: 3 s; a cached read answers in milliseconds]. */
 export const P99_MAX_MS = 3_000;
 /** How long one request may take before it counts as unanswered [design: the page's own 10 s read bound]. */
@@ -51,9 +60,26 @@ async function one(base, fetchFn, path, now) {
   }
 }
 
+/** One push socket's handshake with Origin APP_HOST: 101 when upgraded (then closed), else the status answered, null
+ *  with no answer in TIMEOUT_MS. */
+export function upgrade(base, coin, now = () => performance.now()) {
+  const url = new URL(`${PUSH}?chain=solana&token=${encodeURIComponent(coin)}`, base);
+  const headers = { Origin: APP, Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": randomBytes(16).toString("base64") };
+  const began = now();
+  return new Promise((ok) => {
+    const req = (url.protocol === "https:" ? https : http).request(url, { headers, timeout: TIMEOUT_MS, agent: false });
+    const end = (status, error) => ok({ route: PUSH, status, ms: Math.round(now() - began), ...(error === undefined ? {} : { error }) });
+    req.on("timeout", () => req.destroy(Object.assign(new Error("timeout"), { code: "timeout" })));
+    req.on("error", (e) => end(null, String(e?.code ?? "error")));
+    req.on("response", (res) => (res.resume(), end(res.statusCode)));
+    req.on("upgrade", (res, socket) => (socket.destroy(), end(res.statusCode)));
+    req.end();
+  });
+}
+
 /** The run: { base, coin, answers }; answers in the order sent, each by its route (the path, no query: a record holds
  *  no coin address beside a "token" key, which a secret scan reads as one). */
-export async function read(base = BASE, fetchFn = fetch, now = () => performance.now()) {
+export async function read(base = BASE, fetchFn = fetch, now = () => performance.now(), upgradeFn = upgrade) {
   let coin = null;
   try {
     const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/market/lists?chain=solana`, { headers: { origin: APP }, signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -64,7 +90,7 @@ export async function read(base = BASE, fetchFn = fetch, now = () => performance
   }
   if (coin === null) return { base, coin, answers: [] };
   const paths = Array.from({ length: PAGES }, () => pagePaths(coin)).flat();
-  const answers = await Promise.all(paths.map((p) => one(base, fetchFn, p, now)));
+  const answers = await Promise.all([...paths.map((p) => one(base, fetchFn, p, now)), ...Array.from({ length: SOCKETS }, () => upgradeFn(base, coin, now))]);
   return { base, coin, answers };
 }
 
@@ -72,9 +98,13 @@ export async function read(base = BASE, fetchFn = fetch, now = () => performance
 export function judge(run) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
-  const answers = Array.isArray(run?.answers) ? run.answers : [];
+  const all = Array.isArray(run?.answers) ? run.answers : [];
+  const answers = all.filter((a) => a.route !== PUSH);
+  const sockets = all.filter((a) => a.route === PUSH);
   say(typeof run?.coin === "string", `the coin the first screen opens, from the Solana lists: ${run?.coin ?? "none read"}`);
   say(answers.length === PAGES * READS, `${answers.length} reads of ${PAGES} pages at once (want ${PAGES * READS})`);
+  const shut = sockets.filter((a) => a.status !== 101);
+  say(sockets.length === SOCKETS && shut.length === 0, `push sockets upgraded: ${sockets.length - shut.length} of ${sockets.length} (want ${SOCKETS}; not: ${shut.map((a) => a.status ?? a.error).join(", ") || "none"})`);
   const lost = answers.filter((a) => a.status === null);
   say(lost.length === 0, `unanswered: ${lost.length}${lost.length ? ` (${[...new Set(lost.map((a) => a.error))].join(", ")})` : ""}`);
   const broken = answers.filter((a) => a.status === 500 || a.status === 502 || a.status === 504);
