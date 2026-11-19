@@ -7,7 +7,7 @@
 // into Base's ETH is read past its "Failed to get quote" at one unit.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cashMover, evmCashPlan, evmMoveCostOf, evmMoveOf, planCashMove, evmMoveModel, readOneClickLeast, type CashMoverDeps, type CashNote, type CashQuote } from "../src/cash-to-pool.ts";
+import { cashMover, evmCashPlan, evmMoveCostOf, evmMoveOf, planCashMove, evmMoveModel, type CashMoverDeps, type CashNote, type CashQuote } from "../src/cash-to-pool.ts";
 import { evmMostWithCash, evmMoveShort, evmTapBuys } from "../src/pool-buy-evm.ts";
 import { planEvmBuy, type PoolAsk } from "../src/rules/pool.ts";
 import { EVM_MOVE_FEE_ROOM } from "../src/pool-buy-evm.ts";
@@ -123,27 +123,5 @@ test("Max with Cash counts every note: the most one tap buys after the move, mor
   assert.ok(alone < RUNG && alone < most, `${alone} < ${most}`);
 });
 
-test("1Click's least into Base's ETH is read past its 'Failed to get quote' at one unit, never kept in the code", async () => {
-  const asked: string[] = [];
-  // recorded 15 Nov 13:30Z on the helper's 1Click proxy: into Base's ETH, one unit, then ten
-  const base = (async (_u: unknown, init: RequestInit) => {
-    const amount = String(JSON.parse(String(init.body)).amount);
-    asked.push(amount);
-    return amount === "1" ? new Response(JSON.stringify({ message: "Failed to get quote" }), { status: 400 }) : new Response(JSON.stringify({ message: "Amount is too low for bridge, try at least 1042" }), { status: 400 });
-  }) as unknown as typeof fetch;
-  assert.equal(await readOneClickLeast("base", base, 0), 1_042n);
-  assert.deepEqual(asked, ["1", "10"]);
-  // an amount it quotes is one it takes
-  const quotes = (async (_u: unknown, init: RequestInit) => (String(JSON.parse(String(init.body)).amount) === "100" ? new Response("{\"quote\":{}}", { status: 201 }) : new Response(JSON.stringify({ message: "Failed to get quote" }), { status: 400 }))) as unknown as typeof fetch;
-  assert.equal(await readOneClickLeast("robinhood", quotes, 0), 100n);
-  // any other answer is no read, and is not asked again
-  const other: string[] = [];
-  const refuses = (async (_u: unknown, init: RequestInit) => (other.push(String(JSON.parse(String(init.body)).amount)), new Response(JSON.stringify({ message: "recipient is not valid" }), { status: 400 }))) as unknown as typeof fetch;
-  await assert.rejects(readOneClickLeast("base", refuses, 0), /names no least: HTTP 400 recipient is not valid/);
-  assert.deepEqual(other, ["1"]);
-  // never past one USDC; "Failed to get quote" there is a blip, asked again (card cash-least-read-again), then no least
-  const always: string[] = [];
-  const failed = (async (_u: unknown, init: RequestInit) => (always.push(String(JSON.parse(String(init.body)).amount)), new Response(JSON.stringify({ message: "Failed to get quote" }), { status: 400 }))) as unknown as typeof fetch;
-  await assert.rejects(readOneClickLeast("base", failed, 0, { sleep: async () => {} }), /no least in 3 tries: HTTP 400 Failed to get quote/);
-  assert.deepEqual(always, ["1", "10", "100", "1000", "10000", "100000", "1000000", "1000000", "1000000"]);
-});
+// 1Click's least read into Base's and Robinhood's ETH (readOneClickLeast, past 'Failed to get quote' at one unit) is
+// test/cash-to-pool-least-signed.test.ts's (card cash-to-pool-least-signed): its answers are signed there.

@@ -24,7 +24,7 @@ test("cash-to-pool.ts readOneClickLeast: a budget that ends inside a blip's read
     budget.abort(new Error("budget"));
     return new Response(JSON.stringify({ message: "busy" }), { status: 429 });
   }) as unknown as typeof fetch;
-  const read = readOneClickLeast("base", blip, 0, { signal: budget.signal });
+  const read = readOneClickLeast("base", blip, 0, { price: () => null, signal: budget.signal });
   assert.equal(await settledSoon(read), "settled", "the read waited out its 500 ms backoff on an ended budget");
   await assert.rejects(read, /1Click gave no least within/);
 });

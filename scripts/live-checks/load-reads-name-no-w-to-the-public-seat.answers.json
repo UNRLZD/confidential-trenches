@@ -1,0 +1,26 @@
+{
+ "_note": {
+  "good": "this card build (card/load-reads-name-no-w-to-the-public-seat, packages/signpage/index.html and public/app.js as scripts/build-app.mjs writes them, mainnet): PASS",
+  "bad": "SIGN_HOST as served 2026-11-18T23:49Z, before this card (main 9272c1e9e and earlier): FAIL, every mark named"
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-NPubNRG0gEZlHxPu7hDpljBQ1btcb3JtsKg5GucaWb25cuFUlgHkoBiH2lqXbDS/\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-NPubNRG0gEZlHxPu7hDpljBQ1btcb3JtsKg5GucaWb25cuFUlgHkoBiH2lqXbDS/",
+  "carries": {
+   "before the page's first tap an owed piece's owner is read on the helper's seat alone, past it on both": true,
+   "one seat's mine decides nothing, its other is taken": true,
+   "the one-seat owner is the pair's own rule on one seat, and the pair's is that rule on both": true,
+   "the found-W scan reads the Ws on the pair's second seat, in batches, with no one-W-a-request read": true
+  }
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-rL1CKtvfREBqVE1EpMEbHyg42I0P6cMGRC+pwmysPeSXyOXCfsijnQ+BWMCTlGxZ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-rL1CKtvfREBqVE1EpMEbHyg42I0P6cMGRC+pwmysPeSXyOXCfsijnQ+BWMCTlGxZ",
+  "carries": {
+   "before the page's first tap an owed piece's owner is read on the helper's seat alone, past it on both": false,
+   "one seat's mine decides nothing, its other is taken": false,
+   "the one-seat owner is the pair's own rule on one seat, and the pair's is that rule on both": false,
+   "the found-W scan reads the Ws on the pair's second seat, in batches, with no one-W-a-request read": false
+  }
+ }
+}

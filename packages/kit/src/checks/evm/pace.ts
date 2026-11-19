@@ -118,9 +118,14 @@ export const evmBatchMost = (url: string): number => MOST.get(evmProviderKey(url
  *  A refusal's number is the provider's word, so it may only lower a batch: a lie costs only its own posts. */
 export function evmBatchRefused(url: string, n: number, said: number | null): void {
   const k = evmProviderKey(url);
+  MOST.set(k, Math.min(MOST.get(k) ?? Infinity, evmBatchFit(n, said)));
+}
+/** The most calls a batch after a refusal of `n` calls for its size: half of n, or the maximum the refusal named
+ *  (`said`) where that is smaller and at least 1. The helper's /v1/rpc keeps its upstreams' by this one rule (the kit's
+ *  entry; card helper-rpc-batch-learns-reader-size). */
+export function evmBatchFit(n: number, said: number | null): number {
   const half = Math.max(1, Math.floor(n / 2));
-  const most = said !== null && Number.isSafeInteger(said) && said >= 1 ? Math.min(half, said) : half;
-  MOST.set(k, Math.min(MOST.get(k) ?? Infinity, most));
+  return said !== null && Number.isSafeInteger(said) && said >= 1 ? Math.min(half, said) : half;
 }
 
 /** Holds `url`'s provider for every reader until `ms` from now (a later hold is never shortened). */
