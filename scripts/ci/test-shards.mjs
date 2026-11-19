@@ -108,8 +108,7 @@ export const E2E_SECONDS = {
   "apps/terminal: node ../../scripts/live-checks/token-page-fills-after.mjs --harness": 49, // box 49
   "apps/terminal: node ../../scripts/live-checks/trade-box-bal-cash.mjs --harness": 23, // box 23
   "apps/terminal: node ../../scripts/live-checks/trade-box-pool.mjs --harness": 11, // box 11
-  "apps/terminal: node ../../scripts/live-checks/verify-pools.mjs --harness": 6, // box 6
-  "apps/terminal: node ../../scripts/live-checks/verify-row-survives-one-provider.mjs --harness": 9, // box 9
+  // verify-pools (box 6) and verify-row-survives-one-provider (box 9) join with card e2e-reads-no-public-host (PENDING);
   // the same card's app checks that take --build, timed in the Mac queue (job app-build-18, 19 Nov 00:55Z; the box was
   // reserved), whole seconds, 1 s at the least; app-shell (box 105), app-legend-holds-still (mac 70) and
   // rail-open-pushes-the-middle (mac 16) join with the cards their PENDING entries name (scripts/ci/app-harness-in-e2e.mjs)

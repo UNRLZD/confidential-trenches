@@ -29,12 +29,19 @@ const E2E_RUN = /^node \.\.\/\.\.\/scripts\/live-checks\/([a-z0-9-]+)\.mjs((?: \
 const LOCAL_ARG = /(?:^| )--(?:harness|build)(?: |$)/;
 const CARD = /^[a-z0-9]+(?:-[a-z0-9]+)+$/; // a card key, as the board names one: two words at least
 
-/** The app checks red on the build today, each to the card that fixes it (read on cebdf077e's build, 19 Nov). */
+/** The app checks red or flaky on the build today, each to the card that fixes it (read on cebdf077e's and 5deca0739's
+ *  builds, 19 Nov). */
 export const PENDING = Object.freeze({
-  // the account chip grows when a signed-in load has no sign-in hint (hint.ts firstShape), CLS 0.0021 / 0.0016
-  "app-shell": "app-first-paint-knows-sign-in",
+  // on main the harness has no answer for /v1/market/candles or /v1/logo (net::ERR_NAME_NOT_RESOLVED, "0 trade(s)
+  // arrived"); the account chip's growth on a signed-in load with no sign-in hint (hint.ts firstShape, CLS 0.0021 /
+  // 0.0016) is card app-first-paint-knows-sign-in's
+  "app-shell": "e2e-reads-no-public-host",
   "app-legend-holds-still": "rail-and-legend-hold-on-r5",
   "rail-open-pushes-the-middle": "rail-and-legend-hold-on-r5",
+  // their collect starts plain launchBrowser under harnessRoute, so the page's push socket reaches the live helper, which
+  // refuses a ninth per address with 503 (apps/helper/src/data/push.ts PUSH_CLIENT_MAX): verify-row red 1 run in 3
+  "verify-pools": "e2e-reads-no-public-host",
+  "verify-row-survives-one-provider": "e2e-reads-no-public-host",
 });
 
 /** Whether a check's code reads a --harness argument. */
