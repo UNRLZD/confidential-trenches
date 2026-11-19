@@ -3,13 +3,17 @@
 // raydium-launchlab and pump.fun rows, with every Jupiter answer and account the re-read got: PASS. bad_pump_only: the
 // same run with Graduating cut to its pump.fun rows, while the re-read finds a LaunchLab and two DBC tokens on their
 // curve: FAIL. Made from the good answer: a graduating row off its curve, no graduating list, and a run with no token
-// off pump.fun on a curve (which passes and says so).
+// off pump.fun on a curve (which passes and says so). A no-answer from the RPC or Jupiter (read through
+// provider-answer.mjs) with none found on a curve is INCONCLUSIVE, never a PASS.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { APP, BASE, JUP, RPC, candidates, judge, read, reread } from "./helper-curve-all-pads.mjs";
+import { RETRY } from "./provider-answer.mjs";
+
+RETRY.ms = 0;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-curve-all-pads.answers.json"), "utf8"));
@@ -29,13 +33,14 @@ const replay = (a, body) => async (url, init) => {
   for (const k of keys) assert.ok(Object.hasOwn(a.accounts, k), `unrecorded account ${k}`);
   return json({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: keys.map((k) => a.accounts[k]) } });
 };
-const run = async (a, edit) => {
+const run = async (a, edit, wrap = (f) => f) => {
   const s = JSON.parse(a.answer.body);
   if (edit) edit(s);
   const body = JSON.stringify(s);
   const r = await read(BASE, replay(a, body));
-  const origins = await reread(candidates(s.lists, s.unsettled), replay(a, body));
-  return judge(r, origins);
+  const log = { jupiter: null, accounts: {}, noAnswer: null };
+  const origins = await reread(candidates(s.lists, s.unsettled), wrap(replay(a, body)), RPC, log);
+  return judge(r, origins, log.noAnswer);
 };
 const bad = (r) => r.lines.filter((l) => !l.startsWith("ok")).join("\n");
 
@@ -77,4 +82,17 @@ test("candidates: listed, not at 10,000, not unsettled, off pump.fun, the helper
     trending_1h: [{ token: t(3), launchpad: "raydium-launchlab", curve_bps: 900 }],
   };
   assert.deepEqual(candidates(lists, [t(4)]).map((r) => r.token), [t(3), t(0)]);
+});
+
+test("a no-answer: the RPC's 429 or Jupiter's refusal with none found on a curve is INCONCLUSIVE, never a PASS; a wrong Graduating with a no-answer elsewhere still FAILs", async () => {
+  const rpc429 = (f) => async (url, init) => (url === RPC ? new Response("", { status: 429 }) : f(url, init));
+  const r = await run(A.bad_pump_only, undefined, rpc429);
+  assert.equal(r.verdict, "INCONCLUSIVE", bad(r));
+  assert.ok(r.lines.some((l) => l.includes("429") && l.includes("INCONCLUSIVE")), bad(r));
+  const jup = (f) => async (url, init) => (url.startsWith(JUP) ? new Response("busy", { status: 503 }) : f(url, init));
+  assert.equal((await run(A.bad_pump_only, undefined, jup)).verdict, "INCONCLUSIVE");
+  // a graduating row off its curve is wrong whatever the re-read answered
+  assert.equal((await run(A.good, (s) => (s.lists.graduating[0].curve_bps = 10_000), rpc429)).verdict, "FAIL");
+  assert.equal((await run(A.good)).verdict, "PASS");
+  assert.equal((await run(A.bad_pump_only)).verdict, "FAIL");
 });

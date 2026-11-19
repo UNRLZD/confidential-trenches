@@ -8,13 +8,16 @@
 //   - the answer is 200 JSON with a graduating list, each of its rows a launchpad and a curve from 0 to 9,999;
 //   - whenever the re-read finds such a token on its curve (0 to 9,999), Graduating holds at least one row of a pad
 //     other than pump.fun; with none on a curve it passes and says so.
-// A re-read that settles nothing (Jupiter or the RPC answered nothing usable) is said, never a FAIL on its own.
+// The accounts are read through provider-answer.mjs rpcAnswer: Jupiter or the RPC answering nothing usable is a no-answer,
+// named, never a wrong answer and never a pass. With none found on a curve and a no-answer in the re-read, the check is
+// INCONCLUSIVE: the re-read could not tell.
 // After: helper
 //   node scripts/live-checks/helper-curve-all-pads.mjs [--base <url>] [--rpc <url>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read (the lists cut to each row's token,
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read (the lists cut to each row's token,
 //   symbol, launchpad and curve; Jupiter's answer; every account read).
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
+import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 import { hintsOf, readOrigins } from "../../apps/helper/src/data/solana/origin.ts";
 
 const KEY = "helper-curve-all-pads";
@@ -38,8 +41,9 @@ export function candidates(lists, unsettled = []) {
   return [...left.filter((r) => typeof r.launchpad === "string"), ...left.filter((r) => r.launchpad === null)].slice(0, SAMPLE);
 }
 
-/** The check of one read: the helper's answer and the launches re-read for its candidates (a Map). */
-export function judge(r, origins) {
+/** The check of one read: the helper's answer, the launches re-read for its candidates (a Map) and the re-read's
+ *  no-answer (null when every read answered). */
+export function judge(r, origins, noAnswer = null) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   say(r.status === 200, `GET ${PATH} answers ${r.status}`);
@@ -62,9 +66,12 @@ export function judge(r, origins) {
   const asked = candidates(s?.lists, s?.unsettled).length;
   lines.push(`--  re-read on chain: ${origins.size} of ${asked} listed tokens off pump.fun and not at 10,000 settled, ${on.length} on a curve`);
   for (const [t, o] of on.slice(0, 5)) lines.push(`--  on a curve: ${t} ${o.pad} ${o.curveBps}`);
-  if (on.length === 0) lines.push("ok  no listed token off pump.fun is on a curve now: nothing to hold");
+  const quiet = on.length === 0 && noAnswer !== null;
+  if (quiet) lines.push(`--  the re-read had a no-answer (${noAnswer}): none found on a curve cannot be told: INCONCLUSIVE`);
+  else if (on.length === 0) lines.push("ok  no listed token off pump.fun is on a curve now: nothing to hold");
   else say(others > 0, `graduating holds ${others} rows off pump.fun while ${on.length} listed tokens off pump.fun are on a curve`);
-  return { ok: lines.every((l) => !l.startsWith("BAD")), lines };
+  const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
+  return { verdict, ok: verdict === "PASS", lines };
 }
 
 export async function read(base = BASE, fetchFn = fetch) {
@@ -73,32 +80,34 @@ export async function read(base = BASE, fetchFn = fetch) {
   return { base, readAt, status: r.status, body: await r.text() };
 }
 
-/** The launches of `rows`, re-read here: Jupiter's search for its word, then the accounts on `rpc`; settled ones only.
- *  `log` gets Jupiter's answer and every account read. */
-export async function reread(rows, fetchFn = fetch, rpc = RPC, log = { jupiter: null, accounts: {} }) {
+/** The launches of `rows`, re-read here: Jupiter's search for its word, then the accounts on `rpc` through rpcAnswer;
+ *  settled ones only. `log` gets Jupiter's answer, every account read and the first no-answer (`noAnswer`). */
+export async function reread(rows, fetchFn = fetch, rpc = RPC, log = { jupiter: null, accounts: {}, noAnswer: null }) {
+  log.noAnswer ??= null;
   if (rows.length === 0) return new Map();
   let hints = new Map();
   try {
     const j = await fetchFn(`${JUP}${rows.map((r) => r.token).join(",")}`, { headers: { accept: "application/json" } });
     const body = await j.json();
-    log.jupiter = Array.isArray(body) ? body.map((x) => ({ id: x?.id, launchpad: x?.launchpad, partnerConfig: x?.partnerConfig, graduatedPool: x?.graduatedPool })) : body;
+    if (!j.ok || !Array.isArray(body)) throw new Error(`HTTP ${j.status}`);
+    log.jupiter = body.map((x) => ({ id: x?.id, launchpad: x?.launchpad, partnerConfig: x?.partnerConfig, graduatedPool: x?.graduatedPool }));
     hints = hintsOf(log.jupiter);
-  } catch {
+  } catch (e) {
+    log.noAnswer = `Jupiter's search: ${e.message}`;
     return new Map();
   }
   const get = async (keys) => {
     const out = [];
     for (let i = 0; i < keys.length; i += 100) {
       const part = keys.slice(i, i + 100);
-      try {
-        const r = await fetchFn(rpc, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [part, { encoding: "base64", commitment: "confirmed" }] }) });
-        const v = (await r.json())?.result?.value;
-        if (!Array.isArray(v) || v.length !== part.length) return undefined;
-        part.forEach((k, n) => (log.accounts[k] = v[n]));
-        out.push(...v);
-      } catch {
+      const a = await rpcAnswer(rpc, "getMultipleAccounts", [part, { encoding: "base64", commitment: "confirmed" }], { fetchFn });
+      const v = a.result?.value;
+      if (a.noAnswer !== undefined || !Array.isArray(v) || v.length !== part.length) {
+        log.noAnswer ??= a.noAnswer ?? `${new URL(rpc).host}: getMultipleAccounts answered no list of ${part.length} accounts`;
         return undefined;
       }
+      part.forEach((k, n) => (log.accounts[k] = v[n]));
+      out.push(...v);
     }
     return out;
   };
@@ -124,9 +133,9 @@ export async function check(base = BASE, fetchFn = fetch, rpc = RPC) {
   } catch {
     s = {};
   }
-  const log = { jupiter: null, accounts: {} };
+  const log = { jupiter: null, accounts: {}, noAnswer: null };
   const origins = await reread(candidates(s.lists, s.unsettled), fetchFn, rpc, log);
-  return { answer: { ...answer, body: cut(answer.body) }, log, ...judge(answer, origins) };
+  return { answer: { ...answer, body: cut(answer.body) }, log, ...judge(answer, origins, log.noAnswer) };
 }
 
 if (import.meta.main) {
@@ -137,8 +146,8 @@ if (import.meta.main) {
     const r = await check(base, fetch, opt("--rpc", RPC));
     for (const l of r.lines) console.log(l);
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ answer: r.answer, jupiter: r.log.jupiter, accounts: r.log.accounts })}\n`);
-    console.log(`live-check ${KEY}: ${r.ok ? "PASS" : "FAIL"} (${base})`);
-    process.exit(r.ok ? 0 : 1);
+    console.log(`live-check ${KEY}: ${r.verdict} (${base})`);
+    process.exit(EXIT[r.verdict]);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${e.message}`);
     process.exit(2);
