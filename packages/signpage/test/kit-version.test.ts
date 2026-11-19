@@ -1329,7 +1329,7 @@ test("hello kit 1.15, 1.16, 1.17 and 1.18 against this page: pool.move.dry's max
 // byte where the clone has it). Red before this change: the kit version was 1.17 and the page had no 1.17 level, so a
 // kit-v1.17 client was sent the move op's code as it was.
 import * as V117 from "../../kit/test/fixtures/kit-v1.17/signpage/schema.ts";
-import { stateFor } from "../src/kit-version.ts";
+import { stageFor, stateFor } from "../src/kit-version.ts";
 const V117_COMMIT = "a65607b5c";
 const V117_FILES = {
   "signpage/schema.ts": "5bdb9b56720b2471110838d0c11dc235a805e3c3fdb10ff935393b418c950048",
@@ -1565,6 +1565,9 @@ test("taps-wait-inside-the-page: kit-v1.19 is sent every field and event kit 1.2
     assert.deepEqual(resultFor(v119, kind, owed), owed, kind);
     assert.ok(V119.SIGNPAGE_RESULT_SCHEMAS[kind]?.(owed) ?? true, `kit-v1.19 reads ${kind}'s`);
   }
+  // the exported stage map too, which progressFor skips for kit-v1.19 (its stage event goes as it is)
+  assert.equal(stageFor(v119, "owed_back"), "owed_back");
+  assert.equal(stageFor(kitLevel("1.18"), "owed_back"), "refused");
   const posts = await endPosts("1.19", "owed_back");
   assert.deepEqual(posts, [{ v: 1, type: "progress", id: "x", stage: "owed_back", txs: EVM_TX }], "a stage event in full");
   assert.ok(posts.every((m) => V119.signpageProgressSchema(m)));
