@@ -275,12 +275,16 @@ const drpcBatchRefusal = (init: RequestInit) =>
 const batchOf = (chain: Chain, n: number) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ ...(READ[chain] as object), id: i + 1 })));
 const hostsOf = (asked: string[]) => asked.map((u) => new URL(u).host);
 
-test("review M1: Base, BASE_RPC_URL down (503), QuickNode throttling (429), a batch of 4 dRPC free refuses (400 code 31): the public spare answers 200, and dRPC is not sent the batch", async () => {
+// card helper-receipts-past-retention: a batch past dRPC free's 3 leaves to it in parts of 3 (rpc.ts partOf), never one
+// post past its plan; before, the walk put dRPC out for the read, and a batch past every keyed URL's size answered 503
+test("review M1: Base, BASE_RPC_URL down (503), QuickNode throttling (429), a batch of 4 dRPC free refuses (400 code 31): dRPC answers it in parts of 3, never a post past its plan", async () => {
   const [own, qn, dr] = urlsOf("base");
   const env = Object.fromEntries(LISTS.base.map(([n, u]) => [n, u]));
   const asked: string[] = [];
+  const sizes: number[] = [];
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     asked.push(url);
+    if (url === dr) sizes.push(idsOf(init).length);
     if (url === own) return new Response("down", { status: 503 });
     if (url === qn) return new Response("slow", { status: 429, headers: { "retry-after": "20" } });
     if (url === dr && idsOf(init).length > 3) return drpcBatchRefusal(init);
@@ -291,8 +295,8 @@ test("review M1: Base, BASE_RPC_URL down (503), QuickNode throttling (429), a ba
   const a = await r.handle("base", "application/json", batchOf("base", 4), "198.51.100.9");
   assert.equal(a.status, 200, a.body);
   assert.deepEqual((JSON.parse(a.body) as { result: string }[]).map((x) => x.result), ["0x1", "0x1", "0x1", "0x1"]);
-  assert.ok(!asked.includes(dr), `dRPC was sent a batch past its plan: ${hostsOf(asked).join(" -> ")}`);
-  assert.equal(asked.at(-1), "https://public-spare.test");
+  assert.deepEqual(sizes, [3, 1], `dRPC's posts: ${hostsOf(asked).join(" -> ")}`);
+  assert.ok(!asked.includes("https://public-spare.test"), "the keyed URL took it");
 });
 
 test("review M1: a keyed URL's other 4xx (400 with a JSON body) is that URL down for the read on every chain: the next in the list answers", async () => {
@@ -314,12 +318,14 @@ test("review M1: a keyed URL's other 4xx (400 with a JSON body) is that URL down
   }
 });
 
-test("review M1: Solana, first key 429, QuickNode 429, a batch of 4 dRPC free refuses: the public endpoint answers 200", async () => {
+test("review M1: Solana, first key 429, QuickNode 429, a batch of 4 dRPC free refuses: dRPC answers it in parts of 3, never a post past its plan", async () => {
   const [own, qn, dr] = urlsOf("solana");
   const env = Object.fromEntries(LISTS.solana.map(([n, u]) => [n, u]));
   const asked: string[] = [];
+  const sizes: number[] = [];
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     asked.push(url);
+    if (url === dr) sizes.push(idsOf(init).length);
     if (url === own || url === qn) return new Response("slow", { status: 429, headers: { "retry-after": "20" } });
     if (url === dr && idsOf(init).length > 3) return drpcBatchRefusal(init);
     return answer(init, { value: "public" });
@@ -328,8 +334,8 @@ test("review M1: Solana, first key 429, QuickNode 429, a batch of 4 dRPC free re
   const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), now: c.now, sleep: c.sleep, log: () => undefined });
   const a = await r.handle("solana", "application/json", batchOf("solana", 4), "198.51.100.9");
   assert.equal(a.status, 200, a.body);
-  assert.equal(asked.at(-1), rpcModule.SOLANA_PUBLIC, hostsOf(asked).join(" -> "));
-  assert.ok(!asked.includes(dr), "dRPC was sent a batch past its plan");
+  assert.deepEqual(sizes, [3, 1], hostsOf(asked).join(" -> "));
+  assert.ok(!asked.includes(rpcModule.SOLANA_PUBLIC), "the keyed spare took it");
 });
 
 test("review M1 (call path): Solana's first key refusing a read with a 400 sends it on to its keyed spares, and a lone key's 400 to the public endpoint, never to the caller", async () => {
@@ -349,16 +355,18 @@ test("review M1 (call path): Solana's first key refusing a read with a 400 sends
   }
 });
 
-test("review L3: a batch larger than a company's bucket (QuickNode's 7) never goes to it in one post: it is asked of the next that takes it", async () => {
+test("review L3: a batch larger than a company's bucket (QuickNode's 7) never goes to it in one post: it leaves in parts of 7, the next once the bucket refills", async () => {
   const env = { BASE_RPC_URL_QUICKNODE: LISTS.base[1][1] };
   const asked: string[] = [];
-  const fetch = async (url: string, init: RequestInit): Promise<Response> => (asked.push(url), answer(init, "0x1"));
+  const sizes: number[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => (asked.push(url), sizes.push(idsOf(init).length), answer(init, "0x1"));
   const c = clock();
   const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), pinned: { base: ["https://p1.test"] }, now: c.now, sleep: c.sleep, log: () => undefined });
   assert.equal((await r.handle("base", "application/json", batchOf("base", 7), "198.51.100.9")).status, 200);
   c.t.v += 2_000;
   assert.equal((await r.handle("base", "application/json", batchOf("base", 10), "198.51.100.10")).status, 200);
-  assert.deepEqual(asked, [env.BASE_RPC_URL_QUICKNODE, "https://p1.test"], "7 to QuickNode, 10 to the spare");
+  assert.deepEqual(asked, [env.BASE_RPC_URL_QUICKNODE, env.BASE_RPC_URL_QUICKNODE, env.BASE_RPC_URL_QUICKNODE], "7, then 10 as 7 and 3, all to QuickNode");
+  assert.deepEqual(sizes, [7, 7, 3]);
 });
 
 test("review M2: past a company's daily budget nothing more is sent to it that UTC day, on any chain or path, and the spares serve; the next day it is asked again", async () => {
