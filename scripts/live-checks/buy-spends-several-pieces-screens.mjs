@@ -61,8 +61,10 @@ export const SIGN_MARKS = Object.freeze({
 /** The box's ask for the typed amount, its answer kept through the model's feeReadOf (card buy-box-quotes-before-funds:
  *  an answer with out and no cost is kept too): `.then(o=>{if(!live)return;if(o.ok){let r=feeReadOf(key,o.result,amount);
  *  r!==null&&set(r);return}`, and feeReadOf keeps the cost: `function f(k,r,a){return r.cost===void 0&&r.out===void 0?
- *  null:{key:k,...r.cost===void 0?{}:{cost:r.cost},`. */
-const ASK_READ = new RegExp(`${N}\\(${q("pool\\.buy\\.dry")},\\{chain:(?:${q("solana")}|${N}===${q("near")}\\?${q("near")}:${q("solana")}),token:${N},amount:${N}\\}\\)\\.outcome\\.then\\((${N})=>\\{if\\(!${N}\\)return;if\\(\\1\\.ok\\)\\{let (${N})=(${N})\\(${N},\\1\\.result,${N}\\);\\2!==null&&${N}\\(\\2\\);return\\}`);
+ *  null:{key:k,...r.cost===void 0?{}:{cost:r.cost},`. The box first hands every answer to the Unavailable state (card
+ *  app-unavailable-before-the-tap: `setDryOff(d=>dryOffAfter(d,at,o))`), which the build folds into the same if as
+ *  `if(f(d=>g(d,at,o)),o.ok){`: that one call on the answer may stand before the ok. */
+const ASK_READ = new RegExp(`${N}\\(${q("pool\\.buy\\.dry")},\\{chain:(?:${q("solana")}|${N}===${q("near")}\\?${q("near")}:${q("solana")}),token:${N},amount:${N}\\}\\)\\.outcome\\.then\\((${N})=>\\{if\\(!${N}\\)return;if\\((?:${N}\\(${N}=>${N}\\(${N},${N},\\1\\)\\),)?\\1\\.ok\\)\\{let (${N})=(${N})\\(${N},\\1\\.result,${N}\\);\\2!==null&&${N}\\(\\2\\);return\\}`);
 const askRead = (js) => {
   const m = ASK_READ.exec(js);
   return m !== null && new RegExp(`function ${esc(m[3])}\\((${N}),(${N}),${N}\\)\\{return \\2\\.cost===void 0&&\\2\\.out===void 0\\?null:\\{key:\\1,\\.\\.\\.\\2\\.cost===void 0\\?\\{\\}:\\{cost:\\2\\.cost\\}`).test(js);

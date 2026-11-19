@@ -147,6 +147,7 @@ export const E2E_SECONDS = {
   "apps/terminal: node test/token-rail/sweep.mjs": 60, // C3 59.7 (this card's own command, run C only)
   "apps/terminal: node test/header-search/run.mjs": 51, // C1 50.3
   "apps/terminal: node test/trade-box-mount/run.mjs": 6, // C2 5.4
+  "apps/terminal: node test/trade-unavailable/run.mjs": 80, // no CI time yet: 93 s on the test box with the send and a slot wait (card app-unavailable-before-the-tap); its test-browser time replaces it
   "apps/terminal: node test/trade-sheet/run.mjs": 29, // C3 28.7
   "apps/terminal: node test/quick-buy/run.mjs": 11, // C1 10.9
   "apps/terminal: node test/signin-screens/run.mjs": 28, // C2 27.4

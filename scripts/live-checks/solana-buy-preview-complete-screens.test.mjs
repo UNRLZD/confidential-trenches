@@ -110,3 +110,19 @@ test("the answer kept through feeReadOf (card buy-box-quotes-before-funds): PASS
     assert.deepEqual(judge(facts(INDEX(js), js)).lines, [`BAD ${SAYS.ask}`], js.slice(0, 80));
   }
 });
+
+// card app-unavailable-before-the-tap: the box hands each answer to its Unavailable state first, folded by the build into
+// the ok's if (the branch's own build, apps/terminal/dist at 5e1930207: `if(de(t=>Vh(t,i,e)),e.ok){let t=fg(`)
+const OFF_JS = FEE_JS.replace("if(e.ok){let t=Wh(", "if(de(t=>Vh(t,i,e)),e.ok){let t=Wh(");
+test("the answer handed to the Unavailable state first (card app-unavailable-before-the-tap): PASS; the out not kept, or another statement before the ok: FAIL, ask named", () => {
+  assert.notEqual(OFF_JS, FEE_JS);
+  assert.deepEqual(judge(facts(INDEX(OFF_JS), OFF_JS)).lines, []);
+  for (const js of [
+    OFF_JS.replace(",...t.out===void 0?{}:{out:t.out}", ""),
+    OFF_JS.replace("t!==null&&me(t);", ""),
+    OFF_JS.replace("if(de(t=>Vh(t,i,e)),e.ok)", "if(de(t=>Vh(t,i,e)),x=1,e.ok)"),
+  ]) {
+    assert.notEqual(js, OFF_JS);
+    assert.deepEqual(judge(facts(INDEX(js), js)).lines, [`BAD ${SAYS.ask}`], js.slice(0, 80));
+  }
+});
