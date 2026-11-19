@@ -1271,6 +1271,15 @@ export function pushReaders(swaps: Swaps | undefined, near: NearMarket | undefin
   return { ...(swaps ?? {}), ...(near === undefined ? {} : { near: near.trades }) };
 }
 
+/** Where a start listens (card helper-server-test-400-never-hangs-up): a fixed port (the deploy's PORT, reached by Caddy
+ *  across the container network) on node's wildcard default, as before; an OS-chosen port (port 0, a test's) on
+ *  127.0.0.1, the address its callers dial. On macOS a wildcard bind on port 0 may be given a port another process holds
+ *  on 127.0.0.1, which then takes every 127.0.0.1 call to it (a loaded machine's Redis closed one: a socket hang up);
+ *  bound to 127.0.0.1, the port is refused while another listener holds it there. */
+export function listenAt(port: number): { port: number; host?: string } {
+  return port === 0 ? { port, host: "127.0.0.1" } : { port };
+}
+
 export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held, near?: NearMarket, poolIndexes?: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
@@ -1280,7 +1289,7 @@ export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, wa
   );
   // card market-data-push: the push socket, upgraded for APP_HOST's Origin only, in its own window per client
   attachPush(server, { commit, readers: pushReaders(evmSwaps, near), allowed: (req) => originIn(req, PUSH_ORIGINS) !== null, client: clientOf, take: clientWindow(API_RATE_MAX).take });
-  server.listen(port);
+  server.listen(listenAt(port));
   // the relayers start once this process holds the senders (sendersFromEnv): a restart resends their open sends and
   // settles before any request
   void senders.then(() => {

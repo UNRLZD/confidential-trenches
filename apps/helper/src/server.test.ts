@@ -19,7 +19,7 @@ import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, upstreamBudget } from "./
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
-import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, STARTED_HEADER, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
+import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, listenAt, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, STARTED_HEADER, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
 import { pairNames } from "./token-status/status.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
@@ -328,6 +328,25 @@ test("card evm-pool-leaves-any-source: POST /v1/rpc/{chain}?keyed=only reads the
   const only = await call("POST", "/v1/rpc/base?keyed=only", JSON_H, body, to(keyed));
   assert.equal(only.status, 200, only.body);
   assert.deepEqual(asked, [KEYED]);
+});
+
+// card helper-server-test-400-never-hangs-up: a start on an OS-chosen port (every test's) listened on the wildcard
+// address while its callers dial 127.0.0.1. On macOS a wildcard bind on port 0 may be given a port another process
+// holds on 127.0.0.1, and 127.0.0.1 traffic then goes to that process: on 19 Nov a loaded machine's Redis (one of 29
+// loopback listeners in the ephemeral range) took "POST /v1/rpc/base?keyed=bogus" and closed it, a socket hang up.
+// Bound to 127.0.0.1, no other listener there can share the helper's port; a fixed port (the deploy's PORT, which
+// Caddy reaches across the container network) keeps node's wildcard default.
+test("start() on an OS-chosen port listens on 127.0.0.1, the address its callers dial, so no other loopback listener shares its port; a fixed port keeps the wildcard", async (t) => {
+  const helper = own(start(COMMIT, 0));
+  const at = await listening(helper, "the helper on an OS-chosen port");
+  const other = createServer((_q, s) => s.destroy());
+  t.after(() => closeServer(other));
+  await assert.rejects(listening(other.listen(at, "127.0.0.1"), "a second loopback listener"), /EADDRINUSE/, "a second loopback listener on the helper's port is refused");
+  assert.equal((helper.address() as AddressInfo).address, "127.0.0.1");
+  const r = await call("GET", "/v1/health", {}, undefined, at);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers["x-helper-commit"], COMMIT, "the call reached the helper");
+  assert.deepEqual([listenAt(0), listenAt(8080)], [{ port: 0, host: "127.0.0.1" }, { port: 8080 }]);
 });
 
 test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another token, two tokens or none 404 not_found; reads refused 503 upstream; POST 405", async (t) => {
