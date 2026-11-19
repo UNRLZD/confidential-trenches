@@ -12,7 +12,9 @@
 // read again with its tape once, so a stream that went quiet between the two reads is no verdict.
 // PASS: a coin's tape said whole_ms 0 and its chart did not say filling, and no BAD line. FAIL: a coin whose tape said
 // whole_ms 0 had its chart say filling at both reads. INCONCLUSIVE: no coin's tape said whole_ms 0.
+// It reads the helper as the app does (Origin APP_HOST), so it runs after each helper deploy and each app deploy.
 // After: helper
+// After: app
 //   node scripts/live-checks/app-chart-check-inside-its-bound.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read (per coin, each
 //   pair's whole_ms, the chart's status, bar count and filling; the token as <token>), for the test's replay.
