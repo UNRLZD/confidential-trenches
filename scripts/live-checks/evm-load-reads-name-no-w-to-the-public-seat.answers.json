@@ -1,0 +1,24 @@
+{
+ "_note": {
+  "good": "this card build (card/evm-load-reads-name-no-w-to-the-public-seat, packages/signpage/index.html and public/app.js as scripts/build-app.mjs writes them, mainnet): PASS",
+  "bad": "SIGN_HOST as served 2026-11-19T01:14Z, before this card (main 1841c7bbf and earlier): FAIL, every mark named"
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Oeqi9YIa6bFVHj2hLzK+s3BVE6jtmNq0sG/j+4XSehV7C5SIUWsdwzab3ubSIcHQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-Oeqi9YIa6bFVHj2hLzK+s3BVE6jtmNq0sG/j+4XSehV7C5SIUWsdwzab3ubSIcHQ",
+  "carries": {
+   "a state read's carry pass is idle until the page's first tap's drawn time, the flag handed to the pass": true,
+   "an idle pass returns at the owed Ws, before any W is drawn, and reads each W's balance on the helper's route": true,
+   "the page shows each idle read RETURNING, at its chain's price": true
+  }
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-sLAmXqnKMvA55e61bis07reHy9FPmyH6ppt7+yWfXEEvCRqxAiu8T9bgjwCxKfzz\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-sLAmXqnKMvA55e61bis07reHy9FPmyH6ppt7+yWfXEEvCRqxAiu8T9bgjwCxKfzz",
+  "carries": {
+   "a state read's carry pass is idle until the page's first tap's drawn time, the flag handed to the pass": false,
+   "an idle pass returns at the owed Ws, before any W is drawn, and reads each W's balance on the helper's route": false,
+   "the page shows each idle read RETURNING, at its chain's price": false
+  }
+ }
+}
