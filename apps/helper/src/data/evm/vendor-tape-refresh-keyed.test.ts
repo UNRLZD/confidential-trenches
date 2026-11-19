@@ -49,6 +49,10 @@ function harness(perMin = "300") {
       return new Response("{}", { status: 404 });
     }
     const reqs = JSON.parse(String(init.body ?? "null")) as { id: number; method: string; params: unknown[] }[] | null;
+    // our reads of the vendor's pool (swaps.ts heldFilters: a list of token addresses) are refused: this coin is one
+    // our reads cannot place, whose held tape the vendor's refresh renews (card helper-vendor-tapes-refresh-inside-15s)
+    if (Array.isArray(reqs) && reqs.some((r) => r.method === "eth_getLogs" && Array.isArray((r.params[0] as { address?: unknown })?.address)))
+      return new Response(JSON.stringify(reqs.map((r) => ({ jsonrpc: "2.0", id: r.id, error: { code: -32000, message: "refused" } }))), { status: 200 });
     if (!Array.isArray(reqs) || !reqs.every((r) => r.method === "eth_getTransactionReceipt")) return chain.fetch(url, init);
     return new Response(JSON.stringify(reqs.map((r) => ({ jsonrpc: "2.0", id: r.id, result: receipts[r.params[0] as string] ?? null }))), { status: 200, headers: { "content-type": "application/json" } });
   };

@@ -85,7 +85,7 @@ import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./li
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
 import { openIndexStore } from "./index-store.ts";
-import { exactRow, receiptFacts, type Facts } from "./vendor-rows.ts";
+import { exactRow, receiptFacts, vendorUnits, type Facts } from "./vendor-rows.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -627,6 +627,8 @@ export function v4Key(id: string, token: string, swapFee: number, around: readon
   for (const k of v4Tries(token, swapFee, around, chain)) if (keccakHex(k) === id) return k;
   return null;
 }
+/** Every tick spacing a key may hold, the common first (v4Key's). */
+const ALL_SPACINGS: readonly number[] = [...TICK_SPACINGS, ...Array.from({ length: TICK_SPACING_MAX }, (_, i) => i + 1).filter((t) => !TICK_SPACINGS.includes(t))];
 /** The keys v4Key tries, in its order. */
 function* v4Tries(token: string, swapFee: number, around: readonly string[], chain: EvmChain): Generator<string> {
   const V = VENUES[chain];
@@ -635,11 +637,10 @@ function* v4Tries(token: string, swapFee: number, around: readonly string[], cha
 }
 /** Every key of `token` and one of `others`, a fee (the swap's own, the dynamic-fee flag or a standard tier), a tick
  *  spacing and one of `hooks`. */
-function* keysOf(token: string, others: readonly string[], hooks: readonly string[], swapFee: number): Generator<string> {
+function* keysOf(token: string, others: readonly string[], hooks: readonly string[], swapFee: number, spacings: readonly number[] = ALL_SPACINGS): Generator<string> {
   const w = (n: bigint): string => n.toString(16).padStart(64, "0");
   const a = (x: string): string => x.slice(2).padStart(64, "0");
   const fees = [...new Set([swapFee, DYNAMIC_FEE, 100, 500, 2500, 3000, 10000])];
-  const spacings = [...TICK_SPACINGS, ...Array.from({ length: TICK_SPACING_MAX }, (_, i) => i + 1).filter((t) => !TICK_SPACINGS.includes(t))];
   for (const other of others) {
     const [c0, c1] = token < other ? [token, other] : [other, token];
     for (const ts of spacings) for (const h of hooks) for (const f of fees) yield `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
@@ -678,7 +679,10 @@ export async function provenHooks(f: Facts, token: string): Promise<Facts> {
     let own = false;
     const shared = s.pool !== undefined && [...swaps, ...(f.calls ?? [])].some((o) => o.pool === s.pool && o.sender !== s.sender);
     if (shared && s.fee !== undefined)
-      for (const k of keysOf(token, others, [s.sender], s.fee)) {
+      // the common tick spacings only (card helper-vendor-tapes-refresh-inside-15s): every one up to TICK_SPACING_MAX
+      // tried 30,800 keys for each shared swap that is no hook's own, about 0.5 s of the event loop on a Mac, on every
+      // held vendor tape's new receipts; a hook pool off them is not proven, its swap served as the vendor's row is
+      for (const k of keysOf(token, others, [s.sender], s.fee, TICK_SPACINGS)) {
         if (keccakHex(k) === s.pool) {
           own = true;
           break;
@@ -689,6 +693,81 @@ export async function provenHooks(f: Facts, token: string): Promise<Facts> {
   }
   return { ...f, swaps: marked };
 }
+
+/** A held vendor coin's pool as our reads follow it (card helper-vendor-tapes-refresh-inside-15s): the pool the vendor
+ *  named, a pair (`v4` false: a 20-byte contract holding both tokens, its trades the token's and `quote`'s Transfers to
+ *  and from it) or a v4 pool (its id: the PoolManager's Swap logs of it, the coin's amount `coinLeg`). */
+export type HeldPool = { token: string; pool: string; v4: boolean; coinLeg?: 0 | 1; quote?: string };
+/** A trade our logs show in a held pool: the coin's raw amount and the quote's the pool moved, newest last. */
+export type PoolTrade = { token: string; tx: string; block: number; index: number; t: number | null; side: "b" | "s"; coin: bigint; quote: bigint };
+
+/** The trades of each held pool in `logs` (an eth_getLogs answer of heldFilters, hostile, already parsed): a pair's one
+ *  per transaction, its net Transfers of the coin and of the quote (a buy: the coin out of the pool and the quote in; a
+ *  sell the other way; liquidity, both one way, is no trade); a v4 pool's one per Swap log of its id (the swapper got the
+ *  coin and paid the quote: a buy). */
+export function poolTrades(logs: readonly Log[], held: readonly HeldPool[], poolManager: string): PoolTrade[] {
+  const out: PoolTrade[] = [];
+  const pad = (a: string) => `0x${a.slice(2).padStart(64, "0")}`;
+  for (const h of held) {
+    if (h.v4) {
+      if (h.coinLeg === undefined) continue;
+      for (const l of logs) {
+        if (l.address !== poolManager || l.topics[0] !== TOPIC.swap4 || l.topics[1] !== h.pool || l.data.length !== 2 + 64 * 6) continue;
+        const a = [BigInt.asIntN(128, BigInt(`0x${word(l.data, 0)}`)), BigInt.asIntN(128, BigInt(`0x${word(l.data, 1)}`))];
+        const [c, q] = [a[h.coinLeg]!, a[1 - h.coinLeg]!];
+        if (c > 0n && q < 0n) out.push({ token: h.token, tx: l.tx, block: l.block, index: l.index, t: l.t ?? null, side: "b", coin: c, quote: -q });
+        else if (c < 0n && q > 0n) out.push({ token: h.token, tx: l.tx, block: l.block, index: l.index, t: l.t ?? null, side: "s", coin: -c, quote: q });
+      }
+      continue;
+    }
+    if (h.quote === undefined) continue;
+    const w = pad(h.pool);
+    const byTx = new Map<string, { block: number; index: number; t: number | null; cin: bigint; cout: bigint; qin: bigint; qout: bigint }>();
+    for (const l of logs) {
+      if (l.topics[0] !== TOPIC.transfer || l.topics.length !== 3 || l.data.length !== 66 || (l.address !== h.token && l.address !== h.quote)) continue;
+      const into = l.topics[2] === w;
+      if (into === (l.topics[1] === w)) continue;
+      const v = BigInt(l.data);
+      const x = byTx.get(l.tx) ?? { block: l.block, index: Infinity, t: l.t ?? null, cin: 0n, cout: 0n, qin: 0n, qout: 0n };
+      if (l.address === h.token) {
+        if (into) x.cin += v;
+        else x.cout += v;
+        x.index = Math.min(x.index, l.index);
+      } else if (into) x.qin += v;
+      else x.qout += v;
+      byTx.set(l.tx, x);
+    }
+    // a buy took the quote in and sent the coin out (its fee leaves in the quote); a sell the other way; liquidity, both
+    // legs one way, is no trade
+    for (const [tx, x] of byTx) {
+      if (x.index === Infinity) continue;
+      if (x.qin > 0n && x.cout > 0n && x.cin === 0n) out.push({ token: h.token, tx, block: x.block, index: x.index, t: x.t, side: "b", coin: x.cout, quote: x.qin });
+      else if (x.cin > 0n && x.qout > 0n && x.qin === 0n) out.push({ token: h.token, tx, block: x.block, index: x.index, t: x.t, side: "s", coin: x.cin, quote: x.qout });
+    }
+  }
+  return out.sort((a, b) => a.block - b.block || a.index - b.index);
+}
+
+/** The eth_getLogs filters one round reads for every held pool of a chain (heldPools), over blocks `from` to `to`: the
+ *  pairs' Transfers out of and into them (each filter at most ADDRESSES_MAX token addresses, the coins and their quotes),
+ *  and the v4 pools' Swap logs by id. */
+export function heldFilters(held: readonly HeldPool[], from: number, to: number, poolManager: string): Record<string, unknown>[] {
+  const range = { fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` };
+  const pad = (a: string) => `0x${a.slice(2).padStart(64, "0")}`;
+  const pairs = held.filter((h) => !h.v4 && h.quote !== undefined);
+  const out: Record<string, unknown>[] = [];
+  for (let i = 0; i < pairs.length; i += ADDRESSES_MAX / 2) {
+    const part = pairs.slice(i, i + ADDRESSES_MAX / 2);
+    const address = [...new Set(part.flatMap((h) => [h.token, h.quote!]))];
+    const pools = [...new Set(part.map((h) => pad(h.pool)))];
+    out.push({ address, topics: [TOPIC.transfer, pools], ...range }, { address, topics: [TOPIC.transfer, null, pools], ...range });
+  }
+  const ids = [...new Set(held.filter((h) => h.v4 && h.coinLeg !== undefined).map((h) => h.pool))];
+  if (ids.length > 0) out.push({ address: poolManager, topics: [TOPIC.swap4, ids], ...range });
+  return out;
+}
+/** Token addresses one log filter names: base-rpc.publicnode.com answers more with "A maximum of 10 addresses" (lists.ts). */
+const ADDRESSES_MAX = 10;
 
 /** `t`: the block's time as the provider logged it (`blockTimestamp`), null when it gave none; 0 is no time either. */
 export type Log = { block: number; index: number; tx: string; address: string; topics: string[]; data: string; t?: number | null };
@@ -3279,8 +3358,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // a held tape whose refresh failed was served with its whole_ms whatever its age); the read's age always named
     const age = Math.max(0, now() - h.at);
     const oldest = h.rows.at(-1);
-    const whole = waiting || oldest === undefined || age > BEHIND_MAX[chain].ms ? {} : { whole_ms: oldest.t_ms + 1_000 };
-    const timing = `evm-vendor-read;desc="rows read ${age} ms ago"`;
+    // a first round of our reads that reached back short of the vendor's newest row may have missed trades between
+    const whole = waiting || oldest === undefined || age > BEHIND_MAX[chain].ms || layouts.get(token)?.short === true ? {} : { whole_ms: oldest.t_ms + 1_000 };
+    // rows of ours priced at the vendor's rate for their quote name that rate's age (card helper-vendor-tapes-refresh-inside-15s)
+    const priced = rows.map((r) => rated.get(`${token} ${r.tx}`)).filter((x): x is number => x !== undefined);
+    const timing = `evm-vendor-read;desc="rows read ${age} ms ago"${priced.length > 0 ? `, evm-vendor-price;desc="usd read ${Math.max(0, now() - Math.min(...priced))} ms ago"` : ""}`;
     return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at, timing };
   }
   /** The refresh behind a held vendor tape's rows: the helper's background read, one per coin however many callers. */
@@ -3289,6 +3371,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (renew === undefined) {
       renew = lanes
         .run(newLane(false), async () => {
+          // card helper-vendor-tapes-refresh-inside-15s: a coin whose pool our reads can follow is renewed from them, no
+          // vendor call; the vendor's refresh is for a coin they cannot place (no layout, a row they cannot price)
+          if (await chainRenew(token)) return;
           const h = await readTape(token, true);
           if (h === undefined || h === "none") return;
           await exacting(token, h.rows.map((r) => r.tx));
@@ -3299,6 +3384,165 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       tapeRenewing.set(token, renew);
     }
     return renew;
+  }
+  // ---------------------------------------------------------------------------------------------------------------
+  // card helper-vendor-tapes-refresh-inside-15s: a held vendor tape renewed from our own reads. The vendor's key has
+  // one day of 3,225 calls (../coingecko.ts CG_DAY) and its background share, 2,387, is spent by mid-morning (the
+  // deployed helper's day files 19 Nov: 2,715 by 11:44Z; every held refresh refused from 10:43Z, "minute background"
+  // 64-218 a minute), while one held coin renewed every TAPE_FRESH_MS costs 8,640 a day. So the vendor names the coin's
+  // pool once (its first answer, held GT_POOL_FRESH_MS) and every refresh after it reads that pool on our providers:
+  // one round a chain for every held coin (heldFilters: the pairs' Transfers, the v4 pools' Swap logs, one post), each
+  // new transaction's row made exact from its receipt as a vendor row is (exactOf), its USD the quote leg the pool
+  // moved: exact for the chain's USD token and for WETH (the ETH price the chain tape reads), any other quote at the
+  // USD per unit the vendor's own rows paid for it (their USD over the quote leg their receipts show), named with that
+  // price's age (evm-vendor-price). A coin whose pool or price our reads cannot place keeps the vendor's refresh.
+  /** A held coin's pool as our reads follow it, learned from the vendor's rows and their receipts (layoutOf). */
+  type Layout = HeldPool & { /** USD per raw unit of the quote, and when the vendor read it; null for an exact quote. */ rate: { usd: number; at: number } | null; /** the next block to read */ next: number | null; asked: number; from: number; /** the first round reached back short of the vendor's newest row */ short: boolean };
+  const layouts = new Map<string, Layout>();
+  /** Rows of ours priced at the vendor's rate, by "token tx": their answer names the rate's age. */
+  const rated = new Map<string, number>();
+  const exactQuote = (q: string | undefined): boolean => q === V.usd || q === V.weth;
+  /** The layout of `token`'s held tape: the vendor's pool, the coin's leg of it (a v4 pool) or its quote (a pair), and
+   *  the rate, from the newest vendor row its receipt places; null while none does. */
+  function layoutOf(token: string): Layout | null {
+    const h = gtTapes.get(token);
+    const p = gtPools.get(token)?.id ?? null;
+    const d = vendorDecimals.get(token);
+    const had = layouts.get(token);
+    const va = vendorAt.get(token);
+    if (h === undefined || p === null || d === undefined || va === undefined) return null;
+    if (had !== undefined && had.pool === p && had.from >= va) return had;
+    const v4 = /^0x[0-9a-f]{64}$/.test(p);
+    if (!v4 && !/^0x[0-9a-f]{40}$/.test(p)) return null;
+    let found: { coinLeg?: 0 | 1; quote?: string; rate: number } | null = null;
+    for (const r of h.rows) {
+      if (ours.has(`${token} ${r.tx}`)) continue;
+      const f = vendorFacts.get(`${token} ${r.tx}`);
+      const want = vendorUnits(r.amt, d);
+      const usd = Number(r.usd);
+      if (f === undefined || f === "none" || want === null || !(usd > 0)) continue;
+      const near = (v: bigint) => (v > want ? v - want : want - v) * 10n ** 6n <= want;
+      if (v4) {
+        for (const s of f.legs?.v4 ?? []) {
+          const a = s.a.map((x) => BigInt(x));
+          const k = near(a[0]! < 0n ? -a[0]! : a[0]!) ? 0 : near(a[1]! < 0n ? -a[1]! : a[1]!) ? 1 : null;
+          if (k === null) continue;
+          const q = a[1 - k]! < 0n ? -a[1 - k]! : a[1 - k]!;
+          if (q > 0n) found = { coinLeg: k, rate: usd / Number(q) };
+          break;
+        }
+      } else {
+        // the coin's leg the row was printed from (a buy's out of the pool, a sell's in) and the one other token's other way
+        const legs = (f.legs?.pair ?? []).map(([a, i, o]) => ({ a, i: BigInt(i), o: BigInt(o) }));
+        const coin = legs.find((x) => x.a === token);
+        const others = legs.filter((x) => x.a !== token);
+        if (coin !== undefined && others.length === 1) {
+          const q = r.side === "b" ? others[0]!.i : others[0]!.o;
+          if (near(r.side === "b" ? coin.o : coin.i) && q > 0n) found = { quote: others[0]!.a, rate: usd / Number(q) };
+        }
+      }
+      if (found !== null) break;
+    }
+    if (found === null || !Number.isFinite(found.rate) || found.rate <= 0) return had !== undefined && had.pool === p ? had : null;
+    const l: Layout = { token, pool: p, v4, ...(found.coinLeg === undefined ? {} : { coinLeg: found.coinLeg }), ...(found.quote === undefined ? {} : { quote: found.quote }), rate: !v4 && exactQuote(found.quote) ? null : { usd: found.rate, at: va }, next: had?.pool === p ? had.next : null, asked: had?.asked ?? now(), from: va, short: had?.short ?? false };
+    if (!layouts.has(token) && layouts.size >= POOLS_MAX) layouts.delete(layouts.keys().next().value!);
+    layouts.set(token, l);
+    return l;
+  }
+  /** Rows our round made, by "token tx" (their pool is the layout's: never a vendor row to learn a rate from). */
+  const ours = new Set<string>();
+  /** How far back a coin's first round reads: the vendor's newest row, at most this long before the head. [design:
+   *  STALE_MS, the oldest held rows a refresh renews, and the vendor's lag behind the chain, a minute] */
+  const FIRST_BACK_MS = STALE_MS + 60_000;
+  const blockMsOf = (): number => BLOCK_CLOCK[chain]?.at(-1)?.blockMs ?? Math.floor(BEHIND_MAX[chain].ms / BEHIND_MAX[chain].blocks);
+  /** The round running, one a chain for every held coin; its answer: each coin it renewed (true) or could not (false). */
+  let round: Promise<Map<string, boolean>> | null = null;
+  /** `token`'s tape renewed by a round of our reads: true when it was, false when our reads cannot place it. */
+  async function chainRenew(token: string): Promise<boolean> {
+    const l = layoutOf(token);
+    if (l === null) return false;
+    l.asked = now();
+    for (let i = 0; i < 2; i++) {
+      const r = await (round ??= runRound().finally(() => void (round = null)));
+      const got = r.get(token);
+      if (got !== undefined) return got;
+    }
+    return false;
+  }
+  async function runRound(): Promise<Map<string, boolean>> {
+    const done = new Map<string, boolean>();
+    const head = await agreedHead();
+    if (head === null) return done;
+    const bms = blockMsOf();
+    const held = [...layouts.values()].filter((l) => now() - l.asked <= STALE_MS && gtTapes.has(l.token) && vendorDecimals.has(l.token));
+    if (held.length === 0) return done;
+    const floor = head.n - Math.ceil(FIRST_BACK_MS / bms);
+    const starts = held.map((l) => {
+      if (l.next !== null) return Math.max(l.next, floor);
+      const newest = Math.max(0, ...gtTapes.get(l.token)!.rows.map((r) => r.t_ms));
+      // the head's block at least: a vendor row timed past our head is read from it
+      const back = Math.max(0, Math.ceil((head.t * 1_000 - newest) / bms)) + 1;
+      l.short = back > head.n - floor;
+      return Math.max(head.n - back, floor);
+    });
+    const from = Math.min(...starts);
+    const logs = from > head.n ? [] : await agreedRange(head.with, (lo, hi) => heldFilters(held, lo, hi, V.poolManager), from, head.n);
+    if (logs == null) {
+      for (const l of held) done.set(l.token, false);
+      return done;
+    }
+    const trades = poolTrades(logs, held, V.poolManager);
+    // WETH-quoted pairs are priced at the ETH price the chain tape reads to the same head
+    const eth = held.some((l) => !l.v4 && l.quote === V.weth) && trades.some((t) => layouts.get(t.token)?.quote === V.weth) ? await readRef(head.with, head.n, from) : true;
+    for (const [i, l] of held.entries()) {
+      const h = gtTapes.get(l.token);
+      const d = vendorDecimals.get(l.token);
+      if (h === undefined || d === undefined) continue;
+      const have = new Set(h.rows.map((r) => r.tx));
+      const mine = trades.filter((t) => t.token === l.token && t.block >= starts[i]! && !have.has(t.tx));
+      const rows: TapeRow[] = [];
+      let placed = true;
+      for (const t of mine) {
+        const usd = usdOf(l, t, eth);
+        if (usd === null) {
+          placed = false;
+          break;
+        }
+        const tMs = blockSecondMs(chain, t.block) ?? (t.t !== null ? t.t * 1_000 : (head.t * 1_000 - (head.n - t.block) * bms));
+        rows.push({ t_ms: tMs, side: t.side, usd, amt: fixed(t.coin, d), trader: null, tx: t.tx });
+      }
+      if (!placed) {
+        done.set(l.token, false);
+        continue;
+      }
+      // one row a transaction, as the vendor prints a pair's (its first move of the coin); a v4 pool's each swap
+      const seen = new Set<string>();
+      const fresh = rows.reverse().filter((r) => (seen.has(r.tx) ? false : (seen.add(r.tx), true)));
+      if (fresh.length > 0) await exacting(l.token, fresh.map((r) => r.tx));
+      for (const r of fresh) {
+        ours.add(`${l.token} ${r.tx}`);
+        if (l.rate !== null) rated.set(`${l.token} ${r.tx}`, l.rate.at);
+      }
+      while (ours.size > TRADERS_MAX) ours.delete(ours.values().next().value!);
+      while (rated.size > TRADERS_MAX) rated.delete(rated.keys().next().value!);
+      const merged = [...fresh, ...h.rows].sort((a, b) => b.t_ms - a.t_ms).slice(0, TAPE_MAX);
+      keepTape(l.token, { at: head.at, rows: merged, src: h.src }, true);
+      l.next = head.n + 1;
+      done.set(l.token, true);
+    }
+    return done;
+  }
+  /** A trade's USD as decimal text: the chain's USD token's amount, WETH's at the ETH price before its block, any other
+   *  quote at the layout's rate; null when none is known. */
+  function usdOf(l: Layout, t: PoolTrade, eth: boolean): string | null {
+    if (!l.v4 && l.quote === V.usd) return fixed(t.quote, 6);
+    if (!l.v4 && l.quote === V.weth) {
+      const ref = eth ? [...refEvents].reverse().find((r) => r.block <= t.block) : undefined;
+      return ref === undefined ? null : fixed((t.quote * ref.ethUsd) / 10n ** 18n, 18);
+    }
+    if (l.rate === null) return null;
+    const usd = Number(t.quote) * l.rate.usd;
+    return Number.isFinite(usd) && usd >= 0 ? usd.toFixed(6).replace(/\.?0+$/, "") || "0" : null;
   }
   /** The vendor's rows held for `token` as the answer of a tape whose open is past its bound or failed with no row of
    *  ours (trades): dated by their read, renewed behind them once TAPE_FRESH_MS old; null when none is held. */
@@ -3335,10 +3579,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
   /** The refresh running behind a held vendor tape's rows (noneTrades), one per coin. */
   const tapeRenewing = new Map<string, Promise<void>>();
-  const keepTape = (token: string, h: { at: number; rows: TapeRow[]; src: ChartSrc }): void => {
+  /** `ours`: rows our round renewed (runRound), else the vendor's answer, whose read time vendorAt keeps. */
+  const keepTape = (token: string, h: { at: number; rows: TapeRow[]; src: ChartSrc }, ours = false): void => {
     if (!gtTapes.has(token) && gtTapes.size >= POOLS_MAX) gtTapes.delete(gtTapes.keys().next().value!);
     gtTapes.set(token, h);
+    if (ours) return;
+    if (!vendorAt.has(token) && vendorAt.size >= POOLS_MAX) vendorAt.delete(vendorAt.keys().next().value!);
+    vendorAt.set(token, h.at);
   };
+  /** When the vendor's rows held for each coin were read (keepTape). */
+  const vendorAt = new Map<string, number>();
   /** A vendor tape's read: its top pool (held GT_POOL_FRESH_MS) and that pool's newest trades, CoinGecko's keyed API
    *  first, else GeckoTerminal's keyless one; "none" when the vendor names no pool, undefined when the read was refused
    *  or failed. `background`: the refresh behind a held tape's rows, which no caller waits on. */
@@ -3403,7 +3653,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           const x = r?.[k];
           // no receipt yet (a provider behind the vendor) is no answer; one that shows no trade of the hash is "none"
           if (!x?.ok || x.result === null || typeof x.result !== "object") return null;
-          return receiptFacts(x.result, ask[i]!, token, V.poolManager) ?? "none";
+          return receiptFacts(x.result, ask[i]!, token, V.poolManager, gtPools.get(token)?.id ?? undefined) ?? "none";
         });
       },
       (a, b) => JSON.stringify(a) === JSON.stringify(b),
