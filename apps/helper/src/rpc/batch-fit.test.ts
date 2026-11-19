@@ -6,7 +6,7 @@
 // holds the same shapes). Every URL is made up or the chain's public fallback; the keys are planted strings.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createRpc, RPC_UPSTREAMS } from "./rpc.ts";
+import { createRpc, keyedPaces, RPC_UPSTREAMS } from "./rpc.ts";
 import { providerHolds, type Pace } from "../limits/limits.ts";
 import { batchSizes } from "./batch-sizes.ts";
 
@@ -144,6 +144,92 @@ test("a post-paced upstream's parts each draw a post of its pace", async () => {
   const b = await r.handle("base", "application/json", batch("base", 10, 101), client());
   assert.deepEqual(results(b.body), want("A", 10, 101));
   assert.equal(Math.round((before - holds.room(A)) * 4), 2, "two posts of five drew two of the bucket's four");
+});
+
+// card helper-receipts-past-retention: live 19 Nov 06:5xZ, /v1/rpc/base?keyed=only answered a batch of 7 receipts 200
+// from QuickNode and a batch of 8 or 9 HTTP 503 {"code":"upstream"} with Server-Timing rpc;desc="none": nothing was
+// sent. The walk put a URL out for any batch past its pace's bucket (QuickNode 7 calls at once) or its plan's batch
+// (dRPC free 3), so a batch past both found no URL. Each now takes it in parts of its size, a later part drawn when the
+// bucket has room for it. Each keyed URL is made up, at its company's pace (keyedPaces), its key a planted string.
+const RECEIPT = (h: string) => ({ transactionHash: h, blockNumber: "0x1", status: "0x1" });
+const receipts = (n: number, from = 1) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ jsonrpc: "2.0", id: from + i, method: "eth_getTransactionReceipt", params: [`0x${(from + i).toString(16).padStart(64, "0")}`] })));
+function receiptUpstream(refuse: (url: string, n: number) => Response | null = () => null) {
+  const posts: [string, number][] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const body = JSON.parse(String(init.body)) as (Req & { params: string[] }) | (Req & { params: string[] })[];
+    const sent = Array.isArray(body) ? body : [body];
+    posts.push([url, sent.length]);
+    const r = refuse(url, sent.length);
+    if (r !== null) return r;
+    const one = (q: Req & { params: string[] }) => ({ jsonrpc: "2.0", id: q.id, result: RECEIPT(q.params[0]!) });
+    return json(Array.isArray(body) ? body.map(one) : one(body), 200);
+  };
+  return { fetch, posts, to: (u: string) => posts.filter(([p]) => p === u).map(([, n]) => n) };
+}
+const DRPC_REFUSES = (url: string, n: number) => (url.includes("drpc") && n > 3 ? json(Array.from({ length: n }, (_, i) => ({ jsonrpc: "2.0", id: i, error: { message: DRPC_MSG, code: 31 } })), 400) : null);
+const answeredWhole = (body: string, n: number, from = 1) => {
+  const a = JSON.parse(body) as { id: number; result?: { transactionHash: string } }[];
+  assert.ok(Array.isArray(a), body);
+  assert.deepEqual(
+    a.map((x) => [x.id, x.result?.transactionHash]),
+    Array.from({ length: n }, (_, i) => [from + i, `0x${(from + i).toString(16).padStart(64, "0")}`]),
+  );
+};
+for (const chain of ["base", "robinhood"] as const) {
+  const up = chain.toUpperCase();
+  const QN = `https://name-two.${chain}-mainnet.quiknode.test/plantedQN${chain}key0123456789/`;
+  const DR = [1, 2, 3].map((i) => `https://lb.drpc.test/${chain}/plantedDRPC${chain}key${i}0123456789`);
+  const both = { [`${up}_RPC_URL_QUICKNODE`]: QN, [`${up}_RPC_URL_DRPC_1`]: DR[0]!, [`${up}_RPC_URL_DRPC_2`]: DR[1]!, [`${up}_RPC_URL_DRPC_3`]: DR[2]! };
+  const rpcOf = (env: Record<string, string>, u: ReturnType<typeof receiptUpstream>, c = clock()) => {
+    const holds = providerHolds(c.now, keyedPaces(env));
+    return { holds, r: createRpc(env, { fetch: u.fetch as never, holds, now: c.now, sleep: c.sleep, log: () => undefined, batch: batchSizes() }) };
+  };
+
+  for (const n of [8, 9, 10]) {
+    test(`${chain} keyed (?keyed=only), QuickNode then dRPC's three keys: a batch of ${n} receipts is answered whole, never one 503 for the batch`, async () => {
+      const u = receiptUpstream(DRPC_REFUSES);
+      const { r } = rpcOf(both, u);
+      const a = await r.handle(chain, "application/json", receipts(n), client(), false, true);
+      assert.equal(a.status, 200, `${a.body} posts ${JSON.stringify(u.posts)}`);
+      answeredWhole(a.body, n);
+      assert.ok(u.posts.every(([, k]) => k <= 7), `a post past QuickNode's 7 at once or dRPC's 3: ${JSON.stringify(u.posts)}`);
+    });
+  }
+
+  test(`${chain} keyed, QuickNode alone: a batch of 10 leaves as its pace's parts (7, then 3 once the bucket has room), answered in the device's order`, async () => {
+    const env = { [`${up}_RPC_URL_QUICKNODE`]: QN };
+    const u = receiptUpstream();
+    const { holds, r } = rpcOf(env, u);
+    const a = await r.handle(chain, "application/json", receipts(10), client(), false, true);
+    assert.equal(a.status, 200, a.body);
+    answeredWhole(a.body, 10);
+    assert.deepEqual(u.to(QN), [7, 3]);
+    assert.ok(holds.room(QN) >= 0, "the bucket never drawn past empty");
+  });
+
+  test(`${chain} keyed, dRPC's keys alone: a batch of 10 leaves in parts of the plan's 3, none refused for its size`, async () => {
+    const env = { [`${up}_RPC_URL_DRPC_1`]: DR[0]! };
+    const u = receiptUpstream(DRPC_REFUSES);
+    const { r } = rpcOf(env, u);
+    const a = await r.handle(chain, "application/json", receipts(10), client(), false, true);
+    assert.equal(a.status, 200, a.body);
+    answeredWhole(a.body, 10);
+    assert.deepEqual(u.to(DR[0]!), [3, 3, 3, 1]);
+  });
+}
+
+test("the device's route: a public URL paced at 6 calls at once (base-rpc.publicnode.com's) takes a batch of 10 in parts of 6 and 4, never put out for its size", async () => {
+  const P = "https://base-rpc.publicnode.test";
+  const c = clock();
+  const holds = providerHolds(c.now, { [P]: { perS: 3, burst: 6, unit: "call" } });
+  // the chain's own fallback first: out for this read (5xx), so the paced URL is the one asked
+  const fb = RPC_UPSTREAMS.base.fallback!;
+  const down = receiptUpstream((url) => (url === fb ? new Response("down", { status: 503 }) : null));
+  const r = createRpc({}, { fetch: down.fetch as never, holds, pinned: { base: [P] }, now: c.now, sleep: c.sleep, log: () => undefined, batch: batchSizes() });
+  const a = await r.handle("base", "application/json", receipts(10), client());
+  assert.equal(a.status, 200, `${a.body} posts ${JSON.stringify(down.posts)}`);
+  answeredWhole(a.body, 10);
+  assert.deepEqual(down.to(P), [6, 4]);
 });
 
 test("solana: the first key (call()) refusing a batch for its size (413) serves it in parts, never falling to the public endpoint", async () => {

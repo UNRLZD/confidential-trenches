@@ -1439,17 +1439,31 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    *  reads and the tapes keep too; Infinity until then. */
   const sizes = deps.batch ?? BATCH_SIZES;
   const mostOf = (url: string): number => sizes.most(url);
-  /** A caller's read of `n` calls taken from `url`'s pace (limits.ts take) as the posts fitPost sends it in: 0 when every
-   *  part has room, else the first wait (a part drawn before it stays drawn: the pace is spent early, never past). A
-   *  post refused for its size and sent again as parts draws nothing more: once per URL and size, for the process's life. */
-  const takeParts = (url: string, n: number, page: boolean): number => {
-    const most = mostOf(url);
-    for (let i = 0; i < n; i += most) {
-      const w = holdsAll.take(url, Math.min(most, n - i), false, false, false, page);
-      if (w > 0) return w;
-    }
-    return 0;
+  /** The most calls the walk puts in one post to `url` (card helper-receipts-past-retention): its kept size (mostOf),
+   *  its plan's batch (Pace batch: dRPC free's 3) and, for a pace counted in calls, its bucket (Pace burst: QuickNode's
+   *  7), the swap reads' rule (data/evm/swaps.ts). Live 19 Nov 06:5xZ the walk put a URL out for a batch past either
+   *  instead, and Base's keyed route answered a batch of 8 receipts 503 with nothing sent (rpc;desc="none"). */
+  const partOf = (url: string): number => {
+    const p = holdsAll.paceOf(url);
+    return Math.max(1, Math.min(mostOf(url), p?.batch ?? Infinity, p?.unit === "call" ? Math.floor(p.burst) : Infinity));
   };
+  /** A caller's read of `n` calls: its first post (partOf) taken from `url`'s pace (limits.ts take), 0 when it has room,
+   *  else its wait, nothing drawn. fitPost draws each later post as it leaves (drawOf). A post refused for its size and
+   *  sent again as parts draws nothing more: once per URL and size, for the process's life. */
+  const takeParts = (url: string, n: number, page: boolean): number => holdsAll.take(url, Math.min(partOf(url), n), false, false, false, page);
+  const drawOf = (url: string, page: boolean) => (calls: number): number => holdsAll.take(url, calls, false, false, false, page);
+  /** Whether a later part's post of `calls` gets its pace's room (`draw`, 0 when drawn) by the walk's end `by`, its
+   *  waits the read's rpc-wait; false once the next wait would pass it (a crowd took every refill first). */
+  const roomBy = async (draw: (calls: number) => number, calls: number, by: number): Promise<boolean> => {
+    for (;;) {
+      const w = draw(calls);
+      if (w === 0) return true;
+      if (now() + w > by - WALK_SEND_MIN_MS) return false;
+      await waitFor(w);
+    }
+  };
+  /** A later part that found no room by the walk's end: this upstream down for the read (callList's 5xx). */
+  const NO_ROOM = (): Sent => ({ status: 503, headers: new Headers(), text: undefined });
   /**
    * One read sent to one upstream, fitted to its batch size (card helper-rpc-batch-learns-reader-size), its body read
    * (readAnswer: undefined past RPC_ANSWER_MAX). A batch past the most the upstream takes (mostOf) leaves as its parts, all
@@ -1460,14 +1474,28 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * answer of a part (a throttle's 429, a 5xx, a body that is no batch) is this upstream's answer to the read, as one
    * post's would be. Mainnet's refusals, read 2026-11-18 20:41Z: Pocket's 413 past 5, daybreak's 413 "max 20 calls",
    * robinhood.drpc.org's 400 code 31 past 3, Sentio's 429 code 8 past 5 (batch-fit.test.ts).
+   * The walk (callList) passes its part size (partOf) as `most` and its pace's `draw`: the first part was drawn before
+   * the call (takeParts), and each later one leaves once its pace has room for it (roomBy), so a batch past a bucket
+   * goes as the bucket refills, never past it; a part with no room by `by` ends the read on this upstream (NO_ROOM).
    */
-  async function fitPost(c: RpcChain, url: string, forward: string, n: number, by: number): Promise<Sent> {
-    const most = mostOf(url);
+  async function fitPost(c: RpcChain, url: string, forward: string, n: number, by: number, most = mostOf(url), draw?: (calls: number) => number): Promise<Sent> {
     if (n > most) {
       const reqs = JSON.parse(forward) as unknown[];
       const parts: unknown[][] = [];
       for (let i = 0; i < reqs.length; i += most) parts.push(reqs.slice(i, i + most));
-      return joinParts(await Promise.all(parts.map((p) => fitPost(c, url, JSON.stringify(p), p.length, by))), parts);
+      const sent: Promise<Sent>[] = [];
+      for (let i = 0; i < parts.length; i++) {
+        const p = parts[i]!;
+        if (i > 0 && draw !== undefined && !(await roomBy(draw, p.length, by))) {
+          sent.push(Promise.resolve(NO_ROOM()));
+          break;
+        }
+        const s = fitPost(c, url, JSON.stringify(p), p.length, by);
+        // a part that fails while a later one waits for room is read by Promise.all below, never left unhandled
+        s.catch(() => undefined);
+        sent.push(s);
+      }
+      return joinParts(await Promise.all(sent), parts);
     }
     const r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(sendMs(by - now())) });
     const text = await readAnswer(r);
@@ -1954,13 +1982,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           break;
         }
         const secretForms = formsByUrl.get(url) ?? [];
-        // review M1, L3: a URL whose plan takes fewer requests a post than this read carries (dRPC free: 3, its HTTP 400
-        // code 31 past it), or whose second's bucket is smaller than the read, is out for this read: the next is asked
-        const p = holds.paceOf(url);
-        if (p !== undefined && (methods.length > (p.batch ?? Infinity) || (p.unit === "call" && methods.length > p.burst))) {
-          down = true;
-          continue;
-        }
+        // review M1, L3: a read past a URL's plan's batch (dRPC free: 3, its HTTP 400 code 31 past it) or its second's
+        // bucket leaves in parts of both (partOf, fitPost), never put out for its size (card helper-receipts-past-retention)
         // review M3: a URL past its day's budget is out until the next UTC day, which is no wait: down for this read
         if (holds.dayOut(url, methods.length)) {
           down = true;
@@ -1979,8 +2002,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           soonestMs = Math.min(soonestMs, gate);
           continue;
         }
-        // card helper-rpc-batch-learns-reader-size: a batch past the URL's kept size goes as its parts (fitPost), each
-        // part a post of its pace; a part with no room is the read's wait (the parts drawn before it stay drawn)
+        // card helper-rpc-batch-learns-reader-size: a batch past the URL's part size (partOf) goes as its parts (fitPost),
+        // each a post of its pace: the first's no room is the read's wait, a later one's is waited for as it leaves
         const room = takeParts(url, methods.length, page);
         if (room > 0) {
           soonestMs = Math.min(soonestMs, room);
@@ -1991,7 +2014,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         sent = true;
         const from = now();
         try {
-          r = await fitPost(c, url, forward, methods.length, by);
+          r = await fitPost(c, url, forward, methods.length, by, partOf(url), drawOf(url, page));
           if (r.status === 429) {
             sentTo(url, from);
             const s = upstreamRetryAfterS(r.headers, now());
