@@ -1,0 +1,241 @@
+{
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T23:22:56.641Z",
+  "batch": 10,
+  "reads": {
+   "base": {
+    "status": 200,
+    "answers": [
+     {
+      "result": "0x3885f89"
+     },
+     {
+      "result": "0x3885f89"
+     },
+     {
+      "result": "0x3885f89"
+     },
+     {
+      "result": "0x3885f89"
+     },
+     {
+      "result": "0x3885f89"
+     },
+     {
+      "result": "0x3885f89"
+     },
+     {
+      "result": "0x3885f89"
+     },
+     {
+      "result": "0x3885f89"
+     },
+     {
+      "result": "0x3885f89"
+     },
+     {
+      "result": "0x3885f89"
+     }
+    ],
+    "bytes": 642
+   },
+   "robinhood": {
+    "status": 200,
+    "answers": [
+     {
+      "result": "0x7051f80"
+     },
+     {
+      "result": "0x7051f80"
+     },
+     {
+      "result": "0x7051f80"
+     },
+     {
+      "result": "0x7051f80"
+     },
+     {
+      "result": "0x7051f80"
+     },
+     {
+      "result": "0x7051f80"
+     },
+     {
+      "result": "0x7051f80"
+     },
+     {
+      "result": "0x7051f80"
+     },
+     {
+      "result": "0x7051f80"
+     },
+     {
+      "result": "0x7051f80"
+     }
+    ],
+    "bytes": 642
+   }
+  }
+ },
+ "goodLocal": {
+  "base": "http://127.0.0.1:18732",
+  "at": "2026-11-18T23:22:45.707Z",
+  "batch": 10,
+  "reads": {
+   "base": {
+    "status": 200,
+    "answers": [
+     {
+      "result": "0x1003"
+     },
+     {
+      "result": "0x1003"
+     },
+     {
+      "result": "0x1003"
+     },
+     {
+      "result": "0x1003"
+     },
+     {
+      "result": "0x1003"
+     },
+     {
+      "result": "0x1003"
+     },
+     {
+      "result": "0x1003"
+     },
+     {
+      "result": "0x1003"
+     },
+     {
+      "result": "0x1003"
+     },
+     {
+      "result": "0x1003"
+     }
+    ],
+    "bytes": 642
+   },
+   "robinhood": {
+    "status": 200,
+    "answers": [
+     {
+      "result": "0x1006"
+     },
+     {
+      "result": "0x1006"
+     },
+     {
+      "result": "0x1006"
+     },
+     {
+      "result": "0x1006"
+     },
+     {
+      "result": "0x1006"
+     },
+     {
+      "result": "0x1006"
+     },
+     {
+      "result": "0x1006"
+     },
+     {
+      "result": "0x1006"
+     },
+     {
+      "result": "0x1006"
+     },
+     {
+      "result": "0x1006"
+     }
+    ],
+    "bytes": 642
+   }
+  }
+ },
+ "bad": {
+  "base": "http://127.0.0.1:18731",
+  "at": "2026-11-18T23:22:45.530Z",
+  "batch": 10,
+  "reads": {
+   "base": {
+    "status": 400,
+    "answers": [
+     {
+      "error": {
+       "message": "Batch of more than 3 requests are not allowed on free plan, to use this feature register paid account at drpc.org",
+       "code": 31
+      }
+     },
+     {
+      "error": {
+       "message": "Batch of more than 3 requests are not allowed on free plan, to use this feature register paid account at drpc.org",
+       "code": 31
+      }
+     },
+     {
+      "error": {
+       "message": "Batch of more than 3 requests are not allowed on free plan, to use this feature register paid account at drpc.org",
+       "code": 31
+      }
+     },
+     {
+      "error": {
+       "message": "Batch of more than 3 requests are not allowed on free plan, to use this feature register paid account at drpc.org",
+       "code": 31
+      }
+     },
+     {
+      "error": {
+       "message": "Batch of more than 3 requests are not allowed on free plan, to use this feature register paid account at drpc.org",
+       "code": 31
+      }
+     },
+     {
+      "error": {
+       "message": "Batch of more than 3 requests are not allowed on free plan, to use this feature register paid account at drpc.org",
+       "code": 31
+      }
+     },
+     {
+      "error": {
+       "message": "Batch of more than 3 requests are not allowed on free plan, to use this feature register paid account at drpc.org",
+       "code": 31
+      }
+     },
+     {
+      "error": {
+       "message": "Batch of more than 3 requests are not allowed on free plan, to use this feature register paid account at drpc.org",
+       "code": 31
+      }
+     },
+     {
+      "error": {
+       "message": "Batch of more than 3 requests are not allowed on free plan, to use this feature register paid account at drpc.org",
+       "code": 31
+      }
+     },
+     {
+      "error": {
+       "message": "Batch of more than 3 requests are not allowed on free plan, to use this feature register paid account at drpc.org",
+       "code": 31
+      }
+     }
+    ],
+    "bytes": 642
+   },
+   "robinhood": {
+    "status": 413,
+    "error": {
+     "code": -32600,
+     "message": "batch too large: max 4 calls"
+    },
+    "bytes": 642
+   }
+  }
+ }
+}

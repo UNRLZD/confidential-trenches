@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeChain, open, REC, timeAt, URLS } from "../../../test/evm-swaps/robinhood.ts";
+import { callsIn, pocketRefusal } from "../../../test/pocket.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { providerHolds } from "../../limits/limits.ts";
 import { ROBINHOOD_VENUES, TOPIC } from "./swaps.ts";
@@ -80,6 +81,9 @@ function rig(hopKnown: boolean) {
     return undefined;
   };
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    // a Pocket host answers 413 past 5 calls, as mainnet does (test/pocket.ts)
+    const pocket = pocketRefusal(url, callsIn(init.body));
+    if (pocket) return pocket;
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
     const mine = reqs.map(local);
     const rest = reqs.filter((_, i) => mine[i] === undefined);

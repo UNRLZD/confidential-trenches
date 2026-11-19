@@ -15,6 +15,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeChain, open, REC, timeAt } from "../../../test/evm-swaps/robinhood.ts";
+import { callsIn, pocketRefusal } from "../../../test/pocket.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { HEADER_TIMED, INDEX_RPCS, SWAP_RPCS, TOPIC, TRADES_MAX, type Pool } from "./swaps.ts";
 
@@ -86,6 +87,9 @@ function rig() {
     await new Promise((go) => setTimeout(go, LATE_MS));
     const f = chain.st.faults.get(url) ?? {};
     if (f.down) return new Response("down", { status: 503 });
+    // a Pocket host answers 413 past 5 calls, as mainnet does (test/pocket.ts)
+    const pocket = pocketRefusal(url, callsIn(init.body));
+    if (pocket) return pocket;
     const reqs = [JSON.parse(String(init.body))].flat() as { id: number; method: string; params: unknown[] }[];
     const mine = reqs.map((r) => local(url, r));
     const rest = reqs.filter((_, i) => mine[i] === undefined);
