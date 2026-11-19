@@ -76,6 +76,14 @@ function gatedProver() {
 const pool = (w: WalletStore, prover: ReturnType<typeof gatedProver>["prover"]) =>
   testnetPool(page(w), { prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => ({ events: async () => assert.fail("no sync read") }), evmQueuePool: () => fakeEvmPool() });
 const tick = () => new Promise((r) => setTimeout(r, 10));
+/** Whether `p` settles inside `turns` turns of the event loop with no timer let run past it: a wait that waits for
+ * nothing ends there, and one 250 ms step (TAP_PREPARE_STEP_MS) does not. Counted in turns, never the machine's clock. */
+async function settlesAtOnce(p: Promise<unknown>, turns = 500): Promise<boolean> {
+  let done = false;
+  void p.then(() => void (done = true));
+  for (let i = 0; i < turns && !done; i++) await new Promise((r) => setImmediate(r));
+  return done;
+}
 
 test("a tap right after a load waits for the first pass still proving its note, then the proof is ready; the note is proved once", async () => {
   const { w, ns } = await wallet();
@@ -97,9 +105,7 @@ test("a tap right after a load waits for the first pass still proving its note, 
   assert.equal(ready?.length, 1, "the proof the tap waited for is ready to take");
   assert.equal(g.proves(), 1, "the tap joined the pass in flight: no second proof of the note");
   // prepared now: a tap waits for nothing and asks no pass
-  const t0 = Date.now();
-  await t.prepared("base");
-  assert.ok(Date.now() - t0 < 200);
+  assert.equal(await settlesAtOnce(t.prepared("base")), true);
   assert.equal(g.proves(), 1);
   await t.signedOut();
 });
@@ -108,10 +114,8 @@ test("a chain with no note to prove: the tap waits for nothing and starts no pas
   const { w } = await wallet();
   const g = gatedProver();
   const t = pool(w, g.prover);
-  const t0 = Date.now();
-  await t.prepared("base");
-  await t.prepared("solana");
-  assert.ok(Date.now() - t0 < 200);
+  assert.equal(await settlesAtOnce(t.prepared("base")), true);
+  assert.equal(await settlesAtOnce(t.prepared("solana")), true);
   assert.equal(g.proves(), 0);
   await t.signedOut();
 });
