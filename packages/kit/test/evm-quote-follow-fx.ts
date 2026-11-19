@@ -11,13 +11,13 @@ const evmAgreedReset = (): void => (Q as { evmAgreedReset?: () => void }).evmAgr
 const evmQuoteWarmReset = (): void => (Q as { evmQuoteWarmReset?: () => void }).evmQuoteWarmReset?.();
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
-import { callKey } from "./evm-quote-calls-record.ts";
+import { callKey, withEventOnly } from "./evm-quote-calls-record.ts";
 
 const F = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/evm-quote-calls.json.gz", import.meta.url))).toString("utf8"));
 const POST_MS = 200;
 /** The recording's answers, each POST answered POST_MS of the test clock after it is sent; posts counted per host. */
 const replay = (lie?: (k: string, a: unknown) => unknown) => {
-  const answers = new Map<string, unknown>(F.calls);
+  const answers = new Map<string, unknown>(withEventOnly(F.calls));
   const methods = new Map<string, number>();
   const own = new Map<string, unknown>(F.own);
   const missed: string[] = [];
