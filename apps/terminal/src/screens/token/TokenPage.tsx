@@ -448,7 +448,8 @@ function BottomBar({ c, gecko, auto, onAuto }: { c: ChartState; gecko: boolean; 
  *  plot, then its timeframes. The plot keeps its size in every state, so a read landing moves nothing (BAR-10 CLS): the
  *  skeleton while loading, the candles with the price axis, the volume pane and the crosshair when ready, `No data`
  *  when the helper holds no bars, `Offline` and Retry on a failed read. CoinGecko's label shows while any drawn bar is
- *  GeckoTerminal's (none over no bars): in the desktop's bottom bar, over the phone's volume pane. The bars are drawn
+ *  GeckoTerminal's (none over no bars): in the desktop's bottom bar, over the phone's volume pane, and over the volume
+ *  pane too on a desktop main column whose bottom bar has no room for it (token.css .tkp-vendor-narrow). The bars are drawn
  *  in the toolbar's unit (units.ts). The library draws only once the plot is on screen (the page holds both layouts;
  *  one is display: none). */
 function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
@@ -536,7 +537,7 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
             <button type="button" className="tkp-retry" onClick={c.retry}>{WORDS.retry.text}</button>
           </span>
         )}
-        {phone && gecko && <span className="tkp-vendor tkp-vendor-ph" data-testid="chart-vendor"><W id="gecko" /></span>}
+        {gecko && <span className={phone ? "tkp-vendor tkp-vendor-ph" : "tkp-vendor tkp-vendor-ph tkp-vendor-narrow"} data-testid="chart-vendor"><W id="gecko" /></span>}
       </div>
       </div>
       {!phone && <BottomBar c={c} gecko={gecko} auto={auto} onAuto={onAuto} />}

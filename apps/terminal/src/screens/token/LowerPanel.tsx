@@ -120,7 +120,7 @@ function Holders({ row, decimals, top, state }: { row: MarketRow; decimals: numb
               </div>
               <div className="tkl-share">
                 <div className="tkl-track"><div className="tkl-fill" data-creator={h.creator || undefined} style={{ width: `${h.width}%` }} /></div>
-                <span className="tkl-pct" data-testid="row-share">{h.share}</span>
+                <span key={h.share} className="tkl-pct" data-testid="row-share">{h.share}</span>
               </div>
             </div>
           ))}

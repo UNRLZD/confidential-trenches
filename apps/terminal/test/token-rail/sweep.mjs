@@ -8,7 +8,10 @@
 //   - the header's strip whole in the mode drawn: no tile cut, the strip clear of the trade column and the identity, the
 //     symbol whole, no horizontal scroll;
 //   - where the rail is slim, the full rail opened by its expand button (its own 340 column, as the full mode draws it):
-//     if the strip is whole with it, the full rail fits there and slim is a fault;
+//     if the strip is whole with it and still holds Price and the 24h change, the full rail fits there and slim is a
+//     fault. A dropped 24h change counts as a cut when the page picks its mode (card rail-and-legend-hold-on-r5,
+//     19 Nov: R5's slim boundary at 1527 stays as shipped); it gives way only in the rail opened by », where the strip
+//     must still be whole, the symbol included (strip-fit.ts, token.css's tkp-mid steps);
 //   - no rail at a width whose page box is 1180 layout px or more (R5's own floor for the slim rail, token.css at
 //     design-lock-r5).
 //   node apps/terminal/test/token-rail/sweep.mjs [--shots <dir>] [--widths <w,w,...>]     PASS exit 0, FAIL exit 1
@@ -147,7 +150,9 @@ try {
       await page.waitForTimeout(300);
       const x = await f.evaluate(READ);
       line += `; opened: ${say(x)}`;
-      if (x.railW !== null && Math.abs(x.railW - 340) <= 1 && whole(x)) fails.push(`${w}: slim, yet the full rail fits uncut here (${say(x)})`);
+      const kept = ["price", "change"].every((k) => x.tiles.includes(k));
+      if (x.railW !== null && Math.abs(x.railW - 340) <= 1 && whole(x) && kept) fails.push(`${w}: slim, yet the full rail fits uncut here (${say(x)})`);
+      if (!whole(x)) fails.push(`${w}: the strip is cut with the rail opened by »: ${say(x)}`);
     }
     if (SHOTS && SHOT_AT.includes(w)) await page.screenshot({ path: path.join(SHOTS, `sweep-${w}.png`) });
     if (errors.length) fails.push(`${w}: page errors ${errors.join(" | ")}`);

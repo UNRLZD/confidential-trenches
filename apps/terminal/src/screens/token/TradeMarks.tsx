@@ -221,7 +221,8 @@ function Card({ d, symbol, rect, r }: { d: Drawn; symbol: string; rect: Rect; r:
         {amountText(m.amt)} {symbol}
       </span>
       {m.trader !== null && <span className="tm-cn">{shortTrader(m.trader)}</span>}
-      <span className="tm-cn">{age(Math.floor(m.t_ms / 1000), Date.now())}</span>
+      {/* the age ticks in a right-aligned line: a new age is new text, never moved text (card rail-and-legend-hold-on-r5) */}
+      <span key={age(Math.floor(m.t_ms / 1000), Date.now())} className="tm-cn">{age(Math.floor(m.t_ms / 1000), Date.now())}</span>
     </div>
   );
 }

@@ -42,7 +42,7 @@ export function SafetyGrid({ row, risk, nowMs, filling = false }: { row: MarketR
           {filling && c.tone === "unknown" ? (
             <span className="rg-value tkp-sk" style={{ width: 40 }} aria-hidden="true">{"\u00a0"}</span>
           ) : (
-            <span className="rg-value">
+            <span key={`${c.icon ?? ""}|${c.word ?? c.text}`} className="rg-value">
               {c.icon && <Mark icon={c.icon} />}
               {c.word ? <W id={c.word} /> : c.text}
             </span>
