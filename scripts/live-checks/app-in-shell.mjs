@@ -497,7 +497,7 @@ export function shellHeaders(signHeadersFile) {
  *  (card app-no-test-token): GET /v1/market/lists?chain=solana as read on 1 Nov, and GET /v1/market/token for the top of
  *  its Trending column as read on 3 Nov and for mihao, the token / opens on All, as read on 14 Nov
  *  (apps/terminal/test/discover-data, test/token-source); GET /v1/market/trades
- *  answers an empty tape (card app-chart-controls). A token read for any
+ *  answers a recorded tape (TAPES). A token read for any
  *  other mint answers 404, as the helper answers a mint it does not know, never an aborted load. */
 const HELPER_HOST = "https://ct-api.unrealized.trade";
 const RECORDED = (f) => JSON.parse(readFileSync(path.join(REPO, "apps/terminal/test", f), "utf8"));
@@ -520,6 +520,28 @@ const CANDLES = new Map(
     [TOKEN_ANSWER.row.token, "token-source/helper-candles-djt-2026-11-19.json"],
   ].map(([t, f]) => [t, RECORDED(f).body]),
 );
+/** The token page's tape (card app-harness-serves-a-recorded-tape): GET /v1/market/trades at the page's own limit
+ *  (trades.ts TRADES_LIMIT, 50) for mihao and the Trending top, as read on 19 Nov with the helper's reach (whole_ms)
+ *  (apps/terminal/test/token-source), so About's 5m tiles switch from the row's counts to the list's when the list lands,
+ *  as live's do. Each token's tape is moved once, at its first read on a route, by that read's time less the recording's
+ *  as_of_ms (tapeAt), so its rows are as recent as live's and every later read answers the same rows. A token the
+ *  recordings do not hold answers an empty tape, as the helper answers a token whose book holds no trades yet. */
+const TAPES = new Map(
+  [
+    [OPEN_ANSWER.row.token, "token-source/helper-trades-mihao-2026-11-19.json"],
+    [TOKEN_ANSWER.row.token, "token-source/helper-trades-djt-2026-11-19.json"],
+  ].map(([t, f]) => [t, RECORDED(f).body]),
+);
+/** How long a tape read takes to answer, so the list lands after the page's first paint: live answered the two reads
+ *  recorded in 0.82 s and 0.63 s, and its list landed about 1.4 s after first paint. */
+export const TAPE_MS = 800;
+/** A recorded tape moved by `shift` ms: every row's t_ms, the reach and as_of_ms. */
+export const tapeAt = (body, shift) => ({
+  ...body,
+  trades: body.trades.map((t) => ({ ...t, t_ms: t.t_ms + shift })),
+  ...(typeof body.whole_ms === "number" ? { whole_ms: body.whole_ms + shift } : {}),
+  as_of_ms: body.as_of_ms + shift,
+});
 const LOGOS = new Map([
   [OPEN_ANSWER.row.token, readFileSync(path.join(REPO, "apps/terminal/test/token-source/helper-logo-mihao-2026-11-19.webp"))],
   [TOKEN_ANSWER.row.token, readFileSync(path.join(REPO, "apps/terminal/test/token-source/helper-logo-djt-2026-11-19.webp"))],
@@ -659,6 +681,8 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
   const headers = (rules, p, type) => ({ ...Object.fromEntries(headersFor(rules, p)), "content-type": type });
   const refused = [];
   const named = new Set();
+  /** Each recorded tape's move on this route, set at its first read (TAPES). */
+  const shifts = new Map();
   const answer = async (route) => {
     const u = new URL(route.request().url());
     if (u.origin === SIGN_HOST) {
@@ -669,10 +693,21 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
     if (u.origin === HELPER_HOST && u.pathname === "/v1/market/lists") {
       return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(LISTS) });
     }
-    // the token page's tape (card app-chart-controls, the chart's trade marks): answered as the helper answers a token
-    // whose book holds no trades yet, so the page draws no marks and makes no failed load
+    // the token page's tape (TAPES): the recorded list after TAPE_MS, moved to its first read's clock; a context closed
+    // while it waits takes no answer
     if (u.origin === HELPER_HOST && u.pathname === "/v1/market/trades") {
-      return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify({ trades: [], src: "chain", as_of_ms: Date.now() }) });
+      const asked = Date.now();
+      const tok = u.searchParams.get("chain") === "solana" ? u.searchParams.get("token") : null;
+      const rec = TAPES.get(tok);
+      if (rec && !shifts.has(tok)) shifts.set(tok, asked - rec.as_of_ms);
+      const body = rec ? tapeAt(rec, shifts.get(tok)) : { trades: [], src: "chain", as_of_ms: asked };
+      await new Promise((ok) => setTimeout(ok, TAPE_MS));
+      try {
+        return await route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(body) });
+      } catch (e) {
+        if (/closed/i.test(String(e?.message))) return;
+        throw e;
+      }
     }
     if (u.origin === HELPER_HOST && u.pathname === "/v1/market/token") {
       const known = u.searchParams.get("chain") === "solana" ? [TOKEN_ANSWER, OPEN_ANSWER].find((a) => a.row.token === u.searchParams.get("token")) : undefined;

@@ -22,6 +22,9 @@ registerHooks({
       return { ...r, source: wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
     if (url.endsWith("/signpage/src/pool-price.ts"))
       return { ...r, source: wrap(String(r.source), "poolPrices", "export function poolPrices(deps) { return poolPrices__real({ ...deps, read: globalThis.__ctPriceRead, after: (ms, fn) => void setTimeout(fn, ms).unref() }); }") };
+    // every derivation of an exported key, counted (card signpage-backup-export: none before the user's own Show)
+    if (url.endsWith("/signpage/src/pages/export.ts"))
+      return { ...r, source: wrap(String(r.source), "exportKey", "export function exportKey(...a) { globalThis.__ctExportKeyCalls = (globalThis.__ctExportKeyCalls ?? 0) + 1; return exportKey__real(...a); }") };
     return r;
   },
 });
@@ -242,8 +245,12 @@ async function told(id: string, n: number, what: string): Promise<void> {
 }
 
 
+/** A window event the browser fires on its own (pagehide, pageshow). */
+export const pageEvent = (type: string): void => void win.dispatchEvent(new Event(type));
+/** How many times an exported key was derived so far (src/pages/export.ts exportKey). */
+export const exportKeyCalls = (): number => (gl.__ctExportKeyCalls as number | undefined) ?? 0;
 /** The top window's reloads so far. */
 export const reloadCount = (): number => reloads;
 /** Holds the next request's hash (src/api.ts handle) until the promise settles: set before the send, cleared after. */
 export const holdDigest = (p: Promise<void> | null): void => void (digestHold = p);
-export { answer, doc, esc, find, frameIn, inertAt, opened, posted, press, root, send, sendRaw, shown, tap, tapSheet, told, notices, until };
+export { answer, clip, doc, esc, find, frameIn, inertAt, opened, posted, press, root, send, sendRaw, shown, tap, tapSheet, told, notices, until };
