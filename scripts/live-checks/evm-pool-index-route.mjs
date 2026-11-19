@@ -17,7 +17,6 @@
 // mainnet providers, not a deployed build, a Base index read cold took 316 s with 33 answers of 429 from its second
 // reader (19 Nov 09:0xZ), and a provider's fault fails a tap (the routing itself is held by
 // packages/kit/test/evm-quote-attacks.test.ts F10, F10p and F10w)
-// Bundle: out the kit's quotes on real mainnet providers, which a build cannot hold
 //   node scripts/live-checks/evm-pool-index-route.mjs [--record <file>] [--no-index]
 //   node scripts/live-checks/evm-pool-index-route.mjs --answer <file>     judge a recorded run
 // --no-index quotes with no index served (the quote's bounded scan alone, the state this check refuses): the recorded
