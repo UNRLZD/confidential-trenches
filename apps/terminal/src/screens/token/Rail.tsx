@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
 import { Link } from "react-router";
 import { tokenHref } from "../../routes/routes.ts";
@@ -183,7 +183,7 @@ function Ic({ n, size = 12 }: { n: "pause" | "sort" | "chevL" | "chevR" | "grid"
   return <svg {...p}><rect x="1.75" y="1.75" width="3.5" height="3.5" rx="0.75" /><rect x="6.75" y="1.75" width="3.5" height="3.5" rx="0.75" /><rect x="1.75" y="6.75" width="3.5" height="3.5" rx="0.75" /><rect x="6.75" y="6.75" width="3.5" height="3.5" rx="0.75" /></svg>;
 }
 
-const Row = memo(function Row({ r, nowMs, sel, seen }: { r: MarketRow; nowMs: number; sel: boolean; seen: Map<string, number> }) {
+export const Row = memo(function Row({ r, nowMs, sel, seen }: { r: MarketRow; nowMs: number; sel: boolean; seen: Map<string, number> }) {
   const v = rowView(r, "1h", nowMs);
   const c = r.chg_24h_bps;
   const mc = dec(r.mc_usd);
@@ -209,12 +209,20 @@ const Row = memo(function Row({ r, nowMs, sel, seen }: { r: MarketRow; nowMs: nu
           <span className="tkr-s">{v.symbol}</span>
           <span className="tkr-p">{v.price}</span>
         </span>
+        {/* the right column's lines are right-aligned, so a value of another length starts its text elsewhere in the same
+            box, and the browser counts a text that kept its node and moved as a layout shift (card
+            rail-and-legend-hold-on-r5: release 178's full rail at 1440, 0.00003 at live run 44429326442 as a refresh
+            re-filled the slots). Each value is its own text, keyed by what it says: a new value is new text, never moved */}
         <span className="tkr-b">
           <span className="tkr-mc" data-flash={flash}>
-            {v.mc}
-            <u>{WORDS.mc.text}</u>
+            <Fragment key={v.mc}>
+              {v.mc}
+              <u>{WORDS.mc.text}</u>
+            </Fragment>
           </span>
-          <span className="tkr-c" data-dir={typeof c !== "number" ? "none" : c >= 0 ? "up" : "down"}>{arrowPct(c)}</span>
+          <span className="tkr-c" data-dir={typeof c !== "number" ? "none" : c >= 0 ? "up" : "down"}>
+            <Fragment key={arrowPct(c)}>{arrowPct(c)}</Fragment>
+          </span>
         </span>
       </Link>
     </div>

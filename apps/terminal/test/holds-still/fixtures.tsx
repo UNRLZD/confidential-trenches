@@ -9,6 +9,8 @@ import { MemoryRouter } from "react-router";
 import type { Bar } from "../../src/screens/token/candles.ts";
 import { pricePrecision } from "../../src/screens/token/candles.ts";
 import { Legend } from "../../src/screens/token/TokenPage.tsx";
+import type { MarketRow } from "../../src/screens/discover/fields.ts";
+import { Row } from "../../src/screens/token/Rail.tsx";
 import type { ChartUnit } from "../../src/screens/token/units.ts";
 import { RunLabel } from "../../src/screens/trade/States.tsx";
 import "../../src/screens/trade/trade.css";
@@ -27,9 +29,11 @@ interface Fx {
   eth: number;
   /** The trade box's clock: its Slow counter runs from a tap at 0. */
   now: number;
+  /** The desktop rail's rows (Rail.tsx Row, one slot each, keyed by slot as the rail keys them): MC and 24h change. */
+  rail: { mc: string; chg: number }[];
 }
 
-let fx: Fx = { bars: [], at: null, unit: { mc: false, quote: false }, sol: 151.23, eth: 3456, now: 6_000 };
+let fx: Fx = { bars: [], at: null, unit: { mc: false, quote: false }, sol: 151.23, eth: 3456, now: 6_000, rail: [] };
 const subs = new Set<() => void>();
 const store = {
   subscribe: (f: () => void) => (subs.add(f), () => void subs.delete(f)),
@@ -84,6 +88,21 @@ function Cta() {
   );
 }
 
+const seen = new Map<string, number>();
+const railRow = (i: number, mc: string, chg: number): MarketRow => ({ chain: "solana", token: `T${i}`, symbol: `TK${i}`, name: "", icon: false, price_usd: "0.0012", mc_usd: mc, chg_24h_bps: chg, src: "fixture", as_of_ms: 0, launchpad: null });
+
+function Rail() {
+  const s = useSyncExternalStore(store.subscribe, store.get);
+  if (phone || s.rail.length === 0) return null;
+  return (
+    <aside className="tkr" data-testid="token-rail" data-slim="false" style={{ width: 340 }}>
+      <div className="tkr-rows" role="list">
+        {s.rail.map((x, i) => <Row key={i} r={railRow(i, x.mc, x.chg)} nowMs={0} sel={false} seen={seen} />)}
+      </div>
+    </aside>
+  );
+}
+
 function App() {
   return (
     <SignpageFrame client={client}>
@@ -94,6 +113,7 @@ function App() {
               <Plot />
             </div>
           </div>
+          <Rail />
           <Cta />
         </main>
         <Footer read={async () => ({ height: 223_607_563, ms: 233 })} />

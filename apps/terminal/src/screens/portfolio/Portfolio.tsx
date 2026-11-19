@@ -339,7 +339,7 @@ function CashTile({ parts, col, children }: { parts: readonly CashPart[]; col: s
               <span className="ell">{m?.name ?? p.chain}</span>
               <span className="grow" />
               {p.moving && <span className="tag blue"><W id="processing" /></span>}
-              <span className="num">{p.cents === null ? DASH : usd(p.cents)}</span>
+              <span key={String(p.cents)} className="num">{p.cents === null ? DASH : usd(p.cents)}</span>
             </div>
           );
         })}
@@ -402,7 +402,7 @@ function PoolRows({ p, src, mv, now, open, phone }: { p: Pools; src: PortfolioSo
   return (
     <div className={`pools pv2${phone ? " ph" : ""}`} data-pools={p.view} data-move={mv.ships || undefined}>
       <span className="plk"><W id="privateBalance" /></span>
-      <span className="pltot num" data-pools-total={total?.cents.toString()} data-partial={total?.partial || undefined}>{total ? usd(total.cents) : p.view === "loading" ? <Sk w={60} h={12} /> : DASH}</span>
+      <span key={`${total?.cents.toString() ?? p.view}`} className="pltot num" data-pools-total={total?.cents.toString()} data-partial={total?.partial || undefined}>{total ? usd(total.cents) : p.view === "loading" ? <Sk w={60} h={12} /> : DASH}</span>
       {!cols && <span className="plst" data-pools-state={p.view}>{p.view === "offline" ? <W id="offline" /> : <W id="noBalance" />}</span>}
       {p.view === "loading" &&
         [0, 1].map((i) => (
@@ -628,12 +628,14 @@ function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "mor
       <td className="l">
         <TokCell r={r} />
       </td>
-      <td>{r.bought === null ? DASH : usd(r.bought)}</td>
-      <td>{r.sold ? usd(r.sold) : DASH}</td>
-      <td>{units(r.units)}<div className="s2">{r.symbol}</div></td>
-      <td data-value data-unread={r.value === null || undefined}>{r.value === null ? DASH : usd(r.value)}</td>
-      <td className={sgn(r.pnlSign)} data-pnl>{r.pnl === null ? DASH : <>{usd(r.pnl, true)}<div className={`s2 ${sgn(r.pnlSign)}`}>{pct(r.pnlBps)}</div></>}</td>
-      <td className={sgn(signOf(r.realizedX))}>{r.realizedX !== 0n ? usd(r.realized, true) : DASH}</td>
+      {/* right-aligned live figures, each cell keyed by what it says: a value of another length is a new cell, never
+          text moved in its cell (card rail-and-legend-hold-on-r5) */}
+      <td key={`b${String(r.bought)}`}>{r.bought === null ? DASH : usd(r.bought)}</td>
+      <td key={`s${String(r.sold)}`}>{r.sold ? usd(r.sold) : DASH}</td>
+      <td key={`u${String(r.units)}`}>{units(r.units)}<div className="s2">{r.symbol}</div></td>
+      <td key={`v${String(r.value)}`} data-value data-unread={r.value === null || undefined}>{r.value === null ? DASH : usd(r.value)}</td>
+      <td key={`p${String(r.pnl)}|${String(r.pnlBps)}`} className={sgn(r.pnlSign)} data-pnl>{r.pnl === null ? DASH : <>{usd(r.pnl, true)}<div className={`s2 ${sgn(r.pnlSign)}`}>{pct(r.pnlBps)}</div></>}</td>
+      <td key={`r${String(r.realizedX)}`} className={sgn(signOf(r.realizedX))}>{r.realizedX !== 0n ? usd(r.realized, true) : DASH}</td>
       <td className="l">
         {r.exit ? (
           <span className="xs"><span className="xt tp num">TP {pct(r.exit.tp_bps).replace(".0", "")}</span><span className="xt sl num">SL {pct(-r.exit.sl_bps).replace(".0", "")}</span></span>
@@ -876,8 +878,8 @@ function PhoneRow({ r, onOpen, act }: { r: Row; onOpen(): void; act(a: Portfolio
           <div className="v sell-live" data-selling={r.selling.stage}><Selling r={r} /></div>
         ) : (
           <>
-            <div className="v num" data-value data-unread={r.value === null || undefined}>{r.value === null ? "—" : usd(r.value)}</div>
-            <span className={`pl num ${r.pnlSign === null || r.pnlSign === 0n ? "" : r.pnlSign > 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span>
+            <div key={String(r.value)} className="v num" data-value data-unread={r.value === null || undefined}>{r.value === null ? "—" : usd(r.value)}</div>
+            <span key={String(r.pnlBps)} className={`pl num ${r.pnlSign === null || r.pnlSign === 0n ? "" : r.pnlSign > 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span>
           </>
         )}
       </div>
