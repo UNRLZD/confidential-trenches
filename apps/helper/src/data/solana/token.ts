@@ -501,7 +501,8 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
 /** `timing` (card helper-ready-page-warm): the Server-Timing entries of the read that made this answer, one per upstream
  *  it waited on; "cache" when it was served from what was held. */
-export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number; why?: string; timing?: string };
+/** `pool` (a Solana tape's, card sol-vendor-tape-refresh-from-our-reads): the pool account whose trades its rows are. */
+export type DataAnswer = { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number; why?: string; timing?: string; pool?: string };
 
 const err = (status: number, code: string): DataAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
 export const NOT_FOUND = err(404, "not_found");
@@ -1514,8 +1515,23 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     /** 06b Holders (20 rows, merged per owner), or Jupiter's fallback. */
     holders: (mint: string, client?: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : holders.get(mint, client)),
     /** The top pool's newest trades as tape rows (a JSON array of TapeRow, newest first, at most TAPE_MAX), its source
-     *  in `src`: the tape of a token whose venue the chain tape does not decode (trades.ts). */
-    tape: (mint: string, client?: string): Promise<DataAnswer> => (address(mint) === null ? Promise.resolve(NOT_FOUND) : tapes.get(mint, client)),
+     *  in `src`: the tape of a token whose venue the chain tape does not decode (trades.ts). A good answer names the pool
+     *  its rows are of (`pool`), so trades.ts renews them from its own chain reads of that pool, never this vendor's (card
+     *  sol-vendor-tape-refresh-from-our-reads). */
+    /** The pool a tape's rows are of now (its top pool, chartPool), read as a chart's is: held POOL_FRESH_MS from our own
+     *  read, then one refresh, a refused one serving what is held; null when none is named or read (card
+     *  sol-vendor-tape-refresh-from-our-reads: trades.ts follows a new top pool). */
+    tapePool: async (mint: string): Promise<string | null> => {
+      if (address(mint) === null) return null;
+      const p = await pools.get(mint);
+      return p.status === 200 && address(p.body) !== null ? chartPool(mint, p.body) : null;
+    },
+    tape: async (mint: string, client?: string): Promise<DataAnswer> => {
+      if (address(mint) === null) return NOT_FOUND;
+      const a = await tapes.get(mint, client);
+      const p = pools.peek(mint);
+      return a.status === 200 && p?.status === 200 && address(p.body) !== null ? { ...a, pool: chartPool(mint, p.body) } : a;
+    },
     /** 06b Candles: up to `limit` bars of `tf` ending before `to` (unix seconds) when it is set. */
     async candles(mint: string, tf: string, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
       if (address(mint) === null || !Object.hasOwn(TF, tf)) return NOT_FOUND;

@@ -1067,6 +1067,8 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
     history: (mint, tf, to, limit, client) => token.candles(mint, tf, to, limit, client),
     // a token whose venue the chain tape does not decode: its top pool's trades (card solana-trades-show-on-every-token)
     tape: (mint) => token.tape(mint),
+    // the pool a followed tape reads, renewed at the top pool's own freshness (card sol-vendor-tape-refresh-from-our-reads)
+    pool: (mint) => token.tapePool(mint),
     // a coin quoted in another coin is priced at that coin's own row: Discover's, else Jupiter's held search row
     quoteUsd: async (mint) => {
       const a = await token.named(mint);

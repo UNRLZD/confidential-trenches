@@ -31,6 +31,13 @@ function vendor() {
 
 type Tape = { trades: unknown[]; whole_ms?: number; filling?: boolean; src: string; as_of_ms: number };
 const down = { handle: async () => ({ status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' }) };
+/** Every Solana RPC down: our own reads of the pool fail (card sol-vendor-tape-refresh-from-our-reads), so its tape is
+ *  refreshed from the vendor, as before that card. */
+const rpcDown = async (): Promise<Response> => new Response("{}", { status: 503 });
+/** The event loop's turn: a refresh behind the held rows reaches the vendor in it. */
+const settle = async () => {
+  for (let i = 0; i < 20; i++) await new Promise((ok) => setImmediate(ok));
+};
 
 test("a Solana vendor tape read within SOL_VENDOR_REACH_MS claims every trade after its oldest row and names its read's age; one held past it (its refresh failed) claims none, its rows still served", async () => {
   assert.equal(SOL_VENDOR_REACH_MS, TAPE_FRESH_MS + SOL_BEHIND_MS, "a read renewed each TAPE_FRESH_MS, overdue by at most the chain tape's own SOL_BEHIND_MS");
@@ -39,7 +46,7 @@ test("a Solana vendor tape read within SOL_VENDOR_REACH_MS claims every trade af
   const clock = { t: Date.parse("2026-11-14T17:25:00Z") };
   const read0 = clock.t;
   const token = createSolanaToken(down as never, down as never, { now: () => clock.t, fetch: v.fetch as never, sleep: async () => undefined });
-  const t = createSolanaTrades({ now: () => clock.t, listed: async () => false, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: (m) => token.tape(m) });
+  const t = createSolanaTrades({ now: () => clock.t, listed: async () => false, rpcs: ["https://rpc.test"], fetch: rpcDown as never, source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: (m) => token.tape(m) });
   try {
     const a = await t.trades(v.mint, 50);
     assert.equal(a.status, 200, a.body);
@@ -56,7 +63,8 @@ test("a Solana vendor tape read within SOL_VENDOR_REACH_MS claims every trade af
     clock.t = read0 + SOL_VENDOR_REACH_MS;
     const edge = await t.trades(v.mint, 50);
     const je = JSON.parse(edge.body) as Tape;
-    assert.ok(v.gt.reads > reads, "a held tape past TAPE_FRESH_MS is read again");
+    await settle();
+    assert.ok(v.gt.reads > reads, "a held tape past TAPE_FRESH_MS whose pool our reads cannot renew is read again from the vendor");
     assert.deepEqual([edge.status, je.as_of_ms, je.trades.length, je.whole_ms], [200, read0, v.n, v.oldest + 1_000], "at SOL_VENDOR_REACH_MS the claim still stands");
 
     clock.t = read0 + SOL_VENDOR_REACH_MS + 1;
