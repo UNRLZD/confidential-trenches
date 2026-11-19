@@ -813,7 +813,10 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   // ReaderOpts.turn)
   assert.match(sellHost, /await poolBuyWallets\(await store\(\), r, ask, signal, trade \? "trade" : "pass"\)/, "the sale's finder list on that stop, at a sale's trade turn");
   assert.match(sellHost, /\n {6}signal,\n/, "the host's own signal the same stop");
-  assert.equal([...src.matchAll(/ signal: solanaStop\.signal,/g)].length, 1, "the buy host's");
+  // and the tap's wait for its chain's spend (card taps-wait-inside-the-page: tapPrepare), which a sign out ends
+  assert.equal([...src.matchAll(/ signal: solanaStop\.signal,/g)].length, 2, "the buy host's and the tap's wait");
+  const tapWait = src.slice(src.indexOf("const tapPrepare = "), src.indexOf("\n  };\n", src.indexOf("const tapPrepare = ")));
+  assert.equal([...tapWait.matchAll(/ signal: solanaStop\.signal,/g)].length, 1, "the tap's wait on the stop as it reads it at the tap");
   assert.equal([...src.matchAll(/outSignal: \(\) => solanaStop\.signal,/g)].length, 1);
   // the Solana deposit host's stop: its waits between attempts end at a sign out's tap (review of f0e7bd38, P2-1); and the
   // withdraw host's, ending a step's wait after a provider's throttle (card pool-buy-waits-out-a-throttle)
@@ -826,8 +829,8 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   assert.equal([...src.matchAll(/ stop: \(\) => solanaStop\.signal,\n {2}\};/g)].length, 1);
   // every read of the stop: the six takes, the buy host's, its carry proof's, outSignal, the deposit host's stop, the
   // withdraw host's stop, the state pass's and the exit's, and the late buys' follow (card sol-settle-fix-review-p3s),
-  // taken before its first pass
-  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 14);
+  // taken before its first pass, and the tap's wait for its chain's spend (card taps-wait-inside-the-page)
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 15);
   assert.equal([...src.matchAll(/const stop = solanaStop\.signal;\n {4}if \(!locks\) return;\n {4}if \(lateFollowing === stop\) \{/g)].length, 1);
   // the settle pair: the page's two seats, the helper's with the window-long retry
   assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
