@@ -1843,13 +1843,19 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         evmIndexed.add(chain);
         // the store takes one a minute at most (EVM_INDEX_PUT_MS): the keep below syncs every EVM_INDEX_KEEP_MS
         const t = turnNow();
-        if (indexStore && !(t - (evmIndexPut.get(chain) ?? -Infinity) < EVM_INDEX_PUT_MS)) {
+        if (!(t - (evmIndexPut.get(chain) ?? -Infinity) < EVM_INDEX_PUT_MS)) {
           evmIndexPut.set(chain, t);
-          await indexStore.put(network, s.index);
+          await indexStore?.put(network, s.index);
         }
       }
     };
-    const locked = (): Promise<void> | void => (locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync());
+    const t0 = turnNow();
+    const run = evmIndexServe(chain, network, signal)
+      .catch(() => {})
+      .then(() => (signal.aborted ? undefined : locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync()))
+      .catch(() => {})
+      .finally(() => (evmIndexing.delete(chain), keep(turnNow() - t0)));
+    evmIndexing.set(chain, run);
     // Card evm-index-kept-at-the-head: a served index is kept at the head, so a coin's first quote reads its pools from
     // it and asks no scan by currency before its answer (the quote reads the blocks past N unread only while they start
     // within maxLag of the head, 10 s on both chains; synced once a sign-in, the index fell past it within seconds and
@@ -1863,25 +1869,20 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // that took longer than EVM_INDEX_KEEP_MS (a cold or catch-up one, or one held on 429s) ended with N that much behind
     // the head, past maxLag where it took over 10 s (a catch-up of 59,000 Base blocks from the snapshot took 28.6 s, its
     // first coin's quote then scanned 147 blocks by currency, 19 Nov 10:4xZ), so the next starts at once
+    // (the lock is spelled again here, not shared with run's: evm-index-served-before-lock reads run's serve-then-lock
+    // in the bundle as written)
     const keep = (took: number): void => {
       if (signal.aborted || !evmIndexed.has(chain)) return;
       keepSet(() => {
         if (signal.aborted) return;
         const at = turnNow();
         const again = Promise.resolve()
-          .then(locked)
+          .then(() => (locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync()))
           .catch(() => {})
           .finally(() => (evmIndexing.delete(chain), keep(turnNow() - at)));
         evmIndexing.set(chain, again);
       }, took > EVM_INDEX_KEEP_MS ? 0 : EVM_INDEX_KEEP_MS);
     };
-    const t0 = turnNow();
-    const run = evmIndexServe(chain, network, signal)
-      .catch(() => {})
-      .then(() => (signal.aborted ? undefined : locked()))
-      .catch(() => {})
-      .finally(() => (evmIndexing.delete(chain), keep(turnNow() - t0)));
-    evmIndexing.set(chain, run);
     return run;
   };
   const evmHoldings = (chain: "base" | "robinhood"): void => {
