@@ -347,7 +347,8 @@ else {
   const ground = drawSealedGround(document, groundLogo(GROUND_LOGO_SVG));
   document.body.append(ground);
   // the pool kinds' deps: the network's pins and each chain's two RPCs, which the price reads use too (src/pool-price.ts)
-  const poolDeps = testnetPoolDeps(testnet?.flow, testnet ? () => testnet.outSignal() : undefined);
+  // and a buy's wait at its tap while its chain's spend is prepared (card taps-wait-inside-the-page)
+  const poolDeps = testnetPoolDeps(testnet?.flow, testnet ? () => testnet.outSignal() : undefined, testnet ? (chain) => testnet.prepared(chain) : undefined);
   const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
   // a page shown again reads its prices at once: hidden, it read only every 15 s (src/pool-price.ts)
   wakeWhenShown(document, prices);

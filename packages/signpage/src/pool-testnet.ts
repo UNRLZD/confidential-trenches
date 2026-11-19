@@ -50,6 +50,7 @@ import { base58, base64 } from "@scure/base";
 import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, solanaWrappedRpc, type SolanaRpc, type SolanaRpcLimit, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts, seatRpc, type ReadKind } from "./page-rpc.ts";
 import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
+import { tapPrepared, timerWait } from "./tap-prepare.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -685,7 +686,7 @@ async function moveLegacyPending(w: WalletStore, opId: string, p: PendingOnward)
 /** The page network's deps for poolKinds, with `flow` the ops' flow (none: every checked request is refused). `rpcs` is
  *  each chain's pair, which the sell's decimals read and the page's USD price (src/pool-price.ts, the trade box's Buy)
  *  read on: on mainnet's EVM chains the pool list's two seats (pageEvmPoolRpcs, card evm-pools-on-mainnet). */
-export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDeps["stop"]): PoolKindsDeps {
+export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDeps["stop"], prepared?: PoolKindsDeps["prepared"]): PoolKindsDeps {
   return {
     pinned: (chain) => (chain === "solana" ? PAGE_SOL_PIN !== undefined : EVM_POOLS[POOL_TESTNET ? EVM_TESTNET[chain] : chain] !== undefined),
     rpcs: (chain) =>
@@ -698,6 +699,7 @@ export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDe
     decimals: PAGE_TOKEN_DECIMALS,
     ...(flow ? { flow } : {}),
     ...(stop ? { stop } : {}),
+    ...(prepared ? { prepared } : {}),
   };
 }
 
@@ -961,6 +963,9 @@ export type TestnetPool = {
   signedOut(): Promise<void>;
   /** The session's sign out, aborted at the next one: a pool kind's reads read it when a request comes (pool-kinds.ts). */
   outSignal(): AbortSignal;
+  /** A buy's wait at its tap while the chain's spend is prepared (card taps-wait-inside-the-page, src/tap-prepare.ts):
+   *  bounded, ended by a sign out, never throws (pool-kinds.ts PoolKindsDeps.prepared). */
+  prepared(chain: PoolChain): Promise<void>;
   /** The pool withdraw screen's reads and run (src/withdraw/pool-form.ts) for the request's op id. */
   withdrawDeps(chain: PoolChain, opId: string): PoolWithdrawFormDeps;
   /** The withdraw run of a screen's checked answer, its op record written as it goes; settles at the run's end. `claim`
@@ -1140,11 +1145,18 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const firstPasses = new Map<string, Promise<void>>();
   let solanaStarted!: () => void;
   const solanaFirst = new Promise<void>((r) => (solanaStarted = r));
+  // each chain's newest pass in flight (card taps-wait-inside-the-page): a tap waiting for its chain's spend joins it,
+  // never starts a prover run beside it; and the chains whose first pass of this page life has ended
+  const passes = new Map<string, Promise<unknown>>();
+  const firstDone = new Set<string>();
   const firstOf = <T,>(chain: string, run: Promise<T>): Promise<T> => {
     if (!firstPasses.has(chain)) {
-      firstPasses.set(chain, run.then(() => {}, () => {}));
+      firstPasses.set(chain, run.then(() => void firstDone.add(chain), () => void firstDone.add(chain)));
       if (chain === "solana") solanaStarted();
     }
+    passes.set(chain, run);
+    const done = (): void => void (passes.get(chain) === run && passes.delete(chain));
+    run.then(done, done);
     return run;
   };
   const proofs = (): Promise<QueuePass | null> => firstOf("solana", solanaProofs());
@@ -3805,6 +3817,41 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // a sell tapped here: the front taken at the tap, so the sale's return note is proved in the tab in use; the sell
   // itself spends no proof and does not wait for it
   const sellTapped = (): void => void front.tap().then((end) => end(), () => {});
+  // a buy tapped while the chain's spend is prepared waits for it (card taps-wait-inside-the-page, src/tap-prepare.ts):
+  // the front taken first, as the buy's own tap takes it (tapRun), so this tab's queue opens and proves; preparing while
+  // the chain's first pass of this page life has not ended and the chain holds a note to prove (UNSPENT or HELD, as a
+  // state read opens the queue for), or while its queue makes a note's first proof with none of the note's ready (a
+  // fresh landing, a remake whose old proof is late); the pass joined is the chain's own in flight, else the queue's next
+  const tapPreparing = async (chain: PoolChain): Promise<boolean> => {
+    const s = chain === "solana" ? scope : (evmPool(chain)?.scope ?? null);
+    if (s === null || !wayOut(chain)) return false;
+    const mine = (await readNotes(await within(page.store(), TRADE_STORE_MS, "the wallet store"))).filter((n) => n.scope === s && (n.state === "UNSPENT" || n.state === "HELD"));
+    if (mine.length === 0) return false;
+    if (!firstDone.has(chain)) return true;
+    const q = chain === "solana" ? open : (evmQueues.get(chain) ?? null);
+    const queue = q === null ? null : ((await within(q, STATE_READ_MS, "a proof queue's open").catch(() => null))?.queue ?? null);
+    if (queue === null) return false;
+    const view = await queue.readyWith(async () => null);
+    const ready = new Set(view.ready.map((r) => r.noteId));
+    const ids = new Set(mine.map((n) => n.id));
+    return view.making.some((id) => ids.has(id) && !ready.has(id));
+  };
+  const tapPrepare = async (chain: PoolChain): Promise<void> => {
+    // no front in its bound: no queue of this tab can prove, so nothing is waited for (the buy's own tap answers it)
+    const end = await front.tap().catch(() => null);
+    if (end === null) return;
+    try {
+      await tapPrepared({
+        preparing: () => tapPreparing(chain),
+        pass: () => passes.get(chain) ?? (chain === "solana" ? proofs() : evmProofs(chain)),
+        now: () => Date.now(),
+        wait: timerWait,
+        signal: solanaStop.signal,
+      });
+    } finally {
+      end?.();
+    }
+  };
   return {
     flow: (ask, ctx) => {
       // a tap: the rent backs' passes from a time drawn after it (card rent-backs-resume-private); after a deposit or a
@@ -3969,6 +4016,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     signedOut,
     // the session's sign out: aborted at the next one (this tab's or another's), as every Solana settle's stop
     outSignal: () => solanaStop.signal,
+    // a buy's wait at its tap for the chain's spend being prepared (card taps-wait-inside-the-page)
+    prepared: tapPrepare,
     withdrawDeps,
     withdraw,
   };
