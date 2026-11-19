@@ -34,7 +34,10 @@
 //   node scripts/live-checks/app-legend-holds-still.mjs [--build <dir>] [--path <route>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --path opens that route instead of a picked token (a token page, /token/<chain>/<id>, or / for the top Trending token); --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute,
-// signed out as a first visit to APP_HOST is), the helper still answered live; --record writes what the run read, so the check's test can replay it through judge().
+// signed out as a first visit to APP_HOST is), and reads no public host: the harness answers the helper from its
+// recordings (its lists, token, tape, candles and logos; any other read refused; movingLists below), its browser mocks the push socket
+// (scripts/harness-sockets.mjs), and with no --path it opens the page of the token / opens on (routes.ts OPEN_TOKEN, whose
+// 500 bars at 15m the harness holds) with no pick, since the pick reads the live helper; --record writes what the run read, so the check's test can replay it through judge().
 import "../net-window.mjs";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -42,9 +45,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
 import { CANDLES_URL, DEFAULT_TF, toCandleData } from "../../apps/terminal/src/screens/token/candles.ts";
+import { OPEN_TOKEN } from "../../apps/terminal/src/routes/routes.ts";
 import { candlesReader } from "./candles-read.mjs";
 import { INIT, WIDTHS } from "./app-shell.mjs";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-legend-holds-still";
@@ -232,7 +237,7 @@ export async function pickToken({ fetchFn = fetch, chains = CHAINS, max = MAX_RE
 
 async function watch(browser, w, harness, shots, route) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark" });
-  if (harness) await ctx.route("**/*", (r) => (originOf(r.request().url()) === HELPER_HOST ? r.continue() : harness(r)));
+  if (harness) await ctx.route("**/*", harness);
   await ctx.addInitScript(INIT);
   const page = await ctx.newPage();
   const errors = [];
@@ -304,18 +309,45 @@ async function watch(browser, w, harness, shots, route) {
   }
 }
 
+/** The harness's lists, moving as live ones do (card app-live-checks-run-on-the-build-before-merge): the recorded lists
+ *  are one still answer, so a refresh (Discover's REFRESH_MS, 12 s) re-fills every slot with the same text and the
+ *  rail's re-fill shift that went red on release 178's live run (44429326442: the full rail's MC and change, right
+ *  aligned, moved as their values changed length) could never show on the build. Every other lists read of a chain answers each
+ *  row's mc_usd times MC_STEP and its chg_24h_bps times CHG_STEP, so each refresh gives the rail values of another
+ *  length; every other read is `recorded`'s own answer. */
+export const MC_STEP = 10.37;
+export const CHG_STEP = 10;
+export function movingLists(recorded) {
+  const reads = new Map();
+  return async (route) => {
+    const u = new URL(route.request().url());
+    if (u.origin !== HELPER_HOST || u.pathname !== "/v1/market/lists") return recorded(route);
+    const a = await new Promise((resolve) => recorded({ request: () => route.request(), fulfill: resolve, abort: (why) => resolve({ abort: why }) }));
+    const chain = u.searchParams.get("chain");
+    const n = reads.get(chain) ?? 0;
+    reads.set(chain, n + 1);
+    if (a.abort !== undefined || a.status !== 200 || n % 2 === 0) return a.abort !== undefined ? route.abort(a.abort) : route.fulfill(a);
+    const body = JSON.parse(a.body);
+    for (const rows of Object.values(body.lists ?? {})) for (const r of rows) {
+      if (r.mc_usd !== null && r.mc_usd !== undefined) r.mc_usd = String(Number(r.mc_usd) * MC_STEP);
+      if (typeof r.chg_24h_bps === "number") r.chg_24h_bps = Math.round(r.chg_24h_bps * CHG_STEP);
+    }
+    return route.fulfill({ ...a, body: JSON.stringify(body) });
+  };
+}
+
 export async function collect({ build = null, route = "/", pick = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
   mkdirSync(shots, { recursive: true });
   // a pick that found no chart to walk opens nothing
-  if (pick && !pick.picked) return { rec: { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", route: null, pick, at: new Date().toISOString(), browser: null, loads: [] }, shots };
+  if (pick && !pick.picked) return { rec: { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, the helper recorded` : "live", route: null, pick, at: new Date().toISOString(), browser: null, loads: [] }, shots };
   if (pick) route = `/token/${pick.picked.chain}/${encodeURIComponent(pick.picked.addr)}`;
   let harness = null;
   if (build) {
     const { harnessRoute } = await import("./app-in-shell.mjs");
-    harness = await harnessRoute(path.resolve(build), "signed", { state: SIGNED_OUT });
+    harness = movingLists(await harnessRoute(path.resolve(build), "signed", { state: SIGNED_OUT }));
   }
-  const browser = await launchBrowser("chromium");
-  const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", route, ...(pick ? { pick } : {}), at: new Date().toISOString(), browser: browser.version(), loads: [] };
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
+  const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, the helper recorded` : "live", route, ...(pick ? { pick } : {}), at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const w of WIDTHS) rec.loads.push(await watch(browser, w, harness, shots, route));
   } finally {
@@ -331,7 +363,8 @@ async function main() {
     return i >= 0 ? args[i + 1] : d;
   };
   const fixed = opt("--path", null);
-  const { rec, shots } = await collect({ build: opt("--build", null), route: fixed ?? "/", pick: fixed === null ? await pickToken() : null, shots: opt("--shots", undefined) });
+  const build = opt("--build", null);
+  const { rec, shots } = await collect({ build, route: fixed ?? (build === null ? "/" : `/token/${OPEN_TOKEN.chain}/${OPEN_TOKEN.id}`), pick: fixed === null && build === null ? await pickToken() : null, shots: opt("--shots", undefined) });
   const record = opt("--record", null);
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 2)}\n`);
   const r = judge(rec);

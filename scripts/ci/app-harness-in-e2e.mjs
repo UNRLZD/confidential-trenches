@@ -36,8 +36,6 @@ export const PENDING = Object.freeze({
   // arrived"); the account chip's growth on a signed-in load with no sign-in hint (hint.ts firstShape, CLS 0.0021 /
   // 0.0016) is card app-first-paint-knows-sign-in's
   "app-shell": "e2e-reads-no-public-host",
-  "app-legend-holds-still": "rail-and-legend-hold-on-r5",
-  "rail-open-pushes-the-middle": "rail-and-legend-hold-on-r5",
   // their collect starts plain launchBrowser under harnessRoute, so the page's push socket reaches the live helper, which
   // refuses a ninth per address with 503 (apps/helper/src/data/push.ts PUSH_CLIENT_MAX): verify-row red 1 run in 3
   "verify-pools": "e2e-reads-no-public-host",

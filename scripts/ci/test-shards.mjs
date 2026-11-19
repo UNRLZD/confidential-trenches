@@ -110,8 +110,9 @@ export const E2E_SECONDS = {
   "apps/terminal: node ../../scripts/live-checks/trade-box-pool.mjs --harness": 11, // 11 s
   // verify-pools (6 s) and verify-row-survives-one-provider (9 s) join with card e2e-reads-no-public-host (PENDING);
   // the same card's app checks that take --build, measured on a local run (19 Nov 00:55Z),
-  // whole seconds, 1 s at the least; app-shell (105 s), app-legend-holds-still (70 s) and
-  // rail-open-pushes-the-middle (16 s) join with the cards their PENDING entries name (scripts/ci/app-harness-in-e2e.mjs)
+  // whole seconds, 1 s at the least; app-shell (105 s) joins with the card its PENDING entry names
+  // (scripts/ci/app-harness-in-e2e.mjs); app-legend-holds-still and rail-open-pushes-the-middle joined once the rail fix
+  // landed, the helper answered from the harness's recordings (19 Nov 07:20Z, local runs)
   "apps/terminal: node ../../scripts/live-checks/app-chains-evm-rail.mjs --build dist": 9, // 9 s
   "apps/terminal: node ../../scripts/live-checks/app-chains-evm.mjs --build dist": 27, // 27 s
   "apps/terminal: node ../../scripts/live-checks/app-chart-fills-in-its-history.mjs --build dist": 58, // 58 s
@@ -120,6 +121,7 @@ export const E2E_SECONDS = {
   "apps/terminal: node ../../scripts/live-checks/app-discover-rows-hold.mjs --build dist": 85, // 85 s
   "apps/terminal: node ../../scripts/live-checks/app-discover-toolbar.mjs --build dist": 21, // 21 s
   "apps/terminal: node ../../scripts/live-checks/app-launchpad-badges.mjs --build dist": 9, // 9 s
+  "apps/terminal: node ../../scripts/live-checks/app-legend-holds-still.mjs --build dist": 66, // 66 s
   "apps/terminal: node ../../scripts/live-checks/app-near-trading.mjs --build dist": 6, // 6 s
   "apps/terminal: node ../../scripts/live-checks/app-no-test-token.mjs --build dist": 8, // 8 s
   "apps/terminal: node ../../scripts/live-checks/app-token-chart.mjs --build dist": 9, // 9 s
@@ -127,6 +129,7 @@ export const E2E_SECONDS = {
   "apps/terminal: node ../../scripts/live-checks/app-token-route.mjs --build dist": 21, // 21 s
   "apps/terminal: node ../../scripts/live-checks/app-trade-box-mount.mjs --build dist": 6, // 6 s
   "apps/terminal: node ../../scripts/live-checks/discover-matches-the-main-app.mjs --build dist": 13, // 13 s
+  "apps/terminal: node ../../scripts/live-checks/rail-open-pushes-the-middle.mjs --build dist": 9, // 9 s
   "apps/terminal: node ../../scripts/live-checks/words-nov8-final.mjs --local --host app --build dist": 1, // 0 s
   "apps/terminal: node test/withdraw/run.mjs": 14, // B2 14.0
   "apps/terminal: node test/withdraw-form/run.mjs": 5, // C3 4.7
