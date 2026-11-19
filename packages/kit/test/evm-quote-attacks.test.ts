@@ -1495,6 +1495,40 @@ test("XE a failed early read of a route the quote does not take never ends the q
   await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0), failing], NOW + 1_000, scanner(5_000_000, logs), undefined, () => 0), heldTo(x0));
 });
 
+// Card evm-warm-tap-reads-in-one-round: a warm tap of Base 0x07b3d9 read its two routes through X's markets that its
+// last quote did not take in a round of their own after the rest (about 0.3 s from the Mac, 2026-11-19 03:2xZ). Now the
+// plan keeps them and the next quote reads them beside its first round, their own read: the warm quote reads in one
+// round, held to the same route. Rounds are counted on provider 0 as RX counts them.
+test("RX2 a warm quote reads the routes through X's markets its last quote did not take beside its first round: one round, held to the same route", async () => {
+  const token = "0x00000000000000000000000000000000000ff1fb";
+  const x0 = xAt(0x183);
+  const real: ModelPool = { key: keyOf(token, x0, 3000, 60, NATIVE), give: (a) => a };
+  const market = marketOf(x0);
+  const thin: ModelPool = { key: keyOf(x0, NATIVE, 500, 10, NATIVE), give: (a) => a / 100n };
+  const logs = [{ key: real.key, at: 4_000_100 }, { key: market.key, at: 4_050_000 }, { key: thin.key, at: 4_050_001 }];
+  const pools = [seeded(token), real, market, thin];
+  let rounds = 0;
+  let open = 0;
+  const counted = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const reads = calls.some((c) => c.method === "eth_call");
+    if (reads && open++ === 0) rounds++;
+    try {
+      await new Promise((go) => setTimeout(go, 5));
+      return await rpc(calls);
+    } finally {
+      if (reads) open--;
+    }
+  };
+  const scan = scanner(5_000_000, logs);
+  const at = (amountIn: bigint, now: number) => evmPoolBuyQuoteWith({ chain: "base", token, amountIn, slippageBps: 100, route: seededRoute(token) }, [counted(chain(pools, 0)), chain(pools, 1)], now, scan, undefined, () => 0);
+  await assert.rejects(at(AMOUNT, NOW), heldTo(x0));
+  const cold = rounds;
+  rounds = 0;
+  // the next quote of the token, warm
+  await assert.rejects(at(AMOUNT, NOW + 1_000), heldTo(x0));
+  assert.equal(rounds, 1, `the warm quote read in ${rounds} rounds (the cold one in ${cold})`);
+});
+
 // Card evm-5xx-holds-the-provider-for-the-round, with card evm-cold-multihop-quote-inside-the-kpi's early reads: the
 // fourth round reads its own reads and the early routes through X's markets as two reads at once, and a provider that
 // answers HTTP 5xx to one is held in the other. At a87cbd3ff (this card merged with that one) each read held it in its own
@@ -9761,6 +9795,113 @@ test("GS12 a read that needed fewer a call is sent that many a call in the next 
     assert.ok(warm.length > 0 && warm.every((x) => x === 0), `warm: ${warm.join(",")} reads answered 2 a call`);
   } finally {
     quoteMod.evmReadsPerCall();
+  }
+});
+
+test("GS23 card evm-warm-tap-reads-in-one-round: a tap at another amount than the coin page's warm quote sends each read the warm needed fewer a call in that many: no read answers 2, so no round reads one again", async () => {
+  // every warm tap of Base 0x07b3d9 read 12 quotes again alone in a round of its own (about 1.1 s from the Mac,
+  // 2026-11-19 03:2xZ): the warm quoted EVM_BUY_WARM_IN, the tap the typed amount, and the sizes were kept by calldata
+  const token = "0x00000000000000000000000000000000000a5a6e";
+  const pools = [seeded(token), betterAt(token, 35_000_000)];
+  // each aggregate3 answer's reads answered 2, and the eth_call posts sent
+  const seen = (rpc: EvmRpc, twos: number[], posts: { n: number }): EvmRpc => async (calls) => {
+    if (calls.some((c) => c.method === "eth_call")) posts.n++;
+    const out = (await rpc(calls)) as { result?: string }[];
+    calls.forEach((c, i) => {
+      const r = out[i]?.result;
+      if (c.method !== "eth_call" || (c.params[0] as { to?: string }).to?.toLowerCase() !== MC3 || typeof r !== "string") return;
+      const h = r.slice(2);
+      const at = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
+      twos.push(Array.from({ length: at(32) }, (_, k) => at(64 + at(64 + 32 * k))).filter((w) => w === 2).length);
+    });
+    return out;
+  };
+  const at = (amountIn: bigint, rpcs: [EvmRpc, EvmRpc]) => verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn, slippageBps: 100, route: seededRoute(token) }, rpcs, NOW));
+  quoteMod.evmReadsPerCall(64);
+  try {
+    // the coin page's warm quote: the better pool's quotes answer 2 in a call of several and are read again alone
+    const warm: number[] = [];
+    assert.deepEqual(await at(AMOUNT, [seen(chain(pools, 0), warm, { n: 0 }), chain(pools, 1)]), below);
+    assert.ok(warm.some((x) => x > 0), `warm: ${warm.join(",")} reads answered 2 a call`);
+    // the tap at one and a half times it
+    const tap: number[] = [];
+    const posts = { n: 0 };
+    assert.deepEqual(await at((3n * AMOUNT) / 2n, [seen(chain(pools, 0), tap, posts), chain(pools, 1)]), below);
+    assert.ok(tap.length > 0 && tap.every((x) => x === 0), `tap: ${tap.join(",")} reads answered 2 a call, in ${posts.n} posts`);
+  } finally {
+    quoteMod.evmReadsPerCall();
+  }
+});
+
+test("GS24 card evm-tap-never-restarts-after-the-fit: a follow of a refusal's reference at its block sends no read the refused quote read, one that ran out of its gas alone too", async () => {
+  // 2 of 15 warm taps of Base 0x07b3d9 quoted twice (rs8, rs12 and rs28 from the Mac, 2026-11-19 04:0xZ): the warm's
+  // route was refused below_reference by 0.003% and the tap followed the reference at the refusal's block, which sent
+  // again alone the 12 quotes that had run out of their gas alone (never kept), 860 to 1,325 ms of a 3.0 to 3.6 s tap
+  const token = "0x00000000000000000000000000000000000a5a6f";
+  // every model block has the hash NEW: the agreed reads the tests before kept there (AGREED_READS a block) are let go
+  quoteMod.evmAgreedReset();
+  const pools = [seeded(token), betterAt(token, 1_000_000), spamAt(token)];
+  const rpcs: [EvmRpc, EvmRpc] = [chain(pools, 0), chain(pools, 1)];
+  const req = { chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as const;
+  const refused = await evmPoolBuyQuoteWith(req, rpcs, NOW).then(
+    () => assert.fail("the seeded route is refused"),
+    (e: unknown) => e as EvmQuoteError & { at: string; reference: { route: EvmRoute } },
+  );
+  assert.equal(refused.code, "below_reference");
+  // the block the device's head watch confirmed: the model's head, at the hash the refusal names
+  const h = head("0x" + (5_000_000).toString(16), refused.at);
+  const block = { number: BigInt(h.number), hash: h.hash, timestamp: BigInt(h.timestamp), baseFeePerGas: BigInt(h.baseFeePerGas!) };
+  const watch: quoteMod.EvmHeadWatch = { head: () => Promise.reject(new Error("a follow agrees on no new head")), keep: () => {}, peek: () => null, held: (x) => (x === block.hash ? block : null) };
+  // every read the follow sends, by provider
+  const sent: number[] = [0, 0];
+  const counted = (k: 0 | 1): EvmRpc => async (calls) => {
+    for (const c of calls) if (c.method === "eth_call" && (c.params[0] as { to?: string }).to?.toLowerCase() === MC3) sent[k]! += Number(BigInt("0x" + (c.params[0] as { data: string }).data.slice(74, 138)));
+    return rpcs[k](calls);
+  };
+  const q = await verdict(evmPoolBuyQuoteWith({ ...req, route: refused.reference.route, at: refused.at }, [counted(0), counted(1)], NOW, undefined, watch));
+  assert.deepEqual(q, { accepted: true, amountOut: AMOUNT, minOut: (AMOUNT * 99n) / 100n, block: 5_000_000n });
+  assert.deepEqual(sent, [0, 0], `the follow sent ${sent.join(" and ")} reads again`);
+});
+
+test("GS25 card evm-pinned-follow-reads-no-scan-past-its-block: a follow pinned to a refusal's block reads the scan up to that block from what the refused quote kept: no head read, no getLogs past it", async () => {
+  // each follow of Base 0x07b3d9 read the scan provider's head and the 3 blocks past the pinned one before its first
+  // round (fx5, fx9 and fx10 from the Mac, 2026-11-19 04:2xZ: about 230 to 470 ms of a 542 to 586 ms follow)
+  for (const [token, keptTo] of [["0x00000000000000000000000000000000000a5a70", 5_000_000], ["0x00000000000000000000000000000000000a5a71", 4_999_990]] as const) {
+    const pools = [seeded(token), betterAt(token, 1_000_000)];
+    const rpcs: [EvmRpc, EvmRpc] = [chain(pools, 0), chain(pools, 1)];
+    // one scan provider, its head where the test puts it: each eth_blockNumber and getLogs range it is sent
+    let headNo: number = keptTo;
+    const heads: number[] = [];
+    const logs: [number, number][] = [];
+    const scan: EvmRpc = async (calls, signal) => {
+      for (const c of calls) if (c.method === "eth_blockNumber") heads.push(headNo);
+      return scanner(headNo, [seeded(token), betterAt(token, 1_000_000)].map((p) => ({ key: p.key, at: 4_500_000 })), logs)(calls, signal);
+    };
+    const req = { chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as const;
+    const refused = await evmPoolBuyQuoteWith(req, rpcs, NOW, scan).then(
+      () => assert.fail("the seeded route is refused"),
+      (e: unknown) => e as EvmQuoteError & { at: string; reference: { route: EvmRoute } },
+    );
+    assert.equal(refused.code, "below_reference");
+    // the refused quote kept the scan to keptTo, its head; the chain's agreed block is 5,000,000
+    await new Promise((go) => setTimeout(go, 20));
+    const h = head("0x" + (5_000_000).toString(16), refused.at);
+    const block = { number: BigInt(h.number), hash: h.hash, timestamp: BigInt(h.timestamp), baseFeePerGas: BigInt(h.baseFeePerGas!) };
+    const watch: quoteMod.EvmHeadWatch = { head: () => Promise.reject(new Error("a follow agrees on no new head")), keep: () => {}, peek: () => null, held: (x) => (x === block.hash ? block : null) };
+    // the scan provider is 6 blocks past the pinned block by the follow
+    headNo = 5_000_006;
+    heads.length = 0;
+    logs.length = 0;
+    const q = await verdict(evmPoolBuyQuoteWith({ ...req, route: refused.reference.route, at: refused.at }, rpcs, NOW, scan, watch));
+    // and whatever the follow reads once it has answered
+    await new Promise((go) => setTimeout(go, 20));
+    assert.deepEqual(q, { accepted: true, amountOut: AMOUNT, minOut: (AMOUNT * 99n) / 100n, block: 5_000_000n });
+    assert.deepEqual(heads, [], `kept to ${keptTo}: the follow read the scan provider's head ${heads.length} times`);
+    // kept to the pin: no block is read; kept short of it: only the blocks after the kept scan, up to the pin
+    const past = logs.filter(([, b]) => b > 5_000_000);
+    assert.deepEqual(past, [], `kept to ${keptTo}: the follow read ${JSON.stringify(past)} past the pinned block`);
+    if (keptTo === 5_000_000) assert.deepEqual(logs, [], `the follow read ${JSON.stringify(logs)}`);
+    else assert.deepEqual(logs.length > 0 && logs.every(([a, b]) => a === keptTo + 1 && b === 5_000_000), true, `the follow read ${JSON.stringify(logs)}: not the blocks after ${keptTo} up to the pin`);
   }
 });
 

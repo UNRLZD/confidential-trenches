@@ -12,7 +12,8 @@
 // - the tap asked the kit once: the warm left the coin's route as the tap's first, so no refusal is followed;
 // - the tap's posts and eth_calls are recorded beside its time (a round count is not judged: a provider's hedged spare
 //   still out across rounds hides a round from any count made from outside the kit);
-// - no Base quote provider or index reader answers 429.
+// - no Base quote provider or index reader answers 429, in any step: each 429 is printed with the step it was met
+//   in (`s429At`: the sync, a coin's warm or its tap), and every one fails the run, a sync's too (the page meets it).
 // Reads only: no key, no transaction, no money moves.
 // After: sign
 // Bundle: out SIGN_HOST's Base snapshot, Base's providers
@@ -66,13 +67,17 @@ export function check(run) {
   }
   const hot = Object.entries(run?.s429 ?? {}).filter(([, n]) => n > 0);
   say(hot.length === 0, `[base] answers of 429: ${hot.length === 0 ? "none" : hot.map(([h, n]) => `${h} ${n}`).join(", ")}`);
+  // each step's 429s on a line of its own (a run recorded before s429At prints none); the verdict is the line above
+  for (const [at, n] of Object.entries(run?.s429At ?? {})) lines.push(`    429 in the ${at}: ${n}`);
   return { ok, lines };
 }
 
 /** One run: the served snapshot, one sync from it, then each of COINS warmed and tapped. */
 export async function read(sign = SIGN, site = null, venues = mainnetVenues()) {
   const v = venues.base;
-  const run = { sign, site: site === null ? null : "a build folder at SIGN_HOST's name", at: new Date().toISOString(), snapshot: {}, sync: null, coins: [], s429: {} };
+  const run = { sign, site: site === null ? null : "a build folder at SIGN_HOST's name", at: new Date().toISOString(), snapshot: {}, sync: null, coins: [], s429: {}, s429At: {} };
+  // the step a post is sent in: "sync", "warm <coin>" or "tap <coin>"
+  let step = "snapshot read";
   const quoteHosts = new Set(v.providers.map((u) => new URL(u).host));
   const hosts = new Set([...v.providers, ...v.index.readers].map((u) => new URL(u).host));
   // the running tap's posts to the quote providers and the eth_calls in them
@@ -87,8 +92,12 @@ export async function read(sign = SIGN, site = null, venues = mainnetVenues()) {
         tap.calls += (Array.isArray(body) ? body : [body]).filter((c) => c?.method === "eth_call").length;
       } catch {}
     }
+    const at = step;
     const r = await orig(input, init);
-    if (r.status === 429 && hosts.has(host)) run.s429[host] = (run.s429[host] ?? 0) + 1;
+    if (r.status === 429 && hosts.has(host)) {
+      run.s429[host] = (run.s429[host] ?? 0) + 1;
+      run.s429At[`${at}, ${host}`] = (run.s429At[`${at}, ${host}`] ?? 0) + 1;
+    }
     return r;
   };
   try {
@@ -114,6 +123,7 @@ export async function read(sign = SIGN, site = null, venues = mainnetVenues()) {
     if (ix === null) return run;
     Object.assign(run.snapshot, { through: ix.through, pools: ix.pools.length });
     const t0 = performance.now();
+    step = "sync";
     const { served } = await evmPoolIndexRefresh("base", ix).catch(() => ({ served: false }));
     run.sync = { ms: Math.round(performance.now() - t0), served };
     if (!served) return run;
@@ -121,10 +131,12 @@ export async function read(sign = SIGN, site = null, venues = mainnetVenues()) {
     const quote = (req) => (asks++, evmPoolBuyQuote({ ...req, later: true }));
     for (const token of COINS) {
       const tw = performance.now();
+      step = `warm of ${token}`;
       await evmPoolBuyWarm({ chain: "base", token }, { quote });
       const warm = { ms: Math.round(performance.now() - tw) };
       asks = 0;
       tap = { posts: 0, calls: 0 };
+      step = `tap of ${token}`;
       const t = performance.now();
       let one;
       try {
@@ -135,6 +147,7 @@ export async function read(sign = SIGN, site = null, venues = mainnetVenues()) {
       }
       run.coins.push({ coin: token, warm, tap: { ...one, asks, posts: tap.posts, calls: tap.calls } });
       tap = null;
+      step = "end";
     }
     return run;
   } finally {
