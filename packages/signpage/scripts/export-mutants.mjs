@@ -1,6 +1,10 @@
 // node packages/signpage/scripts/export-mutants.mjs (card signpage-backup-export): plants one mutant at a time in the
 // export of one key (src/pages/export.ts, and its wiring in src/main.ts), one per rule, runs the test that holds that
 // rule, expects it to fail, and puts the source back.
+// No mutant drops show()'s own clear of the wallet and key (src/main.ts show, "off the export screen"): since the review's
+// fix every way off the export (Done, the x, the scrim, Esc, pagehide) runs leaveScreen, which clears them at the tap
+// (X14 drops that), and a sign out here or elsewhere reloads the page; show()'s clear is the same program on every
+// reachable state, kept so a later way off cannot keep them. Its mutant (X9 before the review) survived for that reason.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
@@ -21,7 +25,6 @@ const M = [
   ["X6 the NEAR key with no ed25519: prefix (not NEAR's form)", EXPORT, UNIT, "`ed25519:${base58.encode(full)}`", "base58.encode(full)"],
   ["X7 the ownership check skipped before the answer", MAIN, PAGE, "answer: () => (owned ? decide(", "answer: () => (true ? decide("],
   ["X8 Show unguarded: a lined-up click draws the key", MAIN, PAGE, '"backup", "show", "copy",', '"backup", "copy",'],
-  ["X9 the key kept past the screen: the next open draws it with no Show", MAIN, PAGE, "    exportTarget = null;\n    exportShown = null;\n", "    exportTarget = null;\n"],
   ["X10 the export's Copy leaves the clipboard holding the key after Done", MAIN, PAGE, "          copied = true;\n          void navigator.clipboard?.writeText(key)", "          void navigator.clipboard?.writeText(key)"],
   [
     "X11 the key sent to APP_HOST in the answer",
