@@ -40,22 +40,31 @@
 .tkp-retry::before, .tkp-home::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 
 /* desktop: the left rail (Rail.tsx), the main column (header over chart) and the trade box's place. The rail's width
-   modes (card app-token-rail, R5 token.css): full from 1500 px, slim from 1180, none under it; the column is set from
-   the first paint, so the main column never moves when the rail's rows land */
+   modes are measured on the page's own box in layout px, as R5 draws them (token.css at design-lock-r5: @container app,
+   the zoomed design's px), never on the screen's px (card app-token-rail-r5-fit; research repo docs/owner-decisions.md,
+   8 Nov 19:40Z): full wherever the full rail fits uncut, slim (the rings) where it would cut the header, none under
+   R5's 1180. R5 goes slim under 1500 beside a 400 trade column; beside this page's 440 one, the full rail cut the
+   header's symbol on a 1500 page (1080 css px) and held it whole on a 1527.8 one (1100 css px), so the full rail is
+   drawn from 1527 (test/token-rail/sweep.mjs). The page is drawn at --fit-zoom, so a 1440 screen is a 1920 page and
+   draws the full rail as R5's picture.
+   Each mode also names itself to Rail.tsx (--tkr-mode), so the rail draws what its column holds. The column is set
+   from the first paint, so the main column never moves when the rail's rows land */
+.tkp { container: tkp-page / inline-size; }
 .tkp-desk { height: 100%; display: grid; grid-template-columns: 340px minmax(0, 1fr) 440px; gap: 8px; padding: 0 8px 8px; }
-@media (max-width: 1499.98px) { .tkp-desk { grid-template-columns: 78px minmax(0, 1fr) 440px; } }
-/* the rail folded by its « (Rail.tsx, kept on this device): its rings column, as under 1500 */
+.tkp-desk > .tkr { --tkr-mode: full; }
+@container tkp-page (max-width: 1526.98px) { .tkp-desk { grid-template-columns: 78px minmax(0, 1fr) 440px; } .tkp-desk > .tkr { --tkr-mode: slim; } }
+/* the rail folded by its « (Rail.tsx, kept on this device): its rings column, as the slim mode */
 .tkp-desk:has(> .tkr[data-collapsed="true"]) { grid-template-columns: 78px minmax(0, 1fr) 440px; }
 /* the slim rail opened by its » (card rail-open-pushes-the-middle): the full rail's own column, taken from the main
    column (the chart and the orders move right, never under it), as the UNRLZD terminal's rail slot takes its width */
-@media (min-width: 1180px) and (max-width: 1499.98px) { .tkp-desk:has(> .tkr[data-open="true"]) { grid-template-columns: 340px minmax(0, 1fr) 440px; } }
-@media (max-width: 1179.98px) { .tkp-desk { grid-template-columns: minmax(0, 1fr) 440px; } .tkp-desk > .tkr { display: none; } }
+@container tkp-page (min-width: 1180px) and (max-width: 1526.98px) { .tkp-desk:has(> .tkr[data-open="true"]) { grid-template-columns: 340px minmax(0, 1fr) 440px; } }
+@container tkp-page (max-width: 1179.98px) { .tkp-desk { grid-template-columns: minmax(0, 1fr) 440px; } .tkp-desk > .tkr { display: none; --tkr-mode: none; } }
 .tkp-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; container: tkp-mid / inline-size; }
 /* the box's toasts on this page (card app-trade-box-reads-after-a-buy): top centre (09-design-brief S21), under the
    token's header and the chart's control row, so a fill never covers the header's Price, 24h change or Tax, nor a chart
    control; layout px on the 1920 design: the bar 60, the header 74, the gap 8, the chart's control row 46, then 8 */
 .tkp-desk .rs-toast { top: 196px; }
-/* a narrow main column (the rail opened under 1500, or a 1024 laptop) keeps the identity whole: the strip's last tiles
+/* a narrow main column (the full rail beside it, or opened in the slim mode) keeps the identity whole: the strip's last tiles
    give way from the end, as UNRLZD's headerTiles slices them (Holders, then Liquidity, 24h vol and Tax; each is also in
    the trade column's stats). Each step is a tile and its gap (~105 layout px) over the full strip (~800) and the
    identity's avatar, symbol and icons (~210), with ~40 px to spare (card rail-open-pushes-the-middle) */

@@ -607,7 +607,9 @@ export async function followDeposit(args: FollowArgs, deps: FollowDeps): Promise
         own.ok = leave;
         own.fail = leave;
         run.waiters.add(own);
-        deps.signal?.addEventListener("abort", leave, { once: true });
+        // adopted after an await of U's round: a stop that came before it never fires again
+        if (deps.signal?.aborted) leave();
+        else deps.signal?.addEventListener("abort", leave, { once: true });
       };
       run.done = followU(args, deps, ctl.signal, waiters, adopt).then(
         () => {},

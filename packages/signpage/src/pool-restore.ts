@@ -260,6 +260,8 @@ export async function busyWaited<T>(walk: () => Promise<T>, signal: AbortSignal,
 }
 const sleepFor = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise<void>((ok) => {
+    // a signal ended before the wait never fires again: no wait on it
+    if (signal.aborted) return ok();
     const done = (): void => (clearTimeout(t), signal.removeEventListener("abort", done), ok());
     const t = setTimeout(done, ms);
     // a wait holds no process open on its own (Node's tests of the page; a browser has no unref)

@@ -3,6 +3,7 @@
 // that answers failed (run 6: a devnet provider's 429 burst).
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaPacedRpc, solanaSameProvider, type SolanaFetch } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts } from "../src/page-rpc.ts";
 import { MAINNET_POOL_RPCS, pageEvmPoolRpcs, pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, pageSolanaTokenRpcs, SOLANA_TOKEN_SEAT, SOLANA_TOKEN_SEAT_LIMIT, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
@@ -437,7 +438,7 @@ test("a host that answers one 429 and then stalls: 8 trade reads parked on its p
   globalThis.fetch = ((_u: string | URL | Request, init?: RequestInit) => {
     sent.push(performance.now());
     if (++n === 1) return new Promise<Response>((ok) => setTimeout(() => ok(new Response("", { status: 429, headers: { "retry-after": "1" } })), 100));
-    return new Promise<Response>((_, no) => init?.signal?.addEventListener("abort", () => no(init.signal!.reason), { once: true }));
+    return untilAborted(init?.signal);
   }) as typeof fetch;
   try {
     await onTestClock(async () => {

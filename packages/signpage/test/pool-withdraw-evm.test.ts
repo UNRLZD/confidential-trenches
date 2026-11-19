@@ -103,6 +103,9 @@ const hostOf = (chain: "base" | "robinhood", a: Side = {}, b: Side = a, calls: C
   pool: poolOf(),
 });
 
+// the wallet's refusal of a cut with no leaf: its typed PoolNoLeafError, a plain Error before
+const NoLeaf = (((await import("../../wallet/src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
+
 test("the smallest part: the fee less W's fee (the pool's backstop holds the fee to half the chunk), at least 1 wei", () => {
   assert.equal(evmWithdrawMinPart(FEE, 210_000_000_000n), FEE - 210_000_000_000n);
   assert.equal(evmWithdrawMinPart(100n, 100n), 1n);
@@ -507,8 +510,6 @@ type RunPlant = {
   /** the epoch cut refuses with this error (any refusal but no leaf: a read the run must never take as a cut of no leaf) */
   cutThrows?: Error;
 };
-// the wallet's refusal of a cut with no leaf: its typed PoolNoLeafError, a plain Error before
-const NoLeaf = (((await import("../../wallet/src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
 async function runWorld(plant: RunPlant = {}) {
   const ws = await openWalletStore({ indexedDB: new IDBFactory() });
   closers.push(() => ws.close());

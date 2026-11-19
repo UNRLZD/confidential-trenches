@@ -9,6 +9,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
 import { VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { IDBFactory } from "fake-indexeddb";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import type { DepositOp, FollowRecord } from "../src/deposit/follow.ts";
 import { buildMoveOut, buildRegisterOut, buildWithdrawOut, checkMoveCalls, checkRegisterCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, signedBlockHash, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
@@ -1731,6 +1732,11 @@ test("R10-F7J a forgotten landed record of 1 base unit, its op needing none of i
   assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "empty" });
 });
 
+// A stalled read's end, as fetch ends one, is untilAborted (packages/kit/src/abort.ts): it rejects with the signal's
+// reason once it aborts, and at once when it already has. A listener added after the abort never fires: R11-BUDGET2's
+// read subscribed after writing op3, and on a starved runner its 50 ms budget ended inside that write, so the read
+// waited 49 min (18 Nov 17:00Z, the whole wallet run)
+
 // Delta review 10, F2: the tap's re-reads run at once under one budget, inside U's lock: ten stale ops whose reads stall
 // until their signal aborts (the budget cut to 50 ms here) all end within one budget, each a failed read, and the tap
 // signs with the ranks it has
@@ -1747,7 +1753,10 @@ test("R10-BUDGET ten stale ops whose status reads stall: read at once, all withi
     const signal = init!.signal!;
     if (signal.aborted) throw signal.reason;
     most = Math.max(most, ++inFlight);
-    await new Promise((_, no) => signal.addEventListener("abort", () => (ended.push(signal.reason), no(signal.reason)), { once: true }));
+    await untilAborted(signal).catch((e: unknown) => {
+      ended.push(signal.reason);
+      throw e;
+    });
   }) as unknown as typeof fetch;
   // only the first timeout made is cut: the tap's budget, made before any read's own 10 s timeout (follow.ts
   // readDepositStatus), which stays as it is (delta review 11, F2). The budget ends with a reason of its own, so each
@@ -1795,8 +1804,11 @@ test("R10-ONCE a tap's two passes read each stale op once", async () => {
 // Delta review 11, F2: one budget over both of a tap's passes. Pass 1 reads op1 (stale) until the budget ends (only the
 // first timeout made, the budget, is cut to 50 ms; each read's own 10 s timeout stays); op3, written while pass 1 reads
 // (INCOMPLETE_DEPOSIT: pass 1's walk needs nothing of it), is new by pass 2 and read on the same budget, already ended,
-// so its read aborts at once, never on a fresh budget or its own 10 s alone
-test("R11-BUDGET2 a stale op new on a tap's second pass is read on the tap's one budget, already ended: it aborts at once", async () => {
+// so its read aborts at once, never on a fresh budget or its own 10 s alone. putMs: op3's write takes that long first,
+// as on a starved runner (18 Nov 17:00Z, the whole wallet run beside four other suites): the budget ends inside it
+test("R11-BUDGET2 a stale op new on a tap's second pass is read on the tap's one budget, already ended: it aborts at once", () => budget2(0));
+test("R11-BUDGET2-SLOW the budget ends while pass 1's read writes op3 (a starved runner): the read still ends on it, never waits for ever", () => budget2(80));
+async function budget2(putMs: number) {
   const chain = new Chain();
   chain.registered.add(TO);
   chain.onSend = () => {};
@@ -1814,8 +1826,9 @@ test("R11-BUDGET2 a stale op new on a tap's second pass is read on the tap's one
     asked.push([address, signal.aborted]);
     if (signal.aborted) throw signal.reason;
     if (address === "dep-addr-3") throw new Error("op3 read on a signal not yet ended"); // never a 10 s wait under a plant
+    if (putMs > 0) await new Promise((ok) => setTimeout(ok, putMs));
     await ops.put("ops", "op3", { ...one, created_ms: 3, follow: { ...one.follow, address: "dep-addr-3", status: "INCOMPLETE_DEPOSIT" } });
-    await new Promise((_, no) => signal.addEventListener("abort", () => no(signal.reason), { once: true }));
+    await untilAborted(signal);
   }) as unknown as typeof fetch;
   const timeout = AbortSignal.timeout;
   let made = 0;
@@ -1828,7 +1841,7 @@ test("R11-BUDGET2 a stale op new on a tap's second pass is read on the tap's one
   }
   assert.deepEqual(asked, [["dep-addr", false], ["dep-addr-3", true]], "op1 on pass 1, op3 on pass 2 with the budget already ended");
   assert.equal(((await ops.get("ops", "op3")) as DepositOp).follow.status, "INCOMPLETE_DEPOSIT", "a failed read keeps it");
-});
+}
 
 // Delta review 10, F4: the re-read happens inside U's lock: a tap that cannot take it (another tab follows U) reads no
 // status and signs nothing

@@ -2,9 +2,9 @@
 // 13898c19; card sol-rent-back-dust-burn): plants
 // one mutant at a time in the signing page's rent back (src/pool-sell.ts) and the kit's teardown plan
 // (packages/kit/src/checks/solana/checks.ts), runs the test that holds it, expects it to fail, puts the source back.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 import { sweepPartOrExit } from "../../../scripts/mutant-part.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const SELL = `${W}/src/pool-sell.ts`;
@@ -233,20 +233,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exitCode = 1;
       continue;
     }
-    writeFileSync(file, pairs.reduce((s, [f, t]) => s.replace(f, t), src));
-    // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
-    let r;
-    try {
-      r = runSync("node", ["--test", "--test-timeout=20000", ...(pattern ? [`--test-name-pattern=${pattern}`] : []), test], { cwd: W, encoding: "utf8", timeoutMs: 180_000 });
-    } finally {
-      writeFileSync(file, src);
+    // a run past 180 s is killed, its process group with it; a run with no verdict is refused (scripts/mutant-run.mjs)
+    const r = withPlant(file, pairs.reduce((s, [f, t]) => s.replace(f, t), src), () => runMutant(["--test-timeout=20000", ...(pattern ? [`--test-name-pattern=${pattern}`] : []), test], { cwd: W, timeoutMs: 180_000 }));
+    if (!refused(name, r)) {
+      const by = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((m) => m[1].slice(0, 70)).filter((v, i, a) => a.indexOf(v) === i);
+      const dead = r.verdict === "killed";
+      if (dead) killed++;
+      console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
     }
-    const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-    const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-    const by = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((m) => m[1].slice(0, 70)).filter((v, i, a) => a.indexOf(v) === i);
-    const dead = r.status !== 0 && Number(fail) > 0;
-    if (dead) killed++;
-    console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
     if (readFileSync(file, "utf8") !== src) {
       console.log("SOURCE NOT RESTORED");
       process.exitCode = 1;

@@ -151,6 +151,8 @@ export const WALK_LANE_MAX_MS = 120_000;
 /** The real timer, cleared when the lane ends (`ended`), so no timer outlives its lane. */
 const after = (ms: number, ended: AbortSignal): Promise<void> =>
   new Promise((r) => {
+    // a lane that ended before its bound was set needs none (an ended signal never fires again)
+    if (ended.aborted) return;
     const t = setTimeout(r, ms);
     ended.addEventListener("abort", () => clearTimeout(t), { once: true });
   });

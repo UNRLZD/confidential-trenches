@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { HELPER_LOGO_MAX_BYTES } from "@blindfill/kit";
+import { HELPER_LOGO_MAX_BYTES, untilAborted } from "@blindfill/kit";
 import { blockedAddress, createLogos, fetchLogo, fetchMetaImage, LOGO_NONE_MS, logoUrl, META_MAX_BYTES, Refused, REDIRECTS_MAX, sniff, type Get, type Got, type Resolve } from "./logo.ts";
 import { handler } from "../server.ts";
 import { toRow } from "./solana/lists.ts";
@@ -106,7 +106,9 @@ test("fetchLogo gives up after its time, a body that never ends included", { tim
   const u = new URL("https://slow.example/l");
   const get: Get = async (_u, _a, signal) => got(200, { "content-type": "image/png" }, (async function* () {
     yield PNG;
-    await new Promise((_, no) => signal.addEventListener("abort", () => no(new Error("aborted"))));
+    await untilAborted(signal).catch(() => {
+      throw new Error("aborted");
+    });
   })());
   // the bound is the test's own timeout (scripts/ci/no-wall-clock-asserts.mjs): a fetch that never gave up hangs it
   await assert.rejects(fetchLogo(u, { resolve: PUBLIC, get, timeoutMs: 100 }), refusedAs("timeout"));
@@ -206,7 +208,8 @@ test("a lookup that never answers ends at the fetch's deadline, and logo lookups
   const hang: Resolve = (_h, signal) => {
     open++;
     most = Math.max(most, open);
-    signal?.addEventListener("abort", () => open--, { once: true });
+    if (signal?.aborted) open--;
+    else signal?.addEventListener("abort", () => open--, { once: true });
     return new Promise(() => {});
   };
   const runs = Array.from({ length: 6 }, () => fetchLogo(new URL("https://never.example/x.png"), { resolve: hang, timeoutMs: 300 }).then(() => "ok", (e: unknown) => (e as Error).message));
@@ -317,7 +320,7 @@ test("a full fetch queue answers 503 with no-store, never a cached no-logo answe
 // few slow-DNS coins blanked real coins' logos; and two mutants lived: the default lookup back on dns.lookup (the libuv
 // pool), and createLogos answering null where it means "busy".
 test("a fetch that waits out its time for a DNS slot is busy, never a cached refusal: the next read fetches again", { timeout: 5_000 }, async () => {
-  const hangers = createLogos({ resolve: (_h, signal) => new Promise((_, no) => signal.addEventListener("abort", () => no(signal.reason), { once: true })), timeoutMs: 600 });
+  const hangers = createLogos({ resolve: (_h, signal) => untilAborted(signal), timeoutMs: 600 });
   hangers.remember("solana", "SlowA", "https://slow-a.example/x.png");
   hangers.remember("solana", "SlowB", "https://slow-b.example/x.png");
   const held = [hangers.read("solana", "SlowA"), hangers.read("solana", "SlowB")]; // both DNS slots

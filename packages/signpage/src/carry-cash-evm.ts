@@ -65,6 +65,8 @@ export function evmCashCarrySender(h: EvmCarryCashHost): CarrySender {
   const both = <T>(f: (rpc: EvmRpc) => Promise<T>): Promise<[T, T]> => Promise.all([f(rpcs[0]), f(rpcs[1])]);
   const sleepOf = (signal?: AbortSignal) => (ms: number): Promise<void> =>
     new Promise<void>((ok) => {
+      // a signal ended before the wait never fires again: no wait on it
+      if (signal?.aborted) return ok();
       const t = setTimeout(ok, ms);
       signal?.addEventListener("abort", () => (clearTimeout(t), ok()), { once: true });
     });

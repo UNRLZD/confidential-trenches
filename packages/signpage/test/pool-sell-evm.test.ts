@@ -7,6 +7,7 @@
 // the hostile builds the rule refuses; and the restore of a buy's route from its own transaction. Every chain is a fake
 // one; nothing here reaches a network.
 import { after, afterEach, beforeEach, mock, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import assert from "node:assert/strict";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -843,7 +844,7 @@ test("P2-4: a helper's refusal never locks W's sale: the next tap, before the fi
 test("P3-3: a sign out ends the sale's POST in flight: no answer at once, never the helper's 15 s", async () => {
   const stop = new AbortController();
   const fetchFn = ((_u: string, init: RequestInit) =>
-    new Promise<Response>((_r, no) => init.signal!.addEventListener("abort", () => no(init.signal!.reason), { once: true }))) as typeof fetch;
+    untilAborted(init.signal)) as typeof fetch;
   const sent = evmSellSend("https://helper.test", { pool: POOL, w: W, data: new Uint8Array(4), authorization: { chainId: 84532n, address: W, nonce: 0n, yParity: 0, r: 1n, s: 1n } as never }, fetchFn, stop.signal);
   setTimeout(() => stop.abort(), 5);
   const r = await Promise.race([sent.then(() => "answered", (e) => (e instanceof EvmSendNoAnswer ? "no answer" : String(e))), new Promise((r) => setTimeout(() => r("still waiting"), 2_000))]);
@@ -1100,7 +1101,9 @@ test("review D1: logs trailing past the lag with W's Sell nonce taken: read on, 
 
 test("review F3b: a sign out during a send past the tap's bound frees the note's follow mark", async () => {
   const stop = new AbortController();
-  const x = await world({ send: () => new Promise<string>((_r, no) => stop.signal.addEventListener("abort", () => no(new EvmSendNoAnswer(null, "fault")), { once: true })) });
+  const x = await world({ send: () => untilAborted(stop.signal).catch(() => {
+    throw new EvmSendNoAnswer(null, "fault");
+  }) });
   const kept: Promise<unknown>[] = [];
   x.h.keep = (p) => void kept.push(p);
   x.h.following = new Set();

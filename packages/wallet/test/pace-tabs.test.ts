@@ -6,6 +6,7 @@
 // IndexedDB database of its own, paceDb; here a Map, and fake-indexeddb for paceDb itself).
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
@@ -41,7 +42,8 @@ function locks(): Share["locks"] & { asked: number } {
       return new Promise((res, rej) => {
         let granted = false;
         const stop = () => void (granted || rej(sig!.reason));
-        sig?.addEventListener("abort", stop, { once: true });
+        if (sig?.aborted) stop();
+        else sig?.addEventListener("abort", stop, { once: true });
         void prev.then(async () => {
           if (sig?.aborted) return release();
           granted = true;

@@ -4,9 +4,9 @@
 // row as the card's end state reads them, with the deposit-follow review's D1, finding 5 and r4.
 // Then review wrm-58c238ab's M1, M2, L1 and L2 as folded, and its own plants no named test held; then the delta review
 // of cf8a5524 (M1, L2, L4, L5 and its three pins); then the delta review of 8c046c2d (L1 to L4) and of dedd6401 (S1 to S4).
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 const P = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const FOLLOW = "wallet/src/deposit/follow.ts";
 const REFUND = "wallet/src/deposit/refund.ts";
@@ -165,19 +165,12 @@ for (const [name, file, edits, [pkg, test], pat] of M) {
     }
     planted = planted.replace(from, to);
   }
-  writeFileSync(path, planted);
-  // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
-  let r;
-  try {
-    r = runSync("node", ["--test", `--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, encoding: "utf8", timeoutMs: 180_000 });
-  } finally {
-    writeFileSync(path, src);
-  }
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const killed = r.status !== 0 && Number(fail) > 0;
+  // a run past 180 s is killed, its process group with it; a run with no verdict is refused (scripts/mutant-run.mjs)
+  const r = withPlant(path, planted, () => runMutant([`--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, timeoutMs: 180_000 }));
+  if (refused(name, r)) continue;
+  const killed = r.verdict === "killed";
   if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}`);
+  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}`);
 }
 console.log(`${ok}/${M.length} killed`);
 if (ok !== M.length) process.exitCode = 1;

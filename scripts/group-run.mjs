@@ -9,9 +9,16 @@
 // so a SIGINT or SIGTERM it gets waits for every run it has left: each run is given its end (GROUP_RUN_UNTIL_MS, unix
 // ms) and a run inside it ends by then too, the sweep with it (exit 124 at its next run), so a sweep ends at the bound
 // of the run it is in.
+//   withPlant(file, text, run) -> run()'s result, with `text` written over `file` while it runs
+// A plant is put back before the process ends: at withPlant's end, and on the way out of a process that ends inside it
+// (that exit 124, a signal's exit, a throw), since a process.exit skips the sweep's own finally (card
+// mutant-sweeps-refuse-no-verdict). A SIGKILL can put nothing back.
 import { spawn, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const live = new Set();
+// file -> its bytes before the plant written over it now
+const planted = new Map();
 let hooked = false;
 
 /** SIGKILL to the whole group `pgid`; a group already gone is no error. */
@@ -28,9 +35,25 @@ function hook() {
   hooked = true;
   process.on("exit", () => {
     for (const g of live) killGroup(g);
+    for (const [file, text] of planted) writeFileSync(file, text);
   });
   // a signal ends the sweep through exit, so the groups above die with it
   for (const [sig, n] of [["SIGINT", 2], ["SIGTERM", 15], ["SIGHUP", 1]]) process.on(sig, () => process.exit(128 + n));
+}
+
+/** Writes `text` over `file`, runs `run` (sync) and puts the file's own text back, whether run returns or throws; the text
+ *  is kept and the exit hook set before the write, so a process that ends inside run puts it back on its way out. */
+export function withPlant(file, text, run) {
+  if (planted.has(file)) throw new Error(`group-run: ${file} is already planted`);
+  hook();
+  planted.set(file, readFileSync(file));
+  try {
+    writeFileSync(file, text);
+    return run();
+  } finally {
+    writeFileSync(file, planted.get(file));
+    planted.delete(file);
+  }
 }
 
 const UNTIL = "GROUP_RUN_UNTIL_MS";

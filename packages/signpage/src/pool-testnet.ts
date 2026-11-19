@@ -167,12 +167,29 @@ export function backsSchedule(now: () => number = () => Date.now(), first: numbe
   let at = start;
   let wait = BACKS_FIRST_MS;
   const rideDue = (): boolean => rideAt !== undefined && now() >= rideAt;
+  // the page's first tap (card rent-backs-resume-private), due at a time drawn after it: a run before it is idle (it
+  // reads the Ws on the helper's seat alone and passes none, resumeRentBacks), so a page load names no W to the public
+  // seat; the first run past it is owed (`actRun`) however the idle runs before it ended, and a ride waits for it
+  let actAt: number | undefined;
+  let actRun = false;
+  const acted = (): boolean => actAt !== undefined && now() >= actAt;
   return {
     /** Whether a run starts now; if so, it is marked running. */
     take(): boolean {
-      if (running || now() < start || (now() < at && !rideDue())) return false;
+      if (running || now() < start || (now() < at && !(acted() && (actRun || rideDue())))) return false;
       running = true;
+      if (acted()) actRun = false;
       return true;
+    },
+    /** Whether the page's first tap's time is past: a run taken before it is idle. */
+    acted,
+    /** A tap on the page (a buy, sell, deposit or withdraw asked of its flow): the first books the runs' passes at
+     *  `when`, a time drawn after it (by default as a load's start is, BACKS_LOAD_MIN_MS to BACKS_LOAD_MAX_MS), so no
+     *  pass goes at the instant of the tap's own reads; a later tap changes nothing. */
+    act(when: number = now() + drawLoadStart()): void {
+      if (actAt !== undefined) return;
+      actAt = when;
+      actRun = true;
     },
     /** The run ended: `more`, a W left to try again. */
     ended(more: boolean): void {
@@ -1714,7 +1731,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // host's lane (a trade's reads go first); kept in the page's own index store (src/evm-index-store.ts), so a reload
   // serves the kept index at once and syncs only the gap. A sync that ends partial is synced again at the next state
   // read. One sync a chain at once on the device, across its tabs (the Web Lock ct-evm-index/{chain}, if available: a
-  // tab that finds it held syncs none and asks again at its next state read, then from the index the other tab kept;
+  // tab that finds it held is still served the kept index or the snapshot (evmIndexServe, before the lock), syncs none
+  // and asks again at its next state read, then from the index the other tab kept;
   // card signpage-evm-reads-draw-no-refusal: two tabs signed in at once each read the whole cold index, 13 Nov CDP
   // capture); none past a sign out. It names no wallet: every pool of the PoolManager.
   const evmIndex = new Map<"base" | "robinhood", EvmPoolIndexData | null>();
@@ -1747,16 +1765,22 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return evmPoolIndexFromSnapshot(raw, { chainId: v.chainId, poolManager: v.poolManager, cap: v.index.cap });
   };
   const indexStore: EvmIndexStore | null = over.evmIndexStore !== undefined ? over.evmIndexStore : over.evmIndexSync !== undefined ? null : evmIndexStore();
-  // the index the device already has, served to the kit's quote with no RPC read: the one kept in the page's store,
-  // else the release's snapshot
+  // the index the device already has, served to the kit's quote with no RPC read. The tab's first serve takes the newer
+  // (by its through) of the one kept in the page's store and the release's snapshot: a device back after days keeps an
+  // older release's index, whose sync would read on from its end, not the snapshot's (a kept index 2.16M blocks behind
+  // on Robinhood ended stale_quote, 18 Nov 18:49Z). A later serve takes the kept one if newer than the tab's own
+  // (another tab's sync kept it). Reads only, run before the lock ct-evm-index/{chain} (card
+  // evm-index-served-before-lock: inside it, a tab that found the lock held by another was served none, and its quote
+  // scanned the chain's Initialize logs from the depth, 56 getLogs below the snapshot's end on a mainnet Robinhood quote,
+  // 18 Nov 19:01Z); the store's one write stays in the sync, under the lock
   const evmIndexServe = async (chain: "base" | "robinhood", network: EvmPoolChain, signal: AbortSignal): Promise<void> => {
-    if (!evmIndex.has(chain)) {
-      const kept = await indexStore?.get(network).catch(() => null);
-      if (kept != null && !signal.aborted && evmPoolIndexUse(network, { index: kept, coversThrough: kept.through, pools: kept.pools })) evmIndex.set(chain, kept);
-    }
-    if (!evmIndex.has(chain)) {
-      const shipped = await snapshotOf(network).catch(() => null);
-      if (shipped !== null && !signal.aborted && evmPoolIndexUse(network, { index: shipped, coversThrough: shipped.through, pools: shipped.pools })) evmIndex.set(chain, shipped);
+    const own = evmIndex.get(chain) ?? null;
+    const kept = (await indexStore?.get(network).catch(() => null)) ?? null;
+    const shipped = own === null ? await snapshotOf(network).catch(() => null) : null;
+    const newer = [kept, shipped].filter((x): x is EvmPoolIndexData => x !== null && (own === null || x.through > own.through)).sort((a, b) => b.through - a.through);
+    for (const ix of newer) {
+      if (signal.aborted) return;
+      if (evmPoolIndexUse(network, { index: ix, coversThrough: ix.through, pools: ix.pools })) return void evmIndex.set(chain, ix);
     }
   };
   const evmIndexOf = (chain: "base" | "robinhood"): Promise<void> | undefined => {
@@ -1771,7 +1795,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // each reader's request waits for a pass's turn on its host, so a trade's reads there go first
     const passFetch = (async (url: string, init?: RequestInit) => (await hostLane(url).turn("pass", signal), laneFetch()(url, init))) as typeof fetch;
     const sync = async (): Promise<void> => {
-      await evmIndexServe(chain, network, signal);
       // a device that holds nothing syncs none past it (evmMoney)
       if (!evmMoney) return;
       const prev = evmIndex.get(chain) ?? null;
@@ -1788,7 +1811,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         await indexStore?.put(network, s.index);
       }
     };
-    const run = (locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync())
+    const run = evmIndexServe(chain, network, signal)
+      .catch(() => {})
+      .then(() => (signal.aborted ? undefined : locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync()))
       .catch(() => {})
       .finally(() => evmIndexing.delete(chain));
     evmIndexing.set(chain, run);
@@ -3357,6 +3382,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           // a tap's pass (a withdraw's end, a deposit landed), once its drawn time is past, carries the ride; a plain
           // load's never does. The ride stays booked while any pass of it is held (the spacing, a trade running: review
           // P3 1 of 1d3b96d9c), so a later run rides it
+          // before the page's first tap the run is idle (card rent-backs-resume-private): the Ws read on the helper's
+          // seat alone, none passed, a ride held
+          const idle = !backs.acted();
           const ride = backs.takeRide();
           let held = false;
           const scan = !foundScanned;
@@ -3369,7 +3397,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
                 // that sweeps it only while both RPCs read it owning no token account; a restored device finds there a
                 // buy of several pieces whose pieces paid W and whose buy never landed
                 if (scan) await findHeldWs(mine).catch(() => {});
-                const more = await resumeRentBacks(h, locks, ride !== undefined ? { ride: true, held: () => void (held = true) } : {});
+                const more = await resumeRentBacks(h, locks, { ...(ride !== undefined ? { ride: true as const, held: () => void (held = true) } : {}), ...(idle ? { idle: true as const } : {}) });
                 if (ride !== undefined && !held) {
                   backs.rode(ride);
                   await Promise.resolve(owedRentBacks(page.store).rode?.(ride)).catch(() => {});
@@ -3720,6 +3748,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const sellTapped = (): void => void front.tap().then((end) => end(), () => {});
   return {
     flow: (ask, ctx) => {
+      // a tap: the rent backs' passes from a time drawn after it (card rent-backs-resume-private); after a deposit or a
+      // withdraw, a public address's move, from the ride's gap (rideAfter), so no pass's sweep follows it by seconds
+      backs.act(ask.kind === "pool.buy" || ask.kind === "pool.sell" ? undefined : rideAfter(Date.now()));
       if (ask.kind === "pool.sell") sellTapped();
       return ask.chain !== "solana"
         ? ask.kind === "pool.deposit"

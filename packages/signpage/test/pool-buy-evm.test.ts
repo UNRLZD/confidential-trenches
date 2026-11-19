@@ -208,6 +208,10 @@ const lateOf = async (seen: Seen): Promise<EvmPoolBuyAnswer> => {
 };
 const zero = (b: Uint8Array) => b.every((x) => x === 0);
 
+// the new names read through the module, so this file loads at 39c2ab9c too and each test below fails there on its own
+const M = (await import("../src/pool-buy-evm.ts")) as Record<string, unknown>;
+const L2 = (await import("../src/pool-buy-evm.ts")) as Record<string, unknown>;
+
 test("the buy's calldata is the pool's canonical encoding: byte for byte the testnet run's buyData", async () => {
   const r = readyOf();
   const q = await fixtureQuote();
@@ -599,8 +603,6 @@ test("an amount over what the ready proofs spend (card buy-any-amount-on-every-c
 });
 
 // ---- the second review's fixes (FIX of 39c2ab9c): each fails at 39c2ab9c ----
-// the new names read through the module, so this file loads at 39c2ab9c too and each test below fails there on its own
-const M = (await import("../src/pool-buy-evm.ts")) as Record<string, unknown>;
 const LAG_MS = M.EVM_BUY_LAG_MS as number;
 const turns = async (n: number) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
@@ -1187,7 +1189,6 @@ test("card buy-any-amount-on-every-chain: a buy asks the ETH that goes into swap
 });
 
 // ---- card buy-any-amount-on-every-chain: the plan's legs ----
-const L2 = (await import("../src/pool-buy-evm.ts")) as Record<string, unknown>;
 const W2 = freshWallet(SEED, "evm", L, 1).address;
 const N2 = 0x777n;
 const TX2 = "0x" + "ce".repeat(32);
