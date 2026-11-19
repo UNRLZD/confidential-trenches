@@ -44,13 +44,15 @@ export function loopProbe(now: () => number, lateMs = LOOP_BUSY_MS, holdMs = BUS
 
 // The shed (card helper-answers-through-a-burst): past the helper's capacity a market data read is answered a fast 503
 // at once (server.ts SHED_PATHS), never queued behind the loop, so a relay, a proof, a quote and a device's money read
-// keep the loop. [design: a sample SHED_LATE_MS late or more, 500 ms: half the quote bar, so a read still queued behind
-// such a loop misses it; five times LOOP_BUSY_MS, so the reads ahead stand down long before a caller is shed. On a copy
-// of main pinned to the helper host's 2 CPUs, 300 pages opened at once through Caddy made its health read take up to
-// 1417 ms (deploy/burst-proof.sh, 19 Nov 16:2xZ). Shed for SHED_HOLD_MS after, 1 s, ten samples, so a burst's next
-// wave is shed rather than let in to hold the loop again.]
+// keep the loop. [design: a sample SHED_LATE_MS late or more, 1000 ms, the industry baseline's (Fastify
+// under-pressure's maxEventLoopDelay example): over the longest hold of the helper's own background work, so it alone
+// never sheds a page (a CPU profile of a copy behind 48 pages over 48 cold coins held the loop at most 813 ms, in the EVM
+// pool index's span write, evm/pool-index.ts spanOn), and under the holds of a loop past capacity (copies pinned to the
+// helper host's 2 CPUs: 1417 ms behind 300 pages at once through Caddy, 2655 and 5734 ms after 48 cold coins;
+// deploy/burst-proof.sh, 19 Nov). Shed for SHED_HOLD_MS after, 1 s, ten samples, so a burst's next wave is shed rather
+// than let in to hold the loop again.]
 /** A sample this late or more is a loop past its capacity. */
-export const SHED_LATE_MS = 500;
+export const SHED_LATE_MS = 1_000;
 /** How long market data is shed after such a sample. */
 export const SHED_HOLD_MS = 1_000;
 

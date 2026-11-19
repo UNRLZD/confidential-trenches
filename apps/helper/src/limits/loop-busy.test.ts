@@ -47,6 +47,10 @@ test("card helper-answers-through-a-burst: the shed probe trips only at SHED_LAT
   clk.t += SAMPLE_MS + LOOP_BUSY_MS;
   p.sample(clk.t - LOOP_BUSY_MS);
   assert.equal(p.busy(), false, `a sample ${LOOP_BUSY_MS} ms late stands the reads ahead down but sheds nothing`);
+  // the longest hold of the helper's own background work read on a copy (813 ms, the EVM pool index's span write)
+  clk.t += SAMPLE_MS + 813;
+  p.sample(clk.t - 813);
+  assert.equal(p.busy(), false, "a background span write's 813 ms hold sheds no page");
   clk.t += SAMPLE_MS + SHED_LATE_MS;
   p.sample(clk.t - SHED_LATE_MS);
   assert.equal(p.busy(), true, `a sample ${SHED_LATE_MS} ms late sheds`);
