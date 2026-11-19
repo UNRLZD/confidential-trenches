@@ -558,11 +558,15 @@ jobs:
   # commands are dealt largest first by their measured seconds (E2E_SECONDS; card ci-e2e-shards-by-time), each part
   # prints each command's time and a warning for one past 1.25 times its listed seconds, and
   # scripts/ci/test-shards.test.mjs fails when a part's planned seconds and this job's own steps pass timeout-minutes.
+  # A check that reads the live helper runs through scripts/ci/live-rerun.mjs's rerun rule, so a moment the helper
+  # missed runs it again instead of refusing the group (card queue-browser-checks-tell-a-helper-miss-from-a-page-fault);
+  # the reruns start only inside E2E_RERUN_BUDGET_S, and the same test fails when that budget, a last rerun and the
+  # job's own steps pass timeout-minutes.
   test-browser:
     needs: changes
     if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:

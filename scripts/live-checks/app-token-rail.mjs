@@ -21,7 +21,7 @@
 //   node scripts/live-checks/app-token-rail.mjs --build <dir> [...]   a local build (apps/terminal/dist, built first):
 //     its files read from disk, the page drawn at APP_HOST's name inside the stand-in shell (app-in-shell.mjs
 //     harnessRoute); the helper is still read live
-//     PASS exit 0, FAIL exit 1, error exit 2
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (--build: a FAIL while the helper missed an answer, helper-misses.mjs)
 // --record writes what the run read (the lists answer's counts, the markers each file holds, not the files, and the
 // drawn rail's mode and width), so the check's test can replay it.
 import "../net-window.mjs";
@@ -31,6 +31,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { launchHarnessBrowser } from "../harness-sockets.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
 
 const KEY = "app-token-rail";
 export const APP_URL = "https://ct-app.unrealized.trade/";
@@ -128,7 +129,7 @@ export async function drawn({ url = APP_URL, build = null, shots = path.join(tmp
   const browser = await (harness ? launchHarnessBrowser : launchBrowser)("chromium");
   try {
     const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, colorScheme: "dark" });
-    if (harness) await ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_URL ? r.continue() : harness(r)));
+    if (harness) await liveHelper(ctx, harness);
     const page = await ctx.newPage();
     await page.goto(url, { waitUntil: "load" });
     let m = null;
@@ -199,11 +200,14 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const file = opt("--record", null);
     // the record leaves out where this machine kept the screenshot
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shot: undefined }, null, 1)}\n`);
-    const { ok, lines } = judge(rec);
+    const { ok: judged, lines } = judge(rec);
     for (const l of lines) console.log(l);
+    // a FAIL in a run where the helper missed an answer the page asked for is INCONCLUSIVE (helper-misses.mjs)
+    const miss = helperVerdict(judged ? "PASS" : "FAIL");
+    for (const l of miss.lines) console.log(l);
     console.log(`screenshot: ${rec.shot}`);
-    console.log(`CARD ${KEY} / live: ${ok ? "PASS" : "FAIL"} (${rec.source}; Chrome ${rec.browser})`);
-    process.exit(ok ? 0 : 1);
+    console.log(`CARD ${KEY} / live: ${miss.verdict} (${rec.source}; Chrome ${rec.browser})`);
+    process.exit(HELPER_EXIT[miss.verdict]);
   } catch (e) {
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);
     process.exit(2);

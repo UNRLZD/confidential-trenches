@@ -12,7 +12,9 @@
 // 44375738505). A command with no measured time counts as NEW_E2E_SECONDS.
 //   node scripts/ci/test-shards.mjs e2e-run <index> <total>    (builds, then runs the part's commands, each timed)
 // runs the build, and when it passed each of the part's commands in apps/terminal, all of them even when one fails,
-// with each one's time and a ::warning:: for a command past 1.25 times its listed seconds, as the mutants' parts do.
+// with each one's time and a ::warning:: for a command past 1.25 times its listed seconds, as the mutants' parts do. A
+// live check that reads the live helper (it imports scripts/live-checks/helper-misses.mjs) runs through
+// scripts/ci/live-rerun.mjs's rerun rule (card queue-browser-checks-tell-a-helper-miss-from-a-page-fault: runE2ePart).
 //
 // Card ci-mutants-sharded: the share of the mutant sweeps that one part of ci.yml's test-mutants matrix runs.
 //   node scripts/ci/test-shards.mjs mutants <index> <total>    (runs the part's sweeps; exit 1 when one failed)
@@ -36,7 +38,7 @@
 // the fewest planned seconds, by PACKAGE_SECONDS. `plan` prints the part's yes/no for the three steps ci.yml writes out
 // as GITHUB_OUTPUT lines; `tests` and `typecheck` run the part's pnpm line themselves, narrowed by the pull request's
 // SELECT (the packages pr-paths.mjs picked) so a part runs no package the change leaves out.
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { globSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
@@ -374,6 +376,69 @@ export function runPart(commands, root, log = console.log, { clock = () => perfo
   return ran;
 }
 
+// ---- the checks that read the live helper on a local build (card queue-browser-checks-tell-a-helper-miss-from-a-page-fault)
+// Merge queue group 44547353452 (19 Nov 14:46Z) refused app-trade-box-mount on main's own build while the live helper's
+// vendor answered 503: one read of a check that reads the live helper took the helper's miss for the page's fault. Each
+// such check imports scripts/live-checks/helper-misses.mjs (liveHelper routes and watches the helper, its verdictOf makes a
+// FAIL with a helper miss INCONCLUSIVE, exit 3), and e2e-run runs it through scripts/ci/live-rerun.mjs's rerun rule, as the
+// live runs do: an INCONCLUSIVE runs again within RERUN's bound, a FAIL or an ERROR fails at once, and one still
+// INCONCLUSIVE after the last run prints a notice and is no FAIL (live-rerun.mjs's header). No rerun starts past
+// E2E_RERUN_BUDGET_S of the part's own clock, so the reruns stay inside test-browser's timeout-minutes.
+export const HELPER_MISSES = /from\s+["']\.\/helper-misses\.mjs["']/;
+export const E2E_RERUN_BUDGET_S = 13 * 60;
+/** The live check's key when `command` runs one that reads the live helper (its file imports helper-misses.mjs), else
+ *  null. `read(key)` returns the check's source, null when there is none. */
+export function helperLiveKey(command, read = (k) => readFileSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`), "utf8")) {
+  const m = /^node \.\.\/\.\.\/scripts\/live-checks\/([a-z][a-z0-9-]*)\.mjs(?=\s|$)/.exec(command);
+  if (!m) return null;
+  let text = null;
+  try {
+    text = read(m[1]);
+  } catch {}
+  return text && HELPER_MISSES.test(text) ? m[1] : null;
+}
+/** The live checks that route the live helper the way this card replaced (`HELPER_HOST ? r.continue() : harness(r)`),
+ *  past helper-misses.mjs: [file], from `files` ({ file, text }). Each must use liveHelper, or its misses read as FAILs. */
+export const OWN_HELPER_ROUTE = /HELPER_(?:HOST|URL)\s*\?\s*r\.continue\(\)\s*:\s*harness\(r\)/;
+export const ownHelperRoutes = (files) => files.filter((f) => OWN_HELPER_ROUTE.test(f.text)).map((f) => f.file);
+
+// one run of `c` under `pnpm exec sh -c` in root/<dir>, its stdout and stderr printed as they come and kept: { code, output }
+export function runCaptured(c, root, write = (b) => process.stdout.write(b)) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    const child = spawn("pnpm", ["exec", "sh", "-c", `${c.command} 2>&1`], { cwd: path.join(root, c.dir), stdio: ["ignore", "pipe", "inherit"] });
+    child.stdout.on("data", (b) => (write(b), chunks.push(b)));
+    child.on("error", (e) => resolve({ code: 2, output: `${Buffer.concat(chunks)}${e.message}` }));
+    child.on("close", (code) => resolve({ code: code ?? 2, output: Buffer.concat(chunks).toString("utf8") }));
+  });
+}
+
+// the part's commands, each as runPart runs it, but a check that reads the live helper through live-rerun's rerun():
+// [{ dir, command, seconds, ok }]. `run`, `sleep` and `read` are injected by the tests.
+export async function runE2ePart(commands, root, log = console.log, { clock = () => performance.now(), run = (c) => runCaptured(c, root), sleep, read, budgetS = E2E_RERUN_BUDGET_S, ...names } = {}) {
+  const t0 = clock();
+  const ran = [];
+  for (const c of commands) {
+    const key = helperLiveKey(c.command, read);
+    if (!key) {
+      ran.push(...runPart([c], root, log, { clock, ...names }));
+      continue;
+    }
+    const { rerun, noticeLine } = await import("./live-rerun.mjs");
+    log(`\n== ${sweepKey(c)} (reads the live helper: an INCONCLUSIVE runs again)`);
+    const start = clock();
+    const r = await rerun(key, [], { run: () => run(c), say: log, ...(sleep ? { sleep } : {}), before: async (n) => n === 1 || (clock() - t0) / 1000 < budgetS });
+    const seconds = Math.round((clock() - start) / 100) / 10;
+    const ok = r.exit === 0;
+    if (r.verdict === "inconclusive") log(noticeLine(key, `${r.reason}${r.stopped ? " (no rerun past the part's budget)" : ""}`));
+    log(`== ${ok ? "ok" : `failed (${r.verdict}, exit ${r.code})`} in ${seconds} s after ${r.runs} run${r.runs === 1 ? "" : "s"}: ${sweepKey(c)}`);
+    const warning = r.runs === 1 ? staleWarning(c, seconds, names.seconds ?? MUTANT_SECONDS, names) : null;
+    if (warning) log(warning);
+    ran.push({ dir: c.dir, command: c.command, seconds, ok });
+  }
+  return ran;
+}
+
 // The test files of a package's test/mutants folder that none of the package's test:mutants commands names, by path or by
 // glob (card ci-mutant-shards-true-times: the kit's four ran as one glob and now run a file at a time, so a new file is
 // in no command until someone adds one). [path from the root], for the files git tracks.
@@ -512,7 +577,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // the build, timed with the fixed steps (E2E_FIXED_SECONDS), so no table lists it and it is never warned on
       const [built] = runPart([{ dir: E2E_DIR, name: "terminal", command: build }], ROOT, console.log, { ...names, seconds: {}, fallback: Infinity });
       if (!built.ok) process.exit(1);
-      const ran = runPart(part, ROOT, console.log, names);
+      // a check that reads the live helper runs through live-rerun's rerun rule (runE2ePart)
+      const ran = await runE2ePart(part, ROOT, console.log, names);
       console.log(`\npart ${int(index) + 1} of ${int(total)}:`);
       for (const r of [built, ...ran]) console.log(`  ${String(r.seconds).padStart(7)} s  ${r.ok ? "ok    " : "FAILED"}  ${sweepKey(r)}`);
       if (ran.some((r) => !r.ok)) process.exit(1);

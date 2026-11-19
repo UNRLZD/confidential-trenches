@@ -26,7 +26,7 @@
 // After: app
 // Bundle: out a browser and the helper's cold coins
 //   node scripts/live-checks/app-chart-fills-in-its-history.mjs [--build <dir>] [--shots <dir>] [--record <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (with --build, a FAIL while the helper missed an answer too: helper-misses.mjs)
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the
 // helper still answered live; --record writes what the run read (trim: the count of candidates, and per pick its chain,
 // the token as <token>, and per load the full reads and every failed read), so the check's test can replay it through
@@ -42,6 +42,7 @@ import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { consoleError, pageError } from "./console-errors.mjs";
 import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
 
 const KEY = "app-chart-fills-in-its-history";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -204,7 +205,7 @@ const MEASURE = () => {
 async function watchLoad(browser, w, i, pick, harness, shots, n) {
   const opened = `${APP_HOST}/token/${pick.chain}/${pick.token}`;
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark" });
-  if (harness) await ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
+  if (harness) await liveHelper(ctx, harness);
   const page = await ctx.newPage();
   const errors = [];
   const sends = [];
@@ -298,11 +299,15 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots (trim)
     if (file) writeFileSync(file, `${JSON.stringify(trim(rec), null, 1)}\n`);
-    const { verdict, lines } = judge(rec);
+    const { verdict: judged, lines } = judge(rec);
     for (const x of lines) console.log(x);
+    // a FAIL in a run where the helper missed an answer the page asked for is INCONCLUSIVE (helper-misses.mjs)
+    const miss = helperVerdict(judged);
+    for (const x of miss.lines) console.log(x);
+    const verdict = miss.verdict;
     console.log(`screenshots: ${rec.shots}`);
     console.log(`CARD ${KEY} / live: ${verdict}`);
-    process.exit(EXIT[verdict]);
+    process.exit(HELPER_EXIT[verdict]);
   } catch (e) {
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);
     process.exit(2);
