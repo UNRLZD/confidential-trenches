@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { CARGO_NEAR, CONTRACT_PATH, LIVE_CHECK, REPO, REPRODUCIBLE, STOP_SIGNALS, chainProblems, deployProblems, loadKey, MAX_FUNCTION_BODY, MAX_REGISTRATION, metadataProblems, nextLine, registrationProblems, repoRoots, reproducibleProblems, rpcProblems } from "./deploy.mjs";
+import { CARGO_NEAR, CONTRACT_PATH, LIVE_CHECK, REPO, REPRODUCIBLE, STOP_GRACE_MS, STOP_SIGNALS, chainProblems, deployProblems, loadKey, MAX_FUNCTION_BODY, MAX_REGISTRATION, metadataProblems, nextLine, registrationProblems, repoRoots, reproducibleProblems, rpcProblems } from "./deploy.mjs";
 import { b58encode } from "./near-tx.mjs";
 import { TESTNET_TOKEN } from "../../../scripts/live-checks/vault-testnet-t01.mjs";
 import { TEST_BUILD_MARK } from "../../../scripts/live-checks/vault-skeleton.mjs";
@@ -144,7 +144,12 @@ function stubs(dir, a, b = a) {
       '[ -n "$STUB_FAIL" ] && { echo "stub: a crates.io blip, before any wasm exists" >&2; i=0; while [ "$i" -lt "${STUB_FAIL_TAIL:-0}" ]; do echo "stub: tail line $i" >&2; i=$((i+1)); done; exit 101; }\n' +
       'mkdir -p "$CARGO_TARGET_DIR"\necho "$*" >> "$CARGO_TARGET_DIR/../cargo-args.log"\nname=$(basename "$CARGO_TARGET_DIR")\n' +
       `if [ "$name" = a ] && [ -n "$STUB_FILES" ]; then "${process.execPath}" -e 'const fs=require("fs");const d=process.argv[1]+"/many";fs.mkdirSync(d);for(let i=0;i<+process.argv[2];i++)fs.writeFileSync(d+"/"+i,"x")' "$CARGO_TARGET_DIR" "$STUB_FILES"; fi\n` +
-      'if [ -n "$STUB_SLEEP" ]; then echo $$ > "$CARGO_TARGET_DIR/../build.pid"; sleep "$STUB_SLEEP"; fi\n' +
+      // STUB_LINGER: a process of the build's group with its stdio closed (so the run's 'close' never waits for it) that
+      // ignores SIGTERM and writes into the target 0.6 s later, as a build's own child could
+      'if [ -n "$STUB_LINGER" ]; then ( trap "" TERM; sleep 0.6; mkdir -p "$CARGO_TARGET_DIR"; echo late > "$CARGO_TARGET_DIR/late" ) </dev/null >/dev/null 2>&1 & echo $! > "$CARGO_TARGET_DIR/../linger.pid"; fi\n' +
+      '[ -n "$STUB_IGNORE_TERM" ] && trap "" TERM\n' +
+      // the pid file exists empty for a moment before it holds the pid, as `echo $$ > f` leaves it (opened, then written)
+      'if [ -n "$STUB_SLEEP" ]; then : > "$CARGO_TARGET_DIR/../build.pid"; sleep 0.2; echo $$ > "$CARGO_TARGET_DIR/../build.pid"; sleep "$STUB_SLEEP"; fi\n' +
       'if [ "$name" = b ] && [ -n "$STUB_FIFO_B" ]; then mkfifo "$CARGO_TARGET_DIR/blindfill_vault.wasm"\n' +
       '  ( sleep 1.5; cat "$STUB_WASM_B$SUF" > "$CARGO_TARGET_DIR/blindfill_vault.wasm" ) </dev/null >/dev/null 2>&1 &\n' +
       '  echo done > "$CARGO_TARGET_DIR/../b.exited"; exit 0; fi\n' +
@@ -717,16 +722,25 @@ const waitFor = async (f, ms = 30_000) => {
   for (let t = 0; t < ms && !existsSync(f); t += 20) await new Promise((r) => setTimeout(r, 20));
   assert.ok(existsSync(f), `never made: ${f}`);
 };
+// The pid a stub wrote to `f`, once the file holds a whole line: a shell opens the file before it writes, and an empty
+// read is Number("") = 0, whose process.kill(0, 0) signals this test's own group and never throws ESRCH (merge queue
+// run 44522549430, card vault-deploy-stop-waits-for-the-build).
+const readPid = async (f) => {
+  await waitFor(f);
+  let s = "";
+  for (let t = 0; t < 30_000 && !/^\d+\n$/.test((s = readFileSync(f, "utf8"))); t += 20) await new Promise((r) => setTimeout(r, 20));
+  assert.match(s, /^[1-9]\d*\n$/, `no pid in ${f}`);
+  return Number(s);
+};
 const EXIT = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129, SIGQUIT: 131 };
 
 for (const sig of STOP_SIGNALS) {
   test(`${sig} during a build stops it and removes both target dirs (exit ${EXIT[sig]})`, async () => {
     const dir = fresh();
     const buildDir = path.join(dir, "build");
-    const { c, done } = start(dir, ["--build-only", "--build-dir", buildDir], { ...stubs(dir, wasm()), STUB_SLEEP: "30" });
-    const pidFile = path.join(buildDir, "build.pid");
-    await waitFor(pidFile);
-    const buildPid = Number(readFileSync(pidFile, "utf8"));
+    const { c, done } = start(dir, ["--build-only", "--build-dir", buildDir], { ...stubs(dir, wasm()), STUB_SLEEP: "30", STUB_LINGER: "1" });
+    const buildPid = await readPid(path.join(buildDir, "build.pid"));
+    const lingerPid = await readPid(path.join(buildDir, "linger.pid"));
     const started = Date.now();
     c.kill(sig);
     const r = await done;
@@ -735,8 +749,28 @@ for (const sig of STOP_SIGNALS) {
     assert.match(r.output, new RegExp(`interrupted by ${sig}`));
     targetsGone(buildDir);
     assert.throws(() => process.kill(buildPid, 0), /ESRCH/, "the build is still running");
+    assert.throws(() => process.kill(lingerPid, 0), /ESRCH/, "a process of the build's group is still running");
+    // nothing of the build writes into a target after the run has stopped
+    await new Promise((r) => setTimeout(r, 1000));
+    targetsGone(buildDir);
   });
 }
+
+test("a build that ignores SIGTERM is sent SIGKILL after STOP_GRACE_MS, and the run then stops (exit 130, both dirs gone)", async () => {
+  const dir = fresh();
+  const buildDir = path.join(dir, "build");
+  const { c, done } = start(dir, ["--build-only", "--build-dir", buildDir], { ...stubs(dir, wasm()), STUB_SLEEP: "30", STUB_IGNORE_TERM: "1" });
+  const buildPid = await readPid(path.join(buildDir, "build.pid"));
+  const started = Date.now();
+  c.kill("SIGINT");
+  const r = await done;
+  const took = Date.now() - started;
+  assert.ok(took < 10_000, `the run waited ${took} ms for a build that ignores SIGTERM`);
+  assert.ok(took >= STOP_GRACE_MS, `the build was killed after ${took} ms, before its ${STOP_GRACE_MS} ms grace`);
+  assert.equal(r.code, 130, `exit ${r.code} signal ${r.signal}: ${r.output}`);
+  targetsGone(buildDir);
+  assert.throws(() => process.kill(buildPid, 0), /ESRCH/, "the build is still running");
+});
 
 test("a second SIGINT while a target dir is being removed does not stop the removal (exit 130, both dirs gone)", async () => {
   const dir = fresh();

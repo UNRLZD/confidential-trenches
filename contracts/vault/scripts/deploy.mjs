@@ -323,21 +323,52 @@ export function toolVersions() {
   return { rustc, near };
 }
 
+// Whether any process of process group `pgid` is left (EPERM: one is, though it cannot be signalled).
+const groupAlive = (pgid) => {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+};
+
 // One build as a child process in its own process group, so an interrupt can stop the whole build before its target
-// dir is removed. Resolves { status, signal, output } when the child and its group have exited.
-function runBuild(cmd, args, opts, children) {
+// dir is removed. Its group id goes into `groups` and stays there while any process of it is left once the child has
+// closed (one that closed its stdio, which 'close' does not wait for). Resolves { status, signal, output } on 'close'.
+function runBuild(cmd, args, opts, groups) {
   return new Promise((resolve, reject) => {
     const c = spawn(cmd, args, { ...opts, detached: true, stdio: ["ignore", "pipe", "pipe"] });
-    children.add(c);
+    if (c.pid) groups.add(c.pid);
+    const done = () => groupAlive(c.pid) || groups.delete(c.pid);
     let output = "";
     const keep = (d) => {
       output = (output + d).slice(-(1 << 16));
     };
     c.stdout.on("data", keep);
     c.stderr.on("data", keep);
-    c.on("error", (e) => (children.delete(c), reject(e)));
-    c.on("close", (status, signal) => (children.delete(c), resolve({ status, signal, output })));
+    c.on("error", (e) => (done(), reject(e)));
+    c.on("close", (status, signal) => (done(), resolve({ status, signal, output })));
   });
+}
+
+// How long a build's process group has after SIGTERM before it is sent SIGKILL, and then to be gone. cargo and rustc
+// end on SIGTERM at once; the bound is for a process that ignores it.
+export const STOP_GRACE_MS = 3000;
+
+// Ends every process left in `groups`: SIGTERM, up to STOP_GRACE_MS for them to go, then SIGKILL and up to
+// STOP_GRACE_MS more. Resolves the group ids still left after that (only a process the kernel holds outlasts SIGKILL).
+async function endGroups(groups) {
+  const left = () => [...groups].filter((g) => groupAlive(g) || !groups.delete(g));
+  for (const sig of ["SIGTERM", "SIGKILL"]) {
+    for (const g of left()) {
+      try {
+        process.kill(-g, sig);
+      } catch {}
+    }
+    for (const end = Date.now() + STOP_GRACE_MS; left().length && Date.now() < end; ) await new Promise((r) => setTimeout(r, 10));
+  }
+  return left();
 }
 
 // The signals that stop a build: Ctrl-C, kill, a closed terminal and Ctrl-\. The build runs in its own process group
@@ -346,7 +377,9 @@ export const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"];
 
 // Two clean builds in two new target dirs under buildDir; the wasm and its sha256 when they are equal, else an error
 // naming both. The tools are checked first. Both target dirs are removed on every exit, any STOP_SIGNALS included:
-// the handler stops the build's process group, the build then fails, and the finally removes the dirs. The handlers
+// the handler stops the build's process group (endGroups: SIGTERM, then SIGKILL after STOP_GRACE_MS), the build then
+// fails, and the finally waits until no process of any build's group is left before it removes the dirs, so nothing
+// of a build writes into a target after it is removed. The handlers
 // stay on until the dirs are gone and one more turn of the event loop has run, so a signal that arrives while the
 // script is busy (reading build b's wasm, or removing a dir) is still seen, and the run stops before any send.
 export async function reproducibleBuild({ flavor, buildDir, crate = CRATE, log = console.log }) {
@@ -365,15 +398,14 @@ export async function reproducibleBuild({ flavor, buildDir, crate = CRATE, log =
   delete env.CARGO_ENCODED_RUSTFLAGS;
   const out = [];
   const file = path.join(buildDir, "blindfill_vault.wasm");
-  const children = new Set();
+  const groups = new Set();
   let interrupted = null;
+  // one stop for the run: a second signal waits on the same one
+  let ending = null;
+  const end = () => (ending ??= endGroups(groups));
   const onSignal = (sig) => {
     interrupted = sig;
-    for (const c of children) {
-      try {
-        process.kill(-c.pid, "SIGTERM");
-      } catch {}
-    }
+    end();
   };
   for (const s of STOP_SIGNALS) process.on(s, onSignal);
   try {
@@ -381,7 +413,7 @@ export async function reproducibleBuild({ flavor, buildDir, crate = CRATE, log =
       const target = path.join(buildDir, name);
       const [cmd, args] = buildCommand({ flavor, outDir: target });
       log(`build ${name}: ${cmd} ${args.join(" ")} (in ${crate})`);
-      const r = await runBuild(cmd, args, { cwd: crate, env }, children);
+      const r = await runBuild(cmd, args, { cwd: crate, env }, groups);
       if (interrupted) throw Object.assign(new Error(`interrupted by ${interrupted}: the build target dirs were removed, nothing was sent`), { signal: interrupted });
       // all the build said (its last 64 KiB): the container's own error comes before cargo-near's closing lines, and
       // a tail of 15 lines left only those (merge queue run 44005544940, card vault-build-passes-in-the-queue)
@@ -395,6 +427,9 @@ export async function reproducibleBuild({ flavor, buildDir, crate = CRATE, log =
     if (mp.length) throw new Error(`${mp.join("; ")}; nothing was sent`);
     writeFileSync(file, out[0].wasm);
   } finally {
+    // every path, a stop or not: a build's process left behind is ended before its target goes
+    const left = await end();
+    if (left.length) log(`build process group ${left.join(", ")} is still left after SIGKILL`);
     for (const name of ["a", "b"]) rmSync(path.join(buildDir, name), { recursive: true, force: true });
     // one full loop turn: a signal caught by libuv during the sync work above runs onSignal before the handlers go
     // (one setImmediate let a signal through in one run on 2 Nov, so two)
