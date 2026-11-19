@@ -1168,10 +1168,11 @@ function decide(id: string, kind: AccountKind, way: unknown, fromId?: string, gi
         if (page === "signed-out") return show("signed-out");
         if (page === "backup") showBackup(seed!);
         else if (page === "export") {
+          // only openExport opens it, always with its checked wallet
+          if (!target) return show("signed-in", shown(seed!));
           // the screen needs no seed until Show: its entropy is zeroed at once
           seed!.entropy.fill(0);
-          exportTarget = target ?? null;
-          if (exportTarget === null) return show("signed-in", shown(seed!));
+          exportTarget = target;
           show("export");
         } else if (page === "signout") show("signout", shown(seed!));
         else if (page === "withdraw") {
