@@ -2382,13 +2382,26 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // the ETH price read running or queued last: a foreground caller behind it lifts it (join), so its own read never
   // waits behind a tick's at the background's pace
   let refLane: Lane | null = null;
+  /** The ETH price read queued or running last, the block it reads to and the earliest it needs: a read it already makes
+   *  (to the same block or past it, back as far) is its, joined, never queued again (card
+   *  helper-tape-reopen-whole-from-what-it-holds: at c0d9d08c7 every reopen of an ETH-quoted tape queued its own read to
+   *  the shared head behind the others, and 12 listed Robinhood tapes opened at once on live waited 1.4 to 8.0 s on
+   *  them, each with no post of its own). */
+  let refLast: { to: number; need: number; run: Promise<boolean>; lane: Lane } | null = null;
   function readRef(urls: readonly string[], to: number, need = to - V.step + 1, fresh = false): Promise<boolean> {
+    if (refLast !== null && refLast.to >= to && refLast.need <= need) {
+      join(refLast.lane);
+      return refLast.run;
+    }
     if (refLane !== null) join(refLane);
     const lane = sharedLane();
     const run = refLock.then(() => lanes.run(lane, () => readRefNow(urls, to, need, fresh)));
+    const mine = { to, need, run, lane };
     refLane = lane;
+    refLast = mine;
     refLock = run.catch(() => undefined).finally(() => {
       if (refLane === lane) refLane = null;
+      if (refLast === mine) refLast = null;
     });
     return run;
   }
