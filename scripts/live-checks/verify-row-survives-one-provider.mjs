@@ -27,7 +27,7 @@
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --record writes what the run read, so the check's test can replay it through judge().
 import "../net-window.mjs";
-import { realpathSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,6 +143,30 @@ export function judge(rec) {
   return { verdict: "PASS", ok: lines.length > 0, lines };
 }
 
+/** The harness's Solana reads, recorded: the release's first two operators' answer to the page's read
+ *  (apps/terminal/test/verify/pool-reads.json, the one app-in-shell.mjs answers the page from) and the third's
+ *  (test/verify/pool-reads-solana-third-2026-11-19.json, read on 19 Nov), so a width whose planted host is one of the
+ *  first two reads the other two. `fetch` answers the probe; `third(route)` the page's read on the third, else null. */
+function harnessRecorded() {
+  const rd = (f) => JSON.parse(readFileSync(path.join(REPO, "apps/terminal/test/verify", f), "utf8"));
+  const sol = rd("pool-reads.json").solana;
+  const third = rd("pool-reads-solana-third-2026-11-19.json");
+  const answers = new Map([...sol.rpcs.map((x) => [host(x.name), x.answers.accounts]), [host(third.url), third.answer]]);
+  const headers = { "content-type": "application/json", "access-control-allow-origin": "*" };
+  return {
+    fetch: async (url) => {
+      const a = answers.get(host(url));
+      return a ? new Response(JSON.stringify(a), { status: 200, headers }) : new Response("{}", { status: 404, headers });
+    },
+    third: (route) => {
+      const q = route.request();
+      if (host(q.url()) !== host(third.url)) return null;
+      if (q.method() === "OPTIONS") return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type", "access-control-allow-methods": "POST" }, body: "" });
+      return route.fulfill({ status: 200, headers, body: JSON.stringify(third.answer) });
+    },
+  };
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const opt = (n) => {
@@ -156,7 +180,10 @@ async function main() {
   const release = VERIFY_RELEASES[network];
   const list = release?.pools?.solana?.rpcs ?? [];
   if (list.length < NEED) throw new Error(`${network}: Verify's Solana list is ${list.length} host(s), not ${NEED} or more: nothing to refuse one of`);
-  const probed = await probe(list, release.pools.solana.pin);
+  // the harness reads no public host (card app-live-checks-run-on-the-build-before-merge: test:e2e runs it before the
+  // merge): the probe and the page's reads are answered from the recordings (harnessRecorded); the live run reads live
+  const recordedReads = harness ? harnessRecorded() : null;
+  const probed = await probe(list, release.pools.solana.pin, recordedReads ? { read: (u, m, p, o) => rpcAnswer(u, m, p, { ...o, fetchFn: recordedReads.fetch }) } : {});
   const live = list.filter((u) => probed.hosts.find((x) => x.host === host(u))?.answered);
   if (live.length < NEED) {
     const rec = { check: KEY, at: new Date().toISOString(), source: harness ? "harness" : `live ${APP_HOST}`, network, list, probe: probed, plants: null };
@@ -166,11 +193,11 @@ async function main() {
   }
   const plants = plantsOf(live);
   const plant = refuse(plants);
-  const pass = (route) => plant(route) ?? route.continue();
+  const pass = (route, inner) => plant(route) ?? (recordedReads ? recordedReads.third(route) ?? inner(route) : route.continue());
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
   const rpcs = [...release.rpcs, ...CHAINS.flatMap((c) => release.pools[c]?.rpcs ?? [])];
   const route = harness ? await harnessRoute(build, rpcs, pass) : pass;
-  const source = harness ? `harness, terminal build, the release's ${network} RPCs live but the planted one` : `live ${APP_HOST}`;
+  const source = harness ? `harness, terminal build, the release's ${network} RPC reads recorded but the planted one` : `live ${APP_HOST}`;
   const rec = { ...(await collect({ shots, route, network, source })), check: KEY, probe: probed, plants };
   const record = opt("--record");
   if (record) writeFileSync(record, recorded(rec));
