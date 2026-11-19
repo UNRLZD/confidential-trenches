@@ -50,12 +50,13 @@ export function pagePaths(token) {
   return [...CHAINS.map((c) => `/v1/market/lists?chain=${c}`), `/v1/market/token?chain=solana&token=${t}`, `/v1/market/trades?chain=solana&token=${t}&limit=50`, `/v1/market/candles?chain=solana&token=${t}&tf=15m&limit=500`];
 }
 
-async function one(base, fetchFn, path, now) {
+/** One read: its route, status, time and CORS header (with `keep`, the whole body as `text`, for the caller to drop). */
+async function one(base, fetchFn, path, now, keep = false) {
   const began = now();
   try {
     const r = await fetchFn(`${base.replace(/\/$/, "")}${path}`, { redirect: "manual", headers: { origin: APP }, signal: AbortSignal.timeout(TIMEOUT_MS) });
     const body = await r.text();
-    return { route: routeOf(path), status: r.status, ms: Math.round(now() - began), cors: r.headers.get("access-control-allow-origin"), body: r.status === 200 ? undefined : body.slice(0, 200) };
+    return { route: routeOf(path), status: r.status, ms: Math.round(now() - began), cors: r.headers.get("access-control-allow-origin"), body: r.status === 200 ? undefined : body.slice(0, 200), ...(keep && r.status === 200 ? { text: body } : {}) };
   } catch (e) {
     return { route: routeOf(path), status: null, ms: Math.round(now() - began), error: String(e?.cause?.code ?? e?.name ?? "error") };
   }
@@ -81,15 +82,16 @@ export function upgrade(base, coin, now = () => performance.now()) {
 /** The run: { base, coin, answers }; answers in the order sent, each by its route (the path, no query: a record holds
  *  no coin address beside a "token" key, which a secret scan reads as one). */
 export async function read(base = BASE, fetchFn = fetch, now = () => performance.now(), upgradeFn = upgrade) {
+  // the lists read for the coin, kept in the record when it names none (a 502, a 503 shed, a timeout), so a replay says why
+  const first = await one(base, fetchFn, "/v1/market/lists?chain=solana", now, true);
   let coin = null;
   try {
-    const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/market/lists?chain=solana`, { headers: { origin: APP }, signal: AbortSignal.timeout(TIMEOUT_MS) });
-    const s = await r.json();
-    coin = Object.values(s.lists ?? {}).flat().map((x) => x?.token).find((t) => typeof t === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t)) ?? null;
+    coin = Object.values(JSON.parse(first.text ?? "{}").lists ?? {}).flat().map((x) => x?.token).find((t) => typeof t === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t)) ?? null;
   } catch {
     coin = null;
   }
-  if (coin === null) return { base, coin, answers: [] };
+  delete first.text;
+  if (coin === null) return { base, coin, answers: [first] };
   const paths = Array.from({ length: PAGES }, () => pagePaths(coin)).flat();
   const answers = await Promise.all([...paths.map((p) => one(base, fetchFn, p, now)), ...Array.from({ length: SOCKETS }, () => upgradeFn(base, coin, now))]);
   return { base, coin, answers };

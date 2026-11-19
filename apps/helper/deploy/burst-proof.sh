@@ -44,11 +44,14 @@ perl -pe "s|^\\{\\\$HELPER_SITE:[^}]*\\}|http://127.0.0.1:$CP|; s|admin unix//co
 grep -q 'include http.log.error' "$OUT/Caddyfile" || perl -0pi -e 's/\n\}\n/\n\tlog burst-errors {\n\t\toutput stderr\n\t\tinclude http.log.error\n\t\tformat filter {\n\t\t\trequest delete\n\t\t}\n\t}\n}\n/' "$OUT/Caddyfile"
 HPID=
 CPID=
-cleanup() { [ -n "$CPID" ] && kill "$CPID" 2>/dev/null; [ -n "$HPID" ] && kill "$HPID" 2>/dev/null; rm -f "$OUT/sampling"; }
+# BURST_CPU_PROF=1: the helper runs with --cpu-prof into $OUT/prof, written when it exits on the stop's SIGTERM
+PROF=()
+[ -n "${BURST_CPU_PROF:-}" ] && PROF=(--cpu-prof --cpu-prof-dir "$OUT/prof")
+cleanup() { [ -n "$CPID" ] && kill "$CPID" 2>/dev/null; [ -n "$HPID" ] && kill "$HPID" 2>/dev/null && [ -n "${BURST_CPU_PROF:-}" ] && wait "$HPID"; rm -f "$OUT/sampling"; }
 trap cleanup EXIT
 mkdir -p "$OUT/store"
 (cd "$ROOT/apps/helper" && exec env -i PATH="$PATH" HOME="$HOME" HELPER_COMMIT="$(git -C "$ROOT" rev-parse HEAD)" PORT="$HP" HELPER_STORE_DIR="$OUT/store" HELPER_RELEASE=1 \
-  PROXY_BUDGET_JUPITER=60,30 PROXY_BUDGET_RELAY=60,30 PROXY_BUDGET_LIFI=60,30 PROXY_BUDGET_ONECLICK=60,30 ${PIN[@]+"${PIN[@]}"} node src/server.ts) >"$OUT/helper.log" 2>&1 &
+  PROXY_BUDGET_JUPITER=60,30 PROXY_BUDGET_RELAY=60,30 PROXY_BUDGET_LIFI=60,30 PROXY_BUDGET_ONECLICK=60,30 ${PIN[@]+"${PIN[@]}"} node ${PROF[@]+"${PROF[@]}"} src/server.ts) >"$OUT/helper.log" 2>&1 &
 HPID=$!
 echo "== waiting for the helper's ready (at most 300 s)"
 for _ in $(seq 1 150); do curl -fsS "http://127.0.0.1:$HP/v1/health" 2>/dev/null | grep -q '"ready":true' && break; kill -0 $HPID 2>/dev/null || break; sleep 2; done

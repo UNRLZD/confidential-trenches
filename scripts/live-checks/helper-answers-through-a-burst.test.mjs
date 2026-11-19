@@ -88,3 +88,13 @@ test("upgrade(): 101 from a server that upgrades with Origin APP_HOST, the statu
   assert.equal(gone.status, null);
   assert.equal(gone.error, "ECONNREFUSED");
 });
+
+test("a lists read that names no coin (Caddy's 502 with no CORS header) is kept in the record, and the run FAILs on it", async () => {
+  const fetchFn = async () => new Response("", { status: 502 });
+  const got = await read("https://ct-api.unrealized.trade", fetchFn, () => 0, async () => assert.fail("no socket without a coin"));
+  assert.equal(got.coin, null);
+  assert.deepEqual(got.answers, [{ route: "/v1/market/lists", status: 502, ms: 0, cors: null, body: "" }]);
+  const v = judge(got);
+  assert.equal(v.ok, false);
+  assert.ok(v.lines.some((l) => l.startsWith("BAD 500, 502 or 504: 1")), v.lines.join("\n"));
+});
