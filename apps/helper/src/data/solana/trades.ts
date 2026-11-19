@@ -135,8 +135,12 @@ export const BACK_SPAN_S = 86_400;
 /** The transactions one read back reads at most. [design: 3,000, about two of GTA6's days; at TX_PARALLEL a time on the
  *  public endpoints a few minutes of background reads, its chart filling meanwhile] */
 export const BACK_TX_MAX = 3_000;
-/** Read backs at once across every token, so a burst of listed coins (a deploy's live run opens 194 at once) never takes
- *  the public endpoints from the walks' and callers' reads. [design: two of the walks' TX_PARALLEL] */
+/** Read back steps at once across every token (a signature page, or a chunk of TX_PARALLEL transactions), so a burst of
+ *  listed coins (a deploy's live run opens 194 at once) never takes the public endpoints from the walks' and callers'
+ *  reads. Every read back asked runs, its steps taking these lanes in the order asked (backLane), so a read back of a few
+ *  transactions never waits behind one of BACK_TX_MAX (card app-chart-check-inside-its-bound: live helper 207, 19 Nov
+ *  17:26-17:30Z, two read backs ran to their end at once and the rest queued: ygq5gP...pump's 10 transactions said
+ *  filling 3 min 18 s, EHFrCL...pump's empty page 4 min 21 s). [design: two of the walks' TX_PARALLEL] */
 export const BACK_PARALLEL = 2;
 /** A read back's place in a slot: below the walks' and the stream's (a counter from 1), never a clash of order. */
 const BACK_INDEX = 1e12;
@@ -591,13 +595,18 @@ type Entry = {
    *  oldest it read, or after a transaction a walk could not read, or after the oldest a gap's walk reached at REFILL_MAX
    *  (an unread gap lies below it). Undefined until the first walk ends. */
   whole?: number;
+  /** Card app-chart-check-inside-its-bound: a hole a read back to the mint's first signature does not fill (a transaction
+   *  a walk could not read, or a gap's walk stopped at REFILL_MAX); without one, that read back done leaves the tape whole
+   *  from the first signature, as `whole` 0 does. */
+  holed?: true;
   /** Card sol-meteora-tape-inside-rpc-budget: when this coin's last WHOLE_WINDOW_MS of whole reads were sent, oldest first. */
   wholeSent?: number[];
   /** Its newest stream transaction not read whole (past the budget, or no answer): when (`at`), and the ms after which
    *  its tape holds every trade again (`to`, the second after it arrived). */
   cut?: { at: number; to: number };
 };
-type Back = { before: string | null; events: Swap[]; book: Book | null; done: boolean; txs: number; n: number; want: { tf: Tf; limit: number } };
+/** `born`: it read every successful signature back to the mint's first (card app-chart-check-inside-its-bound). */
+type Back = { before: string | null; events: Swap[]; book: Book | null; done: boolean; born: boolean; txs: number; n: number; want: { tf: Tf; limit: number } };
 
 export function createSolanaTrades(deps: {
   fetch?: Fetch;
@@ -1011,6 +1020,8 @@ export function createSolanaTrades(deps: {
     for (const s of sigs) e.covered = Math.max(e.covered, s.slot);
     // the reach (Entry.whole): a first walk's oldest read, 0 when it read every successful signature the mint has; a gap's
     // walk that stopped at REFILL_MAX leaves the signatures below its oldest unread
+    // a transaction left unread, or a gap's walk stopped short: a hole no read back below the oldest fills (Entry.holed)
+    if (gap.t !== null || (!cold && !listedAll && sigs.length > 0)) e.holed = true;
     if (cold) {
       if (!everyOne) below(todo[0]?.t ?? sigs[0]?.t ?? null);
     } else if (!listedAll && sigs.length > 0) below(sigs[0]!.t);
@@ -1438,6 +1449,20 @@ export function createSolanaTrades(deps: {
   /** One read back (BACK_SPAN_S): pages of COLD_PAGE signatures before the oldest read, each successful one's
    *  transaction read TX_PARALLEL at a time and its trades held, the book built after each page; a page that fails is
    *  asked again a second on, three times at most. */
+  /** The read backs' lanes: BACK_PARALLEL steps at once, a free lane handed to the step that asked first. */
+  let lanes = 0;
+  const laneWaits: (() => void)[] = [];
+  async function backLane<T>(step: () => Promise<T>): Promise<T> {
+    if (lanes < BACK_PARALLEL) lanes++;
+    else await new Promise<void>((go) => laneWaits.push(go));
+    try {
+      return await step();
+    } finally {
+      const next = laneWaits.shift();
+      if (next !== undefined) next();
+      else lanes--;
+    }
+  }
   async function readBack(e: Entry): Promise<void> {
     const b = e.back!;
     const floor = Math.floor(now() / 1000) - BACK_SPAN_S;
@@ -1446,7 +1471,7 @@ export function createSolanaTrades(deps: {
     while (entries.get(e.mint) === e && !b.done) {
       let page: unknown;
       try {
-        page = await rpc("getSignaturesForAddress", [e.mint, { limit: COLD_PAGE, commitment: "confirmed", ...(b.before === null ? {} : { before: b.before }) }]);
+        page = await backLane(() => rpc("getSignaturesForAddress", [e.mint, { limit: COLD_PAGE, commitment: "confirmed", ...(b.before === null ? {} : { before: b.before }) }]));
       } catch {
         if (++fails >= 3) return;
         await new Promise((r) => setTimeout(r, 1_000).unref?.());
@@ -1478,7 +1503,7 @@ export function createSolanaTrades(deps: {
         let chunk = todo.slice(k, Math.min(k + TX_PARALLEL, k + BACK_TX_MAX - b.txs));
         b.txs += chunk.length;
         for (let attempt = 0; chunk.length > 0; attempt++) {
-          const read = await Promise.all(chunk.map(one));
+          const read = await backLane(() => Promise.all(chunk.map(one)));
           chunk = chunk.filter((_, j) => !read[j]);
           if (chunk.length === 0) break;
           if (attempt === 2) {
@@ -1496,14 +1521,17 @@ export function createSolanaTrades(deps: {
       backBook(e, b);
       const oldestT = sigs.at(-1)?.t ?? null;
       const enough = b.book !== null && b.book.candles(b.want.tf, null, b.want.limit).length >= b.want.limit;
+      // the list ran out with every transaction on it read: back to the mint's first signature (Back.born)
+      if (sigs.length < COLD_PAGE && hole === null && b.txs < BACK_TX_MAX) b.born = true;
       if (sigs.length < COLD_PAGE || b.txs >= BACK_TX_MAX || (oldestT !== null && oldestT < floor) || enough) b.done = true;
     }
   }
   let backs = 0;
   const backQueue: Entry[] = [];
-  /** Starts the queued read backs, BACK_PARALLEL at once. */
+  /** Starts the queued read backs, every one asked (at most OPEN_MAX, one per open token), their steps in turn on the
+   *  BACK_PARALLEL lanes (backLane). */
   function startBacks(): void {
-    while (backs < BACK_PARALLEL && backQueue.length > 0) {
+    while (backs < OPEN_MAX && backQueue.length > 0) {
       const e = backQueue.shift()!;
       if (entries.get(e.mint) !== e || e.back === undefined) continue;
       backs++;
@@ -1524,7 +1552,7 @@ export function createSolanaTrades(deps: {
       return;
     }
     if (e.oldest === undefined || e.book === null || e.quoteMint === null) return;
-    e.back = { before: e.oldest, events: [], book: null, done: e.oldest === null, txs: 0, n: 0, want: { tf, limit } };
+    e.back = { before: e.oldest, events: [], book: null, done: e.oldest === null, born: false, txs: 0, n: 0, want: { tf, limit } };
     if (e.back.done) return;
     if (backQueue.length < OPEN_MAX) backQueue.push(e);
     else e.back.done = true;
@@ -1616,7 +1644,13 @@ export function createSolanaTrades(deps: {
       // reads it again while that read goes on, never a short chart drawn as the coin's whole (one rule with swaps.ts
       // candles, card helper-listed-charts-own-reads)
       let short = false;
-      if (mine.length < limit && tf !== "1s" && deps.history !== undefined) {
+      // card app-chart-check-inside-its-bound: a tape that holds every trade from the mint's first signature (its first
+      // walk listed it, whole 0; or a read back reached it with no hole above) is the coin's whole chart: no history
+      // before it to ask, nothing to read back, never filling for either (live helper 207, 19 Nov 17:26-17:30Z:
+      // EHFrCL6p...pump, 7 signatures, its trades whole_ms 0, its 1m chart filling for 4 min 21 s). A walk that listed no
+      // signature (an RPC not yet holding a fresh mint's) knows nothing of its first: not whole
+      const born = (e.whole === 0 && typeof e.oldest === "string") || (e.back?.born === true && e.holed !== true);
+      if (!born && mine.length < limit && tf !== "1s" && deps.history !== undefined) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
         // with no bars of ours the history's newest range is asked as such (`to` null: one cache key, not one per second)
         const h = await deps.history(mint, tf, ownFrom === null ? to : before, limit, client).catch(() => UPSTREAM);
@@ -1641,7 +1675,7 @@ export function createSolanaTrades(deps: {
       if (own.length > 0) body.own_from_s = own[0]![0];
       // a live chart (no `to`) of a token behind the chain is not current: filling, whatever its bar count (card
       // every-tape-and-chart-says-filling-behind-the-head)
-      if (((short || backing(e)) && bars.length < limit) || (to === null && behind(e))) body.filling = true;
+      if ((!born && (short || backing(e)) && bars.length < limit) || (to === null && behind(e))) body.filling = true;
       body.as_of_ms = at;
       return { status: 200, body: JSON.stringify(body), src, asOfMs: at, timing: readTo(e) };
     },

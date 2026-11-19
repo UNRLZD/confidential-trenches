@@ -1,0 +1,124 @@
+{
+ "_note": "good: hand reads of the deployed helper (release 207, 472d2d8e2) on 19 Nov, recorded in this shape: 4pUJbf48...Qc55 (3 signatures on public RPC) trades whole_ms 0 at 17:29:08Z, its 1m chart (limit 300) read at 17:29:07Z 1 bar, not filling; ygq5gP...pump whole_ms 1795108551000 (not whole): PASS. bad: this check run on the same helper at 2026-11-19T17:44:10.279Z: four of the eight new coins had tapes saying whole_ms 0 and charts filling at both reads: FAIL.",
+ "good": {
+  "at": "2026-11-19T17:29:08Z",
+  "base": "https://ct-api.unrealized.trade",
+  "coins": [
+   {
+    "token": "<token>",
+    "whole_ms": 0,
+    "pairs": [
+     {
+      "whole_ms": 0,
+      "status": 200,
+      "bars": 1,
+      "filling": false
+     }
+    ]
+   },
+   {
+    "token": "<token>",
+    "whole_ms": 1795108551000,
+    "pairs": []
+   }
+  ]
+ },
+ "bad": {
+  "at": "2026-11-19T17:44:10.279Z",
+  "base": "https://ct-api.unrealized.trade",
+  "coins": [
+   {
+    "token": "<token>",
+    "pairs": [
+     {
+      "whole_ms": 0,
+      "status": 200,
+      "bars": 1,
+      "filling": true
+     },
+     {
+      "whole_ms": 0,
+      "status": 200,
+      "bars": 1,
+      "filling": true
+     }
+    ],
+    "whole_ms": 0
+   },
+   {
+    "token": "<token>",
+    "pairs": [],
+    "whole_ms": 1795110211000
+   },
+   {
+    "token": "<token>",
+    "pairs": [],
+    "whole_ms": 1795110210000
+   },
+   {
+    "token": "<token>",
+    "pairs": [],
+    "whole_ms": null
+   },
+   {
+    "token": "<token>",
+    "pairs": [],
+    "whole_ms": 1795110215000
+   },
+   {
+    "token": "<token>",
+    "pairs": [
+     {
+      "whole_ms": 0,
+      "status": 200,
+      "bars": 1,
+      "filling": true
+     },
+     {
+      "whole_ms": 0,
+      "status": 200,
+      "bars": 1,
+      "filling": true
+     }
+    ],
+    "whole_ms": 0
+   },
+   {
+    "token": "<token>",
+    "pairs": [
+     {
+      "whole_ms": 0,
+      "status": 200,
+      "bars": 1,
+      "filling": true
+     },
+     {
+      "whole_ms": 0,
+      "status": 200,
+      "bars": 1,
+      "filling": true
+     }
+    ],
+    "whole_ms": 0
+   },
+   {
+    "token": "<token>",
+    "pairs": [
+     {
+      "whole_ms": 0,
+      "status": 200,
+      "bars": 1,
+      "filling": true
+     },
+     {
+      "whole_ms": 0,
+      "status": 200,
+      "bars": 1,
+      "filling": true
+     }
+    ],
+    "whole_ms": 0
+   }
+  ]
+ }
+}
