@@ -1,0 +1,65 @@
+{
+ "note": "good: card signpage-backup-export branch commit 33d212ef1 built as the sign deploy builds it (packages/signpage/scripts/build-app.mjs --out), its index.html and app.js read from that build folder, against the entries release-list.mjs --print --host sign gives that build (what a deploy of it serves): both files match and the bundle holds the backup and the export screens: PASS. bad: a real run of this check on SIGN_HOST, 2026-11-19T10:04:54.726Z, against the newest committed list release-181: both files served as listed and the backup screen there, but no export screen (export.open still refused in that release): FAIL. Records unedited; sizes and sha384s only, no bodies.",
+ "good": {
+  "release": "build-33d212ef1a53",
+  "origin": "https://confidential.unrealized.trade",
+  "read_at": "2026-11-19T10:05:19.283Z",
+  "list": {
+   "/": {
+    "bytes": 423,
+    "sha384": "sha384-20LJz/ae4V4BvwZjPgSBQXoJP47EidoAPFvhAA0fRDwhHvZ3AmK1Et5NbptcdK7d"
+   },
+   "/app.js": {
+    "bytes": 1889735,
+    "sha384": "sha384-z3KgfZz10mbs0in4uEzs12XXgPAzarRP3KWOmv9mUPuuuImL0aSRZSY/cNciJxnZ"
+   }
+  },
+  "files": {
+   "/": {
+    "status": 200,
+    "bytes": 423,
+    "sha384": "sha384-20LJz/ae4V4BvwZjPgSBQXoJP47EidoAPFvhAA0fRDwhHvZ3AmK1Et5NbptcdK7d"
+   },
+   "/app.js": {
+    "status": 200,
+    "bytes": 1889735,
+    "sha384": "sha384-z3KgfZz10mbs0in4uEzs12XXgPAzarRP3KWOmv9mUPuuuImL0aSRZSY/cNciJxnZ",
+    "screens": {
+     "backup": true,
+     "export": true
+    }
+   }
+  }
+ },
+ "bad": {
+  "release": "release-181",
+  "origin": "https://confidential.unrealized.trade",
+  "read_at": "2026-11-19T10:04:54.726Z",
+  "list": {
+   "/": {
+    "bytes": 423,
+    "sha384": "sha384-peR9hR5NkwOeRnrpr6jeKfvGaFUnZYBSWUGAcoROK2biCC/E8k3ZLjRsZSqnpaYP"
+   },
+   "/app.js": {
+    "bytes": 1886134,
+    "sha384": "sha384-czZ5kRnGhnujyDqn+zl+VKZ/Dl5LT+aTMgO/QGxeH1mjls6f0d6z6q8RdE6hjmdD"
+   }
+  },
+  "files": {
+   "/": {
+    "status": 200,
+    "bytes": 423,
+    "sha384": "sha384-peR9hR5NkwOeRnrpr6jeKfvGaFUnZYBSWUGAcoROK2biCC/E8k3ZLjRsZSqnpaYP"
+   },
+   "/app.js": {
+    "status": 200,
+    "bytes": 1886134,
+    "sha384": "sha384-czZ5kRnGhnujyDqn+zl+VKZ/Dl5LT+aTMgO/QGxeH1mjls6f0d6z6q8RdE6hjmdD",
+    "screens": {
+     "backup": true,
+     "export": false
+    }
+   }
+  }
+ }
+}
