@@ -65,7 +65,7 @@ export type Facts = {
    *  decimal text, into the pool positive. A pair's (a 20-byte pool): each ERC-20 it got and what it sent, by token
    *  ([token, in, out]: a pair pays its fee out of the leg it took in, Aerodrome's to its fees contract).
    *  A v4 pool's (a 32-byte id): each of its Swap logs' two amounts, the swapper's side (positive, what it got). */
-  legs?: { pair?: [string, string, string][]; v4?: { index: number; a: [string, string] }[] };
+  legs?: { pool: string; pair?: [string, string, string][]; v4?: { index: number; a: [string, string] }[] };
 };
 
 /** The facts of `token` in a receipt (eth_getTransactionReceipt's answer, hostile), or null for a malformed one, one of
@@ -135,7 +135,7 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
       if (sender !== null && /^0x[0-9a-f]{64}$/.test(topics[1] ?? "")) calls.push({ pool: topics[1]!, sender });
     }
   }
-  const legs = pool === undefined ? {} : { legs: pair !== null ? { pair: [...pair].map(([a, [i, o]]): [string, string, string] => [a, i.toString(), o.toString()]) } : { v4 } };
+  const legs = pool === undefined ? {} : { legs: pair !== null ? { pool, pair: [...pair].map(([a, [i, o]]): [string, string, string] => [a, i.toString(), o.toString()]) } : { pool, v4 } };
   return { traders, moves, swaps, net: [...net].map(([a, v]) => [a, v.toString()]), callers: [...callers], calls, currencies: [...currencies], ...legs };
 }
 

@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { fakeChain, REC, URLS } from "../../../test/evm-swaps/robinhood.ts";
 import { CG_ONCHAIN, coingeckoPace, createKeyed } from "../coingecko.ts";
 import { geckoBudget } from "../gecko.ts";
@@ -40,6 +41,7 @@ function harness(chain: "base" | "robinhood") {
   const [newest, ...older] = SOGNI.trades;
   const answer = (rows: R["trades"]) => ({ data: rows.map(({ id, legs, ...a }) => ({ id, type: "trade", attributes: { ...a, from_token_address: legs.from[0], from_token_amount: legs.from[1], to_token_address: legs.to[0], to_token_amount: legs.to[1] } })) });
   let refuse = false;
+  let top = SOGNI.pool;
   const vendorCalls: string[] = [];
   const logReads: unknown[] = [];
   // the newest trade's logs touching the pool, logged at the head with their block's time
@@ -48,8 +50,8 @@ function harness(chain: "base" | "robinhood") {
     if (url.startsWith(CG_ONCHAIN) || url.startsWith(GT_BASE)) {
       vendorCalls.push(url);
       if (refuse) return new Response("{}", { status: 429, headers: { "retry-after": "60" } });
-      if (url.includes(`/tokens/${SOGNI.coin}/pools?page=1`)) return new Response(JSON.stringify({ data: [{ id: `${chain}_${SOGNI.pool}`, attributes: { address: SOGNI.pool } }] }), { status: 200 });
-      if (url.includes(`/pools/${SOGNI.pool}/trades?token=${SOGNI.coin}`)) return new Response(JSON.stringify(answer(older)), { status: 200 });
+      if (url.includes(`/tokens/${SOGNI.coin}/pools?page=1`)) return new Response(JSON.stringify({ data: [{ id: `${chain}_${top}`, attributes: { address: top } }] }), { status: 200 });
+      if (url.includes(`/pools/${top}/trades?token=${SOGNI.coin}`)) return new Response(JSON.stringify(answer(older)), { status: 200 });
       return new Response("{}", { status: 404 });
     }
     const reqs = JSON.parse(String(init.body ?? "null")) as { id: number; method: string; params: Record<string, unknown>[] }[] | null;
@@ -85,7 +87,7 @@ function harness(chain: "base" | "robinhood") {
     const named = VENDOR_READ.exec(a.timing ?? "")?.[1];
     return { ...a, j: JSON.parse(a.body) as { trades: { tx: string; side: string; amt: string; usd: string; trader: string | null }[]; src: string }, age: named === undefined ? NaN : Number(named), price: PRICE_READ.exec(a.timing ?? "")?.[1] };
   };
-  return { clock, tape, newest: newest!, refuse: () => void (refuse = true), vendorCalls, logReads };
+  return { clock, tape, newest: newest!, refuse: () => void (refuse = true), moveTo: (p: string) => void (top = p), vendorCalls, logReads };
 }
 
 for (const chain of ["base", "robinhood"] as const)
@@ -122,6 +124,37 @@ for (const chain of ["base", "robinhood"] as const)
     for (const r of h.logReads as unknown[][]) assert.ok(r.length <= 3, `a round's post asked ${r.length} filters`);
   });
 
+test("a held coin's pool name is asked again once GT_POOL_FRESH_MS (10 min) old, never more often: 21 minutes held, the vendor answering, 2 pool calls and no trades call; a top pool that moved is named at the next period and its rows read once from the vendor, the tape kept fresh on the last pool until the new one's rows place it", async () => {
+  const h = harness("base");
+  await h.tape();
+  await settle();
+  await h.tape();
+  const from = h.vendorCalls.length;
+  const ages: number[] = [];
+  for (const end = h.clock.t + 21 * 60_000; h.clock.t < end; ) {
+    h.clock.t += 2_000;
+    await settle();
+    ages.push((await h.tape()).age);
+  }
+  const held = h.vendorCalls.slice(from);
+  assert.equal(held.filter((u) => u.includes("/pools?page=1")).length, 2, held.join(" "));
+  assert.equal(held.filter((u) => u.includes("/trades")).length, 0, "no vendor trades call while our reads renew the tape");
+  assert.ok(Math.max(...ages) <= BEHIND_MAX.base.ms, `max age ${Math.max(...ages)}`);
+  // the vendor's top pool moves: its name is read at the next period and the new pool's rows once
+  const moved = `0x${"9a".repeat(20)}`;
+  h.moveTo(moved);
+  const at = h.vendorCalls.length;
+  for (const end = h.clock.t + 10 * 60_000 + 30_000; h.clock.t < end; ) {
+    h.clock.t += 2_000;
+    await settle();
+    const a = await h.tape();
+    assert.ok(a.age <= BEHIND_MAX.base.ms, `age ${a.age} after the move`);
+  }
+  const after = h.vendorCalls.slice(at);
+  assert.equal(after.filter((u) => u.includes("/pools?page=1")).length, 1, after.join(" "));
+  assert.equal(after.filter((u) => u.includes(`/pools/${moved}/trades`)).length, 1, "the new pool's rows read once from the vendor");
+});
+
 test("poolTrades: a pair's trade is its net Transfers of the coin and the quote at the pool (a sell: coin in, quote out); liquidity (both in) is no trade; a v4 pool's is its Swap log's two amounts, the swapper's side", () => {
   const coin = SOGNI.coin;
   const quote = "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2";
@@ -149,21 +182,40 @@ test("poolTrades: a pair's trade is its net Transfers of the coin and the quote 
   assert.ok(fs.every((f) => !Array.isArray(f.address) || (f.address as string[]).length <= 10));
 });
 
-test("provenHooks: a shared v4 swap that is no hook's own, with a dozen currencies in its receipt, tries at most 1,000 pool keys (red at ec662fe86: every tick spacing to 400, 30,800 keys a swap, 265 to 994 ms of the event loop for two on a Mac; 924 now)", async () => {
+test("provenHooks: a shared v4 swap is checked against its pool's own key, asked of keyOf once a swap (createSwaps reads it once a pool, poolKeyOf), and no candidate key is hashed (red at ec662fe86: every tick spacing to 400, 30,800 keys a swap, 52 slices of 1,000 for two)", async () => {
   const token = `0x${"11".repeat(20)}`;
   const currencies = Array.from({ length: 12 }, (_, i) => `0x${(i + 32).toString(16).padStart(2, "0").repeat(20)}`);
   const pool = `0x${"ab".repeat(32)}`;
   const f = { traders: { from: token }, moves: [], swaps: [{ index: 1, sender: `0x${"22".repeat(20)}`, pool, fee: 3000 }, { index: 2, sender: `0x${"33".repeat(20)}`, pool, fee: 3000 }], currencies } as unknown as Parameters<typeof provenHooks>[0];
-  // its keys counted by its turns of the event loop: it yields once each V4_KEY_SLICE (1,000) keys hashed
+  const asked: string[] = [];
   const turns = { n: 0 };
   const real = globalThis.setImmediate;
   globalThis.setImmediate = ((fn: (...a: unknown[]) => void, ...a: unknown[]) => (turns.n++, real(fn, ...a))) as typeof setImmediate;
   let got: Awaited<ReturnType<typeof provenHooks>>;
   try {
-    got = await provenHooks(f, token);
+    got = await provenHooks(f, token, async (id) => (asked.push(id), null));
   } finally {
     globalThis.setImmediate = real;
   }
-  assert.ok(turns.n <= 2, `${turns.n} slices of 1,000 keys for two swaps`);
-  assert.ok((got.swaps ?? []).every((s) => s.hook === undefined), "neither is the hook's");
+  assert.deepEqual(asked, [pool, pool], "the pool's key asked for each shared swap");
+  assert.equal(turns.n, 0, "no key hashed by the slice");
+  assert.ok((got.swaps ?? []).every((s) => s.hook === undefined), "no key: neither is the hook's");
+});
+
+test("provenHooks: a hook pool on an uncommon tick spacing (333): its hook's own swap is marked, never a trade; the router's is not (red at d8b68dcb0: the common spacings alone left it unproven and served)", async () => {
+  const token = `0x${"11".repeat(20)}`;
+  const zora = `0x${"77".repeat(20)}`;
+  const hook = `0x${"44".repeat(19)}c0`;
+  const router = `0x${"55".repeat(20)}`;
+  const w = (n: bigint) => n.toString(16).padStart(64, "0");
+  const a = (x: string) => x.slice(2).padStart(64, "0");
+  const [c0, c1] = token < zora ? [token, zora] : [zora, token];
+  const key = `0x${a(c0)}${a(c1)}${w(3000n)}${w(333n)}${a(hook)}`;
+  const id = `0x${Buffer.from(keccak_256(Buffer.from(key.slice(2), "hex"))).toString("hex")}`;
+  const f = { traders: { from: router }, moves: [], swaps: [{ index: 1, sender: router, pool: id, fee: 3000 }, { index: 4, sender: hook, pool: id, fee: 3000 }], currencies: [zora] } as unknown as Parameters<typeof provenHooks>[0];
+  const got = await provenHooks(f, token, async (x) => (x === id ? key : null));
+  assert.deepEqual((got.swaps ?? []).filter((s) => s.hook).map((s) => s.index), [4], "the hook's own swap is marked");
+  // a key that does not hash to the id is no key
+  const forged = await provenHooks(f, token, async () => `0x${a(c0)}${a(c1)}${w(3000n)}${w(334n)}${a(hook)}`);
+  assert.equal((forged.swaps ?? []).some((s) => s.hook), false);
 });

@@ -637,13 +637,13 @@ function* v4Tries(token: string, swapFee: number, around: readonly string[], cha
 }
 /** Every key of `token` and one of `others`, a fee (the swap's own, the dynamic-fee flag or a standard tier), a tick
  *  spacing and one of `hooks`. */
-function* keysOf(token: string, others: readonly string[], hooks: readonly string[], swapFee: number, spacings: readonly number[] = ALL_SPACINGS): Generator<string> {
+function* keysOf(token: string, others: readonly string[], hooks: readonly string[], swapFee: number): Generator<string> {
   const w = (n: bigint): string => n.toString(16).padStart(64, "0");
   const a = (x: string): string => x.slice(2).padStart(64, "0");
   const fees = [...new Set([swapFee, DYNAMIC_FEE, 100, 500, 2500, 3000, 10000])];
   for (const other of others) {
     const [c0, c1] = token < other ? [token, other] : [other, token];
-    for (const ts of spacings) for (const h of hooks) for (const f of fees) yield `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
+    for (const ts of ALL_SPACINGS) for (const h of hooks) for (const f of fees) yield `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
   }
 }
 /** Keys v4KeySliced hashes between two turns of the event loop. [design: 1,000, about 60 ms on the Mac (a miss of
@@ -663,35 +663,43 @@ export async function v4KeySliced(id: string, token: string, swapFee: number, ar
 
 /**
  * A vendor row's receipt facts (vendor-rows.ts) with each v4 swap its pool's own hook sent marked `hook`, so its row is
- * never served (card helper-v4-hook-trade-is-what-its-trader-paid). The receipt names no pool's hook; the proof is the
- * hash, as v4Key's: a key of `token` and native ETH or a currency the receipt moved (the first HOOKS_MAX), a fee, a tick
- * spacing and the swap's sender as its hook hashes to the swap's pool id. Tried only for a swap whose pool another
- * sender swapped in or called in the same transaction: a hook's own swap runs in its hook call, inside another's call
- * of its pool (Base tx 0xb4503a57: hook 0x0469a4bd's Swap log 98 inside the router's swap, log 95). Hashed V4_KEY_SLICE
- * at a time between turns of the event loop.
+ * never served (card helper-v4-hook-trade-is-what-its-trader-paid). The receipt names no pool's hook: `keyOf` gives the
+ * pool's own key (the PoolKey its id is the keccak-256 of, createSwaps poolKeyOf: read once per pool and held), and the
+ * swap is its hook's own when the key's hook is the swap's sender, whatever the key's tick spacing (card
+ * helper-vendor-tapes-refresh-inside-15s: hashing candidate keys per receipt, every tick spacing to 400, cost 30,800 keys
+ * a shared swap, and the common spacings alone left a hook pool off them unproven). A key that does not hash to the id is
+ * no key. Asked only for a swap whose pool another sender swapped in or called in the same transaction: a hook's own swap
+ * runs in its hook call, inside another's call of its pool (Base tx 0xb4503a57: hook 0x0469a4bd's Swap log 98 inside the
+ * router's swap, log 95).
  */
-export async function provenHooks(f: Facts, token: string): Promise<Facts> {
+export type KeyOf = (id: string, s: { fee: number; senders: readonly string[]; currencies: readonly string[] }) => Promise<string | null>;
+export async function provenHooks(f: Facts, token: string, keyOf: KeyOf): Promise<Facts> {
   const swaps = f.swaps ?? [];
-  const others = [ZERO, ...(f.currencies ?? []).filter((c) => c !== token && c !== ZERO).slice(0, HOOKS_MAX)];
+  const currencies = (f.currencies ?? []).filter((c) => c !== token);
   const marked: NonNullable<Facts["swaps"]> = [];
-  let n = 0;
   for (const s of swaps) {
-    let own = false;
     const shared = s.pool !== undefined && [...swaps, ...(f.calls ?? [])].some((o) => o.pool === s.pool && o.sender !== s.sender);
-    if (shared && s.fee !== undefined)
-      // the common tick spacings only (card helper-vendor-tapes-refresh-inside-15s): every one up to TICK_SPACING_MAX
-      // tried 30,800 keys for each shared swap that is no hook's own, about 0.5 s of the event loop on a Mac, on every
-      // held vendor tape's new receipts; a hook pool off them is not proven, its swap served as the vendor's row is
-      for (const k of keysOf(token, others, [s.sender], s.fee, TICK_SPACINGS)) {
-        if (keccakHex(k) === s.pool) {
-          own = true;
-          break;
-        }
-        if (++n % V4_KEY_SLICE === 0) await new Promise((go) => setImmediate(go));
-      }
+    const senders = [...new Set(swaps.filter((x) => x.pool === s.pool).map((x) => x.sender))];
+    const key = shared && s.fee !== undefined ? await keyOf(s.pool!, { fee: s.fee, senders, currencies }) : null;
+    const own = key !== null && /^0x[0-9a-f]{320}$/.test(key) && keccakHex(key) === s.pool && hookOf(key) === s.sender;
     marked.push(own ? { ...s, hook: true } : s);
   }
   return { ...f, swaps: marked };
+}
+
+/** The key of v4 pool `id` worked out from a receipt, for a pool the PositionManager never made (Zora's, Doppler's): a
+ *  key of `token` and native ETH or one of `currencies` (the first HOOKS_MAX), a fee (the swap's own, the dynamic-fee
+ *  flag or a standard tier), any tick spacing to TICK_SPACING_MAX and one of `hooks` (no hook, or a sender of the pool's
+ *  swaps) hashes to the id; null when none does. Hashed V4_KEY_SLICE at a time between turns of the event loop, once a
+ *  pool (createSwaps poolKeyOf holds it). */
+export async function keyFromReceipt(id: string, token: string, fee: number, hooks: readonly string[], currencies: readonly string[]): Promise<string | null> {
+  const others = [ZERO, ...currencies.filter((c) => c !== token && c !== ZERO).slice(0, HOOKS_MAX)];
+  let n = 0;
+  for (const k of keysOf(token, others, [ZERO, ...hooks.slice(0, HOOKS_MAX)], fee)) {
+    if (keccakHex(k) === id) return k;
+    if (++n % V4_KEY_SLICE === 0) await new Promise((go) => setImmediate(go));
+  }
+  return null;
 }
 
 /** A held vendor coin's pool as our reads follow it (card helper-vendor-tapes-refresh-inside-15s): the pool the vendor
@@ -3374,10 +3382,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           // card helper-vendor-tapes-refresh-inside-15s: a coin whose pool our reads can follow is renewed from them, no
           // vendor call; the vendor's refresh is for a coin they cannot place (no layout, a row they cannot price)
           if (await chainRenew(token)) return;
-          const h = await readTape(token, true);
-          if (h === undefined || h === "none") return;
-          await exacting(token, h.rows.map((r) => r.tx));
-          keepTape(token, h);
+          await vendorRenew(token);
         })
         .catch(() => undefined)
         .finally(() => tapeRenewing.delete(token));
@@ -3420,7 +3425,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const f = vendorFacts.get(`${token} ${r.tx}`);
       const want = vendorUnits(r.amt, d);
       const usd = Number(r.usd);
-      if (f === undefined || f === "none" || want === null || !(usd > 0)) continue;
+      // a receipt read for another pool (the vendor's top pool before it moved) says nothing of this one's legs
+      if (f === undefined || f === "none" || f.legs?.pool !== p || want === null || !(usd > 0)) continue;
       const near = (v: bigint) => (v > want ? v - want : want - v) * 10n ** 6n <= want;
       if (v4) {
         for (const s of f.legs?.v4 ?? []) {
@@ -3443,7 +3449,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
       if (found !== null) break;
     }
-    if (found === null || !Number.isFinite(found.rate) || found.rate <= 0) return had !== undefined && had.pool === p ? had : null;
+    // none placed yet: a coin whose top pool moved keeps its last pool followed until the new one's rows place it
+    if (found === null || !Number.isFinite(found.rate) || found.rate <= 0) return had ?? null;
     const l: Layout = { token, pool: p, v4, ...(found.coinLeg === undefined ? {} : { coinLeg: found.coinLeg }), ...(found.quote === undefined ? {} : { quote: found.quote }), rate: !v4 && exactQuote(found.quote) ? null : { usd: found.rate, at: va }, next: had?.pool === p ? had.next : null, asked: had?.asked ?? now(), from: va, short: had?.short ?? false };
     if (!layouts.has(token) && layouts.size >= POOLS_MAX) layouts.delete(layouts.keys().next().value!);
     layouts.set(token, l);
@@ -3476,6 +3483,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const bms = blockMsOf();
     const held = [...layouts.values()].filter((l) => now() - l.asked <= STALE_MS && gtTapes.has(l.token) && vendorDecimals.has(l.token));
     if (held.length === 0) return done;
+    for (const l of held) renamePool(l.token);
     const floor = head.n - Math.ceil(FIRST_BACK_MS / bms);
     const starts = held.map((l) => {
       if (l.next !== null) return Math.max(l.next, floor);
@@ -3543,6 +3551,33 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (l.rate === null) return null;
     const usd = Number(t.quote) * l.rate.usd;
     return Number.isFinite(usd) && usd >= 0 ? usd.toFixed(6).replace(/\.?0+$/, "") || "0" : null;
+  }
+  /** The vendor's refresh of a held tape: its rows, their receipts read before they are held. */
+  async function vendorRenew(token: string): Promise<void> {
+    const h = await readTape(token, true);
+    if (h === undefined || h === "none") return;
+    await exacting(token, h.rows.map((r) => r.tx));
+    keepTape(token, h);
+  }
+  /** The vendor's name of a held coin's top pool, asked again once GT_POOL_FRESH_MS old (one call a coin a period, the
+   *  key's background first, else the keyless refresh lane): a pool that moved is followed, its rows read once from the
+   *  vendor (vendorRenew) so its layout is learned, the last pool followed meanwhile. */
+  const renaming = new Map<string, Promise<void>>();
+  function renamePool(token: string): void {
+    const p = gtPools.get(token);
+    if (p === undefined || now() - p.at < GT_POOL_FRESH_MS || renaming.has(token)) return;
+    const run = lanes
+      .run(newLane(false), async () => {
+        const was = p.id;
+        const j = deps.keyed == null ? undefined : await deps.keyed.read(`/networks/${chain}/tokens/${token}/pools?page=1`, (x) => poolIdOf(x) !== null, true);
+        if (j !== undefined) holdPool(token, poolIdOf(j));
+        else if (await gtTake("refresh", `${chain} pool`)) await readPool(token);
+        const now_ = gtPools.get(token);
+        if (now_ !== undefined && now_.id !== null && now_.id !== was) await vendorRenew(token);
+      })
+      .catch(() => undefined)
+      .finally(() => renaming.delete(token));
+    renaming.set(token, run);
   }
   /** The vendor's rows held for `token` as the answer of a tape whose open is past its bound or failed with no row of
    *  ours (trades): dated by their read, renewed behind them once TAPE_FRESH_MS old; null when none is held. */
@@ -3662,11 +3697,51 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     for (const [i, t] of ask.entries()) {
       const g = got[i];
       if (g == null) continue;
-      // a swap its pool's own hook sent is no one's trade (provenHooks), proven once per receipt as it is held
-      const f = g === "none" ? g : await provenHooks(g, token);
+      // a swap its pool's own hook sent is no one's trade (provenHooks), against its pool's key read once (poolKeyOf)
+      const f = g === "none" ? g : await provenHooks(g, token, (id, x) => poolKeyOf(id, token, x));
       if (vendorFacts.size >= TRADERS_MAX) vendorFacts.delete(vendorFacts.keys().next().value!);
       vendorFacts.set(`${token} ${t}`, f);
     }
+  }
+  /** Each v4 pool's key (its PoolKey, whose keccak-256 is its id), read once a pool and held for its life (a pool's key
+   *  never changes): the PositionManager's own record of it (poolKeys, as the discovery reads it, any tick spacing), else,
+   *  for a pool it never made, one worked out from the receipt that asked (keyFromReceipt). The PoolManager's Initialize
+   *  log of the id names the key too, but no public provider answers it over the chain's history: base-rpc.publicnode.com
+   *  "Archive requests require a personal token", base.gateway.tenderly.co "maximum 1000 blocks", base-pokt.nodies.app
+   *  "at most 50 blocks" (eth_getLogs of Initialize by id from block 0, read 19 Nov 12:5xZ), and the pool's birth block
+   *  is not known. A key not read (no head, the call not agreed) is not held: the next receipt asks again. */
+  const poolKeys = new Map<string, Promise<string | null>>();
+  /** Each pool's swap senders a key was worked out with and none found, by "id sender": each tried once (a sender that is
+   *  the pool's hook makes the key; routers that are not are many swaps' and few addresses). */
+  const keyTried = new Set<string>();
+  /** Pools the PositionManager holds no key of (its poolKeys answered, agreed, none that hashes to the id). */
+  const notMade = new Set<string>();
+  function poolKeyOf(id: string, token: string, s: { fee: number; senders: readonly string[]; currencies: readonly string[] }): Promise<string | null> {
+    const held = poolKeys.get(id);
+    if (held !== undefined) return held;
+    const k = (async (): Promise<string | null> => {
+      if (!notMade.has(id)) {
+        const head = await agreedHead();
+        const missed = { any: false };
+        const [got] = head === null ? [undefined] : await callsAgreed(head.n, [{ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` }], missed);
+        if (got !== undefined && /^0x[0-9a-f]{320}$/.test(got) && keccakHex(got) === id) return got;
+        // the PositionManager answered and holds no key of the id: a pool it never made, asked no more
+        if (head !== null && !missed.any) notMade.add(id);
+        while (notMade.size > POOLS_MAX) notMade.delete(notMade.values().next().value!);
+      }
+      const fresh = s.senders.filter((x) => !keyTried.has(`${id} ${x}`));
+      const worked = fresh.length === 0 ? null : await keyFromReceipt(id, token, s.fee, fresh, s.currencies);
+      if (worked === null) for (const x of fresh) keyTried.add(`${id} ${x}`);
+      while (keyTried.size > TRADERS_MAX) keyTried.delete(keyTried.values().next().value!);
+      return worked;
+    })();
+    // only a key is held for the pool's life; none found, the next receipt with another sender asks again
+    poolKeys.set(id, k);
+    void k.then((got) => {
+      if (got === null && poolKeys.get(id) === k) poolKeys.delete(id);
+    });
+    if (poolKeys.size > POOLS_MAX) poolKeys.delete(poolKeys.keys().next().value!);
+    return k;
   }
   /** The vendor's rows as their receipts show them, in the vendor's order; `waiting` when a row's receipt or the
    *  token's decimals are not read yet. */
