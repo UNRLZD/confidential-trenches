@@ -2278,16 +2278,28 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         for (;;) {
           while (e!.backing !== undefined) await e!.backing;
           if (!backing(e!) || books.get(t) !== e || e!.ahead !== lane) return;
-          // the run's gate shut (a busy loop, or fewer than two roomy providers: held or drawn down) stands the read back
-          // down, rested where it got to, its tape back in the queue: the run takes it up again on the first turn the gate
-          // is open (AHEAD_WAIT_MS), not at the lists' next load a minute on
-          if (busy() || !roomy()) {
-            count();
+          // a busy loop stands the read back down, rested where it got to, its tape back in the queue: the run takes it
+          // up again on the first turn the loop is free (AHEAD_WAIT_MS), not at the lists' next load a minute on
+          if (busy()) {
+            stood.busy++;
             tapeQueue.add(t);
             return;
           }
+          // fewer than two roomy providers (held or drawn down): the read back waits in place, its book kept, and goes on
+          // AHEAD_WAIT_MS after they have room; rested and queued again it would read its blocks since once more each turn
+          if (!roomy()) {
+            await standDown();
+            continue;
+          }
           const wait = (e!.back?.until ?? now()) - now();
           if (wait > BACK_RETRY_MAX_MS) return;
+          // a read back backed off (its reads failed or were refused) while a provider is held may wait on that one alone
+          // (Robinhood's day read, the chain's own RPC): rested where it got to, the run's worker free for the next tape,
+          // and the lists' next load asks again; a read back with no wait goes on whatever is held
+          if (wait > 0 && heldAny()) {
+            stood.held++;
+            return;
+          }
           if (wait > 0) await new Promise((go) => (setTimeout(go, wait) as { unref?: () => void }).unref?.());
           const head = await agreedHead();
           if (head === null) return;
