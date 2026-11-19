@@ -9,7 +9,11 @@
 //   - on the desktop, the token rail's rows (Rail.tsx Row, keyed by slot as the rail keys them) take MCs and 24h changes
 //     of every length in their right-aligned column, as a list refresh hands each slot another token's values (card
 //     rail-and-legend-hold-on-r5: release 178's full rail at 1440 moved that text, live run 44429326442);
-//   - the trade box's Slow counter counts past 10 s inside its centred label.
+//   - the trade box's Slow counter counts past 10 s inside its centred label;
+//   - the token page's About (scrolled into view) takes, at each step, change windows, 5m volume, buys, sells and net,
+//     liquidity, 24h volume and the flows' counts of every length, in its centred tiles and its right-aligned and
+//     centred places (card app-chart-bar-holds-still-on-desktop: release 181's 5m Buys and Sells moved as the trades
+//     list landed 1.4 s after load, live run 44480394487).
 // A run passes with zero shifts after the legend's first paint, and only if the values it fed did change length (the
 // close took at least four lengths, SOL at least three, the rail's first MC at least four), so it cannot pass on values that never moved. A FAIL names
 // each shift's element and its rects before and after.
@@ -48,6 +52,17 @@ const ETH = [3456.1, 98.76, 0.99, 34567.8, 3456.1];
 // the rail's MCs ($7 to $999.9M) and 24h changes (▲ 0.12% to ▼ 1234.56%), out of order
 const RAIL_MC = ["1234", "999900000", "45600", "8540000", "136500", "200500000", "7", "33910000", "394200", "2530000"];
 const RAIL_CHG = [12, -123456, 2524, -7, 99999, 350, -1200];
+// About's steps: counts 7 to 12.35M, USD $0.5 to $123.46M, changes 0.01% to 99,999.99%, each field out of step with the
+// others, and every field back to the dash
+const COUNTS = [110, 7, 17, 1234, 99999, 12345678, 0];
+const USDS = ["11800", "5", "0.5", "1234567", "123456789", "42"];
+const BPS = [1, -2, 12345, -9999999, 0, 250];
+const ABOUT = Array.from({ length: 12 }, (_, i) => ({
+  chg_5m_bps: BPS[i % BPS.length], chg_1h_bps: BPS[(i + 1) % BPS.length], chg_4h_bps: BPS[(i + 2) % BPS.length], chg_24h_bps: BPS[(i + 3) % BPS.length],
+  vol_5m_usd: USDS[i % USDS.length], buys_5m: COUNTS[i % COUNTS.length], sells_5m: COUNTS[(i + 2) % COUNTS.length], net_5m_usd: `${i % 2 ? "-" : ""}${USDS[(i + 1) % USDS.length]}`,
+  liq_usd: USDS[(i + 2) % USDS.length], vol_24h_usd: USDS[(i + 3) % USDS.length],
+  buys_24h: COUNTS[(i + 3) % COUNTS.length], sells_24h: COUNTS[(i + 4) % COUNTS.length], buys_1h: COUNTS[(i + 5) % COUNTS.length], sells_1h: COUNTS[(i + 6) % COUNTS.length],
+})).concat([{}]);
 
 async function build() {
   const { build } = await import("vite");
@@ -165,6 +180,22 @@ try {
       const log = await page.evaluate((n) => window.__ct.shiftLog.slice(n), before);
       if (log.length) fails.push(`@${w.name} trade box: ${log.length} layout shift(s) while Slow counted past 10 s [${shiftsOf(log)}]`);
     }
+    // About, in view (a scroll is no layout shift), from its first paint with no numbers through every step
+    {
+      await page.locator('[data-testid="ticket-about"]').scrollIntoViewIfNeeded();
+      await settle(page);
+      const before = await page.evaluate(() => window.__ct.shiftLog.length);
+      const buysLengths = new Set();
+      for (const about of ABOUT) {
+        await fx({ about });
+        await settle(page);
+        buysLengths.add([...((await page.locator('[data-testid="about-5m"] > :nth-child(2) > :last-child').textContent()) ?? "")].length);
+      }
+      const log = await page.evaluate((n) => window.__ct.shiftLog.slice(n), before);
+      if (log.length) fails.push(`@${w.name} About: ${log.length} layout shift(s) while its windows, 5m tiles, liquidity, volume and flows took values of every length [${shiftsOf(log)}]`);
+      if (buysLengths.size < 4) fails.push(`@${w.name} About: the 5m Buys took ${buysLengths.size} length(s), not every length fed`);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${w.name}-about.png`) });
+    }
     if (lengths.size < 4) fails.push(`@${w.name} legend: the close took ${lengths.size} length(s), not every length fed`);
     if (errors.length) fails.push(`@${w.name}: ${errors.length} page error(s): ${errors.join("; ")}`);
     console.log(`@${w.name} the close took ${lengths.size} lengths${w.isMobile ? "" : `, SOL ${solLengths.size}`}`);
@@ -179,4 +210,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} check(s): the legend and the footer did not hold still`);
   process.exit(1);
 }
-console.log(`PASS the legend (Price and MCap, ticks, crosshair, resync), the footer and the rail's rows held still at 390 and 1440, zero layout shifts${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS the legend (Price and MCap, ticks, crosshair, resync), the footer, the rail's rows and About held still at 390 and 1440, zero layout shifts${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
