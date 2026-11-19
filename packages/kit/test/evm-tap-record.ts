@@ -11,7 +11,7 @@
 import { fileURLToPath } from "node:url";
 import { readFileSync, writeFileSync } from "node:fs";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexPools, evmPoolIndexReset, evmPoolServedUse, evmProviders, evmRanked, evmSpeedReset } from "../src/checks/evm/quote.ts";
+import { evmGasPacking, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexPools, evmPoolIndexReset, evmPoolServedUse, evmProviders, evmRanked, evmSpeedReset } from "../src/checks/evm/quote.ts";
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import { evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolIndexRefresh } from "../src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, type EvmPoolChain } from "../src/trade/evm/buy-unpinned.ts";
@@ -68,6 +68,9 @@ export const replayTap = async (name: string, F0?: ReturnType<typeof fixture>, l
   evmPaceReset();
   evmPoolIndexReset();
   evmBuyTapReset();
+  // the taps were recorded before the kit packed measured reads by their gas (card
+  // evm-warm-quote-inside-the-kpi-with-room), and their calls are matched call for call
+  evmGasPacking(false);
   const F = F0 ?? fixture(name);
   const chain = F.chain as EvmPoolChain;
   const v = evmPoolVenues()[chain]!;

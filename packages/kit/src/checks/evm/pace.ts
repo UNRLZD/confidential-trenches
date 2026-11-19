@@ -43,7 +43,13 @@ const needOf = (p: EvmPace, calls: EvmPaceCalls): number =>
  *    each real USDG tap's 31 to 59 posts to it, so the taps ran 40 to 67 s and ended stale_quote or rpc_error (card
  *    robinhood-quote-inside-the-bound-under-the-pace, 10:50-10:56Z).
  *  - robinhood.daybreak-rpc.network: 7 posts a second, 3 at once (refuses past about 4 at once).
- *  - robinhood.api.pocket.network: x-ratelimit-limit 1200 a minute; 15 calls a second, 200 at once.
+ *  - robinhood.api.pocket.network and base.api.pocket.network: each answer's own x-ratelimit-limit 5, its remaining
+ *    falling by a batch's calls and its reset one to two seconds on (read 2026-11-19 14:2xZ from the Mac, 7 posts of 2
+ *    calls 0.7 s apart: remaining 3, 3, 1, 3, 3, 3, 3), so 5 calls a second, 5 at once; the 1,200 a minute and 15 a
+ *    second read before (2026-11-14) are gone. A count per window: a bucket of `burst` filled at `perS` sends at most
+ *    burst + perS in any second, so 3 at once and 2 a second (5). Unpaced, Base's met the deployed app's live checks
+ *    429 on eth_call (run 44482038380, 2026-11-19 07:46Z: a cold tap's 6 of 12, its multihop quote's 7). Each answer's
+ *    remaining is the lane's own too (evmPaceAdvised).
  *  - base.gateway.tenderly.co: 2 calls a second; rpc.sentio.xyz/base: 4 a second, 5 at once.
  *  - mainnet.base.org: 20 calls a second none refused (2026-11-05), its own error "25/second request limit reached",
  *    and 429 at 28 calls in one second (tap runs 2026-11-15 08:13Z and 08:20Z). 12 calls a second, 12 at once: no
@@ -67,7 +73,8 @@ export const EVM_PACE: Readonly<Record<string, EvmPace>> = Object.freeze({
   "https://base-rpc.publicnode.com": Object.freeze({ perS: 36, burst: 2_500, unit: "call", logs: 20, keep: 120 }),
   "https://rpc.mainnet.chain.robinhood.com": Object.freeze({ perS: 6, burst: 18, unit: "call", logs: 8 }),
   "https://robinhood.daybreak-rpc.network": Object.freeze({ perS: 7, burst: 7, unit: "post", inflight: 3 }),
-  "https://robinhood.api.pocket.network": Object.freeze({ perS: 15, burst: 200, unit: "call" }),
+  "https://robinhood.api.pocket.network": Object.freeze({ perS: 2, burst: 3, unit: "call" }),
+  "https://base.api.pocket.network": Object.freeze({ perS: 2, burst: 3, unit: "call" }),
   "https://base.gateway.tenderly.co": Object.freeze({ perS: 2, burst: 3, unit: "call" }),
   "https://rpc.sentio.xyz/base": Object.freeze({ perS: 4, burst: 5, unit: "call" }),
   "https://mainnet.base.org": Object.freeze({ perS: 12, burst: 12, unit: "call" }),
@@ -128,6 +135,22 @@ export function evmBatchFit(n: number, said: number | null): number {
   return said !== null && Number.isSafeInteger(said) && said >= 1 ? Math.min(half, said) : half;
 }
 
+/** A provider's own count of what it has left for this address (an answer's x-ratelimit-remaining, or the IETF draft's
+ *  RateLimit-Remaining), in its pace's units: where it is under what the lane holds, the lane holds that much (card
+ *  evm-warm-quote-inside-the-kpi-with-room). The provider counts every post of this address, another page's or a
+ *  reload's too, which the lane, made full when the page loads, cannot see: so a lane is never fuller than the provider
+ *  says it is. Posts sent after the answer are counted twice at most, a turn later, never a 429. A count is only ever
+ *  taken lower, and the lane fills again at its pace, so a provider that lies costs only its own turns. */
+export function evmPaceAdvised(url: string, remaining: number, now: number = performance.now()): void {
+  const key = evmProviderKey(url);
+  const p = EVM_PACE[key];
+  if (p === undefined || !Number.isFinite(remaining) || remaining < 0) return;
+  const l = laneOf(key);
+  l.tokens = Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS);
+  l.at = now;
+  if (remaining < l.tokens) l.tokens = remaining;
+}
+
 /** Holds `url`'s provider for every reader until `ms` from now (a later hold is never shortened). */
 export function evmProviderHold(url: string, ms = EVM_PROVIDER_HOLD_MS): void {
   const l = laneOf(evmProviderKey(url));
@@ -176,6 +199,21 @@ export function evmPaceReady(url: string, calls: EvmPaceCalls, now: number = per
   const tokens = Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS);
   const need = needOf(p, calls);
   return l.queue.length === 0 && (!later || l.later.length === 0) && (p.inflight === undefined || l.out < p.inflight) && tokens >= (later ? laterNeed(p, need) : need);
+}
+
+/** How long a trade's post of `calls` to `url` would wait for its turn, in ms, if sent now after the trade's posts
+ *  already waiting and the posts `before` it that its caller sends first (0: an unpaced provider, or one with its units
+ *  free); a provider's in-flight cap (`inflight`) is not counted. The quote's read round asks each batch's two
+ *  providers by it (quote.ts pairOrders, card evm-warm-quote-inside-the-kpi-with-room). */
+export function evmPaceWaitMs(url: string, calls: EvmPaceCalls, before: readonly EvmPaceCalls[] = [], now: number = performance.now()): number {
+  const key = evmProviderKey(url);
+  const p = EVM_PACE[key];
+  if (p === undefined) return 0;
+  const l = LANES.get(key);
+  const tokens = l === undefined ? p.burst : Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS);
+  const queued = (l?.queue ?? []).reduce((n, a) => n + a.need, 0);
+  const short = queued + before.reduce((n, c) => n + needOf(p, c), 0) + needOf(p, calls) - tokens;
+  return short <= 0 ? 0 : (short / p.perS) * 1000;
 }
 
 /** Waits for `url`'s turn for a post of `calls` at its pace (an unpaced provider: at once), first come first

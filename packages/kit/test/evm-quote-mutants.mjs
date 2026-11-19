@@ -281,7 +281,7 @@ export const MUTANTS = [
   [QUOTE, "            first = performance.now() - (sentAt[k] ?? t0[k]!);\n            arm();", "            first = performance.now() - (sentAt[k] ?? t0[k]!);", R, "V1 "],
   [QUOTE, "        order.forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));", "", R, "V1 "],
   [QUOTE, "        failed ??= { e };\n        if (n === 0) unsure = true;\n        continue;", "        throw e;", R, "V3 "],
-  [QUOTE, "    return [slow, s?.ms ?? Number.MAX_VALUE, k] as const;", "    return [0, s?.ms ?? Number.MAX_VALUE, k] as const;", R, "V4 "],
+  [QUOTE, "[rankClass(u, now), SPEED.get(u)?.ms ?? Number.MAX_VALUE, k] as const;", "[0, SPEED.get(u)?.ms ?? Number.MAX_VALUE, k] as const;", R, "V4 "],
   [QUOTE, "s?.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0);", "0);", R, "V4 "],
   [QUOTE, "|| evmProviderHeld(u, now) ? 2 : s?.out", "|| evmProviderHeld(u, now) ? 1 : s?.out", R, "V4 "],
   [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) s.ms", "      s.ms", R, "V4 "],
@@ -1191,7 +1191,11 @@ export const MUTANTS = [
   // card evm-tap-never-restarts-after-the-fit: a follow at the refusal's block sends no read the refused quote read
   [QUOTE, "    agreedKeep(hash, miss.map((i) => [keys[i]!, out[i]!] as const));", "    agreedKeep(hash, miss.flatMap((i) => ((out[i] as { gas?: true }).gas === true ? [] : [[keys[i]!, out[i]!] as const])));", R, "GS24 "],
   // card evm-pinned-follow-reads-no-scan-past-its-block: a follow pinned to a refusal's block scans up to it, no head read
-  [QUOTE, "(a.pin !== undefined ? Promise.resolve(a.pin.number) : headFrom(f))", "headFrom(f)", R, "GS25 "],
+  [QUOTE, "(a.pin !== undefined ? Promise.resolve(a.pin.number) : spec !== null ? Promise.resolve(spec.number) : headFrom(f))", "(spec !== null ? Promise.resolve(spec.number) : headFrom(f))", R, "GS25 "],
+  // card evm-warm-quote-inside-the-kpi-with-room: a warm buy's scan reads up to its held head, its scan provider's head
+  // read beside it; and each batch of a round asks first the two providers that answer it soonest
+  [QUOTE, "(a.pin !== undefined ? Promise.resolve(a.pin.number) : spec !== null ? Promise.resolve(spec.number) : headFrom(f))", "(a.pin !== undefined ? Promise.resolve(a.pin.number) : headFrom(f))", R, "WS1 "],
+  [QUOTE, "  if (rpcs.length < 3 || urls.every((u) => u === undefined)) return batches.map(() => rpcs);", "  return batches.map(() => rpcs);", R, "WS2 "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
