@@ -6,7 +6,9 @@
 // 43779499955 (test/buy-box-quotes-slow-dry.test.ts SOLANA). Red on main e1995d679: dryUnavailable, buyOff and
 // BELOW_MARKET_CODE did not exist, and the box read Unavailable only from an ended tap.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import * as M from "../src/screens/trade/model.ts";
 import { WORDS } from "../src/screens/trade/words.ts";
 
@@ -42,6 +44,28 @@ test("Unavailable from the dry holds only on its own coin: a new token page star
   // the tap's own Unavailable still holds with no dry answer
   const ended = M.outcome(M.tap(M.READY, "b1", NOW), "b1", refused("venue_not_pinned"), NOW + 300);
   assert.equal(M.buyOff(ended, null, COIN), true);
+});
+
+test("a market state passes: refused below_reference at mount, then an ok dry for the same coin, and Buy is on", () => {
+  // red at a082b2839: only the mount dry cleared dryOff; the Fee's and the buys dry set it but never cleared it
+  const at = "solana:MINT";
+  let d: string | null = null;
+  d = M.dryOffAfter(d, at, refused(M.BELOW_MARKET_CODE));
+  assert.equal(M.buyOff(M.READY, d, at), true, "Unavailable at mount");
+  d = M.dryOffAfter(d, at, GOOD);
+  assert.equal(M.buyOff(M.READY, d, at), false, "the next ok dry for the coin turns Buy on");
+  // a not now keeps what was said; an ok for another coin never clears this one's
+  d = M.dryOffAfter(M.dryOffAfter(null, at, refused("venue_not_pinned")), at, refused("busy"));
+  assert.equal(d, at);
+  assert.equal(M.dryOffAfter(at, "base:0xOTHER", GOOD), at);
+});
+
+test("every dry the box asks goes through the one rule, so an ok clears it on every path", () => {
+  const box = readFileSync(fileURLToPath(new URL("../src/screens/trade/TradeBox.tsx", import.meta.url)), "utf8");
+  // the coin's Max at mount, the Solana and NEAR Fee, the Base and Robinhood buys
+  assert.equal(box.match(/setDryOff\(\(d\) => dryOffAfter\(d, at, o\)\)/g)?.length, 3);
+  assert.doesNotMatch(box, /setDryOff\(at\)/, "a dry that sets it with no way to clear it");
+  assert.equal(box.match(/ask\("pool\.buy\.dry"/g)?.length, 3);
 });
 
 test("no new word: the box draws the owner's Unavailable", () => {

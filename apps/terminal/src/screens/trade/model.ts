@@ -244,6 +244,12 @@ export const dryUnavailable = (o: { ok: true } | { ok: false; error: { code: Err
  *  the coin it answered for), so a new token page starts ready. */
 export const buyOff = (p: Phase, dryOff: string | null, coin: string): boolean => unavailable(p) || dryOff === coin;
 
+/** `dryOff` after a dry for coin `at` answered: every dry the box asks takes this one rule. An Unavailable refusal sets
+ *  it to `at`; an answer for `at` clears it, since a below-market refusal is a market state that can pass; any other
+ *  refusal (a not now) keeps it, and nothing for one coin changes another's. */
+export const dryOffAfter = (d: string | null, at: string, o: { ok: true } | { ok: false; error: { code: ErrorCode } }): string | null =>
+  o.ok ? (d === at ? null : d) : dryUnavailable(o) ? at : d;
+
 /** How an ended trade is drawn: Failed, Not landed (CH-050: the money never left W), part filled (CH-045), or owed back
  *  (card evm-buy-end-carries-its-tx: the swap failed and the money is on its way back to the pool). */
 export interface EndView {

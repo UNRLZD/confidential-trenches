@@ -8,7 +8,8 @@
 // and 1440 x 900 (dpr 1), the page clock paused. Per coin, with no tap: the line above the button, Buy on or off, the
 // four presets, a forced tap of Buy and of a preset sends nothing; app-shell's BAR-10 rules (MEASURE), no external
 // request, no dialog; the box's reads are pool.buy.dry only, none names a wallet, and an unavailable coin asks no more
-// of them than a coin it can buy on the same pool.
+// of them than a coin it can buy on the same pool. And a coin refused below_reference at mount whose next dry answers
+// ok opens ready again, on Solana (the Fee's dry) and on Base (the buys dry, base-ready's 0.001 ETH chunks).
 //   node apps/terminal/test/trade-unavailable/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -36,6 +37,7 @@ const WIDTHS = [
 const ALL_OFF = "10.00:true 25.00:true 50.00:true 100.00:true";
 const READY = "pool=sol-ready&amt=0.16";
 const CASH = "pool=sol-cash&amt=5";
+const BASE_READY = "pool=base-ready&amt=3.50";
 const COINS = [
   [READY, "pump-curve", "Max $0.16", true, ALL_OFF],
   [CASH, "pump-curve", "Max $46.50", true, "10.00:false 25.00:false 50.00:true 100.00:true"],
@@ -44,6 +46,10 @@ const COINS = [
   [READY, "nofit", "Unavailable", false, ALL_OFF],
   [READY, "notbuilt", "Unavailable", false, ALL_OFF],
   [READY, "below", "Unavailable", false, ALL_OFF],
+  // a market state that passes: refused below_reference at mount, then the next dry for the same coin answers ok, so
+  // Buy is on again; on Solana that dry is the Fee's, on Base the tap's own ask's (the buys dry)
+  [READY, "recovers", "Max $0.16", true, ALL_OFF],
+  [BASE_READY, "recovers", "Max $3.50", true, ALL_OFF],
 ];
 // the keys a pool.buy.dry may carry: the chain, the coin and an amount, never a wallet
 const DRY_KEYS = new Set(["chain", "token", "mint", "amount"]);
@@ -150,7 +156,7 @@ try {
     for (const [at, venue] of COINS) {
       const n = readsOf[`${at}|${venue}`];
       const base = readsOf[`${at}|pump-curve`];
-      check(n <= base, `@${w.name}: ${venue} on ${at} asked ${n} dries, more than a coin it can buy (${base})`);
+      if (base !== undefined) check(n <= base, `@${w.name}: ${venue} on ${at} asked ${n} dries, more than a coin it can buy (${base})`);
     }
   }
 } finally {

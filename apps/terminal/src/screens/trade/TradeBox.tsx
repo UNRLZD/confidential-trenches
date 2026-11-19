@@ -48,6 +48,7 @@ import {
   spendSoon,
   tap,
   buyOff,
+  dryOffAfter,
   dryUnavailable,
   unavailable,
   waitingCents,
@@ -226,8 +227,9 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
         ask("pool.buy.dry", { chain: chain as PoolChain, token }).outcome.then(
           (o) => {
             if (!live) return;
-            if (o.ok) return void (setDryOff((d) => (d === at ? null : d)), setCoinTap({ key: coinKey, tap_max: o.result.tap_max, with_cash: o.result.with_cash ?? null, cash: cashAt }));
-            if (dryUnavailable(o)) return void setDryOff(at);
+            setDryOff((d) => dryOffAfter(d, at, o));
+            if (o.ok) return void setCoinTap({ key: coinKey, tap_max: o.result.tap_max, with_cash: o.result.with_cash ?? null, cash: cashAt });
+            if (dryUnavailable(o)) return;
             const again = dryAgainMs(o.error.code, tries);
             if (again === null) return;
             if (o.error.code !== "busy") tries++;
@@ -288,13 +290,14 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
         ask("pool.buy.dry", { chain: chain === "near" ? "near" : "solana", token, amount: feeAmount }).outcome.then(
           (o) => {
             if (!live) return;
+            setDryOff((d) => dryOffAfter(d, at, o));
             // an answer with out and no cost (a move from Cash not priced now: card buy-box-quotes-before-funds) is You
             // receive with the Fee's dash; one with neither keeps the last
             if (o.ok) {
               const r = feeReadOf(feeKey, o.result, amount);
               return void (r !== null && setFeeRead(r));
             }
-            if (dryUnavailable(o)) return void setDryOff(at);
+            if (dryUnavailable(o)) return;
             const again = dryAgainMs(o.error.code, tries);
             if (again === null) return;
             if (o.error.code !== "busy") tries++;
@@ -341,6 +344,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
         ask("pool.buy.dry", { chain: chain as PoolChain, token, amount: buysAmount }).outcome.then(
           (o) => {
             if (!live) return;
+            setDryOff((d) => dryOffAfter(d, at, o));
             if (o.ok) {
               // the page's answer is hostile: buysCents takes only an amount above 0 and below the ask
               const c = buysCents(o.result.buys, buysAmount, p);
@@ -349,7 +353,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
               if (r !== null) setFeeRead(r);
               return;
             }
-            if (dryUnavailable(o)) return void setDryOff(at);
+            if (dryUnavailable(o)) return;
             const again = dryAgainMs(o.error.code, tries);
             if (again === null) return;
             if (o.error.code !== "busy") tries++;

@@ -136,9 +136,10 @@ const kit: TradeKit = {
       // ?venue= (card app-unavailable-before-the-tap): the coin's venue, judged as the page judges it at the tap on this
       // test's own pin list, PINS (the curve alone: mainnet pins PumpSwap too, so PumpSwap stands for a venue with no
       // table here); a venue off the list answers venue_not_pinned, and nofit, notbuilt and below the tap's other
-      // Unavailable codes. A pinned venue answers as below
+      // Unavailable codes. A pinned venue answers as below. recovers: a market state that passes, the first dry (the
+      // box's at mount) refused below_reference and every later one answered as on a pinned venue
       const venue = q.get("venue");
-      const code = venue === null || PINS.includes(venue) ? null : (({ nofit: "no_table_fits", notbuilt: "venue_not_built", below: BELOW_MARKET_CODE } as Record<string, string>)[venue] ?? "venue_not_pinned");
+      const code = venue === null || PINS.includes(venue) ? null : venue === "recovers" ? (window.__reads.length === 1 ? BELOW_MARKET_CODE : null) : (({ nofit: "no_table_fits", notbuilt: "venue_not_built", below: BELOW_MARKET_CODE } as Record<string, string>)[venue] ?? "venue_not_pinned");
       if (code !== null) return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: false, error: { code } }) };
       const withAmount = (params as { amount?: string }).amount !== undefined;
       // on Base and Robinhood (card you-receive-on-every-chain) the tap's own ask's answer: one whole 0.001 ETH note's
