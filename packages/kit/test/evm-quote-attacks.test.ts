@@ -4305,6 +4305,59 @@ test("WG1 a warm round on a pair with no spare sends its measured reads in calls
   }
 }));
 
+// PR 1087's merge group (run 44562373509): the signing page's replays answer the kit's recorded Multicall3 results in the
+// read code's shape with a gas used of 0 (kit test/evm-quote-gas-fx.ts withMarker), and a gas of 0 read as measured
+// packed every such read in one call the recording never held. A read that ran used its call's 2,600 at least: 0 is no
+// measure, and those reads keep the venue's reads a call.
+test("WG2 a warm round whose reads were answered with a gas used of 0 sends them at the venue's 6 a call: a gas of 0 is no measure of a read", () => onTestClock(async () => {
+  const urls = ["https://base-mainnet.public.blastapi.io", "https://mainnet.base.org"];
+  const token = "0x000000000000000000000000000000000fa57a0e";
+  const { pools, logs } = warmCase(token, xAt(0x3d03));
+  const plain = pools.filter((p) => p.key.hooks !== UNPINNED);
+  const models = [chain(plain, 0), chain(plain, 1)];
+  // each aggregate3 answer's gas used words set to 0, as a recorded Multicall3 answer written in the code's shape reads
+  const zeroUsed = (hex: string): string => {
+    const h = hex.slice(2);
+    const at = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
+    if (h.length < 128 || at(0) !== 0x20) return hex;
+    let out = h;
+    for (let k = 0; k < at(32); k++) {
+      const e = 64 + at(64 + 32 * k);
+      out = out.slice(0, 2 * (e + 32)) + "0".repeat(64) + out.slice(2 * (e + 64));
+    }
+    return "0x" + out;
+  };
+  const sizes: number[] = [];
+  const fetchFn = (async (url: string | URL, init?: RequestInit) => {
+    const k = urls.indexOf(String(url));
+    const body = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] }[];
+    const out = (await models[k]!(body.map((c) => ({ method: c.method, params: c.params })))) as { result?: unknown }[];
+    // each aggregate3 call's reads: its array's length, the word after the selector's offset
+    if (k === 1) for (const c of body) if (c.method === "eth_call") { const d = String((c.params[0] as { data?: string }).data ?? ""); if (d.startsWith("0x82ad56cb")) sizes.push(Number(BigInt("0x" + d.slice(74, 138)))); }
+    return new Response(JSON.stringify(out.map((x, i) => (body[i]!.method === "eth_call" && typeof x.result === "string" ? { ...x, result: zeroUsed(x.result) } : x))), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  quoteMod.evmSpeedReset();
+  evmPaceReset();
+  quoteMod.evmReadsPerCall();
+  try {
+    const ps = quoteMod.evmProviders(urls, fetchFn);
+    const watch = quoteMod.evmHeadWatch(() => ps, 50n, () => NOW, false, () => 0);
+    const v1 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [...ps], NOW, scanner(5_000_000, logs), watch, () => 0));
+    assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
+    const cold = sizes.length;
+    await pause(2_000);
+    sizes.length = 0;
+    const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [...ps], NOW, scanner(5_000_000, logs), watch, () => 0));
+    assert.deepEqual(v2, v1);
+    // the warm round asks its venue reads at the venue's 6 a call, as the cold one did, in more calls than a packed
+    // round's 6 (at HEAD before this fix: 6): none packed on a gas of 0
+    assert.ok(cold > 12 && sizes.length > 12, `the cold quote sent ${cold} aggregate3 calls to mainnet.base.org, the warm ${sizes.length}`);
+  } finally {
+    quoteMod.evmSpeedReset();
+    evmPaceReset();
+  }
+}));
+
 test("W9 a warm buy whose held head the scan finds more than maxLag behind uses nothing of the round it sent at that head: it is read at the block agreed again", async () => {
   const token = "0x000000000000000000000000000000000fa57a03";
   const { pools, logs } = warmCase(token, xAt(0x3cf8));

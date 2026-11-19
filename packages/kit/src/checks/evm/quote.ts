@@ -848,10 +848,12 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
       } else for (const j of users) keepAt(j, firstUsed[j]! > share(READ_AGAIN_PER_CALL) ? 1 : READ_AGAIN_PER_CALL);
     });
   }
-  // each plain read's gas used at its final answer, where two providers agreed it and it was not answered 2
+  // each plain read's gas used at its final answer, where two providers agreed it and it was not answered 2; a gas used
+  // of 0 is no measure (a read that ran used its call's 2,600 at least; an answer with no gas word, as a recorded
+  // Multicall3 answer written in the code's shape, reads 0), so such a read keeps the venue's reads a call
   for (const i of plain) {
     const a = all[i]!;
-    if ((a as { gas?: true }).gas === true || a.used === undefined) continue;
+    if ((a as { gas?: true }).gas === true || a.used === undefined || a.used <= 0) continue;
     const key = sizeKey(reads[i]!);
     readGas.delete(key);
     readGas.set(key, a.used);
