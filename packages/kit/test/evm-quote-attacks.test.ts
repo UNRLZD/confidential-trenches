@@ -9863,6 +9863,48 @@ test("GS24 card evm-tap-never-restarts-after-the-fit: a follow of a refusal's re
   assert.deepEqual(sent, [0, 0], `the follow sent ${sent.join(" and ")} reads again`);
 });
 
+test("GS25 card evm-pinned-follow-reads-no-scan-past-its-block: a follow pinned to a refusal's block reads the scan up to that block from what the refused quote kept: no head read, no getLogs past it", async () => {
+  // each follow of Base 0x07b3d9 read the scan provider's head and the 3 blocks past the pinned one before its first
+  // round (fx5, fx9 and fx10 from the Mac, 2026-11-19 04:2xZ: about 230 to 470 ms of a 542 to 586 ms follow)
+  for (const [token, keptTo] of [["0x00000000000000000000000000000000000a5a70", 5_000_000], ["0x00000000000000000000000000000000000a5a71", 4_999_990]] as const) {
+    const pools = [seeded(token), betterAt(token, 1_000_000)];
+    const rpcs: [EvmRpc, EvmRpc] = [chain(pools, 0), chain(pools, 1)];
+    // one scan provider, its head where the test puts it: each eth_blockNumber and getLogs range it is sent
+    let headNo: number = keptTo;
+    const heads: number[] = [];
+    const logs: [number, number][] = [];
+    const scan: EvmRpc = async (calls, signal) => {
+      for (const c of calls) if (c.method === "eth_blockNumber") heads.push(headNo);
+      return scanner(headNo, [seeded(token), betterAt(token, 1_000_000)].map((p) => ({ key: p.key, at: 4_500_000 })), logs)(calls, signal);
+    };
+    const req = { chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as const;
+    const refused = await evmPoolBuyQuoteWith(req, rpcs, NOW, scan).then(
+      () => assert.fail("the seeded route is refused"),
+      (e: unknown) => e as EvmQuoteError & { at: string; reference: { route: EvmRoute } },
+    );
+    assert.equal(refused.code, "below_reference");
+    // the refused quote kept the scan to keptTo, its head; the chain's agreed block is 5,000,000
+    await new Promise((go) => setTimeout(go, 20));
+    const h = head("0x" + (5_000_000).toString(16), refused.at);
+    const block = { number: BigInt(h.number), hash: h.hash, timestamp: BigInt(h.timestamp), baseFeePerGas: BigInt(h.baseFeePerGas!) };
+    const watch: quoteMod.EvmHeadWatch = { head: () => Promise.reject(new Error("a follow agrees on no new head")), keep: () => {}, peek: () => null, held: (x) => (x === block.hash ? block : null) };
+    // the scan provider is 6 blocks past the pinned block by the follow
+    headNo = 5_000_006;
+    heads.length = 0;
+    logs.length = 0;
+    const q = await verdict(evmPoolBuyQuoteWith({ ...req, route: refused.reference.route, at: refused.at }, rpcs, NOW, scan, watch));
+    // and whatever the follow reads once it has answered
+    await new Promise((go) => setTimeout(go, 20));
+    assert.deepEqual(q, { accepted: true, amountOut: AMOUNT, minOut: (AMOUNT * 99n) / 100n, block: 5_000_000n });
+    assert.deepEqual(heads, [], `kept to ${keptTo}: the follow read the scan provider's head ${heads.length} times`);
+    // kept to the pin: no block is read; kept short of it: only the blocks after the kept scan, up to the pin
+    const past = logs.filter(([, b]) => b > 5_000_000);
+    assert.deepEqual(past, [], `kept to ${keptTo}: the follow read ${JSON.stringify(past)} past the pinned block`);
+    if (keptTo === 5_000_000) assert.deepEqual(logs, [], `the follow read ${JSON.stringify(logs)}`);
+    else assert.deepEqual(logs.length > 0 && logs.every(([a, b]) => a === keptTo + 1 && b === 5_000_000), true, `the follow read ${JSON.stringify(logs)}: not the blocks after ${keptTo} up to the pin`);
+  }
+});
+
 test("GS13 a route above the hidden two-hop whose swap does not fit hides it from no verdict: the buy is refused by name", async () => {
   // delta review of 7904e159 (RV1): the two-hop through USDC gives 3 a wei and its read at twice runs out of gas alone;
   // a direct 1% pool gives 4 but its swap does not run (a free seeded pool behind a hook that lets only the quoter

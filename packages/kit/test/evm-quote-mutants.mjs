@@ -210,7 +210,7 @@ export const MUTANTS = [
   // on this mutant: SL5 holds it, a lag over one span, so the lower request ends past the backend too
   [QUOTE, "    const top = p === null;", "    const top = p === null && b === head;", R, "SL5 "],
   // review of 22e29c9, B1: a head read on the second sent the scan's requests there too
-  [QUOTE, "headFrom(f).then((head) => ({ head, first: f })));", "headFrom(f).then((head) => ({ head, first: f.next ?? f })));", R, "SP6 "],
+  [QUOTE, "headFrom(f)).then((head) => ({ head, first: f })));", "headFrom(f)).then((head) => ({ head, first: f.next ?? f })));", R, "SP6 "],
   // review of 22e29c9, N4: the 2 s hold where no second follows (the head read), and a not-yet block as an answer
   [QUOTE, "      fast &&= spareNext;", "", R, "SP8 "],
   [QUOTE, 'throw on.next !== undefined ? new ScanRefused("rpc_error", m) : new NotHeldYet("rpc_error", m);', "return out;", R, "SP3 "],
@@ -239,7 +239,7 @@ export const MUTANTS = [
   // every scan of a quote shares one gate and one head; X's scan failing refuses the quote
   // (no mutant gives each scan its own gate: the token's scan and the one scan of every X run one after the other, so
   // a gate per scan never has more in flight; G1 and TH3 hold the scan gate's own limit, T8b the reads' gate's)
-  [QUOTE, "(scanFrom ??= headFrom(f).then(", "(scanFrom = headFrom(f).then(", R, "G3 "],
+  [QUOTE, "(scanFrom ??= (a.pin !== undefined", "(scanFrom = (a.pin !== undefined", R, "G3 "],
   [QUOTE, "if (next === undefined) free++;\n      else next();", "free++;\n      next?.();", R, "T8b "],
   // review of 2afa8b6 (fold 8): every held pool and X priced at the user's amount within fixed-order bounds that never
   // refuse; a hooked route counts at the lower of its hook replaced and as it is; unlisted v4 middles of a device quote
@@ -1184,6 +1184,8 @@ export const MUTANTS = [
   [QUOTE, "  if (earlyAns !== null) {", "  if (false) {", R, "RX2 "],
   // card evm-tap-never-restarts-after-the-fit: a follow at the refusal's block sends no read the refused quote read
   [QUOTE, "    agreedKeep(hash, miss.map((i) => [keys[i]!, out[i]!] as const));", "    agreedKeep(hash, miss.flatMap((i) => ((out[i] as { gas?: true }).gas === true ? [] : [[keys[i]!, out[i]!] as const])));", R, "GS24 "],
+  // card evm-pinned-follow-reads-no-scan-past-its-block: a follow pinned to a refusal's block scans up to it, no head read
+  [QUOTE, "(a.pin !== undefined ? Promise.resolve(a.pin.number) : headFrom(f))", "headFrom(f)", R, "GS25 "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);

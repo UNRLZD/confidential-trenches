@@ -3572,7 +3572,13 @@ async function routeSetOf(a: {
   // requests stay on the first, the rest behind each (review of 22e29c9, B1: a head answered after 2 s sent a whole
   // cold scan to the second, 800 getLogs where the first carried it)
   const headFrom = (o: ScanOn): Promise<bigint> => scanHeadOf(o.rpc, o.gate).catch((e) => (o.next === undefined ? Promise.reject(e) : headFrom(o.next)));
-  const scanFromOf = (f: ScanOn) => (scanFrom ??= headFrom(f).then((head) => ({ head, first: f })));
+  // A follow pinned to a refusal's block (a request's `at`) scans up to that block, its head with no read: a pool made
+  // after it holds no state there, so no block past it can change the quote, and the blocks the refused quote's scan
+  // kept up to it are read again by none; only those it did not keep, up to the pin, are asked (card
+  // evm-pinned-follow-reads-no-scan-past-its-block: every follow of Base 0x07b3d9 read the scan provider's head and the
+  // 3 blocks past the pin before its first round, 230 to 470 ms of a 542 to 586 ms follow from the Mac, 2026-11-19
+  // 04:2xZ). Each request still asks its own last block in its batch, so a provider that does not hold it counts for none
+  const scanFromOf = (f: ScanOn) => (scanFrom ??= (a.pin !== undefined ? Promise.resolve(a.pin.number) : headFrom(f)).then((head) => ({ head, first: f })));
   // a scan the quote waits for that fails refuses the quote, so it may pick the agreed block to keep its spans; a kept
   // scan started early waits for the quote to pick it, whether it ends or fails (review of bc189de, L-3: one that ended
   // before the token's scan picked the block itself, before the token's logs were in)
