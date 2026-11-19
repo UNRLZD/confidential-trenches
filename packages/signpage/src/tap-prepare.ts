@@ -53,8 +53,9 @@ export async function tapPrepared(d: TapPrepareDeps): Promise<void> {
   const end = d.now() + TAP_PREPARE_MS;
   const stop = new AbortController();
   const out = (): void => stop.abort();
-  d.signal?.addEventListener("abort", out, { once: true });
+  // read first: an aborted signal never fires again (scripts/ci/abort-listen.mjs)
   if (d.signal?.aborted) out();
+  else d.signal?.addEventListener("abort", out, { once: true });
   const stopped = new Promise<void>((r) => (stop.signal.aborted ? r() : stop.signal.addEventListener("abort", () => r(), { once: true })));
   // the last pass ended at once (an open that failed): the next look at a chain still preparing comes a step later
   let fast: number | null = null;
@@ -69,7 +70,7 @@ export async function tapPrepared(d: TapPrepareDeps): Promise<void> {
         continue;
       }
       const left = end - d.now();
-      if (left <= 0 || d.signal?.aborted) return;
+      if (left <= 0 || stop.signal.aborted) return;
       const began = d.now();
       // the pass, or the bound, or the sign out, whichever comes first; the bound's timer is let go with the pass
       const lap = new AbortController();
