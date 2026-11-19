@@ -630,12 +630,17 @@ export function v4Key(id: string, token: string, swapFee: number, around: readon
 /** The keys v4Key tries, in its order. */
 function* v4Tries(token: string, swapFee: number, around: readonly string[], chain: EvmChain): Generator<string> {
   const V = VENUES[chain];
+  const hooks = [ZERO, ...around.filter((x) => x !== token && x !== V.poolManager && x !== V.weth && x !== V.usd).slice(0, HOOKS_MAX)];
+  yield* keysOf(token, [ZERO, V.weth, V.usd], hooks, swapFee);
+}
+/** Every key of `token` and one of `others`, a fee (the swap's own, the dynamic-fee flag or a standard tier), a tick
+ *  spacing and one of `hooks`. */
+function* keysOf(token: string, others: readonly string[], hooks: readonly string[], swapFee: number): Generator<string> {
   const w = (n: bigint): string => n.toString(16).padStart(64, "0");
   const a = (x: string): string => x.slice(2).padStart(64, "0");
-  const hooks = [ZERO, ...around.filter((x) => x !== token && x !== V.poolManager && x !== V.weth && x !== V.usd).slice(0, HOOKS_MAX)];
   const fees = [...new Set([swapFee, DYNAMIC_FEE, 100, 500, 2500, 3000, 10000])];
   const spacings = [...TICK_SPACINGS, ...Array.from({ length: TICK_SPACING_MAX }, (_, i) => i + 1).filter((t) => !TICK_SPACINGS.includes(t))];
-  for (const other of [ZERO, V.weth, V.usd]) {
+  for (const other of others) {
     const [c0, c1] = token < other ? [token, other] : [other, token];
     for (const ts of spacings) for (const h of hooks) for (const f of fees) yield `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
   }
@@ -653,6 +658,36 @@ export async function v4KeySliced(id: string, token: string, swapFee: number, ar
     if (++n % V4_KEY_SLICE === 0) await new Promise((go) => setImmediate(go));
   }
   return null;
+}
+
+/**
+ * A vendor row's receipt facts (vendor-rows.ts) with each v4 swap its pool's own hook sent marked `hook`, so its row is
+ * never served (card helper-v4-hook-trade-is-what-its-trader-paid). The receipt names no pool's hook; the proof is the
+ * hash, as v4Key's: a key of `token` and native ETH or a currency the receipt moved (the first HOOKS_MAX), a fee, a tick
+ * spacing and the swap's sender as its hook hashes to the swap's pool id. Tried only for a swap whose pool another
+ * sender swapped in or called in the same transaction: a hook's own swap runs in its hook call, inside another's call
+ * of its pool (Base tx 0xb4503a57: hook 0x0469a4bd's Swap log 98 inside the router's swap, log 95). Hashed V4_KEY_SLICE
+ * at a time between turns of the event loop.
+ */
+export async function provenHooks(f: Facts, token: string): Promise<Facts> {
+  const swaps = f.swaps ?? [];
+  const others = [ZERO, ...(f.currencies ?? []).filter((c) => c !== token && c !== ZERO).slice(0, HOOKS_MAX)];
+  const marked: NonNullable<Facts["swaps"]> = [];
+  let n = 0;
+  for (const s of swaps) {
+    let own = false;
+    const shared = s.pool !== undefined && [...swaps, ...(f.calls ?? [])].some((o) => o.pool === s.pool && o.sender !== s.sender);
+    if (shared && s.fee !== undefined)
+      for (const k of keysOf(token, others, [s.sender], s.fee)) {
+        if (keccakHex(k) === s.pool) {
+          own = true;
+          break;
+        }
+        if (++n % V4_KEY_SLICE === 0) await new Promise((go) => setImmediate(go));
+      }
+    marked.push(own ? { ...s, hook: true } : s);
+  }
+  return { ...f, swaps: marked };
 }
 
 /** `t`: the block's time as the provider logged it (`blockTimestamp`), null when it gave none; 0 is no time either. */
@@ -721,8 +756,9 @@ export type Pool = {
   token: string;
   tokenIs0: boolean;
   quote: { kind: "usd" | "eth"; decimals: number };
-  /** A v4 pool's hook when its address carries a return-delta flag (hookOf): the hook may then take from or add to
-   *  what the swapper pays or gets, after the `Swap` log is written. */
+  /** A v4 pool's hook, any its key names (hookOf): a swap it sends itself is no trader's (its fees sold in its own pool).
+   *  When its address carries a return-delta flag (deltaHook) it may also take from or add to what the swapper pays or
+   *  gets, after the `Swap` log is written. */
   hook?: string;
   /** A hooked v4 pool's: the token's other v4 pools the discovery found, whose swaps are read with this pool's only so
    *  hookTakes can tell a sender that swapped the token once in the transaction (card helper-v4-hook-liquidity). */
@@ -738,16 +774,27 @@ const BEFORE_SWAP_DELTA = 1n << 3n;
 const AFTER_SWAP_DELTA = 1n << 2n;
 
 /**
- * The hook of a v4 PoolKey (abi-encoded, its fifth word) when it may change a swapper's amounts, else undefined. The
- * PoolManager writes `Swap` with the pool's own amounts, then calls the hook's afterSwap, whose returned delta is taken
- * from the swapper's unspecified leg (a beforeSwap delta from the specified one) and settled by the hook itself in the
- * same call: on Robinhood PonsV2MemeHook 0xe5e70264... takes 2.75% of a buy's token leg, so the buyer of tx 0x2446469c
- * got 22,193.91 of the 22,821.50 the log shows (receipt read on two providers, 2026-11-04 20:1xZ).
+ * The hook of a v4 PoolKey (abi-encoded, its fifth word), whatever its flags, else undefined (none, or no key). A swap
+ * the hook sends itself is no trader's, whether or not the hook can change a swapper's amounts (card
+ * helper-v4-hook-trade-is-what-its-trader-paid: Base pool 0x27363f20's hook 0x0469a4bd...c0 sets beforeSwap and
+ * afterSwap and no return delta, and sold 12.39 of its fees in its own pool inside tx 0xb4503a57's 1,548.21 sell; kept
+ * only for a return-delta hook, it was never known, and the tape showed both as the trader's).
  */
 export function hookOf(key: string): string | undefined {
   if (!/^0x[0-9a-f]{320}$/.test(key)) return undefined;
   const h = `0x${key.slice(2 + 64 * 4 + 24)}`;
-  return (BigInt(h) & (BEFORE_SWAP_DELTA | AFTER_SWAP_DELTA)) !== 0n ? h : undefined;
+  return BigInt(h) !== 0n ? h : undefined;
+}
+/**
+ * A pool's hook when it may change a swapper's amounts (its address carries a return-delta flag), else undefined. The
+ * PoolManager writes `Swap` with the pool's own amounts, then calls the hook's afterSwap, whose returned delta is taken
+ * from the swapper's unspecified leg (a beforeSwap delta from the specified one) and settled by the hook itself in the
+ * same call: on Robinhood PonsV2MemeHook 0xe5e70264... takes 2.75% of a buy's token leg, so the buyer of tx 0x2446469c
+ * got 22,193.91 of the 22,821.50 the log shows (receipt read on two providers, 2026-11-04 20:1xZ). Only such a hook
+ * adds reads (poolFilters) and cuts (hookTakes).
+ */
+export function deltaHook(pool: Pick<Pool, "venue" | "hook">): string | undefined {
+  return pool.venue === "v4" && pool.hook !== undefined && (BigInt(pool.hook) & (BEFORE_SWAP_DELTA | AFTER_SWAP_DELTA)) !== 0n ? pool.hook : undefined;
 }
 
 /** The `eth_getLogs` filters for a pool's trades over blocks `from` to `to`: its swaps, and for a pool with a hook
@@ -760,7 +807,7 @@ export function hookOf(key: string): string | undefined {
  *  address list (-32602, 2026-11-04 20:2xZ). */
 export function poolFilters(pool: Pick<Pool, "venue" | "id" | "token" | "hook" | "siblings" | "log">, from: number, to: number, chain: EvmChain = "base"): Record<string, unknown>[] {
   const swaps = swapFilter(pool, from, to, chain);
-  if (pool.venue !== "v4" || pool.hook === undefined) return [swaps];
+  if (deltaHook(pool) === undefined) return [swaps];
   return [
     { ...swaps, topics: [[TOPIC.swap4, ...POOL_CALLS], pool.siblings?.length ? [pool.id, ...pool.siblings] : pool.id] },
     { address: pool.token, topics: [TOPIC.transfer], fromBlock: swaps.fromBlock, toBlock: swaps.toBlock },
@@ -854,7 +901,7 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
 }
 
 /**
- * A hooked v4 pool's (Pool.hook) cut of the token in each of its swaps, by the swap log's `tx:index`, from the logs read
+ * A hooked v4 pool's (deltaHook) cut of the token in each of its swaps, by the swap log's `tx:index`, from the logs read
  * with the swaps (poolFilters).
  *
  * First the swap's own sender: the PoolManager credits the contract that called swap() (the Swap log's sender) with the
@@ -879,9 +926,9 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
  */
 export function hookTakes(pool: Pool, logs: readonly Log[], chain: EvmChain = "base"): Map<string, bigint> {
   const takes = new Map<string, bigint>();
-  if (pool.venue !== "v4" || pool.hook === undefined) return takes;
+  const hook = deltaHook(pool);
+  if (hook === undefined) return takes;
   const pm = VENUES[chain].poolManager;
-  const hook = pool.hook;
   const after = (BigInt(hook) & AFTER_SWAP_DELTA) !== 0n;
   const tokenWord = `0x${pool.token.slice(2).padStart(64, "0")}`;
   const byTx = new Map<string, { swaps: Log[]; senders: Map<string, number>; calls: number[]; callers: Set<string>; moves: { index: number; take: bigint }[]; net: Map<string, bigint> }>();
@@ -2002,7 +2049,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     // a hooked v4 pool reads the token's other v4 pools' swaps with its own (Pool.siblings), so hookTakes counts a
     // sender's swaps of the token in all of them; their swaps already read join the first read's logs
-    const siblings = best.c.venue === "v4" && best.c.hook !== undefined ? cands.filter((c) => c.venue === "v4" && c.id !== best.c.id).map((c) => c.id) : [];
+    const siblings = deltaHook(best.c) !== undefined ? cands.filter((c) => c.venue === "v4" && c.id !== best.c.id).map((c) => c.id) : [];
     if (siblings.length > 0) best.c = { ...best.c, siblings };
     const sib = new Set(siblings);
     const fromSiblings = cands.flatMap((c, i) => (sib.has(c.id) ? (swaps[i] ?? []).filter((l) => l.topics[0] === TOPIC.swap4 && l.topics[1] === c.id) : []));
@@ -3362,12 +3409,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       (a, b) => JSON.stringify(a) === JSON.stringify(b),
       false,
     );
-    ask.forEach((t, i) => {
-      const f = got[i];
-      if (f == null) return;
+    for (const [i, t] of ask.entries()) {
+      const g = got[i];
+      if (g == null) continue;
+      // a swap its pool's own hook sent is no one's trade (provenHooks), proven once per receipt as it is held
+      const f = g === "none" ? g : await provenHooks(g, token);
       if (vendorFacts.size >= TRADERS_MAX) vendorFacts.delete(vendorFacts.keys().next().value!);
       vendorFacts.set(`${token} ${t}`, f);
-    });
+    }
   }
   /** The vendor's rows as their receipts show them, in the vendor's order; `waiting` when a row's receipt or the
    *  token's decimals are not read yet. */
@@ -3836,9 +3885,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
      * helper-evm-tapes-survive-a-restart: first, the main pools our discovery found and checked on chain (`found`, kept
      * POOL_KEEP_MS from their find), so a deploy's next helper opens a listed coin's tape and chart on its pool at once
      * instead of searching every listed coin's Transfer logs again on the providers the tapes read. A pool taken on the
-     * list's word (`hint`) or a token with none is left out: the next helper decides those itself.
+     * list's word (`hint`) or a token with none is left out: the next helper decides those itself. `v4Hooks: "any"` says
+     * each v4 pool holds its key's hook whatever its flags (hookOf, card helper-v4-hook-trade-is-what-its-trader-paid).
      */
-    state(): { found: [string, { pool: Pool; decimals: number; at: number }][]; kept: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; history: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; pools: [string, { id: string | null; at: number }][] } {
+    state(): { v4Hooks: "any"; found: [string, { pool: Pool; decimals: number; at: number }][]; kept: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; history: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; pools: [string, { id: string | null; at: number }][] } {
       const t = now();
       let room = EVM_HANDOVER_MAX;
       const fit = <T>(list: [string, T][]): [string, T][] => {
@@ -3854,6 +3904,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const found: [string, { pool: Pool; decimals: number; at: number }][] = [];
       for (const [tk, v] of pools) if (v.found !== null && v.hint === undefined && t - v.at < POOL_KEEP_MS) found.push([tk, { pool: v.found.pool, decimals: v.found.decimals, at: v.at }]);
       return {
+        v4Hooks: "any",
         found: fit(found.slice(-HANDOVER_ENTRIES_MAX)),
         pools: fit([...gtPools].filter(([, v]) => t - v.at <= KEPT_HANDOVER_MS).slice(-HANDOVER_ENTRIES_MAX)),
         kept: fit([...kept].filter(([, v]) => t - v.at <= KEPT_HANDOVER_MS).slice(-HANDOVER_ENTRIES_MAX)),
@@ -3884,7 +3935,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (!P.every(([tk, v]) => evmAddress(tk) === tk && (v.id === null || (typeof v.id === "string" && POOL_ID.test(v.id))) && timed(v.at, t, KEPT_HANDOVER_MS))) return false;
       if (!K.every(([key, v]) => barsKey(key, false) && timed(v.at, t, KEPT_HANDOVER_MS) && isBars(v.bars) && v.bars.length > 0)) return false;
       if (!H.every(([key, v]) => barsKey(key, true) && timed(v.at, t, GT_FRESH_MS) && isBars(v.bars))) return false;
+      // an older helper kept a v4 pool's hook only when it could change a swapper's amounts: its v4 pool with none may
+      // have one, so it is found again, never served without its hook (hookOf)
+      const anyHook = o.v4Hooks === "any";
       for (const [tk, v] of F) {
+        if (!anyHook && (v.pool as Pool).venue === "v4" && (v.pool as Pool).hook === undefined) continue;
         const had = pools.get(tk);
         if (had !== undefined && had.at >= (v.at as number)) continue;
         if (pools.size >= POOLS_MAX) pools.delete(pools.keys().next().value!);

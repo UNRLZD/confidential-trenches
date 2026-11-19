@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createBook, type Event } from "../candles.ts";
-import { createSwaps, decodeRef, decodeSwap, hookOf, hookTakes, poolFilters, ROBINHOOD_VENUES, TOPIC, traderLeg, v4Key, type Log, type Pool } from "./swaps.ts";
+import { createSwaps, decodeRef, decodeSwap, deltaHook, hookOf, hookTakes, poolFilters, ROBINHOOD_VENUES, TOPIC, traderLeg, v4Key, type Log, type Pool } from "./swaps.ts";
 
 type RecLog = { a: string; t: string[]; d: string; b: number; i: number; tx: string; ts: number };
 type Fix = { head: number; headTime: number; receipts: Record<string, { from: string; status: string; logs: RecLog[] }>; ref: RecLog[] };
@@ -52,16 +52,24 @@ test("the fixture is the live check's red: five succeeded receipts with one swap
   assert.equal(buys, 3);
 });
 
-test("hookOf: the pool's real key (it hashes to the id) names the hook, whose address carries afterSwap's return-delta flag; a hook with neither flag, or none, is no hook", () => {
+test("hookOf: the pool's real key (it hashes to the id) names the hook, whatever its flags; deltaHook only one whose address carries a return-delta flag (afterSwap's here); no hook, or no key, is none", () => {
   const r = FIX.receipts["0x2446469cca353ce4afab4f4c99cfef6f79db7cb5095705b07b5f42a5cd9883a0"]!;
   const swap = r.logs.find((l) => l.t[0] === TOPIC.swap4 && l.t[1] === ID)!;
   const key = v4Key(ID, COIN, Number(BigInt(`0x${swap.d.slice(2 + 64 * 5)}`)), r.logs.map((l) => l.a), "robinhood");
   assert.ok(key !== null, "the key is found and hashes to the id");
   assert.equal(hookOf(key!), HOOK);
+  assert.equal(deltaHook(POOL), HOOK);
   const withHook = (h: string) => `${key!.slice(0, 2 + 64 * 4)}${h.slice(2).padStart(64, "0")}`;
   assert.equal(hookOf(withHook(`0x${"0".repeat(40)}`)), undefined);
-  assert.equal(hookOf(withHook(`0x${"1".repeat(36)}0040`)), undefined, "afterSwap alone, no return delta");
-  assert.equal(hookOf(withHook(`0x${"1".repeat(36)}0008`)), `0x${"1".repeat(36)}0008`, "beforeSwap's return delta");
+  // card helper-v4-hook-trade-is-what-its-trader-paid: a hook with no return delta is still the pool's hook (a swap it
+  // sends is its own), but adds no reads or cuts
+  const after = `0x${"1".repeat(36)}0040`;
+  assert.equal(hookOf(withHook(after)), after, "afterSwap alone, no return delta");
+  assert.equal(deltaHook({ ...POOL, hook: after }), undefined);
+  const before = `0x${"1".repeat(36)}0008`;
+  assert.equal(hookOf(withHook(before)), before, "beforeSwap's return delta");
+  assert.equal(deltaHook({ ...POOL, hook: before }), before);
+  assert.equal(deltaHook({ ...POOL, venue: "v3" }), undefined);
   assert.equal(hookOf("0x12"), undefined);
 });
 
