@@ -1489,6 +1489,23 @@ test("a tag 3 to W under another attempt's context (another device's salt) is an
   assert.equal(await ownerOf(rpc, OTHER_BUY_SIG), "other");
 });
 
+// Card load-reads-name-no-w-to-the-public-seat: spendOwnerOne, the helper's seat alone for a page load's read, gives the
+// pair's answer from one seat; the pair's own answer still needs both seats, one that holds no spend leaving it unknown.
+test("spendOwnerOne: one seat's mine and other, as the pair reads them; the pair with a seat that holds none is not known", async () => {
+  const { spendOwnerOne } = await import("../src/pool-spend.ts");
+  const one = (rpc: SolanaRpc) => spendOwnerOne(rpc, { program: PROGRAM, feePayer: FEE_PAYER }, BUY_W, NH, contextOfBuy(BUY_RELEASE), 0, new Map());
+  const mine = await buyTx(BUY_RELEASE, BUY_SIG);
+  const rpc = chainOf({ [BUY_SIG]: { tx: mine.tx, meta: { err: null, loadedAddresses: mine.loaded } } });
+  assert.deepEqual(await one(rpc), { mine: BUY_SIG, accounts: ixAccounts(mine) });
+  const salt = BUY_RELEASE.salt.slice();
+  salt[0] ^= 0xff;
+  const theirs = await buyTx({ ...BUY_RELEASE, salt }, OTHER_BUY_SIG);
+  assert.equal(await one(chainOf({ [OTHER_BUY_SIG]: { tx: theirs.tx, meta: { err: null, loadedAddresses: theirs.loaded } } })), "other");
+  const empty = chainOf({});
+  assert.equal(await one(empty), null, "no spend in W's history: not known");
+  assert.equal(await spendOwner([rpc, empty], { program: PROGRAM, feePayer: FEE_PAYER }, BUY_W, NH, contextOfBuy(BUY_RELEASE), 0, undefined, new Map()), null, "the pair: one seat's spend alone decides nothing");
+});
+
 test("a tag 3 whose loaded keys are not known (none, a count off, a key that is not one) is no one's spend: never mine", async () => {
   const { tx, loaded } = await buyTx(BUY_RELEASE, BUY_SIG);
   for (const meta of [
