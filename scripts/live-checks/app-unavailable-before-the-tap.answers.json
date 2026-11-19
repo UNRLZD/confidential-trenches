@@ -1,0 +1,36 @@
+{
+ "good": {
+  "source": "a local build read from dist",
+  "at": "2026-11-19T14:48:32.927Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-C_XYnrSs.js",
+    "status": 200,
+    "found": [
+     "the dry's Unavailable before the tap",
+     "venue_not_pinned is Unavailable",
+     "no_table_fits is Unavailable",
+     "venue_not_built is Unavailable",
+     "below_reference is Unavailable"
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "source": "https://ct-app.unrealized.trade/",
+  "at": "2026-11-19T14:48:33.307Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-CooUdxJ9.js",
+    "status": 200,
+    "found": [
+     "venue_not_pinned is Unavailable",
+     "no_table_fits is Unavailable",
+     "venue_not_built is Unavailable"
+    ]
+   }
+  ]
+ }
+}
