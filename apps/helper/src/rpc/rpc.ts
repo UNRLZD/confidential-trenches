@@ -50,6 +50,7 @@
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
 import { AsyncLocalStorage } from "node:async_hooks";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
   evmPoolVenues,
   HELPER_SOLANA_BLOCK_HEADER,
@@ -793,6 +794,50 @@ function parse(text: string): unknown {
 
 const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
 
+/**
+ * Past records an upstream may have dropped (card helper-receipts-past-retention): a receipt or a transaction by its hash,
+ * a block by its number. An upstream that no longer keeps one answers it null, as one behind /v1/rpc/robinhood?keyed=only
+ * did on 19 Nov 02:20Z for 10 of 10 Initialize receipts of blocks 116376549 on (a run of evm-pool-index.mjs at
+ * f1bb364ad), while rpc.mainnet.chain.robinhood.com and alchemy.com's answered every one. Such a null is no answer
+ * while another upstream keeps the record: callList asks the next, at most PAST_NULL_TRIES more upstreams, and passes
+ * the answer with the fewest nulls when none keeps it (a transaction still pending, a block not made yet). A transaction
+ * the same client sent through the route within SENT_KEEP_MS is pending, not past: its null is passed on at once, so a
+ * page's poll of its own buy (signpage pool-withdraw-evm.ts onwardReceipt, which waits for every reader) costs one send,
+ * as before (measured on Base's public upstreams, 19 Nov 02:52Z: a pending poll p50 278 ms with one send, 1029 ms with three).
+ * [design: 2, so a receipt polled while pending costs at most 3 sends; the route's next two upstreams, the read of 02:20Z
+ * had alchemy.com's and four more keyed behind the one that forgot.]
+ */
+export const PAST_NULL_TRIES = 2;
+/** How long a transaction sent through the route stays pending for its sender's reads, and how many are kept (the
+ *  oldest dropped first). [design: 10 min, past a Base or Robinhood buy's whole wait; 10,000 sends of 32 bytes.] */
+export const SENT_KEEP_MS = 10 * 60 * 1000;
+export const SENT_KEEP_MAX = 10_000;
+/** A signed transaction's hash: keccak-256 of its raw bytes (a typed one's whole envelope), or null for no raw hex. */
+export function sentHash(raw: unknown): string | null {
+  if (typeof raw !== "string" || !/^0x([0-9a-fA-F]{2})+$/.test(raw)) return null;
+  return `0x${Buffer.from(keccak_256(Buffer.from(raw.slice(2), "hex"))).toString("hex")}`;
+}
+const PAST_METHODS: ReadonlySet<string> = new Set(["eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getBlockByNumber"]);
+/** The ids of a read's calls that ask a past record (a block asked by a number, never by a tag; a transaction `pending`
+ *  does not name), or null when none does. */
+export function pastAsks(req: unknown, pending: (hash: string) => boolean = () => false): ReadonlySet<unknown> | null {
+  const ids = new Set<unknown>();
+  for (const r of Array.isArray(req) ? req : [req]) {
+    if (!isPlain(r) || typeof r.method !== "string" || !PAST_METHODS.has(r.method)) continue;
+    const p0 = Array.isArray(r.params) ? r.params[0] : undefined;
+    if (r.method === "eth_getBlockByNumber" && !(typeof p0 === "string" && /^0x[0-9a-fA-F]{1,16}$/.test(p0))) continue;
+    if (r.method !== "eth_getBlockByNumber" && typeof p0 === "string" && pending(p0.toLowerCase())) continue;
+    ids.add(r.id);
+  }
+  return ids.size === 0 ? null : ids;
+}
+/** How many of the calls `asked` names an answer (one, or a batch) answers null. */
+export function pastNullsIn(asked: ReadonlySet<unknown>, answer: unknown): number {
+  let n = 0;
+  for (const a of Array.isArray(answer) ? answer : [answer]) if (isPlain(a) && asked.has(a.id) && Object.hasOwn(a, "result") && a.result === null) n++;
+  return n;
+}
+
 /** The pool programs each Solana route may scan with getProgramAccounts: the helper's own pinned pool programs for that
  *  cluster (mainnet's: apps/helper/src/pool/solana.ts POOL_SOLANA_ENV, which refuses a bad one at start; devnet's a list,
  *  comma apart, read here alone, since the helper serves no devnet pool, card helper-mainnet-pools-only), none when
@@ -1512,6 +1557,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // card base-reads-never-starve-max: an EVM read's shape (rpcShape) and its mode, for its hold and refusal log lines
     const trace = traces.getStore();
     if (trace !== undefined && EVM_CHAINS.has(c)) trace.shape = `${keyedOnly ? "keyed " : ""}${rpcShape(out)}`;
+    // card helper-receipts-past-retention: a transaction sent here is pending for its sender's reads (sentLately)
+    if (EVM_CHAINS.has(c) && methods.includes("eth_sendRawTransaction")) noteSent(c, client, out);
     // card helper-rpc-one-read-many-pages: a read of the named public accounts (SHARED_ACCOUNTS) joins the same read in
     // flight, or is answered from it for SHARED_HOLD_MS after
     const sk = sharedKeyOf(c, out, keyedOnly);
@@ -1564,6 +1611,26 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     } catch {
       return null;
     }
+  };
+
+  // card helper-receipts-past-retention: each client's transactions sent through the route lately, by chain and hash,
+  // the time of the send; a past null for one is its pending answer (SENT_KEEP_MS), never asked again
+  const sentAt = new Map<string, number>();
+  const sentKey = (c: RpcChain, client: string | undefined, hash: string) => `${c} ${client ?? ""} ${hash}`;
+  const noteSent = (c: RpcChain, client: string | undefined, out: unknown): void => {
+    for (const r of Array.isArray(out) ? out : [out]) {
+      if (!isPlain(r) || r.method !== "eth_sendRawTransaction" || !Array.isArray(r.params)) continue;
+      const h = sentHash(r.params[0]);
+      if (h === null) continue;
+      const k = sentKey(c, client, h);
+      sentAt.delete(k);
+      sentAt.set(k, now());
+      while (sentAt.size > SENT_KEEP_MAX) sentAt.delete(sentAt.keys().next().value!);
+    }
+  };
+  const sentLately = (c: RpcChain, client: string | undefined, hash: string): boolean => {
+    const at = sentAt.get(sentKey(c, client, hash));
+    return at !== undefined && now() - at < SENT_KEEP_MS;
   };
 
   /** A checked read sent on its route (route). */
@@ -1858,6 +1925,19 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // a log read is never sent to a provider that refuses every one (LOGS_REFUSED): its 429 would hold it for the reads
     // it does answer
     const list = providers.filter((u) => !(methods.includes("eth_getLogs") && LOGS_REFUSED.has(u)));
+    // card helper-receipts-past-retention: a past record answered null is asked of the next upstream (PAST_NULL_TRIES);
+    // `nulled` the answer with the fewest such nulls, the read's when none keeps them; `forgot` the upstreams that
+    // answered so, never asked again in this read
+    let asked: unknown;
+    try {
+      asked = EVM_CHAINS.has(c) && methods.some((m) => PAST_METHODS.has(m)) ? JSON.parse(forward) : undefined;
+    } catch {
+      asked = undefined;
+    }
+    const past = asked === undefined ? null : pastAsks(asked, (h) => sentLately(c, client, h));
+    let nulled: { status: number; body: string; n: number } | undefined;
+    let nullTries = 0;
+    const forgot = new Set<string>();
     for (let tries = 0; ; tries++) {
       let soonestMs = Infinity;
       let down = false;
@@ -1867,6 +1947,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       let shaped: { status: number; body: string } | undefined;
       let capped: { span: bigint; status: number; body: string } | undefined;
       for (const url of list) {
+        if (forgot.has(url)) continue;
         // review L4: no send starts once the walk's time is nearly spent; the read is answered inside the server's timeout
         if (by - now() < WALK_SEND_MIN_MS) {
           down = true;
@@ -1974,8 +2055,18 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           down = true;
           continue;
         }
+        const nulls = past === null ? 0 : pastNullsIn(past, answer);
+        if (nulls > 0) {
+          if (nulled === undefined || nulls < nulled.n) nulled = { status: r.status, body: text, n: nulls };
+          forgot.add(url);
+          log(`rpc past null ${c} ${companyOf(new URL(url).host)} ${nulls} of ${past!.size}${shapeTail()}`);
+          if (nullTries++ < PAST_NULL_TRIES) continue;
+          return { status: nulled.status, body: nulled.body };
+        }
         return { status: r.status, body: text };
       }
+      // the past nulls' answer when no other upstream is left to ask now (card helper-receipts-past-retention)
+      if (nulled !== undefined && soonestMs === Infinity) return { status: nulled.status, body: nulled.body };
       // none could take it: the soonest provider's short hold or pace wait is waited out, and the read asked again (a
       // read sent and refused draws on the budget once more, as any send does)
       const waitMs = soonestMs + HOLD_MARGIN_MS;
@@ -1992,6 +2083,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       // 4: a read with no spare, the mainnet W Transfer read, would otherwise end unread under repeated holds); a shape
       // refusal only when no provider is held, else the caller's wait below (the device would take the refusal as the
       // read's answer)
+      if (nulled !== undefined) return { status: nulled.status, body: nulled.body };
       if (capped !== undefined) return { status: capped.status, body: capped.body };
       if (shaped !== undefined && soonestMs === Infinity) return { status: shaped.status, body: shaped.body };
       // every provider failed (none held or out of room; a company past its day's budget is down, review M3): upstream,
