@@ -1,0 +1,1697 @@
+{
+ "_about": {
+  "good": "mainnet-run.mjs (named in the card's report) at this card's head 9c3741368, 19 Nov 2026 14:22-14:25Z on the Mac: a helper's createSwaps on Base's and Robinhood's own providers (SWAP_RPCS), no CoinGecko key, keyless GeckoTerminal answering each coin's first read and then refused (429) for every call; each coin's trades read every 2 s for 190 s; each read's Server-Timing evm-vendor and evm-quote entries kept as its timing (evm-open and evm-queue left out), `at` the run's second. No new trade of either coin landed in the run (USEF trades hours apart; fBOMB's rows are not served, card robinhood-solidly-vendor-rows-serve), so no row was priced from chain and none at the vendor's rate: PASS",
+  "bad": "the base before the card, b0cb7010b, on the card's recorded mainnet reads (apps/helper/src/data/evm/quote-token-usd.test.ts's replay harness and fixtures/quote-token-usd.json: the key's share spent, each pool's newest trade on chain), each answer's status, Server-Timing, src and row count as the harness read them; Base's run stops at its first answer naming the rate (8 answers, too few alone), Robinhood's 32 name evm-vendor-price from the eighth: FAIL"
+ },
+ "good": {
+  "base": "http://helper.local",
+  "at": "2026-11-19T14:25:20Z",
+  "chains": {
+   "base": {
+    "coin": "0x1668cd48f31d869fca21eb826ca60e94cffc018c",
+    "reads": [
+     {
+      "at": 1795098135000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 2325 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098137000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 4329 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098139000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 6330 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098141000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 8333 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098143000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 10337 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098145000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1407 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098147000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3412 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098149000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5414 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098151000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7416 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098153000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9417 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098155000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11422 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098157000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1543 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098159000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3546 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098161000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5548 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098163000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7549 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098165000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9551 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098167000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11555 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098169000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1392 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098171000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3393 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098173000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5394 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098175000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7395 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098177000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9395 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098179000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11400 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098181000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1521 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098183000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3523 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098185000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5525 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098187000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7527 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098189000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9527 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098191000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11529 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098193000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1400 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098196000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3402 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098198000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5404 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098200000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7405 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098202000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9407 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098204000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11409 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098206000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1536 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098208000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3538 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098210000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5540 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098212000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7540 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098214000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9543 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098216000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11547 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098218000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1546 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098220000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3548 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098222000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5548 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098224000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7548 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098226000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9549 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098228000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11552 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098230000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1482 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098232000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3483 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098234000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5484 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098236000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7484 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098238000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9485 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098240000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11486 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098242000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1549 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098244000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3551 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098246000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5553 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098248000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7554 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098250000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9556 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098252000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11559 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098254000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1460 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098256000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3460 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098258000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5463 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098260000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7464 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098262000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9465 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098264000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11467 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098266000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1435 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098268000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3436 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098270000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5438 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098272000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7438 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098274000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9439 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098276000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11441 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098278000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1528 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098280000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3530 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098282000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5531 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098284000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7532 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098286000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9533 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098288000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11536 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098290000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1541 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098292000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3543 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098294000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5544 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098296000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7545 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098298000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9547 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098300000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11551 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098302000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1531 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098304000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3533 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098306000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5533 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098308000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7533 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098310000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9534 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098312000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11536 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098314000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1569 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098316000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3570 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098318000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5573 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098320000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7574 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098322000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9577 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098324000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11581 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098326000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1494 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098328000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3496 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098330000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5497 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     },
+     {
+      "at": 1795098332000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7498 ms ago\"",
+      "src": "geckoterminal",
+      "n": 4
+     }
+    ]
+   },
+   "robinhood": {
+    "coin": "0x84d6bb25d3b013c784be60dc598c920588f452bc",
+    "reads": [
+     {
+      "at": 1795098136000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 2559 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098138000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 4562 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098140000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 6563 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098142000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 8564 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098144000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 10567 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098146000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1116 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098148000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3117 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098150000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5120 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098152000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7121 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098154000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9124 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098156000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11126 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098158000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1440 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098160000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3442 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098162000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5443 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098164000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7445 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098166000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9447 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098168000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11451 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098170000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1465 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098172000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3467 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098174000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5471 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098176000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7471 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098178000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9474 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098180000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11477 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098182000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1486 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098184000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3489 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098186000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5491 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098188000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7492 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098190000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9494 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098192000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11497 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098194000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1591 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098196000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3594 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098198000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5596 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098200000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7596 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098202000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9597 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098204000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11599 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098206000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1480 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098208000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3483 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098210000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5485 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098212000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7486 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098214000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9487 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098216000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11488 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098218000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1448 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098220000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3449 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098222000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5451 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098224000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7451 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098226000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9453 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098228000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11455 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098230000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 13455 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098232000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1290 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098234000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3292 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098236000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5293 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098238000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7294 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098240000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9296 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098242000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11300 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098244000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1539 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098246000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3540 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098248000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5542 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098250000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7544 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098252000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9546 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098254000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11548 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098256000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1558 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098258000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3560 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098260000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5562 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098262000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7564 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098264000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9567 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098266000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11569 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098268000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1586 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098270000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3588 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098272000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5591 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098274000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7591 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098276000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9591 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098278000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11593 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098280000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1336 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098282000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3337 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098284000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5338 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098286000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7338 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098288000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9340 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098290000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11343 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098292000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1473 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098294000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3475 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098296000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5477 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098298000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7478 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098300000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9479 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098302000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11482 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098304000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1602 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098306000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3603 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098308000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5604 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098310000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7605 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098312000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9607 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098314000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11610 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098316000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1484 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098318000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3486 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098320000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 5488 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098322000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 7488 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098324000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 9490 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098326000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 11495 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098328000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 1606 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     },
+     {
+      "at": 1795098330000,
+      "status": 200,
+      "timing": "evm-vendor-read;desc=\"rows read 3608 ms ago\"",
+      "src": "geckoterminal",
+      "n": 0
+     }
+    ]
+   }
+  }
+ },
+ "bad": {
+  "base": "replay",
+  "at": "2026-11-19T14:27:00Z",
+  "chains": {
+   "base": {
+    "coin": "0x1668cd48f31d869fca21eb826ca60e94cffc018c",
+    "reads": [
+     {
+      "at": 1795085074000,
+      "status": 200,
+      "timing": "evm-open;dur=10, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 0 ms ago\"",
+      "src": "coingecko",
+      "n": 3
+     },
+     {
+      "at": 1795085074000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 0 ms ago\"",
+      "src": "coingecko",
+      "n": 3
+     },
+     {
+      "at": 1795085076000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 2000 ms ago\"",
+      "src": "coingecko",
+      "n": 3
+     },
+     {
+      "at": 1795085078000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 4000 ms ago\"",
+      "src": "coingecko",
+      "n": 3
+     },
+     {
+      "at": 1795085080000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 6000 ms ago\"",
+      "src": "coingecko",
+      "n": 3
+     },
+     {
+      "at": 1795085082000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 8000 ms ago\"",
+      "src": "coingecko",
+      "n": 3
+     },
+     {
+      "at": 1795085084000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 10000 ms ago\"",
+      "src": "coingecko",
+      "n": 3
+     },
+     {
+      "at": 1795085086000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 0 ms ago\", evm-vendor-price;desc=\"usd read 12000 ms ago\"",
+      "src": "coingecko",
+      "n": 4
+     }
+    ]
+   },
+   "robinhood": {
+    "coin": "0x84d6bb25d3b013c784be60dc598c920588f452bc",
+    "reads": [
+     {
+      "at": 1795077188000,
+      "status": 200,
+      "timing": "evm-open;dur=2, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 0 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077188000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 0 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077190000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 2000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077192000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 4000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077194000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 6000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077196000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 8000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077198000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 10000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077200000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 0 ms ago\", evm-vendor-price;desc=\"usd read 12000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077202000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 2000 ms ago\", evm-vendor-price;desc=\"usd read 14000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077204000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 4000 ms ago\", evm-vendor-price;desc=\"usd read 16000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077206000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 6000 ms ago\", evm-vendor-price;desc=\"usd read 18000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077208000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 8000 ms ago\", evm-vendor-price;desc=\"usd read 20000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077210000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 10000 ms ago\", evm-vendor-price;desc=\"usd read 22000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077212000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 0 ms ago\", evm-vendor-price;desc=\"usd read 24000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077214000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 2000 ms ago\", evm-vendor-price;desc=\"usd read 26000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077216000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 4000 ms ago\", evm-vendor-price;desc=\"usd read 28000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077218000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 6000 ms ago\", evm-vendor-price;desc=\"usd read 30000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077220000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 8000 ms ago\", evm-vendor-price;desc=\"usd read 32000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077222000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 10000 ms ago\", evm-vendor-price;desc=\"usd read 34000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077224000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 0 ms ago\", evm-vendor-price;desc=\"usd read 36000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077226000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 2000 ms ago\", evm-vendor-price;desc=\"usd read 38000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077228000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 4000 ms ago\", evm-vendor-price;desc=\"usd read 40000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077230000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 6000 ms ago\", evm-vendor-price;desc=\"usd read 42000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077232000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 8000 ms ago\", evm-vendor-price;desc=\"usd read 44000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077234000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 10000 ms ago\", evm-vendor-price;desc=\"usd read 46000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077236000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 0 ms ago\", evm-vendor-price;desc=\"usd read 48000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077238000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 2000 ms ago\", evm-vendor-price;desc=\"usd read 50000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077240000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 4000 ms ago\", evm-vendor-price;desc=\"usd read 52000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077242000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 6000 ms ago\", evm-vendor-price;desc=\"usd read 54000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077244000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 8000 ms ago\", evm-vendor-price;desc=\"usd read 56000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077246000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 10000 ms ago\", evm-vendor-price;desc=\"usd read 58000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795077248000,
+      "status": 200,
+      "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 0 ms ago\", evm-vendor-price;desc=\"usd read 60000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     }
+    ]
+   }
+  }
+ }
+}
