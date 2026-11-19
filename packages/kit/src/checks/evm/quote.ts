@@ -1576,8 +1576,8 @@ const indexedName = (p: { readonly key: EvmPoolKey; readonly id?: unknown } | nu
  *  module's scans; one that is not whole, of another chain or PoolManager, or not newer than the one held changes
  *  nothing. Returns whether it is now the one held. A newer sync from the same first block with the same pools as the
  *  one held (card evm-index-kept-at-the-head: the page syncs the gap every EVM_INDEX_KEEP_MS, and most gaps make no
- *  pool) moves the held index's N alone: it is not rebuilt (Robinhood's 34,142 pools took 26-56 ms a rebuild on the page's
- *  main thread from this Mac, 19 Nov 10:2xZ, every gap sync). */
+ *  pool) moves the held index's N alone: it is not rebuilt (a rebuild of each gap sync took 21-38 ms for Robinhood's 34,142
+ *  pools and 6-9 ms for Base's 9,730 on one thread, 0-1 ms when it moves N alone, 19 Nov 11:37Z). */
 export function evmPoolIndexUse(chain: EvmPoolChain, sync: { readonly index: { readonly chainId: number; readonly poolManager: string; readonly from: number } | null; readonly coversThrough: number | null; readonly pools: readonly { readonly key: EvmPoolKey }[] | null }): boolean {
   const all = evmPoolVenues();
   const pinned = typeof chain === "string" && Object.hasOwn(all, chain) ? all[chain] : undefined;
