@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/helper-answers-through-a-burst.test.mjs: the live check replays recorded answers
 // (helper-answers-through-a-burst.answers.json), each the check run against a copy of the helper behind Caddy on the
-// real Caddyfile while apps/helper/deploy/burst.mjs opened 300 pages at once (apps/helper/deploy/burst-proof.sh, on the
-// test box). good: the card's helper: PASS. bad_main: main 0092e5692 the same way: FAIL. Each other bad answer plants one
+// real Caddyfile while apps/helper/deploy/burst.mjs opened pages at once (apps/helper/deploy/burst-proof.sh, on the test
+// box; each record's note names its run). good: the card's helper through 600 pages: PASS. bad_main: main 0092e5692
+// through 300 pages after 48 cold coins, its lists read lost to Caddy's 502s: FAIL. Each other bad answer plants one
 // fault in the good one (a 502, an answer with no CORS header, one unanswered, a p99 past the bound, a page short, a
 // push socket refused, unanswered or missing): FAIL.
 import assert from "node:assert/strict";
@@ -16,12 +17,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-answers-through-a-burst.answers.json"), "utf8"));
 const copy = (x) => JSON.parse(JSON.stringify(x));
 
-test("recorded good answer (the card's helper through a 300-page burst): PASS", () => {
+test("recorded good answer (the card's helper through a 600-page burst): PASS", () => {
   const v = judge(A.good);
   assert.equal(v.ok, true, v.lines.join("\n"));
 });
 
-test("recorded bad answer (main 0092e5692 through the same burst): FAIL", () => {
+test("recorded bad answer (main 0092e5692 through a 300-page burst after 48 cold coins): FAIL", () => {
   const v = judge(A.bad_main);
   assert.equal(v.ok, false, v.lines.join("\n"));
 });
