@@ -2052,7 +2052,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (pools.size >= POOLS_MAX) pools.delete(pools.keys().next().value!);
     pools.set(token, { found: found === null ? null : { pool: found.pool, decimals: found.decimals }, at: now(), ...(found?.hint === undefined ? {} : { hint: found.hint }) });
     // the list's pool answered: the discovery decides the main pool, on the helper's own search (ahead)
-    if (found?.hint !== undefined) void ahead([token]);
+    if (found?.hint !== undefined) void ahead([token], false);
     return found;
   }
 
@@ -2111,9 +2111,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** The lists' tokens as the last lists answer named them, and when the last minute's line was written. */
   let listedNow: string[] = [];
   let lineAt = now();
-  const standDown = (): Promise<unknown> => {
+  /** A wait the gate made (the loop busy, or fewer than two roomy providers: roomy), counted by its cause: busy, else a
+   *  provider held (a held one is no roomy one), else no room. */
+  const count = (): void => {
     if (busy()) stood.busy++;
+    else if (heldAny()) stood.held++;
     else stood.room++;
+  };
+  const standDown = (): Promise<unknown> => {
+    count();
     return new Promise((go) => setTimeout(go, AHEAD_WAIT_MS));
   };
   /** The tokens a search ahead has taken from its queue and not yet done (the tapes read ahead wait for them). */
@@ -2126,18 +2132,26 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const kept = pools.get(t);
     return kept !== undefined && kept.hint === undefined && now() - kept.at < (kept.found === null ? NONE_MS : POOL_KEEP_MS);
   };
-  /** Once a minute, at a lists answer: the listed tapes ready (tapeReady) and what stood the reads ahead down since the
-   *  last line, each cause's waits counted (stood); no address in it. */
+  /** Whether a listed tape's open now answers it whole: an open book read (no read in flight, its read back done, not
+   *  behind the chain), never one the read ahead is still building, else a rested one ready (tapeReady). */
+  const wholeNow = (t: string): boolean => {
+    const e = books.get(t);
+    return e === undefined ? tapeReady(t) : e.ahead === undefined && e.first === undefined && e.readAt !== null && !backing(e) && !behind(e);
+  };
+  /** Once a minute, at a lists answer: the listed tapes whose open answers them whole (wholeNow) and what stood the reads
+   *  ahead down since the last line, each cause's waits counted (stood); no address in it. */
   function aheadLine(): void {
     if (now() - lineAt < 60_000) return;
-    const ready = listedNow.filter((t) => tapeReady(t)).length;
+    const ready = listedNow.filter((t) => wholeNow(t)).length;
     log(`${chain} read ahead: ${ready} of ${listedNow.length} listed tapes ready; stood down ${Math.round((now() - lineAt) / 1000)} s: opening ${stood.opening}, no room ${stood.room}, held ${stood.held}, busy ${stood.busy}`);
     lineAt = now();
     stood.opening = stood.room = stood.held = stood.busy = 0;
   }
-  function ahead(tokens: readonly string[]): Promise<void> {
+  /** `listed`: false for one token's search (mainPool's hinted pool), which is no lists answer: the line's listed tapes
+   *  stay the lists' (a hinted open wrote "0 of 1 listed tapes ready" on the deployed helper, 19 Nov 06:50Z). */
+  function ahead(tokens: readonly string[], listed = true): Promise<void> {
     aheadLine();
-    listedNow = [...new Set(tokens.map((x) => evmAddress(x)).filter((t): t is string => t !== null))];
+    if (listed) listedNow = [...new Set(tokens.map((x) => evmAddress(x)).filter((t): t is string => t !== null))];
     for (const x of tokens) {
       const t = evmAddress(x);
       if (t !== null && !known(t) && !resolving.has(t) && aheadQueue.size < POOLS_MAX) aheadQueue.add(t);
@@ -2179,10 +2193,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    * pool is kept (the search above; one with none found is dropped). All of it runs in a background lane of its own,
    * so every caller's post goes first in each provider's queue (Lane), at the search's gates (no start while a first
    * open waits for its pool, nor without two roomy providers, nor while the helper's loop is busy: limits/loop-busy.ts,
-   * card robinhood-tapes-read-ahead-bounded, and a tape's read back stops there, rested, to go on at the next lists load),
-   * and the run stops when any provider of the chain is held
-   * (a refusal it answered, its 429: limits.ts hold): the read ahead spends no refused budget, and the lists' next load
-   * (LIST_MS) asks again. A caller that opens the coin meanwhile takes the book over (open), its lane lifted to the caller's (join).
+   * card robinhood-tapes-read-ahead-bounded, and a tape's read back stops there, rested, its tape back in the queue).
+   * A held provider (a refusal it answered, its 429: limits.ts hold) is sent nothing (usable) and is no roomy one, so the
+   * read ahead spends no refused budget and waits only while fewer than two others have room, its queue kept, going on
+   * AHEAD_WAIT_MS after (card robinhood-tapes-whole-at-first-open: at fcf128503 one held provider of the chain ended the
+   * run and emptied its queue until the lists' next answer; the deployed helper's minute lines, 19 Nov 06:46-07:21Z,
+   * counted 456 such ends on Base and 212 on Robinhood, almost every lists answer on Base, whose providers' 1 s holds
+   * come several a minute, and Base's tapes ready fell to 11 of 44). A caller that opens the coin meanwhile takes the
+   * book over (open), its lane lifted to the caller's (join).
    * [design: TAPES_AT_ONCE books at most, never into the last of OPEN_MAX, so a page's open is never refused for a read
    * ahead; a third of the capacity checks' dozen, so their locates share a post (locatePump) while two thirds of
    * OPEN_MAX stay the pages'. Stale at half the cold window, so a rested list read on every lists load (a minute) stays
@@ -2201,10 +2219,6 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         for (;;) {
           for (;;) {
             if (tapeQueue.size === 0) return;
-            if (heldAny()) {
-              stood.held++;
-              return tapeQueue.clear();
-            }
             if (opening > 0) {
               stood.opening++;
               await new Promise<void>((go) => idle.push(go));
@@ -2260,14 +2274,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         }
         if (e!.readAt === null) await firstRead(e!);
         // read back to done: a step left to its wait (a fails' backoff, a hold's end: backAll leaves those to the tick,
-        // which reads only open books) is waited here, as long as no provider is held and the book is still ours
+        // which reads only open books) is waited here, as long as the run's gate is open and the book is still ours
         for (;;) {
           while (e!.backing !== undefined) await e!.backing;
           if (!backing(e!) || books.get(t) !== e || e!.ahead !== lane) return;
-          if (heldAny()) {
-            stood.held++;
-            return;
-          }
           // a busy loop stands the read back down, rested where it got to, its tape back in the queue: the run takes it
           // up again on the first turn the loop is free (AHEAD_WAIT_MS), not at the lists' next load a minute on
           if (busy()) {
@@ -2275,8 +2285,21 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
             tapeQueue.add(t);
             return;
           }
+          // fewer than two roomy providers (held or drawn down): the read back waits in place, its book kept, and goes on
+          // AHEAD_WAIT_MS after they have room; rested and queued again it would read its blocks since once more each turn
+          if (!roomy()) {
+            await standDown();
+            continue;
+          }
           const wait = (e!.back?.until ?? now()) - now();
           if (wait > BACK_RETRY_MAX_MS) return;
+          // a read back backed off (its reads failed or were refused) while a provider is held may wait on that one alone
+          // (Robinhood's day read, the chain's own RPC): rested where it got to, the run's worker free for the next tape,
+          // and the lists' next load asks again; a read back with no wait goes on whatever is held
+          if (wait > 0 && heldAny()) {
+            stood.held++;
+            return;
+          }
           if (wait > 0) await new Promise((go) => (setTimeout(go, wait) as { unref?: () => void }).unref?.());
           const head = await agreedHead();
           if (head === null) return;

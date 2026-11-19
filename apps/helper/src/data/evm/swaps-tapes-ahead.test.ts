@@ -5,7 +5,8 @@
 // robinhood-spread-tapes-fill-inside-45s), but a coin nobody had opened was read from nothing at its first open: its pool
 // was looked for ahead (helper-robinhood-search-ahead), its tape only when a page asked, a dozen at once. Now the lists'
 // coins' tapes are read ahead too (swaps.ts ahead), in the helper's background lane, at most AHEAD_AT_ONCE at a time,
-// none started while a first open waits for its pool or while a provider is held, and rested ready for the first open.
+// none started while a first open waits for its pool or with fewer than two roomy providers (a held one is none), and
+// rested ready for the first open.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as base from "../../../test/evm-swaps/base.ts";
@@ -110,35 +111,64 @@ test("card robinhood-tapes-read-ahead: a page's open of a coin no list carries, 
   assert.ok(mid.ms <= alone.ms + 2 * LATE_MS, `the page's open took ${mid.ms} ms mid read ahead, ${alone.ms} ms alone`);
 });
 
-test("card robinhood-tapes-read-ahead: a provider held (its 429) when the lists load: no tape is read ahead (no pool read at all, the pools kept); once no provider is held the next lists answer reads them, and their first opens are whole", async () => {
+test("card robinhood-tapes-whole-at-first-open: one provider held (its 429) when the lists load: the tapes are read ahead on the others at that load, none sent to the held one, and their first opens are whole (red at fcf128503: one held provider of six ended the read ahead and emptied its queue until the lists' next answer; the deployed helper's minute lines 19 Nov 06:46-07:21Z counted 456 such ends on Base, 212 on Robinhood, Base's ready 11 to 41 of 37 to 44)", async () => {
   const r = rig();
   // the two coins' pools kept (an earlier search's), so every pool read here is a tape's
   const kept = new Map(LISTED.slice(0, 2).map(({ token, pool }) => [token, { pool: { venue: "v3", id: pool, token, tokenIs0: true, quote: { kind: "usd", decimals: 6 } } as Pool, decimals: 18 }]));
+  let heldPosts = 0;
   const { value } = await onVirtualTime(9_000_000, async () => {
     const holds = providerHolds(() => Date.now());
-    holds.hold(POCKET, 30);
+    // the longest hold a provider names (RETRY_AFTER_MAX_S), so it outlasts the read ahead and the opens
+    holds.hold(POCKET, 75);
+    const fetch = (url: string, init: RequestInit) => {
+      if (url === POCKET && holds.heldFor(POCKET) > 0) heldPosts++;
+      return r.fetch(url, init);
+    };
+    const s = open(r.chain, clock, { pools: kept, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: fetch as never, holds });
+    // one lists answer, no other: the read ahead it starts reads both tapes while POCKET is held
+    await s.ahead(LISTED.slice(0, 2).map((x) => x.token));
+    const read = LISTED.slice(0, 2).map(({ pool }) => r.n.poolReads.get(pool) ?? 0);
+    const t0 = clock.t;
+    const got = await Promise.all(LISTED.slice(0, 2).map(({ token }) => s.trades(token, 50).then((a) => tapeOf(a, clock.t - t0))));
+    const stillHeld = holds.heldFor(POCKET) > 0;
+    s.stop();
+    return { read, got, stillHeld };
+  });
+  console.log(`pool reads at the one lists answer ${value.read.join(", ")}; posts to the held provider ${heldPosts}; ${line(value.got)}`);
+  assert.ok(value.stillHeld, "POCKET's hold ended before the opens: the test proves nothing");
+  for (const x of value.read) assert.ok(x > 0, `a tape was not read ahead while one provider of six was held: ${value.read.join(", ")}`);
+  assert.equal(heldPosts, 0, "a post went to the held provider");
+  for (const g of value.got) assert.equal(g.filling, false, `a first open still filling: ${line(value.got)}`);
+});
+
+test("card robinhood-tapes-whole-at-first-open: every provider but one held when the lists load: no tape is read ahead while held (two roomy providers are the gate), and it goes on by itself once the holds end, with no lists answer after the first (red at fcf128503: the queue was emptied at the hold, so nothing read until the lists' next answer)", async () => {
+  const r = rig();
+  const kept = new Map(LISTED.slice(0, 2).map(({ token, pool }) => [token, { pool: { venue: "v3", id: pool, token, tokenIs0: true, quote: { kind: "usd", decimals: 6 } } as Pool, decimals: 18 }]));
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const holds = providerHolds(() => Date.now());
+    for (const u of SWAP_RPCS.robinhood.slice(1)) holds.hold(u, 20);
     const s = open(r.chain, clock, { pools: kept, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never, holds });
-    await s.ahead(LISTED.slice(0, 2).map((x) => x.token));
+    void s.ahead(LISTED.slice(0, 2).map((x) => x.token));
+    await sleep(15_000);
     const held = LISTED.slice(0, 2).map(({ pool }) => r.n.poolReads.get(pool) ?? 0);
-    await sleep(31_000);
-    await s.ahead(LISTED.slice(0, 2).map((x) => x.token));
+    await sleep(20_000);
     const after = LISTED.slice(0, 2).map(({ pool }) => r.n.poolReads.get(pool) ?? 0);
     const t0 = clock.t;
     const got = await Promise.all(LISTED.slice(0, 2).map(({ token }) => s.trades(token, 50).then((a) => tapeOf(a, clock.t - t0))));
     s.stop();
     return { held, after, got };
   });
-  console.log(`pool reads while held ${value.held.join(", ")}; after ${value.after.join(", ")}; ${line(value.got)}`);
-  for (const x of value.held) assert.equal(x, 0, `a tape was read ahead while a provider was held: ${value.held.join(", ")}`);
-  for (const x of value.after) assert.ok(x > 0, `no tape was read ahead once no provider was held: ${value.after.join(", ")}`);
-  for (const g of value.got) assert.equal(g.filling, false, `read ahead once no provider was held: ${line(value.got)}`);
+  console.log(`pool reads while held ${value.held.join(", ")}; after the holds, no new lists answer ${value.after.join(", ")}; ${line(value.got)}`);
+  for (const x of value.held) assert.equal(x, 0, `a tape was read ahead with one provider free: ${value.held.join(", ")}`);
+  for (const x of value.after) assert.ok(x > 0, `no tape was read ahead once the holds ended: ${value.after.join(", ")}`);
+  for (const g of value.got) assert.equal(g.filling, false, `a first open still filling: ${line(value.got)}`);
 });
 
 test("card robinhood-tapes-read-ahead: posts and 429s against the base, every provider refusing past 4 posts a second: the lists load and answer again each minute (LIST_MS), three minutes on a page opens the 12 at once and reads each until whole; every tape whole by 45 s (FILLED_MS), the posts and 429s printed (red at f5049c481: all 12 still filling at 45 s, 6 to 20 trades each, the opens' 429s 104 of 435 posts; now whole by 5.1 s, 7 of 67)", async () => {
   const r = rig({ limit: 4 });
   const { value } = await onVirtualTime(9_000_000, async () => {
     const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
-    // the read ahead stops at a provider's hold (its 429) and the lists' next answer asks again
+    // the read ahead waits while fewer than two providers have room (a held one, its 429, has none) and goes on after
     for (let k = 0; k < 3; k++) {
       void s.ahead(LISTED.map((x) => x.token));
       await sleep(60_000);
@@ -271,6 +301,25 @@ test("card robinhood-tapes-read-ahead-bounded: the read ahead's minute line, at 
   assert.equal(Number(m[1]), 12, "every listed tape read ahead once the loop was free");
   assert.ok(Number(m[6]) >= 10_000 / AHEAD_WAIT_MS, `the loop's 10 s busy counted in waits: ${m[6]}`);
   assert.doesNotMatch(minute[0]!, /0x[0-9a-f]/i, "no address in the line");
+});
+
+test("card robinhood-tapes-whole-at-first-open: the minute line counts the lists' tapes, not a one-token search's (mainPool's hinted pool, ahead(.., false)): a hinted search the last call before the line still reads '12 of 12 listed' (red at fcf128503: the deployed helper wrote 'robinhood read ahead: 0 of 1 listed tapes ready' 19 Nov 06:50:37Z and 07:00:37Z)", async () => {
+  const r = rig();
+  const kept = new Map(LISTED.map(({ token, pool }) => [token, { pool: { venue: "v3", id: pool, token, tokenIs0: true, quote: { kind: "usd", decimals: 6 } } as Pool, decimals: 18 }]));
+  const lines: string[] = [];
+  await onVirtualTime(9_000_000, async () => {
+    const s = open(r.chain, clock, { pools: kept, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never, log: (l) => lines.push(l) });
+    void s.ahead(LISTED.map((x) => x.token));
+    await sleep(30_000);
+    void s.ahead([PAGE.token], false);
+    await sleep(31_000);
+    void s.ahead([PAGE.token], false);
+    s.stop();
+  });
+  const minute = lines.filter((l) => l.includes("read ahead:"));
+  console.log(`lines: ${minute.join(" | ")}`);
+  assert.equal(minute.length, 1, "one line a minute");
+  assert.match(minute[0]!, /^robinhood read ahead: 12 of 12 listed tapes ready;/, minute[0]);
 });
 
 test("card robinhood-tapes-read-ahead-bounded: a read back the busy loop stands down for one turn is taken up again within AHEAD_WAIT_MS of the loop coming free, not at the lists' next load (red at 23c25c514: rested until the next ahead() a lists period on, LIST_MS)", async () => {
