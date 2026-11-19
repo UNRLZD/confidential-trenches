@@ -63,7 +63,8 @@
 .tkl-ahead > span { display: block; font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tkl-changes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .tkl-change { padding: 8px 4px; border-radius: 9px; display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
-.tkl-change > span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* each line fills its tile, centred: a value of another length lands in a slot already sized for it */
+.tkl-change > span { align-self: stretch; max-width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tkl-change > span:first-child { font-size: 11px; color: var(--text-2); }
 .tkl-change > span:last-child { font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-1); }
 .tkl-change[data-tone="acc"] { background: rgba(var(--acc-rgb), 0.07); }
@@ -76,7 +77,10 @@
 .tkl-change[data-tone="plain"] > span:last-child { color: var(--text-1); }
 .tkl-mono { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .tkl-flow { display: flex; flex-direction: column; gap: 6px; }
-.tkl-flow > div:first-child { display: flex; justify-content: space-between; font-size: 13px; }
+/* the buys, the window and the sells in three slots: the window keeps its place whatever length the counts land at */
+.tkl-flow > div:first-child { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); font-size: 13px; }
+.tkl-flow > div:first-child > span { white-space: nowrap; }
+.tkl-flow > div:first-child > span:last-child { justify-self: end; }
 .tkl-flowlbl { color: var(--text-2); }
 .tkl-flowbar { display: flex; gap: 4px; height: 5px; }
 .tkl-flowbar > div { height: 100%; border-radius: 3px; }

@@ -200,6 +200,11 @@ export function About({ row, tape, links = {} }: { row: MarketRow; tape: Tape; l
   const short = creator && creator.length > 12 ? `${creator.slice(0, 4)}…${creator.slice(-4)}` : creator;
   const c = curve(row);
   const xSearch = "https://x.com/search?q=" + encodeURIComponent("$" + row.symbol + " OR " + row.token);
+  // Every value here lands after the first paint (the trades list, the row's refresh) at another length, and each sits in
+  // a centred tile or at a right-aligned or centred place in its line: a value that kept its node would move, and the
+  // browser counts it as a layout shift (card app-chart-bar-holds-still-on-desktop: the 5m Buys and Sells, 1.4 s after
+  // load, at live run 44480394487). Each value is keyed by what it says, so a new value is a new node, never moved; each
+  // tile's value fills its tile (lower.css .tkl-change), so the slot is sized before the value lands.
   return (
     <section className="tkl-about" data-testid="ticket-about">
       <div className="tkl-ahead">
@@ -213,20 +218,20 @@ export function About({ row, tape, links = {} }: { row: MarketRow; tape: Tape; l
       </div>
       {c.on ? (
         <div className="tkl-curve" data-testid="about-curve">
-          <div><span><W id="curveProgress" /></span><span className="tkl-mono">{Math.floor(row.curve_bps! / 100)}%</span></div>
+          <div><span><W id="curveProgress" /></span><span key={row.curve_bps} className="tkl-mono">{Math.floor(row.curve_bps! / 100)}%</span></div>
           <div className="tkl-curvebar"><div style={{ width: `${Math.min(100, row.curve_bps! / 100)}%` }} /></div>
         </div>
       ) : (
         <div className="tkl-liq" data-testid="about-liq">
-          <div><span><W id="liq" /></span><span className="tkl-mono">{usd(row.liq_usd)}</span></div>
-          <div><span><W id="sortVol" /></span><span className="tkl-mono">{usd(row.vol_24h_usd)}</span></div>
+          <div><span><W id="liq" /></span><span key={usd(row.liq_usd)} className="tkl-mono">{usd(row.liq_usd)}</span></div>
+          <div><span><W id="sortVol" /></span><span key={usd(row.vol_24h_usd)} className="tkl-mono">{usd(row.vol_24h_usd)}</span></div>
         </div>
       )}
       <div className="tkl-changes" data-testid="about-windows">
         {a.windows.map((w) => (
           <div key={w.id} className="tkl-change" data-tone={w.tone}>
             <span>{w.id}</span>
-            <span>{w.text}</span>
+            <span key={w.text}>{w.text}</span>
           </div>
         ))}
       </div>
@@ -234,16 +239,16 @@ export function About({ row, tape, links = {} }: { row: MarketRow; tape: Tape; l
         {five.map(([k, v, tone]) => (
           <div key={k} className="tkl-change tkl-five" data-tone={v === DASH ? "none" : tone}>
             <span><W id={k} /></span>
-            <span>{v}</span>
+            <span key={v}>{v}</span>
           </div>
         ))}
       </div>
       {a.flows.map((f) => (
         <div key={f.win} className="tkl-flow" data-testid={f.win === "24h" ? "about-flow" : `about-flow-${f.win}`}>
           <div>
-            <span><span className="tkl-mono">{f.buys}</span> <span className="tkl-flowlbl"><W id="flowBuys" /></span></span>
+            <span key={f.buys}><span className="tkl-mono">{f.buys}</span> <span className="tkl-flowlbl"><W id="flowBuys" /></span></span>
             <span className="tkl-flowwin">{f.win}</span>
-            <span><span className="tkl-mono">{f.sells}</span> <span className="tkl-flowlbl"><W id="flowSells" /></span></span>
+            <span key={f.sells}><span className="tkl-mono">{f.sells}</span> <span className="tkl-flowlbl"><W id="flowSells" /></span></span>
           </div>
           <div className="tkl-flowbar" data-unknown={f.buyPct === null}>
             <div style={{ width: `${f.buyPct ?? 50}%` }} />
