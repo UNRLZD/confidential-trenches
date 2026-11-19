@@ -1557,9 +1557,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // card base-reads-never-starve-max: an EVM read's shape (rpcShape) and its mode, for its hold and refusal log lines
     const trace = traces.getStore();
     if (trace !== undefined && EVM_CHAINS.has(c)) trace.shape = `${keyedOnly ? "keyed " : ""}${rpcShape(out)}`;
+    // card helper-receipts-past-retention: a transaction sent here is pending for its sender's reads (sentLately)
+    if (EVM_CHAINS.has(c) && methods.includes("eth_sendRawTransaction")) noteSent(c, client, out);
     // card helper-rpc-one-read-many-pages: a read of the named public accounts (SHARED_ACCOUNTS) joins the same read in
     // flight, or is answered from it for SHARED_HOLD_MS after
-    if (EVM_CHAINS.has(c) && methods.includes("eth_sendRawTransaction")) noteSent(c, client, out);
     const sk = sharedKeyOf(c, out, keyedOnly);
     if (sk !== null) return sharedRead(sk, (out as { id: unknown }).id, c, client, () => send(c, out, forward, methods, client, reserved, keyedOnly));
     return send(c, out, forward, methods, client, reserved, keyedOnly);
@@ -1612,7 +1613,6 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
   };
 
-  /** A checked read sent on its route (route). */
   // card helper-receipts-past-retention: each client's transactions sent through the route lately, by chain and hash,
   // the time of the send; a past null for one is its pending answer (SENT_KEEP_MS), never asked again
   const sentAt = new Map<string, number>();
@@ -1633,6 +1633,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     return at !== undefined && now() - at < SENT_KEEP_MS;
   };
 
+  /** A checked read sent on its route (route). */
   async function send(c: RpcChain, out: unknown, forward: string, methods: string[], client: string | undefined, reserved: boolean, keyedOnly: boolean): Promise<Answer> {
     // a keyed Solana provider fallen back (rpc/slot.ts): the public endpoint, on its own budget; the key while it serves
     // card rpc-keyed-lists: past the first (fallen back, or held by its 429), its keyed spares on their own budget, then
