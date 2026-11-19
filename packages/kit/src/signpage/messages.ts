@@ -484,7 +484,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.19";
+export const SIGNPAGE_KIT_VERSION = "1.20";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -760,6 +760,11 @@ export interface SignpageState {
    * none of it ready yet, in the same whole units; "0" when it makes none. It comes only with `ready`, at most the
    * balance: an app tells "making a proof" only while it is above "0", never from `ready` being "0" alone (a balance
    * no proof is being made for, too small for any proof or held by a running withdraw, has none).
+   * `spendable` (kit 1.20, card taps-wait-inside-the-page): the most one tap can spend on the chain, in the same whole
+   * units, from the first answer after a load: tap_max over the ready proofs and the ones the device keeps for its next
+   * pass, at least tap_max, at most the balance. A pool.buy of it tapped while the device still prepares the spend waits
+   * for it inside the request; an app needs no wait of its own. Present wherever tap_max can be, with or without
+   * `ready`; a page of an earlier release sends none, and an app then reads tap_max as before. Absent below kit 1.20.
    * Absent when the page is signed out or the notes could not be read. Totals
    * only, never a note; the app sees them each time the store changes, so two in a row can show one note's value.
    *
@@ -769,7 +774,7 @@ export interface SignpageState {
    * the page could not price, and once the read is older than the feed's bound (POOL_USD_FEEDS maxAgeS); an app checks
    * that bound again on its own clock, since the state it holds ages.
    */
-  readonly pools?: readonly { readonly chain: Chain; readonly asset: PoolAsset; readonly balance: string; readonly ready?: string; readonly tap_max?: string; readonly making?: string; readonly price?: PoolStatePrice }[];
+  readonly pools?: readonly { readonly chain: Chain; readonly asset: PoolAsset; readonly balance: string; readonly ready?: string; readonly tap_max?: string; readonly making?: string; readonly spendable?: string; readonly price?: PoolStatePrice }[];
   readonly wallets: readonly { readonly chain: Chain; readonly address: string; readonly role: "fresh" | "hop"; readonly size: string; readonly state: WalletState }[];
   /**
    * The tokens the device's buys hold. `decimals` (card signpage-state-holdings, additive) is the token's own decimals,

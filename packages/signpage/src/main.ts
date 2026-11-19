@@ -100,7 +100,8 @@ import type { ExitChain } from "../../kit/src/checks/oneclick-exit.ts";
 import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, poolBuyDryKind, rentOnce, withDepositWallets, withPools, withSolanaRent } from "./pools.ts";
 import { evmBuyDry, evmDryQuote, evmDryTap, evmMostWithCash, evmMoveShort } from "./pool-buy-evm.ts";
-import { poolBalances } from "../../wallet/src/pool/balances.ts";
+import { poolBalances, type BalanceProof } from "../../wallet/src/pool/balances.ts";
+import { keptProofs } from "../../wallet/src/pool/kept-proofs.ts";
 import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -928,7 +929,7 @@ else {
         const withVault = await withVaultBalance(s, shared, pageScope());
         // and each U_X a follow left money at (card deposit-takes-each-pools-own-coin): the ops read after those notes, from
         // the store alone, so a carry the pools count is never listed too (pool-deposit-follow.ts depositWalletsOf)
-        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open, both?.landed, both?.making).then(async (p) =>
+        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open, both?.landed, both?.making, s.signed_in && PAGE_POOLS.length > 0 ? await pageKept().catch(() => []) : undefined).then(async (p) =>
           !p.signed_in || PAGE_POOLS.length === 0 ? p : withDepositWallets(p, [
             ...depositWalletsOf(await pageOps().catch(() => []), (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], (c) => POOL_ADDRESS_ASSET[c]),
             // and each W's tail under the least standard size (src/w-tails.ts): the user's money kept on W, counted too
@@ -1874,6 +1875,12 @@ async function pageTails(): Promise<unknown[]> {
 // stateNotes for the queue's readyWith: its failure kept as a value, so the turn ends and the state's withPools throws it
 // in its own catch
 const notesOrError = (): Promise<{ v: NoteRecord[] } | { e: unknown }> => stateNotes().then((v) => ({ v }), (e: unknown) => ({ e }));
+// every page pool's proofs kept on the device (card taps-wait-inside-the-page): state.pools' spendable from the first
+// answer after a load, before any queue opens (../../wallet/src/pool/balances.ts); a read that fails is none kept
+async function pageKept(): Promise<BalanceProof[]> {
+  const st = await open();
+  return (await Promise.all(PAGE_POOLS.map((p) => keptProofs<unknown>(st, p.id).load()))).flat();
+}
 // a change to the notes, heard on the shell's channel (this document's store and other tabs'): name again
 function notesMoved(e: WalletEvent): void {
   if (!shell || (pageScope() === null && PAGE_POOLS.length === 0) || e?.kind !== "changed" || !Array.isArray(e.stores) || !e.stores.includes("notes")) return;
