@@ -2,7 +2,7 @@
 // --build) runs in apps/terminal's test:e2e or says why not (scripts/ci/app-harness-in-e2e.mjs), on the tree as it is, and each planted failure is refused.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { e2eHarnessRuns, harnessProblems, readTree } from "./app-harness-in-e2e.mjs";
+import { e2eHarnessRuns, harnessProblems, PENDING, readTree } from "./app-harness-in-e2e.mjs";
 
 const HARNESS = `const a = process.argv.slice(2);\nif (a.includes("--harness")) run();\n`;
 const BUILD = `const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);\nrun({ build: opt("--build", null) });\n`;
@@ -11,7 +11,7 @@ const check = ({ after = "// After: app", lines = [], harness = true, build = fa
 const E2E = (...keys) => ["vite build", ...keys.map((k) => `node ../../scripts/live-checks/${k}.mjs --harness`), "node test/bar10/run.mjs"].join(" && ");
 const REASON = "// Harness: not in e2e, its harness reads the release's real RPCs";
 
-test("the tree passes: every app check that can run on a local build runs in test:e2e or says why not", () => {
+test("the tree passes: every app check that can run on a local build runs in test:e2e, says why not, or is PENDING on its card", () => {
   const { checks, e2e } = readTree();
   assert.deepEqual(harnessProblems(checks, e2e), []);
 });
@@ -27,54 +27,54 @@ test("passes: a check test:e2e runs, one with its Harness reason, one with no --
     "no-harness": check({ harness: false }),
     "sign-only": check({ after: "// After: sign" }),
   };
-  assert.deepEqual(harnessProblems(checks, E2E("run-one")), []);
+  assert.deepEqual(harnessProblems(checks, E2E("run-one"), NONE), []);
 });
 
 test("passes: a test:e2e run with more arguments after --harness counts", () => {
   const e2e = "vite build && node ../../scripts/live-checks/app-in-shell.mjs --harness --engines chromium";
   assert.deepEqual(e2eHarnessRuns(e2e), ["app-in-shell"]);
-  assert.deepEqual(harnessProblems({ "app-in-shell": check() }, e2e), []);
+  assert.deepEqual(harnessProblems({ "app-in-shell": check() }, e2e, NONE), []);
 });
 
 test("planted: an app check with a --harness mode left out of test:e2e, with no Harness line, is refused", () => {
-  const p = harnessProblems({ "left-out": check(), "run-one": check() }, E2E("run-one"));
+  const p = harnessProblems({ "left-out": check(), "run-one": check() }, E2E("run-one"), NONE);
   assert.equal(p.length, 1);
   assert.match(p[0], /left-out\.mjs runs after the app's deploy and can run on a local build, but test:e2e does not run it: add "node \.\.\/\.\.\/scripts\/live-checks\/left-out\.mjs --harness"/);
 });
 
 test("planted: a check after app among other hosts, left out, is refused too", () => {
-  assert.equal(harnessProblems({ both: check({ after: "// After: app sign" }) }, E2E()).length, 1);
+  assert.equal(harnessProblems({ both: check({ after: "// After: app sign" }) }, E2E(), NONE).length, 1);
 });
 
 test("planted: a run without --harness, or a wrapper test, does not count as the check's own harness run", () => {
   const e2e = "vite build && node ../../scripts/live-checks/left-out.mjs --engine chromium && node test/left-out/run.mjs";
   assert.deepEqual(e2eHarnessRuns(e2e), []);
-  assert.equal(harnessProblems({ "left-out": check() }, e2e).length, 1);
+  assert.equal(harnessProblems({ "left-out": check() }, e2e, NONE).length, 1);
 });
 
 test("planted: a Harness line on a check test:e2e runs, two Harness lines, a Harness line with no reason or another word", () => {
-  assert.match(harnessProblems({ a: check({ lines: [REASON] }) }, E2E("a"))[0], /runs in test:e2e and says Harness/);
-  assert.match(harnessProblems({ a: check({ lines: [REASON, REASON] }) }, E2E())[0], /has 2 Harness lines/);
-  assert.match(harnessProblems({ a: check({ lines: ["// Harness: not in e2e, slow"] }) }, E2E())[0], /gives no reason/);
-  assert.match(harnessProblems({ a: check({ lines: ["// Harness: later"] }) }, E2E())[0], /a Harness line is "not in e2e, <why>"/);
+  assert.match(harnessProblems({ a: check({ lines: [REASON] }) }, E2E("a"), NONE)[0], /runs in test:e2e and says Harness/);
+  assert.match(harnessProblems({ a: check({ lines: [REASON, REASON] }) }, E2E(), NONE)[0], /has 2 Harness lines/);
+  assert.match(harnessProblems({ a: check({ lines: ["// Harness: not in e2e, slow"] }) }, E2E(), NONE)[0], /gives no reason/);
+  assert.match(harnessProblems({ a: check({ lines: ["// Harness: later"] }) }, E2E(), NONE)[0], /a Harness line is "not in e2e, <why>"/);
 });
 
 test("planted: a Harness line on a check with no --harness mode or in no app list is refused", () => {
-  assert.match(harnessProblems({ a: check({ harness: false, lines: [REASON] }) }, E2E())[0], /reads neither --harness nor --build/);
-  assert.match(harnessProblems({ a: check({ after: "// After: helper", lines: [REASON] }) }, E2E())[0], /is in no app list/);
+  assert.match(harnessProblems({ a: check({ harness: false, lines: [REASON] }) }, E2E(), NONE)[0], /reads neither --harness nor --build/);
+  assert.match(harnessProblems({ a: check({ after: "// After: helper", lines: [REASON] }) }, E2E(), NONE)[0], /is in no app list/);
 });
 
 test("planted: a Harness line below the header block does not count", () => {
   const text = `${check()}// Harness: not in e2e, its harness reads the release's real RPCs\n`;
-  assert.equal(harnessProblems({ a: text }, E2E()).length, 1);
+  assert.equal(harnessProblems({ a: text }, E2E(), NONE).length, 1);
 });
 
 test("planted: test:e2e runs a check file that does not exist", () => {
-  assert.match(harnessProblems({}, E2E("gone"))[0], /runs scripts\/live-checks\/gone\.mjs, which is no file/);
+  assert.match(harnessProblems({}, E2E("gone"), NONE)[0], /runs scripts\/live-checks\/gone\.mjs, which is no file/);
 });
 
 test("planted: an app check that takes --build (no --harness mode) left out of test:e2e is refused, named with --build dist", () => {
-  const p = harnessProblems({ rail: check({ harness: false, build: true }) }, E2E());
+  const p = harnessProblems({ rail: check({ harness: false, build: true }) }, E2E(), NONE);
   assert.equal(p.length, 1);
   assert.match(p[0], /rail\.mjs runs after the app's deploy and can run on a local build, but test:e2e does not run it: add "node \.\.\/\.\.\/scripts\/live-checks\/rail\.mjs --build dist"/);
 });
@@ -83,16 +83,38 @@ test("passes: a --build check test:e2e runs with --build dist, or with its own a
   const checks = { rail: check({ harness: false, build: true }), words: check({ harness: false, build: true }) };
   const e2e = "vite build && node ../../scripts/live-checks/rail.mjs --build dist && node ../../scripts/live-checks/words.mjs --local --host app --build dist";
   assert.deepEqual(e2eHarnessRuns(e2e), ["rail", "words"]);
-  assert.deepEqual(harnessProblems(checks, e2e), []);
+  assert.deepEqual(harnessProblems(checks, e2e, NONE), []);
 });
 
 test("planted: a --build check run without --build (the deployed host, not the build) does not count", () => {
   const e2e = "vite build && node ../../scripts/live-checks/rail.mjs --shots /tmp/x";
   assert.deepEqual(e2eHarnessRuns(e2e), []);
-  assert.equal(harnessProblems({ rail: check({ harness: false, build: true }) }, e2e).length, 1);
+  assert.equal(harnessProblems({ rail: check({ harness: false, build: true }) }, e2e, NONE).length, 1);
 });
 
-test("the tree runs rail-open-pushes-the-middle and app-legend-holds-still on the build, the --build checks red only on release 178's live run", () => {
+test("the tree runs rail-open-pushes-the-middle and app-legend-holds-still on the build or holds them PENDING on their card, the --build checks red only on release 178's live run", () => {
   const runs = e2eHarnessRuns(readTree().e2e);
-  for (const k of ["rail-open-pushes-the-middle", "app-legend-holds-still"]) assert.ok(runs.includes(k), k);
+  for (const k of ["rail-open-pushes-the-middle", "app-legend-holds-still", "app-shell"]) assert.ok(runs.includes(k) !== Object.hasOwn(PENDING, k), k);
+});
+
+// the planted cases below pass their own pending map; the tree's is PENDING
+const NONE = {};
+test("passes: a check PENDING on its card and left out of test:e2e", () => {
+  assert.deepEqual(harnessProblems({ red: check(), "run-one": check() }, E2E("run-one"), { red: "fix-the-red" }), []);
+});
+
+test("planted: a PENDING entry with no card key, or a word that is no card key", () => {
+  assert.match(harnessProblems({ red: check() }, E2E(), { red: "" }).join("\n"), /PENDING red names no card key/);
+  assert.match(harnessProblems({ red: check() }, E2E(), { red: "fix" }).join("\n"), /PENDING red names no card key/);
+});
+
+test("planted: a check neither run nor PENDING fails, and a PENDING check that test:e2e also runs fails", () => {
+  assert.match(harnessProblems({ red: check() }, E2E(), NONE)[0], /red\.mjs runs after the app's deploy and can run on a local build, but test:e2e does not run it/);
+  assert.match(harnessProblems({ red: check() }, E2E("red"), { red: "fix-the-red" })[0], /red\.mjs runs in test:e2e and is PENDING on fix-the-red: the card that adds the run removes its PENDING entry/);
+});
+
+test("planted: a PENDING entry for no file, or for a check that runs on no local build, or with a Harness line too", () => {
+  assert.match(harnessProblems({}, E2E(), { gone: "fix-the-red" })[0], /PENDING names gone, which is no file/);
+  assert.match(harnessProblems({ a: check({ harness: false }) }, E2E(), { a: "fix-the-red" })[0], /PENDING names a, which is no app check that runs on a local build/);
+  assert.match(harnessProblems({ a: check({ lines: [REASON] }) }, E2E(), { a: "fix-the-red" })[0], /is PENDING on fix-the-red and says Harness/);
 });

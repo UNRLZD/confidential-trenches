@@ -110,9 +110,9 @@ export const E2E_SECONDS = {
   "apps/terminal: node ../../scripts/live-checks/trade-box-pool.mjs --harness": 11, // box 11
   "apps/terminal: node ../../scripts/live-checks/verify-pools.mjs --harness": 6, // box 6
   "apps/terminal: node ../../scripts/live-checks/verify-row-survives-one-provider.mjs --harness": 9, // box 9
-  // the same card's app-shell (box 105, its red run on main) and the app checks that take --build, timed in the Mac
-  // queue (job app-build-18, 19 Nov 00:55Z; the box was reserved), whole seconds, 1 s at the least
-  "apps/terminal: node ../../scripts/live-checks/app-shell.mjs --harness": 105, // box 105
+  // the same card's app checks that take --build, timed in the Mac queue (job app-build-18, 19 Nov 00:55Z; the box was
+  // reserved), whole seconds, 1 s at the least; app-shell (box 105), app-legend-holds-still (mac 70) and
+  // rail-open-pushes-the-middle (mac 16) join with the cards their PENDING entries name (scripts/ci/app-harness-in-e2e.mjs)
   "apps/terminal: node ../../scripts/live-checks/app-chains-evm-rail.mjs --build dist": 9, // mac 9
   "apps/terminal: node ../../scripts/live-checks/app-chains-evm.mjs --build dist": 27, // mac 27
   "apps/terminal: node ../../scripts/live-checks/app-chart-fills-in-its-history.mjs --build dist": 58, // mac 58
@@ -121,7 +121,6 @@ export const E2E_SECONDS = {
   "apps/terminal: node ../../scripts/live-checks/app-discover-rows-hold.mjs --build dist": 85, // mac 85
   "apps/terminal: node ../../scripts/live-checks/app-discover-toolbar.mjs --build dist": 21, // mac 21
   "apps/terminal: node ../../scripts/live-checks/app-launchpad-badges.mjs --build dist": 9, // mac 9
-  "apps/terminal: node ../../scripts/live-checks/app-legend-holds-still.mjs --build dist": 70, // mac 70 (red, card rail-and-legend-hold-on-r5)
   "apps/terminal: node ../../scripts/live-checks/app-near-trading.mjs --build dist": 6, // mac 6
   "apps/terminal: node ../../scripts/live-checks/app-no-test-token.mjs --build dist": 8, // mac 8
   "apps/terminal: node ../../scripts/live-checks/app-token-chart.mjs --build dist": 9, // mac 9
@@ -129,7 +128,6 @@ export const E2E_SECONDS = {
   "apps/terminal: node ../../scripts/live-checks/app-token-route.mjs --build dist": 21, // mac 21
   "apps/terminal: node ../../scripts/live-checks/app-trade-box-mount.mjs --build dist": 6, // mac 6
   "apps/terminal: node ../../scripts/live-checks/discover-matches-the-main-app.mjs --build dist": 13, // mac 13
-  "apps/terminal: node ../../scripts/live-checks/rail-open-pushes-the-middle.mjs --build dist": 16, // mac 16 (red, card rail-and-legend-hold-on-r5)
   "apps/terminal: node ../../scripts/live-checks/words-nov8-final.mjs --local --host app --build dist": 1, // mac 0
   "apps/terminal: node test/withdraw/run.mjs": 14, // B2 14.0
   "apps/terminal: node test/withdraw-form/run.mjs": 5, // C3 4.7

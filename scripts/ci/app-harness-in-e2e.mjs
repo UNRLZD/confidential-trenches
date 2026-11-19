@@ -10,8 +10,11 @@
 //     --build, on the build test:e2e makes first (apps/terminal/dist: --harness reads it by default, or `--build dist`); or
 //   - not run there, with one line in its leading comment block that says why, the one place that reason is written:
 //       // Harness: not in e2e, <why, at least 20 characters>
-// A check with both, a Harness line on a check with neither mode or in no app list, and a test:e2e run of a check file
-// that does not exist are refused too, so neither place goes stale.
+//   - or PENDING below: red on the build today, left out of test:e2e, named to the card that fixes it; that card adds
+//     the run and removes its entry in the same change.
+// A check with two of these, a Harness line or a PENDING entry on a check with neither mode or in no app list, a
+// PENDING entry with no card key, and a test:e2e run of a check file that does not exist are refused too, so no place
+// goes stale.
 //   node scripts/ci/app-harness-in-e2e.mjs      PASS exit 0; the problems and exit 1
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
@@ -24,6 +27,15 @@ const HARNESS_ARG = /\bincludes\(\s*["']--harness["']\s*\)/; // how every check 
 const BUILD_OPT = /\bopt\(\s*["']--build["']/; // how every check reads its --build <dir> option
 const E2E_RUN = /^node \.\.\/\.\.\/scripts\/live-checks\/([a-z0-9-]+)\.mjs((?: \S+)*)$/;
 const LOCAL_ARG = /(?:^| )--(?:harness|build)(?: |$)/;
+const CARD = /^[a-z0-9]+(?:-[a-z0-9]+)+$/; // a card key, as the board names one: two words at least
+
+/** The app checks red on the build today, each to the card that fixes it (read on cebdf077e's build, 19 Nov). */
+export const PENDING = Object.freeze({
+  // the account chip grows when a signed-in load has no sign-in hint (hint.ts firstShape), CLS 0.0021 / 0.0016
+  "app-shell": "app-first-paint-knows-sign-in",
+  "app-legend-holds-still": "rail-and-legend-hold-on-r5",
+  "rail-open-pushes-the-middle": "rail-and-legend-hold-on-r5",
+});
 
 /** Whether a check's code reads a --harness argument. */
 export const hasHarness = (text) => HARNESS_ARG.test(text);
@@ -53,10 +65,16 @@ export function harnessLineProblem(value) {
  * The problems of a set of checks ({ key: text }) against test:e2e's text. [] when every check in the app's list that
  * can run on a local build is run by test:e2e or says why not in its header, and none does both.
  */
-export function harnessProblems(checks, e2e) {
+export function harnessProblems(checks, e2e, pending = PENDING) {
   const p = [];
   const runs = new Set(e2eHarnessRuns(e2e));
   for (const key of runs) if (!(key in checks)) p.push(`test:e2e runs ${DIR}/${key}.mjs, which is no file`);
+  for (const [key, card] of Object.entries(pending)) {
+    if (!CARD.test(card ?? "")) p.push(`PENDING ${key} names no card key (lowercase words joined by hyphens): ${card}`);
+    const text = checks[key];
+    if (text === undefined) p.push(`PENDING names ${key}, which is no file in ${DIR}`);
+    else if (!("app" in afterOf(text).runs) || !runsLocal(text)) p.push(`PENDING names ${key}, which is no app check that runs on a local build: drop the entry`);
+  }
   for (const [key, text] of Object.entries(checks).sort(([a], [b]) => a.localeCompare(b))) {
     const file = `${DIR}/${key}.mjs`;
     const app = "app" in afterOf(text).runs;
@@ -70,7 +88,11 @@ export function harnessProblems(checks, e2e) {
     if (lines.length && !(app && local)) p.push(`${file} has a Harness line but ${app ? "reads neither --harness nor --build" : "is in no app list (no After: app line)"}: drop the line`);
     if (!app || !local) continue;
     const ran = runs.has(key);
+    const held = Object.hasOwn(pending, key);
     if (ran && lines.length) p.push(`${file} runs in test:e2e and says Harness: ${lines[0]}: drop one of the two`);
+    if (held && ran) p.push(`${file} runs in test:e2e and is PENDING on ${pending[key]}: the card that adds the run removes its PENDING entry`);
+    if (held && lines.length) p.push(`${file} is PENDING on ${pending[key]} and says Harness: ${lines[0]}: drop one of the two`);
+    if (held) continue;
     const run = hasHarness(text) ? "--harness" : "--build dist";
     if (!ran && !lines.length) p.push(`${file} runs after the app's deploy and can run on a local build, but test:e2e does not run it: add "node ../../${file} ${run}" to ${TERMINAL_PACKAGE}'s test:e2e (and its seconds to scripts/ci/test-shards.mjs E2E_SECONDS), or write "// Harness: not in e2e, <why>" in its header`);
   }
@@ -87,6 +109,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const p = harnessProblems(checks, e2e);
   for (const l of p) console.log(`BAD ${l}`);
   const app = Object.values(checks).filter((t) => "app" in afterOf(t).runs && runsLocal(t)).length;
-  console.log(p.length ? `app-harness-in-e2e: FAIL (${p.length})` : `app-harness-in-e2e: PASS (${app} app checks that run on a local build, ${new Set(e2eHarnessRuns(e2e)).size} run by test:e2e)`);
+  console.log(p.length ? `app-harness-in-e2e: FAIL (${p.length})` : `app-harness-in-e2e: PASS (${app} app checks that run on a local build, ${new Set(e2eHarnessRuns(e2e)).size} run by test:e2e, ${Object.keys(PENDING).length} pending: ${Object.entries(PENDING).map(([k, c]) => `${k} on ${c}`).join(", ")})`);
   process.exit(p.length ? 1 : 0);
 }
