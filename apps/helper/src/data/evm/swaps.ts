@@ -86,6 +86,7 @@ import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
 import { openIndexStore } from "./index-store.ts";
 import { exactRow, receiptFacts, vendorUnits, type Facts } from "./vendor-rows.ts";
+import { LIQ_MIN_USD } from "../near/lists.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -129,9 +130,11 @@ export const BASE_VENUES = {
   weth: "0x4200000000000000000000000000000000000006",
 } as const;
 const ZERO = "0x0000000000000000000000000000000000000000";
-/** Selectors: token0(), token1(), factory(), decimals(), the PositionManager's poolKeys(bytes25), and the Pons v2
- *  factory's getLaunchedToken(address). */
-const SEL = { token0: "0x0dfe1681", token1: "0xd21220a7", factory: "0xc45a0155", decimals: "0x313ce567", poolKeys: "0x86b6be7d", launched: "0x3cf28b5a" } as const;
+/** Selectors: token0(), token1(), factory(), decimals(), the PositionManager's poolKeys(bytes25), the Pons v2
+ *  factory's getLaunchedToken(address), and a Zora coin's getPoolKey() (its v4 pool's key, five words: read 19 Nov
+ *  13:5xZ on base-rpc.publicnode.com, USEF 0x1668cd48... answered ZORA, USEF, fee 0x800000, spacing 200, hook
+ *  0x0469a4bd..., whose keccak-256 is its pool 0x2a922012...). */
+const SEL = { token0: "0x0dfe1681", token1: "0xd21220a7", factory: "0xc45a0155", decimals: "0x313ce567", poolKeys: "0x86b6be7d", launched: "0x3cf28b5a", poolKey: "0x683e76e0" } as const;
 /** A pool's getPool parameter (Venues.getPool), and each factory kind's getPool(address,address,<it>) (keccak-256 of the
  *  signatures, checked in swaps-confirm.test.ts); Uniswap v2's getPair(address,address) takes no third (swaps-univ2.test.ts). */
 const PARAM_SEL = { fee: "0xddca3f43", tickSpacing: "0xd0c93a7c", stable: "0x22be3de1" } as const;
@@ -1148,7 +1151,7 @@ export function poolStateCalls(pool: Pick<Pool, "venue" | "id" | "log">, chain: 
 /** The ETH price pool's Slot0 call (poolStateCalls of the chain's reference v4 pool) and its answer as USD per ETH
  *  times 10^18 (decodeRef's rule), null when it is not one. */
 const refStateCall = (chain: EvmChain) => poolStateCalls({ venue: "v4", id: VENUES[chain].refPoolId }, chain)![0]!;
-const refStateUsd = (a: string | undefined): bigint | null => (a !== undefined && WORD.test(a) ? ethUsdOf(BigInt(a) & MASK_160) : null);
+export const refStateUsd = (a: string | undefined): bigint | null => (a !== undefined && WORD.test(a) ? ethUsdOf(BigInt(a) & MASK_160) : null);
 
 /**
  * poolStateCalls' answers as two legs, token and quote in their smallest units, whose ratio is the pool's price: a
@@ -1172,6 +1175,81 @@ export function poolStateLegs(pool: Pick<Pool, "venue" | "tokenIs0" | "log">, an
   }
   if (sqrt === null || sqrt === 0n) return null;
   return pool.tokenIs0 ? { amt: TWO_192, quote: sqrt * sqrt } : { amt: sqrt * sqrt, quote: TWO_192 };
+}
+
+/** v4-core StateLibrary.LIQUIDITY_OFFSET: a pool's in-range liquidity is the fourth word of its Pool.State
+ *  (v4-core main src/libraries/StateLibrary.sol:19 LIQUIDITY_OFFSET = 3, read by getLiquidity at :183-188, 19 Nov). */
+const LIQUIDITY_OFFSET = 3n;
+const MASK_128 = (1n << 128n) - 1n;
+/** balanceOf(address) (keccak-256 of the signature). */
+const BALANCE_OF = "0x70a08231";
+
+/**
+ * The calls whose answers at one block are how much of its quote a pool holds (card evm-quote-token-priced-from-our-
+ * reads): a v2 or v3 pool's balance of its quote token (USD token or WETH), the reserve it trades from; a v4 pool's
+ * Slot0 and in-range liquidity (the PoolManager holds every pool's tokens together), its quote side the virtual reserve
+ * of that liquidity at its price. Null for a Pons curve.
+ */
+export function quoteSideCalls(pool: Pick<Pool, "venue" | "id" | "quote">, chain: EvmChain = "base"): { to: string; data: string }[] | null {
+  const V = VENUES[chain];
+  if (pool.venue === "v4") {
+    const slot = BigInt(v4StateSlot(pool.id));
+    return [slot, slot + LIQUIDITY_OFFSET].map((s) => ({ to: V.poolManager, data: `${STATE_SEL.extsload}${s.toString(16).padStart(64, "0")}` }));
+  }
+  if (pool.venue === "curve") return null;
+  return [{ to: pool.quote.kind === "usd" ? V.usd : V.weth, data: `${BALANCE_OF}${pool.id.slice(2).padStart(64, "0")}` }];
+}
+
+/** quoteSideCalls' answers as the quote side's USD times 10^18, an ETH quote at `ethUsd` (USD per ETH times 10^18);
+ *  null when an answer is not of its shape or the ETH price is not known. A v4 pool's virtual reserve of liquidity L at
+ *  sqrtPriceX96 P: L * P / 2^96 of currency1, L * 2^96 / P of currency0 (v4-core SqrtPriceMath, at the price's tick). */
+export function quoteSideUsd(pool: Pick<Pool, "venue" | "tokenIs0" | "quote">, answers: readonly (string | undefined)[], ethUsd: bigint | null): bigint | null {
+  let raw: bigint;
+  if (pool.venue === "v4") {
+    const [s, l] = answers;
+    if (s === undefined || l === undefined || !WORD.test(s) || !WORD.test(l)) return null;
+    const sqrt = BigInt(s) & MASK_160;
+    if (sqrt === 0n) return null;
+    const liq = BigInt(l) & MASK_128;
+    raw = pool.tokenIs0 ? (liq * sqrt) >> 96n : (liq << 96n) / sqrt;
+  } else {
+    const a = answers[0];
+    if (a === undefined || !WORD.test(a)) return null;
+    raw = BigInt(a);
+  }
+  if (pool.quote.kind === "usd") return raw * 10n ** BigInt(18 - pool.quote.decimals);
+  return ethUsd === null ? null : (raw * ethUsd) / 10n ** 18n;
+}
+
+/** The pools a token pools answer (GeckoTerminal's, or CoinGecko's on-chain one; hostile) names of `token` against one
+ *  of `quotes` (null: any other token), in its order: each pool's address or v4 id, lower case. The vendor's word only names candidates: each is
+ *  confirmed on chain before it prices (createSwaps pickQuotePool). */
+export function quoteCands(json: unknown, token: string, quotes: readonly string[] | null): string[] {
+  const data = (json as { data?: unknown } | null)?.data;
+  if (!Array.isArray(data)) return [];
+  const addr = (x: unknown): string | null => {
+    const s = typeof x === "string" ? x.toLowerCase().split("_").at(-1)! : "";
+    return /^0x[0-9a-f]{40}$/.test(s) ? s : null;
+  };
+  const out: string[] = [];
+  for (const p of data.slice(0, 100)) {
+    const o = (typeof p === "object" && p !== null ? p : {}) as { attributes?: { address?: unknown }; relationships?: { base_token?: { data?: { id?: unknown } }; quote_token?: { data?: { id?: unknown } } } };
+    const id = typeof o.attributes?.address === "string" ? o.attributes.address.toLowerCase() : "";
+    if (!/^0x[0-9a-f]{40}([0-9a-f]{24})?$/.test(id)) continue;
+    const [b, qt] = [addr(o.relationships?.base_token?.data?.id), addr(o.relationships?.quote_token?.data?.id)];
+    const other = b === token ? qt : qt === token ? b : null;
+    if (other !== null && other !== token && (quotes === null || quotes.includes(other)) && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+/** `raw` of a pool's token (a trade's quote token, priced through the token's own pool) in USD times 10^18 at that
+ *  pool's price `legs` (poolStateLegs: the token's amount against its quote's), an ETH quote at `ethUsd`; null when a leg
+ *  is 0 or the ETH price is not known. */
+export function usdThrough(pool: Pick<Pool, "quote">, legs: { amt: bigint; quote: bigint }, raw: bigint, ethUsd: bigint | null): bigint | null {
+  if (legs.amt <= 0n || legs.quote <= 0n || raw < 0n) return null;
+  if (pool.quote.kind === "usd") return (raw * legs.quote * 10n ** BigInt(18 - pool.quote.decimals)) / legs.amt;
+  return ethUsd === null ? null : (raw * legs.quote * ethUsd) / legs.amt / 10n ** 18n;
 }
 
 /** A book none of whose prices (every bar's high and low it holds) comes within this many times of its list row's
@@ -1818,8 +1896,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** `missed`, when given, is set once a call is not agreed: undefined is both a revert (an answer: the contract has no
    *  such function) and a call no two providers answered alike (no answer), and a discovery must tell them apart (card
    *  helper-restart-fresh: a read that fails is never kept as "no pool"). */
-  async function callsAgreed(n: number, calls: { to: string; data: string }[], missed?: { any: boolean }): Promise<(string | undefined)[]> {
-    const key = (c: { to: string; data: string }) => `${c.to.toLowerCase()} ${c.data.toLowerCase()} ${n}`;
+  /** `n`: the block every call is read at, but a call's own `n` (card evm-quote-token-priced-from-our-reads: a quote
+   *  token's pool read at each row's block, one post). */
+  async function callsAgreed(n: number, calls: { to: string; data: string; n?: number }[], missed?: { any: boolean }): Promise<(string | undefined)[]> {
+    const key = (c: { to: string; data: string; n?: number }) => `${c.to.toLowerCase()} ${c.data.toLowerCase()} ${c.n ?? n}`;
     const out: (string | undefined)[] = calls.map((c) => called.get(key(c)));
     const ask = [...new Set(calls.filter((_, i) => out[i] === undefined).map(key))].map((k) => calls.find((c) => key(c) === k)!);
     if (ask.length === 0) return out;
@@ -1827,7 +1907,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       rpcs,
       ask.length,
       async (u, idx, patient) => {
-        const r = await batchTo(u, idx.map((i) => ({ method: "eth_call", params: [ask[i], `0x${n.toString(16)}`] })), patient);
+        const r = await batchTo(u, idx.map((i) => ({ method: "eth_call", params: [{ to: ask[i]!.to, data: ask[i]!.data }, `0x${(ask[i]!.n ?? n).toString(16)}`] })), patient);
         // a revert is the call's answer, alike between providers, so a call that reverts is agreed by two as a result is,
         // never asked of every provider and again patiently (fold 9: a discovery's factory() of six transfer addresses,
         // routers among them, took 9.1 to 13.9 s of 12 cold tapes at once, 06:25Z)
@@ -3370,7 +3450,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const whole = waiting || oldest === undefined || age > BEHIND_MAX[chain].ms || (layouts.get(token)?.gaps.length ?? 0) > 0 ? {} : { whole_ms: oldest.t_ms + 1_000 };
     // rows of ours priced at the vendor's rate for their quote name that rate's age (card helper-vendor-tapes-refresh-inside-15s)
     const priced = rows.map((r) => rated.get(`${token} ${r.tx}`)).filter((x): x is number => x !== undefined);
-    const timing = `evm-vendor-read;desc="rows read ${age} ms ago"${priced.length > 0 ? `, evm-vendor-price;desc="usd read ${Math.max(0, now() - Math.min(...priced))} ms ago"` : ""}`;
+    // and rows priced through their quote token's own pool at their block say how many (card evm-quote-token-priced-from-our-reads)
+    const through = rows.filter((r) => thirdPriced.has(`${token} ${r.tx}`)).length;
+    const timing = `evm-vendor-read;desc="rows read ${age} ms ago"${priced.length > 0 ? `, evm-vendor-price;desc="usd read ${Math.max(0, now() - Math.min(...priced))} ms ago"` : ""}${through > 0 ? `, evm-quote-usd;desc="${through} rows priced from chain at their block"` : ""}`;
     return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at, timing };
   }
   /** The refresh behind a held vendor tape's rows: the helper's background read, one per coin however many callers. */
@@ -3452,7 +3534,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     // none placed yet: a coin whose top pool moved keeps its last pool followed until the new one's rows place it
     if (found === null || !Number.isFinite(found.rate) || found.rate <= 0) return had ?? null;
-    const l: Layout = { token, pool: p, v4, ...(found.coinLeg === undefined ? {} : { coinLeg: found.coinLeg }), ...(found.quote === undefined ? {} : { quote: found.quote }), rate: !v4 && exactQuote(found.quote) ? null : { usd: found.rate, at: va }, next: had?.pool === p ? had.next : null, asked: had?.asked ?? now(), from: va, gaps: had?.pool === p ? had.gaps : [] };
+    // a v4 pool's quote is read from its key (v4Quotes), kept while the pool and the coin's leg of it are
+    const quote = found.quote ?? (v4 && had?.pool === p && had.coinLeg === found.coinLeg ? had.quote : undefined);
+    const l: Layout = { token, pool: p, v4, ...(found.coinLeg === undefined ? {} : { coinLeg: found.coinLeg }), ...(quote === undefined ? {} : { quote }), rate: !v4 && exactQuote(found.quote) ? null : { usd: found.rate, at: va }, next: had?.pool === p ? had.next : null, asked: had?.asked ?? now(), from: va, gaps: had?.pool === p ? had.gaps : [] };
     if (!layouts.has(token) && layouts.size >= POOLS_MAX) layouts.delete(layouts.keys().next().value!);
     layouts.set(token, l);
     return l;
@@ -3515,8 +3599,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     if (back != null) logs.push(...back);
     const trades = poolTrades(logs, held, V.poolManager);
-    // WETH-quoted pairs are priced at the ETH price the chain tape reads to the same head
-    const eth = held.some((l) => !l.v4 && l.quote === V.weth) && trades.some((t) => layouts.get(t.token)?.quote === V.weth) ? await readRef(head.with, head.n, Math.min(from, ...trades.map((t) => t.block))) : true;
+    // a v4 pool's quote from its key, read once a pool; a third token's USD from its own pool at each trade's block
+    await v4Quotes(held.filter((l) => l.v4 && l.quote === undefined && trades.some((t) => t.token === l.token)), head.n);
+    const px = await thirdPrices(held, trades);
+    // WETH-quoted pools, and third tokens priced through an ETH pool, are priced at the ETH price the chain tape reads to
+    // the same head
+    const ethQuoted = (l: Layout | undefined) => l !== undefined && (l.quote === V.weth || (l.v4 && l.quote === ZERO) || px.eth.has(l.quote ?? ""));
+    const eth = trades.some((t) => ethQuoted(layouts.get(t.token))) ? await readRef(head.with, head.n, Math.min(from, ...trades.map((t) => t.block))) : true;
     for (const [i, l] of held.entries()) {
       const gaps = plan[i]!.gaps;
       const h = gtTapes.get(l.token);
@@ -3525,15 +3614,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const have = new Set(h.rows.map((r) => r.tx));
       const mine = trades.filter((t) => t.token === l.token && !have.has(t.tx));
       const rows: TapeRow[] = [];
+      const byRate = new Set<string>();
+      const through = new Set<string>();
       let placed = true;
       for (const t of mine) {
-        const usd = usdOf(l, t, eth);
+        const usd = usdOf(l, t, eth, px.at);
         if (usd === null) {
           placed = false;
           break;
         }
+        if (usd.how === "rate") byRate.add(t.tx);
+        if (usd.how === "through") through.add(t.tx);
         const tMs = blockSecondMs(chain, t.block) ?? (t.t !== null ? t.t * 1_000 : (head.t * 1_000 - (head.n - t.block) * bms));
-        rows.push({ t_ms: tMs, side: t.side, usd, amt: fixed(t.coin, d), trader: null, tx: t.tx });
+        rows.push({ t_ms: tMs, side: t.side, usd: usd.usd, amt: fixed(t.coin, d), trader: null, tx: t.tx });
       }
       if (!placed) {
         done.set(l.token, false);
@@ -3545,8 +3638,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (fresh.length > 0) await exacting(l.token, fresh.map((r) => r.tx));
       for (const r of fresh) {
         ours.add(`${l.token} ${r.tx}`);
-        if (l.rate !== null) rated.set(`${l.token} ${r.tx}`, l.rate.at);
+        if (byRate.has(r.tx) && l.rate !== null) rated.set(`${l.token} ${r.tx}`, l.rate.at);
+        if (through.has(r.tx)) thirdPriced.add(`${l.token} ${r.tx}`);
       }
+      while (thirdPriced.size > TRADERS_MAX) thirdPriced.delete(thirdPriced.values().next().value!);
       while (ours.size > TRADERS_MAX) ours.delete(ours.values().next().value!);
       while (rated.size > TRADERS_MAX) rated.delete(rated.keys().next().value!);
       const merged = [...fresh, ...h.rows].sort((a, b) => b.t_ms - a.t_ms).slice(0, TAPE_MAX);
@@ -3558,17 +3653,217 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     return done;
   }
-  /** A trade's USD as decimal text: the chain's USD token's amount, WETH's at the ETH price before its block, any other
-   *  quote at the layout's rate; null when none is known. */
-  function usdOf(l: Layout, t: PoolTrade, eth: boolean): string | null {
-    if (!l.v4 && l.quote === V.usd) return fixed(t.quote, 6);
-    if (!l.v4 && l.quote === V.weth) {
-      const ref = eth ? [...refEvents].reverse().find((r) => r.block <= t.block) : undefined;
-      return ref === undefined ? null : fixed((t.quote * ref.ethUsd) / 10n ** 18n, 18);
+  /** A trade's USD as decimal text and how it was priced: the chain's USD token's amount, WETH's or native ETH's at the
+   *  ETH price before its block ("exact"); any other quote through that token's own pool at the trade's block
+   *  ("through", thirdPrices' `at`); else at the layout's vendor rate ("rate"); null when none is known. */
+  function usdOf(l: Layout, t: PoolTrade, eth: boolean, at: ThirdAt): { usd: string; how: "exact" | "through" | "rate" } | null {
+    const refAt = (n: number) => (eth ? [...refEvents].reverse().find((r) => r.block <= n) : undefined);
+    if (l.quote === V.usd) return { usd: fixed(t.quote, 6), how: "exact" };
+    if (l.quote === V.weth || (l.v4 && l.quote === ZERO)) {
+      const ref = refAt(t.block);
+      return ref === undefined ? null : { usd: fixed((t.quote * ref.ethUsd) / 10n ** 18n, 18), how: "exact" };
+    }
+    const p = l.quote === undefined ? undefined : at.get(`${l.quote} ${t.block}`);
+    if (p !== undefined) {
+      // through the hop first (the quote token's amount as the next token's at the hop's price), then the last pool
+      const raw = p.hop === null ? t.quote : p.hop.legs.amt > 0n ? (t.quote * p.hop.legs.quote) / p.hop.legs.amt : null;
+      const usd = raw === null ? null : usdThrough(p.end, p.legs, raw, p.end.quote.kind === "eth" ? (refAt(t.block)?.ethUsd ?? null) : null);
+      if (usd !== null) return { usd: fixed(usd, 18), how: "through" };
     }
     if (l.rate === null) return null;
     const usd = Number(t.quote) * l.rate.usd;
-    return Number.isFinite(usd) && usd >= 0 ? usd.toFixed(6).replace(/\.?0+$/, "") || "0" : null;
+    return Number.isFinite(usd) && usd >= 0 ? { usd: usd.toFixed(6).replace(/\.?0+$/, "") || "0", how: "rate" } : null;
+  }
+  // ---------------------------------------------------------------------------------------------------------------
+  // card evm-quote-token-priced-from-our-reads: a held pool quoted in a third token (USEF/ZORA on Base's v4, fBOMB/r33
+  // on Robinhood's Ramses Legacy) prices its rows through that token's own pool, read at each row's block on two
+  // agreeing providers, never at the vendor's last rate (two pools deep at most: pickRoute). The pool is the deepest of
+  // the token's pools against the
+  // chain's USD token or WETH that the vendor names (each confirmed on chain as the chain tape's pools are, fromHint: its
+  // factory names it, or its key hashes to its id) or our own discovery finds (findPool, no vendor call, so a pick is
+  // made while the vendor refuses), its depth its quote side as it holds it (quoteSideUsd), one under
+  // LIQ_MIN_USD never pricing (a pool of a few dollars can be pushed to any price: ../near/lists.ts); picked once a
+  // token and held GT_POOL_FRESH_MS, as a pool name is. A token with no such pool keeps the vendor's rate, its age named.
+  // ---------------------------------------------------------------------------------------------------------------
+  /** A third quote token's route: `end`, a pool of a token against the chain's USD token or WETH (the quote token's
+   *  own, or, `hop` set, the token the hop pairs it with). */
+  type HopPool = Pick<Pool, "venue" | "id" | "tokenIs0" | "log">;
+  type Route = { end: Pool; hop: HopPool | null };
+  /** Each third quote token's route state at a block, by "token block": the last pool's legs, the hop's. */
+  type ThirdAt = Map<string, { end: Pool; legs: { amt: bigint; quote: bigint }; hop: { legs: { amt: bigint; quote: bigint } } | null }>;
+  /** Rows of ours priced through their quote token's own pool, by "token tx": their answer names them (evm-quote-usd). */
+  const thirdPriced = new Set<string>();
+  const quotePools = new Map<string, { route: Route | null; at: number }>();
+  const quotePicking = new Map<string, Promise<Route | null>>();
+  /** v4 pools whose key was asked and none hashed to the id, by id, with when: asked again once GT_POOL_FRESH_MS old. */
+  const keyless = new Map<string, number>();
+  /** Each v4 layout's quote currency from its pool's key: the PositionManager's record or the coin's own getPoolKey()
+   *  (a Zora coin's, whose hooked pool the PositionManager never made), taken only when it hashes to the pool's id and
+   *  names the coin at its leg. Read at the head, once a pool. */
+  async function v4Quotes(ls: Layout[], n: number): Promise<void> {
+    const ask = ls.filter((l) => l.coinLeg !== undefined && now() - (keyless.get(l.pool) ?? -Infinity) >= GT_POOL_FRESH_MS);
+    if (ask.length === 0) return;
+    const missed = { any: false };
+    const got = await callsAgreed(n, ask.flatMap((l) => [{ to: V.positionManager, data: `${SEL.poolKeys}${l.pool.slice(2, 2 + 50).padEnd(64, "0")}` }, { to: l.token, data: SEL.poolKey }]), missed);
+    ask.forEach((l, i) => {
+      for (const k of [got[2 * i], got[2 * i + 1]]) {
+        if (k === undefined || !/^0x[0-9a-f]{320}$/.test(k) || keccakHex(k) !== l.pool) continue;
+        const c = [wordAddr(k, 0)!, wordAddr(k, 1)!];
+        if (c[l.coinLeg!] !== l.token) continue;
+        l.quote = c[1 - l.coinLeg!]!;
+        return;
+      }
+      if (!missed.any) {
+        if (keyless.size >= POOLS_MAX) keyless.delete(keyless.keys().next().value!);
+        keyless.set(l.pool, now());
+      }
+    });
+  }
+  /** The state of each third quote token's route at the block of each new trade quoted in it, one post on two agreeing
+   *  providers; `eth`: the quote tokens whose route ends in an ETH pool. */
+  async function thirdPrices(held: readonly Layout[], trades: readonly PoolTrade[]): Promise<{ at: ThirdAt; eth: Set<string> }> {
+    const at: ThirdAt = new Map();
+    const eth = new Set<string>();
+    const want = new Map<string, Set<number>>();
+    for (const t of trades) {
+      const l = layouts.get(t.token);
+      const q = l?.quote;
+      if (l === undefined || !held.includes(l) || q === undefined || q === V.usd || q === V.weth || q === ZERO) continue;
+      if (gtTapes.get(t.token)?.rows.some((r) => r.tx === t.tx)) continue;
+      if (!want.has(q)) want.set(q, new Set());
+      want.get(q)!.add(t.block);
+    }
+    const items: { q: string; route: Route; n: number; hop: { to: string; data: string }[]; end: { to: string; data: string }[] }[] = [];
+    for (const [q, blocks] of want) {
+      // a pick not held yet is waited on HEDGE_MS at most, the round never held behind it: its rows meanwhile at the
+      // vendor's rate, their age named
+      const got = await within(quotePool(q), HEDGE_MS);
+      const route = got === LATE ? null : got;
+      const end = route === null ? null : poolStateCalls(route.end, chain);
+      const hop = route?.hop == null ? [] : poolStateCalls(route.hop, chain);
+      if (route === null || end === null || hop === null) continue;
+      if (route.end.quote.kind === "eth") eth.add(q);
+      for (const n of blocks) items.push({ q, route, n, hop, end });
+    }
+    if (items.length === 0) return { at, eth };
+    const got = await callsAgreed(items[0]!.n, items.flatMap((x) => [...x.hop, ...x.end].map((c) => ({ ...c, n: x.n }))));
+    let k = 0;
+    for (const x of items) {
+      const hop = x.route.hop === null ? null : poolStateLegs(x.route.hop, got.slice(k, (k += x.hop.length)));
+      const legs = poolStateLegs(x.route.end, got.slice(k, (k += x.end.length)));
+      if (legs !== null && (x.route.hop === null || hop !== null)) at.set(`${x.q} ${x.n}`, { end: x.route.end, legs, hop: hop === null ? null : { legs: hop } });
+    }
+    return { at, eth };
+  }
+  /** Third quote token `q`'s route, held GT_POOL_FRESH_MS (null: none reaches USD or WETH above LIQ_MIN_USD within
+   *  two pools); a pick not read (the vendor refused, a read not agreed) keeps the last one and is asked again a
+   *  STALE_MS later. */
+  function quotePool(q: string): Promise<Route | null> {
+    const held = quotePools.get(q);
+    if (held !== undefined && now() - held.at < GT_POOL_FRESH_MS) return Promise.resolve(held.route);
+    let p = quotePicking.get(q);
+    if (p === undefined) {
+      p = pickRoute(q)
+        .catch(() => undefined)
+        .then((route) => {
+          const keep = route === undefined ? { route: held?.route ?? null, at: now() - GT_POOL_FRESH_MS + STALE_MS } : { route, at: now() };
+          if (!quotePools.has(q) && quotePools.size >= POOLS_MAX) quotePools.delete(quotePools.keys().next().value!);
+          quotePools.set(q, keep);
+          return keep.route;
+        })
+        .finally(() => quotePicking.delete(q));
+      quotePicking.set(q, p);
+    }
+    return p;
+  }
+  /** The vendor's list of `q`'s pools (GeckoTerminal's answer shape), undefined when not had: one call, the key's
+   *  background share first, else the keyless refresh lane (renamePool's). */
+  async function vendorPoolsOf(q: string): Promise<unknown> {
+    const path = `/networks/${chain}/tokens/${q}/pools?page=1`;
+    let j: unknown = deps.keyed == null ? undefined : await deps.keyed.read(path, (x) => Array.isArray((x as { data?: unknown } | null)?.data), true);
+    if (j === undefined && deps.gecko !== undefined && (await gtTake("refresh", `${chain} quote pools`))) j = await gtJson(path);
+    return j === "failed" ? undefined : j;
+  }
+  /** `q`'s route: its deepest pool against the chain's USD token or WETH (pickEnd); else, none at or above LIQ_MIN_USD,
+   *  a hop: the deepest of its vendor-named pools of a venue of ours against another token X (confirmed: hopOf) whose
+   *  own end pool prices X, the hop's X side at that price at or above LIQ_MIN_USD (two pools deep at most, the industry
+   *  default for a token's USD: r33 on Robinhood holds under $1 of USDG in each of its USDG pools, 19 Nov, and trades
+   *  against RAM, whose RAM/WETH pool is deep). Null when none is, undefined when none is and a read was not had. */
+  async function pickRoute(q: string): Promise<Route | null | undefined> {
+    const j = await vendorPoolsOf(q);
+    const end = await pickEnd(q, j);
+    if (end != null) return { end, hop: null };
+    if (j === undefined) return end;
+    const head = await agreedHead();
+    if (head === null) return undefined;
+    const ids = quoteCands(j, q, null).filter((id) => /^0x[0-9a-f]{40}$/.test(id)).slice(0, CANDIDATES_MAX);
+    const tried = await Promise.all(ids.map((id) => hopOf(q, id, head.n).catch(() => undefined)));
+    const hops = tried.filter((h): h is NonNullable<typeof h> => h != null && h.other !== V.usd && h.other !== V.weth);
+    let unread = end === undefined || tried.some((h) => h === undefined);
+    let best: { route: Route; usd: bigint } | null = null;
+    for (const x of [...new Set(hops.map((h) => h.other))]) {
+      const xEnd = await pickEnd(x, await vendorPoolsOf(x));
+      if (xEnd === undefined) unread = true;
+      if (xEnd == null) continue;
+      const mine = hops.filter((h) => h.other === x);
+      const xCalls = poolStateCalls(xEnd, chain);
+      if (xCalls === null) continue;
+      // each hop's X side (its balance of X) at X's price now, X's end pool read at the same block
+      const got = await callsAgreed(head.n, [refStateCall(chain), ...xCalls, ...mine.map((h) => ({ to: x, data: `${BALANCE_OF}${h.pool.id.slice(2).padStart(64, "0")}` }))]);
+      const legs = poolStateLegs(xEnd, got.slice(1, 1 + xCalls.length));
+      const ethUsd = refStateUsd(got[0]);
+      for (const [i, h] of mine.entries()) {
+        const bal = got[1 + xCalls.length + i];
+        const usd = legs === null || bal === undefined || !WORD.test(bal) ? null : usdThrough(xEnd, legs, BigInt(bal), ethUsd);
+        if (usd === null) unread = true;
+        else if (usd >= LIQ_MIN_USD * 10n ** 18n && (best === null || usd > best.usd)) best = { route: { end: xEnd, hop: h.pool }, usd };
+      }
+    }
+    return best?.route ?? (unread ? undefined : null);
+  }
+  /** A v2 or v3 pool `id` of `q` against any token, its factory one of the chain's venues and naming it back (the chain
+   *  tape's confirmation, fromHint's, for a quote of no USD or WETH): the pool as a hop, and the other token. */
+  async function hopOf(q: string, id: string, n: number): Promise<{ pool: HopPool; other: string } | null> {
+    const [f, t0, t1] = await callsAgreed(n, [SEL.factory, SEL.token0, SEL.token1].map((data) => ({ to: id, data })));
+    const [fa, a0, a1] = [wordAddr(f), wordAddr(t0), wordAddr(t1)];
+    if (fa === null || a0 === null || a1 === null || !(V.v2.includes(fa) || V.v3.includes(fa)) || (a0 !== q && a1 !== q) || a0 === a1) return null;
+    const kind = V.getPool[fa];
+    const [param] = kind === undefined || kind === "pair" ? [undefined] : await callsAgreed(n, [{ to: id, data: PARAM_SEL[kind] }]);
+    const call = confirmCall({ factory: fa, t0: a0, t1: a1, param });
+    if (call === null || wordAddr((await callsAgreed(n, [call]))[0]) !== id) return null;
+    const log = V.pancake.includes(fa) ? { log: "pancake" as const } : V.uniV2.includes(fa) ? { log: "univ2" as const } : {};
+    return { pool: { venue: V.v2.includes(fa) ? "v2" : "v3", id, tokenIs0: a0 === q, ...log }, other: a0 === q ? a1 : a0 };
+  }
+  /** The deepest of `q`'s pools against the chain's USD token or WETH, the vendor's named ones in `j` (its first
+   *  CANDIDATES_MAX, each confirmed on chain: fromHint) and our discovery's, at or above LIQ_MIN_USD on its quote side;
+   *  null when none is, undefined when none is and the vendor's list or a read was not had. */
+  async function pickEnd(q: string, j: unknown): Promise<Pool | null | undefined> {
+    // our own discovery's pool of the token too (the chain tape's main pool, kept or searched: no vendor call), so a
+    // pick is made while the vendor refuses
+    const own = (async (): Promise<Pool | null | undefined> => {
+      const kept = pools.get(q);
+      if (kept?.found != null && now() - kept.at < POOL_KEEP_MS) return kept.found.pool;
+      const f = await findPool(q).catch(() => undefined);
+      return f === undefined ? undefined : (f?.pool ?? null);
+    })();
+    const ids = j === undefined ? null : quoteCands(j, q, [V.usd, V.weth]).slice(0, CANDIDATES_MAX);
+    const found = await Promise.all([own, ...(ids ?? []).map((id) => fromHint(q, id).then((f) => f?.pool ?? null).catch(() => undefined))]);
+    const cands = found.filter((p): p is Pool => p != null && p.venue !== "curve");
+    const picked = cands.filter((p, i) => cands.findIndex((x) => x.id === p.id) === i);
+    const unread = ids === null || found.some((f) => f === undefined);
+    if (picked.length === 0) return unread ? undefined : null;
+    const head = await agreedHead();
+    if (head === null) return undefined;
+    const calls = picked.map((p) => quoteSideCalls(p, chain)!);
+    const got = await callsAgreed(head.n, [refStateCall(chain), ...calls.flat()]);
+    const ethUsd = refStateUsd(got[0]);
+    let k = 1;
+    let best: { pool: Pool; usd: bigint } | null = null;
+    for (const [i, p] of picked.entries()) {
+      const usd = quoteSideUsd(p, got.slice(k, (k += calls[i]!.length)), ethUsd);
+      if (usd !== null && usd >= LIQ_MIN_USD * 10n ** 18n && (best === null || usd > best.usd)) best = { pool: p, usd };
+    }
+    return best?.pool ?? (unread ? undefined : null);
   }
   /** The vendor's refresh of a held tape: its rows, their receipts read before they are held. */
   async function vendorRenew(token: string): Promise<void> {
