@@ -1803,10 +1803,11 @@ test("the helper's start check names every member of this page's public Solana s
 });
 
 // The review of 8522bdf8, F6: the testnet build's finder (pool-testnet.ts finderOf, no holdings given) reads the Ws on
-// the pair's first devnet RPC with one try a call and the route's gate: a 429 is not asked again by a retry, and the
+// the helper's devnet route, the pair's second, with its fetch init (card evm-load-reads-name-no-w-to-the-public-seat:
+// the public devnet RPC, the pair's first, was named every W before), with one try a call and the route's gate: a 429 is not asked again by a retry, and the
 // next round waits the gate (1 s), where the pair's own client asked again within its 3.5 s retry. Read by the
 // positions pass, which takes the same finder as a sell.
-test("the testnet finder reads the Ws on the first devnet RPC, one try a call: a 429 waits the route's gate, never a retry", async () => {
+test("the testnet finder reads the Ws on the helper's devnet route, never the public devnet RPC, one try a call: a 429 waits the route's gate, never a retry", async () => {
   const { onTestClock } = await import("../../kit/test/test-clock.ts");
   const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
   const { jOf } = await import("../../wallet/src/pool/queue.ts");
@@ -1821,9 +1822,10 @@ test("the testnet finder reads the Ws on the first devnet RPC, one try a call: a
     const fw = freshWallet(SEED64, "sol", label, jOf(ref));
     fw.secretKey.fill(0);
     await w.put("meta", POSITION_COSTS_KEY, { [fw.address]: { mint: SOL_TOKEN, received: "5", decimals: 9 } });
-    const host = new URL(TESTNET_RPCS.solana[0]).host;
+    const host = new URL(TESTNET_RPCS.solana[1]).host;
+    assert.notEqual(host, new URL(TESTNET_RPCS.solana[0]).host);
     // the gate's first pause on the test clock, from the first 429: a call before its timer fires came before the gate opened
-    const seen: { host: string; method: string; open: boolean }[] = [];
+    const seen: { host: string; method: string; open: boolean; credentials?: string }[] = [];
     let hot = 2, open = false, timed = false;
     // the fourth getTokenAccountsByOwner, waited for as it comes: before its first read the pass reads fake IndexedDB
     // and takes the seed's Web Lock, work in real time the test clock cannot see, so a loop of clock ticks ran its
@@ -1834,7 +1836,7 @@ test("the testnet finder reads the Ws on the first devnet RPC, one try a call: a
     globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
       const b = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
       if (b.params?.[0] !== fw.address) return new Response("offline", { status: 503 });
-      seen.push({ host: new URL(String(u)).host, method: b.method, open });
+      seen.push({ host: new URL(String(u)).host, method: b.method, open, ...(init?.credentials === undefined ? {} : { credentials: init.credentials }) });
       if (seen.filter((x) => x.method === "getTokenAccountsByOwner").length >= 4) fourth();
       if (b.method === "getTokenAccountsByOwner" && hot > 0) {
         if (!timed) (timed = true), setTimeout(() => (open = true), 999);
@@ -1850,10 +1852,24 @@ test("the testnet finder reads the Ws on the first devnet RPC, one try a call: a
       globalThis.fetch = real;
     }
     assert.ok(seen.length > 0 && seen.every((x) => x.host === host), seen.map((x) => x.host).join(" "));
+    assert.ok(seen.every((x) => x.credentials === "omit"), "the helper's fetch init (HELPER_FETCH_INIT) on every call");
     const tao = seen.filter((x) => x.method === "getTokenAccountsByOwner");
     assert.equal(tao.length, 4, "two calls a round, two rounds: no retry of a 429");
     assert.deepEqual(tao.map((x) => x.open), [false, false, true, true], "the second round after the gate's 1 s pause");
   });
+});
+
+// Card evm-load-reads-name-no-w-to-the-public-seat: every testnet-build read of a W the finder's route makes (its
+// holdings, its buys, the trades' fill, asset_held, a bought token's decimals) is on the helper's devnet route, the
+// pair's second, as mainnet's are on the helper's; the public devnet RPC is only the pair's first seat
+test("evm-load-reads-name-no-w-to-the-public-seat: the testnet build names its public devnet RPC only as the pair's first seat; the finder's reads go to the helper's devnet route", () => {
+  const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
+  assert.equal(src.match(/TESTNET_RPCS\.solana\[0\]/g)?.length, 2, "pageSolanaRpcs' and pageSolanaSettleRpcs' first seat alone");
+  assert.match(src, /POOL_TESTNET \? solanaHoldingsAt\(TESTNET_RPCS\.solana\[1\], turn, HELPER_FETCH_INIT\)/);
+  assert.match(src, /POOL_TESTNET \? solanaBuysAt\(TESTNET_RPCS\.solana\[1\], pin!\.program, HELPER_FETCH_INIT\)/);
+  assert.match(src, /const reader = POOL_TESTNET \? rpcs\("pass"\)\[1\] :/);
+  assert.match(src, /pageAssetHeldRpc = \(signal: AbortSignal\): SolanaRpc =>\s*solanaPacedRpc\(POOL_TESTNET \? testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_RETRY, "pass"\)/);
+  assert.match(src, /const rpc = POOL_TESTNET \|\| over\.rpcs \? r\[1\] :/);
 });
 
 // Card sol-buy-reads-side-by-side: the page's buy host reads the pool's time for the take on the page's pool (its two

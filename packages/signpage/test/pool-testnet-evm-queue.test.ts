@@ -1161,8 +1161,9 @@ test("a page open across the turn keeps the period before's proof takeable while
   await t.signedOut();
 });
 
-// the page's carry pass at a state read (src/pool-carry-evm.ts)
-test("a state read carries a refused buy's ETH on W back into the pool from the chain alone (src/pool-carry-evm.ts): W's own deposit to the pinned pool on its return note, with no buy record and no tap", { timeout: 60_000 }, async () => {
+// the page's carry pass at a state read (src/pool-carry-evm.ts): deposit 0 spent by a refused buy, its change landed,
+// its release a Withdrawn to W of a Buy call to the pool, W holding a rung and more
+async function carryWorld() {
   const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
   const { w, ns } = await wallet();
   // deposit 0 spent by a refused buy: its change landed, its release a Withdrawn to W of a Buy call to the pool
@@ -1180,15 +1181,24 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
   const relTx: Record<string, unknown> = { type: "0x2", chainId: "0x2105", nonce: "0x0", maxPriorityFeePerGas: "0x1", maxFeePerGas: "0x2", gas: "0x5208", to: PIN.pool.toLowerCase(), value: "0x0", input: BUY, accessList: [], yParity: "0x0", r: "0x" + "5a".repeat(32), s: "0x" + "3c".repeat(32) };
   relTx.hash = evmType2Hash(relTx);
   const helperAsked: string[] = [];
-  const helper: EvmRpc = async (method, params) => (helperAsked.push(method), method === "eth_getTransactionByHash" && params[0] === relTx.hash ? relTx : null);
+  const helper: EvmRpc = async (method, params) => {
+    helperAsked.push(method);
+    if (method === "eth_getTransactionByHash") return params[0] === relTx.hash ? relTx : null;
+    // W's balance, read on the helper's route alone before the page's first tap (card evm-load-reads-name-no-w-to-the-public-seat)
+    if (method === "eth_getBalance") return "0x" + (String(params[0]).toLowerCase() === W ? CHUNK + RUNG : 0n).toString(16);
+    return null;
+  };
   const release = { ...ev(20n, { kind: "withdraw", state: 9n, value: CHUNK, nullifier: noteSecrets(SEED64, D0).nullifierHash, recipient: W }), blockHash: HASH20, logIndex: 2n, bytes: ["0x14", HASH20, "0x2", relTx.hash as string, "0x0", PIN.pool.toLowerCase(), "t0", "t1", "0x"].join(" ") };
   const round = { fin: { number: 30n, timestamp: 1_800_000_300n, hash: "", baseFeePerGas: null }, anchor: { number: 40n, hash: "", timestamp: 0n, baseFeePerGas: null }, events: [DEPOSIT, release] };
   const sent: string[] = [];
+  // each pool RPC call that names W: both are public providers on mainnet (MAINNET_POOL_RPCS)
+  const poolNaming: string[] = [];
   const rpcs = (): readonly EvmRpc[] =>
     ["https://a.example", "https://b.example"].map((url, k) =>
       Object.assign(
         async (method: string, params: readonly unknown[]) => {
           const p = params as unknown[];
+          if (JSON.stringify(params).toLowerCase().includes(W)) poolNaming.push(`${url} ${method}`);
           switch (method) {
             case "eth_getBlockByNumber":
               if (p[0] === "0x14" || p[1] === true) throw new Error("the release's block asked of a public RPC");
@@ -1214,6 +1224,10 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
         { url },
       ),
     );
+  // the page clock, moved on past the page's first tap's drawn time by `pastTap`
+  const realNow = Date.now;
+  let ahead = 0;
+  Date.now = () => realNow() + ahead;
   const t = testnetPool({ ...page(w), held: async () => w }, {
     prover: { vault: signalsProver(), stop: () => {} },
     evmPin: (c) => (c === "base" ? PIN : undefined),
@@ -1222,6 +1236,46 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
     evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
     evmHelper: (c) => (c === "base" ? helper : undefined),
   });
+  const pastTap = async (): Promise<void> => {
+    const { BACKS_LOAD_MAX_MS } = await import("../src/pool-testnet.ts");
+    const { POOL_RENT_BACK_SPACE_MAX_MS } = await import("../src/pool-sell.ts");
+    // a tap of the page's flow (a deposit's or withdraw's ask, refused here at once), then past its drawn time
+    t.flow({ kind: "pool.none", chain: "base" } as never, { id: "r1", sha: "00", progress: () => {} } as never);
+    ahead += BACKS_LOAD_MAX_MS + POOL_RENT_BACK_SPACE_MAX_MS;
+  };
+  return { t, ns, W, PIN, sent, helperAsked, poolNaming, pastTap, CHUNK, RUNG, word, sel, restore: () => void (Date.now = realNow) };
+}
+// card evm-load-reads-name-no-w-to-the-public-seat: a page load with no tap names W to no pool RPC: the pass reads W's
+// balance on the helper's route alone and shows it, as the Solana RETURNING row is; nothing is signed or sent
+test("evm-load-reads-name-no-w-to-the-public-seat: a load with no tap reads the refused buy's W on the helper's route alone and shows it; no pool RPC is named W, nothing is sent", { timeout: 60_000 }, async () => {
+  const c = await carryWorld();
+  try {
+    for (let i = 0; i < 3; i++) {
+      await c.t.stateRead();
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    // the pass's first read of W, wherever it goes
+    await until(() => c.poolNaming.length > 0 || c.helperAsked.includes("eth_getBalance"));
+    await new Promise((r) => setTimeout(r, 100));
+    assert.deepEqual(c.poolNaming, [], "no pool RPC named W");
+    assert.deepEqual(c.sent, [], "nothing sent");
+    assert.ok(c.helperAsked.includes("eth_getBalance"), "W's balance read on the helper's route");
+    assert.deepEqual(c.t.evmReturning(), [{ chain: "base", address: c.W, wei: c.CHUNK + c.RUNG }], "shown at the helper's amount");
+    const { evmReturningWallets } = await import("../src/positions.ts");
+    // 3,000 USD an ETH (Chainlink's 8 decimals): 0.0014 ETH
+    assert.deepEqual(evmReturningWallets(c.t.evmReturning(), () => ({ price: "300000000000", expo: -8, published_s: 1, read_ms: 1 })), [{ chain: "base", address: c.W, role: "fresh", size: "4.2", state: "RETURNING" }]);
+    await c.t.signedOut();
+    assert.deepEqual(c.t.evmReturning(), [], "a sign out shows it no more");
+  } finally {
+    c.restore();
+  }
+});
+test("past the page's first tap a state read carries a refused buy's ETH on W back into the pool from the chain alone (src/pool-carry-evm.ts): W's own deposit to the pinned pool on its return note, with no buy record", { timeout: 60_000 }, async () => {
+  const { t, ns, W, PIN, sent, helperAsked, pastTap, word, sel, restore } = await carryWorld();
+  try {
+  // card evm-load-reads-name-no-w-to-the-public-seat: the pass that reads W on the pool's RPCs and signs waits for the
+  // page's first tap's drawn time; before it the pass is idle (the test above)
+  await pastTap();
   // another tab holds the chain's carry lock: this tab's state read runs no pass of it
   let free!: () => void;
   await new Promise<void>((held) => void navigator.locks.request("ct-evm-carry/base", () => new Promise<void>((r) => ((free = r), held()))));
@@ -1241,6 +1295,9 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
   const open = (await ns.list()).find((x) => refKey(x.ref) === refKey(ret));
   assert.equal(open?.state, "INCOMING");
   await t.signedOut();
+  } finally {
+    restore();
+  }
 });
 
 // card sign-out-stops-the-pages-reads: another tab's sign out reaches this page as signedOut alone (main.ts, the store's
