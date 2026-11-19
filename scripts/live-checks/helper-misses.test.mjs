@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { EXIT, HELPER_HOST, MISS_MS, exitOf, helperMisses, helperWatch, verdictOf, watchContext } from "./helper-misses.mjs";
+import { EXIT, HELPER_HOST, MISS_MS, exitOf, helperMisses, helperWatch, stoppedLines, verdictOf, watchContext } from "./helper-misses.mjs";
 import { judge } from "./app-trade-box-mount.mjs";
 import { noAnswerHosts, rerun } from "../ci/live-rerun.mjs";
 
@@ -131,4 +131,14 @@ test("watchContext reads Playwright's context events, every frame, and ends at t
   ctx.emit("requestfailed", c);
   assert.deepEqual(w.misses(), ["ct-api.unrealized.trade HTTP 503: /v1/market/token"]);
   assert.ok(helperMisses().includes("ct-api.unrealized.trade HTTP 503: /v1/market/token"));
+});
+
+test("stopped at its bound (merge queue group 44559433373, 16:06Z): INCONCLUSIVE with a miss seen, FAIL with none", () => {
+  const miss = stoppedLines(["ct-api.unrealized.trade HTTP 503: /v1/market/candles"]);
+  assert.equal(miss.code, EXIT.INCONCLUSIVE);
+  assert.deepEqual(miss.lines, ["-- ct-api.unrealized.trade HTTP 503: /v1/market/candles", "INCONCLUSIVE stopped at its bound; the helper missed 1 answer the page asked for, so the run tells nothing: run again"]);
+  assert.deepEqual(noAnswerHosts(miss.lines.join("\n")), ["ct-api.unrealized.trade"]);
+  const none = stoppedLines([]);
+  assert.equal(none.code, EXIT.FAIL);
+  assert.match(none.lines[0], /^BAD stopped at its bound with no helper miss seen/);
 });

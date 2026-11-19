@@ -561,7 +561,9 @@ jobs:
   # A check that reads the live helper runs through scripts/ci/live-rerun.mjs's rerun rule, so a moment the helper
   # missed runs it again instead of refusing the group (card queue-browser-checks-tell-a-helper-miss-from-a-page-fault);
   # the reruns start only inside E2E_RERUN_BUDGET_S, and the same test fails when that budget, a last rerun and the
-  # job's own steps pass timeout-minutes.
+  # job's own steps pass timeout-minutes. Every command runs under a wall bound from its listed seconds (boundOf), in its
+  # own process group, so no stalled check outlives the job (group 44559433373, 16:06Z): the same test fails when a part's
+  # plan and one command stopped at its bound pass timeout-minutes.
   test-browser:
     needs: changes
     if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'

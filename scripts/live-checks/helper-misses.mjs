@@ -18,7 +18,13 @@
 // rule). A PASS stays a PASS (the page drew right through the miss) and a run with no miss keeps its FAIL.
 // The misses print as provider-answer.mjs names a no-answer (`<host> HTTP <status>: <why>`, `<host>: no answer (<why>)`),
 // so live-rerun's noAnswerHosts names the helper as the host that did not answer.
+// Round 2 (merge queue group 44559433373, 16:06Z: a check that printed nothing until the shard was cancelled): e2e-run
+// runs each command under a wall bound and sends its process group SIGTERM past it (scripts/ci/test-shards.mjs
+// runBounded). Once a run has a watch, this module's SIGTERM handler prints what it saw: the misses and `INCONCLUSIVE
+// stopped at its bound ...` (exit 3) when the helper missed, else `BAD stopped at its bound ...` (exit 1).
 // Runs: once, no check: the shared module the checks that read the live helper on a local build import
+
+import { writeSync } from "node:fs";
 
 export const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** An answer that took this long, or had not come this long after it was asked, is a miss: the helper's reads answer in
@@ -91,6 +97,7 @@ const WATCHES = [];
 export function watchContext(ctx, opts = {}) {
   const w = helperWatch(opts);
   WATCHES.push(w);
+  onStop();
   ctx.on("request", (r) => w.asked(r, r.url(), Date.now()));
   ctx.on("response", (res) => {
     const r = res.request();
@@ -135,3 +142,25 @@ export function exitOf(ok, say = console.log, misses = helperMisses()) {
   for (const l of v.lines) say(l);
   return EXIT[v.verdict];
 }
+
+/** What a check stopped at its bound (e2e-run's SIGTERM) prints and exits with: { code, lines }. */
+export function stoppedLines(misses = helperMisses()) {
+  if (misses.length === 0) return { code: EXIT.FAIL, lines: ["BAD stopped at its bound with no helper miss seen: the check outran its bound on answers it had"] };
+  return { code: EXIT.INCONCLUSIVE, lines: [...misses.map((m) => `-- ${m}`), `INCONCLUSIVE stopped at its bound; the helper missed ${misses.length} answer${misses.length === 1 ? "" : "s"} the page asked for, so the run tells nothing: run again`] };
+}
+
+let stopping = false;
+/** Once a watch exists (a run on a local build: the deployed runs never make one), a SIGTERM prints stoppedLines,
+ *  written synchronously so they reach the pipe before the process ends, and exits with its code. */
+function onStop() {
+  if (stopping) return;
+  stopping = true;
+  process.once("SIGTERM", () => {
+    const { code, lines } = stoppedLines();
+    try {
+      writeSync(1, `${lines.join("\n")}\n`);
+    } catch {}
+    process.exit(code);
+  });
+}
+

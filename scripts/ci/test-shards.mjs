@@ -385,7 +385,7 @@ export function runPart(commands, root, log = console.log, { clock = () => perfo
 // INCONCLUSIVE after the last run prints a notice and is no FAIL (live-rerun.mjs's header). No rerun starts past
 // E2E_RERUN_BUDGET_S of the part's own clock, so the reruns stay inside test-browser's timeout-minutes.
 export const HELPER_MISSES = /from\s+["']\.\/helper-misses\.mjs["']/;
-export const E2E_RERUN_BUDGET_S = 13 * 60;
+export const E2E_RERUN_BUDGET_S = 12 * 60;
 /** The live check's key when `command` runs one that reads the live helper (its file imports helper-misses.mjs), else
  *  null. `read(key)` returns the check's source, null when there is none. */
 export function helperLiveKey(command, read = (k) => readFileSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`), "utf8")) {
@@ -402,37 +402,106 @@ export function helperLiveKey(command, read = (k) => readFileSync(path.join(ROOT
 export const OWN_HELPER_ROUTE = /HELPER_(?:HOST|URL)\s*\?\s*r\.continue\(\)\s*:\s*harness\(r\)/;
 export const ownHelperRoutes = (files) => files.filter((f) => OWN_HELPER_ROUTE.test(f.text)).map((f) => f.file);
 
-// one run of `c` under `pnpm exec sh -c` in root/<dir>, its stdout and stderr printed as they come and kept: { code, output }
-export function runCaptured(c, root, write = (b) => process.stdout.write(b)) {
+// Card queue-browser-checks-tell-a-helper-miss-from-a-page-fault, round 2: merge queue group 44559433373 (PR 1086),
+// test-browser (4) job 135684403606, started app-chart-fills-in-its-history at 15:56:04Z, printed nothing, and was
+// cancelled at the job's 15 minutes at 16:06:26Z: no command had a bound of its own, so one stall cancelled the shard and
+// no verdict ran. That check's own walk is bounded only by TRIES picks of FIRST_MS + WATCH_MAX_MS each (6 x 230 s, about
+// 23 min), and its first read of the helper's lists (candidates(), a fetch with no timeout) by Node's own. Every e2e-run
+// command now runs in its own process group under a wall bound from its listed seconds (boundOf: E2E_BOUND.factor times
+// them, at least E2E_BOUND.floorS more: 180 s, so app-chart-fills-in-its-history's one filling pick, FIRST_MS and
+// WATCH_MAX_MS, 230 s, fits its 238 s); past it the group is sent SIGTERM, then SIGKILL after E2E_BOUND.graceS. A check
+// that imports scripts/live-checks/helper-misses.mjs prints, on that SIGTERM, the helper misses it saw: with one it ends
+// INCONCLUSIVE (exit 3, run again by the rerun rule), with none FAIL (exit 1); any other command stopped at its bound
+// fails; the runner's own line names the bound.
+export const E2E_BOUND = Object.freeze({ factor: 2, floorS: 180, graceS: 10 });
+/** The build's bound (it takes about 2 s; E2E_FIXED_SECONDS counts it). */
+export const E2E_BUILD_BOUND_S = 300;
+/** A command's wall bound, seconds: E2E_BOUND.factor times its listed seconds, and at least E2E_BOUND.floorS more. */
+export function boundOf(c, seconds = E2E_SECONDS, fallback = NEW_E2E_SECONDS) {
+  const listed = listedSeconds(c, seconds, fallback);
+  return Math.max(E2E_BOUND.factor * listed, listed + E2E_BOUND.floorS);
+}
+/** The line helper-misses.mjs prints when its check is stopped at its bound with a miss seen (its exit 3). */
+export const STOPPED_INCONCLUSIVE = /^INCONCLUSIVE stopped at its bound\b/m;
+/** The exit a command stopped at its bound is read as: 3 when its check said INCONCLUSIVE for a helper miss, else 1. */
+export const stoppedCode = (output) => (STOPPED_INCONCLUSIVE.test(String(output)) ? 3 : 1);
+
+/**
+ * One run of `c` under `pnpm exec sh -c` in root/<dir>, in its own process group, under a wall bound of `boundS`
+ * seconds: { code, output, stopped }. With `capture`, its stdout and stderr go through one pipe, each chunk to `write` as
+ * it comes, and are kept; else they are the runner's own. Past the bound the group is sent SIGTERM and, `graceS` later,
+ * SIGKILL; the run's code is then stoppedCode(output).
+ */
+export function runBounded(c, root, boundS, { capture = false, write = (b) => process.stdout.write(b), log = console.log, graceS = E2E_BOUND.graceS } = {}) {
   return new Promise((resolve) => {
     const chunks = [];
-    const child = spawn("pnpm", ["exec", "sh", "-c", `${c.command} 2>&1`], { cwd: path.join(root, c.dir), stdio: ["ignore", "pipe", "inherit"] });
-    child.stdout.on("data", (b) => (write(b), chunks.push(b)));
-    child.on("error", (e) => resolve({ code: 2, output: `${Buffer.concat(chunks)}${e.message}` }));
-    child.on("close", (code) => resolve({ code: code ?? 2, output: Buffer.concat(chunks).toString("utf8") }));
+    let stopped = false;
+    let hard = null;
+    const child = spawn("pnpm", ["exec", "sh", "-c", capture ? `${c.command} 2>&1` : c.command], {
+      cwd: path.join(root, c.dir),
+      detached: true,
+      stdio: ["ignore", capture ? "pipe" : "inherit", "inherit"],
+    });
+    const group = (sig) => {
+      try {
+        process.kill(-child.pid, sig);
+      } catch {}
+    };
+    const soft = setTimeout(() => {
+      stopped = true;
+      log(`== past its bound of ${boundS} s: ${sweepKey(c)}: its process group sent SIGTERM (SIGKILL in ${graceS} s)`);
+      group("SIGTERM");
+      hard = setTimeout(() => group("SIGKILL"), graceS * 1000);
+    }, boundS * 1000);
+    if (capture) child.stdout.on("data", (b) => (write(b), chunks.push(b)));
+    const done = (code, extra = "") => {
+      clearTimeout(soft);
+      const output = `${Buffer.concat(chunks).toString("utf8")}${extra}`;
+      // what the group left running past the command's own end goes with it
+      if (stopped) {
+        clearTimeout(hard);
+        group("SIGKILL");
+      }
+      resolve({ code: stopped ? stoppedCode(output) : code, output, stopped });
+    };
+    child.on("error", (e) => done(2, e.message));
+    child.on("close", (code) => done(code ?? 2));
   });
 }
 
-// the part's commands, each as runPart runs it, but a check that reads the live helper through live-rerun's rerun():
-// [{ dir, command, seconds, ok }]. `run`, `sleep` and `read` are injected by the tests.
-export async function runE2ePart(commands, root, log = console.log, { clock = () => performance.now(), run = (c) => runCaptured(c, root), sleep, read, budgetS = E2E_RERUN_BUDGET_S, ...names } = {}) {
+// the part's commands, each under its bound (runBounded), and a check that reads the live helper through live-rerun's
+// rerun(): [{ dir, command, seconds, ok }]. `run` ((c, boundS, capture) => { code, output }), `sleep`, `read` and
+// `bound` are injected by the tests.
+export async function runE2ePart(commands, root, log = console.log, { clock = () => performance.now(), run, sleep, read, bound, budgetS = E2E_RERUN_BUDGET_S, ...names } = {}) {
+  const runOne = run ?? ((c, boundS, capture) => runBounded(c, root, boundS, { capture, log }));
+  const boundFor = bound ?? ((c) => boundOf(c, names.seconds ?? E2E_SECONDS, names.fallback ?? NEW_E2E_SECONDS));
   const t0 = clock();
   const ran = [];
   for (const c of commands) {
     const key = helperLiveKey(c.command, read);
-    if (!key) {
-      ran.push(...runPart([c], root, log, { clock, ...names }));
-      continue;
-    }
-    const { rerun, noticeLine } = await import("./live-rerun.mjs");
-    log(`\n== ${sweepKey(c)} (reads the live helper: an INCONCLUSIVE runs again)`);
+    const boundS = boundFor(c);
     const start = clock();
-    const r = await rerun(key, [], { run: () => run(c), say: log, ...(sleep ? { sleep } : {}), before: async (n) => n === 1 || (clock() - t0) / 1000 < budgetS });
+    let ok;
+    let failed = "";
+    let runs = null;
+    if (!key) {
+      log(`\n== ${sweepKey(c)}`);
+      const r = await runOne(c, boundS, false);
+      ok = r.code === 0;
+      failed = r.stopped ? `stopped at its bound of ${boundS} s` : `exit ${r.code}`;
+    } else {
+      const { rerun, noticeLine } = await import("./live-rerun.mjs");
+      log(`\n== ${sweepKey(c)} (reads the live helper: an INCONCLUSIVE runs again)`);
+      const r = await rerun(key, [], { run: () => runOne(c, boundS, true), say: log, ...(sleep ? { sleep } : {}), before: async (n) => n === 1 || (clock() - t0) / 1000 < budgetS });
+      ok = r.exit === 0;
+      if (r.verdict === "inconclusive") log(noticeLine(key, `${r.reason}${r.stopped ? " (no rerun past the part's budget)" : ""}`));
+      failed = `${r.verdict}, exit ${r.code}`;
+      runs = r.runs;
+    }
     const seconds = Math.round((clock() - start) / 100) / 10;
-    const ok = r.exit === 0;
-    if (r.verdict === "inconclusive") log(noticeLine(key, `${r.reason}${r.stopped ? " (no rerun past the part's budget)" : ""}`));
-    log(`== ${ok ? "ok" : `failed (${r.verdict}, exit ${r.code})`} in ${seconds} s after ${r.runs} run${r.runs === 1 ? "" : "s"}: ${sweepKey(c)}`);
-    const warning = r.runs === 1 ? staleWarning(c, seconds, names.seconds ?? MUTANT_SECONDS, names) : null;
+    const after = runs === null ? "" : ` after ${runs} run${runs === 1 ? "" : "s"}`;
+    log(`== ${ok ? "ok" : `failed (${failed})`} in ${seconds} s${after}: ${sweepKey(c)}`);
+    const warning = runs === null || runs === 1 ? staleWarning(c, seconds, names.seconds ?? MUTANT_SECONDS, names) : null;
     if (warning) log(warning);
     ran.push({ dir: c.dir, command: c.command, seconds, ok });
   }
@@ -575,7 +644,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       for (const c of part) console.log(`  ${sweepKey(c)}`);
       const names = { seconds: E2E_SECONDS, table: "E2E_SECONDS", fallback: NEW_E2E_SECONDS };
       // the build, timed with the fixed steps (E2E_FIXED_SECONDS), so no table lists it and it is never warned on
-      const [built] = runPart([{ dir: E2E_DIR, name: "terminal", command: build }], ROOT, console.log, { ...names, seconds: {}, fallback: Infinity });
+      const [built] = await runE2ePart([{ dir: E2E_DIR, name: "terminal", command: build }], ROOT, console.log, { ...names, seconds: {}, fallback: Infinity, bound: () => E2E_BUILD_BOUND_S });
       if (!built.ok) process.exit(1);
       // a check that reads the live helper runs through live-rerun's rerun rule (runE2ePart)
       const ran = await runE2ePart(part, ROOT, console.log, names);
