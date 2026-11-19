@@ -29,6 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHAINS, NO_LOGO, PADS } from "../../apps/terminal/src/screens/market/pads.ts";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 
 const KEY = "app-launchpad-badges";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -234,7 +235,7 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
     prepare = (ctx) => ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
   }
   mkdirSync(shots, { recursive: true });
-  const browser = await launchBrowser("chromium");
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   const rec = { url, at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const w of WIDTHS) {

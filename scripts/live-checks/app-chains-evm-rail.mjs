@@ -23,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-chains-evm-rail";
@@ -98,7 +99,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
     const { harnessRoute } = await import("./app-in-shell.mjs");
     harness = await harnessRoute(path.resolve(build), "signed");
   }
-  const browser = await launchBrowser("chromium");
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const chain of CHAINS) {

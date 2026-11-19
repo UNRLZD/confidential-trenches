@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { PATH } from "./app-sell-mount.mjs";
 import { count, usd } from "../../apps/terminal/src/screens/discover/format.ts";
 import { named } from "./record-names.mjs";
@@ -240,7 +241,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
     const { harnessRoute } = await import("./app-in-shell.mjs");
     harness = await harnessRoute(path.resolve(build), "tap");
   }
-  const browser = await launchBrowser("chromium");
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, signed out, HELPER_HOST live` : "live", at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const [i, w] of LOADS.entries()) {

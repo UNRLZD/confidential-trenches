@@ -33,6 +33,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ROW_FIELDS } from "../../apps/terminal/src/screens/discover/fields.ts";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { consoleLine } from "./console-errors.mjs";
 import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
 
@@ -203,7 +204,7 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
     const harness = await harnessRoute(path.resolve(build), "signed");
     prepare = (ctx) => ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
   }
-  const browser = await launchBrowser("chromium");
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   const rec = { url, at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const w of WIDTHS) {

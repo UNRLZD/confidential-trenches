@@ -32,6 +32,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { pageError } from "./console-errors.mjs";
 import { named } from "./record-names.mjs";
@@ -184,10 +185,10 @@ async function runOne(browser, w, shots, shellRoute, kase = "fill") {
 }
 
 /** Both widths in Chromium. `route` answers SIGN_HOST (the stand-in) and APP_HOST (see routeFor). */
-export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), route, source, helper = HELPER_HOST }) {
+export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), route, source, helper = HELPER_HOST, harness = false }) {
   mkdirSync(shots, { recursive: true });
   const h = await readHelper(helper);
-  const browser = await launchBrowser("chromium");
+  const browser = await (harness ? launchHarnessBrowser : launchBrowser)("chromium");
   try {
     const runs = [];
     const unlisted = [];
@@ -239,7 +240,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       source = `harness, terminal build ${named(build)}, the stand-in shell, the token reads answered by the check`;
     }
     const shots = opt("--shots", undefined);
-    const rec = await collect({ shots: shots && path.resolve(shots), route: await routeFor(build), source, helper: opt("--helper", HELPER_HOST) });
+    const rec = await collect({ shots: shots && path.resolve(shots), route: await routeFor(build), source, helper: opt("--helper", HELPER_HOST), harness: build !== null });
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);

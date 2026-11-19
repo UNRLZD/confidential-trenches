@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { POOL_ASSET_DECIMALS } from "../../packages/kit/src/index.ts";
 import { APP_HOST, harnessRoute, shellHeaders, SIGN_HOST } from "./app-in-shell.mjs";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { watchErrors } from "./console-errors.mjs";
 import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
@@ -199,7 +200,7 @@ async function runOne(browser, w, shots, handler) {
 
 export async function collect({ build, shots }) {
   mkdirSync(shots, { recursive: true });
-  const browser = await launchBrowser("chromium");
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   const handler = await route(build);
   const rec = { at: new Date().toISOString(), browser: browser.version(), source: build ? `harness, terminal build ${named(build)}` : `live ${APP_HOST}`, answer: ANSWER, runs: [] };
   try {
