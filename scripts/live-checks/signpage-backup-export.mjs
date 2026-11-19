@@ -13,6 +13,7 @@
 //     (sizes, sha384s, the two screens found or not, and the list's entries it was judged against; no bodies), --answer
 //     judges such a record instead of reading SIGN_HOST
 //   PASS only when both files match the list and the bundle holds both screens. PASS exit 0, FAIL exit 1, error exit 2.
+import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
