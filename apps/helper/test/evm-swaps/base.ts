@@ -2,6 +2,7 @@
 // src/data/evm/swaps.test.ts and swaps-route.test.ts. Not a test itself, and outside src/ so the helper image never
 // holds it.
 import { readFileSync } from "node:fs";
+import { callsIn, pocketRefusal } from "../pocket.ts";
 import { gunzipSync } from "node:zlib";
 import { BASE_VENUES, createSwaps, REF_POOL_ID, type Log, type Pool } from "../../src/data/evm/swaps.ts";
 
@@ -59,6 +60,9 @@ export function fakeChain(o: { shift?: number } = {}) {
     const f = st.faults.get(url) ?? {};
     if (f.down) return new Response("down", { status: 503 });
     if (f.status !== undefined) return new Response("{}", { status: f.status, headers: { "retry-after": "7" } });
+    // a Pocket host answers 413 past 5 calls, as mainnet does (test/pocket.ts)
+    const pocket = pocketRefusal(url, callsIn(init.body));
+    if (pocket) return pocket;
     const head = st.head - (f.lag ?? 0);
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
     for (const r of reqs) st.methods.set(`${url} ${r.method}`, (st.methods.get(`${url} ${r.method}`) ?? 0) + 1);

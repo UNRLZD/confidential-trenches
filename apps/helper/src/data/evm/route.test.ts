@@ -11,6 +11,7 @@ import { start } from "../../server.ts";
 import { geckoBudget } from "../gecko.ts";
 import { createEvmLists, GT_BASE, GT_READS, MAKER_RPCS, makerFilters } from "./lists.ts";
 import { call as bounded, listening } from "../../../test/servers.ts";
+import { callsIn, pocketRefusal } from "../../../test/pocket.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const APP = "https://ct-app.unrealized.trade";
@@ -25,6 +26,9 @@ const NOW = Date.parse(MAKERS.recorded_at);
 const fake = (gtStatus = 200) => async (url: string, init: RequestInit): Promise<Response> => {
   if (url.startsWith(GT_BASE)) return gtStatus === 200 ? new Response(GT[url]!, { status: 200 }) : new Response("{}", { status: gtStatus });
   const which = MAKER_RPCS.base.indexOf(url as never);
+  // a Pocket host answers 413 past 5 calls, as mainnet does (test/pocket.ts)
+  const pocket = pocketRefusal(url, callsIn(init.body));
+  if (pocket) return pocket;
   const reqs = JSON.parse(String(init.body)) as { id: number; params: [{ fromBlock: string; toBlock: string }] }[];
   return new Response(JSON.stringify(reqs.map((r) => {
     const c = MAKERS.cases.find((x) => x.range[0] === parseInt(r.params[0].fromBlock, 16) && x.range[1] === parseInt(r.params[0].toBlock, 16))!;

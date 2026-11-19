@@ -18,6 +18,7 @@ import {
   recordCalls, recordPad, SETTLE_MS, STALE_MS, toRows,
 } from "./lists.ts";
 import { providerHolds } from "../../limits/limits.ts";
+import { callsIn, pocketRefusal } from "../../../test/pocket.ts";
 
 const fx = (f: string) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
 const GT: Record<string, string> = {
@@ -47,6 +48,9 @@ function recorded(opts: { gt?: number; rpcFails?: number[]; tamper?: (which: num
     if (opts.rpcFails?.includes(at)) return new Response("bad gateway", { status: 502 });
     // `sparesAs`: a provider past the recorded three answers as that recorded one did (card evm-rpc-spare-list)
     const which = at >= 3 && opts.sparesAs !== undefined ? opts.sparesAs : at;
+    // a Pocket host answers 413 past 5 calls, as mainnet does (test/pocket.ts)
+    const pocket = pocketRefusal(url, callsIn(init.body));
+    if (pocket) return pocket;
     const reqs = JSON.parse(String(init.body)) as { id: number; params: [{ toBlock: string; fromBlock: string; address: string[]; topics: string[][] }] }[];
     assert.ok(reqs.length <= (BATCH_MAX[url] ?? 10), `${url}: a batch within its cap`);
     const out = reqs.map((r) => {
@@ -221,6 +225,8 @@ function rhRecords(opts: { down?: number[]; lie?: (which: number, q: { method: s
     // `sparesAs`: a provider past the recorded three answers as that recorded one did (card evm-rpc-spare-list)
     const which = at >= 3 && opts.sparesAs !== undefined ? opts.sparesAs : at;
     const url = MAKER_RPCS.robinhood[which]!;
+    const pocket = pocketRefusal(asked, callsIn(init.body));
+    if (pocket) return pocket;
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
     assert.ok(reqs.length <= (BATCH_MAX[asked] ?? 10), `${asked}: a batch within its cap`);
     return new Response(JSON.stringify(reqs.map((q) => {
@@ -699,9 +705,6 @@ test("a priced coin's market cap of 0 is unknown: the FDV stands in, never MC 0"
 
 // ---- card helper-rpc-batch-learns-reader-size: the maker reads fit each provider's batch size ----
 const POCKET_RH = "https://robinhood.api.pocket.network";
-/** Pocket's own refusal past 5 calls (HTTP 413, plain text; base and robinhood .api.pocket.network, 2026-11-18 20:41Z and
- *  23:20Z from the Mac). */
-const pocket413 = () => new Response("request entity too large: the batch has more items than this window allows\n", { status: 413, headers: { "content-type": "text/plain" } });
 /** A provider answering every call's result `0x<id>` by id; `refuse(n)` a refusal of a post of n calls, or null. */
 function sized(refuse: (n: number) => Response | null) {
   const posts: number[] = [];
@@ -718,9 +721,10 @@ const answered = (got: unknown[]) => got.filter((x) => typeof x === "string").le
 test("Robinhood records with Pocket the second to answer: its 413 past 5 never leaves the read one provider short (Pocket starts at 5): the two agree", async () => {
   const gs = later("GS");
   // the chain's own, PublicNode and thirdweb down; dRPC and Pocket (answering as dRPC's recorded reads) left
+  // Pocket answers 413 past 5 in the rig, as on mainnet (test/pocket.ts)
   const r = rhRecords({ down: [0, 1, 4], sparesAs: 2 });
-  const fetch = async (u: string, init: RequestInit) => ((JSON.parse(String(init.body)) as unknown[]).length > 5 && u === POCKET_RH ? pocket413() : r.fetch(u, init));
-  const got = await readMakers("robinhood", fetch, [{ token: gs.address, createdS: gs.created_s }, ...RH.cases.slice(0, 3).map((c) => ({ token: c.address, createdS: c.created_s }))], REC_NOW);
+  assert.equal(pocketRefusal(POCKET_RH, 6)?.status, 413);
+  const got = await readMakers("robinhood", r.fetch, [{ token: gs.address, createdS: gs.created_s }, ...RH.cases.slice(0, 3).map((c) => ({ token: c.address, createdS: c.created_s }))], REC_NOW);
   assert.equal(got.get(gs.address), "pons");
   assert.equal(BATCH_MAX[POCKET_RH], 5);
   assert.equal(BATCH_MAX["https://base.api.pocket.network"], 5);
