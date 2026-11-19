@@ -504,6 +504,11 @@ const READ_SIZES_KEPT = 4_096;
 // A packed read answered 2 is read again as any is (READ_AGAIN_PER_CALL, then alone), so the budget only sets how many
 // share a call, never an answer
 const readGas = new Map<string, number>();
+// whether measured reads are packed by their gas (gasParts): off for the replays of taps recorded before it, whose calls
+// are matched call for call (test/evm-tap-record.ts)
+let gasPacking = true;
+/** Turns the packing of measured reads by their gas on or off (tests). Not in the index. */
+export const evmGasPacking = (on = true): void => void (gasPacking = on);
 const sizeKey = (r: Read) => lower(r.to) + r.data;
 // And by its route (card evm-warm-tap-reads-in-one-round): a buy's quote of a route at the quote's amount or at twice
 // it (`Read.size`, the calldata less its amount word), whatever that amount. The coin page warms a coin at
@@ -718,7 +723,7 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
   for (const i of plain) {
     const kept = readSizes.get(sizeKey(reads[i]!)) ?? routeSizes.get(reads[i]!.size ?? "");
     // (a test's reads a call, evmReadsPerCall, is a count: its recordings are matched call for call)
-    if (again === undefined && readsOverride === undefined && kept === undefined && perCall < STATE_READS_PER_CALL && readGas.has(sizeKey(reads[i]!))) measured.push(i);
+    if (again === undefined && gasPacking && readsOverride === undefined && kept === undefined && perCall < STATE_READS_PER_CALL && readGas.has(sizeKey(reads[i]!))) measured.push(i);
     else append(bySize, again === undefined ? Math.min(kept ?? perCall, perCall) : perCall, i);
   }
   for (const [n, g] of bySize) for (let k = 0; k < g.length; k += n) fit(g.slice(k, k + n));
