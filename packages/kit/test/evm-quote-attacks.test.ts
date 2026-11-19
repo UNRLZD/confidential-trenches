@@ -892,6 +892,78 @@ test("card evm-buy-and-sell-on-mainnet: with the device's pool index served, a q
   }
 });
 
+// card evm-pool-index-route: three coins quoted on a served index that covers the agreed head read their pools from it
+// alone: each coin's cold buy, its warm buy and its sell ask no getLogs at all (the index is the one depth read), and the
+// pools the scan provider does not log (it logs none here) are still found and priced: the real pool behind a hook the
+// venue does not list holds the seeded route, and the coin's pool with X sends a markets scan of X to the index too. An
+// index that is not whole is never served, and the bounded scan runs instead, by currency from the depth's floor.
+const f10Run = async (served: boolean, n: number) => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const coins = [0, 1, 2].map((i) => {
+    const t = "0x" + (0xf1000 + 16 * n + i).toString(16).padStart(40, "0");
+    const x = xAt(0x7f00 + 16 * n + i);
+    const viaX: ModelPool = { key: keyOf(t, x, 3000, 60, NATIVE), give: (a) => a / 20n };
+    return { t, pools: [seeded(t), real(t), viaX, marketOf(x)], keys: [real(t).key, viaX.key, marketOf(x).key] };
+  });
+  const asks: { a: number; currency: boolean }[] = [];
+  const empty = scanner(5_000_000, []);
+  const scan: EvmRpc = async (calls, signal) => {
+    for (const f of getLogsOf(calls)) asks.push({ a: Number(f.fromBlock), currency: f.topics.slice(1).some((x) => x !== null && x !== undefined) });
+    return empty(calls, signal);
+  };
+  const out: unknown[] = [];
+  evmPoolIndexReset();
+  try {
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: served ? 5_000_000 : null, pools: coins.flatMap((c) => c.keys.map((key) => ({ key }))) }), served);
+    for (const c of coins) {
+      const buy = () => verdict(evmPoolBuyQuoteWith({ chain: "base", token: c.t, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(c.t) }, [chain(c.pools, 0), chain(c.pools, 1)], NOW, scan, undefined, () => 0));
+      out.push(await buy(), await buy(), await sellVerdict(sellOn(c.pools, c.t, scan)));
+      await pause(20);
+    }
+  } finally {
+    evmPoolIndexReset();
+  }
+  return { coins, out, asks };
+};
+test("F10 three coins on a served index that covers the agreed head: each one's cold buy, warm buy and sell read their pools from the index, 0 getLogs", async () => {
+  const { coins, out, asks } = await f10Run(true, 1);
+  assert.deepEqual(asks, [], `the quotes asked ${asks.length} getLogs, ${asks.filter((x) => x.currency).length} by currency`);
+  coins.forEach((c, i) => {
+    // each buy of the seeded route refused against the index's real pool, which the scan provider never logged
+    assert.deepEqual(out[3 * i], below, big(out[3 * i]));
+    assert.deepEqual(out[3 * i + 1], below, big(out[3 * i + 1]));
+    // the sell leaves through the index's real pool, not the seeded one it was bought in
+    viaHook(out[3 * i + 2], real(c.t).key, AMOUNT);
+  });
+});
+test("F10p an index that is not whole is never served: the same quotes run the bounded scan by currency from the depth's floor, and find none of the index's pools", async () => {
+  const { out, asks } = await f10Run(false, 2);
+  assert.ok(asks.length > 0 && asks.some((x) => x.currency && x.a === 4_000_001), JSON.stringify(asks.slice(0, 4)));
+  // the seeded route is all the scan finds: each buy takes it
+  out.forEach((v, i) => i % 3 !== 2 && assert.equal((v as { accepted: boolean }).accepted, true, big(v)));
+});
+
+test("F10w a warm buy with a held head (its first round sent beside its scan) on a served index that covers it is held to the index's pool, 0 getLogs", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const token = "0x00000000000000000000000000000000000f10f1";
+  const pools = [seeded(token), real(token)];
+  const rpcs = [chain(pools, 0), chain(pools, 1)];
+  const watch = quoteMod.evmHeadWatch(rpcs, 50n, () => NOW, false, () => 0);
+  const asks: unknown[] = [];
+  const empty = scanner(5_000_000, []);
+  const scan: EvmRpc = async (calls, signal) => (asks.push(...getLogsOf(calls)), empty(calls, signal));
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) };
+  evmPoolIndexReset();
+  try {
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 5_000_000, pools: [{ key: real(token).key }] }), true);
+    assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scan, watch, () => 0)), below);
+    assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scan, watch, () => 0)), below);
+    assert.deepEqual(asks, []);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
 // card evm-tree-reads-only-when-needed: a scanless quote (the page's shown price on a device that holds nothing) reads no
 // log: the served index's pools and the helper's, each read on both providers like any candidate, and no block scanned
 test("SCANLESS a scanless quote asks the scan provider nothing and prices on the served index's pools as a scanned one does", async () => {

@@ -174,6 +174,12 @@ export const MUTANTS = [
   [QUOTE, "if (rs !== null && fine(rs)) return void keep(rs);", "if (rs !== null) return void keep(rs);", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
   [QUOTE, "  if (b - scanHead > maxLag) {", "  if (false) {", R, "card evm-quote-head-watch: a scan that ends more than maxLag"],
   [QUOTE, '  const scanning = scanOf([lower(token)], "all");', '  void agreedOnce();\n  const scanning = scanOf([lower(token)], "all");', R, "card evm-quote-head-watch: the agreed block is picked once"],
+  // card evm-pool-index-route: a served index that covers the agreed head feeds the token's scan, its markets scans and the
+  // warm round with no getLogs; one that is not whole is never served
+  [QUOTE, "    const ixs = indexScanOf(chain, kind, c, weth, floor);\n", "    const ixs = undefined as ReturnType<typeof indexScanOf>;\n", R, "F10 "],
+  [QUOTE, "    const ixs = indexScanOf(chain, kind, c, weth, floor);\n", "    const ixs = undefined as ReturnType<typeof indexScanOf>;\n", R, "F10w "],
+  [QUOTE, "if (ix === undefined || ix.through < floor) return undefined;", "if (ix === undefined || ix.through < floor || kind === \"markets\") return undefined;", R, "F10 "],
+  [QUOTE, "  const n = sync?.coversThrough;", "  const n = sync?.coversThrough ?? 5_000_000;", R, "F10p "],
   // card evm-quote-fast-from-asia: a warm buy's round beside its scan, used only where the scan agrees its block and pools
   [QUOTE, "    if (a.sell || a.minBlock !== undefined || a.speculate === false || ", "    if (true || ", R, "W7 "],
   [QUOTE, "  return a.size === b.size && [...a].every((id) => b.has(id));", "  return true;", R, "W8 "],
