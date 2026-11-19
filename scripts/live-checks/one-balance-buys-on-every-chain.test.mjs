@@ -171,6 +171,11 @@ test("the tap sized on every pool chain (card evm-cash-move-brings-its-fee: `sho
   const every =
     "o=e=>a===`solana`?n.amount-e:null,s={error:`failed`};let c=t(),l=await c.any(a)?await c.tapMax(a,i).catch(()=>null):n.amount,u=l!==null&&l<n.amount&&c.short?await c.short(a,i,n.amount).catch(()=>null):null,d=l!==null&&l<n.amount?u??o(l):null,f=d===null?null:await c.need(a,d);if(f!==null){try{r?.route?.({move:`cash`,op:f})}catch{}let e=await kq(c.moved(f).catch(e=>({landed:!1,error:EK(e)})),c.signal);e!==null&&p(`move`,{move:f,stage:e.landed?`landed`:`stopped`,...e.error===void 0?{}:{error:e.error}});let m=0,s=new Map;for(;e?.landed===!0&&!c.signal?.aborted&&await c.tapMax(a,i)<n.amount&&(m=await c.proving(a,s).catch(()=>!1)?0:m+1,!(m>=2));)await c.wait(kK)";
   assert.equal(facts("", `let ${every}`).tap, true);
+  // card sol-buy-takes-the-best-venue-it-can-trade: the first read with the ask's amount and slippage
+  const asked = every.replace("await c.tapMax(a,i).catch(()=>null)", "await c.tapMax(a,i,{amount:n.amount,slippageBps:n.slippageBps}).catch(()=>null)");
+  assert.notEqual(asked, every);
+  assert.equal(facts("", `let ${asked}`).tap, true);
+  assert.equal(facts("", `let ${asked.replace("u??o(l)", "u")}`).tap, false);
   for (const bad of [
     every.replace("u??o(l)", "u"),
     every.replace("?n.amount-e:", "?n.amount:"),

@@ -233,8 +233,17 @@ export interface SignpageParams {
    * swaps when that is less (PoolBuyDry buys). On NEAR (card you-receive-on-every-chain) a spend of Cash in whole USDC,
    * the fees inside it as a NEAR buy draws them: tap_max the Cash a buy can spend, and with an amount, cost (those fees)
    * and out (one quote of what the buy swaps). An amount that is not a decimal of the chain's asset: not_allowed.
+   * On Solana with an amount (card sol-buy-takes-the-best-venue-it-can-trade) the answer is the tap's own venue decision
+   * on the same reference and pins: `out` is the buy's on the best pool of a venue the page builds and pins a table for,
+   * held to the best pool of every venue read, and the refusals a pool.buy of the same ask answers before it claims a
+   * note: venue_not_pinned (the coin has pools, none on a venue the page pins a table for), below_reference (the best
+   * pinned pool gives less than the coin's market, the best pool of every venue read, less the ask's slippage: a pool
+   * seeded beside the coin's real market), and quote_check_failed (no pool the two providers agree on). The tap alone,
+   * past its reads, also answers no_table_fits (no pinned table makes the buy fit 1,232 bytes) and venue_not_built (a
+   * coin this build does not trade). `slippage_bps`: the slippage the pool.buy will ask, the same rule's;
+   * with none, judged at 0 bps.
    */
-  "pool.buy.dry": { chain: PoolChain | "near"; token: string; amount?: string };
+  "pool.buy.dry": { chain: PoolChain | "near"; token: string; amount?: string; slippage_bps?: number };
   /**
    * Move `amount` of `from`'s own money to `to` (card one-balance-buys-on-every-chain; the Blindfill v2 lite paper §3-4):
    * NEAR is Cash, the vault's USDC; any other chain its pool's asset (POOL_ASSET_DECIMALS: SOL, ETH). `amount` is in

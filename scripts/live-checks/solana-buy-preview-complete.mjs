@@ -39,7 +39,10 @@ const esc = (v) => v.replace(/\$/g, "\\$");
 // (card you-receive-on-every-chain: the proofs, the venue and the rent read by one shared read, `await read(pair, token,
 // pools)`, its refusal returned as is, so the dry and cashFirst's sizing read them the same way; card
 // solana-quote-reads-found-pools-once: the page's finders, with the dry's early pools when the page asks for them)
-const QUOTE = new RegExp(`(${N})=(${N})!==null&&\\2>0n\\?${N}\\(${N},\\{side:\`buy\`,token:${N},amount:\\2\\}(?:,void 0,\\{early:${N}\\.early===!0\\})?\\)\\.catch\\(\\(\\)=>null\\):null,(?:${N}=await ${N}\\.ready\\(\\)|(${N})=await ${N}\\(${N},${N},${N}\\);if\\(\`error\`in \\3\\)return \\3;)`);
+// (card sol-buy-takes-the-best-venue-it-can-trade: a failed read is still no quote, `.then((r)=>({ref:r}),()=>null)`,
+// so the reference read is the tap's venue decision; the shared read's not_funded returned first, its other refusals
+// after the decision)
+const QUOTE = new RegExp(`(${N})=(${N})!==null&&\\2>0n\\?${N}\\(${N},\\{side:\`buy\`,token:${N},amount:\\2\\}(?:,void 0,\\{early:${N}\\.early===!0\\})?\\)(?:\\.catch\\(\\(\\)=>null\\)|\\.then\\((${N})=>\\(\\{ref:\\3\\}\\),\\(\\)=>null\\)):null,(?:${N}=await ${N}\\.ready\\(\\)|(${N})=await ${N}\\(${N},${N},${N}\\);if\\(\`error\`in \\4\\)return \\4;|(${N})=await ${N}\\(${N},${N},${N}\\);if\\(\`error\`in \\5&&\\5\\.error===\`not_funded\`\\)return \\5;)`);
 /** The best venue's pick (bestVenuePool): the quote's pools on a venue list, sorted by expected out, the first
  *  (groups: the function, the venue list). */
 const BEST = new RegExp(`(${N})=(${N})=>\\2\\?\\.pools\\.filter\\((${N})=>(${N})\\.includes\\(\\3\\.venue\\)\\)\\.sort\\(\\((${N}),(${N})\\)=>\\5\\.expectedOut>\\6\\.expectedOut\\?-1:1\\)\\[0\\]`, "g");
@@ -62,6 +65,16 @@ const outRead = (quote, best) =>
   new RegExp(
     `(${N})=async\\(\\)=>\\{let (${N})=${esc(best)}\\(await ${esc(quote)}\\);return \\2!==void 0&&(${N})\\.decimals!==void 0&&\\2\\.expectedOut>0n\\?${N}\\(\\2\\.expectedOut,\\3\\.decimals\\):void 0\\};[^]*?let (${N})=await \\1\\(\\);return\\{result:\\{tap_max:${N},[^;]*?cost:${N}\\([^;]*?\\),\\.\\.\\.\\4===void 0\\?\\{\\}:\\{out:\\4\\}\\}\\}`,
   );
+/** The same out from the buy's own venue decision (card sol-buy-takes-the-best-venue-it-can-trade: page-rpc.ts
+ *  solanaBuyVenue, which the tap takes): the awaited quote's reference decided, its refusal returned, and out the
+ *  decided pool's expected out at the venue's decimals in the answer (groups: the awaited read, the decision, its
+ *  function, the read, its pool, the venue, the awaited out). */
+const outPick = (quote) =>
+  new RegExp(
+    `(${N})=${esc(quote)}===null\\?null:await ${esc(quote)},(${N})=\\1===null\\?null:(${N})\\(\\1\\.ref,[^;]*?;if\\(\\2!==null&&\`error\`in \\2\\)return \\2;[^]*?(${N})=async\\(\\)=>\\{let (${N})=\\2\\?\\.pool;return \\5!==void 0&&(${N})\\.decimals!==void 0&&\\5\\.expectedOut>0n\\?${N}\\(\\5\\.expectedOut,\\6\\.decimals\\):void 0\\};[^]*?let (${N})=await \\4\\(\\);return\\{result:\\{tap_max:${N},[^;]*?cost:${N}\\([^;]*?\\),\\.\\.\\.\\7===void 0\\?\\{\\}:\\{out:\\7\\}\\}\\}`,
+  );
+/** The decision `f` picks among the reference's pools on the buy's venues (group: the venue list). */
+const decidesOn = (js, f) => new RegExp(`function ${esc(f)}\\(${N},${N},${N}\\)\\{[^]{0,300}?\\.filter\\(${N}=>(${N})\\.includes\\(${N}\\.venue\\)\\)`).exec(js)?.[1] ?? null;
 /** The mint's decimals, byte 44 after a length check (group: the decimals). */
 const DECIMALS = new RegExp(`if\\((${N})\\.data\\.length<82\\)throw Error\\(\`the mint is shorter than a mint\`\\);let (${N})=\\1\\.data\\[44\\]`);
 /** kit-v1.13's level in the version chain. */
@@ -73,7 +86,9 @@ const STRIP = new RegExp(`(${N})=\\((${N}),(${N})\\)=>\\{if\\(typeof \\3!=\`obje
 export function facts(index, js) {
   const quote = QUOTE.exec(js);
   // the out written from a pick of the best venue on the buy's venues
-  const out = quote ? [...js.matchAll(BEST)].some((b) => buyVenues(js, b[4]) && (outOf(quote[1], b[1]).test(js) || outRead(quote[1], b[1]).test(js))) : false;
+  const pick = quote ? outPick(quote[1]).exec(js) : null;
+  const decided = pick ? decidesOn(js, pick[3]) : null;
+  const out = quote ? [...js.matchAll(BEST)].some((b) => buyVenues(js, b[4]) && (outOf(quote[1], b[1]).test(js) || outRead(quote[1], b[1]).test(js))) || (decided !== null && buyVenues(js, decided)) : false;
   const dec = DECIMALS.exec(js);
   const strip = STRIP.exec(js);
   // the strip is what kit-v1.13's level returns: its result returned at that level, before any other strip

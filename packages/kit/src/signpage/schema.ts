@@ -464,7 +464,7 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   "pool.address": poolAddressParams,
   "deposit.coin": obj({ chain: poolChain }),
   "pool.sell.dry": poolSellDryParams,
-  "pool.buy.dry": obj({ chain: tradeChain, token: str }, { amount: dec }),
+  "pool.buy.dry": obj({ chain: tradeChain, token: str }, { amount: dec, slippage_bps: bps(0) }),
   "pool.move": poolMove,
   "pool.move.dry": poolMove,
 } as const satisfies Record<SignpageKind, SignpageSchema>;
