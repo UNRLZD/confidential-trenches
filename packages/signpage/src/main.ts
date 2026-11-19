@@ -59,7 +59,13 @@
 //   draws the held deposit's way out (src/withdraw/held.ts, card held-deposit-way-out) for the held op of that id in
 //   this page's own store, and a move a reload cut short is resumed at sign-in, its same signed bytes. Withdraw is guarded like Sign out; its note value, fee and hand-off are the
 //   build's network's (src/withdraw/handoff.ts, card signpage-withdraw-handoff), drawn not offered where that network
-//   names no vault or relayer. export.open stays refused until its card.
+//   names no vault or relayer.
+//   Card signpage-backup-export adds export.open (src/pages/export.ts): taken only for an address the stored seed itself
+//   derives on the named chain, from the page's own notes, pool deposit ops and refund records (else not_allowed, before
+//   any screen); it draws the export screen, sealed as the backup is: the chain, the address shortened, Show and Done.
+//   The key is derived and drawn only at the user's own Show (guarded as Backup), goes to the clipboard only by their own
+//   Copy, and is in no answer, no message and no record: only this top-level page's DOM holds it while it is drawn, and
+//   every way off the screen drops it (and writes the clipboard empty after a Copy, as the backup's words).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
@@ -112,6 +118,7 @@ import { GROUND_LOGO_SVG } from "./ground-logo.ts";
 import { SEALED } from "./frame-cover.ts";
 import { joinRunning } from "./dry-join.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
+import { CHAIN_NAME, exportChain, exportKey, exportRefs, ownsWallet, shortAddress, type ExportChain } from "./pages/export.ts";
 import { parseAmount, vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm, type GivenWithdraw } from "./withdraw/form.ts";
 import { drawHeldMoveOut, type HeldDeps } from "./withdraw/held.ts";
@@ -136,7 +143,7 @@ import type { PoolChain } from "./rules/pool.ts";
 
 type State =
   | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
-  | "choose" | "existing" | "signout" | "withdraw" | "pool-withdraw" | "held"
+  | "choose" | "existing" | "signout" | "withdraw" | "pool-withdraw" | "held" | "export"
   // card withdraw-address-in-the-app: the two withdraw screens for an address and amount typed in the app's own sheet,
   // drawn as a confirm with no field to type into, so not sealed (src/frame-cover.ts): the app's frame stays under them
   | "withdraw-confirm" | "pool-withdraw-confirm";
@@ -163,6 +170,9 @@ const WORDS = {
   cancel: "Cancel", // owner 2 Nov 06:08Z, all approved
   "new-account": "New account", // owner 2 Nov 06:08Z, all approved
   "have-one": "I already have one", // owner 2 Nov 06:08Z, all approved
+  // the export screen's terse labels (card signpage-backup-export)
+  show: "Show",
+  done: "Done",
 } as const;
 
 const framed = window.top !== window;
@@ -189,7 +199,7 @@ const root = document.createElement("main");
 root.id = "signin";
 if (framed) root.dataset.framed = "true";
 // top-level: the shell, with these screens in its layer over the APP_HOST frame; the layer opens only when the app
-// asks (signin.open, signout, backup.open and withdraw.open here; export.open is refused until its card builds it) and
+// asks (signin.open, signout, backup.open, withdraw.open and export.open here) and
 // closes on signed in, signed out by the signout kind, or Cancel
 let shell: Shell | null = null;
 // card signpage-answers-outside-apps (src/outside.ts): on /connect this page is an outside app's popup, its opener the
@@ -956,6 +966,8 @@ else {
       "signin.open": (p, ctx) => openKind(ctx.id, "signin.open", p.way),
       signout: (_p, ctx) => openKind(ctx.id, "signout"),
       "backup.open": (_p, ctx) => openKind(ctx.id, "backup.open"),
+      // one key of this seed's, for an address the seed itself derives on that chain (src/pages/export.ts)
+      "export.open": (p, ctx) => openExport(ctx.id, p.chain, p.address),
       // the form withdraws from the vault's notes; with a one-time id (from_id) the held deposit's way out
       "withdraw.open": (p, ctx) => (takesParams("withdraw.open", p) ? openKind(ctx.id, "withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined, givenOf(p)) : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
@@ -997,6 +1009,8 @@ else {
   // Firefox and Safari, so the x, the scrim, Cancel and Saved (taps) leave it then
   shell.onDismiss = (by) => {
     if (by === "key" && copied) return;
+    const st = root.dataset.signin;
+    if (st === "export" || st === "backup") return leaveScreen();
     void run(cancel);
   };
   // an outside app's popup with no opener (opened by hand, or its opener cut) has no one to connect
@@ -1141,7 +1155,7 @@ async function resynced(): Promise<void> {
 // `closes`: the layer the open shows tells the app when it has closed (src/shell.ts); src/kit-version.ts takes it from an
 // app below the kit's own version, which reads no such notice
 type OpenAnswer = { result: { pending: true; closes: true }; then: () => void } | null;
-function decide(id: string, kind: AccountKind, way: unknown, fromId?: string, given?: GivenWithdraw | null): OpenAnswer {
+function decide(id: string, kind: AccountKind, way: unknown, fromId?: string, given?: GivenWithdraw | null, target?: ExportTarget): OpenAnswer {
   // a sheet shown already is never redrawn by the app: a kind the frame sent before it opened is refused
   if (sheetShown() || !takes(kind, root.dataset.signin, busy)) return null;
   return {
@@ -1155,7 +1169,14 @@ function decide(id: string, kind: AccountKind, way: unknown, fromId?: string, gi
         if (page === "signed-in") return landed({ screen: "signed-in", seed: seed! });
         if (page === "signed-out") return show("signed-out");
         if (page === "backup") showBackup(seed!);
-        else if (page === "signout") show("signout", shown(seed!));
+        else if (page === "export") {
+          // only openExport opens it, always with its checked wallet
+          if (!target) return show("signed-in", shown(seed!));
+          // the screen needs no seed until Show: its entropy is zeroed at once
+          seed!.entropy.fill(0);
+          exportTarget = target;
+          show("export");
+        } else if (page === "signout") show("signout", shown(seed!));
         else if (page === "withdraw") {
           // the form needs no seed: its entropy is zeroed at once
           seed!.entropy.fill(0);
@@ -1172,6 +1193,77 @@ function decide(id: string, kind: AccountKind, way: unknown, fromId?: string, gi
         layer();
       }),
   };
+}
+// export.open (card signpage-backup-export): refused not_allowed on a chain this page exports on none of, an address
+// that is no string, or one the stored seed does not derive there among the page's own records; the check runs before
+// the answer (after a resync's read, as openKind waits), on the seed and records as they are then, and the screen's Show
+// derives again from the store as it is at that tap. The answer carries no key and no word of which wallet it is.
+type ExportTarget = { chain: ExportChain; address: string };
+let exportTarget: ExportTarget | null = null;
+// the key while it is drawn (a JS string, which cannot be zeroed): dropped by every show() off the export screen
+let exportShown: string | null = null;
+function openExport(id: string, chain: unknown, address: unknown): { after: Promise<void>; answer: () => OpenAnswer } | null {
+  if (framed || !exportChain(chain) || typeof address !== "string" || address === "" || sheetShown() || !takes("export.open", root.dataset.signin, busy)) return null;
+  let owned = false;
+  const after = (async () => {
+    await resynced();
+    owned = await ownsNow(chain, address);
+  })();
+  return { after, answer: () => (owned ? decide(id, "export.open", undefined, undefined, undefined, { chain, address }) : null) };
+}
+// The page's own records' wallets (src/pages/export.ts exportRefs): the notes, the pool deposit ops, the refund records.
+async function exportRefsNow() {
+  const st = await open();
+  return exportRefs(await stateNotes(), await pageOps(), await storedRefunds(st));
+}
+async function ownsNow(chain: ExportChain, address: string): Promise<boolean> {
+  const refs = await exportRefsNow();
+  if (refs.length === 0) return false;
+  const seed = await openSeed64();
+  try {
+    return ownsWallet(seed, chain, address, refs);
+  } finally {
+    seed.fill(0);
+  }
+}
+// A way off the export or the backup screen (Done, the x, the scrim, Esc, pagehide) wins over a step still running
+// (Show reading the store and deriving): the screen's wallet and key go at the tap, so the step's own check
+// (exportTarget !== t) draws nothing, and the page goes back to the app once the step ends (run's leaveAfter).
+let leaveAfter = false;
+function leaveScreen(): void {
+  exportTarget = null;
+  exportShown = null;
+  if (busy) return void (leaveAfter = true);
+  void run(cancel);
+}
+// pagehide (the browser may keep the page for Back, or freeze it): the key or the 12 words leave the page in this task,
+// before it is kept, and the page goes back to the app
+addEventListener("pagehide", () => {
+  const st = root.dataset.signin;
+  if (st !== "export" && st !== "backup") return;
+  root.replaceChildren();
+  drawn?.fill(0);
+  drawn = null;
+  leaveScreen();
+});
+// Show: the key, derived now from the stored seed for the screen's wallet; a seed that no longer derives it (another
+// tab signed out and in) draws nothing and goes back to the app as the store stands.
+async function showKey(): Promise<void> {
+  topLevelOnly();
+  const t = exportTarget;
+  if (t === null || root.dataset.signin !== "export") return;
+  const refs = await exportRefsNow();
+  const seed = await openSeed64();
+  let key: string | null;
+  try {
+    key = exportKey(seed, t.chain, t.address, refs);
+  } finally {
+    seed.fill(0);
+  }
+  if (key === null) return cancel();
+  if (root.dataset.signin !== "export" || exportTarget !== t) return;
+  exportShown = key;
+  show("export");
 }
 // pool.withdraw (card signpage-pool-withdraw-form), top-level only and only with a seed stored, as withdraw.open: the
 // answer goes first, then the screen where the user types To and the amount, never passed in by the app; the run's
@@ -1234,7 +1326,7 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
-const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out", "allow", "confirm", "disconnect", "new-account"]);
+const GUARDED = new Set(["signout", "saved", "backup", "show", "copy", "withdraw", "move-out", "allow", "confirm", "disconnect", "new-account"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
@@ -1275,6 +1367,11 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     drawn.fill(0);
     drawn = null;
   }
+  // off the export screen: its wallet and its key go
+  if (state !== "export") {
+    exportTarget = null;
+    exportShown = null;
+  }
   if (state === "signed-in") closeLayer();
   if (seed) {
     root.dataset.account = seed.account;
@@ -1293,7 +1390,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     const parts: HTMLElement[] = [];
     if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words"
       && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw" && state !== "pool-withdraw" && state !== "held"
-      && state !== "withdraw-confirm" && state !== "pool-withdraw-confirm") {
+      && state !== "withdraw-confirm" && state !== "pool-withdraw-confirm" && state !== "export") {
       const p = document.createElement("p");
       p.textContent = WORDS[state];
       parts.push(p);
@@ -1345,6 +1442,9 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       if (!framed && words) {
         const list = document.createElement("ol");
         list.dataset.words = "12";
+        // never sent to the browser's page translation (scripts/build-app.mjs page: the whole page says so too)
+        list.className = "notranslate";
+        list.setAttribute("translate", "no");
         for (const w of words.split(" ")) {
           const li = document.createElement("li");
           li.textContent = w;
@@ -1357,6 +1457,30 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       }));
         parts.push(button("saved", WORDS.saved, () => void run(saved)));
       }
+    } else if (!framed && state === "export" && exportTarget) {
+      // one key of this seed's, top-level only: the chain and the address, the key only after the user's own Show
+      const { chain, address } = exportTarget;
+      const name = document.createElement("p");
+      name.textContent = CHAIN_NAME[chain];
+      const at = document.createElement("p");
+      at.textContent = shortAddress(address);
+      parts.push(name, at);
+      const key = exportShown;
+      if (key === null) parts.push(button("show", WORDS.show, () => void run(showKey)));
+      else {
+        const k = document.createElement("p");
+        k.dataset.key = chain;
+        k.className = "notranslate";
+        k.setAttribute("translate", "no");
+        k.textContent = key;
+        Object.assign(k.style, { overflowWrap: "anywhere", minWidth: "0" });
+        parts.push(k);
+        parts.push(button("copy", WORDS.copy, () => {
+          copied = true;
+          void navigator.clipboard?.writeText(key).catch(() => {});
+        }));
+      }
+      parts.push(button("done", WORDS.done, leaveScreen));
     } else if (!framed && (state === "words" || state === "invalid-code")) {
       const box = document.createElement("textarea");
       box.dataset.input = "words";
@@ -1378,7 +1502,8 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       }
       parts.push(button("recovery", WORDS.recovery, () => show("words")));
     }
-    if (shell && cancellable) parts.push(button("cancel", WORDS.cancel, () => void run(cancel)));
+    // the export screen's own Done is its Cancel
+    if (shell && cancellable && state !== "export") parts.push(button("cancel", WORDS.cancel, () => void run(cancel)));
     root.replaceChildren(...parts);
   };
   // a sealed screen's fields (the 12 words' area, To and the amount, the account, the 12 words and their Copy) are made
@@ -2004,6 +2129,11 @@ async function run(step: () => Promise<void>, again = true): Promise<void> {
     show("error");
   } finally {
     busy = false;
+  }
+  // a way off the export or the backup tapped during the step (leaveScreen): back to the app now
+  if (leaveAfter) {
+    leaveAfter = false;
+    return void run(cancel);
   }
   // another tab's seed write heard during the step, which ended with no account on screen: that seed is landed on
   if (movedInStep) {

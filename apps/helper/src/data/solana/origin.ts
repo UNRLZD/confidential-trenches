@@ -14,7 +14,17 @@
 // Layouts: raydium-io/raydium-sdk-V2 src/raydium/launchpad/layout.ts and pda.ts; MeteoraAg/dynamic-bonding-curve
 // programs/dynamic-bonding-curve/src/state/virtual_pool.rs and config.rs and the pool's seeds in
 // instructions/initialize_pool (all read 2026-11-03 16:45Z); every offset is checked against live accounts in
-// origin.test.ts.
+// origin.test.ts. Re-pinned for card helper-curve-all-pads (2026-11-19 11:00Z), every offset below unchanged at:
+// raydium-sdk-V2@32a184eb0aea15ddbb485e24a1a73d3723fd94d6 src/raydium/launchpad/layout.ts LaunchpadPool;
+// dynamic-bonding-curve@3bde880003183cdbf8ce7fd9444cd04d43ca29d1 programs/dynamic-bonding-curve/src/state/virtual_pool.rs
+// PoolState (INIT_SPACE 416, :199) and .../src/state/config.rs PoolConfig (INIT_SPACE 1040, :681; ConfigWithTransferHook
+// 1120, :691).
+// Completion, each pad's own (curve-pads.test.ts holds each on recorded mainnet accounts):
+//   - pump.fun: complete once real_token_reserves is 0; progress is tokens sold against the 793.1 M a curve starts with
+//     (lists.ts pumpCurveBps);
+//   - LaunchLab: base sold, real_a against total_sell_a (a buy is capped at total_sell_a - real_a: raydium-sdk-V2@32a184e
+//     src/raydium/launchpad/curve/curve.ts:286 and :350); status 0 is the raise, 1 and 2 past it;
+//   - DBC: quote raised, quote_reserve against the config's migration_quote_threshold (dbcBps).
 //
 // The tag: the program that made the token names its family pad ("pump.fun", "raydium-launchlab", "met-dbc"). A
 // provider's tag is kept only when the read agrees with it: Jupiter names a platform or partner pad on these programs
@@ -138,6 +148,14 @@ export function dbcOf(v: unknown, mint: string, config: string): { quoteReserve:
   return { quoteReserve: a.data.readBigUInt64LE(DBC.quoteReserve), migrated: m === 1 };
 }
 
+/** A DBC curve's progress by DBC's own rule: complete once quote_reserve reaches the config's migration_quote_threshold
+ *  (MeteoraAg/dynamic-bonding-curve@3bde880 programs/dynamic-bonding-curve/src/state/virtual_pool.rs:1120
+ *  is_curve_complete), so 10,000 then or once migrated, before the pool migrates as after (its swap refuses a complete
+ *  curve: programs/dynamic-bonding-curve/src/instructions/swap/process_swap.rs:221-224 PoolIsCompleted); else quote
+ *  raised against the threshold, 0-9,999. */
+export const dbcBps = (quoteReserve: bigint, migrated: boolean, threshold: bigint): number =>
+  migrated || quoteReserve >= threshold ? 10_000 : Math.min(9_999, Number((quoteReserve * 10_000n) / threshold));
+
 /** A DBC config account: its quote mint and migration threshold, or null when it is not one. */
 export function dbcConfigOf(v: unknown): { quote: string; threshold: bigint } | null {
   const a = account(v);
@@ -209,8 +227,7 @@ export function firstRound(mint: string, hint: Hint | undefined, accounts: reado
         read: (v) => {
           const d = dbcOf(v, mint, cfg);
           if (d === null) return null;
-          const bps = d.migrated ? 10_000 : Math.min(9_999, Number((d.quoteReserve * 10_000n) / c.threshold));
-          return { pad: agreed("dbc", cfg, hint), family: "dbc", pool, config: cfg, curveBps: bps };
+          return { pad: agreed("dbc", cfg, hint), family: "dbc", pool, config: cfg, curveBps: dbcBps(d.quoteReserve, d.migrated, c.threshold) };
         },
       });
     }
@@ -274,7 +291,7 @@ export function progressOf(o: Origin, mint: string, pool: unknown, threshold: bi
   }
   const d = dbcOf(pool, mint, o.config!);
   if (d === null) return null;
-  return { ...o, curveBps: d.migrated ? 10_000 : threshold === null ? null : Math.min(9_999, Number((d.quoteReserve * 10_000n) / threshold)) };
+  return { ...o, curveBps: d.migrated ? 10_000 : threshold === null ? null : dbcBps(d.quoteReserve, false, threshold) };
 }
 
 /** Jupiter's word on each token of a list answer: its tag and the config it names, each checked as an id. */

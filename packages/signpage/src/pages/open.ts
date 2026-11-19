@@ -15,6 +15,9 @@
 //   where the user types the address and the amount (W:927). With a one-time id (from_id, W:928; card
 //   held-deposit-way-out) it draws the held deposit's way out (src/withdraw/held.ts) for a 64-hex id, and the page then
 //   finds the held op of that id in its own store; any other from_id is refused.
+// - export.open (card signpage-backup-export): only with a seed stored, and only for an address the stored seed itself
+//   derives on the named chain (src/pages/export.ts, checked before the answer); it draws the export screen, where the
+//   key is drawn only at the user's own Show and leaves the page only by their own Copy (W:938, W:957).
 //
 // Every open kind runs top-level only: the framed page answers no kind but state (src/main.ts starts its API with none),
 // so a sign-out asked from inside a frame is refused. Each page draws in the shell's layer, and the layer's opening
@@ -23,13 +26,13 @@
 import { backupFirst } from "@blindfill/wallet/store";
 
 /** The open kinds these pages answer. */
-export type AccountKind = "signin.open" | "signout" | "backup.open" | "withdraw.open";
+export type AccountKind = "signin.open" | "signout" | "backup.open" | "withdraw.open" | "export.open";
 
 /** The page's own states in which no open kind is taken: a step is running, or the store is not read yet. */
 const BUSY = new Set(["loading"]);
 
 /** Whether the page has a seed stored, from the state it shows (its own store's last read). */
-const SIGNED_IN = new Set(["signed-in", "backup", "signout", "withdraw", "pool-withdraw", "held"]);
+const SIGNED_IN = new Set(["signed-in", "backup", "signout", "withdraw", "pool-withdraw", "held", "export"]);
 
 /**
  * Whether `kind` may open now: `state` is the page's data-signin, `busy` whether a step is running. A refused kind is
@@ -51,7 +54,7 @@ export function takesParams(kind: AccountKind, params: Record<string, unknown>):
 }
 
 /** The page a kind draws, read from the store just before it draws: `seed` is the stored seed's status, or none. */
-export type Page = "passkey" | "unsupported" | "words" | "choose" | "signed-in" | "backup" | "signout" | "signed-out" | "withdraw" | "held";
+export type Page = "passkey" | "unsupported" | "words" | "choose" | "signed-in" | "backup" | "signout" | "signed-out" | "withdraw" | "held" | "export";
 
 export function pageFor(
   kind: AccountKind,
@@ -69,6 +72,7 @@ export function pageFor(
   }
   if (!seed) return "signed-out";
   if (kind === "backup.open") return "backup";
+  if (kind === "export.open") return "export";
   if (kind === "withdraw.open") return fromId === undefined ? "withdraw" : "held";
   // signout: the backup first while the 12 words are the only copy and not saved
   return backupFirst(seed) ? "backup" : "signout";

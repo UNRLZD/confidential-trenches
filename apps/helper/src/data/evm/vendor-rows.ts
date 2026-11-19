@@ -61,11 +61,16 @@ export type Facts = {
   callers?: string[];
   calls?: { pool: string; sender: string }[];
   currencies?: string[];
+  /** With `pool` named (receiptFacts): the pool's own legs (card helper-vendor-tapes-refresh-inside-15s), signed raw
+   *  decimal text, into the pool positive. A pair's (a 20-byte pool): each ERC-20 it got and what it sent, by token
+   *  ([token, in, out]: a pair pays its fee out of the leg it took in, Aerodrome's to its fees contract).
+   *  A v4 pool's (a 32-byte id): each of its Swap logs' two amounts, the swapper's side (positive, what it got). */
+  legs?: { pool: string; pair?: [string, string, string][]; v4?: { index: number; a: [string, string] }[] };
 };
 
 /** The facts of `token` in a receipt (eth_getTransactionReceipt's answer, hostile), or null for a malformed one, one of
  *  another transaction, or a reverted one. `poolManager`: the chain's v4 PoolManager. */
-export function receiptFacts(receipt: unknown, tx: string, token: string, poolManager: string): Facts | null {
+export function receiptFacts(receipt: unknown, tx: string, token: string, poolManager: string, pool?: string): Facts | null {
   if (typeof receipt !== "object" || receipt === null || Array.isArray(receipt)) return null;
   const r = receipt as Record<string, unknown>;
   if (low(r.transactionHash) !== tx || r.status !== "0x1" || !Array.isArray(r.logs)) return null;
@@ -79,6 +84,8 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
   const calls: { pool: string; sender: string }[] = [];
   const currencies = new Set<string>();
   const credit = (a: string, v: bigint) => net.set(a, (net.get(a) ?? 0n) + v);
+  const pair = pool !== undefined && /^0x[0-9a-f]{40}$/.test(pool) ? new Map<string, [bigint, bigint]>() : null;
+  const v4: { index: number; a: [string, string] }[] = [];
   for (const raw of r.logs as unknown[]) {
     const l = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
     const index = typeof l.logIndex === "string" && /^0x[0-9a-f]{1,8}$/i.test(l.logIndex) ? parseInt(l.logIndex, 16) : null;
@@ -89,7 +96,15 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
     const words = (data.length - 2) / 64;
     const word = (i: number): bigint => BigInt(`0x${data.slice(2 + 64 * i, 2 + 64 * (i + 1))}`);
     const holder = (t: string | null | undefined): string | null => (t != null && /^0x0{24}[0-9a-f]{40}$/.test(t) ? `0x${t.slice(26)}` : null);
-    if (address !== null && /^0x[0-9a-f]{40}$/.test(address) && topics[0] === TRANSFER && topics.length === 3 && words === 1) currencies.add(address);
+    if (address !== null && /^0x[0-9a-f]{40}$/.test(address) && topics[0] === TRANSFER && topics.length === 3 && words === 1) {
+      currencies.add(address);
+      const [from, to] = [holder(topics[1]), holder(topics[2])];
+      if (pair !== null && from !== to && (from === pool || to === pool)) {
+        const io = pair.get(address) ?? [0n, 0n];
+        io[to === pool ? 0 : 1] += word(0);
+        pair.set(address, io);
+      }
+    }
     if (address === token && topics[0] === TRANSFER && topics.length === 3 && words === 1) {
       const [from, to] = [holder(topics[1]), holder(topics[2])];
       if (from === null || to === null) return null;
@@ -102,6 +117,7 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
       // the pool's id and the swap's fee (a uint24): what provenHooks hashes a key against
       if (sender === null || !/^0x[0-9a-f]{64}$/.test(topics[1] ?? "") || word(5) >= 1n << 24n) return null;
       swaps.push({ index, sender, pool: topics[1]!, fee: Number(word(5)) });
+      if (topics[1] === pool) v4.push({ index, a: [BigInt.asIntN(128, word(0)).toString(), BigInt.asIntN(128, word(1)).toString()] });
       // the swap's two legs, int128 each: either may be the token's
       for (const w of [word(0), word(1)]) {
         const v = BigInt.asIntN(128, w);
@@ -119,7 +135,8 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
       if (sender !== null && /^0x[0-9a-f]{64}$/.test(topics[1] ?? "")) calls.push({ pool: topics[1]!, sender });
     }
   }
-  return { traders, moves, swaps, net: [...net].map(([a, v]) => [a, v.toString()]), callers: [...callers], calls, currencies: [...currencies] };
+  const legs = pool === undefined ? {} : { legs: pair !== null ? { pool, pair: [...pair].map(([a, [i, o]]): [string, string, string] => [a, i.toString(), o.toString()]) } : { pool, v4 } };
+  return { traders, moves, swaps, net: [...net].map(([a, v]) => [a, v.toString()]), callers: [...callers], calls, currencies: [...currencies], ...legs };
 }
 
 /** A vendor's decimal amount in the token's smallest units (its digits past `decimals` dropped), or null when it is no

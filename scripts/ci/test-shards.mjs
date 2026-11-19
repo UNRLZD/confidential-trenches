@@ -240,6 +240,9 @@ export const MUTANT_SECONDS = {
   // on the queue's runner (8)), the 30 min fake-clock runs drained by microtasks and each run's timers bounded
   "packages/signpage: node --test test/pool-price-mutants.test.mjs": 30,
   "packages/signpage: node scripts/held-mutants.mjs": 145, // (4) 144.5
+  // card signpage-backup-export: the export of one key, 20 mutants then (19 now, its X9 dropped), 67 s on the Mac
+  // (19 Nov 10:36:50-10:37:57Z, the run's output file), at about 1.5 times that on a runner
+  "packages/signpage: node scripts/export-mutants.mjs": 101,
   // card sol-rent-back-dust-burn: the rent back's plants in parts, mutant i in part (i % n) + 1. Its 86 plants ran as six
   // parts of 14 or 15 on the queue's runner (jobs 129687360235 (7), 129687360305 (8), 129687360082 (9)): 304.5, 333.8,
   // 378.8, 375.3, 279.4 and 259.4 s, the slowest 27.06 s a plant (part 3, 14 plants, 378.8 s), and eight parts of 11 or

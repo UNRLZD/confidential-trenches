@@ -31,6 +31,10 @@ function vendorCoin() {
       return new Response("{}", { status: 404 });
     }
     const reqs = JSON.parse(String(init.body ?? "null")) as { id: number; method: string; params: unknown[] }[] | null;
+    // our reads of the vendor's pool (swaps.ts heldFilters: a list of token addresses) are refused: this coin is one
+    // our reads cannot place, whose held tape the vendor's refresh renews (card helper-vendor-tapes-refresh-inside-15s)
+    if (Array.isArray(reqs) && reqs.some((r) => r.method === "eth_getLogs" && Array.isArray((r.params[0] as { address?: unknown })?.address)))
+      return new Response(JSON.stringify(reqs.map((r) => ({ jsonrpc: "2.0", id: r.id, error: { code: -32000, message: "refused" } }))), { status: 200 });
     if (!Array.isArray(reqs) || !reqs.every((r) => r.method === "eth_getTransactionReceipt")) return chain.fetch(url, init);
     return new Response(JSON.stringify(reqs.map((r) => ({ jsonrpc: "2.0", id: r.id, result: receipts[r.params[0] as string] ?? null }))), { status: 200, headers: { "content-type": "application/json" } });
   };
@@ -58,6 +62,8 @@ test("a vendor tape read within BEHIND_MAX's ms claims every trade after its old
     clock.t = read0 + ms;
     const edge = await s.trades(v.coin, 50);
     const je = JSON.parse(edge.body) as Tape;
+    // the refresh behind the held rows asks our reads of the pool first (refused here), then the vendor
+    for (let i = 0; i < 40; i++) await new Promise((ok) => setImmediate(ok));
     assert.ok(v.gt.trades > reads, "a held tape past TAPE_FRESH_MS is read again");
     assert.deepEqual([edge.status, je.as_of_ms, je.trades.length, je.whole_ms], [200, read0, 6, v.oldest + 1_000], "at BEHIND_MAX's ms the claim still stands");
 
