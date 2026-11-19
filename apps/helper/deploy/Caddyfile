@@ -14,9 +14,14 @@
 # its time, never its request (card helper-answers-through-a-burst: the 19 Nov 14:30Z 502s left no line naming why):
 # the `upstream` log takes http.log.error alone and deletes its `request` field, which holds the client's address, port
 # and headers. The reason names the helper's container address, never a client's.
-# Caddy keeps up to 1024 idle connections to the helper (card helper-answers-through-a-burst; Caddy's default is 32), so
-# a burst's connections are reused by its next requests, never closed and dialed again: 300 page opens held 921 at
-# once, and each closed one is a new connect into the helper's listen queue (src/server.ts LISTEN_BACKLOG).
+# Caddy holds at most 1024 connections to the helper and keeps every one of them idle for the next request (card
+# helper-answers-through-a-burst): a request past them waits in Caddy for one to come free, as a proxy's per-server
+# connection limit with its queue does, never as a new connect. Without a limit each request in flight that found no
+# idle connection dialed a new one, and Caddy kept only 32 idle (its default): 300 page opens held 921 connections at
+# once, past the helper's listen queue of 511, whose dropped connects were the 3 s dial timeouts and 502s of 19 Nov
+# 14:30Z; on the copy with a queue of 4096, 600 page opens held 4348 and filled it. An upgraded push socket is the
+# page's own and leaves the count once it is upgraded (Go's transport), so the sockets never take the requests' room.
+# The limit stays under the helper's listen queue (src/server.ts LISTEN_BACKLOG, 4096), so Caddy alone can never fill it.
 # The admin endpoint is a unix socket in the caddy_config volume, reachable only from inside the container (never a TCP
 # port): redeploy.sh reloads this file through it with `docker compose exec`, so a change here reaches Caddy with no gap.
 # Every answer a caller asks to have compressed is sent zstd or gzip (card solana-quote-under-1s: a cold page's first
@@ -41,6 +46,7 @@
 	reverse_proxy helper:8080 {
 		transport http {
 			keepalive 30s
+			max_conns_per_host 1024
 			keepalive_idle_conns_per_host 1024
 		}
 	}

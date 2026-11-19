@@ -1303,8 +1303,8 @@ export function listenAt(port: number): { port: number; host?: string; backlog: 
  * itself still answers (19 Nov 14:30-14:33Z: every 502 in 3.6 s, the container healthy). Node's default is 511; 300
  * page opens through Caddy on a copy pinned to 2 CPUs held up to 894 connections to the helper at once, filled its
  * queue (512 of 511) and met 9 dial timeouts (deploy/burst-proof.sh, 19 Nov 16:2xZ). [design: 4096, the kernel's own
- * somaxconn default since Linux 5.4, which compose.yaml sets in the helper's network so the kernel honours it; over four
- * times the connections 300 pages held, at about 200 bytes a waiting connection]
+ * somaxconn default since Linux 5.4, which compose.yaml sets in the helper's network so the kernel honours it; four
+ * times the connections Caddy holds at most (deploy/Caddyfile max_conns_per_host), so Caddy alone can never fill it]
  */
 export const LISTEN_BACKLOG = 4_096;
 
