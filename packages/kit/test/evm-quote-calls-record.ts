@@ -25,6 +25,25 @@ export const CALLS_REQUEST: EvmPoolBuyQuoteRequest = {
 /** A call's key: its method and params, never its id. */
 export const callKey = (c: { method: unknown; params?: unknown }): string => JSON.stringify([c.method, c.params ?? []]);
 
+/** A recording's calls with, for each block range its getLogs named a currency in (recorded before card
+ *  evm-scan-chain-tail), the same range's getLogs of the event alone, answered with the union of those logs: a scan
+ *  names the event alone since, and the pools those logs hold are the same, so the reads a replay checks are. */
+export const withEventOnly = (calls: readonly [string, unknown][]): [string, unknown][] => {
+  const byRange = new Map<string, { key: string; logs: unknown[]; seen: Set<string> }>();
+  for (const [k, a] of calls) {
+    const [method, params] = JSON.parse(k) as [string, [{ address: string; fromBlock: string; toBlock: string; topics: unknown[] }]];
+    const f = params[0];
+    const logs = (a as { result?: unknown }).result;
+    if (method !== "eth_getLogs" || f.topics.length < 2 || !Array.isArray(logs)) continue;
+    const key = callKey({ method, params: [{ ...f, topics: [f.topics[0]] }] });
+    const e = byRange.get(key) ?? { key, logs: [], seen: new Set<string>() };
+    for (const l of logs) if (!e.seen.has(JSON.stringify(l))) (e.seen.add(JSON.stringify(l)), e.logs.push(l));
+    byRange.set(key, e);
+  }
+  const have = new Set(calls.map(([k]) => k));
+  return [...calls, ...[...byRange.values()].filter((e) => !have.has(e.key)).map((e): [string, unknown] => [e.key, { result: e.logs }])];
+};
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const v = evmPoolVenues().robinhood;
   const kept = process.argv[2] === undefined ? null : (deserialize(readFileSync(process.argv[2])) as Map<string, unknown>).get("robinhood") ?? null;

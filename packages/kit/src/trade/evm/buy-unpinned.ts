@@ -112,7 +112,7 @@ export type EvmPoolVenue = {
    *  (checks/evm/quote.ts scanPools; cards evm-scan-second-provider, evm-rpc-spare-list), each with its own span and
    *  requests at once over the same depth. */
   readonly poolManager?: string;
-  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; orSpan?: number; spares?: readonly EvmScanSpare[] }>;
+  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; orSpan?: number; initialized?: Readonly<{ pools: number; blocks: number }>; spares?: readonly EvmScanSpare[] }>;
   /** The device's index of every pool of the PoolManager (checks/evm/pool-index.ts, card evm-pool-index): its two
    *  readers, each of another operator, the first always one the device reaches directly, the second at most the
    *  helper's keyed route (POST /v1/rpc/{chain}?keyed=only, as the NEAR seat: the helper can make the sync refuse,
@@ -375,6 +375,10 @@ export const evmMainnetVenues = () =>
         url: "https://base-rpc.publicnode.com",
         span: 10_000,
         depth: 1_000_000,
+        // the PoolManager's Initialize logs a block (checks/evm/quote.ts tailBudgetOf, card evm-scan-chain-tail): 8,003
+        // pools in the 1,000,000 blocks to 59,100,991 (release 176's snapshot), so one event-alone request holds about
+        // 1.25M blocks of them, past the depth: the tail always reads the event alone here
+        initialized: bare({ pools: 8_003, blocks: 1_000_000 }),
         parallel: 20,
         spares: Object.freeze([
           bare({ url: "https://base.gateway.tenderly.co", span: 1_000, parallel: 3 }),
@@ -568,6 +572,11 @@ export const evmMainnetVenues = () =>
         url: "https://rpc.mainnet.chain.robinhood.com",
         span: 10_000_000,
         depth: 10_000_000,
+        // the PoolManager's Initialize logs a block (checks/evm/quote.ts tailBudgetOf, card evm-scan-chain-tail): 8,804
+        // pools in the 3,000,000 blocks to 117,445,721 (release 176's snapshot; 145 in the 53,872 blocks after it, read
+        // on this provider 18 Nov 15:3xZ), so one event-alone request holds about 3.4M blocks of them; a start further
+        // back, or none, scans by currency
+        initialized: bare({ pools: 8_804, blocks: 3_000_000 }),
         parallel: 2,
         orSpan: 100_000,
         spares: Object.freeze([bare({ url: "https://robinhood.daybreak-rpc.network", span: 2_000, parallel: 4 }), bare({ url: "https://robinhood.api.pocket.network", span: 2_000, parallel: 4 })]),

@@ -196,17 +196,29 @@ export type SpendOwner = { mine: string; accounts: string[] } | "other" | null;
  *  The history is read on from `places` (each RPC's place and find, kept by the caller across passes).
  *  The reads name W, which the balance reads name already, and transactions of its history. */
 export async function spendOwner(rpcs: readonly [SolanaRpc, SolanaRpc], pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number, release: string | undefined, places: HistoryPlaces): Promise<SpendOwner> {
+  return ownerOn(rpcs, pin, w, nullifierHash, context, minSlot, release, places);
+}
+/** spendOwner on one seat alone (card load-reads-name-no-w-to-the-public-seat): the helper's, for a read a page load
+ *  makes with no tap, so no public provider is named W. One seat's word: never the read before a signature, nor one
+ *  whose answer drops what a signature would later need (the page's owed pieces take only its "other" before the tap,
+ *  whose rent back reads W on both seats before W signs anything). `places` must be its own map, never a pair's: the
+ *  keys are by seat index. */
+export async function spendOwnerOne(rpc: SolanaRpc, pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number, places: HistoryPlaces): Promise<SpendOwner> {
+  return ownerOn([rpc], pin, w, nullifierHash, context, minSlot, undefined, places);
+}
+async function ownerOn(rpcs: readonly SolanaRpc[], pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number, release: string | undefined, places: HistoryPlaces): Promise<SpendOwner> {
   if (release !== undefined && release !== "") {
     const own = await Promise.all(rpcs.map((rpc) => spendIn(rpc, pin, w, nullifierHash, context, release)));
     if (own.every((o) => typeof o === "object" && o.mine)) return { mine: release, accounts: [...new Set(own.flatMap((o) => (typeof o === "object" ? o.accounts : [])))] };
   }
   const at = rpcs.map((_, i) => placeOf(places, `${i}:${w}:${nullifierHash}:${context}`));
-  const [a, b] = await Promise.all(rpcs.map((rpc, i) => spendOn(rpc, at[i]!, pin, w, nullifierHash, context, minSlot)));
-  if (!a || !b) return null;
-  if (a.sig !== b.sig || a.mine !== b.mine) {
+  const got = await Promise.all(rpcs.map((rpc, i) => spendOn(rpc, at[i]!, pin, w, nullifierHash, context, minSlot)));
+  const a = got[0];
+  if (!a || got.some((x) => !x)) return null;
+  if (got.some((x) => x!.sig !== a.sig || x!.mine !== a.mine)) {
     // the two name different spends: neither is kept, both are read again
     for (const p of at) delete p.found;
     return null;
   }
-  return a.mine ? { mine: a.sig, accounts: [...new Set([...a.accounts, ...b.accounts])] } : "other";
+  return a.mine ? { mine: a.sig, accounts: [...new Set(got.flatMap((x) => x!.accounts))] } : "other";
 }
