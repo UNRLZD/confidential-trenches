@@ -20,7 +20,7 @@
 import type { BuyRoute, SignpageClientSnapshot, SignpageOutcome, SignpageState, Stage } from "@blindfill/kit";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { centsToDecimal, ladderSplit, parseUsd } from "../../src/screens/trade/model.ts";
+import { BELOW_MARKET_CODE, centsToDecimal, ladderSplit, parseUsd } from "../../src/screens/trade/model.ts";
 import { TradeBox } from "../../src/screens/trade/TradeBox.tsx";
 import { TradeSheet, useTradeSheet } from "../../src/screens/trade/TradeSheet.tsx";
 import { SafetyGrid } from "../../src/screens/trade/SafetyGrid.tsx";
@@ -78,6 +78,8 @@ const POOLS: Record<string, { chain: "solana" | "base"; pools: Pool[] }> = {
   "base-cash": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0" }] },
 };
 const POOL = poolMode ? POOLS[poolMode] : undefined;
+/** The venues this test pins a lookup table for (?venue=, card app-unavailable-before-the-tap): the curve alone. */
+const PINS: readonly string[] = ["pump-curve"];
 if (POOL) STATE.pools = POOL.pools;
 // cash=0: no Cash on NEAR, so the trade box's Bal on a pool is the pool's own part (card one-balance-buys-on-every-chain)
 if (q.get("cash") === "0") STATE.vault_balance = "0";
@@ -131,6 +133,13 @@ const kit: TradeKit = {
     // You receive draws
     if (kind === "pool.buy.dry") {
       window.__reads.push({ kind, params });
+      // ?venue= (card app-unavailable-before-the-tap): the coin's venue, judged as the page judges it at the tap on this
+      // test's own pin list, PINS (the curve alone: mainnet pins PumpSwap too, so PumpSwap stands for a venue with no
+      // table here); a venue off the list answers venue_not_pinned, and nofit, notbuilt and below the tap's other
+      // Unavailable codes. A pinned venue answers as below
+      const venue = q.get("venue");
+      const code = venue === null || PINS.includes(venue) ? null : (({ nofit: "no_table_fits", notbuilt: "venue_not_built", below: BELOW_MARKET_CODE } as Record<string, string>)[venue] ?? "venue_not_pinned");
+      if (code !== null) return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: false, error: { code } }) };
       const withAmount = (params as { amount?: string }).amount !== undefined;
       // on Base and Robinhood (card you-receive-on-every-chain) the tap's own ask's answer: one whole 0.001 ETH note's
       // relay fee, 0.000021 ETH, and 10,600 tokens out

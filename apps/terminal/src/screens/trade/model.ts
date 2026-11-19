@@ -221,7 +221,12 @@ export type Reason = "priceCheck" | "notSent" | "unavailable";
  * (no_table_fits), or the coin is one the build does not trade (venue_not_built: a curve quoted in another mint, buy or sell), Unavailable
  * (owner 10 Nov 18:12Z). Any other code draws Failed alone: the app never makes up a reason, and never draws a code.
  */
-const REASONS: Readonly<Record<string, Reason>> = Object.freeze({ quote_check_failed: "priceCheck", signpage_down: "notSent", venue_not_pinned: "unavailable", no_table_fits: "unavailable", venue_not_built: "unavailable" });
+/** The code the signing page refuses a Solana buy with, at the tap and in pool.buy.dry, where the only venue it can
+ *  trade through prices the coin below its whole market (card sol-buy-takes-the-best-venue-it-can-trade, named by it at
+ *  19 Nov 14:43Z): the kit's own below_reference (checks/evm/quote.ts), Unavailable. */
+export const BELOW_MARKET_CODE = "below_reference";
+
+const REASONS: Readonly<Record<string, Reason>> = Object.freeze({ quote_check_failed: "priceCheck", signpage_down: "notSent", venue_not_pinned: "unavailable", no_table_fits: "unavailable", venue_not_built: "unavailable", [BELOW_MARKET_CODE]: "unavailable" });
 
 /** The app's reason for a kit code; null for a code it has no words for, or none. Own keys only. */
 export const reasonOf = (code: ErrorCode | undefined): Reason | null => (code !== undefined && Object.hasOwn(REASONS, code) ? REASONS[code]! : null);
@@ -229,6 +234,15 @@ export const reasonOf = (code: ErrorCode | undefined): Reason | null => (code !=
 /** A buy the pool cannot make on this token yet (Unavailable): the box keeps Buy and its presets off, with no Retry,
  *  since the same buy would be refused again; a new token page starts ready. */
 export const unavailable = (p: Phase): boolean => p.k === "ended" && p.stage === "refused" && reasonOf(p.code) === "unavailable";
+
+/** A coin the pool cannot buy yet, told before any tap (card app-unavailable-before-the-tap): the page's pool.buy.dry,
+ *  which the box asks at mount, refused with one of the tap's own Unavailable codes. An answer, or any other refusal (a
+ *  not now, no reference), is not. */
+export const dryUnavailable = (o: { ok: true } | { ok: false; error: { code: ErrorCode } }): boolean => !o.ok && reasonOf(o.error.code) === "unavailable";
+
+/** Buy and the presets off: the tap ended Unavailable, or the dry said so of the coin on screen (`dryOff`, the key of
+ *  the coin it answered for), so a new token page starts ready. */
+export const buyOff = (p: Phase, dryOff: string | null, coin: string): boolean => unavailable(p) || dryOff === coin;
 
 /** How an ended trade is drawn: Failed, Not landed (CH-050: the money never left W), part filled (CH-045), or owed back
  *  (card evm-buy-end-carries-its-tx: the swap failed and the money is on its way back to the pool). */
