@@ -1009,6 +1009,8 @@ else {
   // Firefox and Safari, so the x, the scrim, Cancel and Saved (taps) leave it then
   shell.onDismiss = (by) => {
     if (by === "key" && copied) return;
+    const st = root.dataset.signin;
+    if (st === "export" || st === "backup") return leaveScreen();
     void run(cancel);
   };
   // an outside app's popup with no opener (opened by hand, or its opener cut) has no one to connect
@@ -1224,6 +1226,26 @@ async function ownsNow(chain: ExportChain, address: string): Promise<boolean> {
     seed.fill(0);
   }
 }
+// A way off the export or the backup screen (Done, the x, the scrim, Esc, pagehide) wins over a step still running
+// (Show reading the store and deriving): the screen's wallet and key go at the tap, so the step's own check
+// (exportTarget !== t) draws nothing, and the page goes back to the app once the step ends (run's leaveAfter).
+let leaveAfter = false;
+function leaveScreen(): void {
+  exportTarget = null;
+  exportShown = null;
+  if (busy) return void (leaveAfter = true);
+  void run(cancel);
+}
+// pagehide (the browser may keep the page for Back, or freeze it): the key or the 12 words leave the page in this task,
+// before it is kept, and the page goes back to the app
+addEventListener("pagehide", () => {
+  const st = root.dataset.signin;
+  if (st !== "export" && st !== "backup") return;
+  root.replaceChildren();
+  drawn?.fill(0);
+  drawn = null;
+  leaveScreen();
+});
 // Show: the key, derived now from the stored seed for the screen's wallet; a seed that no longer derives it (another
 // tab signed out and in) draws nothing and goes back to the app as the store stands.
 async function showKey(): Promise<void> {
@@ -1420,6 +1442,9 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       if (!framed && words) {
         const list = document.createElement("ol");
         list.dataset.words = "12";
+        // never sent to the browser's page translation (scripts/build-app.mjs page: the whole page says so too)
+        list.className = "notranslate";
+        list.setAttribute("translate", "no");
         for (const w of words.split(" ")) {
           const li = document.createElement("li");
           li.textContent = w;
@@ -1445,6 +1470,8 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       else {
         const k = document.createElement("p");
         k.dataset.key = chain;
+        k.className = "notranslate";
+        k.setAttribute("translate", "no");
         k.textContent = key;
         Object.assign(k.style, { overflowWrap: "anywhere", minWidth: "0" });
         parts.push(k);
@@ -1453,7 +1480,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
           void navigator.clipboard?.writeText(key).catch(() => {});
         }));
       }
-      parts.push(button("done", WORDS.done, () => void run(cancel)));
+      parts.push(button("done", WORDS.done, leaveScreen));
     } else if (!framed && (state === "words" || state === "invalid-code")) {
       const box = document.createElement("textarea");
       box.dataset.input = "words";
@@ -2102,6 +2129,11 @@ async function run(step: () => Promise<void>, again = true): Promise<void> {
     show("error");
   } finally {
     busy = false;
+  }
+  // a way off the export or the backup tapped during the step (leaveScreen): back to the app now
+  if (leaveAfter) {
+    leaveAfter = false;
+    return void run(cancel);
   }
   // another tab's seed write heard during the step, which ended with no account on screen: that seed is landed on
   if (movedInStep) {

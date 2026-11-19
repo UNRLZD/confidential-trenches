@@ -154,3 +154,20 @@ test("the address drawn shortened: its first and last 4", () => {
   assert.equal(shortAddress("7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq"), "7z2k…R1cq");
   assert.equal(shortAddress("0x48966d6e92ec496d9dbb37974d531cdc3a68ae35"), "0x48…ae35");
 });
+
+// review fix 4: a record the page wrote with a value no derivation takes (s or a label at or past the field size) is
+// skipped, never the end of the lookup: the good record beside it is still found, on every chain
+test("a record no derivation takes is skipped: the good one beside it still gives its key", () => {
+  const P = BigInt(`0x${(A8 as unknown as { p: string }).p}`);
+  const bad = exportRefs(
+    [{ ref: { kind: "deposit" as const, s: S, i: 0 }, leaf: { label: P } }, ...NOTES],
+    [{ kind: "pool_deposit", follow: { chain: "solana", s: P.toString(), i: 0, u: "x" } }, { kind: "pool_deposit", follow: { chain: "base", s: (P + 5n).toString(), i: 0, u: "y" } }, ...OPS],
+  );
+  assert.equal(bad.length, 7);
+  const id = A8.ids.find((x) => x.name === "U_{s,0}")!.id!;
+  assert.notEqual(exportKey(seed64(), "solana", base58.encode(Buffer.from(id, "hex")), bad), null, "U_{s,0} on Solana");
+  assert.notEqual(exportKey(seed64(), "base", EVM_U.ids.find((x) => x.name === "U^evm_{s,0}")!.address, bad), null, "U^evm_{s,0} on Base");
+  for (const [chain, name] of [["solana", "W_{sol,l,1}"], ["base", "W_{evm,l,0}"], ["near", "W_{near,l,1}"]] as const)
+    assert.notEqual(exportKey(seed64(), chain, wallet(name).address!, bad), null, name);
+  assert.equal(ownsWallet(seed64(), "solana", "11111111111111111111111111111111", bad), false);
+});

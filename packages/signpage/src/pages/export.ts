@@ -77,28 +77,40 @@ const isEvm = (chain: ExportChain): boolean => chain === "base" || chain === "ro
 const sameAddress = (chain: ExportChain, derived: string, named: string): boolean =>
   isEvm(chain) ? /^0x[0-9a-fA-F]{40}$/.test(named) && derived.toLowerCase() === named.toLowerCase() : derived === named;
 
-/** The key of the one ref whose address on `chain` is `address`, its two parts copied out; null when none is. */
+/** The key of the one ref whose address on `chain` is `address`, its two parts copied out; null when none is. A ref no
+ *  derivation takes (an s or a label at or past the field size, which a broken page could write) is skipped, so one bad
+ *  record never ends the lookup for the good ones beside it. */
 function match(seed64: Uint8Array, chain: ExportChain, address: string, refs: readonly ExportRef[]): { secretKey: Uint8Array; publicKey: Uint8Array } | null {
   if (!exportChain(chain) || typeof address !== "string" || address === "") return null;
   for (const r of refs) {
-    if (r.kind === "w") {
-      for (const tag of TAGS[chain]) {
-        const w = freshWallet(seed64, tag, r.l, r.j);
-        if (sameAddress(chain, w.address, address)) return { secretKey: w.secretKey, publicKey: w.publicKey };
-        w.secretKey.fill(0);
-      }
-    } else if (r.chain === chain) {
-      if (chain === "solana") {
-        const k = depositId(seed64, r.s, r.i);
-        if (base58.encode(k.publicKey) === address) return { secretKey: k.secretKey, publicKey: k.publicKey };
-        k.secretKey.fill(0);
-      } else {
-        const k = depositIdEvm(seed64, r.s, r.i);
-        if (sameAddress(chain, k.address, address)) return { secretKey: k.secretKey, publicKey: k.publicKey };
-        k.secretKey.fill(0);
-      }
+    try {
+      const m = matchOne(seed64, chain, address, r);
+      if (m !== null) return m;
+    } catch {
+      // no key at this ref: the next one
     }
   }
+  return null;
+}
+function matchOne(seed64: Uint8Array, chain: ExportChain, address: string, r: ExportRef): { secretKey: Uint8Array; publicKey: Uint8Array } | null {
+  if (r.kind === "w") {
+    for (const tag of TAGS[chain]) {
+      const w = freshWallet(seed64, tag, r.l, r.j);
+      if (sameAddress(chain, w.address, address)) return { secretKey: w.secretKey, publicKey: w.publicKey };
+      w.secretKey.fill(0);
+    }
+    return null;
+  }
+  if (r.chain !== chain) return null;
+  if (chain === "solana") {
+    const k = depositId(seed64, r.s, r.i);
+    if (base58.encode(k.publicKey) === address) return { secretKey: k.secretKey, publicKey: k.publicKey };
+    k.secretKey.fill(0);
+    return null;
+  }
+  const k = depositIdEvm(seed64, r.s, r.i);
+  if (sameAddress(chain, k.address, address)) return { secretKey: k.secretKey, publicKey: k.publicKey };
+  k.secretKey.fill(0);
   return null;
 }
 

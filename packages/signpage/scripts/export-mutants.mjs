@@ -9,11 +9,13 @@ const MAIN = `${W}/src/main.ts`;
 const EXPORT = `${W}/src/pages/export.ts`;
 const UNIT = "test/pages-export.test.ts";
 const PAGE = "test/main-export.test.ts";
+const LEAVE = "test/main-export-leave.test.ts";
+const BUILD = `${W}/scripts/build-app.mjs`;
 // [name, file, the test that kills it, from, to]
 const M = [
   ["X1 a foreign Solana or NEAR address matches (the address compare dropped)", EXPORT, UNIT, ": derived === named;", ": true;"],
   ["X2 a foreign EVM address matches (the address compare dropped)", EXPORT, UNIT, "/^0x[0-9a-fA-F]{40}$/.test(named) && derived.toLowerCase() === named.toLowerCase()", "true"],
-  ["X3 a U is looked for on a chain its record is not of", EXPORT, UNIT, "} else if (r.chain === chain) {", "} else {"],
+  ["X3 a U is looked for on a chain its record is not of", EXPORT, UNIT, "  if (r.chain !== chain) return null;\n", ""],
   ["X4 a chain outside the four is taken", EXPORT, UNIT, 'typeof chain === "string" && Object.hasOwn(TAGS, chain)', 'typeof chain === "string"'],
   ["X5 the Solana key's halves swapped (not Phantom's form)", EXPORT, UNIT, "full.set(secretKey, 0);\n      full.set(publicKey, 32);", "full.set(publicKey, 0);\n      full.set(secretKey, 32);"],
   ["X6 the NEAR key with no ed25519: prefix (not NEAR's form)", EXPORT, UNIT, "`ed25519:${base58.encode(full)}`", "base58.encode(full)"],
@@ -28,6 +30,16 @@ const M = [
     "  let owned = false;\n  const after = (async () => {\n    await resynced();\n    owned = await ownsNow(chain, address);\n  })();\n  return { after, answer: () => (owned ? decide(id, \"export.open\", undefined, undefined, undefined, { chain, address }) : null) };",
     "  let owned = false;\n  let leaked = \"\";\n  const after = (async () => {\n    await resynced();\n    owned = await ownsNow(chain, address);\n    const seed = await openSeed64();\n    leaked = exportKey(seed, chain, address, await exportRefsNow()) ?? \"\";\n  })();\n  return { after, answer: () => { const a = owned ? decide(id, \"export.open\", undefined, undefined, undefined, { chain, address }) : null; return a && { ...a, result: { ...a.result, key: leaked } as typeof a.result }; } };",
   ],
+  // the review's fixes (each with its test in test/main-export-leave.test.ts, test/pages-export.test.ts or scripts/build-app.test.mjs)
+  ["X12 the key derived at the open and kept until Show", MAIN, LEAVE, "          exportTarget = target;\n          show(\"export\");", "          exportTarget = target;\n          void exportRefsNow().then(async (r) => { const s = await openSeed64(); try { exportKey(s, target.chain, target.address, r); } finally { s.fill(0); } });\n          show(\"export\");"],
+  ["X13 a leave tapped during Show is dropped (run's busy)", MAIN, LEAVE, "  if (busy) return void (leaveAfter = true);", "  if (busy) return;"],
+  ["X14 a leave during Show keeps the wallet: Show draws the key before the page goes back", MAIN, LEAVE, "function leaveScreen(): void {\n  exportTarget = null;\n  exportShown = null;\n", "function leaveScreen(): void {\n"],
+  ["X15 pagehide leaves what the screen drew in the page", MAIN, LEAVE, "  if (st !== \"export\" && st !== \"backup\") return;\n  root.replaceChildren();\n", "  if (st !== \"export\" && st !== \"backup\") return;\n"],
+  ["X16 the drawn key offered to page translation", MAIN, LEAVE, "        k.className = \"notranslate\";\n", ""],
+  ["X17 the 12 words offered to page translation", MAIN, LEAVE, "        list.className = \"notranslate\";\n", ""],
+  ["X18 the page's root offered to page translation", BUILD, "scripts/build-app.test.mjs", '<html lang="en" translate="no">', '<html lang="en">'],
+  ["X19 one record no derivation takes ends the lookup", EXPORT, UNIT, "    try {\n      const m = matchOne(seed64, chain, address, r);\n      if (m !== null) return m;\n    } catch {\n      // no key at this ref: the next one\n    }\n", "    const m = matchOne(seed64, chain, address, r);\n    if (m !== null) return m;\n"],
+  ["X20 a record's own word for its U taken (its derivation not compared)", EXPORT, LEAVE, "    if (base58.encode(k.publicKey) === address) return", "    if (base58.encode(k.publicKey) === address || true) return"],
 ];
 let killed = 0;
 for (const [name, file, test, from, to] of M) {
