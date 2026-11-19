@@ -1345,13 +1345,17 @@ export function createSolanaTrades(deps: {
    *  SOL_VENDOR_REACH_MS waiting for that round within TAPE_OPEN_BOUND_MS (card sol-vendor-tape-waits-past-reach);
    *  with no follow (none started, idle past IDLE_MS) or an unplaced one, the vendor's (vendorTape). */
   async function poolTape(mint: string, limit: number, e: Entry | null): Promise<DataAnswer> {
+    // one bound for the whole answer: the vendor's wait and the round's together (card helper-tapes-refresh-holds-live:
+    // the round's own TAPE_OPEN_BOUND_MS after the vendor's page wait answered a page past its 15 s)
+    const until = now() + TAPE_OPEN_BOUND_MS;
     let f = follows.get(mint);
     if (f !== undefined && now() - f.touched > IDLE_MS) {
       follows.delete(mint);
       f = undefined;
     }
+    let read: DataAnswer | undefined;
     if (f === undefined || f.unplaced) {
-      const v = await vendorTape(mint, limit, e);
+      const v = (read = await vendorTape(mint, limit, e));
       const g = follows.get(mint);
       if (g !== undefined) g.touched = now();
       if (g === undefined || g.unplaced || now() - g.at < FOLLOW_MS) return v;
@@ -1365,8 +1369,9 @@ export function createSolanaTrades(deps: {
         .catch(() => undefined)
         .finally(() => (g.reading = null));
     }
-    if (now() - f.at > SOL_VENDOR_REACH_MS && f.reading !== null) await within(f.reading, TAPE_OPEN_BOUND_MS);
-    if (f.unplaced) return vendorTape(mint, limit, e);
+    if (now() - f.at > SOL_VENDOR_REACH_MS && f.reading !== null) await within(f.reading, Math.max(0, until - now()));
+    // a pool the round found no trade of is the vendor's: the answer this call read already, else the vendor's now
+    if (f.unplaced) return read ?? vendorTape(mint, limit, e);
     return rowsAnswer(f.rows, f.src, f.at, limit, f.hole !== null);
   }
 

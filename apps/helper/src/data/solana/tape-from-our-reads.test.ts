@@ -14,8 +14,8 @@ import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { fixed } from "../candles.ts";
 import { b58encode } from "./lists.ts";
-import { createSolanaToken, POOL_FRESH_MS, type TapeRow } from "./token.ts";
-import { createSolanaTrades, FOLLOW_MS, poolLeg, SOL_VENDOR_REACH_MS, TRADES_MAX } from "./trades.ts";
+import { createSolanaToken, POOL_FRESH_MS, TAPE_OPEN_BOUND_MS, type TapeRow } from "./token.ts";
+import { createSolanaTrades, FOLLOW_MS, IDLE_MS, poolLeg, SOL_VENDOR_REACH_MS, TRADES_MAX } from "./trades.ts";
 
 const VENDOR_READ = /(?:^|,)\s*sol-vendor-read;desc="rows read (\d+) ms ago"/;
 const ageOf = (timing: string | undefined) => Number(VENDOR_READ.exec(timing ?? "")?.[1] ?? NaN);
@@ -34,10 +34,14 @@ type Tape = { trades: TapeRow[]; whole_ms?: number; src: string; as_of_ms: numbe
 /** The vendor (GeckoTerminal): the coin's top pool, and its trades once; then, with `up` false, every call refused. */
 function vendor() {
   const answer = { data: V.trades.slice(SEEDED).map(({ legs, ...a }) => ({ id: a.tx_hash, type: "trade", attributes: { ...a, from_token_address: legs.from[0], from_token_amount: legs.from[1], to_token_address: legs.to[0], to_token_amount: legs.to[1] } })) };
-  const gt = { up: true, calls: 0, log: [] as string[] };
+  // `wait`: run at each call before it is answered (a test moves its clock: a vendor at its page wait); `throttle`: a
+  // refusal is the budget's 429, never a 500
+  const gt = { up: true, calls: 0, log: [] as string[], wait: undefined as (() => void) | undefined, throttle: false };
   const fetch = async (url: string): Promise<Response> => {
     gt.calls++;
     gt.log.push(url);
+    gt.wait?.();
+    if (!gt.up && gt.throttle) return new Response("{}", { status: 429, headers: { "retry-after": "60" } });
     if (!gt.up) return new Response("{}", { status: 500 });
     if (url.endsWith(`/networks/solana/tokens/${V.mint}`)) return new Response(JSON.stringify({ data: { relationships: { top_pools: { data: [{ id: `solana_${V.pool}`, type: "pool" }] } } } }), { status: 200 });
     if (url.includes(`/networks/solana/pools/${V.pool}/trades`)) return new Response(JSON.stringify(answer), { status: 200 });
@@ -51,7 +55,8 @@ function vendor() {
  *  so one round lists more than FOLLOW_TX_MAX. `moved`: a second pool address answering as the recorded one. */
 function chain(pool: Buffer = poolData, burst = 0, moved?: string) {
   const calls: string[] = [];
-  const net = { up: true };
+  // `hang`: no call is ever answered (a provider that holds the request open)
+  const net = { up: true, hang: false };
   /** Transactions the provider does not serve yet (null), each once. */
   const lag = new Set<string>();
   const newest = C.txs[C.sigs[0]!.signature] as { blockTime: number; slot: number };
@@ -65,6 +70,7 @@ function chain(pool: Buffer = poolData, burst = 0, moved?: string) {
   const fetch = async (_url: string, init: RequestInit): Promise<Response> => {
     const { method, params } = JSON.parse(String(init.body)) as { method: string; params: [string, Record<string, unknown>?] };
     calls.push(method);
+    if (net.hang) return new Promise<Response>(() => undefined);
     if (!net.up) return new Response("{}", { status: 503 });
     const ok = (result: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
     if (method === "getAccountInfo" && (params[0] === V.pool || params[0] === moved)) return ok({ context: { slot: 1 }, value: { ...C.pool.value, data: [pool.toString("base64"), "base64"] } });
@@ -352,4 +358,28 @@ test("the top pool is asked of the vendor at POOL_FRESH_MS while a page holds th
   } finally {
     h.trades.stop();
   }
+});
+
+// the bound is judged by the test's own timeout, never the machine's clock (scripts/ci/no-wall-clock-asserts.mjs): the
+// vendor's wait is 5 s on the helper's clock, so the round may hold the answer 3 s more; a round's own full
+// TAPE_OPEN_BOUND_MS after it (8 s) is past the test's 7 s
+test("a page opening a coin whose follow went idle is answered within one TAPE_OPEN_BOUND_MS in all, the vendor's wait and the round's together: the vendor slow and refusing, our provider holding every call open (card helper-tapes-refresh-holds-live; red at 0092e5692: the vendor's wait and then the round's own TAPE_OPEN_BOUND_MS, past the 15 s a page and sol-tape-in-order give a read once the vendor waits its page wait)", { timeout: 7_000 }, async () => {
+  const h = harness();
+  const first = await h.read();
+  assert.equal(first.a.status, 200);
+  // the follow idles out; the vendor now answers 5 s late and refuses, our provider never answers
+  h.clock.t += IDLE_MS + 1_000;
+  h.v.gt.up = false;
+  h.v.gt.throttle = true;
+  // 5 s of vendor wait in all, on the helper's clock
+  let waited = 0;
+  h.v.gt.wait = () => {
+    const step = 5_000 - waited;
+    waited += step;
+    h.clock.t += step;
+  };
+  h.c.net.hang = true;
+  const late = await h.read();
+  assert.equal(late.a.status, 200, late.a.body.slice(0, 160));
+  assert.equal(waited, 5_000, "the vendor was asked and waited");
 });

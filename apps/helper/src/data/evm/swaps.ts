@@ -3455,22 +3455,28 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const timing = `evm-vendor-read;desc="rows read ${age} ms ago"${priced.length > 0 ? `, evm-vendor-price;desc="usd read ${Math.max(0, now() - Math.min(...priced))} ms ago"` : ""}${through > 0 ? `, evm-quote-usd;desc="${through} rows priced from chain at their block"` : ""}`;
     return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at, timing };
   }
-  /** The refresh behind a held vendor tape's rows: the helper's background read, one per coin however many callers. */
-  function renewTape(token: string): Promise<void> {
-    let renew = tapeRenewing.get(token);
-    if (renew === undefined) {
-      renew = lanes
-        .run(newLane(false), async () => {
-          // card helper-vendor-tapes-refresh-inside-15s: a coin whose pool our reads can follow is renewed from them, no
-          // vendor call; the vendor's refresh is for a coin they cannot place (no layout, a row they cannot price)
-          if (await chainRenew(token)) return;
-          await vendorRenew(token);
-        })
-        .catch(() => undefined)
-        .finally(() => tapeRenewing.delete(token));
-      tapeRenewing.set(token, renew);
-    }
-    return renew;
+  /** The refresh behind a held vendor tape's rows, one per coin however many callers. A page's read of the tape starts
+   *  it (heldTape, noneTrades: `caller`, that read's lane), so it is that caller's read: work callers share (sharedLane),
+   *  each later caller joining it (join), as the shared head is. Its vendor call stays the key's background share
+   *  (readTape's own flag). Card helper-tapes-refresh-holds-live: it ran in a background lane no caller lifted, and
+   *  under a deploy's crowd of pages (the deployed helper at 0092e5692, 19 Nov 15:29Z: Robinhood opens 214 s in the
+   *  queue) its reads of our providers never went, so a held tape's rows were served 950 s old (Base SOGNI, live run
+   *  44555332180). */
+  function renewTape(token: string, caller: Lane): Promise<void> {
+    const held = tapeRenewing.get(token);
+    if (held !== undefined) return lanes.run(caller, () => join(held.lane)), held.p;
+    const lane = lanes.run(caller, sharedLane);
+    const p = lanes
+      .run(lane, async () => {
+        // card helper-vendor-tapes-refresh-inside-15s: a coin whose pool our reads can follow is renewed from them, no
+        // vendor call; the vendor's refresh is for a coin they cannot place (no layout, a row they cannot price)
+        if (await chainRenew(token)) return;
+        await vendorRenew(token);
+      })
+      .catch(() => undefined)
+      .finally(() => tapeRenewing.delete(token));
+    tapeRenewing.set(token, { p, lane });
+    return p;
   }
   // ---------------------------------------------------------------------------------------------------------------
   // card helper-vendor-tapes-refresh-inside-15s: a held vendor tape renewed from our own reads. The vendor's key has
@@ -3553,14 +3559,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const VENDOR_LAG_MS = 60_000;
   const blockMsOf = (): number => BLOCK_CLOCK[chain]?.at(-1)?.blockMs ?? Math.floor(BEHIND_MAX[chain].ms / BEHIND_MAX[chain].blocks);
   /** The round running, one a chain for every held coin; its answer: each coin it renewed (true) or could not (false). */
-  let round: Promise<Map<string, boolean>> | null = null;
+  let round: { p: Promise<Map<string, boolean>>; lane: Lane } | null = null;
   /** `token`'s tape renewed by a round of our reads: true when it was, false when our reads cannot place it. */
   async function chainRenew(token: string): Promise<boolean> {
     const l = layoutOf(token);
     if (l === null) return false;
     l.asked = now();
     for (let i = 0; i < 2; i++) {
-      const r = await (round ??= runRound().finally(() => void (round = null)));
+      // the round is shared by every held coin of the chain: run in a lane of its own, lifted by each caller's renew
+      if (round === null) {
+        const lane = sharedLane();
+        round = { p: lanes.run(lane, runRound).finally(() => void (round = null)), lane };
+      } else join(round.lane);
+      const r = await round.p;
       const got = r.get(token);
       if (got !== undefined) return got;
     }
@@ -3899,7 +3910,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   function heldTape(token: string, limit: number, lane: Lane, until: number): Promise<DataAnswer> | null {
     const h = gtTapes.get(token);
     if (h === undefined) return null;
-    if (now() - h.at >= TAPE_FRESH_MS) void renewTape(token);
+    if (now() - h.at >= TAPE_FRESH_MS) void renewTape(token, lane);
     return serveTape(token, h, limit, lane, until);
   }
   async function noneTrades(token: string, limit: number, lane: Lane, until: number): Promise<DataAnswer> {
@@ -3917,7 +3928,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // vendor answers (a local helper on mainnet served Base 0x1668cd48's at 18.9 s, held 17 s before by another reader,
     // 18 Nov 15:13:45Z, with the held rows served at once up to STALE_MS). Past STALE_MS the caller's own read
     if (held !== undefined && now() - held.at <= STALE_MS) {
-      const renew = renewTape(token);
+      const renew = renewTape(token, lane);
       if (now() - held.at > BEHIND_MAX[chain].ms) await within(renew, Math.max(0, until - performance.now()));
       return serve(gtTapes.get(token) ?? held);
     }
@@ -3928,7 +3939,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return serve(h);
   }
   /** The refresh running behind a held vendor tape's rows (noneTrades), one per coin. */
-  const tapeRenewing = new Map<string, Promise<void>>();
+  const tapeRenewing = new Map<string, { p: Promise<void>; lane: Lane }>();
   /** `ours`: rows our round renewed (runRound), else the vendor's answer, whose read time vendorAt keeps. */
   const keepTape = (token: string, h: { at: number; rows: TapeRow[]; src: ChartSrc }, ours = false): void => {
     if (!gtTapes.has(token) && gtTapes.size >= POOLS_MAX) gtTapes.delete(gtTapes.keys().next().value!);
