@@ -293,7 +293,12 @@ export function pumpCurveAddress(mint: string): string {
  * A curve account's progress in basis points: 10,000 once `complete`, otherwise 0-9,999 from real_token_reserves; null
  * for an account that is not a pump.fun bonding curve (wrong owner, discriminator or size, or reserves out of range).
  * Layout: 8 discriminator, then u64 virtual_token_reserves, virtual_sol_reserves, real_token_reserves,
- * real_sol_reserves, token_total_supply, then bool complete (offset 48).
+ * real_sol_reserves, token_total_supply, then bool complete (offset 48); fields appended since sit after it.
+ * Pinned (card helper-curve-all-pads): pump-fun/pump-public-docs@639b87fb45c3adeffa6f7c4a1bf0cb85e392bf22
+ * idl/pump.json BondingCurve (discriminator sha256("account:BondingCurve")[0..8] = 17b7f83760d8ac60) and
+ * docs/PUMP_PROGRAM_README.md "Bonding curve": a curve starts at Global's initial_real_token_reserves (793.1 M, read on
+ * Global 4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf at slot 471309386) and is complete once real_token_reserves is 0.
+ * A mayhem coin (is_mayhem_mode) can hold more than that start; pump publishes no start for it, so it reads null.
  */
 export function pumpCurveBps(account: unknown): number | null {
   const a = obj(account);
