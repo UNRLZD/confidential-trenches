@@ -1,5 +1,5 @@
 // node --test scripts/live-checks/signpage-backup-export.test.mjs: the live check replays its recorded answers
-// (signpage-backup-export.answers.json, unedited). good: this card's branch built as the sign deploy builds it, against
+// (signpage-backup-export.answers.json, unedited). good: this card's branch head (9b29cc2ac) built as the sign deploy builds it, against
 // its own list entries: PASS. bad: a real run on SIGN_HOST against release-181, whose bundle still refuses export.open:
 // FAIL. Then the judge on each way a record can be wrong, and the list reader on the committed lists.
 import assert from "node:assert/strict";
