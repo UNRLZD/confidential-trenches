@@ -2166,7 +2166,7 @@ test("card rh-cold-quote: a first that answers HTTP 503 to every request over 10
 test("card rh-cold-quote: a first whose cold requests over 100,000 blocks holding the real pool's block run out of time is asked their halves, its splits kept, down to 100,000: the spare reads none of the depth and the seeded route is refused", async () => {
   const at = RC_HEAD - 500_000;
   let timedOut = 0;
-  const c = rcFirst("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f15", (inner) => async (calls, s) => {
+  const c = rcFirst("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f16", (inner) => async (calls, s) => {
     const f = calls.find((x) => x.method === "eth_getLogs")?.params[0] as { fromBlock: string; toBlock: string } | undefined;
     if (f !== undefined && Number(f.fromBlock) <= at && Number(f.toBlock) >= at && Number(f.toBlock) - Number(f.fromBlock) + 1 > 100_000 && ++timedOut) throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
     return inner(calls, s);
