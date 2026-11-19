@@ -2242,9 +2242,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
             stood.held++;
             return;
           }
-          // a busy loop stands the read back down, rested where it got to, to go on at the lists' next load
+          // a busy loop stands the read back down, rested where it got to, its tape back in the queue: the run takes it
+          // up again on the first turn the loop is free (AHEAD_WAIT_MS), not at the lists' next load a minute on
           if (busy()) {
             stood.busy++;
+            tapeQueue.add(t);
             return;
           }
           const wait = (e!.back?.until ?? now()) - now();

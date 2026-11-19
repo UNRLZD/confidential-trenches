@@ -272,3 +272,52 @@ test("card robinhood-tapes-read-ahead-bounded: the read ahead's minute line, at 
   assert.ok(Number(m[6]) >= 10_000 / AHEAD_WAIT_MS, `the loop's 10 s busy counted in waits: ${m[6]}`);
   assert.doesNotMatch(minute[0]!, /0x[0-9a-f]/i, "no address in the line");
 });
+
+test("card robinhood-tapes-read-ahead-bounded: a read back the busy loop stands down for one turn is taken up again within AHEAD_WAIT_MS of the loop coming free, not at the lists' next load (red at 23c25c514: rested until the next ahead() a lists period on, LIST_MS)", async () => {
+  const r = rig();
+  const { token, pool } = LISTED[0]!;
+  const kept = new Map([[token!, { pool: { venue: "v3", id: pool!, token: token!, tokenIs0: true, quote: { kind: "usd", decimals: 6 } } as Pool, decimals: 18 }]]);
+  /** The lists' next load: a lists period (server.ts LIST_MS) after the first. */
+  const LIST_MS = 60_000;
+  // once the tape's first read is in, every log read fails (an error answer, no hold): the locate BACK_FAILS_MAX times,
+  // which sends the read back to the day's steps, then the steps BACK_FAILS_MAX times, which back off BACK_RETRY_MS,
+  // past what backAll waits itself; the read back's loop then asks busy() at that wait. The loop is busy for that one
+  // ask, the reads answer again from then, and the loop is free
+  let failing = false;
+  let pulsedAt: number | null = null;
+  /** Every post after the busy turn: when, and its first method. */
+  const posts: { at: number; m: string }[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const body = String(init.body);
+    if (pulsedAt !== null) posts.push({ at: clock.t, m: String(/"method":"(\w+)"/.exec(body)?.[1]) });
+    if (failing && body.includes('"eth_getLogs"')) {
+      const reqs = [JSON.parse(body)].flat() as { id: number }[];
+      const one = (q: { id: number }) => ({ jsonrpc: "2.0", id: q.id, error: { code: -32000, message: "header not found" } });
+      return new Response(JSON.stringify(Array.isArray(JSON.parse(body)) ? reqs.map(one) : one(reqs[0]!)), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return r.fetch(url, init);
+  };
+  const busy = (): boolean => {
+    if (!failing) return false;
+    failing = false;
+    pulsedAt = clock.t;
+    return true;
+  };
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const s = open(r.chain, clock, { pools: kept, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: fetch as never, busy });
+    const t0 = clock.t;
+    void s.ahead([token!]);
+    while ((r.n.poolReads.get(pool!) ?? 0) < 1) await sleep(10);
+    failing = true;
+    // the lists' next load, a lists period on: the read back stood down without its tape requeued goes on only here
+    while (clock.t - t0 < LIST_MS) await sleep(10);
+    void s.ahead([token!]);
+    while (clock.t - t0 < LIST_MS + 2_000) await sleep(10);
+    s.stop();
+    return { t0 };
+  });
+  const first = posts[0];
+  console.log(`busy for one ask at +${pulsedAt === null ? "never" : pulsedAt - value.t0} ms; posts after it: ${posts.slice(0, 4).map((x) => `+${x.at - pulsedAt!} ${x.m}`).join(", ") || "none"}`);
+  assert.ok(pulsedAt !== null, "the read back never asked busy() at its wait: the test proves nothing");
+  assert.ok(first !== undefined && first.at - pulsedAt! <= AHEAD_WAIT_MS, `the read back went on ${first === undefined ? "never" : `${first.at - pulsedAt!} ms`} after the busy turn (bound AHEAD_WAIT_MS, ${AHEAD_WAIT_MS} ms; the lists' next load was ${LIST_MS - (pulsedAt! - value.t0)} ms after it)`);
+});
