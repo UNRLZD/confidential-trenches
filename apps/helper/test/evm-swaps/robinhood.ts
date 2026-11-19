@@ -8,6 +8,7 @@
 // busiest v4 pool's Swap logs (native ETH and Mag, its key read from the PositionManager), and the ETH / USDG price
 // pool's, each with the block time the provider logged.
 import { readFileSync } from "node:fs";
+import { callsIn, pocketRefusal } from "../pocket.ts";
 import { gunzipSync } from "node:zlib";
 import { createSwaps, ROBINHOOD_VENUES, ROBINHOOD_REF_POOL_ID, TOPIC, type Log, type Pool } from "../../src/data/evm/swaps.ts";
 
@@ -65,6 +66,9 @@ export function fakeChain() {
     if (f.down) return new Response("down", { status: 503 });
     const no = f.refuse?.();
     if (no) return no;
+    // a Pocket host answers 413 past 5 calls, as mainnet does (test/pocket.ts)
+    const pocket = pocketRefusal(url, callsIn(init.body));
+    if (pocket) return pocket;
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
     const out = reqs.map((r) => {
       const ok = (result: unknown) => ({ jsonrpc: "2.0", id: r.id, result });
