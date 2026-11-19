@@ -383,6 +383,49 @@ test("a filling answer of the helper's own bars stays live between its full read
   assert.deepEqual(limits, [...Array(AWAY_MS / LIVE_MS - 1).fill(String(LIVE_LIMIT)), String(CANDLES_LIMIT)]);
 });
 
+// Card app-chart-solana-full-read-on-time: a filling chart's full read is sent at its due time, AWAY_MS after the last,
+// whatever came between. Read on the build against the live helper, 19 Nov 21:01Z, a Solana chart filling: full reads
+// sent 21:00:45.1Z and 21:01:31.0Z, then a live read sent 21:01:45.8Z answered at 21:01:51.1Z (5.2 s) with no bars and
+// none of the helper's own; the follow waited AWAY_MS from that answer, so no full read came by 21:02:28.9Z, past the
+// 21:02:16Z it was due (the merge queue's "sent no full read in 63 s (due within 52 s)", group 44609308946). Live reads
+// answered in 4 to 5 s at other times, each putting the full read off by as long when one was out at its due time.
+const filledLive = async (live: (at: number, init: RequestInit | undefined, c: ReturnType<typeof clock>) => Promise<Response> | null) => {
+  const c = clock();
+  const t0 = c.now();
+  const full: number[] = [];
+  const fetchFn = ((u: string, init?: RequestInit) => {
+    const at = c.now() - t0;
+    if (new URL(u).searchParams.get("limit") === String(CANDLES_LIMIT)) {
+      full.push(at);
+      return Promise.resolve(answer(200, { ...own([row(2, "1.1")]), filling: true }));
+    }
+    return live(at, init, c) ?? Promise.resolve(answer(200, own([row(2, "1.1")])));
+  }) as typeof fetch;
+  followCandles("solana", "Mint1", { ...start, filling: true }, () => undefined, { fetchFn, now: c.now, later: c.later, hidden: () => false });
+  while (c.now() - t0 < 3 * AWAY_MS) await c.tick();
+  return { c, full };
+};
+
+test("a live answer with none of the helper's own bars while the chart fills never puts off the full read due AWAY_MS after the last", async () => {
+  const { full } = await filledLive((at) => (at === 19_000 ? Promise.resolve(answer(200, { tf: "1m", candles: [], src: "chain", filling: true, as_of_ms: 1 })) : null));
+  assert.equal(full[0], AWAY_MS, `the full read is sent AWAY_MS on, not AWAY_MS after the empty answer (sent at ${full[0]} ms)`);
+  for (let i = 1; i < full.length; i++) assert.ok(full[i]! - full[i - 1]! >= AWAY_MS && full[i]! - full[i - 1]! <= AWAY_MS + LIVE_MS, `full reads ${full[i - 1]} and ${full[i]} AWAY_MS apart`);
+});
+
+test("a live read still out when the full read comes due is cut, and the full read goes at its due time", async () => {
+  let cut = 0;
+  const { full } = await filledLive((at, init, c) => {
+    if (at !== AWAY_MS - LIVE_MS) return null;
+    // the helper answers this live read 9 s on, inside the page's TIMEOUT_MS, unless the page cuts it first
+    return new Promise((resolve, reject) => {
+      const done = c.later(() => resolve(answer(200, own([row(2, "1.1")]))), 9_000);
+      init?.signal?.addEventListener("abort", () => (cut++, done(), reject(init.signal!.reason)));
+    });
+  });
+  assert.equal(full[0], AWAY_MS, `the full read is sent at its due time (sent at ${full[0]} ms)`);
+  assert.equal(cut, 1, "the live read out at the due time is cut");
+});
+
 // The away read keeps the helper's book of the token open: the helper drops a book no read touched for its IDLE_MS (60 s,
 // apps/helper/src/data/solana/trades.ts and apps/helper/src/data/evm/swaps.ts), and a Solana book opened again costs
 // a mint read, a stream subscription, a signatures read and up to COLD_SIGS (30) transaction reads (trades.ts first,

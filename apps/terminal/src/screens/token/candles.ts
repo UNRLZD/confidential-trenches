@@ -236,9 +236,10 @@ type Newest = { bars: Bar[]; gecko: boolean; own: boolean; filling: boolean } | 
 
 /** One read of the newest `limit` bars: the bars, or a failure (any status but 200, an answer toCandleData refuses, a
  *  throw) with a 429's Retry-After in ms. Never throws, never logs. */
-export async function readNewest(chain: MarketChain, token: string, tf: ChartTf, limit: number, fetchFn: typeof fetch = fetch): Promise<Newest> {
+export async function readNewest(chain: MarketChain, token: string, tf: ChartTf, limit: number, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<Newest> {
   try {
-    const r = await fetchFn(CANDLES_URL(chain, token, tf, limit), { ...HELPER_FETCH_INIT, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const timeout = AbortSignal.timeout(TIMEOUT_MS);
+    const r = await fetchFn(CANDLES_URL(chain, token, tf, limit), { ...HELPER_FETCH_INIT, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (r.status !== 200) {
       await r.body?.cancel().catch(() => undefined);
       const after = Number(r.headers.get("Retry-After"));
@@ -277,11 +278,12 @@ const laterReal = (fn: () => void, ms: number): (() => void) => {
  * Follows a ready chart: every LIVE_MS one read of the newest LIVE_LIMIT bars (a full read
  * once RESYNC_MS passed since the last, or after a failed read), folded (foldBars) and handed to `onBars` when they
  * changed, with the precision of the bars now drawn and CoinGecko's label kept while any drawn bar is GeckoTerminal's.
- * One read at a time; a hidden page reads nothing, and its first read back is a full one once RESYNC_MS passed. A
+ * One read at a time, and the full read goes at its due time: a live read still out then is cut. A hidden page reads
+ * nothing, and its first read back is a full one once RESYNC_MS passed. A
  * failed or refused read keeps the bars drawn and waits longer each time (doubling from LIVE_MS, a 429's Retry-After,
  * at most LIVE_BACKOFF_MAX_MS). An answer with none of the helper's own bars (a helper just restarted or deployed has
  * not read the token's book yet; its newest bars would be GeckoTerminal's) is folded like any other and the next read
- * is a full one AWAY_MS later (the helper keeps GeckoTerminal's newest range a minute, so it reads GeckoTerminal at
+ * is a full one AWAY_MS later, or sooner when a full read is due sooner (the helper keeps GeckoTerminal's newest range a minute, so it reads GeckoTerminal at
  * most once a minute for it), and live reads resume once the helper's own bars are back. A chart whose first answer
  * names none of them starts that way: its first read is a full one AWAY_MS later. While the last full answer (or the
  * first one) says `filling`, its bars are the helper's so far and more are being read (the helper's held bars or a
@@ -315,15 +317,24 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
     woken = false;
     next(Math.min(LIVE_BACKOFF_MAX_MS, waitMs ?? LIVE_MS * 2 ** fails));
   };
+  /** When the next full read is due: AWAY_MS after the last one while it said filling, else RESYNC_MS. */
+  const dueAt = () => lastFull + (filling ? AWAY_MS : RESYNC_MS);
   async function step(): Promise<void> {
     if (stopped) return;
     if (hidden()) return next(LIVE_MS);
     const sent = now();
-    const full = fails > 0 || away || sent - lastFull >= (filling ? AWAY_MS : RESYNC_MS);
+    const full = fails > 0 || away || sent >= dueAt();
     reading = true;
-    const got = await readNewest(chain, token, cur.tf, full ? CANDLES_LIMIT : cur.tf === "1s" ? LIVE_LIMIT_1S : LIVE_LIMIT, deps.fetchFn);
+    // a live read still out when the full read comes due is cut, and the full read goes at once: it holds the newest bars
+    // too (card app-chart-solana-full-read-on-time: helper answers of 4 to 5 s to a live read, so a slow one put off the
+    // full read past its due time by its own answer time)
+    const cut = new AbortController();
+    const uncut = full ? () => undefined : later(() => cut.abort(), Math.max(0, dueAt() - sent));
+    const got = await readNewest(chain, token, cur.tf, full ? CANDLES_LIMIT : cur.tf === "1s" ? LIVE_LIMIT_1S : LIVE_LIMIT, deps.fetchFn, cut.signal);
+    uncut();
     reading = false;
     if (stopped) return;
+    if (cut.signal.aborted) return void ((woken = false), step());
     if ("failed" in got) return failed(got.waitMs);
     const bars = foldBars(cur.bars, got.bars, cur.tf);
     if (bars === null) return failed(null);
@@ -340,7 +351,11 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
     away = !got.own;
     const again = woken && !away;
     woken = false;
-    next(away ? AWAY_MS : again ? 0 : LIVE_MS);
+    // an answer with none of the helper's own bars waits AWAY_MS, never past the full read already due: a live answer of
+    // no bars while the chart was filling (the helper's book of the token read again) put off the full read due AWAY_MS
+    // after the last by up to AWAY_MS more (card app-chart-solana-full-read-on-time: a Solana chart's full read due at
+    // 21:02:16Z, 19 Nov, after a live read sent 21:01:45.8Z answered 0 bars at 21:01:51.1Z, set for 21:02:36Z)
+    next(away ? Math.min(AWAY_MS, Math.max(0, dueAt() - now())) : again ? 0 : LIVE_MS);
   }
   const unwake =
     deps.wake?.(() => {
