@@ -789,8 +789,9 @@ export type TestnetOver = {
   /** The helper's /v1/rpc/{chain} the buy records' rebuild reads a buy's transaction on (pageEvmWalletRpc otherwise,
    *  none in the testnet build; tests). */
   evmHelper?: (chain: "base" | "robinhood") => EvmRpc | undefined;
-  /** A chain's pool index sync (the kit's evmPoolIndexSync on the venue's two index readers otherwise; tests). */
-  evmIndexSync?: (chain: "base" | "robinhood", prev: EvmPoolIndexData | null) => Promise<EvmPoolIndexSync>;
+  /** A chain's pool index sync (the kit's evmPoolIndexSync on the venue's two index readers otherwise; tests). `fetch` is
+   *  the page's own pass fetch the kit's readers would read through. */
+  evmIndexSync?: (chain: "base" | "robinhood", prev: EvmPoolIndexData | null, fetch: typeof globalThis.fetch) => Promise<EvmPoolIndexSync>;
   /** The page's pool index store (src/evm-index-store.ts on the page's IndexedDB otherwise; none with a planted sync;
    *  tests). */
   evmIndexStore?: EvmIndexStore | null;
@@ -1844,7 +1845,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (!evmMoney) return;
       const prev = evmIndex.get(chain) ?? null;
       const s = over.evmIndexSync
-        ? await over.evmIndexSync(chain, prev)
+        ? await over.evmIndexSync(chain, prev, passFetch)
         : (await evmPoolIndexRefresh(network, prev, passFetch)).sync;
       if (s === null) return;
       if (signal.aborted) return;

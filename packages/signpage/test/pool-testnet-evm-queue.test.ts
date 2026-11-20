@@ -1572,6 +1572,111 @@ test("a served index is kept at the head: EVM_INDEX_KEEP_MS after each sync a ga
   }
 });
 
+// Card signpage-index-keep-ends-at-sign-out: the index's pass fetch waited its host's turn and then sent with nothing
+// that read the session's signal after it, and no signal on the fetch: a sign out tapped while a read's turn resolved
+// (the turn given, its continuation not yet run) still sent that read. Every index read is refused once the session's
+// signal is aborted: before its turn, while it waits for it, and after a turn that resolved past the abort.
+test("card signpage-index-keep-ends-at-sign-out: no index read leaves after a sign out, at the keep's timer, in its turn's wait, or from a turn resolved past it", async () => {
+  const { resetHostLanes, hostLane, PASS_BUDGET } = await import("../../wallet/src/throttle.ts");
+  const { w, ns } = await wallet();
+  await landed(ns);
+  evmPoolIndexReset();
+  resetHostLanes();
+  const o = { now: 1_800_000_000_000 + 20_000 };
+  const tt = turnTimers(o);
+  const PM = evmPoolVenues()["base-sepolia"].poolManager!;
+  const ix = (through: number) => ({ v: 1, chainId: 84532, poolManager: PM, from: 1, through, head: { number: through, hash: "0x" + "0".repeat(64) }, spans: [[1, through]], pools: [] });
+  const stats = { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 };
+  const READER = "https://base-rpc.publicnode.com/";
+  const sent: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (u: string) => (sent.push(String(u)), new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x1" })))) as typeof fetch;
+  const keeps: { f: () => void; ms: number }[] = [];
+  // what the next sync does with the page's pass fetch, after which it answers a whole sync
+  let step: (f: typeof fetch) => Promise<void> = async () => {};
+  let t!: ReturnType<typeof testnetPool>;
+  t = testnetPool({ ...page(w), held: async () => w }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c: string) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    evmHelper: (c: string) => (c === "base" ? (async () => null) as EvmRpc : undefined),
+    evmTurn: tt.evmTurn,
+    evmIndexStore: null,
+    evmIndexKeep: (f: () => void, ms: number) => void keeps.push({ f, ms }),
+    evmIndexSync: async (_chain: string, prev: { through: number } | null, f: typeof fetch) => {
+      await step(f);
+      const n = (prev?.through ?? 0) + 10;
+      return { index: ix(n), coversThrough: n + 4, pools: [], error: null, stats };
+    },
+  } as unknown as Parameters<typeof testnetPool>[1]);
+  const settle = async () => {
+    for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 5));
+  };
+  const post = { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }) };
+  try {
+    // signed in: the first sync's read goes, and its keep is armed
+    step = async (f) => void (await f(READER, post));
+    await t.stateRead();
+    await settle();
+    assert.equal(sent.length, 1, "signed in, the index's read is sent");
+    assert.equal(keeps.length, 1, "the whole sync arms its keep");
+    // the keep's sync starts; its read's turn is given at once (the lane open), and the sign out is tapped in the same
+    // tick, before the read's continuation runs: nothing may be sent
+    let refused: unknown = null;
+    step = async (f) => {
+      const read = f(READER, post);
+      t.signingOut();
+      await read.catch((e: unknown) => void (refused = e));
+    };
+    keeps.shift()!.f();
+    await settle();
+    assert.equal(sent.length, 1, "a read whose turn resolved past the sign out is never sent");
+    assert.notEqual(refused, null, "and it is refused");
+    // the keep's timer fired at the sign out: nothing synced, nothing armed
+    for (const k of keeps.splice(0)) k.f();
+    await settle();
+    assert.equal(sent.length, 1, "no read from a keep timer that fires past the sign out");
+    assert.equal(keeps.length, 0, "and no keep armed after it");
+    // a read already waiting for its turn (the host's pass budget full) when the sign out comes: it ends, unsent
+    evmPoolIndexReset();
+    await t.signedOut();
+    resetHostLanes();
+    const u = testnetPool({ ...page(w), held: async () => w }, {
+      prover: { vault: signalsProver(), stop: () => {} },
+      evmPin: (c: string) => (c === "base" ? PIN : undefined),
+      evmRpcs: unread,
+      evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+      evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+      evmHelper: (c: string) => (c === "base" ? (async () => null) as EvmRpc : undefined),
+      evmTurn: tt.evmTurn,
+      evmIndexStore: null,
+      evmIndexKeep: () => {},
+      evmIndexSync: async (_chain: string, prev: { through: number } | null, f: typeof fetch) => {
+        for (let i = 0; i < PASS_BUDGET; i++) hostLane(READER).sent("pass");
+        const read = f(READER, post).catch((e: unknown) => void (refused = e));
+        await new Promise((r) => setTimeout(r, 20));
+        u.signingOut();
+        await read;
+        const n = (prev?.through ?? 0) + 10;
+        return { index: ix(n), coversThrough: n + 4, pools: [], error: null, stats };
+      },
+    } as unknown as Parameters<typeof testnetPool>[1]);
+    t = u;
+    refused = null;
+    await u.stateRead();
+    await settle();
+    assert.equal(sent.length, 1, "a read waiting for its turn at the sign out is never sent");
+    assert.notEqual(refused, null, "and its wait ends refused");
+  } finally {
+    globalThis.fetch = realFetch;
+    evmPoolIndexReset();
+    resetHostLanes();
+    await t.signedOut();
+  }
+});
+
 // Card signpage-evm-reads-draw-no-refusal: two tabs signed in at once each synced the whole cold index (release 130,
 // Chrome CDP capture 13 Nov: two pages' Robinhood index reads at 29.1 s each, one answered 429). One sync a chain on the
 // device at once (the Web Lock ct-evm-index/{chain}): the tab that finds it held syncs none, and at its next state
