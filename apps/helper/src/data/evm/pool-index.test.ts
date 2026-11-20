@@ -1,7 +1,7 @@
 // card evm-pool-index-from-the-first-pool: the helper's index of every PoolManager pool from its first block.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKFILL_DAY_SHARE, createPoolIndex, INITIALIZE, poolIdOf, POOL_INDEX_SPAN_LOGS, type PoolKey, type PoolIndexConfig } from "./pool-index.ts";
@@ -385,6 +385,40 @@ test("card helper-loop-never-held-by-a-read: the checkpoint thread never makes a
     for (let k = 0; k < 200; k++) await new Promise((r) => setTimeout(r, 5));
     assert.deepEqual([file, `${file}-wal`, `${file}-shm`].filter((f) => existsSync(f)), [], "a stopped thread opens nothing again");
     assert.equal(failed, null);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("card helper-loop-never-held-by-a-read: a checkpoint that fails is told to the owner: the thread's file will not open (a directory where it was), `failed` runs once, and the pool index turns its own connection's checkpoint back on, so its log never grows unchecked (red at b45f34f7b: the thread caught the error and said nothing)", async (t) => {
+  const d = dir();
+  try {
+    // the thread alone: a path that is there and cannot open
+    const bad = join(d, "bad.sqlite");
+    mkdirSync(bad);
+    const told: Error[] = [];
+    const a = checkpointAside(bad, (e) => void told.push(e), 1);
+    for (let k = 0; k < 400 && told.length === 0; k++) await new Promise((r) => setTimeout(r, 5));
+    for (let k = 0; k < 20; k++) await new Promise((r) => setTimeout(r, 5));
+    a.stop();
+    assert.equal(told.length, 1, "told once, the thread then stops checkpointing");
+    assert.match(told[0]!.message, /checkpoint of .*bad\.sqlite/);
+    // the pool index: its file moved aside and a directory put at its path once it is open, so its thread's first
+    // checkpoint (CHECKPOINT_MS in) cannot open it
+    const sql: string[] = [];
+    const exec = DatabaseSync.prototype.exec;
+    t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, q: string) {
+      sql.push(q);
+      return exec.call(this, q);
+    });
+    const file = join(d, "rh.sqlite");
+    const ix = createPoolIndex(file, cfg(), deps(chain(() => 10_000, [])));
+    renameSync(file, join(d, "moved.sqlite"));
+    mkdirSync(file);
+    // 1,000 turns of 5 ms at most: the thread's first round is a second in
+    for (let k = 0; k < 1_000 && !sql.includes("PRAGMA wal_autocheckpoint = 1000"); k++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(sql.includes("PRAGMA wal_autocheckpoint = 1000"), "the owner's checkpoint back on");
+    ix.close();
   } finally {
     rmSync(d, { recursive: true, force: true });
   }

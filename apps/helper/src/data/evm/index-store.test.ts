@@ -3,7 +3,7 @@
 // blocks since; a copy is served only once read up to a head read after the start, one past its window behind is
 // dropped; a torn or corrupt file, or one bad row, is dropped whole and started again, never served.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -201,4 +201,21 @@ test("card helper-loop-never-held-by-a-read: the store's file is WAL with synchr
   assert.match(pragmas, /PRAGMA synchronous = NORMAL;/);
   assert.doesNotMatch(pragmas, /synchronous = (FULL|EXTRA)/);
   assert.match(pragmas, /PRAGMA wal_autocheckpoint = 0;/, "no write runs the log's checkpoint (its sync) in a turn of the loop");
+});
+
+test("card helper-loop-never-held-by-a-read: a checkpoint that fails is told to the store, which turns its own connection's checkpoint back on (red at b45f34f7b: the thread caught the error and said nothing)", async (t) => {
+  const sql: string[] = [];
+  const exec = DatabaseSync.prototype.exec;
+  t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, q: string) {
+    sql.push(q);
+    return exec.call(this, q);
+  });
+  const d = dir(t);
+  const file = join(d, "swaps.sqlite");
+  const store = openIndexStore(file, [SWAP]);
+  assert.ok(store !== null);
+  renameSync(file, join(d, "moved.sqlite"));
+  mkdirSync(file);
+  for (let k = 0; k < 1_000 && !sql.includes("PRAGMA wal_autocheckpoint = 1000"); k++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(sql.includes("PRAGMA wal_autocheckpoint = 1000"), "the store's checkpoint back on");
 });

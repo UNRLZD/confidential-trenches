@@ -11,6 +11,9 @@
 // on its first round that finds it, and keeps that connection. `stop` waits, bounded by STOP_WAIT_MS, until the thread
 // has closed it, so a file closed by its owner is never opened again behind it (the helper suite at 179ee8d66: a thread
 // that opened its file after the test removed it left the test's directory not empty).
+//
+// A checkpoint that fails (the file will not open, an I/O error) is told to the owner and ends the thread: `failed` runs,
+// and the owner turns its own connection's checkpoint back on, so the log never grows while nothing checkpoints it.
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 
@@ -33,7 +36,12 @@ const once = () => {
       db = new DatabaseSync(new URL(workerData.url));
     }
     db.exec("PRAGMA wal_checkpoint(PASSIVE)");
-  } catch {}
+  } catch (e) {
+    clearInterval(t);
+    try { db?.close(); } catch {}
+    db = null;
+    parentPort.postMessage({ failed: String(e?.message ?? e) });
+  }
 };
 const t = setInterval(once, workerData.everyMs);
 parentPort.on("message", () => {
@@ -54,9 +62,18 @@ export function checkpointAside(file: string, failed: (e: Error) => void, everyM
   const w = new Worker(BODY, { eval: true, workerData: { path: file, url: url.href, everyMs, done } });
   w.unref();
   let alive = true;
+  let told = false;
+  const fail = (e: Error): void => {
+    if (told) return;
+    told = true;
+    failed(e);
+  };
   w.on("error", (e) => {
     alive = false;
-    failed(e);
+    fail(e);
+  });
+  w.on("message", (m: { failed?: string }) => {
+    if (typeof m?.failed === "string") fail(new Error(`checkpoint of ${file}: ${m.failed}`));
   });
   w.on("exit", () => void (alive = false));
   return {
