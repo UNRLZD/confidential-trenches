@@ -327,7 +327,8 @@ export function judge(rec) {
   const held = reloads
     ? [...(chrome ? [[st.created?.t, st.passkeyOut?.doc ?? st.passkeyOut?.t]] : []), [st.words?.t, st.wordsOut?.doc ?? st.wordsOut?.t], ...(chrome ? [[st.created2?.t, st.passkeyOut2?.doc ?? st.passkeyOut2?.t]] : [])]
     : [...(chrome ? [[st.created?.t, st.passkeyOut?.t]] : []), [st.words?.t, st.wordsOut?.t]];
-  const signedIn = (x) => typeof x.t === "number" && held.some(([a, b]) => typeof a === "number" && typeof b === "number" && x.t >= a && x.t < b);
+  // each request at its send (sentAt: the browser's clock where the run matched it, as the new document's timeOrigin is)
+  const signedIn = (x) => typeof sentAt(x) === "number" && held.some(([a, b]) => typeof a === "number" && typeof b === "number" && sentAt(x) >= a && sentAt(x) < b);
   const pinned = (x) => PINNED_HOSTS.includes(x.host);
   const stray = reqs.filter((x) => x.host !== SIGN_HOST && x.host !== APP_HOST && !pinned(x));
   say(stray.length === 0, `no request leaves SIGN_HOST and APP_HOST but for the pinned pool's hosts (${stray.length}${stray.length ? `: ${stray.slice(0, 4).map((x) => x.host).join(", ")}` : ""})`);
@@ -343,9 +344,9 @@ export function judge(rec) {
     // request of any host may carry one: no read of that account outlives its sign out into the next one's.
     const words0 = st.words?.t;
     const words1 = st.wordsOut?.doc;
-    const before = new Set(reqs.filter((x) => pinned(x) && x.t < words0).flatMap(namesIn));
-    const own = new Set(reqs.filter((x) => pinned(x) && x.t >= words0 && x.t < words1).flatMap(namesIn).filter((n) => !before.has(n) && !CODE_NAMES.has(n)));
-    const later = typeof words1 === "number" ? reqs.filter((x) => typeof x.t === "number" && x.t >= words1) : [];
+    const before = new Set(reqs.filter((x) => pinned(x) && sentAt(x) < words0).flatMap(namesIn));
+    const own = new Set(reqs.filter((x) => pinned(x) && sentAt(x) >= words0 && sentAt(x) < words1).flatMap(namesIn).filter((n) => !before.has(n) && !CODE_NAMES.has(n)));
+    const later = typeof words1 === "number" ? reqs.filter((x) => typeof sentAt(x) === "number" && sentAt(x) >= words1) : [];
     const named = later.filter((x) => namesIn(x).some((n) => own.has(n)));
     // a live run must find some (the restore's reads name the account's ids); on the harness those reads are refused
     // before the walk derives any, so a harness run may find none
@@ -438,6 +439,47 @@ function serveWith(sign, requests) {
   };
 }
 
+// Each request's send on the browser's own clock (card signpage-sign-out-sends-nothing): a recorded request's `t` is
+// node's Date.now() as the route reads it, after the request reached node, while a sign out's window ends at the new
+// document's performance.timeOrigin, the browser's clock. On a loaded runner a request the page sent a few ms before
+// another tab's sign out was heard read as sent after it (merge group 44661520805: the pool price read's eth_chainId,
+// 34 to 84 ms before the hearing in 15 local runs). On Chromium the driver keeps each Network.requestWillBeSent's
+// wallTime; `sent` is set from it where the sends and the records of one request's shape (host, path and query,
+// method, what it asks) are as many and in order, and each send is no later than its record. Elsewhere, or for a shape
+// whose counts differ, `t` stands: a send is never placed earlier than a record it cannot be matched to one for one.
+/** One request's shape, the same for a record and a browser send. */
+const shapeOf = (host, pathAndQuery, method, rpc) => JSON.stringify([host, pathAndQuery, method, rpc ?? null]);
+const recordShape = (x) => shapeOf(x.host, `${x.path}${x.query !== undefined ? `?${x.query}` : ""}`, x.method, x.rpc);
+/** A Network.requestWillBeSent's request as a send: its shape and its time, unix ms on the browser's clock. */
+export function sendOf(request, wallTime) {
+  let u;
+  try {
+    u = new URL(request.url);
+  } catch {
+    return null;
+  }
+  const body = typeof request.postData === "string" ? request.postData : Array.isArray(request.postDataEntries) && request.postDataEntries.length ? Buffer.concat(request.postDataEntries.map((e) => Buffer.from(e.bytes ?? "", "base64"))).toString("utf8") : null;
+  return { shape: shapeOf(u.host, u.pathname + u.search, request.method, body !== null ? rpcOf(body) : undefined), ms: wallTime * 1000 };
+}
+/** Sets each record's `sent` from the browser's sends (see above); a record left unmatched keeps `t` alone. */
+export function stampSends(requests, sends) {
+  const of = (xs, key) => {
+    const m = new Map();
+    for (const x of xs) m.set(key(x), [...(m.get(key(x)) ?? []), x]);
+    return m;
+  };
+  const recs = of(requests.filter((x) => !x.refused && typeof x.t === "number"), recordShape);
+  const browser = of(sends.filter((s) => s !== null), (s) => s.shape);
+  for (const [shape, rs] of recs) {
+    const ss = browser.get(shape) ?? [];
+    // a record's t is Date.now(), whole ms rounded down: its request reached node before t + 1
+    if (ss.length !== rs.length || ss.some((s, i) => !(s.ms < rs[i].t + 1) || (i > 0 && s.ms < ss[i - 1].ms))) continue;
+    rs.forEach((x, i) => (x.sent = Math.round(ss[i].ms * 1000) / 1000));
+  }
+}
+/** When a record's request was sent: the browser's own time where it was matched, node's route time otherwise. */
+export const sentAt = (x) => (typeof x.sent === "number" ? x.sent : x.t);
+
 /** What a request body asks: each JSON-RPC call's method and params (the body as text when it is not JSON-RPC). */
 export function rpcOf(body) {
   let j;
@@ -477,6 +519,13 @@ async function playwrightDriver(engine, serve, live, size, launch) {
     return r.fulfill({ status: a.status, headers: a.headers, body: a.body });
   });
   const page = await ctx.newPage();
+  // each request's send on the browser's clock, Chromium's own (stampSends): the top window's, SIGN_HOST's page
+  const sends = [];
+  if (engine === "chromium") {
+    const cdp = await ctx.newCDPSession(page);
+    cdp.on("Network.requestWillBeSent", (e) => sends.push(sendOf(e.request, e.wallTime)));
+    await cdp.send("Network.enable");
+  }
   // the CSP SIGN_HOST's first top-level answer carries (live: the deployed page's own)
   let csp = null;
   page.on("response", (res) => {
@@ -496,6 +545,7 @@ async function playwrightDriver(engine, serve, live, size, launch) {
       return f.evaluate(`(async () => { ${body} })()`);
     },
     messages: () => reports,
+    sends: () => sends,
     csp: () => csp,
     close: () => browser.close(),
   };
@@ -728,6 +778,7 @@ export async function collect({ engine, site, live, width = "desktop", launch = 
     rec.messages = msgs();
     // WebKit's proxy refuses any other host before serve() sees it: those count as requests too
     for (const r of d.refused?.() ?? []) requests.push({ host: String(r.target).replace(/:\d+$/, ""), path: null, method: r.kind, refused: true });
+    stampSends(requests, d.sends?.() ?? []);
     await d.close();
     if (built) rmSync(built, { recursive: true, force: true });
   }
