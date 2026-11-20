@@ -10,7 +10,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { busiest, judge, sampled } from "./sol-tape-in-order.mjs";
+import { busiest, judge, read, sampled } from "./sol-tape-in-order.mjs";
+import { candlesReader } from "./candles-read.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "sol-tape-in-order.answers.json"), "utf8"));
@@ -68,4 +69,37 @@ test("the coins read are the busiest listed off pump.fun", () => {
   const [SOL, TTWO, XSC9, HIGH] = ["So11111111111111111111111111111111111111112", "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo", "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh", "7ymF66Z6VhgNiwadtVhjTtT6U7iQRpSxeiRrhfufhigh"];
   const list = [row(SOL, "pump.fun", 9e9), row(TTWO, null, 2.7e8), row(XSC9, null, 1e6), row(TTWO, null, 1), row(HIGH, "raydium-launchlab", 6e4), row("not a mint", null, 1e12)];
   assert.deepEqual(busiest(list), [TTWO, XSC9, HIGH]);
+});
+
+// card helper-sol-tape-checks-hold: live run 44665943571 (20 Nov 03:1xZ) read "BAD pumpCmXq read 1: answers 429" on the
+// helper's refusal of the read, its next three reads 200 with 50 rows newest first. A read is now read as the page reads a
+// 429: again at its Retry-After, counted once, within one 75 s span for the run; a 429 standing past it is BAD as before.
+test("card helper-sol-tape-checks-hold: a 429 on a tape read is read again at its Retry-After, the read counted once (red at c6f82f3bc: the 429 judged as the tape's answer)", { timeout: 60_000 }, async () => {
+  const COIN = "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo";
+  const answers = [];
+  let n = 0;
+  const fetchFn = async (url) => {
+    if (url.includes("/lists")) return new Response(JSON.stringify({ lists: { trending: [{ token: COIN, launchpad: null, vol_24h_usd: 1 }] } }));
+    n++;
+    answers.push(n);
+    // the opening read 200, the first counted read refused (Retry-After 5), every other 200 with no row
+    return n === 2 ? new Response('{"error":{"code":"rate_limited"}}', { status: 429, headers: { "retry-after": "5" } }) : new Response(JSON.stringify({ trades: [] }));
+  };
+  const waited = [];
+  const run = await read("http://helper.test", fetchFn, candlesReader({ now: () => 0, wait: async (ms) => void waited.push(ms) }));
+  const reads = run.coins[0].reads;
+  assert.equal(reads.length, 4, "four reads counted");
+  assert.deepEqual(reads.map((r) => r.status), [200, 200, 200, 200]);
+  assert.deepEqual(reads[0].waits, [5_000]);
+  assert.deepEqual(waited, [5_000]);
+  assert.deepEqual(bad(judge(run)), []);
+});
+
+test("card helper-sol-tape-checks-hold: a 429 still standing after the span is BAD with its waits named; the recorded refusal stays BAD", () => {
+  const stood = judge(edit((rec) => (rec.coins[0].reads[0] = { atMs: 1, status: 429, headers: { "retry-after": "5" }, body: "{}", waits: [5_000, 70_000] })));
+  assert.equal(stood.verdict, "FAIL");
+  assert.ok(bad(stood).some((l) => /read 1: answers 429 after 75 s of reads at each Retry-After \(5, 70 s\)$/.test(l)), bad(stood).join("\n"));
+  const recorded = judge(edit((rec) => (rec.coins[1].reads[0] = { atMs: 1, status: 429, body: "{}" })));
+  assert.equal(recorded.verdict, "FAIL");
+  assert.ok(bad(recorded).some((l) => /read 1: answers 429$/.test(l)));
 });
