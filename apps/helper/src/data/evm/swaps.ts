@@ -802,11 +802,15 @@ export function parseLog(raw: unknown): Log | null {
   return { block, index, tx, address, topics: ts, data, t };
 }
 
-/** The logs of an `eth_getLogs` result, in block and log order, or null when it is not a list of valid logs. */
-export function parseLogs(result: unknown): Log[] | null {
+/** The logs of an `eth_getLogs` result, in block and log order, or null when it is not a list of valid logs. Checked a
+ *  turn's slice at a time (limits/turn.ts pass): an answer of LOGS_MAX logs is checked log by log, so a burst's cold
+ *  reads never check theirs in one turn together (card helper-loop-never-held-by-a-read). */
+export async function parseLogs(result: unknown, slice: () => Promise<void> | null = pass): Promise<Log[] | null> {
   if (!Array.isArray(result) || result.length > LOGS_MAX) return null;
   const out: Log[] = [];
   for (const raw of result) {
+    const w = slice();
+    if (w !== null) await w;
     if (obj(raw).removed === true) continue;
     const l = parseLog(raw);
     if (l === null) return null;
@@ -815,10 +819,12 @@ export function parseLogs(result: unknown): Log[] | null {
   return out.sort((a, b) => a.block - b.block || a.index - b.index);
 }
 
-const key = (l: Log, withTime: boolean) => `${l.block}:${l.index}:${l.tx}:${l.address}:${l.topics.join(",")}:${l.data}${withTime ? `:${l.t ?? "-"}` : ""}`;
+const sameLog = (x: Log, y: Log, withTime: boolean): boolean =>
+  x.block === y.block && x.index === y.index && x.tx === y.tx && x.address === y.address && x.data === y.data && x.topics.length === y.topics.length && x.topics.every((t, i) => t === y.topics[i]) && (!withTime || (x.t ?? null) === (y.t ?? null));
 /** Whether two providers' answers for one filter are the same logs; `withTime`: with the same block times too (the
- *  swaps' reads, which are timed by them). */
-export const sameLogs = (a: Log[], b: Log[], withTime = false): boolean => a.length === b.length && a.every((l, i) => key(l, withTime) === key(b[i]!, withTime));
+ *  swaps' reads, which are timed by them). Field by field, no key string built per log (card
+ *  helper-loop-never-held-by-a-read: building two keys a log was 11% of a copy's 155 ms turn). */
+export const sameLogs = (a: Log[], b: Log[], withTime = false): boolean => a.length === b.length && a.every((l, i) => sameLog(l, b[i]!, withTime));
 
 const word = (data: string, i: number): string => data.slice(2 + 64 * i, 2 + 64 * (i + 1));
 const addrOf = (w: string): string => `0x${w.slice(24)}`;
@@ -1277,10 +1283,12 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null; indexFile?: string; writable?: Promise<unknown>; restMax?: number; busy?: () => boolean }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null; indexFile?: string; writable?: Promise<unknown>; restMax?: number; busy?: () => boolean; pass?: () => Promise<void> | null }) {
   const now = deps.now ?? Date.now;
   /** Whether the helper's event loop is busy now (limits/loop-busy.ts): the reads ahead stand down while it is. */
   const busy = deps.busy ?? ((): boolean => false);
+  /** The loop's turns (limits/turn.ts pass, the default): an answer's per-log work gives the loop back between slices. */
+  const slice = deps.pass ?? pass;
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
@@ -1519,6 +1527,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (text.length > ANSWER_MAX) return null;
       refit = batchRefusal(200, text, part.length);
       if (refit !== undefined) throw new Error("refused for its size");
+      // each answer is parsed in a turn of its own once the turn's slice is spent (card helper-loop-never-held-by-a-read:
+      // one ANSWER_MAX answer parses in 3.6 ms on the Mac, but a burst's answers landed in one turn together, and a
+      // copy's profile held one 155 ms with 39% of it in the stream reads and parses)
+      const w = slice();
+      if (w !== null) await w;
       const parsed: unknown = JSON.parse(text);
       const answers = Array.isArray(parsed) ? parsed : [parsed];
       const got: Reply[] = part.map(() => ({ ok: false, wait: 0 }));
@@ -1726,9 +1739,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         if (r[k] != null) got[i]!.push({ a: r[k]!, co }), by[i]!.add(co), answered.add(co);
       });
     };
+    // each pair of answers is compared once (card helper-loop-never-held-by-a-read: pick ran again on every answer of every
+    // request each round, every pair's logs keyed again each time; a copy's profile held one turn 155 ms with agreed, pick
+    // and sameLogs 17% of it): what a request agreed on is kept, and a request's answers already compared are not again
+    const picked: (A | null)[] = Array.from({ length: n }, () => null);
+    const compared: number[] = Array.from({ length: n }, () => 0);
     const pick = (i: number): A | null => {
+      if (picked[i] !== null) return picked[i]!;
       const g = got[i]!;
-      for (let a = 0; a < g.length; a++) for (let b = a + 1; b < g.length; b++) if (g[a]!.co !== g[b]!.co && same(g[a]!.a, g[b]!.a)) return g[a]!.a;
+      for (let b = compared[i]!; b < g.length; b++) {
+        for (let a = 0; a < b; a++) if (g[a]!.co !== g[b]!.co && same(g[a]!.a, g[b]!.a)) return (picked[i] = g[a]!.a);
+        compared[i] = b + 1;
+      }
       return null;
     };
     const all = Array.from({ length: n }, (_, i) => i);
@@ -1788,14 +1810,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     });
     const r = await batchTo(u, groups.map((g) => ({ method: "eth_getLogs", params: [g.of.length === 1 ? g.f : { ...g.f, fromBlock: `0x${g.from.toString(16)}`, toBlock: `0x${g.to.toString(16)}` }] })), patient);
     const out: (Log[] | null)[] = fs.map(() => null);
-    groups.forEach((g, k) => {
-      const logs = r?.[k]?.ok ? parseLogs((r[k] as { result: unknown }).result) : null;
-      if (logs === null) return;
+    for (const [k, g] of groups.entries()) {
+      const logs = r?.[k]?.ok ? await parseLogs((r[k] as { result: unknown }).result, slice) : null;
+      if (logs === null) continue;
       for (const i of g.of) {
         const [from, to] = at(fs[i]!);
         out[i] = logs.filter((l) => l.block >= from && l.block <= to);
       }
-    });
+    }
     return out;
   }
 
@@ -2053,12 +2075,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (u === undefined || V.tapeBack <= 0) return null;
     const lo = Math.max(0, headN - V.tapeBack + 1);
     const r = await batchTo(u, [{ method: "eth_getLogs", params: [{ address: V.poolManager, topics: [TOPIC.swap4, id], fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${headN.toString(16)}` }] }]);
-    const logs = r?.[0]?.ok ? parseLogs((r[0] as { result: unknown }).result) : null;
+    const logs = r?.[0]?.ok ? await parseLogs((r[0] as { result: unknown }).result, slice) : null;
     if (logs == null) return null;
     const txs = [...new Set(logs.filter((l) => l.address === V.poolManager && l.topics[0] === TOPIC.swap4 && l.topics[1] === id && l.block >= lo && l.block <= headN).map((l) => l.tx))];
     if (txs.length === 0) return null;
     const e = (await v4Seen(txs.slice(-V4_TXS), { any: false })).get(id);
-    return e === undefined ? null : v4Pool(token, id, (await v4KeySliced(id, token, e.fee, [...e.around], chain)) ?? undefined);
+    return e === undefined ? null : v4Pool(token, id, (await v4KeySliced(id, token, e.fee, [...e.around], chain, slice)) ?? undefined);
   }
   async function fromHint(token: string, hint: string): Promise<Found | null> {
     const head = await agreedHead();
@@ -2113,6 +2135,17 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return seen;
   }
 
+  /** How many of `logs` decode as swaps of pool `c`, a turn's slice at a time. */
+  async function decodedCount(c: Pool, logs: readonly Log[]): Promise<number> {
+    let n = 0;
+    for (const l of logs) {
+      const w = slice();
+      if (w !== null) await w;
+      if (decodeSwap(c, l, chain) !== null) n++;
+    }
+    return n;
+  }
+
   async function findPool(token: string, hint: string | null = null): Promise<Found | null> {
     const head = await agreedHead();
     if (head === null) throw new Error("no agreed head");
@@ -2129,15 +2162,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const tlogs = tw.logs;
     // who held and moved the token, and the PoolManager's latest transactions
     const count = new Map<string, number>();
-    const pmTxs: string[] = [];
+    // the PoolManager's transactions in the order seen, each once (a Set: a list's includes made the loop quadratic)
+    const pmTxSet = new Set<string>();
     for (const l of tlogs) {
+      const turn = slice();
+      if (turn !== null) await turn;
       if (l.address !== token || l.topics.length !== 3 || l.data.length !== 66) continue;
       for (const w of [l.topics[1]!, l.topics[2]!]) {
         const a = addrOf(w.slice(2));
         if (a !== ZERO && a !== token) count.set(a, (count.get(a) ?? 0) + 1);
-        if (a === V.poolManager && !pmTxs.includes(l.tx)) pmTxs.push(l.tx);
+        if (a === V.poolManager) pmTxSet.add(l.tx);
       }
     }
+    const pmTxs = [...pmTxSet];
     const top = [...count].filter(([a]) => a !== V.poolManager).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, CANDIDATES_MAX).map(([a]) => a);
     const cands: Pool[] = [];
     // v2, v3 and Slipstream pools: the factory of each address, then the two tokens and the getPool parameter of those
@@ -2182,7 +2219,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // the token against a quote of no venue of ours), and no search finds another (card robinhood-cold-open-fast: those
       // misses searched seconds each); else one worked out from the swap (it must hash to the id), the event loop let run
       const k = keys[i];
-      const c = k !== undefined && /^0x[0-9a-f]{320}$/.test(k) && keccakHex(k) === id ? v4Pool(token, id, k) : v4Pool(token, id, (await v4KeySliced(id, token, e.fee, [...e.around], chain)) ?? undefined);
+      const c = k !== undefined && /^0x[0-9a-f]{320}$/.test(k) && keccakHex(k) === id ? v4Pool(token, id, k) : v4Pool(token, id, (await v4KeySliced(id, token, e.fee, [...e.around], chain, slice)) ?? undefined);
       if (c !== null) cands.push(c);
     }
     // a Pons token: the factory's own record of it names its curve and its quote (zero: native ETH), or once it has
@@ -2198,7 +2235,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       Promise.all(cands.map((c) => agreedRange(head.with, (lo, hi) => poolFilters(c, lo, hi, chain), from, head.n))),
       cands.some((c) => c.quote.kind === "eth") ? readRef(head.with, head.n, from) : Promise.resolve(true),
     ]);
-    const score = cands.map((c, i) => (swaps[i] == null ? -1 : swaps[i]!.filter((l) => decodeSwap(c, l, chain) !== null).length));
+    const score: number[] = [];
+    for (const [i, c] of cands.entries()) score.push(swaps[i] == null ? -1 : await decodedCount(c, swaps[i]!));
     if (score.every((x) => x < 0)) throw new Error("swaps not agreed");
     // a candidate whose swaps went unread may be the main pool: no "no pool" from the rest
     if (score.some((x) => x < 0)) missed.any = true;
@@ -2226,7 +2264,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const w = await walk(head.with, (lo, hi) => poolFilters(best.c, lo, hi, chain), from - 1, TRADES_MAX - n, (part) => part.filter((l) => decodeSwap(best.c, l, chain) !== null).length, head.n - V.cold + 1);
       if (w == null) throw new Error("swaps not agreed");
       logs = w.logs.concat(logs);
-      n += w.logs.filter((l) => decodeSwap(best.c, l, chain) !== null).length;
+      n += await decodedCount(best.c, w.logs);
       from = w.from;
     }
     if (n <= 0 && missed.any) throw new Error("pools not read");
@@ -3000,7 +3038,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // BACK_FAILS_MAX, and 12 tapes opened at once walked the day in steps, two still filling at 110 s; read from the
     // Mac on d59370557, 17 Nov 05:1xZ)
     if (r === null && holds.heldFor(u) > 0) return "held";
-    const got = (r ?? []).map((x) => (x?.ok ? parseLogs((x as { result: unknown }).result) : null));
+    const got: (Log[] | null)[] = [];
+    for (const x of r ?? []) got.push(x?.ok ? await parseLogs((x as { result: unknown }).result, slice) : null);
     if (r === null || got.length === 0 || got.some((x) => x === null)) return undefined;
     const logs = (got as Log[][]).flat();
     const blocks = logs.filter((l) => l.block >= lo && l.block <= hi && (decodeSwap(e.pool, l, chain) !== null || isBirth(e.pool, l, chain))).map((l) => l.block);
@@ -4055,7 +4094,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         while (notMade.size > POOLS_MAX) notMade.delete(notMade.values().next().value!);
       }
       const fresh = s.senders.filter((x) => !keyTried.has(`${id} ${x}`));
-      const worked = fresh.length === 0 ? null : await keyFromReceipt(id, token, s.fee, fresh, s.currencies);
+      const worked = fresh.length === 0 ? null : await keyFromReceipt(id, token, s.fee, fresh, s.currencies, slice);
       if (worked === null) for (const x of fresh) keyTried.add(`${id} ${x}`);
       while (keyTried.size > TRADERS_MAX) keyTried.delete(keyTried.values().next().value!);
       return worked;

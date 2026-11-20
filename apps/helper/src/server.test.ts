@@ -172,7 +172,7 @@ test("each of the two origins is echoed byte for byte, with Vary: Origin and no 
     assert.equal(r.headers["access-control-allow-origin"], o);
     assert.equal(r.headers["vary"], "Origin");
     assert.equal(r.headers["access-control-allow-credentials"], undefined);
-    assert.equal(r.headers["access-control-expose-headers"], "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After");
+    assert.equal(r.headers["access-control-expose-headers"], "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After, Server-Timing");
   }
 });
 

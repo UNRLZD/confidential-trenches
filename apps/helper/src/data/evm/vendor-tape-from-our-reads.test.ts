@@ -236,12 +236,12 @@ test("a held coin's pool name is asked again once GT_POOL_FRESH_MS (10 min) old,
   assert.equal(after.filter((u) => u.includes(`/pools/${moved}/trades`)).length, 1, "the new pool's rows read once from the vendor");
 });
 
-test("poolTrades: a pair's trade is its net Transfers of the coin and the quote at the pool (a sell: coin in, quote out); liquidity (both in) is no trade; a v4 pool's is its Swap log's two amounts, the swapper's side", () => {
+test("poolTrades: a pair's trade is its net Transfers of the coin and the quote at the pool (a sell: coin in, quote out); liquidity (both in) is no trade; a v4 pool's is its Swap log's two amounts, the swapper's side", async () => {
   const coin = SOGNI.coin;
   const quote = "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2";
   const held: HeldPool[] = [{ token: coin, pool: SOGNI.pool, v4: false, quote }];
   const newest = SOGNI.trades[0]!;
-  const logs = parseLogs(RECEIPTS[newest.tx_hash]!.logs.map((l) => ({ ...l, transactionHash: newest.tx_hash, blockNumber: "0x1", removed: false })))!;
+  const logs = (await parseLogs(RECEIPTS[newest.tx_hash]!.logs.map((l) => ({ ...l, transactionHash: newest.tx_hash, blockNumber: "0x1", removed: false }))))!;
   const got = poolTrades(logs, held, "0x0000000000000000000000000000000000000001");
   assert.equal(got.length, 1);
   assert.deepEqual([got[0]!.side, got[0]!.quote], ["s", 86_710_609n]);

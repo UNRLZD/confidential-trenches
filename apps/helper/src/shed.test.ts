@@ -40,6 +40,8 @@ test("past capacity every market data read is a 503 the page reads, before any r
     assert.equal(r.status, 503, path);
     assert.equal(r.headers["access-control-allow-origin"], APP, `${path}: the page reads it`);
     assert.match(String(r.headers["access-control-expose-headers"]), /Retry-After/i, path);
+    // a page reads the cause cross-origin only when it is exposed (card helper-loop-never-held-by-a-read)
+    assert.ok(String(r.headers["access-control-expose-headers"]).split(", ").includes("Server-Timing"), `${path}: Server-Timing exposed`);
     assert.equal(r.headers["retry-after"], String(UPSTREAM_RETRY_AFTER_S), path);
     assert.equal(r.headers["x-helper-commit"], COMMIT, path);
     assert.deepEqual(JSON.parse(r.body), { error: { code: "upstream" } }, path);
