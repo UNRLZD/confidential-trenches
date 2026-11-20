@@ -683,5 +683,374 @@
    }
   },
   "where": "this Mac, main 2e7ec335 (every case in one process), the check's own --record"
+ },
+ "bad_scanlag": {
+  "recorded": "2026-11-20T03:55:27Z",
+  "cases": {
+   "robinhood-publicnode-100": {
+    "cold": {
+     "ms": 2561,
+     "code": "ok",
+     "lagHeads": 2
+    },
+    "quotes": [
+     {
+      "ms": 196,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 209,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 188,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 187,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 235,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 189,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 170,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 236,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 212,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 227,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   },
+   "base-blastapi-5": {
+    "cold": {
+     "ms": 559,
+     "code": "ok",
+     "lagHeads": 2
+    },
+    "quotes": [
+     {
+      "ms": 237,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 51,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 53,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 43,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 63,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 83,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 117,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 43,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 44,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 44,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   },
+   "base-blastapi-50": {
+    "cold": {
+     "ms": 33966,
+     "code": "ok",
+     "lagHeads": 2
+    },
+    "quotes": [
+     {
+      "ms": 1136,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 2218,
+      "code": "rpc_error",
+      "lagHeads": 0,
+      "message": "rpc_error: the scan provider does not hold block 59783246 yet"
+     },
+     {
+      "ms": 2502,
+      "code": "rpc_error",
+      "lagHeads": 0,
+      "message": "rpc_error: the scan provider does not hold block 59783255 yet"
+     },
+     {
+      "ms": 6303,
+      "code": "rpc_error",
+      "lagHeads": 0,
+      "message": "rpc_error: the scan provider does not hold block 59783291 yet"
+     },
+     {
+      "ms": 8601,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 59,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 52,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 37,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 52,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 50,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   }
+  },
+  "where": "release 184 (main fa4393bd7), GitHub runner, live app run 44670793512 job 136071114793: the quote lines its log printed"
+ },
+ "good_scanlag": {
+  "recorded": "2026-11-20T05:19:16.799Z",
+  "cases": {
+   "robinhood-publicnode-100": {
+    "cold": {
+     "ms": 3012,
+     "code": "ok",
+     "lagHeads": 3
+    },
+    "quotes": [
+     {
+      "ms": 1943,
+      "code": "ok",
+      "lagHeads": 3
+     },
+     {
+      "ms": 1904,
+      "code": "ok",
+      "lagHeads": 3
+     },
+     {
+      "ms": 1496,
+      "code": "ok",
+      "lagHeads": 3
+     },
+     {
+      "ms": 1479,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1417,
+      "code": "ok",
+      "lagHeads": 3
+     },
+     {
+      "ms": 465,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 453,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1371,
+      "code": "ok",
+      "lagHeads": 3
+     },
+     {
+      "ms": 1401,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1380,
+      "code": "ok",
+      "lagHeads": 3
+     }
+    ]
+   },
+   "base-blastapi-5": {
+    "cold": {
+     "ms": 2622,
+     "code": "ok",
+     "lagHeads": 2
+    },
+    "quotes": [
+     {
+      "ms": 419,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 325,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 507,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 314,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 384,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 355,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 311,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 299,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 355,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 305,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   },
+   "base-blastapi-50": {
+    "cold": {
+     "ms": 35542,
+     "code": "ok",
+     "lagHeads": 2
+    },
+    "quotes": [
+     {
+      "ms": 3849,
+      "code": "ok",
+      "lagHeads": 3
+     },
+     {
+      "ms": 2324,
+      "code": "ok",
+      "lagHeads": 3
+     },
+     {
+      "ms": 1570,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1052,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1621,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 1241,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1678,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 458,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 421,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 378,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   }
+  },
+  "where": "this Mac, card evm-quote-rides-a-scan-lag-at-max at b1d29a799 (origin/main c6f82f3bc and the fix), each case in a process of its own: the check's own --record"
  }
 }

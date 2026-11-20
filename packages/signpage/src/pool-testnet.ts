@@ -789,8 +789,9 @@ export type TestnetOver = {
   /** The helper's /v1/rpc/{chain} the buy records' rebuild reads a buy's transaction on (pageEvmWalletRpc otherwise,
    *  none in the testnet build; tests). */
   evmHelper?: (chain: "base" | "robinhood") => EvmRpc | undefined;
-  /** A chain's pool index sync (the kit's evmPoolIndexSync on the venue's two index readers otherwise; tests). */
-  evmIndexSync?: (chain: "base" | "robinhood", prev: EvmPoolIndexData | null) => Promise<EvmPoolIndexSync>;
+  /** A chain's pool index sync (the kit's evmPoolIndexSync on the venue's two index readers otherwise; tests). `fetch` is
+   *  the page's own pass fetch the kit's readers would read through. */
+  evmIndexSync?: (chain: "base" | "robinhood", prev: EvmPoolIndexData | null, fetch: typeof globalThis.fetch) => Promise<EvmPoolIndexSync>;
   /** The page's pool index store (src/evm-index-store.ts on the page's IndexedDB otherwise; none with a planted sync;
    *  tests). */
   evmIndexStore?: EvmIndexStore | null;
@@ -1837,14 +1838,21 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // a page whose pool RPCs are planted (tests) syncs only through a planted sync, never on the public readers
     if (over.evmIndexSync === undefined && (over.evmRpcs !== undefined || ix === undefined || v?.poolManager === undefined || v.scan === undefined)) return;
     const signal = evmStop.signal;
-    // each reader's request waits for a pass's turn on its host, so a trade's reads there go first
-    const passFetch = (async (url: string, init?: RequestInit) => (await hostLane(url).turn("pass", signal), laneFetch()(url, init))) as typeof fetch;
+    // each reader's request waits for a pass's turn on its host, so a trade's reads there go first; a sign out ends it
+    // before the turn, in its wait, and after a turn that resolved past it (its continuation runs a tick later: card
+    // signpage-index-keep-ends-at-sign-out), and the request in flight
+    const passFetch = (async (url: string, init?: RequestInit) => {
+      // the turn counts nothing: laneFetch counts the request it sends, once (card signpage-sign-out-sends-nothing)
+      await hostLane(url).turn("pass", signal, false);
+      signal.throwIfAborted();
+      return laneFetch()(url, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
+    }) as typeof fetch;
     const sync = async (): Promise<void> => {
       // a device that holds nothing syncs none past it (evmMoney)
       if (!evmMoney) return;
       const prev = evmIndex.get(chain) ?? null;
       const s = over.evmIndexSync
-        ? await over.evmIndexSync(chain, prev)
+        ? await over.evmIndexSync(chain, prev, passFetch)
         : (await evmPoolIndexRefresh(network, prev, passFetch)).sync;
       if (s === null) return;
       if (signal.aborted) return;

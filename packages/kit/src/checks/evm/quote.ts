@@ -1862,11 +1862,16 @@ function atAmount(r: Read, from: bigint, to: bigint): Read {
 export const EVM_WARM_RANGE_S = 60n;
 /** The most tokens whose reads are kept, the oldest dropped first. */
 const PLANS_MAX = 64;
-/** Per chain, token and amount, the routes whose swap fit the last buy quote read or used, and its block's time: the
- *  next quote within EVM_WARM_RANGE_S reads them again at its own block beside its first round (evmPoolBuyQuoteWith). */
+/** Per chain, token and amount, the routes whose swap fit decided the last buy quote's verdicts (each list's best that
+ *  fits and every route above it, card robinhood-taps-meet-no-429), and its block's time: the next quote within
+ *  EVM_WARM_RANGE_S reads them again at its own block beside its first round (evmPoolBuyQuoteWith). */
 const FITS = new Map<string, { ts: bigint; routes: EvmRoute[] }>();
 /** The most fit routes kept a token: one round's worth (a warm Robinhood AI quote asked 15). */
 const EVM_FITS_KEPT = 32;
+/** The routes of a list whose fits the first round of swap-fit reads asks, the best by output (card
+ *  robinhood-taps-meet-no-429): one batch of CALLS_PER_BATCH, so a best that does not fit falls to the next, already
+ *  read, and a list none of them settles is asked whole in the second round. */
+const EVM_FITS_FIRST = 3;
 const readKey = (r: Read) => JSON.stringify([r.to, r.data, r.override ?? null, r.group ?? null, r.state ?? null, r.tx ?? null], (_, x) => (typeof x === "bigint" ? String(x) : x));
 const SCAN_TOKENS = 4096;
 const SCAN_MAX_LOGS = 10_000;
@@ -2235,8 +2240,9 @@ async function scanHeadOf(rpc: EvmRpc, gate: ScanGate): Promise<bigint> {
 type ScanOn = { rpc: EvmRpc; gate: ScanGate; span: number; parallel: number; orSpan?: number | undefined; next?: ScanOn | undefined };
 /** The quote's scan providers: the head every scan reads up to and the provider asked first, the rest behind it in
  *  order (`next`). A first that answered no head still carries the requests: the head is the first of the rest that
- *  answered one. */
-type ScanFrom = { head: bigint; first: ScanOn };
+ *  answered one. `own`, where the head is a block no scan provider named (a warm buy's held head, a follow's pinned
+ *  block): the scan providers' own head, as `head` is read where none is given (card evm-quote-rides-a-scan-lag-at-max). */
+type ScanFrom = { head: bigint; first: ScanOn; own?: (() => Promise<bigint>) | undefined };
 /** The scan of the currencies `cs` up to the scan provider's head, then the agreed block `agreed()`, picked once those
  *  logs are in (card evm-quote-head-watch: a block picked before a long scan had aged past what Robinhood's providers
  *  keep of state by the reads). The head must not be more than `maxLag` blocks past the agreed block (review of
@@ -2281,7 +2287,7 @@ async function scanPools(
     const all = await Promise.all(cs.map(async (c) => [c, [...new Map([...(indexScanOf(chain, kind, c, weth, floor)?.pools ?? []), ...(tail0?.byCurrency.get(c) ?? []).filter(ofKind(c)), ...(await servedOf(chain, kind, c, weth))].map((k) => [poolId(k), k])).values()]] as [string, EvmPoolKey[]]));
     return { pools: new Map(all), commit: () => {} };
   }
-  const { head: scanHead, first } = await from;
+  const { head: scanHead, first, own } = await from;
   const second = first.next;
   // the logs up to the scan provider's head are read beside the round before (at most depth / span requests for each
   // SCAN_OR currencies), and used only once that head is found within maxLag of the agreed block
@@ -2451,12 +2457,15 @@ async function scanPools(
     // a provider that answers it holds no such block (null: not yet) is asked again whole, as a failure: its next try
     // may reach a backend that does; one with another behind it passes the request to the next at once. Any other
     // answer without the block counts as an answer with no logs (logsOf)
+    let unheld = false;
     const rpc: EvmRpc = !top
       ? on.rpc
       : async (cs, signal) => {
+          unheld = false;
           const out = await on.rpc(cs, signal);
           const h = (out[filters.length] as { result?: unknown } | null)?.result;
           if (Array.isArray(out) && h === null && !out.some(limited)) {
+            unheld = true;
             const m = `the scan provider does not hold block ${b} yet`;
             throw on.next !== undefined ? new ScanRefused("rpc_error", m) : new NotHeldYet("rpc_error", m);
           }
@@ -2532,7 +2541,21 @@ async function scanPools(
       return typeof h?.hash === "string" && out.slice(0, filters.length).some((x) => logsBehind((x as { error?: unknown } | null)?.error));
     };
     let behind = false;
-    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast).then((out) => (behindIn(out) ? ((behind = true), null) : logsOf(out)), (e) => {
+    // A scan up to a head no scan provider named (`own`: a warm buy's held head, the quote pair's block, or a follow's
+    // pinned one) whose provider does not hold the request's newest block: the request is asked of it again up to the
+    // scan providers' own head, where that is within maxLag of the scan's, and the blocks past it are the lag the quote
+    // accepts where it reads up to a provider's own head (scanPools above: missed by this quote alone, read by a later
+    // one, never kept as read). Card evm-quote-rides-a-scan-lag-at-max: release 184's live app run 44670793512, with
+    // blastapi 50 blocks back held out of the pair, held a pair's block at Base's tip, and 3 of 10 warm quotes asked
+    // every scan provider for it, each a few blocks behind, and ended rpc_error "the scan provider does not hold block
+    // 59783246 yet" in 2,218 to 6,303 ms. One further behind refuses as before; the provider answering holds the request's
+    // own last block in its batch as any request's
+    let ownTo: number | null = null;
+    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast).then((out) => (behindIn(out) ? ((behind = true), null) : logsOf(out)), async (e) => {
+      if (unheld && own !== undefined && (e instanceof NotHeldYet || e instanceof ScanRefused)) {
+        const h = await own().then(Number, () => null);
+        if (h !== null && h < b && head - h <= lag) return ((ownTo = h), null);
+      }
       if (e instanceof ScanAnswered) {
         answered = true;
         return null;
@@ -2541,6 +2564,7 @@ async function scanPools(
       notYet = e instanceof NotHeldYet;
       return null;
     });
+    if (ownTo !== null) return a > ownTo ? undefined : one({ part, a, b: ownTo, on }, splits);
     // the tail's answer past 4 times the pools the venue's measured rate makes of its blocks (and past one): a flood of
     // pools (independent review of 266cca1b4, M3: 50,000 made-up pools of other currencies in the tail's blocks cost a
     // quote 15 getLogs and 50,001 logs where main asked 2), so this quote drops the tail and scans by currency, as main
@@ -3225,18 +3249,21 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
   // The others are read at most two rounds more, never one route a round: each pool anyone seeds behind a hook that
   // checks the swap's sender and lets only the quoter through, priced above the route, would add a round to every quote, and some tens of them
   // would age every quote past EVM_QUOTE_MAX_AGE_MS (review of 498eae83, M2). The first asks, of each list whose best
-  // is not known, every route that can change the verdict (`band`): the standard routes at or above the route's value
-  // (all of them where the route does not fit), the native ones at or above it, the listed ones within the slippage of
-  // it; a list still not known after it is asked whole in the second
+  // is not known, the EVM_FITS_FIRST best by output of the routes that can change the verdict (`band`): the standard
+  // routes at or above the route's value (all of them where the route does not fit), the native ones at or above it,
+  // the listed ones within the slippage of it; a list still not known after it is asked whole in the second, so still
+  // two rounds at most. Card robinhood-taps-meet-no-429: the first round asked the whole band, and a cold PONS tap's
+  // whole-list search (a partial_fill route, band all) 28 fits a side, which its warm taps then read again, 24 of their
+  // 47 calls a side, where each list's verdict was its first route by output; with the providers' call limits binding
+  // (bloXroute 15 a second), those 23 more calls were about 1.5 s of a warm tap and a round about 0.2 s
   const fit = new Map<string, boolean>();
   if (ownFit >= 0) fit.set(reads[ownFit]!.data, out(ownFit) !== null);
   const fits = (r: EvmRoute) => {
     const x = fitOf(r);
     if (x === null) return false;
-    const f = fit.get(x.data);
-    if (f !== undefined && r !== route) fitsUsed.set(x.data, r);
-    return f;
+    return fit.get(x.data);
   };
+  const firstFew = (xs: readonly Filled[]) => [...xs].sort((a, b) => (b.amountOut > a.amountOut ? 1 : b.amountOut < a.amountOut ? -1 : 0)).slice(0, EVM_FITS_FIRST);
   const bestFits = async (lists: readonly { l: readonly Filled[]; band: (c: Filled) => boolean }[]) => {
     // the early fits, read at this quote's own block (fitOf builds each at its hash): answered as this reads them
     const early = await fitsEarly;
@@ -3248,13 +3275,17 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
         if (b === null || fits(b.route) !== undefined) continue;
         const unknown = l.filter((c) => fits(c.route) === undefined);
         const first = unknown.filter(band);
-        for (const c of round === 0 && first.length > 0 ? first : unknown) {
-          ask.set(fitOf(c.route)!.data, fitOf(c.route)!);
-          if (c.route !== route) fitsUsed.set(fitOf(c.route)!.data, c.route);
-        }
+        for (const c of round === 0 ? firstFew(first.length > 0 ? first : unknown) : unknown) ask.set(fitOf(c.route)!.data, fitOf(c.route)!);
       }
       if (ask.size === 0) {
         const r = lists.map(({ l }) => bestOf(l.filter((c) => fits(c.route) === true)));
+        // kept for the next quote: the routes that decided each list's verdict, its best that fits and every route
+        // above it (each read, none fits), never the ones below it, which no verdict read; every route of a list none
+        // of which fits (each read, GF16)
+        for (const { l } of lists) {
+          const b = best(l.filter((c) => fits(c.route) === true));
+          for (const c of l) if (c.route !== route && (b === null || c.amountOut >= b.amountOut) && fits(c.route) !== undefined) fitsUsed.set(fitOf(c.route)!.data, c.route);
+        }
         FITS.delete(fitsKey);
         FITS.set(fitsKey, { ts: block.timestamp, routes: [...fitsUsed.values()].slice(0, EVM_FITS_KEPT) });
         while (FITS.size > PLANS_MAX) FITS.delete(FITS.keys().next().value!);
@@ -3722,7 +3753,12 @@ async function routeSetOf(a: {
   // as before: a held head more than maxLag below it runs the quote again at a block agreed now (agreedAt). Read before
   // the logs, it was a trip of its own on the warm quote's path: Tenderly's eth_blockNumber, 306-411 ms from the Mac,
   // then the getLogs, which ended warm Base quotes at 920-1,197 ms (2026-11-19 13:0xZ, main 3d415aa83)
-  const scanFromOf = (f: ScanOn) => (scanFrom ??= (a.pin !== undefined ? Promise.resolve(a.pin.number) : spec !== null ? Promise.resolve(spec.number) : headFrom(f)).then((head) => ({ head, first: f })));
+  // Either head is a block no scan provider named: `own` is the scan providers' own head, the warm buy's read beside its
+  // logs (`specHead`), a follow's read only once a request finds its provider without its block (scanPools `ownTo`; card
+  // evm-quote-rides-a-scan-lag-at-max)
+  let ownRead: Promise<bigint> | undefined;
+  const ownOf = (f: ScanOn) => (a.pin === undefined && spec === null ? undefined : () => (ownRead ??= specHead ?? headFrom(f)));
+  const scanFromOf = (f: ScanOn) => (scanFrom ??= (a.pin !== undefined ? Promise.resolve(a.pin.number) : spec !== null ? Promise.resolve(spec.number) : headFrom(f)).then((head) => ({ head, first: f, own: ownOf(f) })));
   // a scan the quote waits for that fails refuses the quote, so it may pick the agreed block to keep its spans; a kept
   // scan started early waits for the quote to pick it, whether it ends or fails (review of bc189de, L-3: one that ended
   // before the token's scan picked the block itself, before the token's logs were in)
@@ -3744,7 +3780,7 @@ async function routeSetOf(a: {
     // quote's own gates: a provider the quote found down or throttled is passed over, and nothing is sent past the
     // quote's bound and deadline
     const on = (o: ScanOn): ScanOn => ({ ...o, rpc: laterOf(o.rpc) ?? o.rpc, next: o.next === undefined ? undefined : on(o.next) });
-    const from = scanFromOf(firstOn).then(({ head }) => ({ head, first: on(firstOn) }));
+    const from = scanFromOf(firstOn).then(({ head, own }) => ({ head, own, first: on(firstOn) }));
     const go = () => evmTailFill(chain, firstOn.rpc, () => scanPools(chain, [...toFill], "all", lower(v.weth), v.poolManager!, v.scan!, agreedHead, v.maxLag, from, agreedHead, undefined, false, firstOn.rpc, v.indexMargin, false, undefined, true));
     go();
   });

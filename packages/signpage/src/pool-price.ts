@@ -50,7 +50,7 @@
 import { POOL_USD_FEEDS, POOL_USD_MAX_AHEAD_S, poolUsdGoodUntilS, poolUsdPrice, type PoolUsdArgs, type PoolUsdChain, type PoolUsdPrice } from "../../kit/src/price/pool-usd.ts";
 import type { Chain } from "../../kit/src/orders/record.ts";
 import type { PoolStatePrice } from "../../kit/src/signpage/messages.ts";
-import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, solanaWrappedRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 
 /** A chain's price is read again at most this long after its last read: a hidden page's every read, and a Chainlink
  *  feed's (a round each 1200 s or more) away from its write; a shown page's Solana price is read at its write
@@ -88,6 +88,9 @@ export type PoolPriceDeps = {
   after?(ms: number, fn: () => void): void;
   /** Whether the page is shown (document.visibilityState otherwise; true with no document). */
   visible?(): boolean;
+  /** The sign out's stop (main.ts: the quotes' stop, src/quotes-stop.ts), read as each read starts: aborted, no read
+   *  starts, and a read under way sends no call after it (card signpage-sign-out-sends-nothing); none: never stopped. */
+  stopped?(): AbortSignal;
 };
 
 export type PoolPrices = {
@@ -127,11 +130,21 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
   };
   /** When a price stops being used, unix ms: the kit's one bound. */
   const endMs = (chain: PoolUsdChain, publishedS: number, readMs: number): number => poolUsdGoodUntilS(chain, publishedS, readMs / 1000) * 1000;
+  // each call of a read refused once `stop` is aborted, and ended with it in flight (the call's own signal too)
+  const stoppable = (pair: readonly [SolanaRpc, SolanaRpc], stop: AbortSignal | undefined): readonly [SolanaRpc, SolanaRpc] =>
+    stop === undefined
+      ? pair
+      : (pair.map((rpc) =>
+          solanaWrappedRpc(rpc, (method, params, signal) => (stop.aborted ? Promise.reject(stop.reason) : rpc(method, params, signal ? AbortSignal.any([signal, stop]) : stop))),
+        ) as unknown as readonly [SolanaRpc, SolanaRpc]);
   const start = (chain: PoolUsdChain): void => {
-    const rpcs = deps.rpcs(chain);
-    if (rpcs === null) return;
-    const base = chain === "robinhood" ? deps.rpcs("base") : null;
-    if (chain === "robinhood" && base === null) return;
+    const stop = deps.stopped?.();
+    const own = deps.rpcs(chain);
+    if (own === null) return;
+    const ownBase = chain === "robinhood" ? deps.rpcs("base") : null;
+    if (chain === "robinhood" && ownBase === null) return;
+    const rpcs = stoppable(own, stop);
+    const base = ownBase === null ? null : stoppable(ownBase, stop);
     reading.add(chain);
     /** The provider's Retry-After of a refused read, ms. */
     let afterMs = 0;
@@ -165,6 +178,8 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
       })
       .then((ok) => {
         reading.delete(chain);
+        // stopped (a sign out): nothing kept of it and nothing due, so a read asked once signed in again goes at once
+        if (stop?.aborted) return void due.delete(chain);
         const t = now();
         let waitMs: number;
         if (ok) {
@@ -197,6 +212,8 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
   return {
     get: (chain) => (priced(chain) ? fresh(chain) : null),
     refresh(chains) {
+      // past the sign out's stop no read starts
+      if (deps.stopped?.().aborted) return;
       for (const chain of new Set(chains)) {
         if (!priced(chain) || reading.has(chain)) continue;
         const at = due.get(chain);
