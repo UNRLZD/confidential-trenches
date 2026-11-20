@@ -89,6 +89,17 @@ export const WHOLE_WINDOW_MS = 10_000;
 /** How long a coin whose Meteora trade went unread (past the budget) is served its top pool's tape (trades): a minute,
  *  so a coin at the budget's edge never flips between the two tapes read to read. */
 export const CUT_KEEP_MS = 60_000;
+/** Card helper-sol-tape-checks-hold: why a coin's trade went unread, named in its cut (Server-Timing sol-whole-cut), so a
+ *  reader tells a busy coin past its own share (the design's bound past two trades a second) from every coin's second
+ *  spent or its provider failing: live run 44721792317 named one DBC coin's cut 13 times as a starved budget. No comma:
+ *  the entry ends at one. */
+const CUT_WHY = {
+  coin: `past the coin's own ${WHOLE_COIN_MAX} a ${WHOLE_WINDOW_MS / 1_000} s`,
+  all: `past every coin's ${WHOLE_PER_S} a second`,
+  held: "its provider held",
+  unanswered: "its read unanswered",
+} as const;
+type CutWhy = keyof typeof CUT_WHY;
 export const PYTH_RECEIVER = "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ";
 export const PYTH_SOL_USD = "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE";
 const PYTH_FEED = "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d";
@@ -606,7 +617,7 @@ type Entry = {
   wholeSent?: number[];
   /** Its newest stream transaction not read whole (past the budget, or no answer): when (`at`), and the ms after which
    *  its tape holds every trade again (`to`, the second after it arrived). */
-  cut?: { at: number; to: number };
+  cut?: { at: number; to: number; why: CutWhy };
 };
 /** `born`: it read every successful signature back to the mint's first (card app-chart-check-inside-its-bound). */
 type Back = { before: string | null; events: Swap[]; book: Book | null; done: boolean; born: boolean; txs: number; n: number; want: { tf: Tf; limit: number } };
@@ -857,17 +868,18 @@ export function createSolanaTrades(deps: {
   const wholeCount = { sent: 0, over: 0, unread: 0 };
   const wholeLane = { urls: deps.wholeRpcs ?? WHOLE_RPCS, throttled: (s: number) => void (wholeHeldTo = now() + s * 1_000) };
   /** Whether a stream transaction of `e` may be read whole now: a place in the second's WHOLE_PER_S (every coin) and in
-   *  the coin's WHOLE_COIN_MAX a WHOLE_WINDOW_MS, taken when there is one. */
-  function wholeTake(e: Entry): boolean {
+   *  the coin's WHOLE_COIN_MAX a WHOLE_WINDOW_MS, taken when there is one (null); else what it is past (CUT_WHY). */
+  function wholeTake(e: Entry): CutWhy | null {
     const t = now();
-    if (t < wholeHeldTo) return false;
+    if (t < wholeHeldTo) return "held";
     while (wholeSent.length > 0 && wholeSent[0]! <= t - 1_000) wholeSent.shift();
     const mine = (e.wholeSent ??= []);
     while (mine.length > 0 && mine[0]! <= t - WHOLE_WINDOW_MS) mine.shift();
-    if (wholeSent.length >= WHOLE_PER_S || mine.length >= WHOLE_COIN_MAX) return false;
+    if (mine.length >= WHOLE_COIN_MAX) return "coin";
+    if (wholeSent.length >= WHOLE_PER_S) return "all";
     wholeSent.push(t);
     mine.push(t);
-    return true;
+    return null;
   }
 
   /** A stream transaction's trades: from its log, or its inner instructions when the log was cut; each dated by its
@@ -880,12 +892,13 @@ export function createSolanaTrades(deps: {
     // unanswered, the log's own trades are held and the coin's tape names its reach from this transaction (cut)
     if (!f.truncated) {
       const e = entries.get(mint);
-      const ok = e !== undefined && wholeTake(e);
+      const past = e === undefined ? "all" : wholeTake(e);
+      const ok = e !== undefined && past === null;
       const w = ok ? ((await rpc("getTransaction", [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }], wholeLane).catch(() => null)) as Record<string, unknown> | null) : null;
       if (ok) wholeCount.sent++;
       if (w === null || w === undefined) {
         wholeCount[ok ? "unread" : "over"]++;
-        if (e !== undefined) e.cut = { at: now(), to: Math.max(e.cut?.to ?? 0, (Math.floor(now() / 1_000) + 1) * 1_000) };
+        if (e !== undefined) e.cut = { at: now(), to: Math.max(e.cut?.to ?? 0, (Math.floor(now() / 1_000) + 1) * 1_000), why: past ?? "unanswered" };
         return dated(await forMint(mint, f.trades), slot, null);
       }
       return dated(await forMint(mint, cutTrades(f, w)), slot, blockTime(w));
@@ -1104,7 +1117,7 @@ export function createSolanaTrades(deps: {
     // unanswered) is a cut as one past the whole reads' budget is: the tape's reach starts after it, never every trade
     // (a local helper at f1a80d8bf on mainnet, 20 Nov 05:49Z: pumpCmXq's tape named whole_ms 1795153718000 and lacked
     // its DLMM trade at 1795153746, its pool's read held with every provider)
-    else e.cut = { at: now(), to: Math.max(e.cut?.to ?? 0, (Math.floor(now() / 1_000) + 1) * 1_000) };
+    else e.cut = { at: now(), to: Math.max(e.cut?.to ?? 0, (Math.floor(now() / 1_000) + 1) * 1_000), why: "unanswered" };
     e.covered = Math.max(e.covered, n.slot);
     foldSoon(e);
   }
@@ -1758,7 +1771,7 @@ export function createSolanaTrades(deps: {
       // The vendor's rows are named in Server-Timing, so a reader can tell this coin's chain tape is past the budget, a coin
       // with no row of its own yet included (every trade of a fresh coin past the budget)
       const cut = e.cut !== undefined && now() - e.cut.at <= CUT_KEEP_MS;
-      const named = (v: DataAnswer): DataAnswer => (cut && v.status === 200 && v.src !== "chain" ? { ...v, timing: `${v.timing === undefined ? "" : `${v.timing}, `}sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago"` } : v);
+      const named = (v: DataAnswer): DataAnswer => (cut && v.status === 200 && v.src !== "chain" ? { ...v, timing: `${v.timing === undefined ? "" : `${v.timing}, `}sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` } : v);
       if (rows.length === 0 && deps.tape !== undefined) return named(await poolTape(mint, limit, e));
       if (cut && deps.tape !== undefined) {
         const v = await poolTape(mint, limit, null);
@@ -1777,7 +1790,7 @@ export function createSolanaTrades(deps: {
       // card helper-sol-tape-checks-hold: a tape past the budget that names no reach (its walk still reading, or behind)
       // names the cut, as the vendor's rows do: it lacks the unread trade and nothing else in it says so (a local helper
       // at 321baac8c, 20 Nov 05:36Z: CARDSccU's tape cold, no whole_ms, its DLMM trade 4vEPr51yjSyE unread)
-      const timing = cut && !("whole_ms" in whole) ? `${readTo(e)}, sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago"` : readTo(e);
+      const timing = cut && !("whole_ms" in whole) ? `${readTo(e)}, sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` : readTo(e);
       return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing };
     },
   };

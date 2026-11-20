@@ -36,7 +36,7 @@ function pyth(price: bigint, pub: number): Buffer {
 
 /** A helper's Solana trades over a recorded chain: every coin in `coins` is TTW's twin (each answers as a mint), every
  *  getTransaction answers dlmm-buy whatever its signature; each request kept as "<url> <method>". */
-function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>; sigsHeld?: () => Promise<void> | null; poolsDown?: boolean } = {}) {
+function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>; sigsHeld?: () => Promise<void> | null; poolsDown?: boolean; whole?: () => Response | null } = {}) {
   let ms = TS * 1000;
   const sent: string[] = [];
   const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
@@ -58,6 +58,7 @@ function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: 
       await opts.sigsHeld?.();
       return ok([]);
     }
+    if (req.method === "getTransaction" && url === WHOLE) return opts.whole?.() ?? ok(TX.result);
     if (req.method === "getTransaction") return ok(TX.result);
     throw new Error(`unexpected ${req.method}`);
   };
@@ -113,7 +114,7 @@ test("card sol-meteora-tape-inside-rpc-budget: past the budget a coin's tape nam
   const a = JSON.parse(va.body) as { src: string; trades: { tx: string }[] };
   assert.equal(a.src, "geckoterminal", "a coin past the budget is served its top pool's trades");
   assert.deepEqual(a.trades.map((r) => r.tx), ["V1"]);
-  assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago"/, "the answer names why");
+  assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago: past every coin's 10 a second"/, "the answer names why");
   // the vendor down: its own rows, whole only from the second after the newest transaction not read
   answers = false;
   c.step(31_000);
@@ -141,7 +142,7 @@ test("card sol-meteora-tape-inside-rpc-budget: a coin with no rows of its own wh
   await settle();
   const va = await c.t.trades(TTW, 50);
   assert.equal((JSON.parse(va.body) as { src: string }).src, "geckoterminal");
-  assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago"/, "the vendor's rows name the cut");
+  assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago: past every coin's 10 a second"/, "the vendor's rows name the cut");
   c.t.stop();
 });
 
@@ -166,7 +167,7 @@ test("card helper-sol-tape-checks-hold: past the budget, a chain tape that names
   assert.ok(a.trades.length > 0);
   assert.equal(a.filling, true, "its first walk still reads");
   assert.equal(a.whole_ms, undefined, "no reach named");
-  assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 31 s ago"/, "the cut named");
+  assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 31 s ago: past every coin's 10 a second"/, "the cut named");
   // its walk done: live, its reach after the cut names it, as before
   gate = null;
   release();
@@ -193,5 +194,46 @@ test("card helper-sol-tape-checks-hold: a stream transaction whose trade cannot 
   const a = JSON.parse((await c.t.trades(TTW, 50)).body) as { whole_ms?: number; trades: unknown[] };
   assert.deepEqual(a.trades, [], "the trade not read");
   assert.equal(a.whole_ms, (TS + 1) * 1000, "the reach starts the second after the unread transaction");
+  c.t.stop();
+});
+
+// card helper-sol-tape-checks-hold: a cut names its cause, so a reader tells a busy coin past its own share (the design's
+// bound for a coin trading past two a second) from every coin's second spent or its provider failing (live run
+// 44721792317, 20 Nov: "every sampled coin ... was served past the helper's whole reads' budget", one DBC coin 13 times,
+// the cut named only "a Meteora trade unread 1 s ago"). The coin's own and every coin's are held above.
+test("card helper-sol-tape-checks-hold: a whole read unanswered, then its provider held at its 429, each names its cause in the cut (red at 5113ed107: the cause unnamed)", async () => {
+  const vendor = { status: 200, body: JSON.stringify([{ t_ms: TS * 1000, side: "b", usd: "1", amt: "1", trader: null, tx: "V1" }]), src: "geckoterminal", asOfMs: TS * 1000 };
+  let whole: () => Response | null = () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }));
+  const c = chain([TTW], { tape: async () => vendor, whole: () => whole() });
+  assert.equal((await c.t.trades(TTW, 50)).status, 200);
+  c.stream(TTW);
+  await settle();
+  assert.match((await c.t.trades(TTW, 50)).timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago: its read unanswered"/);
+  whole = () => new Response("busy", { status: 429, headers: { "retry-after": "30" } });
+  c.step(1_000);
+  c.stream(TTW);
+  await settle();
+  c.step(1_000);
+  c.stream(TTW);
+  await settle();
+  assert.match((await c.t.trades(TTW, 50)).timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago: its provider held"/);
+  c.t.stop();
+});
+
+test("card helper-sol-tape-checks-hold: a coin past its own 20 whole reads a 10 s, each second inside every coin's 10, names its own share (red at 5113ed107: the cause unnamed)", async () => {
+  const vendor = { status: 200, body: JSON.stringify([{ t_ms: TS * 1000, side: "b", usd: "1", amt: "1", trader: null, tx: "V1" }]), src: "geckoterminal", asOfMs: TS * 1000 };
+  const c = chain([TTW], { tape: async () => vendor });
+  assert.equal((await c.t.trades(TTW, 50)).status, 200);
+  for (let s = 0; s < T.WHOLE_COIN_MAX / T.WHOLE_PER_S; s++) {
+    for (let i = 0; i < T.WHOLE_PER_S; i++) c.stream(TTW);
+    await settle();
+    c.step(1_001);
+  }
+  assert.equal(c.reads(WHOLE), T.WHOLE_COIN_MAX, "its 20 read whole, none cut yet");
+  assert.doesNotMatch((await c.t.trades(TTW, 50)).timing ?? "", /sol-whole-cut/);
+  c.stream(TTW);
+  await settle();
+  assert.equal(c.reads(WHOLE), T.WHOLE_COIN_MAX);
+  assert.match((await c.t.trades(TTW, 50)).timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago: past the coin's own 20 a 10 s"/);
   c.t.stop();
 });

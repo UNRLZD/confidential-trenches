@@ -24,8 +24,11 @@
 // history searched). DBC alone may read none, and only while the lists hold no coin on a DBC curve with DBC_VOL_USD in a
 // day (dbc_curves, from the same lists). Card sol-meteora-tape-inside-rpc-budget: a coin whose tape answer names
 // `sol-whole-cut` in Server-Timing (the helper read its Meteora trades whole past their budget and serves it its pool's
-// tape, trades.ts) is skipped, named in the run's `cut`, and its venue watched again; a venue whose every sampled coin
-// was cut is BAD, naming the cut (the budget starved it). A found trade out of the span its coin's tape answers for
+// tape, trades.ts) is skipped, named in the run's `cut` with when it was read, and its venue watched again; a venue whose
+// every sampled coin was cut is BAD. Card helper-sol-tape-checks-hold: a cut coin is passed over while its cut lasts
+// (CUT_KEEP_MS), so the venue's next sample is another coin; the cut coins are counted once each; and the BAD names the
+// budget as starving the venue only when its cuts not explained by the coin's own share (the helper's cut names its
+// cause) were read more than CUT_KEEP_MS apart. Any other venue with every trade cut is BAD as none judged. A found trade out of the span its coin's tape answers for
 // (older than a full tape's 50 rows, or than the reach the answer names in whole_ms: the route takes no time bound) is
 // skipped and named in the run's `rolled`; a venue whose every sampled trade was skipped is BAD.
 // The candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
@@ -238,6 +241,13 @@ const METEORA_SCAN = 40;
 /** A DBC curve coin's 24 h volume in USD from which the check needs a DBC trade (the one listed DBC curve coin on 18 Nov
  *  14:50Z had 0.99 USD in a day and traded none in the run). */
 export const DBC_VOL_USD = 1_000;
+/** Card helper-sol-tape-checks-hold: how long the helper serves a coin whose Meteora trade went unread its pool's tape
+ *  (trades.ts CUT_KEEP_MS, held equal by this check's test). A coin's trades are passed over while its cut lasts: read
+ *  again inside it they only show the same cut (live run 44721792317: one DBC coin, fZgm5f3J, sampled 13 times). */
+export const CUT_KEEP_MS = 60_000;
+/** A cut the coin's own share of the whole reads explains (trades.ts CUT_WHY.coin): the design's bound for a coin trading
+ *  past two a second, never the budget starving other coins. */
+const OWN_SHARE = /: past the coin's own \d+ a \d+ s"$/;
 
 async function call(url, method, params) {
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(10_000) });
@@ -292,9 +302,10 @@ async function meteoraTradeOf(sig, coin, venues) {
  * the public websocket across `tokens`: { [venue]: { coin, sig, heldAtMs, side, ts } } for the venues found in time,
  * each also handed to `onFound` the moment it is found (its tape is read at once: a busy coin's 50 newest rows move on).
  * `onFound` answers whether the venue is done; a venue it answers false for is watched again (a trade that had left the
- * 50 newest rows of a coin trading 5 a second before its tape was read).
+ * 50 newest rows of a coin trading 5 a second before its tape was read). A trade of a coin `passOver` names is not
+ * read (card helper-sol-tape-checks-hold: a coin whose cut still lasts).
  */
-export function watchMeteora(tokens, ws = WS, waitMs = METEORA_WAIT_MS, onFound = async () => true) {
+export function watchMeteora(tokens, ws = WS, waitMs = METEORA_WAIT_MS, onFound = async () => true, passOver = () => false) {
   return new Promise((resolve) => {
     const found = {};
     const want = new Set(Object.keys(METEORA));
@@ -320,7 +331,7 @@ export function watchMeteora(tokens, ws = WS, waitMs = METEORA_WAIT_MS, onFound 
       const coin = subs.get(j.params.subscription);
       const v = j.params.result.value;
       const ran = Object.entries(METEORA).filter(([k, p]) => want.has(k) && v.logs.some((l) => l.startsWith(`Program ${p} invoke`)));
-      if (coin === undefined || v.err !== null || ran.length === 0 || !eventsInInner(v.logs) || busy >= 2) return;
+      if (coin === undefined || v.err !== null || ran.length === 0 || !eventsInInner(v.logs) || busy >= 2 || passOver(coin)) return;
       const heldAtMs = Date.now();
       busy++;
       void (async () => {
@@ -400,7 +411,14 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
   // card sol-meteora-tape-inside-rpc-budget: a coin the helper serves past its whole reads' budget (sol-whole-cut) is
   // skipped and named, and its venue watched again: its trade is judged on a coin the helper reads whole
   const cut = {};
-  const skip = (venue, f, p) => void ((cut[venue] ??= []).some((c) => c.sig === f.sig) || cut[venue].push({ coin: f.coin, sig: f.sig, timing: cutOf(p) }));
+  // card helper-sol-tape-checks-hold: each cut dated (atMs), and its coin passed over until its cut ends (CUT_KEEP_MS),
+  // so the venue's next sample is another coin, or the same one past its cut
+  const cutTill = {};
+  const skip = (venue, f, p) => {
+    cutTill[f.coin] = Date.now() + CUT_KEEP_MS;
+    if (!(cut[venue] ??= []).some((c) => c.sig === f.sig)) cut[venue].push({ coin: f.coin, sig: f.sig, timing: cutOf(p), atMs: Date.now() });
+  };
+  const cutNow = (coin) => (cutTill[coin] ?? 0) > Date.now();
   // and a trade out of the span its coin's tape answers for (outOfSpan) is skipped and named in `rolled`
   const rolled = {};
   const roll = (venue, v) => void ((rolled[venue] ??= []).some((c) => c.sig === v.sig) || rolled[venue].push({ coin: v.coin, sig: v.sig, ts: v.ts, why: outOfSpan(v) }));
@@ -414,7 +432,7 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
     else return true;
     if (reading[venue] === r) delete reading[venue];
     return false;
-  }).finally(stop);
+  }, cutNow).finally(stop);
   const out = {};
   for (const [venue, r] of Object.entries(reading)) {
     const v = await r;
@@ -429,6 +447,7 @@ export async function readMeteora(base, rows, ws = WS, fetchFn = fetch, waitMs =
   const left = new Set(Object.keys(METEORA).filter((v) => !(v in out)));
   for (const coin of tokens.slice(0, METEORA_SCAN)) {
     if (left.size === 0) break;
+    if (cutNow(coin)) continue;
     const p = await get(base, TRADES_PATH(coin), fetchFn).catch(() => null);
     // only a tape of the helper's own chain reads names a trade it decoded: a vendor's (a coin past OPEN_MAX's walks, or
     // with no decoded venue) is passed over (a local helper at 8ddec0fe2, 18 Nov 20:07Z: a DLMM row off Ce2gx9KG's
@@ -526,11 +545,22 @@ export function judgeMeteora(m) {
       continue;
     }
     if (rolled.length > 0) lines.push(`ok  ${venue}: ${rolled.length} trade(s) out of its tape's span skipped: ${rolledSay}`);
+    // card helper-sol-tape-checks-hold: the cut coins counted once each. The venue is starved only by cuts the coin's own
+    // share does not explain (every coin's second spent, its provider held or unanswered: the helper's cut names which)
+    // read more than a cut's keep (CUT_KEEP_MS) apart, the budget spent past one cut (live run 44721792317 named one DBC
+    // coin 13 times as "every sampled coin"). Any other cut judges nothing either way: a fault too, named as that
+    const coins = [...new Set(cut.map((c) => String(c.coin)))];
+    const named = `${coins.length} coin(s), ${cut.length} trade(s): ${coins.map((c) => c.slice(0, 8)).join(", ")}`;
+    const starving = cut.filter((c) => !OWN_SHARE.test(String(c.timing)));
+    const at = starving.map((c) => c.atMs);
+    const spanMs = starving.length > 0 && at.every(Number.isSafeInteger) ? Math.max(...at) - Math.min(...at) : null;
     if (!isObj(v) && cut.length > 0) {
-      lines.push(`BAD ${venue}: every sampled coin (${cut.length}: ${cut.map((c) => String(c.coin).slice(0, 8)).join(", ")}) was served past the helper's whole reads' budget (${cut[0].timing}): the budget starved the venue`);
+      if (spanMs !== null && spanMs > CUT_KEEP_MS) lines.push(`BAD ${venue}: every sampled coin (${named}) was served past the helper's whole reads' budget (${starving.at(-1).timing}), cut again ${Math.round(spanMs / 1_000)} s after its first, past the ${CUT_KEEP_MS / 1_000} s a cut lasts: the budget starved the venue`);
+      else if (starving.length === 0) lines.push(`BAD ${venue}: none judged: every trade found (${named}) was on a coin past its own share of the helper's whole reads (${cut[0].timing}), served its pool's tape as a coin trading past two a second is, and no other coin of the venue traded`);
+      else lines.push(`BAD ${venue}: none judged: every trade found (${named}) was on a coin inside one cut of the helper's whole reads' budget (${starving[0].timing}${spanMs === null ? ", undated" : `, all within ${Math.round(spanMs / 1_000)} s`}), and none was read past the ${CUT_KEEP_MS / 1_000} s a cut lasts: a burst and a spent budget look the same`);
       continue;
     }
-    if (cut.length > 0) lines.push(`ok  ${venue}: ${cut.length} coin(s) past the helper's whole reads' budget skipped (sol-whole-cut): ${cut.map((c) => String(c.coin).slice(0, 8)).join(", ")}`);
+    if (cut.length > 0) lines.push(`ok  ${venue}: ${named} past the helper's whole reads' budget skipped (sol-whole-cut)`);
     if (isObj(v) && Array.isArray(v.polls) && cutOf(v.polls.at(-1)) !== null) {
       lines.push(`BAD ${venue}: the judged coin ${show(v.coin)} was served past the budget (${cutOf(v.polls.at(-1))})`);
       continue;
