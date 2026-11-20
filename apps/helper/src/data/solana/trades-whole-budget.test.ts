@@ -36,7 +36,7 @@ function pyth(price: bigint, pub: number): Buffer {
 
 /** A helper's Solana trades over a recorded chain: every coin in `coins` is TTW's twin (each answers as a mint), every
  *  getTransaction answers dlmm-buy whatever its signature; each request kept as "<url> <method>". */
-function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>; sigsHeld?: () => Promise<void> | null } = {}) {
+function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>; sigsHeld?: () => Promise<void> | null; poolsDown?: boolean } = {}) {
   let ms = TS * 1000;
   const sent: string[] = [];
   const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
@@ -52,7 +52,7 @@ function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: 
       return acct(TOKEN_PROGRAM, b);
     }
     const p = MT.pools[req.params[0]];
-    if (req.method === "getAccountInfo" && p !== undefined) return acct(p.owner, Buffer.from(p.data, "base64"));
+    if (req.method === "getAccountInfo" && p !== undefined) return opts.poolsDown === true ? new Response("busy", { status: 429 }) : acct(p.owner, Buffer.from(p.data, "base64"));
     if (req.method === "getAccountInfo") return ok({ context: { slot: 100 }, value: null });
     if (req.method === "getSignaturesForAddress") {
       await opts.sigsHeld?.();
@@ -174,5 +174,24 @@ test("card helper-sol-tape-checks-hold: past the budget, a chain tape that names
   c.t.tick();
   const vb = await c.t.trades(TTW, 50);
   assert.equal((JSON.parse(vb.body) as { whole_ms?: number }).whole_ms, (TS + 1) * 1000);
+  c.t.stop();
+});
+
+// card helper-sol-tape-checks-hold: a stream transaction read whole whose trade cannot be read on (its pool account
+// unanswered: every provider held, as a local helper at f1a80d8bf on mainnet logged "rpc hold solana background 10 s"
+// 156 times) was dropped while the tape went on naming every trade from its reach on: pumpCmXq's tape, live, whole_ms
+// 1795153718000, lacked its DLMM trade 5KvXhNM11J91 at 1795153746 (index-sol-trades, 20 Nov 05:49Z). An unread stream
+// transaction is a cut as one past the budget is: the tape's reach starts after it.
+test("card helper-sol-tape-checks-hold: a stream transaction whose trade cannot be read on (its pool unanswered) is a cut: the tape names its reach after it, never every trade (red at c6f82f3bc: whole from the walk's)", async () => {
+  const c = chain([TTW], { poolsDown: true });
+  assert.equal((await c.t.trades(TTW, 50)).status, 200);
+  await settle();
+  c.t.tick();
+  assert.equal((JSON.parse((await c.t.trades(TTW, 50)).body) as { whole_ms?: number }).whole_ms, 0, "whole from the mint's first signature before it");
+  c.stream(TTW);
+  await settle();
+  const a = JSON.parse((await c.t.trades(TTW, 50)).body) as { whole_ms?: number; trades: unknown[] };
+  assert.deepEqual(a.trades, [], "the trade not read");
+  assert.equal(a.whole_ms, (TS + 1) * 1000, "the reach starts the second after the unread transaction");
   c.t.stop();
 });

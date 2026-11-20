@@ -1067,6 +1067,11 @@ export function createSolanaTrades(deps: {
     const trades = await txTrades(e.mint, n.sig, n.slot, n.logs).catch(() => null);
     e.inflight.delete(n.sig);
     if (trades !== null) hold(e, n.sig, n.slot, order, trades);
+    // card helper-sol-tape-checks-hold: a transaction not read on (its pool, its whole body or its block's time
+    // unanswered) is a cut as one past the whole reads' budget is: the tape's reach starts after it, never every trade
+    // (a local helper at f1a80d8bf on mainnet, 20 Nov 05:49Z: pumpCmXq's tape named whole_ms 1795153718000 and lacked
+    // its DLMM trade at 1795153746, its pool's read held with every provider)
+    else e.cut = { at: now(), to: Math.max(e.cut?.to ?? 0, (Math.floor(now() / 1_000) + 1) * 1_000) };
     e.covered = Math.max(e.covered, n.slot);
     fold(e);
   }
