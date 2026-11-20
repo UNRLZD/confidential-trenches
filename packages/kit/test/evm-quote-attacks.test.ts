@@ -9454,6 +9454,48 @@ test("GF12 a second quote of the same token and amount reads the last quote's sw
   assert.ok(rounds1 > reads1 && rounds === reads, `rounds ${rounds1} (reads from ${reads1}) then ${rounds} (reads from ${reads})`);
 }));
 
+// Card robinhood-taps-meet-no-429: a warm quote keeps only the fits that decided the last verdicts; where no route of
+// a list fits, every one of them decided it (none fits), so all are kept and the next quote reads them beside its first
+// round, as GF12's do, never in rounds after it.
+test("GF16 a second quote where no route fits reads the last quote's swap fits in its first round: no round after it, the same verdict", () => onTestClock(async () => {
+  const token = "0x00000000000000000000000000000000000f1f16";
+  const K = 6;
+  const fakes: ModelPool[] = Array.from({ length: K }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a) => a, gas: 600_000n }));
+  const pools = [gfMarket(token, 500_000n), gfSeeded(token, 450_000n), ...fakes];
+  const logs = fakes.map((p) => ({ key: p.key, at: 4_500_000 }));
+  let out = 0;
+  let rounds = 0;
+  let reads = 0;
+  const slow = (rpc: EvmRpc, count: boolean): EvmRpc => async (calls) => {
+    if (count) {
+      if (out === 0) rounds++;
+      const data = calls.map((c) => String((c.params[0] as { data?: string } | undefined)?.data));
+      if (reads === 0 && data.some((d) => d.startsWith("0x82ad56cb"))) reads = rounds;
+    }
+    out++;
+    try {
+      const a = await rpc(calls);
+      await new Promise((go) => setTimeout(go, 250));
+      return a;
+    } finally {
+      out--;
+    }
+  };
+  const ask = () =>
+    evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: marketRoute(token) }, [slow(chain(pools, 0), true), slow(chain(pools, 1), false)], NOW, scanner(5_000_000, logs)).then(
+      () => null,
+      (e: unknown) => e,
+    );
+  const r1 = await ask();
+  assert.ok(r1 instanceof EvmQuoteError && r1.code === "over_gas_floor" && r1.reference === null, show(r1));
+  const [rounds1, reads1] = [rounds, reads];
+  rounds = 0;
+  reads = 0;
+  const r2 = await ask();
+  assert.ok(r2 instanceof EvmQuoteError && r2.code === "over_gas_floor" && r2.reference === null, show(r2));
+  assert.ok(rounds1 > reads1 && rounds === reads, `rounds ${rounds1} (reads from ${reads1}) then ${rounds} (reads from ${reads})`);
+}));
+
 // Card evm-5xx-holds-the-provider-for-the-round, with GF12's early fits: a warm quote reads the last quote's swap fits
 // beside its first round, and a provider that answers HTTP 5xx to one is held in the other. At a87cbd3ff
 // each read held it in its own reads alone, and the first round's batches queued in its gate behind the failed fits
@@ -9553,6 +9595,50 @@ test("GF13 evmBuySwapFitCall refuses an amount outside (0, 2^127) and a gas cap 
     assert.match(c.tx.gas, /^0x[0-9a-f]+$/);
     assert.match(c.override[c.tx.to]!.balance, /^0x[0-9a-f]+$/);
   }
+});
+
+// Card robinhood-taps-meet-no-429: the first round of swap-fit reads asks each list's best few by output
+// (EVM_FITS_FIRST), and a warm quote reads again only the fits that decided the last one's verdicts. Every route a
+// quote takes or names still has its own swap read at its block: these hold that a route whose swap does not fit is
+// never the one taken or named, when the best by output does not fit, when the best few do not, and when the route the
+// last quote's verdict kept stops fitting by the next quote.
+test("GF14 the best routes by output whose swaps do not fit, more than the first round asks, are never taken or named: the market that fits is the reference, and asking the best of them is over_gas_floor", async () => {
+  const token = "0x00000000000000000000000000000000000f1f14";
+  // four pools above the market, each quoting more than the one after it, none of whose swaps fit
+  const fakes: ModelPool[] = Array.from({ length: 4 }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a: bigint) => a - BigInt(i) * 1000n, gas: 600_000n }));
+  const pools = [{ ...gfMarket(token), give: (a: bigint) => a / 2n }, gfSeeded(token), ...fakes];
+  const logs = fakes.map((p) => ({ key: p.key, at: 4_500_000 }));
+  const r = await hbQuote(pools, token, logs, gfSeededRoute(token));
+  assert.ok("code" in r && r.code === "below_reference", show(r));
+  assert.deepEqual(r.reference, { amountOut: AMOUNT / 2n, route: marketRoute(token) }, "the best route that fits, below every one that does not");
+  const best = v4Route([{ currency: token, fee: 2000, tickSpacing: 50, hooks: NATIVE }]);
+  const b = await hbQuote(pools, token, logs, best);
+  assert.ok("code" in b && b.code === "over_gas_floor", show(b));
+  assert.deepEqual(b.reference, { amountOut: AMOUNT / 2n, route: marketRoute(token) });
+  const q = await hbQuote(pools, token, logs, marketRoute(token));
+  assert.ok(!("code" in q), show(q));
+  assert.equal(q.amountOut, AMOUNT / 2n);
+  assert.deepEqual(q.reference, { amountOut: AMOUNT / 2n, route: marketRoute(token) });
+});
+
+test("GF15 a route whose swap fit at the last quote and no longer does is never taken or named by the next: its fit is read again at the next quote's block", async () => {
+  const token = "0x00000000000000000000000000000000000f1f15";
+  // a pool above the market whose swap fits at the first quote: the reference, and the fit the next quote keeps
+  const above: ModelPool = { key: keyOf(token, NATIVE, 2000, 50, NATIVE), give: (a: bigint) => (a * 3n) / 4n, gas: 300_000n };
+  const pools = [{ ...gfMarket(token), give: (a: bigint) => a / 2n }, gfSeeded(token), above];
+  const logs = [{ key: above.key, at: 4_500_000 }];
+  const aboveRoute = v4Route([{ currency: token, fee: 2000, tickSpacing: 50, hooks: NATIVE }]);
+  const r1 = await hbQuote(pools, token, logs, marketRoute(token));
+  assert.ok("code" in r1 && r1.code === "below_reference", show(r1));
+  assert.deepEqual(r1.reference, { amountOut: (AMOUNT * 3n) / 4n, route: aboveRoute }, "the pool above, whose swap fits, is the reference");
+  // its swap no longer fits: the next quote of the same token and amount reads the kept fit again and names the market
+  above.gas = 600_000n;
+  const q = await hbQuote(pools, token, logs, marketRoute(token));
+  assert.ok(!("code" in q), show(q));
+  assert.equal(q.amountOut, AMOUNT / 2n);
+  assert.deepEqual(q.reference, { amountOut: AMOUNT / 2n, route: marketRoute(token) }, "never the route whose swap stopped fitting");
+  const b = await hbQuote(pools, token, logs, aboveRoute);
+  assert.ok("code" in b && b.code === "over_gas_floor", show(b));
 });
 
 // Card evm-buy-quote-ends-on-node: a round is agreed a batch at a time. Agreed whole (main at 3a73b181), one late
