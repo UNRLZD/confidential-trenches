@@ -493,6 +493,11 @@ export const keyedBudget = (chain: RpcChain, first?: KeyedProvider): BudgetLimit
  * the token page always finds the other half.]
  */
 export const KEYED_ROUTE_SHARE = 0.5;
+/** Card helper-solana-slots-off-a-spent-key: the sends a second the rpc slot may take on another slot's key (the
+ *  holders key while SOLANA_RPC_URL's plan is spent): KEYED_ROUTE_SHARE of the plan's second (`plan` per 10 s), at least
+ *  1, so that slot's own reads always find the other half on the helper's one pacer (server.ts gives the holders client
+ *  the rpc client's). */
+export const slotShareOf = (plan: number): number => Math.max(1, Math.floor(Math.ceil(plan / 10) * KEYED_ROUTE_SHARE));
 /** The routes whose total sums their keyed providers: the ones the signing page reads beside a trade (RPC_PAGE_NEED).
  *  NEAR keeps its total, which the helper's own reads draw on; solana-marks walks its keys (all company keys, each
  *  paced on its own) under its total as before. */
@@ -1153,7 +1158,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   /** An existing name's URL on a chain whose reads were paced by its chain's pacer before the walk (NEAR_RPC_URL and
    *  NEAR_RPC_URL_B; call() paces the first): its sends a second there, else 0. An EVM chain's walk never paced them. */
   const ownPace = (c: RpcChain, url: string): number =>
-    !EVM_CHAINS.has(c) && upstreams[c].keyed.some((k) => k.url === url && KEYED_PROVIDER[k.env] === undefined) ? Math.max(1, Math.ceil(ownPlans[c] / (LIMIT_WINDOW_MS / 1000))) : 0;
+    c === "solana" && borrowed(url) ? slotShareOf(ownPlans.solana) : !EVM_CHAINS.has(c) && upstreams[c].keyed.some((k) => k.url === url && KEYED_PROVIDER[k.env] === undefined) ? Math.max(1, Math.ceil(ownPlans[c] / (LIMIT_WINDOW_MS / 1000))) : 0;
   /** Whether `c` has a new keyed name set (KEYED_PROVIDER): then every read walks its list (listOf). */
   const walks = (c: RpcChain): boolean => upstreams[c].keyed.some((k) => KEYED_PROVIDER[k.env] !== undefined);
   /** The providers a read on `c` asks, in order: its keyed URLs (else its public fallback first, as before), an EVM chain's
@@ -1172,15 +1177,31 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // its variable alone, never its URL, host or key
     if (!spent(url)) log(`rpc spent ${nameByUrl.get(url) ?? "public"}, out of the mark routes for ${SLOT_RETRY_MS / 1000} s`);
     spentUntil.set(url, now() + SLOT_RETRY_MS);
+    // card helper-solana-slots-off-a-spent-key: the rpc slot falls back once every one of its keys is spent
+    if (slotKeys.includes(url) && slotKeys.every(spent)) slot.fail("credits");
   };
   const { a: marksA, b: marksB, scan: scanA } = marksRoutes(upstreams, aKeyed, spent);
+  // card helper-solana-slots-off-a-spent-key: the rpc slot's key is the first of the host's Solana slot keys
+  // (MARKS_A_SLOTS: SOLANA_RPC_URL, SOLANA_TRADES_RPC_URL, SOLANA_HOLDERS_RPC_URL, each URL once) not spent, on the
+  // chain's plan, before QuickNode, dRPC and the public endpoint. Live 20 Nov 11:2xZ SOLANA_RPC_URL's plan was spent and
+  // the slot fell back: every plain read went to QuickNode, whose day ran out, then the public endpoint at its 16 a
+  // caller (RPC_CLIENT_MAX), and a trade's 42 reads were served 16. None when SOLANA_RPC_URL is not the first keyed name
+  // (a company's URL first: its walk as before).
+  const slotKeys: readonly string[] = upstreams.solana.keyed[0]?.env === MARKS_A_ENV ? aKeyed.filter((k) => MARKS_A_SLOTS.includes(k.env)).map((k) => k.url) : [];
+  const slotKey = (): string => slotKeys.find((u) => !spent(u)) ?? upstreams.solana.url;
+  /** Another slot's key, read here past this client's own (SOLANA_RPC_URL's): the holders key, say. */
+  const borrowed = (url: string): boolean => url !== upstreams.solana.url && slotKeys.includes(url);
   /** Whether a checked read (one or a batch) holds a mark scan (scanAllowed), which route A sends only where route B is
    *  off its company; else its getProgramAccounts are pool scans (poolScanAllowed). */
   const holdsMarkScan = (out: unknown): boolean => (Array.isArray(out) ? out : [out]).some((r) => isPlain(r) && r.method === "getProgramAccounts" && scanAllowed(r, scanPrograms.solana ?? []));
   /** A keyed provider's URL and its sends a second, or null for the public endpoint and a chain on its default
    *  provider, which are not paced (their published limits are per 10 s). */
-  const pacedOf = (key: string): { url: string; perSecond: number } | null =>
-    key === PUBLIC_KEY || upstreams[key as RpcChain].forms.length === 0 ? null : { url: upstreams[key as RpcChain].url, perSecond: Math.max(1, Math.ceil(plans[key as RpcChain] / (LIMIT_WINDOW_MS / 1000))) };
+  const pacedOf = (key: string): { url: string; perSecond: number } | null => {
+    if (key === PUBLIC_KEY || upstreams[key as RpcChain].forms.length === 0) return null;
+    // the Solana slot's key in use (slotKey); a borrowed one at its share of the second (slotShareOf)
+    const url = key === "solana" ? slotKey() : upstreams[key as RpcChain].url;
+    return { url, perSecond: key === "solana" && borrowed(url) ? slotShareOf(plans.solana) : Math.max(1, Math.ceil(plans[key as RpcChain] / (LIMIT_WINDOW_MS / 1000))) };
+  };
   /** How long `n` sends to `key` wait for their second's room, from a hold's end on, booked when within `maxWaitMs`
    *  (and `book`); 0 when not paced. A batch larger than a second's room goes alone in its own second. */
   const pace = (key: string, n: number, maxWaitMs: number, url?: string, book = true): number => {
@@ -1819,9 +1840,13 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       return a;
     }
     if (c === "solana" && keyed && companyUrls.has(upstreams.solana.url)) return solanaRest(forward, methods, client, reserved, by, c, 0);
-    if (c === "solana" && keyed && upstreams.solana.keyed.length > 1 && (!slot.useKeyed() || budget.heldFor("solana") > 0)) return solanaRest(forward, methods, client, reserved, by, SPARES_KEY);
+    if (c === "solana" && keyed && upstreams.solana.keyed.length > 1 && (!slot.useKeyed() || budget.heldFor("solana") > 0)) return solanaRest(forward, methods, client, reserved, by, SPARES_KEY, 1, slotKey());
     if (c === "solana" && keyed && !slot.useKeyed()) return solanaRest(forward, methods, client, reserved, by);
     if ((EVM_CHAINS.has(c) && deps.holds !== undefined && (deps.pinned?.[c]?.length ?? 0) > 0) || (c !== "solana" && walks(c))) return callList(c, listOf(c), forward, methods, client, reserved, by);
+    if (c === "solana" && keyed) {
+      const u = slotKey();
+      return call(c, u, formsByUrl.get(u) ?? upstreams.solana.forms, forward, methods, client, reserved, by);
+    }
     return call(c, upstreams[c].url, upstreams[c].forms, forward, methods, client, reserved, by);
   }
 
@@ -1961,8 +1986,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * budget the spares draw on (SPARES_KEY) when the read drew on none yet; none when it already drew on the chain's.
    * `from`: the first keyed URL asked (0 when a company's URL is first, review L2). `by`: the read's walk's end (WALK_MS).
    */
-  async function solanaRest(forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number, key: string | null = null, from = 1): Promise<Answer> {
-    const spares = upstreams.solana.keyed.slice(from).map((k) => k.url);
+  async function solanaRest(forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number, key: string | null = null, from = 1, tried?: string): Promise<Answer> {
+    // card helper-solana-slots-off-a-spent-key: the host's other Solana slot keys not spent first (slotKeys), then the
+    // keyed spares; never `tried`, the key this read was just refused by
+    const spares = [...new Set([...slotKeys.slice(1).filter((u) => !spent(u)), ...upstreams.solana.keyed.slice(from).map((k) => k.url)])].filter((u) => u !== tried);
     if (spares.length > 0) {
       const a = await callList("solana", spares, forward, methods, client, reserved, by, key);
       // a spare's answer; a 429 or 503 here is ours (every spare held, out of pace or down), never a provider's
@@ -2200,7 +2227,14 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       if (!publicFallback) return Promise.resolve(UPSTREAM());
       const t = traces.getStore();
       if (t !== undefined) Object.assign(t, { keyedMs: now() - begun, waitMs: 0, last: undefined });
-      return solanaRest(forward, methods, client, reserved, by);
+      return solanaRest(forward, methods, client, reserved, by, null, 1, url);
+    };
+    /** Card helper-solana-slots-off-a-spent-key: the key's plan is spent. Out for SLOT_RETRY_MS (markSpent), and the read
+     *  goes on to the next (fellBack); the slot falls back only when no other slot key is left that is not spent. */
+    const spentKey = (): Promise<Answer> => {
+      markSpent(url);
+      if (slotKeys.length === 0) slot.fail("credits");
+      return fellBack();
     };
     // card helper-crowd-429: a hold that ends within HOLD_WAIT_MS is waited out and the send paced from its end, and a
     // send the provider throttles is sent once more after its short hold, all by `deadline`; a longer hold is the
@@ -2220,7 +2254,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       // card helper-serves-many-users-at-once: the first Solana key full for this second, a keyed spare with room takes
       // the read now; it drew the chain's budget above and draws nothing again (solanaRest with no key). A spare with
       // no room: the first key's wait, and its 429 past PACE_MAX_MS, as before
-      if (viaSlot && tries === 0 && upstreams.solana.keyed.length > 1 && pace(key, methods.length, room, shared, false) > 0 && spareHasRoom(methods.length)) return solanaRest(forward, methods, client, reserved, by);
+      if (viaSlot && tries === 0 && upstreams.solana.keyed.length > 1 && pace(key, methods.length, room, shared, false) > 0 && spareHasRoom(methods.length)) return solanaRest(forward, methods, client, reserved, by, null, 1, url);
       const paced = pace(key, methods.length, room, shared);
       if (paced > room) return throttled(Math.max(1, Math.ceil((paced - room) / 1000)), undefined, `${key} pace`);
       if (paced > 0) await rest(paced);
@@ -2251,7 +2285,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           const body = viaSlot ? (r.text ?? "") : "";
           sentTo(url, sent);
           const waitS = upstreamRetryAfterS(r.headers, now());
-          if (viaSlot && (CREDITS.test(body) ? (markSpent(url), slot.fail("credits"), true) : slot.throttled(waitS))) return fellBack();
+          if (viaSlot && CREDITS.test(body)) return spentKey();
+          if (viaSlot && slot.throttled(waitS)) return fellBack();
           hold(key, waitS, "caller");
           // card rpc-keyed-lists: the first key throttled us: this read goes on to its keyed spares now, and the next
           // reads too while its hold lasts (handle)
@@ -2275,7 +2310,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       break;
     }
     if (viaSlot && (r.status === 401 || r.status === 403)) return slot.fail(String(r.status)), fellBack();
-    if (viaSlot && r.status >= 400 && CREDITS.test(text ?? "")) return markSpent(url), slot.fail("credits"), fellBack();
+    if (viaSlot && r.status >= 400 && CREDITS.test(text ?? "")) return spentKey();
     if (viaSlot && r.status >= 500) return slot.unanswered(sent), fellBack();
     if (r.status === 401 || r.status === 403 || r.status >= 500 || r.status < 200 || (r.status >= 300 && r.status < 400)) return UPSTREAM();
     // review M1: a keyed Solana URL's other 4xx (its plan refusing the read) is that URL down for this read: it goes on to
@@ -2290,7 +2325,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       return viaSlot ? (slot.unanswered(sent), fellBack()) : UPSTREAM();
     }
     // a JSON-RPC error that says the plan is spent is the key's end, as a 401 is
-    if (viaSlot && planSpent(answer)) return markSpent(url), slot.fail("credits"), fellBack();
+    if (viaSlot && planSpent(answer)) return spentKey();
     // an EVM provider's throttle in any answer (evmLimited: -32005 or a rate or request limit message) is its throttle, as
     // its 429 is: the chain is held for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
     const limited = evmLimited(c, answer);
@@ -2315,6 +2350,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // card rpc-keyed-lists: a keyed spare of this chain (not its first) is read under its company's pace and hold, as a
     // background read (limits.ts take: it leaves CALLER_ROOM for callers' reads)
     if (key === null) {
+      // card helper-solana-slots-off-a-spent-key: another slot's key (the holders key, say) is read in the half of its
+      // second this client may take (slotShareOf) less the callers' room, so its own slot's reads keep the other half
+      if (chain === "solana" && borrowed(url)) {
+        const per = slotShareOf(ownPlans.solana);
+        return holdsAll.heldMs(url) > 0 || pacer.go(url, 1, Math.max(1, per - userRoomOf(per))) > 0 ? 1 : 0;
+      }
       if (!isSpare(chain, url)) return 0;
       const ms = holdsAll.heldMs(url) || holdsAll.take(url, 1, true);
       return ms > 0 ? Math.max(1, Math.ceil(ms / 1000)) : 0;
@@ -2334,7 +2375,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   function backgroundThrottled(chain: RpcChain, url: string, headers: Headers): void {
     const key = keyOf(chain, url);
     if (key !== null) hold(key, upstreamRetryAfterS(headers, now()), "background");
-    else if (isSpare(chain, url)) {
+    else if (isSpare(chain, url) || (chain === "solana" && borrowed(url))) {
       const s = upstreamRetryAfterS(headers, now());
       holdsAll.hold(url, s);
       log(`rpc hold ${chain} ${companyOf(new URL(url).host)} background ${s} s`);
@@ -2396,7 +2437,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   }
   /** The budget a background read of `url` draws: the chain's provider's, the public endpoint's own when a keyed
    *  Solana provider is set (its fallback, whose budget every reader of it shares), else none (another provider). */
-  const keyOf = (chain: RpcChain, url: string): string | null => (url === upstreams[chain].url && !companyUrls.has(url) ? chain : chain === "solana" && keyed && url === SOLANA_PUBLIC ? PUBLIC_KEY : null);
+  const keyOf = (chain: RpcChain, url: string): string | null => (url === upstreams[chain].url && !companyUrls.has(url) && (chain !== "solana" || url === slotKey()) ? chain : chain === "solana" && keyed && url === SOLANA_PUBLIC ? PUBLIC_KEY : null);
 
   /** A chain's budget (card helper-serves-many-users-at-once) as the IETF RateLimit-Policy field
    *  (draft-ietf-httpapi-ratelimit-headers-11, 23 May 2026, read 11 Nov 06:01Z: `"burst";q=100;w=60`): "chain", what
@@ -2412,7 +2453,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    *  before the public endpoint (solanaRest), so it is "keyed" while one of them serves (not spent, its last identity
    *  read answered), and "fallback" only once none does. Its other members are the slot's own. */
   const shownSlot: Slot = { ...slot, state: () => (slot.state() === "fallback" && upstreams.solana.keyed.slice(1).some((k) => !spent(k.url) && probed.get(k.url) === "answers") ? "keyed" : slot.state()) };
-  return { handle, background, backgroundThrottled, slot: shownSlot, pacer, keyed: keyedHealth, probe, policyOf };
+  return { handle, background, backgroundThrottled, slot: shownSlot, pacer, keyed: keyedHealth, probe, policyOf, spent };
 }
 
 /** The chains whose keyed lists /v1/health names (card rpc-keyed-lists): mainnet's four. */

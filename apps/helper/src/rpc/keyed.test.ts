@@ -144,7 +144,9 @@ test("card rpc-keyed-lists: the list order is the existing name, QuickNode, dRPC
   assert.ok(sw.length > 3 && sw.slice(3).every((u) => u.startsWith("https://") && !u.includes("planted")), "then the public swap providers");
   // Robinhood's swap reads never took ROBINHOOD_RPC_URL (it is /v1/rpc's): its QuickNode and dRPC first
   assert.deepEqual((evmSwapRpcs?.(ENV, "robinhood") ?? []).slice(0, 2), [LISTS.robinhood[1][1], LISTS.robinhood[2][1]]);
-  assert.deepEqual((solanaTradesRpcs?.({ ...ENV, SOLANA_TRADES_RPC_URL: "https://trades.test/k" }) ?? []).slice(0, 3), ["https://trades.test/k", LISTS.solana[1][1], LISTS.solana[2][1]]);
+  // card helper-solana-slots-off-a-spent-key: past its own key, the host's other Solana slot keys (SOLANA_RPC_URL here),
+  // then QuickNode and dRPC
+  assert.deepEqual((solanaTradesRpcs?.({ ...ENV, SOLANA_TRADES_RPC_URL: "https://trades.test/k" }) ?? []).slice(0, 4), ["https://trades.test/k", LISTS.solana[0][1], LISTS.solana[1][1], LISTS.solana[2][1]]);
   // one pace per account: each QuickNode endpoint its own (the owner, 09:27Z), each dRPC key its own (09:16Z)
   const paces = keyedPaces?.(ENV) ?? {};
   assert.equal(paces[LISTS.base[1][1]]?.group, "quicknode-base");

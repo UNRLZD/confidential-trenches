@@ -50,7 +50,7 @@ import { callsFiles } from "./proxy/shared-calls.ts";
 import { dayFiles } from "./limits/day-spend.ts";
 import { loopBusy, loopShed } from "./limits/loop-busy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
-import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
+import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares, MARKS_A_SLOTS } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
 import { RECORD_BODY_MAX } from "./bind/record.ts";
 import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
@@ -933,9 +933,10 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
   const holders = env.SOLANA_HOLDERS_RPC_URL;
   // card helper-solana-failover: the holders key's slot has no public fallback (the public endpoint refuses
   // getTokenLargestAccounts, rpc/rpc.ts Deps): fallen back, its reads answer 503 at once and the page serves Jupiter's
-  // card helper-crowd-429: the holders key set to the main one is one provider's second, so it shares the main pacer
-  const holdersRpc =
-    holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false, ...(holders === env.SOLANA_RPC_URL ? { pacer: rpc.pacer } : {}) });
+  // card helper-crowd-429: the holders key set to the main one is one provider's second, so it shares the main pacer;
+  // card helper-solana-slots-off-a-spent-key: always, since the rpc slot reads the holders key while SOLANA_RPC_URL's plan
+  // is spent, in half of its second (rpc.ts slotShareOf), and the pacer counts both clients' sends to it
+  const holdersRpc = holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false, pacer: rpc.pacer });
   if (holdersRpc !== undefined) slots?.set("holders", holdersRpc.slot);
   return createSolanaToken(proxy, rpc, { gecko, listed: lists.get, holdersRpc, metaLogos: LOGOS, keyed });
 }
@@ -1061,7 +1062,20 @@ export function poolIndexesFromEnv(env: Record<string, string | undefined>, stor
  */
 export function solanaTradesRpcs(env: Record<string, string | undefined>): string[] {
   const own = env.SOLANA_TRADES_RPC_URL;
-  return [...new Set([...(own === undefined || own === "" ? [] : [own]), ...keyedSpares(env, "solana"), ...TRADES_RPCS])];
+  // card helper-solana-slots-off-a-spent-key: past its own key, the host's other Solana slot keys (rpc.ts MARKS_A_SLOTS),
+  // before QuickNode and dRPC, so a spent own key moves the walk to a key with its own credits, never onto route B's day
+  const slotKeys = own === undefined || own === "" ? [] : MARKS_A_SLOTS.map((n) => env[n]).filter((u): u is string => u !== undefined && u !== "");
+  return [...new Set([...(own === undefined || own === "" ? [] : [own]), ...slotKeys, ...keyedSpares(env, "solana"), ...TRADES_RPCS])];
+}
+
+/** Card helper-solana-slots-off-a-spent-key: the trades slot as /v1/health names it: "keyed" while, fallen back, its
+ *  walk's next provider is another Solana slot's key whose plan is not spent (solanaTradesRpcs; `spent` the rpc
+ *  client's), not the public endpoint; else the slot's own state. */
+export function tradesSlotShown(env: Record<string, string | undefined>, slot: Slot, spent: (url: string) => boolean): Slot {
+  const own = env.SOLANA_TRADES_RPC_URL;
+  const others = new Set(MARKS_A_SLOTS.map((n) => env[n]).filter((u) => u !== undefined && u !== "" && u !== own));
+  const next = solanaTradesRpcs(env).slice(1);
+  return { ...slot, state: () => (slot.state() === "fallback" && next.some((u) => others.has(u) && !spent(u)) ? "keyed" : slot.state()) };
 }
 
 /**
@@ -1075,12 +1089,13 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
   // card helper-solana-failover: the keyed trades provider and stream each fall back to the public one (rpc/slot.ts)
   const slot = createSlot("trades", url !== undefined && url !== "");
   const streamSlot = createSlot("stream", ws !== undefined && ws !== "");
-  slots?.set("trades", slot).set("stream", streamSlot);
+  const rpcs = solanaTradesRpcs(env);
+  slots?.set("trades", rpc === undefined ? slot : tradesSlotShown(env, slot, rpc.spent)).set("stream", streamSlot);
   return createSolanaTrades({
     slot,
     streamSlot,
     wsUrl: ws === undefined || ws === "" ? undefined : ws,
-    rpcs: solanaTradesRpcs(env),
+    rpcs,
     history: (mint, tf, to, limit, client) => token.candles(mint, tf, to, limit, client),
     // a token whose venue the chain tape does not decode: its top pool's trades (card solana-trades-show-on-every-token)
     tape: (mint) => token.tape(mint),
