@@ -24,6 +24,7 @@
 // stopped at its bound ...` (exit 3) when the helper missed, else `BAD stopped at its bound ...` (exit 1).
 // Runs: once, no check: the shared module the checks that read the live helper on a local build import
 
+import "../net-window.mjs";
 import { writeSync } from "node:fs";
 
 export const HELPER_HOST = "https://ct-api.unrealized.trade";
