@@ -19,6 +19,7 @@ import { HELPER_FETCH_INIT } from "@blindfill/kit";
 import { useCallback, useEffect, useState } from "react";
 import { OPEN_TOKEN } from "../../routes/routes.ts";
 import { pickSnapshot, sharedAllLists } from "../discover/data.ts";
+import { answerOf, bodyOf, readAgain, type ReadDeps } from "../discover/read-again.ts";
 import type { MarketChain, MarketRow, MarketSnapshot } from "../discover/fields.ts";
 import { columnRows } from "../discover/model.ts";
 import type { RiskRead } from "../trade/safety.ts";
@@ -30,33 +31,39 @@ export type TokenData = { status: "loading" } | { status: "error" } | { status: 
 
 /** HELPER_HOST's token read for one token (the CSP's connect-src names the host, public/_headers). */
 export const TOKEN_URL = (id: string, chain: MarketChain = "solana") => `https://ct-api.unrealized.trade/v1/market/token?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(id)}`;
-const TIMEOUT_MS = 10_000;
+// Card app-token-page-rides-out-a-slow-token-read: a token read the helper gives no answer to is read again inside
+// READY_MS (../discover/read-again.ts readAgain); the error state is a refusal or READY_MS spent.
+export { BACKOFF_MS, MIN_READ_MS, READY_MS, TIMEOUT_MS } from "../discover/read-again.ts";
+export type { ReadDeps } from "../discover/read-again.ts";
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** The helper does not know the token (it answers 404 for an id that is no token of that chain, or one it does not list). */
 class Unknown extends Error {}
 
-/** The row and `risk` of one token read. Throws Unknown on a 404, any other Error on a failed read, another status, or a
+/** The row and `risk` of one token read, read again while the helper gives no answer and READY_MS has room (readAgain).
+ *  Throws Unknown on a 404, NoAnswer once READY_MS is spent (or the page closed), any other Error on another status or a
  *  row that is not this chain's and id's. */
-async function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch): Promise<{ row: MarketRow; risk?: RiskRead; filling: boolean; decimals?: number; links: SocialLinks }> {
-  const r = await fetchFn(TOKEN_URL(id, chain), { ...HELPER_FETCH_INIT, signal: AbortSignal.timeout(TIMEOUT_MS) });
-  if (r.status === 404) throw new Unknown("token: unknown");
-  if (r.status !== 200) throw new Error(`token answered ${r.status}`);
-  const body: unknown = await r.json();
-  const row = isObject(body) ? body.row : null;
-  const risk = isObject(body) ? body.risk : null;
-  if (!isObject(row) || row.chain !== chain || row.token !== id || typeof row.symbol !== "string" || row.symbol === "") throw new Error("token: not this token's row");
-  // the mint's decimals (06b TokenPage `decimals`), which the Holders tab reads its base-unit amounts with
-  const decimals = isObject(body) && typeof body.decimals === "number" && Number.isInteger(body.decimals) && body.decimals >= 0 && body.decimals <= 30 ? body.decimals : undefined;
-  return { row: row as unknown as MarketRow, ...(isObject(risk) ? { risk: risk as RiskRead } : {}), filling: isObject(body) && body.filling === true, ...(decimals === undefined ? {} : { decimals }), links: socialLinks(isObject(body) ? body.links : undefined) };
+function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch, deps: ReadDeps = {}): Promise<{ row: MarketRow; risk?: RiskRead; filling: boolean; decimals?: number; links: SocialLinks }> {
+  return readAgain(async (signal) => {
+    const r = await answerOf(fetchFn, TOKEN_URL(id, chain), HELPER_FETCH_INIT, signal);
+    if (r.status === 404) throw new Unknown("token: unknown");
+    if (r.status !== 200) throw new Error(`token answered ${r.status}`);
+    const body = await bodyOf(r);
+    const row = isObject(body) ? body.row : null;
+    const risk = isObject(body) ? body.risk : null;
+    if (!isObject(row) || row.chain !== chain || row.token !== id || typeof row.symbol !== "string" || row.symbol === "") throw new Error("token: not this token's row");
+    // the mint's decimals (06b TokenPage `decimals`), which the Holders tab reads its base-unit amounts with
+    const decimals = isObject(body) && typeof body.decimals === "number" && Number.isInteger(body.decimals) && body.decimals >= 0 && body.decimals <= 30 ? body.decimals : undefined;
+    return { row: row as unknown as MarketRow, ...(isObject(risk) ? { risk: risk as RiskRead } : {}), filling: isObject(body) && body.filling === true, ...(decimals === undefined ? {} : { decimals }), links: socialLinks(isObject(body) ? body.links : undefined) };
+  }, deps);
 }
 
 /** The page's data for /token/<chain>/<id>: the token's row, the empty state (not found) for an id the helper does not
  *  know, else the error state. */
-export async function loadToken(chain: MarketChain, id: string, fetchFn: typeof fetch = fetch): Promise<TokenData> {
+export async function loadToken(chain: MarketChain, id: string, fetchFn: typeof fetch = fetch, deps: ReadDeps = {}): Promise<TokenData> {
   try {
-    return { status: "ready", ...(await readRow(chain, id, fetchFn)) };
+    return { status: "ready", ...(await readRow(chain, id, fetchFn, deps)) };
   } catch (e) {
     return e instanceof Unknown ? { status: "empty" } : { status: "error" };
   }
@@ -64,11 +71,13 @@ export async function loadToken(chain: MarketChain, id: string, fetchFn: typeof 
 
 /** The page's data: the top Trending token's row on the chain filter's pick (every chain, or one), the empty state when
  *  that column is empty, else the error state. `read` is the lists read (every chain's, shared while in flight). */
-export async function loadTopToken(fetchFn: typeof fetch = fetch, pick: MarketChain | "all" = "all", read: (f: typeof fetch) => Promise<MarketSnapshot> = sharedAllLists): Promise<TokenData> {
+export async function loadTopToken(fetchFn: typeof fetch = fetch, pick: MarketChain | "all" = "all", read: (f: typeof fetch, deps?: ReadDeps) => Promise<MarketSnapshot> = sharedAllLists, deps: ReadDeps = {}): Promise<TokenData> {
   try {
-    const top = columnRows(pickSnapshot(await read(fetchFn), pick), "trending")[0];
+    // the lists read is shared with the rail and Discover while in flight, so this page's close never stops it
+    const { signal: _closed, ...clock } = deps;
+    const top = columnRows(pickSnapshot(await read(fetchFn, clock), pick), "trending")[0];
     if (!top) return { status: "empty" };
-    return { status: "ready", ...(await readRow(top.chain, top.token, fetchFn)) };
+    return { status: "ready", ...(await readRow(top.chain, top.token, fetchFn, deps)) };
   } catch {
     return { status: "error" };
   }
@@ -76,8 +85,8 @@ export async function loadTopToken(fetchFn: typeof fetch = fetch, pick: MarketCh
 
 /** The page's data for /: on All (a fresh open) OPEN_TOKEN, mihao, read as /token/solana/<its mint> is (card
  *  mihao-opens-first); on a chain pick that chain's top Trending token (loadTopToken). */
-export async function loadHome(fetchFn: typeof fetch = fetch, pick: MarketChain | "all" = "all", read: (f: typeof fetch) => Promise<MarketSnapshot> = sharedAllLists): Promise<TokenData> {
-  return pick === "all" ? loadToken(OPEN_TOKEN.chain, OPEN_TOKEN.id, fetchFn) : loadTopToken(fetchFn, pick, read);
+export async function loadHome(fetchFn: typeof fetch = fetch, pick: MarketChain | "all" = "all", read: (f: typeof fetch, deps?: ReadDeps) => Promise<MarketSnapshot> = sharedAllLists, deps: ReadDeps = {}): Promise<TokenData> {
+  return pick === "all" ? loadToken(OPEN_TOKEN.chain, OPEN_TOKEN.id, fetchFn, deps) : loadTopToken(fetchFn, pick, read, deps);
 }
 
 /** How often a page whose row is named on chain reads again (M384). */
@@ -101,10 +110,12 @@ const laterReal = (fn: () => void, ms: number): (() => void) => {
 /** Reads once and hands the answer to `onData`; while the answer's row is named on chain (`following`), reads again
  *  every FILL_MS and hands on each ready answer of the same token, until its row is Jupiter's. A failed read again (or another token's, as /
  *  could pick if its Trending column moved) keeps the row drawn and tries FILL_MS later. One read at a time; a hidden
- *  page reads nothing. Returns the stop. */
-export function followToken(load: () => Promise<TokenData>, onData: (d: TokenData) => void, deps: FillDeps = {}): () => void {
+ *  page reads nothing. `load` is handed a signal the stop aborts, so a read the helper does not answer is not read
+ *  again once the page closed. Returns the stop. */
+export function followToken(load: (signal: AbortSignal) => Promise<TokenData>, onData: (d: TokenData) => void, deps: FillDeps = {}): () => void {
   const later = deps.later ?? laterReal;
   const hidden = deps.hidden ?? (() => typeof document !== "undefined" && document.hidden);
+  const closed = new AbortController();
   let stopped = false;
   let token: string | null = null;
   let cancel: () => void = () => undefined;
@@ -113,13 +124,13 @@ export function followToken(load: () => Promise<TokenData>, onData: (d: TokenDat
   };
   async function step(): Promise<void> {
     if (hidden()) return again();
-    const d = await load();
+    const d = await load(closed.signal);
     if (stopped) return;
     if (d.status !== "ready" || d.row.token !== token) return again();
     onData(d);
     if (following(d)) again();
   }
-  void load().then((d) => {
+  void load(closed.signal).then((d) => {
     if (stopped) return;
     if (d.status === "ready") token = d.row.token;
     onData(d);
@@ -127,6 +138,7 @@ export function followToken(load: () => Promise<TokenData>, onData: (d: TokenDat
   });
   return () => {
     stopped = true;
+    closed.abort();
     cancel();
   };
 }
@@ -136,7 +148,7 @@ type Loaded = { data: TokenData; nowMs: number; retry: () => void };
 /** The data and the clock of one read: loading until it ends, then read again while its row is named on chain (followToken);
  *  `retry` reads again from loading. The caller keys the component by what it reads, so a read never outlives its
  *  token. */
-function useLoaded(load: () => Promise<TokenData>): Loaded {
+function useLoaded(load: (signal: AbortSignal) => Promise<TokenData>): Loaded {
   const [data, setData] = useState<TokenData>({ status: "loading" });
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [attempt, setAttempt] = useState(0);
@@ -156,7 +168,7 @@ function useLoaded(load: () => Promise<TokenData>): Loaded {
 }
 
 /** The data for /: OPEN_TOKEN on All, the top Trending token on a chain pick (loadHome). The caller keys the component by the pick. */
-export const useTopToken = (pick: MarketChain | "all"): Loaded => useLoaded(() => loadHome(fetch, pick));
+export const useTopToken = (pick: MarketChain | "all"): Loaded => useLoaded((signal) => loadHome(fetch, pick, sharedAllLists, { signal }));
 
 /** The data for /token/<chain>/<id>. */
-export const useToken = (chain: MarketChain, id: string): Loaded => useLoaded(() => loadToken(chain, id));
+export const useToken = (chain: MarketChain, id: string): Loaded => useLoaded((signal) => loadToken(chain, id, fetch, { signal }));

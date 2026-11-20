@@ -31,7 +31,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { launchHarnessBrowser } from "../harness-sockets.mjs";
-import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT, helperFetch } from "./helper-misses.mjs";
 
 const KEY = "app-token-rail";
 export const APP_URL = "https://ct-app.unrealized.trade/";
@@ -98,7 +98,7 @@ export function judge(rec) {
 
 // ------------------------------------------------------------------------------------------------ the read
 async function http(url) {
-  const r = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(20_000) });
+  const r = await helperFetch(url, { redirect: "manual", signal: AbortSignal.timeout(20_000) });
   return { status: r.status, text: await r.text() };
 }
 

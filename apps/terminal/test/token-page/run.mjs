@@ -59,8 +59,14 @@ const STATES = [
   { id: "fx-picks-nothing", top: "pool", query: "?fx=curve", state: "ready", curve: false },
   { id: "S7.1-loading", lists: "hang", state: "loading" },
   { id: "empty", lists: "empty", state: "empty" },
-  { id: "error", lists: 503, state: "error" },
-  { id: "error-token", top: "curve", token: 503, state: "error" },
+  // a refusal is the error state; Solana's lists answered 503 for their first 1.5 s are read again inside READY_MS
+  // (src/screens/discover/read-again.ts) and the page draws, long before the lists' next 12 s read
+  { id: "error", lists: 400, state: "error" },
+  { id: "lists-503-rides-out", top: "curve", listsDownMs: 1_500, state: "ready", curve: true },
+  // a refusal is the error state; a token read the helper answers 503 is read again and the page opens (card
+  // app-token-page-rides-out-a-slow-token-read: a 503 or no answer is the error state only once READY_MS is spent)
+  { id: "error-token", top: "curve", token: 400, state: "error" },
+  { id: "token-503-rides-out", top: "curve", token: "503-once", state: "ready", curve: true },
   // the chart (card app-token-chart): GeckoTerminal's bars by default (the label shows), our own (no label), none, a
   // failed read, and a read that never ends (the skeleton)
   { id: "chart-chain", top: "pool", state: "ready", curve: false, candles: "chain" },
@@ -147,6 +153,7 @@ function helperAnswer(s, url, calls) {
     calls.chains.push(url.searchParams.get("chain"));
     if (s.lists === "hang") return "hang";
     if (typeof s.lists === "number") return json(s.lists, { error: "unavailable" });
+    if (s.listsDownMs && url.searchParams.get("chain") === "solana" && Date.now() - (calls.listsAt ??= Date.now()) < s.listsDownMs) return json(503, { error: "unavailable" });
     const top = s.lists === "empty" ? [] : [{ ...live(s.top), vol_1h_usd: live(s.top).vol_1h_usd ?? "1000" }];
     return json(200, { chain: "solana", as_of_ms: Date.now(), lists: { new: [], trending: top, trending_5m: [], trending_1h: top, graduating: [] } });
   }
@@ -154,12 +161,13 @@ function helperAnswer(s, url, calls) {
     calls.tokens++;
     if (!s.top) {
       // a lists state off the phone: / on All reads mihao alone (card mihao-opens-first), so its read answers the
-      // state: never ending (loading), not known (empty) or failed (error)
+      // state: never ending (loading), not known (empty) or refused (error)
       if (url.searchParams.get("token") !== OPEN) return json(404, { error: "unknown token" });
       if (s.lists === "hang") return "hang";
-      return s.lists === "empty" ? json(404, { error: "unknown token" }) : json(s.lists, { error: "unavailable" });
+      return s.lists === "empty" ? json(404, { error: "unknown token" }) : json(400, { error: "refused" });
     }
     if (typeof s.token === "number") return json(s.token, { error: "unavailable" });
+    if (s.token === "503-once" && !calls.failed) return (calls.failed = true), json(503, { error: "unavailable" });
     const row = live(s.top);
     if (url.searchParams.get("token") !== row.token) return json(404, { error: "unknown token" });
     return json(200, { row, decimals: 6, pool: null, risk: {}, route: "ok" });
@@ -261,6 +269,12 @@ async function openAt(browser, route, w, s, calls) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "reduce" });
   // every layout shift in every frame, with its element and rects (app-shell.mjs INIT), for the reads that count them
   await ctx.addInitScript(INIT);
+  // a lists read the helper does not answer at first is ridden out: the rail and the phone's list never draw their error
+  if (s.listsDownMs)
+    await ctx.addInitScript(() => {
+      const seen = () => document.querySelector('[data-testid="token-rail"][data-state="error"], [data-testid="phone-trenches"][data-state="error"]') && (window.__ctListsErrorSeen = true);
+      new MutationObserver(seen).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-state"] });
+    });
   if (MARK_DELAY_MS > 0)
     await ctx.addInitScript((ms) => {
       const raf = window.requestAnimationFrame.bind(window);
@@ -317,6 +331,7 @@ try {
       const sel = selOf(w, s);
       const drawn = await f.locator(sel).first().isVisible().catch(() => false);
       check(drawn, `${tag}: ${sel} not drawn at the route`);
+      if (s.listsDownMs) check(!(await f.evaluate(() => window.__ctListsErrorSeen === true)), `${tag}: the lists' error state drew while the helper answered 503 for ${s.listsDownMs} ms`);
       check(errors.length === 0, `${tag}: page errors ${errors.join(" | ")}`);
       const scroll = await f.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       check(scroll <= 0, `${tag}: horizontal scroll ${scroll}px`);

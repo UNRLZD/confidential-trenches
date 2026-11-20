@@ -143,7 +143,7 @@ export const E2E_SECONDS = {
   "apps/terminal: node test/holds-still/run.mjs": 16, // C3 15.5
   "apps/terminal: node test/token-page/run.mjs": 68, // C1 68.0
   "apps/terminal: node test/chart-pointer/run.mjs": 33, // B2 32.1
-  "apps/terminal: node test/token-route/run.mjs": 19, // C3 18.9
+  "apps/terminal: node test/token-route/run.mjs": 65, // 64.6 s: the never-answers case waits READY_MS at both widths (card app-token-page-rides-out-a-slow-token-read)
   "apps/terminal: node test/chains-evm/run.mjs": 16, // C1 15.3
   "apps/terminal: node test/token-rail/run.mjs": 45, // B2 44.8
   "apps/terminal: node test/token-rail/sweep.mjs": 60, // C3 59.7 (this card's own command, run C only)

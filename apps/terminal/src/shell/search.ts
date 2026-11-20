@@ -7,6 +7,8 @@ import { TOKEN_CHAINS } from "../routes/routes.ts";
 import { REFRESH_MS, sharedAllLists } from "../screens/discover/data.ts";
 import type { MarketChain, MarketRow, MarketSnapshot } from "../screens/discover/fields.ts";
 import { columnRows } from "../screens/discover/model.ts";
+import { loadToken } from "../screens/token/source.ts";
+import type { TokenData } from "../screens/token/source.ts";
 
 /** The filter: every chain, or one. */
 export type ChainPick = "all" | MarketChain;
@@ -166,3 +168,21 @@ export type ListsSource = ReturnType<typeof listsSource>;
 
 /** The app's one source: every chain's lists (card app-chains-evm), read when the search opens. */
 export const SEARCH_LISTS = listsSource();
+
+/** The token reads of a pasted address (Search.tsx useReads): each key `<chain>/<id>` from `held` when it holds it, else
+ *  `load` on that chain and id, kept in `held` unless it failed. Every read goes on `signal`, which a new search or a
+ *  closed search aborts, so a search no longer wanted is not read again (card
+ *  app-token-page-rides-out-a-slow-token-read: a token read the helper does not answer is read again inside READY_MS). */
+export function readTokens(keys: readonly string[], signal: AbortSignal, held: Map<string, TokenData>, load: typeof loadToken = loadToken): Promise<TokenData[]> {
+  return Promise.all(
+    keys.map((k) => {
+      const h = held.get(k);
+      if (h) return h;
+      const at = k.indexOf("/");
+      return load(k.slice(0, at) as MarketChain, k.slice(at + 1), fetch, { signal }).then((d) => {
+        if (d.status !== "error") held.set(k, d);
+        return d;
+      });
+    }),
+  );
+}

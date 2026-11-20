@@ -98,7 +98,8 @@ async function build() {
  *  /discover with the helper refusing, and with it answering no rows. */
 async function states(browser, route, prepare) {
   const bad = [];
-  for (const [name, reply] of [["offline", { status: 503, contentType: "application/json", body: "{}" }], ["no tokens", { status: 200, contentType: "application/json", body: JSON.stringify({ ...answer, lists: { new: [], trending: [], trending_5m: [], trending_1h: [], graduating: [] } }) }]]) {
+  // offline: the helper refuses (a 400); a 503 is read again inside READY_MS first (src/screens/discover/read-again.ts)
+  for (const [name, reply] of [["offline", { status: 400, contentType: "application/json", body: "{}" }], ["no tokens", { status: 200, contentType: "application/json", body: JSON.stringify({ ...answer, lists: { new: [], trending: [], trending_5m: [], trending_1h: [], graduating: [] } }) }]]) {
     for (const w of WIDTHS) {
       const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch });
       await ctx.route("**/*", route);

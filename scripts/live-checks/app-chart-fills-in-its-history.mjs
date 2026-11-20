@@ -44,7 +44,7 @@ import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { consoleError, pageError } from "./console-errors.mjs";
 import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
-import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT, helperFetch } from "./helper-misses.mjs";
 
 const KEY = "app-chart-fills-in-its-history";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -191,7 +191,7 @@ export async function candidates() {
   for (const chain of CHAINS) {
     const out = [];
     try {
-      const r = await fetch(`${HELPER_HOST}/v1/market/lists?chain=${chain}`, { headers, signal: AbortSignal.timeout(15_000) });
+      const r = await helperFetch(`${HELPER_HOST}/v1/market/lists?chain=${chain}`, { headers, signal: AbortSignal.timeout(15_000) });
       const body = await r.json();
       const seen = new Set();
       for (const column of ["new", "trending_5m", "trending_1h", "trending"]) {

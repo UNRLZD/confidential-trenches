@@ -235,8 +235,21 @@ test("a read again that answers another token is not drawn; the page keeps its o
   assert.deepEqual(c.pending(), []);
 });
 
+test("the page's stop aborts the signal its reads are handed, so a read the helper does not answer is not read again once the page closed", async () => {
+  const signals: AbortSignal[] = [];
+  const c = clock();
+  const stop = followToken(async (signal) => (signals.push(signal), { status: "ready", row: chainRow() }), () => undefined, { later: c.later, hidden: () => false });
+  await c.settle();
+  await c.tick(FILL_MS);
+  assert.equal(signals.length, 2);
+  assert.ok(signals.every((s) => s instanceof AbortSignal && !s.aborted), "open while the page is");
+  stop();
+  assert.ok(signals.every((s) => s.aborted), "aborted by the stop");
+});
+
 test("a failed read again keeps the row drawn and tries 5 s later; a hidden page reads nothing", async () => {
-  const h = helper([{ row: chainRow(), filling: true }, { status: 503 }, { row: jupRow(), filling: false }]);
+  // a refusal (a 400): a 503 is read again inside the read itself (token-route.test.ts)
+  const h = helper([{ row: chainRow(), filling: true }, { status: 400 }, { row: jupRow(), filling: false }]);
   const c = clock();
   let away = false;
   const { seen } = follow(h, c, () => away);

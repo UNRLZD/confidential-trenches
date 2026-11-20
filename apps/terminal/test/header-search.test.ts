@@ -8,7 +8,10 @@ import { test } from "node:test";
 import { REFRESH_MS } from "../src/screens/discover/data.ts";
 import type { MarketRow, MarketSnapshot } from "../src/screens/discover/fields.ts";
 import { columnRows } from "../src/screens/discover/model.ts";
+import * as search from "../src/shell/search.ts";
 import { addressChains, allRows, chainsWithData, LIMIT, listsSource, plan, idleRows } from "../src/shell/search.ts";
+import { readFileSync } from "node:fs";
+import type { TokenData } from "../src/screens/token/source.ts";
 import lists from "./discover-data/helper-lists-2026-11-01.json" with { type: "json" };
 
 const unzip = (values: readonly unknown[]) => Object.fromEntries(lists.fields.map((f, i) => [f, values[i]]));
@@ -170,4 +173,41 @@ test("listsSource: the rail's lists while fresh, else one shared read kept for R
   const failing = listsSource({ rail: () => ({ data: { status: "loading" }, nowMs: 0 }), read: async () => Promise.reject(new Error("503")), now: () => t });
   await assert.rejects(failing.get());
   assert.equal(failing.now(), null);
+});
+
+// Card app-token-page-rides-out-a-slow-token-read: a pasted address's token read rides out a helper that does not
+// answer (READY_MS); a search no longer wanted (a new search, or the search closed) aborts its reads, so they stop.
+test("a pasted address's token reads go on the search's signal; a held answer is not read again; a failed one is not held", async () => {
+  const readTokens = (search as { readTokens?: typeof search.readTokens }).readTokens;
+  assert.equal(typeof readTokens, "function", "search.ts readTokens: the search's token reads, on a signal");
+  const wanted = new AbortController();
+  const seen: { chain: string; id: string; signal?: AbortSignal }[] = [];
+  const ready = { status: "ready", row: { chain: "base", token: "0xab", symbol: "AB" } } as unknown as TokenData;
+  const load = (async (chain: string, id: string, _f: typeof fetch, deps: { signal?: AbortSignal } = {}) => (seen.push({ chain, id, signal: deps.signal }), id === "0xbad" ? { status: "error" } : ready)) as Parameters<typeof search.readTokens>[3];
+  const held = new Map<string, TokenData>([["solana/held", ready]]);
+  const out = await readTokens!(["base/0xab", "robinhood/0xbad", "solana/held"], wanted.signal, held, load);
+  assert.deepEqual(out.map((d) => d.status), ["ready", "error", "ready"]);
+  assert.deepEqual(seen.map((x) => `${x.chain}/${x.id}`), ["base/0xab", "robinhood/0xbad"]);
+  assert.ok(seen.every((x) => x.signal === wanted.signal), "every read on the search's signal");
+  assert.deepEqual([...held.keys()].sort(), ["base/0xab", "solana/held"]);
+});
+
+test("a search no longer wanted stops reading: its abort ends a token read the helper does not answer, read once", async () => {
+  const readTokens = (search as { readTokens?: typeof search.readTokens }).readTokens;
+  assert.equal(typeof readTokens, "function");
+  const wanted = new AbortController();
+  let n = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => (n++, wanted.abort(), new Response("{}", { status: 503 }))) as typeof fetch;
+  try {
+    const out = await readTokens!(["base/0xab"], wanted.signal, new Map());
+    assert.deepEqual(out, [{ status: "error" }]);
+    assert.equal(n, 1, "no read again once the search was no longer wanted");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  // Search.tsx's reads go through readTokens on a controller its effect's cleanup aborts (a new key, or the search closed)
+  const tsx = readFileSync(new URL("../src/shell/Search.tsx", import.meta.url), "utf8");
+  assert.match(tsx, /const wanted = new AbortController\(\);[\s\S]*readTokens\(keys, wanted\.signal, READS\)[\s\S]*return \(\) => \{[^}]*wanted\.abort\(\);/);
+  assert.doesNotMatch(tsx, /loadToken\(/, "no token read in Search.tsx outside readTokens");
 });

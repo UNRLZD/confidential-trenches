@@ -12,6 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { judge, LOADS, MARKS, topOf } from "./app-near-trading.mjs";
+import { helperFetch, HELPER_HOST, verdictOf } from "./helper-misses.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-near-trading.answers.json"), "utf8"));
@@ -70,4 +71,26 @@ test("topOf: the top of NEAR's Trending in Discover's order, only NEAR rows", ()
   assert.equal(topOf({ lists: { trending: [row("a.near", "1"), row("b.near", "9")] } }) !== null, true);
   assert.equal(topOf({ lists: { trending: [{ chain: "solana", token: "So11111111111111111111111111111111111111112" }] } }), null);
   assert.equal(topOf(null), null);
+});
+
+// Card app-token-page-rides-out-a-slow-token-read, round 3: merge group 44654180636, test-browser (3) job 136016279740,
+// "BAD NEAR's lists answered 503, the top of Trending none" and "BAD 0 loads of 2" while the helper shed. The check's own
+// lists read goes through helperFetch, so on a local build the 503 is a helper miss and the FAIL is INCONCLUSIVE.
+test("planted (merge group 44654180636): NEAR's lists answered 503 on a local build is a helper miss, INCONCLUSIVE, never a page fault", async () => {
+  const rec = structuredClone(ANSWERS.good);
+  rec.lists = { status: 503, rows: null };
+  rec.top = null;
+  rec.loads = [];
+  const r = judge(rec);
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.some((l) => /^BAD NEAR's lists answered 503, the top of Trending none/.test(l)), r.lines.join("\n"));
+  const into = [];
+  const res = await helperFetch(`${HELPER_HOST}/v1/market/lists?chain=near`, {}, { local: true, fetchFn: async () => new Response("{}", { status: 503 }), into });
+  assert.equal(res.status, 503);
+  assert.equal(verdictOf("FAIL", into).verdict, "INCONCLUSIVE");
+  // the check reads its lists through helperFetch, not a raw fetch
+  const text = readFileSync(path.join(HERE, "app-near-trading.mjs"), "utf8");
+  assert.match(text, /await helperFetch\(LISTS_URL\)/);
+  // a page fault with the lists answered stays a FAIL: no miss
+  assert.equal(verdictOf("FAIL", []).verdict, "FAIL");
 });
