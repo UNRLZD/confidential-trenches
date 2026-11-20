@@ -540,6 +540,10 @@ export const EVM_HANDOVER_MAX = 2 * 1024 * 1024;
 /** The most entries of each kind a handed-over state may hold (the bars' maps keep 500, the pools POOLS_MAX). */
 export const HANDOVER_ENTRIES_MAX = 500;
 const ANSWER_MAX = 4 * 1024 * 1024;
+/** The longest answer naming an error that one() parses at once, its throttle held before the turn a longer one waits.
+ *  [design: 64 KiB, a batch of 100 calls each refused (some 120 bytes an error) with room; one ANSWER_MAX answer parsed
+ *  in 3.6 ms on the Mac (card helper-loop-never-held-by-a-read), so 64 KiB takes about 0.06 ms.] */
+const ERROR_NOW_MAX = 64 * 1024;
 const TIMEOUT_MS = 8_000;
 /** A provider whose post has been out this long, sent and not answered, is left to answer while the next is asked
  *  (hedged: agreed, agreedHead), so one that hangs costs a read this, never TIMEOUT_MS (card
@@ -1546,11 +1550,20 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // the post is answered: out of `out` (latencyOf, hedged) and its place free before the turn is waited (card
       // helper-parse-turn-outside-the-slot: waited with both held, a herd's turns kept a provider's places past their
       // answers and past HEDGE_MS sent the read to another provider while the answers sat waiting to be parsed); a
-      // parse that throws is still this provider's failed read (the catch below: null)
-      o.delete(sent);
-      answered?.();
-      const w = slice();
-      if (w !== null) await w;
+      // parse that throws is still this provider's failed read (the catch below: null). A body that may name an error
+      // (the key written as is, or through an escape: \u, the only one its letters have) keeps both until it is parsed,
+      // and a short one is parsed at once, so a throttle it names (evmThrottleS, held below) is held before any post
+      // queued to this provider is sent: a turn's wait let the places this provider's other answers freed send the
+      // posts behind them to it meanwhile (swaps-hold.test.ts, every parse a turn later: red with the turn)
+      const named = text.includes('"error"') || text.includes("\\u");
+      if (!named) {
+        o.delete(sent);
+        answered?.();
+      }
+      if (!named || text.length > ERROR_NOW_MAX) {
+        const w = slice();
+        if (w !== null) await w;
+      }
       const parsed: unknown = JSON.parse(text);
       const answers = Array.isArray(parsed) ? parsed : [parsed];
       const got: Reply[] = part.map(() => ({ ok: false, wait: 0 }));
