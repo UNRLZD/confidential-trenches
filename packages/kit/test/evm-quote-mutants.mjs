@@ -222,7 +222,12 @@ export const MUTANTS = [
   // on this mutant: SL5 holds it, a lag over one span, so the lower request ends past the backend too
   [QUOTE, "    const top = p === null;", "    const top = p === null && b === head;", R, "SL5 "],
   // review of 22e29c9, B1: a head read on the second sent the scan's requests there too
-  [QUOTE, "headFrom(f)).then((head) => ({ head, first: f })));", "headFrom(f)).then((head) => ({ head, first: f.next ?? f })));", R, "SP6 "],
+  [QUOTE, "headFrom(f)).then((head) => ({ head, first: f, own: ownOf(f) })));", "headFrom(f)).then((head) => ({ head, first: f.next ?? f, own: ownOf(f) })));", R, "SP6 "],
+  // card evm-quote-rides-a-scan-lag-at-max: a scan up to a head no scan provider named reads up to their own head where
+  // its provider does not hold the newest block, within maxLag alone; a follow's pinned block is such a head too
+  [QUOTE, "        if (h !== null && h < b && head - h <= lag) return ((ownTo = h), null);\n", "", R, "LAGMAX1 "],
+  [QUOTE, "if (h !== null && h < b && head - h <= lag) return", "if (h !== null && h < b) return", R, "LAGMAX3 "],
+  [QUOTE, "(a.pin === undefined && spec === null ? undefined :", "(spec === null ? undefined :", R, "LAGMAX4 "],
   // review of 22e29c9, N4: the 2 s hold where no second follows (the head read), and a not-yet block as an answer
   [QUOTE, "      fast &&= spareNext;", "", R, "SP8 "],
   [QUOTE, 'throw on.next !== undefined ? new ScanRefused("rpc_error", m) : new NotHeldYet("rpc_error", m);', "return out;", R, "SP3 "],
@@ -982,10 +987,10 @@ export const MUTANTS = [
   [QUOTE, "asked.forEach((r, i) => fit.set(r.data, a[i]!.kind === \"out\"));", "asked.forEach((r) => fit.set(r.data, a[0]!.kind === \"out\"));", R, "GF10 "],
   [QUOTE, "|gas exhausted during memory expansion:|gas exhausted during precompiled contract execution:|invalid operand to an opcode:", "", R, "GF5 "],
   [QUOTE, "word(BigInt(\"0x\" + fitTo(blockHash)))", "word(0x9116a1e7147d594ae107fe8b0e67f9d4de4b1e76n)", R, "GF5 "],
-  [QUOTE, "for (const c of round === 0 && first.length > 0 ? first : unknown) {", "for (const c of [b]) {", R, "GF10 "],
+  [QUOTE, "for (const c of round === 0 ? firstFew(first.length > 0 ? first : unknown) : unknown) ask.set(", "for (const c of [b]) ask.set(", R, "GF10 "],
   [QUOTE, "      fitAt = b.hash;\n", "", R, "GF2 "],
   // review 2 of c9a8df14: the second fit round (L1, the reviewer's mutant J) and the fit call's bounds (L2)
-  [QUOTE, "for (const c of round === 0 && first.length > 0 ? first : unknown) {", "for (const c of round === 0 && first.length > 0 ? first : [b]) {", R, "GF12 "],
+  [QUOTE, "for (const c of round === 0 ? firstFew(first.length > 0 ? first : unknown) : unknown) ask.set(", "for (const c of round === 0 ? firstFew(first.length > 0 ? first : unknown) : [b]) ask.set(", R, "GF12 "],
   [QUOTE, "  if (typeof amount !== \"bigint\" || amount <= 0n || amount >= MAX_IN) return refuse(\"bad_request\", \"the amount in is above 0 and below 2^127\");\n", "", R, "GF13 "],
   [QUOTE, "  if (typeof exec !== \"bigint\" || exec <= 0n) return refuse(\"bad_request\", \"the swap's gas cap is above 0\");\n", "", R, "GF13 "],
   [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut < gas)", R, "PE8 "],

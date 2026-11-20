@@ -5,6 +5,7 @@
 // reopen reads only the blocks since: Base's on its providers, Robinhood's from the chain's swap index.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { turnSlicer } from "../../limits/turn.ts";
 import * as base from "../../../test/evm-swaps/base.ts";
 import * as rh from "../../../test/evm-swaps/robinhood.ts";
 import { IDLE_MS, type createSwaps, type EvmSwaps } from "./swaps.ts";
@@ -22,10 +23,15 @@ const read = async (s: EvmSwaps, token: string): Promise<Tape> => {
   assert.equal(a.status, 200, a.body);
   return JSON.parse(a.body) as Tape;
 };
-/** Ticks until the token's tape is read to the head and settled, as the page reads it. */
-async function settle(s: EvmSwaps, token: string): Promise<Tape> {
+/** Ticks until the token's tape is read to the head and settled, as the page reads it: each tick and read again on a
+ *  later turn of the loop, as the helper's ticks (TICK_MS) and the page's reads (TRADES_POLL_MS) come. The fake chain
+ *  answers with no I/O, so without the turn every tick ran in one, and a read back waiting its parse turn
+ *  (limits/turn.ts) never got it. `before(i)` runs before tick i. */
+async function settle(s: EvmSwaps, token: string, before?: (i: number) => void): Promise<Tape> {
   let t = await read(s, token);
   for (let i = 0; i < 8 && t.filling === true; i++) {
+    await new Promise<void>((go) => setImmediate(go));
+    before?.(i);
     await s.tick();
     t = await read(s, token);
   }
@@ -109,3 +115,23 @@ for (const c of CHAINS) {
     }
   });
 }
+
+test("base: a read back that waits its parse turn (limits/turn.ts) goes on at a later turn of the loop, so a tape the page reads again, each read a turn of its own, settles; one turn spent before any of the first four ticks (red at b3b5d5f68 for a spend before the first and the third: settle's eight ticks ran in one turn of the loop, the fake chain answering with no I/O, so the read back's turn never came; 1 in 20 under load, merge queue run 44693673920)", async () => {
+  const c = CHAINS[0]!;
+  for (const at of [0, 1, 2, 3]) {
+    const chain = c.rig();
+    const clock = { t: 5_000_000 };
+    chain.st.head = c.start;
+    // the slicer on a clock of its own: still, so every slice has room, but for the one turn spent before tick `at`
+    const turn = { ms: 0 };
+    const s = chain.open(clock, { restMax: 1, index: [], pass: turnSlicer(() => turn.ms, 20).pass });
+    try {
+      const t = await settle(s, base.VVV, (i) => {
+        if (i === at) turn.ms += 20;
+      });
+      assert.ok(t.trades.length > 0, `a turn spent before tick ${at}: the settled tape holds the coin's trades`);
+    } finally {
+      s.stop();
+    }
+  }
+});

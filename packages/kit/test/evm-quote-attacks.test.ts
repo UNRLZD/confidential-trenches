@@ -4291,6 +4291,53 @@ test("WS1 a warm buy whose blocks since its kept scan are read before its answer
   assert.equal(past, false, `the warm quote ran past 2 posts one after the other: ${scanLog.join(" | ")}`);
 }));
 
+// Card evm-quote-rides-a-scan-lag-at-max: a warm buy's scan reads up to the held head, the quote pair's block, which the
+// scan provider never named. Release 184's live app run 44670793512 (evm-quote-lag-held, base-blastapi-50): with blastapi
+// held out of the pair, the pair's block was at the chain's tip, and 3 of 10 warm quotes ended rpc_error "the scan
+// provider does not hold block 59783246 yet" (and ...255, ...291) in 2,218 to 6,303 ms, every scan provider a few blocks
+// behind it. A scan provider whose own head (read beside the logs) is behind the held head within maxLag reads up to its
+// own head, and the blocks past it are the lag the kit accepts elsewhere: read by a later quote, missed by this one alone.
+// LAGMAX1 one scan provider, LAGMAX2 the chain's list with every spare behind too; LAGMAX3 one past maxLag still refuses.
+const lagMax = async (token: string, scans: (headNo: number, asked: [number, number][]) => EvmRpc | EvmRpc[], heldNo: number) => {
+  const req = { ...warmReq(token), route: seededRoute(token) };
+  const pools = [seeded(token)];
+  let m = 0;
+  let on = [chain(pools, 0), chain(pools, 1)];
+  const watch = quoteMod.evmHeadWatch(() => on, 50n, () => NOW, false, () => m);
+  const v1 = await verdict(evmPoolBuyQuoteWith(req, on, NOW, scans(5_000_000, []), watch, () => m));
+  assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
+  // the pair moves to `heldNo` and the watch holds it; the coin has no pool kept, so its blocks since are read first
+  on = [chain(pools, 0, heldNo), chain(pools, 1, heldNo)];
+  m = quoteMod.EVM_HEAD_REUSE_MS + 1;
+  await (await watch.head(NOW)).confirm();
+  const asked: [number, number][] = [];
+  return { v1, v2: await verdict(evmPoolBuyQuoteWith(req, on, NOW, scans(heldNo - 20, asked), watch, () => m)), asked, req, on, watch, m };
+};
+test("LAGMAX1 a warm buy whose lone scan provider is 20 blocks behind the held head (within maxLag) ends at the held head, its scan read up to the provider's own head", () => onTestClock(async () => {
+  const token = "0x000000000000000000000000000000000fa57a1a";
+  const { v1, v2, asked, req, on, watch, m } = await lagMax(token, (h, asked) => scanner(h, [], asked), 5_000_040);
+  assert.deepEqual(v2, { ...v1, block: 5_000_040n });
+  assert.ok(asked.some(([a, b]) => a <= 5_000_001 && b === 5_000_020), JSON.stringify(asked));
+  // the blocks past the provider's head were never kept as read: the next quote, its provider caught up, asks them
+  const again: [number, number][] = [];
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, on, NOW, scanner(5_000_040, [], again), watch, () => m)), { ...v1, block: 5_000_040n });
+  assert.ok(again.some(([a, b]) => a <= 5_000_021 && b >= 5_000_040), JSON.stringify(again));
+}));
+test("LAGMAX2 a warm buy whose every scan provider of the list is 20 blocks behind the held head ends at the held head, read on the first", () => onTestClock(async () => {
+  const token = "0x000000000000000000000000000000000fa57a1b";
+  const spare: [number, number][] = [];
+  const { v1, v2, asked } = await lagMax(token, (h, asked) => [scanner(h, [], asked), scanner(h, [], spare)], 5_000_040);
+  assert.deepEqual(v2, { ...v1, block: 5_000_040n });
+  assert.ok(asked.some(([a, b]) => a <= 5_000_001 && b === 5_000_020), JSON.stringify(asked));
+}));
+test("LAGMAX3 a warm buy whose lone scan provider is more than maxLag behind the held head still refuses, within the scan's bound", () => onTestClock(async () => {
+  const token = "0x000000000000000000000000000000000fa57a1c";
+  // the provider 70 blocks behind a held head 90 blocks on: past Base's 50
+  const { v2 } = await lagMax(token, (h, asked) => scanner(h - 50, [], asked), 5_000_090);
+  assert.equal(v2.accepted, false);
+  assert.equal((v2 as { code?: string }).code, "rpc_error");
+}));
+
 // Card evm-warm-quote-inside-the-kpi-with-room: a warm round of more calls than a provider of its pair takes at once at
 // its pace (mainnet.base.org: 12 calls a second, 12 at once, pace.ts) waited in that pace for its last posts, one turn
 // after the rest: from the Mac a warm Base partial-fill quote's 16 calls sent mainnet.base.org's sixth post 337-340 ms
@@ -9407,6 +9454,48 @@ test("GF12 a second quote of the same token and amount reads the last quote's sw
   assert.ok(rounds1 > reads1 && rounds === reads, `rounds ${rounds1} (reads from ${reads1}) then ${rounds} (reads from ${reads})`);
 }));
 
+// Card robinhood-taps-meet-no-429: a warm quote keeps only the fits that decided the last verdicts; where no route of
+// a list fits, every one of them decided it (none fits), so all are kept and the next quote reads them beside its first
+// round, as GF12's do, never in rounds after it.
+test("GF16 a second quote where no route fits reads the last quote's swap fits in its first round: no round after it, the same verdict", () => onTestClock(async () => {
+  const token = "0x00000000000000000000000000000000000f1f16";
+  const K = 6;
+  const fakes: ModelPool[] = Array.from({ length: K }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a) => a, gas: 600_000n }));
+  const pools = [gfMarket(token, 500_000n), gfSeeded(token, 450_000n), ...fakes];
+  const logs = fakes.map((p) => ({ key: p.key, at: 4_500_000 }));
+  let out = 0;
+  let rounds = 0;
+  let reads = 0;
+  const slow = (rpc: EvmRpc, count: boolean): EvmRpc => async (calls) => {
+    if (count) {
+      if (out === 0) rounds++;
+      const data = calls.map((c) => String((c.params[0] as { data?: string } | undefined)?.data));
+      if (reads === 0 && data.some((d) => d.startsWith("0x82ad56cb"))) reads = rounds;
+    }
+    out++;
+    try {
+      const a = await rpc(calls);
+      await new Promise((go) => setTimeout(go, 250));
+      return a;
+    } finally {
+      out--;
+    }
+  };
+  const ask = () =>
+    evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: marketRoute(token) }, [slow(chain(pools, 0), true), slow(chain(pools, 1), false)], NOW, scanner(5_000_000, logs)).then(
+      () => null,
+      (e: unknown) => e,
+    );
+  const r1 = await ask();
+  assert.ok(r1 instanceof EvmQuoteError && r1.code === "over_gas_floor" && r1.reference === null, show(r1));
+  const [rounds1, reads1] = [rounds, reads];
+  rounds = 0;
+  reads = 0;
+  const r2 = await ask();
+  assert.ok(r2 instanceof EvmQuoteError && r2.code === "over_gas_floor" && r2.reference === null, show(r2));
+  assert.ok(rounds1 > reads1 && rounds === reads, `rounds ${rounds1} (reads from ${reads1}) then ${rounds} (reads from ${reads})`);
+}));
+
 // Card evm-5xx-holds-the-provider-for-the-round, with GF12's early fits: a warm quote reads the last quote's swap fits
 // beside its first round, and a provider that answers HTTP 5xx to one is held in the other. At a87cbd3ff
 // each read held it in its own reads alone, and the first round's batches queued in its gate behind the failed fits
@@ -9506,6 +9595,50 @@ test("GF13 evmBuySwapFitCall refuses an amount outside (0, 2^127) and a gas cap 
     assert.match(c.tx.gas, /^0x[0-9a-f]+$/);
     assert.match(c.override[c.tx.to]!.balance, /^0x[0-9a-f]+$/);
   }
+});
+
+// Card robinhood-taps-meet-no-429: the first round of swap-fit reads asks each list's best few by output
+// (EVM_FITS_FIRST), and a warm quote reads again only the fits that decided the last one's verdicts. Every route a
+// quote takes or names still has its own swap read at its block: these hold that a route whose swap does not fit is
+// never the one taken or named, when the best by output does not fit, when the best few do not, and when the route the
+// last quote's verdict kept stops fitting by the next quote.
+test("GF14 the best routes by output whose swaps do not fit, more than the first round asks, are never taken or named: the market that fits is the reference, and asking the best of them is over_gas_floor", async () => {
+  const token = "0x00000000000000000000000000000000000f1f14";
+  // four pools above the market, each quoting more than the one after it, none of whose swaps fit
+  const fakes: ModelPool[] = Array.from({ length: 4 }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a: bigint) => a - BigInt(i) * 1000n, gas: 600_000n }));
+  const pools = [{ ...gfMarket(token), give: (a: bigint) => a / 2n }, gfSeeded(token), ...fakes];
+  const logs = fakes.map((p) => ({ key: p.key, at: 4_500_000 }));
+  const r = await hbQuote(pools, token, logs, gfSeededRoute(token));
+  assert.ok("code" in r && r.code === "below_reference", show(r));
+  assert.deepEqual(r.reference, { amountOut: AMOUNT / 2n, route: marketRoute(token) }, "the best route that fits, below every one that does not");
+  const best = v4Route([{ currency: token, fee: 2000, tickSpacing: 50, hooks: NATIVE }]);
+  const b = await hbQuote(pools, token, logs, best);
+  assert.ok("code" in b && b.code === "over_gas_floor", show(b));
+  assert.deepEqual(b.reference, { amountOut: AMOUNT / 2n, route: marketRoute(token) });
+  const q = await hbQuote(pools, token, logs, marketRoute(token));
+  assert.ok(!("code" in q), show(q));
+  assert.equal(q.amountOut, AMOUNT / 2n);
+  assert.deepEqual(q.reference, { amountOut: AMOUNT / 2n, route: marketRoute(token) });
+});
+
+test("GF15 a route whose swap fit at the last quote and no longer does is never taken or named by the next: its fit is read again at the next quote's block", async () => {
+  const token = "0x00000000000000000000000000000000000f1f15";
+  // a pool above the market whose swap fits at the first quote: the reference, and the fit the next quote keeps
+  const above: ModelPool = { key: keyOf(token, NATIVE, 2000, 50, NATIVE), give: (a: bigint) => (a * 3n) / 4n, gas: 300_000n };
+  const pools = [{ ...gfMarket(token), give: (a: bigint) => a / 2n }, gfSeeded(token), above];
+  const logs = [{ key: above.key, at: 4_500_000 }];
+  const aboveRoute = v4Route([{ currency: token, fee: 2000, tickSpacing: 50, hooks: NATIVE }]);
+  const r1 = await hbQuote(pools, token, logs, marketRoute(token));
+  assert.ok("code" in r1 && r1.code === "below_reference", show(r1));
+  assert.deepEqual(r1.reference, { amountOut: (AMOUNT * 3n) / 4n, route: aboveRoute }, "the pool above, whose swap fits, is the reference");
+  // its swap no longer fits: the next quote of the same token and amount reads the kept fit again and names the market
+  above.gas = 600_000n;
+  const q = await hbQuote(pools, token, logs, marketRoute(token));
+  assert.ok(!("code" in q), show(q));
+  assert.equal(q.amountOut, AMOUNT / 2n);
+  assert.deepEqual(q.reference, { amountOut: AMOUNT / 2n, route: marketRoute(token) }, "never the route whose swap stopped fitting");
+  const b = await hbQuote(pools, token, logs, aboveRoute);
+  assert.ok("code" in b && b.code === "over_gas_floor", show(b));
 });
 
 // Card evm-buy-quote-ends-on-node: a round is agreed a batch at a time. Agreed whole (main at 3a73b181), one late
@@ -10377,6 +10510,41 @@ test("GS25 card evm-pinned-follow-reads-no-scan-past-its-block: a follow pinned 
     if (keptTo === 5_000_000) assert.deepEqual(logs, [], `the follow read ${JSON.stringify(logs)}`);
     else assert.deepEqual(logs.length > 0 && logs.every(([a, b]) => a === keptTo + 1 && b === 5_000_000), true, `the follow read ${JSON.stringify(logs)}: not the blocks after ${keptTo} up to the pin`);
   }
+});
+
+test("LAGMAX4 card evm-quote-rides-a-scan-lag-at-max: a follow pinned to a block its scan provider does not hold yet, within maxLag, reads up to the provider's own head, read only then, and quotes at the pin", async () => {
+  const token = "0x00000000000000000000000000000000000a5a72";
+  const pools = [seeded(token), betterAt(token, 1_000_000)];
+  const rpcs: [EvmRpc, EvmRpc] = [chain(pools, 0), chain(pools, 1)];
+  let headNo = 4_999_990;
+  const heads: number[] = [];
+  const logs: [number, number][] = [];
+  const scan: EvmRpc = async (calls, signal) => {
+    for (const c of calls) if (c.method === "eth_blockNumber") heads.push(headNo);
+    return scanner(headNo, [seeded(token), betterAt(token, 1_000_000)].map((p) => ({ key: p.key, at: 4_500_000 })), logs)(calls, signal);
+  };
+  const req = { chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as const;
+  const refused = await evmPoolBuyQuoteWith(req, rpcs, NOW, scan).then(
+    () => assert.fail("the seeded route is refused"),
+    (e: unknown) => e as EvmQuoteError & { at: string; reference: { route: EvmRoute } },
+  );
+  assert.equal(refused.code, "below_reference");
+  await new Promise((go) => setTimeout(go, 20));
+  const h = head("0x" + (5_000_000).toString(16), refused.at);
+  const block = { number: BigInt(h.number), hash: h.hash, timestamp: BigInt(h.timestamp), baseFeePerGas: BigInt(h.baseFeePerGas!) };
+  const watch: quoteMod.EvmHeadWatch = { head: () => Promise.reject(new Error("a follow agrees on no new head")), keep: () => {}, peek: () => null, held: (x) => (x === block.hash ? block : null) };
+  // the scan provider 5 blocks short of the pinned block by the follow (the quote pair's block, at the chain's tip)
+  headNo = 4_999_995;
+  heads.length = 0;
+  logs.length = 0;
+  const q = await verdict(evmPoolBuyQuoteWith({ ...req, route: refused.reference.route, at: refused.at }, rpcs, NOW, scan, watch));
+  assert.deepEqual(q, { accepted: true, amountOut: AMOUNT, minOut: (AMOUNT * 99n) / 100n, block: 5_000_000n });
+  // the gap since the kept scan is within maxLag, read once the follow has answered: its head read once, as the pinned
+  // block was not held, and the blocks after the kept scan read up to that head (at main: asked up to the pin 4 times
+  // in about 1.5 s and refused, nothing kept)
+  await new Promise((go) => setTimeout(go, 100));
+  assert.deepEqual(heads, [4_999_995]);
+  assert.ok(logs.some(([a, b]) => a === 4_999_991 && b === 4_999_995), JSON.stringify(logs));
 });
 
 test("GS13 a route above the hidden two-hop whose swap does not fit hides it from no verdict: the buy is refused by name", async () => {

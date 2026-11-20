@@ -1842,7 +1842,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // before the turn, in its wait, and after a turn that resolved past it (its continuation runs a tick later: card
     // signpage-index-keep-ends-at-sign-out), and the request in flight
     const passFetch = (async (url: string, init?: RequestInit) => {
-      await hostLane(url).turn("pass", signal);
+      // the turn counts nothing: laneFetch counts the request it sends, once (card signpage-sign-out-sends-nothing)
+      await hostLane(url).turn("pass", signal, false);
       signal.throwIfAborted();
       return laneFetch()(url, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
     }) as typeof fetch;

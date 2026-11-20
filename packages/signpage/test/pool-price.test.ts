@@ -742,3 +742,49 @@ test("at the feed's write, review P3: wakeWhenShown (main.ts) wakes the prices w
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
   assert.match(main, /\n {2}wakeWhenShown\(document, prices\);\n/, "main.ts wires the page's own document to its prices");
 });
+
+// Card signpage-sign-out-sends-nothing: a state read in flight at the sign out's tap called refresh after it, so the
+// price read's eth_chainId wave went out between the tap and the page's gate (and a read under way at the tap sent its
+// later calls). The sign out's stop (main.ts: the quotes' stop, pulled at the tap and at another tab's sign out) ends it:
+// a read asked after it sends nothing, a read under way sends no call after it, and once signed in again a read goes.
+test("card signpage-sign-out-sends-nothing: past the sign out's stop no price read sends a call, and signed in again one does", async () => {
+  const { quotesStop } = await import("../src/quotes-stop.ts");
+  const stop = quotesStop();
+  const calls: string[] = [];
+  let hold: Promise<void> | null = null;
+  const counted = SOL_RPCS.map((r) =>
+    Object.assign(async (method: string, params: readonly unknown[]) => {
+      calls.push(method);
+      if (hold) await hold;
+      return r(method, params);
+    }, { url: r.url }),
+  ) as unknown as readonly [SolanaRpc, SolanaRpc];
+  const h = holder({ rpcs: (c) => (c === "solana" ? counted : null), stopped: stop.stopped });
+  // a read asked after the tap: nothing sent, nothing held
+  stop.signedOut();
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.deepEqual(calls, [], "a read asked past the stop sends nothing");
+  assert.equal(h.p.get("solana"), null);
+  // signed in again: the read goes at once
+  stop.signedIn();
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.ok(calls.length > 0, "signed in again, the read goes");
+  assert.notEqual(h.p.get("solana"), null);
+  // a read under way at the tap: its first calls held, the stop pulled, then answered: no call after the stop
+  h.clock.ms += POOL_PRICE_REFRESH_MS;
+  for (const f of h.ticks.splice(0)) f();
+  let release!: () => void;
+  hold = new Promise<void>((r) => (release = r));
+  const before = calls.length;
+  h.p.refresh(["solana"]);
+  await settled();
+  const asked = calls.length;
+  assert.ok(asked > before, "the read is under way");
+  stop.signedOut();
+  release();
+  hold = null;
+  await settled();
+  assert.equal(calls.length, asked, "a read under way at the stop sends no call after it");
+});

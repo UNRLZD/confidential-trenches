@@ -351,7 +351,9 @@ else {
   // the pool kinds' deps: the network's pins and each chain's two RPCs, which the price reads use too (src/pool-price.ts)
   // and a buy's wait at its tap while its chain's spend is prepared (card taps-wait-inside-the-page)
   const poolDeps = testnetPoolDeps(testnet?.flow, testnet ? () => testnet.outSignal() : undefined, testnet ? (chain) => testnet.prepared(chain) : undefined);
-  const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
+  // the price reads end at the sign out's tap and at another tab's sign out, as the quotes do (the quotes' stop: card
+  // signpage-sign-out-sends-nothing), and go again once signed in
+  const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null, stopped: quotesStopped });
   // a page shown again reads its prices at once: hidden, it read only every 15 s (src/pool-price.ts)
   wakeWhenShown(document, prices);
   pagePrice = (chain) => prices.get(chain);
@@ -941,7 +943,8 @@ else {
             ...wTailWallets(await pageTails().catch(() => []), (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], (c) => POOL_ADDRESS_ASSET[c]),
           ]),
         );
-        prices.refresh((pooled.pools ?? []).map((p) => p.chain));
+        // never from a sign out's tap on (a state read in flight at it ends here, its prices unread)
+        if (!leaving) prices.refresh((pooled.pools ?? []).map((p) => p.chain));
         // the tokens the pool's buys hold (src/positions.ts, card signpage-state-holdings): the last whole pass, never a
         // chain read inside this state read; the first signed-in read starts one, and a buy's or sell's end the next
         const sol = s.signed_in && testnet ? await testnet.positions() : null;
