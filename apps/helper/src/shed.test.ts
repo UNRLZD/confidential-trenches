@@ -43,6 +43,8 @@ test("past capacity every market data read is a 503 the page reads, before any r
     assert.equal(r.headers["retry-after"], String(UPSTREAM_RETRY_AFTER_S), path);
     assert.equal(r.headers["x-helper-commit"], COMMIT, path);
     assert.deepEqual(JSON.parse(r.body), { error: { code: "upstream" } }, path);
+    // card helper-loop-never-held-by-a-write: never a bare 503, its cause named in the standard Server-Timing header
+    assert.equal(r.headers["server-timing"], 'loop;desc="past capacity"', `${path}: the shed names its cause`);
   }
 });
 

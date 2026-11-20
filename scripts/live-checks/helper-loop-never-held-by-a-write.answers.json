@@ -1,0 +1,432 @@
+{
+  "good": {
+    "base": "https://ct-api.unrealized.trade",
+    "probes": [
+      {
+        "at": 0,
+        "status": 200,
+        "ms": 1249,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 2001,
+        "status": 200,
+        "ms": 522,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 4001,
+        "status": 200,
+        "ms": 776,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 5999,
+        "status": 200,
+        "ms": 749,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 8001,
+        "status": 200,
+        "ms": 812,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 10002,
+        "status": 200,
+        "ms": 687,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 12001,
+        "status": 200,
+        "ms": 784,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 14000,
+        "status": 200,
+        "ms": 686,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 16000,
+        "status": 200,
+        "ms": 682,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 18001,
+        "status": 200,
+        "ms": 785,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 19999,
+        "status": 200,
+        "ms": 677,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 22002,
+        "status": 200,
+        "ms": 766,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 24001,
+        "status": 200,
+        "ms": 839,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 26000,
+        "status": 200,
+        "ms": 670,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 28000,
+        "status": 200,
+        "ms": 740,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 30000,
+        "status": 200,
+        "ms": 844,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 32000,
+        "status": 200,
+        "ms": 707,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 34000,
+        "status": 200,
+        "ms": 811,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 36001,
+        "status": 200,
+        "ms": 692,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 38001,
+        "status": 200,
+        "ms": 698,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 39999,
+        "status": 200,
+        "ms": 808,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 42001,
+        "status": 200,
+        "ms": 708,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 44001,
+        "status": 200,
+        "ms": 764,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 46000,
+        "status": 200,
+        "ms": 699,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 48001,
+        "status": 200,
+        "ms": 673,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 50000,
+        "status": 200,
+        "ms": 768,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 52000,
+        "status": 200,
+        "ms": 985,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 54000,
+        "status": 200,
+        "ms": 725,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 56000,
+        "status": 200,
+        "ms": 823,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 58001,
+        "status": 200,
+        "ms": 923,
+        "retryAfter": null,
+        "timing": null
+      }
+    ]
+  },
+  "bad": {
+    "base": "http://127.0.0.1:18283",
+    "probes": [
+      {
+        "at": 0,
+        "status": 200,
+        "ms": 31,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 2001,
+        "status": 200,
+        "ms": 3,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 4001,
+        "status": 200,
+        "ms": 5,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 6001,
+        "status": 200,
+        "ms": 2,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 7999,
+        "status": 200,
+        "ms": 3,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 10001,
+        "status": 200,
+        "ms": 3,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 11999,
+        "status": 200,
+        "ms": 3,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 14000,
+        "status": 200,
+        "ms": 15,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 16000,
+        "status": 200,
+        "ms": 173,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 18000,
+        "status": 200,
+        "ms": 31,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 20020,
+        "status": 200,
+        "ms": 53,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 22000,
+        "status": 200,
+        "ms": 2,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 24001,
+        "status": 200,
+        "ms": 2,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 26000,
+        "status": 200,
+        "ms": 2,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 28000,
+        "status": 200,
+        "ms": 2,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 30001,
+        "status": 200,
+        "ms": 2,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 32000,
+        "status": 200,
+        "ms": 3,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 34000,
+        "status": 200,
+        "ms": 3,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 36001,
+        "status": 503,
+        "ms": 1094,
+        "retryAfter": "2",
+        "timing": null
+      },
+      {
+        "at": 38000,
+        "status": 503,
+        "ms": 1,
+        "retryAfter": "2",
+        "timing": null
+      },
+      {
+        "at": 40000,
+        "status": 200,
+        "ms": 2,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 41999,
+        "status": 200,
+        "ms": 3,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 44001,
+        "status": 200,
+        "ms": 2,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 46001,
+        "status": 200,
+        "ms": 5,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 48000,
+        "status": 200,
+        "ms": 5,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 50001,
+        "status": 200,
+        "ms": 5,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 52000,
+        "status": 200,
+        "ms": 2,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 54001,
+        "status": 200,
+        "ms": 5,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 56001,
+        "status": 200,
+        "ms": 2,
+        "retryAfter": null,
+        "timing": null
+      },
+      {
+        "at": 57999,
+        "status": 200,
+        "ms": 2,
+        "retryAfter": null,
+        "timing": null
+      }
+    ]
+  }
+}
