@@ -8,8 +8,8 @@
 // (route.continue), every other one to the harness; and it watches each helper request the page made. A miss is an
 // answer the page asked the helper for that:
 //   - came back 5xx or 429 (the helper or its vendor did not answer: a logo the helper is busy on is a 503 too);
-//   - failed in the network (`requestfailed`), but for net::ERR_ABORTED (or a closed page's) under MISS_MS, the page's
-//     own abort of a read it no longer needs (an abort past MISS_MS is a read the helper kept waiting);
+//   - failed in the network (`requestfailed`), but for net::ERR_ABORTED (or a closed page's) under ABORT_MS, the page's
+//     own abort of a read it no longer needs (an abort at ABORT_MS or more is a read the helper kept waiting);
 //   - was CORS-blocked (a fetch or XHR answer with no access-control-allow-origin, so the page could not read it);
 //   - took MISS_MS or more, or had not come MISS_MS after it was asked when the context closed or the check judged.
 // verdictOf(verdict) turns a FAIL into INCONCLUSIVE when a miss happened in the run, and only then: a check judges BAD
@@ -31,6 +31,12 @@ export const HELPER_HOST = "https://ct-api.unrealized.trade";
  *  about a second (app-in-shell.mjs TAPE_MS), and the checks wait 8 to 25 s for a page to draw. */
 export const MISS_MS = 10_000;
 export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
+/** An abort the page made after waiting this long is a read the helper kept waiting, not one the page no longer needed:
+ *  half of MISS_MS. The pages cut their helper reads at 10 s (token source.ts, trades.ts, candles.ts TIMEOUT_MS), the
+ *  same as MISS_MS, and the watch reads that abort a few ms either side of it (card
+ *  app-token-page-rides-out-a-slow-token-read: 10 001-10 005 ms on 8 reads; merge group 44618685462 read it under
+ *  10 s and named no miss). */
+export const ABORT_MS = MISS_MS / 2;
 
 const host = new URL(HELPER_HOST).host;
 const pathOf = (url) => {
@@ -68,8 +74,7 @@ export function helperWatch({ origin = HELPER_HOST, missMs = MISS_MS } = {}) {
       const r = of(req);
       if (!r || r.end !== null || shut !== null) return;
       r.end = t;
-      const late = t - r.at >= missMs;
-      if (/ERR_ABORTED|closed/i.test(String(error)) && !late) return;
+      if (/ERR_ABORTED|closed/i.test(String(error)) && t - r.at < missMs / 2) return;
       r.why = `${host}: no answer (${r.path} failed after ${((t - r.at) / 1000).toFixed(1)} s: ${String(error).slice(0, 80)})`;
     },
     /** How many of the host's requests it saw. */

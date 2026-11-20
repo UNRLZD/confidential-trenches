@@ -38,7 +38,7 @@ import { launchBrowser } from "../browsers.mjs";
 import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
 import { named } from "./record-names.mjs";
-import { helperMisses, liveHelper, MISS_MS, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
+import { ABORT_MS, helperMisses, liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
 
 const KEY = "app-token-route";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -59,10 +59,10 @@ export const LOADS = [
   { name: "desktop", id: "robinhood", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 const READ_MS = 25_000;
-/** A token read the page waited on this long and got no answer to is the helper's miss, not the page's: half of
- *  MISS_MS, where the helper answered the token read in 0.6-2.2 s on 46 reads (19 Nov 21:55-22:06Z); under it the page
- *  cut its own read short, which stays the page's fault. */
-export const NO_ANSWER_MS = MISS_MS / 2;
+/** A token read the page waited on this long and got no answer to is the helper's miss, not the page's: helper-misses'
+ *  ABORT_MS, half of MISS_MS, where the helper answered the token read in 0.6-2.2 s on 46 reads (19 Nov 21:55-22:06Z);
+ *  under it the page cut its own read short, which stays the page's fault. */
+export const NO_ANSWER_MS = ABORT_MS;
 const HELPER_NAME = new URL(HELPER_HOST).host;
 
 /** The read the page drew: the last one the helper answered (not 5xx or 429), else the last with a status, else none

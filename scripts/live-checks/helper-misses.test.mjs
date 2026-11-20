@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { EXIT, HELPER_HOST, MISS_MS, exitOf, helperMisses, helperWatch, stoppedLines, verdictOf, watchContext } from "./helper-misses.mjs";
+import { ABORT_MS, EXIT, HELPER_HOST, MISS_MS, exitOf, helperMisses, helperWatch, stoppedLines, verdictOf, watchContext } from "./helper-misses.mjs";
 import { judge } from "./app-trade-box-mount.mjs";
 import { noAnswerHosts, rerun } from "../ci/live-rerun.mjs";
 
@@ -101,6 +101,25 @@ test("a planted page fault: the trade box never mounts while every helper answer
   assert.equal(n, 1);
   assert.equal(r.verdict, "fail");
   assert.equal(r.exit, 1);
+});
+
+// Card app-token-page-rides-out-a-slow-token-read: merge group 44618685462, test-browser (4) job 135894248598. The page cut
+// its token read at its own 10 s (AbortSignal.timeout), and the watch read that net::ERR_ABORTED at 9 998 ms, under
+// MISS_MS: no miss named, and a helper that never answered was judged a page fault, FAIL, never run again.
+test("planted (merge group 44618685462): the page's own abort of a read the helper kept waiting 9 998 ms is a miss; a short abort is not", () => {
+  for (const after of [9_998, 9_500, ABORT_MS]) {
+    const w = helperWatch();
+    const end = feed(w, [[TOKEN, { failed: "net::ERR_ABORTED", after }]]);
+    const m = w.misses(end);
+    assert.deepEqual(m, [`ct-api.unrealized.trade: no answer (/v1/market/token failed after ${(after / 1000).toFixed(1)} s: net::ERR_ABORTED)`], String(after));
+    assert.equal(verdictOf("FAIL", m).verdict, "INCONCLUSIVE");
+  }
+  for (const after of [0, 400, ABORT_MS - 1]) {
+    const w = helperWatch();
+    const end = feed(w, [[TOKEN, { failed: "net::ERR_ABORTED", after }]]);
+    assert.deepEqual(w.misses(end), [], String(after));
+    assert.equal(verdictOf("FAIL", w.misses(end)).verdict, "FAIL");
+  }
 });
 
 test("never a miss: the page's own abort, a read still young when the context closed, another host", () => {
