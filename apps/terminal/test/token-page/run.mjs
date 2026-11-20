@@ -59,10 +59,10 @@ const STATES = [
   { id: "fx-picks-nothing", top: "pool", query: "?fx=curve", state: "ready", curve: false },
   { id: "S7.1-loading", lists: "hang", state: "loading" },
   { id: "empty", lists: "empty", state: "empty" },
-  // a refusal: a lists read the helper answers 503 is read again inside READY_MS (src/screens/discover/read-again.ts),
-  // and the page draws once Solana's second read answers
+  // a refusal is the error state; Solana's lists answered 503 for their first 1.5 s are read again inside READY_MS
+  // (src/screens/discover/read-again.ts) and the page draws, long before the lists' next 12 s read
   { id: "error", lists: 400, state: "error" },
-  { id: "lists-503-rides-out", top: "curve", listsOnce: 503, state: "ready", curve: true },
+  { id: "lists-503-rides-out", top: "curve", listsDownMs: 1_500, state: "ready", curve: true },
   // a refusal is the error state; a token read the helper answers 503 is read again and the page opens (card
   // app-token-page-rides-out-a-slow-token-read: a 503 or no answer is the error state only once READY_MS is spent)
   { id: "error-token", top: "curve", token: 400, state: "error" },
@@ -153,7 +153,7 @@ function helperAnswer(s, url, calls) {
     calls.chains.push(url.searchParams.get("chain"));
     if (s.lists === "hang") return "hang";
     if (typeof s.lists === "number") return json(s.lists, { error: "unavailable" });
-    if (s.listsOnce && url.searchParams.get("chain") === "solana" && !calls.listsFailed) return (calls.listsFailed = true), json(s.listsOnce, { error: "unavailable" });
+    if (s.listsDownMs && url.searchParams.get("chain") === "solana" && Date.now() - (calls.listsAt ??= Date.now()) < s.listsDownMs) return json(503, { error: "unavailable" });
     const top = s.lists === "empty" ? [] : [{ ...live(s.top), vol_1h_usd: live(s.top).vol_1h_usd ?? "1000" }];
     return json(200, { chain: "solana", as_of_ms: Date.now(), lists: { new: [], trending: top, trending_5m: [], trending_1h: top, graduating: [] } });
   }
@@ -269,6 +269,12 @@ async function openAt(browser, route, w, s, calls) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "reduce" });
   // every layout shift in every frame, with its element and rects (app-shell.mjs INIT), for the reads that count them
   await ctx.addInitScript(INIT);
+  // a lists read the helper does not answer at first is ridden out: the rail and the phone's list never draw their error
+  if (s.listsDownMs)
+    await ctx.addInitScript(() => {
+      const seen = () => document.querySelector('[data-testid="token-rail"][data-state="error"], [data-testid="phone-trenches"][data-state="error"]') && (window.__ctListsErrorSeen = true);
+      new MutationObserver(seen).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-state"] });
+    });
   if (MARK_DELAY_MS > 0)
     await ctx.addInitScript((ms) => {
       const raf = window.requestAnimationFrame.bind(window);
@@ -325,6 +331,7 @@ try {
       const sel = selOf(w, s);
       const drawn = await f.locator(sel).first().isVisible().catch(() => false);
       check(drawn, `${tag}: ${sel} not drawn at the route`);
+      if (s.listsDownMs) check(!(await f.evaluate(() => window.__ctListsErrorSeen === true)), `${tag}: the lists' error state drew while the helper answered 503 for ${s.listsDownMs} ms`);
       check(errors.length === 0, `${tag}: page errors ${errors.join(" | ")}`);
       const scroll = await f.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       check(scroll <= 0, `${tag}: horizontal scroll ${scroll}px`);
