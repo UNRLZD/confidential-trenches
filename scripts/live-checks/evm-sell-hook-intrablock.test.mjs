@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { digestOf, judge, notKnown } from "./evm-sell-hook-intrablock.mjs";
+import { digestOf, judge, notKnown, overOf, precompileAccount, read } from "./evm-sell-hook-intrablock.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-sell-hook-intrablock.answers.json", import.meta.url), "utf8"));
 
@@ -88,4 +88,70 @@ test("planted: a trace provider or a replay seat still behind is INCONCLUSIVE, n
   assert.equal(edit((t) => (t.replays = [{ url: RH, answer: ran }, { url: PK, answer: HNF }])).verdict, "FAIL", "unknown block not waited out: as before");
   assert.equal(edit((t) => (t.replays = [{ url: RH, answer: ran }, { url: PK, answer: HNF, lagging: true }, { url: PN, answer: ran }])).verdict, "PASS", "walked past a seat behind to two that ran it");
   assert.ok(notKnown({ result: null }) && notKnown([{ result: {} }, { error: { message: "transaction not found" } }]) && !notKnown({ error: { code: 3, message: "execution reverted" } }));
+});
+
+// card evm-replay-reads-an-execution-error-as-run: live app run 44651054036 (20 Nov 01:08Z) failed on two transactions
+// that succeeded and whose replay answered -32000 "invalid opcode: INVALID": the override named precompiles (0x6e, 0x71,
+// 0x72), and a precompile an override names, even with no field, is switched off and its code (0xfe) runs. The override
+// leaves them out now; a halt reads as run only where the transaction's own call ended with that same halt.
+test("planted: the override leaves out ArbOS's state and every precompile's account (0x1 to 0xffff), keeping the zero address and every other", () => {
+  const pre = Object.fromEntries(["0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000001", "0x000000000000000000000000000000000000006e", "0x0000000000000000000000000000000000000071", "0x000000000000000000000000000000000000FFFF", "0x0000000000000000000000000000000000010000", "0xa4b05fffffffffffffffffffffffffffffffffff", "0xa4b00000000000000000000000000000000000f6", "0x0000f90827f1c53a10cb7a02335b175320002935"].map((a) => [a, { balance: "0x1" }]));
+  assert.deepEqual(Object.keys(overOf(pre)), ["0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000010000", "0xa4b00000000000000000000000000000000000f6", "0x0000f90827f1c53a10cb7a02335b175320002935"]);
+  assert.ok(precompileAccount("0x0000000000000000000000000000000000000100") && !precompileAccount("0x0000000000000000000000000000000000000000"));
+});
+
+test("planted: a replay that halts where the transaction did not (run 44651054036's invalid opcode) fails; one that halts as the transaction's own call did runs", () => {
+  const INVALID = { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "invalid opcode: INVALID" } };
+  const OOG = { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "out of gas" } };
+  const edit = (f) => {
+    const g = structuredClone(A.good);
+    f(g.txs[0]);
+    return judge(g);
+  };
+  const halted = (t, answer, error) => {
+    for (const x of t.traces) x.digest.error = error;
+    for (const r of t.replays) r.answer = answer;
+  };
+  const r = edit((t) => halted(t, INVALID, null));
+  assert.equal(r.verdict, "FAIL");
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).map((l) => l.replace(/^BAD \[0x[0-9a-f]+\] /, "").replace(/ on https:\S+: /, " on <seat>: ")), [
+    'the replay at its prestate runs on <seat>: {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"invalid opcode: INVALID"}} (the transaction succeeded)',
+    'the replay at its prestate runs on <seat>: {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"invalid opcode: INVALID"}} (the transaction succeeded)',
+    "replayed on two operators: none",
+  ]);
+  assert.equal(edit((t) => halted(t, OOG, "out of gas")).verdict, "PASS", "out of gas, as the transaction ran out");
+  assert.equal(edit((t) => halted(t, INVALID, "invalid opcode: INVALID")).verdict, "PASS", "invalid opcode, as the transaction hit it");
+  assert.equal(edit((t) => halted(t, OOG, null)).verdict, "FAIL", "out of gas where the transaction succeeded");
+  assert.equal(edit((t) => halted(t, OOG, "execution reverted")).verdict, "FAIL", "out of gas where the transaction reverted");
+  assert.equal(edit((t) => halted(t, { ...OOG, error: { ...OOG.error, code: 3 } }, "out of gas")).verdict, "FAIL", "the halt's words with another code");
+});
+
+// the read on a modelled Robinhood: Nitro switches a precompile an override names off (invalid opcode), and a retryable's
+// submission (type 0x69, to ArbRetryableTx) is no call a wallet signs, so it is never read
+test("planted: the read skips Arbitrum's own types and replays with the precompiles left out: PASS; the override with them in: FAIL", async () => {
+  const ARB = "0xa4b05fffffffffffffffffffffffffffffffffff", WASM = "0x0000000000000000000000000000000000000071";
+  const txOf = (n, i, type, to) => ({ hash: "0x" + (n * 16 + i).toString(16).padStart(64, "0"), type, from: "0x" + "11".repeat(20), to, input: "0xc9f95d32", gas: "0x30000", value: "0x0", maxFeePerGas: "0x1", maxPriorityFeePerGas: "0x0" });
+  const block = (n) => ({ number: "0x" + n.toString(16), timestamp: "0x6aff9d6e", baseFeePerGas: "0x1", parentHash: "0x" + "ab".repeat(32), transactions: [txOf(n, 0, "0x69", "0x000000000000000000000000000000000000006e"), txOf(n, 1, "0x2", "0x" + "22".repeat(20))] });
+  const seen = [];
+  const answer = (m, p) => {
+    if (m === "eth_getBlockByNumber") return { result: block(p[0] === "latest" ? 1000 : Number(p[0])) };
+    if (m === "debug_traceTransaction") {
+      seen.push(p[0]);
+      return { result: p[1].tracer === "prestateTracer" ? { [ARB]: { balance: "0x0" }, [WASM]: { balance: "0x0" }, ["0x" + "22".repeat(20)]: { balance: "0x0" } } : { type: "CALL", output: "0x" } };
+    }
+    if (m === "eth_call") return Object.keys(p[2] ?? {}).some((a) => a.toLowerCase() === WASM || a.toLowerCase() === ARB) ? { error: { code: -32000, message: "invalid opcode: INVALID" } } : { result: "0x" };
+    return { error: { code: -32601, message: m } };
+  };
+  const fetchFn = async (_url, init) => {
+    const b = JSON.parse(init.body);
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, ...answer(b.method, b.params) }), { status: 200 });
+  };
+  const run = await read(fetchFn, overOf, async () => {});
+  assert.equal(run.txs.length, 3);
+  assert.ok(run.txs.every((t) => t.hash.endsWith("1")), "only the type 2 transactions");
+  assert.equal(judge(run).verdict, "PASS", judge(run).lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  const withPrecompiles = (pre) => Object.fromEntries(Object.entries(pre ?? {}).filter(([a]) => a !== ARB).map(([a, v]) => [a, { balance: v.balance }]));
+  const bad = judge(await read(fetchFn, withPrecompiles, async () => {}));
+  assert.equal(bad.verdict, "FAIL");
+  assert.ok(bad.lines.some((l) => /invalid opcode: INVALID/.test(l)), bad.lines.join("\n"));
 });

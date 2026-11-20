@@ -5174,6 +5174,15 @@ export const EVM_TRACE_UNANSWERED = "the trade's trace was not answered and coul
 // the transaction's own output on all three for 4 of 4 that succeeded, and reverted for 3 of 3 that reverted (one more
 // that succeeded reverted in the replay: a replay can differ, so no gate trusts one alone).
 const EVM_ARBOS_STATE = "0xa4b05fffffffffffffffffffffffffffffffffff";
+// A precompile's account (card evm-replay-reads-an-execution-error-as-run): the range EIP-1352 keeps for them, 0x0…01 to
+// 0x0…ffff (the zero address, no precompile, stays in). A trade's prestate holds the ones it reached (ArbWasm 0x71 and
+// ArbWasmCache 0x72 in every Robinhood trace read, ecrecover where a signature is checked, ArbRetryableTx 0x6e), and a
+// call whose state override names one, even with no field, runs with that precompile switched off: ArbSys's
+// arbBlockNumber with {0x64: {}} answered "invalid opcode: INVALID" (its code is 0xfe) on rpc.mainnet.chain.robinhood.com,
+// robinhood.drpc.org and robinhood.api.pocket.network, and sha256 with {0x02: {}} "0x" (2026-11-20 01:5xZ). So the replay
+// leaves them out, as ArbOS's state: with them in, 0x67f8d99c (block 108638381), which succeeded, reverted 0x815e1d64
+// (Permit2's InvalidSigner: ecrecover off) on dRPC and Pocket, and with them out answered its own output.
+const precompileAccount = (a: string): boolean => /^0x0{36}[0-9a-f]{4}$/.test(a) && a !== "0x" + "0".repeat(40);
 // The bounds of a trace, from the gas the trade used, its receipt's gasUsed and a quarter more, since a refund returns at
 // most a fifth of the gas spent (EIP-3529) (review of f0f983d2, item 3; of de4e3ed5, 5: the sender's limit could be 32M
 // and its answers 164 MB): what any trade can touch, so no hook can pass them at any size and turn the trace off. A new
@@ -5199,7 +5208,8 @@ function preBounds(gas: bigint) {
 }
 type Bounds = ReturnType<typeof preBounds>;
 
-/** A prestateTracer answer (asked with disableCode) as a state override, every account but ArbOS's state, no code;
+/** A prestateTracer answer (asked with disableCode) as a state override, every account but ArbOS's state and the
+ *  precompiles', no code;
  *  null where it is not one within the bounds `b`. Keys sorted and lowercased, so two providers' answers compare as
  *  JSON. */
 function preOverOf(r: unknown, b: Bounds): Record<string, Override> | null {
@@ -5234,7 +5244,7 @@ function preOverOf(r: unknown, b: Bounds): Record<string, Override> | null {
       }
       if (st.length > 0) one.stateDiff = d;
     }
-    if (!arbos) out[lower(a)] = one;
+    if (!arbos && !precompileAccount(lower(a))) out[lower(a)] = one;
   }
   return out;
 }
