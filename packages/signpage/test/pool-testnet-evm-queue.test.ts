@@ -1677,6 +1677,54 @@ test("card signpage-index-keep-ends-at-sign-out: no index read leaves after a si
   }
 });
 
+// Card signpage-sign-out-sends-nothing: the index's pass fetch took a counting turn and then sent through laneFetch,
+// which counts too, so each index read took two of its host's PASS_BUDGET: the passes on that host met their budget at
+// half the requests sent. One read is one request in the host's window.
+test("card signpage-sign-out-sends-nothing: each index read counts once in its host's pass budget", async () => {
+  const { resetHostLanes, hostLane } = await import("../../wallet/src/throttle.ts");
+  const { w, ns } = await wallet();
+  await landed(ns);
+  evmPoolIndexReset();
+  resetHostLanes();
+  const o = { now: 1_800_000_000_000 + 20_000 };
+  const tt = turnTimers(o);
+  const PM = evmPoolVenues()["base-sepolia"].poolManager!;
+  const ix = (through: number) => ({ v: 1, chainId: 84532, poolManager: PM, from: 1, through, head: { number: through, hash: "0x" + "0".repeat(64) }, spans: [[1, through]], pools: [] });
+  const stats = { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 };
+  const READER = "https://base-rpc.publicnode.com/";
+  const sent: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (u: string) => (sent.push(String(u)), new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x1" })))) as typeof fetch;
+  const post = { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }) };
+  const t = testnetPool({ ...page(w), held: async () => w }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c: string) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    evmHelper: (c: string) => (c === "base" ? (async () => null) as EvmRpc : undefined),
+    evmTurn: tt.evmTurn,
+    evmIndexStore: null,
+    evmIndexKeep: () => {},
+    evmIndexSync: async (_chain: string, prev: { through: number } | null, f: typeof fetch) => {
+      for (let i = 0; i < 3; i++) await f(READER, post);
+      const n = (prev?.through ?? 0) + 10;
+      return { index: ix(n), coversThrough: n + 4, pools: [], error: null, stats };
+    },
+  } as unknown as Parameters<typeof testnetPool>[1]);
+  try {
+    await t.stateRead();
+    for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.equal(sent.length, 3, "three index reads sent");
+    assert.equal(hostLane(READER).inWindow(), 3, "each counted once in the host's window");
+  } finally {
+    globalThis.fetch = realFetch;
+    evmPoolIndexReset();
+    resetHostLanes();
+    await t.signedOut();
+  }
+});
+
 // Card signpage-evm-reads-draw-no-refusal: two tabs signed in at once each synced the whole cold index (release 130,
 // Chrome CDP capture 13 Nov: two pages' Robinhood index reads at 29.1 s each, one answered 429). One sync a chain on the
 // device at once (the Web Lock ct-evm-index/{chain}): the tab that finds it held syncs none, and at its next state
