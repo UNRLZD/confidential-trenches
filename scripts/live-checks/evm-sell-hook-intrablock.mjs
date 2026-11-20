@@ -8,8 +8,12 @@
 //     the kit asks them, both answering, the two prestates equal as JSON and each holding ArbOS's state account (Nitro's
 //     block-start state is in the trace);
 //   - the replay: an eth_call at the transaction's parent with the block's number, time and base fee and its prestate,
-//     ArbOS's state left out, as the state override, on two operators of the kit's Robinhood read list
-//     (evmReadProvidersOf; card device-evm-fee-read-walks-operators): each runs it (an output or an execution revert).
+//     ArbOS's state and the precompiles' accounts left out, as the state override, on two operators of the kit's
+//     Robinhood read list (evmReadProvidersOf; card device-evm-fee-read-walks-operators): each runs it (an output, an
+//     execution revert, or the halt the transaction's own call ended with, "out of gas" say: card
+//     evm-replay-reads-an-execution-error-as-run). Any other halt is a replay broken by its override: a precompile an
+//     override names, even with no field, is switched off and its code (0xfe) runs, so 0xdc58b47b and 0xe738ee51 of live
+//     run 44651054036, which succeeded, answered "invalid opcode: INVALID" (the kit's preOverOf leaves them out too).
 //     A seat that refuses the block's state (dRPC's code 27 "Unknown state", a pruned node's "historical state ... is
 //     not available", "missing trie node") or gives no JSON-RPC answer is walked past to the list's next operator, and
 //     the replay holds only on two operators (the kit's evmRpcOperator) that ran it; any other refusal (the override
@@ -19,6 +23,9 @@
 //     replay reverted), which is why no ban rests on a replay alone.
 // A trace is kept as read time's digest (sha-256 of the prestate's sorted JSON, its accounts, the call frame's error and
 // output), so a record stays small.
+// The transactions read are those a wallet signs, as the kit's trades are: Arbitrum's own types (0x64 to 0x6a: a
+// deposit, a retryable's submission or redeem, ArbOS's internal call) are no call a replay can make (a submission's
+// eth_call to ArbRetryableTx answers NotCallable()).
 // It passes when at least 3 transactions were read and every read and replay holds. It runs after every app deploy
 // (apps/terminal/scripts/deploy.mjs LIVE_CHECKS): the kit ships in the app's bundle and its bans fail open, so a pin
 // that changes or a provider that stops serving traces would turn Robinhood's trace evidence off without a sound.
@@ -44,6 +51,9 @@ const NOT_KNOWN = /not found|unknown block|unknown transaction|header not found/
 /** An answer (a JSON-RPC answer, or a batch of them) from a provider that does not hold the transaction or block yet. */
 export const notKnown = (a) => [a].flat().some((x) => x && typeof x === "object" && (("result" in x && x.result === null) || NOT_KNOWN.test(String(x.error?.message ?? ""))));
 const ARBOS = "0xa4b05fffffffffffffffffffffffffffffffffff";
+/** A precompile's account, the range EIP-1352 keeps for them (0x0…01 to 0x0…ffff), left out of the override as the kit's
+ *  preOverOf leaves it out. */
+export const precompileAccount = (a) => /^0x0{36}[0-9a-f]{4}$/.test(a.toLowerCase()) && !/^0x0{40}$/.test(a);
 const COUNT = 3;
 
 const post = async (url, body, fetchFn) => {
@@ -63,11 +73,12 @@ const hostOf = (u) => {
     return String(u);
   }
 };
-/** The kit's override from a prestate: every account but ArbOS's state (the kit's preOverOf, without its bounds). */
+/** The kit's override from a prestate: every account but ArbOS's state and the precompiles' (the kit's preOverOf,
+ *  without its bounds). */
 export function overOf(pre) {
   const out = {};
   for (const [a, v] of Object.entries(pre ?? {})) {
-    if (a.toLowerCase() === ARBOS) continue;
+    if (a.toLowerCase() === ARBOS || precompileAccount(a)) continue;
     out[a] = { ...(v.balance ? { balance: v.balance } : {}), ...(v.nonce !== undefined ? { nonce: qty(v.nonce) } : {}), ...(v.code ? { code: v.code } : {}), ...(v.storage && Object.keys(v.storage).length ? { stateDiff: v.storage } : {}) };
   }
   return out;
@@ -83,8 +94,12 @@ export function digestOf(answer) {
   return { ok: true, pre: createHash("sha256").update(sorted).digest("hex"), accounts: Object.keys(pre).map((a) => a.toLowerCase()).sort(), error: call.error ?? null, output: call.output ?? null };
 }
 
-/** A replay's answer: it ran (an output or an execution revert). */
-const ranOf = (a) => typeof a?.result === "string" || (a?.error?.code === 3 && /execution reverted/i.test(String(a?.error?.message ?? "")));
+/** A replay's answer: it ran (an output, an execution revert, or `halt`, the error other than a revert the
+ *  transaction's own call ended with in its callTracer: the replay ended as the transaction did). */
+const ranOf = (a, halt = null) =>
+  typeof a?.result === "string" ||
+  (a?.error?.code === 3 && /execution reverted/i.test(String(a?.error?.message ?? ""))) ||
+  (typeof halt === "string" && !/^execution reverted/i.test(halt) && a?.error?.code === -32000 && a.error.message === halt);
 /** A seat's refusal that is the seat's, not the replay's: the block's state not kept, or no JSON-RPC answer. */
 const STATE_REFUSED = /unknown state|historical state \S* ?is not available|missing trie node|header not found/i;
 const seatRefused = (a) => !ranOf(a) && (a?.http !== undefined || a?.error === undefined ? a?.result === undefined : STATE_REFUSED.test(String(a.error?.message ?? "")));
@@ -113,20 +128,21 @@ export function judge(run) {
     say(tr.length === 2 && d.every((x) => x !== null) && d[0].pre === d[1].pre, `[${h}] the two prestates are equal as JSON`);
     for (const [i, x] of d.entries()) say(x?.accounts?.includes(ARBOS) === true, `[${h}] ${tr[i]?.url}'s prestate holds ArbOS's state account`);
     const reverted = typeof d[0]?.error === "string";
+    const halt = d[0]?.error ?? null;
     const replays = Array.isArray(t.replays) ? t.replays : [];
     for (const r of replays) {
       const a = r.answer ?? {};
-      if (!ranOf(a) && (seatRefused(a) || behindOf(r))) {
+      if (!ranOf(a, halt) && (seatRefused(a) || behindOf(r))) {
         lines.push(`ok  [${h}] walked past ${hostOf(r.url)}: ${JSON.stringify(a).slice(0, 120)}`);
         continue;
       }
-      say(d[0] !== null && ranOf(a), `[${h}] the replay at its prestate runs on ${r.url}: ${JSON.stringify(a).slice(0, 160)} (the transaction ${reverted ? "reverted" : "succeeded"})`);
+      say(d[0] !== null && ranOf(a, halt), `[${h}] the replay at its prestate runs on ${r.url}: ${JSON.stringify(a).slice(0, 160)} (the transaction ${reverted ? "reverted" : "succeeded"})`);
     }
-    const ran = replays.filter((r) => ranOf(r.answer));
+    const ran = replays.filter((r) => ranOf(r.answer, halt));
     const ops = new Set(ran.map((r) => evmRpcOperator(r.url)));
     const two = ran.length === 2 && ops.size === 2 && !ops.has(null);
-    const lagged = replays.filter((r) => r.lagging === true && !ranOf(r.answer));
-    if (!two && lagged.length > 0 && replays.every((r) => ranOf(r.answer) || seatRefused(r.answer ?? {}) || behindOf(r))) lines.push(`--  [${h}] replayed on ${ran.length} operator(s): ${lagged.map((r) => hostOf(r.url)).join(" and ")} did not know the block yet after ${LAG_TRIES} reads ${LAG_WAIT_MS} ms apart: INCONCLUSIVE`);
+    const lagged = replays.filter((r) => r.lagging === true && !ranOf(r.answer, halt));
+    if (!two && lagged.length > 0 && replays.every((r) => ranOf(r.answer, halt) || seatRefused(r.answer ?? {}) || behindOf(r))) lines.push(`--  [${h}] replayed on ${ran.length} operator(s): ${lagged.map((r) => hostOf(r.url)).join(" and ")} did not know the block yet after ${LAG_TRIES} reads ${LAG_WAIT_MS} ms apart: INCONCLUSIVE`);
     else say(two, `[${h}] replayed on two operators: ${ran.map((r) => hostOf(r.url)).join(" and ") || "none"}`);
   }
   const ok = lines.length > 0 && lines.every((l) => l.startsWith("ok ") || (l.startsWith("-- ") && l.endsWith(": INCONCLUSIVE")));
@@ -158,7 +174,7 @@ export async function read(fetchFn = fetch, over = overOf, sleep = (ms) => new P
   for (let n = head - 10n; txs.length < COUNT && n > head - 60n; n--) {
     const b = (await rpc(quote[0], "eth_getBlockByNumber", [qty(n), true])).result;
     for (const tx of b?.transactions ?? []) {
-      if (txs.length >= COUNT || tx.type === "0x6a" || tx.to === null || tx.input === "0x") continue;
+      if (txs.length >= COUNT || (Number(tx.type) >= 0x64 && Number(tx.type) <= 0x6a) || tx.to === null || tx.input === "0x") continue;
       const traces = [];
       const answers = [];
       for (const url of trace) {
@@ -168,6 +184,7 @@ export async function read(fetchFn = fetch, over = overOf, sleep = (ms) => new P
       }
       for (const { url, answer, lagging } of answers) traces.push({ url, digest: digestOf(answer), ...(lagging ? { lagging } : {}) });
       const pre = Array.isArray(answers[0]?.answer) ? answers[0].answer.find((x) => x.id === 1)?.result : undefined;
+      const halt = Array.isArray(answers[0]?.answer) ? (answers[0].answer.find((x) => x.id === 2)?.result?.error ?? null) : null;
       const call = { from: tx.from, to: tx.to, data: tx.input, gas: tx.gas, value: tx.value, ...(tx.maxFeePerGas ? { maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas } : { gasPrice: tx.gasPrice }) };
       const env = { number: b.number, time: b.timestamp, baseFeePerGas: b.baseFeePerGas };
       const replays = [];
@@ -180,7 +197,7 @@ export async function read(fetchFn = fetch, over = overOf, sleep = (ms) => new P
         if (ran.has(op)) continue;
         const { answer, lagging } = await untilKnown(() => rpc(url, "eth_call", [call, { blockHash: b.parentHash }, over(pre), env]).catch((e) => ({ http: 0, body: String(e?.message ?? e).slice(0, 120) })));
         replays.push({ url, answer, ...(lagging ? { lagging } : {}) });
-        if (ranOf(answer)) ran.add(op);
+        if (ranOf(answer, halt)) ran.add(op);
         else if (!seatRefused(answer) && !lagging) break;
       }
       txs.push({ hash: tx.hash, block: b.number, readAt: new Date().toISOString(), traces, replays });

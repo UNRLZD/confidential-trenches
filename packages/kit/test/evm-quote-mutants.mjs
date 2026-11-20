@@ -803,7 +803,7 @@ export const MUTANTS = [
   [QUOTE, "Object.entries(p?.over ?? {})", "Object.entries({} as Record<string, Override>)", R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped"],
   [QUOTE, "(r) => r.ok, (r) => !r.ok, preStateOf(v, trace));", "(r) => r.ok, (r) => !r.ok, undefined);", R, "card evm-sell-hook-intrablock, HC2 and HIGH 1 (sell, Robinhood)"],
   [QUOTE, "(r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => boughtOf(r) === false, undefined);", R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped"],
-  [QUOTE, "    if (!arbos) out[lower(a)] = one;", "    out[lower(a)] = one;", R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped"],
+  [QUOTE, "    if (!arbos && !precompileAccount(lower(a))) out[lower(a)] = one;", "    out[lower(a)] = one;", R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped"],
   [QUOTE, "  if (!asIs && errored.length === 0) return legUnread ? ", "  if (!asIs) return legUnread ? ", R, "review of ca907a05, HIGH 1 (buy, Robinhood)"],
   // (the trace names only the route's hooks now, review of f0f983d2 item 2, so the off-route frame of the as-is leg's
   // test no longer tells this one: an honest hook beside the errored one does)

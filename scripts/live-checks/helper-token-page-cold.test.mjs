@@ -100,4 +100,10 @@ test("card helper-page-jup-429: planted on the good answer: a 503 with no cause 
   assert.ok(bad(r).some((l) => l === "BAD 1 page reads answered 503 with no cause in Server-Timing (a bare 503)"), r.lines.join("\n"));
   run.reads[3] = { ...run.reads[3], status: 503, timing: 'search-429;desc="jupiter provider 429"' };
   assert.ok(!judge(run).lines.some((l) => /a bare 503/.test(l)), "a named cause is not bare");
+  // card helper-loop-never-held-by-a-write: the shed's own cause (server.ts SHED_WAIT) is named, not bare, and the read still fails
+  run.reads[3] = { ...run.reads[3], status: 503, retryAfter: "2", timing: 'loop;desc="past capacity"' };
+  const shed = judge(run);
+  assert.ok(!shed.lines.some((l) => /a bare 503/.test(l)), shed.lines.join("\n"));
+  assert.equal(shed.ok, false, "a shed page read is still a failed read");
+  assert.ok(bad(shed).some((l) => / did not: 503 Retry-After 2 Server-Timing loop;desc="past capacity"/.test(l)), shed.lines.join("\n"));
 });
