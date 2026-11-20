@@ -1862,11 +1862,16 @@ function atAmount(r: Read, from: bigint, to: bigint): Read {
 export const EVM_WARM_RANGE_S = 60n;
 /** The most tokens whose reads are kept, the oldest dropped first. */
 const PLANS_MAX = 64;
-/** Per chain, token and amount, the routes whose swap fit the last buy quote read or used, and its block's time: the
- *  next quote within EVM_WARM_RANGE_S reads them again at its own block beside its first round (evmPoolBuyQuoteWith). */
+/** Per chain, token and amount, the routes whose swap fit decided the last buy quote's verdicts (each list's best that
+ *  fits and every route above it, card robinhood-taps-meet-no-429), and its block's time: the next quote within
+ *  EVM_WARM_RANGE_S reads them again at its own block beside its first round (evmPoolBuyQuoteWith). */
 const FITS = new Map<string, { ts: bigint; routes: EvmRoute[] }>();
 /** The most fit routes kept a token: one round's worth (a warm Robinhood AI quote asked 15). */
 const EVM_FITS_KEPT = 32;
+/** The routes of a list whose fits the first round of swap-fit reads asks, the best by output (card
+ *  robinhood-taps-meet-no-429): one batch of CALLS_PER_BATCH, so a best that does not fit falls to the next, already
+ *  read, and a list none of them settles is asked whole in the second round. */
+const EVM_FITS_FIRST = 3;
 const readKey = (r: Read) => JSON.stringify([r.to, r.data, r.override ?? null, r.group ?? null, r.state ?? null, r.tx ?? null], (_, x) => (typeof x === "bigint" ? String(x) : x));
 const SCAN_TOKENS = 4096;
 const SCAN_MAX_LOGS = 10_000;
@@ -3225,18 +3230,21 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
   // The others are read at most two rounds more, never one route a round: each pool anyone seeds behind a hook that
   // checks the swap's sender and lets only the quoter through, priced above the route, would add a round to every quote, and some tens of them
   // would age every quote past EVM_QUOTE_MAX_AGE_MS (review of 498eae83, M2). The first asks, of each list whose best
-  // is not known, every route that can change the verdict (`band`): the standard routes at or above the route's value
-  // (all of them where the route does not fit), the native ones at or above it, the listed ones within the slippage of
-  // it; a list still not known after it is asked whole in the second
+  // is not known, the EVM_FITS_FIRST best by output of the routes that can change the verdict (`band`): the standard
+  // routes at or above the route's value (all of them where the route does not fit), the native ones at or above it,
+  // the listed ones within the slippage of it; a list still not known after it is asked whole in the second, so still
+  // two rounds at most. Card robinhood-taps-meet-no-429: the first round asked the whole band, and a cold PONS tap's
+  // whole-list search (a partial_fill route, band all) 28 fits a side, which its warm taps then read again, 24 of their
+  // 47 calls a side, where each list's verdict was its first route by output; with the providers' call limits binding
+  // (bloXroute 15 a second), those 23 more calls were about 1.5 s of a warm tap and a round about 0.2 s
   const fit = new Map<string, boolean>();
   if (ownFit >= 0) fit.set(reads[ownFit]!.data, out(ownFit) !== null);
   const fits = (r: EvmRoute) => {
     const x = fitOf(r);
     if (x === null) return false;
-    const f = fit.get(x.data);
-    if (f !== undefined && r !== route) fitsUsed.set(x.data, r);
-    return f;
+    return fit.get(x.data);
   };
+  const firstFew = (xs: readonly Filled[]) => [...xs].sort((a, b) => (b.amountOut > a.amountOut ? 1 : b.amountOut < a.amountOut ? -1 : 0)).slice(0, EVM_FITS_FIRST);
   const bestFits = async (lists: readonly { l: readonly Filled[]; band: (c: Filled) => boolean }[]) => {
     // the early fits, read at this quote's own block (fitOf builds each at its hash): answered as this reads them
     const early = await fitsEarly;
@@ -3248,13 +3256,17 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
         if (b === null || fits(b.route) !== undefined) continue;
         const unknown = l.filter((c) => fits(c.route) === undefined);
         const first = unknown.filter(band);
-        for (const c of round === 0 && first.length > 0 ? first : unknown) {
-          ask.set(fitOf(c.route)!.data, fitOf(c.route)!);
-          if (c.route !== route) fitsUsed.set(fitOf(c.route)!.data, c.route);
-        }
+        for (const c of round === 0 ? firstFew(first.length > 0 ? first : unknown) : unknown) ask.set(fitOf(c.route)!.data, fitOf(c.route)!);
       }
       if (ask.size === 0) {
         const r = lists.map(({ l }) => bestOf(l.filter((c) => fits(c.route) === true)));
+        // kept for the next quote: the routes that decided each list's verdict, its best that fits and every route
+        // above it (each read, none fits), never the ones below it, which no verdict read; every route of a list none
+        // of which fits (each read, GF16)
+        for (const { l } of lists) {
+          const b = best(l.filter((c) => fits(c.route) === true));
+          for (const c of l) if (c.route !== route && (b === null || c.amountOut >= b.amountOut) && fits(c.route) !== undefined) fitsUsed.set(fitOf(c.route)!.data, c.route);
+        }
         FITS.delete(fitsKey);
         FITS.set(fitsKey, { ts: block.timestamp, routes: [...fitsUsed.values()].slice(0, EVM_FITS_KEPT) });
         while (FITS.size > PLANS_MAX) FITS.delete(FITS.keys().next().value!);
