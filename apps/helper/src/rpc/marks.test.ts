@@ -1,5 +1,6 @@
 // node --test src/rpc/marks.test.ts (card sol-pools-mainnet-pin): the mainnet mark scan has two routes on two companies.
-// Route A, POST /v1/rpc/solana, sends getProgramAccounts to SOLANA_RPC_URL alone, never to a spare or the public
+// Route A, POST /v1/rpc/solana, sends getProgramAccounts to one provider, SOLANA_RPC_URL while its plan is not spent
+// (card helper-solana-off-a-spent-key: then the next keyed Solana URL with a route B off its company), never the public
 // endpoint. Route B, POST /v1/rpc/solana-marks, answers nothing but that scan (rpc.ts scanAllowed), from the keyed names
 // of RPC_UPSTREAMS["solana-marks"] whose company is not route A's, and has no public fallback. The signing page lists the
 // marks on route B and reads each listed mark on its pair (packages/wallet/src/pool/solana-restore.ts solanaMarksListed). The env check

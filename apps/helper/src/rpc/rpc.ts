@@ -543,12 +543,13 @@ export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: s
   // a silent fallback to that same operator, which would make the page's two reads one provider's (review L-1)
   "solana-devnet": { env: "SOLANA_DEVNET_RPC_URL", fallback: null, keyed: ["SOLANA_DEVNET_RPC_URL"] },
   // card sol-pools-mainnet-pin: the mainnet mark scan's second route (methods.ts SOLANA_MARKS), Solana's keyed names
-  // past SOLANA_RPC_URL, which alone answers the first route's scan (MARKS_A_ENV); a name on that one's company is
-  // never asked (route()), and none set is off (503), never a public endpoint, which refuses the scan anyway
+  // past SOLANA_RPC_URL; a name on the company of the first route's provider in use (marksRoutes) is never asked, and
+  // none set is off (503), never a public endpoint, which refuses the scan anyway
   "solana-marks": { env: "SOLANA_RPC_URL_QUICKNODE", fallback: null, keyed: ["SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC_1", "SOLANA_RPC_URL_DRPC_2", "SOLANA_RPC_URL_DRPC_3"] },
 };
-/** The one name the first route's mark scan (getProgramAccounts on /v1/rpc/solana) is sent to (card
- *  sol-pools-mainnet-pin): never a keyed spare or the public endpoint, so the two routes' answers are two companies'. */
+/** The first route's first provider for the mark scan (getProgramAccounts on /v1/rpc/solana; card
+ *  sol-pools-mainnet-pin): never the public endpoint, and, card helper-solana-off-a-spent-key, passed for the next
+ *  keyed Solana URL while its plan is spent (marksRoutes), always on another company than route B's. */
 export const MARKS_A_ENV = "SOLANA_RPC_URL";
 /** The one operator POST /v1/rpc/near?keyed=only sends to (operatorOf; card near-quote-under-the-pace): the signing
  *  page's other NEAR seat is dRPC, read device-direct, so this one is FastNEAR's key. */
@@ -941,7 +942,7 @@ function blockHeaderAllowed(r: Record<string, unknown>): boolean {
 }
 
 /**
- * The mark scan's two providers (card sol-pools-mainnet-pin): `a`, the URL set under MARKS_A_ENV, and `b`, the
+ * The mark scan's two providers (card sol-pools-mainnet-pin): `a`, route A's provider in use (below), and `b`, the
  * solana-marks route's keyed URLs, in order, whose company (operatorOf) is not a's. The signing page lists the mainnet
  * pool's marks on route b alone (packages/signpage/src/pool-testnet.ts pageSolanaLister) and reads each listed address on
  * its pair, provider A directly, never through this helper (packages/wallet/src/pool/solana-restore.ts
@@ -1717,8 +1718,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // review L2: a company's URL first (SOLANA_RPC_URL unset): the whole keyed list is walked under each company's pace
     // review L4: the read's whole walk, every path below, ends by `by`
     const by = now() + WALK_MS;
-    // card sol-pools-mainnet-pin: the mark scan's two routes, each one company's. A: SOLANA_RPC_URL alone, never a spare
-    // or the public endpoint. B: its keyed names off A's company, in order. Either only lists: the page reads each listed
+    // card sol-pools-mainnet-pin: the mark scan's two routes, each one company's. A: one provider (marksRoutes), never
+    // the public endpoint. B: its keyed names off A's company, in order. Either only lists: the page reads each listed
     // mark by address on its pair (marksRoutes below)
     // card helper-solana-off-a-spent-key: A is the first candidate not spent with a B off its company (a pool scan: the
     // first not spent); a read whose A answered its plan spent is asked once more of the A now in use, drawing nothing again
