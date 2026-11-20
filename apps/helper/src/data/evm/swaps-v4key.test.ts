@@ -12,7 +12,8 @@ import { fakeChain, open, REC, timeAt, URLS } from "../../../test/evm-swaps/robi
 import { callsIn, pocketRefusal } from "../../../test/pocket.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { providerHolds } from "../../limits/limits.ts";
-import { ROBINHOOD_VENUES, TOPIC } from "./swaps.ts";
+import { keyFromReceipt, ROBINHOOD_VENUES, TOPIC, v4KeySliced } from "./swaps.ts";
+import { turnSlicer } from "../../limits/turn.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
 const w = (a: string) => `0x${a.slice(2).padStart(64, "0")}`;
@@ -182,4 +183,39 @@ test("card helper-restart-fresh: a cold v4 token whose PoolManager receipts no p
   assert.deepEqual(JSON.parse(unread.body), { error: { code: "upstream" } });
   assert.equal(read.status, 200, read.body);
   assert.equal((JSON.parse(read.body) as { trades: unknown[] }).trades.length, SWAPS, "the token's own tape, found once its receipts read");
+});
+
+/** Work counted a turn of the loop: a slicer on a counting clock (each item a search hashes asks it once, one unit), and
+ *  the most items asked between two turns, read by an immediate that sets itself again every turn. */
+function turnsCounted(turnItems: number) {
+  let items = 0;
+  let atTick = 0;
+  let most = 0;
+  let on = true;
+  const tick = (): void => {
+    most = Math.max(most, items - atTick);
+    atTick = items;
+    if (on) setImmediate(tick);
+  };
+  setImmediate(tick);
+  const s = turnSlicer(() => items++, turnItems);
+  return { pass: () => s.pass(), done: () => ((on = false), { items, most }) };
+}
+
+test("card helper-loop-never-held-by-a-write: a burst's cold opens, 8 v4 key searches that miss at once (and 8 receipt key searches), take the loop a turn's slice at a time between them, never their sum in one turn (red at e35007152: each search let the loop run every 1,000 keys, and all of them resumed in the same turn, 132 to 171 ms a turn in a copy's profile)", async () => {
+  const ids = Array.from({ length: 8 }, (_, i) => `0x${(i + 1).toString(16).padStart(64, "0")}`);
+  const hooks = AROUND.slice(0, 2);
+  // a slice is 20 items (a turn's 20 ms at one item a ms); a turn holds one search's slice and the release's own read
+  const v4 = turnsCounted(20);
+  await Promise.all(ids.map((id) => v4KeySliced(id, TOKEN, 3000, hooks, "base", v4.pass)));
+  const a = v4.done();
+  assert.ok(a.items >= 8 * 10_000, `every key asked the slicer: ${a.items} items`);
+  assert.ok(a.most <= 2 * 22, `v4KeySliced: ${a.most} items in one turn`);
+  const rc = turnsCounted(20);
+  await Promise.all(ids.map((id) => keyFromReceipt(id, TOKEN, 3000, hooks, [USDG], rc.pass)));
+  const b = rc.done();
+  assert.ok(b.items >= 8 * 2_000, `every key asked the slicer: ${b.items} items`);
+  assert.ok(b.most <= 2 * 22, `keyFromReceipt: ${b.most} items in one turn`);
+  // the search still finds a key that hashes to its id
+  assert.equal(await v4KeySliced(MAIN, TOKEN, 3000, [], "robinhood"), MAIN_KEY);
 });
