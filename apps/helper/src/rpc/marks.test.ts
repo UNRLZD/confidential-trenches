@@ -297,7 +297,7 @@ test("route A spent with no company left for route B: the mark scan stays on A (
   assert.deepEqual(sent.map((s) => s.url), [QN]);
 });
 
-// the live host's shape, read by the CO 20 Nov 09:07Z: SOLANA_RPC_URL and SOLANA_TRADES_RPC_URL one spent Helius URL,
+// the live host's shape, read live 20 Nov 09:07Z: SOLANA_RPC_URL and SOLANA_TRADES_RPC_URL one spent Helius URL,
 // SOLANA_HOLDERS_RPC_URL another Helius key with its own credits that answers, QuickNode the only other company
 const HOLDERS = `https://mainnet.helius-rpc.example/?api-key=${key("holders")}`;
 const HOST = { SOLANA_RPC_URL: A, SOLANA_TRADES_RPC_URL: A, SOLANA_HOLDERS_RPC_URL: HOLDERS, SOLANA_RPC_URL_QUICKNODE: QN, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM };
