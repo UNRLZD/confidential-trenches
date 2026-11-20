@@ -1,0 +1,14 @@
+{
+ "good": {
+  "note": "this card's branch in-process (apps/helper createRpc, the holders client on its pacer, tradesSlotShown, health), the live host's shape with made-up URLs: SOLANA_RPC_URL and SOLANA_TRADES_RPC_URL one Helius URL answering 429 max usage reached, SOLANA_HOLDERS_RPC_URL another Helius key, QuickNode answering; 20 Nov 11:38Z",
+  "base": "in-process at the branch (made-up URLs)",
+  "status": 200,
+  "body": "{\"ok\":true,\"commit\":\"0000000000000000000000000000000000000000\",\"release\":null,\"ready\":true,\"parts\":{\"proxy\":\"down\",\"relay\":\"down\",\"intents\":\"down\",\"delegate\":\"down\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com spent\",\"quiknode.pro answers\"]},\"bind\":{}}"
+ },
+ "bad": {
+  "note": "the deployed helper 5113ed107 (release 211) before this card, read 20 Nov 11:37Z: trades fallback while the holders key and QuickNode serve",
+  "base": "https://ct-api.unrealized.trade",
+  "status": 200,
+  "body": "{\"ok\":true,\"commit\":\"5113ed1071d67fb30cd34c967a99f3490c6fcbe6\",\"release\":211,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"fallback\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com spent\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+ }
+}
