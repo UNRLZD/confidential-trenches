@@ -60,6 +60,7 @@ import { address, b58decode } from "./lists.ts";
 import { HELD_WAIT_MS, SOL_BEHIND_MS, SOL_VENDOR_REACH_MS, TAPE_OPEN_BOUND_MS, type DataAnswer, type TapeRow } from "./token.ts";
 import { cutTrades, dbcPair, eventsInInner, fromLogs, poolMints, poolPair, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
 import { CREDITS, type Slot } from "../../rpc/slot.ts";
+import { pass } from "../../limits/turn.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -646,8 +647,11 @@ export function createSolanaTrades(deps: {
   slot?: Slot;
   /** The stream's slot (SOLANA_STREAM_WS_URL): `wsUrl` falls back to STREAM_WS as wsSource says. */
   streamSlot?: Slot;
+  /** The loop's turns (limits/turn.ts pass, the default): the stream's folds give the loop back between tokens. */
+  pass?: () => Promise<void> | null;
 }) {
   const now = deps.now ?? Date.now;
+  const slice = deps.pass ?? pass;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? TRADES_RPCS;
   const entries = new Map<string, Entry>();
@@ -904,8 +908,37 @@ export function createSolanaTrades(deps: {
     }
   }
 
+  // the folds asked by the stream's notes and the tick, at most one a token, run a turn's slice at a time (limits/turn.ts
+  // pass); a read of a book folds it first (folded), so an answer never misses a note held (card
+  // helper-loop-never-held-by-a-read: a busy coin's transaction reads answered together, and each note's own fold of
+  // every held trade ran in that one turn, 226 to 759 ms a turn in a copy's profile under the page checks)
+  const unfolded = new Set<Entry>();
+  let folding = false;
+  function foldSoon(e: Entry): void {
+    unfolded.add(e);
+    if (folding) return;
+    folding = true;
+    setImmediate(() => void foldAll());
+  }
+  async function foldAll(): Promise<void> {
+    try {
+      for (const e of unfolded) {
+        if (unfolded.has(e)) fold(e);
+        const w = slice();
+        if (w !== null) await w;
+      }
+    } finally {
+      folding = false;
+    }
+  }
+  const folded = (e: Entry): Entry => {
+    if (unfolded.has(e)) fold(e);
+    return e;
+  };
+
   /** Refolds the entry's held events into its book, settling those SETTLE_SLOTS behind its coverage. */
   function fold(e: Entry): void {
+    unfolded.delete(e);
     // a token with no priced trade yet has an empty tape that is as current as the stream: its read time moves on too,
     // or a quiet token's answers stay dated by its open
     if (e.book === null) {
@@ -1059,7 +1092,7 @@ export function createSolanaTrades(deps: {
     e.inflight.delete(n.sig);
     if (trades !== null) hold(e, n.sig, n.slot, order, trades);
     e.covered = Math.max(e.covered, n.slot);
-    fold(e);
+    foldSoon(e);
   }
 
   const source = (deps.source ?? ((on) => wsSource(deps.wsUrl ?? STREAM_WS, on, deps.wsUrl !== undefined && deps.streamSlot !== undefined ? { fallback: { url: STREAM_WS, slot: deps.streamSlot } } : {})))({
@@ -1109,7 +1142,7 @@ export function createSolanaTrades(deps: {
       if (t - e.touched > IDLE_MS) {
         entries.delete(e.mint);
         source.unwatch(e.mint);
-      } else if (e.state === "live") fold(e);
+      } else if (e.state === "live") foldSoon(e);
     }
     if (entries.size === 0 && timer !== null) {
       clearInterval(timer);
@@ -1607,7 +1640,7 @@ export function createSolanaTrades(deps: {
     change4h(token: string): number | null {
       const mint = address(token);
       const e = mint === null ? undefined : entries.get(mint);
-      return e === undefined || e.book === null ? null : change4h(e.book, Math.floor(now() / 1000));
+      return e === undefined || folded(e).book === null ? null : change4h(e.book!, Math.floor(now() / 1000));
     },
     /** 06b Candles for a listed Solana token: our own bars (1s included), and the history source's before our first. */
     async candles(token: string, tf: string, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
@@ -1638,7 +1671,7 @@ export function createSolanaTrades(deps: {
         const h = await deps.history(mint, tf, to, limit, client).catch(() => e);
         return h.status === 200 ? h : e;
       }
-      const own: Candle[] = e.book === null ? [] : e.book.candles(tf as Tf, to, limit);
+      const own: Candle[] = folded(e).book === null ? [] : e.book!.candles(tf as Tf, to, limit);
       const ownFrom = e.book === null ? null : e.book.ownFrom(tf as Tf);
       // our own reads: the read back's bars (wantBack) before the walk's, one bar where a bucket holds both
       const backBars = tf === "1s" || e.back?.book == null ? [] : e.back.book.candles(tf as Tf, to, limit);
@@ -1695,7 +1728,7 @@ export function createSolanaTrades(deps: {
       if (!entries.has(mint) && deps.tape !== undefined && (await deps.listed(mint)) !== true) return poolTape(mint, limit, null);
       const e = await open(mint);
       if (!("mint" in e)) return e;
-      const rows = e.book === null ? [] : e.book.tape(limit);
+      const rows = folded(e).book === null ? [] : e.book!.tape(limit);
       // a token with no trade of a venue this tape decodes (Raydium's other pools, Meteora's older pools, the other launchpads: a
       // token not on the pump.fun curve, PumpSwap, Orca, Raydium CLMM, CPMM, LaunchLab, Meteora DLMM, DBC or DAMM v2) is served its top pool's trades (token.ts tape),
       // never an empty tape for a token that trades (card solana-trades-show-on-every-token: NEARKAT and BONK answered 0

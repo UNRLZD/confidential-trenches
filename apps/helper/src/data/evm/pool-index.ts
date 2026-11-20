@@ -21,6 +21,7 @@
 // a user's read never waits on it. It stays `margin` blocks behind the head; until it reaches that, every answer says
 // `complete: false`, which the device treats as no answer.
 import { DatabaseSync } from "node:sqlite";
+import { checkpointAside } from "../../store/checkpoint.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import type { ProviderHolds } from "../../limits/limits.ts";
 import { pass } from "../../limits/turn.ts";
@@ -112,11 +113,18 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
   const turn = d.pass ?? pass;
   const pm = c.poolManager.toLowerCase();
   const db = new DatabaseSync(file);
-  db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;
+  // WAL with synchronous NORMAL, SQLite's own setting for WAL: a commit writes the log and syncs nothing, so no slice's
+  // commit waits on the disk in a turn of the loop (card helper-loop-never-held-by-a-read: under FULL each slice's
+  // commit synced, and a copy's profile under the page checks held the loop 637 and 757 ms in keep's commit with no
+  // sample taken). Never corrupt on a crash; a power loss rolls back only the newest commits, in order, and `next`
+  // moves in a span's last one, so a span lost is read again and INSERT OR IGNORE keeps each pool once. The log's
+  // checkpoint, the one sync left, runs on a thread of its own (store/checkpoint.ts).
+  db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA wal_autocheckpoint = 0;
     CREATE TABLE IF NOT EXISTS pools (id BLOB PRIMARY KEY, c0 BLOB NOT NULL, c1 BLOB NOT NULL, fee INTEGER NOT NULL, ts INTEGER NOT NULL, hooks BLOB NOT NULL, block INTEGER NOT NULL) WITHOUT ROWID;
     CREATE INDEX IF NOT EXISTS pools_c0 ON pools (c0);
     CREATE INDEX IF NOT EXISTS pools_c1 ON pools (c1);
     CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID;`);
+  const aside = checkpointAside(file, () => db.isOpen && db.exec("PRAGMA wal_autocheckpoint = 1000"));
   const get = db.prepare("SELECT v FROM meta WHERE k = ?");
   const set = db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v");
   const put = db.prepare("INSERT OR IGNORE INTO pools (id, c0, c1, fee, ts, hooks, block) VALUES (?, ?, ?, ?, ?, ?, ?)");
@@ -285,7 +293,10 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
       };
     },
     state: () => ({ next, head }),
-    close: () => db.close(),
+    close: () => {
+      aside.stop();
+      db.close();
+    },
   };
 }
 export type PoolIndex = ReturnType<typeof createPoolIndex>;

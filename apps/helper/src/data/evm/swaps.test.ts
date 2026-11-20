@@ -92,17 +92,17 @@ test("the ETH price: USD per ETH from the reference pool's price after a swap, a
   assert.equal(decodeRef({ ...l, address: POOL_ICNT.id }), null, "another emitter");
 });
 
-test("logs from a provider are hostile input: malformed ones refuse the whole answer, removed ones are skipped", () => {
+test("logs from a provider are hostile input: malformed ones refuse the whole answer, removed ones are skipped", async () => {
   const ok = { address: POOL_ICNT.id, topics: [TOPIC.swap3], data: "0x", blockNumber: "0x10", logIndex: "0x2", transactionHash: `0x${"ab".repeat(32)}` };
   assert.equal(parseLog(ok)!.block, 16);
   for (const bad of [{ ...ok, blockNumber: "16" }, { ...ok, logIndex: "0xzz" }, { ...ok, address: "0x12" }, { ...ok, topics: [] }, { ...ok, topics: ["0x1"] }, { ...ok, topics: Array(5).fill(TOPIC.swap3) }, { ...ok, data: "0x123" }, { ...ok, data: `0x${"00".repeat(64 * 17)}` }, { ...ok, transactionHash: "0x12" }, null, 5, "x"]) {
     assert.equal(parseLog(bad), null);
-    assert.equal(parseLogs([ok, bad]), null);
+    assert.equal(await parseLogs([ok, bad]), null);
   }
-  assert.deepEqual(parseLogs([{ ...ok, removed: true }]), []);
-  assert.equal(parseLogs({}), null);
-  assert.equal(parseLogs(new Array(20_001).fill(ok)), null, "more logs than a read may hold");
-  assert.deepEqual(parseLogs([{ ...ok, blockNumber: "0x20" }, ok])!.map((l) => l.block), [16, 32], "in block order");
+  assert.deepEqual(await parseLogs([{ ...ok, removed: true }]), []);
+  assert.equal(await parseLogs({}), null);
+  assert.equal(await parseLogs(new Array(20_001).fill(ok)), null, "more logs than a read may hold");
+  assert.deepEqual((await parseLogs([{ ...ok, blockNumber: "0x20" }, ok]))!.map((l) => l.block), [16, 32], "in block order");
 });
 
 test("sameLogs: two answers are alike only if every log is", () => {
