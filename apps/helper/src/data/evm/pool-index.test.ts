@@ -295,7 +295,7 @@ test("card helper-loop-never-held-by-a-write: a span at the log cap (9,999 pools
   }, 2);
   // a caller's read of the index while the span is written answers at once, from what has landed (never a later block)
   let mid: ReturnType<typeof ix.pools> | null = null;
-  const reader = setTimeout(() => void (mid = ix.pools(tok(1))), 5);
+  const reader = setTimeout(() => void (mid = ix.pools(tok(2))), 5);
   const n = await ix.step();
   // the turn the span ended in is measured too: the timer's next firing
   await new Promise((r) => setTimeout(r, 5));
