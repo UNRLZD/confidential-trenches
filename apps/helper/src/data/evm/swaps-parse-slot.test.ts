@@ -1,9 +1,9 @@
 // node --test apps/helper/src/data/evm/swaps-parse-slot.test.ts: card helper-parse-turn-outside-the-slot. A provider's
-// answer waits its parse turn (limits/turn.ts, card helper-loop-never-held-by-a-read) after its post has been counted
-// answered: its in-flight place (slot, INFLIGHT_MAX) is free for the next post, and it is out of `out`, so latencyOf and
-// hedged never read an answered post as one a provider is late with. Before, the turn was waited inside slot() with the
-// post still out: a herd's parse turns held a provider's places past their answers and, past HEDGE_MS, sent the read to
-// another provider while the answers sat waiting to be parsed.
+// answer waits its parse turn (limits/turn.ts, card helper-loop-never-held-by-a-read) out of `out`, so latencyOf and
+// hedged never read an answer in hand as one a provider is late with; before, past HEDGE_MS a herd's parse turns sent
+// the read to a third provider while the answers sat waiting to be parsed. Its in-flight place (slot, INFLIGHT_MAX) is
+// held to the parse: the cap on posts out is also the cap on answers read and waiting (freed at the answer, the burst's
+// answers landed together: helper-answers-through-a-burst on a mainnet copy, p99 4597 and 5106 ms, FAIL).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CURVE_TOKEN, fakeChain, open, REC } from "../../../test/evm-swaps/robinhood.ts";
@@ -19,7 +19,7 @@ const RPCS = ["https://a.test", ONE, "https://c.test"];
  * A cold open whose parse turns are shut from the first eth_getLogs post on: every answer from then waits for its turn
  * until `open()`. `closed` counts, per provider, the eth_getLogs posts sent while shut; `out` and `peak` the posts out to
  * ONE (sent, unanswered) now and at most. `garble`: ONE answers every eth_getLogs post 200 with a body that is no JSON,
- * so its parse throws after its place was freed.
+ * so its parse throws.
  */
 function rig(garble = false) {
   const chain = fakeChain();
@@ -57,7 +57,7 @@ function rig(garble = false) {
   return { s, st, gate, openGate };
 }
 
-test(`a post answered while parse turns queue frees its in-flight place and is counted answered: with every turn shut ${HEDGE_MS * 2} ms, more than INFLIGHT_MAX of a walk's posts reach ONE, never more than INFLIGHT_MAX out at once, and no read goes to a third provider for answers that sit waiting to parse (red at 2d1c955f9: ONE's places were held to the parse, and past HEDGE_MS the answered posts read as late)`, async () => {
+test(`a post answered while parse turns queue is counted answered, its place held to the parse: with every turn shut ${HEDGE_MS * 2} ms, no read goes out HEDGE_MS or more after the answers began to wait, and ONE is sent no more than INFLIGHT_MAX of the walk's posts (red at 2d1c955f9: past HEDGE_MS the answered posts read as late, and c.test was sent the read at 2000 ms)`, async () => {
   const { s, st, gate, openGate } = rig();
   try {
     const { value } = await onVirtualTime(1_793_918_000_000, async () => {
@@ -72,7 +72,7 @@ test(`a post answered while parse turns queue frees its in-flight place and is c
     });
     console.log(`eth_getLogs posts sent while the parse turns were shut: ${JSON.stringify(value.shut)}; HEDGE_MS or more after the shut: ${JSON.stringify(value.late)}; most out to ONE at once ${st.peak}`);
     assert.equal(value.r.status, 200, value.r.body);
-    assert.ok((value.shut[ONE] ?? 0) > INFLIGHT_MAX, `${value.shut[ONE] ?? 0} of the walk's posts reached ONE while the answers waited to parse: their places were held`);
+    assert.ok((value.shut[ONE] ?? 0) <= INFLIGHT_MAX, `${value.shut[ONE] ?? 0} of the walk's posts reached ONE while its answers waited to parse: the cap on answers read and waiting`);
     assert.ok(st.peak <= INFLIGHT_MAX, `${st.peak} out to ONE at once`);
     assert.deepEqual(value.late, [], "a read sent HEDGE_MS or more after the answers began to wait their parse: a hedge on answered posts");
   } finally {
@@ -97,7 +97,7 @@ async function shutOpen(garble: boolean) {
   }
 }
 
-test("an answer whose parse throws once its place is freed is still that provider's failed read: ONE's every eth_getLogs answer no JSON, the tape is the other providers' agreed one, the same as when ONE answers right", async () => {
+test("an answer whose parse throws after its turn is still that provider's failed read: ONE's every eth_getLogs answer no JSON, the tape is the other providers' agreed one, the same as when ONE answers right", async () => {
   const good = await shutOpen(false);
   const bad = await shutOpen(true);
   assert.equal(good.r.status, 200, good.r.body);
