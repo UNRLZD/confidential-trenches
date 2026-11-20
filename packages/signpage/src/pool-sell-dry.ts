@@ -431,13 +431,16 @@ export async function poolSellDry(d: PoolSellDryDeps, params: Record<string, unk
   const need = drySellCalls(pick.pass.length, pick.since.length);
   if (turn.calls.some((c) => c.length + need > POOL_SELL_DRY_CALLS)) return { error: "busy" };
   const answers: Answers = [new Map(), new Map()];
-  const rpcs = bare.map((rpc, i) => solanaWrappedRpc(rpc, (m, p) => {
+  // the preview's bound ends its reads at the provider too, not only its wait for them (card
+  // signpage-reads-take-the-call-signal): a read held past it holds no host slot or pace token
+  const cut = new AbortController();
+  const rpcs = bare.map((rpc, i) => solanaWrappedRpc(rpc, (m, p, s) => {
     turn.calls[i as 0 | 1].push(now());
-    return rpc(m, p).then((x) => (answers[i as 0 | 1].set(callKey(m, p), x), x));
+    return rpc(m, p, s === undefined ? cut.signal : AbortSignal.any([s, cut.signal])).then((x) => (answers[i as 0 | 1].set(callKey(m, p), x), x));
   })) as unknown as readonly [SolanaRpc, SolanaRpc];
   // answered inside the kit client's 10 s: a read held past POOL_SELL_DRY_ANSWER_MS (a trade's hold on its host) is busy
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<DryAnswer>((r) => (timer = setTimeout(() => r({ error: "busy" }), POOL_SELL_DRY_ANSWER_MS)));
+  const late = new Promise<DryAnswer>((r) => (timer = setTimeout(() => (cut.abort(new Error("the preview's bound")), r({ error: "busy" })), POOL_SELL_DRY_ANSWER_MS)));
   try {
     const a = await Promise.race([previewOn(d, params, pos, extra, pick, rpcs), late]);
     // kept only when no trade of this page started or ended while it read

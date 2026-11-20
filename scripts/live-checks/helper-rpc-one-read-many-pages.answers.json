@@ -1,0 +1,371 @@
+{
+ "_note": "good: the branch helper at b9a41e97f (card helper-rpc-one-read-many-pages) run on the Mac (port 8799, no Solana key: its public endpoint), read by helper-rpc-one-read-many-pages.mjs --base http://127.0.0.1:8799 --record at 2026-11-18 07:01Z: 4 price reads at once, one result, 3 marked rpc-cache hit; the 2 reads of an account off the list each its own. bad: the deployed helper at 27c4d830a, the same run at 07:00Z: 4 price reads at once answered 2 different results, none marked; the 2 off-list reads each its own. Converted 18 Nov 09:0xZ to the shape rpcAnswer gives (the same recorded statuses, Server-Timing and bodies read through provider-answer's classify in page mode; acao not recorded then: null).",
+ "good": {
+  "base": "http://127.0.0.1:8799",
+  "at": "2026-11-18T07:01:03.764Z",
+  "reads": [
+   {
+    "id": "price-0",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "ms": 358,
+    "answer": {
+     "result": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 470843707
+      },
+      "value": [
+       {
+        "data": [
+         "IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=",
+         "base64"
+        ],
+        "executable": false,
+        "lamports": 1825031,
+        "owner": "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+        "rentEpoch": 18446744073709552000,
+        "space": 134
+       }
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=339;desc=\"public\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "price-0",
+     "tries": 1
+    }
+   },
+   {
+    "id": "price-1",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "ms": 346,
+    "answer": {
+     "result": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 470843707
+      },
+      "value": [
+       {
+        "data": [
+         "IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=",
+         "base64"
+        ],
+        "executable": false,
+        "lamports": 1825031,
+        "owner": "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+        "rentEpoch": 18446744073709552000,
+        "space": 134
+       }
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-cache;desc=\"hit\", rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "price-1",
+     "tries": 1
+    }
+   },
+   {
+    "id": "price-2",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "ms": 346,
+    "answer": {
+     "result": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 470843707
+      },
+      "value": [
+       {
+        "data": [
+         "IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=",
+         "base64"
+        ],
+        "executable": false,
+        "lamports": 1825031,
+        "owner": "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+        "rentEpoch": 18446744073709552000,
+        "space": 134
+       }
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-cache;desc=\"hit\", rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "price-2",
+     "tries": 1
+    }
+   },
+   {
+    "id": "price-3",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "ms": 346,
+    "answer": {
+     "result": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 470843707
+      },
+      "value": [
+       {
+        "data": [
+         "IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=",
+         "base64"
+        ],
+        "executable": false,
+        "lamports": 1825031,
+        "owner": "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+        "rentEpoch": 18446744073709552000,
+        "space": 134
+       }
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-cache;desc=\"hit\", rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "price-3",
+     "tries": 1
+    }
+   },
+   {
+    "id": "other-0",
+    "account": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+    "ms": 337,
+    "answer": {
+     "result": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 470843707
+      },
+      "value": [
+       null
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=326;desc=\"public\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "other-0",
+     "tries": 1
+    }
+   },
+   {
+    "id": "other-1",
+    "account": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+    "ms": 346,
+    "answer": {
+     "result": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 470843707
+      },
+      "value": [
+       null
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=339;desc=\"public\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "other-1",
+     "tries": 1
+    }
+   }
+  ]
+ },
+ "bad": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T07:00:52.913Z",
+  "reads": [
+   {
+    "id": "price-0",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "ms": 782,
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 470843658,
+       "apiVersion": "4.3.0-alpha.2"
+      },
+      "value": [
+       {
+        "lamports": 1825031,
+        "data": [
+         "IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=",
+         "base64"
+        ],
+        "owner": "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+        "executable": false,
+        "rentEpoch": 18446744073709552000,
+        "space": 134
+       }
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=85;desc=\"SOLANA_RPC_URL\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "price-0",
+     "tries": 1
+    }
+   },
+   {
+    "id": "price-1",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "ms": 760,
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 470843658,
+       "apiVersion": "4.3.0-alpha.2"
+      },
+      "value": [
+       {
+        "lamports": 1825031,
+        "data": [
+         "IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=",
+         "base64"
+        ],
+        "owner": "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+        "executable": false,
+        "rentEpoch": 18446744073709552000,
+        "space": 134
+       }
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=75;desc=\"SOLANA_RPC_URL\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "price-1",
+     "tries": 1
+    }
+   },
+   {
+    "id": "price-2",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "ms": 771,
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 470843658,
+       "apiVersion": "4.3.0-alpha.2"
+      },
+      "value": [
+       {
+        "lamports": 1825031,
+        "data": [
+         "IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=",
+         "base64"
+        ],
+        "owner": "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+        "executable": false,
+        "rentEpoch": 18446744073709552000,
+        "space": 134
+       }
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=82;desc=\"SOLANA_RPC_URL\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "price-2",
+     "tries": 1
+    }
+   },
+   {
+    "id": "price-3",
+    "account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+    "ms": 708,
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 470843657,
+       "apiVersion": "4.3.0-alpha.2"
+      },
+      "value": [
+       {
+        "lamports": 1825031,
+        "data": [
+         "IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1baUhY7wBAAAAnvsiAAAAAAD4/////kz9agAAAAD9TP1qAAAAAFJMYL4BAAAADWAnAAAAAABagBAcAAAAAAA=",
+         "base64"
+        ],
+        "owner": "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+        "executable": false,
+        "rentEpoch": 18446744073709552000,
+        "space": 134
+       }
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=24;desc=\"SOLANA_RPC_URL\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "price-3",
+     "tries": 1
+    }
+   },
+   {
+    "id": "other-0",
+    "account": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+    "ms": 755,
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 470843657,
+       "apiVersion": "4.3.0-alpha.2"
+      },
+      "value": [
+       null
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=70;desc=\"SOLANA_RPC_URL\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "other-0",
+     "tries": 1
+    }
+   },
+   {
+    "id": "other-1",
+    "account": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+    "ms": 707,
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 470843657,
+       "apiVersion": "4.3.0-alpha.2"
+      },
+      "value": [
+       null
+      ]
+     },
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=20;desc=\"SOLANA_RPC_URL\""
+     },
+     "status": 200,
+     "acao": null,
+     "answerId": "other-1",
+     "tries": 1
+    }
+   }
+  ]
+ }
+}

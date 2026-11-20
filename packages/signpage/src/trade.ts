@@ -117,8 +117,9 @@ export function releaseTradeDeps(): TradeHost["deps"] {
     // a provider read that fails past its retry rejects (pageReference), never reads as "no reference pool"
     reference: (q, paced) => pageReference(paced, q),
     // every send path's requests counted on its host's lane, the helper's among them (../../wallet/src/throttle.ts laneFetch);
-    // the public path is provider A, never the kit's default api.mainnet-beta.solana.com, which answers a browser 403
-    // "Access forbidden" (Chrome, 2026-11-11T05:18:53Z; test/trade.test.ts holds the set's hosts)
+    // the public path is provider A, named here though the kit's default is provider A too (card solana-send-browser-origin),
+    // never api.mainnet-beta.solana.com, which answers a browser 403 "Access forbidden" (Chrome, 2026-11-11T05:18:53Z;
+    // the page's Origin, 2026-11-18 12:03Z; test/trade.test.ts holds the set's hosts and that connect-src names it not)
     paths: solanaSendPaths({ helper: solanaHelperRpc(TRADE_HELPER, { fetch: laneFetch() }), rpcUrl: SOLANA_PROVIDER_A, fetch: laneFetch() }),
   };
 }
@@ -396,7 +397,7 @@ export function tradeKind(host: TradeHost): TradeKind {
         throw e;
       };
       // each provider stays itself to the kit (solanaWrappedRpc): its refusal of two that are one, its URL and its one queue
-      const watched = (rpc: SolanaRpc): SolanaRpc => solanaWrappedRpc(rpc, (method, params) => rpc(method, params).catch(noteDown));
+      const watched = (rpc: SolanaRpc): SolanaRpc => solanaWrappedRpc(rpc, (method, params, signal) => rpc(method, params, signal).catch(noteDown));
       // each stage as it comes: the answer at "sent", the fill stages to the frame at once (before any teardown)
       const onProgress = (stage: SolanaTradeStage): void => {
         if (stage === "signed") write({ stage, txs: signed.slice() });

@@ -739,7 +739,8 @@ async function depositRun(h: PoolDepositHost, ask: PoolAsk | null, fixed: PoolDe
     let ref: NoteRef | null = source === null ? null : onU(source.i);
     if (fixed !== undefined) {
       // the fixed source: U_{s,i}'s planned deposit note, else (its deposit used) its next second arrival; a U with a
-      // note still landing is read again next time; a U the store never planned is refused
+      // note still landing is read again next time; a U the store never planned (planDeposit) nor wrote for money a restore
+      // found there (the note store's planFound, card notes-plan-at-restored-index) is refused
       if (fixed.s !== scope) return { error: "not_allowed" };
       if (uKey(fixed).address !== fixed.u) return { error: "not_allowed" };
       if (busy.has(fixed.i)) return { stage: "not_landed", txs: [] };

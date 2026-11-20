@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 
 const MAIN = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 /** The text from `start` to the first `end` after it. */
@@ -101,11 +102,12 @@ async function host(page: { stopped: () => AbortSignal }, records: () => boolean
   const { depositQuoteHost } = await import("../src/deposit-wire.ts");
   const sent: unknown[] = [];
   const quote = depositQuoteHost({
+    quoted: async () => {},
     scope: () => 7n,
     read: async () => (records() ? RECORD : null),
     fetch: (async (_url: string, init: RequestInit) => {
       sent.push(JSON.parse(String(init.body)).recipient);
-      if (hang) return new Promise<Response>((_ok, no) => init.signal!.addEventListener("abort", () => no(init.signal!.reason), { once: true }));
+      if (hang) return untilAborted(init.signal);
       return new Response("{}", { status: 503, headers: { "content-type": "application/json" } });
     }) as unknown as typeof fetch,
     now: () => Date.parse("2026-11-02T06:00:00.000Z"),

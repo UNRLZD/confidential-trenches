@@ -15,6 +15,8 @@ import { appSrc, VEIL_CAP_MS, FRAME_SANDBOX, mountShell, navUrl, SERVED_FILES, w
 // @ts-expect-error: the deploy script is plain JavaScript, with no types
 import { build } from "../scripts/deploy.mjs";
 import { outsideKinds } from "../src/outside.ts";
+import { connections } from "../src/connections.ts";
+import { IDBFactory } from "fake-indexeddb";
 import { FIXTURES } from "../../kit/test/signpage-fixtures.ts";
 
 test("appSrc: APP_HOST with this page's path and query; never another origin", () => {
@@ -1150,6 +1152,30 @@ test("popup with no opener: nothing is read, nothing is posted, allow() binds no
   await quiet();
   assert.deepEqual(p.knocks, []);
   assert.deepEqual(p.d.posted, []);
+});
+
+// card signpage-other-apps-connect: the popup's gate, the approvals store (src/connections.ts) through src/api.ts admit
+test("popup: a bound origin is answered while its approval is kept; once removed, its next request is refused not_allowed with no state read", async () => {
+  const store = connections(new IDBFactory());
+  await store.add(OUT);
+  let reads = 0;
+  const d = fakeDom(`${SIGN_ORIGIN}/connect`);
+  const posts: { msg: unknown; to: string }[] = [];
+  const op = { postMessage: (msg: unknown, to: string) => void posts.push({ msg, to }) };
+  const sh = mountShell(d.doc, { state: () => (reads++, signedOutState()), admit: (o) => store.has(o), popup: { opener: op, knock: () => {} } });
+  sh.allow(OUT);
+  const answerOf = (id: string) => posts.find((x) => (x.msg as { id?: string }).id === id);
+  const q1 = ask();
+  d.send(q1, op, OUT);
+  await until(() => answerOf(q1.id) !== undefined, "the state answer");
+  assert.deepEqual(answerOf(q1.id), { msg: { v: 1, id: q1.id, ok: true, result: signedOutState() }, to: OUT });
+  assert.equal(reads, 1);
+  await store.remove(OUT);
+  const q2 = ask();
+  d.send(q2, op, OUT);
+  await until(() => answerOf(q2.id) !== undefined, "the refusal");
+  assert.deepEqual(answerOf(q2.id), { msg: { v: 1, id: q2.id, ok: false, error: { code: "not_allowed" } }, to: OUT });
+  assert.equal(reads, 1, "no wallet read once the approval is gone");
 });
 
 test("APP_HOST's path is unchanged: the frame is APP_HOST, answered from its first message with no allow(), at APP_HOST only", async () => {

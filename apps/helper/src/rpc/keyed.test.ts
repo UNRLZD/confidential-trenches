@@ -13,6 +13,10 @@ import { PROVIDER_PACE, providerHolds, type Pace } from "../limits/limits.ts";
 import * as serverModule from "../server.ts";
 import { health, PARTS } from "../health.ts";
 import { HELPER_V1_PATHS } from "../../../../packages/kit/src/index.ts";
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 // read off the modules, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
 const { keyedPaces, keyedSpares } = rpcModule as unknown as { keyedPaces?: (env: Record<string, string>) => Record<string, Pace>; keyedSpares?: (env: Record<string, string>, c: string) => string[] };
 const { evmSwapRpcs, solanaTradesRpcs } = serverModule as unknown as { evmSwapRpcs?: (env: Record<string, string>, c: string) => string[]; solanaTradesRpcs?: (env: Record<string, string>) => string[] };
@@ -72,6 +76,8 @@ const DOWN: [string, () => Promise<Response>][] = [
   ["a refused connection", async () => { throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) }); }],
   ["HTTP 401 (a revoked key)", async () => new Response("unauthorized", { status: 401 })],
 ];
+
+const daySpend = (await import("../limits/day-spend.ts").catch(() => ({}))) as { dayFiles?: (dir: string, id: string) => unknown };
 
 for (const chain of Object.keys(LISTS) as Chain[]) {
   for (const [what, down] of DOWN) {
@@ -195,7 +201,7 @@ test("card rpc-keyed-lists: a key planted in every keyed URL reaches no log line
   // a refused URL names its variable, never its value
   for (const [n, u] of Object.values(LISTS).flat()) {
     try {
-      createRpc({ [n]: `${u}#frag` });
+      createRpc({ [n]: `${u}#frag` }, { now: STILL });
       assert.fail(`${n} with a fragment was taken`);
     } catch (e) {
       out.push((e as Error).message);
@@ -230,7 +236,7 @@ test("card rpc-keyed-lists: /v1/health's rpc lists each chain's keyed companies 
     near: ["fastnear.com answers", "keyed-own.test answers", "keyed-b.test wrong chain"],
   });
   // a host with none set: an empty list, never the public fallback
-  assert.deepEqual((createRpc({}) as Rpc).keyed?.(), { solana: [], base: [], robinhood: [], near: [] });
+  assert.deepEqual((createRpc({}, { now: STILL }) as Rpc).keyed?.(), { solana: [], base: [], robinhood: [], near: [] });
 });
 
 test("card rpc-keyed-lists: /v1/health stays within its 1 KB (the kit's HELPER_V1_PATHS row) with every keyed slot set, every Solana slot named and the longest states", () => {
@@ -239,7 +245,7 @@ test("card rpc-keyed-lists: /v1/health stays within its 1 KB (the kit's HELPER_V
   const real = { SOLANA_RPC_URL: "https://mainnet.helius-rpc.com/?api-key=x", BASE_RPC_URL: "https://base-mainnet.g.alchemy.com/v2/x", ROBINHOOD_RPC_URL: "https://robinhood-mainnet.g.alchemy.com/v2/x", NEAR_RPC_URL: "https://free.rpc.fastnear.com", NEAR_RPC_URL_B: "https://lava-endpoint.example" };
   const env: Record<string, string> = { ...real };
   for (const [n, u] of [...Object.values(LISTS).flat(), ...Object.values(DRPC_MORE).flat()]) if (!(n in real)) env[n] = u.replace(/[a-z-]+\.quiknode\.test/, "sparkling-quiet-sunset-wave.base-mainnet.quiknode.pro").replace("drpc.test", "drpc.live");
-  const listed = (createRpc(env) as Rpc).keyed?.() ?? {};
+  const listed = (createRpc(env, { now: STILL }) as Rpc).keyed?.() ?? {};
   const worst = Object.fromEntries(Object.entries(listed).map(([c, l]) => [c, l.map((e) => e.replace(/ \S+$/, " wrong chain"))]));
   assert.equal(Object.values(worst).flat().length, 18);
   const body = JSON.stringify(health("0123456789abcdef0123456789abcdef01234567", new Set(PARTS), 999_999_999, false, { rpc: "fallback", trades: "fallback", holders: "fallback", stream: "fallback" }, worst as never));
@@ -269,12 +275,16 @@ const drpcBatchRefusal = (init: RequestInit) =>
 const batchOf = (chain: Chain, n: number) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ ...(READ[chain] as object), id: i + 1 })));
 const hostsOf = (asked: string[]) => asked.map((u) => new URL(u).host);
 
-test("review M1: Base, BASE_RPC_URL down (503), QuickNode throttling (429), a batch of 4 dRPC free refuses (400 code 31): the public spare answers 200, and dRPC is not sent the batch", async () => {
+// card helper-receipts-past-retention: a batch past dRPC free's 3 leaves to it in parts of 3 (rpc.ts partOf), never one
+// post past its plan; before, the walk put dRPC out for the read, and a batch past every keyed URL's size answered 503
+test("review M1: Base, BASE_RPC_URL down (503), QuickNode throttling (429), a batch of 4 dRPC free refuses (400 code 31): dRPC answers it in parts of 3, never a post past its plan", async () => {
   const [own, qn, dr] = urlsOf("base");
   const env = Object.fromEntries(LISTS.base.map(([n, u]) => [n, u]));
   const asked: string[] = [];
+  const sizes: number[] = [];
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     asked.push(url);
+    if (url === dr) sizes.push(idsOf(init).length);
     if (url === own) return new Response("down", { status: 503 });
     if (url === qn) return new Response("slow", { status: 429, headers: { "retry-after": "20" } });
     if (url === dr && idsOf(init).length > 3) return drpcBatchRefusal(init);
@@ -285,8 +295,8 @@ test("review M1: Base, BASE_RPC_URL down (503), QuickNode throttling (429), a ba
   const a = await r.handle("base", "application/json", batchOf("base", 4), "198.51.100.9");
   assert.equal(a.status, 200, a.body);
   assert.deepEqual((JSON.parse(a.body) as { result: string }[]).map((x) => x.result), ["0x1", "0x1", "0x1", "0x1"]);
-  assert.ok(!asked.includes(dr), `dRPC was sent a batch past its plan: ${hostsOf(asked).join(" -> ")}`);
-  assert.equal(asked.at(-1), "https://public-spare.test");
+  assert.deepEqual(sizes, [3, 1], `dRPC's posts: ${hostsOf(asked).join(" -> ")}`);
+  assert.ok(!asked.includes("https://public-spare.test"), "the keyed URL took it");
 });
 
 test("review M1: a keyed URL's other 4xx (400 with a JSON body) is that URL down for the read on every chain: the next in the list answers", async () => {
@@ -308,12 +318,14 @@ test("review M1: a keyed URL's other 4xx (400 with a JSON body) is that URL down
   }
 });
 
-test("review M1: Solana, first key 429, QuickNode 429, a batch of 4 dRPC free refuses: the public endpoint answers 200", async () => {
+test("review M1: Solana, first key 429, QuickNode 429, a batch of 4 dRPC free refuses: dRPC answers it in parts of 3, never a post past its plan", async () => {
   const [own, qn, dr] = urlsOf("solana");
   const env = Object.fromEntries(LISTS.solana.map(([n, u]) => [n, u]));
   const asked: string[] = [];
+  const sizes: number[] = [];
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     asked.push(url);
+    if (url === dr) sizes.push(idsOf(init).length);
     if (url === own || url === qn) return new Response("slow", { status: 429, headers: { "retry-after": "20" } });
     if (url === dr && idsOf(init).length > 3) return drpcBatchRefusal(init);
     return answer(init, { value: "public" });
@@ -322,8 +334,8 @@ test("review M1: Solana, first key 429, QuickNode 429, a batch of 4 dRPC free re
   const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), now: c.now, sleep: c.sleep, log: () => undefined });
   const a = await r.handle("solana", "application/json", batchOf("solana", 4), "198.51.100.9");
   assert.equal(a.status, 200, a.body);
-  assert.equal(asked.at(-1), rpcModule.SOLANA_PUBLIC, hostsOf(asked).join(" -> "));
-  assert.ok(!asked.includes(dr), "dRPC was sent a batch past its plan");
+  assert.deepEqual(sizes, [3, 1], hostsOf(asked).join(" -> "));
+  assert.ok(!asked.includes(rpcModule.SOLANA_PUBLIC), "the keyed spare took it");
 });
 
 test("review M1 (call path): Solana's first key refusing a read with a 400 sends it on to its keyed spares, and a lone key's 400 to the public endpoint, never to the caller", async () => {
@@ -343,16 +355,18 @@ test("review M1 (call path): Solana's first key refusing a read with a 400 sends
   }
 });
 
-test("review L3: a batch larger than a company's bucket (QuickNode's 7) never goes to it in one post: it is asked of the next that takes it", async () => {
+test("review L3: a batch larger than a company's bucket (QuickNode's 7) never goes to it in one post: it leaves in parts of 7, the next once the bucket refills", async () => {
   const env = { BASE_RPC_URL_QUICKNODE: LISTS.base[1][1] };
   const asked: string[] = [];
-  const fetch = async (url: string, init: RequestInit): Promise<Response> => (asked.push(url), answer(init, "0x1"));
+  const sizes: number[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => (asked.push(url), sizes.push(idsOf(init).length), answer(init, "0x1"));
   const c = clock();
   const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), pinned: { base: ["https://p1.test"] }, now: c.now, sleep: c.sleep, log: () => undefined });
   assert.equal((await r.handle("base", "application/json", batchOf("base", 7), "198.51.100.9")).status, 200);
   c.t.v += 2_000;
   assert.equal((await r.handle("base", "application/json", batchOf("base", 10), "198.51.100.10")).status, 200);
-  assert.deepEqual(asked, [env.BASE_RPC_URL_QUICKNODE, "https://p1.test"], "7 to QuickNode, 10 to the spare");
+  assert.deepEqual(asked, [env.BASE_RPC_URL_QUICKNODE, env.BASE_RPC_URL_QUICKNODE, env.BASE_RPC_URL_QUICKNODE], "7, then 10 as 7 and 3, all to QuickNode");
+  assert.deepEqual(sizes, [7, 7, 3]);
 });
 
 test("review M2: past a company's daily budget nothing more is sent to it that UTC day, on any chain or path, and the spares serve; the next day it is asked again", async () => {
@@ -484,7 +498,7 @@ test("review M2: a keyed URL that answers its chain is probed once in 10 min, on
 
 test("review M3: /v1/health marks a keyed list's URL with no key in it (a company's public endpoint) as keyless", () => {
   const env = { NEAR_RPC_URL_FASTNEAR: LISTS.near[0][1], NEAR_RPC_URL: "https://free.rpc.fastnear.com", NEAR_RPC_URL_B: LISTS.near[2][1] };
-  assert.deepEqual((createRpc(env) as Rpc).keyed?.().near, ["fastnear.com unread", "fastnear.com keyless unread", "keyed-b.test unread"]);
+  assert.deepEqual((createRpc(env, { now: STILL }) as Rpc).keyed?.().near, ["fastnear.com unread", "fastnear.com keyless unread", "keyed-b.test unread"]);
 });
 
 test("review L1: a hold's log line names the company, never the keyed host", async () => {
@@ -598,13 +612,12 @@ test("owner 09:16Z: with dRPC's three keys all held, the public spares serve, on
 
 test("owner 09:16Z: /v1/health names each dRPC key as its own entry (key1, key2, key3), in order after QuickNode", () => {
   const env: Record<string, string> = Object.fromEntries([...LISTS.base.map(([n, u]) => [n, u as string]), ...DRPC_MORE.base]);
-  assert.deepEqual((createRpc(env) as Rpc).keyed?.().base, ["alchemy.test unread", "quiknode.test unread", "drpc.test key1 unread", "drpc.test key2 unread", "drpc.test key3 unread"]);
+  assert.deepEqual((createRpc(env, { now: STILL }) as Rpc).keyed?.().base, ["alchemy.test unread", "quiknode.test unread", "drpc.test key1 unread", "drpc.test key2 unread", "drpc.test key3 unread"]);
 });
 
 // ---- the delta review of 424dce1e (H1, M2, M3, L2, L3, L4) ----
 
 /** The keyed accounts' shared daily spend (review H1), read off the module so this file loads at a base without it. */
-const daySpend = (await import("../limits/day-spend.ts").catch(() => ({}))) as { dayFiles?: (dir: string, id: string) => unknown };
 const dayStart = () => Math.ceil((performance.timeOrigin + performance.now()) / 86_400_000) * 86_400_000 + 1_000;
 const holdsOn = (now: () => number, pace: Record<string, Pace>, peers: unknown) => (providerHolds as unknown as (n: () => number, p: Record<string, Pace>, d?: unknown) => ReturnType<typeof providerHolds>)(now, pace, peers);
 

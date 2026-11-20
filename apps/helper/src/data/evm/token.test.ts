@@ -1,22 +1,24 @@
 // node --test apps/helper/src/data/evm/token.test.ts: GET /v1/market/token and /v1/market/holders with chain=base and
 // chain=robinhood on a real server on a free port (card market-data-evm-token), with the deployed helper's recorded
-// lists answers and GeckoTerminal's recorded token info answers (fixtures/token-info-<chain>.json, 2026-11-09 01:49-01:52Z)
-// behind a fake fetch: 200 in exactly the Solana path's frozen fields, the row the lists' own with its launchpad tag
-// and chain, the info's decimals, holder count and top 10 share; an address the lists never served, or no address, 404;
-// GeckoTerminal refusing or failing never invents a value. Red at 26438c0c: both routes answered 404 for any chain but
-// solana (server.ts:478).
+// lists answers and the recorded on-chain token info answers (fixtures/token-info-<chain>.json, GeckoTerminal's v2 at
+// 2026-11-09 01:49-01:52Z, the answer CoinGecko's keyed /onchain path serves) behind a fake keyed read: 200 in exactly
+// the Solana path's frozen fields, the row the lists' own with its launchpad tag and chain, the info's decimals, holder
+// count and top 10 share; an address the lists never served, or no address, 404; the key missing or missing a read
+// never invents a value. Red at 26438c0c: both routes answered 404 for any chain but solana (server.ts:478). Card
+// evm-token-page-off-the-5-call-window: the info is CoinGecko's keyed read, never GeckoTerminal's keyless window.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { request } from "node:http";
-import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { ROW_FIELDS } from "../../../../terminal/src/screens/discover/fields.ts";
 import { start } from "../../server.ts";
-import { GT_PAGE_WAIT_MS, GT_SERVE_MS, geckoBudget, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
 import { HOLDERS_FIELDS, PAGE_FIELDS, RISK_FIELDS } from "../solana/token.ts";
-import { GT_BASE } from "./lists.ts";
-import { createEvmToken, INFO_FRESH_MS, INFO_SERVE_MS, INFO_WAIT_MS, toInfo } from "./token.ts";
+import { CHASE_PER_TICK, CHASE_TICK_MS, CHASE_TRIES, createEvmToken, HOLDERS_DAY, HOLDERS_GROUP, holdersDay, INFO_FRESH_MS, INFO_SERVE_MS, INFO_WAIT_MS, MISSED_HOLD_MS, toInfo } from "./token.ts";
+import { CG_DAY } from "../coingecko.ts";
+import { DAY_SYNC_MS, PROBE_DAY_SHARE } from "../../limits/limits.ts";
+import type { DayPeers } from "../../limits/day-spend.ts";
 import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
+import { call as bounded, listening } from "../../../test/servers.ts";
 
 /** `p`'s answer once the promise steps queued now have run, with no timer firing; undefined while it waits on one. */
 async function atOnce<T>(p: Promise<T>): Promise<T | undefined> {
@@ -49,36 +51,35 @@ const listsOf = (chain: keyof typeof FX) => {
   return { get: async () => ({ status: 200, body: FX[chain].lists_body, asOfMs: FX[chain].lists.as_of_ms }), listed: async (t: string) => tokens.has(t) };
 };
 let calls = 0;
-const fake = (chain: keyof typeof FX, status = 200) => async (url: string): Promise<Response> => {
-  calls++;
-  const m = new RegExp(`^${GT_BASE}/networks/${chain}/tokens/(0x[0-9a-f]{40})/info$`).exec(url);
-  if (m === null) throw new Error(`unexpected ${url}`);
-  if (status !== 200) return new Response("{}", { status, headers: status === 429 ? { "retry-after": "30" } : {} });
-  const a = FX[chain].info[m[1]!];
-  return a === undefined ? new Response(JSON.stringify(FX.base.info_404), { status: 404 }) : new Response(JSON.stringify(a), { status: 200 });
-};
-const tokens = (status = 200) => ({
-  base: createEvmToken("base", { lists: listsOf("base"), gecko: geckoBudget(() => NOW), fetch: fake("base", status), now: () => NOW }),
-  robinhood: createEvmToken("robinhood", { lists: listsOf("robinhood"), gecko: geckoBudget(() => NOW), fetch: fake("robinhood", status), now: () => NOW }),
+/** The keyed reads (../coingecko.ts Keyed) of one chain: the recorded info for each asked token, as CoinGecko's 200;
+ *  "missed" as the key answers when its minute or day is spent or CoinGecko refused or failed (undefined). `bg`: each
+ *  call's background flag. `gate`: awaited before each answer. */
+const keyedOf = (chain: keyof typeof FX, mode: "ok" | "missed" = "ok", o: { bg?: boolean[]; gate?: () => Promise<unknown> } = {}) => ({
+  read: async (path: string, ok: (json: unknown) => boolean, background = false): Promise<unknown> => {
+    const m = new RegExp(`^/networks/${chain}/tokens/(0x[0-9a-f]{40})/info$`).exec(path);
+    if (m === null) throw new Error(`unexpected ${path}`);
+    calls++;
+    o.bg?.push(background);
+    await o.gate?.();
+    if (mode !== "ok") return undefined;
+    const a = FX[chain].info[m[1]!];
+    return a !== undefined && ok(a) ? a : undefined;
+  },
+});
+const tokens = (mode: "ok" | "missed" | "unset" = "ok") => ({
+  base: createEvmToken("base", { lists: listsOf("base"), keyed: mode === "unset" ? null : keyedOf("base", mode), now: () => NOW }),
+  robinhood: createEvmToken("robinhood", { lists: listsOf("robinhood"), keyed: mode === "unset" ? null : keyedOf("robinhood", mode), now: () => NOW }),
 });
 const at = (evmTokens: ReturnType<typeof tokens>) => start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, evmTokens);
-const servers = [at(tokens()), at(tokens(429)), at(tokens(500))];
+const servers = [at(tokens()), at(tokens("missed")), at(tokens("unset"))];
 const ports: number[] = [];
-before(() => Promise.all(servers.map((s, i) => new Promise<void>((ok) => s.on("listening", () => ((ports[i] = (s.address() as AddressInfo).port), ok()))))));
+before(async () => (await Promise.all(servers.map((s, i) => listening(s, `the helper ${i}`)))).forEach((p, i) => (ports[i] = p)));
 after(() => Promise.all(servers.map((s) => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok()))))));
 
-function call(path: string, to = 0) {
-  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port: ports[to], method: "GET", path }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (d: Buffer) => chunks.push(d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
-    });
-    r.on("error", fail).end();
-  });
-}
+const call = (path: string, to = 0) => bounded(ports[to]!, { path }, `the helper ${to}`);
 
 for (const c of CASES) {
-  test(`GET /v1/market/token?chain=${c.chain}: 200 in the frozen fields, the lists' row with its ${c.pad} tag, GeckoTerminal's decimals, holders and top 10`, async () => {
+  test(`GET /v1/market/token?chain=${c.chain}: 200 in the frozen fields, the lists' row with its ${c.pad} tag, the keyed info's decimals, holders and top 10`, async () => {
     const r = await call(`/v1/market/token?chain=${c.chain}&token=${c.addr}`);
     assert.equal(r.status, 200, r.body);
     assert.equal(r.headers["x-helper-source"], "geckoterminal");
@@ -97,15 +98,15 @@ for (const c of CASES) {
     assert.equal(p.row.top10_bps, c.top);
     assert.equal(p.decimals, c.decimals);
     assert.equal(p.pool, null); // no swap read holds its pool here
-    assert.deepEqual(p.risk.holders, { v: c.holders, src: "geckoterminal", as_of_ms: p.risk.holders.as_of_ms });
+    assert.deepEqual(p.risk.holders, { v: c.holders, src: "coingecko", as_of_ms: p.risk.holders.as_of_ms });
     assert.equal(p.risk.top10_bps.v, c.top);
-    assert.deepEqual(p.risk.liq_usd, { v: listed.liq_usd, src: "geckoterminal", as_of_ms: listed.as_of_ms });
+    assert.deepEqual(p.risk.liq_usd, { v: listed.liq_usd, src: listed.src, as_of_ms: listed.as_of_ms });
     for (const f of ["mint_auth", "freeze_auth", "lp", "dev_bps", "snipers_bps", "tax", "honeypot", "insiders_bps", "bundlers_bps", "fresh_bps"]) assert.equal(p.risk[f].src, "none", f);
     assert.equal(p.route, "unknown");
     assert.equal(p.filling, false);
   });
 
-  test(`GET /v1/market/holders?chain=${c.chain}: 200 in the frozen fields, no rows, GeckoTerminal's count and top 10`, async () => {
+  test(`GET /v1/market/holders?chain=${c.chain}: 200 in the frozen fields, no rows, the keyed info's count and top 10`, async () => {
     const r = await call(`/v1/market/holders?chain=${c.chain}&token=${c.addr}`);
     assert.equal(r.status, 200, r.body);
     const h = JSON.parse(r.body);
@@ -113,7 +114,7 @@ for (const c of CASES) {
     assert.deepEqual(h.holders, []);
     assert.equal(h.total, c.holders);
     assert.equal(h.top_bps, c.top);
-    assert.equal(h.src, "geckoterminal");
+    assert.equal(h.src, "coingecko");
   });
 }
 
@@ -134,8 +135,8 @@ test("an address the lists never served, a mixed-case listed address, no token, 
   for (const q of ["?chain=BASE", "?chain=eip155:8453", "?chain=constructor"]) assert.equal((await call(`/v1/market/token${q}&token=${CASES[0].addr}`)).status, 404, q);
 });
 
-test("GeckoTerminal refusing (429) or failing (500): the page is the lists' row with those fields null, holders 200 with no count (src none) or 503, never a value made up and never a 429", async () => {
-  for (const [to, holders] of [[1, 200], [2, 503]] as const) {
+test("the key missing a read (its minute or day spent, CoinGecko refusing or down) or no key set: the page is the lists' row with those fields null, holders 200 with no count (src none), never a value made up, never a 429 or a 503", async () => {
+  for (const to of [1, 2]) {
     const r = await call(`/v1/market/token?chain=base&token=${CASES[0].addr}`, to);
     assert.equal(r.status, 200);
     const p = JSON.parse(r.body);
@@ -145,18 +146,16 @@ test("GeckoTerminal refusing (429) or failing (500): the page is the lists' row 
     assert.equal(p.risk.holders.src, "none");
     assert.equal(p.row.launchpad, "doppler");
     const h = await call(`/v1/market/holders?chain=base&token=${CASES[0].addr}`, to);
-    assert.equal(h.status, holders, h.body);
-    if (holders === 200) {
-      const b = JSON.parse(h.body);
-      assert.deepEqual([b.holders, b.total, b.top_bps, b.src], [[], null, null, "none"]);
-    }
+    assert.equal(h.status, 200, h.body);
+    const b = JSON.parse(h.body);
+    assert.deepEqual([b.holders, b.total, b.top_bps, b.src], [[], null, null, "none"]);
   }
 });
 
 test("the info is read once a token and held INFO_FRESH_MS; a held page answers with no call and no wait", async (ctx) => {
   let t = NOW;
   calls = 0;
-  const tok = createEvmToken("robinhood", { lists: listsOf("robinhood"), gecko: geckoBudget(() => t), fetch: fake("robinhood"), now: () => t });
+  const tok = createEvmToken("robinhood", { lists: listsOf("robinhood"), keyed: keyedOf("robinhood"), now: () => t });
   assert.equal((await tok.page(CASES[1].addr)).status, 200);
   assert.equal(calls, 1);
   // a held page waits on no timer: with the timers mocked and never moved, each answers at once
@@ -178,8 +177,10 @@ test("a first info read slower than INFO_WAIT_MS: the page answers without it, t
   const slow = new Promise<void>((ok) => (release = ok));
   const tok = createEvmToken("base", {
     lists: listsOf("base"),
-    gecko: geckoBudget(Date.now),
-    fetch: async (url) => (await slow, fake("base")(url)),
+    keyed: keyedOf("base", "ok", { gate: () => slow }),
+    // a still clock: the page's wait is INFO_WAIT_MS from the request's start on it, never shortened by a slow machine
+    // (the helper suite on a loaded box answered 1 ms before it, the rows' read having taken real time)
+    now: () => NOW,
   });
   // the page's wait for the info on mocked timers: it answers at INFO_WAIT_MS, not 1 ms before
   enableTimers(t.mock.timers, { apis: ["setTimeout"] });
@@ -202,9 +203,9 @@ test("a first info read slower than INFO_WAIT_MS: the page answers without it, t
   assert.equal(JSON.parse((await tok.page(CASES[0].addr)).body).row.holders, CASES[0].holders);
 });
 
-test("the pool and decimals the swap reads found and checked on chain win over GeckoTerminal's decimals", async () => {
+test("the pool and decimals the swap reads found and checked on chain win over the info's decimals", async () => {
   const kept = { pool: "0x00000000000000000000000000000000000000000000000000000000000000ab", decimals: 6 };
-  const tok = createEvmToken("base", { lists: listsOf("base"), gecko: geckoBudget(() => NOW), fetch: fake("base"), now: () => NOW, kept: (t) => (t === CASES[0].addr ? kept : undefined) });
+  const tok = createEvmToken("base", { lists: listsOf("base"), keyed: keyedOf("base"), now: () => NOW, kept: (t) => (t === CASES[0].addr ? kept : undefined) });
   const p = JSON.parse((await tok.page(CASES[0].addr)).body);
   assert.equal(p.pool, kept.pool);
   assert.equal(p.decimals, 6);
@@ -215,7 +216,7 @@ test("a lists answer rebuilt with the same as_of_ms (a maker settled in a tick w
   for (const r of Object.values(snap.lists).flat()) if (r.token === CASES[0].addr) r.launchpad = null;
   let body = JSON.stringify(snap);
   const lists = { get: async () => ({ status: 200, body, asOfMs: snap.as_of_ms }), listed: async () => true };
-  const tok = createEvmToken("base", { lists, gecko: geckoBudget(() => NOW), fetch: fake("base"), now: () => NOW });
+  const tok = createEvmToken("base", { lists, keyed: keyedOf("base"), now: () => NOW });
   assert.equal(JSON.parse((await tok.page(CASES[0].addr)).body).row.launchpad, null);
   body = FX.base.lists_body; // the same as_of_ms, the maker now read
   assert.equal(JSON.parse((await tok.page(CASES[0].addr)).body).row.launchpad, "doppler");
@@ -231,167 +232,149 @@ test("toInfo: only an answer naming this token; numbers in range or null", () =>
   assert.deepEqual(toInfo(CASES[0].addr, bad, NOW), { decimals: null, holders: null, top10Bps: null, asOfMs: NOW });
 });
 
-// Card evm-holders-never-starve: the live helper's window holds its own background reads every minute (helper log
-// 14:33-14:46Z: "calls: ahead sol bars 1, lists 1-2 ... window 3 of 5"), and a token's first info read went to the
-// "refresh" (page) or "stale" (holders) lane, which stop at 3 and 4 calls: Robinhood's holders answered 429 at 14:46Z
-// ("stale base info 1; refused: ... stale 4"). A read of what nobody holds is a page read (../gecko.ts refreshLane).
-// Its promise as it holds on the keyless budget (card market-data-evm-capacity): a listed token's holders answer 200
-// whenever the helper read them in the last INFO_SERVE_MS, however busy the window; a token nobody read in that time
-// answers 200 when the budget frees a call within GT_PAGE_WAIT_MS, else 429 with the wait (the last test below).
-/** One budget for both chains, as the server's, with the window the live helper had: one ahead call, two list calls. */
-function liveWindow(clock: () => number): GeckoBudget {
-  const b = geckoBudget(clock);
-  assert.ok(b.take("ahead", false, false, "sol bars"));
-  assert.ok(b.take("lists", true));
-  assert.ok(b.take("lists", true));
-  return b;
-}
-
-test("the window busy as the live helper's (ahead 1, lists 2 of 5): each chain's first page and holders answer 200 with GeckoTerminal's count, one call a token", async () => {
-  calls = 0;
-  const gecko = liveWindow(() => NOW);
-  const tok = {
-    base: createEvmToken("base", { lists: listsOf("base"), gecko, fetch: fake("base"), now: () => NOW }),
-    robinhood: createEvmToken("robinhood", { lists: listsOf("robinhood"), gecko, fetch: fake("robinhood"), now: () => NOW }),
-  };
-  for (const c of CASES) {
-    const page = await tok[c.chain].page(c.addr);
-    assert.equal(page.status, 200);
-    assert.equal(JSON.parse(page.body).row.holders, c.holders, `${c.chain} page: the holder count`);
-    const h = await tok[c.chain].holders(c.addr);
-    assert.equal(h.status, 200, `${c.chain} holders: ${h.body}`);
-    assert.deepEqual([JSON.parse(h.body).total, JSON.parse(h.body).top_bps], [c.holders, c.top]);
-  }
-  assert.equal(calls, 2, "one info call a token");
-});
-
-test("the window busy: a token's first holders read with no page before it answers 200 on both chains", async () => {
-  calls = 0;
-  const gecko = liveWindow(() => NOW);
-  for (const c of CASES) {
-    const tok = createEvmToken(c.chain, { lists: listsOf(c.chain), gecko, fetch: fake(c.chain), now: () => NOW });
-    const h = await tok.holders(c.addr);
-    assert.equal(h.status, 200, `${c.chain} holders: ${h.body}`);
-    assert.equal(JSON.parse(h.body).total, c.holders);
-  }
-  assert.equal(calls, 2);
-});
-
 // Card market-data-evm-capacity: the holder count is display data that moves slowly, so a held one serves, dated by its
-// own read, for INFO_SERVE_MS, while its re-read waits for a call nobody's first read needs. Before it, a count held
-// past GT_SERVE_MS (10 min) was dropped and a full window answered 429 for a token the helper had read (live 20:34Z:
-// "refused /v1/market/holders geckoterminal budget", window 5 of 5). Red at 1e00df14 (the 429 at GT_SERVE_MS).
-test("a held info's re-read leaves a first read its calls: refused, the held count serves, dated, while under INFO_SERVE_MS, never past it", async () => {
+// own read, for INFO_SERVE_MS, while its re-read is background (it leaves callers the key's room). Card
+// evm-token-page-off-the-5-call-window: a re-read the key misses leaves the held count served, never a 429.
+test("a held info's re-read is background; missed, the held count serves, dated, while under INFO_SERVE_MS, never past it", async () => {
   let t = NOW;
   calls = 0;
-  const gecko = geckoBudget(() => t);
-  const tok = createEvmToken("robinhood", { lists: listsOf("robinhood"), gecko, fetch: fake("robinhood"), now: () => t });
+  const bg: boolean[] = [];
+  let mode: "ok" | "missed" = "ok";
+  const ok = keyedOf("robinhood", "ok", { bg });
+  const miss = keyedOf("robinhood", "missed", { bg });
+  const tok = createEvmToken("robinhood", { lists: listsOf("robinhood"), keyed: { read: (p, f, b) => (mode === "ok" ? ok : miss).read(p, f, b) }, now: () => t, later: () => {} });
   const c = CASES[1];
   const first = JSON.parse((await tok.holders(c.addr)).body);
-  assert.equal(first.total, c.holders);
-  // past INFO_FRESH_MS, the window at the room a held re-read leaves a first read (COLD_RESERVE)
+  assert.deepEqual([first.total, first.src], [c.holders, "coingecko"]);
+  assert.deepEqual(bg, [false], "a first read is a caller's");
+  // past INFO_FRESH_MS the key misses the re-read: the held count, dated by its read
   t += INFO_FRESH_MS;
-  for (let i = 0; i < 3; i++) assert.ok(gecko.take("pages"));
+  mode = "missed";
   const held = await tok.holders(c.addr);
   assert.equal(held.status, 200);
   assert.equal(JSON.parse(held.body).total, c.holders, "the held count");
   assert.equal(JSON.parse(held.body).as_of_ms, first.as_of_ms, "dated by its read, not by the answer");
   assert.equal(JSON.parse((await tok.page(c.addr)).body).row.holders, c.holders);
-  assert.equal(calls, 1, "the re-read refused: no call");
-  // past GT_SERVE_MS, the window full: still the held count, dated (the 429 before this card)
-  t = NOW + GT_SERVE_MS;
-  for (let i = 0; i < 5; i++) assert.ok(gecko.take("pages"));
-  const kept = await tok.holders(c.addr);
-  assert.equal(kept.status, 200, kept.body);
-  assert.equal(JSON.parse(kept.body).total, c.holders);
-  assert.equal(JSON.parse((await tok.page(c.addr)).body).row.holders, c.holders);
-  assert.equal(calls, 1);
-  // past INFO_SERVE_MS the held count is not served: its re-read is a page read, and refused it is no count from no
-  // source (the read queued), never a 200 with a count older than the bound and never a 429 (card
-  // evm-chart-opens-without-a-vendor-call)
+  assert.deepEqual(bg, [false, true, true], "each re-read background");
+  // past INFO_SERVE_MS the held count is not served: no count from no source, never a count older than the bound and
+  // never a 429 (card evm-chart-opens-without-a-vendor-call)
   t = NOW + INFO_SERVE_MS;
-  for (let i = 0; i < 5; i++) assert.ok(gecko.take("pages"));
   const old = await tok.holders(c.addr);
   assert.equal(old.status, 200, old.body);
   assert.deepEqual([JSON.parse(old.body).total, JSON.parse(old.body).src], [null, "none"]);
-  assert.equal(JSON.parse((await tok.page(c.addr)).body).row.holders, null, "the page: no old count");
-  assert.equal(calls, 1);
+  assert.equal(bg.at(-1), false, "past INFO_SERVE_MS a first read again, a caller's");
 });
 
-// Card market-data-evm-capacity: N tokens opened inside one window, on the window the live helper keeps with its own
-// background reads (liveWindow: 3 of 5). Each token's holders were read once in the last INFO_SERVE_MS (a page opened
-// earlier, a live run's read): every one answers 200 with its count and no call is spent. Red at 1e00df14: each count
-// was dropped at GT_SERVE_MS, the re-reads met the full window and answered 429.
-test("four tokens on both chains, read within the hour, opened again inside one window with the background's 3 of 5 held: holders 200 for each, dated, no 429", async () => {
+// Card evm-token-page-off-the-5-call-window: a first read the key misses (its minute spent by 50 users opening coins at
+// once, token-load.test.ts) is chased in the background so the holders tab's next poll has the count, and a token the
+// key never answers costs at most CHASE_TRIES + 1 calls an INFO_FRESH_MS.
+test("a first read the key misses answers src none, is chased in the background, and the next read has the count with no call", async () => {
   let t = NOW;
   calls = 0;
-  const all = (["base", "robinhood"] as const).flatMap((chain) => Object.keys(FX[chain].info).map((addr) => ({ chain, addr })));
-  assert.equal(all.length, 4);
-  const gecko = geckoBudget(() => t);
-  const tok = {
-    base: createEvmToken("base", { lists: listsOf("base"), gecko, fetch: fake("base"), now: () => t }),
-    robinhood: createEvmToken("robinhood", { lists: listsOf("robinhood"), gecko, fetch: fake("robinhood"), now: () => t }),
-  };
-  for (const [i, c] of all.entries()) {
-    t = NOW + i * WINDOW_MS; // one a window
-    assert.equal((await tok[c.chain].holders(c.addr)).status, 200);
-  }
-  assert.equal(calls, 4);
-  // 40 min later the window holds the background's three calls (ahead 1, lists 2) and a cold chart's pool and bars
-  t = NOW + 40 * 60_000;
-  assert.ok(gecko.take("ahead", false, false, "sol bars"));
-  assert.ok(gecko.take("lists", true));
-  assert.ok(gecko.take("lists", true));
-  assert.ok(gecko.take("pages", false, false, "base pool"));
-  assert.ok(gecko.take("pages", false, false, "base bars"));
-  for (const c of all) {
-    const h = await tok[c.chain].holders(c.addr);
-    assert.equal(h.status, 200, `${c.chain} ${c.addr}: ${h.body}`);
-    assert.equal(typeof JSON.parse(h.body).total, "number");
-    const p = await tok[c.chain].page(c.addr);
-    assert.equal(typeof JSON.parse(p.body).row.holders, "number", `${c.chain} ${c.addr} page`);
-  }
-  assert.equal(calls, 4, "no call spent: the window is full");
-});
-
-// The window full, 5 of 5, as at 14:29Z with the live run's Solana pages: a cold holders read waits for the budget's next
-// free call under GT_PAGE_WAIT_MS (../gecko.ts takeOrWait, the Solana path's cold-read wait) instead of answering 429.
-test("the window full (5 of 5): a cold base holders read waits for the next free call and answers 200, within GT_PAGE_WAIT_MS", async () => {
-  let t = NOW;
-  calls = 0;
-  const gecko = geckoBudget(() => t);
-  gecko.seed(Array.from({ length: 5 }, () => NOW - WINDOW_MS + 2_000)); // all five leave the window 2 s from now
-  const slept: number[] = [];
-  const tok = createEvmToken("base", { lists: listsOf("base"), gecko, fetch: fake("base"), now: () => t, sleep: async (ms) => (slept.push(ms), (t += ms)) });
-  const h = await tok.holders(CASES[0].addr);
-  assert.equal(h.status, 200, h.body);
-  assert.equal(JSON.parse(h.body).total, CASES[0].holders);
-  assert.equal(calls, 1);
-  const waited = slept.reduce((a, b) => a + b, 0);
-  assert.ok(waited >= 2_000 && waited <= GT_PAGE_WAIT_MS, `waited ${waited} ms`);
-});
-
-test("the window full with its next free call past GT_PAGE_WAIT_MS: a cold holders read answers 200 with no count (src none) without waiting, never a 429; the read is queued, takes the next free call, and the next read has the count", async () => {
-  let t = NOW;
-  calls = 0;
-  const gecko = geckoBudget(() => t);
-  gecko.seed(Array.from({ length: 5 }, () => NOW - 1_000)); // the next free call 74 s away
-  const slept: number[] = [];
   const due: { at: number; fn: () => void }[] = [];
-  const tok = createEvmToken("base", { lists: listsOf("base"), gecko, fetch: fake("base"), now: () => t, sleep: async (ms) => (slept.push(ms), (t += ms)), later: (fn, ms) => void due.push({ at: t + ms, fn }) });
+  let mode: "ok" | "missed" = "missed";
+  const ok = keyedOf("base");
+  const miss = keyedOf("base", "missed");
+  const tok = createEvmToken("base", { lists: listsOf("base"), keyed: { read: (p, f, b) => (mode === "ok" ? ok : miss).read(p, f, b) }, now: () => t, later: (fn, ms) => void due.push({ at: t + ms, fn }) });
   const h = await tok.holders(CASES[0].addr);
-  assert.equal(h.status, 200, h.body);
-  assert.deepEqual([JSON.parse(h.body).total, JSON.parse(h.body).src], [null, "none"]);
-  assert.deepEqual(slept, []);
-  assert.equal(calls, 0);
-  assert.equal(due.length, 1, "the queued read waits for the next free call");
-  assert.ok(due[0]!.at >= NOW + 70_000, `at ${due[0]!.at - NOW}`);
+  assert.deepEqual([h.status, JSON.parse(h.body).total, JSON.parse(h.body).src], [200, null, "none"]);
+  assert.equal(calls, 1);
+  assert.equal(due.length, 1, "chased");
+  assert.equal(due[0]!.at, NOW + CHASE_TICK_MS);
+  // a read meanwhile makes no call of its own: the chase is on it
+  assert.equal(JSON.parse((await tok.holders(CASES[0].addr)).body).src, "none");
+  assert.equal(calls, 1);
+  mode = "ok";
   t = due[0]!.at;
   due.shift()!.fn();
-  for (let i = 0; i < 20; i++) await new Promise((ok) => setImmediate(ok));
-  assert.equal(calls, 1, "the queued read made its call");
+  for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(calls, 2, "the chase made its call");
   const again = await tok.holders(CASES[0].addr);
-  assert.equal(again.status, 200);
-  assert.equal(JSON.parse(again.body).total, CASES[0].holders);
-  assert.equal(calls, 1, "served from the queued read");
+  assert.deepEqual([JSON.parse(again.body).total, JSON.parse(again.body).src], [CASES[0].holders, "coingecko"]);
+  assert.equal(calls, 2, "served from the chase's read");
+  assert.equal(due.length, 0, "the chase ended");
+});
+
+test("a token the key never answers: chased CHASE_TRIES times, then not read again for MISSED_HOLD_MS; at most CHASE_TRIES + 1 calls", async () => {
+  let t = NOW;
+  calls = 0;
+  const due: { at: number; fn: () => void }[] = [];
+  const tok = createEvmToken("base", { lists: listsOf("base"), keyed: keyedOf("base", "missed"), now: () => t, later: (fn, ms) => void due.push({ at: t + ms, fn }) });
+  await tok.holders(CASES[0].addr);
+  for (let i = 0; i < 100 && due.length > 0; i++) {
+    const d = due.shift()!;
+    t = d.at;
+    d.fn();
+    for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
+  }
+  assert.equal(due.length, 0, "the chase ended");
+  assert.equal(calls, CHASE_TRIES + 1);
+  for (let i = 0; i < 10; i++) assert.equal(JSON.parse((await tok.holders(CASES[0].addr)).body).src, "none");
+  assert.equal(calls, CHASE_TRIES + 1, "not read again inside MISSED_HOLD_MS");
+  t += MISSED_HOLD_MS;
+  await tok.holders(CASES[0].addr);
+  assert.equal(calls, CHASE_TRIES + 2, "read again after it");
+  assert.ok(CHASE_PER_TICK >= 1);
+});
+
+test("no key set: no read, holders src none at once, nothing chased", async () => {
+  const due: unknown[] = [];
+  const tok = createEvmToken("base", { lists: listsOf("base"), keyed: null, now: () => NOW, later: (fn) => void due.push(fn) });
+  const h = await tok.holders(CASES[0].addr);
+  assert.deepEqual([h.status, JSON.parse(h.body).src], [200, "none"]);
+  assert.equal(JSON.parse((await tok.page(CASES[0].addr)).body).row.holders, null);
+  assert.equal(due.length, 0);
+});
+
+// The review's fold at b25a82fb7: the holders read within their own quarter of the CoinGecko key's day, apart from the charts'.
+const callerCap = HOLDERS_DAY - Math.floor(HOLDERS_DAY * PROBE_DAY_SHARE);
+
+test("HOLDERS_DAY is a quarter of the key's day; the holders' day stops at it and opens again at 00:00Z", () => {
+  assert.equal(HOLDERS_DAY, Math.floor(CG_DAY / 4));
+  let t = Date.parse("2026-11-18T10:00:00Z");
+  const d = holdersDay(() => t);
+  let n = 0;
+  while (d.left() && n < 10_000) (d.spend(), n++);
+  assert.equal(n, callerCap, "the cap, less the share every paced day keeps for probes (limits.ts PROBE_DAY_SHARE)");
+  t = Date.parse("2026-11-19T00:00:00Z");
+  assert.equal(d.left(), true, "a new UTC day");
+});
+
+test("the holders' day spent: no keyed call; a held count is still served, a token nothing is held for answers src none", async () => {
+  let t = NOW;
+  calls = 0;
+  const day = holdersDay(() => t);
+  const tok = createEvmToken("robinhood", { lists: listsOf("robinhood"), keyed: keyedOf("robinhood"), now: () => t, later: () => {}, day });
+  const held = CASES[1];
+  assert.equal(JSON.parse((await tok.holders(held.addr)).body).total, held.holders);
+  assert.equal(calls, 1);
+  while (day.left()) day.spend();
+  t += INFO_FRESH_MS; // a re-read is due, the day is spent
+  const h = await tok.holders(held.addr);
+  assert.deepEqual([JSON.parse(h.body).total, JSON.parse(h.body).src], [held.holders, "coingecko"], "the held count, under INFO_SERVE_MS");
+  const other = Object.keys(FX.robinhood.info).find((a) => a !== held.addr)!;
+  const o = await tok.holders(other);
+  assert.deepEqual([o.status, JSON.parse(o.body).total, JSON.parse(o.body).src], [200, null, "none"]);
+  assert.equal(calls, 1, "no call once the holders' day is spent");
+});
+
+test("the holders' day is counted with the helper it replaces: a deploy's next helper starts from the day's spend", () => {
+  let t = Date.parse("2026-11-18T10:00:00Z");
+  const files = new Map<string, { day: number; units: Map<string, number> }>();
+  const peersOf = (id: string): DayPeers => ({
+    write: (day, units) => void files.set(id, { day, units: new Map(units) }),
+    read: (day) => {
+      const sum = new Map<string, number>();
+      for (const [k, f] of files) if (k !== id && f.day === day) for (const [g, u] of f.units) sum.set(g, (sum.get(g) ?? 0) + u);
+      return sum;
+    },
+  });
+  const old = holdersDay(() => t, peersOf("a"));
+  // a read each DAY_SYNC_MS (limits.ts), so each spend is written to the old helper's file as it is made
+  for (let i = 0; i < callerCap - 10; i++) (old.spend(), (t += DAY_SYNC_MS));
+  assert.equal(files.get("a")?.units.get(HOLDERS_GROUP) !== undefined, true, "the old helper's spend is in its day file");
+  const next = holdersDay(() => t, peersOf("b"));
+  let n = 0;
+  while (next.left() && n < 10_000) (next.spend(), n++);
+  assert.ok(n <= 10, `the next helper read ${n}, the day had ${10} left`);
 });

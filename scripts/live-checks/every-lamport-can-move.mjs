@@ -97,10 +97,11 @@ export const MARKS = Object.freeze({
   // review P2-1 of 1d3b96d9c: the ride is a time (the next mark), taken only once due, and let go only once a pass rode
   // with nothing held; a booking never moves it earlier
   "a tap's ride is taken once it is due: the backs run that takes it rides, it is let go only when that run held nothing, and only it passes again a W that ended at the floor": tied(
-    re(R`take\(\)\{return (?<n>${I})\|\|(?<e>${I})\(\)<(?<i>${I})\|\|\k<e>\(\)<(?<a>${I})&&!(?<s>${I})\(\)\?!1:\(\k<n>=!0,!0\)\}[^]{0,200}?ride\((?<b>${I})\)\{(?<r>${I})=\k<r>===void 0\?\k<b>:Math\.max\(\k<r>,\k<b>\)\},takeRide\(\)\{return \k<s>\(\)\?\k<r>:void 0\},rode\((?<c>${I})\)\{\k<r>===\k<c>&&\(\k<r>=void 0\)\}`),
+    // since card rent-backs-resume-private the ride waits for the page's first tap too: take()'s test and its owed run
+    re(R`take\(\)\{return (?<n>${I})\|\|(?<e>${I})\(\)<(?<i>${I})\|\|\k<e>\(\)<(?<a>${I})&&!(?:\(${I}\(\)&&\(${I}\|\|)?(?<s>${I})\(\)(?:\)\))?\?!1:\(\k<n>=!0,(?:${I}\(\)&&\(${I}=!1\),)?!0\)\}[^]{0,300}?ride\((?<b>${I})\)\{(?<r>${I})=\k<r>===void 0\?\k<b>:Math\.max\(\k<r>,\k<b>\)\},takeRide\(\)\{return \k<s>\(\)\?\k<r>:void 0\},rode\((?<c>${I})\)\{\k<r>===\k<c>&&\(\k<r>=void 0\)\}`),
     (g) => [
       R`[,; ]${esc(g.s)}=\(\)=>${esc(g.r)}!==void 0&&${esc(g.e)}\(\)>=${esc(g.r)}[,;}]`,
-      R`let (${I})=(${I})\.takeRide\(\),(${I})=!1[^]{0,300}?await ${I}\(${I},${I},\1===void 0\?\{\}:\{ride:!0,held:\(\)=>void\(\3=!0\)\}\);return \1!==void 0&&!\3&&\(\2\.rode\(\1\),await Promise\.resolve\(${I}\(${I}\.store\)\.rode\?\.\(\1\)\)`,
+      R`(?:let |,)(${I})=(${I})\.takeRide\(\),(${I})=!1[^]{0,300}?await ${I}\(${I},${I},(?:\1===void 0\?\{\}:\{ride:!0,held:\(\)=>void\(\3=!0\)\}|\{\.\.\.\1===void 0\?\{\}:\{ride:!0,held:\(\)=>void\(\3=!0\)\},\.\.\.${I}\?\{idle:!0\}:\{\}\})\);return \1!==void 0&&!\3&&\(\2\.rode\(\1\),await Promise\.resolve\(${I}\(${I}\.store\)\.rode\?\.\(\1\)\)`,
       // the backs run tells it held a W (another pass's lock), so the ride is kept for the next run
       R`${I}=!0,(${I})\.held\?\.\(\);continue\}[^]{0,200}?${I}=!0,\1\.held\?\.\(\);break\}`,
       R`(?:let (${I})=${I}\.ride===!0&&${I}\.floor===!0;\(${I}===void 0\?${I}\.seen===void 0:${I}\.seen!==${I}\.seen\|\|\1\)&&|\?\(${I}\.ride===!0&&${I}\.floor===!0\|\|\(${I}===void 0\?${I}\.seen===void 0:${I}\.seen!==${I}\.seen\)\)&&)`,

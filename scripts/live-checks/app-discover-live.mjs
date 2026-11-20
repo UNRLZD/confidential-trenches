@@ -23,7 +23,7 @@
 // After: app
 // Bundle: out a browser and the helper
 //   node scripts/live-checks/app-discover-live.mjs [--url <page>] [--build <dir>] [--shots <dir>] [--record <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (--build: a FAIL while the helper missed an answer, helper-misses.mjs)
 // --url is the page to open (default APP_HOST/discover); --build serves that terminal build at APP_HOST's name inside
 // the stand-in shell (app-in-shell.mjs harnessRoute), the helper still answered live; --record writes what the run
 // read, so the check's test can replay it through judge().
@@ -33,8 +33,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ROW_FIELDS } from "../../apps/terminal/src/screens/discover/fields.ts";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { consoleLine } from "./console-errors.mjs";
 import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
 
 const KEY = "app-discover-live";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -201,9 +203,9 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
   if (build && !prepare) {
     const { harnessRoute } = await import("./app-in-shell.mjs");
     const harness = await harnessRoute(path.resolve(build), "signed");
-    prepare = (ctx) => ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
+    prepare = (ctx) => liveHelper(ctx, harness);
   }
-  const browser = await launchBrowser("chromium");
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   const rec = { url, at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const w of WIDTHS) {
@@ -333,11 +335,14 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
-    const { ok, lines } = judge(rec);
+    const { ok: judged, lines } = judge(rec);
     for (const l of lines) console.log(l);
+    // a FAIL in a run where the helper missed an answer the page asked for is INCONCLUSIVE (helper-misses.mjs)
+    const miss = helperVerdict(judged ? "PASS" : "FAIL");
+    for (const l of miss.lines) console.log(l);
     console.log(`screenshots: ${rec.shots}`);
-    console.log(`CARD ${KEY} / live: ${ok ? "PASS" : "FAIL"} (Chrome ${rec.browser})`);
-    process.exit(ok ? 0 : 1);
+    console.log(`CARD ${KEY} / live: ${miss.verdict} (Chrome ${rec.browser})`);
+    process.exit(HELPER_EXIT[miss.verdict]);
   } catch (e) {
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);
     process.exit(2);

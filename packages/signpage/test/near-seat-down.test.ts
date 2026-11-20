@@ -7,6 +7,7 @@
 //   node --test test/near-seat-down.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
 import { nearFinal, RheaQuoteRefused } from "../../kit/src/near/rhea.ts";
@@ -27,7 +28,7 @@ const fresh = async () => (await import(new URL(`../../wallet/src/pace.ts?seat-d
 type Seat = "ok" | "deadline" | "busy-once-3s" | "busy" | "503" | "day" | "huge";
 /** The seat's answer by mode: hangs to its deadline, 429 once with Retry-After 3, 429 Retry-After 1 always, or 503. */
 function seatAnswer(mode: Seat, nth: number, signal: AbortSignal | null | undefined): Response | Promise<Response> | null {
-  if (mode === "deadline") return new Promise<Response>((_, no) => signal!.addEventListener("abort", () => no(signal!.reason), { once: true }));
+  if (mode === "deadline") return untilAborted(signal);
   if (mode === "busy-once-3s" && nth === 1) return new Response("{}", { status: 429, headers: { "retry-after": "3" } });
   if (mode === "busy") return new Response("{}", { status: 429, headers: { "retry-after": "1" } });
   if (mode === "503") return new Response(JSON.stringify({ error: { code: "upstream" } }), { status: 503 });
@@ -152,7 +153,7 @@ async function buy(mode: Seat | "share", poolPages = 0, drpcBusy?: readonly [num
         // the helper's per-caller share: RPC_PAGE_NEED near per fixed 10 s window, past it 429 with the seconds left
         const w = Math.floor(t / 10_000);
         if (w !== win) (win = w), (used = 0);
-        if (++used > 30) return refused++, new Response("{}", { status: 429, headers: { "retry-after": String(Math.max(1, Math.ceil(((w + 1) * 10_000 - t) / 1000))) } });
+        if (++used > 90) return refused++, new Response("{}", { status: 429, headers: { "retry-after": String(Math.max(1, Math.ceil(((w + 1) * 10_000 - t) / 1000))) } });
       } else {
         const busy = seatAnswer(mode, asked.seat, init?.signal);
         if (busy !== null) return busy;
@@ -212,17 +213,18 @@ test("a NEAR buy after its payout with the helper's seat at 429 throughout fills
   assert.equal(r.usdcOnW, 0n);
 }));
 
-test("a session's first NEAR buy with the seat up at the helper's per-caller share (30 a 10 s window): its one 429 is waited out on the seat, never the spare, and the buy fills (pace.ts PACE.seat's numbers)", { timeout: 120_000 }, () => onTestClock(async () => {
+test("a session's first NEAR buy with the seat up at the helper's per-caller share (90 a 10 s window): no read is refused, none goes to the spare, and the buy fills (pace.ts PACE.seat's numbers)", { timeout: 120_000 }, () => onTestClock(async () => {
   const r = await buy("share", 6);
   console.log("share:", r.ms, "ms", "refused", r.refused, "most in 10 s", r.most, JSON.stringify(r.asked));
   assert.ok("result" in r.a && r.a.result.stage === "filled", JSON.stringify(r.a));
-  // card near-dcl-route: the buy's first quote also reads the token's own DCL pools once a session (src/near-pools.ts
-  // dclPoolsKept, 4 reads; a token not on DCL asks DCL nothing more): its busiest 10 s meets the share's 429 4 times, not
-  // once, each waited out on the seat, and the buy takes 15.8 s on this clock, not 14.4 s (a5fb2af73: 51 seat reads, 1
-  // refused, 14.4 s). The bounds hold both: a change that adds reads past them fails here.
-  assert.ok(r.refused <= 4, `the helper refused ${r.refused} of ${r.asked.seat}`);
-  assert.ok(r.ms <= 15_800, `the buy took ${r.ms} ms`);
-  assert.equal(r.asked.keyless, 0, "a share's 429 waited out, the seat never taken for down");
+  // card near-seat-pace-fits-one-quote: the page's pace of the seat (30 at once, then 5 a second) lets out at most 80 in
+  // any 10 s, under the helper's share of 90 (apps/helper/src/rpc/rpc.ts RPC_PAGE_NEED near), so the buy's 57 seat reads
+  // meet no 429 and it takes 5.8 s on this clock. Before it (5 at once, the share 30): 4 refused, 15.8 s. The bounds
+  // hold it: a change that adds reads past the share or turns back to the pace's turns fails here.
+  assert.equal(r.refused, 0, `the helper refused ${r.refused} of ${r.asked.seat}`);
+  assert.ok(r.most <= 80, `${r.most} seat reads in 10 s`);
+  assert.ok(r.ms <= 5_800, `the buy took ${r.ms} ms`);
+  assert.equal(r.asked.keyless, 0, "the seat never taken for down");
 }));
 
 test("a NEAR buy after its payout with dRPC at 429 naming 30 s from 3 s to 33 s fills: a long wait is the seat's alone to skip, any other provider's is waited out in its tries (review P3-1 of 997ce7a7f)", { timeout: 300_000 }, () => onTestClock(async () => {

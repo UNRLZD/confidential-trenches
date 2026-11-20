@@ -119,7 +119,7 @@ import {
   type SolanaPoolRelease,
   type SolanaRent,
 } from "../../kit/src/trade/solana/pool-buy.ts";
-import { bestVenuePool, pageReference } from "./page-rpc.ts";
+import { pageReference, solanaBuyVenue } from "./page-rpc.ts";
 import { solanaDecodeLookupTable, type SolanaLookupTable } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX } from "../../kit/src/checks/solana/checks.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
@@ -248,7 +248,7 @@ export type PoolBuyHost = {
   signal?: AbortSignal;
 };
 
-export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "no_table_fits" | "venue_not_built" | "failed" | "down" };
+export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "below_reference" | "no_table_fits" | "venue_not_built" | "failed" | "down" };
 
 /** The helper's busy answer to a send (its 429: rate_limited when a pool provider throttled a read, in_flight when this
  *  caller holds too many sends open, or its per-caller throttle), with the wait its Retry-After names. The send is
@@ -332,7 +332,7 @@ const POOL_DISC = /* @__PURE__ */ new TextEncoder().encode("bfpool01");
 const TREE_LEN = 8 + 1 + 33 * 32;
 const OFF_TREES = 49;
 
-type Code = "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "no_table_fits" | "failed";
+type Code = "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "below_reference" | "no_table_fits" | "failed";
 class Refused extends Error {
   readonly code: Code;
   constructor(code: Code) {
@@ -884,10 +884,13 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // round 1: the pool account's two tree sizes and the reference (the quote's age counts from it, so it is read
       // again each round), with the rent on the first
       const [sizes, ref] = await Promise.all([treeSizes(h, pool, wait), pageReference(h.rpcs, { side: "buy", token, amount: ask.amount }), round === 0 ? rentRead.then((x) => void ((rent = x), (feeCap = solanaPoolFee(x)))) : null]);
-      const best = bestVenuePool(ref);
-      if (!ref || !best) return no("quote_check_failed");
-      // the venue's own tables: a venue the page pins none for is refused as soon as the reference names it, before its
-      // own accounts are read and before the pick, so no note is claimed
+      // the venue (card sol-buy-takes-the-best-venue-it-can-trade): the best pool on a venue the page pins a table for,
+      // held to the best of every venue read (solanaBuyVenue, the decision pool.buy.dry takes too); a reference with no
+      // pinned pool, or one below the market, is refused as soon as the reference is read, before the venue's own
+      // accounts are read and before the pick, so no note is claimed
+      const pick = solanaBuyVenue(ref, new Set(tableReads.keys()), ask.slippageBps);
+      if ("error" in pick) return no(pick.error);
+      const best = pick.pool;
       const kind = best.venue;
       const ownRead = tableReads.get(kind);
       if (ownRead === undefined) return no("venue_not_pinned");
@@ -920,7 +923,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // after the page before it): when the round ends over POOL_BUY_SLOT_STALE_MS after the slot was answered, the
       // blockhash and slot are read again, so a slow or lying provider costs a round, never the quote's age bound
       let slotAt = 0;
-      const timed: readonly [SolanaRpc, SolanaRpc] = [((m: string, q: readonly unknown[]) => h.rpcs[0](m, q).then((x) => ((slotAt = nowMs()), x))) as SolanaRpc, h.rpcs[1]];
+      const timed: readonly [SolanaRpc, SolanaRpc] = [((m: string, q: readonly unknown[], s?: AbortSignal) => h.rpcs[0](m, q, s).then((x) => ((slotAt = nowMs()), x))) as SolanaRpc, h.rpcs[1]];
       const [, venue, first] = await Promise.all([Promise.all(lookups), venueRead, blockhashOf(timed)]);
       const bh = nowMs() - slotAt > POOL_BUY_SLOT_STALE_MS ? await blockhashOf(h.rpcs) : first;
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;

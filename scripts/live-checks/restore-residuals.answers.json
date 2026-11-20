@@ -1,0 +1,22 @@
+{
+ "key": "restore-residuals",
+ "recorded": "2026-11-18T11:16Z: good, facts() over this card's build (node scripts/live-checks/restore-residuals.mjs --site packages/signpage, branch card/restore-residuals); bad, SIGN_HOST as served at 2026-11-18T11:00Z, before the card",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-g4aEiR/Bo6iusQA5Cq+8ZfIQuGt0+Ol9USekuVo8iwdBL/GlwqIMfBYIEKpvyL8o\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-g4aEiR/Bo6iusQA5Cq+8ZfIQuGt0+Ol9USekuVo8iwdBL/GlwqIMfBYIEKpvyL8o",
+  "kept": true,
+  "part": true,
+  "shape": true,
+  "lock": true,
+  "again": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-9zdVRUrbjWKM6PrnlI+5+ozEmNLwcGeoOlOEpV3jDrkI3CU7GEYGQwQrpsDEw+8p\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-9zdVRUrbjWKM6PrnlI+5+ozEmNLwcGeoOlOEpV3jDrkI3CU7GEYGQwQrpsDEw+8p",
+  "kept": false,
+  "part": false,
+  "shape": false,
+  "lock": false,
+  "again": false
+ }
+}

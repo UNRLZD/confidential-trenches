@@ -139,6 +139,7 @@ export interface OneClickChecked {
   amountOut: bigint;
   minAmountOut: bigint;
   withdrawFee: bigint | undefined; // signed: a live answer's only
+  refundFee: bigint | undefined; // signed: a live answer's only, in the origin's base units (D52); undefined when it names none
   unsignedDryWithdrawFee: bigint | undefined; // a dry answer's figure, not signed (SDK 0.1.26 dist/index.mjs:1626-1636)
   deadline: string | undefined; // a live answer's signed deadline
   timeEstimate: unknown; // a live answer's signed timeEstimate as it came (seconds), unchecked; never set for a dry one
@@ -319,13 +320,20 @@ export function oneClickFeeBps(path: OneClickPath, originAsset: string, destinat
 }
 
 // The pinned fee entry: [] on a same-asset quote, else exactly one entry, the collector and the route's fee as read,
-// nothing else set. Returns F.
+// nothing else set, or none at all. Returns F.
+// None at all (card oneclick-answer-names-no-fee-entry): since 17 Nov 2026, between 05:20Z and 22:37Z, 1Click names no
+// fee entry on any quote: every dry quote read 22:39Z answered appFees [], keyed through the helper and keyless, public
+// and advanced (ETH to Base ETH: amountOut 3,998,632,041,603,919 of 4,000,000,000,000,000 on both paths). [] is taken at
+// the route's F from the device's own table, which the floors below keep: appFees is unsigned (D4) and never set them, so
+// a quote that pays less than the table's fee allows is refused "floor" as before. The mode stays held by the echo and
+// the signing page's own keyless ask (pool-deposit-address.ts oneClickHidden); the collector was never signed either.
 function checkAppFees(v: unknown, path: OneClickPath, originAsset: string, destinationAsset: string, collector: string): number {
   const fee = oneClickFeeBps(path, originAsset, destinationAsset);
   if (originAsset === destinationAsset) {
     if (!(Array.isArray(v) && v.length === 0)) fail("app-fees", `appFees ${show(JSON.stringify(v))} on a same-asset quote is not []`);
     return 0;
   }
+  if (Array.isArray(v) && v.length === 0) return fee;
   const e = Array.isArray(v) && v.length === 1 ? v[0] : undefined;
   const ok = isObj(e) && e.recipient === collector && e.fee === fee &&
     Object.keys(e).every((k) => k === "recipient" || k === "fee" || e[k] === null || e[k] === undefined);
@@ -412,7 +420,10 @@ export function checkOneClickQuote(request: OneClickRequest, answer: unknown, op
     pricing: opts.pricing, decimalsIn: opts.decimalsIn, decimalsOut: opts.decimalsOut, intoVault: opts.intoVault });
   if (amountOut < floor.amountOut) fail("floor", `amountOut ${amountOut} is below the device's floor ${floor.amountOut}`);
   if (minAmountOut < floor.minAmountOut) fail("floor", `minAmountOut ${minAmountOut} is below the device's floor ${floor.minAmountOut}`);
-  return { depositAddress, amountIn, amountOut, minAmountOut, withdrawFee: request.dry ? undefined : fee,
+  // what 1Click keeps of a refund (D52): read for the device's refund floor, never taken off a fill, and never a refusal
+  // (none, or no base-unit amount: undefined, and the floor is the whole amountIn)
+  const refundFee = !request.dry && typeof q.refundFee === "string" && UINT.test(q.refundFee) ? BigInt(q.refundFee) : undefined;
+  return { depositAddress, amountIn, amountOut, minAmountOut, withdrawFee: request.dry ? undefined : fee, refundFee,
     unsignedDryWithdrawFee: request.dry ? fee : undefined, deadline, timeEstimate: request.dry ? undefined : q.timeEstimate,
     unsignedDryTimeEstimate: request.dry ? q.timeEstimate : undefined, timestamp: a.timestamp as string };
 }

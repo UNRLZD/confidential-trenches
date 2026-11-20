@@ -10,9 +10,9 @@
 // deep-import gate's copy of packages/ alone (.dependency-cruiser.cjs exit-imports-must-resolve,
 // scripts/ci/deep-import.test.mjs), where scripts/group-run.mjs is not.
 // A stale entry stops the sweep before any run: every text an entry replaces must occur in restore.ts exactly once.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 
 const F = fileURLToPath(new URL("../src/notes/restore.ts", import.meta.url));
 const EXIT = fileURLToPath(new URL("../../exit/", import.meta.url));
@@ -25,7 +25,8 @@ const PICK = [
   "        treeHas(commitment, spend.refundLeafIndex, `spend ${spend.index}'s refund note`);",
   "        put(rref, rP, { value: spend.refundValue, label: spend.refundLabel, commitment, leafIndex: spend.refundLeafIndex }, key);",
 ].join("\n");
-const MOVE = '    asDeposit({ kind: "move", l, j });\n';
+// asDeposit is a generator since the restore's walk yields for the seed: its calls are `yield*`
+const MOVE = '    yield* asDeposit({ kind: "move", l, j });\n';
 // the first leaf on R the pages give: a deposit row on R before the spend row's own refund
 const FIRST_ON_R = [
   "        const d = byP.get(rP);",
@@ -42,7 +43,7 @@ const M = [
   ["a deposit row on rP of the refund's value taken as the refund", [[PICK, SAME_VALUE_ON_R]]],
   ["refund_pending taken as settled, from the leaf on R", [[SETTLED, '      if (spend.status === "settled" || (spend.status === "refund_pending" && byP.has(rP))) {\n'], [PICK, FIRST_ON_R]]],
   ["a refund on a precommitment other than rP taken", [[STOP, ""], [PICK, PICK.replaceAll("rP", "spend.refundPrecommitment")]]],
-  ["a deposit row on R taken as a deposit-kind note", [[MOVE, `    asDeposit(rref);\n${MOVE}`]]],
+  ["a deposit row on R taken as a deposit-kind note", [[MOVE, `    yield* asDeposit(rref);\n${MOVE}`]]],
 ];
 
 const src = readFileSync(F, "utf8");
@@ -54,20 +55,13 @@ for (const [name, reps] of M)
     }
 let killed = 0;
 for (const [name, reps] of M) {
-  writeFileSync(F, reps.reduce((s, [from, to]) => s.replace(from, () => to), src));
-  let r;
-  try {
-    // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
-    r = runSync("node", ["--test", T], { cwd: EXIT, encoding: "utf8", timeoutMs: 180_000 });
-  } finally {
-    writeFileSync(F, src);
-  }
-  const fail = Number((r.stdout.match(/ℹ fail (\d+)/) ?? [])[1] ?? 0);
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const dead = r.status !== 0 && fail > 0;
+  // a run past 180 s is killed, its process group with it; a run with no verdict is refused (scripts/mutant-run.mjs)
+  const r = withPlant(F, reps.reduce((s, [from, to]) => s.replace(from, () => to), src), () => runMutant([T], { cwd: EXIT, timeoutMs: 180_000 }));
+  if (refused(name, r)) continue;
+  const dead = r.verdict === "killed";
   if (dead) killed++;
   const which = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((x) => x[1]).filter((x) => x !== T && !x.startsWith("failing"));
-  console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}${which.length ? `: ${[...new Set(which)].join(" | ")}` : ""}`);
+  console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}${which.length ? `: ${[...new Set(which)].join(" | ")}` : ""}`);
 }
 if (readFileSync(F, "utf8") !== src) throw new Error("restore.ts was not put back");
 console.log(`${killed}/${M.length} killed`);

@@ -7,7 +7,7 @@
 //   - the close control: the app's x icon path and its accessible name "Close";
 //   - the user's own Esc ("Escape");
 //   - the screens the frame must not sit under, as one set ("words", "invalid-code", "withdraw", "pool-withdraw", "held",
-//     "backup"): the frame leaves the document before them (src/frame-cover.ts SEALED);
+//     "backup", "export"): the frame leaves the document before them (src/frame-cover.ts SEALED);
 // and SIGN_HOST's Permissions-Policy denies picture-in-picture and fullscreen (packages/signpage/public/_headers).
 // The script's text holds what the build is; what it does is proven in browsers, not here: the frame kept in the page
 // under the sheet, its messages dropped, close to the same app document, and a typed screen with the frame out, by
@@ -33,7 +33,7 @@ export const SIGN_URL = "https://confidential.unrealized.trade/";
 const Q = "[\"'`]";
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const lit = (s) => new RegExp(`${Q}${esc(s)}${Q}`);
-export const TYPED = ["words", "invalid-code", "withdraw", "pool-withdraw", "held", "backup"];
+export const TYPED = ["words", "invalid-code", "withdraw", "pool-withdraw", "held", "backup", "export"];
 /** Each marker by name, and its test on the script's text. */
 export const MARKS = {
   "sheet scrim": (js) => /sheet=["'`]scrim["'`]/.test(js),

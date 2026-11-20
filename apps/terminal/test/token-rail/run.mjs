@@ -2,22 +2,33 @@
 // The token page's left rail (card app-token-rail), from the built app at / inside the stand-in shell (as
 // test/token-page/run.mjs): APP_HOST the build under its _headers, SIGN_HOST the stand-in shell, HELPER_HOST answered
 // from the recorded lists (test/discover-data, as app-in-shell.mjs's harness) and, for any listed mint, a token read of
-// that list row (as test/token-route/run.mjs). Signed in and signed out, at 1600, 1440, 1280, 1180, 1179 and 1024 x 900:
-//   - the width mode, read off the desktop grid's first track and the rail's own box: the full rail (340 layout px) from
-//     1500 css px, the slim rail (78: the rings and the expand button) from 1180, no rail under it (and no lists read:
-//     / on All reads mihao alone, card mihao-opens-first);
+// that list row (as test/token-route/run.mjs), and /'s chart from mihao's recorded candle read (GeckoTerminal's bars
+// among ours). Signed in and signed out, at 1600, 1440, 1280, 1180, 1060, 1024, 1000 and 900 x 900:
+//   - the width mode, read off the desktop grid's first track and the rail's own box, set by the page's box in layout px
+//     (card app-token-rail-r5-fit: the page is drawn at --fit-zoom, so 1100 css px and up are pages of 1528 layout px
+//     and more): the full rail (340 layout px) wherever it fits uncut (1440 as R5's picture), the slim rail (78: the
+//     rings and the expand button) on the fit zoom's floor (1024 and 1060 css px, pages of 1422 and 1472), no rail on a
+//     page under 1180 (1000 and 900 css px, drawn unzoomed; and no lists read: / on All reads mihao alone, card
+//     mihao-opens-first; there the long symbol ends in its "…" with no rail at all, so only its tiles are held whole);
+//     every width from 1100 to 1920 is sweep.mjs's;
 //   - the full rail's chips as UNRLZD's rail (owner 12 Nov parity): Trending, Watchlist, New, Hot, Graduating (Trending pressed), its rows the Trending column as Discover orders it, each
 //     a link to /token/solana/<mint>, none marked on / (mihao, in no list), the page's own token marked after a hop (aria-current);
 //   - the header's strip whole in every mode (no tile cut, clear of the trade column and the rail: the design's one-row
 //     rule) and its symbol whole, /'s token's a long one (card rail-open-keeps-the-symbol-whole), no horizontal scroll, no text under 11 px, no layout shift from the first paint (CLS 0), no page error;
+//   - the chart's bars landing after the first paint (held until the bottom bar is drawn), and with them CoinGecko's
+//     label, move nothing in the bottom bar: the ranges, the clock and the scale buttons keep their boxes, inside the
+//     bar; the label is drawn once, whole, inside the chart and clear of every control; and no layout shift (card
+//     rail-and-legend-hold-on-r5: run 44451023237's harness answered candles, and the label pushed the clock at 900 and
+//     1000);
 //   - opening / reads the lists once, each chain's once (the rail's read; every
 //     chain's lists since card app-chains-evm-rail, the other chains answered with Solana's recording and so dropped);
 //   - a click on another rail row opens that token's page (its data-token, the frame at /token/solana/<mint>) with the
 //     rail still drawn and no second lists read; New shows the New column and its row opens its token; on the slim rail
-//     (1440 and 1280) the expand button opens the full rail in its own column: the chart's and the orders' left edges
-//     move right by what the rail grew, the rail's box never overlaps them, and it stays open across a hop to its row's
-//     token and a reload; « closes it back to the rings (card rail-open-pushes-the-middle);
-//   - a refresh that lands a new token on top of Trending (signed out, full at 1600 and slim at 1440) shows it in the
+//     (1060 and 1024) the expand button opens the full rail in its own column: the chart's and the orders' left edges
+//     move right by what the rail grew, the rail's box never overlaps them, no tile is cut (the full rail does not fit
+//     there, so the symbol may end in its "…", strip-fit.ts's last resort, its title the full symbol), and it stays open
+//     across a hop to its row's token and a reload; « closes it back to the rings (card rail-open-pushes-the-middle);
+//   - a refresh that lands a new token on top of Trending (signed out, full at 1600 and slim at 1024) shows it in the
 //     first row and moves no row already drawn: each row's element keeps its box, no value is cut, and no element shifts
 //     (text re-aligned inside its own right-aligned cell is named on a NOTE line).
 //   node apps/terminal/test/token-rail/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
@@ -41,11 +52,13 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 // mode: the rail's first grid track in layout px (null: no rail)
 const WIDTHS = [
   { name: "1600", width: 1600, mode: "full", track: 340 },
-  { name: "1440", width: 1440, mode: "slim", track: 78 },
-  { name: "1280", width: 1280, mode: "slim", track: 78 },
-  { name: "1180", width: 1180, mode: "slim", track: 78 },
-  { name: "1179", width: 1179, mode: "hidden", track: null },
-  { name: "1024", width: 1024, mode: "hidden", track: null },
+  { name: "1440", width: 1440, mode: "full", track: 340 },
+  { name: "1280", width: 1280, mode: "full", track: 340 },
+  { name: "1180", width: 1180, mode: "full", track: 340 },
+  { name: "1060", width: 1060, mode: "slim", track: 78 },
+  { name: "1024", width: 1024, mode: "slim", track: 78 },
+  { name: "1000", width: 1000, mode: "hidden", track: null },
+  { name: "900", width: 900, mode: "hidden", track: null },
 ];
 const KINDS = [
   { name: "in", kind: "signed" },
@@ -71,6 +84,8 @@ const openRead = JSON.parse(readFileSync(path.join(APP, "test/token-source/helpe
 // helper too, card nearkat-opens-first's finding), a fault of the fit's own, held apart from this run's layout checks
 const OPEN_ROW = { ...Object.fromEntries(openRead.fields.map((k, i) => [k, openRead.row[i]])), symbol: LONG_SYMBOL };
 const NEW = columnRows(SNAP, "new").map((r) => r.token);
+// mihao's candles as the helper answered them on 18 Nov (its first timeframe; src "chain,geckoterminal": the label shows)
+const CANDLES = JSON.parse(readFileSync(path.join(APP, "test/token-source/helper-candles-mihao-2026-11-19.json"), "utf8")).body;
 // the lists a later read answers: a new token with the most 1h volume (a decimal string, as the helper sends it), so it
 // lands on top of Trending
 const NEW_TOP = "RaiLTop1111111111111111111111111111111111111";
@@ -110,6 +125,11 @@ async function open(browser, route, w, reads, hint) {
       reads.by[c] = (reads.by[c] ?? 0) + 1;
       return r.fulfill(json(200, { ...(reads.topped ? TOPPED : SNAP), as_of_ms: Date.now() }));
     }
+    // /'s candles, held until the run lets them land (reads.release), after the first paint
+    if (u.origin === HELPER && u.pathname === "/v1/market/candles" && u.searchParams.get("chain") === "solana" && u.searchParams.get("token") === OPEN && u.searchParams.get("tf") === CANDLES.tf) {
+      reads.candles++;
+      return reads.held.then(() => r.fulfill(json(200, CANDLES)));
+    }
     if (u.origin === HELPER && u.pathname === "/v1/market/token") {
       const id = u.searchParams.get("token");
       if (u.searchParams.get("chain") === "solana" && id === OPEN) return r.fulfill(json(200, { ...openRead.rest, links: {}, row: { ...OPEN_ROW, as_of_ms: Date.now() } }));
@@ -145,6 +165,20 @@ async function open(browser, route, w, reads, hint) {
   if (!f) throw new Error(`@${w.name}: no APP_HOST frame inside the shell`);
   return { ctx, page, f, errors };
 }
+
+/** The desktop chart's bottom bar: its controls' boxes, CoinGecko's label wherever drawn, the layout shift so far. */
+const readBar = (f) =>
+  f.evaluate(() => {
+    const box = (e) => {
+      const r = e.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height };
+    };
+    const bar = document.querySelector(".tkp-desk .tkp-bottombar");
+    const chart = document.querySelector(".tkp-desk .tkp-chart");
+    const controls = bar ? [...bar.querySelectorAll(".tkp-tf, .tkp-clock, .tkp-csep")].map((e) => ({ k: e.getAttribute("data-testid") ?? e.className, ...box(e) })) : [];
+    const labels = [...document.querySelectorAll('.tkp-desk [data-testid="chart-vendor"]')].filter((e) => e.getClientRects().length).map((e) => ({ inBar: bar?.contains(e) ?? false, text: e.textContent, cut: e.scrollWidth > e.clientWidth + 0.5, ...box(e) }));
+    return { bar: bar ? box(bar) : null, chart: chart ? box(chart) : null, state: chart?.getAttribute("data-chart") ?? null, controls, labels, cls: window.__cls ?? null, src: window.__clsSrc ?? [] };
+  });
 
 const ready = (f, token) => f.waitForSelector(`main[data-route="token"] [data-token-page="ready"]${token ? `[data-token="${token}"]` : ""}`, { timeout: 10_000 }).then(() => true, () => false);
 
@@ -186,6 +220,8 @@ const readPage = (f) =>
       identRight: ident?.right ?? null,
       identInk,
       symCut,
+      sym: sym?.textContent ?? null,
+      symTitle: sym?.getAttribute("title") ?? null,
       tiles: [...document.querySelectorAll(".tkp-desk .tkp-strip > [data-k]")].filter((e) => e.getClientRects().length).map((e) => e.getAttribute("data-k")),
       mainLeft: main?.left ?? null,
       mainRight: main?.right ?? null,
@@ -209,7 +245,9 @@ try {
     for (const w of WIDTHS) {
       n++;
       const tag = `@${w.name} ${k.name}`;
-      const reads = { lists: 0, by: {} };
+      let release;
+      const held = new Promise((r) => (release = r));
+      const reads = { lists: 0, by: {}, candles: 0, held, release };
       // one read of the lists: each chain's once
       const once = () => reads.lists === LIST_CHAINS.length && LIST_CHAINS.every((c) => reads.by[c] === 1);
       const seen = () => JSON.stringify(reads.by);
@@ -223,7 +261,7 @@ try {
       const tracks = p.tracks ? p.tracks.split(" ").length : 0;
       // the mode
       if (w.mode === "hidden") {
-        check(p.railW === null && tracks === 2, `${tag}: a rail under 1180 (rail ${p.railW}, tracks ${p.tracks})`);
+        check(p.railW === null && tracks === 2, `${tag}: a rail on a page under 1180 layout px (rail ${p.railW}, tracks ${p.tracks})`);
         check(reads.lists === 0, `${tag}: lists reads ${seen()} with no rail drawn: / on All reads mihao alone`);
       } else {
         check(tracks === 3 && Math.abs(first - w.track) < 0.5, `${tag}: the rail's track is ${p.tracks}, want ${w.track}px first`);
@@ -249,10 +287,31 @@ try {
       check(p.cut.length === 0, `${tag}: strip tiles cut: ${JSON.stringify(p.cut)}`);
       check(p.stripRight !== null && p.stripRight <= p.tradeLeft + 0.5 && p.stripRight <= p.mainRight + 0.5, `${tag}: the strip runs past the main column (${p.stripRight} > ${p.mainRight}, trade at ${p.tradeLeft})`);
       check(p.stripLeft !== null && p.stripLeft >= p.mainLeft - 0.5 && p.identRight <= p.stripLeft + 0.5, `${tag}: the strip overlaps the identity or leaves the main column (strip ${p.stripLeft}, ident ${p.identRight}, main ${p.mainLeft})`);
-      check(!p.symCut && p.identInk !== null && p.identInk <= p.stripLeft + 0.5, `${tag}: the identity runs under the strip or loses its symbol (content right ${p.identInk}, strip ${p.stripLeft}, symbol cut ${p.symCut}; tiles ${p.tiles.join(" ")})`);
+      // no rail is drawn only on an unzoomed page under 1180 (768 to 1023 css px), whose main column is too narrow for
+      // the long symbol with no rail at all: its "…" there is strip-fit.ts's last resort, the rail's mode no part of it
+      if (w.mode !== "hidden") check(!p.symCut && p.identInk !== null && p.identInk <= p.stripLeft + 0.5, `${tag}: the identity runs under the strip or loses its symbol (content right ${p.identInk}, strip ${p.stripLeft}, symbol cut ${p.symCut}; tiles ${p.tiles.join(" ")})`);
       check(p.scroll <= 0, `${tag}: horizontal scroll ${p.scroll}px`);
       check(p.small.length === 0, `${tag}: text under 11 px: ${JSON.stringify(p.small.slice(0, 4))}`);
       check(p.cls === 0, `${tag}: layout shift ${p.cls} from the first paint, want 0`);
+
+      // the bars land: the bottom bar holds still, CoinGecko's label lands whole, once, clear of every control
+      const b0 = await readBar(f);
+      check(b0.bar !== null && b0.state === "loading" && reads.candles > 0, `${tag}: before the bars: bottom bar ${!!b0.bar}, chart ${b0.state}, candle reads ${reads.candles}`);
+      reads.release();
+      const landed = await f.waitForFunction(() => [...document.querySelectorAll('.tkp-desk [data-testid="chart-vendor"]')].some((e) => e.getClientRects().length), null, { timeout: 10_000 }).then(() => true, () => false);
+      await page.waitForTimeout(400);
+      const b1 = await readBar(f);
+      check(landed && b1.state === "ready", `${tag}: the bars landed: chart ${b1.state}, label drawn ${landed}`);
+      const same = (a, b) => a && b && ["x", "y", "w", "h"].every((q) => Math.abs(a[q] - b[q]) < 0.01);
+      const moved = b0.controls.map((c) => [c, b1.controls.find((d) => d.k === c.k)]).filter(([c, d]) => !same(c, d)).map(([c, d]) => `${c.k} ${Math.round(c.x)},${Math.round(c.y)} ${Math.round(c.w)} -> ${d ? `${Math.round(d.x)},${Math.round(d.y)} ${Math.round(d.w)}` : "gone"}`);
+      check(b0.controls.length === 10 && b1.controls.length === 10 && moved.length === 0, `${tag}: the bars' landing moved the bottom bar's controls: ${moved.join("; ") || `${b0.controls.length} -> ${b1.controls.length} controls`}`);
+      const outside = b1.controls.filter((c) => c.x < b1.bar.x - 0.5 || c.x + c.w > b1.bar.x + b1.bar.w + 0.5).map((c) => c.k);
+      check(outside.length === 0, `${tag}: controls past the bottom bar's edge: ${outside.join(" ")}`);
+      const lb = b1.labels[0];
+      const inChart = lb && lb.x >= b1.chart.x - 0.5 && lb.x + lb.w <= b1.chart.x + b1.chart.w + 0.5 && lb.y >= b1.chart.y - 0.5 && lb.y + lb.h <= b1.chart.y + b1.chart.h + 0.5;
+      const over = lb ? b1.controls.filter((c) => lb.x < c.x + c.w && c.x < lb.x + lb.w && lb.y < c.y + c.h && c.y < lb.y + lb.h).map((c) => c.k) : [];
+      check(b1.labels.length === 1 && lb.text === "Powered by CoinGecko" && !lb.cut && inChart && over.length === 0, `${tag}: CoinGecko's label: ${JSON.stringify(b1.labels)} (want one, whole, inside the chart; over ${over.join(" ") || "none"})`);
+      check(b1.cls === 0, `${tag}: layout shift ${b1.cls} once the bars landed, want 0: ${b1.src.slice(0, 4).join("; ")}`);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `rail-${w.name}-${k.name}.png`) });
 
       // the clicks (signed in: the rail is the same signed out)
@@ -289,7 +348,7 @@ try {
         check(Math.abs(ex.chartLeft - before.chartLeft - grew) < 0.5 && Math.abs(ex.lowerLeft - before.lowerLeft - grew) < 0.5 && Math.abs(ex.mainLeft - before.mainLeft - grew) < 0.5, `${tag}: the chart (${before.chartLeft} -> ${ex.chartLeft}) and the orders (${before.lowerLeft} -> ${ex.lowerLeft}) did not move right by the rail's ${grew}px`);
         check(ex.railRight <= ex.chartLeft + 0.5 && ex.railRight <= ex.lowerLeft + 0.5 && ex.railRight <= ex.mainLeft + 0.5, `${tag}: the open rail (right ${ex.railRight}) overlaps the chart (${ex.chartLeft}) or the orders (${ex.lowerLeft})`);
         check(ex.cut.length === 0 && ex.scroll <= 0 && ex.stripRight <= ex.tradeLeft + 0.5, `${tag}: with the rail open: strip tiles cut ${JSON.stringify(ex.cut)}, scroll ${ex.scroll}, strip ${ex.stripRight} past trade ${ex.tradeLeft}`);
-        check(!ex.symCut && ex.identInk <= ex.stripLeft + 0.5 && ex.tiles[0] === "price", `${tag}: with the rail open the identity runs under the strip or loses its symbol (content right ${ex.identInk}, strip ${ex.stripLeft}, symbol cut ${ex.symCut}; tiles ${ex.tiles.join(" ")})`);
+        check(ex.identRight <= ex.stripLeft + 0.5 && ex.symTitle === ex.sym && ex.tiles[0] === "price", `${tag}: with the rail open the identity runs under the strip or its symbol's title is not the full symbol (identity right ${ex.identRight}, strip ${ex.stripLeft}, title ${ex.symTitle} for ${ex.sym}; tiles ${ex.tiles.join(" ")})`);
         check(JSON.stringify(ex.chips) === JSON.stringify(["Trending:true", "Watchlist:false", "New:false", "Hot:false", "Graduating:false"]) && ex.rows.every((r) => r.sym), `${tag}: the expanded rail: chips ${JSON.stringify(ex.chips)}, rows with text ${ex.rows.filter((r) => r.sym).length}/${ex.rows.length}`);
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `rail-${w.name}-expanded.png`) });
         const next = TRENDING[2];
@@ -308,8 +367,10 @@ try {
         check(shut.open === "false" && Math.abs(shut.railW - 78) <= 1 && Math.abs(shut.chartLeft - before.chartLeft) < 0.5, `${tag}: « left the rail ${shut.railW} wide (open ${shut.open}), chart at ${shut.chartLeft} (closed ${before.chartLeft}): want the rings and the chart back`);
       }
       // a refresh lands a token on top: it is drawn in the first row, and no drawn row moves
-      if (k.name === "out" && (w.name === "1600" || w.name === "1440")) {
+      if (k.name === "out" && (w.name === "1600" || w.name === "1024")) {
         const rowsSel = '.tkp-desk [data-testid="token-rail"] [role="listitem"]';
+        // the refresh's own shifts: counted from here
+        await f.evaluate(() => ((window.__cls = 0), (window.__clsSrc = [])));
         const before = await f.evaluate((sel) => [...document.querySelectorAll(sel)].map((e, i) => {
           e.__slot = i;
           const b = e.getBoundingClientRect();
@@ -330,11 +391,9 @@ try {
         const moved = after.kept.filter(([i, b]) => b.some((x, j) => Math.abs(x - before[i][j]) > 0.5));
         check(after.kept.length === before.length && moved.length === 0, `${tag}: the refresh moved drawn rows: ${after.kept.length}/${before.length} kept, ${moved.length} moved (${moved.slice(0, 3).map(([i, b]) => `row ${i} y ${before[i][1].toFixed(1)} -> ${b[1].toFixed(1)}`).join(", ")})`);
         check(after.cut.length === 0, `${tag}: rail values cut by the right column's width: ${JSON.stringify(after.cut.slice(0, 4))}`);
-        // no element moved: a shift's sources may only be text re-aligned inside its own fixed cell (R5 right-aligns the MC
-        // and change lines, so a value of another length starts elsewhere in its cell; Chrome counts that text)
-        const boxes = after.src.filter((x) => !x.startsWith("#text"));
-        check(boxes.length === 0, `${tag}: the refresh shifted ${boxes.length} element(s): ${boxes.slice(0, 6).join(" | ")}`);
-        if (after.cls) notes.push(`${tag}: text re-aligned in its cell after the refresh, layout shift ${after.cls.toExponential(1)}`);
+        // nothing moved, text included: R5 right-aligns the MC and change lines, and a value of another length is new text
+        // in its cell, never text moved in it (card rail-and-legend-hold-on-r5; release 178 counted that text as a shift)
+        check(after.src.length === 0 && !after.cls, `${tag}: the refresh shifted ${after.src.length} source(s), layout shift ${after.cls ?? 0}: ${after.src.slice(0, 6).join(" | ")}`);
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `rail-${w.name}-refresh.png`) });
       }
       check(errors.length === 0, `${tag}: page errors ${errors.join(" | ")}`);
@@ -352,4 +411,4 @@ if (fails.length) {
   process.exit(1);
 }
 for (const x of notes) console.log(`NOTE ${x}`);
-console.log(`PASS ${n} views (1600, 1440, 1280, 1180, 1179, 1024; signed in and out) from the built app at / inside the stand-in shell, Trending ${TRENDING.length} and New ${NEW.length} rows${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${n} views (1600, 1440, 1280, 1180, 1060, 1024, 1000, 900; signed in and out; the bars and CoinGecko's label landing after the first paint moved nothing) from the built app at / inside the stand-in shell, Trending ${TRENDING.length} and New ${NEW.length} rows${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

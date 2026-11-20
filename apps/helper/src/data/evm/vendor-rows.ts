@@ -26,6 +26,13 @@
 // token with the PoolManager settled, no ModifyLiquidity or Donate sender (a take sent straight to its recipient). A buy
 // gets at most the pool's amount and a sell pays at least it; with no such settlement read the pool's amount stands, as
 // it does on the chain tape for a pool with no hook.
+//
+// A swap its pool's own hook sent is no one's trade, whatever its hook can do to a swapper's amounts (card
+// helper-v4-hook-trade-is-what-its-trader-paid: Base tx 0xb4503a57, the trader's router sold 1,548.21 of coin 0x5084b942
+// in pool 0x27363f20 (Swap log 95), then the pool's hook 0x0469a4bd, which sets beforeSwap and afterSwap and no return
+// delta, sold 12.39 of its fees there (Swap log 98); GeckoTerminal served both under the trader, and the 12.39 row was
+// served from log 98's leg). The receipt names no pool's hook, so swaps.ts provenHooks proves it by the hash: a key with
+// the swap's sender as its hook hashes to the swap's pool id. A row printed from such a swap's leg is never served.
 
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { traderAt, txTraders, type Traders } from "./index.ts";
@@ -41,20 +48,29 @@ const low = (v: unknown): string | null => (typeof v === "string" ? v.toLowerCas
 
 /** What a receipt says about one token: the transaction's traders and each move of the token with its log index
  *  (`tier` 1 a Transfer of the token, 2 a v4 Swap leg (`swap`) or an ERC-6909 claim of it), the raw value as decimal
- *  text; and the v4 PoolManager's side of it: each Swap log's sender (`swaps`), the token each address got from the
- *  PoolManager less what it paid in, as Transfers and claims (`net`, raw signed decimal text), and the senders of its
- *  ModifyLiquidity and Donate logs (`callers`). */
+ *  text; and the v4 PoolManager's side of it: each Swap log's sender, pool id and fee (`swaps`; `hook` once swaps.ts
+ *  provenHooks proved the sender its pool's hook), the token each address got from the PoolManager less what it paid
+ *  in, as Transfers and claims (`net`, raw signed decimal text), the senders of its ModifyLiquidity and Donate logs
+ *  (`callers`) with their pools (`calls`); and the contracts that logged an ERC-20 Transfer, in log order, each once
+ *  (`currencies`: what a pool key may hold besides native ETH). */
 export type Facts = {
   traders: Traders;
   moves: { index: number; raw: string; tier: 1 | 2; from?: string; to?: string; swap?: true }[];
-  swaps?: { index: number; sender: string }[];
+  swaps?: { index: number; sender: string; pool?: string; fee?: number; hook?: true }[];
   net?: [string, string][];
   callers?: string[];
+  calls?: { pool: string; sender: string }[];
+  currencies?: string[];
+  /** With `pool` named (receiptFacts): the pool's own legs (card helper-vendor-tapes-refresh-inside-15s), signed raw
+   *  decimal text, into the pool positive. A pair's (a 20-byte pool): each ERC-20 it got and what it sent, by token
+   *  ([token, in, out]: a pair pays its fee out of the leg it took in, Aerodrome's to its fees contract).
+   *  A v4 pool's (a 32-byte id): each of its Swap logs' two amounts, the swapper's side (positive, what it got). */
+  legs?: { pool: string; pair?: [string, string, string][]; v4?: { index: number; a: [string, string] }[] };
 };
 
 /** The facts of `token` in a receipt (eth_getTransactionReceipt's answer, hostile), or null for a malformed one, one of
  *  another transaction, or a reverted one. `poolManager`: the chain's v4 PoolManager. */
-export function receiptFacts(receipt: unknown, tx: string, token: string, poolManager: string): Facts | null {
+export function receiptFacts(receipt: unknown, tx: string, token: string, poolManager: string, pool?: string): Facts | null {
   if (typeof receipt !== "object" || receipt === null || Array.isArray(receipt)) return null;
   const r = receipt as Record<string, unknown>;
   if (low(r.transactionHash) !== tx || r.status !== "0x1" || !Array.isArray(r.logs)) return null;
@@ -62,10 +78,14 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
   if (traders === null) return null;
   const tokenWord = `0x${token.slice(2).padStart(64, "0")}`;
   const moves: Facts["moves"] = [];
-  const swaps: { index: number; sender: string }[] = [];
+  const swaps: NonNullable<Facts["swaps"]> = [];
   const net = new Map<string, bigint>();
   const callers = new Set<string>();
+  const calls: { pool: string; sender: string }[] = [];
+  const currencies = new Set<string>();
   const credit = (a: string, v: bigint) => net.set(a, (net.get(a) ?? 0n) + v);
+  const pair = pool !== undefined && /^0x[0-9a-f]{40}$/.test(pool) ? new Map<string, [bigint, bigint]>() : null;
+  const v4: { index: number; a: [string, string] }[] = [];
   for (const raw of r.logs as unknown[]) {
     const l = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
     const index = typeof l.logIndex === "string" && /^0x[0-9a-f]{1,8}$/i.test(l.logIndex) ? parseInt(l.logIndex, 16) : null;
@@ -76,6 +96,15 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
     const words = (data.length - 2) / 64;
     const word = (i: number): bigint => BigInt(`0x${data.slice(2 + 64 * i, 2 + 64 * (i + 1))}`);
     const holder = (t: string | null | undefined): string | null => (t != null && /^0x0{24}[0-9a-f]{40}$/.test(t) ? `0x${t.slice(26)}` : null);
+    if (address !== null && /^0x[0-9a-f]{40}$/.test(address) && topics[0] === TRANSFER && topics.length === 3 && words === 1) {
+      currencies.add(address);
+      const [from, to] = [holder(topics[1]), holder(topics[2])];
+      if (pair !== null && from !== to && (from === pool || to === pool)) {
+        const io = pair.get(address) ?? [0n, 0n];
+        io[to === pool ? 0 : 1] += word(0);
+        pair.set(address, io);
+      }
+    }
     if (address === token && topics[0] === TRANSFER && topics.length === 3 && words === 1) {
       const [from, to] = [holder(topics[1]), holder(topics[2])];
       if (from === null || to === null) return null;
@@ -85,8 +114,10 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
     }
     else if (address === poolManager && topics[0] === SWAP4 && topics.length === 3 && words === 6) {
       const sender = holder(topics[2]);
-      if (sender === null) return null;
-      swaps.push({ index, sender });
+      // the pool's id and the swap's fee (a uint24): what provenHooks hashes a key against
+      if (sender === null || !/^0x[0-9a-f]{64}$/.test(topics[1] ?? "") || word(5) >= 1n << 24n) return null;
+      swaps.push({ index, sender, pool: topics[1]!, fee: Number(word(5)) });
+      if (topics[1] === pool) v4.push({ index, a: [BigInt.asIntN(128, word(0)).toString(), BigInt.asIntN(128, word(1)).toString()] });
       // the swap's two legs, int128 each: either may be the token's
       for (const w of [word(0), word(1)]) {
         const v = BigInt.asIntN(128, w);
@@ -101,9 +132,11 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
     } else if (address === poolManager && (topics[0] === MODIFY_LIQUIDITY || topics[0] === DONATE) && topics.length === 3) {
       const sender = holder(topics[2]);
       if (sender !== null) callers.add(sender);
+      if (sender !== null && /^0x[0-9a-f]{64}$/.test(topics[1] ?? "")) calls.push({ pool: topics[1]!, sender });
     }
   }
-  return { traders, moves, swaps, net: [...net].map(([a, v]) => [a, v.toString()]), callers: [...callers] };
+  const legs = pool === undefined ? {} : { legs: pair !== null ? { pool, pair: [...pair].map(([a, [i, o]]): [string, string, string] => [a, i.toString(), o.toString()]) } : { pool, v4 } };
+  return { traders, moves, swaps, net: [...net].map(([a, v]) => [a, v.toString()]), callers: [...callers], calls, currencies: [...currencies], ...legs };
 }
 
 /** A vendor's decimal amount in the token's smallest units (its digits past `decimals` dropped), or null when it is no
@@ -128,6 +161,9 @@ function fixed(raw: bigint, decimals: number): string {
 export function exactRow(side: "b" | "s", amt: string, decimals: number, f: Facts): { amt: string; trader: string | null } | null {
   const want = vendorUnits(amt, decimals);
   if (want === null) return null;
+  // a row printed from a swap its pool's own hook sent (provenHooks) is no one's trade, however the hook settled it
+  const own = new Set((f.swaps ?? []).filter((s) => s.hook).map((s) => s.index));
+  if (f.moves.some((m) => m.swap && own.has(m.index) && near(BigInt(m.raw), want))) return null;
   for (const tier of [1, 2] as const) {
     const hits = f.moves.filter((m) => m.tier === tier && near(BigInt(m.raw), want));
     const values = new Set(hits.map((m) => m.raw));

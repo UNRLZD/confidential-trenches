@@ -4,6 +4,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { ADDRESS, H72, NOW, COLLECTOR, mockKey, signAnswer, type Answer } from "./oneclick-mock.ts";
 
 const { oneClickFloors } = await import("../../kit/src/checks/oneclick.ts");
@@ -48,12 +49,18 @@ function answerFor(req: Record<string, string | number | boolean>, decimalsOut: 
   return a;
 }
 
-function world(o: { records?: Record<string, unknown>; status?: unknown; status_code?: number; throws?: boolean; change?: (a: Answer) => void; checked?: boolean; priced?: boolean; moveAfter?: boolean; network?: "mainnet" | "testnet"; floor?: bigint | null | "throws" | "none"; noLiquidity?: number } = {}) {
+function world(o: { quoted?: "throws"; records?: Record<string, unknown>; status?: unknown; status_code?: number; throws?: boolean; change?: (a: Answer) => void; checked?: boolean; priced?: boolean; moveAfter?: boolean; network?: "mainnet" | "testnet"; floor?: bigint | null | "throws" | "none"; noLiquidity?: number } = {}) {
   const sent: Record<string, string | number | boolean>[] = [];
   const took: unknown[] = [];
+  // each mark (card restore-shows-a-note-on-a-planned-index), with the 1Click asks sent before it
+  const marks: { scope: bigint; index: number; sentBefore: number }[] = [];
   let reads = 0;
   const records = { ...RECORDS, ...(o.records ?? {}) };
   const deps: Deps = {
+    quoted: async (scope, index) => {
+      if (o.quoted === "throws") throw new Error("deposit index TAKEN");
+      marks.push({ scope, index, sentBefore: sent.length });
+    },
     pools: () => POOLS,
     network: o.network ?? "mainnet",
     read: async (scope) => {
@@ -79,7 +86,7 @@ function world(o: { records?: Record<string, unknown>; status?: unknown; status_
       return new Response(JSON.stringify(a), { status: 201, headers: { "content-type": "application/json" } });
     }) as typeof fetch,
   };
-  return { deps, sent, took };
+  return { deps, sent, took, marks };
 }
 function ask(w: ReturnType<typeof world>, params: Record<string, unknown>, id: string | null = "op-1"): Promise<object | null> {
   const d = poolAddressHost(w.deps)(params, id === null ? undefined : { id });
@@ -123,11 +130,40 @@ test("from another chain: a quote to U_X, its refund under U_{s,i}'s id, checked
   assert.equal(w.sent[0]!.recipient, SOL_U);
   assert.equal(w.sent[0]!.refundTo, SOL_ID);
   assert.equal(w.sent[0]!.refundType, "INTENTS");
-  assert.deepEqual((w.took[0] as { u: unknown }).u, { scope: SOL_S, index: 3, wallet: SOL_U, refundId: SOL_ID });
+  // the quote's lowest refund rides with the op (card refunded-needs-the-refund): amountIn less its signed refundFee
+  assert.deepEqual((w.took[0] as { u: unknown }).u, { scope: SOL_S, index: 3, wallet: SOL_U, refundId: SOL_ID, refund_min: "25000000" });
+  const fee = world({ change: (a) => { a.quote.refundFee = "300000"; } });
+  await ask(fee, { chain: "solana", origin_asset: BASE_USDC, amount: "25" });
+  assert.equal((fee.took[0] as { u: { refund_min: string } }).u.refund_min, "24700000");
   const b = world();
   await ask(b, { chain: "base", origin_asset: BASE_USDC, amount: "25" });
   assert.equal(b.sent[0]!.recipient, BASE_U);
   assert.equal(b.sent[0]!.refundTo, BASE_ID, "an EVM pool's refund is the ed25519 id, never the 0x");
+});
+
+test("Q2 (card restore-shows-a-note-on-a-planned-index): U_X's index is marked quoted before U_X, a plain send or a 1Click ask leaves; a mark refused sends nothing", async () => {
+  // the address alone: marked, then shown
+  const a = world();
+  assert.deepEqual(await ask(a, { chain: "solana" }), { result: { chain: "solana", address: SOL_U, asset: "SOL" } });
+  assert.deepEqual(a.marks, [{ scope: SOL_S, index: 3, sentBefore: 0 }]);
+  // a 1Click quote: marked before its ask left
+  const q = world();
+  const got = await ask(q, { chain: "base", origin_asset: BASE_USDC, amount: "25" });
+  assert.ok(got !== null && "result" in got, JSON.stringify(got));
+  assert.deepEqual(q.marks, [{ scope: BASE_S, index: 4, sentBefore: 0 }]);
+  assert.equal(q.sent.length, 1);
+  // the pool's own coin, a plain send to U_X: marked before its quote is answered
+  const p = world();
+  const plain = await ask(p, { chain: "solana", origin_asset: "nep141:sol.omft.near", amount: "25" });
+  assert.ok(plain !== null && "result" in plain, JSON.stringify(plain));
+  assert.deepEqual(p.marks, [{ scope: SOL_S, index: 3, sentBefore: 0 }]);
+  // a mark refused (the index TAKEN since the record was read): down, no address, no ask, nothing to the follow
+  for (const params of [{ chain: "solana" }, { chain: "base", origin_asset: BASE_USDC, amount: "25" }, { chain: "solana", origin_asset: "nep141:sol.omft.near", amount: "25" }]) {
+    const x = world({ quoted: "throws" });
+    assert.deepEqual(await ask(x, params), { error: "down" }, JSON.stringify(params));
+    assert.equal(x.sent.length, 0);
+    assert.equal(x.took.length, 0);
+  }
 });
 
 test("an answer whose recipient or refund is not U_X: quote_check_failed, nothing handed to the follow", async () => {
@@ -408,6 +444,7 @@ test("card pool-usd-price-never-stale, review P1: the quote is checked at the pr
     const ages: number[] = [];
     const took: unknown[] = [];
     const deps: Deps = {
+      quoted: async () => {},
       pools: () => [{ chain: "solana", scope: SOL_S }],
       network: "mainnet",
       read: async () => ({ status: STATUS, deposit: RECORDS[SOL_S.toString()] }) as never,
@@ -611,7 +648,7 @@ test("a sign out while the Move's keyless tell is in flight: the tell's read is 
   const hidden = (_address: string, signal?: AbortSignal) =>
     new Promise<"hidden">((_ok, no) => {
       told = signal;
-      signal?.addEventListener("abort", () => no(signal.reason), { once: true });
+      untilAborted(signal).catch(no);
     });
   const d = poolAddressHost({ ...w.deps, stop: page.stopped, confidential: true, hidden })({ chain: "base", origin_asset: BASE_USDC, amount: "25" }, { id: "mv-4/pool" });
   while (told === undefined) await new Promise((ok) => setImmediate(ok));

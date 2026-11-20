@@ -1,0 +1,40 @@
+{
+ "_note": "bad: SIGN_HOST as deployed, read 2026-11-18T15:47:43Z (before this card: its /app.js holds neither mainnet v3 factory pin; the quoters read on mainnet). good: this tree's build (packages/signpage/scripts/build-app.mjs --out, --site) on card/robinhood-tap-asks-no-missing-v3-tier, read 2026-11-18T15:47:29Z, with each quoter's factory() read on two providers; re-recorded from SIGN_HOST once this card is deployed.",
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-hshkiLW4uPP4mStJ37C/3baBHFHluzcJLju4C/v3Z7YVcrtUI3J1aoCEyCcCyOeG\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-hshkiLW4uPP4mStJ37C/3baBHFHluzcJLju4C/v3Z7YVcrtUI3J1aoCEyCcCyOeG",
+   "markers": []
+  },
+  "factories": {
+   "base": [
+    "0x33128a8fc17869897dce68ed026d694621f6fdfd",
+    "0x33128a8fc17869897dce68ed026d694621f6fdfd"
+   ],
+   "robinhood": [
+    "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+    "0x1f7d7550b1b028f7571e69a784071f0205fd2efa"
+   ]
+  }
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MoRXvooMzO0NVpDES/FQ6IuNeARC/+IFUu+/sYDGqZj06q5rLre67Y5oRq3a+UkN\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-MoRXvooMzO0NVpDES/FQ6IuNeARC/+IFUu+/sYDGqZj06q5rLre67Y5oRq3a+UkN",
+   "markers": [
+    "33128a8fc17869897dce68ed026d694621f6fdfd",
+    "1f7d7550b1b028f7571e69a784071f0205fd2efa"
+   ]
+  },
+  "factories": {
+   "base": [
+    "0x33128a8fc17869897dce68ed026d694621f6fdfd",
+    "0x33128a8fc17869897dce68ed026d694621f6fdfd"
+   ],
+   "robinhood": [
+    "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+    "0x1f7d7550b1b028f7571e69a784071f0205fd2efa"
+   ]
+  }
+ }
+}

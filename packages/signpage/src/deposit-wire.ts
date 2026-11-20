@@ -8,6 +8,9 @@
 //   (state-no-seed-read.test.ts), in the shell and in the frame alike.
 // - So the deposit index is recorded before any address is shown: no answer carries an address for a U the store has
 //   not recorded, and every quote names that same index until money reaches it (W:355-358).
+// - Before a quote naming U leaves the device, U's index is marked quoted in the note store (`quoted`, the wallet's
+//   markQuoted, card restore-shows-a-note-on-a-planned-index), so a restore that reads U as used never marks it dead;
+//   a mark refused or failed answers down, nothing sent.
 // - The answer is a Deferred (./api.ts): the helper's round trip takes up to DEPOSIT_QUOTE_TIMEOUT_MS. Its codes are the
 //   rule's: ok, above_max, busy, down, quote_check_failed, not_allowed (not_available for any other helper status).
 //   busy and down are not kept for the id (./api.ts RETRY_CODES), so the same request again runs again. A read here
@@ -38,6 +41,9 @@ export interface DepositWireDeps {
   read(scope: bigint): Promise<DepositPublic | null>;
   /** Settles once the top-level page's naming of U in flight is done (src/main.ts); the frame names nothing. */
   named?(): Promise<unknown>;
+  /** Marks deposit index `index` of `scope` quoted in the note store, under the seed lock (the wallet's markQuoted),
+   *  before a quote naming U leaves the device; a throw answers down, nothing sent. */
+  quoted(scope: bigint, index: number): Promise<void>;
   priced?: DepositQuoteKindContext["priced"];
   /** A Move's host (card move-one-confidential-swap): every quote confidential, held to 1Click's keyless tell. */
   confidential?: true;
@@ -51,7 +57,7 @@ export interface DepositWireDeps {
    * deposit record the rule checked it under, never a fresh read. A throw answers "down", so no address goes out
    * that nothing follows.
    */
-  checked(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string; refund_to?: string }): Promise<void>;
+  checked(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string; refund_to?: string; refund_min?: string }): Promise<void>;
   /**
    * A host whose quotes a device wallet pays (card refunds-land-on-the-devices-own-wallet: pool to Cash, a leftover's
    * carry): U_{scope,index}'s own address on `chain`, derived on the device (base58 of the id's key on Solana, U^evm on
@@ -90,6 +96,10 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       const before = usable(await deps.read(scope), scope);
       if (stopped()) return void (out = { error: "not_allowed" });
       if (!before) return;
+      // U's index marked quoted before a quote naming U leaves the device (card restore-shows-a-note-on-a-planned-index):
+      // a restore then never marks that index dead. A mark refused (the index TAKEN) or failed answers down, nothing sent
+      await deps.quoted(scope, before.deposit.index);
+      if (stopped()) return void (out = { error: "not_allowed" });
       // a pool coin a device wallet pays: its refund back on its own chain, at U's own address there
       const coin = deps.refund === undefined ? null : poolCoinChain(params.origin_asset);
       let refund: OriginRefund | undefined;
@@ -115,7 +125,9 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       if (!now || !same(now.deposit, before.deposit)) return;
       // no request id, no follow: no address goes out
       if (ctx === undefined) return;
-      await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id, ...(refund === undefined ? {} : { refund_to: refund.to }) });
+      // the quote's lowest refund rides with the op, never in the answer: refunded counts only at or over it (card
+      // refunded-needs-the-refund)
+      await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id, ...(refund === undefined ? {} : { refund_to: refund.to }), refund_min: got.refund_min });
       if (stopped()) return void (out = { error: "not_allowed" });
       out = { result: got.result };
     })().catch(() => {

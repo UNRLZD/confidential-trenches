@@ -41,6 +41,8 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   fails((a) => { a.pairs[0].status = 429; }, /answered HTTP 429/);
   fails((a) => { a.pairs[1].mode = "public"; }, /not a confidential quote/);
   fails((a) => { a.pairs[2].collector = "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd"; }, /not a confidential quote/);
+  fails((a) => { a.pairs[2].collector = null; a.pairs[2].entries = 2; }, /not a confidential quote/);
+  fails((a) => { a.pairs[2].collector = null; a.pairs[2].entries = 0; a.pairs[2].mode = "public"; }, /not a confidential quote/);
   fails((a) => { a.pairs[3].out = null; }, /not a confidential quote/);
   fails((a) => { a.tell.hidden = { status: 200, message: null, state: "PENDING_DEPOSIT" }; }, /no longer answers not found/);
   fails((a) => { a.tell.hidden.message = "Deposit address X not found"; }, /no longer answers not found/);
@@ -51,8 +53,17 @@ test("facts() and pairOf() read the marks and the answers as minified and as 1Cl
   const js = `x=\`${CONF_COLLECTOR}\`;y={confidentiality:\`advanced\`};z=\`https://1click.chaindefuser.com/v0/status\``;
   assert.deepEqual(facts("", js).marks, ["collector", "mode", "tell"]);
   assert.deepEqual(facts("", js.replace("advanced", "public")).marks, ["collector", "tell"]);
-  assert.deepEqual(pairOf("a>b", 201, { quoteRequest: { confidentiality: "advanced", appFees: [{ recipient: CONF_COLLECTOR, fee: 20 }] }, quote: { amountOut: "5" } }), { pair: "a>b", status: 201, mode: "advanced", collector: CONF_COLLECTOR, out: "5" });
-  assert.deepEqual(pairOf("a>b", 401, { message: "User authentication is required for confidential intent quotes" }), { pair: "a>b", status: 401, mode: null, collector: null, out: null });
+  assert.deepEqual(pairOf("a>b", 201, { quoteRequest: { confidentiality: "advanced", appFees: [{ recipient: CONF_COLLECTOR, fee: 20 }] }, quote: { amountOut: "5" } }), { pair: "a>b", status: 201, mode: "advanced", collector: CONF_COLLECTOR, entries: 1, out: "5" });
+  assert.deepEqual(pairOf("a>b", 201, { quoteRequest: { confidentiality: "advanced", appFees: [] }, quote: { amountOut: "5" } }), { pair: "a>b", status: 201, mode: "advanced", collector: null, entries: 0, out: "5" });
+  assert.deepEqual(pairOf("a>b", 401, { message: "User authentication is required for confidential intent quotes" }), { pair: "a>b", status: 401, mode: null, collector: null, entries: null, out: null });
   assert.equal(PAIRS.length, 12);
   assert.equal(HIDDEN.length, 44);
+});
+
+// card oneclick-answer-names-no-fee-entry: since 17 Nov 2026 1Click names no fee entry on any quote (read 22:39Z)
+test("an advanced answer that names no fee entry passes on every pair", () => {
+  const a = clone(ANSWERS.good);
+  for (const p of a.pairs) { p.collector = null; p.entries = 0; }
+  const v = judge(a);
+  assert.equal(v.ok, true, v.lines.join("\n"));
 });

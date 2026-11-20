@@ -7,7 +7,7 @@
 // is never asked and stays in Cash; Max is what those parts can move, Cash less a fee a part.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cashMover, cashMoveCost, cashMoveMost, cashUsdcFor, moveCostOf, planCashMove, readOneClickLeast, solanaMoveModel, withCash, type CashMoverDeps, type CashNote, type CashQuote } from "../src/cash-to-pool.ts";
+import { cashMover, cashMoveCost, cashMoveMost, cashUsdcFor, moveCostOf, planCashMove, solanaMoveModel, withCash, type CashMoverDeps, type CashNote, type CashQuote } from "../src/cash-to-pool.ts";
 
 const PRICE = { price: "8000000000", expo: -8 }; // SOL at 80 USD
 const FEE = 50_000n; // the relay fee, 0.05 USDC
@@ -103,19 +103,5 @@ test("a note too small for a part is never asked: under the pool's quote floor o
   assert.equal(cashMoveMost([{ id: "f", value: FEE + 150_000n }], FEE, solanaMoveModel(PRICE, FLOOR, 0n)), 0n);
 });
 
-test("1Click's least is read live from its refusal of one unit, never kept in the code; an answer that names none is no read", async () => {
-  const answer = (status: number, body: unknown): typeof fetch => (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
-  // recorded 15 Nov 13:0xZ on the helper's 1Click proxy: into SOL, into Robinhood's ETH, into Base's ETH
-  assert.equal(await readOneClickLeast("solana", answer(400, { message: "Amount is too low for bridge, try at least 75621" }), 0), 75_621n);
-  assert.equal(await readOneClickLeast("robinhood", answer(400, { message: "Amount is too low for bridge, try at least 18533" }), 0), 18_533n);
-  assert.equal(await readOneClickLeast("base", answer(400, { message: "Failed to get quote" }), 0), null);
-  assert.equal(await readOneClickLeast("solana", (async () => { throw new Error("down"); }) as unknown as typeof fetch, 0), null);
-  // what the read asks: a dry quote of one unit of Cash's USDC, naming no account of the user's
-  let sent: Record<string, unknown> = {};
-  await readOneClickLeast("solana", (async (_u: unknown, init: RequestInit) => ((sent = JSON.parse(String(init.body))), new Response("{}", { status: 400 }))) as unknown as typeof fetch, 0);
-  assert.equal(sent.dry, true);
-  assert.equal(sent.amount, "1");
-  assert.equal(sent.destinationAsset, "nep141:sol.omft.near");
-  // 1Click refuses Solana's system program as a recipient ("recipient is not valid", 15 Nov 12:49Z), which names no least
-  assert.equal(sent.recipient, "So11111111111111111111111111111111111111112");
-});
+// 1Click's least read (readOneClickLeast) is test/cash-to-pool-least-signed.test.ts's (card cash-to-pool-least-signed):
+// its answers are signed there, by a key that file's process alone trusts, as the least is set only by a signed quote.

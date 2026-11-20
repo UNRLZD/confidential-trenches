@@ -79,6 +79,9 @@ export type HandoffPage = {
 /** Tests only: the network and its reads. */
 export type HandoffOver = {
   network?: NearNetwork;
+  /** A dry's fee (card near-quote-inside-the-kpi): the device's fee cap read within this many ms is taken again, not
+   *  read anew (FEE_CAP_DRY_KEPT_MS). Never given on a withdrawal or a buy: those read their own cap before any proof. */
+  capKeptMs?: number;
   rpcs?: readonly [RelayRpc, RelayRpc];
   priceRpcs?: readonly [RelayRpc, RelayRpc];
   fetchFn?: typeof fetch;
@@ -164,6 +167,27 @@ const waitSignal = (page: HandoffPage, over: HandoffOver): AbortSignal => {
 };
 
 /**
+ * The fee cap a dry may take again (card near-quote-inside-the-kpi): fee_max (wallet withdraw/feemax.ts) from the gas
+ * price and the NEAR/USDC price pool at one block, about 4 reads of each provider. A dry (pool.buy.dry on NEAR) only
+ * shows what a buy would cost and signs nothing; it uses the cap to refuse a relayer fee above it before drawing that
+ * cost. The withdrawal a buy makes reads its own cap before its proof (this file's fee with no capKeptMs), so a kept cap
+ * never caps what the user pays. [design: 60 s: a minute of gas price and NEAR price moves fee_max by far less than its
+ * margins (G_cap at 1.5x the gas, S_cap at twice the storage); one cap read a minute, not one an ask.]
+ */
+export const FEE_CAP_DRY_KEPT_MS = 60_000;
+const CAPS_KEPT = new Map<string, { at: number; cap: Promise<bigint> }>();
+function keptCap(network: NearNetwork, ms: number, read: () => Promise<bigint>): Promise<bigint> {
+  const was = CAPS_KEPT.get(network);
+  if (was !== undefined && performance.now() - was.at < ms) return was.cap;
+  const cap = read();
+  const entry = { at: performance.now(), cap };
+  CAPS_KEPT.set(network, entry);
+  // a read that failed is not kept
+  cap.catch(() => CAPS_KEPT.get(network) === entry && CAPS_KEPT.delete(network));
+  return cap;
+}
+
+/**
  * The form's reads on the build's network, and the hand-off wherever the release names a vault and a relayer
  * (withdrawHandoff; elsewhere none, and Withdraw is drawn pending, ./form.ts data-pending).
  */
@@ -186,10 +210,8 @@ export function withdrawFormDeps(page: HandoffPage, over: HandoffOver = {}): Wit
       // the quote is asked for the most one withdrawal can carry: askWithdrawFee refuses a fee at or above it; with
       // `amount` (card buy-quote-before-any-note: a preview for a user with no Cash note), for a withdrawal of it
       const most = amount ?? (await available());
-      const [quote, cap] = await Promise.all([
-        askWithdrawFee({ token: net.usdc, relayer, amount: most, fetchFn }),
-        readTokenStorageMin(network, rpcs).then((registerDeposit) => readWithdrawFeeMax({ network, rpcs, priceRpcs, registerDeposit })),
-      ]);
+      const readCap = () => readTokenStorageMin(network, rpcs).then((registerDeposit) => readWithdrawFeeMax({ network, rpcs, priceRpcs, registerDeposit }));
+      const [quote, cap] = await Promise.all([askWithdrawFee({ token: net.usdc, relayer, amount: most, fetchFn }), over.capKeptMs === undefined ? readCap() : keptCap(network, over.capKeptMs, readCap)]);
       if (quote.relayFee > cap) throw new Error("relay_fee: above the device's fee_max");
       return quote.relayFee;
     },
@@ -296,7 +318,15 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
 export const HANDOFF_QUOTE_TRIES = 3;
 /** Blocks the quote must stay open past both providers' final heights when the proof is made: the relay's first round
  *  (the pages, the block time and the fee cap, on the seat) and its send. 30 blocks, about 17 s at mainnet's 0.566 s a
- *  block (224567754 to 224569370 in 915 s, read 14 Nov 21:15Z), against the helper's 100-block window. */
+ *  block (224567754 to 224569370 in 915 s, read 14 Nov 21:15Z). The helper's window was 100 blocks then and is 1,200 since
+ *  card near-cash-pays-any-amount (apps/helper/src/withdraw/fee.ts FEE_QUOTE_WINDOW_BLOCKS): asked after T, it outlives
+ *  the request's last send (deadline_ms - WITHDRAW_SEND_MARGIN_MS, at most T + 480 s) while NEAR's blocks take the
+ *  helper's FEE_BLOCK_MS_MIN, 0.5 s, or more: (1,200 - 120) x 0.5 = 540 s covers the 480 s, the quote's block up to about
+ *  41 s old (MAX_FINAL_AGE_MS 30 s, the reads after it, FEE_CACHE_MS) and the POST's own reads (RELAY_TIMEOUT_MS 10 s),
+ *  the 120 being the blocks the device's pages block may stand behind the pair's higher final (the kit's
+ *  VAULT_SYNC_LAG_MAX); at mainnet's 0.566 s about 1,060 of the 1,200 blocks are used,
+ *  so this check now holds only a tap whose reads and proof outlast the window. A re-quote is made only here, before
+ *  RESERVED: a request sent and refused (fee_too_low) stands, and its deadline frees the note (card wallet-withdraw-requote). */
 export const HANDOFF_QUOTE_MARGIN_BLOCKS = 30;
 /** A quote whose window closes before its request could be sent: the request is made again on a fresh one. */
 export class QuoteStale extends Error {

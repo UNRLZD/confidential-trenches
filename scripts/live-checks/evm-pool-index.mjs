@@ -17,7 +17,9 @@
 //     same last-block hash on both (block N's is the pin) and the same pools on both (by pool id), at least one pool in
 //     all, each batch within the kit's RPC timeout (10 s);
 //   - each reader answers, within TRIES tries, the receipts of the transactions of each span's first RECEIPTS pools,
-//     asked as the kit asks them (pool-index.ts: one batch of at most INDEX_RECEIPT_BATCH, 10; a request that throws
+//     asked as the kit asks them (pool-index.ts: one batch of at most INDEX_RECEIPT_BATCH, 10, which evmJsonRpc splits
+//     where the reader refuses it for its size, keeping the reader's most calls a batch: card
+//     evm-batch-fits-each-reader, base.api.pocket.network 413 past 5 since 2026-11-18; a request that throws
 //     and a receipt answered null or with a rate limit are asked again, anything else is final: review 3 of 7f1ad79a,
 //     base.api.pocket.network answered null for 119 of 500 mined Initialize transactions; review 4 of 43f8e45f), each
 //     in the span and holding the PoolManager's Initialize of its pool.
@@ -131,21 +133,54 @@ const retryAfterMs = (h) => {
   return Number.isNaN(at) ? null : Math.max(0, at - Date.now());
 };
 
-/** One POST of a batch, read as the kit's evmJsonRpc reads it (quote.ts): HTTP 429 is a rate limit (thrown with its
- *  Retry-After), any other status outside 2xx is a failure, never an answer to read, and an answer that is not a batch
- *  counts only for a batch of one call, by its id. */
+/** Each reader's most calls a batch, where it refused one for its size this run: the kit's own (pace.ts evmBatchMost,
+ *  kept for the page's life; card evm-batch-fits-each-reader). */
+export const MOST = new Map();
+/** A reader's answer that refuses a batch for its size, in the kit's words (quote.ts sizeRefusal, which the kit's entry
+ *  does not export): HTTP 413 whatever its body (base.api.pocket.network past 5 calls, 2026-11-18 20:41Z), or a 4xx or
+ *  200 whose error names a batch and a size or limit and no rate limit. Returns the maximum it names (null: none), or
+ *  undefined where it is no size refusal. */
+export function sizeRefusal(status, text) {
+  if (status >= 500 || (status > 200 && status < 400)) return undefined;
+  let j;
+  try {
+    j = JSON.parse(text);
+  } catch {
+    j = { message: text };
+  }
+  const msgs = (Array.isArray(j) ? j.slice(0, 1_000) : [j]).flatMap((a) => (a && typeof a === "object" && a.error?.code !== 3 ? [a.message, a.error?.message] : [])).filter((m) => typeof m === "string" && !/^execution reverted/i.test(m)).map((m) => m.slice(0, 500));
+  const m = msgs.find((x) => /\bbatch\b/i.test(x) && /too large|too big|exceed|more than|more items|maximum|\bmax\b|\blimit\b|\bsize\b/i.test(x) && !LIMITED.test(x));
+  if (m === undefined) return status === 413 ? null : undefined;
+  const k = /\b(\d{1,9})\b/.exec(m);
+  return k === null ? null : Number(k[1]);
+}
+/** One batch to a reader as the kit's evmJsonRpc sends it (quote.ts): past the reader's kept most calls it leaves as
+ *  parts, all at once; a batch of more than one call it refuses for its size (sizeRefusal) is asked again as parts of at
+ *  most half (or the maximum its refusal names, where smaller and at least 1), and that size is kept for the run. Then,
+ *  as the kit reads a status: HTTP 429 is a rate limit, thrown with its Retry-After (ask waits it out, a part's 429 the
+ *  whole batch's, as the kit's); any other status outside 2xx is a failure, never an answer to read; and an answer that
+ *  is not a batch counts only for a batch of one call, by its id. Answers by the caller's ids. */
 async function post(url, body, fetchFn) {
   const t = performance.now();
+  const most = MOST.get(url) ?? Infinity;
+  if (body.length > most) {
+    const parts = [];
+    for (let i = 0; i < body.length; i += most) parts.push(body.slice(i, i + most));
+    const outs = await Promise.all(parts.map((p) => post(url, p, fetchFn)));
+    return { byId: new Map(outs.flatMap((o) => [...o.byId])), ms: Math.round(performance.now() - t) };
+  }
   const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(TIMEOUT_MS) });
-  if (r.status === 429) {
-    await r.text().catch(() => {});
-    throw Object.assign(new Error("the reader answered HTTP 429"), { limited: true, afterMs: retryAfterMs(r.headers.get("retry-after")) });
+  const text = await r.text();
+  const said = body.length > 1 ? sizeRefusal(r.status, text) : undefined;
+  if (said !== undefined) {
+    const half = Math.max(1, Math.floor(body.length / 2));
+    MOST.set(url, Math.min(most, Number.isSafeInteger(said) && said >= 1 ? Math.min(half, said) : half));
+    const again = await post(url, body, fetchFn);
+    return { byId: again.byId, ms: Math.round(performance.now() - t) };
   }
-  if (!(r.status >= 200 && r.status < 300)) {
-    await r.text().catch(() => {});
-    throw new Error(`the reader answered HTTP ${r.status}`);
-  }
-  const j = await r.json();
+  if (r.status === 429) throw Object.assign(new Error("the reader answered HTTP 429"), { limited: true, afterMs: retryAfterMs(r.headers.get("retry-after")) });
+  if (!(r.status >= 200 && r.status < 300)) throw new Error(`the reader answered HTTP ${r.status}`);
+  const j = JSON.parse(text);
   if (!Array.isArray(j) && !(body.length === 1 && j !== null && typeof j === "object")) throw new Error(`the reader's answer is not a batch: ${String(JSON.stringify(j)).slice(0, 80)}`);
   const arr = Array.isArray(j) ? j : [j];
   return { byId: new Map(arr.map((a) => [a?.id, a])), ms: Math.round(performance.now() - t) };
@@ -262,7 +297,9 @@ export async function read(venues, fetchFn = fetch, sleep = (ms) => new Promise(
       const receipts = firsts.length > 0 ? await Promise.all(ix.readers.map((u) => readReceipts(u, v.poolManager, firsts, fetchFn, sleep))) : undefined;
       spans.push({ a, b, on, ...(receipts ? { txs: firsts.map((f) => f.tx), receipts } : {}) });
     }
-    chains[chain] = { index, preflight, heads, spans };
+    // each reader's most calls a batch where it refused one for its size (the kit splits its batches to it)
+    const most = Object.fromEntries(ix.readers.filter((u) => MOST.has(u)).map((u) => [u, MOST.get(u)]));
+    chains[chain] = { index, preflight, heads, spans, ...(Object.keys(most).length > 0 ? { most } : {}) };
   }
   return { at: new Date().toISOString(), chains };
 }

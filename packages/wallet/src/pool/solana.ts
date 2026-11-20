@@ -271,7 +271,7 @@ const int = (x: unknown, what: string): number => {
 async function blockTime(rpc: SolanaRpc, slot: number, wait: SolanaLagWait = slotWait, signal?: AbortSignal): Promise<{ slot: number; ms: bigint }> {
   for (let waits = 0; ; waits++) {
     try {
-      const t = await rpc("getBlockTime", [slot]);
+      const t = await rpc("getBlockTime", [slot], signal);
       return { slot, ms: BigInt(int(t, `getBlockTime(${slot})`)) * 1000n };
     } catch (e) {
       if (waits >= SOL_REACH_WAITS || !(e instanceof Error) || !NOT_YET.test(e.message)) throw e;
@@ -281,7 +281,7 @@ async function blockTime(rpc: SolanaRpc, slot: number, wait: SolanaLagWait = slo
   }
 }
 /** One RPC's finalized slot and its block time, ms. */
-const finalTime = async (rpc: SolanaRpc, signal?: AbortSignal): Promise<{ slot: number; ms: bigint }> => blockTime(rpc, int(await rpc("getSlot", [FINAL]), "getSlot"), slotWait, signal);
+const finalTime = async (rpc: SolanaRpc, signal?: AbortSignal): Promise<{ slot: number; ms: bigint }> => blockTime(rpc, int(await rpc("getSlot", [FINAL], signal), "getSlot"), slotWait, signal);
 
 /** One page entry, as stored. */
 type Entry = { leaf: bigint; root: bigint; t: bigint; bytes: Uint8Array };
@@ -356,7 +356,7 @@ async function readPages(rpc: SolanaRpc, program: string, from: readonly [number
     const want: { tree: 0 | 1; pageNo: number }[] = [];
     for (const tree of [TREE_STATE, TREE_LABEL] as const) if (open[tree]) for (let k = 0; k < BATCH / 2; k++) want.push({ tree, pageNo: from[tree] + step + k });
     const cfg = { commitment, encoding: "base64", ...(minContextSlot > 0 ? { minContextSlot } : {}) };
-    const a = (await solanaLagRetry(() => rpc("getMultipleAccounts", [want.map((w) => solanaPageOf(program, w.tree, w.pageNo)), cfg]), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
+    const a = (await solanaLagRetry(() => rpc("getMultipleAccounts", [want.map((w) => solanaPageOf(program, w.tree, w.pageNo)), cfg], signal), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
     const at = int(a?.context?.slot, "getMultipleAccounts context slot");
     if (at < minContextSlot) throw new Error(`getMultipleAccounts: answered at slot ${at}, below ${minContextSlot}`);
     slot = Math.min(slot, at);

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import * as bw from "../src/pool/buy-wallets.ts";
-import { evmHelperKeyedRpc, HOLDINGS_RPC_LIMIT } from "../src/pool/buy-wallets.ts";
+import { evmHelperKeyedRpc, evmHelperRpc, HOLDINGS_RPC_LIMIT } from "../src/pool/buy-wallets.ts";
 import { EVM_POOLS } from "../src/pool/evm.ts";
 import { hostLane } from "../src/throttle.ts";
 
@@ -75,3 +75,39 @@ test("every other read of the keyed-only route keeps HOLDINGS_RPC_LIMIT: eth_cal
     assert.ok(Math.max(...starts) >= HOLDINGS_RPC_LIMIT.windowMs, `the fourth waited for the window: ${starts.join(", ")}`);
   });
 }));
+
+// card kit-rpc-client-takes-a-signal: the helper's routes (a pool page and any other read on the keyed-only route, and a
+// background read on the plain route) carry the caller's signal to the fetch, so a read the device gave up on (the pool
+// sync's bound, a pair's other side that failed) ends at the helper too
+test("the helper's routes carry the caller's signal to the fetch: a hung request is aborted at the provider", { timeout: 5_000 }, async () => {
+  const real = globalThis.fetch;
+  let asked = 0;
+  const aborted: unknown[] = [];
+  globalThis.fetch = ((_u: string | URL | Request, init?: RequestInit) => {
+    asked++;
+    return new Promise<never>((_, rej) => {
+      const s = init!.signal!;
+      if (s.aborted) return void (aborted.push(s.reason), rej(s.reason));
+      s.addEventListener("abort", () => (aborted.push(s.reason), rej(s.reason)), { once: true });
+    });
+  }) as typeof fetch;
+  try {
+    const origin = "https://signal-routes.example";
+    const ac = new AbortController();
+    const calls = [
+      evmHelperKeyedRpc(origin, "robinhood")("eth_getLogs", [{ address: POOL, topics: [], fromBlock: hex(PAGES[0]![0]), toBlock: hex(PAGES[0]![1]) }], ac.signal),
+      evmHelperKeyedRpc(origin, "robinhood")("eth_call", [{ to: POOL, data: "0x" }, "latest"], ac.signal),
+      evmHelperRpc(origin, "base")("eth_blockNumber", [], ac.signal),
+    ];
+    calls.forEach((c) => c.catch(() => {}));
+    for (let i = 0; i < 50 && asked < calls.length; i++) await new Promise((r) => setImmediate(r));
+    assert.equal(asked, calls.length, "each read reached the fetch");
+    assert.equal(aborted.length, 0);
+    const why = new Error("the read's bound");
+    ac.abort(why);
+    for (const c of calls) await assert.rejects(c, (e: unknown) => e === why);
+    assert.equal(aborted.length, calls.length, "every hung request was aborted at the provider");
+  } finally {
+    globalThis.fetch = real;
+  }
+});

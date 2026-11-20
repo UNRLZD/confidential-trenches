@@ -129,7 +129,7 @@ function Row({ v, win, href }: { v: RowView; win: Win; href: string }) {
           <span className="dsc-l1">
             <span className="dsc-sym" title={v.symbol}>{v.symbol}</span>
             <span className="dsc-name" title={v.name}>{v.name}</span>
-            <span className="dsc-mcin" title={`${WORDS.price.text} ${v.price}`}>
+            <span key={v.mc} className="dsc-mcin" title={`${WORDS.price.text} ${v.price}`}>
               <span className="dsc-lbl">{WORDS.mc.text}</span>
               {v.mc}
             </span>
@@ -182,7 +182,7 @@ function PhoneRow({ v, href }: { v: RowView; href: string }) {
             <span className="dsc-dots" data-tier={v.stage.curve ? tier : "pool"} aria-hidden="true">
               {Array.from({ length: 40 }, (_, i) => <i key={i} data-on={i < lit} />)}
             </span>
-            <span className="dsc-pl">{v.stage.pill === "POOL" ? WORDS.pool.text : v.stage.pill}</span>
+            <span key={v.stage.pill} className="dsc-pl">{v.stage.pill === "POOL" ? WORDS.pool.text : v.stage.pill}</span>
           </span>
         </span>
       </Link>

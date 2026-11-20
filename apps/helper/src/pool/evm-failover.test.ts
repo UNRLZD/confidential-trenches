@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
+import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolVenues, SECRET_SCRUB_MAX } from "@blindfill/kit";
 import { providerHolds, throttleOf } from "../limits/limits.ts";
 import * as evm from "./evm.ts";
 
@@ -101,7 +101,9 @@ test("a read only one operator can answer: the fee route still fails (503 upstre
   const s = evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), undefined, undefined, (l: string) => void lines.push(l)).get(PIN)!;
   await assert.rejects(s.fee(EPOCH + 1), (e: Error) => throttleOf(e) === 0);
   assert.equal(lines.length, 1, lines.join("\n"));
-  assert.match(lines[0]!, /^evm robinhood: fee upstream: .*eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400: RPC error 27[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400[^;]*; rpc-robinhood\.globalstake\.io: HTTP 400/);
+  assert.match(lines[0]!, /^evm robinhood: fee upstream: .*eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400: RPC error 27[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400/);
+  // card rh-provider-fails-64-read-batch: globalstake left the kit's Robinhood quote list, which these seats take
+  assert.ok(!lines[0]!.includes("globalstake"), lines[0]);
   assert.ok(!lines[0]!.includes("rpc.mainnet.chain.robinhood.com"), "the other side's operator is never asked for the first side");
   assert.ok(!lines[0]!.includes(FAKE), lines[0]);
   // the failed read answers its period's callers for EVM_FEE_MISS_MS (review of d190f62f, A-4), then the next caller
@@ -136,7 +138,8 @@ test("(3) one operator alone holds the state a proof's life back: the start asks
   stub(t, (host, method) => (host !== "rpc.mainnet.chain.robinhood.com" && method === "eth_call" ? UNKNOWN_STATE : null));
   const waits: number[] = [];
   await assert.rejects(evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), undefined, undefined, () => {}).get(PIN)!.ready(async (ms) => void waits.push(ms)), (e: Error) => {
-    assert.match(e.message, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state at block 99400, 600 s old \(a proof's fee is read up to 600 s back\), 14 tries over 87 s: HTTP 400: RPC error 27: Unknown state\. First available state is 1 \(eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400[^;]*; rpc-robinhood\.globalstake\.io: HTTP 400/);
+    assert.match(e.message, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state at block 99400, 600 s old \(a proof's fee is read up to 600 s back\), 14 tries over 87 s: HTTP 400: RPC error 27: Unknown state\. First available state is 1 \(eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400/);
+    assert.ok(!e.message.includes("globalstake"), e.message);
     assert.ok(!e.message.includes(FAKE), e.message);
     return true;
   });
@@ -150,7 +153,7 @@ test("one list of seats, each with its operator: the pair, the keyed URLs, the k
   assert.deepEqual(seats([DRPC!, OWN!], [SPARE_QN, ...drpc], evmPoolVenues().robinhood.providers!), [
     "robinhood.drpc.org drpc.org", "rpc.mainnet.chain.robinhood.com robinhood.com", "made-up.robinhood-mainnet.quiknode.pro quiknode.pro",
     "lb.drpc.live drpc.org", "lb.drpc.live drpc.org", "lb.drpc.live drpc.org",
-    "robinhood-rpc.publicnode.com publicnode.com", "robinhood.rpc.blxrbdn.com blxrbdn.com", "rpc-robinhood.globalstake.io globalstake.io",
+    "robinhood-rpc.publicnode.com publicnode.com", "robinhood.rpc.blxrbdn.com blxrbdn.com",
   ]);
   // the pair's own URL set again as a key is no second seat
   assert.deepEqual(seats([DRPC!, OWN!], [`${DRPC}/`, OWN!], []), ["robinhood.drpc.org drpc.org", "rpc.mainnet.chain.robinhood.com robinhood.com"]);
@@ -318,6 +321,19 @@ test("Base: a provider's -32000 'historical state … is not available' is that 
   assert.equal(f?.fee, opFee("base").toString());
   assert.ok(stateReads(calls, "lb.drpc.live") > 0, "another operator answered the state reads");
   assert.ok(lines.length > 0 && lines.every((l) => /failed at base-rpc\.publicnode\.com: RPC error -32000: historical state [0-9a-f]+ is not available.* answered$/.test(l)), lines.join("\n"));
+});
+
+// card mutants-killed-on-main (the release sweep's mutants 107 and 108): mainnet reads past its pair and the helper's
+// keyed URLs to the kit's quote providers for the network (Base's: publicnode, Bware's blastapi, Coinbase's and Pocket),
+// as the test network did before the helper loaded mainnet pools only (card helper-mainnet-pools-only)
+test("Base reads past its pair to the kit's listed providers: with no keyed URL, Coinbase's mainnet.base.org refusing the state, the fee is answered by publicnode and a listed operator", async (t) => {
+  const calls = chainStub(t, (host, method) => (host === "mainnet.base.org" && method === "eth_call" ? UNKNOWN_STATE : null));
+  const lines: string[] = [];
+  const env = { POOL_EVM_ADDRESS_BASE: evmPoolVenues().base.pool!, POOL_EVM_SENDER_KEY_BASE: KEY };
+  const f = await sendersOf(env, lines).get(BASE_PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, opFee("base").toString());
+  assert.ok(stateReads(calls, "base-rpc.publicnode.com") > 0, "publicnode answered");
+  assert.ok(stateReads(calls, "base-mainnet.public.blastapi.io") + stateReads(calls, "base.api.pocket.network") > 0, "a listed operator answered");
 });
 
 test("a read each side fails, one side on a throttle: the answer stays a throttle (429 with its wait), never the other side's 503", async (t) => {
@@ -913,8 +929,8 @@ test("review of f86e1c27 P2: 500 strings of the key, its starts and cases, U+013
   `) as [number, string][];
   assert.equal(outs.length, 500);
   for (const [i, [inLength, out]] of outs.entries()) {
-    assert.ok(out.length <= evm.EVM_SCRUB_MAX + 1, `${i}: ${out.length} characters`);
-    assert.ok(inLength <= evm.EVM_SCRUB_MAX || out.endsWith("…"), `${i}: the cut is marked`);
+    assert.ok(out.length <= SECRET_SCRUB_MAX + 1, `${i}: ${out.length} characters`);
+    assert.ok(inLength <= SECRET_SCRUB_MAX || out.endsWith("…"), `${i}: the cut is marked`);
     assert.ok(!holdsKey(out) && !holdsKey(out, QK), `${i}: ${JSON.stringify(out.slice(0, 300))}`);
   }
 });
@@ -1034,7 +1050,7 @@ test("review of 41c6c371 P3-2: a secret of 4,000 or 20,000 characters in a seat 
     for (const n of [4000, 20000]) {
       const k = "LONGkey-" + "0123456789abcdef".repeat(Math.ceil(n / 16)).slice(0, n - 8);
       const scrub = evm.evmScrubber(["https://a.example/v2/" + k]);
-      // cut within its first 256 characters (EVM_SCRUB_KEY_MAX), the start the patterns read
+      // cut within its first 256 characters (the kit's SEAT_SECRET_START_MAX), the start the patterns read
       res.push([scrub("whole " + k + " end"), scrub("cut " + k.slice(0, 200)), scrub("upper " + k.slice(0, 100).toUpperCase())]);
     }
     console.log(JSON.stringify(res));
@@ -1059,4 +1075,90 @@ test("review of e52fa55f P3: a URL echoed with its key is its host alone: a quer
   assert.equal(scrub(`limit at https://b.example/rpc?apikey=${QK} reached`), "limit at b.example reached");
   assert.equal(scrub(`moved: https://a.example/v2/${PK}/acct/9912345/x?uid=4471&s=abc now`), "moved: a.example now");
   assert.equal(scrub(`bad key at https://c.example/rpc?key=${AK}: over its plan`), "bad key at c.example over its plan");
+});
+
+// ---- card helper-start-residuals: a start where fewer than two operators answer JSON-RPC at all (every other seat
+// hung to its client's timeout, 401 or 403, an HTML page, no connection) is refused within EVM_READY_DEAD_MS of the
+// check's time plus one try and one census of the seats, never at the state check's 90 s bound (the 87 s the review of
+// card helper-evm-ready-holds-a-fee read on four hung seats), so a deploy fails fast and the old helper keeps serving.
+// A state the operators answer but do not hold (dRPC's "Unknown state" periods) keeps its 90 s bound, as before ----
+/** The bound these tests hold the refusal to: EVM_READY_DEAD_MS, then one try and one census, each a hung seat's 5 s
+ *  client timeout and the read's budget at most. */
+const DEAD_BOUND_MS = 35_000;
+const HUNG = Symbol("hung");
+/**
+ * ready() on the test's clock, every clock the sender reads (Date.now, and performance.now, which the read pair's budget
+ * and holds read) the test's own. A seat `plant` answers HUNG for ends at its client's 5 s timeout: calls made in one
+ * turn of the event loop (a census asks every seat at once) run side by side, so they end together, 5 s after the
+ * first; a call made later starts its own 5 s. Every other call takes 200 ms.
+ */
+async function deadStart(t: TestContext, env: Record<string, string>, plant: (host: string, method: string) => Planted | typeof HUNG) {
+  const at = { T: NOW_MS };
+  const perfNow = performance.now;
+  performance.now = () => at.T;
+  t.after(() => void (performance.now = perfNow));
+  let turn: number | null = null;
+  planted(t, (host, method) => {
+    const p = plant(host, method);
+    if (p !== HUNG) {
+      at.T += 200;
+      return p;
+    }
+    if (turn === null) {
+      turn = at.T;
+      setImmediate(() => void (turn = null));
+    }
+    at.T = Math.max(at.T, turn + 5_000);
+    throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+  }, at);
+  const r = await readyOn(sendersWith(env).get(PIN)!, at);
+  return { r, s: (at.T - NOW_MS) / 1000, ms: at.T - NOW_MS };
+}
+
+test("card helper-start-residuals 1: every seat hung to its client's 5 s timeout: refused within 35 s (84 s before the card), naming no operator that answers and each seat that answered none", async (t) => {
+  const { r, s, ms } = await deadStart(t, ENV, () => HUNG);
+  t.diagnostic(`refused after ${s} s: ${r.out.slice(0, 400)}`);
+  assert.notEqual(r.out, "ready");
+  assert.ok(ms <= DEAD_BOUND_MS, `refused after ${s} s, over ${DEAD_BOUND_MS / 1000} s`);
+  assert.match(r.out, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state, \d+ tries over \d+ s: fewer than two operators answer JSON-RPC \(none\): /);
+  for (const host of ["robinhood.drpc.org", "rpc.mainnet.chain.robinhood.com", "drpc.live (ROBINHOOD_RPC_URL_DRPC_1)", "quiknode.pro (ROBINHOOD_RPC_URL_QUICKNODE)", "robinhood-rpc.publicnode.com", "robinhood.rpc.blxrbdn.com"]) assert.ok(r.out.includes(`${host}: `), `${host} named: ${r.out}`);
+  assert.ok(!r.out.includes(FAKE), "no key in the refusal");
+});
+
+test("card helper-start-residuals 1: the review's four hung seats with Robinhood's own RPC the one other operator (no keyed seat set): refused within 35 s (87 s before the card, the figure the review read), naming it alone", async (t) => {
+  const { r, s, ms } = await deadStart(t, ENV_RH, (host) => (host === "rpc.mainnet.chain.robinhood.com" ? null : HUNG));
+  t.diagnostic(`refused after ${s} s: ${r.out.slice(0, 400)}`);
+  assert.ok(ms <= DEAD_BOUND_MS, `refused after ${s} s, over ${DEAD_BOUND_MS / 1000} s`);
+  assert.match(r.out, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state, \d+ tries over \d+ s: fewer than two operators answer JSON-RPC \(robinhood\.com alone\): robinhood\.drpc\.org: /);
+});
+
+test("card helper-start-residuals 3: one operator alone answers (Robinhood's own RPC), every other seat dead (hung, HTTP 401, an HTML page, no connection): refused within 35 s naming it alone, never ready on one operator", async (t) => {
+  const html = new Response("<html><body>Bad gateway</body></html>", { status: 200, headers: { "content-type": "text/html" } });
+  const { r, s, ms } = await deadStart(t, ENV, (host) => {
+    if (host === "robinhood.drpc.org") return HUNG;
+    if (host === "robinhood-rpc.publicnode.com") return new Response("unauthorized", { status: 401 });
+    if (host === "robinhood.rpc.blxrbdn.com") return html.clone();
+    if (host === "lb.drpc.live" || host === "made-up.robinhood-mainnet.quiknode.pro") throw new TypeError("fetch failed");
+    return null;
+  });
+  t.diagnostic(`refused after ${s} s: ${r.out.slice(0, 400)}`);
+  assert.notEqual(r.out, "ready");
+  assert.ok(ms <= DEAD_BOUND_MS, `refused after ${s} s, over ${DEAD_BOUND_MS / 1000} s`);
+  assert.match(r.out, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state, \d+ tries over \d+ s: fewer than two operators answer JSON-RPC \(robinhood\.com alone\): /);
+  for (const host of ["robinhood.drpc.org", "drpc.live (ROBINHOOD_RPC_URL_DRPC_1)", "quiknode.pro (ROBINHOOD_RPC_URL_QUICKNODE)", "robinhood-rpc.publicnode.com", "robinhood.rpc.blxrbdn.com"]) assert.ok(r.out.includes(`${host}: `), `${host} named: ${r.out}`);
+  assert.ok(!r.out.includes("rpc.mainnet.chain.robinhood.com: "), `the seat that answers is not named dead: ${r.out}`);
+});
+
+test("card helper-start-residuals 1 and 3: a dead spell shorter than EVM_READY_DEAD_MS is no dead start: every seat but Robinhood's own hangs for the start's first 12 s, then answers: ready, never refused", async (t) => {
+  const up = NOW_MS + 12_000;
+  const { r, s } = await deadStart(t, ENV, (host) => (host !== "rpc.mainnet.chain.robinhood.com" && performance.now() < up ? HUNG : null));
+  t.diagnostic(`${r.out} after ${s} s`);
+  assert.equal(r.out, "ready");
+});
+
+test("card helper-start-residuals 1: state misses on every operator but one (dRPC's 'Unknown state' periods) keep the state check's 90 s bound: the census counts an operator that answers JSON-RPC, so the four-hung-seat rule never cuts a start a period on would pass", async (t) => {
+  const { r, s } = await deadStart(t, ENV_RH, (host, method) => (method === "eth_call" && host !== "rpc.mainnet.chain.robinhood.com" ? { status: 400, error: UNKNOWN_STATE.body } : null));
+  t.diagnostic(`refused after ${s} s: ${r.out.slice(0, 200)}`);
+  assert.match(r.out, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state at block \d+, \d+ s old .*, \d+ tries over (8\d|9\d) s: /);
+  assert.ok(!r.out.includes("fewer than two operators"), r.out);
 });

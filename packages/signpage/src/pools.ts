@@ -25,13 +25,13 @@ import { readSolanaPoolBuyVenue, readSolanaRent, readSolanaVenueAt, solanaPoolBu
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { pickPieces, solanaLegsPlan, unitsOf, type LegPiece } from "./pool-buy.ts";
 import { carriesOf, carryOk } from "./pool-carry.ts";
-import { bestVenuePool, pageReference, POOL_FINDER_VENUES, type PoolFinderKind, type PoolFinders } from "./page-rpc.ts";
+import { pageReference, pinnedBuyVenues, POOL_FINDER_VENUES, solanaBuyVenue, type PoolFinderKind, type PoolFinders } from "./page-rpc.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { heldBy, type NoteRecord } from "../../wallet/src/notes/store.ts";
 import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof, type LandedRelease } from "../../wallet/src/pool/balances.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, type EvmNetwork } from "../../wallet/src/pool/evm.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
-import { SOL_LADDER, SOL_POOLS, SOL_TIP_CAP, solanaPoolOf } from "../../wallet/src/pool/solana.ts";
+import { SOL_LADDER, SOL_POOL_TABLES, SOL_POOLS, SOL_TIP_CAP, solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import type { Running } from "./api.ts";
 import { ANSWER_ROOM, pickOps } from "./state.ts";
@@ -166,6 +166,10 @@ export type PoolBuyDryDeps = {
    *  as one provider's scan names them (page-rpc.ts PoolsOf.early), never waiting for the slower provider's half; the
    *  tap's own read (main.ts tapDry, src/pool-buy.ts) waits for both. */
   early?: boolean;
+  /** The pin's lookup tables per venue (PAGE_TABLES, the tap's own): the venues a buy may take (pinnedBuyVenues), so
+   *  an ask with an amount answers the tap's own venue decision (page-rpc.ts solanaBuyVenue). None: the network's pins
+   *  (the wallet's SOL_POOL_TABLES, which PAGE_TABLES is). */
+  tables?: Readonly<Partial<Record<string, readonly string[]>>>;
 };
 
 /**
@@ -308,18 +312,30 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): PoolBuyDryKind {
     if (params.chain !== "solana" || sol.length === 0 || typeof params.token !== "string") return { error: "not_allowed" };
     const amount = params.amount === undefined ? null : lamportsOf(params.amount);
     if (amount === undefined) return { error: "not_allowed" };
+    // the ask's slippage, the tap's own: with none, judged at 0 bps, so the dry never says a buy fills that a
+    // tap at any slippage refuses
+    const slip = params.slippage_bps === undefined ? 0 : params.slippage_bps;
+    if (typeof slip !== "number" || !Number.isInteger(slip) || slip < 0 || slip > 10_000) return { error: "not_allowed" };
     const pair = d.rpcs();
     if (pair === null) return { error: "not_allowed" };
     if (d.trading()) return { error: "busy" };
     // the quote for `out`, beside the proofs and the venue (never awaited before them); a failed read is no out
     const token = params.token;
-    const quote = amount !== null && amount > 0n ? pageReference(pair, { side: "buy", token, amount }, undefined, { early: d.early === true }).catch(() => null) : null;
+    // a read that failed is no answer of the venue (no out, as before); a reference read is the tap's venue decision
+    const quote = amount !== null && amount > 0n ? pageReference(pair, { side: "buy", token, amount }, undefined, { early: d.early === true }).then((ref) => ({ ref }), () => null) : null;
     const r = await read(pair, token, sol);
+    if ("error" in r && r.error === "not_funded") return r;
+    // the tap's own venue decision (card sol-buy-takes-the-best-venue-it-can-trade: page-rpc.ts solanaBuyVenue, on the
+    // same reference and the same pins), before the coin's venue read's own refusal, as the tap decides it before its
+    // venue's read: a coin whose only pools are on a venue the page pins no table for is venue_not_pinned here as there
+    const q = quote === null ? null : await quote;
+    const pick = q === null ? null : solanaBuyVenue(q.ref, pinnedBuyVenues(d.tables ?? SOL_POOL_TABLES[POOL_TESTNET ? "devnet" : "mainnet"] ?? {}), slip);
+    if (pick !== null && "error" in pick) return pick;
     if ("error" in r) return r;
     const { tap, tapL, venue, rent, live, valueOf } = r;
     if (amount === null || amount === 0n) return { result: { tap_max: tap } };
     const outOf = async (): Promise<string | undefined> => {
-      const best = bestVenuePool(await quote);
+      const best = pick?.pool;
       return best !== undefined && venue.decimals !== undefined && best.expectedOut > 0n ? unitsOf(best.expectedOut, venue.decimals) : undefined;
     };
     if (amount <= tapL) {
@@ -397,6 +413,8 @@ const utf8 = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v))
  * whose queue runs (src/pool-testnet.ts readyWith); a chain with none of them has no `ready` (poolBalances). `landed`:
  * the RESERVED notes whose release this page read landed (src/pool-testnet.ts readyWith), each counted as its change.
  * `making`: the notes whose first proof the queue makes now (src/pool-testnet.ts readyWith), each entry's making.
+ * `kept`: the proofs kept on the device (../../wallet/src/pool/kept-proofs.ts, every pool's), each entry's spendable
+ * (card taps-wait-inside-the-page: from the first answer after a load, before any queue opens).
  */
 export async function withPools(
   state: SignpageState,
@@ -407,11 +425,12 @@ export async function withPools(
   open?: ReadonlySet<string>,
   landed?: ReadonlyMap<string, LandedRelease>,
   making?: ReadonlySet<string>,
+  kept?: readonly BalanceProof[],
 ): Promise<SignpageState> {
   if (!state.signed_in) return state;
   try {
     const notes = pools.length === 0 ? [] : await readNotes();
-    const sums = poolBalances(notes, pools, ready, open, landed, making).map((e) => {
+    const sums = poolBalances(notes, pools, ready, open, landed, making, kept).map((e) => {
       const p = price?.(e.chain) ?? null;
       return p === null ? e : { ...e, price: p };
     });

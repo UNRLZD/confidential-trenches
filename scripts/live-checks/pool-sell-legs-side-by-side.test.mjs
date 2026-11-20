@@ -78,6 +78,10 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
     ["shared past 4 s", "nU=4e3", "nU=6e4", "young"],
     ["shared at any age", "if(l&&c-l.at<n)return l.read", "if(l)return l.read", "young"],
     ["a failed read kept", "u.catch(()=>{a.get(s)===d&&a.delete(s)})", "u.catch(()=>{})", "young"],
+    // card signpage-reads-take-the-call-signal (the excerpt's young reads re-cut to the build's three-argument call)
+    ["a read no leg shares drops the call's signal", "return e(i,o,f);", "return e(i,o);", "young"],
+    ["a shared read carries one leg's signal (that leg's stop would end every leg's read)", "Promise.resolve(e(i,o))", "Promise.resolve(e(i,o,f))", "young"],
+    ["the old two-argument shape", "Ph(e,(i,o,f)=>{if(!t(i,o))return e(i,o,f);", "Ph(e,(i,o)=>{if(!t(i,o))return e(i,o);", "young"],
     ["a W's read shared (every getMultipleAccounts)", "t===`getMultipleAccounts`&&Array.isArray(n[0])&&n[0].includes(e)", "t===`getMultipleAccounts`", "young"],
     ["nothing forgotten after a leg's wait", "return{error:`failed`};nR(e.rpcs);continue}", "return{error:`failed`};continue}", "young"],
     ["a sale's wait off the tap's bound", "m=async t=>{if(!i.hold(t))return $(`failed`,`tap_bound`);", "m=async t=>{", "fresh"],

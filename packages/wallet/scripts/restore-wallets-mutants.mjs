@@ -4,9 +4,9 @@
 // back. Also the same-chain deposit's rent hand-off to the kit's builder (card kit-sol-pool-deposit-floor, src/pool/
 // same-chain.ts). "strings sent and taken" is the wallet-restore-notes round-3 review's case: a bridge that sends the
 // precommitments as strings to a Worker that takes them restores no note with every check on the walk passing.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 const P = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const WALK = "wallet/src/restore/walk.ts";
 const WAL = "wallet/src/restore/wallets.ts";
@@ -17,13 +17,18 @@ const NOTES = "wallet/src/notes/restore.ts";
 const ID = ["wallet", "test/restore-id-reader.test.ts"];
 const NR = ["wallet", "test/note-restore.test.ts"];
 const RW = ["wallet", "test/restore-wallets.test.ts"];
+const STORE = "wallet/src/notes/store.ts";
+const FOUND = ["wallet", "test/note-store-found.test.ts"];
+const PRS = "signpage/src/pool-restore.ts";
+const PRT = ["signpage", "test/pool-restore.test.ts"];
 // card kit-sol-pool-deposit-floor (S-01 review): the same-chain deposit hands the kit's builder the rent the device read
 const SC = "wallet/src/pool/same-chain.ts";
 const PSC = ["wallet", "test/pool-same-chain.test.ts"];
 const RENT_IN = "a.sizes, a.blockhash, a.rent) };";
 const SENT = "precommitments: [...precommitments] };";
 const STRINGS = "precommitments: [...precommitments].map(String) as unknown as bigint[] };";
-const CHECK = '!a.precommitments.every((p) => typeof p === "bigint")';
+// the Worker's check, in matchOf since 7d5ff87fc (answerWalk hands it the ask's precommitments)
+const CHECK = '!m.precommitments.every((p) => typeof p === "bigint")';
 // [name, file, [[the source as written, the plant]...], [package, test file], test name pattern]
 const M = [
   ["S-01 review: the same-chain deposit builds at a rent of 0, not the rent read", SC, [[RENT_IN, "a.sizes, a.blockhash, { lamportsPerByte: 0n, factor: 1n }) };"]], PSC, "S-01 review"],
@@ -31,7 +36,9 @@ const M = [
   ["the bridge sends the precommitments as strings", WALK, [[SENT, STRINGS]], NR, "Worker bridge"],
   ["the Worker takes precommitments that are not bigints", WALK, [[CHECK, "false"]], NR, "Worker bridge"],
   ["strings sent and taken (round-3 review)", WALK, [[SENT, STRINGS], [CHECK, "false"]], NR, "Worker bridge"],
-  ["a Worker's refusal taken as an empty walk", WALK, [["a?.ok === true ? resolve(a.walk)", "a?.ok !== undefined ? resolve(a.ok ? a.walk : { found: [], last: lane, lastPrecommitment: 0n })"]], NR, "Worker bridge"],
+  ["a Worker's refusal taken as an empty walk", WALK, [["a?.ok === true ? resolve(a.walk) : reject(new Error(`lane ${lane}:", "a?.ok !== undefined ? resolve(a.ok ? a.walk : { found: [], last: lane, lastPrecommitment: 0n }) : reject(new Error(`lane ${lane}:"]], NR, "Worker bridge"],
+  // the same rule in the pool walk's bridge (inWorker, walkLanes' Workers)
+  ["inWorker: a Worker's refusal taken as an empty walk", WALK, [["a?.ok === true ? resolve(a.walk) : reject(new Error(`lane ${ask.lane}:", "a?.ok !== undefined ? resolve(a.ok ? a.walk : { found: [], last: ask.lane, lastPrecommitment: 0n }) : reject(new Error(`lane ${ask.lane}:"]], ["wallet", "test/walk-lanes.test.ts"], "a Worker that refuses stops the walk"],
   ["a failed history read taken as no history", WAL, [["        s.failed = true;\n        unread.push({ c: s.c, l: s.l, j: s.j, address: s.address, chain, error: why(e) });\n        continue;", "        continue;"]], RW, "step 4"],
   ["no hop target read after a failed read", WAL, [["slots.some((s) => found(s) || s.failed)", "slots.some((s) => found(s))"]], RW, "step 4"],
   ["an evm wallet read on Base only", WAL, [['  evm: ["base", "robinhood"],', '  evm: ["base"],']], RW, "step 4"],
@@ -94,7 +101,7 @@ const M = [
   ["review R1: a restore's pass taken on other provider objects", IDR, [["own[0] === on.rpcs[0] && own[1] === on.rpcs[1]", "true"]], ID, "owned steps take no reader"],
   ["review R1: afterRestore takes a pass openRestorePass never opened", WAL, [["if (!isRestorePass(restored)) throw", "if (false) throw"]], RW, "step 7"],
   ["review R1: the re-reads take a plan of another height", AFT, [["if (plan?.after !== restored.h) throw", "if (false) throw"]], ID, "owned steps take no reader"],
-  ["review R1: the re-reads read on the restore's pass", AFT, [["const read = await nearIdReader(network, rpcs, pass,", "const read = await nearIdReader(network, rpcs, restored,"]], ID, "owned steps take no reader"],
+  ["review R1: the re-reads read on the restore's pass", AFT, [["const read = await nearIdHeldReader(network, rpcs, pass,", "const read = await nearIdHeldReader(network, rpcs, restored,"]], ID, "owned steps take no reader"],
   ["review R1: the second scan's ids read on the restore's pass", AFT, [["notes, await nearIdReader(network, rpcs, pass,", "notes, await nearIdReader(network, rpcs, restored,"]], ID, "second scan:"],
   ["review R1: the second scan's arms read on the restore's pass", AFT, [["await nearBalanceReader(network, rpcs, pass,", "await nearBalanceReader(network, rpcs, restored,"]], ID, "second scan:"],
   ["review R1: the re-reads' clock the higher final", AFT, [["if (Math.min(...now.timesMs) >= restoreMs", "if (Math.max(...now.timesMs) >= restoreMs"]], ID, "step 7's re-reads"],
@@ -121,12 +128,62 @@ const M = [
   ["R13: the lanes' order not checked", WAL, [["|| !lanes.every((x, k) => x.lane === k)", ""]], RW, "step 7"],
   ["R01: the seed in the Worker's message", WALK, [[SENT, "precommitments: [...precommitments], seed64 } as WalkAsk;"]], NR, "Worker bridge"],
   ["R02: no Worker error listener", WALK, [['      w.addEventListener("error", () => end(() => reject(new Error(`lane ${lane}: the walk worker failed`))));\n', ""]], NR, "Worker bridge"],
+  // card notes-plan-at-restored-index: each refusal of the note store's found deposit (planFound), its place outside
+  // planDeposit's one unfunded index, and the restore's carry that writes it
+  ["planFound: an index the store holds taken", STORE, [["if (all.some((n) => refKey(n.ref) === key)) throw new Error(`deposit index", "if (false) throw new Error(`deposit index"]], FOUND, "notes-plan-at-restored-index"],
+  ["planFound: an index of the store's lane its counter has not passed taken", STORE, [["        if (i % WALLET_LANES === store.lane) {", "        if (false) {"]], FOUND, "notes-plan-at-restored-index"],
+  ["planFound: one provider's read taken", STORE, [["a.length !== 2 ||", "a.length < 1 ||"], ["  if (a[0] !== a[1]) throw", "  if (a.length === 2 && a[0] !== a[1]) throw"]], FOUND, "notes-plan-at-restored-index"],
+  ["planFound: two providers apart taken", STORE, [["  if (a[0] !== a[1]) throw", "  if (false) throw"]], FOUND, "notes-plan-at-restored-index"],
+  ["planFound: a read of no money taken", STORE, [["  if (a[0]! <= 0n) throw", "  if (false) throw"]], FOUND, "notes-plan-at-restored-index"],
+  ["planDeposit counts a found note as the scope's unfunded index", STORE, [[' && n.state === "PLANNED" && !found.has(refKey(n.ref)) && !skipped.has(refKey(n.ref)));', ' && n.state === "PLANNED" && !skipped.has(refKey(n.ref)));']], FOUND, "notes-plan-at-restored-index"],
+  ["the restore names a U_X with no note, never writes its note", PRS, [["has.has(f.i) || ((amounts) => own.found(w.scope, f.i, amounts))", "has.has(f.i)"]], PRT, "notes-plan-at-restored-index"],
+  ["carryUx deposits from a U_X with no note written", PRS, [["        await noted([a, b]);", "        void 0;"]], PRT, "notes-plan-at-restored-index"],
+  // card vault-late-send-carried: each refusal of a late send's amount (after.ts lateFound) and the page's vault carry
+  ["late send: two providers apart taken", AFT, [["    if (a !== b) out.push", "    if (false) out.push"]], ID, "step 7's late send"],
+  ["late send: a failed read taken as nothing held", AFT, [['if ("error" in x) return { found: null, why: [{ text: `its read failed (${x.error}): read again`, retry: true }] };', 'if ("error" in x) return { found: null, why: [] };']], ID, "step 7's late send"],
+  ["late send: an intents.near asset taken as the token", AFT, [["    else if (asset !== token) out.push", "    else if (false) out.push"]], ID, "step 7's late send"],
+  ["the restore reads no vault deposit id", PRS, [["  if (vault !== null)\n    await readVaultLate(", "  if (false)\n    await readVaultLate("]], PRT, "vault-late-send-carried"],
+  ["a vault late send carried with no note written", PRS, [["        await own.found(v.scope, x.i, found);", "        void 0;"]], PRT, "vault-late-send-carried"],
+  ["a vault late send taken on one provider's read", PRS, [["const { found, why } = lateFound(x, token);", 'const { found, why } = "error" in x ? { found: null, why: [] } : { found: x.held.find((h) => h.asset === token)?.amounts ?? null, why: [] };']], PRT, "vault-late-send-carried"],
+  ["a vault late send under MIN_DEPOSIT carried", PRS, [["found[0] < VAULT_CONSTANTS.MIN_DEPOSIT", "found[0] < 0n"]], PRT, "vault-late-send-carried"],
+  ["a vault carry refused never named", PRS, [["    if (c !== null) (c.retry ? out.held : out.named).push(`${at} ${c.why}`);", "    void c;"]], PRT, "vault-late-send-carried"],
+  ["step 7's window ended at the first answered try", PRS, [["          if (owed) stays = true;", "          void owed;"]], PRT, "vault-late-send-carried"],
+  ["step 7's window restarted on each load", PRS, [["              if (o.late !== undefined) return void (first = o.late);\n", ""]], PRT, "vault-late-send-carried"],
+  // card pool-late-send-carried: step 7 on the pools' ids and U_X (readPoolLate), each rule its own plant
+  ["the pools' U_X get no step 7", PRS, [["    if (ms7 !== null && r.complete)\n      await readPoolLate(", "    if (false)\n      await readPoolLate("]], PRT, "pool-late-send-carried"],
+  ["step 7's window not kept for the pools", PRS, [["    if (ms7 !== null) await step7!.late(ms7);\n", ""]], PRT, "pool-late-send-carried"],
+  ["a pool late send carried with no note written", PRS, [["note !== undefined || ((amounts) => own.found(w.scope, x.i, amounts))", "true"]], PRT, "pool-late-send-carried"],
+  ["a pool late send's U_X read that fails never named", PRS, [['      out.retry.push(`${said} was not read (${e instanceof Error ? e.message : "it threw"}): read again`);\n', ""]], PRT, "pool-late-send-carried"],
+  ["a pool U_X under a note this device planned carried by step 7", PRS, [["    if (note !== undefined && !note.found) continue;\n    const u = await uxOf(", "    const u = await uxOf("]], PRT, "pool-late-send-carried"],
+  ["a pool U_X step 5 found read again by step 7", PRS, [["    if (skip.ux.has(x.i)) continue;\n", ""]], PRT, "pool-late-send-carried"],
+  ["a lane kept on the marker left out of step 7's plan", PRS, [["    if (x !== undefined) return x;\n    const readTo = done.get(lane);", "    if (x !== undefined) return x;\n    const readTo = undefined as number | undefined;"]], PRT, "pool-late-send-carried"],
+  ["a kept lane's highest with history dropped from step 7's plan", PRS, [["const top = Math.max(readTo - RESTORE_LANES * DEPOSIT_ID_MARGIN, notes.at(-1) ?? -1);", "const top = notes.at(-1) ?? -1;"]], PRT, "pool-late-send-carried"],
+  ["a pool id NEAR re-reads holding money never named", PRS, [['    for (const y of ys) ("error" in x ? out.retry : y.retry ? out.held : out.named).push(', "    for (const y of ys) ([] as string[]).push("]], PRT, "pool-late-send-carried"],
+  ["a pool id step 5 named named again by step 7", PRS, [["    if (skip.near.has(x.i)) continue;\n", ""]], PRT, "pool-late-send-carried"],
+  // card restore-residuals (delta review of c2761c71): the two plants that passed every test, then ze1's and ze2's rules
+  ["another run's kept lanes used", PRS, [["            if (o?.run !== runId) return new Map();\n            return new Map((o.read?.", "            if (o === null) return new Map();\n            return new Map((o.read?."]], PRT, "restore-residuals"],
+  ["a kept lane's readTo taken off its lane", PRS, [["  x[1] % RESTORE_LANES === x[0] &&\n", ""]], PRT, "P3-A"],
+  ["ze1: a kept lane matched on its highest note alone", PRS, [["hi === (laneHighest[l] ?? null) && n === laneCount[l])", "hi === (laneHighest[l] ?? null))"]], PRT, "restore-residuals ze1"],
+  ["ze1: a part lane matched on its highest note alone", PRS, [["nh === (laneHighest[l] ?? null) && nc === laneCount[l])", "nh === (laneHighest[l] ?? null))"]], PRT, "restore-residuals ze1"],
+  ["ze2: a step 5 another tab holds is skipped", PRS, [['{ mode: "exclusive", signal }, async () => {\n              signal.throwIfAborted();', '{ mode: "exclusive", ifAvailable: true }, async (l) => {\n              if (l === null) return;\n              signal.throwIfAborted();']], PRT, "P2-4"],
+  ["ze2: a request joining a running id read not read for again", PRS, [["          if (state.reading) again = true;\n", ""]], PRT, "restore-residuals ze2"],
+  ["ze2 (review of 4f6e75ad9 P2): a run not reading for joined requests until it holds the ids lock", PRS, [["        if (ids !== null && idsOwed && (walked.length > 0 || vaultIds !== null)) run.reading = true;\n", ""]], PRT, "review of 4f6e75ad9"],
+  ["ze2: a joined request's run started after a sign out", PRS, [["if (again && epoch === e && !ctl.signal.aborted && run === null)", "if (again && run === null)"]], PRT, "review of 4f6e75ad9"],
+  ["review of 4f6e75ad9 P3: a marker a closed tab's run wrote skipped, never taken over", PRS, [["            return o.run === runId ? undefined : { scopes, run: runId,", "            if (o.run !== runId) owed = false;\n            return o.run === runId ? undefined : { scopes, run: runId,"]], PRT, "review of 4f6e75ad9 P3"],
+  ["review of 4f6e75ad9 P3: a marker taken over keeping its kept lanes", PRS, [["            return o.run === runId ? undefined : { scopes, run: runId,", "            return o.run === runId ? undefined : { ...o, scopes, run: runId,"]], PRT, "review of 4f6e75ad9 P3"],
+  ["review of 4f6e75ad9 P3: the wait for the ids lock not on the run's signal", PRS, [['request(RESTORE_IDS_LOCK, { mode: "exclusive", signal }, async', 'request(RESTORE_IDS_LOCK, { mode: "exclusive" }, async']], PRT, "review of 4f6e75ad9 P3"],
+  ["review of 4f6e75ad9 P3: a step 5 read on in its tries on another run's marker", PRS, [["          if (t > 1 && owedOf(await seedHeld(async () => (await h.store()).get(\"meta\", RESTORE_IDS_KEY)))?.run !== runId) return;\n", ""]], PRT, "review of 4f6e75ad9 P3"],
+  ["restore-follow-up-run-op: a joined request's run that ends stalled writes no op (the earlier done stands)", PRS, [['      if (!first(stage) && stage === "stalled" && !owed && !signal.aborted) await stalledOp().catch(() => {});\n', "      first(stage);\n"]], PRT, "restore-follow-up-run-op"],
+  ["restore-follow-up-run-op: a load's resume that ends stalled writes an op", PRS, [['stage === "stalled" && !owed && !signal.aborted)', 'stage === "stalled" && !signal.aborted)']], PRT, "restore-follow-up-run-op"],
+  ["restore-follow-up-run-op: a clean last try writes done over a walk that ended stalled", PRS, [['if (!r.last || !run.finding || stage === "stalled") return;', "if (!r.last || !run.finding) return;"]], PRT, "restore-follow-up-run-op"],
+  ["restore-follow-up-run-op: a walk's throw told after the run's key is zeroed (its op's seed check fails)", PRS, [["        await stop(e);\n        runKey.fill(0);", "        runKey.fill(0);"]], PRT, "restore-follow-up-run-op"],
 ];
 // one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
 const only = process.argv[2];
 const RUN = only === undefined ? M : M.filter(([name]) => name.includes(only));
 if (RUN.length === 0) throw new Error(`no plant named ${only}`);
 let ok = 0;
+let none = 0;
 for (const [name, file, edits, [pkg, test], pat] of RUN) {
   const path = `${P}/${file}`;
   const src = readFileSync(path, "utf8");
@@ -138,19 +195,15 @@ for (const [name, file, edits, [pkg, test], pat] of RUN) {
     }
     planted = planted.replace(from, to);
   }
-  writeFileSync(path, planted);
-  // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
-  let r;
-  try {
-    r = runSync("node", ["--test", `--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, encoding: "utf8", timeoutMs: 180_000 });
-  } finally {
-    writeFileSync(path, src);
+  // a run past 180 s is killed, its process group with it; a run with no verdict (HUNG, CANCELLED, NO TEST) is refused,
+  // never a survivor (scripts/mutant-run.mjs; cards restore-sweep-world-tests-exit-alone, mutant-sweeps-refuse-no-verdict)
+  const r = withPlant(path, planted, () => runMutant([`--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, timeoutMs: 180_000 }));
+  if (refused(name, r)) {
+    none++;
+    continue;
   }
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const killed = r.status !== 0 && Number(fail) > 0;
-  if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}`);
+  if (r.verdict === "killed") ok++;
+  console.log(`${r.verdict === "killed" ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}`);
 }
-console.log(`${ok}/${RUN.length} killed`);
+console.log(`${ok}/${RUN.length} killed${none > 0 ? `; ${none} with no verdict, refused` : ""}`);
 if (ok !== RUN.length) process.exitCode = 1;

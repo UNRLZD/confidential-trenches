@@ -135,18 +135,22 @@ export function progress(p: Phase, id: string, stage: Stage, now: number): Phase
   // a Filled not yet Final: the stage filled makes it Final with its own time. The page posts a pool buy's final stage
   // as progress (pool-buy.ts poolBuyKind): "sent" is a run that ended not known (a settle never read, a run that threw
   // after its answer), which is Landing again, then Slow, as for any buy whose end is not known; not_landed,
-  // part_filled and refused end it
+  // part_filled, refused and owed_back (card evm-buy-end-carries-its-tx: a Base or Robinhood swap that failed with the
+  // ETH on the buy's wallet, on its way back to the pool) end it
   if (p.k === "filled" && p.provisional && p.id === id) {
     if (stage === "filled") return { k: "filled", id, at: p.at, ms: p.ms };
     if (stage === "sent") return { k: "landing", id, at: p.at };
-    if (stage === "part_filled" || stage === "not_landed" || stage === "refused") return { k: "ended", id, at: p.at, stage };
+    if (stage === "part_filled" || stage === "not_landed" || stage === "refused" || stage === "owed_back") return { k: "ended", id, at: p.at, stage };
     return p;
   }
+  // a buy answered refused whose bytes landed anyway, its swap failed and its ETH on W: the page's late end owed_back
+  // moves it from Failed to owed back (review of 167d9deea)
+  if (p.k === "ended" && p.stage === "refused" && p.id === id && stage === "owed_back") return { k: "ended", id, at: p.at, stage };
   if (!busy(p) || p.id !== id) return p;
   if (stage === "signed") return p;
   if (stage === "sent") return p.k === "sending" ? { k: "landing", id, at: p.at } : p;
   if (stage === "filled") return { k: "filled", id, at: p.at, ms: Math.max(0, now - p.at) };
-  if (stage === "part_filled" || stage === "not_landed" || stage === "refused") return { k: "ended", id, at: p.at, stage };
+  if (stage === "part_filled" || stage === "not_landed" || stage === "refused" || stage === "owed_back") return { k: "ended", id, at: p.at, stage };
   return p;
 }
 
@@ -217,7 +221,12 @@ export type Reason = "priceCheck" | "notSent" | "unavailable";
  * (no_table_fits), or the coin is one the build does not trade (venue_not_built: a curve quoted in another mint, buy or sell), Unavailable
  * (owner 10 Nov 18:12Z). Any other code draws Failed alone: the app never makes up a reason, and never draws a code.
  */
-const REASONS: Readonly<Record<string, Reason>> = Object.freeze({ quote_check_failed: "priceCheck", signpage_down: "notSent", venue_not_pinned: "unavailable", no_table_fits: "unavailable", venue_not_built: "unavailable" });
+/** The code the signing page refuses a Solana buy with, at the tap and in pool.buy.dry, where the only venue it can
+ *  trade through prices the coin below its whole market (card sol-buy-takes-the-best-venue-it-can-trade, named by it at
+ *  19 Nov 14:43Z): the kit's own below_reference (checks/evm/quote.ts), Unavailable. */
+export const BELOW_MARKET_CODE = "below_reference";
+
+const REASONS: Readonly<Record<string, Reason>> = Object.freeze({ quote_check_failed: "priceCheck", signpage_down: "notSent", venue_not_pinned: "unavailable", no_table_fits: "unavailable", venue_not_built: "unavailable", [BELOW_MARKET_CODE]: "unavailable" });
 
 /** The app's reason for a kit code; null for a code it has no words for, or none. Own keys only. */
 export const reasonOf = (code: ErrorCode | undefined): Reason | null => (code !== undefined && Object.hasOwn(REASONS, code) ? REASONS[code]! : null);
@@ -226,9 +235,25 @@ export const reasonOf = (code: ErrorCode | undefined): Reason | null => (code !=
  *  since the same buy would be refused again; a new token page starts ready. */
 export const unavailable = (p: Phase): boolean => p.k === "ended" && p.stage === "refused" && reasonOf(p.code) === "unavailable";
 
-/** How an ended trade is drawn: Failed, Not landed (CH-050: the money never left W), or part filled (CH-045). */
+/** A coin the pool cannot buy yet, told before any tap (card app-unavailable-before-the-tap): the page's pool.buy.dry,
+ *  which the box asks at mount, refused with one of the tap's own Unavailable codes. An answer, or any other refusal (a
+ *  not now, no reference), is not. */
+export const dryUnavailable = (o: { ok: true } | { ok: false; error: { code: ErrorCode } }): boolean => !o.ok && reasonOf(o.error.code) === "unavailable";
+
+/** Buy and the presets off: the tap ended Unavailable, or the dry said so of the coin on screen (`dryOff`, the key of
+ *  the coin it answered for), so a new token page starts ready. */
+export const buyOff = (p: Phase, dryOff: string | null, coin: string): boolean => unavailable(p) || dryOff === coin;
+
+/** `dryOff` after a dry for coin `at` answered: every dry the box asks takes this one rule. An Unavailable refusal sets
+ *  it to `at`; an answer for `at` clears it, since a below-market refusal is a market state that can pass; any other
+ *  refusal (a not now) keeps it, and nothing for one coin changes another's. */
+export const dryOffAfter = (d: string | null, at: string, o: { ok: true } | { ok: false; error: { code: ErrorCode } }): string | null =>
+  o.ok ? (d === at ? null : d) : dryUnavailable(o) ? at : d;
+
+/** How an ended trade is drawn: Failed, Not landed (CH-050: the money never left W), part filled (CH-045), or owed back
+ *  (card evm-buy-end-carries-its-tx: the swap failed and the money is on its way back to the pool). */
 export interface EndView {
-  k: "failed" | "notLanded" | "partial";
+  k: "failed" | "notLanded" | "partial" | "owedBack";
   reason: Reason | null;
 }
 
@@ -237,12 +262,13 @@ export interface EndView {
  * to its ready label, so any further tap is a new trade of the amount on screen: a retry of the whole amount would
  * trade more than the user asked (a buy), or re-apply a share to the smaller balance (a sell).
  */
-export const showsRetry = (p: Phase): boolean => p.k === "ended" && p.stage !== "part_filled" && !unavailable(p);
+export const showsRetry = (p: Phase): boolean => p.k === "ended" && p.stage !== "part_filled" && p.stage !== "owed_back" && !unavailable(p);
 
 export function endView(p: Phase): EndView | null {
   if (p.k !== "ended") return null;
   if (p.stage === "not_landed") return { k: "notLanded", reason: null };
   if (p.stage === "part_filled") return { k: "partial", reason: null };
+  if (p.stage === "owed_back") return { k: "owedBack", reason: null };
   return { k: "failed", reason: reasonOf(p.code) };
 }
 

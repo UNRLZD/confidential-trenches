@@ -118,10 +118,15 @@ export type EvmCarryHost = {
   random?: (out: Uint32Array<ArrayBuffer>) => void;
   /** W's key from the seed (freshWallet when not given): a test's own, to see every key zeroed. */
   derive?: typeof freshWallet;
+  /** A pass before the page's first tap (card evm-load-reads-name-no-w-to-the-public-seat): the helper's route each owed
+   *  W's balance is read on, alone. Nothing is signed or sent and no W is named to the pool's RPCs: each refused buy's W
+   *  (its release's kind the helper's word, as every pass takes it) answers `idle` with its balance there, display alone,
+   *  never signed on; a pass after the tap reads W on both RPCs before W signs. */
+  idle?: EvmRpc;
 };
 
 /** One W's outcome in a pass. */
-export type EvmCarryOutcome = { w: string; end: "sent" | "landed" | "pending" | "withdraw" | "other" | "empty" | "unread" | "high_fee" | "sim_failed" };
+export type EvmCarryOutcome = { w: string; end: "sent" | "landed" | "pending" | "withdraw" | "other" | "empty" | "unread" | "high_fee" | "sim_failed" | "idle"; balance?: bigint };
 
 const lower = (s: string): string => s.toLowerCase();
 const hex = (b: Uint8Array): string => "0x" + Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -376,6 +381,7 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
       }
       owed.push({ l, j, w, release: e });
     }
+    if (h.idle !== undefined) return await idleReads(h, h.idle, owed);
     const o = shuffled(owed, h.random)[0];
     if (o === undefined || h.signal?.aborted) return [];
     const p: Pass = { h, store, seed, sleep, now };
@@ -452,4 +458,22 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
   } finally {
     seed.fill(0);
   }
+}
+
+/** The pass before the page's first tap (EvmCarryHost.idle): each owed W whose release was a refused buy (a rest W from
+ *  its record), its balance read on the helper's route alone, one W a request in a random order; a W the helper names
+ *  no buy of, or whose read fails, is left out (the pass after the tap reads it on both RPCs). */
+async function idleReads(h: EvmCarryHost, read: EvmRpc, owed: readonly Owed[]): Promise<EvmCarryOutcome[]> {
+  const out: EvmCarryOutcome[] = [];
+  for (const o of shuffled(owed, h.random)) {
+    if (h.signal?.aborted) break;
+    try {
+      if (!o.rest && (await evmReleaseKind(h.helper, h.pin.pool, o.release)) !== "buy") continue;
+      const balance = quantity(await read("eth_getBalance", [o.w, "latest"], h.signal), "the helper's balance");
+      if (balance > 0n) out.push({ w: o.w, end: "idle", balance });
+    } catch {
+      // left out: read again at the next pass
+    }
+  }
+  return out;
 }

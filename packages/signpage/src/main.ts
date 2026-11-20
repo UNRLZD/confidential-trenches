@@ -34,6 +34,8 @@
 //   Sign out; the backup's Saved, which opens the deposit gate of a seed whose 12 words are the only copy (W:888), so a
 //   lined-up click cannot mark words saved that the user never saw; Backup, which draws the 12 words; and Copy, which
 //   puts them on the clipboard, so a lined-up burst cannot draw the words and copy them for a paste the page asks for.
+//   New account (card wallet-signin-wallet): it opens a wallet's prompt, not the browser's own sheet, and makes a seed
+//   and its 12 words once the wallet signs, so a lined-up click cannot raise that prompt.
 //   Create passkey and Use passkey open the browser's own passkey sheet, which carries the browser's protection.
 // - The page shows public values only, but for the backup screen's 12 words: the account's profile key T_0 (wallet.md:68,
 //   a public key, never a NEAR account or money), in data-account, so a check can compare it. The entropy and seed64
@@ -50,18 +52,26 @@
 //   signout (the backup first while the 12 words are the only copy, then Sign out, which closes the layer back to the
 //   app signed out), backup.open (the 12 words, then Saved or Cancel back to the app) and signin.open's wallet way (the
 //   store read first, then the two choices before the wallet is asked anything; I already have one draws Use passkey
-//   and Recovery code). Each opens the layer through openLayer(), which resets the activation guard (guard.shown()).
+//   and Recovery code; New account, card wallet-signin-wallet, asks the window's wallet for one sign-in signature,
+//   checks it on the device and only then makes new random 12 words, the backup first). Each opens the layer through openLayer(), which resets the activation guard (guard.shown()).
 //   Card signpage-withdraw-form adds withdraw.open: with a seed stored it draws the withdraw form (src/withdraw/), where
 //   the user types the address and the amount, refused before any proof when bad; a withdraw.open with a one-time id
 //   draws the held deposit's way out (src/withdraw/held.ts, card held-deposit-way-out) for the held op of that id in
 //   this page's own store, and a move a reload cut short is resumed at sign-in, its same signed bytes. Withdraw is guarded like Sign out; its note value, fee and hand-off are the
 //   build's network's (src/withdraw/handoff.ts, card signpage-withdraw-handoff), drawn not offered where that network
-//   names no vault or relayer. export.open stays refused until its card.
+//   names no vault or relayer.
+//   Card signpage-backup-export adds export.open (src/pages/export.ts): taken only for an address the stored seed itself
+//   derives on the named chain, from the page's own notes, pool deposit ops and refund records (else not_allowed, before
+//   any screen); it draws the export screen, sealed as the backup is: the chain, the address shortened, Show and Done.
+//   The key is derived and drawn only at the user's own Show (guarded as Backup), goes to the clipboard only by their own
+//   Copy, and is in no answer, no message and no record: only this top-level page's DOM holds it while it is drawn, and
+//   every way off the screen drops it (and writes the clipboard empty after a Copy, as the backup's words).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
 import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLET_CHANNEL, WALLET_SEED_LOCK, walletSeedMoved, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
+import { newAccountByWallet, walletFound } from "@blindfill/wallet/signin/wallet";
 import { activationGuard, type Press } from "./guard.ts";
 import { startApi, type HostAnswer, type HostRefusal, type KindContext, type Running } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
@@ -90,28 +100,35 @@ import type { ExitChain } from "../../kit/src/checks/oneclick-exit.ts";
 import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, poolBuyDryKind, rentOnce, withDepositWallets, withPools, withSolanaRent } from "./pools.ts";
 import { evmBuyDry, evmDryQuote, evmDryTap, evmMostWithCash, evmMoveShort } from "./pool-buy-evm.ts";
-import { poolBalances } from "../../wallet/src/pool/balances.ts";
+import { poolBalances, type BalanceProof } from "../../wallet/src/pool/balances.ts";
+import { keptProofs } from "../../wallet/src/pool/kept-proofs.ts";
 import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { unitsOf } from "./pool-buy.ts";
 import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { withVaultBalance } from "./vault-balance.ts";
-import { returningWallets, withPositions, withReturning } from "./positions.ts";
+import { evmReturningWallets, returningWallets, withPositions, withReturning } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { CONFIRM_TITLE, CONNECT_PATH, confirmLines, outsideKinds, outsideOrigin, type ConfirmedKind } from "./outside.ts";
+import { clearConnections, connections } from "./connections.ts";
+import { connectedApps } from "./connected-apps.ts";
+import { dress } from "./sheet.ts";
 import { drawBackdrop, drawSealedGround, groundLogo } from "./backdrop.ts";
 import { GROUND_LOGO_SVG } from "./ground-logo.ts";
 import { SEALED } from "./frame-cover.ts";
+import { joinRunning } from "./dry-join.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
+import { CHAIN_NAME, exportChain, exportKey, exportRefs, ownsWallet, shortAddress, type ExportChain } from "./pages/export.ts";
 import { parseAmount, vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm, type GivenWithdraw } from "./withdraw/form.ts";
 import { drawHeldMoveOut, type HeldDeps } from "./withdraw/held.ts";
 import { archivalRpc, heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src/deposit/moveout.ts";
 import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
-import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
+import { FEE_CAP_DRY_KEPT_MS, PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
 import { nearBuyDry, nearBuyKind, nearHoldingsPass, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
-import { dclPoolsKept, rheaPoolsKept } from "./near-pools.ts";
+import { dclPoolsKept, keptDb, rheaPoolsKept, type KeptOptions } from "./near-pools.ts";
 import { nearSeatRpc, paceDb, pacedNearRpc, seatsUp, sharePaces } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm, type GivenPoolWithdraw } from "./withdraw/pool-form.ts";
@@ -128,7 +145,7 @@ import type { PoolChain } from "./rules/pool.ts";
 
 type State =
   | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
-  | "choose" | "existing" | "signout" | "withdraw" | "pool-withdraw" | "held"
+  | "choose" | "existing" | "signout" | "withdraw" | "pool-withdraw" | "held" | "export"
   // card withdraw-address-in-the-app: the two withdraw screens for an address and amount typed in the app's own sheet,
   // drawn as a confirm with no field to type into, so not sealed (src/frame-cover.ts): the app's frame stays under them
   | "withdraw-confirm" | "pool-withdraw-confirm";
@@ -155,6 +172,9 @@ const WORDS = {
   cancel: "Cancel", // owner 2 Nov 06:08Z, all approved
   "new-account": "New account", // owner 2 Nov 06:08Z, all approved
   "have-one": "I already have one", // owner 2 Nov 06:08Z, all approved
+  // the export screen's terse labels (card signpage-backup-export)
+  show: "Show",
+  done: "Done",
 } as const;
 
 const framed = window.top !== window;
@@ -181,12 +201,15 @@ const root = document.createElement("main");
 root.id = "signin";
 if (framed) root.dataset.framed = "true";
 // top-level: the shell, with these screens in its layer over the APP_HOST frame; the layer opens only when the app
-// asks (signin.open, signout, backup.open and withdraw.open here; export.open is refused until its card builds it) and
+// asks (signin.open, signout, backup.open, withdraw.open and export.open here) and
 // closes on signed in, signed out by the signout kind, or Cancel
 let shell: Shell | null = null;
 // card signpage-answers-outside-apps (src/outside.ts): on /connect this page is an outside app's popup, its opener the
 // one peer; on every other path, APP_HOST's shell, which nothing here changes
 const outside = !framed && location.pathname === CONNECT_PATH;
+// card signpage-other-apps-connect (src/connections.ts): the origins the user connected, kept on this device; on /connect
+// every request and state push is read against it first (src/api.ts admit). APP_HOST's shell never opens it.
+const connected = outside ? connections() : null;
 // top-level, on every build: the page network's pool flow, its settling and the next buy's proofs (src/pool-testnet.ts,
 // card signpage-pool-mainnet); with no pool pinned on the network it refuses every pool kind and reads nothing; the
 // store and the seed are opened when a run needs them
@@ -326,7 +349,8 @@ else {
   const ground = drawSealedGround(document, groundLogo(GROUND_LOGO_SVG));
   document.body.append(ground);
   // the pool kinds' deps: the network's pins and each chain's two RPCs, which the price reads use too (src/pool-price.ts)
-  const poolDeps = testnetPoolDeps(testnet?.flow, testnet ? () => testnet.outSignal() : undefined);
+  // and a buy's wait at its tap while its chain's spend is prepared (card taps-wait-inside-the-page)
+  const poolDeps = testnetPoolDeps(testnet?.flow, testnet ? () => testnet.outSignal() : undefined, testnet ? (chain) => testnet.prepared(chain) : undefined);
   const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
   // a page shown again reads its prices at once: hidden, it read only every 15 s (src/pool-price.ts)
   wakeWhenShown(document, prices);
@@ -355,14 +379,16 @@ else {
   // with no trade gate, since the tap's own run holds it)
   // one mover per signed-in session (its signal is the sign out's): a move on its way is never counted for another
   // 1Click's least for a move of Cash into a pool (card cash-buys-spend-every-note), read live, kept a minute so a dry
-  // per keystroke asks it once; a read that names none is not kept
-  const leastRead = new Map<PoolChain, { at: number; least: Promise<bigint | null> }>();
-  const oneClickLeastNow = (chain: PoolChain): Promise<bigint | null> => {
+  // per keystroke asks it once; a read that names none (it throws: card cash-least-read-again) is not kept, so the next
+  // dry or tap reads again
+  const leastRead = new Map<PoolChain, { at: number; least: Promise<bigint> }>();
+  const oneClickLeastNow = (chain: PoolChain): Promise<bigint> => {
     const kept = leastRead.get(chain);
     if (kept !== undefined && Date.now() - kept.at < 60_000) return kept.least;
-    const least = readOneClickLeast(chain, fetch, Date.now());
+    // its answers checked at the page's own price of the pool's coin, read as each answers (card cash-to-pool-least-signed)
+    const least = readOneClickLeast(chain, fetch, Date.now(), { price: () => prices.get(chain) });
     leastRead.set(chain, { at: Date.now(), least });
-    void least.then((x) => x === null && leastRead.delete(chain));
+    least.catch(() => leastRead.get(chain)?.least === least && leastRead.delete(chain));
     return least;
   };
   // the floor a Move's quote into a pool is held to (pool.address's), read for a message by the pool's pinned fee payer on
@@ -418,6 +444,18 @@ else {
     cashMoverOf = { signal, m };
     return m;
   };
+  // every host that shows a deposit address or sends a quote naming one marks its index quoted first (card
+  // restore-shows-a-note-on-a-planned-index; the wallet's markQuoted), under the seed lock shared as a seed write: a
+  // restore then never marks dead an address the user was shown, and a sign out never runs inside the mark
+  const quotedIndex = (scope: bigint, index: number): Promise<void> =>
+    navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+      const notes = await openNoteStore(await open());
+      try {
+        await notes.markQuoted(scope, index);
+      } finally {
+        notes.close();
+      }
+    }) as Promise<void>;
   // a pool's money back to Cash (src/pool-to-cash.ts, card one-balance-buys-on-every-chain): Cash's own deposit quote of
   // the pool's coin to U (a host of its own that prices the pool coins at the device's price: the app's deposit.quote
   // stays as it is), its follow op written before the address is used; then the pool withdraw run pays that address
@@ -425,6 +463,7 @@ else {
     scope: pageScope,
     read: fs.depositRead,
     named: () => namer.named(),
+    quoted: quotedIndex,
     priced: (origin) => pricedPoolCoin(origin, (c) => prices.get(c)),
     checked: async (id, r, u) => {
       // its refund address recorded first, so a refund there is carried (card refunds-land-on-the-devices-own-wallet)
@@ -545,6 +584,8 @@ else {
       const ms = r?.end === "pending" ? CARRY_FOLLOW_MS : r?.end === "landed" ? POOL_RENT_BACK_SPACE_MIN_MS + Math.floor(Math.random() * (POOL_RENT_BACK_SPACE_MAX_MS - POOL_RENT_BACK_SPACE_MIN_MS)) : CARRY_PASS_MS;
       // a wait that never holds a process open (Node's unref; a browser's timer has none)
       await new Promise<void>((ok) => {
+        // a sign out during the pass above never fires again: the loop ends at once, not after the wait
+        if (signal.aborted) return ok();
         const t = setTimeout(ok, ms);
         (t as unknown as { unref?: () => void }).unref?.();
         signal.addEventListener("abort", () => (clearTimeout(t), ok()), { once: true });
@@ -614,7 +655,8 @@ else {
         const e = testnet?.evmPoolOf(chain) ?? null;
         // the chain's pool index, started by this first coin quote where none runs or is served (card
         // robinhood-quote-answers-cold: from the release's snapshot), its sync waited for at most EVM_DRY_INDEX_WAIT_MS
-        return e === null ? null : evmDryQuote(chain, e.pin, e.rpcs, undefined, () => testnet!.evmIndexReady(chain));
+        // and, on a device that holds nothing, a quote that reads no log (card evm-tree-reads-only-when-needed)
+        return e === null ? null : evmDryQuote(chain, e.pin, e.rpcs, undefined, () => testnet!.evmIndexReady(chain), () => !testnet!.evmMoney());
       },
       // above tap_max (card evm-cash-move-brings-its-fee): the move cashFirst starts, sized at the epoch's relay fee
       // (src/pool-buy-evm.ts evmMoveShort over the rungs its parts land, `rungs`) and priced on the device (card
@@ -636,7 +678,8 @@ else {
     const token = params.token;
     const after = (async () => {
       if (!(await fs.state()).signed_in) return void (answer = { error: "not_funded" });
-      answer = await nearBuyDry(page, token, amount);
+      // a dry's fee takes the device's fee cap read within FEE_CAP_DRY_KEPT_MS (card near-quote-inside-the-kpi)
+      answer = await nearBuyDry({ ...page, fee: (a) => withdrawFormDeps(nearDryVault(), { capKeptMs: FEE_CAP_DRY_KEPT_MS }).fee(a) }, token, amount);
     })().catch(() => void (answer = { error: "failed" }));
     return { running: true, after, answer: () => answer };
   };
@@ -664,8 +707,9 @@ else {
     },
     // Solana: the dry's tap_max on the coin's venue, a throw when that venue is not read (no move from Cash); Base and
     // Robinhood: state.pools' tap_max, the largest ready note
-    tapMax: async (chain, token) => {
-      if (chain === "solana") return solanaTapMaxOf(tapDry({ chain: "solana", token }));
+    tapMax: async (chain, token, ask) => {
+      // with the ask: the tap's own venue decision (pools.ts poolBuyDryKind), a refusal thrown before any move
+      if (chain === "solana") return solanaTapMaxOf(tapDry({ chain: "solana", token, ...(ask === undefined ? {} : { amount: unitsOf(ask.amount, 9), slippage_bps: ask.slippageBps }) }));
       if (!testnet) return 0n;
       const both = await testnet.readyWith(pageNotes);
       const tap = poolBalances(both.value, PAGE_POOLS.filter((p) => p.chain === chain), both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
@@ -747,6 +791,8 @@ else {
   const poolBuyDry = poolBuyDryKind({
     pools: PAGE_POOLS,
     finders: dryFinders,
+    // the tap's own pins: an ask with an amount answers the tap's venue decision (page-rpc.ts solanaBuyVenue)
+    tables: PAGE_TABLES,
     // a preview: each kind's pools as soon as one provider's scan names them (card solana-quote-reads-found-pools-once);
     // tapDry below, the tap's own, waits for both providers' scans
     early: true,
@@ -783,6 +829,7 @@ else {
   const tapDry = poolBuyDryKind({
     pools: PAGE_POOLS,
     finders: dryFinders,
+    tables: PAGE_TABLES,
     rpcs: dryPair,
     rent: () => (hasSolana ? rent.get() : null),
     ready: async () => {
@@ -818,7 +865,7 @@ else {
   // pool's coin priced at the device's own price of each
   // another pool's coin, which that pool's run pays, refunds back on its own chain at U_{s,i}'s own address there (card
   // refunds-land-on-the-devices-own-wallet), recorded before the address goes out; Cash's NEAR USDC keeps INTENTS
-  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor,
+  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), quoted: quotedIndex, priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor,
     checked: async (id, chain, quote, u) => {
       if (u.refund_to !== undefined) await keepRefund(await open(), { chain: poolCoinChain(quote.origin_asset)!, address: u.refund_to, s: u.scope.toString(), i: u.index, deadline_ms: Date.parse(quote.deadline) });
       await poolFollow!.quoted(id, chain, quote, u);
@@ -887,7 +934,7 @@ else {
         const withVault = await withVaultBalance(s, shared, pageScope());
         // and each U_X a follow left money at (card deposit-takes-each-pools-own-coin): the ops read after those notes, from
         // the store alone, so a carry the pools count is never listed too (pool-deposit-follow.ts depositWalletsOf)
-        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open, both?.landed, both?.making).then(async (p) =>
+        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open, both?.landed, both?.making, s.signed_in && PAGE_POOLS.length > 0 ? await pageKept().catch(() => []) : undefined).then(async (p) =>
           !p.signed_in || PAGE_POOLS.length === 0 ? p : withDepositWallets(p, [
             ...depositWalletsOf(await pageOps().catch(() => []), (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], (c) => POOL_ADDRESS_ASSET[c]),
             // and each W's tail under the least standard size (src/w-tails.ts): the user's money kept on W, counted too
@@ -902,11 +949,14 @@ else {
         const nearPage = s.signed_in ? nearBuyPage() : null;
         const near = nearPage ? await nearPositions(nearPage).catch(() => []) : [];
         const positioned = withPositions(pooled, sol === null && near.length === 0 ? null : [...(sol ?? []), ...near]);
+        // the EVM Ws a refused buy left ETH on, read on the helper's route before the page's first tap
+        const evmOwed = s.signed_in && testnet ? evmReturningWallets(testnet.evmReturning(), (c) => prices.get(c)) : [];
+        const listed = withReturning(positioned, evmOwed);
         // the Ws whose money waits for its rent back, on their way (src/positions.ts returningWallets): a store read
         const owed = s.signed_in && testnet ? await testnet.returning().catch(() => []) : [];
         // the notes the balance counted, so a W whose sweep's note is counted is not listed too
         const counted = owed.some((o) => o.sweep !== undefined) ? await shared().catch(() => null) : [];
-        return withReturning(positioned, returningWallets(owed, prices.get("solana"), counted));
+        return withReturning(listed, returningWallets(owed, prices.get("solana"), counted));
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {
@@ -923,12 +973,14 @@ else {
       "signin.open": (p, ctx) => openKind(ctx.id, "signin.open", p.way),
       signout: (_p, ctx) => openKind(ctx.id, "signout"),
       "backup.open": (_p, ctx) => openKind(ctx.id, "backup.open"),
+      // one key of this seed's, for an address the seed itself derives on that chain (src/pages/export.ts)
+      "export.open": (p, ctx) => openExport(ctx.id, p.chain, p.address),
       // the form withdraws from the vault's notes; with a one-time id (from_id) the held deposit's way out
       "withdraw.open": (p, ctx) => (takesParams("withdraw.open", p) ? openKind(ctx.id, "withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined, givenOf(p)) : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       // money in from an outside wallet (card move-one-confidential-swap, 14 Nov): one confidential swap as a Move, held to
       // 1Click's keyless tell, so the paying wallet is not tied to U on chain
-      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), quoted: quotedIndex, checked: (id, r, u) => follows!.quoted(id, r, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
       ...depositReadHosts({ stop: quotesStopped, poolFloor: pagePoolFloor }),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
@@ -937,22 +989,26 @@ else {
       // move-one-confidential-swap, 14 Nov): every 1Click quote is one confidential swap, held to 1Click's keyless tell
       // on the page's stop, so the paying wallet is not tied to U_X on chain; a plain send of the pool's own coin asks 1Click
       // nothing
-      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
+      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), quoted: quotedIndex, priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with
       // no pin, mainnet until its pools deploy, refuses every one not_allowed and makes no read); a sell's decimals read
       // on two providers
       ...poolKindMap,
-      "pool.sell.dry": (params) => poolSellDry(params),
+      // each dry joins a running one with exactly its params (card dry-ask-joins-the-running-quote, src/dry-join.ts): the
+      // box's ask again after the client's 10 s gets the running quote's answer, never a second quote on the same reads;
+      // here, above the routing, so every chain joins in one place
+      "pool.sell.dry": joinRunning((params) => poolSellDry(params)),
       // with_cash (card one-balance-buys-on-every-chain): a tap's most with Cash moved first, on Solana
-      "pool.buy.dry": (params) => dryWithCash(params),
+      "pool.buy.dry": joinRunning((params) => dryWithCash(params)),
       // a move between Cash and a pool (card one-balance-buys-on-every-chain): the same mover a buy's shortfall takes
       ...(prover && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null ? poolMoveKinds(cashMoverNow, toCashNow) : {}),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
     }))),
     popup: outside ? { opener: (window.opener as Window | null) ?? null, knock } : undefined,
+    ...(connected ? { admit: (o: string) => connected.has(o) } : {}),
   });
   shell.body.append(root);
   // the user's own Esc, close tap or scrim tap: Cancel's step, on a screen Cancel is drawn on (show() below). Esc leaves
@@ -960,6 +1016,8 @@ else {
   // Firefox and Safari, so the x, the scrim, Cancel and Saved (taps) leave it then
   shell.onDismiss = (by) => {
     if (by === "key" && copied) return;
+    const st = root.dataset.signin;
+    if (st === "export" || st === "backup") return leaveScreen();
     void run(cancel);
   };
   // an outside app's popup with no opener (opened by hand, or its opener cut) has no one to connect
@@ -973,7 +1031,8 @@ function kindsFor<K extends object>(kinds: K): K {
 }
 
 // An outside app's sheet, drawn in the layer in root's place: the connect step (its origin, Allow, Cancel), then each
-// buy's or sell's Confirm (its origin and what it does). Nothing is kept: a reload asks to connect again.
+// buy's or sell's Confirm (its origin and what it does). Allow keeps the origin's approval (src/connections.ts), which
+// every request is read against; a reload still asks to connect again.
 const outsideView = document.createElement("main");
 outsideView.id = "outside";
 let confirming = false;
@@ -1012,8 +1071,30 @@ let knocked: string | null = null;
 let allowedOrigin: string | null = null;
 const status = document.createElement("p");
 Object.assign(status.style, { margin: "0", padding: "24px 16px", color: "#a3a3a3", font: '14px "Schibsted Grotesk", system-ui, sans-serif', overflowWrap: "anywhere" });
+// card signpage-other-apps-connect (src/connected-apps.ts): on /connect, every app the user connected, each with
+// Disconnect, dressed as the connect sheet is; under the status once connected, on the sheet when not. Disconnect of the
+// bound origin ends its session (src/api.ts reads the store first) and clears what the page shows for it
+const connectedList = document.createElement("main");
+connectedList.id = "connected";
+const dressed = (e: HTMLElement): HTMLElement => (dress(e, false), e);
+dressed(connectedList).style.padding = "0 16px 24px";
+const connectedView =
+  connected &&
+  connectedApps(connectedList, {
+    doc: document,
+    store: connected,
+    text: (tag, text) => dressed(outsideText(tag, text)),
+    origin: originLine,
+    button: (action, label, onClick) => dressed(button(action, label, onClick)),
+    removed: (o) => {
+      if (o !== allowedOrigin) return;
+      allowedOrigin = null;
+      status.textContent = "Not connected";
+    },
+  });
 function notConnected(): void {
-  showOutside([outsideText("p", "Not connected")]);
+  showOutside([outsideText("p", "Not connected"), connectedList]);
+  void connectedView?.refresh();
 }
 function knock(origin: string): void {
   if (knocked !== null || !outsideOrigin(origin, location.origin)) return;
@@ -1022,10 +1103,19 @@ function knock(origin: string): void {
     originLine(`Connect ${origin}`),
     button("allow", "Allow", () => {
       hideOutside();
-      allowedOrigin = origin;
-      status.textContent = `Connected ${origin}`;
-      if (!status.isConnected) document.body.append(status);
-      shell!.allow(origin);
+      // the approval is kept first: every request from the origin is read against it, so a session is bound only once
+      // its write completed, and a write that failed binds none
+      void connected!.add(origin).then(
+        () => {
+          allowedOrigin = origin;
+          status.textContent = `Connected ${origin}`;
+          if (!status.isConnected) document.body.append(status);
+          shell!.allow(origin);
+          document.body.append(connectedList);
+          void connectedView?.refresh();
+        },
+        notConnected,
+      );
     }),
     button("cancel", "Cancel", notConnected),
   ]);
@@ -1072,7 +1162,7 @@ async function resynced(): Promise<void> {
 // `closes`: the layer the open shows tells the app when it has closed (src/shell.ts); src/kit-version.ts takes it from an
 // app below the kit's own version, which reads no such notice
 type OpenAnswer = { result: { pending: true; closes: true }; then: () => void } | null;
-function decide(id: string, kind: AccountKind, way: unknown, fromId?: string, given?: GivenWithdraw | null): OpenAnswer {
+function decide(id: string, kind: AccountKind, way: unknown, fromId?: string, given?: GivenWithdraw | null, target?: ExportTarget): OpenAnswer {
   // a sheet shown already is never redrawn by the app: a kind the frame sent before it opened is refused
   if (sheetShown() || !takes(kind, root.dataset.signin, busy)) return null;
   return {
@@ -1086,7 +1176,14 @@ function decide(id: string, kind: AccountKind, way: unknown, fromId?: string, gi
         if (page === "signed-in") return landed({ screen: "signed-in", seed: seed! });
         if (page === "signed-out") return show("signed-out");
         if (page === "backup") showBackup(seed!);
-        else if (page === "signout") show("signout", shown(seed!));
+        else if (page === "export") {
+          // only openExport opens it, always with its checked wallet
+          if (!target) return show("signed-in", shown(seed!));
+          // the screen needs no seed until Show: its entropy is zeroed at once
+          seed!.entropy.fill(0);
+          exportTarget = target;
+          show("export");
+        } else if (page === "signout") show("signout", shown(seed!));
         else if (page === "withdraw") {
           // the form needs no seed: its entropy is zeroed at once
           seed!.entropy.fill(0);
@@ -1103,6 +1200,77 @@ function decide(id: string, kind: AccountKind, way: unknown, fromId?: string, gi
         layer();
       }),
   };
+}
+// export.open (card signpage-backup-export): refused not_allowed on a chain this page exports on none of, an address
+// that is no string, or one the stored seed does not derive there among the page's own records; the check runs before
+// the answer (after a resync's read, as openKind waits), on the seed and records as they are then, and the screen's Show
+// derives again from the store as it is at that tap. The answer carries no key and no word of which wallet it is.
+type ExportTarget = { chain: ExportChain; address: string };
+let exportTarget: ExportTarget | null = null;
+// the key while it is drawn (a JS string, which cannot be zeroed): dropped by every show() off the export screen
+let exportShown: string | null = null;
+function openExport(id: string, chain: unknown, address: unknown): { after: Promise<void>; answer: () => OpenAnswer } | null {
+  if (framed || !exportChain(chain) || typeof address !== "string" || address === "" || sheetShown() || !takes("export.open", root.dataset.signin, busy)) return null;
+  let owned = false;
+  const after = (async () => {
+    await resynced();
+    owned = await ownsNow(chain, address);
+  })();
+  return { after, answer: () => (owned ? decide(id, "export.open", undefined, undefined, undefined, { chain, address }) : null) };
+}
+// The page's own records' wallets (src/pages/export.ts exportRefs): the notes, the pool deposit ops, the refund records.
+async function exportRefsNow() {
+  const st = await open();
+  return exportRefs(await stateNotes(), await pageOps(), await storedRefunds(st));
+}
+async function ownsNow(chain: ExportChain, address: string): Promise<boolean> {
+  const refs = await exportRefsNow();
+  if (refs.length === 0) return false;
+  const seed = await openSeed64();
+  try {
+    return ownsWallet(seed, chain, address, refs);
+  } finally {
+    seed.fill(0);
+  }
+}
+// A way off the export or the backup screen (Done, the x, the scrim, Esc, pagehide) wins over a step still running
+// (Show reading the store and deriving): the screen's wallet and key go at the tap, so the step's own check
+// (exportTarget !== t) draws nothing, and the page goes back to the app once the step ends (run's leaveAfter).
+let leaveAfter = false;
+function leaveScreen(): void {
+  exportTarget = null;
+  exportShown = null;
+  if (busy) return void (leaveAfter = true);
+  void run(cancel);
+}
+// pagehide (the browser may keep the page for Back, or freeze it): the key or the 12 words leave the page in this task,
+// before it is kept, and the page goes back to the app
+addEventListener("pagehide", () => {
+  const st = root.dataset.signin;
+  if (st !== "export" && st !== "backup") return;
+  root.replaceChildren();
+  drawn?.fill(0);
+  drawn = null;
+  leaveScreen();
+});
+// Show: the key, derived now from the stored seed for the screen's wallet; a seed that no longer derives it (another
+// tab signed out and in) draws nothing and goes back to the app as the store stands.
+async function showKey(): Promise<void> {
+  topLevelOnly();
+  const t = exportTarget;
+  if (t === null || root.dataset.signin !== "export") return;
+  const refs = await exportRefsNow();
+  const seed = await openSeed64();
+  let key: string | null;
+  try {
+    key = exportKey(seed, t.chain, t.address, refs);
+  } finally {
+    seed.fill(0);
+  }
+  if (key === null) return cancel();
+  if (root.dataset.signin !== "export" || exportTarget !== t) return;
+  exportShown = key;
+  show("export");
 }
 // pool.withdraw (card signpage-pool-withdraw-form), top-level only and only with a seed stored, as withdraw.open: the
 // answer goes first, then the screen where the user types To and the amount, never passed in by the app; the run's
@@ -1165,7 +1333,7 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
-const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out", "allow", "confirm"]);
+const GUARDED = new Set(["signout", "saved", "backup", "show", "copy", "withdraw", "move-out", "allow", "confirm", "disconnect", "new-account"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
@@ -1206,6 +1374,11 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     drawn.fill(0);
     drawn = null;
   }
+  // off the export screen: its wallet and its key go
+  if (state !== "export") {
+    exportTarget = null;
+    exportShown = null;
+  }
   if (state === "signed-in") closeLayer();
   if (seed) {
     root.dataset.account = seed.account;
@@ -1224,7 +1397,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     const parts: HTMLElement[] = [];
     if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words"
       && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw" && state !== "pool-withdraw" && state !== "held"
-      && state !== "withdraw-confirm" && state !== "pool-withdraw-confirm") {
+      && state !== "withdraw-confirm" && state !== "pool-withdraw-confirm" && state !== "export") {
       const p = document.createElement("p");
       p.textContent = WORDS[state];
       parts.push(p);
@@ -1241,10 +1414,13 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       if (!framed && seed?.signout) parts.push(button("signout", WORDS.signout, () => void run(signOut)));
     } else if (!framed && state === "choose") {
       // wallet.md:50: the two choices, before the wallet is asked anything or any seed is made. New account asks the
-      // wallet to sign; that request has no code yet, so it is drawn and not offered (data-pending) until it lands.
-      const fresh = button("new-account", WORDS["new-account"], () => {});
-      fresh.disabled = true;
-      fresh.dataset.pending = "wallet-signature";
+      // window's wallet for one sign-in signature, then makes new 12 words (signInByWallet); with no wallet in this
+      // window it is drawn and not offered (data-pending="no-wallet")
+      const fresh = button("new-account", WORDS["new-account"], () => void run(signInByWallet));
+      if (!walletFound()) {
+        fresh.disabled = true;
+        fresh.dataset.pending = "no-wallet";
+      }
       parts.push(fresh);
       parts.push(button("have-one", WORDS["have-one"], () => ((restoreOnly = true), show("existing"))));
     } else if (!framed && state === "withdraw") {
@@ -1273,6 +1449,9 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       if (!framed && words) {
         const list = document.createElement("ol");
         list.dataset.words = "12";
+        // never sent to the browser's page translation (scripts/build-app.mjs page: the whole page says so too)
+        list.className = "notranslate";
+        list.setAttribute("translate", "no");
         for (const w of words.split(" ")) {
           const li = document.createElement("li");
           li.textContent = w;
@@ -1285,6 +1464,30 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       }));
         parts.push(button("saved", WORDS.saved, () => void run(saved)));
       }
+    } else if (!framed && state === "export" && exportTarget) {
+      // one key of this seed's, top-level only: the chain and the address, the key only after the user's own Show
+      const { chain, address } = exportTarget;
+      const name = document.createElement("p");
+      name.textContent = CHAIN_NAME[chain];
+      const at = document.createElement("p");
+      at.textContent = shortAddress(address);
+      parts.push(name, at);
+      const key = exportShown;
+      if (key === null) parts.push(button("show", WORDS.show, () => void run(showKey)));
+      else {
+        const k = document.createElement("p");
+        k.dataset.key = chain;
+        k.className = "notranslate";
+        k.setAttribute("translate", "no");
+        k.textContent = key;
+        Object.assign(k.style, { overflowWrap: "anywhere", minWidth: "0" });
+        parts.push(k);
+        parts.push(button("copy", WORDS.copy, () => {
+          copied = true;
+          void navigator.clipboard?.writeText(key).catch(() => {});
+        }));
+      }
+      parts.push(button("done", WORDS.done, leaveScreen));
     } else if (!framed && (state === "words" || state === "invalid-code")) {
       const box = document.createElement("textarea");
       box.dataset.input = "words";
@@ -1306,7 +1509,8 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       }
       parts.push(button("recovery", WORDS.recovery, () => show("words")));
     }
-    if (shell && cancellable) parts.push(button("cancel", WORDS.cancel, () => void run(cancel)));
+    // the export screen's own Done is its Cancel
+    if (shell && cancellable && state !== "export") parts.push(button("cancel", WORDS.cancel, () => void run(cancel)));
     root.replaceChildren(...parts);
   };
   // a sealed screen's fields (the 12 words' area, To and the amount, the account, the 12 words and their Copy) are made
@@ -1331,6 +1535,15 @@ function withdrawDeps() {
 // Made at its first use (a tap or the load's settle), never while the module is read: it names the sign out's signal
 // and the seed lock, defined further down.
 let nearPageMade: NearBuyPage | null | undefined;
+/** The kept lists' storage (card near-quote-inside-the-kpi): SIGN_HOST's own IndexedDB, one for the page. */
+let keptMade: KeptOptions | undefined;
+function keptStore(): KeptOptions {
+  return (keptMade ??= typeof indexedDB === "undefined" ? {} : { store: keptDb() });
+}
+/** The vault the NEAR dry's fee reads through: the NEAR buy page's (nearBuyPage), made only once that page is. */
+function nearDryVault() {
+  return { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
+}
 function nearBuyPage(): NearBuyPage | null {
   if (nearPageMade !== undefined) return nearPageMade;
   if (!prover) return (nearPageMade = null);
@@ -1351,8 +1564,9 @@ function nearBuyPage(): NearBuyPage | null {
     settle: () => withdrawSettle(vault()),
     rpcs: () => pair,
     signal: () => withdrawWait.signal,
-    pools: rheaPoolsKept(PAGE_NETWORK, () => pair),
-    dclKept: dclPoolsKept(PAGE_NETWORK, () => pair),
+    // kept across asks and page loads in SIGN_HOST's own storage (card near-quote-inside-the-kpi)
+    pools: rheaPoolsKept(PAGE_NETWORK, () => pair, keptStore()),
+    dclKept: dclPoolsKept(PAGE_NETWORK, () => pair, keptStore()),
     log: (line) => console.info(line),
   });
 }
@@ -1531,10 +1745,16 @@ function storeMoved(e: WalletEvent): void {
 const CEREMONY_ENDS: ReadonlySet<string> = new Set(["cancelled", "no-prf", "error"]);
 let movedInStep = false;
 function landStored(): Promise<void> {
-  return run(async () => {
-    const s = await readSeedSettled();
-    if (s) return landed({ screen: "signed-in", seed: s });
-  }, false);
+  return run(async () => void (await landedStored()), false);
+}
+// The seed stored, landed on when there is one. A ceremony's end with no account reads it before it draws that end
+// (signIn): the other tab's channel event is a task of its own that a slow scheduler delivers after the end is drawn,
+// and "Cancelled" stood beside the account stored until it came (merge queue run 44258172994, 'cancelled' at 374 ms).
+async function landedStored(): Promise<boolean> {
+  const s = await readSeedSettled();
+  if (!s) return false;
+  await landed({ screen: "signed-in", seed: s });
+  return true;
 }
 // Another tab's sign out, heard on the shell's channel (storeMoved) or the store's own (open's onEvent), whichever comes
 // first, each a task of its own: every read of the account stops in the one task that hears it (card
@@ -1549,6 +1769,8 @@ function signedOutElsewhere(): void {
   // reloads signed out
   closeHostLanes();
   quotesSignedOut();
+  // the connected apps go with the account in every tab too, should the signing-out tab's delete not have completed
+  void clearConnections().catch(() => {});
   restore?.signedOut();
   follows?.signedOut();
   poolFollow?.stop();
@@ -1658,6 +1880,12 @@ async function pageTails(): Promise<unknown[]> {
 // stateNotes for the queue's readyWith: its failure kept as a value, so the turn ends and the state's withPools throws it
 // in its own catch
 const notesOrError = (): Promise<{ v: NoteRecord[] } | { e: unknown }> => stateNotes().then((v) => ({ v }), (e: unknown) => ({ e }));
+// every page pool's proofs kept on the device (card taps-wait-inside-the-page): state.pools' spendable from the first
+// answer after a load, before any queue opens (../../wallet/src/pool/balances.ts); a read that fails is none kept
+async function pageKept(): Promise<BalanceProof[]> {
+  const st = await open();
+  return (await Promise.all(PAGE_POOLS.map((p) => keptProofs<unknown>(st, p.id).load()))).flat();
+}
 // a change to the notes, heard on the shell's channel (this document's store and other tabs'): name again
 function notesMoved(e: WalletEvent): void {
   if (!shell || (pageScope() === null && PAGE_POOLS.length === 0) || e?.kind !== "changed" || !Array.isArray(e.stores) || !e.stores.includes("notes")) return;
@@ -1741,15 +1969,42 @@ async function signIn(ceremony: () => Promise<PasskeyOutcome>, create: boolean):
   // never replace a seed already stored here, and run no ceremony: sign out first (wallet.md:919)
   const had = await readSeed();
   if (had) return landed({ screen: "signed-in", seed: had });
-  const r = await ceremony();
+  // a sheet that ended with no account (refused, no PRF on Use passkey, or failed): a seed another tab stored while it
+  // was up is the account, read before that end is drawn (landedStored)
+  let r: PasskeyOutcome;
+  try {
+    r = await ceremony();
+  } catch (e) {
+    if (await landedStored()) return;
+    throw e;
+  }
   // ses.4: a random seed, and the backup screen in the same visit; insert-only, so another tab's seed stays
   if (r.kind === "no-prf" && create) return landed(await signInNoPrf(open));
-  if (r.kind !== "prf") return show(r.kind);
+  if (r.kind !== "prf") return void ((await landedStored()) || show(r.kind));
   // insert-only: when another tab stored a seed meanwhile, that one stays and is the account shown; the entropy is
   // zeroed on every path, an open that fails included (words.ts storeSeed)
   await landed(await signInPrf(open, r.entropy));
   // a passkey that opens an existing account on this browser: its notes are rebuilt from the chain with no tap
   if (!create) void restore?.auto().catch(() => {});
+}
+
+// New account by a wallet (W:50; @blindfill/wallet/signin/wallet): the store read first, so a seed already here is the
+// account and the wallet is never asked; then one sign-in signature of the exact bytes, checked on the device, and only
+// then new random 12 words { source: "wallet", code_saved: false }, insert-only, with the backup first. The wallet's no
+// goes back to the two choices; a refused answer is the error page; neither makes anything.
+async function signInByWallet(): Promise<void> {
+  topLevelOnly();
+  const had = await readSeed();
+  if (had) return landed({ screen: "signed-in", seed: had });
+  let r: Awaited<ReturnType<typeof newAccountByWallet>>;
+  try {
+    r = await newAccountByWallet(open);
+  } catch (e) {
+    if (await landedStored()) return;
+    throw e;
+  }
+  if (r.kind === "landed") return landed(r.landing);
+  if (!(await landedStored())) show(r.kind === "cancelled" ? "choose" : "error");
 }
 
 // ses.10-12: the typed 12 words, checked on the device before anything else; a failure stores nothing
@@ -1868,6 +2123,9 @@ async function signOut(): Promise<void> {
   }
   store = null;
   seatsUp();
+  // the apps this account connected go with it (src/connections.ts): an open popup's next request is refused, and the
+  // next account on this device starts with none; bounded, so the sign out never waits on it
+  await clearConnections().catch(() => {});
   // after the store signed out: a deposit that landed while it waited cannot open the queue again (no seed)
   await testnet?.signedOut();
   // signed out: the page reloads, and with it the app, which then shows signed out
@@ -1884,6 +2142,11 @@ async function run(step: () => Promise<void>, again = true): Promise<void> {
     show("error");
   } finally {
     busy = false;
+  }
+  // a way off the export or the backup tapped during the step (leaveScreen): back to the app now
+  if (leaveAfter) {
+    leaveAfter = false;
+    return void run(cancel);
   }
   // another tab's seed write heard during the step, which ended with no account on screen: that seed is landed on
   if (movedInStep) {

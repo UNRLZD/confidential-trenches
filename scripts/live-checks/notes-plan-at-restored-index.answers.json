@@ -1,0 +1,22 @@
+{
+ "key": "notes-plan-at-restored-index",
+ "recorded": "bad: 2026-11-17T23:45:07Z, the Mac, node scripts/live-checks/notes-plan-at-restored-index.mjs --record (SIGN_HOST as served before the card); good: facts() over this card's build (node packages/signpage/scripts/build-app.mjs on branch card/notes-plan-at-restored-index), its index.html and public/app.js",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-soO9xkspycxzppcTo2ULvcWQNXIfZvnRck6Si2bmA1d6G5vc7dG7Z0OW1KAX5ije\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-soO9xkspycxzppcTo2ULvcWQNXIfZvnRck6Si2bmA1d6G5vc7dG7Z0OW1KAX5ije",
+  "rule": true,
+  "held": true,
+  "counter": true,
+  "funded": true,
+  "wired": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oJm8RtLDhg/7RG+kMipUNMIISF5fRX+5uWB2z1skrC3OKAbwO9a6vnPmgxz1iZiw\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-oJm8RtLDhg/7RG+kMipUNMIISF5fRX+5uWB2z1skrC3OKAbwO9a6vnPmgxz1iZiw",
+  "rule": false,
+  "held": false,
+  "counter": false,
+  "funded": false,
+  "wired": false
+ }
+}

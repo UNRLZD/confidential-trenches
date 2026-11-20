@@ -80,6 +80,14 @@ const saleOut = async (v: "pump" | "pumpswap", token: string, units: bigint): Pr
   return { e: best.expectedOut, cashback: best.cashback };
 };
 
+// Card app-sell-shows-what-you-receive, devnet run 116 (11 Nov): right after a buy's Filled the preview answered
+// not_funded for 7.6 s, waiting for the positions pass's finder read of the new W, while a sale tapped then planned W from
+// its buy mint and W's own read. The preview takes a W bought since the last whole pass as the sale's plan does: its buy
+// mint names the token (boughtSincePass), and W's own read (pool-sell.ts wHeldNow, the sale's wHeld) says what it holds.
+const { solanaAta } = await import("../../kit/src/checks/solana/message.ts");
+const { base58 } = await import("@scure/base");
+const { boughtSincePass, keptHeldOf, readFirst } = await import("../src/pool-sell-dry.ts");
+
 test("the preview's out is the sale's own quote for the units pool.sell would sell, on both recorded venues, for a share and a typed amount", async () => {
   for (const [v, token] of [["pump", MINT], ["pumpswap", SWAP_MINT]] as const) {
     for (const [params, units] of [[share(token, 10_000), HELD], [share(token, 5_000), HELD / 2n], [share(token, 2_500), HELD / 4n], [{ chain: "solana", token, amount: "1000000", slippage_bps: 300 }, 1_000_000_000_000n]] as const) {
@@ -423,6 +431,27 @@ test("answered inside the client's 10 s: a read its host holds answers by POOL_S
   }
 });
 
+// card signpage-reads-take-the-call-signal: the bound ends the preview's reads at the provider too, so a held read
+// keeps no host slot or pace token past it
+test("the preview's bound ends every read it still holds at the provider", { timeout: 10_000 }, async (t) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  try {
+    const signals: (AbortSignal | undefined)[] = [];
+    const hold = (url: string) => Object.assign(async (_m: string, _p: readonly unknown[], s?: AbortSignal) => (signals.push(s), new Promise(() => {})), { url });
+    const held = [hold("https://held.example/"), hold("https://held-2.example/")] as unknown as readonly [SolanaRpc, SolanaRpc];
+    let answer: unknown = null;
+    void poolSellDry(deps({ rpcs: () => held }), share(MINT, 5_000)).then((a) => (answer = a));
+    for (let i = 0; i < 5; i++) await null;
+    assert.ok(signals.length > 0 && signals.every((s) => s?.aborted === false), "each read went out with the preview's signal");
+    t.mock.timers.tick(POOL_SELL_DRY_ANSWER_MS);
+    for (let i = 0; i < 20; i++) await null;
+    assert.deepEqual(answer, { error: "busy" });
+    assert.ok(signals.every((s) => s?.aborted === true), "every held read aborted at the bound");
+  } finally {
+    resetTimers(t.mock.timers);
+  }
+});
+
 test("a stopped preview books nothing: N asks with changing shares, then a trade's getMultipleAccounts on the same providers goes out within their answer time (N = 12, 30)", async () => {
   for (const n of [12, 30]) {
     const rec = pair("pump", []);
@@ -506,7 +535,8 @@ test("the kind: a read that runs, its answer once its wait settles; a throw is d
 
 test("the page answers it (src/main.ts): the kind on the trades' paced pair as background reads, the held positions, every pool trade counted from its tap to its run's end, the lanes", () => {
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
-  assert.match(main, /"pool\.sell\.dry": \(params\) => poolSellDry\(params\),/);
+  // joined with a running sell dry of the same params (card dry-ask-joins-the-running-quote, test/dry-join.test.ts)
+  assert.match(main, /"pool\.sell\.dry": joinRunning\(\(params\) => poolSellDry\(params\)\),/);
   assert.match(main, /PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)/, "the trades' own paced pair, each read a background one on its host's lane");
   assert.match(main, /positions: \(\) => testnet\?\.positionsNow\(\) \?\? null, pin: \(\) => PAGE_SOL_PIN \?\? null,/, "the held positions: no pass, no seed read, no write; the page's pool");
   assert.match(main, /bought: \(token\) => testnet\?\.boughtSince\(token\) \?\? Promise\.resolve\(undefined\),/, "the Ws bought since the pass, as the sale finds them");
@@ -651,13 +681,6 @@ test("the kept answers are the preview's only: a sale's reference after a previe
   assert.match(main, /const dryPair = \(\): readonly \[SolanaRpc, SolanaRpc\] \| null => \(PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)\);/, "the preview's pair is its own, made per ask");
 });
 
-// Card app-sell-shows-what-you-receive, devnet run 116 (11 Nov): right after a buy's Filled the preview answered
-// not_funded for 7.6 s, waiting for the positions pass's finder read of the new W, while a sale tapped then planned W from
-// its buy mint and W's own read. The preview takes a W bought since the last whole pass as the sale's plan does: its buy
-// mint names the token (boughtSincePass), and W's own read (pool-sell.ts wHeldNow, the sale's wHeld) says what it holds.
-const { solanaAta } = await import("../../kit/src/checks/solana/message.ts");
-const { base58 } = await import("@scure/base");
-const { boughtSincePass, keptHeldOf, readFirst } = await import("../src/pool-sell-dry.ts");
 type BoughtW = import("../src/pool-sell-dry.ts").BoughtW;
 type StoreWs = import("../src/pool-sell-dry.ts").StoreWs;
 const MINT_PROGRAM = (Object.entries(fx.pump.reads[0]).find(([k]) => JSON.parse(k)[0] === MINT)![1] as { value: { owner: string }[] }).value[0]!.owner;

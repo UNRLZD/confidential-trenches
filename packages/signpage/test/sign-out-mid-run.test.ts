@@ -231,6 +231,14 @@ async function evmWorld(log: string[]) {
   return { ws, w, chain, clock, on, pool, raw: stubFetch(rpcs, helper), pair };
 }
 
+const sw = await import("./pool-sell-world.ts");
+const { BUY_MINTS_KEY, poolSellKind } = await import("../src/pool-sell.ts");
+const { solanaDecodeMessage } = await import("../../kit/src/checks/solana/message.ts");
+const { PROGRAM, rent } = await import("../../kit/test/solana-pool-buy-fx.ts");
+const { solanaSweepOf, solanaSweepStay } = await import("../src/rules/pool.ts");
+const { SOL_GRID, SOL_NOTE_FLOOR } = await import("../../wallet/src/pool/pieces.ts");
+const { isRung } = await import("../../wallet/src/pool/ladder.ts");
+
 test("an EVM pool withdraw with a sign out tapped after its release, before W's send: both are sent, W's send kept before it leaves, and the gate closes only once the run let the seed lock go", { timeout: 30_000 }, async () => {
   const log: string[] = [];
   const world = await evmWorld(log);
@@ -280,14 +288,6 @@ test("an EVM pool withdraw with a sign out tapped after its release, before W's 
 });
 
 // ---------- 2 and 3. a Solana pool sell: the sale, then a full sale's rent back (its teardown and its sweep) ----------
-
-const sw = await import("./pool-sell-world.ts");
-const { BUY_MINTS_KEY, poolSellKind } = await import("../src/pool-sell.ts");
-const { solanaDecodeMessage } = await import("../../kit/src/checks/solana/message.ts");
-const { PROGRAM, rent } = await import("../../kit/test/solana-pool-buy-fx.ts");
-const { solanaSweepOf, solanaSweepStay } = await import("../src/rules/pool.ts");
-const { SOL_GRID, SOL_NOTE_FLOOR } = await import("../../wallet/src/pool/pieces.ts");
-const { isRung } = await import("../../wallet/src/pool/ladder.ts");
 
 /** What a Solana transaction is: the sale (the venue's 24-byte sell, with a partial sale's deposit back; since card
  *  every-lamport-can-move a full sale carries none), the sweep (the deposit alone) or a teardown frame (the rest). */

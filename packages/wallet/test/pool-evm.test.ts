@@ -8,11 +8,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createHash } from "node:crypto";
-import { EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaSameProvider, VaultTree } from "@blindfill/kit";
+import { EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaJsonRpc, solanaSameProvider, VaultTree } from "@blindfill/kit";
 import { evmPoolSender } from "../../../apps/helper/src/pool/evm.ts";
+import { evmTwoOperators } from "@blindfill/kit";
+import { evmBindChainFee, evmPeriodChainFee } from "../src/pool/evm.ts";
 import { evmAddress } from "../src/derive/index.ts";
 import { checkPool, TAKE_SLACK_MS } from "../src/pool/pool.ts";
 import { SOL_LADDER } from "../src/pool/solana.ts";
@@ -968,6 +971,86 @@ test("bind walks the fee list past an operator that refuses the block's state fo
     const fees = [rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com" }), rpc(c, { url: "https://robinhood.drpc.org", ...refusals.state! }), rpc(c, { url: "https://customer-origin.offchainlabs.com" })];
     await assert.rejects(evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined }).bind(bindArgs()), /one operator alone never passes/);
   }
+});
+
+// card robinhood-fee-read-old-blocks-own-rpc: Robinhood's fee list, its four providers' answers to the period fee read
+// (ArbGasInfo 0x6c, f5d6ded7) by the block's hash, read 2026-11-18 14:49Z and 15:36Z: Robinhood's own answers 2 to 383 s
+// back; dRPC (HTTP 400 code 27) and Pocket (-32000 "historical state") answer intermittently; publicnode answers under
+// about 10 s back and from then refuses (HTTP 403 "Archive requests require a personal token"), which is no lag, so it
+// ended the read where the lag retry reads it again. A block 10 s or more behind the head walks the list without
+// publicnode, own first; a block at the head walks it whole.
+test("a Robinhood fee read 10 s or more behind the head asks Robinhood's own first and never publicnode; at the head publicnode is a seat", async () => {
+  const c = { ...CB(), head: 31 };
+  const blockMs = Number(c.ts(30)) * 1000;
+  const OWN = "https://rpc.mainnet.chain.robinhood.com", DRPC = "https://robinhood.drpc.org", POCKET = "https://robinhood.api.pocket.network", PUBLICNODE = "https://robinhood-rpc.publicnode.com";
+  for (const [name, ageMs, drpcAnswersAfter] of [["60 s back", 60_000, 1], ["10 s back", 10_000, 1], ["the head, 3 s back", 3_000, Infinity]] as const) {
+    const asked: string[] = [];
+    const drpcAsks = { n: 0 };
+    const answers: Record<string, Over["chainFee"]> = {
+      [OWN]: () => 0n,
+      [DRPC]: () => { if (drpcAsks.n++ < drpcAnswersAfter) throw new Error(UNKNOWN_STATE); return 0n; },
+      [POCKET]: () => { throw new Error("RPC error -32000: historical state bea3dab671ea9af74e4a35773096c6e5b7f8eceb9cd is not available"); },
+      [PUBLICNODE]: () => { if (ageMs >= 10_000) throw new Error(ARCHIVE_403); return 0n; },
+    };
+    const seat = (url: string) => {
+      const r = rpc(c, { url, chainId: 4663n, chainFee: answers[url] });
+      return Object.assign(async (m: string, p: readonly unknown[]) => (m === "eth_call" && asked.push(new URL(url).host), r(m, p)), { url }, url === PUBLICNODE ? { stateMs: 10_000 } : {}) as EvmRpc;
+    };
+    const p = evmPool({ pin: { ...PIN, network: "robinhood" }, rpcs: pair(c, c, { chainId: 4663n }, { chainId: 4663n }), feeRpcs: [OWN, DRPC, POCKET, PUBLICNODE].map(seat), clock: () => blockMs + ageMs, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined } as Parameters<typeof evmPool>[0]);
+    await p.holdFee(EPOCH);
+    assert.equal(asked[0], new URL(OWN).host, `${name}: Robinhood's own asked first (${asked.join(", ")})`);
+    if (ageMs >= 10_000) assert.ok(!asked.includes(new URL(PUBLICNODE).host), `${name}: publicnode never asked (${asked.join(", ")})`);
+    else assert.ok(asked.includes(new URL(PUBLICNODE).host), `${name}: publicnode a seat at the head (${asked.join(", ")})`);
+  }
+});
+
+test("feeRpcs: a stateMs is a positive number of ms, and the seats with none hold two operators", () => {
+  const c = CB();
+  const seat = (url: string, stateMs?: number) => Object.assign(rpc(c, { url }), stateMs === undefined ? {} : { stateMs }) as EvmRpc;
+  const mk = (feeRpcs: EvmRpc[]) => () => evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs, relayFee: async () => answer(), epochFee: feeRule([]) });
+  for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) assert.throws(mk([seat("https://c.example"), seat("https://d.example"), seat("https://e.example", bad)]), /^Error: feeRpcs: stateMs a positive number of ms$/, String(bad));
+  assert.throws(mk([seat("https://c.example"), seat("https://d.example", 10_000), seat("https://e.example", 10_000)]), /^Error: feeRpcs, the seats that keep old state: seats: two operators at least/);
+  assert.doesNotThrow(mk([seat("https://c.example"), seat("https://d.example"), seat("https://e.example", 10_000)]));
+});
+
+// card kit-rpc-client-takes-a-signal (review of device-evm-fee-read-walks-operators, P3-7): the walk's cut ended the wait
+// for a hung operator but not its request, which held the connection to the client's own 10 s timeout. The seat is the
+// kit's real client (solanaJsonRpc, as the device builds it) over a fetch that never answers an eth_call: the walk's
+// cut (feeRead.callMs, on mocked timers) now reaches that fetch, and the bind still binds on the other two.
+test("the fee walk's cut ends a hung operator's request at the provider, not only the walk's wait for it", { timeout: 10_000 }, async (t) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
+  const c = CB();
+  const base = rpc(c, { url: "https://robinhood.drpc.org" });
+  let hung = 0;
+  const aborted: unknown[] = [];
+  const fetch = async (_u: string, init: RequestInit): Promise<Response> => {
+    const { id, method, params } = JSON.parse(String(init.body)) as { id: string; method: string; params: unknown[] };
+    if (method === "eth_call") {
+      hung++;
+      return new Promise<never>((_, rej) => {
+        const s = init.signal!;
+        if (s.aborted) return (aborted.push(s.reason), rej(s.reason));
+        s.addEventListener("abort", () => (aborted.push(s.reason), rej(s.reason)), { once: true });
+      });
+    }
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: await base(method, params) }));
+  };
+  const hangs = solanaJsonRpc("https://robinhood.drpc.org", { fetch, retry: SOLANA_RPC_RETRY }) as EvmRpc;
+  const fees = [hangs, rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com" }), rpc(c, { url: "https://robinhood-rpc.publicnode.com" })];
+  const seen: unknown[] = [];
+  const bound = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, feeRead: { callMs: 50 }, relayFee: async () => answer(), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep: async () => undefined }).bind(bindArgs());
+  let done = false;
+  bound.then(() => (done = true), () => (done = true));
+  for (let i = 0; i < 100 && !done; i++) {
+    for (let j = 0; j < 20; j++) await new Promise((r) => setImmediate(r));
+    t.mock.timers.tick(10);
+  }
+  await bound;
+  assert.equal(seen.length, 1, "the bind binds on the other two operators");
+  assert.ok(hung >= 1, "the hung operator was asked");
+  assert.equal(aborted.length, hung, "every hung request was aborted at the provider");
+  assert.ok(aborted.every((e) => /no answer in 50 ms/.test(String((e as Error)?.message))), `the walk's own cut: ${aborted.map(String).join("; ")}`);
 });
 
 // card evm-device-reads-need-no-old-state: with robinhood.drpc.org out, Pocket and publicnode refuse a block's state
@@ -3879,4 +3962,25 @@ test("card evm-restore-walk-keeps-its-place: a saved place that misses a leaf pa
   const refusing = { getLogs: ({ from }: { from: number }) => { if (from > 900_000) throw new Error("HTTP 403: RPC error -32602: forbidden"); } };
   await assert.rejects(evmTreeSync({ rpcs: pair(c, c, refusing, refusing), pin: PIN, held: bad, ...noWait }).events());
   assert.equal((h as EvmSyncHeld | null)?.to, 950_000n, "kept on a refusal");
+});
+
+// card device-evm-read-residuals (delta review of 1d895550, item 4: the mutant `e.errors.length > 0` survived): a walk that
+// refused with no seat error (its time spent before a side asked any seat) is the walk's own refusal, never a lag, in
+// both fee reads (the bind's chain fee, and the period's: Base reads the pool's size first); one whose every seat error
+// lagged is a lag
+test("a fee walk refused with no seat error is its own refusal, never a lag; every seat error a lag is a lag", async () => {
+  const block = { number: 30n, hash: `0x${"cd".repeat(32)}`, timestamp: 1n, baseFeePerGas: 1n };
+  const urls = ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network"];
+  // a clock that jumps past the walk's budget once the read has started: no seat is asked
+  const spent = () => {
+    let n = 0;
+    return evmTwoOperators(urls.map((url) => ({ url, rpc: Object.assign(async () => assert.fail("no seat is asked"), { url }) as unknown as EvmRpc })), { now: () => (n++ === 0 ? 0 : 1e9) });
+  };
+  const own = (e: unknown) => e instanceof EvmOperatorsUnanswered && e.errors.length === 0 && !(e instanceof EvmLagError) && /none asked/.test(e.message);
+  await assert.rejects(evmBindChainFee(spent(), "base", block, 0), own);
+  await assert.rejects(evmPeriodChainFee(spent(), "base", "0x" + "11".repeat(20), block), own);
+  await assert.rejects(evmBindChainFee(spent(), "robinhood", block, 0), own);
+  // every seat lagging: a lag
+  const lagging = evmTwoOperators(urls.map((url) => ({ url, rpc: Object.assign(async () => Promise.reject(new EvmLagError("behind")), { url }) as unknown as EvmRpc })), { restMs: 0 });
+  await assert.rejects(evmBindChainFee(lagging, "base", block, 0, undefined, async () => {}), (e: unknown) => e instanceof EvmLagError);
 });

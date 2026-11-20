@@ -7,6 +7,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { after, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { HDKey } from "@scure/bip32";
 import { base58, base64 } from "@scure/base";
@@ -482,9 +483,14 @@ test("no second key derivation: only derive/keys.ts holds BIP-32, SLIP-10 or a w
   // whole release to W_{evm,l,j} of the plan's rest note, refused unless it is the proof's W and the relay data's
   // recipient, signs only what checkEvmRestRelease passed; signRest's buy by W itself, refused unless the derived W is the
   // rest's W, signs only the transaction checkEvmWBuy passed; each key zeroed in a finally; card
-  // buy-any-amount-on-every-chain).
+  // buy-any-amount-on-every-chain). And where one wallet's key is exported (signpage src/pages/export.ts: matchOne derives
+  // W_{c,l,j} of each note's label and change index on the chain's two tags only to compare it with the asked address,
+  // each key that does not match zeroed at once; ownsWallet, at export.open, zeroes the matched key at once; exportKey,
+  // only after a trusted Show and only for an address this seed itself derives, turns the matched key into its import
+  // form and zeroes it, with the 64-byte buffer, in finally blocks; it signs nothing; test/pages-export.test.ts and
+  // test/main-export-leave.test.ts; card signpage-backup-export).
   const calls = files.filter((f) => /\bfreshWallet\s*\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length)).sort();
-  assert.deepEqual(calls, ["packages/exit/src/sol-out.ts", "packages/signpage/src/carry-cash-evm.ts", "packages/signpage/src/carry-cash-sol.ts", "packages/signpage/src/pool-buy-evm-rest.ts", "packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-carry-evm.ts", "packages/signpage/src/pool-found.ts", "packages/signpage/src/pool-holdings-evm.ts", "packages/signpage/src/pool-sell-evm.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw-evm.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/deposit/delegate.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/near/swap-delegate.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-exit.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
+  assert.deepEqual(calls, ["packages/exit/src/sol-out.ts", "packages/signpage/src/carry-cash-evm.ts", "packages/signpage/src/carry-cash-sol.ts", "packages/signpage/src/pages/export.ts", "packages/signpage/src/pool-buy-evm-rest.ts", "packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-carry-evm.ts", "packages/signpage/src/pool-found.ts", "packages/signpage/src/pool-holdings-evm.ts", "packages/signpage/src/pool-sell-evm.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw-evm.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/deposit/delegate.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/near/swap-delegate.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-exit.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
 });
 
 // ---------- fold 2 ----------
@@ -1157,7 +1163,7 @@ test("a throttle as the kit's JSON-RPC client throws it (HTTP 429, or -32029 in 
 // list's refusal at once, with no wait
 test("the kit's JSON-RPC client's 5xx or timeout past its retry refuses the wallet list at once on both chains, with no wait", async () => {
   const hang = (async (_u: string, init: RequestInit) =>
-    new Promise((_res, rej) => init.signal?.addEventListener("abort", () => rej(init.signal!.reason)))) as never;
+    untilAborted(init.signal)) as never;
   const five = (async () => new Response("down", { status: 503 })) as never;
   for (const [what, fetch, want] of [["HTTP 503", five, /http 503/], ["a timeout", hang, /the call failed/]] as const) {
     for (const chain of ["sol", "evm"] as const) {
@@ -1538,3 +1544,22 @@ test("a buy read's calls are held by the host's pass budget: with the page's win
     st.restore();
   }
 }));
+
+// card kit-rpc-client-takes-a-signal: a holdings read's signal (a sign out, the pass's stop) reaches the provider client,
+// so a read stopped mid-request ends at the provider, never only in the wait for it
+test("a holdings read hands its signal to the provider: a hung request is aborted when the read is stopped", { timeout: 5_000 }, async () => {
+  const seen: AbortSignal[] = [];
+  const hung = (async (_m: string, _p: readonly unknown[], signal?: AbortSignal) => {
+    if (signal !== undefined) seen.push(signal);
+    return untilAborted(signal);
+  }) as JsonRpc;
+  const ac = new AbortController();
+  const r = evmHoldingsReader(hung, []).read("0x00000000000000000000000000000000000000a1", ac.signal);
+  r.catch(() => {});
+  for (let i = 0; i < 20; i++) await new Promise((x) => setImmediate(x));
+  assert.equal(seen.length, 1, "the provider got the read's signal");
+  const why = new Error("signed out");
+  ac.abort(why);
+  await assert.rejects(r);
+  assert.ok(seen[0]!.aborted && seen[0]!.reason === why);
+});

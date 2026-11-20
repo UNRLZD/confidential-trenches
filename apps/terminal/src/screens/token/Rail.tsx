@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { RefObject } from "react";
 import { Link } from "react-router";
 import { tokenHref } from "../../routes/routes.ts";
 import { usePick } from "../../shell/chain-pick.ts";
@@ -50,9 +51,6 @@ export const SORTS: readonly { key: SortKey; word: WordId }[] = [
 ];
 const SKELETON_ROWS = 14;
 const FLASH_MS = 800;
-/** The rail is drawn from this width (rail.css; token.css .tkp-desk): under it, it reads nothing. */
-export const RAIL_MEDIA = "(min-width: 1180px)";
-const SLIM_MEDIA = "(max-width: 1499.98px)";
 const PREFS = "ct.rail.v1";
 
 const dec = (v: string | null | undefined): number | null => (typeof v === "string" && /^\d+(\.\d+)?$/.test(v) ? Number(v) : null);
@@ -105,6 +103,27 @@ export function useMedia(q: string): boolean {
   return useSyncExternalStore(sub, () => window.matchMedia(q).matches, () => false);
 }
 
+/** The rail's width mode: token.css's container rules on the page's box name it on the rail (--tkr-mode), so the
+ *  rail draws what its column holds; read before the first paint and again whenever the rail's column (its parent, the
+ *  desk) changes size. "none": no rail drawn, so it reads nothing (card app-token-rail-r5-fit). */
+export type RailMode = "full" | "slim" | "none";
+function useRailMode(ref: RefObject<HTMLElement | null>): RailMode {
+  const [mode, setMode] = useState<RailMode>("none");
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    const read = () => {
+      const m = getComputedStyle(el).getPropertyValue("--tkr-mode").trim();
+      setMode(m === "full" || m === "slim" ? m : "none");
+    };
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el.parentElement ?? el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return mode;
+}
+
 const storage = (): Storage | null => {
   try {
     return window.localStorage;
@@ -112,8 +131,9 @@ const storage = (): Storage | null => {
     return null;
   }
 };
-/** `collapsed`: folded by « from 1500 (full by default); `open`: opened by » under 1500 (slim by default). Both kept on
- *  this device, so a hop to another token or a reload keeps the rail as it was left (card rail-open-pushes-the-middle). */
+/** `collapsed`: folded by « in the full mode (full by default); `open`: opened by » in the slim mode (slim by default).
+ *  Both kept on this device, so a hop to another token or a reload keeps the rail as it was left (card
+ *  rail-open-pushes-the-middle). */
 export type Prefs = { list: List; sort: Sort; collapsed: boolean; open: boolean };
 export function readPrefs(): Prefs {
   const d: Prefs = { list: "trending", sort: null, collapsed: false, open: false };
@@ -163,7 +183,7 @@ function Ic({ n, size = 12 }: { n: "pause" | "sort" | "chevL" | "chevR" | "grid"
   return <svg {...p}><rect x="1.75" y="1.75" width="3.5" height="3.5" rx="0.75" /><rect x="6.75" y="1.75" width="3.5" height="3.5" rx="0.75" /><rect x="1.75" y="6.75" width="3.5" height="3.5" rx="0.75" /><rect x="6.75" y="6.75" width="3.5" height="3.5" rx="0.75" /></svg>;
 }
 
-const Row = memo(function Row({ r, nowMs, sel, seen }: { r: MarketRow; nowMs: number; sel: boolean; seen: Map<string, number> }) {
+export const Row = memo(function Row({ r, nowMs, sel, seen }: { r: MarketRow; nowMs: number; sel: boolean; seen: Map<string, number> }) {
   const v = rowView(r, "1h", nowMs);
   const c = r.chg_24h_bps;
   const mc = dec(r.mc_usd);
@@ -189,12 +209,20 @@ const Row = memo(function Row({ r, nowMs, sel, seen }: { r: MarketRow; nowMs: nu
           <span className="tkr-s">{v.symbol}</span>
           <span className="tkr-p">{v.price}</span>
         </span>
+        {/* the right column's lines are right-aligned, so a value of another length starts its text elsewhere in the same
+            box, and the browser counts a text that kept its node and moved as a layout shift (card
+            rail-and-legend-hold-on-r5: release 178's full rail at 1440, 0.00003 at live run 44429326442 as a refresh
+            re-filled the slots). Each value is its own text, keyed by what it says: a new value is new text, never moved */}
         <span className="tkr-b">
           <span className="tkr-mc" data-flash={flash}>
-            {v.mc}
-            <u>{WORDS.mc.text}</u>
+            <Fragment key={v.mc}>
+              {v.mc}
+              <u>{WORDS.mc.text}</u>
+            </Fragment>
           </span>
-          <span className="tkr-c" data-dir={typeof c !== "number" ? "none" : c >= 0 ? "up" : "down"}>{arrowPct(c)}</span>
+          <span className="tkr-c" data-dir={typeof c !== "number" ? "none" : c >= 0 ? "up" : "down"}>
+            <Fragment key={arrowPct(c)}>{arrowPct(c)}</Fragment>
+          </span>
         </span>
       </Link>
     </div>
@@ -254,8 +282,10 @@ function SortMenu({ list, sort, onPick, onClose }: { list: List; sort: Sort; onP
 
 /** The rail. `chain` and `token` are the page's own token (null while it loads); `store` is the page's lists store. */
 export function Rail({ chain, token, store = RAIL }: { chain: MarketChain | null; token: string | null; store?: RailStore }) {
-  const drawn = useMedia(RAIL_MEDIA);
-  const narrow = useMedia(SLIM_MEDIA);
+  const self = useRef<HTMLElement>(null);
+  const mode = useRailMode(self);
+  const drawn = mode !== "none";
+  const narrow = mode === "slim";
   const sub = useCallback((f: () => void) => (drawn ? store.subscribe(f) : () => {}), [drawn, store]);
   const { data, nowMs } = useSyncExternalStore(sub, store.get, store.get);
   const [prefs, setPrefs] = useState(readPrefs);
@@ -298,8 +328,11 @@ export function Rail({ chain, token, store = RAIL }: { chain: MarketChain | null
   // a chip switch ends a pause (UNRLZD: "a chip or tab switch ends it")
   useLayoutEffect(() => setHeld(false), [list]);
   const closeMenu = useCallback(() => setMenu(false), []);
+  // none (and the first render, before the mode is read): the rail draws nothing inside, as it reads nothing; its full
+  // body's links need the app's router, which a page mounted without one (test/trade-box ?page=1) has not
+  if (!drawn) return <aside ref={self} className="tkr" data-testid="token-rail" data-mode={mode} />;
   return (
-    <aside className="tkr" data-testid="token-rail" data-open={narrow && open} data-slim={slim} data-collapsed={!narrow && collapsed} data-list={list} data-state={data.status}>
+    <aside ref={self} className="tkr" data-testid="token-rail" data-mode={mode} data-open={narrow && open} data-slim={slim} data-collapsed={!narrow && collapsed} data-list={list} data-state={data.status}>
       {slim ? (
         <button
           type="button"

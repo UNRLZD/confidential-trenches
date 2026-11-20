@@ -38,8 +38,14 @@
 // - held: the relayer struck U or refused the call, the bind refused (USDC's code hash moved, a note with another leaf,
 //   the seed not U's), or the pages do not hold a note's leaf. halted while the bind waits on a halt, cleared by the next
 //   bind phase that waits on none.
-// - refunded: only for an op whose own status read REFUNDED, once what U holds inside intents.near of its origin asset
-//   or of NEAR USDC reads more than 0 on both RPCs. A stage, no end: U's USDC is still bound each round. With
+// - refunded: only for an op whose own status read REFUNDED, once what U holds inside intents.near reads, on both RPCs at
+//   one block, at or over the op's own lowest refund (refundIsThere, card refunded-needs-the-refund): of its origin
+//   asset its refund_min (the checked quote's amountIn less its signed refundFee, refundFloor), or of NEAR USDC (a failed
+//   delivery's return) its min_out. The status is the helper's word, so a speck a broken-in helper put under U beside a
+//   forged REFUNDED is no refund: under that floor the op's stage stays, the speck is not moved as its refund (it waits
+//   under U, and a restore names U as holding money), and the refund move takes it with the refund once that lands. An
+//   op recorded before refund_min (no field) keeps the old floor, more than 0. A stage, no end: U's USDC is still bound
+//   each round. With
 //   deps.refundMove (wallet.md §2.4 point 8, ./refund.ts) the move is recorded in the op with its intent's nonce,
 //   deadline, asset, amount and the block its reads were made at before it is sent. Its state is read at one block on
 //   both RPCs (each one's final, heights within HEIGHT_SPREAD_MAX, read at the lower): the block's time, is_nonce_used
@@ -192,6 +198,26 @@ export function statusFacts(f: FollowRecord, st: StatusRead | null): Partial<Fol
   if (st.status !== "PENDING_DEPOSIT" && !f.sent) read.sent = true;
   if (st.status === "SUCCESS" && f.delivered === undefined) read.delivered = (st.delivered ?? 0n).toString();
   return read;
+}
+
+/**
+ * A quote's lowest refund (card refunded-needs-the-refund), in its origin asset's base units: the checked quote's
+ * amountIn less its signed refundFee (1Click quotes it on every live answer, wallet.md D52), or amountIn whole when the
+ * fee is unread or not under it. Taken from the quote the device checked, never from the helper.
+ */
+export function refundFloor(amountIn: bigint, refundFee: bigint | undefined): bigint {
+  return refundFee !== undefined && refundFee >= 0n && refundFee < amountIn ? amountIn - refundFee : amountIn;
+}
+
+/**
+ * The one refunded rule of both follows (this one and the signing page's pool follow, poolRefundMover): what the id holds
+ * inside intents.near, read on both RPCs at one block, is the op's refund only at or over `floor` (its refund_min, or
+ * its min_out for NEAR USDC). An op recorded before the floor was (none): more than 0, as it was. A floor that is no
+ * amount counts nothing.
+ */
+export function refundIsThere(held: bigint, floor: string | undefined): boolean {
+  if (floor === undefined) return held > 0n;
+  return typeof floor === "string" && DIGITS.test(floor) && floor !== "0" && held >= BigInt(floor);
 }
 
 async function capped(res: Response, max: number): Promise<string> {
@@ -384,6 +410,9 @@ export interface FollowRecord {
   deadline_ms: number;
   origin: string;
   min_out: string;
+  /** The quote's lowest refund, in its origin asset's base units (refundFloor of the checked quote): what U must hold of
+   *  the origin before the op counts as refunded. Absent on an op recorded before it (refundIsThere: more than 0). */
+  refund_min?: string;
   /** A pool coin a device wallet paid (card refunds-land-on-the-devices-own-wallet): the address on the origin coin's
    *  chain the quote refunds to (ORIGIN_CHAIN), U's own key there; absent, the refund is INTENTS under U. */
   refund_to?: string;
@@ -423,7 +452,7 @@ export interface FollowRecord {
 }
 export type DepositOp = { kind: "deposit"; stage: DepositStage; txs: { chain: "near"; hash: string }[]; created_ms: number; follow: FollowRecord } & DepositFacts;
 
-export interface FollowArgs extends Pick<FollowRecord, "network" | "i" | "u" | "address" | "deadline_ms" | "origin" | "min_out"> {
+export interface FollowArgs extends Pick<FollowRecord, "network" | "i" | "u" | "address" | "deadline_ms" | "origin" | "min_out" | "refund_min"> {
   /** The op's id: the deposit.quote request's id. */
   opId: string;
   s: bigint;
@@ -544,8 +573,10 @@ export async function followDeposit(args: FollowArgs, deps: FollowDeps): Promise
   if (typeof args.u !== "string" || !IMPLICIT.test(args.u)) throw new DepositFollowRefused("U is not an implicit id");
   if (typeof args.origin !== "string" || args.origin === "" || typeof args.min_out !== "string" || !DIGITS.test(args.min_out) || BigInt(args.min_out) < VAULT_CONSTANTS.MIN_DEPOSIT)
     throw new DepositFollowRefused("the quote's origin asset and a min_amount_out of MIN_DEPOSIT or more are needed");
+  if (args.refund_min !== undefined && (typeof args.refund_min !== "string" || !DIGITS.test(args.refund_min) || args.refund_min === "0"))
+    throw new DepositFollowRefused("the quote's lowest refund is not a positive amount");
   const now = deps.now ?? Date.now;
-  const fresh: FollowRecord = { network: args.network, s: args.s.toString(), i: args.i, u: args.u, address: args.address, deadline_ms: args.deadline_ms, origin: args.origin, min_out: args.min_out };
+  const fresh: FollowRecord = { network: args.network, s: args.s.toString(), i: args.i, u: args.u, address: args.address, deadline_ms: args.deadline_ms, origin: args.origin, min_out: args.min_out, ...(args.refund_min === undefined ? {} : { refund_min: args.refund_min }) };
   await deps.ops.update("ops", args.opId, (v) => (v === undefined ? { kind: "deposit", stage: "quote_checked", txs: [], created_ms: now(), follow: fresh } : undefined));
   const op = (await deps.ops.get("ops", args.opId)) as DepositOp | undefined;
   if (!isObj(op) || op.kind !== "deposit" || !isObj(op.follow)) throw new DepositFollowRefused("the op is not a deposit op");
@@ -576,7 +607,9 @@ export async function followDeposit(args: FollowArgs, deps: FollowDeps): Promise
         own.ok = leave;
         own.fail = leave;
         run.waiters.add(own);
-        deps.signal?.addEventListener("abort", leave, { once: true });
+        // adopted after an await of U's round: a stop that came before it never fires again
+        if (deps.signal?.aborted) leave();
+        else deps.signal?.addEventListener("abort", leave, { once: true });
       };
       run.done = followU(args, deps, ctl.signal, waiters, adopt).then(
         () => {},
@@ -1048,25 +1081,34 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
         } else {
           // what U holds of each asset, at one block on both RPCs
           let found: { asset: string; at: MoveRead } | null = null;
-          let held = false;
           const holds = new Map<string, bigint>();
+          // `asset` held as `h` is op's own refund (refundIsThere, card refunded-needs-the-refund): its origin at or over its
+          // refund_min, or NEAR USDC (a failed delivery's return) at or over its min_out; an op recorded before refund_min
+          // keeps more than 0 on either
+          const own = (op: DepositOp, asset: string, h: bigint): boolean =>
+            asset === op.follow.origin ? refundIsThere(h, op.follow.refund_min) : asset === usdcId && refundIsThere(h, op.follow.refund_min === undefined ? undefined : op.follow.min_out);
+          const refundOf = (op: DepositOp): boolean => [...holds].some(([asset, h]) => own(op, asset, h));
           for (const asset of [...new Set([...back.map(([, op]) => op.follow.origin), usdcId])]) {
             const at = await readAt(null, asset);
             if (at === null) continue;
             holds.set(asset, at.held);
             if (at.held === 0n) continue;
-            held = true;
+            // a speck of an open op's origin, under every such op's lowest refund, is no refund: never moved as one (it
+            // would show refund_move); it waits under U until the refund itself lands beside it. What U holds of an asset
+            // no open op names (dust after a move, NEAR USDC) is moved as before (D1)
+            const named = open.filter(([, op]) => op.follow.origin === asset);
+            if (named.length > 0 && !named.some(([, op]) => own(op, asset, at.held))) continue;
             if (found === null && !underMin.has(`${asset} ${at.held}`)) found = { asset, at };
           }
           movable = found !== null && deps.refundMove !== undefined && !struck;
-          if (held) for (const [id, op] of open) if (op.stage !== "refunded" && RANK[op.stage] !== undefined) await write(id, "refunded", legFacts(op, "refunded"));
+          for (const [id, op] of open) if (op.stage !== "refunded" && RANK[op.stage] !== undefined && refundOf(op)) await write(id, "refunded", legFacts(op, "refunded"));
           // an op whose own move went unlanded and whose own asset U now holds none of, read at one block: its money left
           // U by another intent of U's own (a withdraw.open); it ends held, with nothing left to move (L2)
           for (const [id, op] of open) if (op.follow.unlanded === true && holds.get(op.follow.origin) === 0n) await write(id, "held", legFacts(op, "held"), { why: "moved_out" });
           // L1: once U is struck (this session or kept from an earlier one), an op refunded later whose money waits under
           // U inside intents.near (its origin asset, or NEAR USDC where 1Click also refunds: S3) is held for the way out
           // too; nothing is signed for it
-          if (struck) for (const [id, op] of open) if (!ENDS.has(op.stage) && ((holds.get(op.follow.origin) ?? 0n) > 0n || (holds.get(usdcId) ?? 0n) > 0n)) await write(id, "held", legFacts(op, "held"), { why: "sender_struck" });
+          if (struck) for (const [id, op] of open) if (!ENDS.has(op.stage) && refundOf(op)) await write(id, "held", legFacts(op, "held"), { why: "sender_struck" });
           if (movable && now() >= moveAt) {
             const f = found!;
             const prior = back.find(([, op]) => op.follow.prior_ms !== undefined)?.[1].follow.prior_ms ?? null;
@@ -1097,7 +1139,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
               // no quote takes it into the vault: an op whose own refund it is waits held for withdraw.open; anything
               // else under MIN_DEPOSIT (a stranger's dust, what is left after a move) is left as it is (restore finds it)
               underMin.add(`${f.asset} ${f.at.held}`);
-              for (const [id, op] of open) if (op.follow.origin === f.asset) await write(id, "held", legFacts(op, "held"), { why: "under_min" });
+              for (const [id, op] of open) if (op.follow.origin === f.asset && own(op, f.asset, f.at.held)) await write(id, "held", legFacts(op, "held"), { why: "under_min" });
             }
             // refused (a quote off the request, the helper down, a read that moved): nothing signed; a later round asks again
           }

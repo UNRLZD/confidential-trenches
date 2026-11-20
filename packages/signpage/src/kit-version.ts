@@ -38,13 +38,19 @@
 // left out (every level below it too), the dry move's max, the move event and every closed notice. A client that names
 // kit-v1.17 reads everything but a move op's code (card move-sends-or-says-why), a key its reader drops the whole move
 // op for: it is sent every state, answer and event, with each move op's code left out (every level below it too), and
-// everything else as the current level is. A client at
+// everything else as the current level is. A client that names kit-v1.18 reads everything but a progress event's txs and
+// the trade stage owed_back (card evm-buy-end-carries-its-tx): it checks a progress event with exact keys and has no
+// owed_back, so it is sent each stage event with txs left out and owed_back as refused (the stage it was sent for that
+// end before), on an event and on a trade's answer (every level below it too). A client that names kit-v1.19 reads
+// everything but a pool entry's spendable (card taps-wait-inside-the-page), a key its schema refuses the whole state
+// for: it is sent each state with spendable left out (every level below it too), and every event and other answer as the
+// current level is. A client at
 // SIGNPAGE_KIT_VERSION or above gets every message as it is. A change
 // to what the page may send raises the kit's
 // SIGNPAGE_KIT_VERSION and adds the version before it here.
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 import { OPEN_KINDS } from "../../kit/src/signpage/messages.ts";
-import type { DepositStage, Operation, ProgressRouteEvent, SignpageKind, SignpageState, Stage } from "../../kit/src/signpage/messages.ts";
+import type { DepositStage, Operation, ProgressEvent, ProgressRouteEvent, SignpageKind, SignpageState, Stage } from "../../kit/src/signpage/messages.ts";
 
 /** The levels this page sends at: kit-v1.4's shape, kit-v1.5's (no moved_out, no pool_deposit op), kit-v1.6's (no
  *  pool_deposit op), kit-v1.7's (no position decimals), kit-v1.8's (no op detail; none at the levels below either),
@@ -53,8 +59,9 @@ import type { DepositStage, Operation, ProgressRouteEvent, SignpageKind, Signpag
  *  the levels below either), kit-v1.13's (no dry buy out; none at the levels below either), kit-v1.14's (no dry buy
  *  with_cash, no move route event; none at the levels below either), kit-v1.15's (no dry move max; none at the levels
  *  below either), kit-v1.16's (no dry buy buys; none at the levels below either), kit-v1.17's (no move op code; none at
- *  the levels below either), or everything (kit-v1.18 and above). */
-export type KitLevel = "1.4" | "1.5" | "1.6" | "1.7" | "1.8" | "1.9" | "1.10" | "1.11" | "1.12" | "1.13" | "1.14" | "1.15" | "1.16" | "1.17" | "current";
+ *  the levels below either), kit-v1.18's (no progress txs, owed_back as refused; none at the levels below either),
+ *  kit-v1.19's (no pool spendable; none at the levels below either), or everything (kit-v1.20 and above). */
+export type KitLevel = "1.4" | "1.5" | "1.6" | "1.7" | "1.8" | "1.9" | "1.10" | "1.11" | "1.12" | "1.13" | "1.14" | "1.15" | "1.16" | "1.17" | "1.18" | "1.19" | "current";
 /** A client that posts no hello. */
 export const KIT_DEFAULT: KitLevel = "1.4";
 /** The first kit version that names itself and reads everything this page sends: the kit's own, as [major, minor]. */
@@ -76,7 +83,7 @@ export function kitLevel(kit: string): KitLevel {
   if (!v) return KIT_DEFAULT;
   const [major, minor] = [Number(v[1]), Number(v[2])];
   const from = (m: number, n: number) => major > m || (major === m && minor >= n);
-  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 17) ? "1.17" : from(1, 16) ? "1.16" : from(1, 15) ? "1.15" : from(1, 14) ? "1.14" : from(1, 13) ? "1.13" : from(1, 12) ? "1.12" : from(1, 11) ? "1.11" : from(1, 10) ? "1.10" : from(1, 9) ? "1.9" : from(1, 8) ? "1.8" : from(1, 7) ? "1.7" : from(1, 6) ? "1.6" : from(1, 5) ? "1.5" : KIT_DEFAULT;
+  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 19) ? "1.19" : from(1, 18) ? "1.18" : from(1, 17) ? "1.17" : from(1, 16) ? "1.16" : from(1, 15) ? "1.15" : from(1, 14) ? "1.14" : from(1, 13) ? "1.13" : from(1, 12) ? "1.12" : from(1, 11) ? "1.11" : from(1, 10) ? "1.10" : from(1, 9) ? "1.9" : from(1, 8) ? "1.8" : from(1, 7) ? "1.7" : from(1, 6) ? "1.6" : from(1, 5) ? "1.5" : KIT_DEFAULT;
 }
 
 /** kit-v1.4's deposit stages (kit-v1.4:packages/kit/src/signpage/schema.ts DEPOSIT). */
@@ -171,6 +178,10 @@ const noDecimals = (s: SignpageState): SignpageState => ({ ...s, positions: s.po
 
 /** The pools with no making (card buy-spends-several-pieces): kit-v1.11 and before refuse a pool entry that has one. */
 const noMaking = (s: SignpageState): SignpageState => (s.pools === undefined ? s : { ...s, pools: s.pools.map(({ making: _m, ...p }) => p) });
+/** The pools with no spendable (card taps-wait-inside-the-page): kit-v1.19 and before refuse a pool entry that has one. */
+const noSpendable = (s: SignpageState): SignpageState => (s.pools === undefined ? s : { ...s, pools: s.pools.map(({ spendable: _s, ...p }) => p) });
+/** The state answer with no pool spendable; every other kind's result as it is. */
+const spendableFor = (kind: SignpageKind, result: unknown): unknown => (kind === "state" && typeof result === "object" && result !== null ? noSpendable(result as SignpageState) : result);
 /** The state with no move op's code (card move-sends-or-says-why): kit-v1.17 and before drop a move op that has one. */
 const noMoveCode = (s: SignpageState): SignpageState => ({ ...s, ops: s.ops.map((o) => (o.kind === "move" && own(o, "code") ? (({ code: _c, ...m }) => m)(o) : o)) });
 /** The state answer with no move op's code (card move-sends-or-says-why): every other kind's result as it is. */
@@ -240,7 +251,11 @@ function noDetail(o: Operation): Operation {
  *  mapped or left out. */
 export function stateFor(level: KitLevel, state: SignpageState): SignpageState {
   if (level === "current") return state;
-  const all = noMoveCode(state);
+  // kit-v1.19 reads the whole state but a pool entry's spendable (card taps-wait-inside-the-page), every level below too;
+  // kit-v1.18 reads the rest: its level takes a progress event's txs and owed_back alone
+  const spent = noSpendable(state);
+  if (level === "1.19" || level === "1.18") return spent;
+  const all = noMoveCode(spent);
   if (level === "1.17" || level === "1.16" || level === "1.15" || level === "1.14" || level === "1.13" || level === "1.12") return all;
   const given = noMaking(all);
   if (level === "1.11") return given;
@@ -262,18 +277,37 @@ export function stateFor(level: KitLevel, state: SignpageState): SignpageState {
  *  kit-v1.14 and before have no { move: "cash" } shape (card one-balance-buys-on-every-chain) and refuse that event;
  *  kit-v1.15, kit-v1.16 and kit-v1.17 read it. */
 export function routeFor(level: KitLevel, e: ProgressRouteEvent): ProgressRouteEvent | null {
-  return level !== "current" && level !== "1.17" && level !== "1.16" && level !== "1.15" && Object.hasOwn(e, "move") ? null : e;
+  return level !== "current" && level !== "1.19" && level !== "1.18" && level !== "1.17" && level !== "1.16" && level !== "1.15" && Object.hasOwn(e, "move") ? null : e;
 }
 
-/** A progress stage as a client at `level` reads it, or null when that client has no stage for it (the event is not sent). */
-export function stageFor(level: KitLevel, stage: Stage): Stage | null {
+/** A progress stage as a client at `level` reads it, or null when that client has no stage for it (the event is not sent):
+ *  below kit-v1.19, owed_back as refused (card evm-buy-end-carries-its-tx), the stage that end was sent as before. */
+export function stageFor(level: KitLevel, given: Stage): Stage | null {
+  const stage: Stage = level !== "current" && level !== "1.19" && given === "owed_back" ? "refused" : given;
   if (level !== "1.4" || V1_4_STAGES.has(stage)) return stage;
   return own(V1_4_DEPOSIT_STAGE, stage) ? V1_4_DEPOSIT_STAGE[stage as DepositStage] : null;
 }
 
+/** A stage event as a client at `level` reads it, or null when it reads none of it: below kit-v1.19, with no txs (its
+ *  client checks a progress event with exact keys) and its stage as stageFor maps it (card evm-buy-end-carries-its-tx). */
+export function progressFor(level: KitLevel, e: ProgressEvent): ProgressEvent | null {
+  if (level === "current" || level === "1.19") return e;
+  const stage = stageFor(level, e.stage);
+  if (stage === null) return null;
+  const { txs: _t, ...plain } = e;
+  return { ...plain, stage };
+}
+
+/** The trade kinds whose answer is a TradeStage and its txs (messages.ts SignpageResults). */
+const TRADE_KINDS: ReadonlySet<SignpageKind> = new Set(["buy", "pool.buy", "pool.sell", "pool.deposit"]);
+/** A trade's answer below kit-v1.19: owed_back as refused, its txs kept (card evm-buy-end-carries-its-tx); any other
+ *  answer as it is. */
+const owedFor = (kind: SignpageKind, result: unknown): unknown =>
+  TRADE_KINDS.has(kind) && typeof result === "object" && result !== null && (result as { stage?: unknown }).stage === "owed_back" ? { ...result, stage: "refused" } : result;
+
 /**
- * An answer's result of `kind` as a client at `level` reads it: below the current level, the state with no move op's
- * code (kit-v1.17's level is that alone); below kit-v1.17, pool.buy.dry's with no buys too (kit-v1.16's level is that);
+ * An answer's result of `kind` as a client at `level` reads it: below the current level, a trade's owed_back as refused
+ * (kit-v1.18's level is that alone); below kit-v1.18, the state with no move op's code too (kit-v1.17's level is that); below kit-v1.17, pool.buy.dry's with no buys too (kit-v1.16's level is that);
  * below kit-v1.16, pool.move.dry's priced one with no max too (kit-v1.15's level is
  * that); below kit-v1.15, with no with_cash either (kit-v1.14's level is that); below
  * kit-v1.14, with no out either (kit-v1.13's level is that); below kit-v1.13, an open kind's with no closes too (kit-v1.12's
@@ -290,7 +324,12 @@ export function stageFor(level: KitLevel, stage: Stage): Stage | null {
  */
 export function resultFor(level: KitLevel, kind: SignpageKind, given: unknown): unknown {
   if (level === "current") return given;
-  const uncoded = moveCodeFor(kind, given);
+  // below kit 1.20: the state with no pool spendable (card taps-wait-inside-the-page); kit-v1.19's level is that alone
+  const spent = spendableFor(kind, given);
+  if (level === "1.19") return spent;
+  const owed = owedFor(kind, spent);
+  if (level === "1.18") return owed;
+  const uncoded = moveCodeFor(kind, owed);
   if (level === "1.17") return uncoded;
   const planned = dryBuysFor(kind, uncoded);
   if (level === "1.16") return planned;

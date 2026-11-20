@@ -121,7 +121,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/let\{end:([\w$]+)\}=await ([\w$]+)\.deposit\(/, "let $1=await $2.deposit(").ux_carry, false, "the deposit's run read as its end");
   // card deposit-takes-each-pools-own-coin, delta review r3 P2-1: what the carry reads U_X holds is its op's left
   assert.equal(mut(/await ([\w$]+)\.leftAt\?\.\(/, "await $1.leftOff?.(").ux_carry, false, "the carry writes no left");
-  assert.equal(mut(/,await ([\w$]+)\(0n\);let\{end:/, ";let{end:").ux_carry, false, "no left 0 before the carry's deposit (listed and in the pool at once)");
+  assert.equal(mut(/\}await ([\w$]+)\(0n\);let\{end:/, "};let{end:").ux_carry, false, "no left 0 before the carry's deposit (listed and in the pool at once)");
   assert.equal(mut(/,leftAt:async\(/, ",leftOff:async(").ux_wired, false, "the restore's U_X reads with no leftAt");
   assert.equal(mut(/(ux:[\w$]+=>\{let [\w$]+=[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1zz$2({chain:").ux_wired, false, "other deps than the follow's");
   assert.equal(mut(/(\[`https:\/\/solana-rpc\.publicnode\.com`,)`https:\/\/solana\.api\.pocket\.network`\]\);function/, "$1`https://ct-api.unrealized.trade`]);function").ux_pair, false, "our helper as the second");
@@ -133,7 +133,12 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(evmPair, "rpcs:[$1($2.rpcs[0]),$2.rpcs[1]],pin:$2.pin,deposit:").ux_pair, false, "the EVM pair's second unpaced");
   assert.equal(mut(/\[([\w$]+),\[([\w$]+),([\w$]+)\]\]=await Promise\.all\(\[([\w$]+)\(([\w$]+),([\w$]+)\),([\w$]+)\.balances/, "[$1,[$2,$3]]=await Promise.all([$4($5,$6),$7.balancez").ux_read, false, "the U_X not read");
   assert.equal(mut(/if\(!([\w$]+)\)return\{why:`holds \$\{String\(([\w$]+)\)\}, with no deposit note/, "if(!1)return{why:`holds ${String($2)}, with no deposit note").ux_carry, false, "a U_X with no note here carried");
-  assert.equal(mut(/,([\w$]+)\.has\(([\w$]+)\.i\),/, ",!0,").ux_carry, false, "the store's word on the index not asked");
+  assert.equal(mut(/,([\w$]+)\.has\(([\w$]+)\.i\)\|\|\(([\w$]+)=>[\w$]+\.found\([^)]*\)\),/, ",!0,").ux_carry, false, "the store's word on the index not asked");
+  // card notes-plan-at-restored-index: a U_X with no note here gets its note written (found) from the two balances
+  assert.equal(mut(/\.has\(([\w$]+)\.i\)\|\|\(([\w$]+)=>[\w$]+\.found\([^)]*\)\),/, ".has($1.i),").ux_carry, false, "a U_X with no note here named, its note never written");
+  assert.equal(mut(/try\{await ([\w$]+)\(\[([\w$]+),([\w$]+)\]\)\}/, "try{await $1([$2,$2+1n])}").ux_carry, false, "the note written from balances the two RPCs did not read");
+  assert.equal(mut(/try\{await ([\w$]+)\(\[([\w$]+),([\w$]+)\]\)\}/, "try{void 0}").ux_carry, false, "carried with no note written");
+  assert.equal(mut(/\)\}catch\(([\w$]+)\)\{if\(([\w$]+)\.throwIfAborted\(\),\1 instanceof ([\w$]+)\)throw \1;return\{why:`holds/, ")}catch($1){if($2.throwIfAborted(),!1)throw $1;return{why:`holds").ux_carry, false, "a sign out during the note's write named as a refusal");
   // review P1: the held rule
   assert.equal(mut(/if\(([\w$]+)===`money`&&([\w$]+)\.set\(/, "if($1===`used`&&$2.set(").ux_read, false, "an id NEAR reads as money not noted");
   assert.equal(mut(/:([\w$]+)>1n&&([\w$]+)\.push\(\{why:`holds/, ":$1>2n&&$2.push({why:`holds").id_held, false, "the kept unit read as 2");
@@ -201,8 +206,11 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(dead(broken(/(ux:[\w$]+=>\{let [\w$]+=[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1(()=>null)({chain:"), `;var __dead_w={signedIn:0,${wired}0}`).ux_wired, false, "dead copy: wired (real deps swapped)");
   assert.equal(dead(js, read).ux_read, false, "a second copy of the reader beside the real one");
   assert.equal(dead(js, ";var __dead_p=Object.freeze([`https://solana-rpc.publicnode.com`,`https://solana.api.pocket.network`])").ux_pair, false, "a second copy of the pair beside the real one");
-  const handed = /(`money`\)\},[\w$]+=await [\w$]+\([\w$]+,([\w$]+)\.scope,\{notes:\[\.\.\.\2\.notes\],\.\.\.[\w$]+\(\2\.notes,\2\.scope\)\},)([\w$]+),await ([\w$]+)\(\2\.scope,\2\.notes\)\)/;
-  assert.equal(mut(handed, "$1l,await $4($2.scope,$2.notes))").ux_read, false, "the U_X reader not handed to restoreDepositIds");
+  // since card restore-shows-a-note-on-a-planned-index the reader goes through the used-id skip on the same scope
+  const handed = /(`money`\)\},[\w$]+=await [\w$]+\([\w$]+,([\w$]+)\.scope,\{notes:\[\.\.\.\2\.notes\],\.\.\.[\w$]+\(\2\.notes,\2\.scope\)\},)([\w$]+)\(([\w$]+),\2\.scope,([\w$]+)\),await ([\w$]+)\(\2\.scope,\2\.notes\)\)/;
+  assert.ok(handed.test(js), "the reader handed through the skip, as built");
+  assert.equal(mut(handed, "$1$3($4,$2.scope,l),await $6($2.scope,$2.notes))").ux_read, false, "the U_X reader not handed to restoreDepositIds");
+  assert.equal(mut(handed, "$1$3($4,zz.scope,$5),await $6($2.scope,$2.notes))").ux_read, false, "the reader handed through a skip on another scope");
 });
 
 test("the review's two plants, recorded as bad answers, fail on the bundle alone", () => {

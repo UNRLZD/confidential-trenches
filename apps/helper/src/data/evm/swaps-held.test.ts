@@ -6,6 +6,7 @@
 // answers 503, so the page reads again.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { untilAborted } from "@blindfill/kit";
 import { fakeChain, ICNT, open, REC, URLS } from "../../../test/evm-swaps/base.ts";
 import { STALE_MS } from "./swaps.ts";
 
@@ -18,7 +19,7 @@ function stalling(chain: ReturnType<typeof fakeChain>) {
     st.stalled
       ? new Promise((_, no) => {
           out.push(no);
-          init.signal?.addEventListener("abort", () => no(init.signal!.reason), { once: true });
+          untilAborted(init.signal).catch(no);
         })
       : chain.fetch(url, init);
   const release = () => {
@@ -50,11 +51,17 @@ for (const how of ["fail", "stall"] as const) {
       clock.t += step;
       const live = await s.candles(ICNT, "1m", null, 2);
       assert.equal(live.status, 200, `${clock.t - readAt} ms after the last read: ${live.status} ${live.body}`);
-      assert.deepEqual(JSON.parse(live.body), held, "the held bars, as_of_ms their last read");
+      // the held bars, filling: a book this far behind draws no current chart (card
+      // every-tape-and-chart-says-filling-behind-the-head, BEHIND_MAX)
+      assert.deepEqual(JSON.parse(live.body), { ...held, filling: true }, "the held bars, as_of_ms their last read, filling");
       assert.equal(live.asOfMs, readAt, "X-Fetched-At is the last read, never now");
       const t = await s.trades(ICNT, 50);
       assert.equal(t.status, 200, t.body);
-      assert.equal(t.body, tape.body, "the held tape, dated by its last read");
+      // the held rows, dated by their last read, and filling with no reach: a book this far behind is no complete list
+      // (card base-tape-never-complete-behind-the-index, BEHIND_MAX)
+      const { whole_ms: _, ...rest } = JSON.parse(tape.body);
+      const { trades, src, as_of_ms } = rest;
+      assert.deepEqual(JSON.parse(t.body), { trades, filling: true, src, as_of_ms }, "the held tape, dated by its last read, filling");
     }
 
     // the providers answer again: the held answer started a read, and the next one is dated now

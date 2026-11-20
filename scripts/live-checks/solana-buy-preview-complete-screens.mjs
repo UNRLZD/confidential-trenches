@@ -45,7 +45,9 @@ const ASK_FN = new RegExp(`function (${N})\\((${N}),(${N}),(${N})\\)\\{return \\
 const askOf = (js) => {
   if (ASK.test(js)) return true;
   const f = ASK_FN.exec(js);
-  return f !== null && new RegExp(`if\\((${N})\\.ok\\)\\{let (${N})=${esc(f[1])}\\(${N},\\1\\.result,${N}\\);\\2!==null&&${N}\\(\\2\\)`).test(js);
+  // the box first hands every answer to the Unavailable state (card app-unavailable-before-the-tap), folded by the build
+  // into the same if: `if(f(d=>g(d,at,o)),o.ok){`
+  return f !== null && new RegExp(`if\\((?:${N}\\(${N}=>${N}\\(${N},${N},${N}\\)\\),)?(${N})\\.ok\\)\\{let (${N})=${esc(f[1])}\\(${N},\\1\\.result,${N}\\);\\2!==null&&${N}\\(\\2\\)`).test(js);
 };
 /** receiveShown (group: its name). */
 const SHOWN = new RegExp(`function (${N})\\((${N}),(${N}),(${N})\\)\\{return \\2===null\\|\\|\\3===null\\|\\|\\2\\.key!==\\3\\|\\|\\2\\.out===void 0\\|\\|\\4===null\\|\\|\\4<=0n\\?null:\\{out:\\2\\.out,pending:\\2\\.amount!==\\4\\}\\}`);

@@ -3,9 +3,10 @@
 // that answers failed (run 6: a devnet provider's 429 burst).
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaPacedRpc, solanaSameProvider, type SolanaFetch } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts } from "../src/page-rpc.ts";
-import { pageEvmPoolRpcs, pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, pageSolanaTokenRpcs, SOLANA_TOKEN_SEAT, SOLANA_TOKEN_SEAT_LIMIT, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { MAINNET_POOL_RPCS, pageEvmPoolRpcs, pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, pageSolanaTokenRpcs, SOLANA_TOKEN_SEAT, SOLANA_TOKEN_SEAT_LIMIT, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { closeHostLanes, hostLane, PROBE_HELD_MAX_MS, resetHostLanes, TRADE_TURN_MAX_MS } from "../../wallet/src/throttle.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
@@ -339,6 +340,38 @@ test("(card move-sends-or-says-why) Base with publicnode and Pocket both giving 
   }
 });
 
+// Card robinhood-reads-draw-no-revert: release 175's walk (13:01Z) drew 10 failed posts on Robinhood's own RPC, each of
+// the pool sync's first-round views (SCOPE, currentRoot, currentTreeSize, currentLabelRoot, currentLabelTreeSize) asked
+// twice: a browser reads Robinhood's own 429 as no connection (its allow-origin "*,*", which CORS refuses), and the page's
+// lane asked the same provider again after its backoff, into the same throttle, before the pair walked to its spare. The
+// kit's own transport moves on at once and holds the provider for every reader (card evm-unreachable-moves-on). A pool
+// list member with a member after it now does the same: asked once, the read on the next member, the provider held.
+test("a pool list member with no connection is asked once: the read goes to the next member at once and the provider is held for every reader; the list's last is asked again as before", async () => {
+  const { evmPair } = await import("../../wallet/src/pool/evm.ts");
+  const { evmPaceReset, evmProviderHeld } = await import("../../kit/src/checks/evm/pace.ts");
+  const OWN = "rpc.mainnet.chain.robinhood.com";
+  const view = ["eth_call", [{ to: "0x9306359433127c4f3be426f6faeb00a3c41f66db", data: "0xfdab463d" }, { blockHash: "0x" + "ab".repeat(32) }]] as const;
+  evmPaceReset();
+  try {
+    await onSeat((host) => (host === OWN ? { status: 0, down: "throw" } : { status: 200, result: "0x" + "0".repeat(63) + "7" }), async (log) => {
+      const pair = evmPair(pageEvmPoolRpcs("robinhood")!);
+      assert.equal(await (pair[0] as unknown as (m: string, p: unknown[]) => Promise<unknown>)(view[0], [...view[1]]), "0x" + "0".repeat(63) + "7");
+      assert.deepEqual(log.map((r) => r.host), [OWN, "robinhood.api.pocket.network"], "Robinhood's own once, then the next member");
+      assert.equal(evmProviderHeld("https://rpc.mainnet.chain.robinhood.com"), true, "held for the kit's readers too");
+    });
+    evmPaceReset();
+    // the list's last member (no member after it) is asked again once, as before
+    const last = MAINNET_POOL_RPCS.robinhood.at(-1)!;
+    await onSeat((host) => (host === new URL(last).host ? { status: 0, down: "throw" } : { status: 200 }), async (log) => {
+      const r = pageEvmPoolRpcs("robinhood")!.find((x) => (x as unknown as { url: string }).url.startsWith(last))!;
+      await assert.rejects((r as unknown as (m: string, p: unknown[]) => Promise<unknown>)("eth_blockNumber", []));
+      assert.deepEqual(log.map((x) => x.host), [new URL(last).host, new URL(last).host], "the last member asked again once");
+    });
+  } finally {
+    evmPaceReset();
+  }
+});
+
 // The review of 507431c0, item 5: with no member open, the seat asks the member whose host opens first.
 test("a public seat with every member paused asks the one whose pause ends first", async () => {
   await onSeat(() => ({ status: 200 }), async (log) => {
@@ -405,7 +438,7 @@ test("a host that answers one 429 and then stalls: 8 trade reads parked on its p
   globalThis.fetch = ((_u: string | URL | Request, init?: RequestInit) => {
     sent.push(performance.now());
     if (++n === 1) return new Promise<Response>((ok) => setTimeout(() => ok(new Response("", { status: 429, headers: { "retry-after": "1" } })), 100));
-    return new Promise<Response>((_, no) => init?.signal?.addEventListener("abort", () => no(init.signal!.reason), { once: true }));
+    return untilAborted(init?.signal);
   }) as typeof fetch;
   try {
     await onTestClock(async () => {

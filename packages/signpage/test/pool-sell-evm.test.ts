@@ -7,6 +7,7 @@
 // the hostile builds the rule refuses; and the restore of a buy's route from its own transaction. Every chain is a fake
 // one; nothing here reaches a network.
 import { after, afterEach, beforeEach, mock, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import assert from "node:assert/strict";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -843,7 +844,7 @@ test("P2-4: a helper's refusal never locks W's sale: the next tap, before the fi
 test("P3-3: a sign out ends the sale's POST in flight: no answer at once, never the helper's 15 s", async () => {
   const stop = new AbortController();
   const fetchFn = ((_u: string, init: RequestInit) =>
-    new Promise<Response>((_r, no) => init.signal!.addEventListener("abort", () => no(init.signal!.reason), { once: true }))) as typeof fetch;
+    untilAborted(init.signal)) as typeof fetch;
   const sent = evmSellSend("https://helper.test", { pool: POOL, w: W, data: new Uint8Array(4), authorization: { chainId: 84532n, address: W, nonce: 0n, yParity: 0, r: 1n, s: 1n } as never }, fetchFn, stop.signal);
   setTimeout(() => stop.abort(), 5);
   const r = await Promise.race([sent.then(() => "answered", (e) => (e instanceof EvmSendNoAnswer ? "no answer" : String(e))), new Promise((r) => setTimeout(() => r("still waiting"), 2_000))]);
@@ -1100,7 +1101,9 @@ test("review D1: logs trailing past the lag with W's Sell nonce taken: read on, 
 
 test("review F3b: a sign out during a send past the tap's bound frees the note's follow mark", async () => {
   const stop = new AbortController();
-  const x = await world({ send: () => new Promise<string>((_r, no) => stop.signal.addEventListener("abort", () => no(new EvmSendNoAnswer(null, "fault")), { once: true })) });
+  const x = await world({ send: () => untilAborted(stop.signal).catch(() => {
+    throw new EvmSendNoAnswer(null, "fault");
+  }) });
   const kept: Promise<unknown>[] = [];
   x.h.keep = (p) => void kept.push(p);
   x.h.following = new Set();
@@ -1410,4 +1413,26 @@ test("SellDelegate v2: W's tail after a sale (the ETH it left on W off the rung)
   const host = evmSellHost("base", PIN, SCOPE, x.h.rpcs, { notes: x.h.notes, seed64: x.h.seed64, held: async () => md as unknown as WalletStore, round: x.h.round, testnet: false });
   await host.tail!({ chain: "base", address: W, l: "7", j: 1, amount: "5" });
   assert.deepEqual(await md.get("meta", wTailKeyOf("base", W)), { chain: "base", address: W, l: "7", j: 1, amount: "5" });
+});
+
+// card evm-buy-end-carries-its-tx: the sale's answer is the early "sent" with no transaction once the bytes have left, so
+// its end goes out as progress with the end's transactions (the same fix as the buy's, the same kind wrapper shape)
+test("kind (evm-buy-end-carries-its-tx): a filled sale's end goes out as progress with its transaction", async () => {
+  let x!: World;
+  x = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      x.land(s.minOut - s.fee);
+      return "0x" + "d1".repeat(32);
+    },
+  });
+  const locks = { request: (_name: string, _o: LockOptions, f: () => unknown) => Promise.resolve().then(f) } as unknown as Pick<LockManager, "request">;
+  const posts: [string, unknown][] = [];
+  let done!: () => void;
+  const ended = new Promise<void>((r) => (done = r));
+  const ctx = { id: "r1", sha: "00", progress: (s: string, txs?: unknown) => (posts.push([s, txs]), s !== "sent" && done()) };
+  const r = poolSellEvmKind(() => x.h, locks)(ASK, ctx as never) as { after: Promise<void>; answer(): unknown };
+  await r.after;
+  await ended;
+  assert.deepEqual(posts.at(-1), ["filled", [{ chain: "base", hash: "0x" + "d1".repeat(32) }]]);
 });

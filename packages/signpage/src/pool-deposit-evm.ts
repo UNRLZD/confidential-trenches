@@ -19,10 +19,12 @@
 //   (eth_call from U with the value and data). A failure on either signs nothing. If a Deposited already names the
 //   precommitment, the note was taken: it is restored as the user's (evmClaimTaken, at the value that deposit carried)
 //   and the run goes on to the next note. If none names it, the run reads and simulates once more before not_funded.
+//   A refusal for want of state at the block (a pruned or lagging node: stateMiss) is no word on the call: a lag, so
+//   the run reads again on the page's waits, then "down", never not_funded (card evm-deposit-pruned-sim-says-why).
 // - The note goes PLANNED -> INCOMING with its send { hash, nonce, value } written BEFORE eth_sendRawTransaction leaves
 //   for both RPCs; a send built again is written first too (addEvmSend), at the note's recorded value.
 // - The verdict: a Deposited naming the precommitment at the round's newest agreed block (both RPCs, evmTreeSync's
-//   events and evmTakenNotes) moves the note to UNSPENT with its leaf, marked landed while above the finalized block; one at another value is a take, the note restored at that
+//   events, read by the note's own precommitment: evmDepositLeaf, never the chain walk) moves the note to UNSPENT with its leaf, marked landed while above the finalized block; one at another value is a take, the note restored at that
 //   value. A send is dead ONLY when U's nonce has passed it at a block final on BOTH RPCs (spentFinal: the nonce read
 //   at the newest block by its hash, that block then final by its header), read before the round, and no
 //   Deposited names the precommitment on either (final or not): then it is built again from fresh reads at the new nonce on the SAME note,
@@ -59,7 +61,7 @@ import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import type { EvmPoolSend, NoteRecord, NoteState, NoteStore } from "../../wallet/src/notes/store.ts";
 import { evmAgreedBlock, EvmLagError, evmPoolScopeOf, evmRetryLag, EvmUnansweredError, EVM_CHAIN_IDS, EVM_LADDER, EVM_READ_TRY_MS, type EvmNetwork, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
-import { evmClaimTaken, evmNextNote, EvmNotFinalError, evmTakenNotes } from "../../wallet/src/pool/evm-restore.ts";
+import { evmClaimTaken, evmDepositLeaf, evmNextNote, EvmNotFinalError, evmTakenNotes, type EvmRestoredNote } from "../../wallet/src/pool/evm-restore.ts";
 import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
@@ -177,6 +179,25 @@ const apart = (what: string): never => {
   throw new EvmDepositDisagree(`the two RPCs read ${what} apart`);
 };
 const both = <T>(rpcs: readonly [EvmRpc, EvmRpc], f: (rpc: EvmRpc, k: number) => Promise<T>): Promise<[T, T]> => Promise.all([f(rpcs[0], 0), f(rpcs[1], 1)]);
+/** A call the chain refused: code 3, or words that start "execution reverted" in the kit client's "RPC error <code>:
+ *  <message>" (kit src/trade/solana/send.ts). Its words after that are the called contract's, which may say anything. */
+const REVERT = /^RPC error (3: |-?\d+: execution reverted)/i;
+/**
+ * A node's answer that it holds no block or state at the block asked, never the chain's word on the call (card
+ * evm-deposit-pruned-sim-says-why): the wallet's lag words (wallet src/pool/evm.ts UNKNOWN_BLOCK and PRUNED: "missing
+ * trie node", "unknown state", "unknown block", "header not found", "block not found", "no such block", "historical
+ * state <root> is not available") and the words public mainnet RPCs answered on 2026-11-18 11:27-11:28Z: "historical
+ * state <root> is not available" (-32000, robinhood.rpc.blxrbdn.com and rpc-robinhood.globalstake.io, 300 blocks back),
+ * "header not found" (-32000, robinhood-rpc.publicnode.com, past its head), "block not found: 0x<n>" (-32001,
+ * base-rpc.publicnode.com and mainnet.base.org, past their head), "unsupported block number <n>" (-32000,
+ * rpc.mainnet.chain.robinhood.com, past its head) and "Archive requests require a personal token" (-32602,
+ * robinhood-rpc.publicnode.com, 5,000 blocks back). Never a revert.
+ */
+const STATE_MISS = /missing trie node|historical state \S* ?is not available|state \S* ?is not available|state (has been|was) pruned|unknown state|unknown block|header not found|block not found|no such block|unsupported block number|archive requests require/i;
+const stateMiss = (e: unknown): boolean => {
+  const m = String((e as Error | null)?.message ?? e);
+  return !REVERT.test(m) && STATE_MISS.test(m);
+};
 
 /** A block at which U's nonce read past a send's on both RPCs: its number and hash. The state of an older block is
  *  refused by pruned nodes (Robinhood's keep ~10 to 24 s), so the read is made once, at the newest block, and its block
@@ -423,9 +444,13 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
   // U's balance at the padded limit: a send again U can no longer pay is `keep`, its top-up named
   if (call.value + gasLimit * maxFee + l1[0] > low) return { kind: "keep", short: call.value + gasLimit * maxFee + l1[0] - low, u };
   checkEvmDeposit(tx, ask, { wallet: u, precommitment: step.precommitment, call, pin: r.h.pin }, { nonce: acct.nonces, balance: acct.balance, estimate, baseFee: acct.baseFees, l1Fee: l1, stateDepth: depths.state, labelDepth: depths.label, priorityCap: tip }, r.h.testnet);
-  // simulated on both before U signs: a failure on either signs nothing
+  // simulated on both before U signs: a failure on either signs nothing. A node that holds no state at the block (a
+  // pruned or lagging node: stateMiss) gave no word on the call: a lag, so the run reads again from fresh reads (the
+  // page's waits, then "down"), never not_funded. A revert on either is the chain's word and stands
   const sim = await Promise.allSettled(r.h.rpcs.map((rpc) => rpc("eth_call", [{ from: u, to: call.to, value: qty(call.value), data: call.data, gas: qty(gasLimit) }, acct.tag])));
-  if (sim.some((s) => s.status === "rejected")) return { kind: "sim_failed" };
+  const refused = sim.flatMap((s) => (s.status === "rejected" ? [s.reason] : []));
+  if (refused.length > 0 && refused.every(stateMiss)) throw new EvmLagError(`the simulation at block ${acct.block}: an RPC holds no state there`);
+  if (refused.length > 0) return { kind: "sim_failed" };
   const raw = signEvmDeposit(id.secretKey, tx);
   const send: EvmPoolSend = { hash: hex(keccak_256(raw)), nonce: acct.nonce, value: call.value, sentMs: nowOf(r) };
   // the state and its send, written before the signed tx leaves the device
@@ -461,11 +486,19 @@ async function verdictOf(r: Run, n: NoteRecord, kept: (n: NoteRecord) => void = 
   // evm-settle.ts). A landed note needs nothing else, so its verdict is the round's time alone (card
   // evm-deposit-ready-in-ten-seconds: on the Base copy the reads below, 4 host answers in a row, came first and held a
   // landing 3.6 s)
+  // The note's own Deposited is read by its precommitment (as noteEndEvm reads it), never through the chain walk
+  // (evmTakenNotes): a note of U's chain before it with no Deposited (a take a reorg dropped after U signed past it)
+  // ends the walk there, and this note would read dead and be built again on that other note, U told to top up (card
+  // evm-deposit-pruned-sim-says-why). The walk's takes before it are claimed with it
   const round = await r.h.round();
-  const pick = evmTakenNotes(r.seed, r.scope, round.events, first, round.finalBlock);
-  if (pick.taken.some((t) => sameRef(t.ref, n.ref))) {
+  const leaf = evmDepositLeaf(r.scope, round.events, n.precommitment);
+  if (leaf !== null) {
     if (ended(r.h)) return { kind: "pending" }; // a sign out or a stop while the round was read: nothing written
-    for (const c of await evmClaimTaken(r.store, pick.taken)) r.h.landed?.(c);
+    const pick = evmTakenNotes(r.seed, r.scope, round.events, first, round.finalBlock);
+    const block = round.events[Number(leaf.leafIndex)]!.block;
+    const own: EvmRestoredNote = { ref: n.ref, scope: r.scope, precommitment: n.precommitment, leaf, state: "UNSPENT", ...(block > round.finalBlock ? { landed: { block, fin: round.finalBlock } } : {}) };
+    // the walk's takes in its chain's order, as before; the note's own after them when the walk stopped short of it
+    for (const c of await evmClaimTaken(r.store, pick.taken.some((t) => sameRef(t.ref, n.ref)) ? pick.taken : [...pick.taken, own])) r.h.landed?.(c);
     const now = (await r.store.get(n.id))!;
     return { kind: "landed", note: now, filled: now.leaf?.value === n.evmSends?.[0]?.value };
   }
@@ -707,7 +740,8 @@ async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { f
     if (ladderSplit(EVM_LADDER, ask.amount).notes.length === 0) return { error: "not_allowed" };
     // the fixed source (card evm-deposit-route-mainnet; the Solana runner's rule, review H1): U^evm_{s,i} of the pool's
     // scope whose address is the op's U_X, from its deposit note the store planned (else its next second arrival, as
-    // tryNote picks on U's chain); a U with a note still landing is read again next time; any other U is refused
+    // tryNote picks on U's chain); a U with a note still landing is read again next time; any other U (one the store neither
+    // planned nor wrote for money a restore found there, planFound: card notes-plan-at-restored-index) is refused
     if (fixed !== undefined) {
       if (fixed.s !== scope) return { error: "not_allowed" };
       const id = depositIdEvm(seed, fixed.s, fixed.i);

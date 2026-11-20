@@ -18,7 +18,7 @@ name: ci
 # group as a pull request from main to the group's head: its main is the merge base of main and the head, never
 # merge_group.base_sha, which is the group's parent commit and can be the queue entry ahead, so not main's copy of a
 # gate. Main is refs/remotes/origin/main in full (a bare origin/main reads a tag of that name first, and the checkout
-# fetches every tag), and a group into any other branch runs no gate and fails. verify-gate judges each queued pull request on its own (verify-gate.mjs --group). base-gate.test.mjs replays
+# fetches every tag), and a group into any other branch runs no gate and fails. verify-gate judges each queued pull request on its own (verify-gate.mjs --group). quote-speed runs as main has it too, and decides whether to measure on the queued pull request's own files, from base_sha to the head (deep-import's step). base-gate.test.mjs replays
 # every gate step as a pull request and as a group, each with the head's gates tampered.
 # No push trigger (card main-ci-runs-once): main's ruleset (26292755) lets a commit onto main only through the merge
 # queue (its pull_request and merge_queue rules, no bypass actor), and the queue lands the very commit its group's run
@@ -155,10 +155,22 @@ jobs:
   # 15 minutes: the quote-speed step's two tries, each killed at 300 s (quote-speed.mjs TRY_MS; evm-quote-warm-round's
   # own runner jobs took 98 to 128 s with setup, live runs 42500836732 to 42522703562), so at most 10 minutes, on top
   # of the 17 s the rest of the job takes (run 42532277117), with the rest as margin for the install and the clone.
+  # Card quote-speed-measures-its-own-change: two quote-speed measures never run at once on the same public RPCs (PR 979's
+  # group run 44246114264 failed base-partial-v4 at p95 1148 ms while PR 980's run measured beside it). GitHub Actions has
+  # no step-level concurrency, so the lock is this job's, one group shared by every ci.yml run (pull requests, groups, a
+  # dispatch): queue: max keeps up to 100 jobs waiting, where the default (single) cancels a waiting job once another
+  # arrives and the queue builds up to 4 groups at once (ruleset 26292755 max_entries_to_build); cancel-in-progress is
+  # false (GitHub's workflow syntax, jobs.<job_id>.concurrency, read 18 Nov 06:0xZ). The job keeps its required name; one
+  # that measures nothing holds the lock for its 23 to 40 s (runs 44240437369 to 44247585034). The timeout counts from
+  # the job's start, never its wait. quote-speed.test.mjs holds the block.
   deep-import:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    concurrency:
+      group: quote-speed
+      cancel-in-progress: false
+      queue: max
     steps:
       # the full history: the quote-speed step reads the change base..head and the base's scripts/
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -198,18 +210,26 @@ jobs:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           MQ_HEAD: ${{ github.event.merge_group.head_sha }}
+          MQ_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
         run: |
-          # a merge queue group runs as a pull request from main to the group's head (see the merge_group trigger above)
-          if [ "$EVENT" = merge_group ]; then [ "$MQ_BASE_REF" = refs/heads/main ] || { echo "a merge queue group into $MQ_BASE_REF: only main's queue is judged"; exit 1; }; EVENT=pull_request; PR_HEAD="$MQ_HEAD"; PR_BASE="$(git merge-base refs/remotes/origin/main "$MQ_HEAD")"; fi
+          # a merge queue group runs as a pull request from main to the group's head (see the merge_group trigger above):
+          # the gate and CHECK come from main (PR_BASE). Card quote-speed-measures-its-own-change: the files that decide
+          # whether to measure are the queued pull request's own, its head against base_sha, the group's parent, which
+          # holds every entry ahead, each measured on its own change in its own group run (the queue lands entries only
+          # when each one's run is green, ruleset 26292755 grouping_strategy ALLGREEN). The head must be one merge onto
+          # base_sha (merge method MERGE: run 44246114264's head 821897e3 has first parent e835d972, the base its
+          # gh-readonly-queue ref names), or the step stops. base-gate.test.mjs plants both queue orders.
+          CHANGE_BASE="$PR_BASE"
+          if [ "$EVENT" = merge_group ]; then [ "$MQ_BASE_REF" = refs/heads/main ] || { echo "a merge queue group into $MQ_BASE_REF: only main's queue is judged"; exit 1; }; EVENT=pull_request; PR_HEAD="$MQ_HEAD"; PR_BASE="$(git merge-base refs/remotes/origin/main "$MQ_HEAD")"; [ "$(git rev-parse "$MQ_HEAD^1")" = "$MQ_BASE_SHA" ] || { echo "the group's head $MQ_HEAD is not one merge onto its parent '$MQ_BASE_SHA'"; exit 1; }; CHANGE_BASE="$MQ_BASE_SHA"; fi
           case "$EVENT" in
             pull_request)
               mkdir -p "$RUNNER_TEMP/base"
               git archive "$PR_BASE" scripts apps/helper/src/pool/mainnet-only.ts | tar -x -f - -C "$RUNNER_TEMP/base"
-              [ -e "$RUNNER_TEMP/base/scripts/ci/quote-speed.mjs" ] || { echo "main has no scripts/ci/quote-speed.mjs yet, so this pull request's own copy decides"; node scripts/ci/quote-speed.mjs "$PR_BASE" "$PR_HEAD"; exit; }
-              node "$RUNNER_TEMP/base/scripts/ci/quote-speed.mjs" "$PR_BASE" "$PR_HEAD" ;;
+              [ -e "$RUNNER_TEMP/base/scripts/ci/quote-speed.mjs" ] || { echo "main has no scripts/ci/quote-speed.mjs yet, so this pull request's own copy decides"; node scripts/ci/quote-speed.mjs "$CHANGE_BASE" "$PR_HEAD"; exit; }
+              node "$RUNNER_TEMP/base/scripts/ci/quote-speed.mjs" "$CHANGE_BASE" "$PR_HEAD" ;;
             push)
               if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
                 node scripts/ci/quote-speed.mjs --all
@@ -534,16 +554,25 @@ jobs:
 
   # The terminal's browser runs, split across the matrix: scripts/ci/test-shards.mjs reads apps/terminal's test:e2e,
   # runs its first command (the build) in every part and gives each later command to exactly one part, by the job's
-  # own strategy.job-index of strategy.job-total, so a part added to the matrix or to test:e2e is never dropped.
+  # own strategy.job-index of strategy.job-total, so a part added to the matrix or to test:e2e is never dropped. The
+  # commands are dealt largest first by their measured seconds (E2E_SECONDS; card ci-e2e-shards-by-time), each part
+  # prints each command's time and a warning for one past 1.25 times its listed seconds, and
+  # scripts/ci/test-shards.test.mjs fails when a part's planned seconds and this job's own steps pass timeout-minutes.
+  # A check that reads the live helper runs through scripts/ci/live-rerun.mjs's rerun rule, so a moment the helper
+  # missed runs it again instead of refusing the group (card queue-browser-checks-tell-a-helper-miss-from-a-page-fault);
+  # the reruns start only inside E2E_RERUN_BUDGET_S, and the same test fails when that budget, a last rerun and the
+  # job's own steps pass timeout-minutes. Every command runs under a wall bound from its listed seconds (boundOf), in its
+  # own process group, so no stalled check outlives the job (group 44559433373, 16:06Z): the same test fails when a part's
+  # plan and one command stopped at its bound pass timeout-minutes.
   test-browser:
     needs: changes
     if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3]
+        part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -566,10 +595,7 @@ jobs:
         env:
           INDEX: ${{ strategy.job-index }}
           TOTAL: ${{ strategy.job-total }}
-        run: |
-          cmd="$(node scripts/ci/test-shards.mjs e2e "$INDEX" "$TOTAL")"
-          echo "$cmd"
-          cd apps/terminal && pnpm exec sh -c "$cmd"
+        run: node scripts/ci/test-shards.mjs e2e-run "$INDEX" "$TOTAL"
       # The kit's one call in headless Chromium: the real prover worker under SIGN_HOST's own headers proves the fixture's
       # leaves, snarkjs accepts each proof, and a changed leaf or worker answer is refused (vault-prover-e2e; card
       # signpage-prover-host). The browser is the Chrome the step above installs. The first part runs it.
@@ -665,7 +691,7 @@ jobs:
   # The signing page's browser runs (card e2e-runs-once-in-the-queue): live.yml ran them, with the terminal's browser
   # chain, on every pull request (about 27 minutes, 25.5 of them the terminal's chain: runs 43440753733 and 43440138300),
   # and no required check read them, so every pull request waited on them before it could queue and the queue never ran
-  # them. They run here, once, on the queue's group and by hand; the terminal's chain is test-browser's (its three parts
+  # them. They run here, once, on the queue's group and by hand; the terminal's chain is test-browser's (its four parts
   # run every command of apps/terminal's test:e2e), so it is not run twice. A shard of test: a failed or skipped one fails
   # the required check, so a screen break stays off main (scripts/ci/test-shards.test.mjs plants each way it could not).
   browser-e2e:

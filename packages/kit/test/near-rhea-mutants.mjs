@@ -6,6 +6,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant } from "../../../scripts/mutant-run.mjs";
 import { kitCopy } from "./mutant-copy.mjs";
 
 const WITH_FEE = "  const withFee = amountIn * (RHEA_FEE_DIVISOR - BigInt(pool.feeBps));";
@@ -51,15 +52,15 @@ for (const [name, from, repl, pat] of M) {
   writeFileSync(F, src.replace(from, repl));
   let r;
   try {
-    r = runSync(process.execPath, ["--test", `--test-name-pattern=${pat}`, "test/near-rhea.test.ts"], { cwd: root, encoding: "utf8", env: CHILD_ENV, timeoutMs: 120_000 });
+    // a run past 120 s is killed, its process group with it; a run with no verdict is refused (scripts/mutant-run.mjs)
+    r = runMutant([`--test-name-pattern=${pat}`, "test/near-rhea.test.ts"], { cwd: root, timeoutMs: 120_000 });
   } finally {
     writeFileSync(F, src);
   }
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const killed = r.status !== 0 && Number(fail) > 0;
+  if (refused(name, r)) continue;
+  const killed = r.verdict === "killed";
   if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}`);
+  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}`);
 }
 console.log(`${ok}/${M.length} killed`);
 if (ok !== M.length) process.exitCode = 1;

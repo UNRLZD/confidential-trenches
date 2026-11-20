@@ -19,7 +19,7 @@ import { gunzipSync } from "node:zlib";
 import { evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolIndexUse, evmProviders, evmRanked, evmSpeedReset, type EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
-import { callKey } from "./evm-quote-calls-record.ts";
+import { callKey, withEventOnly } from "./evm-quote-calls-record.ts";
 import { onTestClock } from "./test-clock.ts";
 
 const F = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/evm-quote-calls.json.gz", import.meta.url))).toString("utf8"));
@@ -30,7 +30,7 @@ const POST_MS = 200;
 const BOUND_MS = 8_000;
 
 const replay = () => {
-  const answers = new Map<string, unknown>(F.calls);
+  const answers = new Map<string, unknown>(withEventOnly(F.calls));
   const own = new Map<string, unknown>(F.own);
   const missed: string[] = [];
   const flying = new Map<string, number>();
@@ -122,5 +122,7 @@ test("each mainnet quote provider has its own in-flight pin, and no pin names an
   assert.equal(evmPoolVenues().robinhood.inflight!["https://rpc.mainnet.chain.robinhood.com"], 2);
   // inside the helper's pace in calls at once (apps/helper/src/limits/limits.ts PROVIDER_PACE), a quote's post up to 3 calls
   assert.equal(evmPoolVenues().robinhood.inflight!["https://robinhood.drpc.org"], 5);
-  assert.equal(evmPoolVenues().base.inflight!["https://base-rpc.publicnode.com"], 2);
+  // Base's publicnode at the 8 at once measured on the device (card evm-first-quote-inside-the-kpi), never the helper's 2:
+  // a cold quote's reads queued behind it at 2 while blastapi answered 8 at once
+  assert.equal(evmPoolVenues().base.inflight!["https://base-rpc.publicnode.com"], 8);
 });

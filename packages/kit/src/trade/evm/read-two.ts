@@ -20,8 +20,15 @@
 // - "Answered": the read resolved. Two answers that differ (`same` false) are refused, EvmOperatorsDiffer, which
 //   carries both: the walk never asks a third operator once both sides answered, so a disagreement is never turned
 //   into agreement. One operator alone never passes: a side left with no operator refuses the read.
-// - Words: a seat is named by its host, never its URL, in every message; any URL a provider's own words carry (any case,
-//   port, path or key) and any listed host followed by a path are replaced by the host.
+// - Words: a seat is named by its host, never its URL, in every message (seatWords, card device-evm-read-residuals):
+//   every secret part of a seat's own URL (its user, password, query keys and values as parsed and as written, path
+//   segments and fragment, each of SEAT_SECRET_MIN characters or more; a path segment or query name that is a
+//   lowercase word, SEAT_WORD, left out), as written, percent-decoded, percent-encoded or with JSON's escaped slash, in
+//   any case, and any start of one of SEAT_SECRET_MIN or more (the longest at each place), becomes <key>, wherever it
+//   stands (a path alone, an unlisted host, a backslash path); secretScrubber is that rule, on the kit's public entry for any app or server (card
+//   helper-scrubber-takes-the-kits-rule). Then any URL of any scheme becomes its host (<url> when it does not parse), and
+//   any listed host followed by a path, a trailing dot or a backslash becomes the host. errors[] and cause carry the
+//   same words: each seat error is a copy of its class with its message, string fields and cause so cleaned.
 // - What the walk gives up against a fixed pair (independent review, 2026-11-10): any two of the list's operators that
 //   collude, with the others blocked, can now agree, where before only the fixed two could. Accepted for the reads on
 //   it: the bind's fee must still equal the helper's answer, is capped at 50% of the chunk and goes to the pinned
@@ -77,6 +84,111 @@ export type EvmTwoOperators<R> = {
 
 export type EvmTwoOperatorsOpts = { callMs?: number; budgetMs?: number; restMs?: number; now?: () => number };
 
+/** A secret part of a seat's URL is one of this many characters or more (a shorter one is a word, "v2" or "rpc"). */
+const SEAT_SECRET_MIN = 8;
+/** A path segment or a query name in lowercase letters alone, its words joined by "-" or "_" (a chain's name in a path,
+ *  "robinhood" or "base-mainnet"; a query name, "access_token"), is a word, never a secret (a username, password, query
+ *  value or fragment always is): taken as one, every such word in the
+ *  provider's words, a seat's host and an env name among them, would read <key>. */
+const SEAT_WORD = /^[a-z]+(?:[-_][a-z]+)*$/;
+/** A secret's start matched at most this long (a longer secret is still removed whole where it stands whole). */
+const SEAT_SECRET_START_MAX = 256;
+const decodeOr = (x: string): string => {
+  try {
+    return decodeURIComponent(x);
+  } catch {
+    return x;
+  }
+};
+/** The most of a provider's words secretScrubber reads by default: a JSON-RPC error's words are a line or two; a log
+ *  line holds 160 of them, a refusal 1,200. A longer text is cut there, "…" marking the cut. */
+export const SECRET_SCRUB_MAX = 4_096;
+/**
+ * The one rule that takes a provider's secret out of its words (the file's head, Words), for the kit's own seat errors
+ * and for any app or server that writes a keyed URL's words into a log line or an answer (card
+ * helper-scrubber-takes-the-kits-rule: the helper cleans every provider error with it). `urls` are the keyed URLs; one
+ * that does not parse has no parts to read and is passed over. The words are cut to `max` characters ("…" marks the
+ * cut) after each whole secret is removed from all of them. Each pattern is built once; each pass reads the words as
+ * they are (no index into a case-folded copy). It only removes text or puts <key>, <url> or a host in its place.
+ */
+export function secretScrubber(urls: readonly string[], max = SECRET_SCRUB_MAX): (text: string) => string {
+  const secrets = new Set<string>();
+  const hosts = new Set<string>();
+  for (const url of urls) {
+    let p: URL;
+    try {
+      p = new URL(url);
+    } catch {
+      continue;
+    }
+    if (p.hostname !== "") hosts.add(p.hostname.replace(/\.$/, ""));
+    // the query's names and values as written too: the parser reads a raw "+" as a space, so a key holding one is no
+    // part it lists
+    const raw = p.search.slice(1).split("&").map((kv) => (kv.includes("=") ? [kv.slice(0, kv.indexOf("=")), kv.slice(kv.indexOf("=") + 1)] : [kv, ""]));
+    // a lowercase word is a word only where a URL names things (a path segment, a query name); a password, a query value
+    // and a fragment hold only what was set there, so each is a secret whatever its letters
+    const named = [...p.pathname.split("/"), ...[...p.searchParams.keys()], ...raw.map(([k]) => k!)];
+    const held = [p.username, p.password, ...p.searchParams.values(), ...raw.map(([, v]) => v!), p.hash.slice(1)];
+    for (const [x, word] of [...named.map((x) => [x, true] as const), ...held.map((x) => [x, false] as const)]) {
+      for (const f of [x, decodeOr(x), encodeURIComponent(decodeOr(x))]) {
+        if (f.length < SEAT_SECRET_MIN || (word && SEAT_WORD.test(f))) continue;
+        secrets.add(f);
+        if (f.includes("/")) secrets.add(f.replaceAll("/", "\\/"));
+      }
+    }
+  }
+  const esc = (c: string) => c.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  // each secret: its first SEAT_SECRET_MIN characters, then each next one optional inside the one before, so a whole
+  // secret and any start of it match with no backtracking past a character. Where one matches, the longest of them at
+  // that place is removed: two forms of one secret share a start ("k+1" and "k%2B1"), and the shorter must not leave
+  // the longer's rest behind
+  const starts = [...secrets]
+    .map((k) => [...k].slice(0, SEAT_SECRET_START_MAX).map(esc))
+    .map((cs) => new RegExp(`${cs.slice(0, SEAT_SECRET_MIN).join("")}${cs.slice(SEAT_SECRET_MIN).map((c) => `(?:${c}`).join("")}${")?".repeat(Math.max(0, cs.length - SEAT_SECRET_MIN))}`, "iy"));
+  // where any secret's first SEAT_SECRET_MIN characters stand, in any case: one pattern of the starts alone, found natively
+  const firsts = new RegExp([...new Set([...secrets].map((k) => [...k].slice(0, SEAT_SECRET_MIN).map(esc).join("")))].join("|") || "(?!)", "gi");
+  const wholes = [...secrets].sort((x, y) => y.length - x.length);
+  // any scheme's URL run, passing over a secret already put as <key>
+  const ANY_URL = /\b[a-z][a-z0-9+.-]*:\/\/(?:<key>|[^\s"'<>`])*/gi;
+  const bare = [...hosts].map((h) => ({ h, re: new RegExp(`\\b${esc(h)}\\.?(?::\\d+)?[/?#\\\\][^\\s"'<>]*`, "gi") }));
+  return (text) => {
+    let all = String(text);
+    for (const k of wholes) all = all.split(k).join("<key>");
+    let m = all.slice(0, max);
+    let out = "";
+    let last = 0;
+    firsts.lastIndex = 0;
+    for (let x = firsts.exec(m); x !== null; x = firsts.exec(m)) {
+      let len = 0;
+      for (const r of starts) {
+        r.lastIndex = x.index;
+        len = Math.max(len, r.exec(m)?.[0].length ?? 0);
+      }
+      if (len === 0) {
+        firsts.lastIndex = x.index + 1;
+        continue;
+      }
+      out += `${m.slice(last, x.index)}<key>`;
+      last = firsts.lastIndex = x.index + len;
+    }
+    m = out + m.slice(last);
+    m = m.replace(ANY_URL, (u) => {
+      try {
+        return new URL(u).host || "<url>";
+      } catch {
+        return "<url>";
+      }
+    });
+    for (const { h, re } of bare) m = m.replace(re, h);
+    return all.length > max ? `${m}…` : m;
+  };
+}
+/** A seat error's words (secretScrubber over the seats' URLs), at most 200 characters. */
+function seatWords(urls: readonly string[]): (e: unknown) => string {
+  const scrub = secretScrubber(urls, 2_000);
+  return (e) => scrub(String((e as Error | undefined)?.message ?? e)).slice(0, 200);
+}
+
 const hostOf = (url: string): string => {
   try {
     return new URL(url).host;
@@ -106,17 +218,30 @@ export function evmTwoOperators<R>(list: readonly EvmReadSeat<R>[], o: EvmTwoOpe
   if (operators.length < 2) throw new Error("seats: two operators at least (two seats of one operator are one)");
   const seatsOf = new Map(operators.map((op) => [op, seats.filter((s) => s.operator === op)]));
   const restUntil = new Map<string, number>();
-  // a provider's words with every URL as its host: any http(s) run, in any case and with any port, path or key, and any
-  // listed host followed by a path with no scheme; each regex built once, each replace one pass over the original
-  // string, bounded first (no loop whose progress hangs on an index into a case-folded copy)
-  const ANY_URL = /https?:\/\/([^\s/?#"'<>]+)[^\s"'<>]*/gi;
-  const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const bare = [...new Set(seats.map((s) => s.host.replace(/:\d+$/, "")))].map((h) => ({ h, re: new RegExp(`\\b${escape(h)}(?::\\d+)?[/?#][^\\s"'<>]*`, "gi") }));
-  const said = (e: unknown): string => {
-    let m = String((e as Error | undefined)?.message ?? e).slice(0, 2_000);
-    m = m.replace(ANY_URL, (_, host: string) => host.replace(/^[^@]*@/, ""));
-    for (const { h, re } of bare) m = m.replace(re, h);
-    return m.slice(0, 200);
+  const said = seatWords(seats.map((s) => s.url));
+  // a seat's error as errors[] and cause carry it: its own class (a caller tells a lag by it), its words said()'s
+  const clean = (e: unknown, depth = 0): unknown => {
+    if (!(e instanceof Error)) return said(e);
+    try {
+      const c = Object.create(Object.getPrototypeOf(e) as object) as Error;
+      for (const k of Reflect.ownKeys(e)) {
+        if (k === "message" || k === "stack" || k === "cause") continue;
+        // each own field as its value (an accessor read once, never carried as a getter), a string's words said()'s
+        const v = (e as unknown as Record<PropertyKey, unknown>)[k];
+        Object.defineProperty(c, k, { value: typeof v === "string" ? said(v) : v, writable: true, configurable: true, enumerable: Object.prototype.propertyIsEnumerable.call(e, k) });
+      }
+      // a name or code read through the prototype (a DOMException's getters throw on a copy) kept as its own value
+      for (const k of ["name", "code"] as const) {
+        const v = (e as unknown as Record<string, unknown>)[k];
+        if (!Object.hasOwn(c, k) && v !== undefined) Object.defineProperty(c, k, { value: typeof v === "string" ? said(v) : v, writable: true, configurable: true });
+      }
+      Object.defineProperty(c, "message", { value: said(e), writable: true, configurable: true });
+      Object.defineProperty(c, "stack", { value: `${c.name}: ${c.message}`, writable: true, configurable: true });
+      if ("cause" in e) Object.defineProperty(c, "cause", { value: depth < 2 ? clean(e.cause, depth + 1) : said(e.cause), writable: true, configurable: true });
+      return c;
+    } catch {
+      return Object.assign(new Error(said(e)), { name: "Error" });
+    }
   };
 
   async function read<T>(what: string, f: (rpc: R, signal: AbortSignal) => Promise<T>, same: (a: T, b: T) => boolean, signal?: AbortSignal): Promise<[EvmOperatorAnswer<T>, EvmOperatorAnswer<T>]> {
@@ -165,8 +290,9 @@ export function evmTwoOperators<R>(list: readonly EvmReadSeat<R>[], o: EvmTwoOpe
           } catch (e) {
             if (ac.signal.aborted) throw ac.signal.reason;
             restUntil.set(op, now() + restMs);
-            errors.push(e);
-            walked.push(`${s.host}: ${said(e)}`);
+            const c = clean(e);
+            errors.push(c);
+            walked.push(`${s.host}: ${c instanceof Error ? c.message : String(c)}`);
           } finally {
             clearTimeout(timer);
           }

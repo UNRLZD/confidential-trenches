@@ -5,7 +5,7 @@
 //   node --test apps/helper/src/held-share.test.ts
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { HELD_MAX } from "./data/held.ts";
@@ -13,23 +13,21 @@ import { b58encode, createSolanaLists } from "./data/solana/lists.ts";
 import { createProxy } from "./proxy/proxy.ts";
 import { createRpc } from "./rpc/rpc.ts";
 import { handler, heldFrom, solanaTokenFromEnv } from "./server.ts";
+import { call, listening } from "../test/servers.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const KEYS = { JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001" };
 const USER = "198.51.100.77";
 
-function send(port: number, method: string, path: string, body?: string): Promise<{ status: number; text: string }> {
-  return new Promise((ok, fail) => {
-    const headers: Record<string, string | number> = { "x-forwarded-for": USER };
-    if (body !== undefined) Object.assign(headers, { "content-type": "application/json", "content-length": Buffer.byteLength(body) });
-    const r = request({ host: "127.0.0.1", port, path, method, headers, agent: false }, (res) => {
-      let text = "";
-      res.on("data", (c) => (text += c));
-      res.on("end", () => ok({ status: res.statusCode!, text }));
-    });
-    r.on("error", fail);
-    r.end(body);
-  });
+async function send(port: number, method: string, path: string, body?: string): Promise<{ status: number; text: string }> {
+  const headers: Record<string, string | number> = { "x-forwarded-for": USER };
+  if (body !== undefined) Object.assign(headers, { "content-type": "application/json", "content-length": Buffer.byteLength(body) });
+  const r = await call(port, { method, path, headers, body, agent: false }, "the helper");
+  return { status: r.status, text: r.body };
 }
 const mint = () => b58encode(randomBytes(32));
 
@@ -68,13 +66,13 @@ test("30 held Solana mints, cold and again: the same address's RPC read, token p
   while (Date.now() % 10_000 > 2_000) await new Promise((r) => setTimeout(r, 50));
   globalThis.fetch = stub;
   const proxy = createProxy(KEYS, { fetch: stub });
-  const rpc = createRpc({}, { fetch: stub });
+  const rpc = createRpc({}, { now: STILL, fetch: stub });
   const lists = createSolanaLists(proxy, rpc);
   const token = solanaTokenFromEnv({}, proxy, lists, rpc);
   const held = heldFrom(token, {});
   const h = createServer(handler(COMMIT, proxy, rpc, undefined, lists, undefined, undefined, token, undefined, null, new Map(), new Map(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, held));
   try {
-    await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
+    await listening(h.listen(0, "127.0.0.1"), "the helper");
     const port = (h.address() as AddressInfo).port;
     const mints = Array.from({ length: HELD_MAX }, mint);
     const q = mints.map((m) => `token=${m}`).join("&");

@@ -1,0 +1,26 @@
+{
+ "good": {
+  "source": "build-app.mjs --out at card/evm-quote-reads-need-no-old-state 5b14d5f0d",
+  "at": "2026-11-17T22:39:01.439Z",
+  "facts": {
+   "pin": "sha384-crji+Ch5VFUT8t2t+mJnXJTlfE/hAv7wbnn5w14pQBLGNM2OAFSw0TTacu1Srvp3",
+   "sha384": "sha384-crji+Ch5VFUT8t2t+mJnXJTlfE/hAv7wbnn5w14pQBLGNM2OAFSw0TTacu1Srvp3",
+   "marks": {
+    "index": 1,
+    "evidence": 1
+   }
+  }
+ },
+ "bad": {
+  "source": "live https://confidential.unrealized.trade",
+  "at": "2026-11-17T22:39:02.037Z",
+  "facts": {
+   "pin": "sha384-mR+sDFTP/pvzKq1FEEP/HYKJhwH9JmNyc728o2AM010cVUno4YEYejCwdA99FxyN",
+   "sha384": "sha384-mR+sDFTP/pvzKq1FEEP/HYKJhwH9JmNyc728o2AM010cVUno4YEYejCwdA99FxyN",
+   "marks": {
+    "index": 0,
+    "evidence": 0
+   }
+  }
+ }
+}

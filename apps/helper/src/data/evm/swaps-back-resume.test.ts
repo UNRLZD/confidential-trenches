@@ -27,8 +27,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fakeChain, open, REC, timeAt } from "../../../test/evm-swaps/robinhood.ts";
+import { callsIn, pocketRefusal } from "../../../test/pocket.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
-import { HEADER_TIMED, ROBINHOOD_VENUES, SWAP_RPCS, TOPIC, TRADES_MAX } from "./swaps.ts";
+import { HEADER_TIMED, IDLE_MS, ROBINHOOD_VENUES, SWAP_RPCS, TOPIC, TRADES_MAX } from "./swaps.ts";
 
 const OWN = "https://rpc.mainnet.chain.robinhood.com";
 const POCKET = "https://robinhood.api.pocket.network";
@@ -126,8 +127,8 @@ function rig(o: { ownFrom?: number; ownTo?: number; traderLateMs?: number } = {}
     const mine = q.address === undefined ? undefined : (SWAPS.get(q.address) ?? TRANSFERS.get(q.address));
     if (mine === undefined) return undefined;
     const [from, to] = [parseInt(q.fromBlock, 16), parseInt(q.toBlock, 16)];
-    if (to > HEAD || to - from + 1 > (f.span ?? 100)) return { error: { code: -32602, message: "eth_getLogs block range exceeds 100 blocks" } };
-    if (f.window !== undefined && from < HEAD - f.window) return { error: { code: -32011, message: "block reference is outside the public history window" } };
+    if (to > chain.st.head || to - from + 1 > (f.span ?? 100)) return { error: { code: -32602, message: "eth_getLogs block range exceeds 100 blocks" } };
+    if (f.window !== undefined && from < chain.st.head - f.window) return { error: { code: -32011, message: "block reference is outside the public history window" } };
     if (SWAPS.has(q.address!)) reads.set(url, (reads.get(url) ?? 0) + 1), spans.push(to - from + 1);
     const want = [q.topics?.[0]].flat();
     return { result: mine.filter((l) => l.b >= from && l.b <= to && want.includes(l.t[0])).map((l) => wire(l, f.zeroTime === true)) };
@@ -141,6 +142,9 @@ function rig(o: { ownFrom?: number; ownTo?: number; traderLateMs?: number } = {}
     if (f.down) return new Response("down", { status: 503 });
     const no = refused(url);
     if (no) return no;
+    // a Pocket host answers 413 past 5 calls, as mainnet does (test/pocket.ts)
+    const pocket = pocketRefusal(url, callsIn(init.body));
+    if (pocket) return pocket;
     const reqs = [JSON.parse(String(init.body))].flat() as { id: number; method: string; params: unknown[] }[];
     const mine = reqs.map((r) => local(url, r));
     const rest = reqs.filter((_, i) => mine[i] === undefined);
@@ -200,14 +204,14 @@ async function fillTimes(r: ReturnType<typeof rig>, only: number[] = TOKENS.map(
   return value;
 }
 
-test("card robinhood-trades-finish-filling: 12 Robinhood coins the discovery finds, opened at once with the helper's tick 8.8 s apart, each at its live coin's trades over the day: the 8 whose newest 50 trades lie in at most 30 of daybreak's 2,000-block spans answer them, filling false, inside the live checks' 45 s, and the 4 spread over 50 spans inside 60 s (red at d59370557: a seeded tape read back only from a tick, a step that read no new block waited the next, each locate waited for a post of its own, and a spread coin asked all its spans at once: six of the eight past 45 s, the slowest at 83 s)", async () => {
+test("card robinhood-spread-tapes-fill-inside-45s: 12 Robinhood coins the discovery finds, opened at once with the helper's tick 8.8 s apart, each at its live coin's trades over the day, every one answers its newest 50 trades, filling false, inside the live checks' 45 s, the 4 spread over 50 of daybreak's 2,000-block spans too (red at cea17ee5f: they took 51.5 to 53.9 s, every named block of theirs a daybreak post at 7 a second; red at d59370557: a seeded tape read back only from a tick, a step that read no new block waited the next, each locate waited for a post of its own, and a spread coin asked all its spans at once: six of the eight dense coins past 45 s, the slowest at 83 s)", async () => {
   const r = rig({});
   const got = await fillTimes(r);
   const line = got.map((g, n) => `${TOKENS[n]!.token.slice(-4)} ${SPANS_OF(n)} spans ${g.ms === null ? `not filled (n${g.n}${g.filling ? " filling" : " settled"})` : `${(g.ms / 1000).toFixed(1)} s`}`).join(", ");
   console.log(`${line}; pool log reads: ${[...r.reads].map(([u, n]) => `${new URL(u).hostname} ${n}`).join(", ")}; posts: ${[...r.posts].map(([u, n]) => `${new URL(u).hostname} ${n}`).join(", ")}`);
   got.forEach((g, n) => {
     assert.notEqual(g.ms, null, `a tape not filled with its newest 50 trades: ${line}`);
-    assert.ok(g.ms! <= (SPANS_OF(n) <= 30 ? FILLED_MS : 60_000), `${TOKENS[n]!.token.slice(-4)} past its bound: ${line}`);
+    assert.ok(g.ms! <= FILLED_MS, `${TOKENS[n]!.token.slice(-4)} past the live checks' 45 s: ${line}`);
   });
   // every swap shown was read from two providers, never the locate's untimed word alone
   assert.ok((r.reads.get(DAYBREAK) ?? 0) > 0 && (r.reads.get(POCKET) ?? 0) > 0, `the read back asked daybreak and pocket: ${[...r.reads].join(" ")}`);
@@ -221,26 +225,114 @@ test("card robinhood-trades-finish-filling: a coin whose locate the chain's own 
   assert.equal(steps, 0, `the day read in ${steps} steps of 10,000 blocks`);
 });
 
-/** Each coin opened alone, at 909222c27 (#943, the located read back before this card) on this rig: its time to its
- *  newest 50 trades, its posts and its pool log reads. */
-const SOLO_909 = [
-  { what: "busy", n: 8, ms: 11_800, posts: 56, reads: 30 },
-  { what: "medium", n: 6, ms: 12_000, posts: 68, reads: 40 },
-  { what: "medium", n: 2, ms: 14_800, posts: 83, reads: 54 },
-  { what: "quiet", n: 7, ms: 17_800, posts: 152, reads: 122 },
+/** Each coin opened alone on this rig at cea17ee5f (main before card robinhood-spread-tapes-fill-inside-45s): its time to
+ *  its newest 50 trades, its posts and its pool log reads (at 909222c27, #943: busy 11.8 s 56 posts 30 reads, medium
+ *  12.0 s 68/40 and 14.8 s 83/54, quiet 17.8 s 152/122). `posts` is main's at e202edec4 on this rig with Pocket answering
+ *  413 past 5 calls as mainnet does (test/pocket.ts; card helper-rpc-batch-learns-reader-size): busy 7.1 s 74 posts 30
+ *  reads, medium 10.0 s 85/40 and 9.2 s 98/54, quiet 12.2 s 93/96. The rig's Pocket took batches of 10 before, which
+ *  mainnet refuses, and cea17ee5f's posts (54, 69, 87, 169) were counted on it. */
+const SOLO_MAIN = [
+  { what: "busy", n: 8, ms: 5_800, posts: 74, reads: 28 },
+  { what: "medium", n: 6, ms: 8_800, posts: 85, reads: 40 },
+  { what: "medium", n: 2, ms: 8_800, posts: 98, reads: 54 },
+  { what: "quiet", n: 7, ms: 15_200, posts: 93, reads: 120 },
 ];
 
-test("card robinhood-trades-finish-filling: a coin opened alone, busy (its newest 50 trades in 6 spans), medium (13 and 18 spans: a few steps past the newest) or quiet (50 spans), fills no later than at 909222c27 and reads no more pool logs; the busy coin sends no more posts (at 909222c27: busy 11.8 s 56 posts 30 reads, medium 12.0 s 68/40 and 14.8 s 83/54, quiet 17.8 s 152/122; now 5.8 s 54/28, 8.8 s 69/40 and 8.8 s 87/54, 15.2 s 169/120: rounds of BACK_ROUND_SPANS cost a medium coin up to 4 posts more, a quiet one 17)", async () => {
-  for (const b of SOLO_909) {
+test("card robinhood-spread-tapes-fill-inside-45s: a coin opened alone, busy (its newest 50 trades in 6 spans), medium (13 and 18 spans) or quiet (50 spans), fills no later than at cea17ee5f, with no more pool log reads than then and no more posts than main at e202edec4 on a Pocket that refuses past 5 (cea17ee5f: busy 5.8 s 28 reads, medium 8.8 s 40 and 8.8 s 54, quiet 15.2 s 120; e202edec4's posts 74, 85, 98, 93; now busy 5.8 s 60 posts, medium 8.8 s 74 and 94, quiet 8.8 s 89/96: its single-block spans asked six a round, a batch a seat)", async () => {
+  for (const b of SOLO_MAIN) {
     const r = rig({});
     const [g] = await fillTimes(r, [b.n], 120_000);
     const posts = [...r.posts.values()].reduce((x, y) => x + y, 0);
     const reads = [...r.reads.values()].reduce((x, y) => x + y, 0);
-    const line = `${b.what} ${SPANS_OF(b.n)} spans: ${g!.ms === null ? "not filled" : `${(g!.ms / 1000).toFixed(1)} s`}, ${posts} posts, ${reads} pool reads (909222c27: ${(b.ms / 1000).toFixed(1)} s, ${b.posts}, ${b.reads})`;
+    const line = `${b.what} ${SPANS_OF(b.n)} spans: ${g!.ms === null ? "not filled" : `${(g!.ms / 1000).toFixed(1)} s`}, ${posts} posts, ${reads} pool reads (cea17ee5f: ${(b.ms / 1000).toFixed(1)} s, ${b.reads} reads; e202edec4: ${b.posts} posts)`;
     console.log(line);
-    assert.ok(g!.ms !== null && g!.ms <= b.ms, `slower than at 909222c27: ${line}`);
-    assert.ok(reads <= b.reads, `more pool reads than at 909222c27: ${line}`);
-    if (b.what === "busy") assert.ok(posts <= b.posts, `a busy coin sent more posts than at 909222c27: ${line}`);
+    assert.ok(g!.ms !== null && g!.ms <= b.ms, `slower than at cea17ee5f: ${line}`);
+    assert.ok(reads <= b.reads, `more pool reads than at cea17ee5f: ${line}`);
+    assert.ok(posts <= b.posts, `more posts than main at e202edec4: ${line}`);
+  }
+});
+
+/** Each coin's reopen past IDLE_MS on this rig at ff65a0403 (main before the book rests): read again from nothing, its
+ *  first answer filling, settled at 3.8 to 6.8 s, with these posts and pool log reads. */
+const REOPEN_MAIN: Record<number, { posts: number; reads: number }> = { 8: { posts: 21, reads: 20 }, 6: { posts: 27, reads: 28 }, 2: { posts: 41, reads: 42 }, 7: { posts: 35, reads: 84 } };
+/** The busy and the quiet coin's reopen on this rig at ff65a0403 with the chain 2,000 and 3,500 blocks on. */
+const REOPEN_WIDE_MAIN: Record<number, { near: { posts: number; reads: number }; wide: { posts: number; reads: number } }> = { 8: { near: { posts: 25, reads: 22 }, wide: { posts: 25, reads: 22 } }, 7: { near: { posts: 37, reads: 85 }, wide: { posts: 37, reads: 85 } } };
+
+/** A coin filled on the rig, left unread past IDLE_MS while the chain moves `gap` blocks on, then opened again: its fill,
+ *  its reopen's first answer and the posts and pool log reads of each. */
+async function reopenAfterIdle(b: (typeof SOLO_MAIN)[number], gap: number) {
+  const sleep = (ms: number) => new Promise((go) => setTimeout(go, ms));
+  const sum = (m: Map<string, number>) => [...m.values()].reduce((x, y) => x + y, 0);
+  const r = rig({});
+  const { token, pool } = TOKENS[b.n]!;
+  const newest = SWAPS.get(pool)!.at(-1)!.tx;
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    r.start();
+    const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
+    let over = false;
+    const ticker = (async () => {
+      while (!over) {
+        await sleep(TICK_EVERY_MS);
+        await s.tick();
+      }
+    })();
+    const read = async () => {
+      const a = await s.trades(token, TRADES_MAX);
+      const j = a.status === 200 ? (JSON.parse(a.body) as { trades: { tx: string }[]; filling?: boolean }) : null;
+      return { n: j?.trades.length ?? -1, filling: j === null || j.filling === true, newest: j?.trades[0]?.tx === newest };
+    };
+    const t0 = clock.t;
+    let fill = await read();
+    while (fill.filling && clock.t - t0 < RUN_MS) {
+      await sleep(3_000);
+      fill = await read();
+    }
+    const fillMs = clock.t - t0;
+    // nobody reads it past IDLE_MS and two ticks more: its book stops being read; the chain moves on meanwhile
+    await sleep(IDLE_MS + 2 * TICK_EVERY_MS);
+    r.chain.st.head = HEAD + gap;
+    const [posts0, reads0] = [sum(r.posts), sum(r.reads)];
+    const t1 = clock.t;
+    const again = await read();
+    const againMs = clock.t - t1;
+    // read on as the page does until it settles, so a reopen that reads the coin again is counted whole
+    let settled = again;
+    while (settled.filling && clock.t - t1 < RUN_MS) {
+      await sleep(3_000);
+      settled = await read();
+    }
+    const settledMs = clock.t - t1;
+    over = true;
+    await ticker;
+    s.stop();
+    return { fill, fillMs, again, againMs, settled, settledMs, posts: [posts0, sum(r.posts) - posts0] as const, reads: [reads0, sum(r.reads) - reads0] as const };
+  });
+  const line = `${b.what} ${SPANS_OF(b.n)} spans, ${gap} blocks since: filled at ${(value.fillMs / 1000).toFixed(1)} s with ${value.posts[0]} posts and ${value.reads[0]} pool reads; reopened past IDLE_MS: ${value.again.n} trades${value.again.filling ? " filling" : ""} in ${value.againMs} ms, settled at ${(value.settledMs / 1000).toFixed(1)} s (${value.settled.n} trades${value.settled.filling ? " filling" : ""}), ${value.posts[1]} posts, ${value.reads[1]} pool reads`;
+  console.log(line);
+  return { line, ...value };
+}
+
+test("card robinhood-spread-tapes-fill-inside-45s: a coin filled, left unread past IDLE_MS (its book stops being read) and opened again answers its whole list at once, filling false, and reads only the blocks since: busy, medium and quiet, each reopen's posts and pool log reads a few, never the fill's again (red at ff65a0403: the idle book was deleted with its read back, and the reopen read the coin from nothing, its first answer filling)", async () => {
+  const got = [];
+  for (const b of SOLO_MAIN) got.push({ b, ...(await reopenAfterIdle(b, 0)) });
+  for (const { b, line, fill, again, posts, reads } of got) {
+    assert.ok(!fill.filling && fill.n === TRADES_MAX, `never filled: ${line}`);
+    assert.ok(!again.filling && again.n === TRADES_MAX && again.newest, `the reopen did not answer the whole list at once: ${line}`);
+    // one read of the blocks since, on the rig's providers as a tick's read of the book is (its head, its pool's filters
+    // agreed), never the read back again; and never more than main's reopen of the same coin
+    assert.ok(reads[1] <= 4 && reads[1] <= REOPEN_MAIN[b.n]!.reads, `the reopen read more than the blocks since: ${line}`);
+    assert.ok(posts[1] <= 8 && posts[1] <= REOPEN_MAIN[b.n]!.posts, `the reopen sent more than the blocks since take: ${line}`);
+  }
+});
+
+test("card robinhood-spread-tapes-fill-inside-45s: a reopen whose blocks since are inside the cold window (2,000) reads those blocks alone and answers the whole list at once; one wider (3,500, past the cold window and with no index to hold it) opens the coin cold as main does and still settles whole, never sending more than main's reopen of the same gap", async () => {
+  const got = [];
+  for (const b of [SOLO_MAIN[0]!, SOLO_MAIN[3]!]) got.push({ b, near: await reopenAfterIdle(b, 2_000), wide: await reopenAfterIdle(b, 3_500) });
+  for (const { b, near, wide } of got) {
+    assert.ok(!near.again.filling && near.again.n === TRADES_MAX && near.again.newest, `the reopen did not answer the whole list at once: ${near.line}`);
+    assert.ok(near.posts[1] <= REOPEN_WIDE_MAIN[b.n]!.near.posts && near.reads[1] <= REOPEN_WIDE_MAIN[b.n]!.near.reads, `the reopen sent more than main's: ${near.line}`);
+    assert.ok(!wide.settled.filling && wide.settled.n === TRADES_MAX && wide.settled.newest, `the wide reopen never settled whole: ${wide.line}`);
+    assert.ok(wide.posts[1] <= REOPEN_WIDE_MAIN[b.n]!.wide.posts && wide.reads[1] <= REOPEN_WIDE_MAIN[b.n]!.wide.reads, `the wide reopen sent more than main's: ${wide.line}`);
   }
 });
 

@@ -9,7 +9,9 @@
 // serves that code. It passes only when SIGN_HOST's served /app.js is the one its index.html pins (its sha384), and in
 // it, as minified:
 //   - seat (packages/wallet/src/pool/evm.ts walkSeat), exactly once: a seat's call whose fault "network" is thrown as
-//     the walk's answer at once (`e?.name===\`SolanaRpcTransportError\`&&e.fault===\`network\`?new X(String(e.message),e):e`);
+//     the walk's answer at once (`e?.name===\`SolanaRpcTransportError\`&&e.fault===\`network\`?new X(String(e.message),e):e`),
+//     the call's signal handed to its provider (card kit-rpc-client-takes-a-signal: the walk's cut ends the request
+//     at the provider too, so the seat takes three arguments and passes all three on);
 //   - used: that seat wraps both walk reads, the pool's size and the chain fee at the period's first block, exactly
 //     twice in all.
 // After: sign
@@ -31,9 +33,11 @@ const N = "[\\w$]+";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const esc = (s) => s.replace(/[$]/g, "\\$");
 
-/** walkSeat as minified: `var oO=e=>Object.assign(async(t,n)=>{try{return await e(t,n)}catch(e){throw
- *  e?.name===\`SolanaRpcTransportError\`&&e.fault===\`network\`?new xD(String(e.message),e):e}},{url:e.url})`. */
-const SEAT = new RegExp(`(${N})=(${N})=>Object\\.assign\\(async\\((${N}),(${N})\\)=>\\{try\\{return await \\2\\(\\3,\\4\\)\\}catch\\((${N})\\)\\{throw \\5\\?\\.name===\`SolanaRpcTransportError\`&&\\5\\.fault===\`network\`\\?new ${N}\\(String\\(\\5\\.message\\),\\5\\):\\5\\}\\},\\{url:\\2\\.url\\}\\)`, "g");
+/** walkSeat as minified (card kit-rpc-client-takes-a-signal: the call's method, params and signal, all three passed on):
+ *  `var Lk=e=>Object.assign(async(t,n,r)=>{try{return await e(t,n,r)}catch(e){throw
+ *  e?.name===\`SolanaRpcTransportError\`&&e.fault===\`network\`?new qO(String(e.message),e):e}},{url:e.url})`. A seat
+ *  that drops the signal (`e(t,n)`) is no seat here: the walk's cut would end the wait and leave the request open. */
+const SEAT = new RegExp(`(${N})=(${N})=>Object\\.assign\\(async\\((${N}),(${N}),(${N})\\)=>\\{try\\{return await \\2\\(\\3,\\4,\\5\\)\\}catch\\((${N})\\)\\{throw \\6\\?\\.name===\`SolanaRpcTransportError\`&&\\6\\.fault===\`network\`\\?new ${N}\\(String\\(\\6\\.message\\),\\6\\):\\6\\}\\},\\{url:\\2\\.url\\}\\)`, "g");
 
 /** What the check keeps of SIGN_HOST's build: its pin and sha384, the seat found once, and its uses. */
 export function pageFacts(index, js) {

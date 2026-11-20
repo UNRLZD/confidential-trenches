@@ -34,6 +34,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { named } from "./record-names.mjs";
 
@@ -196,9 +197,9 @@ async function runOne(browser, w, shell, shots, route) {
 }
 
 /** Both widths and shells in Chromium. `routes` answers the hosts' names per shell (see routeFor). */
-export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), routes, source }) {
+export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), routes, source, harness = false }) {
   mkdirSync(shots, { recursive: true });
-  const browser = await launchBrowser("chromium");
+  const browser = await (harness ? launchHarnessBrowser : launchBrowser)("chromium");
   try {
     const runs = [];
     for (const w of WIDTHS) for (const s of SHELLS) runs.push(await runOne(browser, w, s, shots, routes[s]));
@@ -232,7 +233,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       source = `harness, terminal build ${named(build)}, the stand-in shell signed in`;
     }
     const routes = Object.fromEntries(await Promise.all(SHELLS.map(async (s) => [s, await routeFor(build, s)])));
-    const rec = await collect({ shots: opt("--shots", undefined), routes, source });
+    const rec = await collect({ shots: opt("--shots", undefined), routes, source, harness: build !== null });
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);

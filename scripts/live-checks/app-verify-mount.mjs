@@ -405,12 +405,14 @@ export async function collect({ shots, route = null, network, source, beforeReop
   }
 }
 
-/** The harness: app-in-shell's route (APP_HOST from `build`, the stand-in shell), with the release's RPCs passed to `rpc`. */
+/** The harness: app-in-shell's route (APP_HOST from `build`, the stand-in shell), with the release's RPCs passed to
+ *  `rpc(route, inner)`; `inner` is app-in-shell's own route, which answers the release's NEAR and pool reads from their
+ *  recordings (apps/terminal/test/verify-mount/answers-mainnet.json, test/verify/pool-reads.json) and refuses the rest. */
 export async function harnessRoute(build, rpcs, rpc = (route) => route.continue()) {
   const { harnessRoute: shell } = await import("./app-in-shell.mjs");
   const inner = await shell(build, "signed");
   // the footer's block read is the shell harness's to answer (app-in-shell.mjs, a local chain), never the recording's
-  return (route) => (rpcs.some((u) => sameHost(route.request().url(), u)) && !isFooterUrl(route.request().url()) ? rpc(route) : inner(route));
+  return (route) => (rpcs.some((u) => sameHost(route.request().url(), u)) && !isFooterUrl(route.request().url()) ? rpc(route, inner) : inner(route));
 }
 
 // ------------------------------------------------------------------------------------------------ main
@@ -430,8 +432,10 @@ async function main() {
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
   // the pool rows' RPCs (card verify-pools) are reached live too, so the panel's pool reads end as on the hosts
   const pools = Object.values(release.pools).flatMap((p) => p?.rpcs ?? []);
-  const route = harness ? await harnessRoute(build, [...release.rpcs, ...pools]) : null;
-  const source = harness ? `harness, terminal build ${named(build)}, the release's ${network} RPCs live` : `live ${APP_HOST}`;
+  // the harness reads no public host (card app-live-checks-run-on-the-build-before-merge: test:e2e runs it before the
+  // merge): every RPC read is answered from its recording; the live run after a deploy reads them live
+  const route = harness ? await harnessRoute(build, [...release.rpcs, ...pools], (r, inner) => inner(r)) : null;
+  const source = harness ? `harness, terminal build ${named(build)}, the release's ${network} RPC reads recorded` : `live ${APP_HOST}`;
   const rec = await collect({ shots, route, network, source });
   const record = opt("--record");
   if (record) writeFileSync(record, recorded(rec));

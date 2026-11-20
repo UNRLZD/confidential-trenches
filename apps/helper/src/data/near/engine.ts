@@ -34,6 +34,7 @@ import { NOT_FOUND, type DataAnswer, type Field, type Holder, type RISK_FIELDS }
 import { TF_SECONDS } from "../candles.ts";
 import { nearAccount, pacedFetch, type Fetch } from "./views.ts";
 import { routed, type Scan } from "./lists.ts";
+import { FRESH_MS as RHEA_FRESH_MS } from "./trades.ts";
 import type { NearMarket } from "./token.ts";
 
 export const ENGINE = "https://api.unrealized.trade/v1";
@@ -45,6 +46,13 @@ export const LISTS_MS = 10_000;
 export const STALE_MS = 60_000;
 /** A token's page, holders, tape and bars are served as held this long. */
 export const FRESH_MS = 5_000;
+/** How old the engine's trade rows may be and the tape still claim them complete (`whole_ms`): the read is renewed past
+ *  FRESH_MS, its held rows served while the renewal runs, and a renewal overdue by more than the chain tape's own bound
+ *  (./trades.ts FRESH_MS: Rhea's tape is read again past it; it claims no whole list, so NEAR has no tighter bound) ends
+ *  the claim. A normal renewal (0.6 to 1.0 s, header) lands well inside it; one that failed or timed out (TIMEOUT_MS)
+ *  does not (card vendor-tapes-name-their-reach-every-chain: held rows were served with their whole_ms at any age, as
+ *  card evm-vendor-tape-names-its-reach found on Base and Robinhood). */
+export const NEAR_VENDOR_REACH_MS = FRESH_MS + RHEA_FRESH_MS;
 /** Rows a list holds (lists.ts LIST_MAX). */
 export const LIST_MAX = 50;
 export const TOKENS_MAX = 500;
@@ -271,8 +279,10 @@ export function createEngineNear(deps: EngineDeps = {}) {
     return JSON.parse(body);
   }
 
-  /** A per-key cache of the last good answer, read again past FRESH_MS (the held one serves meanwhile), one at a time. */
-  function cached<T>(freshMs: number) {
+  /** A per-key cache of the last good answer, read again past FRESH_MS (the held one serves meanwhile, while it is at most
+   *  `staleMs` old; past that the caller waits for the new read, and is served the held one only when it fails), one at
+   *  a time. */
+  function cached<T>(freshMs: number, staleMs = Infinity) {
     const held = new Map<string, { at: number; v: T | undefined }>();
     const reading = new Map<string, Promise<{ at: number; v: T | undefined } | null>>();
     return async (key: string, read: () => Promise<T | undefined>): Promise<{ at: number; v: T | undefined } | null> => {
@@ -291,14 +301,20 @@ export function createEngineNear(deps: EngineDeps = {}) {
           .finally(() => reading.delete(key));
         reading.set(key, p);
       }
-      if (had !== undefined) return had; // the held answer serves while the new read runs
-      return p;
+      if (had !== undefined && now() - had.at <= staleMs) return had; // the held answer serves while the new read runs
+      return p.then((got) => got ?? had ?? null);
     };
   }
 
   const tokens = cached<{ raw: unknown; row: Row }>(FRESH_MS);
   const holderReads = cached<unknown>(FRESH_MS);
-  const tradeReads = cached<unknown>(FRESH_MS);
+  // card near-tape-reach-on-trending: held trade rows serve behind their renewal only while they still claim their reach.
+  // At any age they were the answer to the first ask after a quiet minute, so a tape read once (a page opened, the live
+  // check) claimed none: the deployed helper served prl.omft.near's, zec.omft.near's and qtc.omft.near's 50 rows read
+  // 57, 47 and 37 s before with no whole_ms (18 Nov 15:28:58Z), each fresh read of theirs claiming one (15:27Z, 0.6 s).
+  // Past the bound the ask waits for the renewal, as a cold one does (0.6 to 1.0 s); a failed renewal serves the held rows,
+  // their age named and no reach claimed (trades below).
+  const tradeReads = cached<unknown>(FRESH_MS, NEAR_VENDOR_REACH_MS);
   const barReads = cached<unknown>(FRESH_MS);
 
   let last: { body: string; gzip: Buffer; asOfMs: number } | null = null;
@@ -383,12 +399,15 @@ export function createEngineNear(deps: EngineDeps = {}) {
       if (h === null || rows === null) return null;
       // the engine indexes every NEAR block: its newest trades hold every one after their oldest (card
       // token-stats-count-every-trade), when each row of its answer was read (a row dropped as malformed is a trade the
-      // tape lacks, so no reach is claimed)
+      // tape lacks, so no reach is claimed), up to their read: claimed only while that read is within NEAR_VENDOR_REACH_MS,
+      // its age always named (card vendor-tapes-name-their-reach-every-chain)
       const listed = obj(h.v).trades;
       const all = engineTape(h.v, d, Number.MAX_SAFE_INTEGER);
-      const oldest = Array.isArray(listed) && all !== null && all.length === listed.length ? all.at(-1)?.t_ms : undefined;
+      const age = Math.max(0, now() - h.at);
+      const oldest = Array.isArray(listed) && all !== null && all.length === listed.length && age <= NEAR_VENDOR_REACH_MS ? all.at(-1)?.t_ms : undefined;
       const whole = oldest === undefined ? {} : { whole_ms: oldest + 1_000 };
-      return { status: 200, body: JSON.stringify({ trades: rows, ...whole, src: SRC, as_of_ms: h.at }), src: SRC, asOfMs: h.at };
+      const timing = `near-vendor-read;desc="rows read ${age} ms ago"`;
+      return { status: 200, body: JSON.stringify({ trades: rows, ...whole, src: SRC, as_of_ms: h.at }), src: SRC, asOfMs: h.at, timing };
     },
     async candles(id: string, tf: string, to: number | null, limit: number): Promise<DataAnswer | null> {
       if (!Object.hasOwn(TF_SECONDS, tf)) return NOT_FOUND;

@@ -305,3 +305,17 @@ test("card buy-quote-before-any-note: a plan over no Cash note is made at fee 0,
   // over no note with no price read: with_cash is tap_max alone, "0" for a pool with no note
   assert.equal(withCash("0", 0n, [], cashPlanFee([], refused), null), "0");
 });
+
+// Card evm-buy-end-carries-its-tx (review of 167d9deea, P2): cashFirst wraps the pool buy's context to trace its stages
+// and must hand the api each stage with its transactions, on every chain: the stage alone left a Base or Robinhood
+// buy's late filled or owed_back with no tx, so the fill showed no link.
+test("evm-buy-end-carries-its-tx: cashFirst passes the pool buy's stages to the api with their transactions", async () => {
+  const TX = [{ chain: "base" as const, hash: `0x${"ab".repeat(32)}` }];
+  for (const chain of ["solana", "base", "robinhood"] as const) {
+    const posted: unknown[] = [];
+    const c: KindContext = { id: `r-${chain}`, sha: "00", progress: (stage, txs) => void posted.push([stage, txs]), route: () => {} };
+    const inner = (_a: PoolAsk, k: KindContext | null): Running<"pool.buy"> => (k?.progress("sent"), k?.progress("filled", TX), { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) });
+    await run(cashFirst(inner, () => tap({ taps: [10n ** 18n], moving: false }, { inner: [] }))({ ...ask(400_000_000n), chain }, c));
+    assert.deepEqual(posted, [["sent", undefined], ["filled", TX]], chain);
+  }
+});

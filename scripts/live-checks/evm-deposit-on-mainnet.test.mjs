@@ -107,7 +107,7 @@ test("the page markers on planted bundles: a table that leaves a chain out, or a
   const index = '<script type="module" src="/app.js" integrity="sha384-x"></script>';
   const js =
     "var X=Object.freeze({solana:!0,base:!0,robinhood:!0}),F=(e,t=X)=>t[e]===!0;var H=`https://ct-api.unrealized.trade`;" +
-    "var Z=(e,t=!1)=>{if(t)return;let n=M.get(e);if(n===void 0){let t=C(H,e);M.set(e,n=Object.assign((e,n)=>t(e,n),{url:`${H}/v1/rpc/${e}`}))}return n};" +
+    "var Z=(e,t=!1)=>{if(t)return;let n=M.get(e);if(n===void 0){let t=C(H,e);M.set(e,n=Object.assign((e,n,r)=>t(e,n,r),{url:`${H}/v1/rpc/${e}`}))}return n};" +
     "function A(){return S().filter(e=>F(e.chain))}var K={\"pool.address\":P({pools:A,network:R}),q:1};" +
     "v=Q({network:R,pool:e=>T?.evmPoolOf(e)??null,wallet:e=>Z(e),notes:()=>a()});";
   const f = pageFacts(index, js);
@@ -117,6 +117,9 @@ test("the page markers on planted bundles: a table that leaves a chain out, or a
   assert.equal(pageFacts(index, js.replace("wallet:e=>Z(e)", "wallet:e=>void 0")).reader, false, "no wallet reader");
   assert.equal(pageFacts(index, js.replace("`https://ct-api.unrealized.trade`", "`https://rpc.example`")).reader, false, "a reader that is not our helper");
   assert.equal(pageFacts(index, js + "var X2=Object.freeze({solana:!0,base:!0,robinhood:!0}),F2=(e,t=X2)=>t[e]===!0;").rule, false, "a second copy beside it");
+  // card signpage-reads-take-the-call-signal: the route's wrapper hands each call's signal on
+  assert.equal(pageFacts(index, js.replace("(e,n,r)=>t(e,n,r)", "(e,n,r)=>t(e,n)")).reader, false, "the call's signal dropped");
+  assert.equal(pageFacts(index, js.replace("(e,n,r)=>t(e,n,r)", "(e,n)=>t(e,n)")).reader, false, "the old shape, no signal");
 });
 
 test("planted: each EVM withdraw site off the rule, or not read, is a FAIL on the page alone", () => {

@@ -1593,6 +1593,26 @@ test("evm-deposit-route-mainnet: a fixed U_X of another scope, an address that i
   assert.equal(ch.c.sent.length, sent, "nothing sent");
 });
 
+test("notes-plan-at-restored-index: a fixed U^evm_{s,i} whose deposit note a restore wrote (planFound, money both providers read alike) pays the ask from U_X alone; before it is written it signs nothing", async () => {
+  const { ch, ns, next, i1 } = await twoUs();
+  // a lost store's quote in another lane than this store's, far past its counter
+  const i = (((i1 % 8) + 3) % 8) + 8 * 30;
+  const ux = depositIdEvm(SEED, SCOPE, i).address;
+  ch.c.at.set(ux.toLowerCase(), [RUNG + FEE, RUNG + FEE]);
+  const sent = ch.c.sent.length;
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns), ASK, undefined, { s: SCOPE, i, u: ux }), { error: "not_allowed" }, "no note at i yet");
+  assert.equal(ch.c.sent.length, sent, "nothing sent");
+  const found = await ns.planFound(SCOPE, i, (ref) => noteSecrets(SEED, ref).precommitment, { s: SCOPE, i, amounts: [RUNG + FEE, RUNG + FEE] });
+  const f = fromsOf(ch);
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs: f.rpcs }), ASK, undefined, { s: SCOPE, i, u: ux });
+  assert.ok("stage" in a && a.stage === "filled", JSON.stringify(a));
+  assert.deepEqual([...new Set(f.froms)], [ux], "the fixed U_X alone");
+  assert.equal(sentOf(ch.c.sent.at(-1)!).pre, found.precommitment, "its found deposit note");
+  assert.equal((await ns.get(found.id))!.state, "UNSPENT");
+  // the scope's unfunded index is still the one this store planned
+  assert.equal((await ns.planDeposit(SCOPE, (ref) => noteSecrets(SEED, ref).precommitment)).id, next.id);
+});
+
 test("evm-deposit-route-mainnet: a fixed U_X that cannot pay the rung and its fee is not_funded with its own top-up named, never paid from the newest landed U", async () => {
   const { ch, ns, i1, u0, u1 } = await twoUs();
   ch.c.at.set(u1.toLowerCase(), [RUNG / 2n, RUNG / 2n]);
@@ -1747,4 +1767,111 @@ test("evm-money-shows-and-spends-at-once: a round that fails right after the sen
     assert.equal((b as { stage?: string }).stage, "sent", k);
     assert.equal(waits, 0, `${k}: no wait for a read again`);
   }
+});
+
+// card evm-deposit-pruned-sim-says-why ----
+// The words a node answers for a block or state it does not hold, each read on a public mainnet RPC (2026-11-18
+// 11:27-11:28Z) or kept by the wallet's own lag rule (wallet src/pool/evm.ts UNKNOWN_BLOCK, PRUNED): the kit client's
+// "RPC error <code>: <message>" (kit src/trade/solana/send.ts).
+const STATE_MISSES = [
+  "RPC error -32000: historical state 77ea78f05b472b9ac7d705313266c15f0b70b17e0a43888c3717df57a546c8d9 is not available", // robinhood.rpc.blxrbdn.com, rpc-robinhood.globalstake.io, 300 blocks back
+  "RPC error -32000: header not found", // robinhood-rpc.publicnode.com, a block past its head
+  "RPC error -32001: block not found: 0x3869ff9", // base-rpc.publicnode.com, mainnet.base.org, a block past their head
+  "RPC error -32000: unsupported block number 117462274", // rpc.mainnet.chain.robinhood.com, a block past its head
+  "RPC error -32602: Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode", // robinhood-rpc.publicnode.com, 5,000 blocks back
+  "RPC error -32000: missing trie node 0b1e (path )", // geth's pruned state (wallet PRUNED)
+  "RPC error 27: Unknown state. First available state is 1", // dRPC (wallet PRUNED)
+];
+
+test("evm-deposit-pruned-sim-says-why: a simulation refused because a node holds no state at the agreed block is a lag, read again from fresh reads: the deposit lands, never not_funded", async () => {
+  for (const words of STATE_MISSES) {
+    const { ch, ns, planned } = await funded(RUNG + FEE);
+    ch.c.onSend = (raw) => ch.land(raw);
+    // RPC 1 holds no state for the simulation's block on its first two simulations (the run's try and its try again)
+    let refused = 0;
+    const one = ch.rpcs[1];
+    const rpcs = [ch.rpcs[0], async (m: string, p: readonly unknown[]) => {
+      if (m === "eth_call" && (p[0] as { from?: string }).from !== undefined && refused < 2) (refused++, (() => { throw new Error(words); })());
+      return one(m, p);
+    }] as const;
+    const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs }), ASK);
+    assert.deepEqual(a, { stage: "filled", txs: [{ chain: CHAIN, hash: sentOf(ch.c.sent[0]!).hash }] }, words);
+    assert.equal((await ns.get(planned.id))!.state, "UNSPENT", words);
+  }
+});
+
+test("evm-deposit-pruned-sim-says-why: a node that never holds the simulation's state ends the ask down (not now), never not_funded, nothing signed or written; a revert on either RPC is still the chain's word", async () => {
+  for (const words of STATE_MISSES) {
+    const { ch, ns, planned } = await funded(RUNG + FEE);
+    const one = ch.rpcs[1];
+    const rpcs = [ch.rpcs[0], async (m: string, p: readonly unknown[]) => {
+      if (m === "eth_call" && (p[0] as { from?: string }).from !== undefined) throw new Error(words);
+      return one(m, p);
+    }] as const;
+    const shorts: bigint[] = [];
+    const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs, short: (_u, w) => void shorts.push(w) }), ASK);
+    assert.deepEqual(a, { error: "down" }, words);
+    assert.deepEqual(shorts, [], `${words}: no top-up named`);
+    assert.equal(ch.c.sent.length, 0, `${words}: nothing sent`);
+    assert.equal((await ns.get(planned.id))!.state, "PLANNED", `${words}: nothing written`);
+  }
+  // a revert on one RPC and a state miss on the other: the revert is the chain's answer (read and simulated once more,
+  // then not_funded, as a revert alone); a revert's words are the contract's, so "execution reverted: header not found"
+  // is a revert
+  for (const [w0, w1] of [["RPC error 3: execution reverted", STATE_MISSES[0]!], ["RPC error -32000: execution reverted: header not found", "RPC error -32000: execution reverted: header not found"]] as const) {
+    const { ch, ns } = await funded(RUNG + FEE);
+    const [zero, one] = ch.rpcs;
+    const sim = (rpc: typeof zero, words: string) => async (m: string, p: readonly unknown[]) => {
+      if (m === "eth_call" && (p[0] as { from?: string }).from !== undefined) throw new Error(words);
+      return rpc(m, p);
+    };
+    assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { rpcs: [sim(zero, w0), sim(one, w1)] }), ASK), { error: "not_funded" }, `${w0} / ${w1}`);
+    assert.equal(ch.c.sent.length, 0);
+  }
+});
+
+test("evm-deposit-pruned-sim-says-why: a note's verdict reads its Deposited by its own precommitment, never through the chain walk: a note signed past a take a reorg dropped (an empty note before it) lands, never read dead and built again on another note", async () => {
+  // U's chain: its deposit note landed; second arrival 0 taken by a front-runner in a block not final, so U signed second
+  // arrival 1 next (evmNextNote names a note past a pending take); a reorg dropped the take and kept U's send, so 0 is
+  // empty and 1's Deposited is in the pool. The chain walk stops at 0 and never reaches 1 (wallet src/pool/evm-restore.ts
+  // SECOND_GAP's note); 1's own precommitment finds it.
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  const i = (planned.ref as { i: number }).i;
+  ch.deposit(planned.precommitment, RUNG);
+  const e0 = ch.c.events[0]!;
+  await ns.move((await ns.move(planned.id, "PLANNED", "INCOMING")).id, "INCOMING", "UNSPENT", { leaf: { value: RUNG, label: e0.label!, commitment: e0.state, leafIndex: 0n } });
+  // second arrival 0 as the store holds it once the take was claimed, before the settle backs it out: the dropped take's leaf
+  const ref0: NoteRef = { kind: "second", id: { id: "U", s: SCOPE, i }, n: 0 };
+  const pre0 = noteSecrets(SEED, ref0).precommitment;
+  await ns.add({ ref: ref0, scope: SCOPE, precommitment: pre0, state: "UNSPENT", leaf: { value: EVM_POOL_MIN_DEPOSIT, label: 77n, commitment: noteCommitment(EVM_POOL_MIN_DEPOSIT, 77n, pre0), leafIndex: 1n } });
+  const ref1: NoteRef = { kind: "second", id: { id: "U", s: SCOPE, i }, n: 1 };
+  const pre1 = noteSecrets(SEED, ref1).precommitment;
+  ch.deposit(pre1, RUNG);
+  const send = { hash: `0x${"5e".repeat(32)}`, nonce: 1n, value: RUNG, sentMs: 1_000n };
+  const n1 = await ns.move((await ns.add({ ref: ref1, scope: SCOPE, precommitment: pre1, state: "PLANNED" })).id, "PLANNED", "INCOMING", { evmSend: send });
+  // U's nonce past the send at the final block on both RPCs: with no Deposited read, the send would be dead
+  ch.c.nonce = 2n;
+  const shorts: bigint[] = [];
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { short: (_u, w) => void shorts.push(w), now: () => 1_000_000 }), null);
+  assert.deepEqual(a, { stage: "filled", txs: [] });
+  const now = (await ns.get(n1.id))!;
+  assert.deepEqual([now.state, now.leaf?.value, now.leaf?.commitment, now.leaf?.leafIndex], ["UNSPENT", RUNG, ch.c.events[1]!.state, 1n], "landed at its own Deposited's leaf");
+  assert.deepEqual(shorts, [], "no top-up named for a funded U");
+  assert.equal(ch.c.sent.length, 0, "never built again");
+});
+
+test("evm-deposit-pruned-sim-says-why: a note its Deposited lands is claimed in its chain's order: a take past it (U's next note, not yet in the store) is written after it, never refused", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  const i = (planned.ref as { i: number }).i;
+  // U's deposit note sent and in the pool; a front-runner's MIN_DEPOSIT on U's second arrival 0 after it
+  const send = { hash: `0x${"5f".repeat(32)}`, nonce: 0n, value: RUNG, sentMs: 1_000n };
+  await ns.move(planned.id, "PLANNED", "INCOMING", { evmSend: send });
+  ch.deposit(planned.precommitment, RUNG);
+  const ref0: NoteRef = { kind: "second", id: { id: "U", s: SCOPE, i }, n: 0 };
+  ch.deposit(noteSecrets(SEED, ref0).precommitment, EVM_POOL_MIN_DEPOSIT);
+  ch.c.nonce = 1n;
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { now: () => 1_000_000 }), null);
+  assert.deepEqual(a, { stage: "filled", txs: [] });
+  const mine = await ours(ns);
+  assert.deepEqual(mine.map((n) => [n.ref.kind, n.state, n.leaf?.value]).sort(), [["deposit", "UNSPENT", RUNG], ["second", "UNSPENT", EVM_POOL_MIN_DEPOSIT]].sort());
 });

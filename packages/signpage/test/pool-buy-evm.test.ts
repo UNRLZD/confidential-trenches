@@ -208,6 +208,10 @@ const lateOf = async (seen: Seen): Promise<EvmPoolBuyAnswer> => {
 };
 const zero = (b: Uint8Array) => b.every((x) => x === 0);
 
+// the new names read through the module, so this file loads at 39c2ab9c too and each test below fails there on its own
+const M = (await import("../src/pool-buy-evm.ts")) as Record<string, unknown>;
+const L2 = (await import("../src/pool-buy-evm.ts")) as Record<string, unknown>;
+
 test("the buy's calldata is the pool's canonical encoding: byte for byte the testnet run's buyData", async () => {
   const r = readyOf();
   const q = await fixtureQuote();
@@ -348,8 +352,8 @@ test("the fee is the sender's pick up to the proof's cap (PrivacyPool.sol _relea
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
   assert.equal(seen.records.at(-1)![1].received, "41");
   const free = host(both([release({ kind: "withdrawn", fee: 0n })]));
-  assert.deepEqual(await runEvmPoolBuy(free.h, ASK), { stage: "refused", txs: [{ chain: "base", hash: TX }] });
-  assert.equal(free.seen.carries, 1, "the carry pass started at the refusal");
+  assert.deepEqual(await runEvmPoolBuy(free.h, ASK), { stage: "owed_back", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(free.seen.carries, 1, "the carry pass started at the failed swap");
 });
 
 test("a sign out ends the reads past the tap: no late end, no more reads", async () => {
@@ -365,9 +369,9 @@ test("a sign out ends the reads past the tap: no late end, no more reads", async
   assert.deepEqual(seen.late, []);
 });
 
-test("(ruling 4) a Withdrawn for the nullifier: the buy did not fill, the carry pass starts (W's ETH back into the pool, read from the chain), and the answer names the release", async () => {
+test("(ruling 4, card evm-buy-end-carries-its-tx) a Withdrawn for the nullifier: the buy did not fill, the carry pass starts (W's ETH back into the pool, read from the chain), and the answer is owed_back naming the release, never refused", async () => {
   const { h, seen } = host(both([release({ kind: "withdrawn" })]));
-  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "refused", txs: [{ chain: "base", hash: TX }] });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "owed_back", txs: [{ chain: "base", hash: TX }] });
   assert.equal(seen.carries, 1);
   assert.equal(seen.records.at(-1)![1].state, "withdrawn");
 });
@@ -599,8 +603,6 @@ test("an amount over what the ready proofs spend (card buy-any-amount-on-every-c
 });
 
 // ---- the second review's fixes (FIX of 39c2ab9c): each fails at 39c2ab9c ----
-// the new names read through the module, so this file loads at 39c2ab9c too and each test below fails there on its own
-const M = (await import("../src/pool-buy-evm.ts")) as Record<string, unknown>;
 const LAG_MS = M.EVM_BUY_LAG_MS as number;
 const turns = async (n: number) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
@@ -1187,7 +1189,6 @@ test("card buy-any-amount-on-every-chain: a buy asks the ETH that goes into swap
 });
 
 // ---- card buy-any-amount-on-every-chain: the plan's legs ----
-const L2 = (await import("../src/pool-buy-evm.ts")) as Record<string, unknown>;
 const W2 = freshWallet(SEED, "evm", L, 1).address;
 const N2 = 0x777n;
 const TX2 = "0x" + "ce".repeat(32);
@@ -1249,6 +1250,12 @@ test("card buy-any-amount-on-every-chain: the legs' ends as one (legsEnd)", () =
   assert.equal(legsEnd([e("filled"), null]).stage, "sent", "a leg still on its way: sent");
   assert.equal(legsEnd([e("refused"), e("not_landed")]).stage, "refused");
   assert.equal(legsEnd([e("not_landed"), e("not_landed")]).stage, "not_landed");
+  // card evm-buy-end-carries-its-tx: a leg whose ETH sits on its W is owed back, over a refusal or a leg that never landed
+  assert.equal(legsEnd([e("owed_back"), e("owed_back")]).stage, "owed_back");
+  assert.equal(legsEnd([e("owed_back"), e("refused")]).stage, "owed_back");
+  assert.equal(legsEnd([e("not_landed"), e("owed_back")]).stage, "owed_back");
+  assert.equal(legsEnd([e("filled"), e("owed_back")]).stage, "part_filled");
+  assert.equal(legsEnd([e("owed_back"), null]).stage, "sent");
   assert.equal(legsEnd([e("filled", "0xa"), e("filled", "0xb")]).txs.length, 2);
 });
 
@@ -1333,10 +1340,10 @@ test("card buy-any-amount-on-every-chain: an amount under a note's spend: the no
   assert.equal(seen.carries, 1, "W's change: the carry pass");
 });
 
-test("card buy-any-amount-on-every-chain: W's own buy reverting is refused (the release's and W's transactions), W's holding withdrawn and its ETH the carry's", async () => {
+test("card buy-any-amount-on-every-chain: W's own buy reverting is owed_back (card evm-buy-end-carries-its-tx; the release's and W's transactions), W's holding withdrawn and its ETH the carry's", async () => {
   const { h, seen, rests } = restHost({ receipt: "0x0" });
   const got = await runEvmPoolBuy(h, { ...ASK, amount: AMOUNT_IN });
-  assert.ok("stage" in got && got.stage === "refused" && got.txs.length === 2, JSON.stringify(got));
+  assert.ok("stage" in got && got.stage === "owed_back" && got.txs.length === 2, JSON.stringify(got));
   assert.equal(rests.at(-1)!.end, "reverted");
   assert.equal(seen.records.at(-1)![1].state, "withdrawn");
   assert.equal(seen.carries, 1);

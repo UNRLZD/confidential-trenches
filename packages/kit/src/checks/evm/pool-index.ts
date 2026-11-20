@@ -14,15 +14,20 @@
 //   equal (the pin), in the first read round, or the sync refuses rpc_disagree and nothing it read is kept;
 // - F4a: every span is asked of both readers, each batch holding the span's logs and its last block; a span counts only
 //   when both readers answered it, each with that block (the same hash on both) in the same batch as its logs; a span
-//   either failed is asked again of that reader, at most INDEX_TRIES times, and a span with INDEX_SPAN_LOGS logs or more
-//   on either is asked again as its two halves on both; a batch whose tries are spent on throws (a body past its
+//   either failed is asked again of that reader, at most INDEX_TRIES times; a span a reader answered with an error is
+//   asked again of that reader at once, the same span, and only once its INDEX_TRIES answers are all errors as its two
+//   halves on both (card evm-first-quote-inside-the-kpi: base.api.pocket.network answers about one 10,000-block span in
+//   ten with -32602 "block range exceeds maximum 500" from some of its backends, and the same span asked again answers,
+//   read 2026-11-18 02:4xZ; halving both readers for it took a fresh account's Base sync past 52 s); a span with
+//   INDEX_SPAN_LOGS logs or more on either is asked again as its two halves on both; a batch whose tries are spent on throws (a body past its
 //   size, a 4xx, a timeout) is asked one span a request, then as halves, under one budget of halves;
 // - F2: a pool both readers report is at the same block on both (else the span is asked again, then refused), and one
 //   pool id at two blocks, in two spans or in a span and the stored index is refused rpc_disagree: a pool initializes
 //   once;
-// - F5: a pool that only one reader reported counts only where the PoolManager's state of it at N (extsload of its
-//   state slot, by N's hash) is the same non-zero word on both readers: 0 on both is no pool, any other pair refuses
-//   rpc_disagree; its id is recomputed from its key, and any log whose pool id is not the key's is no log;
+// - F5: a pool that only one reader reported counts only where the PoolManager's state of it (extsload of its state
+//   slot, by the hash of the newest block both readers agree on, at or past N) is the same non-zero word on both
+//   readers: 0 on both is no pool, any other pair refuses rpc_disagree; its id is recomputed from its key, and any log
+//   whose pool id is not the key's is no log;
 // - F6: past the venue's `index.cap` pools both readers report, the sync refuses too_many_pools by name and serves
 //   nothing; one reader's pools that take it past (held or not) refuse rpc_disagree;
 // - F4d: what it stores ends `index.margin` blocks below N (a reorg's reach), so the next sync's gap starts there and
@@ -174,9 +179,10 @@ function poolOfLog(l: unknown, pm: string, a: number, b: number): Found | null {
 /** A reader's answer to a span: its last block's hash and its pools; `cut` where its logs were an error or no answer
  *  ("error") or at the cap ("full"), which is asked again as halves. */
 type Answer = { hash: string; pools: Map<string, EvmIndexedPool>; logs: Map<string, Found>; cut: "error" | "full" | null };
-/** `alone`: the reader's batches holding the span spent their tries on throws, so it is asked one span a request. */
-type Job = { a: number; b: number; ans: [Answer | null, Answer | null]; tries: [number, number]; alone: [boolean, boolean]; disagree: number };
-const jobOf = (a: number, b: number): Job => ({ a, b, ans: [null, null], tries: [0, 0], alone: [false, false], disagree: 0 });
+/** `alone`: the reader's batches holding the span spent their tries on throws, so it is asked one span a request.
+ *  `errs`: the reader's answers to the span that were errors, asked again at once until INDEX_TRIES of them. */
+type Job = { a: number; b: number; ans: [Answer | null, Answer | null]; tries: [number, number]; errs: [number, number]; alone: [boolean, boolean]; disagree: number };
+const jobOf = (a: number, b: number): Job => ({ a, b, ans: [null, null], tries: [0, 0], errs: [0, 0], alone: [false, false], disagree: 0 });
 const NO_ANSWER: Answer = Object.freeze({ hash: "", pools: new Map(), logs: new Map(), cut: "error" as const });
 
 /** One sync of `prev` (or a new index) to the readers' agreed head; see the file's head. Refuses (throws) where nothing
@@ -230,6 +236,21 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
       }
     }
     return null;
+  }
+
+  // the newest block both readers agree on, at or past N (F5's state reads): the lower of their heads now, read by number
+  // on both with the same hash; null where either answers none, it is below N, or the two hashes differ
+  async function agreedNow(): Promise<string | null> {
+    const blockOf = async (r: 0 | 1, at: string) => {
+      const h = ((await ask(r, [{ method: "eth_getBlockByNumber", params: [at, false] }]))?.[0] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
+      return h && isQty(h.number) && isHash(h.hash) && (at === "latest" || Number(h.number) === Number(at)) ? { number: Number(h.number), hash: h.hash.toLowerCase() } : null;
+    };
+    const [x, y] = await Promise.all([blockOf(0, "latest"), blockOf(1, "latest")]);
+    if (x === null || y === null) return null;
+    const m = Math.min(x.number, y.number);
+    if (m < n) return null;
+    const [u, v] = await Promise.all([x.number === m ? x : blockOf(0, hx(m)), y.number === m ? y : blockOf(1, hx(m))]);
+    return u !== null && v !== null && u.hash === v.hash ? u.hash : null;
   }
 
   // F4b: the lower of the two proven heads, never more than the margin apart (a reader far behind would set `from`
@@ -337,6 +358,9 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
         }
         g.forEach((j, i) => {
           const a = answerOf(out, i, j);
+          // an error from one of the reader's backends: the same span asked of it again at once, as halves only once
+          // INDEX_TRIES answers to it were errors
+          if (a === NO_ANSWER && ++j.errs[r] < INDEX_TRIES) return;
           if (a !== null) j.ans[r] = a;
           else if (++j.tries[r] >= INDEX_TRIES) throw new EvmQuoteError("rpc_error", `index reader ${r + 1} did not answer blocks ${j.a}-${j.b}`);
           else missed = Math.max(missed, j.tries[r]);
@@ -380,19 +404,28 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     where.set(p.id, p.block);
   }
 
-  // F5: a pool one reader reported counts only where the PoolManager's state of it at N is the same non-zero word on
-  // both readers; 0 on both is no pool; any other pair is a lie at one pinned hash. Where that is not answered, the
+  // F5: a pool one reader reported counts only where the PoolManager's state of it (at or past N) is the same non-zero
+  // word on both readers; 0 on both is no pool; any other pair is a lie at one pinned hash. Where that is not answered, the
   // spans that hold such a pool are not proven
   const ones = proved.flatMap((p) => p.one);
   // more pools one reader alone reported than the cap: the readers disagree past any honest lag, and none is read
   if (ones.length > c.cap) return refuse("rpc_disagree", `the index readers disagree on ${ones.length} pools, more than the cap ${c.cap}`);
   const held = new Set<string>();
   if (ones.length > 0) {
-    const calls = ones.map((p) => ({ method: "eth_call", params: [{ to: pm, data: "0x" + SEL_EXTSLOAD + stateSlot(p.id).slice(2) }, { blockHash: pin }] }));
+    // the state is read at the newest block both readers agree on (`now`, at or past N), never at N itself: the spans
+    // take seconds to minutes, and a reader that keeps only the newest blocks' state answers N's by then with -32000
+    // "historical state ... is not available" (Pocket and publicnode on Robinhood refused state 15 to 242 s back,
+    // 2026-11-10; card evm-quote-reads-need-no-old-state). A pool initializes once and its price is never 0 again, so its
+    // state is a non-zero word from its Initialize on at every later block; the receipt below proves its block. No block
+    // both agree on: every such pool is unread, as an unanswered state read is
+    const now = await agreedNow();
+    if (now === null) error ??= new EvmQuoteError("rpc_error", "the index readers agree on no block at or past N to read the PoolManager's state at");
+    const calls = ones.map((p) => ({ method: "eth_call", params: [{ to: pm, data: "0x" + SEL_EXTSLOAD + stateSlot(p.id).slice(2) }, { blockHash: now }] }));
     // INDEX_STATE_BATCH reads a batch (fewer where a reader takes fewer, c.batchMax), one batch at a time on each reader
     const per = Math.max(1, Math.min(INDEX_STATE_BATCH, c.batchMax ?? INDEX_STATE_BATCH));
     const outs = await Promise.all(([0, 1] as const).map(async (r) => {
       const all: unknown[] = [];
+      if (now === null) return calls.map(() => null);
       for (let i = 0; i < calls.length; i += per) {
         const part = calls.slice(i, i + per);
         all.push(...((await ask(r, part)) ?? part.map(() => null)));
@@ -405,7 +438,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     ones.forEach((p, i) => {
       const [u, v] = [res(outs[0]!, i), res(outs[1]!, i)];
       if (!ok(u) || !ok(v)) unread.add(p.id);
-      else if (BigInt(u) !== BigInt(v)) refuse("rpc_disagree", `the index readers answer the PoolManager's state of pool ${p.id} at block ${n} apart`);
+      else if (BigInt(u) !== BigInt(v)) refuse("rpc_disagree", `the index readers answer the PoolManager's state of pool ${p.id} at block ${now} apart`);
       // slot0's low 160 bits are the price, never 0 once the pool is initialized
       else if (BigInt.asUintN(160, BigInt(u)) !== 0n) held.add(p.id);
     });

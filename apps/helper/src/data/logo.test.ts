@@ -1,8 +1,8 @@
 // GET /v1/logo/{chain}/{token} (logo.ts): each rule of the fetch is a refusal tested here, then the route as served.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createServer, request } from "node:http";
-import { HELPER_LOGO_MAX_BYTES } from "@blindfill/kit";
+import { createServer } from "node:http";
+import { HELPER_LOGO_MAX_BYTES, untilAborted } from "@blindfill/kit";
 import { blockedAddress, createLogos, fetchLogo, fetchMetaImage, LOGO_NONE_MS, logoUrl, META_MAX_BYTES, Refused, REDIRECTS_MAX, sniff, type Get, type Got, type Resolve } from "./logo.ts";
 import { handler } from "../server.ts";
 import { toRow } from "./solana/lists.ts";
@@ -106,7 +106,9 @@ test("fetchLogo gives up after its time, a body that never ends included", { tim
   const u = new URL("https://slow.example/l");
   const get: Get = async (_u, _a, signal) => got(200, { "content-type": "image/png" }, (async function* () {
     yield PNG;
-    await new Promise((_, no) => signal.addEventListener("abort", () => no(new Error("aborted"))));
+    await untilAborted(signal).catch(() => {
+      throw new Error("aborted");
+    });
   })());
   // the bound is the test's own timeout (scripts/ci/no-wall-clock-asserts.mjs): a fetch that never gave up hangs it
   await assert.rejects(fetchLogo(u, { resolve: PUBLIC, get, timeoutMs: 100 }), refusedAs("timeout"));
@@ -143,16 +145,9 @@ test("a Solana list row has icon true exactly when Jupiter gave it an icon URL t
 });
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
-function call(port: number, path: string, method = "GET"): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }> {
-  return new Promise((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port, path, method }, (res) => {
-      const c: Buffer[] = [];
-      res.on("data", (d: Buffer) => c.push(d));
-      res.on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(c) }));
-    });
-    r.on("error", fail);
-    r.end();
-  });
+async function call(port: number, path: string, method = "GET") {
+  const r = await bounded(port, { method, path }, "the helper");
+  return { status: r.status, headers: r.headers, body: r.raw };
 }
 
 test("GET /v1/logo/{chain}/{token} serves a listed token's logo with the kit's headers, 204 with no body for a token with none (no failed load in the browser), and 404 for a path that names no token", async () => {
@@ -164,7 +159,7 @@ test("GET /v1/logo/{chain}/{token} serves a listed token's logo with the kit's h
   logos.remember("base", EVM, "https://assets.example/e.png");
   const h = handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, logos);
   const s = createServer(h);
-  await new Promise<void>((ok) => s.listen(0, "127.0.0.1", ok));
+  await listening(s.listen(0, "127.0.0.1"), "the helper");
   const port = (s.address() as { port: number }).port;
   try {
     const r = await call(port, `/v1/logo/solana/${MINT}`);
@@ -202,6 +197,7 @@ import { createServer as tcpServer, type Server as TcpServer, type Socket } from
 import { createSocket } from "node:dgram";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { call as bounded, listening } from "../../test/servers.ts";
 
 const within = <T>(p: Promise<T>, ms: number, what: string) =>
   Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error(`${what}: still running after ${ms} ms`)), ms).unref())]);
@@ -212,7 +208,8 @@ test("a lookup that never answers ends at the fetch's deadline, and logo lookups
   const hang: Resolve = (_h, signal) => {
     open++;
     most = Math.max(most, open);
-    signal?.addEventListener("abort", () => open--, { once: true });
+    if (signal?.aborted) open--;
+    else signal?.addEventListener("abort", () => open--, { once: true });
     return new Promise(() => {});
   };
   const runs = Array.from({ length: 6 }, () => fetchLogo(new URL("https://never.example/x.png"), { resolve: hang, timeoutMs: 300 }).then(() => "ok", (e: unknown) => (e as Error).message));
@@ -250,7 +247,7 @@ async function helloServer(): Promise<{ s: TcpServer; port: number; hellos: Buff
     c.once("data", (d) => hellos.push(d));
     c.on("error", () => {});
   });
-  await new Promise<void>((ok) => s.listen(0, "127.0.0.1", ok));
+  await listening(s.listen(0, "127.0.0.1"), "the TCP stub");
   return { s, port: (s.address() as { port: number }).port, hellos, socks };
 }
 const closeAll = async (x: { s: TcpServer; socks: Socket[] }) => {
@@ -307,7 +304,7 @@ test("a full fetch queue answers 503 with no-store, never a cached no-logo answe
   const busy = { ...createLogos(), read: async () => "busy" as const } as unknown as Parameters<typeof handler>[22];
   const h = handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, busy);
   const s = createServer(h);
-  await new Promise<void>((ok) => s.listen(0, "127.0.0.1", ok));
+  await listening(s.listen(0, "127.0.0.1"), "the helper");
   try {
     const r = await call((s.address() as { port: number }).port, "/v1/logo/solana/6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN");
     assert.equal(r.status, 503);
@@ -323,7 +320,7 @@ test("a full fetch queue answers 503 with no-store, never a cached no-logo answe
 // few slow-DNS coins blanked real coins' logos; and two mutants lived: the default lookup back on dns.lookup (the libuv
 // pool), and createLogos answering null where it means "busy".
 test("a fetch that waits out its time for a DNS slot is busy, never a cached refusal: the next read fetches again", { timeout: 5_000 }, async () => {
-  const hangers = createLogos({ resolve: (_h, signal) => new Promise((_, no) => signal.addEventListener("abort", () => no(signal.reason), { once: true })), timeoutMs: 600 });
+  const hangers = createLogos({ resolve: (_h, signal) => untilAborted(signal), timeoutMs: 600 });
   hangers.remember("solana", "SlowA", "https://slow-a.example/x.png");
   hangers.remember("solana", "SlowB", "https://slow-b.example/x.png");
   const held = [hangers.read("solana", "SlowA"), hangers.read("solana", "SlowB")]; // both DNS slots

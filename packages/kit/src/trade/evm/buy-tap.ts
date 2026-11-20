@@ -2,7 +2,7 @@
 // and any app or check: the route order a tap asks the kit's evmPoolBuyQuote in, and the device's pool index sync that
 // serves the quote (checks/evm/pool-index.ts, on the venue's two index readers, never the helper). The quote it returns
 // is the kit's own, checked as every quote is; the order only decides which route the kit is asked first.
-import { evmHeldHead, evmJsonRpc, evmPoolBuyQuote, evmPoolIndexPools, evmPoolIndexUse, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../checks/evm/quote.ts";
+import { evmHeldHead, evmJsonRpc, evmPoolBuyQuote, evmPoolIndexPools, evmPoolIndexUse, evmProviders, evmRanked, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../checks/evm/quote.ts";
 import { evmPoolIndexSync, type EvmPoolIndexData, type EvmPoolIndexSync } from "../../checks/evm/pool-index.ts";
 import { evmPoolVenues, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "./buy-unpinned.ts";
 import { evmHookListed } from "./sell-unpinned.ts";
@@ -47,10 +47,81 @@ export type EvmBuyTapHost = {
   readonly indexPools?: (chain: EvmPoolChain, token: string) => readonly EvmPoolKey[] | null;
   /** The kit's evmHeldHead otherwise: the hash of the block a quote reads at now with no read of its own, or null. */
   readonly held?: (chain: EvmPoolChain) => string | null;
+  /** Whether the chain's v3 factory holds a WETH pool of the token at each of `fees`, in their order, or null where it
+   *  is not known: the kit's evmPoolV3Tiers otherwise, unless the host brings its own `quote` (a test's model chain, a
+   *  replay, an app's own providers), whose reads it then brings too: with none, every tier is asked as before. */
+  readonly v3Tiers?: (chain: EvmPoolChain, token: string, fees: readonly number[]) => Promise<readonly boolean[] | null>;
 };
+
+/** UniswapV3Factory.getPool(address,address,uint24): the pool of two tokens at a fee, or the zero address. */
+const SEL_GET_POOL = "1698ee82";
+/** Multicall3 (github.com/mds1/multicall3), the same address on every chain (checks/evm/quote.ts MULTICALL3, its code
+ *  read on the four Base and Robinhood providers), and its aggregate3((address,bool,bytes)[]). */
+const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
+const SEL_AGGREGATE3 = "82ad56cb";
+const word = (x: string | number | bigint): string => BigInt(x).toString(16).padStart(64, "0");
+
+/** Each getPool's answer in an aggregate3 result `hex` (no 0x), in order: the pool's address as a bigint, or null where
+ *  the call failed or the answer is not one word; null for the whole where the result is not `n` such answers. */
+function poolsOf(hex: string, n: number): (bigint | null)[] | null {
+  const at = (byte: number): bigint | null => (hex.length >= (byte + 32) * 2 ? BigInt("0x" + hex.slice(byte * 2, (byte + 32) * 2)) : null);
+  const head = at(0);
+  if (head === null || head !== 32n || at(32) !== BigInt(n)) return null;
+  const out: (bigint | null)[] = [];
+  for (let i = 0; i < n; i++) {
+    const off = at(64 + 32 * i);
+    if (off === null || off > BigInt(hex.length)) return null;
+    const e = 64 + Number(off);
+    const ok = at(e);
+    const dataOff = at(e + 32);
+    if (ok === null || dataOff === null || dataOff > BigInt(hex.length)) return null;
+    const len = at(e + Number(dataOff));
+    out.push(ok === 1n && len === 32n ? at(e + Number(dataOff) + 32) : null);
+  }
+  return out;
+}
+
+/** Which of `fees` the chain's pinned v3 factory (the venue's v3Factory) holds a WETH/`token` pool at, in their order
+ *  (card robinhood-tap-asks-no-missing-v3-tier): one eth_call, Multicall3's aggregate3 of a getPool a fee, to each of
+ *  the chain's two first-ranked quote providers at their newest block (one call, not a batch: robinhood.drpc.org's free
+ *  plan refuses a batch of more than 3 requests, code 31, read 2026-11-18 15:43Z). A tier has no pool only where both
+ *  answer the zero address; one that names a pool, answers anything else or fails leaves the tier asked, as before, so
+ *  no provider can hide a pool alone (and two that agree hide no market: the kit's own search, on every quote the tap
+ *  asks, finds and names it). Null where the chain pins no v3 factory or no providers, or the token is not an address.
+ *  Reads only. */
+export async function evmPoolV3Tiers(chain: EvmPoolChain, token: string, fees: readonly number[], fetchFn: typeof fetch = fetch): Promise<readonly boolean[] | null> {
+  const v = evmPoolVenues()[chain];
+  const factory = v?.v3Factory;
+  const p = v?.providers;
+  if (v === undefined || factory === undefined || p === undefined || p.length < 2 || typeof token !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(token)) return null;
+  if (!Array.isArray(fees) || fees.length === 0 || fees.some((f) => !Number.isInteger(f) || f < 0 || f >= 1 << 24)) return null;
+  // aggregate3's calls: each (target, allowFailure, callData) at its offset after the array's length; a getPool's call
+  // data is 100 bytes, padded to 128, so each element is 256 bytes
+  const getPool = (fee: number) => SEL_GET_POOL + word(v.weth) + word(token) + word(fee) + "0".repeat(56);
+  const data = "0x" + SEL_AGGREGATE3 + word(32) + word(fees.length) + fees.map((_, i) => word(32 * fees.length + 256 * i)).join("") + fees.map((f) => word(factory) + word(1) + word(96) + word(100) + getPool(f)).join("");
+  const call = [{ method: "eth_call", params: [{ to: MULTICALL3, data }, "latest"] }];
+  const two = evmProviders(evmRanked(p), fetchFn).slice(0, 2);
+  const answers = await Promise.all(
+    two.map((rpc) =>
+      rpc(call).then(
+        (a) => {
+          const r = (a[0] as { result?: unknown } | null)?.result;
+          return typeof r === "string" && /^0x([0-9a-fA-F]{64})+$/.test(r) ? poolsOf(r.slice(2), fees.length) : null;
+        },
+        () => null,
+      ),
+    ),
+  );
+  return fees.map((_, i) => !answers.every((a) => a !== null && a[i] === 0n));
+}
 
 /** The route that last quoted per chain and token, this module's life: a tap asks it first (one quote a tap). */
 const LAST_ROUTE = new Map<string, EvmRoute>();
+/** Each chain and token's v3 tier read (evmPoolV3Tiers) and when it was asked (performance.now()), kept
+ *  EVM_BUY_WARM_EVERY_MS: the coin page's warm reads it and the tap typed after it reads none, so the read adds no round
+ *  to the tap the KPI times. A pool made inside that time is still found by the kit's own search (its reference). */
+const TIERS = new Map<string, { readonly at: number; readonly tiers: Promise<readonly boolean[] | null> }>();
+const TIERS_KEPT = 256;
 /** Each route's refusal per chain, token, amount and slippage, for the one held block it was read at (card
  *  evm-warm-tap-ends-inside-two-seconds): a route refused at a block is refused again at that block (the same reads of
  *  the same block hash), so a tap at that same held block takes the refusal again with no kit quote, and one at any
@@ -60,7 +131,7 @@ const LAST_ROUTE = new Map<string, EvmRoute>();
 const REFUSED = new Map<string, { readonly at: string; readonly routes: Map<string, unknown> }>();
 const REFUSED_KEPT = 256;
 /** Forgets every token's last route and held refusals (tests). */
-export const evmBuyTapReset = (): void => (LAST_ROUTE.clear(), REFUSED.clear());
+export const evmBuyTapReset = (): void => (LAST_ROUTE.clear(), REFUSED.clear(), WARMS.clear(), TIERS.clear());
 const FAULTS = new Set(["rpc_error", "rpc_disagree", "stale_quote"]);
 
 /** A buy tap's quote, EVM_BUY_TAP_QUOTES kit quotes at most:
@@ -68,7 +139,10 @@ const FAULTS = new Set(["rpc_error", "rpc_disagree", "stale_quote"]);
  *    own v4 pools in it that a buy may take (paired with the native asset or WETH, hookless or a launchpad hook the
  *    venue lists with its fee and tick spacing: sell-unpinned.ts evmHookListed, the sell builder's rule); with no index,
  *    the first standard hookless shape;
- *  - then the first standard v3 tier;
+ *  - then the first standard v3 tier the v3 factory holds a pool at (one read of every tier, evmPoolV3Tiers; card
+ *    robinhood-tap-asks-no-missing-v3-tier: a tier with no pool is never asked, so no read of its route reverts); where
+ *    no other route is there to ask, the first standard tier still is, once, so the kit's whole search runs and names
+ *    the token's market;
  *  - a refusal that names the kit's own best route (REQUOTE) asks that route once, where the same hook rule takes it:
  *    the kit's best holds every other shape.
  *  A provider's fault (rpc_error, rpc_disagree, stale_quote) is thrown as the kit's; every route refused throws
@@ -96,25 +170,44 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
       ];
   const v3 = V3_FIRST.map((fee): EvmRoute => ({ venue: "uniswap-v3", tokens: [v.weth, t], fees: [fee] }));
   const last = LAST_ROUTE.get(known);
-  const seen = new Set<string>();
-  const shapes = [...(last === undefined ? [] : [last]), ...v4, ...v3].filter((r) => {
-    const k = JSON.stringify(r);
-    return !seen.has(k) && (seen.add(k), true);
-  });
+  // the v3 tiers' pools, read once beside the first ask and awaited only where a v3 tier is next to ask
+  const reader = h.v3Tiers ?? (h.quote === undefined ? evmPoolV3Tiers : undefined);
+  const tiersNow = performance.now();
+  let kept = TIERS.get(known);
+  if (reader !== undefined && (kept === undefined || !(tiersNow - kept.at >= 0 && tiersNow - kept.at < EVM_BUY_WARM_EVERY_MS))) {
+    kept = { at: tiersNow, tiers: Promise.resolve().then(() => reader(chain, t, V3_FIRST)).catch(() => null) };
+    TIERS.delete(known);
+    TIERS.set(known, kept);
+    while (TIERS.size > TIERS_KEPT) TIERS.delete(TIERS.keys().next().value!);
+  }
+  const tiers = reader === undefined ? null : kept!.tiers;
+  // the v3 tiers a tap may ask: those the read did not find empty (all of them where it is not known)
+  const v3Held = async (): Promise<EvmRoute[]> => {
+    const has = tiers === null ? null : await tiers;
+    return Array.isArray(has) && has.length === v3.length ? v3.filter((_, i) => has[i] !== false) : v3;
+  };
+  const head = last ?? v4[0] ?? (await v3Held())[0] ?? v3[0]!;
+  // the second try: the first v3 tier with a pool that is not the first try
+  const second = async (): Promise<EvmRoute | null> => (await v3Held()).find((r) => JSON.stringify(r) !== JSON.stringify(head)) ?? null;
   const held = h.held ?? evmHeldHead;
   const refusedKey = `${known}:${amountIn}:${slippageBps}`;
-  const ask = async (route: EvmRoute) => {
+  // `at`: a follow's, the block the refusal it follows was read at (EvmQuoteError `at`): the kit reads the reference
+  // there, sending only the reads the refused quote did not agree on (card evm-cold-multihop-quote-inside-the-kpi)
+  const ask = async (route: EvmRoute, at: string | null = null) => {
     const k = JSON.stringify(route);
     const pre = held(chain);
     const kept = REFUSED.get(refusedKey);
     if (pre !== null && kept !== undefined && kept.at === pre && kept.routes.has(k)) throw kept.routes.get(k);
     try {
-      const q = await quote({ chain, token, amountIn, slippageBps, route });
+      const q = await quote({ chain, token, amountIn, slippageBps, route, ...(at === null ? {} : { at }) });
       LAST_ROUTE.set(known, q.route);
       return q;
     } catch (e) {
       const code = (e as { code?: unknown })?.code;
-      if (pre !== null && typeof code === "string" && !FAULTS.has(code) && held(chain) === pre) {
+      // held for the block it was read at alone: a refusal that names its block (the kit's `at`) another than the held
+      // head, as a follow's read at the refusal it follows, is not this block's
+      const readAt = (e as { at?: unknown })?.at;
+      if (pre !== null && typeof code === "string" && !FAULTS.has(code) && held(chain) === pre && (typeof readAt !== "string" || readAt === pre)) {
         const at = REFUSED.get(refusedKey);
         const routes = at !== undefined && at.at === pre ? at.routes : new Map<string, unknown>();
         routes.set(k, e);
@@ -127,7 +220,6 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
   };
   const takes = (r: EvmRoute) =>
     r.venue === "uniswap-v3" || ((r.currencyIn === ZERO || lower(r.currencyIn) === weth) && r.hops.every((p) => p.hooks === ZERO || evmHookListed(chain, p.hooks, p.fee, p.tickSpacing)));
-  const tries = [shapes[0]!, ...shapes.slice(1).filter((r) => r.venue === "uniswap-v3").slice(0, 1)];
   let refused = false;
   // a refusal whose reference (the kit's best route) is one this tap may not take
   let untakeable = false;
@@ -139,14 +231,18 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
   // mainnet, 2026-11-13), which is followed while the bound lasts, each route once
   let left = EVM_BUY_TAP_QUOTES;
   const asked = new Set<string>();
-  for (const first of tries) {
+  for (let k = 0; k < 2; k++) {
+    const first = k === 0 ? head : left > 0 ? await second() : null;
+    if (first === null) break;
     let route: EvmRoute | null = first;
     let followed = false;
+    // the block the last refusal was read at, which its reference is asked at
+    let at: string | null = null;
     while (route !== null && left > 0 && !asked.has(JSON.stringify(route))) {
       left--;
       asked.add(JSON.stringify(route));
       try {
-        return await ask(route);
+        return await ask(route, followed ? at : null);
       } catch (e) {
         const err = e as { code?: unknown; reference?: { route: EvmRoute } | null };
         if (err?.code === "rpc_error" || err?.code === "rpc_disagree" || err?.code === "stale_quote") throw e;
@@ -164,6 +260,7 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
         if (next === null && followed) throw e;
         if (next === null && err?.code !== "no_quote") refused = true;
         lastErr = e;
+        at = typeof (e as { at?: unknown })?.at === "string" ? ((e as { at: string }).at) : null;
         route = next;
         followed = next !== null;
       }
@@ -176,6 +273,49 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
   const hookOnly = !refused && indexed !== null && indexed.length > 0 && v4.length === 0;
   throw new EvmBuyTapRefused(untakeable || hookOnly ? "not_allowed" : none ? "no_reference" : "quote_check_failed", lastErr);
 }
+
+/** The amount a coin page's warm quotes at, wei: 0.001 ETH, a small tap's. The tap's own amount is read in the tap. */
+export const EVM_BUY_WARM_IN = 10n ** 15n;
+/** The least time between two warms of one coin, ms: within it the kit still holds the first warm's reads (the token's
+ *  plan, EVM_WARM_RANGE_S of block time), so a second warm would only load the providers. */
+export const EVM_BUY_WARM_EVERY_MS = 30_000;
+const WARMS = new Map<string, { at: number; run: Promise<void> }>();
+const WARMS_KEPT = 64;
+
+/** A coin page's warm (card evm-quote-warm-from-the-coin-page): one buy tap quote of the coin at EVM_BUY_WARM_IN, its
+ *  answer and any refusal dropped, so the reads that do not depend on the amount (the agreed head, the coin's pools
+ *  from the index and its scans, X's markets and every pool's state) are held by the kit when the amount is typed: the
+ *  tap's own quote asks them in its first round with its amount-dependent reads (the token's plan, made again at the
+ *  tap's amount), and takes one round where nothing changed. Every read is the tap's own, on the same providers, under
+ *  every check; nothing here is signed, kept for a buy or shown. One warm a coin at a time, and none within
+ *  EVM_BUY_WARM_EVERY_MS of the last (`now`: a clock that never steps back), so a page that asks again while it sits
+ *  idle reads nothing more. Resolves once the warm ends, whatever it ends in. */
+export function evmPoolBuyWarm(req: { readonly chain: EvmPoolChain; readonly token: string }, h: EvmBuyTapHost = {}, now: () => number = () => performance.now()): Promise<void> {
+  const chain = req?.chain;
+  const token = req?.token;
+  if (typeof chain !== "string" || typeof token !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(token)) return Promise.resolve();
+  const k = `${chain}:${lower(token)}`;
+  const t = now();
+  const last = WARMS.get(k);
+  if (last !== undefined && t - last.at >= 0 && t - last.at < EVM_BUY_WARM_EVERY_MS) return last.run;
+  const run = evmPoolBuyQuoteTap({ chain, token, amountIn: EVM_BUY_WARM_IN, slippageBps: 100 }, h).then(
+    () => {},
+    () => {},
+  );
+  WARMS.delete(k);
+  WARMS.set(k, { at: t, run });
+  while (WARMS.size > WARMS_KEPT) WARMS.delete(WARMS.keys().next().value!);
+  return run;
+}
+
+/** The wait between a whole sync's end and the next gap sync of a served index, ms (card evm-index-kept-at-the-head): a
+ *  quote reads the blocks past the index's N unread before its answer only while they start within the chain's maxLag of
+ *  the scan provider's head (checks/evm/quote.ts scanPools), 50 Base blocks and 100 Robinhood ones, about 10 s each; an
+ *  index synced once a sign-in fell past it within seconds, and every new coin's first quote then sent 5 getLogs by
+ *  currency over the same blocks before its answer (Robinhood 2, 10 and 5, Base 6, 19 Nov). A gap sync from the kept
+ *  index reads its margin and the new blocks: one span, a head post and one batch on each reader (Base 0.5-1.7 s,
+ *  Robinhood 2.2 s), so 3 s keeps N within about 7 s of the head. */
+export const EVM_INDEX_KEEP_MS = 3_000;
 
 /** One sync of the chain's pool index from `prev` (none: cold) on the venue's two index readers through `fetchFn`, and a
  *  whole one served to the kit's quote (evmPoolIndexUse). `served` is false where the sync ended partial or the chain

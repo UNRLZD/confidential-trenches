@@ -133,3 +133,31 @@ test("review of 418af7d5: another buy's stage or answer never moves a Filled not
   assert.equal(outcome(f, "b2", { ok: false, error: { code: "failed" } }, T0 + 3_000), f);
   assert.equal(outcome(f, "b2", { ok: true, result: { stage: "filled" } }, T0 + 3_000), f);
 });
+
+// card evm-buy-end-carries-its-tx: a Base or Robinhood buy whose swap failed with the ETH on its one-time wallet ends
+// owed_back: the box says owed back (its own line, the owner's draft), never Failed, and shows no Retry, since the money
+// left the pool and comes back to it on its own (a retry would buy again from what is left).
+test("owed_back ends the buy as owed back: its own line, no Retry, never Failed", () => {
+  const l = progress(tap(READY, "b1", T0), "b1", "sent", T0 + 150);
+  const owed = progress(l, "b1", "owed_back", T0 + 9_000);
+  assert.deepEqual(owed, { k: "ended", id: "b1", at: T0, stage: "owed_back" });
+  assert.deepEqual(endView(owed), { k: "owedBack", reason: null });
+  assert.equal(showsRetry(owed), false);
+  assert.equal(WORDS.owedBack.text, "Owed back");
+  assert.equal(WORDS.owedBack.draft, true, "a new line, marked as a draft until picked");
+  // the answer of owed_back (a run that ended inside the tap's time) ends it the same way
+  assert.deepEqual(outcome(l, "b1", { ok: true, result: { stage: "owed_back" } }, T0 + 9_000), owed);
+});
+
+// Review of 167d9deea (P3): a buy answered refused (every leg's first post refused by the helper) whose bytes landed
+// anyway, its swap failed and its ETH on W: the page's late end is owed_back under the same id. The box moves from
+// Failed to owed back (no Retry); any other late stage, or another id, leaves an ended buy as it is.
+test("evm-buy-end-carries-its-tx: a late owed_back moves a refused buy of the same id to owed back; nothing else moves an ended buy", () => {
+  const refused: Phase = { k: "ended", id: "b1", at: T0, stage: "refused" };
+  assert.deepEqual(progress(refused, "b1", "owed_back", T0 + 30_000), { k: "ended", id: "b1", at: T0, stage: "owed_back" });
+  assert.equal(showsRetry(progress(refused, "b1", "owed_back", T0 + 30_000)), false);
+  assert.equal(progress(refused, "b2", "owed_back", T0 + 30_000), refused);
+  for (const s of ["filled", "part_filled", "not_landed", "sent", "refused"] as const) assert.equal(progress(refused, "b1", s, T0 + 30_000), refused, s);
+  const notLanded: Phase = { k: "ended", id: "b1", at: T0, stage: "not_landed" };
+  assert.equal(progress(notLanded, "b1", "owed_back", T0 + 30_000), notLanded);
+});

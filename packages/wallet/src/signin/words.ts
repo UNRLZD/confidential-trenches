@@ -64,6 +64,14 @@ export function noPrfSeed(env: WordsEnv = {}): Seed {
   return { v: 1, entropy: newEntropy(env.random), source: "random", code_saved: false, created_ms: (env.now ?? Date.now)() };
 }
 
+/**
+ * A wallet sign-in's new account (W:50, OD:271 "New 12 words"): 16 random bytes like the no-PRF way in, never from the
+ * wallet's signature, the 12 words not saved yet, so the backup comes first (backupFirst).
+ */
+export function walletSeed(env: WordsEnv = {}): Seed {
+  return { v: 1, entropy: newEntropy(env.random), source: "wallet", code_saved: false, created_ms: (env.now ?? Date.now)() };
+}
+
 /** Typed 12 words (ses.12): the checksum is checked before anything else; a failure throws WordsRefused. */
 export function typedSeed(typed: string, env: WordsEnv = {}): Seed {
   if (typeof typed !== "string") throw new WordsRefused();
@@ -108,6 +116,11 @@ export async function signInPrf(open: Opener, entropy: Uint8Array): Promise<Land
 /** A passkey without PRF on create (ses.4): a random seed, then its backup screen when this seed is the one stored. */
 export async function signInNoPrf(open: Opener, env: WordsEnv = {}): Promise<Landing> {
   return land(await storeSeed(open, noPrfSeed(env)));
+}
+
+/** A wallet sign-in whose signature checked (signin/wallet.ts): a wallet seed, its backup when this seed is the one stored. */
+export async function signInWallet(open: Opener, env: WordsEnv = {}): Promise<Landing> {
+  return land(await storeSeed(open, walletSeed(env)));
 }
 
 /** Typed words (ses.10-12): refused with WordsRefused before the store is opened; a code seed lands signed in. */

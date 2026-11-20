@@ -6,7 +6,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as rpcMod from "./rpc.ts";
 import { createRpc } from "./rpc.ts";
+import { call, listening } from "../../test/servers.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 const KEYED = "https://keyed.test/?api-key=11111111-2222-3333-4444-555555555555";
 const PUBLIC = "https://api.mainnet-beta.solana.com";
 const JSON_T = "application/json";
@@ -105,7 +110,7 @@ test("the public endpoint has its own budget while it stands in: 100 per 10 s an
 test("the holders slot: the public endpoint refuses its call, so while fallen back it answers 503 at once and the token page serves Jupiter's holders", async () => {
   const calls: string[] = [];
   const logs: string[] = [];
-  const r = createRpc({ SOLANA_RPC_URL: KEYED }, { fetch: (async (u: string) => (calls.push(u), new Response("x", { status: 403 }))) as never, log: (l: string) => logs.push(l), slot: "holders", publicFallback: false } as never);
+  const r = createRpc({ SOLANA_RPC_URL: KEYED }, { now: STILL, fetch: (async (u: string) => (calls.push(u), new Response("x", { status: 403 }))) as never, log: (l: string) => logs.push(l), slot: "holders", publicFallback: false } as never);
   const read2 = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getTokenLargestAccounts", params: ["x"] });
   assert.equal((await r.handle("solana", JSON_T, read2)).status, 503);
   assert.equal((await r.handle("solana", JSON_T, read2)).status, 503);
@@ -115,24 +120,20 @@ test("the holders slot: the public endpoint refuses its call, so while fallen ba
 
 test("a public SOLANA_RPC_URL (unset) is the public endpoint from the start: its 401 is 503 as before, no fallback", async () => {
   const calls: string[] = [];
-  const r = createRpc({}, { fetch: (async (u: string) => (calls.push(u), new Response("x", { status: 401 }))) as never, log: () => undefined });
+  const r = createRpc({}, { now: STILL, fetch: (async (u: string) => (calls.push(u), new Response("x", { status: 401 }))) as never, log: () => undefined });
   assert.equal((await r.handle("solana", JSON_T, read)).status, 503);
   assert.equal((r as unknown as { slot?: { state(): string } }).slot?.state(), "public");
   assert.equal(typeof (rpcMod as Record<string, unknown>).SOLANA_PUBLIC, "string");
 });
 
 test("GET /v1/health names each Solana slot keyed, fallback or public, never a URL or a key", async () => {
-  const { createServer, request } = await import("node:http");
+  const { createServer } = await import("node:http");
   const { handler } = await import("../server.ts");
-  const r = createRpc({ SOLANA_RPC_URL: KEYED }, { fetch: (async (u: string) => (u === PUBLIC ? ok(u) : new Response("x", { status: 401 }))) as never, log: () => undefined });
+  const r = createRpc({ SOLANA_RPC_URL: KEYED }, { now: STILL, fetch: (async (u: string) => (u === PUBLIC ? ok(u) : new Response("x", { status: 401 }))) as never, log: () => undefined });
   const h = createServer(handler("0123456789abcdef0123456789abcdef01234567", undefined, r as never));
-  await new Promise<void>((done) => h.listen(0, "127.0.0.1", () => done()));
+  await listening(h.listen(0, "127.0.0.1"), "the helper");
   const port = (h.address() as { port: number }).port;
-  const get = () =>
-    new Promise<string>((done, fail) => request({ host: "127.0.0.1", port, path: "/v1/health" }, (res) => {
-      let b = "";
-      res.setEncoding("utf8").on("data", (d) => (b += d)).on("end", () => done(b));
-    }).on("error", fail).end());
+  const get = async () => (await call(port, { path: "/v1/health" }, "the helper")).body;
   try {
     assert.deepEqual(JSON.parse(await get()).solana, { rpc: "keyed" });
     await r.handle("solana", JSON_T, read);

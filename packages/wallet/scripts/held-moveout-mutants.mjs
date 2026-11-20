@@ -3,9 +3,9 @@
 // to fail, puts the source back. The first 21 are the review's own sweep (12 of them killed at d791adda), each anchored
 // on today's lines; the rest are the folds' rules (M1, M2, L1, L6; the delta review's D1, D3, D4; review 3's M1, L1; card held-move-forgotten-tx's archival read, its delta reviews of c3e71713 and its delta review 4,
 // and delta review 8's holdAll status read in src/deposit/follow.ts, run against test/deposit-follow.test.ts).
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 import { sweepPartOrExit } from "../../../scripts/mutant-part.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const F = `${W}/src/deposit/moveout.ts`;
@@ -198,10 +198,10 @@ const M = [
 // delta review 8, ruling 1: holdAll's status read (src/deposit/follow.ts), run against the follow's own tests
 const FF = `${W}/src/deposit/follow.ts`;
 const MF = [
-  ["H8a (review 8, ruling 1) holdAll holds an op with no status read", "      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());\n      await ops.update", "      const st = null as StatusRead | null;\n      await ops.update"],
+  ["H8a (review 8, ruling 1) holdAll holds an op with no status read", "      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now(), op.follow.refund_to ?? U);\n      await ops.update", "      const st = null as StatusRead | null;\n      await ops.update"],
   ["H8b (review 8, ruling 1) holdAll's read never marks the send seen", "  if (st.status !== \"PENDING_DEPOSIT\" && !f.sent) read.sent = true;\n", ""],
   ["H8c (review 8, ruling 1) holdAll's SUCCESS read never keeps delivered", "  if (st.status === \"SUCCESS\" && f.delivered === undefined) read.delivered = (st.delivered ?? 0n).toString();\n", ""],
-  ["H9a (review 9, ruling 2) holdAll reads each op's status before its held write", "    for (const [id, op] of all) await write(id, \"held\", legFacts(op, \"held\"), { why });\n    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());\n", "    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());\n      await write(id, \"held\", legFacts(op, \"held\"), { why });\n"],
+  ["H9a (review 9, ruling 2) holdAll reads each op's status before its held write", "    for (const [id, op] of all) await write(id, \"held\", legFacts(op, \"held\"), { why });\n    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now(), op.follow.refund_to ?? U);\n", "    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now(), op.follow.refund_to ?? U);\n      await write(id, \"held\", legFacts(op, \"held\"), { why });\n"],
 ];
 const ALL = [...M.map((m) => [F, TESTS, m]), ...MF.map((m) => [FF, ["test/deposit-follow.test.ts"], m])];
 // every mutant's name, in the order the parts take them
@@ -229,20 +229,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exitCode = 1;
       continue;
     }
-    writeFileSync(file, s);
-    // a run past 120 s is killed, its process group with it (scripts/group-run.mjs)
-    let r;
-    try {
-      r = runSync("node", ["--test", ...tests], { cwd: W, encoding: "utf8", timeoutMs: 120_000 });
-    } finally {
-      writeFileSync(file, src);
-    }
-    const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-    const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
+    // a run past 120 s is killed, its process group with it; a run with no verdict is refused (scripts/mutant-run.mjs)
+    const r = withPlant(file, s, () => runMutant(tests, { cwd: W, timeoutMs: 120_000 }));
+    if (refused(name, r)) continue;
     const by = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((m) => m[1].slice(0, 70)).filter((v, i, a) => a.indexOf(v) === i);
-    const dead = r.status !== 0 && Number(fail) > 0;
+    const dead = r.verdict === "killed";
     if (dead) killed++;
-    console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
+    console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
   }
   console.log(`${killed}/${part.at.length} killed`);
   console.log([...srcs].every(([f, src]) => readFileSync(f, "utf8") === src) ? "source restored" : "SOURCE NOT RESTORED");

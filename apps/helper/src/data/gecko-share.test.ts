@@ -4,13 +4,13 @@
 // still answer, and while pages are opened the lists give up their calls; a repeat read inside its age calls nothing.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { start } from "../server.ts";
 import { clockOf, createEvmLists, EVM_CHAINS, GT_BASE, GT_READS, LIST_KEYS, STALE_MS, TICK_MS, toRows } from "./evm/lists.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_PER_CLIENT, REFRESH_URGENT_MS, WINDOW_MS } from "./gecko.ts";
 import { createSolanaToken } from "./solana/token.ts";
+import { call, listening } from "../../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const NOW = Date.parse("2026-11-02T13:53:00Z"); // the token page fixture's read
@@ -73,16 +73,9 @@ async function world(handover?: unknown, settled = false) {
   const lists = { base: createEvmLists("base", budget, { fetch: doFetch as never, now }), robinhood: createEvmLists("robinhood", budget, { fetch: doFetch as never, now }) };
   if (settled) for (const c of EVM_CHAINS) assert.equal(lists[c].restore(SETTLED[c]), false, "makers alone: every list is still read from GeckoTerminal");
   const server = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, token, undefined, undefined, lists);
-  await new Promise<void>((ok) => server.on("listening", () => ok()));
+  await listening(server, "the helper");
   const port = (server.address() as AddressInfo).port;
-  const get = (path: string) =>
-    new Promise<{ status: number; body: string }>((ok, fail) => {
-      const r = request({ host: "127.0.0.1", port, path, headers: { origin: "https://ct-app.unrealized.trade" } }, (res) => {
-        let b = "";
-        res.on("data", (d) => (b += d)).on("end", () => ok({ status: res.statusCode ?? 0, body: b }));
-      });
-      r.on("error", fail).end();
-    });
+  const get = (path: string) => call(port, { path, headers: { origin: "https://ct-app.unrealized.trade" } }, "the helper");
   const candles = (mint: string, tf = "1h") => get(`/v1/market/candles?chain=solana&token=${mint}&tf=${tf}&limit=24`);
   const close = () => new Promise<void>((ok) => (server.closeAllConnections(), server.close(() => ok())));
   const listsAnswer = (c: string) => get(`/v1/market/lists?chain=${c}`);

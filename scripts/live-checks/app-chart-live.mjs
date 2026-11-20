@@ -30,11 +30,14 @@
 //        own bars yet). A quiet probe says nothing about the page or the helper, so it is never a FAIL.
 //      At both widths in a watch with a verdict: no reload (one time origin), live reads (limit 2) made, at most one
 //      full read (limit 500) a minute after the first, no console error and no page error in the terminal's frame.
+//   The whole walk ends by RUN_MS from its start: no pick starts with less than PICK_MIN_MS left, and a probe and a
+//   watch stop at it, so the run ends with its own verdict inside the bound the merge queue gives it (card
+//   app-chart-solana-full-read-on-time).
 // A screenshot of every load is kept.
 // After: app
 // Bundle: out a browser and the helper
 //   node scripts/live-checks/app-chart-live.mjs [--build <dir>] [--shots <dir>] [--record <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (with --build, a FAIL while the helper missed an answer too: helper-misses.mjs)
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the
 // helper still answered live; --record writes what the run read, so the check's test can replay it through judge().
 // Record: what the run read; a live run that fails keeps it beside its log
@@ -44,9 +47,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { consoleError, pageError } from "./console-errors.mjs";
 import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
 
 const KEY = "app-chart-live";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -62,6 +67,20 @@ export const PROBE_MS = 30_000;
 export const WATCH_MAX_MS = 240_000;
 export const TRIES = 3;
 const READY_MS = 25_000;
+/** The whole walk's deadline from its start: candidates, every pick's probe and watch (card
+ *  app-chart-solana-full-read-on-time: merge groups 44609308946 and 44612103674, test-browser (1) jobs 135861403148 and
+ *  135871185151, 19 Nov 20:36-20:40Z and 20:53-20:57Z, stopped at their bound of 232 s, two times the listed 52 s or 180 s
+ *  more, scripts/ci/test-shards.mjs boundOf, with nothing printed: TRIES picks of PROBE_MS, READY_MS and WATCH_MAX_MS
+ *  each had no deadline, one pick alone 295 s). It leaves 42 s of that bound for the browser's launch, the build's
+ *  serving, the last screenshots and the close. */
+export const RUN_MS = 190_000;
+/** The longest a read of the helper's lists, candles or tape waits for its answer. */
+export const READ_MS = 15_000;
+/** The least a pick needs to give a verdict: its probe, the chart's settling and WATCH_MIN_MS of watch. */
+export const WATCH_MIN_MS = 30_000;
+export const PICK_MIN_MS = PROBE_MS + READY_MS + WATCH_MIN_MS;
+/** Whether a pick may start at `now` within a walk that ends at `deadline`. */
+export const pickFits = (now, deadline) => deadline - now >= PICK_MIN_MS;
 /** The page's full reads: its first, one a minute after (candles.ts RESYNC_MS), and one after a failed read. */
 const fullMax = (watchMs) => 1 + Math.ceil(watchMs / 60_000) + 1;
 
@@ -152,7 +171,7 @@ export function judge(rec) {
 const headers = { origin: APP_HOST, "cache-control": "no-cache" };
 const getJson = async (url) => {
   try {
-    const r = await fetch(url, { headers });
+    const r = await fetch(url, { headers, signal: AbortSignal.timeout(READ_MS) });
     return { status: r.status, retryAfter: r.headers.get("retry-after"), body: await r.json().catch(() => null) };
   } catch {
     return { status: 0, body: null };
@@ -202,7 +221,7 @@ const newestTrade = async (c) => {
 };
 
 /** The probe: { pick (pickOf), stats } over PROBE_MS. A refused read (429) holds that token's reads for its Retry-After. */
-export async function probe(cands) {
+export async function probe(cands, deadline = Infinity) {
   const last = new Map();
   const changes = new Map(cands.map((c) => [c, 0]));
   const tape = new Map();
@@ -210,9 +229,10 @@ export async function probe(cands) {
   const stats = { rounds: 0, reads: 0, own: 0, vendor: 0, refused: 0, retryAfterMaxS: null, failed: 0, tapeMoved: 0, ms: 0 };
   const t0 = Date.now();
   for (const c of cands) tape.set(c, [await newestTrade(c)]);
-  for (; Date.now() - t0 < PROBE_MS; await sleep(500)) {
+  for (; Date.now() - t0 < PROBE_MS && Date.now() < deadline; await sleep(500)) {
     stats.rounds++;
     for (const c of cands) {
+      if (Date.now() >= deadline) break;
       if ((held.get(c) ?? 0) > Date.now()) continue;
       const r = await getJson(candlesUrl(c.chain, c.token, 2));
       stats.reads++;
@@ -238,7 +258,7 @@ export async function probe(cands) {
       last.set(c, k);
     }
   }
-  for (const c of cands) tape.get(c).push(await newestTrade(c));
+  for (const c of cands) tape.get(c).push(Date.now() < deadline ? await newestTrade(c) : null);
   stats.tapeMoved = cands.filter((c) => {
     const [a, b] = tape.get(c);
     return Number.isFinite(a) && Number.isFinite(b) && b > a;
@@ -258,10 +278,10 @@ const MEASURE = () => {
   return { route: root?.dataset.route ?? null, chart: c?.getAttribute("data-chart") ?? null, last: c?.querySelector("[data-testid=chart-canvas]")?.getAttribute("data-last") || null };
 };
 
-async function watchLoad(browser, w, i, pick, harness, shots, n) {
+async function watchLoad(browser, w, i, pick, harness, shots, n, deadline) {
   const opened = `${APP_HOST}/token/${pick.chain}/${pick.token}`;
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark" });
-  if (harness) await ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
+  if (harness) await liveHelper(ctx, harness);
   const page = await ctx.newPage();
   const errors = [];
   let liveReads = 0;
@@ -304,7 +324,7 @@ async function watchLoad(browser, w, i, pick, harness, shots, n) {
   let changedMs = null;
   // a page that draws no last bar has nothing to watch
   if (app && m?.chart === "ready" && first !== null) {
-    for (const t0 = Date.now(); Date.now() - t0 < WATCH_MAX_MS; await page.waitForTimeout(250)) {
+    for (const t0 = Date.now(); Date.now() - t0 < WATCH_MAX_MS && Date.now() < deadline; await page.waitForTimeout(250)) {
       final = (await app.evaluate(MEASURE).catch(() => null))?.last ?? final;
       if (final !== first) {
         changedMs = Date.now() - t0;
@@ -326,7 +346,7 @@ async function watchLoad(browser, w, i, pick, harness, shots, n) {
 }
 
 /** One pick watched at both widths, with the helper's newest bars read each second and its tape every two. */
-async function watch(browser, pick, harness, shots, n) {
+async function watch(browser, pick, harness, shots, n, deadline) {
   const a = { pick, helper: [], tape: [], loads: [] };
   let watching = true;
   const reads = (async () => {
@@ -341,7 +361,7 @@ async function watch(browser, pick, harness, shots, n) {
     }
   })();
   try {
-    a.loads = await Promise.all(LOADS.map((w, i) => watchLoad(browser, w, i, pick, harness, shots, n)));
+    a.loads = await Promise.all(LOADS.map((w, i) => watchLoad(browser, w, i, pick, harness, shots, n, deadline)));
   } finally {
     watching = false;
     await reads;
@@ -351,6 +371,7 @@ async function watch(browser, pick, harness, shots, n) {
 
 export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
   mkdirSync(shots, { recursive: true });
+  const deadline = Date.now() + RUN_MS;
   const cands = await candidates();
   const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), candidates: cands.map((c) => ({ chain: c.chain, symbol: c.symbol })), attempts: [], shots };
   let harness = null;
@@ -358,18 +379,18 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
     const { harnessRoute } = await import("./app-in-shell.mjs");
     harness = await harnessRoute(path.resolve(build), "signed");
   }
-  const browser = await launchBrowser("chromium");
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   rec.browser = browser.version();
   try {
     const left = [...cands];
-    for (let n = 0; n < TRIES && left.length; n++) {
-      const { pick, stats } = await probe(left);
+    for (let n = 0; n < TRIES && left.length && pickFits(Date.now(), deadline); n++) {
+      const { pick, stats } = await probe(left, deadline);
       if (!pick) {
         rec.attempts.push({ pick: null, probe: stats, helper: [], tape: [], loads: [] });
         continue;
       }
       left.splice(left.findIndex((c) => c.token === pick.token), 1);
-      const a = { ...(await watch(browser, pick, harness, shots, n)), probe: stats };
+      const a = { ...(await watch(browser, pick, harness, shots, n, deadline)), probe: stats };
       rec.attempts.push(a);
       if (classify(a) !== "silent") break;
     }
@@ -387,11 +408,15 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
-    const { verdict, lines } = judge(rec);
+    const { verdict: judged, lines } = judge(rec);
     for (const x of lines) console.log(x);
+    // a FAIL in a run where the helper missed an answer the page asked for is INCONCLUSIVE (helper-misses.mjs)
+    const miss = helperVerdict(judged);
+    for (const x of miss.lines) console.log(x);
+    const verdict = miss.verdict;
     console.log(`screenshots: ${rec.shots}`);
     console.log(`CARD ${KEY} / live: ${verdict}`);
-    process.exit(EXIT[verdict]);
+    process.exit(HELPER_EXIT[verdict]);
   } catch (e) {
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);
     process.exit(2);

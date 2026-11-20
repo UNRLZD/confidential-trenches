@@ -51,8 +51,8 @@ import { TRADE_CHAINS, type TradeChain } from "../../kit/src/signpage/messages.t
 import { checkNearBuyRequest, checkNearSellRequest, NearTradeRefused, type NearBuyAsk, type NearSellAsk } from "./rules/near-trade.ts";
 import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, tokenDecimalsKeptOf, tokenDecimalsOf, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 
-/** One provider's JSON-RPC call: the method's result, or a throw. */
-export type PoolRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
+/** One provider's JSON-RPC call: the method's result, or a throw; `signal` ends it at the provider (SolanaRpc's). */
+export type PoolRpc = (method: string, params: readonly unknown[], signal?: AbortSignal) => Promise<unknown>;
 
 /** ERC-20 decimals(): its selector, keccak256("decimals()")[0..4]. */
 export const ERC20_DECIMALS = "0x313ce567";
@@ -106,8 +106,8 @@ export async function keptTokenDecimals(chain: PoolChain, token: string, rpcs: r
   const waits = o.waits === 0 ? null : (o.waits ?? readWaits());
   const one = (rpc: PoolRpc) =>
     chain === "solana"
-      ? rpc("getAccountInfo", [token, { encoding: "base64", commitment: "confirmed" }])
-      : rpc("eth_call", [{ to: token, data: ERC20_DECIMALS }, "latest"]);
+      ? rpc("getAccountInfo", [token, { encoding: "base64", commitment: "confirmed" }], o.signal)
+      : rpc("eth_call", [{ to: token, data: ERC20_DECIMALS }, "latest"], o.signal);
   const answers: [unknown, unknown] = [undefined, undefined];
   const answered = [false, false];
   for (;;) {
@@ -162,6 +162,11 @@ export type PoolKindsDeps = {
   cash?: () => CashToPoolDeps;
   /** The NEAR buy's flow (src/near-trade.ts nearBuyFlow), given a request its rule passed; none: refused not_allowed. */
   near?: { buy?: (ask: NearBuyAsk, ctx: KindContext) => HostRefusal | Running<"pool.buy">; sell?: (ask: NearSellAsk, ctx: KindContext) => HostRefusal | Running<"pool.sell"> };
+  /** A checked pool.buy waits here, at its tap, while the device prepares the chain's spend (card
+   *  taps-wait-inside-the-page, src/tap-prepare.ts: bounded, ended by a sign out), before Cash's check and the buy's flow
+   *  read or hold anything; resolves when the buy may run. None: no wait. A sell and a withdraw spend no prepared proof
+   *  and never wait on it. */
+  prepared?: (chain: PoolChain) => Promise<void>;
 };
 type Answer<K extends PoolKind> = HostRefusal | Deferred<K> | HostAnswer<K>;
 type Handler<K extends PoolKind> = (params: Record<string, unknown>, ctx: KindContext) => Answer<K>;
@@ -241,6 +246,20 @@ function nearKind<K extends "pool.buy" | "pool.sell">(deps: PoolKindsDeps, kind:
   return (kind === "pool.buy" ? buy!(ask as NearBuyAsk, ctx) : sell!(ask as NearSellAsk, ctx)) as HostRefusal | Running<K>;
 }
 
+/** `go` once `prepared` settles (card taps-wait-inside-the-page): a run whose answer is `go`'s, as it answers; a sign out
+ *  during the wait answers failed and `go` never runs. Its answer is read through to `go`'s own, so an early answer
+ *  (a buy's "sent") reaches the app as it did. */
+function afterPrepared<K extends PoolKind>(prepared: Promise<void>, go: () => Answer<K>, signal?: AbortSignal): Running<K> {
+  let got: Answer<K> | null = null;
+  const after = prepared
+    .catch(() => {})
+    .then(() => {
+      got = signal?.aborted ? FAILED : go();
+      return "after" in got ? got.after : undefined;
+    });
+  return { running: true, after, answer: () => (got === null ? FAILED : "after" in got ? got.answer() : got) as HostAnswer<K> | HostRefusal | null };
+}
+
 /** The four kinds' handlers for the page's api host. */
 export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } {
   const kept = deps.decimals ?? tokenDecimalsKept();
@@ -255,8 +274,9 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
         if (!ask) return NO;
         if (!deps.pinned(ask.chain) || !deps.flow) return NO;
         const flow = deps.flow;
-        if (kind === "pool.buy" && deps.cash) return cashFirst((a, c) => runFlow(flow, a, c ?? ctx) as HostRefusal | Running<"pool.buy">, deps.cash)(ask, ctx) as Answer<K>;
-        return runFlow(flow, ask, ctx) as Answer<K>;
+        const go = (): Answer<K> => (kind === "pool.buy" && deps.cash ? (cashFirst((a, c) => runFlow(flow, a, c ?? ctx) as HostRefusal | Running<"pool.buy">, deps.cash)(ask, ctx) as Answer<K>) : (runFlow(flow, ask, ctx) as Answer<K>));
+        if (kind === "pool.buy" && deps.prepared) return afterPrepared(deps.prepared(ask.chain), go, deps.stop?.()) as Answer<K>;
+        return go();
       }
       // a sell: on a pinned pool's chain only, for a token that is an address of that chain, the token's decimals (kept,
       // or read on two providers), then the whole request checked with them; no read is made for any other string

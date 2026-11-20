@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { classify, LIMIT_CODES, NOT_YET, PAGE_THROTTLE_CODES, pageRefuses, preflight, preflightRefuses, RATE_LIMIT, RETRY, rpcAnswer, STATELESS } from "./provider-answer.mjs";
+import { classify, LIMIT_CODES, NOT_YET, PAGE_THROTTLE_CODES, pageRefuses, preflight, preflightRefuses, RATE_LIMIT, RETRY, rpcAnswer, rpcBatchAnswer, STATELESS } from "./provider-answer.mjs";
 import { NO_ANSWERS } from "./provider-answer.plants.mjs";
 
 // a no-answer is read again at once here, not after provider-answer.mjs's pause
@@ -69,6 +69,18 @@ test("rpcAnswer pauses RETRY.ms before it reads again", async () => {
   } finally {
     RETRY.ms = 0;
   }
+});
+
+test("rpcAnswer with an id sends it and gives back the answer's own id and its tries; without one, as before", async () => {
+  const sent = [];
+  const echo = (id) => async (_u, init) => (sent.push(JSON.parse(init.body).id), new Response(JSON.stringify({ jsonrpc: "2.0", id, result: "0x1" }), { status: 200 }));
+  assert.deepEqual(await rpcAnswer("https://p.example/rpc", "eth_chainId", [], { fetchFn: echo("price-0"), id: "price-0" }), { result: "0x1", answerId: "price-0", tries: 1 });
+  assert.deepEqual(await rpcAnswer("https://p.example/rpc", "eth_chainId", [], { fetchFn: echo("price-9"), id: "price-1" }), { result: "0x1", answerId: "price-9", tries: 1 });
+  assert.deepEqual(await rpcAnswer("https://p.example/rpc", "eth_chainId", [], { fetchFn: echo(1) }), { result: "0x1" });
+  assert.deepEqual(sent, ["price-0", "price-1", 1]);
+  let n = 0;
+  const later = await rpcAnswer("https://p.example/rpc", "eth_chainId", [], { id: 7, fetchFn: async () => (n++ === 0 ? new Response("", { status: 429 }) : new Response(JSON.stringify({ jsonrpc: "2.0", id: 7, result: "0x1" }), { status: 200 })) });
+  assert.deepEqual(later, { result: "0x1", answerId: 7, tries: 2 });
 });
 
 test("rpcAnswer reads a no-answer again once, and no more", async () => {
@@ -268,4 +280,40 @@ test("keep: the named answer headers come back beside the answer, each its value
   assert.deepEqual(a.kept, { "ratelimit-policy": '"chain";q=135;w=10', "retry-after": null });
   assert.equal(a.result, 7);
   assert.equal("kept" in (await rpcAnswer("https://h.example/v1/rpc/solana", "getSlot", [], { fetchFn })), false);
+});
+
+test("rpcBatchAnswer: one POST of the calls with ids 1 to n; each answer by its id; the body's bytes beside it", async () => {
+  let seen;
+  const a = await rpcBatchAnswer("https://p.example/rpc", [["eth_chainId", []], ["eth_call", [{ to: "0x1" }, "latest"]]], {
+    fetchFn: async (url, init) => ((seen = [url, init.method, JSON.parse(init.body), init.body.length]), new Response(JSON.stringify([{ jsonrpc: "2.0", id: 2, result: "0x2a" }, { jsonrpc: "2.0", id: 1, result: "0x1" }]), { status: 200 })),
+  });
+  assert.deepEqual(seen.slice(0, 3), ["https://p.example/rpc", "POST", [{ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }, { jsonrpc: "2.0", id: 2, method: "eth_call", params: [{ to: "0x1" }, "latest"] }]]);
+  assert.deepEqual(a, { status: 200, answers: [{ result: "0x1" }, { result: "0x2a" }], bytes: seen[3] });
+});
+
+test("rpcBatchAnswer: a whole-batch no-answer (an HTTP 500 page, a 429, a lone result) is read again once, then named; a lone error is judged", async () => {
+  for (const [status, body, words] of [[500, "<html> <head><title>500 Internal Server Error</title>", /HTTP 500: not JSON/], [429, "", /HTTP 429/], [200, ok("0x1"), /one answer for a batch of 2 calls/]]) {
+    let n = 0;
+    const a = await rpcBatchAnswer("https://p.example/rpc", [["eth_chainId", []], ["eth_chainId", []]], { fetchFn: async () => (n++, new Response(body, { status })) });
+    assert.equal(n, 2, `${status}`);
+    assert.match(a.noAnswer, words);
+    assert.equal(a.answers, undefined);
+  }
+  let n = 0;
+  const e = await rpcBatchAnswer("https://p.example/rpc", [["eth_chainId", []]], { fetchFn: async () => (n++, new Response(rpcErr(-32600, "batch too large"), { status: 200 })) });
+  assert.equal(n, 1);
+  assert.deepEqual(e.error, { code: -32600, message: "batch too large" });
+});
+
+test("rpcBatchAnswer: a call the batch left out or throttled is read again once; each answer classified as one", async () => {
+  let n = 0;
+  const a = await rpcBatchAnswer("https://p.example/rpc", [["eth_chainId", []], ["eth_chainId", []], ["eth_chainId", []]], {
+    fetchFn: async () => (n++, new Response(JSON.stringify([{ jsonrpc: "2.0", id: 1, result: "0x1" }, { jsonrpc: "2.0", id: 3, error: { code: 15, message: "You reached Public endpoint rate limit" } }]), { status: 200 })),
+  });
+  assert.equal(n, 2);
+  assert.deepEqual(a.answers[0], { result: "0x1" });
+  assert.match(a.answers[1].noAnswer, /no answer for call 2 of 3/);
+  assert.match(a.answers[2].noAnswer, /rate limit/);
+  const t = await rpcBatchAnswer("https://p.example/rpc", [["eth_chainId", []]], { fetchFn: async () => { throw new DOMException("timed out", "TimeoutError"); } });
+  assert.match(t.noAnswer, /no answer \(TimeoutError\)/);
 });

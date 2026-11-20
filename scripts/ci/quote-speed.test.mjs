@@ -339,14 +339,55 @@ test("ci.yml runs the gate as main has it in the required deep-import job, every
   assert.ok(lines.findIndex((l) => /pnpm install --frozen-lockfile/.test(l)) < start, "the install comes before the step");
   // pull_request: the base's scripts/ tree and the files CHECK imports past it, its gate on the head's change
   assert.equal(archived(step)[0], "scripts", step);
-  assert.match(step, /node "\$RUNNER_TEMP\/base\/scripts\/ci\/quote-speed\.mjs" "\$PR_BASE" "\$PR_HEAD"/);
+  assert.match(step, /node "\$RUNNER_TEMP\/base\/scripts\/ci\/quote-speed\.mjs" "\$CHANGE_BASE" "\$PR_HEAD"/);
   assert.match(step, /PR_BASE: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
   assert.match(step, /PR_HEAD: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   // the head's own copy only while main has none
-  assert.match(step, /\[ -e "\$RUNNER_TEMP\/base\/scripts\/ci\/quote-speed\.mjs" \] \|\| \{[^}]*node scripts\/ci\/quote-speed\.mjs "\$PR_BASE" "\$PR_HEAD"; exit; \}/);
+  assert.match(step, /\[ -e "\$RUNNER_TEMP\/base\/scripts\/ci\/quote-speed\.mjs" \] \|\| \{[^}]*node scripts\/ci\/quote-speed\.mjs "\$CHANGE_BASE" "\$PR_HEAD"; exit; \}/);
+  // card quote-speed-measures-its-own-change: a pull request's change is read from its base, a group's from its parent
+  // (base_sha) once the head is checked to be one merge onto it; the gate itself still comes from PR_BASE (archived above)
+  assert.match(step, /^ {10}CHANGE_BASE="\$PR_BASE"$/m, step);
+  assert.match(step, /MQ_BASE_SHA: \$\{\{ github\.event\.merge_group\.base_sha \}\}/, step);
+  assert.match(step, /\[ "\$\(git rev-parse "\$MQ_HEAD\^1"\)" = "\$MQ_BASE_SHA" \] \|\| \{[^}]*exit 1; \}; CHANGE_BASE="\$MQ_BASE_SHA"; fi$/m, step);
   // a push measures its own change, or everything when it names no before; any other event measures
   assert.match(step, /node scripts\/ci\/quote-speed\.mjs "\$BEFORE" "\$AFTER"/);
   assert.match(step, /\*\) node scripts\/ci\/quote-speed\.mjs --all ;;/);
   assert.equal(CHECK, "scripts/live-checks/evm-quote-warm-round.mjs");
   assert.deepEqual(PATHS, ["packages/kit/src/checks/evm/", "packages/kit/src/trade/evm/", "packages/kit/package.json", "pnpm-lock.yaml"]);
+});
+
+// Card quote-speed-measures-its-own-change: two measures never run at once (PR 979's group run 44246114264 overlapped PR
+// 980's measure, 05:42:48-05:44:36Z against 05:43:15-05:45:08Z, and failed base-partial-v4 at p95 1148 ms). The lock is
+// the job's, one group for every run, and waits instead of cancelling: queue: max (the default, single, cancels a waiting
+// job when a third arrives) and never cancel-in-progress. The problems of a job's lines, [] when it holds the lock.
+export function lockProblems(lines) {
+  const at = lines.findIndex((l) => l === "    concurrency:");
+  if (at < 0) return ["the job has no concurrency block: two measures run at once"];
+  const block = [];
+  for (const l of lines.slice(at + 1)) {
+    if (!/^ {6}\S/.test(l)) break;
+    block.push(l.trim());
+  }
+  const p = [];
+  if (!block.includes("group: quote-speed")) p.push(`the group is not the one fixed name every run shares: ${block.join("; ")}`);
+  if (!block.includes("cancel-in-progress: false")) p.push("cancel-in-progress is not false: a measure would be cut off");
+  if (!block.includes("queue: max")) p.push("queue is not max: a third run cancels the one waiting");
+  return p;
+}
+
+test("the quote-speed step's job holds one lock every ci.yml run shares, waiting, never cancelling", () => {
+  const yml = CI_YML();
+  const { lines } = gateStep(yml);
+  assert.deepEqual(lockProblems(lines), [], lines.slice(0, 12).join("\n"));
+  // the step runs in no other job, and no other job takes the lock's name
+  assert.equal(yml.match(/^ {6}- name: .*evm-quote-warm-round/gm)?.length, 1);
+  assert.equal(yml.match(/^ {6}group: quote-speed$/gm)?.length, 1);
+  // planted: none, a per-run group, a cancelling one, the default queue
+  const job = (block) => ["  deep-import:", "    runs-on: ubuntu-24.04", ...block, "    steps:"];
+  const ok = ["    concurrency:", "      group: quote-speed", "      cancel-in-progress: false", "      queue: max"];
+  assert.deepEqual(lockProblems(job(ok)), []);
+  assert.match(lockProblems(job([])).join(), /no concurrency block/);
+  assert.match(lockProblems(job([ok[0], "      group: quote-speed-${{ github.run_id }}", ok[2], ok[3]])).join(), /fixed name/);
+  assert.match(lockProblems(job([ok[0], ok[1], "      cancel-in-progress: true", ok[3]])).join(), /cut off/);
+  assert.match(lockProblems(job([ok[0], ok[1], ok[2]])).join(), /queue is not max/);
 });

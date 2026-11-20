@@ -9,8 +9,9 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { fromLogs } from "./decode.ts";
 import { joinBars } from "../candles.ts";
-import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
+import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, SYSVAR_CLOCK, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
 import { createRpc } from "../../rpc/rpc.ts";
+import { b58decode, b58encode } from "./lists.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"), "utf8")) as {
@@ -50,6 +51,13 @@ const rpcFetch = (c: Chain, mints: Record<string, number>) => async (_url: strin
   throw new Error(`unexpected ${req.method} ${String(req.params[0])}`);
 };
 const settle = () => new Promise((r) => setTimeout(r, 20));
+/** Card app-chart-check-inside-its-bound: `n` successful signatures older than `slot` whose transactions hold no trade,
+ *  and their bodies: a first walk's page made full by them has not reached the mint's first signature (a page shorter
+ *  than its limit says the list ran out, and its tape is then whole from the first signature). */
+const noTrades = (n: number, slot: number, tag: string) => {
+  const list = Array.from({ length: n }, (_, i) => ({ signature: `${tag}${String(i).padStart(4, "0")}${"1".repeat(80 - tag.length)}`.slice(0, 88), slot: slot - 1 - i, err: null }));
+  return { list, txs: Object.fromEntries(list.map((x) => [x.signature, { slot: x.slot, meta: { logMessages: [] } }])) };
+};
 
 test("Pyth's SOL/USD account is taken only whole: owner, full verification, feed, exponent, price, fresh", () => {
   assert.equal(pythSolUsd(PYTH_RECEIVER, pyth(9_342_267_796n, 1_000), 1_010), 93_422_677_960_000_000_000n);
@@ -169,7 +177,7 @@ test("the websocket source: up only once every subscription is in force; a close
   type Fake = { sent: string[]; onopen: (() => void) | null; onmessage: ((m: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; send(s: string): void; close(): void };
   const sockets: Fake[] = [];
   const events: string[] = [];
-  const src = wsSource("wss://test", { note: (m, n) => events.push(`note ${m} ${n.sig}`), down: () => events.push("down"), up: () => events.push("up") }, {
+  const src = wsSource("wss://test", { note: (m, n) => events.push(`note ${m} ${n.sig}`), down: () => events.push("down"), up: () => events.push("up"), clock: () => undefined }, {
     ws: () => {
       const f: Fake = { sent: [], onopen: null, onmessage: null, onclose: null, onerror: null, send: (s) => void f.sent.push(s), close: () => undefined };
       sockets.push(f);
@@ -457,11 +465,14 @@ test("card helper-live-bars-no-503: a held token's tape and live candles (limit 
     // the held tape, as_of_ms its last read; while the gap is unread it claims no reach (card token-stats-count-every-trade)
     const { whole_ms, ...held } = JSON.parse(tape0.body) as Record<string, unknown>;
     assert.equal(whole_ms, 0, "the walk listed the mint's every signature");
-    assert.deepEqual(JSON.parse(a.body), held, "the held tape, as_of_ms its last read, and no reach while a gap is unread");
+    // and filling while the gap is unread: behind the chain, no complete list (card
+    // every-tape-and-chart-says-filling-behind-the-head, SOL_BEHIND_MS)
+    const { trades, src, as_of_ms } = held;
+    assert.deepEqual(JSON.parse(a.body), { trades, filling: true, src, as_of_ms }, "the held tape, as_of_ms its last read, filling and no reach while a gap is unread");
     assert.equal(a.asOfMs, readAt);
     const c = await t.candles(MINT, "1m", null, 2);
     assert.equal(c.status, 200, c.body);
-    assert.equal(c.body, bars0.body, "the held bars, as_of_ms their last read");
+    assert.deepEqual(JSON.parse(c.body), { ...JSON.parse(bars0.body), filling: true }, "the held bars, as_of_ms their last read, filling");
   }
 
   rpcUp = true;
@@ -861,6 +872,8 @@ test("card helper-listed-charts-own-reads: a listed coin off pump.fun (SPYx, Ray
   // no history and no pool tape: the bar and the row can only be ours
   const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === SPYX, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
   assert.equal((await t.trades(SPYX, 50)).status, 200);
+  on!.clock(11, TS); // the stream's clock for the notes' slots (card sol-tape-in-order)
+  on!.clock(10, TS);
   on!.note(SPYX, { sig: "C1", slot: 10, err: false, logs: V.txs["clmm-buy"]!.result.meta.logMessages });
   // a route that only mentions SPYX's neighbours (SOL into SOL/Xs3eBt, then an Orca pool for AMZN): no SPYx trade
   on!.note(SPYX, { sig: "C2", slot: 11, err: false, logs: V.txs["clmm-sol-in"]!.result.meta.logMessages });
@@ -868,7 +881,7 @@ test("card helper-listed-charts-own-reads: a listed coin off pump.fun (SPYx, Ray
   const a = JSON.parse((await t.trades(SPYX, 50)).body) as { trades: unknown[]; src: string };
   assert.equal(a.src, "chain");
   // SPYx is the pool's token 1: the trader paid 2,082,875,407 lamports of token 0 for 0.19699205 SPYx, a buy, dated by
-  // its arrival (the event has no clock); at 93.42267796 USD per SOL
+  // its block (the event has no clock: its slot's clock the stream sent); at 93.42267796 USD per SOL
   assert.deepEqual(a.trades, [{ t_ms: TS * 1000, side: "b", usd: "194.58779837896492972", amt: "0.19699205", trader: "4GQeEya6ZTwvXre4Br6ZfDyfe2WQMkcDz2QbkJZazVqS", tx: "C1" }]);
   const c = JSON.parse((await t.candles(SPYX, "1s", null, 10)).body) as { candles: [number, string, string, string, string, string][]; src: string };
   assert.equal(c.src, "chain");
@@ -885,15 +898,24 @@ test("card helper-listed-charts-own-reads: a Raydium CPMM trade names its own mi
   const FCAT = "2YPWT4QK1Why57mxBZGwBAFckBC4nLwEAL2t6CcCQtvw";
   const WXMR = "WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp";
   let on: SourceEvents | null = null;
-  // the rpc answers the SOL price and the two mints only: a pool read would throw
-  const t = createSolanaTrades({ fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [FCAT]: 6, [WXMR]: 12 }), now: () => TS * 1000, listed: async (m) => m === FCAT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: async (m) => (m === WXMR ? "300" : null), tickMs: 0 });
+  // the rpc answers the SOL price and the two mints only: a CPMM pool read would throw. The route's first hops cross
+  // Meteora DLMM (card index-sol-trades-2), so the transaction is read whole, and its DLMM pool answers no account
+  const DLMM_POOL = "BFKBQT4yFZPtzyttHQayNmjDJYduvFaPXuytMgnaqexV";
+  const chain = rpcFetch({ sigs: () => [], txs: { F1: V.txs["cpmm-buy-fee"]!.result }, price: 9_342_267_796n, pub: TS, slot: 100 }, { [FCAT]: 6, [WXMR]: 12 });
+  const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    if (req.method === "getAccountInfo" && req.params[0] === DLMM_POOL) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: null } }));
+    return chain(url, init);
+  };
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === FCAT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: async (m) => (m === WXMR ? "300" : null), tickMs: 0 });
   assert.equal((await t.trades(FCAT, 50)).status, 200);
   on!.note(FCAT, { sig: "F1", slot: 10, err: false, logs: V.txs["cpmm-buy-fee"]!.result.meta.logMessages });
   await settle();
   const a = JSON.parse((await t.trades(FCAT, 50)).body) as { trades: unknown[]; src: string };
   assert.equal(a.src, "chain");
-  // the pool paid 3,264,281.114937 FCAT for 0.114146586323 of its quote coin at 300 USD; CPMM's event names no trader
-  assert.deepEqual(a.trades, [{ t_ms: TS * 1000, side: "b", usd: "34.2439758969", amt: "3264281.114937", trader: null, tx: "F1" }]);
+  // the pool paid 3,264,281.114937 FCAT for 0.114146586323 of its quote coin at 300 USD; CPMM's event names no trader;
+  // dated by the transaction's block, read whole
+  assert.deepEqual(a.trades, [{ t_ms: 1794785264_000, side: "b", usd: "34.2439758969", amt: "3264281.114937", trader: null, tx: "F1" }]);
   t.stop();
 });
 
@@ -911,6 +933,7 @@ test("card helper-listed-charts-own-reads: a Raydium LaunchLab coin's buy reache
     let on: SourceEvents | null = null;
     const t = createSolanaTrades({ fetch: answer(owner), now: () => TS * 1000, listed: async (m) => m === FLOYD, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
     await t.trades(FLOYD, 50);
+    on!.clock(10, TS); // the slot's clock (card sol-tape-in-order)
     on!.note(FLOYD, { sig: "L1", slot: 10, err: false, logs: V.txs["launchlab-buy"]!.result.meta.logMessages });
     await settle();
     const rows = (JSON.parse((await t.trades(FLOYD, 50)).body) as { trades: unknown[] }).trades;
@@ -958,6 +981,131 @@ test("card helper-listed-charts-own-reads: bars of ours with the history before 
   const full = JSON.parse((await t.candles(MINT, "1m", null, 500)).body);
   t.stop();
   assert.deepEqual([full.candles.length, full.src, full.filling], [3, "chain,geckoterminal", undefined]);
+});
+
+// card app-chart-check-inside-its-bound: live helper 207, 19 Nov 17:26-17:30Z, EHFrCL6p...pump had 7 signatures on
+// public RPC and its trades answered whole_ms 0, yet its 1m chart (limit 300) said filling for 4 min 21 s: a tape that
+// holds every trade from the mint's first signature asked the history anyway (its refusal said filling) and queued a read
+// back of nothing behind other coins' (filling until its turn). The same coin with its read back to the first signature
+// done is whole too, whatever the history answers.
+test("card app-chart-check-inside-its-bound: a chart whose tape holds every trade from the mint's first signature is the coin's whole chart: no history asked, no read back, never filling, whatever the history answers (red at 0092e5692: filling while the history refused)", async () => {
+  // its whole life: 3 signatures, every one read by the first walk
+  const f = botFlood(3, () => true);
+  let asked = 0;
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: f.sigs, txs: f.txs, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 }),
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async () => (asked++, { status: 429, body: '{"error":{"code":"rate_limited"}}', retryAfterS: 30 }),
+    tickMs: 0,
+  });
+  const tape = JSON.parse((await t.trades(MINT, 50)).body);
+  await settle();
+  assert.equal(JSON.parse((await t.trades(MINT, 50)).body).whole_ms, 0, "the tape: every trade from the first signature");
+  asked = 0;
+  const a = JSON.parse((await t.candles(MINT, "1m", null, 300)).body);
+  await settle();
+  const b = JSON.parse((await t.candles(MINT, "1m", null, 300)).body);
+  t.stop();
+  assert.ok(tape.trades.length > 0);
+  assert.ok(a.candles.length > 0, "its bars");
+  assert.deepEqual([a.filling, a.src, b.filling, asked], [undefined, "chain", undefined, 0], "whole: not filling, src chain, no history asked");
+  assert.equal(f.asked.filter((l) => l === 1_000).length, 0, "no read back page asked");
+});
+
+test("card app-chart-check-inside-its-bound: a read back that reaches the mint's first signature leaves a whole chart: not filling once done, whatever the history answers; a walk that left a transaction unread is no whole chart (filling while the history refuses)", async () => {
+  for (const unread of [false, true]) {
+    // 40 successful signatures: the walk reads the newest 30, the read back the 10 before them, to the first
+    const f = botFlood(40, () => true);
+    const missing = f.list[5]!.signature;
+    const txs = unread ? { ...f.txs, [missing]: null } : f.txs;
+    const t = createSolanaTrades({
+      fetch: rpcFetch({ sigs: f.sigs, txs, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 }),
+      now: () => TS * 1000,
+      listed: async (m) => m === MINT,
+      rpcs: ["https://rpc.test"],
+      source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+      history: async () => ({ status: 429, body: '{"error":{"code":"rate_limited"}}', retryAfterS: 30 }),
+      tickMs: 0,
+    });
+    await t.trades(MINT, 50);
+    await settle();
+    let a = JSON.parse((await t.candles(MINT, "1m", null, 300)).body);
+    assert.equal(a.filling, true, "reading back: filling");
+    for (let i = 0; i < 50 && f.asked.filter((l) => l === 1_000).length === 0; i++) await settle();
+    for (let i = 0; i < 10; i++) await settle();
+    a = JSON.parse((await t.candles(MINT, "1m", null, 300)).body);
+    t.stop();
+    assert.equal(a.filling, unread ? true : undefined, unread ? "a transaction the walk left unread: still short while the history refuses" : "read back to the first signature: whole");
+  }
+});
+
+// card app-chart-check-inside-its-bound: live helper 207, 19 Nov 17:26-17:30Z, ygq5gP...pump (10 trades before the
+// walk's newest 30) said filling 3 min 18 s and EHFrCL...pump (an empty page to read back) 4 min 21 s: the read backs ran
+// BACK_PARALLEL at once, each to its end (up to BACK_TX_MAX transactions), the rest queued behind them. Their lanes are
+// now taken a step at a time (a signature page, a TX_PARALLEL chunk), in the order asked.
+test("card app-chart-check-inside-its-bound: a small read back asked behind BACK_PARALLEL large ones is done while they still read: their lanes go a step at a time, in turn (red at 0092e5692: queued until one large read back ended)", async () => {
+  const remint = (body: typeof BUY.result, mint: Buffer) => {
+    const m = Buffer.from(b58decode(MINT)!);
+    const logMessages = body.meta.logMessages.map((l) => {
+      if (!l.startsWith("Program data: ")) return l;
+      const b = Buffer.from(l.slice(14), "base64");
+      const i = b.indexOf(m);
+      if (i >= 0) mint.copy(b, i);
+      return `Program data: ${b.toString("base64")}`;
+    });
+    return { ...body, meta: { ...body.meta, logMessages } };
+  };
+  const coin = (n: number, tag: string, body: unknown) => {
+    const list = Array.from({ length: n }, (_, i) => ({ signature: `${tag}${String(i).padStart(5, "0")}`, slot: 465_000_000 - i, err: null }));
+    return { list, txs: Object.fromEntries(list.map((x) => [x.signature, body])) };
+  };
+  const big = [1, 2].map((k) => {
+    const bytes = Buffer.alloc(32, k + 10);
+    return { mint: b58encode(bytes), ...coin(1_030, `big${k}`, remint(BUY.result, bytes)) };
+  });
+  const small = { mint: MINT, ...coin(31, "small", BUY.result) };
+  const coins = [...big, small];
+  const by = new Map(coins.map((c) => [c.mint, c]));
+  const txs = Object.assign({}, ...coins.map((c) => c.txs)) as Record<string, unknown>;
+  const base = rpcFetch({ sigs: () => [], txs, price: 9_342_267_796n, pub: TS, slot: 100 }, Object.fromEntries(coins.map((c) => [c.mint, 6])));
+  const t = createSolanaTrades({
+    fetch: async (url: string, init: RequestInit) => {
+      const req = JSON.parse(String(init.body)) as { method: string; params: [string, Record<string, unknown>] };
+      if (req.method === "getSignaturesForAddress") {
+        const c = by.get(req.params[0])!;
+        const q = req.params[1];
+        const from = q.before === undefined ? 0 : c.list.findIndex((s) => s.signature === q.before) + 1;
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: c.list.slice(from, from + (q.limit as number)) }), { status: 200 });
+      }
+      // a large coin's transaction takes a few ms, as an RPC's does
+      if (req.method === "getTransaction" && String(req.params[0]).startsWith("big")) await new Promise((r) => setTimeout(r, 3));
+      return base(url, init);
+    },
+    now: () => TS * 1000,
+    listed: async (m) => by.has(m),
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async () => ({ status: 404, body: '{"error":{"code":"not_found"}}' }),
+    tickMs: 0,
+  });
+  const chart = async (m: string) => JSON.parse((await t.candles(m, "1m", null, 300)).body) as { filling?: boolean };
+  for (const c of coins) await t.trades(c.mint, 50);
+  await settle();
+  // the two large read backs asked first, then the small one
+  for (const c of big) assert.equal((await chart(c.mint)).filling, true);
+  await settle();
+  let s = await chart(small.mint);
+  for (let i = 0; i < 100 && s.filling === true; i++) {
+    await settle();
+    s = await chart(small.mint);
+  }
+  const bigs = await Promise.all(big.map((c) => chart(c.mint)));
+  t.stop();
+  assert.equal(s.filling, undefined, "the small read back done");
+  assert.deepEqual(bigs.map((x) => x.filling), [true, true], "while both large ones still read");
 });
 
 // card helper-listed-charts-own-reads round 3: a listed coin with no vendor bars charts from its own signatures read back.
@@ -1096,7 +1244,9 @@ test("card helper-listed-charts-own-reads: a listed coin's first chart read with
   let walked = false;
   let release = () => undefined as void;
   const gate = new Promise<void>((r) => (release = r));
-  const fast = rpcFetch({ sigs: () => [{ signature: BUY.signature, slot: 465_000_000, err: null }], txs: { [BUY.signature]: BUY.result }, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  // a coin older than the walk: its newest COLD_SIGS signatures, the buy and 29 with no trade, not its first
+  const older = noTrades(COLD_SIGS - 1, 465_000_000, "older");
+  const fast = rpcFetch({ sigs: (p) => (p.before === undefined ? [{ signature: BUY.signature, slot: 465_000_000, err: null }, ...older.list] : []), txs: { [BUY.signature]: BUY.result, ...older.txs }, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
   const held = [[TS - 7_200, "1", "1", "1", "1", "5"], [TS - 3_600, "1", "1", "1", "1", "5"]];
   const t = createSolanaTrades({
     fetch: async (url, init) => {
@@ -1141,4 +1291,289 @@ test("card token-stats-count-every-trade: the first walk's reach: 0 from the min
   assert.equal(await reach({ sigs: (p) => (p.before === undefined ? sigsOf(COLD_SIGS) : []), txs: txs(COLD_SIGS), price: 9_342_267_796n, pub: TS, slot: 100 }), (TS - 100 - (COLD_SIGS - 1)) * 1000 + 1000);
   // the whole list, one transaction not read: a trade may be missing at its second, so the reach is past it
   assert.equal(await reach({ sigs: () => sigsOf(5), txs: txs(5, [3]), price: 9_342_267_796n, pub: TS, slot: 100 }), (TS - 103) * 1000 + 1000);
+});
+
+// card sol-tape-trader-is-the-events-user: the recorded pump-buy (a router 6Vo3 calling the pump.fun curve, its
+// TradeEvent at log line 31) with a second swap of the curve made by the curve's own program inside the trader's buy:
+// the shape of Base tx 0xa1782de0 (a v4 pool's hook selling its fees in its own pool inside the trader's sell, card
+// market-reads-hold-under-load), on the Solana venue whose real transaction the fixture copies. No decoded venue does
+// this on mainnet today; the next one may.
+const OWN_USER = new Uint8Array(32).fill(7); // the program's own account (a PDA in a real one)
+/** The recorded buy's event, turned into a sell of a tenth of its legs by `user`. */
+function ownSell(user: Uint8Array): string {
+  const line = BUY.result.meta.logMessages[31]!;
+  const b = Buffer.from(line.slice("Program data: ".length), "base64");
+  b.writeBigUInt64LE(b.readBigUInt64LE(8 + 32) / 10n, 8 + 32); // sol_amount
+  b.writeBigUInt64LE(b.readBigUInt64LE(8 + 40) / 10n, 8 + 40); // token_amount
+  b[8 + 48] = 0; // is_buy: a sell
+  Buffer.from(user).copy(b, 8 + 49); // user
+  return `Program data: ${b.toString("base64")}`;
+}
+const PUMP_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+/** The curve's own sell, invoked by the curve at `depth`, its event sent to itself as Anchor's event CPI. */
+const ownFrame = (depth: number, user: Uint8Array) => [
+  `Program ${PUMP_ID} invoke [${depth}]`,
+  "Program log: Instruction: Sell",
+  ownSell(user),
+  `Program ${PUMP_ID} invoke [${depth + 1}]`,
+  `Program ${PUMP_ID} consumed 2170 of 200000 compute units`,
+  `Program ${PUMP_ID} success`,
+  `Program ${PUMP_ID} consumed 40000 of 250000 compute units`,
+  `Program ${PUMP_ID} success`,
+];
+
+test("card sol-tape-trader-is-the-events-user: a swap the venue's own program makes inside the trader's swap is off the tape and in the bars; each row is named by its own event's user", async () => {
+  const logs = BUY.result.meta.logMessages;
+  // nested: the curve's own sell inside the curve's frame of the trader's buy (before the curve's own end, line 35)
+  const nested = [...logs.slice(0, 35), ...ownFrame(3, OWN_USER), ...logs.slice(35)];
+  assert.deepEqual(fromLogs(logs).truncated, false);
+  assert.deepEqual(fromLogs(nested).truncated, false, "a well-formed invoke stack");
+  // apart: the same sell as its own instruction after the router's (one transaction, two traders, as two signers make it)
+  const apart = [...logs.slice(0, 39), ...ownFrame(1, OWN_USER), ...logs.slice(39)];
+  const run = async (lines: string[]) => {
+    const s = setup({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 });
+    await s.t.trades(MINT, 50);
+    s.on().note(MINT, { sig: BUY.signature, slot: 465_000_000, err: false, logs: lines });
+    await settle();
+    const bars = JSON.parse((await s.t.candles(MINT, "1s", null, 10)).body) as { candles: [number, string, string, string, string, string][] };
+    return { rows: (await tape(s.t)).trades, bars: bars.candles };
+  };
+  const one = await run(nested);
+  // one trade: the trader's buy, named by its event's user
+  assert.deepEqual(one.rows, [{ t_ms: TS * 1000, side: "b", usd: "9.18540990521034652", amt: "2156510.335886", trader: "4ZvukwqXc2AFAHcuvW8VrKD9j3zGHuoqW4hvEQfANH2n", tx: BUY.signature }]);
+  const two = await run(apart);
+  // two traders' trades, each named by its own event's user, never the transaction's first
+  assert.deepEqual(two.rows.map((r) => [r.side, r.trader]), [["s", b58encode(OWN_USER)], ["b", "4ZvukwqXc2AFAHcuvW8VrKD9j3zGHuoqW4hvEQfANH2n"]]);
+  // the bars hold the program's own swap, price and volume both: the same bars as when it is a trader's
+  assert.deepEqual(one.bars, two.bars);
+  assert.notEqual(one.bars[0]![5], "9.18540990521034652", "the own swap's volume is in the bar");
+});
+
+// card index-sol-trades-2: the Meteora venues (fixtures/sol-meteora-txs.json, recorded mainnet). Their events are in the
+// inner instructions only, so a stream transaction whose log names one running is read whole; a walk reads it whole
+// anyway. Each pool is read from its own program (a DBC pool and its config both).
+const MT = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-meteora-txs.json"), "utf8")) as { txs: Record<string, { signature: string; result: Record<string, unknown> & { slot: number; meta: { logMessages: string[] } } }>; pools: Record<string, { owner: string; data: string }> };
+const MTS = 1795011900;
+function meteoraChain(mints: Record<string, number>, opts: { sigs?: (p: Record<string, unknown>) => unknown[]; pools?: Record<string, { owner: string; data: string }>; quoteUsd?: (m: string) => Promise<string | null> } = {}) {
+  const pools = { ...MT.pools, ...opts.pools };
+  const txs = Object.fromEntries(Object.values(MT.txs).map((x) => [x.signature, x.result]));
+  const reads: string[] = [];
+  const inner = rpcFetch({ sigs: opts.sigs ?? (() => []), txs, price: 9_342_267_796n, pub: MTS, slot: 100 }, mints);
+  const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    reads.push(`${req.method} ${req.params[0]}`);
+    const p = pools[req.params[0]];
+    if (req.method === "getAccountInfo" && p !== undefined) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: { owner: p.owner, data: [p.data, "base64"] } } }));
+    // a route's other pools (dlmm-buy's PumpSwap hop) not recorded: no such account
+    if (req.method === "getAccountInfo" && req.params[0] !== PYTH_SOL_USD && !(req.params[0] in mints)) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: null } }));
+    return inner(url, init);
+  };
+  let on: SourceEvents | null = null;
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => MTS * 1000, listed: async (m) => m in mints, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: opts.quoteUsd, tickMs: 0 });
+  const rows = async (m: string) => (JSON.parse((await t.trades(m, 50)).body) as { trades: { t_ms: number; side: string; usd: string; amt: string; trader: string | null; tx: string }[] }).trades;
+  const stream = (m: string, k: string) => on!.note(m, { sig: MT.txs[k]!.signature, slot: MT.txs[k]!.result.slot, err: false, logs: MT.txs[k]!.result.meta.logMessages });
+  return { t, rows, stream, reads };
+}
+const TTW_MINT = "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo";
+const MOON = "8HuYsEpBS2WZACBCbAKcoh8XmbNYYqRjoJrCqC3Cmoon";
+const C467 = "467cTkm8GXBA96QDGG5Spm1WbpVHp2LnPA1VAcrMctem";
+const C26E = "26Ekp9mYjJS3CjFMHKkuTS4uP75oysve4A4c8CPeayBG";
+
+test("card index-sol-trades-2: a Meteora coin's stream trades (DLMM, DBC, DAMM v2) reach its tape and bars from the transaction's inner instructions, each pool read from its own program", async () => {
+  const c = meteoraChain({ [TTW_MINT]: 6, [MOON]: 6, [C467]: 6 });
+  for (const m of [TTW_MINT, MOON, C467]) assert.equal((await c.t.trades(m, 50)).status, 200);
+  c.stream(TTW_MINT, "dlmm-buy");
+  c.stream(MOON, "dbc-buy-usdc");
+  c.stream(C467, "damm-sell");
+  await settle();
+  // DLMM: 0.8 SOL at 93.42267796 USD for 0.276952 TTW (the pool's X), dated by its block (the event has no clock)
+  assert.deepEqual(await c.rows(TTW_MINT), [{ t_ms: 1795011852_000, side: "b", usd: "74.738142368", amt: "0.276952", trader: "GPCp5rTs2j6PQG51cUBRejspiQW3VMY1T4BUDY9vZBPY", tx: MT.txs["dlmm-buy"]!.signature }]);
+  // DBC: 4.846455 USDC (its config's quote) for 140,195.474297 of the pool's base, at the event's clock
+  assert.deepEqual(await c.rows(MOON), [{ t_ms: 1795011854_000, side: "b", usd: "4.846455", amt: "140195.474297", trader: null, tx: MT.txs["dbc-buy-usdc"]!.signature }]);
+  // DAMM v2: the token is the pool's B, so the trade told as SOL (A) sees it is turned round: a sell of 2,340,517.796257
+  // for 0.698738224 SOL
+  assert.deepEqual(await c.rows(C467), [{ t_ms: 1795011890_000, side: "s", usd: "65.27799607909434304", amt: "2340517.796257", trader: null, tx: MT.txs["damm-sell"]!.signature }]);
+  for (const m of [TTW_MINT, MOON, C467]) assert.equal((JSON.parse((await c.t.candles(m, "1s", null, 10)).body) as { candles: unknown[] }).candles.length, 1, m);
+  // each transaction read whole once; each pool (and the DBC pool's config) read once
+  for (const k of ["dlmm-buy", "dbc-buy-usdc", "damm-sell"]) assert.equal(c.reads.filter((r) => r === `getTransaction ${MT.txs[k]!.signature}`).length, 1, k);
+  for (const a of ["E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN", "2vHhAP3Z2uVHvjeSgDPrckXsmYByd7hGzVuK5UQ6ucMV", "FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM", "4Fk2beWHZ3DYn8cLkRs31dP6eTw7Vwpq7kNDSNvW8dWz"]) assert.equal(c.reads.filter((r) => r === `getAccountInfo ${a}`).length, 1, a);
+  c.t.stop();
+});
+
+test("card index-sol-trades-2: a Meteora coin's first walk reads its trades from each transaction's inner instructions", async () => {
+  const sig = MT.txs["damm-buy"]!.signature;
+  const c = meteoraChain({ [C26E]: 6 }, { sigs: () => [{ signature: sig, slot: MT.txs["damm-buy"]!.result.slot, err: null, blockTime: 1795011890 }] });
+  await c.t.trades(C26E, 50);
+  await settle();
+  // 1.37241791 SOL for 164,412.686233 of the pool's A
+  assert.deepEqual(await c.rows(C26E), [{ t_ms: 1795011890_000, side: "b", usd: "128.2149564324662636", amt: "164412.686233", trader: null, tx: sig }]);
+  c.t.stop();
+});
+
+test("card index-sol-trades-2: a Meteora coin quoted in another coin is priced at that coin's USD price; a config another program owns gives no trade", async () => {
+  // the recorded DLMM pool with its Y named another coin (QCOIN, 9 decimals, 2 USD)
+  const QCOIN = "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh";
+  const lb = Buffer.from(MT.pools["E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN"]!.data, "base64");
+  keyInto(QCOIN, lb, 120);
+  const c = meteoraChain({ [TTW_MINT]: 6, [QCOIN]: 9 }, { pools: { E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN: { owner: MT.pools["E8NTyKJzdaTHSftbkEZPHQ1a32s58z2bR5jZ7WxAFnWN"]!.owner, data: lb.toString("base64") } }, quoteUsd: async (m) => (m === QCOIN ? "2" : null) });
+  await c.t.trades(TTW_MINT, 50);
+  c.stream(TTW_MINT, "dlmm-buy");
+  await settle();
+  // 0.8 QCOIN at 2 USD for 0.276952 TTW
+  assert.deepEqual((await c.rows(TTW_MINT)).map((r) => [r.side, r.usd, r.amt]), [["b", "1.6", "0.276952"]]);
+  c.t.stop();
+  // the DBC config answered as another program's account: no pair, no trade
+  const cfg = MT.pools["FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM"]!;
+  const f = meteoraChain({ [MOON]: 6 }, { pools: { FbKf76ucsQssF7XZBuzScdJfugtsSKwZFYztKsMEhWZM: { owner: "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", data: cfg.data } } });
+  await f.t.trades(MOON, 50);
+  f.stream(MOON, "dbc-buy-usdc");
+  await settle();
+  assert.deepEqual(await f.rows(MOON), []);
+  f.t.stop();
+});
+/** Writes a base58 key's 32 bytes into `b` at `o`. */
+function keyInto(k: string, b: Buffer, o: number): void {
+  let n = 0n;
+  for (const ch of k) n = n * 58n + BigInt("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".indexOf(ch));
+  Buffer.from(n.toString(16).padStart(64, "0"), "hex").copy(b, o);
+}
+
+// card sol-tape-in-order: a busy coin's tape is newest first by its blocks' times. Recorded mainnet (fixtures/sol-tape-
+// order.json): TTWO's two transactions in slot 471007315 (block time 1795020581 on api.mainnet-beta and publicnode), an
+// Orca buy whose event has no clock, then a DLMM sell read whole. The deployed helper c775de255 dated the Orca row by the
+// second the stream sent it (1795020583) and the DLMM row by its block: "trade 29 is newer than trade 28" at 16:49:43Z.
+// The DLMM transaction's two addressTableLookups are left out (gitleaks reads their accountKey field as a key; the
+// decoder reads the addresses they load from meta.loadedAddresses, kept).
+const TO = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-tape-order.json"), "utf8")) as { txs: Record<string, { signature: string; result: Record<string, unknown> & { slot: number; blockTime: number; meta: { logMessages: string[] } } }>; pools: Record<string, { owner: string; data: string }> };
+const TO_SLOT = 471007315;
+const TO_BLOCK = 1795020581;
+function orderChain(opts: { sigs?: (p: Record<string, unknown>) => unknown[]; txs?: Record<string, unknown>; blockTimes?: Record<number, number>; noHistory?: boolean } = {}) {
+  const txs = { ...Object.fromEntries(Object.values(TO.txs).map((x) => [x.signature, x.result])), ...opts.txs };
+  const reads: string[] = [];
+  let nowMs = (TO_BLOCK + 2) * 1000; // the stream's note arrives 2 s after its block, as measured from the helper
+  const inner = rpcFetch({ sigs: opts.sigs ?? (() => []), txs, price: 9_342_267_796n, pub: TO_BLOCK, slot: 100 }, { [TTW_MINT]: 6 });
+  const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string | number] };
+    reads.push(`${req.method} ${req.params[0]}`);
+    if (req.method === "getBlockTime") {
+      const t = opts.blockTimes?.[req.params[0] as number];
+      return new Response(JSON.stringify(t === undefined ? { jsonrpc: "2.0", id: 1, error: { code: -32009, message: "slot skipped" } } : { jsonrpc: "2.0", id: 1, result: t }));
+    }
+    const p = TO.pools[req.params[0] as string];
+    if (req.method === "getAccountInfo" && p !== undefined) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: { owner: p.owner, data: [p.data, "base64"] } } }));
+    // the routes' PumpSwap pools not recorded: no such account
+    if (req.method === "getAccountInfo" && req.params[0] !== PYTH_SOL_USD && req.params[0] !== TTW_MINT) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: null } }));
+    return inner(url, init);
+  };
+  let on: SourceEvents | null = null;
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => nowMs, listed: async (m) => m === TTW_MINT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), ...(opts.noHistory ? { history: async () => ({ status: 404, body: '{"error":{"code":"not_found"}}' }) } : {}), tickMs: 0 });
+  const rows = async () => (JSON.parse((await t.trades(TTW_MINT, 50)).body) as { trades: { t_ms: number; tx: string }[] }).trades;
+  const stream = (k: string) => on!.note(TTW_MINT, { sig: TO.txs[k]!.signature, slot: TO.txs[k]!.result.slot, err: false, logs: TO.txs[k]!.result.meta.logMessages });
+  return { t, rows, stream, reads, on: () => on!, at: (ms: number) => void (nowMs = ms) };
+}
+/** Newest first: no row dated after the row above it. */
+const inOrder = (rows: { t_ms: number }[]): boolean => rows.every((r, i) => i === 0 || r.t_ms <= rows[i - 1]!.t_ms);
+
+test("card sol-tape-in-order: a stream trade whose event has no clock is dated by its block's clock, so it merges into a held tape in order (red at c775de255: dated by its arrival, 2 s late, above a DLMM row of its own block)", async () => {
+  const c = orderChain();
+  await c.t.trades(TTW_MINT, 50);
+  // the stream's Clock sysvar names the slot's clock (absent before this card: the note was dated by its arrival)
+  c.on().clock?.(TO_SLOT, TO_BLOCK);
+  c.stream("orca-older");
+  c.stream("dlmm-newer");
+  await settle();
+  const rows = await c.rows();
+  assert.deepEqual(rows.map((r) => [r.tx, r.t_ms]), [[TO.txs["dlmm-newer"]!.signature, TO_BLOCK * 1000], [TO.txs["orca-older"]!.signature, TO_BLOCK * 1000]]);
+  assert.ok(inOrder(rows));
+  // the Orca trade carried in the log needs no read of its transaction; the DLMM one is read whole once
+  assert.equal(c.reads.filter((r) => r.startsWith("getTransaction")).length, 1);
+  assert.equal(c.reads.filter((r) => r.startsWith("getBlockTime")).length, 0);
+  c.t.stop();
+});
+
+test("card sol-tape-in-order: a stream trade whose slot's clock the stream did not send (a later slot's came) is dated by the slot's block time read once, never by its arrival (red at c775de255)", async () => {
+  const c = orderChain({ blockTimes: { [TO_SLOT]: TO_BLOCK } });
+  await c.t.trades(TTW_MINT, 50);
+  c.on().clock?.(TO_SLOT + 1, TO_BLOCK);
+  c.stream("orca-older");
+  c.stream("dlmm-newer");
+  await settle();
+  const rows = await c.rows();
+  assert.deepEqual(rows.map((r) => r.t_ms), [TO_BLOCK * 1000, TO_BLOCK * 1000]);
+  assert.equal(c.reads.filter((r) => r === `getBlockTime ${TO_SLOT}`).length, 1, "the slot's block time read once");
+  c.t.stop();
+});
+
+test("card sol-tape-in-order: a walk's transaction answered with no block time, its signature listed with none, is dated by its slot's block time, never by the walk's clock (red at c775de255: dated now)", async () => {
+  const orca = TO.txs["orca-older"]!;
+  const c = orderChain({
+    sigs: (p) => (p.before === undefined ? [{ signature: orca.signature, slot: TO_SLOT, err: null }] : []),
+    txs: { [orca.signature]: { ...orca.result, blockTime: null } },
+    blockTimes: { [TO_SLOT]: TO_BLOCK },
+  });
+  c.on().clock?.(TO_SLOT + 1, TO_BLOCK);
+  await c.t.trades(TTW_MINT, 50);
+  await settle();
+  assert.deepEqual((await c.rows()).map((r) => [r.tx, r.t_ms]), [[orca.signature, TO_BLOCK * 1000]]);
+  c.t.stop();
+});
+
+test("card sol-tape-in-order: a read back's transaction answered with no block time, its signature listed with none, is dated by its slot's block time: its bar is its own minute, never the read's (red at c775de255: the minute it was read)", async () => {
+  const orca = TO.txs["orca-older"]!;
+  const dlmm = TO.txs["dlmm-newer"]!;
+  // the walk holds the DLMM trade (its page full with 29 that hold no trade, so not the mint's first); the read back
+  // before them finds the Orca one, answered with no block time
+  const older = noTrades(COLD_SIGS - 1, TO_SLOT + 1, "quiet");
+  const oldest = older.list.at(-1)!.signature;
+  const c = orderChain({
+    sigs: (p) => (p.before === undefined ? [{ signature: dlmm.signature, slot: TO_SLOT, err: null, blockTime: TO_BLOCK }, ...older.list.map((x) => ({ ...x, slot: TO_SLOT, blockTime: TO_BLOCK }))] : p.before === oldest ? [{ signature: orca.signature, slot: TO_SLOT, err: null }] : []),
+    txs: { [orca.signature]: { ...orca.result, blockTime: null }, ...Object.fromEntries(Object.entries(older.txs).map(([k, v]) => [k, { ...v, slot: TO_SLOT }])) },
+    blockTimes: { [TO_SLOT]: TO_BLOCK },
+    noHistory: true,
+  });
+  c.at((TO_BLOCK + 90) * 1000); // read a minute and a half after the block, the Pyth price still in force
+  c.on().clock?.(TO_SLOT + 300, TO_BLOCK + 90);
+  const t = c.t;
+  let bars = JSON.parse((await t.candles(TTW_MINT, "1m", null, 500)).body) as { candles: [number, ...string[]][]; filling?: boolean };
+  for (let i = 0; i < 100 && bars.filling === true; i++) {
+    await settle();
+    bars = JSON.parse((await t.candles(TTW_MINT, "1m", null, 500)).body);
+  }
+  t.stop();
+  assert.equal(bars.filling, undefined, "read back");
+  // one bar, the block's minute, holding both trades: the walk's DLMM sell (1.010003 USD) and the read back's Orca buy
+  // (1.158187 USD, the stream test's rows); misdated by the read's minute, the read back's bar fell after ours and was
+  // not joined: 1.010003 alone
+  assert.deepEqual(bars.candles.map((b) => [b[0], b[5]]), [[TO_BLOCK - (TO_BLOCK % 60), "2.16819"]], "both trades in their block's minute");
+});
+
+test("card sol-tape-in-order: the stream subscribes the Clock sysvar at confirmed and passes on each slot's clock, taken only whole: the sysvar program as owner, 40 bytes, the slot its context's", () => {
+  type W = { sent: string[]; onopen: (() => void) | null; onmessage: ((m: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; send(s: string): void; close(): void };
+  let w: W | null = null;
+  const clocks: [number, number][] = [];
+  const src = wsSource("wss://stream.test", { note: () => undefined, down: () => undefined, up: () => undefined, clock: (s, t) => void clocks.push([s, t]) }, {
+    ws: () => (w = { sent: [], onopen: null, onmessage: null, onclose: null, onerror: null, send: (s) => void w!.sent.push(s), close: () => undefined }),
+  });
+  void src.watch(MINT).catch(() => undefined);
+  w!.onopen!();
+  const sub = w!.sent.map((s) => JSON.parse(s) as { id: number; method: string; params?: unknown[] }).find((m) => m.method === "accountSubscribe")!;
+  assert.deepEqual(sub.params, [SYSVAR_CLOCK, { encoding: "base64", commitment: "confirmed" }]);
+  w!.onmessage!({ data: JSON.stringify({ jsonrpc: "2.0", id: sub.id, result: 77 }) });
+  /** A Clock account at `slot` with unix time `t`. */
+  const body = (slot: number, t: number, len = 40) => {
+    const b = Buffer.alloc(len);
+    b.writeBigUInt64LE(BigInt(slot), 0);
+    if (len >= 40) b.writeBigInt64LE(BigInt(t), 32);
+    return b.toString("base64");
+  };
+  const note = (subscription: number, ctx: number, owner: string, data: string) => w!.onmessage!({ data: JSON.stringify({ jsonrpc: "2.0", method: "accountNotification", params: { subscription, result: { context: { slot: ctx }, value: { owner, data: [data, "base64"] } } } }) });
+  const SYSVAR = "Sysvar1111111111111111111111111111111111111";
+  note(77, TO_SLOT, SYSVAR, body(TO_SLOT, TO_BLOCK));
+  note(77, TO_SLOT + 1, "SomeoneElse1111111111111111111111111111111", body(TO_SLOT + 1, TO_BLOCK + 9)); // not the sysvar's
+  note(77, TO_SLOT + 2, SYSVAR, body(TO_SLOT + 2, TO_BLOCK + 9, 32)); // short
+  note(77, TO_SLOT + 4, SYSVAR, body(TO_SLOT + 3, TO_BLOCK + 9)); // another slot than its context's
+  note(78, TO_SLOT + 5, SYSVAR, body(TO_SLOT + 5, TO_BLOCK + 9)); // another subscription
+  note(77, TO_SLOT + 6, SYSVAR, body(TO_SLOT + 6, 0)); // no time
+  assert.deepEqual(clocks, [[TO_SLOT, TO_BLOCK]]);
+  src.close();
 });

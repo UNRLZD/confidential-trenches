@@ -1,7 +1,8 @@
 // The live numbers held still (card app-legend-holds-still), on fixtures (run.mjs): the chart's own Legend over a plot
 // of the desktop's and the phone's size, and the desktop's own Footer over a stand-in signing page client. run.mjs
-// drives them with window.__fx: the legend's bars, its crosshair bar and its unit, the footer's SOL and ETH prices,
-// each through values of every length, and reads every layout shift. Test only.
+// drives them with window.__fx: the legend's bars, its crosshair bar and its unit, the footer's SOL and ETH prices, and
+// the token page's own About (LowerPanel.tsx About, drawn from the first paint), each through values of every length,
+// and reads every layout shift. Test only.
 import type { SignpageClient, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
 import { StrictMode, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
@@ -9,6 +10,10 @@ import { MemoryRouter } from "react-router";
 import type { Bar } from "../../src/screens/token/candles.ts";
 import { pricePrecision } from "../../src/screens/token/candles.ts";
 import { Legend } from "../../src/screens/token/TokenPage.tsx";
+import type { MarketRow } from "../../src/screens/discover/fields.ts";
+import { About } from "../../src/screens/token/LowerPanel.tsx";
+import { Row } from "../../src/screens/token/Rail.tsx";
+import type { Tape } from "../../src/screens/token/trades.ts";
 import type { ChartUnit } from "../../src/screens/token/units.ts";
 import { RunLabel } from "../../src/screens/trade/States.tsx";
 import "../../src/screens/trade/trade.css";
@@ -27,9 +32,13 @@ interface Fx {
   eth: number;
   /** The trade box's clock: its Slow counter runs from a tap at 0. */
   now: number;
+  /** The desktop rail's rows (Rail.tsx Row, one slot each, keyed by slot as the rail keys them): MC and 24h change. */
+  rail: { mc: string; chg: number }[];
+  /** About's row fields: the change windows, the 5m tiles, liquidity and 24h volume, the flows' counts. */
+  about: Partial<MarketRow>;
 }
 
-let fx: Fx = { bars: [], at: null, unit: { mc: false, quote: false }, sol: 151.23, eth: 3456, now: 6_000 };
+let fx: Fx = { bars: [], at: null, unit: { mc: false, quote: false }, sol: 151.23, eth: 3456, now: 6_000, rail: [], about: {} };
 const subs = new Set<() => void>();
 const store = {
   subscribe: (f: () => void) => (subs.add(f), () => void subs.delete(f)),
@@ -84,6 +93,34 @@ function Cta() {
   );
 }
 
+const seen = new Map<string, number>();
+const railRow = (i: number, mc: string, chg: number): MarketRow => ({ chain: "solana", token: `T${i}`, symbol: `TK${i}`, name: "", icon: false, price_usd: "0.0012", mc_usd: mc, chg_24h_bps: chg, src: "fixture", as_of_ms: 0, launchpad: null });
+
+function Rail() {
+  const s = useSyncExternalStore(store.subscribe, store.get);
+  if (phone || s.rail.length === 0) return null;
+  return (
+    <aside className="tkr" data-testid="token-rail" data-slim="false" style={{ width: 340 }}>
+      <div className="tkr-rows" role="list">
+        {s.rail.map((x, i) => <Row key={i} r={railRow(i, x.mc, x.chg)} nowMs={0} sel={false} seen={seen} />)}
+      </div>
+    </aside>
+  );
+}
+
+// no trades list: About draws the row's own numbers, as before the page's list lands
+const NO_TAPE: Tape = { trades: [], status: "none" };
+const aboutRow = (p: Partial<MarketRow>): MarketRow => ({ chain: "solana", token: "AB", symbol: "ABOUT", name: "", icon: false, price_usd: "0.0012", mc_usd: "1000", src: "fixture", as_of_ms: 0, launchpad: null, ...p });
+
+function AboutPanel() {
+  const s = useSyncExternalStore(store.subscribe, store.get);
+  return (
+    <div style={phone ? undefined : { width: 440 }}>
+      <About row={aboutRow(s.about)} tape={NO_TAPE} />
+    </div>
+  );
+}
+
 function App() {
   return (
     <SignpageFrame client={client}>
@@ -94,7 +131,9 @@ function App() {
               <Plot />
             </div>
           </div>
+          <Rail />
           <Cta />
+          <AboutPanel />
         </main>
         <Footer read={async () => ({ height: 223_607_563, ms: 233 })} />
       </div>

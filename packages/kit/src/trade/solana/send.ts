@@ -45,9 +45,12 @@ export const SOLANA_SENDER_FAST_URL = "https://sender.helius-rpc.com/fast?swqos_
 // skip_preflight=true"; its examples send params [tx, { encoding }] only). Its preflight from the app's origin answered
 // that origin between 2026-11-02 01:54Z and 01:57Z (date -u before and after the read).
 export const SOLANA_JITO_TRANSACTIONS_URL = "https://mainnet.block-engine.jito.wtf/api/v1/transactions";
-// The public mainnet RPC: https://solana.com/docs/references/clusters (100 requests per 10 s per IP). Its preflight
-// from the app's origin answered that origin between 2026-11-02 01:54Z and 01:57Z (date -u before and after the read).
-export const SOLANA_PUBLIC_RPC_URL = "https://api.mainnet-beta.solana.com";
+// The keyless public RPC a browser's send reaches: PublicNode's (https://solana-rpc.publicnode.com), the signing page's
+// provider A. Solana's own api.mainnet-beta.solana.com refuses a browser: with the signing page's Origin, 2026-11-18
+// 12:03:10-12:03:40Z, its preflight answered 200 but every POST 403 {"code":403,"message":"Access forbidden"} (200 with
+// no Origin), while publicnode answered getHealth and getLatestBlockhash 200 with allow-origin * and served
+// sendTransaction (a 1-byte payload that is no transaction answered "unable to decode tx.Message").
+export const SOLANA_PUBLIC_RPC_URL = "https://solana-rpc.publicnode.com";
 
 /** The paper's rebroadcast interval (T2.1, DESIGN from P4S). */
 export const SOLANA_REBROADCAST_MS = 2_000;
@@ -140,7 +143,7 @@ function queueWith(rpc: SolanaRpc, limit: SolanaRpcLimit): RpcQueue {
   q.limits.set(`${limit.windowMs}/${limit.total}/${limit.perMethod}`, { windowMs: limit.windowMs, total: limit.total, perMethod: limit.perMethod });
   return q;
 }
-function rpcSlot(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): { run: (params: readonly unknown[]) => Promise<unknown>; wait: Promise<void> | null; drop: () => void } {
+function rpcSlot(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): { run: (params: readonly unknown[], signal?: AbortSignal) => Promise<unknown>; wait: Promise<void> | null; drop: () => void } {
   const queue = queueWith(rpc, limit);
   const now = queueNow();
   queue.slots = queue.slots.filter((x) => !x.started || x.t > now - WINDOW_MAX_MS);
@@ -154,9 +157,9 @@ function rpcSlot(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): { run: 
   };
   // The call itself: checked against the calls that went out, then marked started and sent in the same tick, so no
   // other call is let through on a start time this one has not kept (a caller that runs it late waits again).
-  const run = (params: readonly unknown[]): Promise<unknown> => {
+  const run = (params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
     const ms = room();
-    if (ms > 0) return new Promise<void>((r) => setTimeout(r, ms)).then(() => run(params));
+    if (ms > 0) return new Promise<void>((r) => setTimeout(r, ms)).then(() => run(params, signal));
     slot.t = queueNow();
     slot.started = true;
     const was = inSlot;
@@ -164,7 +167,7 @@ function rpcSlot(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): { run: 
     // Stamped again once the call has been handed over: a pause in between (a GC, a slow tick) then makes the call look
     // later, never earlier, than when it left this queue, so the window this queue counts never starts too soon.
     try {
-      return rpc(method, params);
+      return rpc(method, params, signal);
     } finally {
       inSlot = was;
       slot.t = queueNow();
@@ -227,7 +230,7 @@ export function solanaSameProvider(a: SolanaRpc, b: SolanaRpc): boolean {
  *  solanaSameProvider and in the same shared queue, its URL carried. `call` calls the provider once, synchronously: a
  *  paced call of the same queue made synchronously inside a slot's call is that slot's own, so a second one would go
  *  out on the first one's turn, past the queue. */
-export function solanaWrappedRpc(rpc: SolanaRpc, call: (method: string, params: readonly unknown[]) => Promise<unknown>): SolanaRpc {
+export function solanaWrappedRpc(rpc: SolanaRpc, call: (method: string, params: readonly unknown[], signal?: AbortSignal) => Promise<unknown>): SolanaRpc {
   const bare = bareOf.get(rpc) ?? rpc;
   const out: SolanaRpc = rpc.url === undefined ? call : Object.assign(call, { url: rpc.url });
   bareOf.set(out, bare);
@@ -237,11 +240,12 @@ export function solanaWrappedRpc(rpc: SolanaRpc, call: (method: string, params: 
 export function solanaPacedRpc(rpc: SolanaRpc, limit: SolanaRpcLimit = SOLANA_KEYLESS_RPC_LIMIT): SolanaRpc {
   const bare = bareOf.get(rpc) ?? rpc;
   const queue = queueWith(bare, limit);
-  const paced = (method: string, params: readonly unknown[]): Promise<unknown> => {
-    if (inSlot === queue) return rpc(method, params);
+  const paced = (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
+    if (inSlot === queue) return rpc(method, params, signal);
     const s = rpcSlot(rpc, limit, method);
-    // a call its limit allows now starts in this tick, as the bare provider's would
-    return s.wait ? s.wait.then(() => s.run(params)) : s.run(params);
+    // a call its limit allows now starts in this tick, as the bare provider's would; one its caller gave up on while
+    // it waited for its turn is dropped from the queue unsent
+    return s.wait ? s.wait.then(() => (signal?.aborted ? (s.drop(), Promise.reject(signal.reason)) : s.run(params, signal))) : s.run(params, signal);
   };
   const out: SolanaRpc = bare.url === undefined ? paced : Object.assign(paced, { url: bare.url });
   bareOf.set(out, bare);
@@ -254,16 +258,18 @@ export function solanaPacedRpc(rpc: SolanaRpc, limit: SolanaRpcLimit = SOLANA_KE
  *  wrapper given here is that turn's own call, never queued twice. `ms` as a function is asked when the turn comes (a
  *  throw there ends the call unsent, its error the call's); `late` makes the timeout's error (the caller's own type). */
 export function solanaTimedRpc(rpc: SolanaRpc, ms: number | (() => number), late?: (ms: number) => Error): SolanaRpc {
-  const timed = solanaWrappedRpc(rpc, (method, params) => {
+  const timed = solanaWrappedRpc(rpc, (method, params, signal) => {
     let p: Promise<unknown>;
     let bound: number;
+    // the bound ends the request at the provider too, not only the wait for it (card kit-rpc-client-takes-a-signal)
+    const cut = new AbortController();
     try {
       bound = typeof ms === "function" ? ms() : ms;
-      p = Promise.resolve(rpc(method, params));
+      p = Promise.resolve(rpc(method, params, signal === undefined ? cut.signal : AbortSignal.any([signal, cut.signal])));
     } catch (e) {
       return Promise.reject(e);
     }
-    return withTimeout(p, bound, late);
+    return withTimeout(p, bound, late, cut);
   });
   const bare = bareOf.get(rpc) ?? rpc;
   const queue = bare.url === undefined ? queueOfFn.get(bare) : queueOfUrl.get(urlKey(bare.url));
@@ -273,8 +279,11 @@ export function solanaTimedRpc(rpc: SolanaRpc, ms: number | (() => number), late
 
 export type SolanaFetch = (url: string, init: RequestInit) => Promise<Response>;
 /** One JSON-RPC call on one Solana provider: resolves the call's `result`, rejects on any other answer. `url`, when
- * set (solanaJsonRpc sets it), is what tells two providers apart; the set send refuses two with the same one. */
-export type SolanaRpc = ((method: string, params: readonly unknown[]) => Promise<unknown>) & { readonly url?: string };
+ * set (solanaJsonRpc sets it), is what tells two providers apart; the set send refuses two with the same one.
+ * `signal`, when given, is the caller's bound: once it aborts the request is ended at the provider too (solanaJsonRpc
+ * aborts its fetch) and the call rejects with its reason, so a read the caller gave up on holds no connection (card
+ * kit-rpc-client-takes-a-signal). A client that takes no signal is still one. */
+export type SolanaRpc = ((method: string, params: readonly unknown[], signal?: AbortSignal) => Promise<unknown>) & { readonly url?: string };
 /** One send path: posts the base64 bytes, resolves the signature the path answered. A path with `minIntervalMs` gets
  * one tx per that interval, rotating through the set; one without gets every tx every rebroadcast. */
 export type SolanaSendPath = {
@@ -322,9 +331,20 @@ export type SolanaSetOptions = {
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e).slice(0, 200);
 
-function withTimeout<T>(p: Promise<T>, ms: number, late?: (ms: number) => Error): Promise<T> {
+/** p, or its timeout's error once `ms` pass; `cut`, when given, is aborted with that error, so the request it bounds
+ *  ends at the provider too. */
+function withTimeout<T>(p: Promise<T>, ms: number, late?: (ms: number) => Error, cut?: AbortController): Promise<T> {
   let t: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([p, new Promise<never>((_, rej) => { t = setTimeout(() => rej(late ? late(ms) : new Error(`no answer in ${ms} ms`)), ms); })]).finally(() => clearTimeout(t));
+  return Promise.race([
+    p,
+    new Promise<never>((_, rej) => {
+      t = setTimeout(() => {
+        const e = late ? late(ms) : new Error(`no answer in ${ms} ms`);
+        cut?.abort(e);
+        rej(e);
+      }, ms);
+    }),
+  ]).finally(() => clearTimeout(t));
 }
 
 async function readBounded(r: Response): Promise<string> {
@@ -409,6 +429,14 @@ class Fault extends Error {
     this.orig = orig;
   }
 }
+/** A retry's wait: `ms`, or the caller's abort, which rejects with its reason at once. */
+const waitOrAbort = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((res, rej) => {
+    if (signal?.aborted) return rej(signal.reason);
+    const stop = () => (clearTimeout(t), rej(signal!.reason));
+    const t = setTimeout(() => (signal?.removeEventListener("abort", stop), res()), ms);
+    signal?.addEventListener("abort", stop, { once: true });
+  });
 const timedOut = (e: unknown): boolean => e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
 /** ": RPC error <code>: <message>" when `text` is a JSON-RPC error object, else "". */
 function rpcErrorWords(text: string): string {
@@ -439,21 +467,24 @@ export function retryAfterMs(h: string | null, now: number): number | null {
 /** JSON-RPC over HTTP POST to one URL. `init` is merged into every request (the helper's HELPER_FETCH_INIT). The id is
  * a string of digits, so an echo of it as the string or as the same number both match, and nothing else does. With
  * `retry`, a transport fault (SolanaRpcFault) is tried again within its bounds and then rejects as a
- * SolanaRpcTransportError; any other answer (an RPC error, a foreign id, no result, a 4xx) rejects at once. */
+ * SolanaRpcTransportError; any other answer (an RPC error, a foreign id, no result, a 4xx) rejects at once. A call's
+ * `signal` (SolanaRpc) aborts its fetch, ends a retry's wait, and rejects the call with its reason: never a fault
+ * asked again. */
 export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: RequestInit; timeoutMs?: number; retry?: SolanaRpcRetry } = {}): SolanaRpc {
   const href = httpsUrl(url, "an RPC URL").href;
   const host = new URL(href).host;
   const doFetch: SolanaFetch = opts.fetch ?? ((u, i) => fetch(u, i));
   const timeoutMs = opts.timeoutMs ?? SOLANA_CALL_TIMEOUT_MS;
   const retry = opts.retry;
-  const once = (method: string, params: readonly unknown[], ms: number): Promise<unknown> => {
+  const once = (method: string, params: readonly unknown[], ms: number, signal?: AbortSignal): Promise<unknown> => {
+    if (signal?.aborted) return Promise.reject(signal.reason);
     const id = String(nextId++);
     const init: RequestInit = {
       ...opts.init,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-      signal: AbortSignal.timeout(ms),
+      signal: signal === undefined ? AbortSignal.timeout(ms) : AbortSignal.any([AbortSignal.timeout(ms), signal]),
     };
     // fetch is called here, synchronously: a caller that starts several calls starts them all in one tick.
     return doFetch(url, init).then(
@@ -462,6 +493,7 @@ export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: R
         try {
           text = await readBounded(r);
         } catch (e) {
+          if (signal?.aborted) throw signal.reason;
           if (e instanceof Error && e.message === "answer too large") throw e;
           throw new Fault(timedOut(e) ? "timeout" : "network", timedOut(e) ? `no answer in ${ms} ms` : "the answer broke off", e);
         }
@@ -490,31 +522,33 @@ export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: R
         return o.result;
       },
       (e: unknown) => {
+        // the caller's own abort is its reason, never a fault the retry asks again
+        if (signal?.aborted) throw signal.reason;
         throw new Fault(timedOut(e) ? "timeout" : "network", timedOut(e) ? `no answer in ${ms} ms` : "no connection", e);
       },
     );
   };
   // without `retry`, one attempt, its faults as plain errors (the kit's own send paths and the helper keep their rules)
-  const plain = (method: string, params: readonly unknown[]): Promise<unknown> =>
-    once(method, params, timeoutMs).catch((e: unknown) => {
+  const plain = (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> =>
+    once(method, params, timeoutMs, signal).catch((e: unknown) => {
       throw e instanceof Fault ? e.orig : e;
     });
   const call = !retry
     ? plain
-    : (method: string, params: readonly unknown[]): Promise<unknown> => {
+    : (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
         const start = Date.now();
         const end = start + retry.deadlineMs;
         const go = async (tries: number): Promise<unknown> => {
           const left = end - Date.now();
           try {
-            return await once(method, params, Math.max(1, Math.min(timeoutMs, left)));
+            return await once(method, params, Math.max(1, Math.min(timeoutMs, left)), signal);
           } catch (e) {
             if (!(e instanceof Fault)) throw e;
             // the backoff is a floor: a Retry-After of 0 never makes a throttled call a burst
             const waitMs = Math.max(e.afterMs ?? 0, retry.backoffMs * 2 ** (tries - 1));
             // a wait that ends past the deadline is not begun: the call answers now, its fault named
             if (Date.now() + waitMs >= end) throw new SolanaRpcTransportError(e.fault, e.message, tries, host, e.afterMs);
-            await new Promise((res) => setTimeout(res, waitMs));
+            await waitOrAbort(waitMs, signal);
             return go(tries + 1);
           }
         };
@@ -870,7 +904,9 @@ export function sendSolanaSet(set: readonly SolanaSignedTx[], opts: SolanaSetOpt
     return (wait ?? Promise.resolve()).then(() => {
       pending.delete(drop);
       if (over) { drop(); throw new Error("the set is over"); }
-      return withTimeout(Promise.resolve().then(() => run(params)), callTimeoutMs);
+      // the bound ends the request at the provider too (card kit-rpc-client-takes-a-signal)
+      const cut = new AbortController();
+      return withTimeout(Promise.resolve().then(() => run(params, cut.signal)), callTimeoutMs, undefined, cut);
     }).then(
       (v) => { backoffMs[p] = 0; return v; },
       (e) => {

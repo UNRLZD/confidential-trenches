@@ -43,56 +43,119 @@ const OPT_IN = [
 ];
 const TEST_START = /^[ \t]*(?:await\s+)?(?:test|it|describe|suite)(?:\.\w+)?\(/gm;
 
-/** `text` with its comments replaced by spaces (same length, so offsets and lines hold); quotes are respected. */
-export function stripComments(text) {
-  let out = "";
+// What each character of a JavaScript text is, read by one walk for both stripComments and skeleton: code, a comment,
+// the inside of a string or of a template's text, or the inside of a regex literal (the quotes, backticks and slashes
+// around them are code). A `/` that opens no comment opens a regex where an operand is due: at the start of the text,
+// after one of ( , = : [ ! & | ? { } ; + - * % < > ~ ^, or after return, typeof, case, do, else, in, of, new, delete,
+// void, throw or yield; anywhere else it divides. Inside a regex an escape, and a / inside a [...] class, end nothing.
+const CODE = 0;
+const COMMENT = 1;
+const STRING = 2;
+const REGEX = 3;
+const OPERAND_DUE = new Set("(,=:[!&|?{};+-*%<>~^");
+const OPERAND_WORDS = new Set(["return", "typeof", "case", "do", "else", "in", "of", "new", "delete", "void", "throw", "yield"]);
+const WORD = /[\w$]/;
+
+function literals(text) {
+  const n = text.length;
+  const kind = new Uint8Array(n).fill(CODE);
+  const opened = []; // the brace depth outside each open template ${, innermost last
+  let depth = 0;
+  let inTemplate = false;
+  let prev = ""; // the last code character that is not white space
+  let word = ""; // the word that ends at prev, if one does
   let i = 0;
-  let quote = null; // ' " or ` while inside a string
-  while (i < text.length) {
+  while (i < n) {
     const c = text[i];
     const d = text[i + 1];
-    if (quote) {
-      out += c;
-      if (c === "\\") out += text[++i] ?? "";
-      else if (c === quote) quote = null;
-      else if (c === "\n" && quote !== "`") quote = null;
-      i++;
+    if (inTemplate) {
+      if (c === "\\") {
+        kind[i++] = STRING;
+        if (i < n) kind[i++] = STRING;
+      } else if (c === "`") {
+        inTemplate = false;
+        prev = c;
+        word = "";
+        i++;
+      } else if (c === "$" && d === "{") {
+        kind[i++] = STRING;
+        kind[i++] = STRING;
+        opened.push(depth++);
+        inTemplate = false;
+        prev = "{";
+        word = "";
+      } else kind[i++] = STRING;
     } else if (c === "/" && d === "/") {
-      while (i < text.length && text[i] !== "\n") (out += " "), i++;
+      while (i < n && text[i] !== "\n") kind[i++] = COMMENT;
     } else if (c === "/" && d === "*") {
-      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) (out += text[i] === "\n" ? "\n" : " "), i++;
-      out += "  ";
-      i += 2;
+      const e = text.indexOf("*/", i + 2);
+      const end = e < 0 ? n : e + 2;
+      kind.fill(COMMENT, i, end);
+      i = end;
+    } else if (c === '"' || c === "'") {
+      i++;
+      while (i < n && text[i] !== c && text[i] !== "\n") {
+        if (text[i] === "\\" && i + 1 < n) kind[i++] = STRING;
+        kind[i++] = STRING;
+      }
+      if (text[i] === c) i++;
+      prev = c;
+      word = "";
+    } else if (c === "`") {
+      inTemplate = true;
+      i++;
+    } else if (c === "/" && (prev === "" || OPERAND_DUE.has(prev) || OPERAND_WORDS.has(word))) {
+      i++;
+      let inClass = false;
+      while (i < n && text[i] !== "\n" && (inClass || text[i] !== "/")) {
+        if (text[i] === "\\" && i + 1 < n && text[i + 1] !== "\n") kind[i++] = REGEX;
+        else if (text[i] === "[") inClass = true;
+        else if (text[i] === "]") inClass = false;
+        kind[i++] = REGEX;
+      }
+      if (text[i] === "/") i++;
+      prev = "/";
+      word = "";
+    } else if (WORD.test(c)) {
+      let j = i;
+      while (j < n && WORD.test(text[j])) j++;
+      word = text.slice(i, j);
+      prev = text[j - 1];
+      i = j;
     } else {
-      if (c === '"' || c === "'" || c === "`") quote = c;
-      out += c;
+      if (c === "{") depth++;
+      else if (c === "}" && opened.length && opened.at(-1) === depth - 1) {
+        // the } that closes a template's ${: the template's text again
+        opened.pop();
+        depth--;
+        kind[i++] = STRING;
+        inTemplate = true;
+        continue;
+      } else if (c === "}") depth = Math.max(0, depth - 1);
+      if (!/\s/.test(c)) {
+        prev = c;
+        word = "";
+      }
       i++;
     }
   }
+  return kind;
+}
+
+// `text` with every character of a kind in `blank` replaced by a space, its line breaks kept
+function blanked(text, blank) {
+  const kind = literals(text);
+  let out = "";
+  for (let i = 0; i < text.length; i++) out += blank.has(kind[i]) && text[i] !== "\n" ? " " : text[i];
   return out;
 }
 
-// `text` (comments already out) with the inside of every string blanked, so its braces and parens count for nothing
-function skeleton(text) {
-  let out = "";
-  let quote = null;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (quote) {
-      if (c === "\\") {
-        out += "  ";
-        i++;
-      } else if (c === quote) {
-        quote = null;
-        out += c;
-      } else out += c === "\n" ? "\n" : " ";
-    } else {
-      if (c === '"' || c === "'" || c === "`") quote = c;
-      out += c;
-    }
-  }
-  return out;
-}
+/** `text` with its comments replaced by spaces (same length, so offsets and lines hold); strings and regexes are respected. */
+export const stripComments = (text) => blanked(text, new Set([COMMENT]));
+
+// `text` (comments already out) with the inside of every string, template text and regex blanked, so its braces and
+// parens count for nothing
+const skeleton = (text) => blanked(text, new Set([COMMENT, STRING, REGEX]));
 
 /** What is executed on import in `text`: a function from an offset to whether code there runs at the top level or in a test call. */
 function runsOnImport(text) {

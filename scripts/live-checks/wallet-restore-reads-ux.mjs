@@ -24,9 +24,10 @@
 //     call right after it is handed;
 //   - ux_carry: a U_X is carried as the follow carries it: the lower of two equal balances, the follow's floor and
 //     askOf's ask, the page's pool.deposit (its run's end, card pool-deposit-op-txs), read again after a filled one, and named when it does not fill or a filled
-//     one leaves the balance as it was; a U_X whose index has no deposit note in the store is named with its index,
-//     address and balance, never carried (card notes-plan-at-restored-index makes that note); the carry called is this
-//     one, on the scope's own U_X reads and held map;
+//     one leaves the balance as it was; a U_X whose index has no deposit note in the store gets one first (card
+//     notes-plan-at-restored-index: the carry hands the two equal balances to the step's `found`, which writes it, before
+//     its first deposit; a write refused names U_X, never carried); the carry called is this one, on the scope's own U_X
+//     reads and held map;
 //   - id_held: each id NEAR read as money is read again by asset on both providers at once (the wallet's
 //     nearIdHeldReader: the token and what intents.near holds, on each, an asset dropped only at 0 on both), and named
 //     into step 5's own list while one asset is above the kept unit a move out leaves (ID_KEEP, 1n) or the two read it
@@ -85,11 +86,12 @@ const esc = (n) => n.replace(/[$]/g, "\\$");
 // broken real one matches twice, or the real one's call site names another function
 const once = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length === 1;
 // step 5's reader of an id, bound to its call site: the U_X reader `R` is the reader argument of the scope's
-// restoreDepositIds call right after it (its lane order after it: card restore-first-sign-in-under-two-minutes), and it notes each id NEAR reads as money (`D`) for the held reads below
+// restoreDepositIds call right after it (its lane order after it: card restore-first-sign-in-under-two-minutes), and it notes each id NEAR reads as money (`D`) for the held reads below;
+// since card restore-shows-a-note-on-a-planned-index `R` may reach the call through its used-id take on the same scope
 const UX_READ = new RegExp(
   `,(${N})=async\\((${N}),(${N})\\)=>\\{if\\(\\3===void 0\\)throw Error\\(${Q}no deposit index for its U_X${Q}\\);let (${N})=await ${N}\\(${N},${N},(${N})\\.scope,\\3,\\2\\),` +
     `\\[(${N}),\\[(${N}),(${N})\\]\\]=await Promise\\.all\\(\\[${N}\\(\\2,\\3\\),(${N})\\.balances\\(\\{u:\\4\\}\\)\\]\\);if\\(\\6===${Q}money${Q}&&(${N})\\.set\\(\\3,\\2\\),\\7!==\\8\\)throw Error\\(${Q}its U_X reads [^${Q}]*${Q}\\);` +
-    `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},\\1,await ${N}\\(\\5\\.scope,\\5\\.notes\\)\\);`,
+    `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},(?:\\1|${N}\\(${N},\\5\\.scope,\\1\\)),await ${N}\\(\\5\\.scope,\\5\\.notes\\)\\);`,
 );
 // (card deposit-takes-each-pools-own-coin, delta review r3 P2-1: what each read leaves at U_X is written as its op's
 // left, `L`: 0 before a deposit is sent, the last read when what is left is under one deposit's floor)
@@ -98,13 +100,18 @@ const UX_CARRY = new RegExp(
     `for\\(;;\\)\\{let\\[(${N}),(${N})\\]=await \\2\\.balances\\(\\3\\);if\\(\\9!==\\10\\)return\\{why:${Q}reads [^${Q}]*${Q},retry:\\6===null\\};` +
     `if\\(\\6!==null&&\\9>=\\6\\)return\\{why:${Q}holds [^${Q}]*after a deposit from it filled: read again${Q},retry:!1\\};if\\(\\9<\\2\\.ladder\\.min\\)return \\7\\(\\9\\);let (${N})=await \\2\\.costs\\(\\3\\);if\\(\\9<\\11\\.floor\\)return \\7\\(\\9\\);` +
     `let (${N})=${N}\\(\\2\\.ladder,\\9,\\11\\.perRung,\\11\\.keep\\);if\\(\\12===0n\\)return \\7\\(\\9\\);if\\(!\\4\\)return\\{why:${Q}holds \\$\\{String\\(\\9\\)\\}, with no deposit note on this device for its index to carry it into the pool${Q},retry:!1\\};` +
-    `\\5\\.throwIfAborted\\(\\),await \\7\\(0n\\);let\\{end:(${N})\\}=await \\2\\.deposit\\(\\3,\\12,\\5\\);` +
-    `if\\(\\13!==${Q}filled${Q}&&\\13!==${Q}part_filled${Q}\\)return\\{why:${Q}holds [^${Q}]*its carry into the pool ended [^${Q}]*${Q},retry:!1\\};\\6=\\9\\}\\}`,
+    // card notes-plan-at-restored-index: a U_X with no note here (`noted` a function) has its note written from the two
+    // equal balances before its first deposit; a write refused is named, never carried, and a sign out goes on as a throw
+    `if\\(\\5\\.throwIfAborted\\(\\),typeof \\4==${Q}function${Q}\\)\\{try\\{await \\4\\(\\[\\9,\\10\\]\\)\\}catch\\((${N})\\)\\{if\\(\\5\\.throwIfAborted\\(\\),\\13 instanceof ${N}\\)throw \\13;` +
+    `return\\{why:${Q}holds \\$\\{String\\(\\9\\)\\}; its deposit note was not written \\(\\$\\{\\13 instanceof Error\\?\\13\\.message:${Q}it threw${Q}\\}\\): restore again to carry it${Q},retry:!1\\}\\}\\4=!0\\}` +
+    `await \\7\\(0n\\);let\\{end:(${N})\\}=await \\2\\.deposit\\(\\3,\\12,\\5\\);` +
+    `if\\(\\14!==${Q}filled${Q}&&\\14!==${Q}part_filled${Q}\\)return\\{why:${Q}holds [^${Q}]*its carry into the pool ended [^${Q}]*${Q},retry:!1\\};\\6=\\9\\}\\}`,
 );
 // the carry's call site, bound to the reader's held map (`held`), the scope's U_X reads (`ux`) and the carry's own name:
-// `noted(scope)` read once per scope with a U_X held, and the carry handed whether U_{s,i}'s own index is among them
+// `noted(scope)` read once per scope with a U_X held, and the carry handed whether U_{s,i}'s own index is among them,
+// else (card notes-plan-at-restored-index) the step's `found` for that scope and index, handed the carry's two balances
 const UX_NOTED = (held, ux, carry) =>
-  new RegExp(`=${esc(held)}\\.size===0\\?new Set:await ${N}\\(${N}\\.scope\\);for\\(let (${N}) of\\[\\.\\.\\.${esc(held)}\\.values\\(\\)\\]\\.sort\\(\\([^)]*\\)=>[^)]*\\)\\)\\{${N}\\.throwIfAborted\\(\\);let ${N}=await ${esc(carry)}\\(${esc(ux)},\\1,${N}\\.has\\(\\1\\.i\\),${N}\\)`);
+  new RegExp(`=${esc(held)}\\.size===0\\?new Set:await ${N}\\((${N})\\.scope\\);for\\(let (${N}) of\\[\\.\\.\\.${esc(held)}\\.values\\(\\)\\]\\.sort\\(\\([^)]*\\)=>[^)]*\\)\\)\\{${N}\\.throwIfAborted\\(\\);let ${N}=await ${esc(carry)}\\(${esc(ux)},\\2,${N}\\.has\\(\\2\\.i\\)\\|\\|\\((${N})=>${N}\\.found\\(\\1\\.scope,\\2\\.i,\\3\\)\\),${N}\\)`);
 // each id NEAR read as money (`D`), in index order, named by the held rule (`H`) on the both-provider held reader, into
 // step 5's own lists (delta review 2 P3-1: a push into any other list names nothing; card
 // restore-first-sign-in-under-two-minutes: a read again on `held`, which the last try tells as a finding, the rest on
@@ -142,8 +149,10 @@ const MAINNET = (n) => new RegExp(`[,; ]${esc(n)}=${Q}mainnet${Q}[,;]`);
 // since card restore-first-sign-in-under-two-minutes (first in release 115) the reader's opening, the held reader's and
 // each held read are waited on through letGo (`lg`) on the run's own signal, so a sign out lets go of a read in flight;
 // the loop reads through the let-go reader `H`
+// (since card vault-late-send-carried step 5 takes the NEAR vault's reads last, `vault = null`, and since card
+// pool-late-send-carried step 7's window and notes for the pools, `step7 = null`: the head names them, no more)
 const STEP5_HEAD = new RegExp(
-  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N},${N},${N}\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await (?<lg>${N})\\(${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),\\k<signal>\\),` +
+  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N},${N},${N}(?:,${N}=null){0,2}\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await (?<lg>${N})\\(${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),\\k<signal>\\),` +
     `(?<H0>${N})=await \\k<lg>\\((?<R>${N})\\(\\k<net>,\\k<pair>,\\k<pass>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),\\k<signal>\\),(?<H>${N})=(?<e>${N})=>\\k<lg>\\(\\k<H0>\\(\\k<e>\\),\\k<signal>\\),`,
 );
 // letGo (src/pool-restore.ts) by its body: a read waited on only while the signal lasts, rejected with its reason at the

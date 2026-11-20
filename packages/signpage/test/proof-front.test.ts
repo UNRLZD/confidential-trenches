@@ -6,6 +6,7 @@
 //   node --test test/proof-front.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
 import { afterEach, mock, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -63,12 +64,14 @@ function originLocks() {
         if (!held.has(name) && (waiting.get(name) ?? []).length === 0) return grant();
         const ask: Ask = { grant, drop: reject };
         waiting.set(name, [...(waiting.get(name) ?? []), ask]);
-        opts.signal?.addEventListener("abort", () => {
+        const cut = () => {
           const list = waiting.get(name) ?? [];
           if (!list.includes(ask)) return;
           waiting.set(name, list.filter((x) => x !== ask));
           reject(new DOMException("aborted", "AbortError"));
-        });
+        };
+        if (opts.signal?.aborted) return cut();
+        opts.signal?.addEventListener("abort", cut);
       });
     },
   } as unknown as Pick<LockManager, "request">;

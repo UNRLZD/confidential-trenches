@@ -85,8 +85,11 @@ export const RETRY = { ms: 1000 };
  *  answer's `status` and Access-Control-Allow-Origin (`acao`) back beside it, for pageRefuses, and its answer is read in
  *  page mode (classify); a read without is as before. `keep`: answer header names (lower case) returned beside it as
  *  `kept`, each its value or null (helper-serves-many-users-at-once reads the helper's RateLimit-Policy); none: as
- *  before. */
-export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutMs = RPC_TIMEOUT_MS, nullNoAnswer = false, judgeStateMiss = false, headers, redirect, keep } = {}) {
+ *  before. `id`: the request's id (1 when none), for a check of reads sent at once that each must come back with its
+ *  own (helper-rpc-one-read-many-pages: a shared answer carries each caller's id); with it the answer's own id comes
+ *  back as `answerId` (undefined where it has none) and `tries`, 2 where the first read was a no-answer, so a check
+ *  of reads at one moment can tell one read later. */
+export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutMs = RPC_TIMEOUT_MS, nullNoAnswer = false, judgeStateMiss = false, headers, redirect, keep, id } = {}) {
   const host = new URL(url).host;
   const once = async () => {
     let r;
@@ -94,7 +97,7 @@ export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutM
       r = await fetchFn(url, {
         method: "POST",
         headers: { "content-type": "application/json", ...headers },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        body: JSON.stringify({ jsonrpc: "2.0", id: id ?? 1, method, params }),
         signal: AbortSignal.timeout(timeoutMs),
         ...(redirect === undefined ? {} : { redirect }),
       });
@@ -104,12 +107,57 @@ export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutM
     const text = await r.text().catch(() => "");
     const a = classify(host, r.status, text, { nullNoAnswer, judgeStateMiss, page: headers !== undefined });
     const k = keep === undefined ? a : { ...a, kept: Object.fromEntries(keep.map((n) => [n, r.headers.get(n)])) };
-    return headers === undefined ? k : { ...k, status: r.status, acao: r.headers.get("access-control-allow-origin") };
+    const h = headers === undefined ? k : { ...k, status: r.status, acao: r.headers.get("access-control-allow-origin") };
+    if (id === undefined) return h;
+    let answerId;
+    try {
+      answerId = JSON.parse(text)?.id;
+    } catch {}
+    return { ...h, answerId };
   };
   const a = await once();
-  if (a.noAnswer === undefined) return a;
+  if (a.noAnswer === undefined) return id === undefined ? a : { ...a, tries: 1 };
   await new Promise((r) => setTimeout(r, RETRY.ms));
-  return once();
+  const b = await once();
+  return id === undefined ? b : { ...b, tries: 2 };
+}
+
+/** One JSON-RPC batch on `url`: `calls`, each [method, params], in one POST with ids 1 to n, as the kit sends its reads
+ *  (card rh-provider-fails-64-read-batch), read again once on a no-answer. `{ status, answers }`: each call's answer by
+ *  its id, read as `classify` reads one answer, or a no-answer naming the call the batch left out; or, for the batch as a
+ *  whole, `{ status, noAnswer }` (an HTTP answer `classify` names a no-answer, or a lone result for a batch of more than
+ *  one call), `{ noAnswer }` (a fetch that failed) or `{ status, error }` (one JSON-RPC error for the whole batch,
+ *  judged); each with `bytes`, the request body's length. */
+export async function rpcBatchAnswer(url, calls, { fetchFn = fetch, timeoutMs = RPC_TIMEOUT_MS } = {}) {
+  const host = new URL(url).host;
+  const body = JSON.stringify(calls.map(([method, params], i) => ({ jsonrpc: "2.0", id: i + 1, method, params })));
+  const once = async () => {
+    let r;
+    try {
+      r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (e) {
+      return { noAnswer: thrown(host, e) };
+    }
+    const text = await r.text().catch(() => "");
+    let j;
+    try {
+      j = JSON.parse(text);
+    } catch {}
+    if (!Array.isArray(j)) {
+      const a = classify(host, r.status, text);
+      return { status: r.status, ...("result" in a ? { noAnswer: `${host} HTTP ${r.status}: one answer for a batch of ${calls.length} calls` } : a) };
+    }
+    const answers = calls.map((_, i) => {
+      const x = j.find((y) => y !== null && typeof y === "object" && y.id === i + 1);
+      return x === undefined ? { noAnswer: `${host} HTTP ${r.status}: no answer for call ${i + 1} of ${calls.length}` } : classify(host, r.status, JSON.stringify(x));
+    });
+    return { status: r.status, answers };
+  };
+  const missed = (a) => a.noAnswer !== undefined || (a.answers ?? []).some((x) => x.noAnswer !== undefined);
+  const a = await once();
+  if (!missed(a)) return { ...a, bytes: body.length };
+  await new Promise((r) => setTimeout(r, RETRY.ms));
+  return { ...(await once()), bytes: body.length };
 }
 
 /** Why a page at `origin` gets nothing from this answer (`rpcAnswer` with the page's headers), or null. An HTTP answer

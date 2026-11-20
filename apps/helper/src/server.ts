@@ -30,7 +30,7 @@ import { LOGO_NONE_MS, LOGOS, type LogoChain, type Logos } from "./data/logo.ts"
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
 import { createSwaps, INDEX_RPCS, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
 import { createPoolIndex, jsonRpcPost, type PoolIndex, type PoolIndexConfig } from "./data/evm/pool-index.ts";
-import { createEvmToken, type EvmToken } from "./data/evm/token.ts";
+import { createEvmToken, holdersDay, type EvmToken } from "./data/evm/token.ts";
 import { createHeld, DEX_LIMITS, parseHeld, type Held } from "./data/held.ts";
 import { createEvmNamed, type EvmNamed } from "./data/evm/named.ts";
 import { createNearLists } from "./data/near/lists.ts";
@@ -48,6 +48,7 @@ import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts"
 import { checkPoolRpcOperators, checkSolanaPairOperators } from "./env-check.ts";
 import { callsFiles } from "./proxy/shared-calls.ts";
 import { dayFiles } from "./limits/day-spend.ts";
+import { loopBusy, loopShed } from "./limits/loop-busy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
@@ -57,7 +58,7 @@ import { INTENTS_BODY_MAX } from "./intents/carry.ts";
 import { pairNames, statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
 import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./withdraw/fee.ts";
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
-import { POOL_EPOCH_MS } from "./pool/fee.ts";
+import { epochStartOf, POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
 import { POOL_SOLANA_PIECES_BODY_MAX } from "./pool/solana-pieces.ts";
 import { isMainnetEvm, isMainnetSolana } from "./pool/mainnet-only.ts";
@@ -94,6 +95,15 @@ const ONECLICK_QUOTE = "oneclick/v0/quote";
 /** GET /v1/health's header naming mainnet NEAR's agreement pair (card near-pair-on-keyed-providers; token-status/status.ts
  *  pairNames): "<first>, <second>", each "<company's domain>[ key<n>][ keyless]", never a URL or a key. */
 export const NEAR_PAIR_HEADER = "X-Helper-Near-Pair";
+/** GET /v1/health's header naming when this process started, in ms (card helper-evm-tapes-survive-a-restart): the live
+ *  check that reads a coin's tape right after a deploy knows the helper it reads is the new one, and how new. */
+export const STARTED_HEADER = "X-Helper-Started";
+/** GET /v1/health's header naming each mainnet EVM pool's fee for the running period (card helper-start-residuals;
+ *  pool/evm.ts feeNow): "<network> <fee in wei>", "<network> reading" while its read ahead is under way, or "<network>
+ *  none", ", "-joined by network; "" with no pool. `ready` is false while one names none. A header, as the near pair:
+ *  the body has 11 B left under the kit's 1 KB at its longest config. */
+export const POOL_FEES_HEADER = "X-Helper-Pool-Fees";
+const STARTED_MS = Date.now();
 const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/", "/v1/market/pools"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind", "/v1/bind/record"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD, LOGO_PREFIX, MARKET_POOLS] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL, POOL_SOLANA_PIECES] = MOUNTED.relay;
@@ -154,6 +164,14 @@ const ROUTE_NAMES: ReadonlySet<string> = new Set(["/v1/health", ...Object.values
 const routeOf = (path: string): string => (ROUTE_NAMES.has(path) ? path : path.startsWith(PROXY_PREFIX) ? "/v1/proxy" : path.startsWith(RPC_PREFIX) ? "/v1/rpc" : path.startsWith(LOGO_PREFIX) ? "/v1/logo" : "other");
 /** The reason a per-client window names (limits.ts clientWindow): one address past its requests a window. */
 const CLIENT_WINDOW = "client window";
+/** The routes shed past capacity (card helper-answers-through-a-burst; limits/loop-busy.ts loopShed): market data only,
+ *  which the page reads again on its own cadence and draws as loading meanwhile. Never a relay, a send, a proof's fee, a
+ *  quote, a device's RPC read, a pool list a buy reads, the token status or health. */
+export const SHED_PATHS: ReadonlySet<string> = new Set([MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_HELD]);
+/** Whether a request's path is shed past capacity: a SHED_PATHS route or a logo. */
+export const shedsPath = (path: string): boolean => SHED_PATHS.has(path) || path.startsWith(LOGO_PREFIX);
+/** The reason a shed names in the refusal log. */
+const SHED_WHY = "loop past capacity";
 
 // The cross-origin rules are the kit's HELPER_CORS (packages/kit/src/helper/v1.ts).
 export const ORIGINS: ReadonlySet<string> = new Set(HELPER_CORS.origins);
@@ -302,6 +320,9 @@ export function handler(
   // card evm-pool-index-from-the-first-pool: GET /v1/market/pools, each EVM chain's PoolManager pools from its first
   // block (src/data/evm/pool-index.ts); a chain with none answers 404
   poolIndexes: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>> = {},
+  // card helper-answers-through-a-burst: whether the loop is past its capacity now, when market data is shed; start()
+  // passes the process's own (limits/loop-busy.ts loopShed), so a test's handler sheds only when it asks to
+  shed: () => boolean = () => false,
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
@@ -396,6 +417,9 @@ export function handler(
         return send(400, { error: "bad_request" }, cors(req));
       }
       route = routeOf(path);
+      // past capacity a market read is answered at once, a 503 the page reads (its CORS headers, the kit's upstream code
+      // and a wait), and costs the loop nothing more (card helper-answers-through-a-burst)
+      if (shedsPath(path) && shed()) return reply({ status: 503, headers: UPSTREAM_WAIT, body: '{"error":{"code":"upstream"}}', why: SHED_WHY });
       // every route but the pool, RPC, proxy and record routes (which have their own windows below) counts in the client's window
       if (path.startsWith(LOGO_PREFIX)) {
         const wait = logoRate.take(clientOf(req));
@@ -425,7 +449,11 @@ export function handler(
       }
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        return send(200, health(commit, SERVED, release, ready(), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", ") });
+        // card helper-start-residuals: never ready while a mainnet pool holds no fee for the running period
+        const period = epochStartOf(now());
+        const fees = [...evmPools.values()].filter((p) => isMainnetEvm(p.network)).map((p) => ({ network: p.network, fee: p.feeNow(period) })).sort((x, y) => (x.network < y.network ? -1 : 1));
+        const named = fees.map((f) => `${f.network} ${f.fee === null ? "none" : String(f.fee)}`).join(", ");
+        return send(200, health(commit, SERVED, release, ready() && fees.every((f) => f.fee !== null), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", "), [STARTED_HEADER]: String(STARTED_MS), [POOL_FEES_HEADER]: named });
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
@@ -913,7 +941,9 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
  * The EVM chains' own swap reads (src/data/evm/swaps.ts): Base's and Robinhood's candles and trade tape. A token is
  * served only when its chain's Discover lists hold it. The providers: evmSwapRpcs.
  */
-export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}): Swaps {
+/** `disk` (card helper-evm-tapes-survive-a-restart): each chain's swap index kept in `storeDir` (swap-index-<chain>.sqlite,
+ *  data/evm/index-store.ts), written once `writable` settles (the senders this helper's, as the pool index waits). */
+export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}, disk?: { storeDir: string; writable: Promise<unknown> }): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
@@ -926,7 +956,9 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       if (a.status !== 200 || a.asOfMs === undefined) return null;
       if (seen === null || seen.asOfMs !== a.asOfMs) {
         const snap = JSON.parse(a.body) as { lists: Record<string, { token: string; price_usd?: string | null }[]>; pools?: Record<string, string> };
-        const rows = Object.values(snap.lists).flat();
+        // Trending 1h, then 5m, then New first, the order the tapes are read ahead in (swaps.ts ahead; card
+        // robinhood-tapes-read-ahead): the trending coins are the ones opened most (helper-robinhood-capacity's tokensOf)
+        const rows = [...(["trending_1h", "trending_5m", "new"] as const).flatMap((k) => snap.lists[k] ?? []), ...Object.values(snap.lists).flat()];
         const prices = new Map<string, number>();
         for (const r of rows) {
           const p = typeof r.price_usd === "string" ? Number(r.price_usd) : NaN;
@@ -943,6 +975,7 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       rpcs: evmSwapRpcs(env, chain),
       spares: evmSwapSpares(env, chain),
       index: INDEX_RPCS[chain],
+      ...(disk === undefined || disk.storeDir === "" || INDEX_RPCS[chain] === undefined ? {} : { indexFile: join(disk.storeDir, `swap-index-${chain}.sqlite`), writable: disk.writable }),
       // every token an answer of the last SERVED_MS held, not only the newest answer's: a user taps what they read, and a
       // refresh between drops tokens (card robinhood-listed-tape-opens); and any token DexScreener names a pool for, as
       // its page (card evm-token-page-opens-any-coin: a coin no list served answered 404)
@@ -956,6 +989,8 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       // the same rows' price_usd, as the last answer read held it (a token no list carries: its DexScreener row's): a
       // book off it by SCALE_BOUND is not served as ours
       price: (token) => seen?.prices.get(token) ?? named?.price(token) ?? null,
+      // the reads ahead stand down while callers wait on the loop (card robinhood-tapes-read-ahead-bounded)
+      busy: loopBusy,
     });
     out[chain] = swaps;
     // the lists' tokens' pools looked for as each answer loads, not at each token's first open (card
@@ -1046,6 +1081,8 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
     history: (mint, tf, to, limit, client) => token.candles(mint, tf, to, limit, client),
     // a token whose venue the chain tape does not decode: its top pool's trades (card solana-trades-show-on-every-token)
     tape: (mint) => token.tape(mint),
+    // the pool a followed tape reads, renewed at the top pool's own freshness (card sol-vendor-tape-refresh-from-our-reads)
+    pool: (mint) => token.tapePool(mint),
     // a coin quoted in another coin is priced at that coin's own row: Discover's, else Jupiter's held search row
     quoteUsd: async (mint) => {
       const a = await token.named(mint);
@@ -1250,16 +1287,37 @@ export function pushReaders(swaps: Swaps | undefined, near: NearMarket | undefin
   return { ...(swaps ?? {}), ...(near === undefined ? {} : { near: near.trades }) };
 }
 
+/** Where a start listens (card helper-server-test-400-never-hangs-up): a fixed port (the deploy's PORT, reached by Caddy
+ *  across the container network) on node's wildcard default, as before; an OS-chosen port (port 0, a test's) on
+ *  127.0.0.1, the address its callers dial. On macOS a wildcard bind on port 0 may be given a port another process holds
+ *  on 127.0.0.1, which then takes every 127.0.0.1 call to it (a loaded machine's Redis closed one: a socket hang up);
+ *  bound to 127.0.0.1, the port is refused while another listener holds it there. */
+export function listenAt(port: number): { port: number; host?: string; backlog: number } {
+  return port === 0 ? { port, host: "127.0.0.1", backlog: LISTEN_BACKLOG } : { port, backlog: LISTEN_BACKLOG };
+}
+/**
+ * The connections the kernel holds for this server before it takes them (listen(2)'s backlog; card
+ * helper-answers-through-a-burst). Caddy opens one connection to the helper for each request in flight that finds no
+ * idle one, so a burst of page opens is a burst of connects: past the queue the kernel drops the SYN, the dial waits
+ * for its resends (at 1 s and 3 s) and Caddy's 3 s dial gives up with a 502 that has no CORS header, while the helper
+ * itself still answers (19 Nov 14:30-14:33Z: every 502 in 3.6 s, the container healthy). Node's default is 511; 300
+ * page opens through Caddy on a copy pinned to 2 CPUs held up to 894 connections to the helper at once, filled its
+ * queue (512 of 511) and met 9 dial timeouts (deploy/burst-proof.sh, 19 Nov 16:2xZ). [design: 4096, the kernel's own
+ * somaxconn default since Linux 5.4, which compose.yaml sets in the helper's network so the kernel honours it; four
+ * times the connections Caddy holds at most (deploy/Caddyfile max_conns_per_host), so Caddy alone can never fill it]
+ */
+export const LISTEN_BACKLOG = 4_096;
+
 export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held, near?: NearMarket, poolIndexes?: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes, loopShed),
   );
   // card market-data-push: the push socket, upgraded for APP_HOST's Origin only, in its own window per client
   attachPush(server, { commit, readers: pushReaders(evmSwaps, near), allowed: (req) => originIn(req, PUSH_ORIGINS) !== null, client: clientOf, take: clientWindow(API_RATE_MAX).take });
-  server.listen(port);
+  server.listen(listenAt(port));
   // the relayers start once this process holds the senders (sendersFromEnv): a restart resends their open sends and
   // settles before any request
   void senders.then(() => {
@@ -1400,12 +1458,15 @@ if (import.meta.main) {
     // card evm-token-page-opens-any-coin: a token no list carries is named by DexScreener, on the budget held reads draw
     const dex = upstreamBudget(() => DEX_LIMITS, Date.now);
     const evmNamed = evmNamedFrom(SERVED_EVM, dex);
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
-    // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info on the one
-    // GeckoTerminal budget, its pool and decimals the swap reads' when they hold them
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed, { storeDir, writable: senders.held }), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info CoinGecko's keyed
+    // on-chain read, never GeckoTerminal's keyless window (card evm-token-page-off-the-5-call-window), its pool and
+    // decimals the swap reads' when they hold them
     // card every-cell-shows-a-value: and each token's contract checks from GoPlus, one pace for the helper (data/goplus.ts)
     const goplus = createGoPlus();
-    const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, named: evmNamed[c], gecko, kept: swaps[c]?.kept, goplus })]));
+    // and the holders' own quarter of the key's day, in day files of their own id, so the charts keep three quarters
+    const day = holdersDay(Date.now, dayFiles(storeDir, randomUUID()));
+    const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, named: evmNamed[c], keyed, kept: swaps[c]?.kept, day, goplus })]));
     if (warm !== null) restoreEvmMarket(warm, SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] }));
     const held = heldFrom(token, evmLists, dex);
     // card helper-near-lists-and-token: NEAR's lists from Rhea classic's views, read now and on their cadence; card

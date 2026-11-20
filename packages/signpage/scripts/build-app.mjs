@@ -112,9 +112,10 @@ export function copyServed(out, list = SERVED) {
 
 /** The page around the script: no inline script or style, nothing but the one module script with its integrity, and
  *  the framed app's own title (apps/terminal/index.html), the browser tab's name on every page since this page is the
- *  top window (card signpage-tab-title-and-origin). */
+ *  top window (card signpage-tab-title-and-origin). translate="no": the browser's own page translation sends the page's
+ *  text to its vendor, past the CSP, and the 12 words and an exported key are that text (card signpage-backup-export). */
 export const page = (integrity) => `<!doctype html>
-<html lang="en">
+<html lang="en" translate="no">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />

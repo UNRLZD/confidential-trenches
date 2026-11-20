@@ -59,6 +59,9 @@ type Reader = {
   state?: Set<string>;
   /** a getLogs over more than this many blocks is answered with an error */
   maxRange?: number;
+  /** getLogs answered -32602 "block range exceeds maximum 500" at these places (counted from 1), as one of
+   *  base.api.pocket.network's backends answers about one 10,000-block span in ten (2026-11-18) */
+  rangeErrorsAt?: Set<number>;
   /** getLogs answered with a rate-limit error inside a 200, this many first */
   limitedInBody?: number;
   /** the 429s' Retry-After, in ms (default 1) */
@@ -77,10 +80,16 @@ type Reader = {
   receiptError?: boolean;
   /** pools this reader's receipts read, where they are not its logs' (default: `pools`) */
   receipts?: Pool[];
+  /** the state of only the newest this many blocks: a state read by the hash of an older block is answered -32000
+   *  "historical state ... is not available" (Pocket and publicnode on Robinhood, 2026-11-10) */
+  keeps?: number;
+  /** blocks the head moves on once, after this reader's first getLogs answer (the chain going on during a sync) */
+  moves?: number;
   calls: EvmRpcCall[][];
 };
 function reader(r: Reader): EvmRpc {
   let req = 0;
+  let logsAsked = 0;
   return async (calls) => {
     req++;
     r.calls.push([...calls]);
@@ -110,11 +119,15 @@ function reader(r: Reader): EvmRpc {
         const f = c.params[0] as { fromBlock: string; toBlock: string };
         const [a, b] = [Number(f.fromBlock), Number(f.toBlock)];
         if (r.maxRange !== undefined && b - a + 1 > r.maxRange) return { error: { code: -32602, message: "nope" } };
+        logsAsked++;
+        if (r.rangeErrorsAt?.has(logsAsked) && b - a + 1 > 500) return { error: { code: -32602, message: "invalid argument 0: block range exceeds maximum 500" } };
         if (r.limitedInBody !== undefined && r.limitedInBody > 0) {
           r.limitedInBody--;
           return { error: { code: -32005, message: "25/second request limit reached" } };
         }
-        return { result: [...r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf), ...(r.extraLogs ?? [])] };
+        const out = { result: [...r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf), ...(r.extraLogs ?? [])] };
+        if (r.moves !== undefined) (r.head += r.moves), delete r.moves;
+        return out;
       }
       if (c.method === "eth_getTransactionReceipt") {
         if (r.receiptError) return { error: { code: -32000, message: "header not found" } };
@@ -123,6 +136,12 @@ function reader(r: Reader): EvmRpc {
       }
       if (c.method === "eth_call") {
         if (r.stateError) return { error: { code: -32000, message: "missing trie node" } };
+        const at = (c.params[1] as { blockHash?: string } | undefined)?.blockHash;
+        if (r.keeps !== undefined && at !== undefined) {
+          let n = r.head;
+          while (n > r.head - 10_000 && h(n) !== at) n--;
+          if (r.head - n >= r.keeps) return { error: { code: -32000, message: `historical state ${at.slice(2)} is not available` } };
+        }
         const data = (c.params[0] as { data: string }).data;
         const held = r.state ?? new Set(r.pools.map((p) => evmPoolIdOf(p.key)));
         const hit = [...held].some((id) => "0x1e2eaeaf" + slotOf(id).slice(2) === data);
@@ -287,14 +306,35 @@ test("a span answered with an error is asked as its halves on both, and a 429 wa
   await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [], maxRange: 0 }, { head, pools: ps, calls: [] })), (e: Error & { code?: string }) => e.code === "rpc_disagree" && /with an error/.test(e.message));
 });
 
+test("IDXERR a span one reader's backend answers with an error is asked of it again at once, never as halves on both (card evm-first-quote-inside-the-kpi)", async () => {
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  // four of the flaky reader's getLogs, the pin's (the first) among them, two of them in a row
+  const a: Reader = { head, pools: ps, calls: [], rangeErrorsAt: new Set([1, 4, 7, 8]) };
+  const b: Reader = { head, pools: ps, calls: [] };
+  const naps: number[] = [];
+  const r = await evmPoolIndexSync(null, { ...cfgOf(a, b), nap: async (ms: number) => void naps.push(ms) });
+  assert.equal(r.coversThrough, head);
+  assert.deepEqual(ids(r.pools), new Set(ps.map((p) => evmPoolIdOf(p.key))));
+  const spans = (x: Reader) => x.calls.flat().filter((c) => c.method === "eth_getLogs").map((c) => c.params[0] as { fromBlock: string; toBlock: string });
+  assert.ok([...spans(a), ...spans(b)].every((f) => Number(f.toBlock) - Number(f.fromBlock) + 1 === 10_000), "a span asked as halves");
+  assert.equal(spans(b).length, 10, "the reader that answered every span was asked one again");
+  assert.equal(spans(a).length, 14, "each error asked again once");
+  assert.deepEqual(naps, [], "an error's span waited before it was asked again");
+});
+
 test("a rate limit answered inside a batch is asked again, never as halves", async () => {
   const head = 1_000_000;
   const ps = pools(10, head);
   const a: Reader = { head, pools: ps, calls: [], limitedInBody: 2 };
-  const r = await evmPoolIndexSync(null, cfgOf(a, { head, pools: ps, calls: [] }));
+  // card mutants-killed-on-main (the index sweep's mutant 31): the limited span waits the backoff before it is asked
+  // again, as a limit is, never at once, as a reader's error is (above: an error's span waits nothing)
+  const naps: number[] = [];
+  const r = await evmPoolIndexSync(null, cfgOf(a, { head, pools: ps, calls: [] }, { nap: async (ms) => void naps.push(ms) }));
   assert.equal(r.coversThrough, head);
   const spans = a.calls.flat().filter((c) => c.method === "eth_getLogs").map((c) => c.params[0] as { fromBlock: string; toBlock: string });
   assert.ok(spans.every((f) => Number(f.toBlock) - Number(f.fromBlock) + 1 === 10_000), "no span asked as halves");
+  assert.deepEqual(naps, [1_000, 2_000], "each limited answer waited the backoff before the span was asked again");
 });
 
 test("a sync whose readers lag the last sync's head keeps what that sync stored", async () => {
@@ -457,6 +497,13 @@ test("Q1: a 429 whose Retry-After is 0 or a past date waits at least the backoff
     assert.ok(asked < 20, `${retry}: ${asked} requests`);
     assert.ok(slept >= INDEX_LIMITED_WAIT_MS!, `${retry}: slept ${slept} ms`);
   }
+  // card mutants-killed-on-main (the index sweep's mutant 37): a reader the pace holds nothing for (any EvmRpc of the
+  // caller's, not evmJsonRpc's, whose 429 holds its provider) that names no wait still waits at least the backoff, each
+  // 429 double the last, never asks again at once
+  const naps: number[] = [];
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [], limited: 3, limitedAfterMs: 0 }, { head, pools: ps, calls: [] }, { nap: async (ms) => void naps.push(ms) }));
+  assert.equal(r.coversThrough, head);
+  assert.deepEqual(naps.slice(0, 3), [500, 1_000, 2_000], `naps ${naps.join(", ")}`);
 });
 
 // card evm-taps-meet-no-429: a throttle or a refused connection any reader meets holds the provider for every reader
@@ -620,6 +667,60 @@ test("R2: one-reader pools' receipts are asked in batches small enough for evmJs
   assert.equal(gaps.filter((g) => ids(r.pools).has(evmPoolIdOf(g.key))).length, 60);
 });
 
+/** A reader behind evmJsonRpc's fetch that answers a batch of more than `max` calls HTTP 413 with
+ *  base.api.pocket.network's own body (read 2026-11-18 20:41Z: 5 calls answer 200, 6 to 1,000 answer 413); `sizes`
+ *  holds each post's calls and `refused` counts the 413s. */
+const capped = (inner: EvmRpc, max: number, log: { sizes: number[]; refused: number }) =>
+  (async (_u: string, init?: RequestInit) => {
+    const sent = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] }[];
+    log.sizes.push(sent.length);
+    if (sent.length > max) return log.refused++, new Response("request entity too large: the batch has more items than this window allows\n", { status: 413 });
+    const out = await inner(sent.map((c) => ({ method: c.method, params: c.params })));
+    return new Response(JSON.stringify(out.map((o, i) => ({ jsonrpc: "2.0", id: sent[i]!.id, ...(o as object) }))), { status: 200 });
+  }) as unknown as typeof fetch;
+
+test("BF1: a reader that answers a batch past 5 calls 413 still answers every receipt, its batches halved and kept (card evm-batch-fits-each-reader)", async () => {
+  // release 177's app live run 44388203690: base.api.pocket.network, Base's second index reader, answered 0 of 10
+  // receipts in every span, each batch of 10 answered 413
+  const head = 1_000_000;
+  const gaps = Array.from({ length: 12 }, (_, i) => ({ key: key(200 + i), block: 940_000 + i * 100 }));
+  const st = new Set([real, ...gaps].map((p) => evmPoolIdOf(p.key)));
+  const log = { sizes: [] as number[], refused: 0 };
+  const b = capped(reader({ head, pools: [real], receipts: [real, ...gaps], state: st, calls: [] }), 5, log);
+  const cfg = cfgOf({ head, pools: [real, ...gaps], state: st, calls: [] }, { head, pools: [], calls: [] });
+  evmPaceReset();
+  // batchMax 5: the state reads fit, so only the receipts' batches of 10 meet the 413, as on mainnet
+  const r = await evmPoolIndexSync(null, { ...cfg, batchMax: 5, readers: [cfg.readers[0], evmJsonRpc("https://pocket-cap.example", b)] });
+  evmPaceReset();
+  assert.equal(r.error?.message ?? null, null);
+  assert.equal(r.coversThrough, head);
+  assert.equal(gaps.filter((g) => ids(r.pools).has(evmPoolIdOf(g.key))).length, 12, "every one-reader pool's receipt is answered");
+  // only the batches in flight at once (parallel 2) when the first refusal comes back meet it; every later post fits
+  assert.ok(log.refused >= 1 && log.refused <= cfg.parallel, `refused ${log.refused}: ${log.sizes.join(",")}`);
+  const last = log.sizes.length - 1 - [...log.sizes].reverse().findIndex((n) => n > 5);
+  assert.ok(log.sizes.slice(last + 1).every((n) => n <= 5) && log.sizes.length - last > 10, log.sizes.join(","));
+});
+
+test("BF2: the state reads (batchMax unset, 500 a batch) split on the same 413, and a later reader object of the same URL starts at the kept size", async () => {
+  const head = 1_000_000;
+  const gaps = Array.from({ length: 12 }, (_, i) => ({ key: key(300 + i), block: 940_000 + i * 100 }));
+  const st = new Set([real, ...gaps].map((p) => evmPoolIdOf(p.key)));
+  const log = { sizes: [] as number[], refused: 0 };
+  const inner = { head, pools: [real], receipts: [real, ...gaps], state: st, calls: [] };
+  const cfg = cfgOf({ head, pools: [real, ...gaps], state: st, calls: [] }, { head, pools: [], calls: [] });
+  evmPaceReset();
+  const r = await evmPoolIndexSync(null, { ...cfg, readers: [cfg.readers[0], evmJsonRpc("https://pocket-cap.example", capped(reader(inner), 5, log))] });
+  assert.equal(r.error?.message ?? null, null);
+  assert.equal(r.coversThrough, head);
+  assert.equal(gaps.filter((g) => ids(r.pools).has(evmPoolIdOf(g.key))).length, 12);
+  // the page's next sync makes a new provider object of the same URL: its first batch is already at most 5
+  const again = { sizes: [] as number[], refused: 0 };
+  const r2 = await evmPoolIndexSync(null, { ...cfg, readers: [cfg.readers[0], evmJsonRpc("https://pocket-cap.example/", capped(reader(inner), 5, again))] });
+  evmPaceReset();
+  assert.equal(r2.coversThrough, head);
+  assert.equal(again.refused, 0, `kept for the page's life: ${again.sizes.join(",")}`);
+});
+
 test("R3: a receipt answer that is not a receipt (a number, a string, an array) is unread, never a TypeError or a refusal", async () => {
   const head = 1_000_000;
   for (const odd of [(_x: unknown) => 7, (_x: unknown) => ({ result: "0x01" }), (_x: unknown) => ({ result: [] }), (_x: unknown) => ({ result: 5 })]) {
@@ -723,6 +824,36 @@ test("the Robinhood venue's cold index asks its device-direct reader few calls a
 // Card signpage-evm-reads-draw-no-refusal: a reader that takes at most `batchMax` calls a batch (the helper's
 // HELPER_RPC_BATCH_MAX, 10: a batch past it is its 413) gets the state reads (F5) in batches of at most that many; with
 // 500 a batch, 25 one-reader pools went in one batch of 25 the helper refuses, each pool unread and the sync partial.
+test("F5's state read needs no old block: a reader keeping only the newest blocks' state, the pin 24 s old by then, still covers (card evm-quote-reads-need-no-old-state)", async () => {
+  const head = 1_000_000;
+  // Base's 2 s blocks: the chain moves 12 blocks (24 s) while the spans are read; reader a keeps 10 blocks' state and
+  // answers -32000 "historical state ... is not available" past them (Pocket and publicnode on Robinhood, 2026-11-10)
+  const a: Reader = { head, pools: [real, deep], state: both2, calls: [], keeps: 10, moves: 12 };
+  const b: Reader = { head, pools: [deep], receipts: [real, deep], state: both2, calls: [], moves: 12 };
+  const r = await evmPoolIndexSync(null, cfgOf(a, b));
+  assert.equal(r.error?.message ?? null, null);
+  assert.equal(r.coversThrough, head);
+  assert.ok(ids(r.pools).has(evmPoolIdOf(real.key)), "the one-reader pool the state holds is served");
+  // the state read went to the newest block both readers agree on, past the pin
+  for (const x of [a, b]) {
+    const call = x.calls.flat().filter((c) => c.method === "eth_call");
+    assert.equal(call.length, 1);
+    assert.deepEqual(call[0]!.params[1], { blockHash: blockHash(head + 12) });
+  }
+  // nothing is loosened: a pool one reader logs whose state is 0 there on both is still no pool, and one reader alone
+  // holding it still refuses
+  const none = new Set([evmPoolIdOf(deep.key)]);
+  const zero = await evmPoolIndexSync(null, cfgOf({ head, pools: [real, deep], state: none, calls: [], keeps: 10, moves: 12 }, { head, pools: [deep], receipts: [real, deep], state: none, calls: [], moves: 12 }));
+  assert.equal(zero.coversThrough, head);
+  assert.ok(!ids(zero.pools).has(evmPoolIdOf(real.key)));
+  const half = await evmPoolIndexSync(null, cfgOf({ head, pools: [real, deep], state: both2, calls: [], keeps: 10, moves: 12 }, { head, pools: [deep], receipts: [real, deep], state: none, calls: [], moves: 12 })).catch((e: unknown) => e);
+  assert.ok(half instanceof EvmQuoteError && half.code === "rpc_disagree", String(half));
+  // no newer block both agree on (their hashes past N differ): the pool is unread and the sync partial, as before
+  const split = await evmPoolIndexSync(null, cfgOf({ head, pools: [real, deep], state: both2, calls: [], moves: 12 }, { head, pools: [deep], receipts: [real, deep], state: both2, calls: [], moves: 12, hash: (n) => blockHash(n, n > head ? "fork" : "") }));
+  assert.equal(split.coversThrough, null);
+  assert.match(split.error?.message ?? "", /agree on no block at or past N/);
+});
+
 test("F5's state reads take each reader's batchMax: no batch of more calls than it takes", async () => {
   const head = 1_000_000;
   const gaps = Array.from({ length: 25 }, (_, i) => ({ key: key(200 + i), block: 940_000 + i * 100 }));

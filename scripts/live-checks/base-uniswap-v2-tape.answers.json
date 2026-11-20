@@ -1,0 +1,518 @@
+{
+ "_about": "good: the deployed helper fc3c11b6e, 2026-11-18 21:53Z (PASS). bad_live: the helper at a6b7a3ad7, the commit before Uniswap v2 was a Base venue (8a92d76bd), run keyless on a Mac, 21:59Z (FAIL: an empty tape and no candles while the chain logged 2 swaps).",
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-18T21:54:18.333Z",
+  "gt": 200,
+  "tokens": [
+   {
+    "coin": "0xb8147ce9b0dac5f8165785dec6494e57748e4b78",
+    "pair": "0x06831088c586d475e51c37c716f8f5c601793ef4",
+    "head": 59242464,
+    "confirm": {
+     "factory": "0x8909dc15e40173ff4699343b6eb8132c65e18ec6",
+     "asset0": "0x4200000000000000000000000000000000000006",
+     "asset1": "0xb8147ce9b0dac5f8165785dec6494e57748e4b78",
+     "back": "0x06831088c586d475e51c37c716f8f5c601793ef4"
+    },
+    "swaps": [
+     {
+      "tx": "0xd0f345e487b2eaaba01e00177a5eb4342e50f020b5cb3fce7b32949a9e401957",
+      "index": 20,
+      "ts": 1795038637,
+      "side": "b"
+     },
+     {
+      "tx": "0xa0167cad080023d982760180cbf51e8f4d42f38a6d29a8e279ca4b2d54d21190",
+      "index": 52,
+      "ts": 1795038719,
+      "side": "s"
+     },
+     {
+      "tx": "0xc36957c8a8f16a7f14d1fded6265ffb07cd1d5350e450a55c06ce1cc251f9afa",
+      "index": 13,
+      "ts": 1795038765,
+      "side": "b"
+     },
+     {
+      "tx": "0xc8c6938daa922b3e53ad310d1bf29a0405b96d1822a45d204a357137ca1205d9",
+      "index": 80,
+      "ts": 1795038791,
+      "side": "s"
+     }
+    ],
+    "tape": {
+     "status": 200,
+     "src": "chain",
+     "as_of_ms": 1795038878227,
+     "filling": false,
+     "rows": [
+      {
+       "tx": "0xc8c6938daa922b3e53ad310d1bf29a0405b96d1822a45d204a357137ca1205d9",
+       "side": "s",
+       "t_ms": 1795038791000
+      },
+      {
+       "tx": "0xc36957c8a8f16a7f14d1fded6265ffb07cd1d5350e450a55c06ce1cc251f9afa",
+       "side": "b",
+       "t_ms": 1795038765000
+      },
+      {
+       "tx": "0xa0167cad080023d982760180cbf51e8f4d42f38a6d29a8e279ca4b2d54d21190",
+       "side": "s",
+       "t_ms": 1795038719000
+      },
+      {
+       "tx": "0xd0f345e487b2eaaba01e00177a5eb4342e50f020b5cb3fce7b32949a9e401957",
+       "side": "b",
+       "t_ms": 1795038637000
+      },
+      {
+       "tx": "0xe71356de1852dc4b36fe330836d6ff5f7af9f26f4f23c9a53a656b92a3a0ff69",
+       "side": "b",
+       "t_ms": 1795038535000
+      },
+      {
+       "tx": "0xdd2c9a3a0a11989cf816d2a357b548296a49db31b6fef1cf4ec566ae1cdc38b0",
+       "side": "s",
+       "t_ms": 1795038515000
+      },
+      {
+       "tx": "0x4e1ecd2431a321a8de682a8add622dd39724644899e902e6fa509b6e204782cf",
+       "side": "s",
+       "t_ms": 1795038386000
+      },
+      {
+       "tx": "0xc3ca7bac94539f8726e8f92999bf2a86175a441f90812ac24177ed73aa229d27",
+       "side": "b",
+       "t_ms": 1795038362000
+      },
+      {
+       "tx": "0x23bbefe59a254599fbc1bfa9b30cdcc9b0d4f303f896e2925c0365021b86c00c",
+       "side": "b",
+       "t_ms": 1795038264000
+      },
+      {
+       "tx": "0x7dc6d0a29337224e697fa697109fced431b1de8eda529832563f0f2c4d514bf0",
+       "side": "b",
+       "t_ms": 1795038199000
+      },
+      {
+       "tx": "0x70291a1b106db79314b59be2098a53a13736a7d3b3acb637a64caf3061142f28",
+       "side": "b",
+       "t_ms": 1795038132000
+      },
+      {
+       "tx": "0x3cf83b3d3f348279c85aa6ce13caa355599583994d3313973eac58dbd5e7d150",
+       "side": "s",
+       "t_ms": 1795038026000
+      },
+      {
+       "tx": "0xbc0307fef846d6a4ee5badf8aa269e1ba38ea9071e9794c45236dd5b98c52374",
+       "side": "s",
+       "t_ms": 1795038004000
+      },
+      {
+       "tx": "0x373a8e39b7f5241e5c150f9a945d1ecfe8d8b5f1fcea0693e4417274fe8b645a",
+       "side": "s",
+       "t_ms": 1795037869000
+      },
+      {
+       "tx": "0x8572b2e7b6b5d15badff6a595337ac0217cb18e38e8b12621f954ba1434af7c2",
+       "side": "s",
+       "t_ms": 1795037854000
+      },
+      {
+       "tx": "0x92a37de7a2642fd4893fad54958137e0586336634fd41333c84d1358c79679c4",
+       "side": "b",
+       "t_ms": 1795037723000
+      },
+      {
+       "tx": "0x0b8c267e175d6e572d4028f33be91cbc97498387c974a93979d861e34193c9be",
+       "side": "b",
+       "t_ms": 1795037684000
+      },
+      {
+       "tx": "0xad6f4bcd578229a13baff8d8b8a8189f772eb8bbee247675ffb06699da59e319",
+       "side": "b",
+       "t_ms": 1795037606000
+      },
+      {
+       "tx": "0xd7e1bc4a193742c44762fa2be0329d99d3c4718920c4bd65458388cc53d17709",
+       "side": "s",
+       "t_ms": 1795037593000
+      },
+      {
+       "tx": "0x2fb3a9418ca0d9fc5ee1dcef985f30c9bac0cfb2759592d578e7b8d8ac914d65",
+       "side": "b",
+       "t_ms": 1795037533000
+      },
+      {
+       "tx": "0x58a458dc1143d62c0345f332cfc6a9bc9dbda053257d9b02a971368f6d9b9fdb",
+       "side": "b",
+       "t_ms": 1795037520000
+      },
+      {
+       "tx": "0xd2561704670c4125ce6ccefa8336f13c475c7b67b96d416ba497435cb578a95e",
+       "side": "s",
+       "t_ms": 1795037464000
+      },
+      {
+       "tx": "0x9196e811ecd8e5a0202d5a72f44bbe71ee53068810620c2402066bcc4966ebe4",
+       "side": "s",
+       "t_ms": 1795037342000
+      },
+      {
+       "tx": "0x55ba3198791937af902f4792711ea76d60a0e5d71d3636368e9d5fd93b689aa5",
+       "side": "b",
+       "t_ms": 1795037326000
+      },
+      {
+       "tx": "0xf7c1e56dfeb82663bedf4c092b7db00188d862fb8026d53c88b31ca5edfe7c3c",
+       "side": "b",
+       "t_ms": 1795037192000
+      },
+      {
+       "tx": "0xe2869900010b798488dc351a0491283e79edf3a87030d9e27bd44a68e45512d1",
+       "side": "s",
+       "t_ms": 1795037167000
+      },
+      {
+       "tx": "0x4fca57aae09793f69d4efbd9895fcfbf48dff917386fb2c33c21c20c14e97716",
+       "side": "s",
+       "t_ms": 1795037069000
+      },
+      {
+       "tx": "0x6716bb6a8b26d5d5fd154acc53a8af85784e1597a9e6fce267c0f6adb9d5a130",
+       "side": "b",
+       "t_ms": 1795036973000
+      },
+      {
+       "tx": "0x9e9af457754647a5d18326c00d6540068f5594b5612c3fe1a5bdf123afe869aa",
+       "side": "s",
+       "t_ms": 1795036933000
+      },
+      {
+       "tx": "0x2e2319bdb62f7d7d25d7587aecdbafdda8bb205833c32b855cfaeca684dff438",
+       "side": "b",
+       "t_ms": 1795036807000
+      },
+      {
+       "tx": "0x77907150f1690203f99d0207efb38c253db019673ee93fe1fba963415125c749",
+       "side": "b",
+       "t_ms": 1795036800000
+      },
+      {
+       "tx": "0x68e7f2a6547e1a61103fa216f06ef51392cc146d9fb1590f0f553ee286be92c0",
+       "side": "b",
+       "t_ms": 1795036667000
+      },
+      {
+       "tx": "0xf30e3d04b4debee8fd9a8d5ba2ee5d495863fe0987eca7bd84f1323607ed5987",
+       "side": "s",
+       "t_ms": 1795036652000
+      },
+      {
+       "tx": "0x8dfdcd2b27cccd81cb33f9fdde254bac0f708a3db052fb98251ac2f8677a1f97",
+       "side": "s",
+       "t_ms": 1795036628000
+      },
+      {
+       "tx": "0x4672aa9a94a09131a4169f6e8945210efb7581f424e496b8cfdc494179766b81",
+       "side": "b",
+       "t_ms": 1795036540000
+      },
+      {
+       "tx": "0xee7c8717fa328a1a0cb3128e05764f196bd9c3d401aee34395e9f81558c49549",
+       "side": "s",
+       "t_ms": 1795036450000
+      },
+      {
+       "tx": "0xd666bacebaf3a3cc95a45e350a8279505ba740e3f0f6162a11727afa3f459cce",
+       "side": "s",
+       "t_ms": 1795036422000
+      },
+      {
+       "tx": "0xf1f3e13a99163d98c5aa6b9393f0134bd6824f3a434b8f76b6814a7b1489161a",
+       "side": "s",
+       "t_ms": 1795036407000
+      },
+      {
+       "tx": "0x99c3751db2369cfff1e53085d2aa188076a10d3c55d70e17bc18dca8fd3117bf",
+       "side": "s",
+       "t_ms": 1795036287000
+      },
+      {
+       "tx": "0x873d82b0a17dfa3a88407f48a50216316ab5d427aebfc925f1c6cc76e391424a",
+       "side": "s",
+       "t_ms": 1795036278000
+      },
+      {
+       "tx": "0x2ebaee03f01faefad41e953cb4c8c40c662bd68d253b75f2137b32810ccd2ce3",
+       "side": "b",
+       "t_ms": 1795036262000
+      },
+      {
+       "tx": "0x0b890b01a6a19b570bc76f3487f8fd506cb67ed5a056a5323b8eb5a6154f5090",
+       "side": "s",
+       "t_ms": 1795036245000
+      },
+      {
+       "tx": "0xd7d434dc04d97c42364a248024a3ac07c50e38b3485f86e796759e47f21f0712",
+       "side": "b",
+       "t_ms": 1795036133000
+      },
+      {
+       "tx": "0x004dcd9579f7c09f62ddb35cc2a8e20c7469b067a8011220ef2430b5fe2bccd2",
+       "side": "b",
+       "t_ms": 1795036086000
+      },
+      {
+       "tx": "0xf48db94ae705178662c893952dc07a39812ab5233af7a59ed9a56bb2e88f16e0",
+       "side": "b",
+       "t_ms": 1795036001000
+      },
+      {
+       "tx": "0x647aa98afc1c5bc2e0d32e21d873ec49de457e2d922b0262b31a66743a6b5b5b",
+       "side": "s",
+       "t_ms": 1795035908000
+      },
+      {
+       "tx": "0xcb418ef8e7462fe663955d3348b69991e52ce84a037d9576ef0fe5caa1f9d8e2",
+       "side": "s",
+       "t_ms": 1795035881000
+      },
+      {
+       "tx": "0x1f4cf5846ae81969aaa5d7893faea33adc86c9a541e380e6aae1b72a6fdd26e3",
+       "side": "s",
+       "t_ms": 1795035875000
+      },
+      {
+       "tx": "0xbe6956d4371a06cc56add2a9ccbe6a898b88a676e1473bead16bd4bc221f9ff5",
+       "side": "s",
+       "t_ms": 1795035738000
+      },
+      {
+       "tx": "0x6db41f553ab456c7b11db5dc09b8396fcdfd3dab8ac6fae864a4c06b1ae4720d",
+       "side": "s",
+       "t_ms": 1795035722000
+      }
+     ]
+    },
+    "candles": {
+     "status": 200,
+     "src": "chain,coingecko",
+     "as_of_ms": 1795038878498,
+     "bars": [
+      1795035960,
+      1795036080,
+      1795036200,
+      1795036260,
+      1795036380,
+      1795036440,
+      1795036500,
+      1795036620,
+      1795036800,
+      1795036920,
+      1795037040,
+      1795037160,
+      1795037280,
+      1795037340,
+      1795037460,
+      1795037520,
+      1795037580,
+      1795037640,
+      1795037700,
+      1795037820,
+      1795038000,
+      1795038120,
+      1795038180,
+      1795038240,
+      1795038360,
+      1795038480,
+      1795038600,
+      1795038660,
+      1795038720,
+      1795038780
+     ]
+    }
+   },
+   {
+    "coin": "0x03cafeb9b4aa1edc012bc40fe489d203b75de08f",
+    "pair": "0xc0506adacabbed5c32809d41f2fe59750caf1acd",
+    "head": 59242508,
+    "confirm": {
+     "factory": "0x8909dc15e40173ff4699343b6eb8132c65e18ec6",
+     "asset0": "0x03cafeb9b4aa1edc012bc40fe489d203b75de08f",
+     "asset1": "0x4200000000000000000000000000000000000006",
+     "back": "0xc0506adacabbed5c32809d41f2fe59750caf1acd"
+    },
+    "swaps": [
+     {
+      "tx": "0xdaf5cf29dd2e9eecd0835537de695207ac3cefae4c6c0586f050b082fe074108",
+      "index": 98,
+      "ts": 1795038755,
+      "side": "b"
+     }
+    ],
+    "tape": {
+     "status": 200,
+     "src": "chain",
+     "as_of_ms": 1795038886584,
+     "filling": true,
+     "rows": [
+      {
+       "tx": "0xdaf5cf29dd2e9eecd0835537de695207ac3cefae4c6c0586f050b082fe074108",
+       "side": "b",
+       "t_ms": 1795038755000
+      },
+      {
+       "tx": "0x3bb557820a97b97e7d4a8c47abb0451537f8d34c4e1231028c9aa891107c6ce6",
+       "side": "s",
+       "t_ms": 1795038484000
+      },
+      {
+       "tx": "0x3bb557820a97b97e7d4a8c47abb0451537f8d34c4e1231028c9aa891107c6ce6",
+       "side": "s",
+       "t_ms": 1795038484000
+      },
+      {
+       "tx": "0x6591964649847a8b3eea196278a06f365031fc860422ed53ab9b83e0716cf8fa",
+       "side": "b",
+       "t_ms": 1795038255000
+      },
+      {
+       "tx": "0xd5b3f59902536f3b76b5496708bfd18e15f29848d2a303788c088c5bed489a72",
+       "side": "s",
+       "t_ms": 1795037993000
+      },
+      {
+       "tx": "0xd5b3f59902536f3b76b5496708bfd18e15f29848d2a303788c088c5bed489a72",
+       "side": "s",
+       "t_ms": 1795037993000
+      },
+      {
+       "tx": "0xb431aed1c8f1e6f36ded7de3ca7098cfbcbeab73ef1bf25215b52172db307aa1",
+       "side": "s",
+       "t_ms": 1795037939000
+      },
+      {
+       "tx": "0xb431aed1c8f1e6f36ded7de3ca7098cfbcbeab73ef1bf25215b52172db307aa1",
+       "side": "s",
+       "t_ms": 1795037939000
+      },
+      {
+       "tx": "0x30a72bcbd34d5068e5aabbb77c8fea0752c2d8425f3ab678e94370c3b3487009",
+       "side": "s",
+       "t_ms": 1795037772000
+      },
+      {
+       "tx": "0x30a72bcbd34d5068e5aabbb77c8fea0752c2d8425f3ab678e94370c3b3487009",
+       "side": "s",
+       "t_ms": 1795037772000
+      },
+      {
+       "tx": "0xc55d282591ee25a699edcc55c49d52e0945dff611e61db3025b00d5f64661489",
+       "side": "b",
+       "t_ms": 1795037754000
+      },
+      {
+       "tx": "0x4c206d66ced72ae4311ce137678acf695271cc60584898d1c8fade4691fe6c75",
+       "side": "s",
+       "t_ms": 1795037503000
+      },
+      {
+       "tx": "0x4c206d66ced72ae4311ce137678acf695271cc60584898d1c8fade4691fe6c75",
+       "side": "s",
+       "t_ms": 1795037503000
+      }
+     ]
+    },
+    "candles": {
+     "status": 200,
+     "src": "chain,coingecko",
+     "as_of_ms": 1795038886584,
+     "bars": [
+      1795033800,
+      1795033860,
+      1795033920,
+      1795033980,
+      1795034040,
+      1795034220,
+      1795034520,
+      1795034580,
+      1795034700,
+      1795034820,
+      1795034880,
+      1795034940,
+      1795035000,
+      1795035240,
+      1795035480,
+      1795035720,
+      1795036020,
+      1795036200,
+      1795036500,
+      1795036740,
+      1795036980,
+      1795037220,
+      1795037460,
+      1795037700,
+      1795037760,
+      1795037880,
+      1795037940,
+      1795038240,
+      1795038480,
+      1795038720
+     ]
+    }
+   }
+  ],
+  "quiet": []
+ },
+ "bad_live": {
+  "base": "http://127.0.0.1:18611",
+  "at": "2026-11-18T21:59:47.685Z",
+  "gt": 200,
+  "tokens": [
+   {
+    "coin": "0xb8147ce9b0dac5f8165785dec6494e57748e4b78",
+    "pair": "0x06831088c586d475e51c37c716f8f5c601793ef4",
+    "head": 59244103,
+    "confirm": {
+     "factory": "0x8909dc15e40173ff4699343b6eb8132c65e18ec6",
+     "asset0": "0x4200000000000000000000000000000000000006",
+     "asset1": "0xb8147ce9b0dac5f8165785dec6494e57748e4b78",
+     "back": "0x06831088c586d475e51c37c716f8f5c601793ef4"
+    },
+    "swaps": [
+     {
+      "tx": "0x1f774dda147e768d150fca81a127e696a2680c671d40e2223e20903469286cbd",
+      "index": 29,
+      "ts": 1795039075,
+      "side": "s"
+     },
+     {
+      "tx": "0x9a7b07e231a3a555b71f43f7f28b6f12403866feb539c6f5d16bc0d8a552b5dc",
+      "index": 14,
+      "ts": 1795039134,
+      "side": "s"
+     }
+    ],
+    "tape": {
+     "status": 200,
+     "src": "chain",
+     "as_of_ms": 1795039224305,
+     "filling": true,
+     "rows": []
+    },
+    "candles": {
+     "status": 404,
+     "src": null,
+     "as_of_ms": null,
+     "bars": null
+    }
+   }
+  ],
+  "quiet": []
+ }
+}

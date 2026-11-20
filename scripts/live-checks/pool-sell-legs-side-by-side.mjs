@@ -60,10 +60,12 @@ const youngOf = (js) => {
   const m = YOUNG.exec(js);
   if (!m) return false;
   const [, y, sale, bound] = m;
-  const fn = new RegExp(`function ${y.replace(/\$/g, "\\$")}\\((${N}),(${N}),(${N}),(${N})\\)\\{let (${N})=\\[\\],(${N})=(${N})=>\\{let (${N})=new Map;return \\5\\.push\\(\\8\\),${N}\\(\\7,\\((${N}),(${N})\\)=>\\{if\\(!\\2\\(\\9,\\10\\)\\)return \\7\\(\\9,\\10\\);let (${N})=\`\\$\\{\\9\\} \\$\\{JSON\\.stringify\\(\\10\\)\\}\`,(${N})=\\4\\(\\),(${N})=\\8\\.get\\(\\11\\);if\\(\\13&&\\12-\\13\\.at<\\3\\)return \\13\\.read;let (${N})=Promise\\.resolve\\(\\7\\(\\9,\\10\\)\\),(${N})=\\{at:\\12,read:\\14\\};return \\8\\.set\\(\\11,\\15\\),\\14\\.catch\\(\\(\\)=>\\{\\8\\.get\\(\\11\\)===\\15&&\\8\\.delete\\(\\11\\)\\}\\),\\14\\}\\)\\};return Object\\.assign\\(\\[\\6\\(\\1\\[0\\]\\),\\6\\(\\1\\[1\\]\\)\\],\\{forget:\\(\\)=>\\5\\.forEach\\(${N}=>${N}\\.clear\\(\\)\\)\\}\\)\\}var (${N})=${N}=>${N}\\.forget\\?\\.\\(\\)`);
+  // a read no leg shares carries the call's signal; a shared read carries none, so one leg's stop never ends another's
+  // read (card signpage-reads-take-the-call-signal)
+  const fn = new RegExp(`function ${y.replace(/\$/g, "\\$")}\\((${N}),(${N}),(${N}),(${N})\\)\\{let (${N})=\\[\\],(${N})=(${N})=>\\{let (${N})=new Map;return \\5\\.push\\(\\8\\),${N}\\(\\7,\\((${N}),(${N}),(${N})\\)=>\\{if\\(!\\2\\(\\9,\\10\\)\\)return \\7\\(\\9,\\10,\\11\\);let (${N})=\`\\$\\{\\9\\} \\$\\{JSON\\.stringify\\(\\10\\)\\}\`,(${N})=\\4\\(\\),(${N})=\\8\\.get\\(\\12\\);if\\(\\14&&\\13-\\14\\.at<\\3\\)return \\14\\.read;let (${N})=Promise\\.resolve\\(\\7\\(\\9,\\10\\)\\),(${N})=\\{at:\\13,read:\\15\\};return \\8\\.set\\(\\12,\\16\\),\\15\\.catch\\(\\(\\)=>\\{\\8\\.get\\(\\12\\)===\\16&&\\8\\.delete\\(\\12\\)\\}\\),\\15\\}\\)\\};return Object\\.assign\\(\\[\\6\\(\\1\\[0\\]\\),\\6\\(\\1\\[1\\]\\)\\],\\{forget:\\(\\)=>\\5\\.forEach\\(${N}=>${N}\\.clear\\(\\)\\)\\}\\)\\}var (${N})=${N}=>${N}\\.forget\\?\\.\\(\\)`);
   const f = fn.exec(js);
   if (!f) return false;
-  const forget = f[16].replace(/\$/g, "\\$");
+  const forget = f[17].replace(/\$/g, "\\$");
   const esc = (x) => x.replace(/\$/g, "\\$");
   return (
     new RegExp(`(?<![\\w$])${esc(bound)}=4e3[,;]`).test(js) &&

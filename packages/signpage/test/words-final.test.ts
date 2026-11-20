@@ -27,6 +27,8 @@ while (main[noteAt - 1]?.startsWith("// ")) noteAt--;
 const note = main.slice(noteAt, start).map((l) => l.slice(3)).join(" ");
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const nov8 = await Promise.all([import("../src/withdraw/held.ts"), import("../src/withdraw/form.ts"), import("../src/withdraw/pool-form.ts")]);
+
 test("the table and its note are where this test reads them", () => {
   assert.ok(start > 0 && end > start, "const WORDS = { ... } as const;");
   assert.ok(note.startsWith("DRAFT COPY:"), note);
@@ -60,7 +62,6 @@ test("no note calls a picked word a draft", () => {
 // that draws it carries data-draft-copy: the only marks left in these three files are To and Amount (not on the page),
 // Min $ and the unmatched notice (the vault form's own).
 const NOV8 = "owner 8 Nov 07:55Z, kept";
-const nov8 = await Promise.all([import("../src/withdraw/held.ts"), import("../src/withdraw/form.ts"), import("../src/withdraw/pool-form.ts")]);
 const [held, form, pool] = nov8;
 const NOV8_ROWS: readonly (readonly [string, Record<string, string>, string, string])[] = [
   ["held.moveOut", held.HELD_WORDS, "move-out", "Move out"],

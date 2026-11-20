@@ -7,15 +7,13 @@
 // never a 404 for a real coin.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { request } from "node:http";
-import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
 import { after, before, test } from "node:test";
+import { call as _call, listening } from "../../../test/servers.ts";
 import { ROW_FIELDS } from "../../../../terminal/src/screens/discover/fields.ts";
 import { start } from "../../server.ts";
-import { geckoBudget } from "../gecko.ts";
 import { DEX_BASE } from "../held.ts";
 import { HOLDERS_FIELDS, PAGE_FIELDS } from "../solana/token.ts";
-import { GT_BASE } from "./lists.ts";
 import { createEvmNamed, toNamed } from "./named.ts";
 import { createEvmToken } from "./token.ts";
 
@@ -47,7 +45,6 @@ const listsOf = (chain: Chain) => {
 /** DexScreener behind a fake fetch: the recorded answer for each asked token ([] for one it has none for), or `status`. */
 let dexCalls = 0;
 const dexFetch = (status = 200) => async (url: string): Promise<Response> => {
-  if (url.startsWith(GT_BASE)) return new Response("{}", { status: 404 }); // GeckoTerminal's info: none held for these
   const m = new RegExp(`^${DEX_BASE}/tokens/v1/(base|robinhood)/(0x[0-9a-f]{40})$`).exec(url);
   if (m === null) throw new Error(`unexpected ${url}`);
   dexCalls++;
@@ -58,24 +55,25 @@ const tokensWith = (status = 200) =>
   Object.fromEntries(
     (["base", "robinhood"] as const).map((c) => {
       const fetch = dexFetch(status);
-      return [c, createEvmToken(c, { lists: listsOf(c), named: createEvmNamed(c, { fetch, now: () => NOW }), gecko: geckoBudget(() => NOW), fetch, now: () => NOW })];
+      return [c, createEvmToken(c, { lists: listsOf(c), named: createEvmNamed(c, { fetch, now: () => NOW }), now: () => NOW })];
     }),
   );
 const at = (evmTokens: ReturnType<typeof tokensWith>) => start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, evmTokens);
-const servers = [at(tokensWith()), at(tokensWith(429)), at(tokensWith(500))];
+// Each server may have said 'listening' before before() runs (start() listens at import); the shared wait reads its own
+// state first, and every call is bounded (card helper-test-servers-never-hang, test/servers.ts).
+const servers: [string, Server][] = [
+  ["the DexScreener-up server", at(tokensWith())],
+  ["the DexScreener-429 server", at(tokensWith(429))],
+  ["the DexScreener-500 server", at(tokensWith(500))],
+];
 const ports: number[] = [];
-before(() => Promise.all(servers.map((s, i) => new Promise<void>((ok) => s.on("listening", () => ((ports[i] = (s.address() as AddressInfo).port), ok()))))));
-after(() => Promise.all(servers.map((s) => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok()))))));
+before(async () => {
+  (await Promise.all(servers.map(([name, s]) => listening(s, name)))).forEach((p, i) => (ports[i] = p));
+});
+after(() => Promise.all(servers.map(([, s]) => new Promise<void>((ok) => (s.closeAllConnections(), s.close(() => ok()))))));
 
-function call(path: string, to = 0) {
-  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((ok, fail) => {
-    const r = request({ host: "127.0.0.1", port: ports[to], method: "GET", path }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (d: Buffer) => chunks.push(d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
-    });
-    r.on("error", fail).end();
-  });
-}
+/** One GET to server `to`, bounded and named. */
+const call = (path: string, to = 0) => _call(ports[to]!, { path }, servers[to]![0]);
 
 for (const c of CASES) {
   test(`GET /v1/market/token?chain=${c.chain} for ${c.symbol}, which no list served: 200, its row DexScreener's, in the frozen fields`, async () => {

@@ -5,6 +5,9 @@
 //   base58 of the id's 32 bytes (the same ed25519 key); on an EVM chain it is the record's address. A chain the page's
 //   network does not pin, a record of another scope, or an EVM record with no address: not_allowed, nothing sent.
 // - Signed out, or a no-PRF seed whose backup is not saved (backupFirst, OD:20): not_allowed, nothing sent.
+// - Before U_X, a plain send's quote or a 1Click request naming it leaves the device, its index is marked quoted in the
+//   note store (`quoted`, the wallet's markQuoted, card restore-shows-a-note-on-a-planned-index), so a restore that
+//   reads its id as used never marks it dead; a mark refused or failed answers down, nothing sent.
 // - With `origin_asset` and `amount`: a 1Click quote to U_X (../../wallet/src/deposit/quote.ts poolDepositQuoteRequest:
 //   X's coin to U_X on X, the refund under U_{s,i}'s id inside intents.near, the key the refund move signs with), sent
 //   through the helper's proxy and checked by ./pool-deposit-quote.ts before its address goes out, at the device's own
@@ -35,6 +38,7 @@ import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../kit/src/checks
 import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
 import { POOL_ASSET_DECIMALS, type PoolAsset, type PoolChain, type PoolStatePrice, type SignpageResults } from "../../kit/src/signpage/messages.ts";
 import { DEPOSIT_QUOTE_DEADLINE_MS, POOL_DEPOSIT_DESTINATION, POOL_DEPOSIT_NETWORK, askDepositQuoteAgain, poolCoinChain, poolDepositQuoteRequest, type OriginRefund } from "../../wallet/src/deposit/quote.ts";
+import { refundFloor } from "../../wallet/src/deposit/follow.ts";
 import type { Deferred, HostAnswer, HostRefusal } from "./api.ts";
 import type { DepositPublic } from "./deposit-wire.ts";
 import { checkPoolDepositQuote, evmPoolDepositFloor, solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
@@ -153,13 +157,16 @@ export interface PoolAddressDeps {
   read(scope: bigint): Promise<DepositPublic | null>;
   /** Settles once the top-level page's naming in flight is done (src/deposit-name.ts named). */
   named?(): Promise<unknown>;
+  /** Marks deposit index `index` of `scope` quoted in the note store, under the seed lock (the wallet's markQuoted),
+   *  before U_X or a quote naming it leaves the device; a throw answers down, nothing sent. */
+  quoted(scope: bigint, index: number): Promise<void>;
   /** The device's own two price reads of `originAsset` and of X's coin; null when it has none. */
   priced?(chain: PoolChain, originAsset: string): PoolQuotePricing | null;
   /** The follow that takes a checked quote under request `id` on into X's pool; none, and no quote is answered. */
   /** The device's floor for a quote into X's pool to U_X, read at quote time on two RPCs (readSolanaPoolFloor); null
    *  when it has none for the chain. None given: no quote. */
   floor?(chain: PoolChain, wallet: string, signal?: AbortSignal): Promise<bigint | null>;
-  checked?(id: string, chain: PoolChain, result: NonNullable<SignpageResults["pool.address"]["quote"]>, u: { scope: bigint; index: number; wallet: string; refundId: string; refund_to?: string }): Promise<void>;
+  checked?(id: string, chain: PoolChain, result: NonNullable<SignpageResults["pool.address"]["quote"]>, u: { scope: bigint; index: number; wallet: string; refundId: string; refund_to?: string; refund_min?: string }): Promise<void>;
   /** A Move from another pool (card refunds-land-on-the-devices-own-wallet): U_{scope,index}'s own address on `chain`,
    *  the origin coin's chain, derived on the device (base58 of the id's key on Solana, U^evm on Base and Robinhood). That
    *  quote then refunds ORIGIN_CHAIN there, never INTENTS. None (money from an outside wallet, Cash's NEAR USDC): INTENTS
@@ -287,6 +294,11 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       const before = usable(await deps.read(pool.scope), chain, pool.scope);
       if (stopped()) return void (out = { error: "not_allowed" });
       if (!before) return;
+      // U_X's index marked quoted before U_X, or a quote naming it, leaves the device (card
+      // restore-shows-a-note-on-a-planned-index): a restore then never marks that index dead. A mark refused (the index
+      // TAKEN) or failed answers down, nothing sent
+      await deps.quoted(pool.scope, before.record.index);
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (!quoted) return void (out = { result: { chain, address: before.wallet, asset } });
 
       // a quote: only under a request id, with a follow to carry the money on, and the device's own price reads
@@ -405,7 +417,8 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
         deadline: checked.deadline,
         time_estimate_s: timeEstimate,
       };
-      await deps.checked(ctx.id, chain, quote, { scope: pool.scope, index: before.record.index, wallet: before.wallet, refundId: before.record.id, ...(refund === undefined ? {} : { refund_to: refund.to }) });
+      // the quote's lowest refund rides with the op (card refunded-needs-the-refund): refunded counts only at or over it
+      await deps.checked(ctx.id, chain, quote, { scope: pool.scope, index: before.record.index, wallet: before.wallet, refundId: before.record.id, ...(refund === undefined ? {} : { refund_to: refund.to }), refund_min: refundFloor(checked.amountIn, checked.refundFee).toString() });
       if (stopped()) return void (out = { error: "not_allowed" });
       out = { result: { chain, address: before.wallet, asset, quote } };
     })().catch(() => {

@@ -136,7 +136,8 @@ export async function rheaQuote(args: RheaQuoteArgs): Promise<RheaQuote> {
     throw new RheaQuoteRefused("input", `pools: 1 to ${RHEA_QUOTE_POOLS_MAX} distinct pool ids`);
 
   // The two final heights; every read after this one names the lower.
-  const { height } = await finalOf(network, rpcs, args.final, signal);
+  const final = await finalOf(network, rpcs, args.final, signal);
+  const { height } = final;
   let blockHash = "";
   const same = (what: string, x: Answer, y: Answer): void => {
     if (x.height !== height || y.height !== height) throw new RheaQuoteRefused("rpc", `${what}: an answer not at block ${height}`);
@@ -157,7 +158,7 @@ export async function rheaQuote(args: RheaQuoteArgs): Promise<RheaQuote> {
     both("metadata", view(exchange, "metadata", {}, at)),
     both("get_frozenlist_tokens", view(exchange, "get_frozenlist_tokens", {}, at)),
     both("get_pool_by_ids", view(exchange, "get_pool_by_ids", { pool_ids: ids }, at)),
-    accountCode(rpcs, token, height, signal, same),
+    accountCode(rpcs, token, final, signal, same),
     feeView ? both(`${token} ${feeView.method}`, view(token, feeView.method, {}, at)) : Promise.resolve(null),
   ]);
 
@@ -333,8 +334,15 @@ export async function answer(rpc: NearRpc, params: Obj, signal?: AbortSignal): P
   return { height: r.block_height as number, hash: r.block_hash, bytes: Uint8Array.from(bytes as number[]), failed: false, error: "" };
 }
 
-/** The token's code hash at the block on both providers (its global contract's hash when it runs one; shared with dcl.ts). */
-export async function accountCode(rpcs: readonly [NearRpc, NearRpc], token: string, height: number, signal: AbortSignal | undefined, same: (what: string, x: Answer, y: Answer) => void): Promise<string> {
+/** Each provider's view_account answer for a token at one final height (card near-quote-inside-the-kpi): read once per
+ *  NearFinal and token, so Rhea classic and Rhea DCL quoting one amount at one block (wallet.ts nearQuote) ask it of each
+ *  provider once, not twice. Kept only on the NearFinal object (a WeakMap: gone with it), so nothing outlives the quote. */
+const ACCOUNTS = new WeakMap<NearFinal, Map<string, Promise<readonly [{ at: Answer; code: string }, { at: Answer; code: string }]>>>();
+
+/** The token's code hash at the block on both providers (its global contract's hash when it runs one; shared with dcl.ts):
+ *  each venue checks the two answers against its own block hash (`same`) and against each other, as when read alone. */
+export async function accountCode(rpcs: readonly [NearRpc, NearRpc], token: string, final: NearFinal, signal: AbortSignal | undefined, same: (what: string, x: Answer, y: Answer) => void): Promise<string> {
+  const height = final.height;
   const read = async (rpc: NearRpc): Promise<{ at: Answer; code: string }> => {
     let a: unknown;
     try {
@@ -350,7 +358,15 @@ export async function accountCode(rpcs: readonly [NearRpc, NearRpc], token: stri
     if (typeof code !== "string" || code === "") throw new RheaQuoteRefused("rpc", `${rpc.name}: view_account ${token}: no code hash`);
     return { at: { height: r.block_height as number, hash: r.block_hash, bytes: new Uint8Array(), failed: false, error: "" }, code };
   };
-  const [x, y] = (await Promise.all(rpcs.map(read))) as [{ at: Answer; code: string }, { at: Answer; code: string }];
+  // the pair is the one nearFinal read `final` on (finalOf checked it), so one read of each serves every venue
+  const kept = ACCOUNTS.get(final) ?? new Map();
+  ACCOUNTS.set(final, kept);
+  let both = kept.get(token);
+  if (both === undefined) {
+    both = Promise.all([read(rpcs[0]), read(rpcs[1])] as const);
+    kept.set(token, both);
+  }
+  const [x, y] = await both;
   same(`view_account ${token}`, x.at, y.at);
   if (x.code !== y.code) throw new RheaQuoteRefused("disagree", `view_account ${token}: the providers' code hashes differ`);
   return x.code;

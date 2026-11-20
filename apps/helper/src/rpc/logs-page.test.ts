@@ -9,8 +9,27 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as rpcModule from "./rpc.ts";
 import { DRPC_IP_PACE } from "../limits/limits.ts";
-import { createRpc, evmRangeCap, PACE_MAX_MS, RPC_ANSWER_MAX } from "./rpc.ts";
+import { createPacer, createRpc, evmRangeCap, PACE_MAX_MS, RPC_ANSWER_MAX } from "./rpc.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
+/** A test clock for one helper: its pages wait out dRPC's pace and the providers' holds, so the helper's waits move it
+ *  (each to its own wake time, as timers end) and its pacer reads it, never the machine's clock; it starts on a share
+ *  window's first ms (STILL is a multiple of 10 s). */
+function testClock() {
+  let t = STILL();
+  return {
+    now: (): number => t,
+    pacer: createPacer(() => t),
+    sleep: async (ms: number): Promise<void> => {
+      const wake = t + ms;
+      await null;
+      t = Math.max(t, wake);
+    },
+  };
+}
 // read off the module, so this file loads at a base without them and fails on the behaviour (red runs)
 const { LOGS_PAGES_MAX } = rpcModule as unknown as { LOGS_PAGES_MAX?: number };
 const PAGES_MAX = LOGS_PAGES_MAX ?? 100;
@@ -83,7 +102,7 @@ const read = (r: ReturnType<typeof createRpc>, body: string, chain = "base") => 
 
 test("a 10,000-block eth_getLogs on Base's keyed list (QuickNode at 5, dRPC at 100) answers 200: its logs in order, the caller's id, every page inside dRPC's 100", async () => {
   const p = providers(BASE_SPANS);
-  const r = createRpc(BASE_ENV, { fetch: p.fetch as never, log: () => undefined });
+  const r = createRpc(BASE_ENV, { ...testClock(), fetch: p.fetch as never, log: () => undefined });
   const from = FINAL - 30_000;
   const to = from + 9_999;
   const a = await read(r, logsBody("w-1", from, to));
@@ -106,21 +125,21 @@ test("a 10,000-block eth_getLogs on Base's keyed list (QuickNode at 5, dRPC at 1
 
 test("a log read inside dRPC's span goes to dRPC alone, never to QuickNode, whose 5-block cap would refuse it", async () => {
   const p = providers(BASE_SPANS);
-  const r = createRpc(BASE_ENV, { fetch: p.fetch as never, log: () => undefined });
+  const r = createRpc(BASE_ENV, { ...testClock(), fetch: p.fetch as never, log: () => undefined });
   const a = await read(r, logsBody(4, FINAL - 500, FINAL - 451));
   assert.equal(a.status, 200);
   assert.deepEqual((JSON.parse(a.body) as { result: Log[] }).result, logsIn(FINAL - 500, FINAL - 451));
   assert.deepEqual(p.logs().map((s) => s.url), [DR[0]], "one send, to dRPC");
   // and a read QuickNode does serve still goes to it first, as the list orders it
   const q = providers(BASE_SPANS);
-  const r2 = createRpc(BASE_ENV, { fetch: q.fetch as never, log: () => undefined });
+  const r2 = createRpc(BASE_ENV, { ...testClock(), fetch: q.fetch as never, log: () => undefined });
   assert.equal((await read(r2, logsBody(5, FINAL - 500, FINAL - 496))).status, 200);
   assert.deepEqual(q.logs().map((s) => s.url), [QN]);
 });
 
 test(`past ${PAGES_MAX} pages a read is refused before any send with a JSON-RPC range cap naming the widest span served, in words the page and the helper read`, async () => {
   const p = providers(BASE_SPANS);
-  const r = createRpc(BASE_ENV, { fetch: p.fetch as never, log: () => undefined });
+  const r = createRpc(BASE_ENV, { ...testClock(), fetch: p.fetch as never, log: () => undefined });
   const max = PAGES_MAX * DR_SPAN;
   const a = await read(r, logsBody(11, FINAL - 50_000, FINAL - 50_000 + max));
   assert.equal(a.status, 200, a.body);
@@ -145,7 +164,7 @@ test(`past ${PAGES_MAX} pages a read is refused before any send with a JSON-RPC 
 test("on dRPC's free pace a read is paged only as far as the keys' bucket serves inside a send's pace wait: past it, the range cap before any send", async () => {
   const p = providers(BASE_SPANS);
   const { BASE_RPC_URL_QUICKNODE, BASE_RPC_URL_DRPC_1, BASE_RPC_URL_DRPC_2, BASE_RPC_URL_DRPC_3 } = BASE_ENV;
-  const r = createRpc({ BASE_RPC_URL_QUICKNODE, BASE_RPC_URL_DRPC_1, BASE_RPC_URL_DRPC_2, BASE_RPC_URL_DRPC_3 } as Record<string, string>, { fetch: p.fetch as never, log: () => undefined });
+  const r = createRpc({ BASE_RPC_URL_QUICKNODE, BASE_RPC_URL_DRPC_1, BASE_RPC_URL_DRPC_2, BASE_RPC_URL_DRPC_3 } as Record<string, string>, { ...testClock(), fetch: p.fetch as never, log: () => undefined });
   // the bucket (12) and what refills it inside PACE_MAX_MS (0.8 x 2 s): 13 pages of 100
   const served = (DRPC_IP_PACE.burst + Math.floor((DRPC_IP_PACE.perS * PACE_MAX_MS) / 1000)) * DR_SPAN;
   const a = await read(r, logsBody(21, FINAL - 50_000, FINAL - 50_000 + 1_999));
@@ -165,7 +184,7 @@ test("a page's JSON-RPC error is the read's answer, with the caller's id; a page
   const p = providers(BASE_SPANS, (_url, f, _t, id) =>
     f === bad ? new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32005, message: "query returned more than 10000 results" } }), { status: 200, headers: { "content-type": "application/json" } }) : undefined,
   );
-  const r = createRpc(BASE_ENV, { fetch: p.fetch as never, log: () => undefined });
+  const r = createRpc(BASE_ENV, { ...testClock(), fetch: p.fetch as never, log: () => undefined });
   const a = await read(r, logsBody(21, from, from + 4_999));
   assert.equal(a.status, 200);
   // the pinned pool's read (card helper-keyed-logs-serve-a-whole-pool-range): its words and code kept, with how far the
@@ -173,7 +192,7 @@ test("a page's JSON-RPC error is the read's answer, with the caller's id; a page
   assert.deepEqual(JSON.parse(a.body), { jsonrpc: "2.0", id: 21, error: { code: -32005, message: "query returned more than 10000 results", data: "pool logs kept to block 54325670" } });
 
   const q = providers(BASE_SPANS, (_url, f) => (f === bad ? new Response("bad gateway", { status: 502 }) : undefined));
-  const r2 = createRpc(BASE_ENV, { fetch: q.fetch as never, log: () => undefined });
+  const r2 = createRpc(BASE_ENV, { ...testClock(), fetch: q.fetch as never, log: () => undefined });
   const b = await read(r2, logsBody(22, from, from + 4_999));
   // its own provider down for it, the page is asked of the others, whose seconds the other pages hold: 503 when none of
   // them was free to ask, else the helper's 429 (the device rests the seat on either); never a partial list
@@ -184,7 +203,7 @@ test("a page's JSON-RPC error is the read's answer, with the caller's id; a page
 test("pages whose logs together pass the answer cap are refused with a range cap naming the pages that fit", async () => {
   // each log 20 KB of data: a 100-block page holds 6 logs, about 120 KB, so about 34 pages fit RPC_ANSWER_MAX
   const p = providers(BASE_SPANS, undefined, 10_000);
-  const r = createRpc(BASE_ENV, { fetch: p.fetch as never, log: () => undefined });
+  const r = createRpc(BASE_ENV, { ...testClock(), fetch: p.fetch as never, log: () => undefined });
   const from = FINAL - 20_000;
   const a = await read(r, logsBody(31, from, from + 9_999));
   assert.equal(a.status, 200);
@@ -193,7 +212,7 @@ test("pages whose logs together pass the answer cap are refused with a range cap
   const span = evmRangeCap(e);
   assert.ok(span !== null && span >= BigInt(DR_SPAN) && span < 10_000n && span % BigInt(DR_SPAN) === 0n, `named ${span}`);
   // a read of that span fits (a helper of its own: the refused read drew its 100 pages of the caller's window)
-  const r2 = createRpc(BASE_ENV, { fetch: p.fetch as never, log: () => undefined });
+  const r2 = createRpc(BASE_ENV, { ...testClock(), fetch: p.fetch as never, log: () => undefined });
   const ok = await read(r2, logsBody(32, from, from + Number(span) - 1));
   assert.equal(ok.status, 200);
   assert.ok(Buffer.byteLength(ok.body) <= RPC_ANSWER_MAX + 64);
@@ -202,7 +221,7 @@ test("pages whose logs together pass the answer cap are refused with a range cap
 
 test("a finalized paged read is kept whole: asked again, it is answered with no send", async () => {
   const p = providers(BASE_SPANS);
-  const r = createRpc(BASE_ENV, { fetch: p.fetch as never, log: () => undefined });
+  const r = createRpc(BASE_ENV, { ...testClock(), fetch: p.fetch as never, log: () => undefined });
   const from = FINAL - 40_000;
   const first = await read(r, logsBody(41, from, from + 999));
   assert.equal(first.status, 200);
@@ -219,14 +238,14 @@ test("Robinhood: its first keyed URL, of no known span (Alchemy's Pay As You Go)
   const env = { ROBINHOOD_RPC_URL: RH_OWN, ROBINHOOD_RPC_URL_DRPC_1: RH_DR, RPC_PACE_DRPC: PAID_DRPC };
   const from = FINAL - 30_000;
   const p = providers({ [RH_DR]: DR_SPAN });
-  const r = createRpc(env, { fetch: p.fetch as never, log: () => undefined });
+  const r = createRpc(env, { ...testClock(), fetch: p.fetch as never, log: () => undefined });
   const a = await read(r, logsBody(51, from, from + 1_999), "robinhood");
   assert.equal(a.status, 200);
   assert.deepEqual((JSON.parse(a.body) as { result: Log[] }).result, logsIn(from, from + 1_999));
   assert.deepEqual(p.logs().map((s) => s.url), [RH_OWN], "one send, whole, to the wide provider");
 
   const q = providers({ [RH_DR]: DR_SPAN }, (url) => (url === RH_OWN ? new Response("down", { status: 500 }) : undefined));
-  const r2 = createRpc(env, { fetch: q.fetch as never, log: () => undefined });
+  const r2 = createRpc(env, { ...testClock(), fetch: q.fetch as never, log: () => undefined });
   const b = await read(r2, logsBody(52, from, from + 1_999), "robinhood");
   assert.equal(b.status, 200, b.body);
   assert.deepEqual((JSON.parse(b.body) as { result: Log[] }).result, logsIn(from, from + 1_999));
@@ -236,10 +255,8 @@ test("Robinhood: its first keyed URL, of no known span (Alchemy's Pay As You Go)
 
 test(`a caller's paged reads draw ${PAGES_MAX} pages a window of their own: a second wide read in the window is a 429, and the caller's other reads still go`, async () => {
   const p = providers(BASE_SPANS);
-  // the budget's clock read from the start of a 10 s share window, so both reads fall in one window
-  const at0 = performance.timeOrigin + performance.now();
-  const now = () => performance.timeOrigin + performance.now() - (at0 % 10_000);
-  const r = createRpc(BASE_ENV, { fetch: p.fetch as never, log: () => undefined, now });
+  // the budget's clock from the start of a 10 s share window, so both reads fall in one window
+  const r = createRpc(BASE_ENV, { ...testClock(), fetch: p.fetch as never, log: () => undefined });
   const from = FINAL - 30_000;
   const span = PAGES_MAX * DR_SPAN;
   assert.equal((await read(r, logsBody(71, from, from + span - 1))).status, 200);

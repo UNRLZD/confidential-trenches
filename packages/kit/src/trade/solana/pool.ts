@@ -137,6 +137,11 @@ export type SolanaReference = {
    *  pool's byte 244, solanaPumpSwapCashback), the flag the sale's venue read takes too; absent when not read. For a
    *  preview's bound only (card app-sell-shows-what-you-receive): no check before signing reads it. */
   pools: { venue: SolanaReferenceVenue; address: string; depth: readonly [bigint, bigint]; expectedOut: bigint; cashback?: boolean }[];
+  /** The candidates both providers agree on whose depth is under the set's cutoff (card
+   *  sol-buy-takes-the-best-venue-it-can-trade), each priced as a pool of the set is; absent when there is none. Never
+   *  part of E: a buy may take one only on a venue its device trades, held to E less the slippage (the kit's QUOTE
+   *  check), so a coin whose deepest pool sits on a venue the device cannot trade still buys on one it can. */
+  shallow?: SolanaReference["pools"];
   /** The oldest slot of the reads it rests on (readSolanaReference), so a check can bound its age. */
   slot?: number;
 };
@@ -510,13 +515,19 @@ export function solanaReferenceSet(candidates: readonly SolanaAgreedCandidate[])
   const inSet = candidates.filter((c) => c.reads.some((r) => r.depth * 10_000n >= (10_000n - tol) * maxMin));
   let best: SolanaCandidateRead | null = null;
   const pools: SolanaReference["pools"] = [];
-  for (const c of inSet) {
+  const shallow: SolanaReference["pools"] = [];
+  for (const c of candidates) {
     const r = c.reads[0].out >= c.reads[1].out ? c.reads[0] : c.reads[1];
-    pools.push({ venue: c.venue, address: c.address, depth: [c.reads[0].depth, c.reads[1].depth], expectedOut: r.out, ...(c.cashback === undefined ? {} : { cashback: c.cashback }) });
+    const p = { venue: c.venue, address: c.address, depth: [c.reads[0].depth, c.reads[1].depth] as const, expectedOut: r.out, ...(c.cashback === undefined ? {} : { cashback: c.cashback }) };
+    if (!inSet.includes(c)) {
+      if (r.out > 0n) shallow.push(p);
+      continue;
+    }
+    pools.push(p);
     if (!best || r.out > best.out) best = r;
   }
   if (!best || best.out <= 0n) return null;
-  return { expectedOut: best.out, expectedOuts: [...(best.outs ?? [])], spotOut: best.spotOut, pools };
+  return { expectedOut: best.out, expectedOuts: [...(best.outs ?? [])], spotOut: best.spotOut, pools, ...(shallow.length === 0 ? {} : { shallow }) };
 }
 
 // ------------------------------------------------------------------------------------------------- the read

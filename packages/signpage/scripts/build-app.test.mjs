@@ -31,6 +31,16 @@ test("index.html runs one script, /app.js, with its sha384, and nothing inline",
   assert.doesNotMatch(html, /<style|\sstyle=|\son[a-z]+=/i);
 });
 
+// card signpage-backup-export (review fix 2): the browser's own page translation sends the page's text to its vendor,
+// past the CSP; the drawn key and the backup's 12 words are that text. The whole page is marked not to be translated.
+test("the built page's root is marked translate=\"no\": no page translation reads the key or the 12 words", () => {
+  for (const html of [readFileSync(join(PKG, "index.html"), "utf8"), page("sha384-x")]) {
+    const root = /<html\b([^>]*)>/.exec(html);
+    assert.ok(root, "an <html> tag");
+    assert.match(root[1], /\stranslate="no"/);
+  }
+});
+
 // card signpage-tab-title-and-origin (QA walk item 9): SIGN_HOST is the top window, so its index.html's <title> is the
 // browser tab's name on every page; the framed app's own title never reaches the tab. It is the app's, word for word.
 test("index.html's head holds one <title>, the framed app's own (apps/terminal/index.html), so the tab reads the app's name", () => {

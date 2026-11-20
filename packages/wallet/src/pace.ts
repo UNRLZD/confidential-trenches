@@ -34,20 +34,20 @@ import { NEAR_NETWORKS, type NearNetwork, type NearRpc, nearRpc, RPC_TIMEOUT_MS,
  * holds it (pacedNearRpc).
  *
  * `seat`: the helper's FastNEAR seat (NEAR_NETWORKS seat, card near-quote-under-the-pace), FastNEAR's key behind the
- * helper's own pace for it (apps/helper/src/limits/limits.ts KEYED_PACE fastnear: 5 a second, 5 at once). The device
- * asks no faster than the key, but faster than the helper's share for one caller (apps/helper/src/rpc/rpc.ts
- * RPC_PAGE_NEED near: 30 a 10 s window), so a session's first buy meets that 429 once: its busiest 10 s asks the seat
- * 52 times (Rhea's 6 pool pages and the buy's reads; packages/signpage/test/near-seat-down.test.ts, on the test clock),
- * the share answers the rest 429 with the seconds left, and pacedNearRpc waits it out. Measured there (review P3-3 of
- * e6c66cce3), the buy fills in 10.0 s with no share, 14.4 s at 5 a second with the share (1 refused), 17.0 s at 3 (1
- * refused), 19.2 s at 2.5 (none: 5 + 25 fits 30) and 24.0 s at 2: the share's one wait costs less than any slower
- * pace, and no share fits the 52 inside the key's own 50 a 10 s. Another device's reads at the same moment can meet the
- * key's 429 too; past NEAR_BUSY_TRIES the keyless seat answers (nearSeatRpc).
+ * helper's own pace for it (apps/helper/src/limits/limits.ts KEYED_PACE fastnear: 60 a second, 120 at once, from Dev's
+ * published "up to 10,000" requests a minute per key, docs.fastnear.com/pricing, read 2026-11-18 02:50Z). Card
+ * near-seat-pace-fits-one-quote: 30 at once, so one quote's reads at its block (about 29 with every list kept: DCL 19,
+ * Rhea 4, the final block, decimals, the fee cap about 4; 18 once near-quote-inside-the-kpi lands; the app lead, 18 Nov
+ * 02:39Z) go out in one burst with no turn waited, then 5 a second: at most 30 + 50 = 80 in any 10 s, under the helper's
+ * share for one caller (apps/helper/src/rpc/rpc.ts RPC_PAGE_NEED near, 90), so a buy's busiest 10 s (52 reads,
+ * packages/signpage/test/near-seat-down.test.ts) meets no share 429. Before it, 5 at once held a quote of 29 reads about
+ * 5 s on turns alone, and the share of 30 answered a session's first buy one 429. Another device's reads at the same
+ * moment can meet the key's 429; past NEAR_BUSY_TRIES the keyless seat answers (nearSeatRpc).
  */
 export const PACE: Readonly<Record<"fastnear" | "drpc" | "seat", { perSec: number; burst: number }>> = Object.freeze({
   fastnear: Object.freeze({ perSec: 0.39, burst: 8 }),
   drpc: Object.freeze({ perSec: 10, burst: 20 }),
-  seat: Object.freeze({ perSec: 5, burst: 5 }),
+  seat: Object.freeze({ perSec: 5, burst: 30 }),
 });
 
 /** A provider URL's pace: the theoretical arrival time of its next request, the gap one request takes, the floor the
@@ -471,6 +471,8 @@ async function sharedTurn(s: PaceShare, p: Pace, signal?: AbortSignal): Promise<
     }
     if (wait <= 0) return;
     await new Promise<void>((res, rej) => {
+      // a stop that came while the lock was held (after its request's signal stopped counting) never fires again
+      if (signal?.aborted) return rej(signal.reason);
       const k = setTimeout(() => {
         signal?.removeEventListener("abort", stop);
         res();

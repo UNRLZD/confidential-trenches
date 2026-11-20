@@ -86,6 +86,8 @@ import { perEpoch, PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, typ
 
 /** One JSON-RPC call on one EVM provider (the kit's JSON-RPC client shape, solanaJsonRpc, which speaks any JSON-RPC). */
 export type EvmRpc = SolanaRpc;
+/** A fee list seat (EvmPoolArgs feeRpcs): `stateMs`, when set, how far behind the head it keeps a block's state, ms. */
+export type EvmFeeRpc = EvmRpc & { readonly stateMs?: number };
 
 /** ETH's ladder: one = the pool's MIN_DEPOSIT, 0.0001 ETH (src/PrivacyPool.sol:53), from 0.001 ETH = 10 x one, as
  * SOL_LADDER's smallest chunk is 0.01 SOL = 10 x the Solana program's MIN_DEPOSIT (./solana.ts SOL_LADDER) [design:
@@ -580,7 +582,7 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
     }
   };
   const seat = (k: number): EvmRpc => {
-    const call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
+    const call = async (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
       const span = method === "eth_getLogs" ? spanOf(params) : null;
       const logs = method === "eth_getLogs";
       // each provider asked at most once in one call, its error kept (review of 8cdf6ee8, MEDIUM: as the helper's
@@ -604,14 +606,17 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
           at[k] = n;
           continue;
         }
+        signal?.throwIfAborted();
         open[k]![i]!++;
         const t0 = Date.now();
         let r: unknown;
         try {
-          r = await list[i]!(method, params);
+          r = await list[i]!(method, params, signal);
         } catch (e) {
           open[k]![i]!--;
           took[i] = Date.now() - t0;
+          // the caller gave up (its bound, or the other side's failure): the provider is neither rested nor walked past
+          if (signal?.aborted) throw e;
           // the provider that refused, on its error, so the pager halves that provider's page however the seat moved
           // since (another call on the seat may have moved it: spreadLogs' readers share it)
           if (e !== null && typeof e === "object" && !Object.hasOwn(e, EVM_REFUSED_BY)) Object.defineProperty(e, EVM_REFUSED_BY, { value: list[i]!.url });
@@ -731,7 +736,8 @@ async function agreedSpan<T>(rpcs: Rpcs, f: () => Promise<T>): Promise<T> {
 async function bothIn<T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> {
   const ac = new AbortController();
   const stop = () => ac.abort(signal!.reason);
-  signal?.addEventListener("abort", stop, { once: true });
+  if (signal?.aborted) stop();
+  else signal?.addEventListener("abort", stop, { once: true });
   let first: { e: unknown } | null = null;
   const side = (k: number) => f(rpcs[k]!, k, ac.signal).catch((e: unknown) => {
     first ??= { e };
@@ -759,7 +765,7 @@ function blockOf(v: unknown, what: string): EvmBlock | null {
     baseFeePerGas: b.baseFeePerGas === undefined ? null : qty(b.baseFeePerGas, `${what} baseFeePerGas`),
   };
 }
-const getBlock = async (rpc: EvmRpc, at: string, what: string): Promise<EvmBlock | null> => blockOf(await rpc("eth_getBlockByNumber", [at, false]), what);
+const getBlock = async (rpc: EvmRpc, at: string, what: string, signal?: AbortSignal): Promise<EvmBlock | null> => blockOf(await rpc("eth_getBlockByNumber", [at, false], signal), what);
 
 /** The wait after a throttled try `tries` (1 first): the provider's Retry-After, else 1 s doubled per try; at most
  * EVM_LOG_THROTTLE_WAIT_MAX_MS. */
@@ -810,7 +816,7 @@ type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
  * failure named `what`. */
 const poolRead = <T>(what: string, f: () => Promise<T>, signal: AbortSignal | undefined, sleep: Sleep): Promise<T> => evmAnswered(f, signal, sleep, { tries: EVM_POOL_READ_TRIES, waitMs: EVM_POOL_READ_WAIT_MS, what });
 /** A block of the pool's reads, by tag or number, as a pool read. */
-const readBlock = (rpc: EvmRpc, at: string, what: string, signal: AbortSignal | undefined, sleep: Sleep): Promise<EvmBlock | null> => poolRead(what, () => getBlock(rpc, at, what), signal, sleep);
+const readBlock = (rpc: EvmRpc, at: string, what: string, signal: AbortSignal | undefined, sleep: Sleep): Promise<EvmBlock | null> => poolRead(what, () => getBlock(rpc, at, what, signal), signal, sleep);
 
 /** A JSON-RPC error that says the node does not know the block yet (a lag, not a lie). */
 const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such block/i;
@@ -909,7 +915,7 @@ const PRUNED = /missing trie node|historical state \S* ?is not available|state \
 async function view(rpc: EvmRpc, pool: string, data: string, blockHash: string, what: string, signal: AbortSignal | undefined, sleep: Sleep): Promise<bigint> {
   let r: unknown;
   try {
-    r = await poolRead(what, () => rpc("eth_call", [{ to: pool, data: `0x${data}` }, { blockHash }]), signal, sleep);
+    r = await poolRead(what, () => rpc("eth_call", [{ to: pool, data: `0x${data}` }, { blockHash }], signal), signal, sleep);
   } catch (e) {
     if (UNKNOWN_BLOCK.test(String((e as Error)?.message ?? e))) lag(`${what}: the RPC does not know block ${blockHash} yet`);
     if (PRUNED.test(String((e as Error)?.message ?? e))) lag(`${what}: the RPC no longer keeps the state of block ${blockHash}`);
@@ -1103,7 +1109,7 @@ async function oneValueLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filters
   try {
     got = await Promise.all(
       filters.map(async (f, n) => {
-        const r = await rpc("eth_getLogs", [{ ...f, fromBlock: tag(from), toBlock: tag(to) }]);
+        const r = await rpc("eth_getLogs", [{ ...f, fromBlock: tag(from), toBlock: tag(to) }], signal);
         if (!Array.isArray(r)) throw new Error("not a list");
         return r.map((g, i) => decode(g, from, to, `rpc ${k}: log ${i} of value ${n}, ${from}..${to}`));
       }),
@@ -1182,7 +1188,7 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     const end = at + size - 1n < to ? at + size - 1n : to;
     let got: unknown;
     try {
-      got = await rpc("eth_getLogs", [{ ...filter, fromBlock: tag(at), toBlock: tag(end) }]);
+      got = await rpc("eth_getLogs", [{ ...filter, fromBlock: tag(at), toBlock: tag(end) }], signal);
     } catch (e) {
       lastFull = null;
       // the other RPC failed and this read was stopped: never a smaller page for the next W
@@ -1475,9 +1481,9 @@ export async function evmTokensSentTo(rpcs: readonly [EvmRpc, EvmRpc], w: string
  */
 export async function evmHoldsAnchor(rpcs: readonly [EvmRpc, EvmRpc], chainId: bigint, anchor: EvmBlock, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait): Promise<void> {
   checkEvmRpcs(rpcs);
-  const ids = await both(rpcs, async (rpc, k, sig) => qty(await evmAnswered(() => rpc("eth_chainId", []), sig, sleep), `rpc ${k} eth_chainId`), signal);
+  const ids = await both(rpcs, async (rpc, k, sig) => qty(await evmAnswered(() => rpc("eth_chainId", [], sig), sig, sleep), `rpc ${k} eth_chainId`), signal);
   if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${chainId}`);
-  const bs = await both(rpcs, (rpc, k, sig) => evmAnswered(() => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`), sig, sleep), signal);
+  const bs = await both(rpcs, (rpc, k, sig) => evmAnswered(() => getBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`, sig), sig, sleep), signal);
   if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(`an RPC does not hold block ${anchor.number} as ${anchor.hash}`);
 }
 
@@ -1494,7 +1500,7 @@ export async function evmTokensSentToOne(rpc: EvmRpc, w: string, from: bigint, {
   addr20(w, "W");
   const to = lower(w);
   if (typeof from !== "bigint" || from < 0n) throw new Error("from: a block number");
-  const b = await evmAnswered(() => getBlock(rpc, tag(anchor.number), `block ${anchor.number}`), signal, sleep);
+  const b = await evmAnswered(() => getBlock(rpc, tag(anchor.number), `block ${anchor.number}`, signal), signal, sleep);
   if (b === null || b.hash !== anchor.hash) lag(`the reader does not hold block ${anchor.number} as ${anchor.hash}`);
   if (from > anchor.number) return [];
   const logs = await readLogs(rpc, 0, { topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, "0")}`] }, (raw, f, t, what) => decodeTransfer(raw, to, f, t, what), from, anchor.number, transferPager(page, EVM_LOG_CEILING_PAGES), signal, sleep);
@@ -2007,7 +2013,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       }
     }
     if (!checked) {
-      const ids = await both(rpcs, async (rpc, k, sig) => qty(await poolRead(`rpc ${k} eth_chainId`, () => rpc("eth_chainId", []), sig, sleep), `rpc ${k} eth_chainId`), signal);
+      const ids = await both(rpcs, async (rpc, k, sig) => qty(await poolRead(`rpc ${k} eth_chainId`, () => rpc("eth_chainId", [], sig), sig, sleep), `rpc ${k} eth_chainId`), signal);
       if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${a.pin.network}'s ${chainId}`);
     }
     // the newest anchor first (the pass's own, within EVM_NEWEST_REUSE_MS): the last completed round's block again is
@@ -2124,7 +2130,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       if (cap !== undefined && to - from + 1n > cap) return null;
       let raw: unknown;
       try {
-        raw = await wide!("eth_getLogs", [{ ...poolFilter, fromBlock: tag(from), toBlock: tag(to) }]);
+        raw = await wide!("eth_getLogs", [{ ...poolFilter, fromBlock: tag(from), toBlock: tag(to) }], signal);
       } catch (e) {
         signal?.throwIfAborted();
         const named = capSpanOf(String((e as Error)?.message ?? e));
@@ -2162,15 +2168,17 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       const confirm = async (f: bigint, t: bigint, mine: Ev[]): Promise<boolean> => {
         const ac = new AbortController();
         const stop = () => ac.abort(signal!.reason);
-        signal?.addEventListener("abort", stop, { once: true });
+        // a run confirmed after the reader's last await: a stop before it never fires again
+        if (signal?.aborted) stop();
+        else signal?.addEventListener("abort", stop, { once: true });
         // each provider's calls of the run one after another, none asked once the run stands: a paced provider's queue
         // (a one-event-a-call read's three calls) never holds the walk's next read behind calls no one waits for
         const gated = (r: EvmRpc): EvmRpc => {
           let last: Promise<unknown> = Promise.resolve();
-          const call = (method: string, params: readonly unknown[]): Promise<unknown> => {
+          const call = (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
             const go = last.then(() => {
               ac.signal.throwIfAborted();
-              return r(method, params);
+              return r(method, params, signal);
             });
             last = go.catch(() => {});
             return go;
@@ -2231,7 +2239,9 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       const liveAt = new Map<string, bigint>();
       const stop = new AbortController();
       const outer = () => stop.abort(signal!.reason);
-      signal?.addEventListener("abort", outer, { once: true });
+      // the sources are asked after the seats' awaits: a stop before them never fires again
+      if (signal?.aborted) outer();
+      else signal?.addEventListener("abort", outer, { once: true });
       const one = async ({ rpc: src, op }: { rpc: EvmRpc; op: string }, i: number): Promise<void> => {
         const url = (src as { url?: unknown }).url;
         const name = `source ${i} (${op}${typeof url === "string" ? ` ${url}` : ""})`;
@@ -2240,15 +2250,16 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const start = prior === null ? from : prior.to + 1n;
         const own = new AbortController();
         const end = () => own.abort(stop.signal.reason);
-        stop.signal.addEventListener("abort", end, { once: true });
+        if (stop.signal.aborted) end();
+        else stop.signal.addEventListener("abort", end, { once: true });
         let calls = 0;
         const capped = Object.assign(
-          async (method: string, params: readonly unknown[]): Promise<unknown> => {
+          async (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
             if (method === "eth_getLogs" && ++calls > EVM_SOURCE_CALLS) {
               own.abort(new Error(`more than ${EVM_SOURCE_CALLS} log calls`));
               own.signal.throwIfAborted();
             }
-            return src(method, params);
+            return src(method, params, signal);
           },
           typeof url === "string" ? { url } : {},
         ) as EvmRpc;
@@ -2586,9 +2597,9 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
  *  answer is still asked again as before. */
 const walkSeat = (rpc: EvmRpc): EvmRpc =>
   Object.assign(
-    async (method: string, params: readonly unknown[]) => {
+    async (method: string, params: readonly unknown[], signal?: AbortSignal) => {
       try {
-        return await rpc(method, params);
+        return await rpc(method, params, signal);
       } catch (e) {
         if ((e as { name?: unknown; fault?: unknown } | null)?.name === "SolanaRpcTransportError" && (e as { fault?: unknown }).fault === "network") throw new EvmUnansweredError(String((e as Error).message), e);
         throw e;
@@ -2783,8 +2794,13 @@ export type EvmPoolArgs = {
    * Robinhood testnet no second free provider gives both (read 2026-11-04 20:09-20:44Z: PublicNode keeps about 15 s of
    * state and pages 50,000 blocks of logs; dRPC keeps 600 s and more but refuses a 1,000-block page of the pool's old
    * logs).
+   * A seat with `stateMs` keeps a block's state only that long behind the head (card
+   * robinhood-fee-read-old-blocks-own-rpc: robinhood-rpc.publicnode.com answers HTTP 403 "Archive requests require a
+   * personal token" from about 10 s back, read 2026-11-18 14:49Z and 15:36Z): a read at a block that old or older, by
+   * the device clock against the block's time, walks the list without it, in the list's order; a younger one walks it
+   * whole. The seats with no `stateMs` hold two operators at least.
    */
-  feeRpcs: readonly EvmRpc[];
+  feeRpcs: readonly EvmFeeRpc[];
   /** Where the device holds the pool's sync between syncs (EvmSyncArgs held). */
   held?: EvmSyncHold;
   /** Where else the pool's logs may be read (EvmSyncArgs history), before the providers of `rpcs`. */
@@ -2805,6 +2821,8 @@ export type EvmPoolArgs = {
   epochFee: EvmEpochFeeRule;
   /** tests only: the fee walk's cut, budget, rest and clock (the kit's EvmTwoOperatorsOpts; its defaults live) */
   feeRead?: EvmTwoOperatorsOpts;
+  /** tests only: the device clock a fee read's block age is taken on, ms (Date.now) */
+  clock?: () => number;
   /** tests only: the salt source (16 random bytes unless given) and the wait between lag retries */
   salt?: () => Uint8Array;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -2832,7 +2850,25 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   if (!Array.isArray(a.feeRpcs) || a.feeRpcs.length < 2 || a.feeRpcs.some((r) => typeof r !== "function")) throw new Error("feeRpcs: two or more");
   if (a.feeRpcs.some((r) => typeof r.url !== "string")) throw new Error("feeRpcs: each with its url (its operator)");
   for (let i = 0; i < a.feeRpcs.length; i++) for (let j = i + 1; j < a.feeRpcs.length; j++) if (solanaSameProvider(a.feeRpcs[i]!, a.feeRpcs[j]!)) throw new Error("feeRpcs: one provider twice is one read");
-  const feeRpcs = evmTwoOperators(a.feeRpcs.map((rpc) => ({ url: rpc.url!, rpc })), a.feeRead);
+  for (const r of a.feeRpcs) if (r.stateMs !== undefined && !(Number.isFinite(r.stateMs) && r.stateMs > 0)) throw new Error("feeRpcs: stateMs a positive number of ms");
+  // a fee walk for each set of seats a block's age leaves (the list's order kept), made once: the seats that keep any
+  // block's state, then one more set for each stateMs; the oldest's made here, so a list with fewer than two operators
+  // keeping old state is refused at once
+  const feeWalks = new Map<string, EvmTwoOperators<EvmRpc>>();
+  const clock = a.clock ?? (() => Date.now());
+  const feeWalkAt = (block: EvmBlock): EvmTwoOperators<EvmRpc> => {
+    const age = clock() - Number(block.timestamp) * 1000;
+    const seats = a.feeRpcs.filter((r) => r.stateMs === undefined || age < r.stateMs);
+    const key = seats.map((r) => r.url).join(" ");
+    let w = feeWalks.get(key);
+    if (w === undefined) feeWalks.set(key, (w = evmTwoOperators(seats.map((rpc) => ({ url: rpc.url!, rpc })), a.feeRead)));
+    return w;
+  };
+  try {
+    feeWalkAt({ number: 0n, hash: "", timestamp: 0n, baseFeePerGas: null });
+  } catch (e) {
+    throw new Error(`feeRpcs, the seats that keep old state: ${(e as Error).message}`);
+  }
   if (typeof a.epochFee !== "function" || typeof a.relayFee !== "function") throw new Error("epochFee and relayFee: functions");
   const pool = lower(a.pin.pool);
   const feeRecipient = lower(a.pin.feeRecipient);
@@ -2905,7 +2941,7 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
         // the period's fee state read while its block is fresh, straight after the block (review of 7fbf2af3, P2-2);
         // held by the block's hash (a reorg that replaced the block is another block)
         const stop = new AbortController();
-        const held: HeldFee = { hash: block.hash, block, read: evmPeriodChainFee(feeRpcs, a.pin.network, pool, block, stop.signal, sleep), done: false, waiting: 0, stop };
+        const held: HeldFee = { hash: block.hash, block, read: evmPeriodChainFee(feeWalkAt(block), a.pin.network, pool, block, stop.signal, sleep), done: false, waiting: 0, stop };
         held.read.then(() => void (held.done = true), () => void (heldFees.get(epochStartMs) === held && heldFees.delete(epochStartMs)));
         heldFees.set(epochStartMs, (h = held));
         const newest = [...heldFees.keys()].reduce((x, y) => (y > x ? y : x));

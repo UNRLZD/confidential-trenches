@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { EXIT, MAX_READS, MIN_BARS, MIN_TEXTS, collect, crosshairTexts, judge, pickLines, pickToken } from "./app-legend-holds-still.mjs";
+import { CHG_STEP, EXIT, HELPER_HOST, MAX_READS, MC_STEP, MIN_BARS, MIN_TEXTS, collect, crosshairTexts, judge, movingLists, pickLines, pickToken } from "./app-legend-holds-still.mjs";
 import * as legend from "./app-legend-holds-still.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -256,4 +256,21 @@ test("a 429 that clears inside the span: that token read again and picked; an em
   const p2 = await pickToken({ fetchFn: helper(empty), chains: ["solana"], wait: noWait });
   assert.notEqual(p2.picked?.addr, first);
   assert.ok(p2.read[0].bars === null || p2.read[0].bars === 0, JSON.stringify(p2.read[0]));
+});
+
+test("movingLists: every other lists read of a chain moves each row's MC and 24h change, so a --build refresh re-fills the rail with values of another length; every other read is the recorded answer", async () => {
+  const body = { chain: "solana", as_of_ms: 1, lists: { trending: [{ mc_usd: "100", chg_24h_bps: 50 }, { mc_usd: null, chg_24h_bps: null }] } };
+  const seen = [];
+  const recorded = (route) => (seen.push(route.request().url()), route.fulfill({ status: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+  const moving = movingLists(recorded);
+  const read = (url) => new Promise((ok) => moving({ request: () => ({ url: () => url }), fulfill: ok, abort: (why) => ok({ abort: why }) }));
+  const lists = (chain) => `${HELPER_HOST}/v1/market/lists?chain=${chain}`;
+  const rows = (a) => JSON.parse(a.body).lists.trending;
+  assert.deepEqual(rows(await read(lists("solana"))), body.lists.trending);
+  assert.deepEqual(rows(await read(lists("base"))), body.lists.trending, "each chain's reads are counted on their own");
+  assert.deepEqual(rows(await read(lists("solana"))), [{ mc_usd: String(100 * MC_STEP), chg_24h_bps: 50 * CHG_STEP }, { mc_usd: null, chg_24h_bps: null }]);
+  assert.deepEqual(rows(await read(lists("solana"))), body.lists.trending);
+  const token = await read(`${HELPER_HOST}/v1/market/token?chain=solana`);
+  assert.equal(token.status, 200);
+  assert.equal(seen.length, 5, "every read goes through the recorded route");
 });

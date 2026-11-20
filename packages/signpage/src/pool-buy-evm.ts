@@ -34,16 +34,18 @@
 //     filled: both RPCs show one Bought for the nullifier, the same in the same block, paying W the token, out at least
 //       the min out W signed, of the chunk at a fee up to the proof's (the sender picks the fee, at most the relay
 //       data's cap); W's holding is completed with what W received, and filled names that transaction;
-//     refused, with the release's transaction: both show a Withdrawn (the swap failed in the pool's own call and W got
-//       the chunk less the fee charged, in ETH): the holding is marked withdrawn and the page's carry pass starts
-//       (src/pool-carry-evm.ts: W deposits that ETH back into the pool as a note of the user's, found from the chain
-//       alone, again on every load until it lands); the buy did not fill;
+//     owed_back, with the release's transaction (card evm-buy-end-carries-its-tx; "refused" before kit 1.19): both show
+//       a Withdrawn (the swap failed in the pool's own call and W got the chunk less the fee charged, in ETH): the
+//       holding is marked withdrawn and the page's carry pass starts (src/pool-carry-evm.ts: W deposits that ETH back
+//       into the pool as a note of the user's, found from the chain alone, again on every load until it lands); the buy
+//       did not fill, and the money is the user's on its way back;
 //     not_landed: both show another release of the nullifier (the note spent elsewhere), or both RPCs' newest block is
 //       past the proof's deadline with no release of it on either (the pool refuses it from then on: PrivacyPool.sol
 //       reverts a release once block.timestamp is past the relay data's deadline). Never on a revert: the pool has no
 //       sender check, so the public calldata can land until the deadline.
 //   The tap's run reads for EVM_BUY_SETTLE_MS from the send and then answers its last true stage ("sent"); the reads go
-//   on, with no lock held, until an end, which goes to the app as the kind's progress (`late`), so its button never
+//   on, with no lock held, until an end, which goes to the app as the kind's progress (`late`) with its transactions
+//   (the early "sent" answer names none: card evm-buy-end-carries-its-tx), so its button never
 //   stays on "sent": every EVM_BUY_WAIT_MS until EVM_BUY_FOLLOW_MS past the deadline (an end comes by then unless a
 //   pool RPC is down or stuck), then every EVM_BUY_SLOW_WAIT_MS while the page is signed in (`signal`, aborted at sign
 //   out, ends the reads; the settle pass ends the note either way). The proof's deadline is at most EVM_LIFE_MS (210 s) from its epoch's start and at least
@@ -56,8 +58,8 @@
 //   nullifier or a transaction hash.
 // Nothing here logs.
 import { POOL_ASSET_DECIMALS, type PoolStatePrice, type TradeStage, type TxRef } from "../../kit/src/signpage/messages.ts";
-import { evmPoolBuyQuote, evmPoolIndexPools, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../kit/src/checks/evm/quote.ts";
-import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap } from "../../kit/src/trade/evm/buy-tap.ts";
+import { evmPoolBuyQuote, evmPoolIndexPools, EvmQuoteError, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../kit/src/checks/evm/quote.ts";
+import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolBuyWarm, evmPoolV3Tiers } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
@@ -145,6 +147,9 @@ export type EvmPoolBuyHost = {
   quote(req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote>;
   /** The token's v4 pools in the chain's served pool index (the kit's evmPoolIndexPools), or null where none is served. */
   indexPools?(network: EvmPoolChain, token: string): readonly EvmPoolKey[] | null;
+  /** The kit's evmPoolV3Tiers: which v3 fee tiers hold a pool of the token, so the tap asks no tier with none (card
+   *  robinhood-tap-asks-no-missing-v3-tier). None: every tier is asked. */
+  v3Tiers?: (network: EvmPoolChain, token: string, fees: readonly number[]) => Promise<readonly boolean[] | null>;
   /** The kit's evmPoolBuildQuoted. */
   build(adapter: string, q: EvmPoolBuyQuote): EvmPoolBuy;
   /** The token's decimals, the same on both RPCs (rules/pool.ts tokenDecimalsOf, via pool-kinds.ts keptTokenDecimals); throws otherwise. */
@@ -247,9 +252,9 @@ export const evmLastRouteReset = (): void => evmBuyTapReset();
  *  list) or that no pool quotes (no_reference) is one this build does not trade, venue_not_built, as a Solana coin on a
  *  venue not built is (pool-buy.ts), which the app draws Unavailable with no Retry (card
  *  base-coin-quote-check-names-its-cause: the same tap is refused again); any other is quote_check_failed. */
-async function quoteOf(h: Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools">, network: EvmPoolChain, token: string, amountIn: bigint, slippageBps: number): Promise<EvmPoolBuyQuote> {
+async function quoteOf(h: Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "v3Tiers">, network: EvmPoolChain, token: string, amountIn: bigint, slippageBps: number): Promise<EvmPoolBuyQuote> {
   try {
-    return await evmPoolBuyQuoteTap({ chain: network, token, amountIn, slippageBps }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null) });
+    return await evmPoolBuyQuoteTap({ chain: network, token, amountIn, slippageBps }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null), ...(h.v3Tiers === undefined ? {} : { v3Tiers: h.v3Tiers }) });
   } catch (e) {
     if (e instanceof EvmBuyTapRefused) return no(e.code === "quote_check_failed" ? e.code : "venue_not_built", refusalRule(e));
     throw e;
@@ -413,7 +418,7 @@ export function evmMostWithCash(ready: readonly ReadyProof[], fee: bigint, pays:
 
 /** What pool.buy.dry quotes `out` with on Base and Robinhood: the tap's quote path (quoteOf: the page's quote, venues
  *  and index pools) on the pin's network, and the token's decimals as the tap reads them. */
-export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "decimals"> & {
+export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "v3Tiers" | "decimals"> & {
   network: EvmPoolChain;
   /** The chain's pool index for this quote (pool-testnet.ts evmIndexReady): started where none runs or is served, and
    *  settled once its sync ends; the quote waits for it at most EVM_DRY_INDEX_WAIT_MS. None: no wait. */
@@ -422,31 +427,52 @@ export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools"
 /** The longest a dry's quote waits for the chain's index sync it started (card robinhood-quote-answers-cold): the sync
  *  from the release's snapshot reads only the blocks past it, two to six 500,000-block spans on Robinhood's two index
  *  readers, where a cold quote with no index sent 20 to 100+ deep getLogs posts to rpc.mainnet.chain.robinhood.com at
- *  about one a second and ended stale_quote (box run 2026-11-16 03:24Z, 6 of 8 coins). Past it the quote runs as it did
- *  with no index. */
+ *  about one a second and ended stale_quote (box run 2026-11-16 03:24Z, 6 of 8 coins). A sync still running past it
+ *  answers the dry EVM_DRY_SYNCING (down: the box asks again), never a quote with no index beside it (card
+ *  evm-first-quote-inside-the-kpi: on 18 Nov 00:36Z a fresh account's Base dry started its no-index scan at 20 s while
+ *  the index synced, 223 getLogs posts and 26 answers of 429 on base-rpc.publicnode.com, the index's own first reader,
+ *  and answered at 73.6 s). Only a sync that ended with no index served (failed, partial, another tab's) leaves the
+ *  quote to its own scan. */
 export const EVM_DRY_INDEX_WAIT_MS = 20_000;
+/** evmDryOut's answer while the chain's index sync still runs past EVM_DRY_INDEX_WAIT_MS: no quote was asked. */
+export const EVM_DRY_SYNCING = Symbol("evm-dry-syncing");
 
 /** The page's kit quote of a buy (evmBuyHost's and the dry's): the helper's pools of the token from the PoolManager's
  *  first block asked beside it (evm-served.ts), then the kit's evmPoolBuyQuote; `later`, the dry's: a background read,
- *  each of its posts after every tap's waiting at its provider (kit pace.ts). */
-const pageQuote = (fetchFn?: typeof fetch, later = false) => (req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote> => (evmServedAsk(laneFetch(fetchFn), TRADE_HELPER, req.chain, req.token), evmPoolBuyQuote(later ? { ...req, later } : req));
+ *  each of its posts after every tap's waiting at its provider (kit pace.ts); `scanless`, the dry's on a device that
+ *  holds nothing (card evm-tree-reads-only-when-needed): a quote that reads no log, its pools the served index's and the
+ *  helper's, for a price shown and never signed. */
+const pageQuote = (fetchFn?: typeof fetch, later = false, scanless?: () => boolean) => (req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote> => (evmServedAsk(laneFetch(fetchFn), TRADE_HELPER, req.chain, req.token), evmPoolBuyQuote(later ? { ...req, later, ...(scanless?.() === true ? { scanless: true } : {}) } : req));
+/** A quote a buy may sign from: never one asked scanless (card evm-tree-reads-only-when-needed: its pools are the served
+ *  index's and the helper's, a price to show, and the helper can leave a pool out). */
+export function signedQuote(q: EvmPoolBuyQuote): EvmPoolBuyQuote {
+  if (q.scanless === true) throw new EvmQuoteError("bad_request", "a quote asked scanless is a shown price, never one a buy signs from");
+  return q;
+}
 /** The token's decimals as a buy reads them: the page's kept read on both pool RPCs, no wait (pool-kinds.ts keptTokenDecimals). */
 const pageDecimals = (chain: Chain, rpcs: readonly [EvmRpc, EvmRpc]) => (token: string): Promise<number> => keptTokenDecimals(chain, token, rpcs as readonly [PoolRpc, PoolRpc], { waits: 0 });
 
 /** The dry's quote host on the page: the buy's own quote and decimals (evmBuyHost) on the chain's pinned pool. */
-export function evmDryQuote(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], fetchFn?: typeof fetch, indexed?: () => Promise<boolean>): EvmDryQuote {
-  return { network: pin.network, venues: evmPoolVenues(), quote: pageQuote(fetchFn, true), indexPools: evmPoolIndexPools, decimals: pageDecimals(chain, rpcs), ...(indexed === undefined ? {} : { indexed }) };
+export function evmDryQuote(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], fetchFn?: typeof fetch, indexed?: () => Promise<boolean>, scanless?: () => boolean): EvmDryQuote {
+  return { network: pin.network, venues: evmPoolVenues(), quote: pageQuote(fetchFn, true, scanless), indexPools: evmPoolIndexPools, v3Tiers: evmPoolV3Tiers, decimals: pageDecimals(chain, rpcs), ...(indexed === undefined ? {} : { indexed }) };
+}
+
+/** Whether the chain's index sync the dry's host started (`indexed`) has ended, waiting for it at most
+ *  EVM_DRY_INDEX_WAIT_MS: true with no sync to wait for, or one that ended in any way; false while it still runs. */
+async function indexEnded(h: EvmDryQuote): Promise<boolean> {
+  if (h.indexed === undefined) return true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const ended = await Promise.race([h.indexed().then(() => true, () => true), new Promise<false>((r) => (timer = setTimeout(() => r(false), EVM_DRY_INDEX_WAIT_MS)))]);
+  clearTimeout(timer);
+  return ended;
 }
 
 /** pool.buy.dry's `out` on Base and Robinhood: one tap quote (quoteOf, three kit quotes at most, no retry) of `amountIn`
  *  wei, its expected out before slippage in whole units of the token at its decimals as the tap reads them, read beside
- *  the quote. Null when either read fails, or the quote is not of this token, chain and amount, or gives nothing. */
-export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint): Promise<string | null> {
-  if (h.indexed !== undefined) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([h.indexed().catch(() => false), new Promise((r) => (timer = setTimeout(r, EVM_DRY_INDEX_WAIT_MS)))]);
-    clearTimeout(timer);
-  }
+ *  the quote. Null when either read fails, or the quote is not of this token, chain and amount, or gives nothing;
+ *  EVM_DRY_SYNCING, with no quote asked, while the chain's index sync still runs past EVM_DRY_INDEX_WAIT_MS. */
+export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint): Promise<string | null | typeof EVM_DRY_SYNCING> {
+  if (!(await indexEnded(h))) return EVM_DRY_SYNCING;
   try {
     const [q, decimals] = await Promise.all([quoteOf(h, h.network, token, amountIn, 0), h.decimals(token)]);
     if (q.chain !== h.network || typeof q.token !== "string" || lower(q.token) !== lower(token) || q.amountIn !== amountIn) return null;
@@ -454,6 +480,24 @@ export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint)
     return poolUnits(q.amountOut, decimals);
   } catch {
     return null;
+  }
+}
+
+/** The coin's warm on the page (card evm-quote-warm-from-the-coin-page): the box asks pool.buy.dry with no amount as it
+ *  opens on a coin (its Max), and the kit's evmPoolBuyWarm then quotes the coin once at a small amount on the dry's own
+ *  host (its background reads, the page's quote, venues and index pools), so the reads that do not depend on the amount
+ *  are held when one is typed: a fresh account's first quote of a Base coin took 5.2 to 7.7 s cold. Like the dry's own
+ *  quote it waits for the chain's index sync it started, at most EVM_DRY_INDEX_WAIT_MS, and reads nothing past it, so
+ *  it never starts a scan with no index beside it. Its quotes are the dry's (h.quote): on a device that holds nothing
+ *  they read no log (scanless, card evm-tree-reads-only-when-needed), and none is ever signed: the warm drops every
+ *  answer, and the tap's own quote host takes each quote it signs through signedQuote. Resolves once it ends; never
+ *  throws. */
+export async function evmDryWarm(h: EvmDryQuote, token: string): Promise<void> {
+  try {
+    if (!(await indexEnded(h))) return;
+    await evmPoolBuyWarm({ chain: h.network, token }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null), ...(h.v3Tiers === undefined ? {} : { v3Tiers: h.v3Tiers }) });
+  } catch {
+    // a warm reads ahead only: what it meets, the tap meets again
   }
 }
 
@@ -509,6 +553,11 @@ export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmB
     if (d.trading()) return void (answer = { error: "busy" });
     const got = await d.tap();
     if (got === null) return void (answer = { error: "not_funded" });
+    // the box on the coin with no amount yet (its Max ask): the coin's warm, never waited for (evmDryWarm)
+    if (amount === null) {
+      const w = d.quote();
+      if (w !== null) void evmDryWarm(w, token);
+    }
     const tap = evmDryAmount(got.tapMax);
     // above tap_max: the move cashFirst starts, sized by the tap's own plan over the ready proofs and the notes it brings
     const above = amount !== null && typeof tap === "bigint" && amount > tap && d.fee !== undefined && d.moved !== undefined;
@@ -533,6 +582,8 @@ export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmB
     const most = await d.withCash(got.tapMax, got.ready);
     const moved = await sized;
     const o = await out;
+    // the chain's index still syncing past the dry's wait: down, so the box asks again, never a scan beside the sync
+    if (o === EVM_DRY_SYNCING) return void (answer = { error: "down" });
     const buys = plan !== null && amount !== null && plan.amount < amount ? poolUnits(plan.amount, ETH_DECIMALS) : null;
     const cost = plan !== null ? evmDryCost(plan) : (moved?.cost ?? null);
     answer = { result: { tap_max: got.tapMax, ...(most === null ? {} : { with_cash: most }), ...(buys === null ? {} : { buys }), ...(cost === null ? {} : { cost: poolUnits(cost, ETH_DECIMALS) }), ...(o === null ? {} : { out: o }) } };
@@ -755,13 +806,15 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
 }
 
 /** The legs' ends as one: filled when every leg filled; part_filled when one filled and none is still on its way; sent
- *  while one is (or ended unread); else refused when one was, and not_landed. Every leg's transactions. */
+ *  while one is (or ended unread); else owed_back when one leg's ETH sits on its W (card evm-buy-end-carries-its-tx:
+ *  the user's money on its way back, over a refusal), refused when one was, and not_landed. Every leg's transactions. */
 export function legsEnd(ends: readonly ({ stage: TradeStage; txs: TxRef[] } | null)[]): { stage: TradeStage; txs: TxRef[] } {
   const txs = ends.flatMap((e) => e?.txs ?? []);
   const st = ends.map((e) => e?.stage ?? "sent");
   if (st.every((s) => s === "filled")) return { stage: "filled", txs };
   if (st.some((s) => s === "sent" || s === "signed")) return { stage: "sent", txs };
   if (st.some((s) => s === "filled" || s === "part_filled")) return { stage: "part_filled", txs };
+  if (st.some((s) => s === "owed_back")) return { stage: "owed_back", txs };
   if (st.some((s) => s === "refused")) return { stage: "refused", txs };
   return { stage: "not_landed", txs };
 }
@@ -849,7 +902,7 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
     } catch {
       /* the next state read runs it */
     }
-    return { stage: "refused", txs };
+    return { stage: "owed_back", txs };
   }
   return null;
 }
@@ -973,9 +1026,11 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
       return null;
     },
     seed64: page.seed64,
-    // the helper's pools of the token from the PoolManager's first block, asked beside the quote (evm-served.ts)
-    quote: pageQuote(page.fetch),
+    // the helper's pools of the token from the PoolManager's first block, asked beside the quote (evm-served.ts); a
+    // quote asked scanless (a shown price's) is never one a buy signs from (signedQuote)
+    quote: (req) => pageQuote(page.fetch)(req).then(signedQuote),
     indexPools: evmPoolIndexPools,
+    v3Tiers: evmPoolV3Tiers,
     build: evmPoolBuildQuoted,
     // the page's kept decimals (pool-kinds.ts keptTokenDecimals: read on both RPCs and kept, so a sell after it reads none);
     // no wait here: this read falls between the buy's quote check and W's signature, and fails fast as the heads read does
@@ -1048,12 +1103,13 @@ export function poolBuyEvmKind(host: () => EvmPoolBuyHost & { end?(): void }, lo
               if (!answer) answer = { result: { stage: "sent", txs: [] } };
               give();
             },
-            late: (x) => ctx?.progress(x.stage),
+            // the end with its transactions: the early answer names none (card evm-buy-end-carries-its-tx)
+            late: (x) => ctx?.progress(x.stage, x.txs),
           },
           ask,
         );
         if (!answer) answer = "error" in a ? (a.rule === undefined ? { error: a.error } : { error: a.error, rule: a.rule }) : { result: a };
-        if ("stage" in a) ctx?.progress(a.stage);
+        if ("stage" in a) ctx?.progress(a.stage, a.txs);
       } finally {
         h.end?.();
       }

@@ -54,6 +54,10 @@ export type EvmPoolVenue = {
   /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
    *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
   readonly quoters?: Readonly<{ v3?: string; v4?: string }>;
+  /** The v3 factory the v3 quoter reads its pools from (QuoterV2.factory()): the buy tap asks its getPool for each fee
+   *  tier before it asks a tier's route (trade/evm/buy-tap.ts evmPoolV3Tiers, card robinhood-tap-asks-no-missing-v3-tier);
+   *  a chain with none has every tier asked. */
+  readonly v3Factory?: string;
   /** A route starts from the native asset whenever a native v4 pool exists and its route quotes at least as much as the
    *  WETH route (the chain's WETH is behind an upgradeable proxy). */
   readonly nativeFirst?: boolean;
@@ -108,7 +112,7 @@ export type EvmPoolVenue = {
    *  (checks/evm/quote.ts scanPools; cards evm-scan-second-provider, evm-rpc-spare-list), each with its own span and
    *  requests at once over the same depth. */
   readonly poolManager?: string;
-  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; orSpan?: number; spares?: readonly EvmScanSpare[] }>;
+  readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; orSpan?: number; initialized?: Readonly<{ pools: number; blocks: number }>; spares?: readonly EvmScanSpare[] }>;
   /** The device's index of every pool of the PoolManager (checks/evm/pool-index.ts, card evm-pool-index): its two
    *  readers, each of another operator, the first always one the device reaches directly, the second at most the
    *  helper's keyed route (POST /v1/rpc/{chain}?keyed=only, as the NEAR seat: the helper can make the sync refuse,
@@ -206,6 +210,8 @@ export const evmMainnetVenues = () =>
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
       quoters: bare({ v3: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", v4: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" }),
+      // QuoterV2.factory() above, on base-rpc.publicnode.com and mainnet.base.org (2026-11-18 15:34Z): the same address
+      v3Factory: "0x33128a8fc17869897dce68ed026d694621f6fdfd",
       // Keyless, of four operators, timed on one warm quote's six eth_call batches (109 kB) at each one's newest block
       // hash, 10 rounds each, every answer equal to publicnode's (card evm-quote-warm-round, 2026-11-04 16:4xZ from this
       // Mac): publicnode (Allnodes) p50/p95 146/207 ms; Blast 315/476, served by Alchemy (its answers carry
@@ -242,10 +248,15 @@ export const evmMainnetVenues = () =>
       // Each provider's posts at once (card robinhood-quotes-inside-provider-limits): 5 bursts of 2, 4, 6 and 8 posts at
       // once, 1.5 s apart, each post a batch of 3 eth_call PoolManager extsload(bytes32[]) of 110 slots at latest (22 KB,
       // a quote's request), from the Mac 2026-11-14 05:10-05:11Z: every post of all four served at 8, none refused (429
-      // or a rate-limit error). publicnode 2: the helper's PROVIDER_PACE (apps/helper/src/limits/limits.ts) holds it to 6
-      // calls at once and a quote's post carries up to 3; mainnet.base.org 8, under its 20; blastapi and Pocket's Base
+      // or a rate-limit error). publicnode 8, as measured (card evm-first-quote-inside-the-kpi): the 2 it had was the
+      // helper's PROVIDER_PACE (apps/helper/src/limits/limits.ts, 6 calls at once for the helper's one address), which
+      // no device shares; the device's own bound for it is its pace (checks/evm/pace.ts, 36 calls a second, eth_call
+      // alone 900 in 25 s none refused). At 2 a cold Base quote's reads queued behind it while blastapi answered 8 at once:
+      // a fresh account's first quote of a coin whose market is a WETH-USDC-coin v3 route took 10.1 s, its first round
+      // 1.56 s on publicnode against 0.54 s on blastapi; at 8 the same quote took 6.6 s and seven cold coins in a row
+      // drew no 429 (2026-11-18 02:5xZ from this Mac). mainnet.base.org 8, under its 20; blastapi and Pocket's Base
       // endpoint 8 (the helper names neither: the measurement alone)
-      inflight: bare<Record<string, number>>({ "https://base-rpc.publicnode.com": 2, "https://base-mainnet.public.blastapi.io": 8, "https://mainnet.base.org": 8, "https://base.api.pocket.network": 8 }),
+      inflight: bare<Record<string, number>>({ "https://base-rpc.publicnode.com": 8, "https://base-mainnet.public.blastapi.io": 8, "https://mainnet.base.org": 8, "https://base.api.pocket.network": 8 }),
       // 6 reads a call: aggregate3 shares one call's gas, and 64 of a 100 ETH buy's exact-out reads (8 of them 8.4-9.4M gas
       // each) needed 77.3M, past base-rpc.publicnode.com's 50M eth_call cap (3/3 refused "out of gas: gas required exceeds:
       // 50000000"; at 6 a call 30/30 answered; review of 2c02f7df, Base block 54,810,601). 24,000 bytes a request:
@@ -364,6 +375,10 @@ export const evmMainnetVenues = () =>
         url: "https://base-rpc.publicnode.com",
         span: 10_000,
         depth: 1_000_000,
+        // the PoolManager's Initialize logs a block (checks/evm/quote.ts tailBudgetOf, card evm-scan-chain-tail): 8,003
+        // pools in the 1,000,000 blocks to 59,100,991 (release 176's snapshot), so one event-alone request holds about
+        // 1.25M blocks of them, past the depth: the tail always reads the event alone here
+        initialized: bare({ pools: 8_003, blocks: 1_000_000 }),
         parallel: 20,
         spares: Object.freeze([
           bare({ url: "https://base.gateway.tenderly.co", span: 1_000, parallel: 3 }),
@@ -376,7 +391,16 @@ export const evmMainnetVenues = () =>
       // A cold index of the scan's 1M blocks: 100 spans, 4,701 pools, 25 batches on each, no 429, 10.8 s; the gap a
       // minute on, one batch each, 1.7 s (18:33Z). Some of Pocket's backends refuse 1,000 blocks (above), so a span it
       // answers with an error is asked as its halves on both. The margin: 474 blocks; the cap: 131,072 pools.
-      index: bare({ readers: Object.freeze(["https://base-rpc.publicnode.com", "https://base.api.pocket.network"] as const), span: 10_000, perBatch: 5, parallel: 4, margin: 474, cap: 131_072 }),
+      // The second reader is bloXroute's base.rpc.blxrbdn.com since card evm-index-kept-at-the-head (the index is synced
+      // again every EVM_INDEX_KEEP_MS): read from this Mac 2026-11-19 10:12-10:17Z, at the gap sync's rate (every 3 s a
+      // head post and a batch of the margin's 494 blocks' Initialize logs and their last block, 3 minutes) it answered
+      // 100 of 100 posts 200, every tick whole, p50/p95 579/1,168 ms, where Pocket answered 7 of 101 429 (and the index's
+      // cold sync on it 33 of 106, 19 Nov 09:0xZ); at the cold sync's rate (4 batches at once of 5 spans of 10,000
+      // blocks, 4 rounds) 16 of 16 200, 8,620 logs, no error, where Pocket answered 15 of 16 413 and one 429. Preflight
+      // 204, allow-origin *. Its operator is not publicnode's; its history starts at block 52,500,000 (above), under the
+      // depth's floor. Passed over for this seat: base-mainnet.public.blastapi.io (getLogs of 10 blocks at most) and
+      // mainnet.base.org (-32011 "request limit reached" to 50 of 51 batches), both read in the same 3 minutes.
+      index: bare({ readers: Object.freeze(["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com"] as const), span: 10_000, perBatch: 5, parallel: 4, margin: 474, cap: 131_072 }),
     }),
     robinhood: bare({
       chainId: 4663,
@@ -405,14 +429,28 @@ export const evmMainnetVenues = () =>
       // and robinhood.drpc.org, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak 0x3db0868d…96a28, and
       // 6,118 bytes, keccak 0xd707b1da…868f6
       quoters: bare({ v3: "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7", v4: "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94" }),
+      // QuoterV2.factory() above, on robinhood-rpc.publicnode.com, robinhood.drpc.org and rpc.mainnet.chain.robinhood.com
+      // (2026-11-18 15:34Z): the same address
+      v3Factory: "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
       nativeFirst: true,
       // Keyless, of five operators (Allnodes, dRPC, Robinhood, bloXroute, Globalstake), timed on the first five eth_call
       // batches of a USDG quote (1.31 MB) at each one's newest block hash, 10 rounds each, every answer equal to
       // Robinhood's (card evm-quote-warm-round, 2026-11-04 16:5xZ from this Mac): p50/p95 511/1,014 ms, 606/845,
       // 823/1,180, 766/2,801 and 2,349/4,972 ms. Passed over: daybreak (413 on a batch this size), blockvectra (outside
       // its history window), pocket and blockmachine (8 s and more, timeouts), thirdweb (refused requests), tatum,
-      // nodeflare (no head)
-      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com", "https://rpc-robinhood.globalstake.io"]),
+      // nodeflare (no head).
+      // Globalstake (rpc-robinhood.globalstake.io) left this list (card rh-provider-fails-64-read-batch): in some hours it
+      // answers a request of more than about 12 reads HTTP 500, and a quote's batch holds 3 calls of 64. On GitHub's
+      // runners the gas-starve live check read its 500 in 8 of 47 runs, 12-17 Nov, every one 22:28Z to 04:08Z; from
+      // this Mac at 00:43-00:45Z on 18 Nov, 3 rounds, it answered 1 call of 1 to 12 reads and 2 calls of 1 to 4, and HTTP
+      // 500 to 1 call of 16, 1 call of 64 (2 of 3 rounds of 32) and every batch of 2 or 3 calls of 6 to 64 reads, where
+      // the four left answered every shape to 3 calls of 64 (one dRPC 429). Its answers to a batch of 64 came as HTTP
+      // 500 after about 1 s; a real USDG tap at 00:46Z drew 36 of them, beside 41 dRPC 429s, and took 34.8 s, the other
+      // three taps 7.7 to 10.9 s. At 23:3xZ it answered every size from 1 to 256 reads. A per-provider batch would
+      // ask it for 12 reads a request, 16 times the posts, for the slowest operator here (its 64-read batches p50/p95
+      // 916/3,298 ms against publicnode's 466/941, 23:2xZ), so it is not asked; the pool list keeps it for log pages.
+      // Live check rh-provider-fails-64-read-batch reads every one of this list at the batch after each app deploy.
+      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com"]),
       // Robinhood's own is asked last (card robinhood-quotes-inside-provider-limits): it answers 429 past about 1 post a
       // second (apps/helper/src/limits/limits.ts PROVIDER_PACE) and is the scan's and the pool sync's seat, yet ranked in
       // by its speed whenever publicnode was held it carried a warm tap's rounds of reads, FRONG's 35 to 38 posts in one
@@ -427,7 +465,7 @@ export const evmMainnetVenues = () =>
       // publicnode, blxrbdn and globalstake served every post at 8, none refused, and the helper names none of them: 8,
       // the measurement alone. One limit of 2 for every provider (the scan's) held a cold USDG quote's 173 posts in the
       // queue: 12.2 s, against 7.0 s at 6 (05:0xZ the same day)
-      inflight: bare<Record<string, number>>({ "https://robinhood-rpc.publicnode.com": 8, "https://robinhood.drpc.org": 5, "https://rpc.mainnet.chain.robinhood.com": 2, "https://robinhood.rpc.blxrbdn.com": 8, "https://rpc-robinhood.globalstake.io": 8 }),
+      inflight: bare<Record<string, number>>({ "https://robinhood-rpc.publicnode.com": 8, "https://robinhood.drpc.org": 5, "https://rpc.mainnet.chain.robinhood.com": 2, "https://robinhood.rpc.blxrbdn.com": 8 }),
       // 64 reads a call (card evm-buy-quote-in-window): a cold WETH-USDG quote's 2,303 reads at 6 a call were 128 batches,
       // which ran past the 10-13 s that three of these five keep a block's state. Its exact-out reads cost about 100,000
       // gas each, about 6.4M a call against the 50M caps; all five answered 3 calls of 64 alike (review of 2c02f7df) and
@@ -543,6 +581,11 @@ export const evmMainnetVenues = () =>
         url: "https://rpc.mainnet.chain.robinhood.com",
         span: 10_000_000,
         depth: 10_000_000,
+        // the PoolManager's Initialize logs a block (checks/evm/quote.ts tailBudgetOf, card evm-scan-chain-tail): 8,804
+        // pools in the 3,000,000 blocks to 117,445,721 (release 176's snapshot; 145 in the 53,872 blocks after it, read
+        // on this provider 18 Nov 15:3xZ), so one event-alone request holds about 3.4M blocks of them; a start further
+        // back, or none, scans by currency
+        initialized: bare({ pools: 8_804, blocks: 3_000_000 }),
         parallel: 2,
         orSpan: 100_000,
         spares: Object.freeze([bare({ url: "https://robinhood.daybreak-rpc.network", span: 2_000, parallel: 4 }), bare({ url: "https://robinhood.api.pocket.network", span: 2_000, parallel: 4 })]),

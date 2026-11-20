@@ -5,6 +5,7 @@
 // pacedFetch by default.
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import * as P from "../src/pace.ts";
 import { bindRpc } from "../src/deposit/bind.ts";
@@ -53,7 +54,7 @@ test("a wait its caller ends gives its slot back, sends nothing and throws the c
 });
 
 test("the deadline starts at the slot and still bounds the request", async () => {
-  const f = P.pacedFetch(FAST, (_u, init) => new Promise((_r, rej) => init?.signal?.addEventListener("abort", () => rej(init.signal!.reason))), 100);
+  const f = P.pacedFetch(FAST, (_u, init) => untilAborted(init?.signal), 100);
   const t = performance.now();
   await assert.rejects(f(FAST), (e: Error) => e.name === "TimeoutError");
   assert.ok(performance.now() - t < 2_000);
@@ -306,8 +307,9 @@ test("reserve takes the provider's turn once: its first query goes at once with 
 
 // card near-quote-under-the-pace: the helper's FastNEAR seat (nearSeatRpc) at the key's pace, its keyless spare
 const SEAT = NEAR_NETWORKS.mainnet.seat;
-/** A key's pace as the helper holds it (5 a second, 5 at once, GCRA on the real clock): past it, 429 with Retry-After 1. */
-const keyPace = (perSec = 5, burst = 5) => {
+/** A key's pace as the helper holds it (apps/helper/src/limits/limits.ts KEYED_PACE fastnear: 60 a second, 120 at once,
+ *  GCRA on the real clock): past it, 429 with Retry-After 1. */
+const keyPace = (perSec = 60, burst = 120) => {
   let tat = 0;
   const every = 1000 / perSec;
   return () => {
@@ -320,39 +322,67 @@ const keyPace = (perSec = 5, burst = 5) => {
 };
 const VIEW = { request_type: "view_account", finality: "final", account_id: "intents.near" };
 
-test("the seat: 11 reads asked at once go out 5 at once, then one every 200 ms; the key never answers 429 and none goes to the keyless seat", () => onTestClock(async () => {
+/** `n` reads asked of the seat at once: each read's send time, the pace timers fired before it (work done, never real
+ *  time: a loaded runner's slow work cannot fail a burst; the box at load 8, 13 Nov), and the key's 429s and keyless
+ *  reads, against the helper's pace for the key. */
+async function seatBurst(n: number) {
   const take = keyPace();
   const sent: number[] = [];
-  // the timers the pace set that have fired by each send: work done, never real time elapsed, so a loaded runner's slow
-  // work cannot fail the burst (the box at load 8, 13 Nov: "the first 5 at once" read real milliseconds)
   let fired = 0;
   const firedAt: number[] = [];
   const set = globalThis.setTimeout;
   globalThis.setTimeout = ((f: (...a: unknown[]) => void, ms?: number, ...a: unknown[]) => set((...x: unknown[]) => (fired++, f(...x)), ms, ...a)) as typeof setTimeout;
   let keyless = 0;
   let refused = 0;
-  await withFetch((async (u: string) => {
-    if (u === SEAT) {
-      sent.push(performance.now());
-      firedAt.push(fired);
-      return take() ? answer() : (refused++, busy("1"));
-    }
-    keyless++;
-    return answer();
-  }) as typeof fetch, async () => {
-    const rpc = P.nearSeatRpc("mainnet");
-    assert.equal(rpc.name, SEAT);
-    const t = performance.now();
-    const all = await Promise.all(Array.from({ length: 11 }, () => rpc.query(VIEW)));
-    assert.equal(all.length, 11);
-    assert.equal(refused, 0, "the device's pace keeps under the key's");
-    assert.equal(keyless, 0);
-    assert.equal(sent.length, 11);
-    // the first 5 at once: none waited on a pace timer; each later read not before its own 200 ms slot on the clock
-    assert.deepEqual(firedAt.slice(0, 5), [0, 0, 0, 0, 0], "the first 5 at once");
-    for (let k = 5; k < 11; k++) assert.ok(sent[k]! - t >= (k - 4) * 200 - 5, `read ${k} at ${sent[k]! - t} ms`);
-  }).finally(() => void (globalThis.setTimeout = set));
+  let out: { t: number; sent: number[]; firedAt: number[]; refused: number; keyless: number } | undefined;
+  try {
+    await withFetch((async (u: string) => {
+      if (u === SEAT) {
+        sent.push(performance.now());
+        firedAt.push(fired);
+        return take() ? answer() : (refused++, busy("1"));
+      }
+      keyless++;
+      return answer();
+    }) as typeof fetch, async () => {
+      const rpc = P.nearSeatRpc("mainnet");
+      assert.equal(rpc.name, SEAT);
+      const t = performance.now();
+      const all = await Promise.all(Array.from({ length: n }, () => rpc.query(VIEW)));
+      assert.equal(all.length, n);
+      out = { t, sent, firedAt, refused, keyless };
+    });
+  } finally {
+    globalThis.setTimeout = set;
+  }
+  return out!;
+}
+
+test("card near-seat-pace-fits-one-quote: one NEAR quote's reads at its block (18 to 29 seat reads, the app lead's count 18 Nov 02:39Z) go out on the seat in one burst, none waiting a pace turn, and the helper's key answers every one", () => onTestClock(async () => {
+  for (const n of [18, 29]) {
+    P.resetPaces();
+    const r = await seatBurst(n);
+    assert.deepEqual(r.firedAt, Array(n).fill(0), `a quote of ${n} reads waited a pace turn: ${r.firedAt.join(",")}`);
+    assert.ok(r.sent.every((x) => x - r.t < 5), `a quote of ${n} reads: sent at ${r.sent.map((x) => Math.round(x - r.t)).join(",")} ms`);
+    assert.equal(r.refused, 0, "the device's burst fits the helper's for the key");
+    assert.equal(r.keyless, 0);
+  }
+  assert.ok(P.PACE.seat.burst >= 29, "one quote of 29 reads is one burst");
 }));
+
+test("the seat: 31 reads asked at once go out 30 at once, then one every 200 ms; the key never answers 429 and none goes to the keyless seat", () => onTestClock(async () => {
+  const r = await seatBurst(31);
+  assert.equal(r.refused, 0, "the device's pace keeps under the key's");
+  assert.equal(r.keyless, 0);
+  assert.equal(r.sent.length, 31);
+  // the first 30 at once: none waited on a pace timer; the 31st not before its own 200 ms slot on the clock
+  assert.deepEqual(r.firedAt.slice(0, 30), Array(30).fill(0), "the first 30 at once");
+  assert.ok(r.sent[30]! - r.t >= 200 - 5, `read 30 at ${r.sent[30]! - r.t} ms`);
+}));
+
+test("the seat's most in any 10 s is under the helper's share for one caller (apps/helper/src/rpc/rpc.ts RPC_PAGE_NEED near, 90): its burst and ten seconds of its rate, 80", () => {
+  assert.ok(P.PACE.seat.burst + 10 * P.PACE.seat.perSec <= 80, JSON.stringify(P.PACE.seat));
+});
 
 test("the seat falls to FastNEAR's keyless URL when the helper is busy past its tries, down (5xx), slow or unreachable; never on a 4xx or the caller's own abort", async () => {
   const cases: [string, () => Response | Promise<Response>, boolean][] = [

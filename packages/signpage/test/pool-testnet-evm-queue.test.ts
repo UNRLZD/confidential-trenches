@@ -13,12 +13,13 @@ import { VaultTree } from "../../kit/src/vault/inputs.ts";
 import { VAULT_FIELD_P, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { evmPoolVenues, evmReadProvidersOf } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
-import { evmPoolIndexPools, evmPoolIndexReset } from "../../kit/src/checks/evm/quote.ts";
+import { evmPoolIndexHeld, evmPoolIndexPools, evmPoolIndexReset } from "../../kit/src/checks/evm/quote.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, readReservedMarks, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
 import type { EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
+import { untilAborted } from "../../kit/src/abort.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { testnetPool, TESTNET_EVM_FEE_RPCS, MAINNET_EVM_FEE_RPCS, TESTNET_RPCS, evmEpochFee, evmPoolRelayFee } = await import("../src/pool-testnet.ts");
@@ -84,6 +85,13 @@ const unread = (): readonly EvmRpc[] => ["https://a.example", "https://b.example
 /** A pool event as the sync gives it. */
 const ev = (block: bigint, e: Partial<EvmPoolEvent> & Pick<EvmPoolEvent, "kind" | "state" | "value">): EvmPoolEvent => ({ block, blockHash: `0x${"11".repeat(32)}`, logIndex: 0n, bytes: "", label: null, precommitment: null, nullifier: null, recipient: null, token: null, ...e });
 const page = (w: WalletStore, signedIn = () => true) => ({ store: async () => w, seed64: async () => (signedIn() ? SEED64.slice() : Promise.reject(new Error("no seed is stored"))) });
+
+// A keyless operator keeps a block's state seconds to minutes, so the page reads each chain's period fee a few seconds
+// past the turn, while the period's first block is fresh, and runs the queue's pass then, only for a chain with its
+// queue open or its notes landed.
+const { EVM_SIGHT_MS, EVM_TURN_PASS_MS, EVM_TURN_SPREAD_MS } = await import("../src/pool-testnet.ts");
+const { evmPool: walletEvmPool } = await import("../../wallet/src/pool/evm.ts");
+const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
 
 test("each EVM chain's fee list is the kit's read list (evmReadProvidersOf), and the epoch fee rule is the kit's evmPoolFee", () => {
   const v = evmPoolVenues();
@@ -223,7 +231,7 @@ function slowSync() {
     started++;
     return new Promise<typeof FREEING>((resolve, reject) => {
       waiting.push(() => resolve(FREEING));
-      signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      untilAborted(signal).catch(reject);
     });
   };
   return { sync: { events }, started: () => started, go: () => waiting.splice(0).forEach((f) => f()) };
@@ -595,12 +603,6 @@ test("the EVM buy's live check reads what the testnet page reads: its pairs, cha
 });
 
 // ---- the turn pass (card evm-device-reads-need-no-old-state) ----
-// A keyless operator keeps a block's state seconds to minutes, so the page reads each chain's period fee a few seconds
-// past the turn, while the period's first block is fresh, and runs the queue's pass then, only for a chain with its
-// queue open or its notes landed.
-const { EVM_SIGHT_MS, EVM_TURN_PASS_MS, EVM_TURN_SPREAD_MS } = await import("../src/pool-testnet.ts");
-const { evmPool: walletEvmPool } = await import("../../wallet/src/pool/evm.ts");
-const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
 /** The page's turn timers, by hand: each set timer's wait and its callback (which returns the pass). */
 function turnTimers(o: { now: number; random?: () => number; hidden?: () => boolean }) {
   // `at`: the device's time the timer fires at
@@ -1159,8 +1161,9 @@ test("a page open across the turn keeps the period before's proof takeable while
   await t.signedOut();
 });
 
-// the page's carry pass at a state read (src/pool-carry-evm.ts)
-test("a state read carries a refused buy's ETH on W back into the pool from the chain alone (src/pool-carry-evm.ts): W's own deposit to the pinned pool on its return note, with no buy record and no tap", { timeout: 60_000 }, async () => {
+// the page's carry pass at a state read (src/pool-carry-evm.ts): deposit 0 spent by a refused buy, its change landed,
+// its release a Withdrawn to W of a Buy call to the pool, W holding a rung and more
+async function carryWorld() {
   const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
   const { w, ns } = await wallet();
   // deposit 0 spent by a refused buy: its change landed, its release a Withdrawn to W of a Buy call to the pool
@@ -1178,15 +1181,24 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
   const relTx: Record<string, unknown> = { type: "0x2", chainId: "0x2105", nonce: "0x0", maxPriorityFeePerGas: "0x1", maxFeePerGas: "0x2", gas: "0x5208", to: PIN.pool.toLowerCase(), value: "0x0", input: BUY, accessList: [], yParity: "0x0", r: "0x" + "5a".repeat(32), s: "0x" + "3c".repeat(32) };
   relTx.hash = evmType2Hash(relTx);
   const helperAsked: string[] = [];
-  const helper: EvmRpc = async (method, params) => (helperAsked.push(method), method === "eth_getTransactionByHash" && params[0] === relTx.hash ? relTx : null);
+  const helper: EvmRpc = async (method, params) => {
+    helperAsked.push(method);
+    if (method === "eth_getTransactionByHash") return params[0] === relTx.hash ? relTx : null;
+    // W's balance, read on the helper's route alone before the page's first tap (card evm-load-reads-name-no-w-to-the-public-seat)
+    if (method === "eth_getBalance") return "0x" + (String(params[0]).toLowerCase() === W ? CHUNK + RUNG : 0n).toString(16);
+    return null;
+  };
   const release = { ...ev(20n, { kind: "withdraw", state: 9n, value: CHUNK, nullifier: noteSecrets(SEED64, D0).nullifierHash, recipient: W }), blockHash: HASH20, logIndex: 2n, bytes: ["0x14", HASH20, "0x2", relTx.hash as string, "0x0", PIN.pool.toLowerCase(), "t0", "t1", "0x"].join(" ") };
   const round = { fin: { number: 30n, timestamp: 1_800_000_300n, hash: "", baseFeePerGas: null }, anchor: { number: 40n, hash: "", timestamp: 0n, baseFeePerGas: null }, events: [DEPOSIT, release] };
   const sent: string[] = [];
+  // each pool RPC call that names W: both are public providers on mainnet (MAINNET_POOL_RPCS)
+  const poolNaming: string[] = [];
   const rpcs = (): readonly EvmRpc[] =>
     ["https://a.example", "https://b.example"].map((url, k) =>
       Object.assign(
         async (method: string, params: readonly unknown[]) => {
           const p = params as unknown[];
+          if (JSON.stringify(params).toLowerCase().includes(W)) poolNaming.push(`${url} ${method}`);
           switch (method) {
             case "eth_getBlockByNumber":
               if (p[0] === "0x14" || p[1] === true) throw new Error("the release's block asked of a public RPC");
@@ -1212,6 +1224,10 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
         { url },
       ),
     );
+  // the page clock, moved on past the page's first tap's drawn time by `pastTap`
+  const realNow = Date.now;
+  let ahead = 0;
+  Date.now = () => realNow() + ahead;
   const t = testnetPool({ ...page(w), held: async () => w }, {
     prover: { vault: signalsProver(), stop: () => {} },
     evmPin: (c) => (c === "base" ? PIN : undefined),
@@ -1220,6 +1236,46 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
     evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
     evmHelper: (c) => (c === "base" ? helper : undefined),
   });
+  const pastTap = async (): Promise<void> => {
+    const { BACKS_LOAD_MAX_MS } = await import("../src/pool-testnet.ts");
+    const { POOL_RENT_BACK_SPACE_MAX_MS } = await import("../src/pool-sell.ts");
+    // a tap of the page's flow (a deposit's or withdraw's ask, refused here at once), then past its drawn time
+    t.flow({ kind: "pool.none", chain: "base" } as never, { id: "r1", sha: "00", progress: () => {} } as never);
+    ahead += BACKS_LOAD_MAX_MS + POOL_RENT_BACK_SPACE_MAX_MS;
+  };
+  return { t, ns, W, PIN, sent, helperAsked, poolNaming, pastTap, CHUNK, RUNG, word, sel, restore: () => void (Date.now = realNow) };
+}
+// card evm-load-reads-name-no-w-to-the-public-seat: a page load with no tap names W to no pool RPC: the pass reads W's
+// balance on the helper's route alone and shows it, as the Solana RETURNING row is; nothing is signed or sent
+test("evm-load-reads-name-no-w-to-the-public-seat: a load with no tap reads the refused buy's W on the helper's route alone and shows it; no pool RPC is named W, nothing is sent", { timeout: 60_000 }, async () => {
+  const c = await carryWorld();
+  try {
+    for (let i = 0; i < 3; i++) {
+      await c.t.stateRead();
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    // the pass's first read of W, wherever it goes
+    await until(() => c.poolNaming.length > 0 || c.helperAsked.includes("eth_getBalance"));
+    await new Promise((r) => setTimeout(r, 100));
+    assert.deepEqual(c.poolNaming, [], "no pool RPC named W");
+    assert.deepEqual(c.sent, [], "nothing sent");
+    assert.ok(c.helperAsked.includes("eth_getBalance"), "W's balance read on the helper's route");
+    assert.deepEqual(c.t.evmReturning(), [{ chain: "base", address: c.W, wei: c.CHUNK + c.RUNG }], "shown at the helper's amount");
+    const { evmReturningWallets } = await import("../src/positions.ts");
+    // 3,000 USD an ETH (Chainlink's 8 decimals): 0.0014 ETH
+    assert.deepEqual(evmReturningWallets(c.t.evmReturning(), () => ({ price: "300000000000", expo: -8, published_s: 1, read_ms: 1 })), [{ chain: "base", address: c.W, role: "fresh", size: "4.2", state: "RETURNING" }]);
+    await c.t.signedOut();
+    assert.deepEqual(c.t.evmReturning(), [], "a sign out shows it no more");
+  } finally {
+    c.restore();
+  }
+});
+test("past the page's first tap a state read carries a refused buy's ETH on W back into the pool from the chain alone (src/pool-carry-evm.ts): W's own deposit to the pinned pool on its return note, with no buy record", { timeout: 60_000 }, async () => {
+  const { t, ns, W, PIN, sent, helperAsked, pastTap, word, sel, restore } = await carryWorld();
+  try {
+  // card evm-load-reads-name-no-w-to-the-public-seat: the pass that reads W on the pool's RPCs and signs waits for the
+  // page's first tap's drawn time; before it the pass is idle (the test above)
+  await pastTap();
   // another tab holds the chain's carry lock: this tab's state read runs no pass of it
   let free!: () => void;
   await new Promise<void>((held) => void navigator.locks.request("ct-evm-carry/base", () => new Promise<void>((r) => ((free = r), held()))));
@@ -1239,6 +1295,9 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
   const open = (await ns.list()).find((x) => refKey(x.ref) === refKey(ret));
   assert.equal(open?.state, "INCOMING");
   await t.signedOut();
+  } finally {
+    restore();
+  }
 });
 
 // card sign-out-stops-the-pages-reads: another tab's sign out reaches this page as signedOut alone (main.ts, the store's
@@ -1419,6 +1478,100 @@ test("the pool index syncs once a sign-in, after the state read's proof pass end
   }
 });
 
+// Card evm-index-kept-at-the-head: the index was synced once a sign-in, so it fell past the quote's maxLag within seconds
+// and every new coin's first quote scanned the blocks past it by currency before its answer (Robinhood 2, 10 and 5 getLogs,
+// Base 6, 19 Nov). A served index is kept at the head: EVM_INDEX_KEEP_MS after each sync ends, a gap sync from the index
+// it kept, whose new pools a quote reads from the index; the store takes one a minute at most; none past a sign out.
+test("a served index is kept at the head: EVM_INDEX_KEEP_MS after each sync a gap sync from the kept index serves the new blocks' pools, stored once a minute, none past a sign out", async () => {
+  const { EVM_INDEX_KEEP_MS } = await import("../../kit/src/trade/evm/buy-tap.ts");
+  const { EVM_INDEX_PUT_MS } = await import("../src/pool-testnet.ts");
+  const { w, ns } = await wallet();
+  await landed(ns);
+  evmPoolIndexReset();
+  const o = { now: 1_800_000_000_000 + 20_000 };
+  const tt = turnTimers(o);
+  const PM = evmPoolVenues()["base-sepolia"].poolManager!;
+  const ZERO = "0x" + "0".repeat(40);
+  // a coin whose only pool is made in the blocks past the first sync's head
+  const COIN = "0x00000000000000000000000000000000000000c7";
+  const fresh = { id: "0x" + "c7".repeat(32), key: { currency0: ZERO, currency1: COIN, fee: 3000, tickSpacing: 60, hooks: ZERO }, block: 72 };
+  const ix = (through: number, pools: unknown[] = []) => ({ v: 1, chainId: 84532, poolManager: PM, from: 1, through, head: { number: through, hash: "0x" + "0".repeat(64) }, spans: [[1, through]], pools });
+  const stats = { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 };
+  const kept = new Map<string, unknown>([["base-sepolia", ix(50)]]);
+  const puts: number[] = [];
+  const calls: (number | null)[] = [];
+  const keeps: { f: () => void; ms: number }[] = [];
+  // the time the next sync takes, ms on the page's clock
+  let takes = 0;
+  const t = testnetPool({ ...page(w), held: async () => w }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c: string) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    evmHelper: (c: string) => (c === "base" ? (async () => null) as EvmRpc : undefined),
+    evmTurn: tt.evmTurn,
+    evmIndexStore: { get: async (c: string) => (kept.get(c) ?? null) as never, put: async (c: string, i: unknown) => void (kept.set(c, i), puts.push((i as { through: number }).through)) },
+    evmIndexKeep: (f: () => void, ms: number) => void keeps.push({ f, ms }),
+    evmIndexSync: async (_chain: string, prev: { through: number; pools: unknown[] } | null) => {
+      calls.push(prev?.through ?? null);
+      o.now += takes;
+      // a whole sync, as the kit answers it (pool-index.ts F4d): proven to N = through + 10 + 4, kept to N less a margin
+      const n = (prev?.through ?? 0) + 10;
+      const pools = [...(prev?.pools ?? []), ...(n + 4 >= fresh.block ? [fresh] : [])];
+      return { index: ix(n, pools.filter((p) => (p as { block: number }).block <= n)), coversThrough: n + 4, pools, error: null, stats };
+    },
+  } as unknown as Parameters<typeof testnetPool>[1]);
+  const settle = async () => {
+    for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 5));
+  };
+  const tick = async () => {
+    keeps.shift()?.f();
+    await settle();
+  };
+  try {
+    await t.stateRead();
+    await settle();
+    assert.deepEqual(calls, [50], "the first sync reads on from the kept index");
+    assert.deepEqual(puts, [60], "the first whole sync is stored");
+    assert.deepEqual(evmPoolIndexPools("base-sepolia", COIN), [], "the coin's pool is past the first sync's head");
+    assert.deepEqual(keeps.map((k) => k.ms), [EVM_INDEX_KEEP_MS], "a whole sync arms the next gap sync");
+    await tick();
+    assert.deepEqual(calls, [50, 60], "the gap sync reads on from the index the last sync kept, never from none");
+    assert.deepEqual(evmPoolIndexPools("base-sepolia", COIN), [fresh.key], "the new blocks' pool is served to the quote");
+    assert.deepEqual(puts, [60], "a gap sync within a minute of the last write is not stored");
+    assert.equal(keeps.length, 1, "each gap sync arms the next");
+    const served = evmPoolIndexHeld("base-sepolia");
+    assert.equal(served?.through, 74);
+    o.now += EVM_INDEX_PUT_MS;
+    await tick();
+    assert.deepEqual(calls, [50, 60, 70]);
+    assert.equal(evmPoolIndexHeld("base-sepolia"), served, "a gap sync that adds no pool leaves the served index the same object");
+    assert.equal(served?.through, 84, "and moves its coversThrough on");
+    assert.deepEqual(puts, [60, 80], "a minute on, the kept index is stored again");
+    assert.deepEqual(keeps.map((k) => k.ms), [EVM_INDEX_KEEP_MS]);
+    // a sync that takes longer than the keep's wait ended with N that far behind: the next starts at once
+    takes = EVM_INDEX_KEEP_MS + 1;
+    await tick();
+    assert.deepEqual(keeps.map((k) => k.ms), [0], "a sync that took longer than EVM_INDEX_KEEP_MS is followed at once");
+    takes = 0;
+    await tick();
+    assert.deepEqual(calls, [50, 60, 70, 80, 90]);
+    assert.deepEqual(keeps.map((k) => k.ms), [EVM_INDEX_KEEP_MS], "and one that did not, EVM_INDEX_KEEP_MS after it");
+    await t.stateRead();
+    await settle();
+    assert.deepEqual(calls, [50, 60, 70, 80, 90], "a state read starts no second keep");
+    assert.equal(keeps.length, 1, "one keep a chain");
+    await t.signedOut();
+    await tick();
+    assert.deepEqual(calls, [50, 60, 70, 80, 90], "no gap sync past a sign out");
+    assert.equal(keeps.length, 0, "and none armed");
+  } finally {
+    evmPoolIndexReset();
+    await t.signedOut();
+  }
+});
+
 // Card signpage-evm-reads-draw-no-refusal: two tabs signed in at once each synced the whole cold index (release 130,
 // Chrome CDP capture 13 Nov: two pages' Robinhood index reads at 29.1 s each, one answered 429). One sync a chain on the
 // device at once (the Web Lock ct-evm-index/{chain}): the tab that finds it held syncs none, and at its next state
@@ -1482,4 +1635,166 @@ test("the pool index syncs in one tab at a time: a second tab syncs none while t
     await a.signedOut();
     await b.signedOut();
   }
+});
+
+// Card evm-index-served-before-lock: the kept index (or the shipped snapshot) was served inside the Web Lock
+// ct-evm-index/{chain}, so a tab that found it held was served none, and its quote scanned from the chain's depth
+// (Robinhood cold 23 s with the tail, 5.6 s on main's scan; evm-scan-chain-tail's lead, 18 Nov 16:42Z). The serve is
+// reads only, before the lock: a tab without the lock still quotes from the device's index.
+const indexTab = (w: WalletStore, kept: Map<string, unknown>, name: string, log: string[], gate?: Promise<void>) => {
+  const PM = evmPoolVenues()["base-sepolia"].poolManager!;
+  const ix = (through: number) => ({ v: 1, chainId: 84532, poolManager: PM, from: 1, through, head: { number: through, hash: "0x" + "0".repeat(64) }, spans: [[1, through]], pools: [] });
+  const stats = { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 };
+  const tt = turnTimers({ now: 1_800_000_000_000 + 20_000 });
+  return testnetPool({ ...page(w), held: async () => w }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c: string) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    evmHelper: (c: string) => (c === "base" ? (async () => null) as EvmRpc : undefined),
+    evmTurn: tt.evmTurn,
+    locks: navigator.locks,
+    evmIndexStore: {
+      get: async (c: string) => (kept.get(c) ?? null) as never,
+      put: async (c: string, i: unknown) => {
+        log.push(`${name} put`);
+        if (gate !== undefined) await gate;
+        kept.set(c, i);
+        log.push(`${name} put done`);
+      },
+    },
+    evmIndexSync: async (_chain: string, prev: { through: number } | null) => {
+      log.push(`${name} sync ${prev?.through ?? null}`);
+      const n = (prev?.through ?? 0) + 10;
+      return { index: ix(n), coversThrough: n + 4, pools: [], error: null, stats };
+    },
+  } as unknown as Parameters<typeof testnetPool>[1]);
+};
+const indexSettle = async () => {
+  for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 5));
+};
+
+test("a tab that finds the chain's index sync held by another tab is still served the device's kept index, and syncs none", async () => {
+  const { w, ns } = await wallet();
+  await landed(ns);
+  evmPoolIndexReset();
+  const PM = evmPoolVenues()["base-sepolia"].poolManager!;
+  const kept = new Map<string, unknown>([["base-sepolia", { v: 1, chainId: 84532, poolManager: PM, from: 1, through: 50, head: { number: 50, hash: "0x" + "0".repeat(64) }, spans: [[1, 50]], pools: [] }]]);
+  const log: string[] = [];
+  // another tab holds the chain's sync
+  let free!: () => void;
+  await new Promise<void>((held) => void navigator.locks.request("ct-evm-index/base", () => new Promise<void>((r) => ((free = r), held()))));
+  const b = indexTab(w, kept, "b", log);
+  try {
+    assert.equal(evmPoolIndexPools("base-sepolia", "0x00000000000000000000000000000000000000aa"), null, "no index is served before the state read");
+    await b.stateRead();
+    await indexSettle();
+    assert.deepEqual(evmPoolIndexPools("base-sepolia", "0x00000000000000000000000000000000000000aa"), [], "the tab without the lock is served the kept index");
+    assert.deepEqual(log, [], "the tab without the lock syncs none and writes none");
+  } finally {
+    free();
+    evmPoolIndexReset();
+    await b.signedOut();
+  }
+});
+
+test("the index store's writes stay under the lock: two tabs' syncs and writes never interleave", async () => {
+  const { w, ns } = await wallet();
+  await landed(ns);
+  evmPoolIndexReset();
+  const kept = new Map<string, unknown>();
+  const log: string[] = [];
+  let open!: () => void;
+  const gate = new Promise<void>((r) => (open = r));
+  const a = indexTab(w, kept, "a", log, gate);
+  const b = indexTab(w, kept, "b", log);
+  try {
+    await a.stateRead();
+    await indexSettle();
+    // tab a's write is still running (gate held): tab b, at its state read, neither syncs nor writes
+    await b.stateRead();
+    await indexSettle();
+    assert.deepEqual(log, ["a sync null", "a put"], "the second tab syncs none while the first's write runs under the lock");
+    open();
+    await indexSettle();
+    evmPoolIndexReset();
+    await b.stateRead();
+    await indexSettle();
+    assert.deepEqual(log, ["a sync null", "a put", "a put done", "b sync 10", "b put", "b put done"], "each tab's sync and write run whole, one tab after the other, the second on from the first's kept index");
+    assert.equal((kept.get("base-sepolia") as { through: number }).through, 20);
+    assert.deepEqual(evmPoolIndexPools("base-sepolia", "0x00000000000000000000000000000000000000aa"), [], "the second tab serves its own whole sync");
+  } finally {
+    open();
+    evmPoolIndexReset();
+    await a.signedOut();
+    await b.signedOut();
+  }
+});
+
+test("a dry's quote on a device that holds nothing, in a tab without the chain's index lock, is still served the kept index", async () => {
+  const { w } = await wallet();
+  evmPoolIndexReset();
+  const PM = evmPoolVenues()["base-sepolia"].poolManager!;
+  const kept = new Map<string, unknown>([["base-sepolia", { v: 1, chainId: 84532, poolManager: PM, from: 1, through: 50, head: { number: 50, hash: "0x" + "0".repeat(64) }, spans: [[1, 50]], pools: [] }]]);
+  const log: string[] = [];
+  let free!: () => void;
+  await new Promise<void>((held) => void navigator.locks.request("ct-evm-index/base", () => new Promise<void>((r) => ((free = r), held()))));
+  const b = indexTab(w, kept, "b", log);
+  try {
+    await b.stateRead();
+    assert.equal(b.evmMoney(), false, "the device holds nothing");
+    assert.equal(await b.evmIndexReady("base"), false, "a tab without the lock syncs none");
+    assert.deepEqual(evmPoolIndexPools("base-sepolia", "0x00000000000000000000000000000000000000aa"), [], "the dry's quote is served the kept index");
+    assert.deepEqual(log, []);
+  } finally {
+    free();
+    evmPoolIndexReset();
+    await b.signedOut();
+  }
+});
+
+// Card evm-index-served-before-lock (review of 6c8a6dd30): the first serve took the kept index whenever there was
+// one, even one older than the release's snapshot, so a device back after days synced on from an old release's index
+// end, not the snapshot's. The first serve takes the newer of the two by its through.
+test("a tab's first serve takes the newer of the kept index and the release's snapshot, and its sync reads on from it", async () => {
+  const v = evmPoolVenues().robinhood;
+  const pm = v.poolManager!.toLowerCase();
+  const ixAt = (through: number) => ({ v: 1, chainId: v.chainId, poolManager: pm, from: 1, through, head: { number: through, hash: "0x" + "1".repeat(64) }, spans: [[1, through]], pools: [] });
+  const RH: EvmPoolPin = Object.freeze({ ...PIN, network: "robinhood" as never });
+  const stats = { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 };
+  const firstSync = async (keptThrough: number, snapshotThrough: number) => {
+    const { w, ns } = await wallet();
+    await landed(ns);
+    evmPoolIndexReset();
+    const kept = new Map<string, unknown>([["robinhood", ixAt(keptThrough)]]);
+    const prevs: (number | null)[] = [];
+    const tt = turnTimers({ now: 1_800_000_000_000 + 20_000 });
+    const t = testnetPool({ ...page(w), held: async () => w }, {
+      prover: { vault: signalsProver(), stop: () => {} },
+      evmPin: (c: string) => (c === "robinhood" ? RH : undefined),
+      evmRpcs: unread,
+      evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+      evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+      evmHelper: (c: string) => (c === "robinhood" ? (async () => null) as EvmRpc : undefined),
+      evmTurn: tt.evmTurn,
+      locks: navigator.locks,
+      evmIndexStore: { get: async (c: string) => (kept.get(c) ?? null) as never, put: async (c: string, i: unknown) => void kept.set(c, i) },
+      evmIndexSnapshot: async (n: string) => (n === "robinhood" ? ixAt(snapshotThrough) : null),
+      evmIndexSync: async (_chain: string, prev: { through: number } | null) => {
+        prevs.push(prev?.through ?? null);
+        return { index: null, coversThrough: null, pools: null, error: { code: "rpc_failed", message: "x" }, stats };
+      },
+    } as unknown as Parameters<typeof testnetPool>[1]);
+    try {
+      await t.stateRead();
+      await indexSettle();
+      return prevs;
+    } finally {
+      evmPoolIndexReset();
+      await t.signedOut();
+    }
+  };
+  assert.deepEqual(await firstSync(100, 200), [200], "a kept index older than the snapshot: the snapshot is served and the sync reads on from its end");
+  assert.deepEqual(await firstSync(300, 200), [300], "a kept index newer than the snapshot: the kept one");
 });

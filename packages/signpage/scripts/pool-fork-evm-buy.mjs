@@ -269,8 +269,12 @@ const evmIndexKept = {
     if (INDEX_FILE) writeFileSync(INDEX_FILE, v8.serialize(indexed));
   },
 };
-const t = testnetPool(page, { prover: { vault, stop: () => {} }, fetch: helperFetch, evmIndexStore: evmIndexKept });
-const kinds = poolKinds(testnetPoolDeps(t.flow));
+const pageOver = { prover: { vault, stop: () => {} }, fetch: helperFetch, evmIndexStore: evmIndexKept };
+let t = testnetPool(page, pageOver);
+// the pool kinds as src/main.ts wires them: a buy waits at its tap while its chain's spend is prepared (card
+// taps-wait-inside-the-page)
+const kindsOf = (p) => poolKinds(testnetPoolDeps(p.flow, undefined, (c) => p.prepared(c)));
+let kinds = kindsOf(t);
 
 // 2. the proof queue's proof: the state read starts the chain's pass; its ready proof. The queue proves at an epoch's
 // start (EVM_EPOCH_MS) on the tree of the leaves before it, once the newest block both RPCs agree on is past that start
@@ -339,6 +343,24 @@ if (ready.length === 0) {
 }
 const proof = ready[0];
 log("ready", { ms: readyMs, proveMs: record.times.proveMs, note: proof.noteId, chunk: proof.chunk, fee: proof.binding.feeCap, root: proof.root, w: proof.wallet.address, epoch: proof.epochStartMs });
+
+// FORK_TAP_AFTER_LOAD=<ms> (card taps-wait-inside-the-page): the page loaded again as a reload loads it (this page's
+// queues closed, their proofs kept on the device, a new page on the same store), its first state read started, and
+// the tap made <ms> after it, while the new page's first pass still makes its proofs ready: the tap waits for them
+// inside the page and fills. Unset: the tap with every proof ready, as before
+if (process.env.FORK_TAP_AFTER_LOAD !== undefined) {
+  const afterMs = Number(process.env.FORK_TAP_AFTER_LOAD);
+  if (!Number.isInteger(afterMs) || afterMs < 0 || afterMs > 60_000) throw new Error("FORK_TAP_AFTER_LOAD is 0 to 60000 ms");
+  await t.signedOut();
+  t = testnetPool(page, pageOver);
+  kinds = kindsOf(t);
+  const loadAt = Date.now();
+  void t.stateRead();
+  await sleep(afterMs);
+  const seen = ((await t.readyWith(async () => null)).ready ?? []).filter((p) => p.wallet.chain === "evm").length;
+  record.load = { tapAfterLoadMs: Date.now() - loadAt, readyAtTap: seen };
+  log("load", record.load);
+}
 
 // 3. the tap: pool.buy into the token, 300 bps, of <amount> or the note's whole spend
 const units = (v, d) => {

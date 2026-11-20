@@ -26,7 +26,7 @@ import { SOLANA_POOL_BUY_VENUES } from "../../kit/src/trade/solana/pool-buy.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { HostPaused, gateSignal, hostLane } from "../../wallet/src/throttle.ts";
-import { evmPaceTake } from "../../kit/src/checks/evm/pace.ts";
+import { evmPaceTake, evmProviderHold } from "../../kit/src/checks/evm/pace.ts";
 
 /** Whose read it is: a trade's own (first on its host) or a background pass's (on its host's budget). */
 export type ReadKind = "trade" | "pass";
@@ -47,9 +47,11 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   const retry = o.retry ?? SOLANA_RPC_RETRY;
   const href = solanaJsonRpc(url).url!;
   const lane = hostLane(href);
-  // one attempt within `ms`, its fault named (a retry whose first wait is past its own bound tries once)
-  const once = (ms: number, method: string, params: readonly unknown[]): Promise<unknown> =>
-    solanaJsonRpc(url, { ...(o.init ? { init: o.init } : {}), ...(o.fetch ? { fetch: o.fetch } : {}), retry: { deadlineMs: ms, backoffMs: ms } })(method, params);
+  // one attempt within `ms`, its fault named (a retry whose first wait is past its own bound tries once); `stop` in its
+  // fetch, so a read the page gave up on (its caller's cut, a sign out) ends at the provider too, never holding the
+  // host's slot or its pace token (card signpage-reads-take-the-call-signal)
+  const once = (ms: number, method: string, params: readonly unknown[], stop: AbortSignal): Promise<unknown> =>
+    solanaJsonRpc(url, { ...(o.init ? { init: o.init } : {}), ...(o.fetch ? { fetch: o.fetch } : {}), retry: { deadlineMs: ms, backoffMs: ms } })(method, params, stop);
   // every outcome reported to the lane: the gate's pause, and the probe's settle when this read was it
   // `stop`: the caller's signal and the page's gate (gateSignal), so an ask after the gate closed during the call is never
   // sent (card sign-out-stops-the-pages-reads); its waits for a turn also end at a sign out's tap (HostLane.turn)
@@ -61,12 +63,16 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
     const give = typeof turn === "function" ? turn : await turn;
     const sentIn = lane.gate.epoch();
     try {
-      const r = await once(Math.max(1, Math.floor(end - performance.now())), method, params);
+      const r = await once(Math.max(1, Math.floor(end - performance.now())), method, params, stop);
       lane.answered(sentIn);
       return r;
     } catch (e) {
       if (e instanceof SolanaRpcTransportError && throttles(e)) lane.throttled(sentIn, e.afterMs);
       else lane.failed(sentIn);
+      // no connection: in a browser any failure with no response, Robinhood's own 429 among them (its allow-origin "*,*",
+      // which CORS refuses): the provider held for every EVM reader, as the kit's own transport holds it (quote.ts
+      // evmJsonRpc; card robinhood-reads-draw-no-revert), so the kit's quotes ask it after the others meanwhile
+      if (e instanceof SolanaRpcTransportError && e.fault === "network" && !stop.aborted) evmProviderHold(href);
       throw e;
     } finally {
       give();
@@ -103,9 +109,10 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
   };
   // a read whose turn is open now goes out in this tick (a paced queue's slot calls it as its own)
   // (a trade's turn refused past its TRADE_TURN_MAX_MS is the host's throttle, never sent: HostPaused)
-  const rpc = (method: string, params: readonly unknown[]): Promise<unknown> => {
-    // the caller's signal and the page's gate: every ask of this call ends at either
-    const stop = gateSignal(o.signal);
+  const rpc = (method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> => {
+    // the reader's signal, this call's own (SolanaRpc's: a walk's cut, a read's bound) and the page's gate: every ask of
+    // this call, and its request in flight, ends at any of them
+    const stop = gateSignal(signal === undefined ? o.signal : o.signal === undefined ? signal : AbortSignal.any([o.signal, signal]));
     // the gate closed (a sign out; throttle.ts): a call made after it, a paced slot's or a seat's failover included, is
     // refused here, never sent or counted
     if (stop.aborted) return Promise.reject(stop.reason);
@@ -145,27 +152,28 @@ export function seatRpc(urls: readonly string[], kind: ReadKind = "trade", retry
   const members = urls.map((u) => ({ lane: hostLane(u), fast: lanedRpc(u, { kind, retry, spare: true }), last: lanedRpc(u, { kind, retry }) }));
   const href = members[0]!.last.url!;
   SEATS.set(href, members.map((m) => m.last.url!));
-  const read = (method: string, params: readonly unknown[], tried: ReadonlySet<number>): Promise<unknown> => {
+  // the call's signal goes to whichever member is asked (an abort is never a member's fault: no failover after it)
+  const read = (method: string, params: readonly unknown[], tried: ReadonlySet<number>, signal?: AbortSignal): Promise<unknown> => {
     const left = members.map((_, i) => i).filter((i) => !tried.has(i));
     const open = left.filter((i) => members[i]!.lane.open(kind));
     if (open.length === 0) {
       // none open: the one whose host opens first, as any page RPC
       const next = left.reduce((a, b) => (members[b]!.lane.wait(kind) < members[a]!.lane.wait(kind) ? b : a));
-      return members[next]!.last(method, params);
+      return members[next]!.last(method, params, signal);
     }
     const i = open[0]!;
     // the last member left is asked as any page RPC; one with members after it fails over on a throttle
-    if (left.length === 1) return members[i]!.last(method, params);
-    return members[i]!.fast(method, params).catch((e: unknown) => {
-      if (!(e instanceof SolanaRpcTransportError)) throw e;
-      return read(method, params, new Set([...tried, i]));
+    if (left.length === 1) return members[i]!.last(method, params, signal);
+    return members[i]!.fast(method, params, signal).catch((e: unknown) => {
+      if (!(e instanceof SolanaRpcTransportError) || signal?.aborted) throw e;
+      return read(method, params, new Set([...tried, i]), signal);
     });
   };
-  return Object.assign((method: string, params: readonly unknown[]) => read(method, params, new Set()), { url: href });
+  return Object.assign((method: string, params: readonly unknown[], signal?: AbortSignal) => read(method, params, new Set(), signal), { url: href });
 }
 
 /** A provider the device reaches directly. */
-export const pageRpc = (url: string, kind: ReadKind = "trade"): SolanaRpc => lanedRpc(url, { kind });
+export const pageRpc = (url: string, kind: ReadKind = "trade", spare = false): SolanaRpc => lanedRpc(url, spare ? { kind, spare } : { kind });
 /** The helper's POST /v1/rpc/solana, `origin` the helper's origin only; the page's retry unless a read names its own
  *  (a pool settle's and restore's, SOLANA_RPC_WINDOW_RETRY: src/pool-testnet.ts pageSolanaSettleRpcs). */
 export const pageHelperRpc = (origin: string, retry: SolanaRpcRetry = SOLANA_RPC_RETRY, kind: ReadKind = "trade"): SolanaRpc => lanedRpc(solanaHelperRpc(origin).url!, { kind, retry, init: HELPER_FETCH_INIT });
@@ -224,6 +232,40 @@ export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: 
 /** The best of a reference's priced pools among the venues the kit builds (each of SOLANA_POOL_BUY_VENUES): the most out. */
 export const bestVenuePool = (ref: SolanaReference | null | undefined): SolanaReference["pools"][number] | undefined =>
   ref?.pools.filter((p) => SOLANA_POOL_BUY_VENUES.includes(p.venue)).sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+
+/** The venues a page's tables pin a buy on: each the kit builds with a non-empty list of table addresses. */
+export const pinnedBuyVenues = (tables: Readonly<Partial<Record<string, readonly string[] | undefined>>>): ReadonlySet<SolanaReference["pools"][number]["venue"]> =>
+  new Set(SOLANA_POOL_BUY_VENUES.filter((v) => Object.hasOwn(tables, v) && Array.isArray(tables[v]) && tables[v]!.length > 0));
+
+/** A Solana buy's venue, or why there is none (solanaBuyVenue). */
+export type SolanaBuyVenue = { readonly pool: SolanaReference["pools"][number] } | { readonly error: "quote_check_failed" | "venue_not_pinned" | "below_reference" };
+
+/**
+ * The one venue decision of a Solana buy (card sol-buy-takes-the-best-venue-it-can-trade), which the tap (src/pool-buy.ts)
+ * and pool.buy.dry (src/pools.ts) both take on the same reference: among the reference's pools on a venue the kit builds
+ * and the page pins a table for (`pinned`, pinnedBuyVenues), the one that gives the most. Its expected out is held to
+ * the market M, the kit's E: the best pool of the reference's set on any venue, pinned or not: the EVM rule of card
+ * evm-buy-never-below-a-hidden-market (kit checks/evm/quote.ts `near` and `underHooked`), where a market the device
+ * can read but not trade through still sets the price a buy must meet, and a buy within the ask's slippage of it is
+ * taken at its own min out. So a coin whose larger pool sits on a venue the page cannot trade (a DLMM pair or a Raydium
+ * pool beside its pump venue) fills on its pinned venue, and a thin pinned pool seeded beside the coin's real market
+ * is refused. Refusals, in this order: quote_check_failed (no reference, no pool on a venue the kit builds, or a
+ * slippage outside 0 to 9,999 bps, as the kit's QUOTE check refuses it), venue_not_pinned (no such pool on a pinned
+ * venue), below_reference (the best pinned pool's out under M less the slippage: x * 10000 < M * (10000 - bps)).
+ */
+export function solanaBuyVenue(ref: SolanaReference | null | undefined, pinned: ReadonlySet<string>, slippageBps: number): SolanaBuyVenue {
+  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10_000) return { error: "quote_check_failed" };
+  // the set's pools and those under its depth cutoff (the kit's `shallow`): a pinned venue's pool may be either
+  const built = [...(ref?.pools ?? []), ...(ref?.shallow ?? [])].filter((p) => SOLANA_POOL_BUY_VENUES.includes(p.venue));
+  if (built.length === 0) return { error: "quote_check_failed" };
+  const most = (xs: readonly SolanaReference["pools"][number][]) => xs.reduce<SolanaReference["pools"][number] | null>((m, p) => (m === null || p.expectedOut > m.expectedOut ? p : m), null);
+  const pool = most(built.filter((p) => pinned.has(p.venue)));
+  if (pool === null) return { error: "venue_not_pinned" };
+  // M: the kit's E, the best pool of the set over every venue read (a pool under the depth cutoff never raises it)
+  const market = ref!.expectedOut;
+  if (pool.expectedOut * 10_000n < market * BigInt(10_000 - slippageBps)) return { error: "below_reference" };
+  return { pool };
+}
 
 /** Finds a coin's SOL pools of one venue for a reference (the kit's readSolanaDlmmPairs, readSolanaCpmmPools or
  *  readSolanaAmmV4Pools on the page's providers): both providers' scans, their union (a tap's reference waits for it).
@@ -284,8 +326,8 @@ export function keptPools(kind: PoolFinderKind, scan: () => readonly [SolanaRpc,
     // provider's own fault is thrown as the kit threw it (card pool-buy-waits-out-a-throttle)
     const w = readWatch("the scan");
     const pair = scan().map((rpc, i) =>
-      w.watch(rpc, async (method, params) => {
-        const answer = await rpc(method, params);
+      w.watch(rpc, async (method, params, signal) => {
+        const answer = await rpc(method, params, signal);
         if (method === "getProgramAccounts" && scannedList(answer) !== null) {
           answers[i]!.set(JSON.stringify(params), answer);
           if (answers[i]!.size === 2) halfOf(i);
@@ -341,17 +383,17 @@ export function pinnedPoolFinders(finders: PoolFinders | null, tables: Readonly<
  *  each provider's calls still in flight. `fault` is the read's own fault once the kit's reader gave up: that provider
  *  fault, else a timeout naming a provider whose call is still unanswered (the kit gave up on it at its own bound,
  *  with a plain error), else null. */
-function readWatch(what: string): { watch: (rpc: SolanaRpc, call?: (method: string, params: readonly unknown[]) => Promise<unknown>) => SolanaRpc; fault: () => SolanaRpcTransportError | null } {
+function readWatch(what: string): { watch: (rpc: SolanaRpc, call?: (method: string, params: readonly unknown[], signal?: AbortSignal) => Promise<unknown>) => SolanaRpc; fault: () => SolanaRpcTransportError | null } {
   let fault: SolanaRpcTransportError | null = null;
   // the calls still in flight, by the provider's host
   const inFlight = new Map<string, number>();
   return {
-    watch: (rpc, call = (method, params) => rpc(method, params)) => {
+    watch: (rpc, call = (method, params, signal) => rpc(method, params, signal)) => {
       const host = rpc.url === undefined ? "a provider" : new URL(rpc.url).host;
-      return solanaWrappedRpc(rpc, async (method, params) => {
+      return solanaWrappedRpc(rpc, async (method, params, signal) => {
         inFlight.set(host, (inFlight.get(host) ?? 0) + 1);
         try {
-          return await call(method, params);
+          return await call(method, params, signal);
         } catch (e) {
           if (e instanceof SolanaRpcTransportError) fault ??= e;
           throw e;

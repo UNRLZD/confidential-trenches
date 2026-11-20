@@ -87,8 +87,22 @@ function coinLines(chain, c) {
   }
   if (typeof b.fee !== "string" || !/^Fee/.test(b.fee)) lines.push(`BAD ${tag}: no Fee row`);
   if (!(c.dry ?? []).some((d) => d.amount !== undefined)) lines.push(`BAD ${tag}: the box asked no quote of the amount`);
-  else if ((c.dry ?? []).some((d) => d.amount !== undefined && outOf(d) !== null) && !quoted(b.receive)) lines.push(`BAD ${tag}: the page answered an out, You receive reads ${JSON.stringify(b.receive)}`);
+  else if ((c.dry ?? []).some((d) => d.amount !== undefined && outOf(d) !== null) && !quoted(b.receive)) lines.push(`BAD ${tag}: the page answered an out, You receive reads ${JSON.stringify(b.receive)}; its answers: ${answersOf(c)}`);
   return lines;
+}
+
+/** Each of a coin's amount asks, in order: how long the page took to answer it (ms, from the ask) and what it answered
+ *  (out, no out or the refusal's code), with when it was asked after the amount went in where the read kept it; "no
+ *  answer" for one the page never answered. So a red names a late answer (the kit's client ends a dry at 10 s) apart
+ *  from one the box dropped. */
+export function answersOf(c) {
+  return (c.dry ?? [])
+    .filter((d) => d.amount !== undefined)
+    .map((d) => {
+      const what = typeof d.ms !== "number" ? (d.code ?? "no answer") : `${d.ms} ms ${d.ok ? (outOf(d) !== null ? "out" : "no out") : d.code}`;
+      return typeof d.askedMs === "number" ? `${what} (asked at ${d.askedMs} ms)` : what;
+    })
+    .join(", ");
 }
 
 /** The verdict on an answer { chains: { <chain>: { coins: [coin read, ...] } } }: { ok, verdict, lines }. */
@@ -236,10 +250,11 @@ export async function read({ appDir = null, site = null, fetchFn = fetch } = {})
         const asked = await page.evaluate(() => window.__dry ?? []);
         const answered = new Map((await f.evaluate(() => window.__dry ?? [])).map((d) => [d.id, d]));
         // `coin`, not `token`: a record field named token holding a mint reads to a secret scan as a key
-        // ms: how long the page took to answer (the kit's client gives pool.buy.dry 10 s)
+        // ms: how long the page took to answer (the kit's client gives pool.buy.dry 10 s); askedMs: when the box asked it,
+        // from the amount going in (both frames read Date.now on one machine)
         const dry = asked.filter((d) => d.chain === chain && d.coin === coin).map(({ id, at: t0, chain: _c, coin: _t, ...ask }) => {
           const ans = answered.get(id);
-          return { ...ask, ...(ans ? { ok: ans.ok, ms: ans.at - t0, ...(ans.ok ? { result: ans.result } : { code: ans.code }) } : { ok: false, code: "no answer" }) };
+          return { ...ask, ...(ask.amount === undefined ? {} : { askedMs: t0 - at }), ...(ans ? { ok: ans.ok, ms: ans.at - t0, ...(ans.ok ? { result: ans.result } : { code: ans.code }) } : { ok: false, code: "no answer" }) };
         });
         // the Deposit offer's tap: the deposit sheet opens in APP_HOST's frame, and no buy is posted from the tap on
         let tap = null;

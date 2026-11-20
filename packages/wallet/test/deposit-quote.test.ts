@@ -4,6 +4,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { untilAborted } from "../../kit/src/abort.ts";
 import {
   askDepositQuote,
   DEPOSIT_QUOTE_ANSWER_MAX,
@@ -305,7 +306,7 @@ test("a stop before the first ask sends none; a stop while an ask is under way c
   const hang = (async (_u: string | URL | Request, init?: RequestInit) => {
     sent++;
     if (sent === 1) return new Response(JSON.stringify(NO_LIQ.body), { status: 400, headers: { "content-type": "application/json" } });
-    return await new Promise<Response>((_ok, no) => init!.signal!.addEventListener("abort", () => no(init!.signal!.reason)));
+    return await untilAborted(init!.signal);
   }) as typeof fetch;
   const asked = askDepositQuoteAgain(req(), hang, async () => {}, () => 0, late.signal);
   while (sent < 2) await new Promise((ok) => setImmediate(ok));

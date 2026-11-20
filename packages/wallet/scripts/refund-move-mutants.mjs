@@ -4,9 +4,9 @@
 // row as the card's end state reads them, with the deposit-follow review's D1, finding 5 and r4.
 // Then review wrm-58c238ab's M1, M2, L1 and L2 as folded, and its own plants no named test held; then the delta review
 // of cf8a5524 (M1, L2, L4, L5 and its three pins); then the delta review of 8c046c2d (L1 to L4) and of dedd6401 (S1 to S4).
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
+import { refused, runMutant, withPlant } from "../../../scripts/mutant-run.mjs";
 const P = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const FOLLOW = "wallet/src/deposit/follow.ts";
 const REFUND = "wallet/src/deposit/refund.ts";
@@ -14,6 +14,8 @@ const HOST = "signpage/src/deposit-follow.ts";
 const WT = ["wallet", "test/deposit-follow.test.ts"];
 const WR = ["wallet", "test/deposit-refund.test.ts"];
 const ST = ["signpage", "test/refund-move.test.ts"];
+const PF = "signpage/src/pool-deposit-follow.ts";
+const PC = ["signpage", "test/pool-refund-carry.test.ts"];
 // [name, file, [[the source as written, the plant]...], [package, test file], test name pattern]
 const M = [
   ["through only on a used nonce (a pruned nonce never through)", FOLLOW,
@@ -50,7 +52,7 @@ const M = [
     [["    if (!ONECLICK_USDC_ASSETS.includes(ask.asset)) return { kind: \"refused\", why: \"asset\" };\n", ""]], ST, "not USDC"],
   // review wrm-58c238ab: M1, M2, L1, L2
   ["M1: a NEAR USDC balance under MIN_DEPOSIT holds every open op", FOLLOW,
-    [["if (op.follow.origin === f.asset) await write(id, \"held\", legFacts(op, \"held\"), { why: \"under_min\" });", "if (f.asset === usdcId || op.follow.origin === f.asset) await write(id, \"held\", legFacts(op, \"held\"), { why: \"under_min\" });"]], WT, "M1: "],
+    [["if (op.follow.origin === f.asset && own(op, f.asset, f.at.held)) await write(id, \"held\", legFacts(op, \"held\"), { why: \"under_min\" });", "if (f.asset === usdcId || op.follow.origin === f.asset) await write(id, \"held\", legFacts(op, \"held\"), { why: \"under_min\" });"]], WT, "M1: "],
   ["M2: sender_struck not read: U's moves go on", FOLLOW,
     [["if (res.kind === \"sent\" && res.code === \"sender_struck\") {", "if (false) {"]], WT, "M2: sender_struck"],
   ["M2: a refused move asked again at once", FOLLOW,
@@ -115,7 +117,7 @@ const M = [
     [["export const INTENTS_ANSWER_MAX_BYTES = 1_024;", "export const INTENTS_ANSWER_MAX_BYTES = 1_023;"]], WR, "pin \\(delta\\)"],
   // the delta review of 8c046c2d (L1 to L4)
   ["L1: an op refunded after the strike is never held", FOLLOW,
-    [["if (struck) for (const [id, op] of open) if (!ENDS.has(op.stage) && ((holds.get(op.follow.origin) ?? 0n) > 0n || (holds.get(usdcId) ?? 0n) > 0n)) await write(id, \"held\", legFacts(op, \"held\"), { why: \"sender_struck\" });", ""]], WT, "REVIEW R1 \\(L1\\):|REVIEW2 S4"],
+    [["if (struck) for (const [id, op] of open) if (!ENDS.has(op.stage) && refundOf(op)) await write(id, \"held\", legFacts(op, \"held\"), { why: \"sender_struck\" });", ""]], WT, "REVIEW R1 \\(L1\\):|REVIEW2 S4"],
   ["L1: the strike not read back from the store after a reload", FOLLOW,
     [["if (all.some(([, op]) => op.follow.intents_struck === true)) struck = true;", ""]], WT, "REVIEW R1 \\(L1, after a reload\\)"],
   ["L2: the block that read a move through not kept", FOLLOW,
@@ -135,6 +137,21 @@ const M = [
     [["            // pruned nonce (intents.near's cleanup_nonces) of a move that landed\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: at.height }", "            // pruned nonce (intents.near's cleanup_nonces) of a move that landed\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: undefined }"]], WT, "REVIEW2 L2b"],
   ["L3: the block that read a held op's move through not kept", FOLLOW,
     [["{ move: undefined, prior_ms: undefined, prior_height: at.height, ...(its ? { moved: true as const, why: undefined } : {}) }", "{ move: undefined, prior_ms: undefined, ...(its ? { moved: true as const, why: undefined } : {}) }"]], WT, "REVIEW2 L3b"],
+  // card refunded-needs-the-refund (pool-deposit-stages' delta review P3): the one refunded rule, refundIsThere
+  ["refunded on any speck: the floor read as more than 0", FOLLOW,
+    [["return typeof floor === \"string\" && DIGITS.test(floor) && floor !== \"0\" && held >= BigInt(floor);", "return held > 0n;"]], WT, "refunded-needs-the-refund"],
+  ["refunded one unit under the floor", FOLLOW,
+    [["held >= BigInt(floor);", "held + 1n >= BigInt(floor);"]], WT, "refunded-needs-the-refund"],
+  ["the real refund at the floor not refunded", FOLLOW,
+    [["held >= BigInt(floor);", "held > BigInt(floor);"]], WT, "refunded-needs-the-refund"],
+  ["the wallet round shows refunded on any hold", FOLLOW,
+    [["RANK[op.stage] !== undefined && refundOf(op)) await write(id, \"refunded\"", "RANK[op.stage] !== undefined && holds.size > 0) await write(id, \"refunded\""]], WT, "refunded-needs-the-refund"],
+  ["the wallet round moves a speck as the op's refund", FOLLOW,
+    [["if (named.length > 0 && !named.some(([, op]) => own(op, asset, at.held))) continue;", ""]], WT, "refunded-needs-the-refund"],
+  ["NEAR USDC counted on any hold", FOLLOW,
+    [["asset === usdcId && refundIsThere(h, op.follow.refund_min === undefined ? undefined : op.follow.min_out)", "asset === usdcId && h > 0n"]], WT, "refunded-needs-the-refund"],
+  ["the pool carry moves a speck as the op's refund", PF,
+    [["if (!(m !== undefined && r.used === true) && !refundIsThere(r.held, f.refund_min)) return \"speck\";", ""]], PC, "refunded-needs-the-refund"],
 ];
 let ok = 0;
 for (const [name, file, edits, [pkg, test], pat] of M) {
@@ -148,19 +165,12 @@ for (const [name, file, edits, [pkg, test], pat] of M) {
     }
     planted = planted.replace(from, to);
   }
-  writeFileSync(path, planted);
-  // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
-  let r;
-  try {
-    r = runSync("node", ["--test", `--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, encoding: "utf8", timeoutMs: 180_000 });
-  } finally {
-    writeFileSync(path, src);
-  }
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const killed = r.status !== 0 && Number(fail) > 0;
+  // a run past 180 s is killed, its process group with it; a run with no verdict is refused (scripts/mutant-run.mjs)
+  const r = withPlant(path, planted, () => runMutant([`--test-name-pattern=${pat}`, test], { cwd: `${P}/${pkg}`, timeoutMs: 180_000 }));
+  if (refused(name, r)) continue;
+  const killed = r.verdict === "killed";
   if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}`);
+  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${r.pass} fail ${r.fail}`);
 }
 console.log(`${ok}/${M.length} killed`);
 if (ok !== M.length) process.exitCode = 1;

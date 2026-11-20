@@ -4,12 +4,17 @@
 // only. A provider-B read that answers slowly can then be told apart from a read that waited for its second's room.
 // No entry ever holds a URL, a host or a key: a key-like path segment is planted and looked for in every header.
 import assert from "node:assert/strict";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
-import { createRpc } from "./rpc.ts";
+import { createPacer, createRpc } from "./rpc.ts";
 import { handler } from "../server.ts";
+import { call, listening } from "../../test/servers.ts";
 
+/** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
+ *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
+ *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
+const STILL = (): number => 1_800_000_000_000;
 // planted key-like path segments (16 characters or more: rpc.ts readUpstreams takes them as a key's place)
 const KEY_MAIN = `ctproof-main-${"0".repeat(20)}`;
 const KEY_QN = `ctproof-qn-${"1".repeat(20)}`;
@@ -32,21 +37,23 @@ const clean = (where: string, text: string) => {
 
 async function serve(rpc: ReturnType<typeof createRpc>) {
   const h = createServer(handler("a".repeat(40), undefined, rpc, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map()));
-  await new Promise<void>((done) => h.listen(0, "127.0.0.1", () => done()));
+  await listening(h.listen(0, "127.0.0.1"), "the helper");
   const port = (h.address() as AddressInfo).port;
   const post = (ip: string) =>
-    new Promise<{ status: number; headers: Record<string, string | string[] | undefined> }>((done, fail) => {
-      const r = request({ host: "127.0.0.1", port, method: "POST", path: "/v1/rpc/solana", headers: { "content-type": "application/json", origin: "https://other.example", "x-forwarded-for": ip } }, (res) => {
-        res.resume().on("end", () => done({ status: res.statusCode ?? 0, headers: res.headers }));
-      });
-      r.on("error", fail).end(BODY);
-    });
+    call(port, { method: "POST", path: "/v1/rpc/solana", headers: { "content-type": "application/json", origin: "https://other.example", "x-forwarded-for": ip }, body: BODY }, "the helper");
   return { post, close: () => new Promise<void>((done) => (h.closeAllConnections(), h.close(() => done()))) };
 }
 
 test("a paced burst on the first key: every 200 names rpc-wait, rpc and SOLANA_RPC_URL; a later one waited for its second", async () => {
   // 50 a 10 s: 5 sends a second on the first key (rpc.ts pacedOf); the share at least one page's (RPC_PAGE_NEED 42)
-  const rpc = createRpc({ SOLANA_RPC_URL: MAIN, RPC_BUDGET_SOLANA: "50,45" }, { fetch: async (_u, i) => ok(JSON.parse(String(i!.body)).id), log: () => undefined });
+  // a clock the pace's wait moves: the wait it names is the time it slept on the helper's clock, never the machine's;
+  // the pacer on it too (createRpc builds its own pacer on the machine's monotonic clock, whatever `now` it is given)
+  let clock = STILL();
+  const rpc = createRpc({ SOLANA_RPC_URL: MAIN, RPC_BUDGET_SOLANA: "50,45" }, { now: () => clock, pacer: createPacer(() => clock), sleep: async (ms: number) => {
+    const wake = clock + ms; // waits side by side end at their own wake time, as timers do, never one after another
+    await null;
+    clock = Math.max(clock, wake);
+  }, fetch: async (_u, i) => ok(JSON.parse(String(i!.body)).id), log: () => undefined });
   const S = await serve(rpc);
   try {
     const all = await Promise.all(Array.from({ length: 6 }, (_, k) => S.post(`203.0.113.${10 + k}`)));
@@ -69,7 +76,7 @@ test("a paced burst on the first key: every 200 names rpc-wait, rpc and SOLANA_R
 });
 
 test("the first key throttled: the read is answered by the QuickNode spare, named SOLANA_RPC_URL_QUICKNODE, after the first key's send", async () => {
-  const rpc = createRpc({ SOLANA_RPC_URL: MAIN, SOLANA_RPC_URL_QUICKNODE: QN }, {
+  const rpc = createRpc({ SOLANA_RPC_URL: MAIN, SOLANA_RPC_URL_QUICKNODE: QN }, { now: STILL,
     fetch: async (u, i) => (u === MAIN ? new Response(`{"error":"slow down ${KEY_MAIN}"}`, { status: 429, headers: { "retry-after": "5" } }) : ok(JSON.parse(String(i!.body)).id)),
     log: () => undefined,
   });
@@ -89,7 +96,7 @@ test("the first key throttled: the read is answered by the QuickNode spare, name
 
 test("a 503 (every provider down) and a 429 (the chain held) carry Server-Timing too, with no URL, host or key", async () => {
   let mode: "down" | "429" = "down";
-  const rpc = createRpc({ SOLANA_RPC_URL: MAIN }, {
+  const rpc = createRpc({ SOLANA_RPC_URL: MAIN }, { now: STILL,
     fetch: async (u) => {
       if (mode === "down") throw new Error(`connect ECONNREFUSED ${u}`);
       return new Response(`slow ${KEY_MAIN}`, { status: 429, headers: { "retry-after": "30" } });
@@ -118,7 +125,7 @@ test("a 503 (every provider down) and a 429 (the chain held) carry Server-Timing
 });
 
 test("a refused request (not JSON-RPC, a method off the list) still carries Server-Timing, naming no provider", async () => {
-  const rpc = createRpc({ SOLANA_RPC_URL: MAIN }, { fetch: async () => ok(), log: () => undefined });
+  const rpc = createRpc({ SOLANA_RPC_URL: MAIN }, { now: STILL, fetch: async () => ok(), log: () => undefined });
   const a = await rpc.handle("solana", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "requestAirdrop", params: [] }));
   assert.equal(a.status, 400);
   assert.deepEqual((a as { timing?: string[] }).timing, ["rpc-wait;dur=0", 'rpc;dur=0;desc="none"']);
