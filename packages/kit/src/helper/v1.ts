@@ -44,8 +44,9 @@ export const HELPER_CORS = {
   origins: ["https://ct-app.unrealized.trade", "https://confidential.unrealized.trade"],
   allowMethods: ["GET", "POST", "PUT", "DELETE"],
   allowHeaders: ["content-type"],
-  // Retry-After: a device reads a 429's wait cross-origin (card wallet-per-buy, M367)
-  exposeHeaders: ["X-Helper-Commit", "X-Helper-Source", "X-Fetched-At", "Retry-After"],
+  // Retry-After: a device reads a 429's wait cross-origin (card wallet-per-buy, M367); Server-Timing: a page reads why
+  // a 503 came, the loop past capacity or a named read's wait (card helper-loop-never-held-by-a-read)
+  exposeHeaders: ["X-Helper-Commit", "X-Helper-Source", "X-Fetched-At", "Retry-After", "Server-Timing"],
   maxAgeSeconds: 600,
   vary: "Origin",
   allowCredentialsHeader: "absent",

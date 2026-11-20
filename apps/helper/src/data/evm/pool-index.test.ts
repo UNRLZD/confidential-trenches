@@ -1,13 +1,15 @@
 // card evm-pool-index-from-the-first-pool: the helper's index of every PoolManager pool from its first block.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKFILL_DAY_SHARE, createPoolIndex, INITIALIZE, poolIdOf, POOL_INDEX_SPAN_LOGS, type PoolKey, type PoolIndexConfig } from "./pool-index.ts";
 import { CALLER_ROOM, providerHolds, type Pace } from "../../limits/limits.ts";
 import { turnSlicer } from "../../limits/turn.ts";
 import { call, listening } from "../../../test/servers.ts";
+import { DatabaseSync } from "node:sqlite";
+import { checkpointAside } from "../../store/checkpoint.ts";
 
 /** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
  *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
@@ -314,4 +316,110 @@ test("card helper-loop-never-held-by-a-write: a span at the log cap (9,999 pools
   if (mid !== null) assert.equal(mid, -1, "mid-span the index still says it holds no block of it");
   ix.close();
   rmSync(d, { recursive: true });
+});
+
+test("card helper-loop-never-held-by-a-read: the index's file is WAL with synchronous NORMAL, so a slice's commit syncs nothing in a turn of the loop (red at c6711e2c3: synchronous FULL, every slice's commit an fsync, 637 and 757 ms holds in a copy's profile)", async (t) => {
+  const d = dir();
+  const sql: string[] = [];
+  const exec = DatabaseSync.prototype.exec;
+  t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, q: string) {
+    sql.push(q);
+    return exec.call(this, q);
+  });
+  try {
+    const ix = createPoolIndex(join(d, "rh.sqlite"), cfg(), deps(chain(() => 10_000, [])));
+    const pragmas = sql.join("\n");
+    assert.match(pragmas, /PRAGMA journal_mode = WAL;/);
+    assert.match(pragmas, /PRAGMA synchronous = NORMAL;/);
+    assert.doesNotMatch(pragmas, /synchronous = (FULL|EXTRA)/);
+    assert.match(pragmas, /PRAGMA wal_autocheckpoint = 0;/, "no commit runs the log's checkpoint (its sync) in a turn of the loop");
+    ix.close();
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("card helper-loop-never-held-by-a-read: a file whose connection never checkpoints is checkpointed by its own thread (store/checkpoint.ts): the log's pages reach the file while the writer goes on, and a stop ends the thread", async () => {
+  const d = dir();
+  try {
+    const file = join(d, "x.sqlite");
+    const db = new DatabaseSync(file);
+    db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA wal_autocheckpoint = 0; CREATE TABLE p (id INTEGER PRIMARY KEY, v BLOB NOT NULL);");
+    const put = db.prepare("INSERT INTO p (id, v) VALUES (?, ?)");
+    db.exec("BEGIN IMMEDIATE");
+    for (let i = 0; i < 2_000; i++) put.run(i, Buffer.alloc(200, i % 256));
+    db.exec("COMMIT");
+    const small = statSync(file).size;
+    assert.ok(statSync(file + "-wal").size > 400_000, "the rows are in the log, not yet in the file");
+    let failed: Error | null = null;
+    const aside = checkpointAside(file, (e) => void (failed = e), 10);
+    // the thread's checkpoint is seen by the file's size, asked once a turn, for at most 2,000 turns of 5 ms
+    for (let k = 0; k < 2_000 && statSync(file).size <= small; k++) await new Promise((r) => setTimeout(r, 5));
+    aside.stop();
+    assert.equal(failed, null);
+    assert.ok(statSync(file).size > 400_000, `the log's pages reached the file: ${small} -> ${statSync(file).size} bytes`);
+    assert.equal((db.prepare("SELECT count(*) AS n FROM p").get() as { n: number }).n, 2_000);
+    db.close();
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("card helper-loop-never-held-by-a-read: the checkpoint thread never makes a file: one not there is never created, and once stopped it never opens its file again (red at 179ee8d66: the thread opened its path when it started, after the suite's tests had removed it)", async () => {
+  const d = dir();
+  try {
+    const none = join(d, "none.sqlite");
+    let failed: Error | null = null;
+    const a = checkpointAside(none, (e) => void (failed = e), 1);
+    // 200 turns of 5 ms: rounds of the thread's 1 ms checkpoint
+    for (let k = 0; k < 200; k++) await new Promise((r) => setTimeout(r, 5));
+    a.stop();
+    assert.equal(existsSync(none), false, "no file made where none was");
+    const file = join(d, "x.sqlite");
+    const db = new DatabaseSync(file);
+    db.exec("PRAGMA journal_mode = WAL; CREATE TABLE p (id INTEGER PRIMARY KEY);");
+    const b = checkpointAside(file, (e) => void (failed = e), 1);
+    b.stop();
+    db.close();
+    for (const f of [file, `${file}-wal`, `${file}-shm`]) rmSync(f, { force: true });
+    for (let k = 0; k < 200; k++) await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual([file, `${file}-wal`, `${file}-shm`].filter((f) => existsSync(f)), [], "a stopped thread opens nothing again");
+    assert.equal(failed, null);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("card helper-loop-never-held-by-a-read: a checkpoint that fails is told to the owner: the thread's file will not open (a directory where it was), `failed` runs once, and the pool index turns its own connection's checkpoint back on, so its log never grows unchecked (red at b45f34f7b: the thread caught the error and said nothing)", async (t) => {
+  const d = dir();
+  try {
+    // the thread alone: a path that is there and cannot open
+    const bad = join(d, "bad.sqlite");
+    mkdirSync(bad);
+    const told: Error[] = [];
+    const a = checkpointAside(bad, (e) => void told.push(e), 1);
+    for (let k = 0; k < 400 && told.length === 0; k++) await new Promise((r) => setTimeout(r, 5));
+    for (let k = 0; k < 20; k++) await new Promise((r) => setTimeout(r, 5));
+    a.stop();
+    assert.equal(told.length, 1, "told once, the thread then stops checkpointing");
+    assert.match(told[0]!.message, /checkpoint of .*bad\.sqlite/);
+    // the pool index: its file moved aside and a directory put at its path once it is open, so its thread's first
+    // checkpoint (CHECKPOINT_MS in) cannot open it
+    const sql: string[] = [];
+    const exec = DatabaseSync.prototype.exec;
+    t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, q: string) {
+      sql.push(q);
+      return exec.call(this, q);
+    });
+    const file = join(d, "rh.sqlite");
+    const ix = createPoolIndex(file, cfg(), deps(chain(() => 10_000, [])));
+    renameSync(file, join(d, "moved.sqlite"));
+    mkdirSync(file);
+    // 1,000 turns of 5 ms at most: the thread's first round is a second in
+    for (let k = 0; k < 1_000 && !sql.includes("PRAGMA wal_autocheckpoint = 1000"); k++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(sql.includes("PRAGMA wal_autocheckpoint = 1000"), "the owner's checkpoint back on");
+    ix.close();
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
 });

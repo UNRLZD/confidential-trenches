@@ -12,6 +12,7 @@ import { joinBars } from "../candles.ts";
 import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, SYSVAR_CLOCK, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { b58decode, b58encode } from "./lists.ts";
+import { turnSlicer } from "../../limits/turn.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"), "utf8")) as {
@@ -183,6 +184,52 @@ test("a recorded hour of one token replays to the fixed answer (candles 1m and 1
   assert.equal(got.tape.length, Math.min(50, trades.length));
   assert.equal(got.tape[0].tx, H.txs.filter((x) => !x.err && fromLogs(x.logs).trades.some((y) => y.mint === H.mint)).at(-1)!.sig);
   assert.equal(got.m1.length, 6); // the recorded hour's 315 trades fell in six minutes (21:44Z to 21:49Z)
+  assert.deepEqual(got, want);
+});
+
+test("card helper-loop-never-held-by-a-read: a busy coin's notes landing in one turn fold its book once, a turn's slice at a time, never once a note in that turn; a read folds what is held first, so the answer is the same (red at c6711e2c3: each of the recorded hour's notes refolded every held trade in the turn it landed, and no fold asked the slicer)", async () => {
+  const H = JSON.parse(gunzipSync(readFileSync(path.join(HERE, "fixtures/sol-trades-hour.json.gz"))).toString()) as {
+    mint: string; decimals: number; end: number; pyth: { slot: number; owner: string; data: string };
+    txs: { sig: string; slot: number; err: boolean; logs?: string[] }[];
+  };
+  const want = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-hour.answer.json"), "utf8"));
+  const p = Buffer.from(H.pyth.data, "base64");
+  const pub = Number(p.readBigInt64LE(93));
+  let on: SourceEvents | null = null;
+  // each fold the feed runs off its notes asks the slicer once: a counting clock, a turn of 1 item
+  let folds = 0;
+  const slicer = turnSlicer(() => folds++, 1);
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: () => [], txs: {}, price: p.readBigInt64LE(73), pub, slot: H.pyth.slot }, { [H.mint]: H.decimals }),
+    now: () => pub * 1000,
+    listed: async (m) => m === H.mint,
+    rpcs: ["https://rpc.test"],
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+    pass: () => slicer.pass(),
+  });
+  await t.trades(H.mint, 50);
+  // the stream sends each note's slot clock first, as the deployed one does (card helper-sol-tape-checks-hold: a trade is
+  // dated by its block, so a note with no clock waits on one)
+  const note = (x: (typeof H.txs)[number]) => withClock(on!).note(H.mint, { sig: x.sig, slot: x.slot, err: x.err, logs: x.logs ?? [] });
+  const half = Math.floor(H.txs.length / 2);
+  // the first half: its notes' trades held in their own turn (their microtasks run), folded in a turn after, once
+  const before = folds;
+  for (const x of H.txs.slice(0, half)) note(x);
+  for (let i = 0; i < 200; i++) await null;
+  assert.equal(folds - before, 0, "no fold ran in the notes' own turn");
+  await settle();
+  const asked = folds - before;
+  assert.ok(asked >= 1 && asked <= 3, `${half} notes in one turn asked the slicer ${asked} times`);
+  // the second half read at once, before the folds' turn: the read folds what is held itself, so the answer is whole
+  for (const x of H.txs.slice(half)) note(x);
+  for (let i = 0; i < 200; i++) await null;
+  const got = {
+    m1: JSON.parse((await t.candles(H.mint, "1m", null, 500)).body).candles,
+    s1: JSON.parse((await t.candles(H.mint, "1s", null, 500)).body).candles,
+    tape: JSON.parse((await t.trades(H.mint, 50)).body).trades,
+  };
+  t.stop();
   assert.deepEqual(got, want);
 });
 
