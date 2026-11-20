@@ -4415,7 +4415,8 @@ async function routeSetOf(a: {
         const pin = u !== undefined && v.inflight !== undefined && Object.hasOwn(v.inflight, u) ? v.inflight[u] : undefined;
         return typeof pin === "number" && Number.isSafeInteger(pin) && pin >= 1 ? pin : (v.scan?.parallel ?? 2);
       };
-      const waves = (n: number, pin: number) => Math.max(1, Math.ceil(n / pin));
+      // (a round of none of its own reads makes no wave: early reads there would be one more)
+      const waves = (n: number, pin: number) => Math.ceil(n / pin);
       const own = postsOf(rpcs, block.hash, fourth.slice(0, ownFourth), v.reads);
       const all = own + postsOf(rpcs, block.hash, fourth.slice(ownFourth), v.reads);
       if (rpcs.slice(0, 2).every((r) => waves(all, pinOf(r)) <= waves(own, pinOf(r)))) {
