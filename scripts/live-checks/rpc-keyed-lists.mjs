@@ -30,13 +30,13 @@ export const CHAINS = ["solana", "base", "robinhood", "near"];
 // plan"; M359), so Solana's keyed list is its existing Helius key, then QuickNode.
 const DRPC = ["drpc.live key1", "drpc.live key2", "drpc.live key3"];
 export const WANT = { solana: ["helius-rpc.com", "quiknode.pro"], base: ["quiknode.pro", ...DRPC], robinhood: ["quiknode.pro", ...DRPC], near: ["fastnear.com"] };
-export const STATES = ["answers", "wrong chain", "held", "down", "unread"];
-const ENTRY = /^([a-z0-9-]+(?:\.[a-z0-9-]+)+(?: key[1-9])?)( keyless)? (answers|wrong chain|held|down|unread)$/;
+export const STATES = ["answers", "wrong chain", "held", "spent", "down", "unread"];
+const ENTRY = /^([a-z0-9-]+(?:\.[a-z0-9-]+)+(?: key[1-9])?)( keyless)? (answers|wrong chain|held|spent|down|unread)$/;
 /** How long a run that fails only on a URL's state reads the health again, and how often. */
 export const RETRY_MS = 180_000;
 export const RETRY_EVERY_MS = 30_000;
 
-const STATE_LINE = /^BAD [a-z]+: \S+(?: key[1-9])?(?: keyless)? (wrong chain|held|down|unread)$/;
+const STATE_LINE = /^BAD [a-z]+: \S+(?: key[1-9])?(?: keyless)? (wrong chain|held|spent|down|unread)$/;
 
 export async function read(base = BASE, fetchFn = fetch) {
   const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/health`, { redirect: "manual", headers: { origin: APP, "cache-control": "no-cache" } });

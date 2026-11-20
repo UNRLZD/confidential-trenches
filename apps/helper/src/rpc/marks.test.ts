@@ -6,6 +6,7 @@
 // that redeploy.sh runs asks B's provider the exact scan and refuses a B on A's company, or one that does not answer.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { solanaDlmmPairScan } from "@blindfill/kit";
 import { RPC_CHAINS, RPC_METHODS } from "./methods.ts";
 import { createRpc } from "./rpc.ts";
 import { checkMarksRoute } from "../env-check.ts";
@@ -198,6 +199,148 @@ test("route B folds a company's other domain: dRPC's keyed lb.drpc.live is A's c
   assert.equal((await call(r, "solana-marks", scan())).status, 503);
   assert.equal(sent.length, 0);
   await assert.rejects(checkMarksRoute({ SOLANA_RPC_URL: aDrpc, SOLANA_RPC_URL_DRPC_1: bDrpc, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, f), /SOLANA_RPC_URL_DRPC_1 on SOLANA_RPC_URL's company/);
+});
+
+// ---------------------------------------------------- card helper-solana-off-a-spent-key: route A off a spent plan
+// Live 20 Nov 08:5xZ: SOLANA_RPC_URL's provider answered every read HTTP 429 "max usage reached" (its plan spent), and
+// the deploy's settings check, which asked SOLANA_RPC_URL alone, refused every helper deploy (helper-9.sh, 08:46Z).
+const SPENT_429 = () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32429, message: "max usage reached" } }), { status: 429, headers: { "content-type": "application/json", "retry-after": "1" } });
+const SHORT_429 = () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32429, message: "rate limited" } }), { status: 429, headers: { "content-type": "application/json", "retry-after": "1" } });
+/** A fetch whose `url` answers `bad(n)` for its n-th call (undefined: the scan's answer), every other URL the scan's
+ *  answer, and getGenesisHash mainnet's genesis (the probe's identity read). */
+function scripted(bad: Record<string, (n: number) => Response | undefined>) {
+  const sent: Sent[] = [];
+  const n = new Map<string, number>();
+  const f = async (url: string, init: RequestInit) => {
+    sent.push({ url, body: String(init.body) });
+    const i = n.get(url) ?? 0;
+    n.set(url, i + 1);
+    const r = bad[url]?.(i);
+    if (r !== undefined) return r;
+    const p = JSON.parse(String(init.body));
+    const one = (q: { id: unknown; method?: string }) => (q.method === "getGenesisHash" ? { jsonrpc: "2.0", id: q.id, result: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" } : ANSWER(q.id));
+    return new Response(JSON.stringify(Array.isArray(p) ? p.map(one) : one(p)), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  return { sent, f };
+}
+/** A clock the waits move (a hold of 1 s ends after a sleep of 1 s). */
+function moving() {
+  let t = STILL();
+  return { now: () => t, sleep: async (ms: number) => void (t += ms) };
+}
+const POOL_SCAN = (id = 9) => ({ jsonrpc: "2.0", id, method: "getProgramAccounts", params: [...solanaDlmmPairScan("So11111111111111111111111111111111111111112", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")] });
+
+test("a spent route A (429 max usage reached): the start check takes the next keyed provider that answers, on a company no route B URL is on, before any public endpoint", async () => {
+  const { sent, f } = scripted({ [A]: () => SPENT_429() });
+  const t = moving();
+  const lines = await checkMarksRoute(ENV, f, t.sleep);
+  // A asked once: a spent plan is no throttle to wait out; then QuickNode as A, dRPC as B, never A again
+  assert.deepEqual(sent.map((s) => s.url), [A, QN, QN, DRPC, DRPC]);
+  assert.ok(lines.some((l) => /SOLANA_RPC_URL size 13: HTTP 429, its plan spent/.test(l)), lines.join("\n"));
+  assert.ok(lines.some((l) => /route A: SOLANA_RPC_URL_QUICKNODE; route B: SOLANA_RPC_URL_DRPC_1/.test(l)), lines.join("\n"));
+  assert.deepEqual(secretsIn(lines), []);
+});
+
+test("a spent route A with no other company left for route B: the start check refuses, naming the spent variable and why no pair answers", async () => {
+  const { f } = scripted({ [A]: () => SPENT_429() });
+  const t = moving();
+  await assert.rejects(checkMarksRoute({ SOLANA_RPC_URL: A, SOLANA_RPC_URL_QUICKNODE: QN, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, f, t.sleep), (e: Error) => secretsIn([e.message]).length === 0 && /SOLANA_RPC_URL size 13: HTTP 429, its plan spent/.test(e.message) && /SOLANA_RPC_URL_QUICKNODE: no route B provider off its company/.test(e.message));
+});
+
+test("a short throttle on route A (429, no spent plan) is waited out, never a switch: the start check asks A again after its Retry-After", async () => {
+  const { sent, f } = scripted({ [A]: (n) => (n === 0 ? SHORT_429() : undefined) });
+  const t = moving();
+  const lines = await checkMarksRoute(ENV, f, t.sleep);
+  assert.deepEqual(sent.map((s) => s.url), [A, A, A, QN, QN]);
+  assert.ok(lines.some((l) => /route A: SOLANA_RPC_URL; route B: SOLANA_RPC_URL_QUICKNODE/.test(l)), lines.join("\n"));
+  // one that never ends is refused on A, never moved past
+  const always = scripted({ [A]: () => SHORT_429() });
+  await assert.rejects(checkMarksRoute(ENV, always.f, t.sleep), /SOLANA_RPC_URL size 13: HTTP 429$/);
+  assert.ok(always.sent.every((s) => s.url === A));
+});
+
+test("the helper's route A moves off a spent plan to the next keyed provider, route B off that one's company; a pool scan follows A", async () => {
+  const { sent, f } = scripted({ [A]: () => SPENT_429() });
+  const t = moving();
+  const r = createRpc(ENV, { now: t.now, sleep: t.sleep, fetch: f, log: () => {} });
+  const first = await call(r, "solana", scan());
+  assert.equal(first.status, 200);
+  assert.deepEqual(sent.map((s) => s.url), [A, QN]);
+  sent.length = 0;
+  assert.equal((await call(r, "solana", scan())).status, 200);
+  assert.equal((await call(r, "solana-marks", scan())).status, 200);
+  assert.equal((await call(r, "solana", POOL_SCAN())).status, 200);
+  // the spent plan is never asked again inside its retry; B is dRPC, never QuickNode, now route A's company
+  assert.deepEqual(sent.map((s) => s.url), [QN, DRPC, QN]);
+});
+
+test("route A's short throttle is waited out on A, never a switch to another provider", async () => {
+  const { sent, f } = scripted({ [A]: (n) => (n === 0 ? SHORT_429() : undefined) });
+  const t = moving();
+  const r = createRpc(ENV, { now: t.now, sleep: t.sleep, fetch: f, log: () => {} });
+  assert.equal((await call(r, "solana", scan())).status, 200);
+  assert.deepEqual(sent.map((s) => s.url), [A, A]);
+  sent.length = 0;
+  assert.equal((await call(r, "solana-marks", scan())).status, 200);
+  assert.deepEqual(sent.map((s) => s.url), [QN]);
+});
+
+test("route A spent with no company left for route B: the mark scan stays on A (503 while spent), B stays off A's company; the pool scan moves to the keyed provider that answers", async () => {
+  const { sent, f } = scripted({ [A]: () => SPENT_429() });
+  const t = moving();
+  const r = createRpc({ SOLANA_RPC_URL: A, SOLANA_RPC_URL_QUICKNODE: QN, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, { now: t.now, sleep: t.sleep, fetch: f, log: () => {} });
+  assert.equal((await call(r, "solana", scan())).status, 503);
+  assert.equal((await call(r, "solana-marks", scan())).status, 200);
+  sent.length = 0;
+  assert.equal((await call(r, "solana", POOL_SCAN())).status, 200);
+  assert.deepEqual(sent.map((s) => s.url), [QN]);
+});
+
+// the live host's shape, read by the CO 20 Nov 09:07Z: SOLANA_RPC_URL and SOLANA_TRADES_RPC_URL one spent Helius URL,
+// SOLANA_HOLDERS_RPC_URL another Helius key with its own credits that answers, QuickNode the only other company
+const HOLDERS = `https://mainnet.helius-rpc.example/?api-key=${key("holders")}`;
+const HOST = { SOLANA_RPC_URL: A, SOLANA_TRADES_RPC_URL: A, SOLANA_HOLDERS_RPC_URL: HOLDERS, SOLANA_RPC_URL_QUICKNODE: QN, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM };
+test("the live host's shape: SOLANA_RPC_URL spent (the trades slot the same URL, asked once), the holders slot's own Helius key takes route A and QuickNode route B, in the check and in the helper", async () => {
+  const t = moving();
+  const check = scripted({ [A]: () => SPENT_429() });
+  const lines = await checkMarksRoute(HOST, check.f, t.sleep);
+  assert.deepEqual(check.sent.map((s) => s.url), [A, HOLDERS, HOLDERS, QN, QN]);
+  assert.ok(lines.some((l) => /route A: SOLANA_HOLDERS_RPC_URL; route B: SOLANA_RPC_URL_QUICKNODE/.test(l)), lines.join("\n"));
+  assert.deepEqual(secretsIn(lines), []);
+  const { sent, f } = scripted({ [A]: () => SPENT_429() });
+  const r = createRpc(HOST, { now: t.now, sleep: t.sleep, fetch: f, log: () => {} });
+  const a = await call(r, "solana", scan());
+  assert.equal(a.status, 200);
+  // the read names the provider by its variable alone (Server-Timing rpc), never its URL
+  assert.match((a.timing ?? []).join(", "), /rpc;dur=\d+;desc="SOLANA_HOLDERS_RPC_URL"/);
+  assert.equal((await call(r, "solana-marks", scan())).status, 200);
+  assert.equal((await call(r, "solana", POOL_SCAN())).status, 200);
+  assert.deepEqual(sent.map((s) => s.url), [A, HOLDERS, QN, HOLDERS]);
+  // QuickNode is never route A while it is route B's only company
+  const both = scripted({ [A]: () => SPENT_429(), [HOLDERS]: () => SPENT_429() });
+  await assert.rejects(checkMarksRoute(HOST, both.f, t.sleep), /SOLANA_HOLDERS_RPC_URL size 13: HTTP 429, its plan spent.*SOLANA_RPC_URL_QUICKNODE: no route B provider off its company/);
+});
+
+test("/v1/health's solana.rpc is keyed while a keyed spare serves past a spent first key, and rpc.solana names the spent one", async () => {
+  const { f } = scripted({ [A]: () => SPENT_429() });
+  const t = moving();
+  const r = createRpc(ENV, { now: t.now, sleep: t.sleep, fetch: f, log: () => {} });
+  const a = await call(r, "solana", { jsonrpc: "2.0", id: 1, method: "getSlot" });
+  assert.equal(a.status, 200);
+  // the probe draws a second of the spares' pace the read just took
+  await t.sleep(1_000);
+  await r.probe();
+  assert.equal(r.slot.state(), "keyed");
+  assert.deepEqual(r.keyed().solana, ["helius-rpc.example spent", "quiknode.example answers", "drpc.example key1 answers"]);
+});
+
+test("/v1/health's solana.rpc is fallback once no keyed provider serves: every one spent", async () => {
+  const { f } = scripted({ [A]: () => SPENT_429(), [QN]: () => SPENT_429(), [DRPC]: () => SPENT_429() });
+  const t = moving();
+  const r = createRpc(ENV, { now: t.now, sleep: t.sleep, fetch: f, log: () => {} });
+  await call(r, "solana", { jsonrpc: "2.0", id: 1, method: "getSlot" });
+  await r.probe();
+  assert.equal(r.slot.state(), "fallback");
 });
 
 test("the start check refuses a 200 list with no context slot, and a non-200 that carries a list (review P3-2)", async () => {
