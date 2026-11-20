@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { connectHosts, EVENT_MS, judge, namesIn, PINNED_HOSTS, RELOAD_MS, START, WIDTHS } from "./signpage-shell.mjs";
+import { connectHosts, EVENT_MS, judge, namesIn, PINNED_HOSTS, RELOAD_MS, sendOf, sentAt, stampSends, START, WIDTHS } from "./signpage-shell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-shell.answers.json"), "utf8"));
@@ -513,6 +513,91 @@ test("sign-out-stops-the-pages-reads planted: no reload, a late or a signed-in n
   r = clone(RELOAD);
   r.source = "live https://confidential.unrealized.trade";
   badLine(r, names);
+});
+
+// card signpage-sign-out-sends-nothing (merge group 44661520805, test-browser 1): the check read each request at node's
+// route time and each sign out's end at the new document's timeOrigin, the browser's clock, so the pool price read's
+// eth_chainId sent just before another tab's sign out was heard read as sent after it ("2 signed out:
+// rpc.mainnet.chain.robinhood.com/, base-rpc.publicnode.com/"). A request is now read at its browser send (`sent`,
+// Chromium's Network.requestWillBeSent wallTime, matched one for one by its shape), node's time where none matched.
+test("sign-out-sends-nothing planted: sent before the hearing but routed after it: ok; sent after it, on the browser's clock or on node's: FAIL", () => {
+  const st = RELOAD.steps;
+  const out = /^BAD signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names \(\d+ signed out/;
+  const okLine = /^ok  signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names \(0 signed out/;
+  const chainId = (host, t, sent) => ({ t, host, path: "/", method: "POST", rpc: [{ method: "eth_chainId", params: [] }], ...(sent === undefined ? {} : { sent }) });
+  for (const [label, end] of [["another tab's hearing", st.wordsOut.doc], ["this tab's new document", st.passkeyOut.doc], ["the second account's new document", st.passkeyOut2.doc]]) {
+    // the CI red's shape: sent 1 ms before the window's end, routed 3 ms after it
+    let r = clone(RELOAD);
+    r.requests.push(chainId("rpc.mainnet.chain.robinhood.com", end + 3, end - 1), chainId("base-rpc.publicnode.com", end + 3, end - 1));
+    assert.ok(judge(r).lines.some((l) => okLine.test(l)), `${label}: sent before it\n${judge(r).lines.join("\n")}`);
+    // sent at or after the end on the browser's clock: BAD
+    for (const sent of [end, end + 1]) {
+      r = clone(RELOAD);
+      r.requests.push(chainId("base-rpc.publicnode.com", sent + 3, sent));
+      const j = judge(r);
+      assert.equal(j.ok, false, `${label}: sent at +${sent - end}\n${j.lines.join("\n")}`);
+      assert.ok(j.lines.some((l) => out.test(l)), j.lines.join("\n"));
+    }
+    // no browser send (Firefox, WebKit, a shape not matched one for one): node's time, routed after the end: BAD
+    r = clone(RELOAD);
+    r.requests.push(chainId("base-rpc.publicnode.com", end + 1));
+    assert.ok(judge(r).lines.some((l) => out.test(l)), `${label}: no send stamp\n${judge(r).lines.join("\n")}`);
+  }
+});
+
+// this card's own run (chromium, phone, 20 Nov 04:31Z): 433 of its 488 pinned requests matched to their browser send,
+// each before its record's ms ended, the route up to 15 ms behind the send; PASS. Moved by its route lag, the same run
+// FAILs: the price read's wave sent 2 ms before another tab's sign out was heard is routed after it.
+const SENDS = ANSWERS.sends.chromium.phone;
+test("recorded run on this card's check (chromium, phone): PASS, its requests read at their browser sends", () => {
+  const r = judge(SENDS);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  const pinned = SENDS.requests.filter((x) => PINNED_HOSTS.includes(x.host));
+  const sent = pinned.filter((x) => typeof x.sent === "number");
+  assert.ok(sent.length * 2 > pinned.length, `${sent.length} of ${pinned.length} pinned requests matched to a send`);
+  assert.ok(sent.every((x) => x.sent < x.t + 1), "no send after its record's ms");
+  // the hearing's race, planted on this run: the wave sent 2 ms before it, routed 3 ms after it
+  const end = SENDS.steps.wordsOut.doc;
+  const wave = clone(SENDS);
+  wave.requests.push({ t: end + 3, sent: end - 2, host: "rpc.mainnet.chain.robinhood.com", path: "/", method: "POST", rpc: [{ method: "eth_chainId", params: [] }] });
+  assert.equal(judge(wave).ok, true, judge(wave).lines.join("\n"));
+  // without its send (node's clock alone): BAD, as main's check read it
+  delete wave.requests.at(-1).sent;
+  assert.equal(judge(wave).ok, false, judge(wave).lines.join("\n"));
+});
+
+test("stampSends: a record takes its browser send only where its shape's sends and records are as many, in order, and none later than its record", () => {
+  const rec = (t, id = 1) => ({ t, host: "base-rpc.publicnode.com", path: "/", method: "POST", rpc: [{ method: "eth_chainId", params: [id] }] });
+  const send = (ms, id = 1) => sendOf({ url: "https://base-rpc.publicnode.com/", method: "POST", postData: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [id] }) }, ms / 1000);
+  // one for one, in order: each stamped
+  let rs = [rec(100), rec(200)];
+  stampSends(rs, [send(97), send(198)]);
+  assert.deepEqual(rs.map((x) => x.sent), [97, 198]);
+  // one send more than records (a send the route never saw): none stamped, node's time stands
+  rs = [rec(100), rec(200)];
+  stampSends(rs, [send(50), send(97), send(198)]);
+  assert.deepEqual(rs.map((x) => x.sent), [undefined, undefined]);
+  // a send later than its record (no send comes after its own route; t is Date.now's whole ms): none stamped
+  rs = [rec(100)];
+  stampSends(rs, [send(101)]);
+  assert.equal(rs[0].sent, undefined);
+  // a send inside its record's own ms: stamped
+  rs = [rec(100)];
+  stampSends(rs, [send(100.5)]);
+  assert.equal(rs[0].sent, 100.5);
+  // another shape's sends never stamp a record; the body read from postDataEntries as from postData
+  rs = [rec(100, 2)];
+  stampSends(rs, [send(97, 1)]);
+  assert.equal(rs[0].sent, undefined);
+  const entries = sendOf({ url: "https://base-rpc.publicnode.com/", method: "POST", postDataEntries: [{ bytes: Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [2] })).toString("base64") }] }, 0.097);
+  stampSends(rs, [entries]);
+  assert.equal(rs[0].sent, 97);
+  // a record WebKit's proxy refused, or with no time, is never stamped
+  rs = [{ ...rec(100), refused: true }, { ...rec(100), t: undefined }];
+  stampSends(rs, [send(97), send(98)]);
+  assert.deepEqual(rs.map((x) => x.sent), [undefined, undefined]);
+  assert.equal(sentAt({ t: 5, sent: 3 }), 3);
+  assert.equal(sentAt({ t: 5 }), 5);
 });
 
 // card ci-stops-costing-reruns (CI run 43419178373, test-browser 3, attempt 1): the words' open is answered first and
