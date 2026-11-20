@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { DiscoverData } from "./Discover.tsx";
 import type { MarketChain, MarketRow, MarketSnapshot } from "./fields.ts";
 import { SNAPSHOT_LISTS } from "./fields.ts";
+import { answerOf, bodyOf, readAgain, type ReadDeps } from "./read-again.ts";
 
 /** The chains whose lists the helper serves, in the chain filter's order (routes.ts TOKEN_CHAINS). */
 export const LIST_CHAINS = ["solana", "base", "robinhood", "near"] as const satisfies readonly MarketChain[];
@@ -27,25 +28,28 @@ export const listsUrl = (chain: ListChain): string => `https://ct-api.unrealized
 export const HELPER_URL = listsUrl("solana");
 export const REFRESH_MS = 12_000;
 export const STALE_MS = 60_000;
-const TIMEOUT_MS = 10_000;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isRow = (v: unknown): v is MarketRow => isObject(v) && typeof v.token === "string" && v.token !== "" && typeof v.symbol === "string" && v.symbol !== "";
 
-/** One read of one chain's lists. Throws on a failed read, a non-200 answer, an answer that is not that chain's
- *  snapshot. A row of another chain is dropped. */
-export async function readChainLists(chain: ListChain, fetchFn: typeof fetch = fetch): Promise<MarketSnapshot> {
-  const r = await fetchFn(listsUrl(chain), { ...HELPER_FETCH_INIT, signal: AbortSignal.timeout(TIMEOUT_MS) });
-  if (r.status !== 200) throw new Error(`lists answered ${r.status}`);
-  const body: unknown = await r.json();
-  if (!isObject(body) || body.chain !== chain || !isObject(body.lists) || typeof body.as_of_ms !== "number") throw new Error(`lists: not a ${chain} snapshot`);
-  const lists: Record<string, MarketRow[]> = {};
-  for (const [name, rows] of Object.entries(body.lists)) {
-    if (!Array.isArray(rows)) throw new Error(`lists: ${name} is not a list`);
-    lists[name] = rows.filter((x): x is MarketRow => isRow(x) && x.chain === chain);
-  }
-  if (!lists.new || !lists.trending) throw new Error("lists: new or trending missing");
-  return { chain, as_of_ms: body.as_of_ms, lists: lists as unknown as MarketSnapshot["lists"] };
+/** One chain's lists, read again while the helper gives no answer (none in its wait, a network failure, a 5xx or 429)
+ *  and READY_MS has room (read-again.ts readAgain, card app-token-page-rides-out-a-slow-token-read). Throws on another
+ *  status or an answer that is not that chain's snapshot at once, and once READY_MS is spent. A row of another chain is
+ *  dropped. */
+export function readChainLists(chain: ListChain, fetchFn: typeof fetch = fetch, deps: ReadDeps = {}): Promise<MarketSnapshot> {
+  return readAgain(async (signal) => {
+    const r = await answerOf(fetchFn, listsUrl(chain), HELPER_FETCH_INIT, signal);
+    if (r.status !== 200) throw new Error(`lists answered ${r.status}`);
+    const body = await bodyOf(r);
+    if (!isObject(body) || body.chain !== chain || !isObject(body.lists) || typeof body.as_of_ms !== "number") throw new Error(`lists: not a ${chain} snapshot`);
+    const lists: Record<string, MarketRow[]> = {};
+    for (const [name, rows] of Object.entries(body.lists)) {
+      if (!Array.isArray(rows)) throw new Error(`lists: ${name} is not a list`);
+      lists[name] = rows.filter((x): x is MarketRow => isRow(x) && x.chain === chain);
+    }
+    if (!lists.new || !lists.trending) throw new Error("lists: new or trending missing");
+    return { chain, as_of_ms: body.as_of_ms, lists: lists as unknown as MarketSnapshot["lists"] };
+  }, deps);
 }
 
 /** Each chain's own read time (as_of_ms) in a merged snapshot, so one chain's view dates its lists by its own read. */
@@ -91,8 +95,8 @@ export function allListsReader(deps: { now?: () => number; chains?: readonly Lis
   const now = deps.now ?? Date.now;
   const chains = deps.chains ?? LIST_CHAINS;
   const held = new Map<ListChain, { s: MarketSnapshot; at: number }>();
-  return async (fetchFn: typeof fetch = fetch): Promise<MarketSnapshot> => {
-    const got = await Promise.allSettled(chains.map((c) => readChainLists(c, fetchFn)));
+  return async (fetchFn: typeof fetch = fetch, read: ReadDeps = {}): Promise<MarketSnapshot> => {
+    const got = await Promise.allSettled(chains.map((c) => readChainLists(c, fetchFn, read)));
     const t = now();
     const parts: MarketSnapshot[] = [];
     chains.forEach((c, i) => {
@@ -111,10 +115,11 @@ export const readAllLists = allListsReader();
 
 let inflight: { fetchFn: typeof fetch; p: Promise<MarketSnapshot> } | null = null;
 
-/** readAllLists, one read for every caller while one is in flight with the same fetch. */
-export function sharedAllLists(fetchFn: typeof fetch = fetch): Promise<MarketSnapshot> {
+/** readAllLists, one read for every caller while one is in flight with the same fetch. `read` (a test's clock) goes to
+ *  the read it starts. */
+export function sharedAllLists(fetchFn: typeof fetch = fetch, read: ReadDeps = {}): Promise<MarketSnapshot> {
   if (inflight && inflight.fetchFn === fetchFn) return inflight.p;
-  const p = readAllLists(fetchFn).finally(() => {
+  const p = readAllLists(fetchFn, read).finally(() => {
     if (inflight?.p === p) inflight = null;
   });
   inflight = { fetchFn, p };

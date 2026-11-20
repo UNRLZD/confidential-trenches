@@ -59,7 +59,10 @@ const STATES = [
   { id: "fx-picks-nothing", top: "pool", query: "?fx=curve", state: "ready", curve: false },
   { id: "S7.1-loading", lists: "hang", state: "loading" },
   { id: "empty", lists: "empty", state: "empty" },
-  { id: "error", lists: 503, state: "error" },
+  // a refusal: a lists read the helper answers 503 is read again inside READY_MS (src/screens/discover/read-again.ts),
+  // and the page draws once Solana's second read answers
+  { id: "error", lists: 400, state: "error" },
+  { id: "lists-503-rides-out", top: "curve", listsOnce: 503, state: "ready", curve: true },
   // a refusal is the error state; a token read the helper answers 503 is read again and the page opens (card
   // app-token-page-rides-out-a-slow-token-read: a 503 or no answer is the error state only once READY_MS is spent)
   { id: "error-token", top: "curve", token: 400, state: "error" },
@@ -150,6 +153,7 @@ function helperAnswer(s, url, calls) {
     calls.chains.push(url.searchParams.get("chain"));
     if (s.lists === "hang") return "hang";
     if (typeof s.lists === "number") return json(s.lists, { error: "unavailable" });
+    if (s.listsOnce && url.searchParams.get("chain") === "solana" && !calls.listsFailed) return (calls.listsFailed = true), json(s.listsOnce, { error: "unavailable" });
     const top = s.lists === "empty" ? [] : [{ ...live(s.top), vol_1h_usd: live(s.top).vol_1h_usd ?? "1000" }];
     return json(200, { chain: "solana", as_of_ms: Date.now(), lists: { new: [], trending: top, trending_5m: [], trending_1h: top, graduating: [] } });
   }

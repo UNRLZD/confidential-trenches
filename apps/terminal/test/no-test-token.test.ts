@@ -68,6 +68,8 @@ function helper(o: { lists?: unknown; listsStatus?: number; token?: unknown; tok
     }
     if (url === HELPER_URL) return send(o.lists ?? listsAnswer(), o.listsStatus ?? 200);
     if (url.startsWith("https://ct-api.unrealized.trade/v1/market/token?chain=solana&")) return send(o.token ?? token.answer, o.tokenStatus ?? 200);
+    // a chain this test serves no lists for refuses (a no-answer is read again inside READY_MS, read-again.ts)
+    if (url.startsWith("https://ct-api.unrealized.trade/v1/market/lists?")) return send({ error: { code: "not_found" } }, 404);
     throw new TypeError(`no such host: ${url}`);
   };
   return { fetchFn, calls };

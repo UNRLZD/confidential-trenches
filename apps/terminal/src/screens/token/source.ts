@@ -19,6 +19,7 @@ import { HELPER_FETCH_INIT } from "@blindfill/kit";
 import { useCallback, useEffect, useState } from "react";
 import { OPEN_TOKEN } from "../../routes/routes.ts";
 import { pickSnapshot, sharedAllLists } from "../discover/data.ts";
+import { answerOf, bodyOf, readAgain, type ReadDeps } from "../discover/read-again.ts";
 import type { MarketChain, MarketRow, MarketSnapshot } from "../discover/fields.ts";
 import { columnRows } from "../discover/model.ts";
 import type { RiskRead } from "../trade/safety.ts";
@@ -30,90 +31,32 @@ export type TokenData = { status: "loading" } | { status: "error" } | { status: 
 
 /** HELPER_HOST's token read for one token (the CSP's connect-src names the host, public/_headers). */
 export const TOKEN_URL = (id: string, chain: MarketChain = "solana") => `https://ct-api.unrealized.trade/v1/market/token?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(id)}`;
-/** One token read's own wait for the helper's answer. */
-export const TIMEOUT_MS = 10_000;
-
-// Card app-token-page-rides-out-a-slow-token-read: merge group 44618685462 drew /token/robinhood/<cbBTC> in the error
-// state while the helper answered that token in 0.6-1.1 s on every read before and after (19 Nov 21:55Z): one read the
-// helper did not answer in TIMEOUT_MS was the error state, with no second read. A read the helper does not answer (no
-// answer in its wait, a network failure) or answers 5xx or 429 is read again after BACKOFF_MS, while READY_MS from the
-// page's first read has room for a read; the error state is a refusal (another status, a body that is not this token's
-// row) or READY_MS spent with no answer.
-/** How long a token read keeps reading a helper that does not answer before the page draws the error state. */
-export const READY_MS = 20_000;
-/** The waits before each read again, the last one repeated. */
-export const BACKOFF_MS = [500, 1_000, 2_000, 4_000] as const;
-/** No read again starts with less of READY_MS left than this: a cold token read took 2.0-2.2 s (19 Nov 21:58Z). */
-export const MIN_READ_MS = 2_500;
+// Card app-token-page-rides-out-a-slow-token-read: a token read the helper gives no answer to is read again inside
+// READY_MS (../discover/read-again.ts readAgain); the error state is a refusal or READY_MS spent.
+export { BACKOFF_MS, MIN_READ_MS, READY_MS, TIMEOUT_MS } from "../discover/read-again.ts";
+export type { ReadDeps } from "../discover/read-again.ts";
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** The helper does not know the token (it answers 404 for an id that is no token of that chain, or one it does not list). */
 class Unknown extends Error {}
-/** The helper gave no answer to read: none in the read's wait, a network failure, or a 5xx or 429. */
-class NoAnswer extends Error {}
 
-/** What a token read waits on; each is the real one unless a test hands its own in. `signal`: the page closed, so no
- *  read again starts. */
-export interface ReadDeps {
-  now?: () => number;
-  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
-  timeout?: (ms: number) => AbortSignal;
-  signal?: AbortSignal;
-}
-
-const sleepReal = (ms: number, signal?: AbortSignal): Promise<void> =>
-  new Promise((done) => {
-    const t = setTimeout(done, ms);
-    signal?.addEventListener("abort", () => (clearTimeout(t), done()), { once: true });
-  });
-
-const cutShort = (e: unknown): boolean => isObject(e) && (e.name === "TimeoutError" || e.name === "AbortError");
-
-/** The row and `risk` of one token read, read again while the helper gives no answer (NoAnswer) and READY_MS has room.
+/** The row and `risk` of one token read, read again while the helper gives no answer and READY_MS has room (readAgain).
  *  Throws Unknown on a 404, NoAnswer once READY_MS is spent (or the page closed), any other Error on another status or a
  *  row that is not this chain's and id's. */
-async function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch, deps: ReadDeps = {}): Promise<{ row: MarketRow; risk?: RiskRead; filling: boolean; decimals?: number; links: SocialLinks }> {
-  const now = deps.now ?? Date.now;
-  const sleep = deps.sleep ?? sleepReal;
-  const end = now() + READY_MS;
-  for (let n = 0; ; n++) {
-    try {
-      return await readOnce(chain, id, fetchFn, (deps.timeout ?? AbortSignal.timeout)(Math.min(TIMEOUT_MS, end - now())));
-    } catch (e) {
-      if (!(e instanceof NoAnswer)) throw e;
-      const wait = BACKOFF_MS[Math.min(n, BACKOFF_MS.length - 1)]!;
-      if (deps.signal?.aborted || end - now() - wait < MIN_READ_MS) throw e;
-      await sleep(wait, deps.signal);
-      if (deps.signal?.aborted) throw e;
-    }
-  }
-}
-
-/** One token read, waiting on `signal`. */
-async function readOnce(chain: MarketChain, id: string, fetchFn: typeof fetch, signal: AbortSignal): Promise<{ row: MarketRow; risk?: RiskRead; filling: boolean; decimals?: number; links: SocialLinks }> {
-  let r: Response;
-  try {
-    r = await fetchFn(TOKEN_URL(id, chain), { ...HELPER_FETCH_INIT, signal });
-  } catch {
-    throw new NoAnswer("token: no answer");
-  }
-  if (r.status === 404) throw new Unknown("token: unknown");
-  if (r.status >= 500 || r.status === 429) throw new NoAnswer(`token answered ${r.status}`);
-  if (r.status !== 200) throw new Error(`token answered ${r.status}`);
-  let body: unknown;
-  try {
-    body = await r.json();
-  } catch (e) {
-    // the body cut off by the read's wait is no answer; a body that is not JSON is a refusal
-    throw cutShort(e) ? new NoAnswer("token: no answer") : e;
-  }
-  const row = isObject(body) ? body.row : null;
-  const risk = isObject(body) ? body.risk : null;
-  if (!isObject(row) || row.chain !== chain || row.token !== id || typeof row.symbol !== "string" || row.symbol === "") throw new Error("token: not this token's row");
-  // the mint's decimals (06b TokenPage `decimals`), which the Holders tab reads its base-unit amounts with
-  const decimals = isObject(body) && typeof body.decimals === "number" && Number.isInteger(body.decimals) && body.decimals >= 0 && body.decimals <= 30 ? body.decimals : undefined;
-  return { row: row as unknown as MarketRow, ...(isObject(risk) ? { risk: risk as RiskRead } : {}), filling: isObject(body) && body.filling === true, ...(decimals === undefined ? {} : { decimals }), links: socialLinks(isObject(body) ? body.links : undefined) };
+function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch, deps: ReadDeps = {}): Promise<{ row: MarketRow; risk?: RiskRead; filling: boolean; decimals?: number; links: SocialLinks }> {
+  return readAgain(async (signal) => {
+    const r = await answerOf(fetchFn, TOKEN_URL(id, chain), HELPER_FETCH_INIT, signal);
+    if (r.status === 404) throw new Unknown("token: unknown");
+    if (r.status !== 200) throw new Error(`token answered ${r.status}`);
+    const body = await bodyOf(r);
+    const row = isObject(body) ? body.row : null;
+    const risk = isObject(body) ? body.risk : null;
+    if (!isObject(row) || row.chain !== chain || row.token !== id || typeof row.symbol !== "string" || row.symbol === "") throw new Error("token: not this token's row");
+    // the mint's decimals (06b TokenPage `decimals`), which the Holders tab reads its base-unit amounts with
+    const decimals = isObject(body) && typeof body.decimals === "number" && Number.isInteger(body.decimals) && body.decimals >= 0 && body.decimals <= 30 ? body.decimals : undefined;
+    return { row: row as unknown as MarketRow, ...(isObject(risk) ? { risk: risk as RiskRead } : {}), filling: isObject(body) && body.filling === true, ...(decimals === undefined ? {} : { decimals }), links: socialLinks(isObject(body) ? body.links : undefined) };
+  }, deps);
 }
 
 /** The page's data for /token/<chain>/<id>: the token's row, the empty state (not found) for an id the helper does not
@@ -128,9 +71,11 @@ export async function loadToken(chain: MarketChain, id: string, fetchFn: typeof 
 
 /** The page's data: the top Trending token's row on the chain filter's pick (every chain, or one), the empty state when
  *  that column is empty, else the error state. `read` is the lists read (every chain's, shared while in flight). */
-export async function loadTopToken(fetchFn: typeof fetch = fetch, pick: MarketChain | "all" = "all", read: (f: typeof fetch) => Promise<MarketSnapshot> = sharedAllLists, deps: ReadDeps = {}): Promise<TokenData> {
+export async function loadTopToken(fetchFn: typeof fetch = fetch, pick: MarketChain | "all" = "all", read: (f: typeof fetch, deps?: ReadDeps) => Promise<MarketSnapshot> = sharedAllLists, deps: ReadDeps = {}): Promise<TokenData> {
   try {
-    const top = columnRows(pickSnapshot(await read(fetchFn), pick), "trending")[0];
+    // the lists read is shared with the rail and Discover while in flight, so this page's close never stops it
+    const { signal: _closed, ...clock } = deps;
+    const top = columnRows(pickSnapshot(await read(fetchFn, clock), pick), "trending")[0];
     if (!top) return { status: "empty" };
     return { status: "ready", ...(await readRow(top.chain, top.token, fetchFn, deps)) };
   } catch {
@@ -140,7 +85,7 @@ export async function loadTopToken(fetchFn: typeof fetch = fetch, pick: MarketCh
 
 /** The page's data for /: on All (a fresh open) OPEN_TOKEN, mihao, read as /token/solana/<its mint> is (card
  *  mihao-opens-first); on a chain pick that chain's top Trending token (loadTopToken). */
-export async function loadHome(fetchFn: typeof fetch = fetch, pick: MarketChain | "all" = "all", read: (f: typeof fetch) => Promise<MarketSnapshot> = sharedAllLists, deps: ReadDeps = {}): Promise<TokenData> {
+export async function loadHome(fetchFn: typeof fetch = fetch, pick: MarketChain | "all" = "all", read: (f: typeof fetch, deps?: ReadDeps) => Promise<MarketSnapshot> = sharedAllLists, deps: ReadDeps = {}): Promise<TokenData> {
   return pick === "all" ? loadToken(OPEN_TOKEN.chain, OPEN_TOKEN.id, fetchFn, deps) : loadTopToken(fetchFn, pick, read, deps);
 }
 
