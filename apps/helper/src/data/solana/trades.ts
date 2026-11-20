@@ -739,12 +739,19 @@ export function createSolanaTrades(deps: {
     }
     return read;
   }
-  /** The trades each dated: its event's own clock, else its block's (`known`, the transaction's or its signature's block
-   *  time, else the slot's: timeOf); null when a trade needs its block's time and none answers (as a transaction not read). */
+  /** The trades each dated by its block (`known`, the transaction's or its signature's block time, else the slot's:
+   *  timeOf), an event's own clock included: card helper-sol-tape-checks-hold, the clock a pump.fun, PumpSwap, DBC or DAMM
+   *  v2 event carries is a second before its block in some slots (slot 471386582: DAMM v2 and DBC events 1795102226,
+   *  block time 1795102227 on api.mainnet-beta and publicnode; slot 471614249: a PumpSwap event 1795151265, the stream's
+   *  Clock sysvar and getBlockTime 1795151266), so a tape dating those by their event and the rest by their block held a
+   *  later row a second below an older one (live helper f5639e5bb, 20 Nov 03:15Z: "trade 31 is newer than trade 30").
+   *  With no block time answering, an event's own clock stands (within a second of it); a trade with none makes the
+   *  transaction unread (null). */
   async function dated(trades: RawTrade[], slot: number, known: number | null): Promise<RawTrade[] | null> {
-    if (trades.every((t) => t.ts > 0)) return trades;
+    if (trades.length === 0) return trades;
     const t = known ?? (await timeOf(slot));
-    return t === null ? null : trades.map((x) => (x.ts > 0 ? x : { ...x, ts: t }));
+    if (t === null) return trades.every((x) => x.ts > 0) ? trades : null;
+    return trades.map((x) => (x.ts === t ? x : { ...x, ts: t }));
   }
 
   async function account(key: string): Promise<{ owner: unknown; data: Buffer; slot: number } | null> {
