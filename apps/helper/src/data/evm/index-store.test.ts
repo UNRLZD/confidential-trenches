@@ -7,9 +7,11 @@ import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, truncateSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { test } from "node:test";
+import { after, test } from "node:test";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createSwapIndex } from "./index.ts";
-import { openIndexStore } from "./index-store.ts";
+import { openIndexStore, type IndexStore } from "./index-store.ts";
 import type { Log } from "./swaps.ts";
 
 const SWAP = `0x${"aa".repeat(32)}`;
@@ -30,10 +32,20 @@ function dir(t: { after: (f: () => void) => void }): string {
   return d;
 }
 /** A helper's index on `file`: its reads, and the drops its store logged. */
+/** Every store a test opens, closed at the file's end, so the file ends with nothing of its own left open. */
+const opened: (IndexStore | null)[] = [];
+after(() => {
+  for (const s of opened) s?.close();
+});
+const open = (file: string, log?: (l: string) => void): IndexStore | null => {
+  const s = openIndexStore(file, [SWAP], log);
+  opened.push(s);
+  return s;
+};
 function helper(file: string, writable?: Promise<unknown>) {
   const reads: [number, number][] = [];
   const logged: string[] = [];
-  const store = openIndexStore(file, [SWAP], (l) => logged.push(l));
+  const store = open(file, (l) => logged.push(l));
   const read = async (lo: number, hi: number) => (reads.push([lo, hi]), chainLogs(lo, hi));
   const index = createSwapIndex({ topics: [SWAP], read, window: WINDOW, chunk: 40, store, ...(writable === undefined ? {} : { writable }) });
   return { reads, logged, index, store };
@@ -194,7 +206,7 @@ test("card helper-loop-never-held-by-a-read: the store's file is WAL with synchr
     sql.push(q);
     return exec.call(this, q);
   });
-  const store = openIndexStore(join(dir(t), "swaps.sqlite"), [SWAP]);
+  const store = open(join(dir(t), "swaps.sqlite"));
   assert.ok(store !== null);
   const pragmas = sql.join("\n");
   assert.match(pragmas, /PRAGMA journal_mode = WAL;/);
@@ -212,10 +224,38 @@ test("card helper-loop-never-held-by-a-read: a checkpoint that fails is told to 
   });
   const d = dir(t);
   const file = join(d, "swaps.sqlite");
-  const store = openIndexStore(file, [SWAP]);
+  const store = open(file);
   assert.ok(store !== null);
   renameSync(file, join(d, "moved.sqlite"));
   mkdirSync(file);
   for (let k = 0; k < 1_000 && !sql.includes("PRAGMA wal_autocheckpoint = 1000"); k++) await new Promise((r) => setTimeout(r, 5));
   assert.ok(sql.includes("PRAGMA wal_autocheckpoint = 1000"), "the store's checkpoint back on");
+});
+
+test("card helper-loop-never-held-by-a-read: a process that opens a store exits on its own, the store left open, closed, or its checkpoint failed: its checkpoint thread never holds the loop, and its close ends the thread (red at 962feb6ac: the thread's message listener held its port, and a process with a store open never ended)", (t) => {
+  const d = dir(t);
+  const store = pathToFileURL(fileURLToPath(new URL("./index-store.ts", import.meta.url))).href;
+  for (const how of ["open", "closed", "failed"] as const) {
+    const file = join(d, `exit-${how}.sqlite`);
+    const script = join(d, `exit-${how}.mjs`);
+    writeFileSync(
+      script,
+      `import { openIndexStore } from ${JSON.stringify(store)};
+import { mkdirSync, renameSync } from "node:fs";
+const s = openIndexStore(${JSON.stringify(file)}, [${JSON.stringify(SWAP)}]);
+if (s === null) process.exit(3);
+s.put(1, 2, []);
+${how === "closed" ? "s.close();" : ""}
+${how === "failed" ? `renameSync(${JSON.stringify(file)}, ${JSON.stringify(`${file}.moved`)}); mkdirSync(${JSON.stringify(file)});` : ""}
+// past the thread's first round (CHECKPOINT_MS), so a failed checkpoint has been told
+setTimeout(() => process.stdout.write("ran"), ${how === "failed" ? 1_500 : 50});
+`,
+    );
+    // [design: 20 s, far past a store's open, a thread's start (milliseconds) and its first round (1 s); a process held
+    // open never ends]
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", timeout: 20_000 });
+    assert.equal(r.error, undefined, `the process with its store ${how} did not end on its own: ${r.error?.message}`);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, "ran");
+  }
 });

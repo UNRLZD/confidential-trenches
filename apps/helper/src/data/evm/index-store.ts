@@ -32,6 +32,8 @@ export type IndexStore = {
   put(from: number, to: number, logs: readonly Log[], whole?: boolean): void;
   /** Holds nothing. */
   clear(): void;
+  /** Ends the file's checkpoint thread and closes the file. */
+  close(): void;
 };
 
 type Row = { block: unknown; idx: unknown; tx: unknown; address: unknown; topics: unknown; data: unknown; t: unknown };
@@ -100,8 +102,8 @@ export function openIndexStore(file: string, topicList: readonly string[], log: 
       return null;
     }
   }
-  // the store lives as long as the helper: its thread is unref'd and ends with it
-  checkpointAside(file, () => db.isOpen && db.exec("PRAGMA wal_autocheckpoint = 1000"));
+  // the thread never holds the loop (unref'd), and ends with the store's close
+  const aside = checkpointAside(file, () => db.isOpen && db.exec("PRAGMA wal_autocheckpoint = 1000"));
   const setMeta = db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v");
   const put = db.prepare("INSERT OR REPLACE INTO logs (block, idx, tx, address, topics, data, t) VALUES (?, ?, ?, ?, ?, ?, ?)");
   const before = db.prepare("DELETE FROM logs WHERE block < ?");
@@ -138,6 +140,10 @@ export function openIndexStore(file: string, topicList: readonly string[], log: 
     return { from, to, logs };
   };
   return {
+    close() {
+      aside.stop();
+      if (db.isOpen) db.close();
+    },
     load() {
       try {
         return read();

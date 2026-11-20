@@ -59,8 +59,9 @@ export function checkpointAside(file: string, failed: (e: Error) => void, everyM
   const url = pathToFileURL(file);
   url.searchParams.set("mode", "rw");
   const done = new SharedArrayBuffer(4);
-  const w = new Worker(BODY, { eval: true, workerData: { path: file, url: url.href, everyMs, done } });
-  w.unref();
+  // execArgv []: the thread runs none of the process's own flags or preloads (a module --input-type made its CommonJS
+  // body fail to load, and a --import preload ran inside it)
+  const w = new Worker(BODY, { eval: true, execArgv: [], workerData: { path: file, url: url.href, everyMs, done } });
   let alive = true;
   let told = false;
   const fail = (e: Error): void => {
@@ -76,6 +77,10 @@ export function checkpointAside(file: string, failed: (e: Error) => void, everyM
     if (typeof m?.failed === "string") fail(new Error(`checkpoint of ${file}: ${m.failed}`));
   });
   w.on("exit", () => void (alive = false));
+  // unref'd after its listeners: a `message` listener refs the thread's port again, and a port that holds the loop
+  // kept a process that opened a store from ever exiting on its own (card helper-loop-never-held-by-a-read round 3:
+  // index-store.test.ts at 962feb6ac ran its 9 tests, then hung on 45 MessagePorts until killed)
+  w.unref();
   return {
     stop: () => {
       if (!alive) return;
