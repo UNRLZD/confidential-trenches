@@ -682,7 +682,9 @@ export const evmAgreedReset = (): void => AGREED.clear();
  *  (tests). Not in the index. */
 export const evmQuoteWarmReset = (): void => (PLANS.clear(), FITS.clear());
 
-async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, again: number | undefined, down: Set<EvmRpc>): Promise<Answer[]> {
+/** How readBothSent sends `reads` at `hash`: its calls, each call's answer as the reads it holds, and where each batch
+ *  (one post to a provider) starts in the calls, the aggregate3 calls' reads and the plain reads. Sends nothing. */
+function planOf(hash: string, reads: readonly Read[], lim: ReadLimits, again: number | undefined): { calls: EvmRpcCall[]; decode: ((raw: unknown, who: string) => [number, Answer][])[]; starts: number[]; parts: number[][]; plain: number[] } {
   // `again`: reads answered `gas` in a call of more, read again this many to a call (READ_AGAIN_PER_CALL, then 1)
   const perCall = again ?? readsOverride ?? lim.perCall;
   const at = { blockHash: hash, requireCanonical: true };
@@ -748,6 +750,31 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
     ...slotParts.map((part) => (raw: unknown, who: string) => unslots(raw, part.length, who).map((x, k): [number, Answer] => [part[k]!, { kind: "out", amountOut: x }])),
     ...lone.map((i) => (raw: unknown, who: string): [number, Answer][] => [[i, answerOf(raw, who, false, reads[i]!.oog === true) as Answer]]),
   ];
+  // batches of CALLS_PER_BATCH calls in order, each request body kept to maxBytes (a call past it alone)
+  const starts: number[] = [];
+  for (let c = 0, size = Infinity, k = CALLS_PER_BATCH; c < calls.length; c++) {
+    const b = bytesOf(calls[c]!);
+    if (k === CALLS_PER_BATCH || size + b > lim.maxBytes) {
+      starts.push(c);
+      size = BATCH_BYTES;
+      k = 0;
+    }
+    size += b;
+    k++;
+  }
+  return { calls, decode, starts, parts, plain };
+}
+
+/** The posts readBoth sends each provider it asks for `reads` at `hash`: the batches of the reads it does not answer from
+ *  AGREED. Sends nothing. */
+function postsOf(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits): number {
+  const kept = MEMO_FOR.get(rpcs) === hash ? AGREED.get(hash) : undefined;
+  const miss = kept === undefined ? reads : reads.filter((r) => !kept.has(agreedKey(r)));
+  return miss.length === 0 ? 0 : planOf(hash, miss, lim, undefined).starts.length;
+}
+
+async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, again: number | undefined, down: Set<EvmRpc>): Promise<Answer[]> {
+  const { calls, decode, starts, parts, plain } = planOf(hash, reads, lim, again);
   const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial && a.overflow === b.overflow);
   // a read that may have run out of gas on one provider and reverted on another is not the same answer, nor one whose
   // gas used differs (readSizes is written from it: card evm-quote-gas-used)
@@ -762,18 +789,6 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
   // budget is (Finagle's RetryBudget, gRPC's retry throttling): two, plus one per five batches, so a provider slowed by
   // the quote's own load is not handed the load again; a batch whose answer failed or differs asks the next provider
   // whatever the budget.
-  // batches of CALLS_PER_BATCH calls in order, each request body kept to maxBytes (a call past it alone)
-  const starts: number[] = [];
-  for (let c = 0, size = Infinity, k = CALLS_PER_BATCH; c < calls.length; c++) {
-    const b = bytesOf(calls[c]!);
-    if (k === CALLS_PER_BATCH || size + b > lim.maxBytes) {
-      starts.push(c);
-      size = BATCH_BYTES;
-      k = 0;
-    }
-    size += b;
-    k++;
-  }
   const n = starts.length;
   const orders = pairOrders(rpcs, starts.map((c0, k) => calls.slice(c0, starts[k + 1] ?? calls.length)));
   let spares = 2 + Math.ceil(n / 5);
@@ -1503,6 +1518,9 @@ export const EVM_QUOTE_MAX_QUOTED = 1_024;
 /** The most routes through X's markets a quote reads beside the markets' own quotes, before it knows which it asks
  *  (card evm-cold-multihop-quote-inside-the-kpi, "The routes through X's markets in the markets' own round"). */
 const EVM_X_EARLY = 8;
+/** The most routes one level further a quote reads in the fourth round, before it knows which the seventh asks (card
+ *  evm-warm-tap-ends-inside-two-seconds, "The routes one level further in the fourth round"). */
+const EVM_Y_EARLY = 32;
 /** With no more found pools than this, those of the native asset or WETH whose hook is none or pinned are quoted in
  *  the first round already. */
 const EVM_QUOTE_EARLY = 64;
@@ -4368,7 +4386,64 @@ async function routeSetOf(a: {
       vias.set(x, ks.map((e) => foundOf(e.k, x, fourth, e.id)));
     }
   }
-  await round(fourth);
+  // The routes one level further in the fourth round (card evm-warm-tap-ends-inside-two-seconds): the seventh round asks
+  // a route through Y's market, X's pool with Y and the token's pool with X only once the fourth has read that pool's
+  // state, and a warm Base tap of ANTc waited a round for its seventh (about 350 ms of a 2.8 s tap at blastapi,
+  // 2026-11-20 17:0xZ). A buy reads each such route whose Y's markets are already read (none waits for the fifth
+  // round) here, before the pool's state is known and with no prune, their own read beside the round's as the early
+  // routes through X's markets are: the seventh round takes the ones it asks from these answers, counted against
+  // EVM_QUOTE_MAX_QUOTED only then, and reads any other as before; the rest are never used. Only through X's pools with Y
+  // whose hook is none or listed, so no read carries the override of a pool this quote has not found held (review of
+  // 5452011, S1): Y's market and the token's pool with X are held by the reads before. Past EVM_Y_EARLY routes none is
+  // read here, so a token seeded with many such pools costs no more reads than it did
+  const viaY = new Map<string, Quote>();
+  const yKey = (mk: Found, via: Found, p: Found) => `${mk.id} ${via.id} ${p.id}`;
+  const routeY = (x: string, mk: Found, via: Found, p: Found): EvmV4Route => ({ venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)] });
+  const ownFourth = fourth.length;
+  if (!a.sell) {
+    const yAsk = [...vias].flatMap(([x, fs]) => fs.filter((via) => !replaced(via.key) && markets.has(via.other)).flatMap((via) => routeMarkets(via.other).mks.flatMap((mk) => (xPools.get(x) ?? []).map((p) => [x, mk, via, p] as const))));
+    if (yAsk.length <= EVM_Y_EARLY) {
+      const from = reads.length + ownFourth;
+      const before = new Set(hit);
+      for (const [x, mk, via, p] of yAsk) viaY.set(yKey(mk, via, p), quoteAt(fourth, routeY(x, mk, via, p), [mk.key, via.key, p.key], token, amountIn));
+      // only where their posts fit the round's own wave on each of the two providers every batch is asked first, at its
+      // in-flight pin (gated): an early read that adds a wave costs a round where it was to save one, and on a quote whose
+      // seventh round would read nothing (every such route pruned) it is only that cost (Robinhood's AI, about 250 ms a
+      // warm tap at drpc's 5 and the chain's own RPC's 2, 2026-11-20 17:2xZ)
+      const pinOf = (r: EvmRpc) => {
+        const u = GATED_URL.get(r);
+        const pin = u !== undefined && v.inflight !== undefined && Object.hasOwn(v.inflight, u) ? v.inflight[u] : undefined;
+        return typeof pin === "number" && Number.isSafeInteger(pin) && pin >= 1 ? pin : (v.scan?.parallel ?? 2);
+      };
+      const waves = (n: number, pin: number) => Math.max(1, Math.ceil(n / pin));
+      const own = postsOf(rpcs, block.hash, fourth.slice(0, ownFourth), v.reads);
+      const all = own + postsOf(rpcs, block.hash, fourth.slice(ownFourth), v.reads);
+      if (rpcs.slice(0, 2).every((r) => waves(all, pinOf(r)) <= waves(own, pinOf(r)))) {
+        // kept out of the next quote's plan unless taken, as the early routes through X's markets are (`taken`)
+        for (let i = from; i < reads.length + fourth.length; i++) untaken.add(i);
+        for (const i of hit) {
+          if (before.has(i)) continue;
+          hit.delete(i);
+          earlyHits.add(i);
+        }
+      } else {
+        // none read here: the seventh round reads its routes as before
+        fourth.length = ownFourth;
+        viaY.clear();
+        for (const i of hit) if (!before.has(i)) hit.delete(i);
+      }
+    }
+  }
+  if (fourth.length === ownFourth) await round(fourth);
+  else {
+    reads.push(...fourth);
+    // one 5xx hold for the round's two reads (readBoth's `down`)
+    const down = new Set<EvmRpc>();
+    const [main, early] = await Promise.all([ownFourth === 0 ? Promise.resolve([] as Answer[]) : readBoth(rpcs, block.hash, fourth.slice(0, ownFourth), v.reads, undefined, down), readBoth(rpcs, block.hash, fourth.slice(ownFourth), v.reads, undefined, down).catch(() => null)]);
+    // an early read that failed answers nothing any route is priced on: none of its quotes is taken
+    if (early === null) viaY.clear();
+    ans.push(...main, ...(early ?? fourth.slice(ownFourth).map((): Answer => ({ kind: "revert", partial: false }))));
+  }
   for (const [x, fs] of vias) vias.set(x, fs.filter(holds));
   const yPools = new Map<string, Found[]>();
   for (const fs of vias.values()) for (const f of fs) append(yPools, f.other, f);
@@ -4398,8 +4473,11 @@ async function routeSetOf(a: {
         const xa = ubOf(via, out(marketQuote.get(mk)!.at)!);
         for (const p of xPools.get(x)!) {
           if (!can(p, xa)) continue;
-          const r: EvmV4Route = { venue: "uniswap-v4", currencyIn: mk.other, hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)] };
-          p.quotes.push(quoteOf(seventh, r, [mk.key, via.key, p.key]));
+          // read in the fourth round where it could be (viaY): the same read at the same block, counted only here
+          const e = viaY.get(yKey(mk, via, p));
+          if (e !== undefined) taken(e);
+          if (e !== undefined && quotesLeft-- === 0) return refuse("too_many_pools", `more than the ${EVM_QUOTE_MAX_QUOTED} routes a quote reads could beat the route`);
+          p.quotes.push(e ?? quoteOf(seventh, routeY(x, mk, via, p), [mk.key, via.key, p.key]));
         }
       }
     }
