@@ -719,3 +719,61 @@ test("the fee payer's low mark: its rent floor, the worst release fronted and th
   }
   assert.equal(solanaFeePayerLowMark!({ lamportsPerByte: 5_080n, factor: 1n }), 2_681_045n, "2,681,045 lamports at today's mainnet rent (5,080 a byte, factor 1)");
 });
+
+// ---- card helper-solana-slots-off-a-spent-key, round 2: a read A throttles goes to B ----
+// Live run 44783106750 (20 Nov 17:26:46Z): relayer-cost-guards' program_fails and sol-pool-buy-lands' next_tag2 and
+// next_tag3 answered 429 rate_limited, the pool's provider A throttling its simulation, while B had room (the same three
+// answered 422 three seconds before and at 18:05Z alone). A user's release is never a 429 while one provider has room.
+
+/** A provider that throttles every read, as the kit's client throws it (send.ts solanaJsonRpc: HTTP 429). */
+function throttledStub(calls: Calls = []): SolanaRpc {
+  return Object.assign(
+    async (method: string, params: readonly unknown[]) => {
+      calls.push({ method, params });
+      throw new Error("HTTP 429");
+    },
+    { url: `https://throttled.invalid/${Math.random()}` },
+  );
+}
+const senderOn = (providers: readonly [SolanaRpc, SolanaRpc], sent: Uint8Array[] = []) =>
+  solanaPoolSender(
+    { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
+    {
+      providers,
+      now: () => NOW,
+      readRent: async () => TEST_RENT,
+      log: () => {},
+      send: (set) => {
+        sent.push(set[0]!.wire);
+        const sig = base58(set[0]!.wire.subarray(1, 65));
+        return { signatures: [sig], done: Promise.resolve({ txs: [{ signature: sig, state: "filled" as const, sends: [] }] }), stop() {} };
+      },
+    },
+  );
+
+test("provider A throttles the simulation: B simulates it, so a release whose program fails is refused 422 simulation_failed, never 429", async () => {
+  const onA: Calls = [];
+  const onB: Calls = [];
+  const sent: Uint8Array[] = [];
+  const a = await senderOn([throttledStub(onA), rpcStub({ InstructionError: [1, { Custom: 9 }] }, onB)], sent).carry(body(build()));
+  assert.equal(code(a), "simulation_failed", JSON.stringify(a.body));
+  assert.equal(a.status, 422);
+  assert.equal(sent.length, 0);
+  assert.ok(onA.some((c) => c.method === "simulateTransaction"), "A was asked first");
+  assert.ok(onB.some((c) => c.method === "simulateTransaction"), "B simulated it");
+});
+
+test("provider A throttles the simulation: B's passing simulation lets a good release be carried and sent", async () => {
+  const sent: Uint8Array[] = [];
+  const a = await senderOn([throttledStub(), rpcStub()], sent).carry(body(build({ tag: 3 })));
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  assert.equal(sent.length, 1);
+});
+
+test("both providers throttle: 429 rate_limited as before, nothing signed or sent", async () => {
+  const sent: Uint8Array[] = [];
+  const a = await senderOn([throttledStub(), throttledStub()], sent).carry(body(build()));
+  assert.equal(a.status, 429);
+  assert.equal(code(a), "rate_limited");
+  assert.equal(sent.length, 0);
+});
