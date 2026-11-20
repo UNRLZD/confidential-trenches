@@ -52,6 +52,19 @@ const rpcFetch = (c: Chain, mints: Record<string, number>) => async (_url: strin
   throw new Error(`unexpected ${req.method} ${String(req.params[0])}`);
 };
 const settle = () => new Promise((r) => setTimeout(r, 20));
+/** The stream as the deployed one sends a note: its slot's clock first (the Clock sysvar, card sol-tape-in-order; every
+ *  trade is dated by its block, card helper-sol-tape-checks-hold), here the clock its own event names, else none. */
+/** A recorded transaction's block time, as getTransaction answers it: the recorded hour holds none, so its event's own clock
+ *  stands for it (every trade is dated by its block, card helper-sol-tape-checks-hold); null with no clocked trade. */
+const blockOf = (logs: unknown): number | null => fromLogs(logs).trades.find((x) => x.ts > 0)?.ts ?? null;
+const withClock = (on: SourceEvents): SourceEvents => ({
+  ...on,
+  note(m, n) {
+    const ts = fromLogs(n.logs).trades.find((x) => x.ts > 0)?.ts;
+    if (ts !== undefined) on.clock(n.slot, ts);
+    on.note(m, n);
+  },
+});
 /** Card app-chart-check-inside-its-bound: `n` successful signatures older than `slot` whose transactions hold no trade,
  *  and their bodies: a first walk's page made full by them has not reached the mint's first signature (a page shorter
  *  than its limit says the list ran out, and its tape is then whole from the first signature). */
@@ -86,7 +99,7 @@ function setup(chain: Chain) {
     tickMs: 0,
   });
   const note = (sig: string, slot: number): Note => ({ sig, slot, err: false, logs: BUY.result.meta.logMessages });
-  return { t, on: () => on!, watched, note };
+  return { t, on: () => withClock(on!), watched, note };
 }
 const tape = async (t: ReturnType<typeof createSolanaTrades>) => JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string; side: string; usd: string; amt: string; trader: string | null; t_ms: number }[] };
 
@@ -154,7 +167,7 @@ test("a recorded hour of one token replays to the fixed answer (candles 1m and 1
     tickMs: 0,
   });
   await t.trades(H.mint, 50);
-  for (const x of H.txs) on!.note(H.mint, { sig: x.sig, slot: x.slot, err: x.err, logs: x.logs ?? [] });
+  for (const x of H.txs) withClock(on!).note(H.mint, { sig: x.sig, slot: x.slot, err: x.err, logs: x.logs ?? [] });
   await settle();
   const got = {
     m1: JSON.parse((await t.candles(H.mint, "1m", null, 500)).body).candles,
@@ -196,7 +209,9 @@ test("card helper-loop-never-held-by-a-read: a busy coin's notes landing in one 
     pass: () => slicer.pass(),
   });
   await t.trades(H.mint, 50);
-  const note = (x: (typeof H.txs)[number]) => on!.note(H.mint, { sig: x.sig, slot: x.slot, err: x.err, logs: x.logs ?? [] });
+  // the stream sends each note's slot clock first, as the deployed one does (card helper-sol-tape-checks-hold: a trade is
+  // dated by its block, so a note with no clock waits on one)
+  const note = (x: (typeof H.txs)[number]) => withClock(on!).note(H.mint, { sig: x.sig, slot: x.slot, err: x.err, logs: x.logs ?? [] });
   const half = Math.floor(H.txs.length / 2);
   // the first half: its notes' trades held in their own turn (their microtasks run), folded in a turn after, once
   const before = folds;
@@ -278,7 +293,7 @@ test("a PumpSwap trade counts for the pool's base mint only, the pool read once 
   const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async () => true, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
   await t.trades(BASE, 50);
   await t.trades(OTHER, 50);
-  const n = (m: string, sig: string, slot: number) => on!.note(m, { sig, slot, err: false, logs: SWAP.result.meta.logMessages });
+  const n = (m: string, sig: string, slot: number) => withClock(on!).note(m, { sig, slot, err: false, logs: SWAP.result.meta.logMessages });
   n(BASE, "S1", 10);
   n(OTHER, "S2", 11); // the stream may send a transaction for a mint it only mentions: not that mint's trade
   n(BASE, "S3", 12);
@@ -334,7 +349,7 @@ function slowSigs() {
   });
   const note = (sig: string, slot: number): Note => ({ sig, slot, err: false, logs: BUY.result.meta.logMessages });
   const hold = () => (gate = new Promise<void>((r) => (release = r)));
-  return { t, on: () => on!, note, hold, walks: () => walks, release: () => ((gate = null), release()) };
+  return { t, on: () => withClock(on!), note, hold, walks: () => walks, release: () => ((gate = null), release()) };
 }
 
 test("the tape never waits on the RPC: a stream trade is on it while a first walk's signature read hangs", async () => {
@@ -490,7 +505,7 @@ test("card helper-live-bars-no-503: a held token's tape and live candles (limit 
   });
   assert.equal((await t.trades(MINT, 50)).status, 200);
   await settle();
-  on!.note(MINT, { sig: BUY.signature, slot: 465_000_000, err: false, logs: BUY.result.meta.logMessages });
+  withClock(on!).note(MINT, { sig: BUY.signature, slot: 465_000_000, err: false, logs: BUY.result.meta.logMessages });
   await settle();
   t.tick();
   const tape0 = await t.trades(MINT, 50);
@@ -564,7 +579,7 @@ test("a coin quoted in another coin fills the tape, priced at that coin's USD pr
     tickMs: 0,
   });
   assert.equal((await t.trades(QC.mint, 50)).status, 200);
-  on!.note(QC.mint, { sig: QC.signature, slot: QC.slot, err: false, logs: QC.logMessages });
+  withClock(on!).note(QC.mint, { sig: QC.signature, slot: QC.slot, err: false, logs: QC.logMessages });
   await settle();
   const rows = (JSON.parse((await t.trades(QC.mint, 50)).body) as { trades: { usd: string; amt: string; side: string; tx: string }[] }).trades;
   // 53.265791 FRONTIER at 0.87 USD; 14,716,998.471539 BUBBLE
@@ -593,7 +608,7 @@ test("a quote coin with no price keeps the tape empty and the log says why, neve
     tickMs: 0,
   });
   await t.trades(QC.mint, 50);
-  on!.note(QC.mint, { sig: QC.signature, slot: QC.slot, err: false, logs: QC.logMessages });
+  withClock(on!).note(QC.mint, { sig: QC.signature, slot: QC.slot, err: false, logs: QC.logMessages });
   await settle();
   assert.deepEqual((JSON.parse((await t.trades(QC.mint, 50)).body) as { trades: unknown[] }).trades, []);
   t0 += 61_000;
@@ -811,7 +826,7 @@ test("card solana-trades-show-on-every-token: the pool's trades refused or down,
   let asked = 0;
   const t = createSolanaTrades({ fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: BUY.result.slot }, { [MINT]: 6 }), now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: (o) => ((pumpOn = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: async () => (asked++, { status: 200, body: "[]" }) });
   await t.trades(MINT, 50);
-  pumpOn!.note(MINT, { sig: BUY.signature, slot: BUY.result.slot, err: false, logs: BUY.result.meta.logMessages });
+  withClock(pumpOn!).note(MINT, { sig: BUY.signature, slot: BUY.result.slot, err: false, logs: BUY.result.meta.logMessages });
   await settle();
   const rows = (JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[]; src: string }).trades;
   assert.deepEqual(rows.map((r) => r.tx), [BUY.signature]);
@@ -919,9 +934,9 @@ test("card helper-listed-charts-own-reads: a listed coin off pump.fun (SPYx, Ray
   assert.equal((await t.trades(SPYX, 50)).status, 200);
   on!.clock(11, TS); // the stream's clock for the notes' slots (card sol-tape-in-order)
   on!.clock(10, TS);
-  on!.note(SPYX, { sig: "C1", slot: 10, err: false, logs: V.txs["clmm-buy"]!.result.meta.logMessages });
+  withClock(on!).note(SPYX, { sig: "C1", slot: 10, err: false, logs: V.txs["clmm-buy"]!.result.meta.logMessages });
   // a route that only mentions SPYX's neighbours (SOL into SOL/Xs3eBt, then an Orca pool for AMZN): no SPYx trade
-  on!.note(SPYX, { sig: "C2", slot: 11, err: false, logs: V.txs["clmm-sol-in"]!.result.meta.logMessages });
+  withClock(on!).note(SPYX, { sig: "C2", slot: 11, err: false, logs: V.txs["clmm-sol-in"]!.result.meta.logMessages });
   await settle();
   const a = JSON.parse((await t.trades(SPYX, 50)).body) as { trades: unknown[]; src: string };
   assert.equal(a.src, "chain");
@@ -954,7 +969,7 @@ test("card helper-listed-charts-own-reads: a Raydium CPMM trade names its own mi
   };
   const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === FCAT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: async (m) => (m === WXMR ? "300" : null), tickMs: 0 });
   assert.equal((await t.trades(FCAT, 50)).status, 200);
-  on!.note(FCAT, { sig: "F1", slot: 10, err: false, logs: V.txs["cpmm-buy-fee"]!.result.meta.logMessages });
+  withClock(on!).note(FCAT, { sig: "F1", slot: 10, err: false, logs: V.txs["cpmm-buy-fee"]!.result.meta.logMessages });
   await settle();
   const a = JSON.parse((await t.trades(FCAT, 50)).body) as { trades: unknown[]; src: string };
   assert.equal(a.src, "chain");
@@ -979,7 +994,7 @@ test("card helper-listed-charts-own-reads: a Raydium LaunchLab coin's buy reache
     const t = createSolanaTrades({ fetch: answer(owner), now: () => TS * 1000, listed: async (m) => m === FLOYD, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
     await t.trades(FLOYD, 50);
     on!.clock(10, TS); // the slot's clock (card sol-tape-in-order)
-    on!.note(FLOYD, { sig: "L1", slot: 10, err: false, logs: V.txs["launchlab-buy"]!.result.meta.logMessages });
+    withClock(on!).note(FLOYD, { sig: "L1", slot: 10, err: false, logs: V.txs["launchlab-buy"]!.result.meta.logMessages });
     await settle();
     const rows = (JSON.parse((await t.trades(FLOYD, 50)).body) as { trades: unknown[] }).trades;
     const bars = (JSON.parse((await t.candles(FLOYD, "1s", null, 10)).body) as { candles: unknown[] }).candles;
@@ -1011,7 +1026,7 @@ test("card helper-listed-charts-own-reads: bars of ours with the history before 
   });
   assert.equal((await t.trades(MINT, 50)).status, 200);
   await settle();
-  on!.note(MINT, { sig: BUY.signature, slot: 465_000_000, err: false, logs: BUY.result.meta.logMessages });
+  withClock(on!).note(MINT, { sig: BUY.signature, slot: 465_000_000, err: false, logs: BUY.result.meta.logMessages });
   await settle();
   t.tick();
   const refused = JSON.parse((await t.candles(MINT, "1m", null, 500)).body);
@@ -1165,7 +1180,7 @@ test("card helper-listed-charts-own-reads: a listed coin whose history answers 4
   const p = Buffer.from(H.pyth.data, "base64");
   const pub = Number(p.readBigInt64LE(93));
   const list = H.txs.slice().reverse().map((x) => ({ signature: x.sig, slot: x.slot, err: x.err ? { InstructionError: [0, { Custom: 1 }] } : null }));
-  const txs = Object.fromEntries(H.txs.filter((x) => !x.err).map((x) => [x.sig, { slot: x.slot, meta: { logMessages: x.logs ?? [] } }]));
+  const txs = Object.fromEntries(H.txs.filter((x) => !x.err).map((x) => [x.sig, { slot: x.slot, blockTime: blockOf(x.logs), meta: { logMessages: x.logs ?? [] } }]));
   const asked: Record<string, unknown>[] = [];
   const sigs = (q: Record<string, unknown>) => {
     asked.push(q);
@@ -1248,7 +1263,7 @@ test("card helper-listed-charts-own-reads: a transaction a read back cannot read
   const p = Buffer.from(H.pyth.data, "base64");
   const pub = Number(p.readBigInt64LE(93));
   const list = H.txs.slice().reverse().map((x) => ({ signature: x.sig, slot: x.slot, err: x.err ? { InstructionError: [0, { Custom: 1 }] } : null }));
-  const txs = Object.fromEntries(H.txs.filter((x) => !x.err).map((x) => [x.sig, { slot: x.slot, meta: { logMessages: x.logs ?? [] } }]));
+  const txs = Object.fromEntries(H.txs.filter((x) => !x.err).map((x) => [x.sig, { slot: x.slot, blockTime: blockOf(x.logs), meta: { logMessages: x.logs ?? [] } }]));
   const sigs = (q: Record<string, unknown>) => list.slice(q.before === undefined ? 0 : list.findIndex((s) => s.signature === q.before) + 1).slice(0, q.limit as number);
   // the successful transaction 200th from the newest never reads
   const lost = list.filter((x) => x.err === null)[200]!;
@@ -1416,7 +1431,7 @@ function meteoraChain(mints: Record<string, number>, opts: { sigs?: (p: Record<s
   let on: SourceEvents | null = null;
   const t = createSolanaTrades({ fetch: fetchFn, now: () => MTS * 1000, listed: async (m) => m in mints, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: opts.quoteUsd, tickMs: 0 });
   const rows = async (m: string) => (JSON.parse((await t.trades(m, 50)).body) as { trades: { t_ms: number; side: string; usd: string; amt: string; trader: string | null; tx: string }[] }).trades;
-  const stream = (m: string, k: string) => on!.note(m, { sig: MT.txs[k]!.signature, slot: MT.txs[k]!.result.slot, err: false, logs: MT.txs[k]!.result.meta.logMessages });
+  const stream = (m: string, k: string) => withClock(on!).note(m, { sig: MT.txs[k]!.signature, slot: MT.txs[k]!.result.slot, err: false, logs: MT.txs[k]!.result.meta.logMessages });
   return { t, rows, stream, reads };
 }
 const TTW_MINT = "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo";
@@ -1433,11 +1448,13 @@ test("card index-sol-trades-2: a Meteora coin's stream trades (DLMM, DBC, DAMM v
   await settle();
   // DLMM: 0.8 SOL at 93.42267796 USD for 0.276952 TTW (the pool's X), dated by its block (the event has no clock)
   assert.deepEqual(await c.rows(TTW_MINT), [{ t_ms: 1795011852_000, side: "b", usd: "74.738142368", amt: "0.276952", trader: "GPCp5rTs2j6PQG51cUBRejspiQW3VMY1T4BUDY9vZBPY", tx: MT.txs["dlmm-buy"]!.signature }]);
-  // DBC: 4.846455 USDC (its config's quote) for 140,195.474297 of the pool's base, at the event's clock
+  // DBC: 4.846455 USDC (its config's quote) for 140,195.474297 of the pool's base, dated by its block (its event's clock
+  // the same second)
   assert.deepEqual(await c.rows(MOON), [{ t_ms: 1795011854_000, side: "b", usd: "4.846455", amt: "140195.474297", trader: null, tx: MT.txs["dbc-buy-usdc"]!.signature }]);
   // DAMM v2: the token is the pool's B, so the trade told as SOL (A) sees it is turned round: a sell of 2,340,517.796257
-  // for 0.698738224 SOL
-  assert.deepEqual(await c.rows(C467), [{ t_ms: 1795011890_000, side: "s", usd: "65.27799607909434304", amt: "2340517.796257", trader: null, tx: MT.txs["damm-sell"]!.signature }]);
+  // for 0.698738224 SOL, dated by its block 1795011891, never its event's own clock a second before (card
+  // helper-sol-tape-checks-hold: the recorded event names 1795011890)
+  assert.deepEqual(await c.rows(C467), [{ t_ms: 1795011891_000, side: "s", usd: "65.27799607909434304", amt: "2340517.796257", trader: null, tx: MT.txs["damm-sell"]!.signature }]);
   for (const m of [TTW_MINT, MOON, C467]) assert.equal((JSON.parse((await c.t.candles(m, "1s", null, 10)).body) as { candles: unknown[] }).candles.length, 1, m);
   // each transaction read whole once; each pool (and the DBC pool's config) read once
   for (const k of ["dlmm-buy", "dbc-buy-usdc", "damm-sell"]) assert.equal(c.reads.filter((r) => r === `getTransaction ${MT.txs[k]!.signature}`).length, 1, k);
@@ -1621,4 +1638,97 @@ test("card sol-tape-in-order: the stream subscribes the Clock sysvar at confirme
   note(77, TO_SLOT + 6, SYSVAR, body(TO_SLOT + 6, 0)); // no time
   assert.deepEqual(clocks, [[TO_SLOT, TO_BLOCK]]);
   src.close();
+});
+
+// card helper-sol-tape-checks-hold: a trade is dated by its block, an event's own clock included. The clock a pump.fun,
+// PumpSwap, DBC or DAMM v2 event carries is a second before its block in some slots (read on mainnet 20 Nov: slot
+// 471386582's DAMM v2 and DBC events name 1795102226, its block time 1795102227 on api.mainnet-beta and publicnode;
+// slot 471614249's PumpSwap event 1795151265, the stream's Clock sysvar and getBlockTime 1795151266), and the live
+// helper f5639e5bb dated those by their event and the rest by their block: a coin's tape held a later row a second
+// below an older one ("trade 31 is newer than trade 30", index-sol-trades, 20 Nov 03:15Z).
+test("card helper-sol-tape-checks-hold: a stream trade whose event's clock is a second before its block is dated by its block (the slot's clock the stream sent), its row and its 1s bar (red at f5639e5bb: its event's second)", async () => {
+  let on: SourceEvents | null = null;
+  const t = createSolanaTrades({ fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 }), now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
+  await t.trades(MINT, 50);
+  assert.equal(fromLogs(BUY.result.meta.logMessages).trades[0]!.ts, TS, "the recorded event names TS");
+  on!.clock(465_000_000, TS + 1);
+  on!.note(MINT, { sig: BUY.signature, slot: 465_000_000, err: false, logs: BUY.result.meta.logMessages });
+  await settle();
+  assert.deepEqual((await tape(t)).trades.map((r) => [r.tx, r.t_ms]), [[BUY.signature, (TS + 1) * 1000]]);
+  assert.deepEqual((JSON.parse((await t.candles(MINT, "1s", null, 10)).body) as { candles: [number][] }).candles.map((c) => c[0]), [TS + 1]);
+  t.stop();
+});
+
+test("card helper-sol-tape-checks-hold: a walk's transaction whose event's clock is a second before its block time is dated by its block time (red at f5639e5bb: its event's second)", async () => {
+  const s = setup({ sigs: (p) => (p.before === undefined ? [{ signature: BUY.signature, slot: 465_000_000, err: null, blockTime: TS + 1 }] : []), txs: { [BUY.signature]: { ...BUY.result, blockTime: TS + 1 } }, price: 9_342_267_796n, pub: TS, slot: 100 });
+  await s.t.trades(MINT, 50);
+  await settle();
+  assert.deepEqual((await tape(s.t)).trades.map((r) => [r.tx, r.t_ms]), [[BUY.signature, (TS + 1) * 1000]]);
+  s.t.stop();
+});
+
+// card helper-sol-tape-checks-hold: a tape's date (as_of_ms, the route's X-Fetched-At) is its last fold. A live tape is
+// folded every tick; a cold one only at its walk's rounds and the stream's notes, so a quiet coin whose first walk waits
+// on a slow read answered rows dated by its last round while the stream held it current (live helper f5639e5bb, 20 Nov
+// 03:15Z: GM8EysYT's DLMM tape "X-Fetched-At 03:14:52.003Z", past 15 s at the read).
+test("card helper-sol-tape-checks-hold: a tape whose walk waits on a read (its first, or a gap's after a drop) is dated by the tick while the stream is heard, never by its last round; with the stream silent or down, by its last fold (red at f5639e5bb: dated by its open)", async () => {
+  const clock = { t: TS * 1000 };
+  let gate: Promise<void> | null = null;
+  let release = () => undefined as void;
+  const chain = rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  let heard: { at: number; slot: number | null } | null = { at: clock.t, slot: 100 };
+  let on: SourceEvents | null = null;
+  const t = createSolanaTrades({
+    fetch: async (url, init) => {
+      if (String(init.body).includes("getSignaturesForAddress") && gate !== null) await gate;
+      return chain(url, init);
+    },
+    now: () => clock.t,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined, heard: () => heard }),
+    tickMs: 0,
+    coldWait: () => settle(),
+  });
+  gate = new Promise<void>((r) => (release = r));
+  const asOf = async () => (JSON.parse((await t.trades(MINT, 50)).body) as { as_of_ms: number; filling?: boolean });
+  const first = await asOf();
+  assert.equal(first.as_of_ms, TS * 1000);
+  assert.equal(first.filling, true, "its walk still reads");
+  // 20 s on, the walk's signature read still waiting, the stream heard a moment ago
+  clock.t += 20_000;
+  heard = { at: clock.t - 200, slot: 150 };
+  t.tick();
+  assert.equal((await asOf()).as_of_ms, clock.t, "dated by the tick while the stream holds it current");
+  // the stream silent past SOL_BEHIND_MS: the tape is dated by its last fold, never moved on
+  const held = clock.t;
+  clock.t += 20_000;
+  t.tick();
+  assert.equal((await asOf()).as_of_ms, held, "a silent stream moves no date");
+  // the walk done; then the stream drops (no date moves while it is down) and comes back, its gap's walk waiting
+  gate = null;
+  release();
+  heard = { at: clock.t, slot: 160 };
+  await settle();
+  t.tick();
+  assert.equal((await asOf()).filling, undefined, "the first walk done");
+  gate = new Promise<void>((r) => (release = r));
+  on!.down();
+  heard = null;
+  const down = clock.t;
+  clock.t += 20_000;
+  t.tick();
+  assert.equal((await asOf()).as_of_ms, down, "a dropped stream moves no date");
+  heard = { at: clock.t, slot: 210 };
+  on!.up();
+  await settle();
+  clock.t += 20_000;
+  heard = { at: clock.t - 100, slot: 260 };
+  t.tick();
+  const back = await asOf();
+  assert.equal(back.filling, true, "its gap still walked");
+  assert.equal(back.as_of_ms, clock.t, "dated by the tick while the stream is heard again");
+  gate = null;
+  release();
+  t.stop();
 });

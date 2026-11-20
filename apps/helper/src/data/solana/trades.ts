@@ -43,8 +43,10 @@
 // trade most, decode.ts) are read the same way: the pool account (or CPMM's own event) names the two mints (a pool
 // taken only with that venue's program as its owner), the token is either one and the other is the quote, priced as
 // above; their events carry no clock, so a trade is dated by its block: a transaction read its blockTime, a stream's the
-// slot's own clock, the Clock sysvar the stream sends for each confirmed slot (`SourceEvents.clock`; the clock a pump.fun
-// or PumpSwap event carries is the same one), or the slot's getBlockTime when the stream sent none within CLOCK_WAIT_MS
+// slot's own clock, the Clock sysvar the stream sends for each confirmed slot (`SourceEvents.clock`, getBlockTime's in 18
+// of 18 slots read 20 Nov 05:0xZ; the clock a pump.fun, PumpSwap, DBC or DAMM v2 event carries is a second before it in
+// some slots, so those are dated by their block too: card helper-sol-tape-checks-hold, `dated`), or the slot's
+// getBlockTime when the stream sent none within CLOCK_WAIT_MS
 // (card sol-tape-in-order: dated by the second it arrived, 2 s after its block from the deployed helper, an Orca row sat
 // above a DLMM row of its own block on TTWO's tape). Meteora DLMM, DBC and DAMM v2 (card index-sol-trades-2) send their
 // events only to themselves, so a stream transaction whose log names one running is read whole (`eventsInInner`) and
@@ -743,12 +745,19 @@ export function createSolanaTrades(deps: {
     }
     return read;
   }
-  /** The trades each dated: its event's own clock, else its block's (`known`, the transaction's or its signature's block
-   *  time, else the slot's: timeOf); null when a trade needs its block's time and none answers (as a transaction not read). */
+  /** The trades each dated by its block (`known`, the transaction's or its signature's block time, else the slot's:
+   *  timeOf), an event's own clock included: card helper-sol-tape-checks-hold, the clock a pump.fun, PumpSwap, DBC or DAMM
+   *  v2 event carries is a second before its block in some slots (slot 471386582: DAMM v2 and DBC events 1795102226,
+   *  block time 1795102227 on api.mainnet-beta and publicnode; slot 471614249: a PumpSwap event 1795151265, the stream's
+   *  Clock sysvar and getBlockTime 1795151266), so a tape dating those by their event and the rest by their block held a
+   *  later row a second below an older one (live helper f5639e5bb, 20 Nov 03:15Z: "trade 31 is newer than trade 30").
+   *  With no block time answering, an event's own clock stands (within a second of it); a trade with none makes the
+   *  transaction unread (null). */
   async function dated(trades: RawTrade[], slot: number, known: number | null): Promise<RawTrade[] | null> {
-    if (trades.every((t) => t.ts > 0)) return trades;
+    if (trades.length === 0) return trades;
     const t = known ?? (await timeOf(slot));
-    return t === null ? null : trades.map((x) => (x.ts > 0 ? x : { ...x, ts: t }));
+    if (t === null) return trades.every((x) => x.ts > 0) ? trades : null;
+    return trades.map((x) => (x.ts === t ? x : { ...x, ts: t }));
   }
 
   async function account(key: string): Promise<{ owner: unknown; data: Buffer; slot: number } | null> {
@@ -1091,6 +1100,11 @@ export function createSolanaTrades(deps: {
     const trades = await txTrades(e.mint, n.sig, n.slot, n.logs).catch(() => null);
     e.inflight.delete(n.sig);
     if (trades !== null) hold(e, n.sig, n.slot, order, trades);
+    // card helper-sol-tape-checks-hold: a transaction not read on (its pool, its whole body or its block's time
+    // unanswered) is a cut as one past the whole reads' budget is: the tape's reach starts after it, never every trade
+    // (a local helper at f1a80d8bf on mainnet, 20 Nov 05:49Z: pumpCmXq's tape named whole_ms 1795153718000 and lacked
+    // its DLMM trade at 1795153746, its pool's read held with every provider)
+    else e.cut = { at: now(), to: Math.max(e.cut?.to ?? 0, (Math.floor(now() / 1_000) + 1) * 1_000) };
     e.covered = Math.max(e.covered, n.slot);
     foldSoon(e);
   }
@@ -1142,7 +1156,12 @@ export function createSolanaTrades(deps: {
       if (t - e.touched > IDLE_MS) {
         entries.delete(e.mint);
         source.unwatch(e.mint);
-      } else if (e.state === "live") foldSoon(e);
+        // a tape whose walk still reads (its first, cold, or a gap's after a drop) is folded too while the stream is heard:
+        // the stream holds each of its trades as they land, so its newest rows are current and dated so, its older ones
+        // `filling` (card helper-sol-tape-checks-hold: a quiet coin whose walk waited on a slow read answered rows dated
+        // by its last round, past 15 s); with the stream silent or down, a tape keeps the date of its last fold. Each
+        // fold runs a turn's slice at a time (foldSoon, card helper-loop-never-held-by-a-read)
+      } else if (e.state === "live" || heardNow()) foldSoon(e);
     }
     if (entries.size === 0 && timer !== null) {
       clearInterval(timer);
@@ -1155,12 +1174,13 @@ export function createSolanaTrades(deps: {
   const UPSTREAM = err(503, "upstream");
   /** Whether a token's tape is behind the chain (SOL_BEHIND_MS): its dropped stream's gap still walked, or the stream
    *  silent past the bound or not connected. Its tape is then no complete list and its live chart not current. */
-  const behind = (e: Entry): boolean => {
-    if (e.state === "refilling") return true;
-    if (source.heard === undefined) return false;
+  const behind = (e: Entry): boolean => e.state === "refilling" || !heardNow();
+  /** Whether the stream is connected and heard within SOL_BEHIND_MS (a source without `heard`, a test's, is live). */
+  function heardNow(): boolean {
+    if (source.heard === undefined) return true;
     const h = source.heard();
-    return h === null || now() - h.at > SOL_BEHIND_MS;
-  };
+    return h !== null && now() - h.at <= SOL_BEHIND_MS;
+  }
   /** The slot a token is held to with no gap and the stream's newest slot, for the answer's Server-Timing. */
   const readTo = (e: Entry): string => {
     const h = source.heard?.() ?? null;
@@ -1754,7 +1774,11 @@ export function createSolanaTrades(deps: {
       const fill = (e.state === "cold" && rows.length < limit) || late ? { filling: true } : {};
       // how far back the tape holds every trade (Entry.whole), only while no gap is being walked and the stream is heard
       const whole = e.state === "live" && !late && e.whole !== undefined ? { whole_ms: Math.max(e.whole, e.cut?.to ?? 0) } : {};
-      return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing: readTo(e) };
+      // card helper-sol-tape-checks-hold: a tape past the budget that names no reach (its walk still reading, or behind)
+      // names the cut, as the vendor's rows do: it lacks the unread trade and nothing else in it says so (a local helper
+      // at 321baac8c, 20 Nov 05:36Z: CARDSccU's tape cold, no whole_ms, its DLMM trade 4vEPr51yjSyE unread)
+      const timing = cut && !("whole_ms" in whole) ? `${readTo(e)}, sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago"` : readTo(e);
+      return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing };
     },
   };
 

@@ -133,7 +133,7 @@ test("the 1s candles: a 200 after a 429 that cleared inside the span passes; a 4
   const stood = judge(edit((rec) => Object.assign(rec.candles, { status: 429, body: '{"error":{"code":"rate_limited"}}', waits: [60_000, 15_000] })));
   assert.ok(bad(stood).some((l) => l.endsWith("answers 429 after 75 s of reads at each Retry-After (60, 15 s)")), bad(stood).join("\n"));
   const empty = judge(edit((rec) => body(rec.candles, (b) => (b.candles = []))));
-  assert.ok(bad(empty).some((l) => /the 1s candles hold the trade's second/.test(l)), bad(empty).join("\n"));
+  assert.ok(bad(empty).some((l) => /the 1s candles hold the trade's block second/.test(l)), bad(empty).join("\n"));
 });
 
 // card index-sol-trades-2: one listed Meteora coin per venue. good.meteora: the in-process recorder's Meteora part, its
@@ -294,4 +294,49 @@ test("card sol-meteora-tape-inside-rpc-budget: a transaction with several rows o
 test("card sol-meteora-tape-inside-rpc-budget: the check keeps open fewer coins than the helper's walks, room left for the users' pages", async () => {
   const { OPEN_MAX } = await import("../../apps/helper/src/data/solana/trades.ts");
   assert.ok(check.METEORA_WATCH + check.OPEN <= OPEN_MAX - 10, `${check.METEORA_WATCH} + ${check.OPEN} of ${OPEN_MAX}`);
+});
+
+// card helper-sol-tape-checks-hold: a trade's time is its block's (the good answer's block read on api.mainnet-beta 20 Nov
+// 05:3xZ: 1793741218, its event's clock the same second). An event's clock is a second before its block in some slots
+// (slot 471386582's DAMM v2 event 1795102226, block 1795102227 on both public RPCs), where the helper now dates the row by
+// its block: that row and its 1s bar pass, the event's second fails, and a run whose block was read on no RPC fails.
+test("card helper-sol-tape-checks-hold: the pump.fun trade's row and 1s bar are judged at its block's second, never its event's clock a second before", () => {
+  const atBlock = (rec, s) => {
+    rec.fresh.block = rec.fresh.ts + 1;
+    if (s.row) body(rec.polls[hitIndex(rec)], (b) => (b.trades.find((x) => x.tx === rec.fresh.sig).t_ms = rec.fresh.block * 1000));
+    if (s.bar) body(rec.candles, (b) => (b.candles.find((c) => c[0] === rec.fresh.ts)[0] = rec.fresh.block));
+  };
+  assert.deepEqual(bad(judge(edit((rec) => atBlock(rec, { row: true, bar: true })))), [], "dated by its block: PASS");
+  const evRow = bad(judge(edit((rec) => atBlock(rec, { bar: true }))));
+  assert.ok(evRow.some((l) => /its side "s", time 1793741218000 .* its block's time \(s, 1793741219000,/.test(l)), evRow.join("\n"));
+  const evBar = bad(judge(edit((rec) => atBlock(rec, { row: true }))));
+  assert.ok(evBar.some((l) => /the 1s candles hold the trade's block second 1793741219: none/.test(l)), evBar.join("\n"));
+  const unread = bad(judge(edit((rec) => (rec.fresh.block = null))));
+  assert.ok(unread.some((l) => /its block time read back: null/.test(l)), unread.join("\n"));
+});
+
+test("card helper-sol-tape-checks-hold: a signature a public RPC knows no status for yet is asked again (2, 4, 8, 16 s), never judged on its first none", async () => {
+  const asked = [];
+  const waits = [];
+  const st = { value: [{ slot: 1, confirmations: null, err: null, confirmationStatus: "finalized" }] };
+  // publicnode answers none twice (a node behind), then the status; api.mainnet-beta at once
+  const callFn = async (u, method) => (asked.push(`${new URL(u).host} ${method}`), new URL(u).host === "solana-rpc.publicnode.com" && asked.filter((a) => a.startsWith("solana-rpc")).length <= 2 ? { value: [null] } : st);
+  const reads = await check.readBack("5".repeat(88), callFn, async (ms) => void waits.push(ms));
+  assert.deepEqual(Object.values(reads).map((r) => r.value[0]?.confirmationStatus), ["finalized", "finalized"]);
+  assert.deepEqual(waits, [2_000, 4_000]);
+  // none on every try stays none (judged BAD, as before)
+  const never = await check.readBack("5".repeat(88), async () => ({ value: [null] }), async () => undefined);
+  assert.equal(never["https://solana-rpc.publicnode.com"].value[0], null);
+  const m = structuredClone(A.good.meteora);
+  m["meteora-damm2"].reads["https://solana-rpc.publicnode.com"] = never["https://solana-rpc.publicnode.com"];
+  assert.ok(bad(check.judgeMeteora(m)).some((l) => l === "BAD meteora-damm2: the signature reads back succeeded on solana-rpc.publicnode.com: none"));
+});
+
+test("card helper-sol-tape-checks-hold: a trade's block time is the first public RPC's that names one, asked again 2, 4 and 8 s on; none answering is null", async () => {
+  let n = 0;
+  const waits = [];
+  const t = await check.blockOf("5".repeat(88), async () => (++n <= 3 ? null : { blockTime: 1795102227 }), async (ms) => void waits.push(ms));
+  assert.equal(t, 1795102227);
+  assert.deepEqual(waits, [2_000]);
+  assert.equal(await check.blockOf("5".repeat(88), async () => ({ blockTime: null }), async () => undefined), null);
 });

@@ -30,6 +30,12 @@
 // skipped and named in the run's `rolled`; a venue whose every sampled trade was skipped is BAD.
 // The candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
 // one 75 s span; a 429 still standing after it, or no bar at the trade's second, is BAD as any other answer.
+// Card helper-sol-tape-checks-hold: a trade's time is its block's, on both parts (the transaction's blockTime read on
+// READ_BACK), never its event's own clock, which is a second before its block in some slots (slot 471386582's DAMM v2
+// event 1795102226, block 1795102227 on both RPCs): the tape's rows and its 1s bars are dated by their block, as
+// sol-tape-in-order holds them. A signature a public RPC does not know yet (status null, a node behind) is asked again
+// as a refusal is, 2, 4, 8 and 16 s on (solana-rpc.publicnode.com answered none for a finalized DAMM v2 trade, 19 Nov
+// 15:31Z).
 // After: helper
 //   node scripts/live-checks/index-sol-trades.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
@@ -134,11 +140,13 @@ function judgePump(run) {
   const prev = hit.i > 0 ? polls[hit.i - 1] : null;
   const asOf = JSON.parse(hit.p.body).as_of_ms;
   lines.push(`    timing: the helper folded it after +${prev === null ? "?" : prev.atMs - f.heldAtMs} ms (read ${hit.i} sent, without it) and by +${asOf - f.heldAtMs} ms (as_of_ms of read ${hit.i + 1}); read ${hit.i + 1} sent at +${hit.p.atMs - f.heldAtMs} ms, answered in ${hit.p.answeredMs - hit.p.atMs} ms`);
-  say(hit.row.side === f.side && hit.row.t_ms === f.ts * 1000 && hit.row.trader === f.user, `its side ${show(hit.row.side)}, time ${hit.row.t_ms} and trader ${show(hit.row.trader)} are the event's (${f.side}, ${f.ts * 1000}, ${f.user})`);
+  // its time is its block's (card helper-sol-tape-checks-hold), read on READ_BACK
+  say(Number.isSafeInteger(f.block), `its block time read back: ${show(f.block)}`);
+  say(hit.row.side === f.side && hit.row.t_ms === f.block * 1000 && hit.row.trader === f.user, `its side ${show(hit.row.side)}, time ${hit.row.t_ms} and trader ${show(hit.row.trader)} are the event's side and trader and its block's time (${f.side}, ${f.block * 1000}, ${f.user})`);
   const c = answer(say, `GET ${CANDLES_PATH(run.coin)}`, run.candles, run.candles?.answeredMs);
   if (c === undefined) return { ok: false, lines };
-  const bar = Array.isArray(c.candles) ? c.candles.find((b) => Array.isArray(b) && b[0] === f.ts) : undefined;
-  say(c.tf === "1s" && bar !== undefined && bar.length === 6 && bar.slice(1).every((v) => typeof v === "string" && DEC.test(v)) && Number(bar[5]) > 0, `the 1s candles hold the trade's second ${f.ts}: ${show(bar)}`);
+  const bar = Array.isArray(c.candles) ? c.candles.find((b) => Array.isArray(b) && b[0] === f.block) : undefined;
+  say(c.tf === "1s" && bar !== undefined && bar.length === 6 && bar.slice(1).every((v) => typeof v === "string" && DEC.test(v)) && Number(bar[5]) > 0, `the 1s candles hold the trade's block second ${f.block}: ${show(bar)}`);
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
@@ -273,7 +281,8 @@ async function meteoraTradeOf(sig, coin, venues) {
     if (!venues.has(t.venue)) continue;
     const p = await meteoraPair(t);
     if (p === null || ![p.a, p.b].includes(coin) || !PRICED.includes(p.a === coin ? p.b : p.a)) continue;
-    return { venue: t.venue, side: p.a === coin ? t.side : t.side === "b" ? "s" : "b", ts: t.ts > 0 ? t.ts : r.blockTime };
+    // its block's time, never its event's own clock (card helper-sol-tape-checks-hold)
+    return { venue: t.venue, side: p.a === coin ? t.side : t.side === "b" ? "s" : "b", ts: r.blockTime };
   }
   return null;
 }
@@ -336,17 +345,31 @@ export function watchMeteora(tokens, ws = WS, waitMs = METEORA_WAIT_MS, onFound 
 }
 
 /** `sig`'s status on each of READ_BACK, each RPC asked again 2, 4, 8 and 16 s on when it refuses (the public RPC
- *  answered 429 for 6 s, 18 Nov 15:07Z). */
-export async function readBack(sig) {
+ *  answered 429 for 6 s, 18 Nov 15:07Z) or knows no status for it yet (card helper-sol-tape-checks-hold: publicnode
+ *  answered none for a finalized trade, 19 Nov 15:31Z). `wait` is the sleep (a test plants it). */
+export async function readBack(sig, callFn = call, wait = (ms) => new Promise((r) => setTimeout(r, ms))) {
   const reads = {};
   for (const u of READ_BACK) {
     for (let i = 0; i < 5; i++) {
-      reads[u] = await call(u, "getSignatureStatuses", [[sig], { searchTransactionHistory: true }]).catch((e) => ({ error: e.message }));
-      if (reads[u].error === undefined || i === 4) break;
-      await new Promise((r) => setTimeout(r, 2_000 * 2 ** i));
+      reads[u] = await callFn(u, "getSignatureStatuses", [[sig], { searchTransactionHistory: true }]).catch((e) => ({ error: e.message }));
+      if ((reads[u].error === undefined && reads[u]?.value?.[0] != null) || i === 4) break;
+      await wait(2_000 * 2 ** i);
     }
   }
   return reads;
+}
+
+/** A transaction's block time (unix seconds) on the first of READ_BACK that names one, each asked again 2, 4 and 8 s on;
+ *  null when none does. */
+export async function blockOf(sig, callFn = call, wait = (ms) => new Promise((r) => setTimeout(r, ms))) {
+  for (let i = 0; i < 4; i++) {
+    for (const u of READ_BACK) {
+      const r = await callFn(u, "getTransaction", [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]).catch(() => null);
+      if (Number.isSafeInteger(r?.blockTime) && r.blockTime > 0) return r.blockTime;
+    }
+    if (i < 3) await wait(2_000 * 2 ** i);
+  }
+  return null;
 }
 
 /** A found venue's coin's tape on the helper until it holds the trade (every second, up to METEORA_TAPE_MS), then the
@@ -586,7 +609,7 @@ export async function read(base = BASE, fetchFn = fetch, ws = WS, reader = candl
   }
   const candles = await reader.read(() => get(base, CANDLES_PATH(fresh.coin), fetchFn));
   const { coin, ...rest } = fresh;
-  return { base, coin, fresh: rest, polls, candles, meteora: await meteora() };
+  return { base, coin, fresh: { ...rest, block: await blockOf(fresh.sig) }, polls, candles, meteora: await meteora() };
 }
 
 if (import.meta.main) {

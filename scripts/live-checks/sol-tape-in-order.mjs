@@ -11,12 +11,17 @@
 //   - every read answers 200 with its trades newest first (no row dated after the row above it);
 //   - every sampled row's time is its transaction's block time, to the second;
 //   - at least MIN_DATED rows were read back (fewer: INCONCLUSIVE, exit 3).
+// Card helper-sol-tape-checks-hold: each read is read as the page reads a 429 (candles-read.mjs): again at its
+// Retry-After, the read counted once, for at most one 75 s span in the run; a 429 still standing after it is BAD with its
+// waits named. The live helper's 429 on a read is its walks' or its window's refusal, which names its wait (live run
+// 44665943571, 20 Nov 03:1xZ: "pumpCmXq read 1: answers 429", its next reads 200).
 // After: helper
 //   node scripts/live-checks/sol-tape-in-order.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { EXIT, rpcAnswer } from "./provider-answer.mjs";
+import { candlesReader, waitsText } from "./candles-read.mjs";
 
 const KEY = "sol-tape-in-order";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -55,7 +60,7 @@ export function judge(run) {
     for (const [i, r] of (c.reads ?? []).entries()) {
       const name = `${String(c.coin).slice(0, 8)} read ${i + 1}`;
       if (r.status !== 200) {
-        say(false, `${name}: answers ${r.status}`);
+        say(false, `${name}: answers ${r.status}${waitsText(r)}`);
         continue;
       }
       let b;
@@ -89,22 +94,24 @@ async function get(base, path, fetchFn) {
   const atMs = Date.now();
   try {
     const r = await fetchFn(`${base}${path}`, { headers: { origin: APP }, signal: AbortSignal.timeout(15_000) });
-    return { atMs, status: r.status, body: await r.text() };
+    return { atMs, status: r.status, headers: { "retry-after": r.headers.get("retry-after") }, body: await r.text() };
   } catch (e) {
     throw new Error(`GET ${path} failed: ${e?.name === "TimeoutError" ? "timed out after 15 s" : e?.message}`);
   }
 }
 
-/** One live run against `base`. */
-export async function read(base = BASE, fetchFn = fetch) {
+/** One live run against `base`. `reader`: the run's 429 reader (candles-read.mjs): a 429 is read again at its
+ *  Retry-After, as the page reads it, within one span for the run. */
+export async function read(base = BASE, fetchFn = fetch, reader = candlesReader()) {
   const lists = await get(base, "/v1/market/lists?chain=solana", fetchFn);
   if (lists.status !== 200) throw new Error(`lists answered ${lists.status}`);
   const coins = busiest(Object.values(JSON.parse(lists.body).lists ?? {}).flat()).map((coin) => ({ coin, reads: [] }));
+  const tape = (c) => reader.read(() => get(base, TRADES_PATH(c.coin), fetchFn));
   // the first read opens each tape on the helper; its walk and stream fill it before the reads that count
-  for (const c of coins) await get(base, TRADES_PATH(c.coin), fetchFn);
+  for (const c of coins) await tape(c);
   await new Promise((r) => setTimeout(r, 10_000));
   for (let i = 0; i < READS; i++) {
-    for (const c of coins) c.reads.push(await get(base, TRADES_PATH(c.coin), fetchFn));
+    for (const c of coins) c.reads.push(await tape(c));
     if (i < READS - 1) await new Promise((r) => setTimeout(r, GAP_MS));
   }
   const blocks = {};
