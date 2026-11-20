@@ -688,7 +688,7 @@ export const MUTANTS = [
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || BigInt(sale.status) !== 0n) return [];", R, "RV8 "],
   [QUOTE, "(r) => r.ok, (r) => !r.ok, preStateOf(v, trace));\n  } catch (e) {\n    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "(r) => r.ok, (r) => !r.ok, preStateOf(v, trace));\n  } catch (e) {\n", R, "RV8 "],
   [QUOTE, "(r) => boughtOf(r) === false, preStateOf(v, trace));\n  } catch (e) {\n    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "(r) => boughtOf(r) === false, preStateOf(v, trace));\n  } catch (e) {\n", R, "HB6 "],
-  [QUOTE, "(x, y) => (x.ok && y.ok && x.result === y.result) || (!x.ok && !y.ok && x.data === y.data),", "(x, y) => x.ok === y.ok,", R, "RV8 "],
+  [QUOTE, "(x, y) => (x.ok && y.ok && x.result === y.result) || (!x.ok && !y.ok && x.data === y.data && x.halt === y.halt),", "(x, y) => x.ok === y.ok,", R, "RV8 "],
   [QUOTE, "  for (const k of keys) if (fault.has(k.hooks) && !out.includes(", "  for (const k of keys.filter((x, i, a) => a.findIndex((y) => y.hooks === x.hooks) === i)) if (fault.has(k.hooks) && !out.includes(", R, "RV10 "],
   // the sets of hooks (review of c1f486ae, M1; review of 72e28658, H3): where no one hook's no-op rescues the trade, a
   // larger set's, on providers that agree, bans every pool of the route behind any hook of a smallest such set; never
@@ -836,6 +836,12 @@ export const MUTANTS = [
   [QUOTE, "  const arbosSlots = Math.floor(g / 800) + 256;", "  const arbosSlots = Math.floor(g / 800) + 257;", R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, "  const accounts = Math.floor(g / 2400) + 64;", "  const accounts = 256;", R, "review of f0f983d2, item 3"],
   [QUOTE, '{ tracer: "prestateTracer", tracerConfig: { disableCode: true } }', '{ tracer: "prestateTracer" }', R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) the replay's override"],
+  // card evm-sell-ban-reads-a-root-halt: a replay that halts as the sale did at its root is the sale failed; any other
+  // halt is a refusal; with no callTracer read, the sale's halt is its receipt's every unit of gas spent
+  [QUOTE, "  if (halt !== null && said === halt) return { ok: false, data: \"\", halt };\n", "", R, "card evm-sell-ban-reads-a-root-halt (sell, Base and Robinhood) a hook that burns"],
+  [QUOTE, "  if (halt !== null && said === halt) return", "  if (halt !== null && said !== undefined) return", R, "card evm-sell-ban-reads-a-root-halt (sell, Base and Robinhood) a halt that is not"],
+  [QUOTE, "o.error.message === `out of gas: gas required exceeds: ${gas}` ?", "o.error.message.startsWith(\"out of gas\") ?", R, "card evm-sell-ban-reads-a-root-halt (sell, Base and Robinhood) a halt that is not"],
+  [QUOTE, "BigInt(sale.status) === 0n && BigInt(sale.gasUsed) === BigInt(sale.gas) ? \"out of gas\"", "BigInt(sale.status) === 0n ? \"out of gas\"", R, "card evm-sell-ban-reads-a-root-halt (sell, Base and Robinhood) a halt that is not"],
   [QUOTE, "  if (!asIs && errored.length === 0) return legUnread ? again() : [];", "  if (!asIs && errored.length === 0) return false ? again() : [];", R, "review of f0f983d2, item 5a"],
   [QUOTE, '    if (!(e instanceof EvmQuoteError) || e.code !== "rpc_disagree") unread = true;\n', "", R, "review of f0f983d2, item 5a"],
   // review of de4e3ed5: the market read on the replay's own basis, its state and its block (1); the trace's rpc_error
@@ -855,11 +861,11 @@ export const MUTANTS = [
   // both did, and only the as-is leg is unread (1); a callTracer answered apart or not the trade's own call still drops
   // the prestate with it (1d); with the prestate unread, step 3's and step 4's [] are asked again (2); a numeric field
   // that is not a number refuses (question 5)
-  [QUOTE, '    if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };\n', "", R, "review of fb923143, 1a"],
-  [QUOTE, '    if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };\n', "", R, "review of fb923143, 1b"],
+  [QUOTE, '    if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined, halt: undefined };\n', "", R, "review of fb923143, 1a"],
+  [QUOTE, '    if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined, halt: undefined };\n', "", R, "review of fb923143, 1b"],
   // (the 1d mutant that kept the prestate on any EvmQuoteError is gone: since review of 1ee73a00, 2 the catch keeps it
   // on rpc_disagree too, and the agreed read of a callTracer throws no other code, so it is equivalent)
-  [QUOTE, "  return errored === null ? null : { over, errored };", "  return { over, errored: errored ?? undefined };", R, "review of fb923143, 1d"],
+  [QUOTE, "  return errored === null ? null : { over, errored: errored.errored, halt: errored.halt };", "  return { over, errored: errored?.errored, halt: errored?.halt };", R, "review of fb923143, 1d"],
   [QUOTE, "  if (over === null) return null;\n", "", R, "review of fb923143, 1e"],
   [QUOTE, "  const legUnread = unread || (p !== undefined && p.errored === undefined);", "  const legUnread = unread;", R, "review of fb923143, 1c"],
   [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return unread ? again() : [];", "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return [];", R, "review of fb923143, 2 (buy"],
@@ -894,9 +900,9 @@ export const MUTANTS = [
   [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1 "],
   [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1d"],
   [QUOTE, "export const EVM_NOOP_HOOK_CODE = \"0x6004600060003760003560e01c63575e24b414601b5760406000f35b60606000f3\";", "export const EVM_NOOP_HOOK_CODE = \"0x6004600060003760003560e01c63575e24b414601b5760406000f35b6240000060405260606000f3\";", R, "review of 1ee73a00, 1 "],
-  [QUOTE, 'if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };', 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };', R, "review of 1ee73a00, 2c"],
-  [QUOTE, 'if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };', 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };', R, "review of 1ee73a00, 2d"],
-  [QUOTE, 'if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };', 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };', R, "review of fb923143, 1d"],
+  [QUOTE, 'if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined, halt: undefined };', 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined, halt: undefined };', R, "review of 1ee73a00, 2c"],
+  [QUOTE, 'if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined, halt: undefined };', 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined, halt: undefined };', R, "review of 1ee73a00, 2d"],
+  [QUOTE, 'if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined, halt: undefined };', 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined, halt: undefined };', R, "review of fb923143, 1d"],
   [QUOTE, "      trace.map((t) => t[at]),", "      trace.map((t) => t[0]),", R, "review of 1ee73a00, 3 "],
   [QUOTE, "[evmJsonRpc(u, fetch, b.preBytes), evmJsonRpc(u, fetch, b.callBytes)]", "[evmJsonRpc(u, fetch, b.preBytes), evmJsonRpc(u, fetch, b.preBytes)]", R, "review of 1ee73a00, 3 "],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => r.ok, (r) => boughtOf(r) === false, preStateOf(v, trace));", R, "review of fb923143, 2 step 4"],

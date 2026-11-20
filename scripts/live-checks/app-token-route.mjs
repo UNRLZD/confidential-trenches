@@ -21,6 +21,14 @@
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (--build: a FAIL while the helper missed an answer, helper-misses.mjs)
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the
 // helper still answered live; --record writes what the run read, so the check's test can replay it through judge().
+// Card app-token-page-rides-out-a-slow-token-read (merge group 44618685462, test-browser (4) job 135894248598): the
+// Robinhood load drew the error state after its one token read got no answer, the page's own 10 s wait cut it
+// (source.ts TIMEOUT_MS), and helper-misses.mjs's watch read that net::ERR_ABORTED a few ms under MISS_MS as the page's
+// own abort of a read it no longer needed: FAIL, never run again. Each load now records every token read the page made
+// (`reads`: its wait, and its status or its failure), and on --build tokenMisses() names as a helper miss each one the
+// helper gave no answer to: a 5xx or 429, or none in NO_ANSWER_MS or more (a read the page waited on that long, then
+// cut). A FAIL with one is INCONCLUSIVE and runs again; a page that draws the error state on answers it got still
+// FAILs. The page's token answer judged is the one it drew: its last read the helper answered (drawnRead).
 import "../net-window.mjs";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +38,7 @@ import { launchBrowser } from "../browsers.mjs";
 import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
 import { named } from "./record-names.mjs";
-import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
+import { ABORT_MS, helperMisses, liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT, helperFetch } from "./helper-misses.mjs";
 
 const KEY = "app-token-route";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -51,6 +59,37 @@ export const LOADS = [
   { name: "desktop", id: "robinhood", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 const READ_MS = 25_000;
+/** A token read the page waited on this long and got no answer to is the helper's miss, not the page's: helper-misses'
+ *  ABORT_MS, half of MISS_MS, where the helper answered the token read in 0.6-2.2 s on 46 reads (19 Nov 21:55-22:06Z);
+ *  under it the page cut its own read short, which stays the page's fault. */
+export const NO_ANSWER_MS = ABORT_MS;
+const HELPER_NAME = new URL(HELPER_HOST).host;
+
+/** The read the page drew: the last one the helper answered (not 5xx or 429), else the last with a status, else none
+ *  (-1): an index of `reads`. */
+export function drawnRead(reads) {
+  const answered = reads.findLastIndex((r) => typeof r.status === "number" && r.status < 500 && r.status !== 429);
+  return answered >= 0 ? answered : reads.findLastIndex((r) => typeof r.status === "number");
+}
+
+/** The helper misses in a run on a local build: each token read of a load the helper gave no answer to (a 5xx or 429,
+ *  or no answer in NO_ANSWER_MS or more), as helper-misses.mjs names them. A deployed run names none: there the helper
+ *  is part of what is checked. */
+export function tokenMisses(rec) {
+  if (!String(rec?.source ?? "").startsWith("harness")) return [];
+  const out = [];
+  for (const l of rec.loads ?? [])
+    for (const r of l.reads ?? []) {
+      const s = (r.ms / 1000).toFixed(1);
+      const why =
+        typeof r.status === "number" ? (r.status >= 500 || r.status === 429 ? `${HELPER_NAME} HTTP ${r.status}: /v1/market/token` : null)
+        : r.ms < NO_ANSWER_MS ? null
+        : r.failed ? `${HELPER_NAME}: no answer (/v1/market/token failed after ${s} s: ${r.failed})`
+        : `${HELPER_NAME}: no answer (/v1/market/token not answered ${s} s after it was asked)`;
+      if (why && !out.includes(why)) out.push(why);
+    }
+  return out;
+}
 
 // ------------------------------------------------------------------------------------------------ the verdict
 /** The live mint the check opens: the third row of the Trending column of the recorded rows (the list columnRows reads:
@@ -136,7 +175,7 @@ const MEASURE = () => {
 
 export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
   mkdirSync(shots, { recursive: true });
-  const lr = await fetch(LISTS_URL, { headers: { origin: APP_HOST } });
+  const lr = await helperFetch(LISTS_URL, { headers: { origin: APP_HOST } });
   const lb = await lr.json().catch(() => null);
   const rows = lb?.lists?.trending_1h ?? lb?.lists?.trending ?? null;
   // the rows kept to the fields the Trending column's order reads (the id as `mint`: gitleaks reads a long id beside a token key as a secret)
@@ -146,7 +185,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
   const evm = {};
   const ids = { mint, unknown: UNKNOWN };
   for (const c of EVM_CHAINS) {
-    const er = await fetch(listsUrl(c), { headers: { origin: APP_HOST } });
+    const er = await helperFetch(listsUrl(c), { headers: { origin: APP_HOST } });
     const eb = await er.json().catch(() => null);
     const erows = eb?.lists?.trending_1h ?? eb?.lists?.trending ?? null;
     evm[c] = { url: listsUrl(c), status: er.status, as_of_ms: eb?.as_of_ms ?? null, trending: Array.isArray(erows) ? erows.map((r) => ({ mint: r?.token, symbol: r?.symbol, vol_1h_usd: r?.vol_1h_usd ?? null })) : null };
@@ -166,9 +205,18 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
       const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark" });
       if (harness) await liveHelper(ctx, harness);
       const page = await ctx.newPage();
-      let token = null;
+      // every token read the page made: when it was asked, then its answer or its failure
+      const asked = new Map();
+      const reads = [];
+      const isToken = (q) => q.url().startsWith(`${HELPER_HOST}/v1/market/token?`);
+      page.on("request", (q) => isToken(q) && asked.set(q, { t: Date.now(), read: null }));
       page.on("response", (r) => {
-        if (r.url().startsWith(`${HELPER_HOST}/v1/market/token?`) && !token) token = r;
+        const a = asked.get(r.request());
+        if (a && !a.read) reads.push((a.read = { ms: Date.now() - a.t, status: r.status(), res: r }));
+      });
+      page.on("requestfailed", (q) => {
+        const a = asked.get(q);
+        if (a && !a.read) reads.push((a.read = { ms: Date.now() - a.t, failed: q.failure()?.errorText ?? "failed" }));
       });
       await page.goto(opened, { waitUntil: "load" });
       let app = null;
@@ -189,6 +237,8 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
       // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
       const shot = `${i}-${w.name}-${w.id}.png`;
       await page.screenshot({ path: path.join(shots, shot) });
+      for (const a of asked.values()) if (!a.read) reads.push((a.read = { ms: Date.now() - a.t, pending: true }));
+      const token = reads[drawnRead(reads)]?.res ?? null;
       const tb = token ? await token.json().catch(() => null) : null;
       rec.loads.push({
         width: w.name,
@@ -202,6 +252,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
         id: m?.id ?? null,
         // the read's URL kept as its path, chain and mint (gitleaks reads a long id after `token=` as a secret)
         token: token ? { url: token.url().split("?")[0], chain: new URL(token.url()).searchParams.get("chain"), mint: new URL(token.url()).searchParams.get("token"), params: [...new URL(token.url()).searchParams].length, status: token.status(), rowMint: tb?.row?.token ?? null, symbol: tb?.row?.symbol ?? null } : null,
+        reads: reads.map(({ res, ...r }) => r),
         shot,
       });
       await ctx.close();
@@ -224,7 +275,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const { ok: judged, lines } = judge(rec);
     for (const l of lines) console.log(l);
     // a FAIL in a run where the helper missed an answer the page asked for is INCONCLUSIVE (helper-misses.mjs)
-    const miss = helperVerdict(judged ? "PASS" : "FAIL");
+    const miss = helperVerdict(judged ? "PASS" : "FAIL", [...new Set([...helperMisses(), ...tokenMisses(rec)])]);
     for (const l of miss.lines) console.log(l);
     console.log(`screenshots: ${rec.shots}`);
     console.log(`CARD ${KEY} / live: ${miss.verdict}`);

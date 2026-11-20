@@ -144,21 +144,28 @@ test("the search finds a Base and a Robinhood token by symbol, and by its 0x add
   }
 });
 
+/** A clock only the lists read's waits move (read-again.ts ReadDeps): a down chain's 503 is read again inside READY_MS
+ *  with no real wait. */
+const still = () => {
+  let t = 0;
+  return { now: () => t, sleep: async (ms: number) => void (t += ms) };
+};
+
 test("each chain held on its own: a chain's failed read keeps its last lists for 60 s, then leaves them out; the others stay", async () => {
   let t = 1_000_000;
   const read = allListsReader({ now: () => t });
   await read(helper().fn);
   t += STALE_MS;
-  let s = await read(helper(["robinhood"]).fn);
+  let s = await read(helper(["robinhood"]).fn, still());
   assert.ok(allRows(s).some((r) => r.chain === "robinhood"), "held at 60 s");
   t += 1;
-  s = await read(helper(["robinhood"]).fn);
+  s = await read(helper(["robinhood"]).fn, still());
   assert.deepEqual(chainsWithData(allRows(s)), ["solana", "base", "near"]);
   // a chain that never answered is left out, never an error while another chain draws
-  s = await allListsReader()(helper(["solana", "robinhood", "near"]).fn);
+  s = await allListsReader()(helper(["solana", "robinhood", "near"]).fn, still());
   assert.deepEqual(chainsWithData(allRows(s)), ["base"]);
   // no chain to draw: the read fails, so Discover's own rule (afterFail) runs
-  await assert.rejects(allListsReader()(helper(["solana", "base", "robinhood", "near"]).fn), /no chain answered/);
+  await assert.rejects(allListsReader()(helper(["solana", "base", "robinhood", "near"]).fn, still()), /no chain answered/);
 });
 
 test("one chain's read: an answer of another chain, or a row of another chain inside it, is not that chain's", async () => {

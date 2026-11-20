@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { HELPER_URL, readChainLists } from "../src/screens/discover/data.ts";
+import { BACKOFF_MS, MIN_READ_MS, READY_MS, TIMEOUT_MS } from "../src/screens/discover/read-again.ts";
 
 /** One read of Solana's lists. */
 const readSolana = (f: typeof fetch) => readChainLists("solana", f);
@@ -86,15 +87,67 @@ test("readChainLists solana: GET /v1/market/lists?chain=solana on HELPER_HOST wi
   for (const k of ["new", "trending", "hot"] as const) assert.ok(columnRows(s, k).length > 0, k);
 });
 
-test("readChainLists solana: a failed read, a non-200, text that is not JSON, another chain or lists that are not lists all throw", async () => {
-  await assert.rejects(readSolana(async () => { throw new TypeError("offline"); }));
-  await assert.rejects(readSolana(reply(answer(), 503)));
-  await assert.rejects(readSolana(reply({ error: { code: "upstream" } }, 503)));
-  await assert.rejects(readSolana(reply("<html>")));
-  await assert.rejects(readSolana(reply({ ...answer(), chain: "base" })));
-  await assert.rejects(readSolana(reply({ ...answer(), lists: null })));
-  await assert.rejects(readSolana(reply({ ...answer(), lists: { ...answer().lists, new: "x" } })));
-  await assert.rejects(readSolana(reply([])));
+test("readChainLists solana: a refusal (another status, text that is not JSON, another chain, lists that are not lists) throws at once, read once", async () => {
+  for (const [name, f] of [
+    ["400", reply({ error: { code: "bad" } }, 400)],
+    ["not JSON", reply("<html>")],
+    ["another chain", reply({ ...answer(), chain: "base" })],
+    ["no lists", reply({ ...answer(), lists: null })],
+    ["a list that is not a list", reply({ ...answer(), lists: { ...answer().lists, new: "x" } })],
+    ["an array", reply([])],
+  ] as const) {
+    const c = still();
+    let n = 0;
+    await assert.rejects(readChainLists("solana", (async (i, o) => (n++, f(i, o))) as typeof fetch, c), undefined, name);
+    assert.equal(n, 1, `${name}: read once`);
+    assert.deepEqual(c.waits, [], name);
+  }
+});
+
+// Card app-token-page-rides-out-a-slow-token-read: the lists read rides out a helper that does not answer as the token
+// read does (read-again.ts readAgain). A clock handed in: `sleep` and a read the helper never answers move it.
+function still() {
+  let t = 0;
+  const waits: number[] = [];
+  const timeouts: number[] = [];
+  return {
+    waits,
+    timeouts,
+    now: () => t,
+    sleep: async (ms: number) => void (waits.push(ms), (t += ms)),
+    timeout: (ms: number) => (timeouts.push(ms), new AbortController().signal),
+    hang: async (): Promise<Response> => {
+      t += timeouts.at(-1)!;
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    },
+  };
+}
+
+test("readChainLists: no answer, a network failure, a 503 and a 429 are read again with backoff, and the lists draw on the answer", async () => {
+  const c = still();
+  const answers: (() => Promise<Response>)[] = [c.hang, async () => Promise.reject(new TypeError("offline")), reply(answer(), 503) as () => Promise<Response>, reply("slow down", 429) as () => Promise<Response>, reply(answer()) as () => Promise<Response>];
+  const urls: string[] = [];
+  const s = await readChainLists("solana", (async (input) => (urls.push(String(input)), answers[urls.length - 1]!())) as typeof fetch, c);
+  assert.equal(s.chain, "solana");
+  assert.deepEqual(urls, Array(5).fill(HELPER_URL));
+  assert.deepEqual(c.waits, [...BACKOFF_MS]);
+  assert.ok(c.now() <= READY_MS);
+});
+
+test("readChainLists: a helper that never answers, or answers 5xx or 429 every time, throws once READY_MS is spent, never past it", async () => {
+  const c = still();
+  let n = 0;
+  await assert.rejects(readChainLists("solana", (async () => (n++, c.hang())) as typeof fetch, c));
+  assert.deepEqual(c.timeouts, [TIMEOUT_MS, READY_MS - TIMEOUT_MS - 500]);
+  assert.equal(n, 2);
+  assert.equal(c.now(), READY_MS);
+  for (const status of [503, 502, 429]) {
+    const k = still();
+    let m = 0;
+    await assert.rejects(readChainLists("solana", (async () => (m++, new Response("{}", { status }))) as typeof fetch, k), undefined, String(status));
+    assert.ok(m > 1, `${status}: read ${m} time(s)`);
+    assert.ok(k.now() <= READY_MS - MIN_READ_MS, `${status}: last read at ${k.now()} ms`);
+  }
 });
 
 test("readChainLists solana: a row that is not an object with a mint and a symbol is dropped, the others stay", async () => {

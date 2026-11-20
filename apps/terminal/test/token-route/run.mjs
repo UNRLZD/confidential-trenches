@@ -11,7 +11,7 @@
 //     tab, which lands on the shell at that path and draws the token, while the first tab stays on Discover;
 //   - a deep link (SIGN_HOST and APP_HOST at /token/solana/<mint>) draws the token inside the shell, and so does a reload;
 //   - an unknown id and a chain the terminal does not draw draw the page's not-found state ("No token") with its link
-//     back to Trenches ("/", card app-pages-open-right), a bad chain with no read of the helper; a token read that fails draws the error state;
+//     back to Trenches ("/", card app-pages-open-right), a bad chain with no read of the helper; a token read the helper refuses draws the error state, and one it never answers draws it once READY_MS is spent;
 //   - hover fills the desktop row and a keyboard focus draws the 2 px blue ring; no page error, no CSP violation.
 //   node apps/terminal/test/token-route/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
+import { READY_MS } from "../../src/screens/discover/read-again.ts";
 
 const HELPER = "https://ct-api.unrealized.trade";
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -46,12 +47,16 @@ const check = (ok, what) => {
   if (!ok) fails.push(what);
 };
 
-/** HELPER_HOST's token read: a listed mint answers its row, `broken` mints answer 503, any other 404. `reads` records them. */
+/** HELPER_HOST's token read: a listed mint answers its row, `broken` mints a refusal (400), HUNG never answers (null), any
+ *  other 404. `reads` records them. A 503 or no answer is read again inside READY_MS (src/screens/discover/read-again.ts,
+ *  card app-token-page-rides-out-a-slow-token-read), so the error state is a refusal, or READY_MS spent. */
+const HUNG = "HungMint11111111111111111111111111111111111";
 function tokenAnswer(u, reads, broken) {
   const json = (status, body) => ({ status, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(body) });
   const id = u.searchParams.get("token");
   reads.push(`${u.searchParams.get("chain")}/${id}`);
-  if (broken.has(id)) return json(503, { error: "unavailable" });
+  if (id === HUNG) return null;
+  if (broken.has(id)) return json(400, { error: "refused" });
   const row = u.searchParams.get("chain") === "solana" ? ROWS.get(id) : undefined;
   return row ? json(200, { ...tokenRest, row: { ...row, as_of_ms: Date.now() } }) : json(404, { error: { code: "not_found" } });
 }
@@ -71,7 +76,10 @@ async function context(w, scheme, reads, broken, errors) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: scheme, reducedMotion: "reduce" });
   await ctx.route("**/*", (r) => {
     const u = new URL(r.request().url());
-    if (u.origin === HELPER && u.pathname === "/v1/market/token") return r.fulfill(tokenAnswer(u, reads, broken));
+    if (u.origin === HELPER && u.pathname === "/v1/market/token") {
+      const a = tokenAnswer(u, reads, broken);
+      return a ? r.fulfill(a) : undefined;
+    }
     return route(r);
   });
   await ctx.addInitScript(() => {
@@ -261,14 +269,14 @@ try {
       const mint = [...ROWS.keys()][3];
       const sym = ROWS.get(mint).symbol;
 
-      const open = async (url, state, name) => {
+      const open = async (url, state, name, ms = undefined) => {
         n++;
         reads.length = 0;
         const page = await ctx.newPage();
         page.on("pageerror", (e) => errors.push(String(e)));
         await page.goto(url, { waitUntil: "load" });
         const f = await appFrame(page);
-        const ok = f ? await settle(page, f, state) : false;
+        const ok = f ? await settle(page, f, state, ms) : false;
         check(ok, `${tag} ${name}: no [data-token-page=${state}] (frame ${f ? f.url() : "none"})`);
         return { page, f, t: ok ? await readToken(f) : null };
       };
@@ -331,6 +339,19 @@ try {
           await f.locator(".tkp-retry").click();
           check(await settle(page, f, "empty"), `${tag} failed read: Retry did not read again`);
           check(reads.length === 1, `${tag} failed read: Retry read ${JSON.stringify(reads)}`);
+        }
+        await page.close();
+      }
+      // a helper that never answers: the page reads again past its read's own 10 s wait and draws the error state once
+      // READY_MS is spent, never at the first wait
+      {
+        const t0 = Date.now();
+        const { page, f, t } = await open(`${SIGN_HOST}/token/solana/${HUNG}`, "error", "never answers", READY_MS + 8_000);
+        const ms = Date.now() - t0;
+        if (t) {
+          check(ms >= READY_MS - 1_000, `${tag} never answers: the error state at ${ms} ms, before READY_MS (${READY_MS} ms)`);
+          check(reads.length >= 2 && reads.every((r) => r === `solana/${HUNG}`), `${tag} never answers: token reads ${JSON.stringify(reads)}, want it read again`);
+          check(t.token === null && (await f.locator(".tkp-retry").count()) > 0, `${tag} never answers: ${JSON.stringify({ token: t.token })}, Retry drawn`);
         }
         await page.close();
       }

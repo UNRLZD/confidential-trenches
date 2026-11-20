@@ -51,7 +51,7 @@ import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { consoleError, pageError } from "./console-errors.mjs";
 import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
-import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT, helperFetch } from "./helper-misses.mjs";
 
 const KEY = "app-chart-live";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -171,7 +171,7 @@ export function judge(rec) {
 const headers = { origin: APP_HOST, "cache-control": "no-cache" };
 const getJson = async (url) => {
   try {
-    const r = await fetch(url, { headers, signal: AbortSignal.timeout(READ_MS) });
+    const r = await helperFetch(url, { headers, signal: AbortSignal.timeout(READ_MS) });
     return { status: r.status, retryAfter: r.headers.get("retry-after"), body: await r.json().catch(() => null) };
   } catch {
     return { status: 0, body: null };
