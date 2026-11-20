@@ -29,7 +29,7 @@ import { pairDown } from "./outage.ts";
 import { holdHosts, hostLane, PASS_BUDGET, PASS_FLOOR_MS, resetHostLanes } from "../../wallet/src/throttle.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { buyReads } from "../src/pool-testnet.ts";
-import { keptPools, setPagePoolFinders, type ReadKind } from "../src/page-rpc.ts";
+import { keptPools, pageReference, setPagePoolFinders, type ReadKind } from "../src/page-rpc.ts";
 import { solanaPoolAddresses } from "../../kit/src/trade/solana/pool.ts";
 import { liveRuns } from "../src/pool-sell-dry.ts";
 import { readWaits } from "../src/read-waits.ts";
@@ -2982,4 +2982,112 @@ test("legs: the kind runs a split tap's legs side by side, each on a host of its
   assert.equal(ended, 2);
   assert.deepEqual(w.log.filter((l) => l.startsWith("take:")), ["take:note-1"], "W2's leg took nothing");
   assert.equal(w.state(), "SPENT");
+});
+
+// Card sol-buy-takes-the-best-venue-it-can-trade: a coin whose deepest pool sits on a venue the page pins no table for
+// is bought on the best pool of a venue it pins, held to that deepest pool's out less the ask's slippage (the EVM rule
+// of evm-buy-never-below-a-hidden-market). The recorded PumpSwap coin, with an open curve planted beside it on both
+// RPCs: the curve far deeper (10,000 SOL of virtual SOL) at a price `ratio` of the PumpSwap pool's out, so the
+// reference's set is the curve alone and the PumpSwap pool is under its depth cutoff (the kit's `shallow`); the page
+// pins PumpSwap only. Red at e1995d679: every such coin answered venue_not_pinned.
+const PS = solanaPoolAddresses(fx.pumpswap.mint);
+async function deepCurve(rpc: SolanaRpc, ratio: number): Promise<SolanaRpc> {
+  const pump = (await replay(fx.pump, 0)("getMultipleAccounts", [solanaPoolAddresses(fx.pump.mint).curveList, { encoding: "base64" }])) as { value: { data: [string, string] }[] };
+  const psOut = 503_819_263n; // the recorded PumpSwap pool's E for SPEND (the reference with no curve)
+  const vS = 10_000_000_000_000n;
+  const vT = (psOut * BigInt(Math.round(ratio * 1000)) * (vS + SPEND)) / (SPEND * 1000n) + psOut;
+  const curve = base64.decode(pump.value[1]!.data[0]);
+  const dv = new DataView(curve.buffer, curve.byteOffset);
+  dv.setBigUint64(8, vT, true);
+  dv.setBigUint64(16, vS, true);
+  dv.setBigUint64(24, vT, true);
+  curve[48] = 0;
+  const held = base64.decode(pump.value[5]!.data[0]);
+  held.set(base58.decode(fx.pumpswap.mint), 0);
+  held.set(base58.decode(PS.curve), 32);
+  return Object.assign(async (m: string, q: readonly unknown[], s?: AbortSignal) => {
+    const a = (await rpc(m, q, s)) as { value: ({ data: [string, string] } | null)[] };
+    if (m !== "getMultipleAccounts" || (q[0] as string[]).join() !== PS.curveList.join()) return a;
+    const v = a.value.slice();
+    v[1] = { ...v[1]!, data: [base64.encode(curve), "base64"] };
+    v[5] = { ...v[5]!, data: [base64.encode(held), "base64"] };
+    return { ...a, value: v };
+  }, { url: rpc.url }) as SolanaRpc;
+}
+const deepCurveHost = async (w: World, ratio: number): Promise<PoolBuyHost> => ({ ...w.host, rpcs: [await deepCurve(w.host.rpcs[0], ratio), await deepCurve(w.host.rpcs[1], ratio)] as const });
+
+test("card sol-buy-takes-the-best-venue-it-can-trade: a coin whose deepest pool is on a venue the page pins no table for fills through its pinned venue within the slippage of that market", async () => {
+  // the curve gives 2% more than the PumpSwap pool: within the ask's 3%, so the buy fills on PumpSwap
+  const w = await world({ coin: "pumpswap" });
+  const host = await deepCurveHost(w, 1.02);
+  const routes: unknown[] = [];
+  assert.deepEqual(await runPoolBuy({ ...host, route: (r) => void routes.push(r) }, ASK_PS), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.ok(routes.some((r) => JSON.stringify(r) === JSON.stringify({ venue: "pumpswap", pool: PS.pool })), `bought on the PumpSwap pool: ${JSON.stringify(routes)}`);
+  const ref = await pageReference(host.rpcs, { side: "buy", token: fx.pumpswap.mint, amount: SPEND }, null);
+  assert.deepEqual(ref?.pools.map((p) => p.venue), ["pump-curve"], "the set: the deep curve alone");
+  assert.deepEqual(ref?.shallow?.map((p) => p.venue), ["pumpswap"], "PumpSwap under the depth cutoff");
+  const ps = ref!.shallow![0]!.expectedOut;
+  assert.ok(ps < ref!.expectedOut && ps * 10_000n >= ref!.expectedOut * 9_700n, `PumpSwap ${ps} under the market ${ref!.expectedOut}, within 3%`);
+});
+
+test("card sol-buy-takes-the-best-venue-it-can-trade: a pinned pool far below the coin's bigger unpinned market is refused below_reference before any claim", async () => {
+  // the curve gives 10x the PumpSwap pool: the pinned pool is a tenth of the market, far past the ask's 3%
+  const w = await world({ coin: "pumpswap" });
+  assert.deepEqual(await runPoolBuy(await deepCurveHost(w, 10), ASK_PS), { error: "below_reference" });
+  nothingMoved(w);
+  // past the slippage by a little: the pinned pool's out under 97% of the curve's (the ask's 3%) is refused too, and
+  // one at or above it fills (the first test)
+  const x = await world({ coin: "pumpswap" });
+  const hx = await deepCurveHost(x, 1.05);
+  assert.deepEqual(await runPoolBuy(hx, ASK_PS), { error: "below_reference" });
+  nothingMoved(x);
+  const ref = (await pageReference(hx.rpcs, { side: "buy", token: fx.pumpswap.mint, amount: SPEND }, null))!;
+  const ps = ref.shallow!.find((p) => p.venue === "pumpswap")!.expectedOut;
+  assert.ok(ps * 10_000n < ref.expectedOut * 9_700n && ps * 10_000n >= ref.expectedOut * 9_400n, `PumpSwap ${ps} against the market ${ref.expectedOut}: past 3%, within 6%`);
+});
+
+test("card sol-buy-takes-the-best-venue-it-can-trade: a coin whose every pool is on a venue the page pins no table for is refused venue_not_pinned", async () => {
+  // the deep curve beside PumpSwap, the page pinning the curve's venue alone: PumpSwap's pool is the coin's only other
+  const w = await world({ coin: "pumpswap", tables: { "pump-curve": [OTHER_TABLE] } });
+  assert.deepEqual(await runPoolBuy({ ...(await deepCurveHost(w, 1.02)), tables: {} as never }, ASK_PS), { error: "not_allowed" }, "no pin at all: not_allowed, as before");
+  const y = await world({ coin: "pumpswap", tables: { "pump-curve": [OTHER_TABLE] } });
+  // the curve pinned and the coin's only pool PumpSwap (no curve planted): venue_not_pinned
+  assert.deepEqual(await runPoolBuy(y.host, ASK_PS), { error: "venue_not_pinned" });
+  nothingMoved(y);
+});
+
+test("card sol-buy-takes-the-best-venue-it-can-trade: pool.buy.dry answers the tap's own venue decision for each venue state, and signs, writes and sends nothing", async () => {
+  const { poolBuyDryKind } = await import("../src/pools.ts");
+  const { solanaBalancePool } = await import("../../wallet/src/pool/balances.ts");
+  const dryOf = async (host: PoolBuyHost, tables: PoolBuyHost["tables"]): Promise<string> => {
+    const sends: string[] = [];
+    const watched = host.rpcs.map((r) => Object.assign(async (m: string, q: readonly unknown[], s?: AbortSignal) => (/^send|^simulate/.test(m) && sends.push(m), r(m, q, s)), { url: r.url })) as unknown as readonly [SolanaRpc, SolanaRpc];
+    const kind = poolBuyDryKind({
+      pools: [solanaBalancePool("sol:p", 11n)], tables, rpcs: () => watched, rent: () => rent, trading: () => false,
+      ready: async () => ({ notes: [], ready: [], open: new Set() }),
+    });
+    const r = kind({ chain: "solana", token: ASK_PS.token, amount: "0.005", slippage_bps: ASK_PS.slippageBps });
+    await r.after;
+    assert.deepEqual(sends, [], "the dry sends nothing");
+    const a = r.answer() as { result?: unknown; error?: string };
+    return a.error ?? "ok";
+  };
+  const tapOf = async (host: PoolBuyHost): Promise<string> => {
+    const a = await runPoolBuy(host, ASK_PS);
+    return "error" in a ? a.error : "ok";
+  };
+  for (const [name, ratio, tables, want] of [
+    ["pinned within the market's slippage", 1.02, { pumpswap: [s0.tableAddr] }, "ok"],
+    ["pinned far below the market", 10, { pumpswap: [s0.tableAddr] }, "below_reference"],
+    // the coin's only pool PumpSwap's (no curve planted), the page pinning the curve's venue alone
+    ["no pool on a pinned venue", null, { "pump-curve": [s0.tableAddr] }, "venue_not_pinned"],
+  ] as const) {
+    const w = await world({ coin: "pumpswap", tables });
+    const tap = await tapOf(ratio === null ? w.host : await deepCurveHost(w, ratio));
+    const x = await world({ coin: "pumpswap", tables });
+    const dry = await dryOf(ratio === null ? x.host : await deepCurveHost(x, ratio), tables);
+    assert.deepEqual({ tap: tap === "ok" || tap === "filled" ? "ok" : tap, dry }, { tap: want, dry: want }, name);
+    assert.equal(x.state(), "HELD", `${name}: the dry claimed nothing`);
+    assert.equal(x.sentTx(), null, `${name}: the dry sent nothing`);
+  }
 });

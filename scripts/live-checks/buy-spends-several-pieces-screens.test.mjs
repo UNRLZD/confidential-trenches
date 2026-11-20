@@ -148,3 +148,21 @@ test("the answer kept through feeReadOf (card buy-box-quotes-before-funds): PASS
     assert.deepEqual(carriesOf(APP_MARKS, js), ["ask"], js.slice(0, 80));
   }
 });
+
+// card app-unavailable-before-the-tap: the box hands each answer to its Unavailable state first, and the build folds that
+// call into the ok's if (the branch's own build, apps/terminal/dist at 5e1930207: `if(de(t=>Vh(t,i,e)),e.ok){let t=fg(`)
+const APP_JS4 = APP_JS3.replace("if(e.ok){let t=Wh(", "if(de(t=>Vh(t,i,e)),e.ok){let t=Wh(");
+test("the answer handed to the Unavailable state first (card app-unavailable-before-the-tap): PASS; no amount asked, the cost not kept, or another statement before the ok: FAIL, ask named", () => {
+  assert.notEqual(APP_JS4, APP_JS3);
+  assert.deepEqual(carriesOf(APP_MARKS, APP_JS4), []);
+  for (const js of [
+    APP_JS4.replace(",amount:t}", "}"),
+    APP_JS4.replace("...t.cost===void 0?{}:{cost:t.cost},", ""),
+    APP_JS4.replace("t!==null&&ve(t);", ""),
+    APP_JS4.replace("if(de(t=>Vh(t,i,e)),e.ok)", "if(de(t=>Vh(t,i,e)),!0)"),
+    APP_JS4.replace("if(de(t=>Vh(t,i,e)),e.ok)", "if(de(t=>Vh(t,i,e)),x=1,e.ok)"),
+  ]) {
+    assert.notEqual(js, APP_JS4);
+    assert.deepEqual(carriesOf(APP_MARKS, js), ["ask"], js.slice(0, 80));
+  }
+});

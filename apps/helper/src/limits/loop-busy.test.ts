@@ -3,7 +3,7 @@
 // no sample for SAMPLE_MS + LOOP_BUSY_MS is a loop held now.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BUSY_HOLD_MS, LOOP_BUSY_MS, loopBusy, loopProbe, SAMPLE_MS } from "./loop-busy.ts";
+import { BUSY_HOLD_MS, LOOP_BUSY_MS, loopBusy, loopProbe, loopShed, SAMPLE_MS, SHED_HOLD_MS, SHED_LATE_MS } from "./loop-busy.ts";
 
 test("card robinhood-tapes-read-ahead-bounded: a sample on time is no busy loop; one LOOP_BUSY_MS late is, for BUSY_HOLD_MS; a loop that sends no sample past SAMPLE_MS + LOOP_BUSY_MS is busy now", () => {
   const clk = { t: 1_000 };
@@ -39,4 +39,30 @@ test("card robinhood-tapes-read-ahead-bounded: the process's own probe sees a lo
   assert.equal(loopBusy(), true, "held right now: no sample has come");
   await new Promise((go) => setTimeout(go, SAMPLE_MS));
   assert.equal(loopBusy(), true, "the late sample keeps it busy");
+});
+
+test("card helper-answers-through-a-burst: the shed probe trips only at SHED_LATE_MS late, holds for SHED_HOLD_MS, and the process's own sees a held loop", async () => {
+  const clk = { t: 1_000 };
+  const p = loopProbe(() => clk.t, SHED_LATE_MS, SHED_HOLD_MS);
+  clk.t += SAMPLE_MS + LOOP_BUSY_MS;
+  p.sample(clk.t - LOOP_BUSY_MS);
+  assert.equal(p.busy(), false, `a sample ${LOOP_BUSY_MS} ms late stands the reads ahead down but sheds nothing`);
+  // the longest hold of the helper's own background work read on a copy (813 ms, the EVM pool index's span write)
+  clk.t += SAMPLE_MS + 813;
+  p.sample(clk.t - 813);
+  assert.equal(p.busy(), false, "a background span write's 813 ms hold sheds no page");
+  clk.t += SAMPLE_MS + SHED_LATE_MS;
+  p.sample(clk.t - SHED_LATE_MS);
+  assert.equal(p.busy(), true, `a sample ${SHED_LATE_MS} ms late sheds`);
+  for (let i = 0; i < SHED_HOLD_MS / SAMPLE_MS; i++) {
+    clk.t += SAMPLE_MS;
+    p.sample(clk.t);
+  }
+  assert.equal(p.busy(), false, "not past SHED_HOLD_MS with samples on time");
+  loopShed();
+  await new Promise((go) => setTimeout(go, 2 * SAMPLE_MS));
+  assert.equal(loopShed(), false, "an idle loop sheds nothing");
+  const until = performance.now() + 2 * SHED_LATE_MS;
+  while (performance.now() < until);
+  assert.equal(loopShed(), true, "held right now past SAMPLE_MS + SHED_LATE_MS: shed");
 });

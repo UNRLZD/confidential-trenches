@@ -24,34 +24,58 @@ export const LOOP_BUSY_MS = 100;
 export const BUSY_HOLD_MS = 2_000;
 
 /** A probe on `now` (a monotonic clock, ms): `sample(at)` records a timer that was due at `at`; `busy()` is true while
- *  the latest late sample is within BUSY_HOLD_MS, or while no sample has come for SAMPLE_MS + LOOP_BUSY_MS (the loop is
- *  held right now, past what a sample would show). */
-export function loopProbe(now: () => number) {
+ *  the latest sample `lateMs` late or more is within `holdMs`, or while no sample has come for SAMPLE_MS + `lateMs` (the
+ *  loop is held right now, past what a sample would show). */
+export function loopProbe(now: () => number, lateMs = LOOP_BUSY_MS, holdMs = BUSY_HOLD_MS) {
   let lateAt = -Infinity;
   let lastAt = now();
   return {
     sample(due: number): void {
       const t = now();
-      if (t - due >= LOOP_BUSY_MS) lateAt = t;
+      if (t - due >= lateMs) lateAt = t;
       lastAt = t;
     },
     busy(): boolean {
       const t = now();
-      return t - lateAt < BUSY_HOLD_MS || t - lastAt >= SAMPLE_MS + LOOP_BUSY_MS;
+      return t - lateAt < holdMs || t - lastAt >= SAMPLE_MS + lateMs;
     },
   };
 }
 
-let probe: ReturnType<typeof loopProbe> | null = null;
-/** This process's loop, sampled from the first ask on (an unref'd timer: it never keeps the process up). */
-export function loopBusy(): boolean {
-  if (probe === null) {
-    const p = (probe = loopProbe(() => performance.now()));
+// The shed (card helper-answers-through-a-burst): past the helper's capacity a market data read is answered a fast 503
+// at once (server.ts SHED_PATHS), never queued behind the loop, so a relay, a proof, a quote and a device's money read
+// keep the loop. [design: a sample SHED_LATE_MS late or more, 1000 ms, the industry baseline's (Fastify
+// under-pressure's maxEventLoopDelay example): over the longest hold of the helper's own background work, so it alone
+// never sheds a page (a CPU profile of a copy behind 48 pages over 48 cold coins held the loop at most 813 ms, in the EVM
+// pool index's span write, evm/pool-index.ts spanOn), and under the holds of a loop past capacity (copies pinned to the
+// helper host's 2 CPUs: 1417 ms behind 300 pages at once through Caddy, 2655 and 5734 ms after 48 cold coins;
+// deploy/burst-proof.sh, 19 Nov). Shed for SHED_HOLD_MS after, 1 s, ten samples, so a burst's next wave is shed rather
+// than let in to hold the loop again.]
+/** A sample this late or more is a loop past its capacity. */
+export const SHED_LATE_MS = 1_000;
+/** How long market data is shed after such a sample. */
+export const SHED_HOLD_MS = 1_000;
+
+let probes: { busy: ReturnType<typeof loopProbe>; shed: ReturnType<typeof loopProbe> } | null = null;
+/** This process's loop, sampled from the first ask on (one unref'd timer: it never keeps the process up). */
+function sampled(): NonNullable<typeof probes> {
+  if (probes === null) {
+    const now = () => performance.now();
+    const p = (probes = { busy: loopProbe(now), shed: loopProbe(now, SHED_LATE_MS, SHED_HOLD_MS) });
     let due = performance.now() + SAMPLE_MS;
     setInterval(() => {
-      p.sample(due);
+      p.busy.sample(due);
+      p.shed.sample(due);
       due = performance.now() + SAMPLE_MS;
     }, SAMPLE_MS).unref();
   }
-  return probe.busy();
+  return probes;
+}
+/** Whether this process's loop is busy now (the reads ahead stand down). */
+export function loopBusy(): boolean {
+  return sampled().busy.busy();
+}
+/** Whether this process's loop is past its capacity now (market data is shed). */
+export function loopShed(): boolean {
+  return sampled().shed.busy();
 }

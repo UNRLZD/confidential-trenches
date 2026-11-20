@@ -48,16 +48,32 @@ export function problems(text) {
   const encode = (sites[0]?.body ?? []).filter((d) => d.depth === 1 && /^encode(\s|$)/.test(d.line));
   const algos = encode.length === 1 ? encode[0].line.split(/\s+/).slice(1) : [];
   if (!algos.includes("zstd") || !algos.includes("gzip")) bad.push(`encode with zstd and gzip in the site block (read: ${encode.map((d) => d.line).join(", ") || "none"})`);
+  // card helper-answers-through-a-burst: one global log takes http.log.error alone, its request deleted (the client's
+  // address, port and headers), and no log takes the access log
+  const g = global[0]?.body ?? [];
+  const logs = [];
+  let open = null;
+  for (const d of g) {
+    if (open === null && /^log(\s.*)?\{$/.test(d.line)) logs.push((open = []));
+    else if (open !== null && d.line === "}" && d.depth === 1) open = null;
+    else if (open !== null) open.push(d.line);
+  }
+  const upstream = logs.filter((l) => l.includes("include http.log.error"));
+  if (upstream.length !== 1 || !upstream[0].includes("request delete") || upstream[0].some((l) => /^include\s/.test(l) && l !== "include http.log.error")) {
+    bad.push("one log that includes http.log.error alone, with its request deleted");
+  }
+  if (all.some((b) => b.body.some((d) => /^include\b.*\bhttp\.log\.access\b/.test(d.line))) || sites.some((b) => b.body.some((d) => /^log(\s|$)/.test(d.line)))) bad.push("no access log");
   return bad;
 }
 
-test("the Caddyfile compresses with zstd and gzip in its site block, and its admin is a unix socket under /config", () => {
+test("the Caddyfile compresses with zstd and gzip in its site block, its admin is a unix socket under /config, and it logs an upstream failure with no request", () => {
   assert.deepEqual(problems(readFileSync(FILE, "utf8")), []);
 });
 
-test("planted Caddyfiles fail: no encode, encode in the global block, gzip only, admin off, admin on TCP, admin on a socket outside /config", () => {
-  const site = (inner) => `{\n\tadmin unix//config/caddy-admin.sock\n}\n\nexample.org {\n${inner}\treverse_proxy helper:8080\n}\n`;
-  const withAdmin = (admin) => `{\n\t${admin}\n}\n\nexample.org {\n\tencode zstd gzip\n\treverse_proxy helper:8080\n}\n`;
+test("planted Caddyfiles fail: no encode, encode in the global block, gzip only, admin off, admin on TCP, admin on a socket outside /config, no upstream log, one that keeps the request or takes the access log", () => {
+  const UP = "\tlog upstream {\n\t\toutput stderr\n\t\tinclude http.log.error\n\t\tformat filter {\n\t\t\trequest delete\n\t\t}\n\t}\n";
+  const site = (inner, up = UP) => `{\n\tadmin unix//config/caddy-admin.sock\n${up}}\n\nexample.org {\n${inner}\treverse_proxy helper:8080\n}\n`;
+  const withAdmin = (admin) => `{\n\t${admin}\n${UP}}\n\nexample.org {\n\tencode zstd gzip\n\treverse_proxy helper:8080\n}\n`;
   assert.deepEqual(problems(site("\tencode zstd gzip\n")), [], "the good shape passes");
   const planted = {
     "no encode": site(""),
@@ -71,6 +87,12 @@ test("planted Caddyfiles fail: no encode, encode in the global block, gzip only,
     "admin on a socket outside /config": withAdmin("admin unix//tmp/caddy.sock"),
     "admin on a socket path that climbs out": withAdmin("admin unix//config/../tmp/caddy.sock"),
     "no admin line (Caddy's default is localhost:2019)": `{\n}\n\nexample.org {\n\tencode zstd gzip\n}\n`,
+    // card helper-answers-through-a-burst: an upstream failure is logged with its reason and never its request
+    "no upstream log": site("\tencode zstd gzip\n", ""),
+    "the upstream log keeps the request (the client's address)": site("\tencode zstd gzip\n", UP.replace("\t\t\trequest delete\n", "\t\t\trequest>headers delete\n")),
+    "the upstream log also takes the access log": site("\tencode zstd gzip\n", UP.replace("include http.log.error", "include http.log.error http.log.access")),
+    "an access log on the site": site("\tencode zstd gzip\n\tlog\n"),
+    "the error log in the default log": site("\tencode zstd gzip\n", "\tlog default {\n\t\toutput stderr\n\t}\n"),
   };
   for (const [name, text] of Object.entries(planted)) assert.notDeepEqual(problems(text), [], name);
 });

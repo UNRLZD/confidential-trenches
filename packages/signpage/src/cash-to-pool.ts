@@ -1156,8 +1156,10 @@ export type CashToPoolDeps = {
   any(chain: PoolChain): Promise<boolean>;
   /** Base units one pool.buy of `token` on `chain` spends now (Solana: pool.buy.dry's tap_max on the coin's venue,
    *  solanaTapMaxOf; Base and Robinhood: the largest ready note, state.pools' tap_max); 0n when none. Throws when the
-   *  coin's venue is not read: the tap then moves nothing from Cash. */
-  tapMax(chain: PoolChain, token: string): Promise<bigint>;
+   *  coin's venue is not read: the tap then moves nothing from Cash. `ask` (Solana; card
+   *  sol-buy-takes-the-best-venue-it-can-trade): the tap's amount and slippage, so the read answers the tap's own venue
+   *  decision, and a coin the tap refuses (venue_not_pinned, below_reference) throws before any move. */
+  tapMax(chain: PoolChain, token: string, ask?: { readonly amount: bigint; readonly slippageBps: number }): Promise<bigint>;
   /** The least shortfall a move must bring so one tap pays `amount`, the size pool.buy.dry prices: on Solana (card
    *  you-receive-on-every-chain) src/pools.ts solanaMoveShort, each note the move brings its own W with its own relay
    *  fee, tip and rent, null: `amount` less tapMax; on Base and Robinhood (card evm-cash-move-brings-its-fee)
@@ -1235,9 +1237,9 @@ function steadyTap(d: CashToPoolDeps, t: (step: TraceStep, f?: TraceFields) => v
   const said = (e: unknown): TraceFields => ({ ...(move === null ? {} : { move }), stage: "tap_unread", error: errorText(e) });
   return {
     ...d,
-    tapMax: async (chain, token) => {
+    tapMax: async (chain, token, ask) => {
       if (!moving) {
-        last = await d.tapMax(chain, token).catch((e: unknown) => {
+        last = await d.tapMax(chain, token, ask).catch((e: unknown) => {
           t("move", said(e));
           throw e;
         });
@@ -1288,7 +1290,8 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
       const d = steadyTap(deps(), t);
       // a tap read that throws (Solana: the coin's venue not read, solanaTapMaxOf) moves nothing from Cash: the pool buy
       // reads the venue itself and answers its refusal at once
-      const now = (await d.any(chain)) ? await d.tapMax(chain, token).catch(() => null) : ask.amount;
+      // with the ask (Solana): the tap's own venue decision, so a coin the tap refuses moves nothing from Cash
+      const now = (await d.any(chain)) ? await d.tapMax(chain, token, { amount: ask.amount, slippageBps: ask.slippageBps }).catch(() => null) : ask.amount;
       // sized as pool.buy.dry prices it, so the notes the move brings pay the rest with their own costs: on Solana each
       // W's relay fee, tip and rent (solanaMoveShort), on Base and Robinhood each note's relay fee (evmMoveShort)
       const sized = now !== null && now < ask.amount && d.short ? await d.short(chain, token, ask.amount).catch(() => null) : null;

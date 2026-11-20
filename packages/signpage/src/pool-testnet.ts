@@ -50,6 +50,7 @@ import { base58, base64 } from "@scure/base";
 import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, solanaWrappedRpc, type SolanaRpc, type SolanaRpcLimit, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts, seatRpc, type ReadKind } from "./page-rpc.ts";
 import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
+import { tapPrepared, timerWait } from "./tap-prepare.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -98,7 +99,7 @@ import { evmPoolSend } from "./evm-send.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolIndexFromSnapshot, type EvmPoolIndexData, type EvmPoolIndexSync } from "../../kit/src/checks/evm/pool-index.ts";
 import { evmPoolIndexUse } from "../../kit/src/checks/evm/quote.ts";
-import { evmPoolIndexRefresh } from "../../kit/src/trade/evm/buy-tap.ts";
+import { EVM_INDEX_KEEP_MS, evmPoolIndexRefresh } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmIndexStore, type EvmIndexStore } from "./evm-index-store.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
@@ -249,6 +250,10 @@ export const EVM_HOLDINGS_RETRY_MAX_MS = 600_000;
  *  Base's 0.67 MB (2026-11-16); a file past this many bytes is no snapshot, and one not read within the time a cold sync. */
 export const EVM_INDEX_SNAPSHOT_MAX = 32 << 20;
 export const EVM_INDEX_SNAPSHOT_MS = 30_000;
+/** The least time between two writes of a kept index to the page's store, ms (card evm-index-kept-at-the-head): a
+ *  served index is synced again every EVM_INDEX_KEEP_MS, and Robinhood's 34,142 pools are about 11 MB as stored, so the
+ *  store takes one a minute; a reload syncs that minute's gap from it. */
+export const EVM_INDEX_PUT_MS = 60_000;
 export const MAINNET_POOL_HISTORY: Readonly<Record<"base" | "robinhood", readonly string[]>> = EVM_POOL_HISTORY;
 const HISTORY = new Map<string, readonly EvmRpc[]>();
 /** Where else an EVM pool's logs are read when its seats cannot give them (evm.ts EvmSyncArgs history): on mainnet the
@@ -685,7 +690,7 @@ async function moveLegacyPending(w: WalletStore, opId: string, p: PendingOnward)
 /** The page network's deps for poolKinds, with `flow` the ops' flow (none: every checked request is refused). `rpcs` is
  *  each chain's pair, which the sell's decimals read and the page's USD price (src/pool-price.ts, the trade box's Buy)
  *  read on: on mainnet's EVM chains the pool list's two seats (pageEvmPoolRpcs, card evm-pools-on-mainnet). */
-export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDeps["stop"]): PoolKindsDeps {
+export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDeps["stop"], prepared?: PoolKindsDeps["prepared"]): PoolKindsDeps {
   return {
     pinned: (chain) => (chain === "solana" ? PAGE_SOL_PIN !== undefined : EVM_POOLS[POOL_TESTNET ? EVM_TESTNET[chain] : chain] !== undefined),
     rpcs: (chain) =>
@@ -698,6 +703,7 @@ export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDe
     decimals: PAGE_TOKEN_DECIMALS,
     ...(flow ? { flow } : {}),
     ...(stop ? { stop } : {}),
+    ...(prepared ? { prepared } : {}),
   };
 }
 
@@ -788,6 +794,8 @@ export type TestnetOver = {
   /** The page's pool index store (src/evm-index-store.ts on the page's IndexedDB otherwise; none with a planted sync;
    *  tests). */
   evmIndexStore?: EvmIndexStore | null;
+  /** The timer of a served index's next gap sync (an unref'd setTimeout otherwise; tests). */
+  evmIndexKeep?: (f: () => void, ms: number) => unknown;
   /** A chain's shipped index snapshot (SIGN_HOST's /evm-index/<chain>.json otherwise; tests). */
   evmIndexSnapshot?: (network: EvmPoolChain) => Promise<unknown>;
 };
@@ -961,6 +969,9 @@ export type TestnetPool = {
   signedOut(): Promise<void>;
   /** The session's sign out, aborted at the next one: a pool kind's reads read it when a request comes (pool-kinds.ts). */
   outSignal(): AbortSignal;
+  /** A buy's wait at its tap while the chain's spend is prepared (card taps-wait-inside-the-page, src/tap-prepare.ts):
+   *  bounded, ended by a sign out, never throws (pool-kinds.ts PoolKindsDeps.prepared). */
+  prepared(chain: PoolChain): Promise<void>;
   /** The pool withdraw screen's reads and run (src/withdraw/pool-form.ts) for the request's op id. */
   withdrawDeps(chain: PoolChain, opId: string): PoolWithdrawFormDeps;
   /** The withdraw run of a screen's checked answer, its op record written as it goes; settles at the run's end. `claim`
@@ -1140,11 +1151,18 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const firstPasses = new Map<string, Promise<void>>();
   let solanaStarted!: () => void;
   const solanaFirst = new Promise<void>((r) => (solanaStarted = r));
+  // each chain's newest pass in flight (card taps-wait-inside-the-page): a tap waiting for its chain's spend joins it,
+  // never starts a prover run beside it; and the chains whose first pass of this page life has ended
+  const passes = new Map<string, Promise<unknown>>();
+  const firstDone = new Set<string>();
   const firstOf = <T,>(chain: string, run: Promise<T>): Promise<T> => {
     if (!firstPasses.has(chain)) {
-      firstPasses.set(chain, run.then(() => {}, () => {}));
+      firstPasses.set(chain, run.then(() => void firstDone.add(chain), () => void firstDone.add(chain)));
       if (chain === "solana") solanaStarted();
     }
+    passes.set(chain, run);
+    const done = (): void => void (passes.get(chain) === run && passes.delete(chain));
+    run.then(done, done);
     return run;
   };
   const proofs = (): Promise<QueuePass | null> => firstOf("solana", solanaProofs());
@@ -1746,7 +1764,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // each span proven on two readers of two operators), served to the kit's quote (evmPoolIndexUse), so a buy's quote at
   // the tap asks the scan provider only the blocks past the index's N, not the venue's 1M (Base) of Initialize logs. Read
   // on Base mainnet 13 Nov 04:51-05:17Z, nothing signed: a cold sync 11.2-28.5 s, 4,586-4,591 pools, no 429; the gap a
-  // moment on 526-563 ms. Synced once a sign-in, after the state read's proof passes end, each read a "pass" turn on its
+  // moment on 526-563 ms. Synced first after the state read's proof passes end, then kept at the head (evmIndexOf's
+  // keep, card evm-index-kept-at-the-head), each read a "pass" turn on its
   // host's lane (a trade's reads go first); kept in the page's own index store (src/evm-index-store.ts), so a reload
   // serves the kept index at once and syncs only the gap. A sync that ends partial is synced again at the next state
   // read. One sync a chain at once on the device, across its tabs (the Web Lock ct-evm-index/{chain}, if available: a
@@ -1757,6 +1776,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const evmIndex = new Map<"base" | "robinhood", EvmPoolIndexData | null>();
   const evmIndexed = new Set<"base" | "robinhood">();
   const evmIndexing = new Map<"base" | "robinhood", Promise<void>>();
+  // when each chain's index was last written to the store (evmIndexOf's keep)
+  const evmIndexPut = new Map<"base" | "robinhood", number>();
+  const keepSet = over.evmIndexKeep ?? ((f: () => void, ms: number) => {
+    const t = setTimeout(f, ms) as unknown as { unref?: () => void };
+    t.unref?.();
+    return t;
+  });
   // whether the device holds money anywhere (any `held` note of any scope, or a buy or sale record), as the last state
   // read found it: only then is a chain's index synced past what the device already has. A fresh account's coin quote
   // is served the kept index or the release's snapshot alone, read from this origin, and its quote's own scan reads the
@@ -1827,15 +1853,48 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // (a whole sync is proven to its head; the index it keeps ends the margin below, read again by the next gap)
       if (s.index !== null && s.coversThrough !== null && evmPoolIndexUse(network, s)) {
         evmIndexed.add(chain);
-        await indexStore?.put(network, s.index);
+        // the store takes one a minute at most (EVM_INDEX_PUT_MS): the keep below syncs every EVM_INDEX_KEEP_MS
+        const t = turnNow();
+        if (!(t - (evmIndexPut.get(chain) ?? -Infinity) < EVM_INDEX_PUT_MS)) {
+          evmIndexPut.set(chain, t);
+          await indexStore?.put(network, s.index);
+        }
       }
     };
+    const t0 = turnNow();
     const run = evmIndexServe(chain, network, signal)
       .catch(() => {})
       .then(() => (signal.aborted ? undefined : locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync()))
       .catch(() => {})
-      .finally(() => evmIndexing.delete(chain));
+      .finally(() => (evmIndexing.delete(chain), keep(turnNow() - t0)));
     evmIndexing.set(chain, run);
+    // Card evm-index-kept-at-the-head: a served index is kept at the head, so a coin's first quote reads its pools from
+    // it and asks no scan by currency before its answer (the quote reads the blocks past N unread only while they start
+    // within maxLag of the head, 10 s on both chains; synced once a sign-in, the index fell past it within seconds and
+    // every new coin's first quote sent 5 getLogs by currency over the same blocks, 19 Nov). EVM_INDEX_KEEP_MS after each
+    // sync ends, a gap sync from the index it kept (its margin and the new blocks: a head post and one batch on each
+    // reader), never a full one, under the same lock; a tab that finds it held syncs at its next keep. The keep is on the
+    // index readers' own head, not beside a quote: a quote's reads hold none of the sync's, and not on the quote's head
+    // watch, which stops a minute after the last quote, so a coin opened after it would scan first. No store read here:
+    // this tab's index is the newest it serves. Ends at a sign out; a device that holds nothing syncs none (sync above)
+    // (one keep a chain: evmIndexOf runs no more once the chain is indexed, so only this chain of timers syncs it). A sync
+    // that took longer than EVM_INDEX_KEEP_MS (a cold or catch-up one, or one held on 429s) ended with N that much behind
+    // the head, past maxLag where it took over 10 s (a catch-up of 59,000 Base blocks from the snapshot took 28.6 s, its
+    // first coin's quote then scanned 147 blocks by currency, 19 Nov 10:4xZ), so the next starts at once
+    // (the lock is spelled again here, not shared with run's: evm-index-served-before-lock reads run's serve-then-lock
+    // in the bundle as written)
+    const keep = (took: number): void => {
+      if (signal.aborted || !evmIndexed.has(chain)) return;
+      keepSet(() => {
+        if (signal.aborted) return;
+        const at = turnNow();
+        const again = Promise.resolve()
+          .then(() => (locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync()))
+          .catch(() => {})
+          .finally(() => (evmIndexing.delete(chain), keep(turnNow() - at)));
+        evmIndexing.set(chain, again);
+      }, took > EVM_INDEX_KEEP_MS ? 0 : EVM_INDEX_KEEP_MS);
+    };
     return run;
   };
   const evmHoldings = (chain: "base" | "robinhood"): void => {
@@ -3805,6 +3864,41 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // a sell tapped here: the front taken at the tap, so the sale's return note is proved in the tab in use; the sell
   // itself spends no proof and does not wait for it
   const sellTapped = (): void => void front.tap().then((end) => end(), () => {});
+  // a buy tapped while the chain's spend is prepared waits for it (card taps-wait-inside-the-page, src/tap-prepare.ts):
+  // the front taken first, as the buy's own tap takes it (tapRun), so this tab's queue opens and proves; preparing while
+  // the chain's first pass of this page life has not ended and the chain holds a note to prove (UNSPENT or HELD, as a
+  // state read opens the queue for), or while its queue makes a note's first proof with none of the note's ready (a
+  // fresh landing, a remake whose old proof is late); the pass joined is the chain's own in flight, else the queue's next
+  const tapPreparing = async (chain: PoolChain): Promise<boolean> => {
+    const s = chain === "solana" ? scope : (evmPool(chain)?.scope ?? null);
+    if (s === null || !wayOut(chain)) return false;
+    const mine = (await readNotes(await within(page.store(), TRADE_STORE_MS, "the wallet store"))).filter((n) => n.scope === s && (n.state === "UNSPENT" || n.state === "HELD"));
+    if (mine.length === 0) return false;
+    if (!firstDone.has(chain)) return true;
+    const q = chain === "solana" ? open : (evmQueues.get(chain) ?? null);
+    const queue = q === null ? null : ((await within(q, STATE_READ_MS, "a proof queue's open").catch(() => null))?.queue ?? null);
+    if (queue === null) return false;
+    const view = await queue.readyWith(async () => null);
+    const ready = new Set(view.ready.map((r) => r.noteId));
+    const ids = new Set(mine.map((n) => n.id));
+    return view.making.some((id) => ids.has(id) && !ready.has(id));
+  };
+  const tapPrepare = async (chain: PoolChain): Promise<void> => {
+    // no front in its bound: no queue of this tab can prove, so nothing is waited for (the buy's own tap answers it)
+    const end = await front.tap().catch(() => null);
+    if (end === null) return;
+    try {
+      await tapPrepared({
+        preparing: () => tapPreparing(chain),
+        pass: () => passes.get(chain) ?? (chain === "solana" ? proofs() : evmProofs(chain)),
+        now: () => Date.now(),
+        wait: timerWait,
+        signal: solanaStop.signal,
+      });
+    } finally {
+      end?.();
+    }
+  };
   return {
     flow: (ask, ctx) => {
       // a tap: the rent backs' passes from a time drawn after it (card rent-backs-resume-private); after a deposit or a
@@ -3969,6 +4063,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     signedOut,
     // the session's sign out: aborted at the next one (this tab's or another's), as every Solana settle's stop
     outSignal: () => solanaStop.signal,
+    // a buy's wait at its tap for the chain's spend being prepared (card taps-wait-inside-the-page)
+    prepared: tapPrepare,
     withdrawDeps,
     withdraw,
   };

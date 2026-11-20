@@ -19,7 +19,7 @@ import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, upstreamBudget } from "./
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
-import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, listenAt, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, STARTED_HEADER, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
+import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, LISTEN_BACKLOG, listenAt, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, STARTED_HEADER, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
 import { pairNames } from "./token-status/status.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
@@ -346,7 +346,9 @@ test("start() on an OS-chosen port listens on 127.0.0.1, the address its callers
   const r = await call("GET", "/v1/health", {}, undefined, at);
   assert.equal(r.status, 200);
   assert.equal(r.headers["x-helper-commit"], COMMIT, "the call reached the helper");
-  assert.deepEqual([listenAt(0), listenAt(8080)], [{ port: 0, host: "127.0.0.1" }, { port: 8080 }]);
+  assert.deepEqual([listenAt(0), listenAt(8080)], [{ port: 0, host: "127.0.0.1", backlog: LISTEN_BACKLOG }, { port: 8080, backlog: LISTEN_BACKLOG }]);
+  // card helper-answers-through-a-burst: a burst's connects wait in the kernel's queue, never past Node's 511
+  assert.ok(LISTEN_BACKLOG >= 4_096, String(LISTEN_BACKLOG));
 });
 
 test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another token, two tokens or none 404 not_found; reads refused 503 upstream; POST 405", async (t) => {

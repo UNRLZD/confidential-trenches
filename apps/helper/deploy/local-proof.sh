@@ -66,7 +66,9 @@ docker compose -p $P start helper >/dev/null 2>&1
 sleep 2
 docker compose -p $P logs --no-color --no-log-prefix helper caddy >"$OUT/logs.txt" 2>&1
 echo "$(wc -l <"$OUT/logs.txt" | tr -d ' ') log lines; IP-like strings in them (want none):"
-grep -nE '([0-9]{1,3}\.){3}[0-9]{1,3}|remote_ip|client_ip|X-Forwarded' "$OUT/logs.txt" || echo "none"
+# Caddy's upstream log (card helper-answers-through-a-burst) names the helper's own container address in a failed dial,
+# never a client's: that one address is masked before the search
+sed -E 's/dial tcp ([0-9]{1,3}\.){3}[0-9]{1,3}:8080/dial tcp <helper>:8080/g' "$OUT/logs.txt" | grep -nE '([0-9]{1,3}\.){3}[0-9]{1,3}|remote_ip|client_ip|X-Forwarded' || echo "none"
 echo "planted keys in them (want none):"
 grep -nF -e "$JUPITER_API_KEY" -e "$RELAY_API_KEY" -e "$LIFI_API_KEY" -e "$ONECLICK_JWT" "$OUT/logs.txt" || echo "none"
 echo "== container settings"

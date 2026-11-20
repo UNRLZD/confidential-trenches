@@ -47,6 +47,9 @@ import {
   setMatches,
   spendSoon,
   tap,
+  buyOff,
+  dryOffAfter,
+  dryUnavailable,
   unavailable,
   waitingCents,
   withCoinTap,
@@ -204,11 +207,16 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const nearCash = useCashPart(snapshot, "near");
   const cashAt = nearCash === null ? "" : String(nearCash);
   const [coinTap, setCoinTap] = useState<{ key: string; tap_max: string; with_cash: string | null; cash: string } | null>(null);
+  // a coin the pool cannot buy yet, as a dry the box asks says before any tap (card app-unavailable-before-the-tap):
+  // the coin it answered for, so Unavailable holds on this coin's page only
+  const coin = `${chain}:${token}`;
+  const [dryOff, setDryOff] = useState<string | null>(null);
   const request = useRef(kit.request);
   request.current = kit.request;
   useEffect(() => {
     const ask = request.current;
     if (coinKey === null || !ask) return;
+    const at = coin;
     let live = true;
     let t: ReturnType<typeof setTimeout> | undefined;
     let tries = 0;
@@ -219,7 +227,9 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
         ask("pool.buy.dry", { chain: chain as PoolChain, token }).outcome.then(
           (o) => {
             if (!live) return;
+            setDryOff((d) => dryOffAfter(d, at, o));
             if (o.ok) return void setCoinTap({ key: coinKey, tap_max: o.result.tap_max, with_cash: o.result.with_cash ?? null, cash: cashAt });
+            if (dryUnavailable(o)) return;
             const again = dryAgainMs(o.error.code, tries);
             if (again === null) return;
             if (o.error.code !== "busy") tries++;
@@ -266,6 +276,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     const ask = request.current;
     const feeAmount = feeKey === null ? null : chain === "solana" ? feeAskAmount(amount, priceNow.current) : chain === "near" && amount !== null && amount > 0n ? centsToDecimal(amount) : null;
     if (feeKey === null || feeAmount === null || !ask) return;
+    const at = coin;
     let live = true;
     let t: ReturnType<typeof setTimeout> | undefined;
     let tries = 0;
@@ -279,12 +290,14 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
         ask("pool.buy.dry", { chain: chain === "near" ? "near" : "solana", token, amount: feeAmount }).outcome.then(
           (o) => {
             if (!live) return;
+            setDryOff((d) => dryOffAfter(d, at, o));
             // an answer with out and no cost (a move from Cash not priced now: card buy-box-quotes-before-funds) is You
             // receive with the Fee's dash; one with neither keeps the last
             if (o.ok) {
               const r = feeReadOf(feeKey, o.result, amount);
               return void (r !== null && setFeeRead(r));
             }
+            if (dryUnavailable(o)) return;
             const again = dryAgainMs(o.error.code, tries);
             if (again === null) return;
             if (o.error.code !== "busy") tries++;
@@ -318,6 +331,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     const p = priceNow.current;
     const buysAmount = buysKey !== null && amount !== null ? buysAsk.current(amount) : null;
     if (buysKey === null || amount === null || buysAmount === null || !ask) return;
+    const at = coin;
     let live = true;
     let t: ReturnType<typeof setTimeout> | undefined;
     let tries = 0;
@@ -330,6 +344,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
         ask("pool.buy.dry", { chain: chain as PoolChain, token, amount: buysAmount }).outcome.then(
           (o) => {
             if (!live) return;
+            setDryOff((d) => dryOffAfter(d, at, o));
             if (o.ok) {
               // the page's answer is hostile: buysCents takes only an amount above 0 and below the ask
               const c = buysCents(o.result.buys, buysAmount, p);
@@ -338,6 +353,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
               if (r !== null) setFeeRead(r);
               return;
             }
+            if (dryUnavailable(o)) return;
             const again = dryAgainMs(o.error.code, tries);
             if (again === null) return;
             if (o.error.code !== "busy") tries++;
@@ -379,8 +395,11 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const coming = onPool && !signedOut && spendSoon(pools, chain, max);
   const askable = (c: Cents | null) => c !== null && (!onPool || poolBuyAsk(pools, chain, token, c, price, slippageBps, withCash).ok);
   const running = busy(phase);
-  // the pool cannot buy this token yet (Unavailable): Buy and the presets stay off on this token's page
-  const off = unavailable(phase);
+  // the pool cannot buy this token yet (Unavailable): Buy and the presets stay off on this token's page, from the tap's
+  // refusal or, before any tap, from the dry's (card app-unavailable-before-the-tap)
+  const off = buyOff(phase, dryOff, coin);
+  const offRef = useRef(off);
+  offRef.current = off;
 
   // the set preview for the amount in the box; a change asks again and the last numbers stay, dimmed, until it answers
   useEffect(() => {
@@ -452,6 +471,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
 
   function buy(c: Cents) {
     if (!ready || busy(phaseRef.current) || unavailable(phaseRef.current) || !amountOk(c, max, balance)) return;
+    if (offRef.current) return;
     let h;
     if (path !== "vault") {
       // only an ask the box's own checks passed: on a pool, a proof ready, at most one tap's spend, the device's price as
@@ -495,7 +515,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   useEffect(() => {
     if (toDeposit) warm();
   }, [toDeposit, warm]);
-  return { toDeposit, depositIntent, chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown: feeKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, receive, quoting, sell, side, setSide: pickSide, held, heldNow, onSell };
+  return { toDeposit, depositIntent, chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown: feeKey !== null, askable, running, ready, off, buy, presets, presetOff, tapPreset, preview, receive, quoting, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */
@@ -545,7 +565,7 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
   const est = recv !== null ? `≈ ${fmtOut(recv.out)} ${symbol}` : (shown ?? last) ? `≈ ${fmtOut((shown ?? last)!.out)} ${symbol}` : t.quoting ? WORDS.quoting.text : "—";
   const now = src.now();
   const state = signedOut ? "S8.1" : (stateId(phase, now, "buy") ?? "S8.3");
-  const canBuy = ready && !running && !unavailable(phase) && amountOk(amount, max, balance) && askable(amount);
+  const canBuy = ready && !running && !t.off && amountOk(amount, max, balance) && askable(amount);
 
   let label;
   if (signedOut) label = <W id="signInToTrade" />;
@@ -633,6 +653,11 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
       <div className="trb-warn" data-testid="trade-max">
         {phase.k === "ended" ? (
           <EndLine phase={phase} side="buy" part={kit.part?.(phase.id) ?? null} />
+        ) : t.off ? (
+          // before any tap, as a refused tap draws it (States.tsx EndLine): the owner's Unavailable alone
+          <span className="trb-end" data-end="failed" data-testid="trade-end">
+            <W id="unavailable" />
+          </span>
         ) : (
           <>
             {max !== null && !coming && path !== "near" && (

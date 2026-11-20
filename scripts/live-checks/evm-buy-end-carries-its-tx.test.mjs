@@ -104,6 +104,13 @@ test("the marks read the builds' minified shapes", () => {
   assert.deepEqual(marksIn("app", APP_TEXT.replaceAll("`", "'")), NAMES.app);
 });
 
+test("kit 1.20's stage function (card taps-wait-inside-the-page): kit-v1.19 read as the current level, kit-v1.18 and below still sent owed_back as refused", () => {
+  const at120 = SIGN_TEXT.replace("let n=e!==`current`&&t===`owed_back`", "let n=e!==`current`&&e!==`1.19`&&t===`owed_back`");
+  assert.deepEqual(marksIn("sign", at120), NAMES.sign);
+  // any other level in its place is no such stage function
+  for (const v of ["1.18", "1.20", "1.12"]) assert.ok(!marksIn("sign", at120.replace("e!==`1.19`", `e!==\`${v}\``)).includes(NAMES.sign[5]), v);
+});
+
 test("near misses: the shapes before this card, or one piece cut, are refused", () => {
   const without = (host, text, name) => assert.ok(!marksIn(host, text).includes(name), name);
   // a stage event with no txs, or txs passed through as given (no own fields)

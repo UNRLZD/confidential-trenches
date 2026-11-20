@@ -168,3 +168,20 @@ test("the watch's start: a ready chart counts only once its last bar is drawn (r
   assert.equal(settled(null), false);
   assert.equal(settled({ route, chart: null, last: null }), false);
 });
+
+// Card app-chart-solana-full-read-on-time: merge groups 44609308946 and 44612103674 (test-browser (1) jobs 135861403148
+// and 135871185151) stopped this check at its bound of 232 s with nothing printed: its walk had no deadline (TRIES picks
+// of PROBE_MS, READY_MS and WATCH_MAX_MS each, one pick alone 295 s). It now ends by RUN_MS, inside the bound the queue
+// gives it, with room for the launch and the close.
+test("the walk ends by RUN_MS inside the queue's bound: with less than PICK_MIN_MS left no pick starts", async () => {
+  const live = await import("./app-chart-live.mjs");
+  const { boundOf } = await import("../ci/test-shards.mjs");
+  assert.equal(typeof live.RUN_MS, "number", "the walk has a deadline");
+  assert.ok(live.PROBE_MS + live.WATCH_MAX_MS > live.RUN_MS, "one pick alone would run past the deadline (why it is needed)");
+  const bound = boundOf({ dir: "apps/terminal", command: "node ../../scripts/live-checks/app-chart-live.mjs --build dist" });
+  assert.ok(live.RUN_MS / 1000 + live.READ_MS / 1000 + 20 <= bound, `RUN_MS ${live.RUN_MS} ms, a last read and 20 s for the launch and close inside the bound of ${bound} s`);
+  const deadline = 1_000_000;
+  assert.equal(live.pickFits(deadline - live.PICK_MIN_MS, deadline), true);
+  assert.equal(live.pickFits(deadline - live.PICK_MIN_MS + 1, deadline), false, "too little left: no pick");
+  assert.ok(live.PICK_MIN_MS <= live.RUN_MS, "a first pick always fits");
+});

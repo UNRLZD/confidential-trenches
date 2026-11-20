@@ -810,3 +810,24 @@ test("a venue kind outside the two venues names no compute limit or account size
   }
   assert.ok(buildSolanaPoolBuy(cfg, release, venue, req, chain).size <= 1232);
 });
+
+// card sol-buy-takes-the-best-venue-it-can-trade: the venue's pool may sit under the reference set's depth cutoff
+// (`shallow`), and QUOTE holds its E to the market E (the set's best, any venue) less the slippage, the rule of
+// evm-buy-never-below-a-hidden-market. Red at e1995d679: a pool under the cutoff was no reference read at all, and a
+// pool in the set far under E passed.
+test("QUOTE finds the venue's pool under the depth cutoff and refuses one more than the slippage under the market's E", async () => {
+  const { venue, req, chain, reads, ref } = await setup("pump");
+  const wire = buildSolanaPoolBuy(cfg, release, venue, req, chain).wire;
+  const own = ref.pools.find((p) => p.venue === "pump-curve")!;
+  const deeper = { venue: "dlmm" as const, address: "B8BH6ZKrBx6vAfeaQLTFfMRR7NcfPhAN6XJDhNuT6xNR", depth: [own.depth[0] * 100n, own.depth[1] * 100n] as const, cashback: false };
+  const at = (marketOut: bigint) => failed(checkSolanaPoolBuy(wire, cfg, release, venue, req, { ...reads, reference: { ...reads.reference, ref: { ...ref, expectedOut: marketOut, pools: [{ ...deeper, expectedOut: marketOut }], shallow: [own] } } }));
+  // the market 3% over the venue at the ask's 3%: passes, from under the cutoff
+  const bps = BigInt(reads.reference.slippageBps);
+  const edge = (own.expectedOut * 10_000n) / (10_000n - bps);
+  assert.deepEqual(at(edge), []);
+  // a lamport of out past it, and a market 10x the venue: QUOTE
+  assert.deepEqual(at(edge + 2n), ["QUOTE"]);
+  assert.deepEqual(at(own.expectedOut * 10n), ["QUOTE"]);
+  // a venue in the set far under the set's E: QUOTE
+  assert.deepEqual(failed(checkSolanaPoolBuy(wire, cfg, release, venue, req, { ...reads, reference: { ...reads.reference, ref: { ...ref, expectedOut: own.expectedOut * 10n, pools: [own, { ...deeper, expectedOut: own.expectedOut * 10n }] } } })), ["QUOTE"]);
+});

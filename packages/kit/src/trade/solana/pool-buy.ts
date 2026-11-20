@@ -1680,7 +1680,8 @@ export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, rele
   // at most SOLANA_POOL_QUOTE_MAX_AGE_SLOTS before the device's own slot
   const { amount, ref, slippageBps } = reads.reference;
   const venueAddr = solanaPoolVenueAddress(venue);
-  const pool = ref?.pools.find((x) => x.address === venueAddr && x.venue === venue.kind);
+  // the venue's pool in the set, or one under its depth cutoff (card sol-buy-takes-the-best-venue-it-can-trade)
+  const pool = [...(ref?.pools ?? []), ...(ref?.shallow ?? [])].find((x) => x.address === venueAddr && x.venue === venue.kind);
   const stale = quoteAgeProblem(ref, reads.slot);
   if (amount !== req.spend) fail("QUOTE", `the reference is for ${amount} lamports, not the spend ${req.spend}`);
   else if (!pool) fail("QUOTE", `no reference read for ${venueAddr} on two providers`);
@@ -1688,7 +1689,11 @@ export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, rele
   else if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10_000) fail("QUOTE", "slippage out of range");
   else {
     const floor = (pool.expectedOut * BigInt(10_000 - slippageBps)) / 10_000n;
-    if (req.minOut < floor || req.minOut === 0n) fail("QUOTE", `min out ${req.minOut} under ${floor} (E ${pool.expectedOut}, slippage ${slippageBps} bps)`);
+    // the venue's pool held to the coin's market E (the best of the set, any venue): one more than the slippage under
+    // it is a pool seeded beside the coin's real market (card sol-buy-takes-the-best-venue-it-can-trade, the rule of
+    // evm-buy-never-below-a-hidden-market)
+    if (pool.expectedOut * 10_000n < ref!.expectedOut * BigInt(10_000 - slippageBps)) fail("QUOTE", `the venue's E ${pool.expectedOut} is under the market's ${ref!.expectedOut} less ${slippageBps} bps`);
+    else if (req.minOut < floor || req.minOut === 0n) fail("QUOTE", `min out ${req.minOut} under ${floor} (E ${pool.expectedOut}, slippage ${slippageBps} bps)`);
     else pass("QUOTE", `min out ${req.minOut} >= ${floor} (E ${pool.expectedOut}, read at slot ${ref!.slot})`);
   }
   return done();

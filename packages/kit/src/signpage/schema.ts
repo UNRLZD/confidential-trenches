@@ -196,7 +196,8 @@ const unitsAt = (s: string, d: number): bigint | null => {
  * from POOL_ASSET_DECIMALS only) and the one its chain's pool holds, its amounts with no more fraction digits than the
  * asset has decimals, its ready at most its balance, its tap_max only with a ready and at most that ready (one tap's
  * spend, at most its chunks; "0" when the fees and W's new accounts eat every chunk), its making (kit 1.12) only with a
- * ready and at most its balance, one entry per chain (a chain twice is refused). */
+ * ready and at most its balance, its spendable (kit 1.20) at most its balance and at least its tap_max, one entry per
+ * chain (a chain twice is refused). */
 /** The pool asset's USD price as the page read it (card signpage-pool-price): one asset is price x 10^expo USD, price a
  * positive integer with no leading zero, expo an integer in -18..0 (poolUsdPrice's bounds), published_s the feed's own
  * time and read_ms the device's clock at the read; only on a chain with a feed (POOL_USD_FEEDS: not NEAR). */
@@ -207,15 +208,18 @@ const poolPrice = obj({
   read_ms: uint,
 });
 const PRICED: readonly Chain[] = ["solana", "base", "robinhood"];
-const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec, tap_max: dec, making: dec, price: poolPrice });
+const poolEntry = obj({ chain, asset: oneOf(POOL_ASSETS), balance: dec }, { ready: dec, tap_max: dec, making: dec, spendable: dec, price: poolPrice });
 const poolFits: SignpageSchema = (v) => {
   if (!poolEntry(v)) return false;
-  const p = v as { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; making?: string; price?: unknown };
+  const p = v as { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; making?: string; spendable?: string; price?: unknown };
   if (POOL_CHAIN_ASSET[p.chain] !== p.asset) return false;
   if (p.price !== undefined && !PRICED.includes(p.chain)) return false;
   const d = POOL_ASSET_DECIMALS[p.asset];
   const balance = unitsAt(p.balance, d);
   if (balance === null) return false;
+  // spendable (kit 1.20): at most the balance, at least tap_max (checked below with it), with or without a ready
+  const spendable = p.spendable === undefined ? null : unitsAt(p.spendable, d);
+  if (p.spendable !== undefined && (spendable === null || spendable > balance)) return false;
   if (p.ready === undefined) return p.tap_max === undefined && p.making === undefined;
   const ready = unitsAt(p.ready, d);
   if (ready === null || ready > balance) return false;
@@ -225,7 +229,7 @@ const poolFits: SignpageSchema = (v) => {
   }
   if (p.tap_max === undefined) return true;
   const tapMax = unitsAt(p.tap_max, d);
-  return tapMax !== null && tapMax <= ready;
+  return tapMax !== null && tapMax <= ready && (spendable === null || spendable >= tapMax);
 };
 const poolList = arr(poolFits);
 const pools: SignpageSchema = (v) =>
@@ -460,7 +464,7 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   "pool.address": poolAddressParams,
   "deposit.coin": obj({ chain: poolChain }),
   "pool.sell.dry": poolSellDryParams,
-  "pool.buy.dry": obj({ chain: tradeChain, token: str }, { amount: dec }),
+  "pool.buy.dry": obj({ chain: tradeChain, token: str }, { amount: dec, slippage_bps: bps(0) }),
   "pool.move": poolMove,
   "pool.move.dry": poolMove,
 } as const satisfies Record<SignpageKind, SignpageSchema>;

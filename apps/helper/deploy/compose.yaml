@@ -149,6 +149,10 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     expose: ["8080"]
+    # the kernel's bound on a listen queue in the helper's own network (card helper-answers-through-a-burst), so the
+    # queue src/server.ts asks for (LISTEN_BACKLOG) is the one it gets on any host kernel (older ones default to 128)
+    sysctls:
+      net.core.somaxconn: 4096
     # Healthy only when GET /v1/health answers ready: true (src/server.ts listens on 8080 only once the helper is ready).
     # deploy/redeploy.sh starts a new helper beside the running one and stops the old one only after this passes, so the
     # swap has no gap; start_period lets a slow start run without counting its failed checks.

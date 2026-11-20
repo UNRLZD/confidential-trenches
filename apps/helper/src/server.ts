@@ -48,7 +48,7 @@ import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts"
 import { checkPoolRpcOperators, checkSolanaPairOperators } from "./env-check.ts";
 import { callsFiles } from "./proxy/shared-calls.ts";
 import { dayFiles } from "./limits/day-spend.ts";
-import { loopBusy } from "./limits/loop-busy.ts";
+import { loopBusy, loopShed } from "./limits/loop-busy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
@@ -164,6 +164,14 @@ const ROUTE_NAMES: ReadonlySet<string> = new Set(["/v1/health", ...Object.values
 const routeOf = (path: string): string => (ROUTE_NAMES.has(path) ? path : path.startsWith(PROXY_PREFIX) ? "/v1/proxy" : path.startsWith(RPC_PREFIX) ? "/v1/rpc" : path.startsWith(LOGO_PREFIX) ? "/v1/logo" : "other");
 /** The reason a per-client window names (limits.ts clientWindow): one address past its requests a window. */
 const CLIENT_WINDOW = "client window";
+/** The routes shed past capacity (card helper-answers-through-a-burst; limits/loop-busy.ts loopShed): market data only,
+ *  which the page reads again on its own cadence and draws as loading meanwhile. Never a relay, a send, a proof's fee, a
+ *  quote, a device's RPC read, a pool list a buy reads, the token status or health. */
+export const SHED_PATHS: ReadonlySet<string> = new Set([MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_HELD]);
+/** Whether a request's path is shed past capacity: a SHED_PATHS route or a logo. */
+export const shedsPath = (path: string): boolean => SHED_PATHS.has(path) || path.startsWith(LOGO_PREFIX);
+/** The reason a shed names in the refusal log. */
+const SHED_WHY = "loop past capacity";
 
 // The cross-origin rules are the kit's HELPER_CORS (packages/kit/src/helper/v1.ts).
 export const ORIGINS: ReadonlySet<string> = new Set(HELPER_CORS.origins);
@@ -312,6 +320,9 @@ export function handler(
   // card evm-pool-index-from-the-first-pool: GET /v1/market/pools, each EVM chain's PoolManager pools from its first
   // block (src/data/evm/pool-index.ts); a chain with none answers 404
   poolIndexes: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>> = {},
+  // card helper-answers-through-a-burst: whether the loop is past its capacity now, when market data is shed; start()
+  // passes the process's own (limits/loop-busy.ts loopShed), so a test's handler sheds only when it asks to
+  shed: () => boolean = () => false,
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
@@ -406,6 +417,9 @@ export function handler(
         return send(400, { error: "bad_request" }, cors(req));
       }
       route = routeOf(path);
+      // past capacity a market read is answered at once, a 503 the page reads (its CORS headers, the kit's upstream code
+      // and a wait), and costs the loop nothing more (card helper-answers-through-a-burst)
+      if (shedsPath(path) && shed()) return reply({ status: 503, headers: UPSTREAM_WAIT, body: '{"error":{"code":"upstream"}}', why: SHED_WHY });
       // every route but the pool, RPC, proxy and record routes (which have their own windows below) counts in the client's window
       if (path.startsWith(LOGO_PREFIX)) {
         const wait = logoRate.take(clientOf(req));
@@ -1278,16 +1292,28 @@ export function pushReaders(swaps: Swaps | undefined, near: NearMarket | undefin
  *  127.0.0.1, the address its callers dial. On macOS a wildcard bind on port 0 may be given a port another process holds
  *  on 127.0.0.1, which then takes every 127.0.0.1 call to it (a loaded machine's Redis closed one: a socket hang up);
  *  bound to 127.0.0.1, the port is refused while another listener holds it there. */
-export function listenAt(port: number): { port: number; host?: string } {
-  return port === 0 ? { port, host: "127.0.0.1" } : { port };
+export function listenAt(port: number): { port: number; host?: string; backlog: number } {
+  return port === 0 ? { port, host: "127.0.0.1", backlog: LISTEN_BACKLOG } : { port, backlog: LISTEN_BACKLOG };
 }
+/**
+ * The connections the kernel holds for this server before it takes them (listen(2)'s backlog; card
+ * helper-answers-through-a-burst). Caddy opens one connection to the helper for each request in flight that finds no
+ * idle one, so a burst of page opens is a burst of connects: past the queue the kernel drops the SYN, the dial waits
+ * for its resends (at 1 s and 3 s) and Caddy's 3 s dial gives up with a 502 that has no CORS header, while the helper
+ * itself still answers (19 Nov 14:30-14:33Z: every 502 in 3.6 s, the container healthy). Node's default is 511; 300
+ * page opens through Caddy on a copy pinned to 2 CPUs held up to 894 connections to the helper at once, filled its
+ * queue (512 of 511) and met 9 dial timeouts (deploy/burst-proof.sh, 19 Nov 16:2xZ). [design: 4096, the kernel's own
+ * somaxconn default since Linux 5.4, which compose.yaml sets in the helper's network so the kernel honours it; four
+ * times the connections Caddy holds at most (deploy/Caddyfile max_conns_per_host), so Caddy alone can never fill it]
+ */
+export const LISTEN_BACKLOG = 4_096;
 
 export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held, near?: NearMarket, poolIndexes?: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes, loopShed),
   );
   // card market-data-push: the push socket, upgraded for APP_HOST's Origin only, in its own window per client
   attachPush(server, { commit, readers: pushReaders(evmSwaps, near), allowed: (req) => originIn(req, PUSH_ORIGINS) !== null, client: clientOf, take: clientWindow(API_RATE_MAX).take });
