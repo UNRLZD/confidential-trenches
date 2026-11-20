@@ -1389,8 +1389,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (!ok && unsent !== undefined && holds.heldFor(url) === 0) unsent.paced = true;
       return ok;
     };
-    const send = (part: Call[]) => async () => ((await paceOk(part.length)) ? one(url, part) : null);
-    const got = await Promise.all(parts.map(async (part) => (fgNow() ? slot(url, part.length, wait, send(part)) : (await paceOk(part.length)) ? slot(url, part.length, wait, () => one(url, part)) : null)));
+    const send = (part: Call[]) => async (answered: () => void) => ((await paceOk(part.length)) ? one(url, part, answered) : null);
+    const got = await Promise.all(parts.map(async (part) => (fgNow() ? slot(url, part.length, wait, send(part)) : (await paceOk(part.length)) ? slot(url, part.length, wait, (answered) => one(url, part, answered)) : null)));
     if (unsent !== undefined && got.some((g) => g === GAVE_UP)) unsent.paced = true;
     // a part given back from the queue (slot) is no answer for its requests alone: the parts answered are kept, and only
     // its requests are asked of the next provider
@@ -1407,7 +1407,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // a post queued past `maxWaitMs` is another provider's, as a read past its pace's wait is (one): GAVE_UP, counted in
   // `paced` so agreed's patient round may ask it again (fold 4: at c780282 a cold dozen's reads waited 68.7 s in all in
   // daybreak's queue, and the slowest tape took 16.7 s)
-  async function slot<T>(url: string, calls: number, maxWaitMs: number, run: () => Promise<T>): Promise<T | typeof GAVE_UP> {
+  async function slot<T>(url: string, calls: number, maxWaitMs: number, run: (answered: () => void) => Promise<T>): Promise<T | typeof GAVE_UP> {
     const q = inflight.get(url) ?? { n: 0, calls: 0, queue: [] };
     inflight.set(url, q);
     q.calls += calls;
@@ -1434,9 +1434,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       waited(performance.now() - queuedAt, true);
       if (!sent) return (q.calls -= calls), paced.set(url, (paced.get(url) ?? 0) + 1), GAVE_UP;
     } else q.n++;
-    try {
-      return await run();
-    } finally {
+    // the place is given up once: at the post's answer (`answered`, one's: its parse then waits its turn with no place
+    // held, card helper-parse-turn-outside-the-slot), else when the post ends
+    let freed = false;
+    const free = (): void => {
+      if (freed) return;
+      freed = true;
       q.calls -= calls;
       // the first foreground post queued, a background one a caller joined while it waited (join) among them, else the
       // first queued
@@ -1444,6 +1447,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const next = lifted < 0 ? q.queue.shift() : q.queue.splice(lifted, 1)[0];
       if (next !== undefined) next.go();
       else q.n--;
+    };
+    try {
+      return await run(free);
+    } finally {
+      free();
     }
   }
 
@@ -1479,7 +1487,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     waited(slept);
     return true;
   }
-  async function one(url: string, part: Call[]): Promise<Reply[] | null> {
+  /** `answered`, when given, is told once the provider's whole answer is in (its place in slot then free), before the
+   *  answer waits its parse turn; a post that ends with no answer read never tells it. */
+  async function one(url: string, part: Call[], answered?: () => void): Promise<Reply[] | null> {
     // card helper-rpc-batch-learns-reader-size: a part past the most calls the provider takes (the helper's one map,
     // rpc/batch-sizes.ts: a size it refused, any path's) goes as its parts, all at once, the replies in the calls' order;
     // they draw no more of its pace than the part drew
@@ -1487,7 +1497,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (part.length > most) {
       const subs: Call[][] = [];
       for (let i = 0; i < part.length; i += most) subs.push(part.slice(i, i + most));
-      const got = await Promise.all(subs.map((s) => one(url, s)));
+      // the parts' place is free once every part's answer is in
+      let left = subs.length;
+      const each = answered === undefined ? undefined : () => void (--left === 0 && answered());
+      const got = await Promise.all(subs.map((s) => one(url, s, each)));
       return got.some((g) => g === null) ? null : (got as Reply[][]).flat();
     }
     if (holds.heldFor(url) > 0) return null;
@@ -1530,6 +1543,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // each answer is parsed in a turn of its own once the turn's slice is spent (card helper-loop-never-held-by-a-read:
       // one ANSWER_MAX answer parses in 3.6 ms on the Mac, but a burst's answers landed in one turn together, and a
       // copy's profile held one 155 ms with 39% of it in the stream reads and parses)
+      // the post is answered: out of `out` (latencyOf, hedged) and its place free before the turn is waited (card
+      // helper-parse-turn-outside-the-slot: waited with both held, a herd's turns kept a provider's places past their
+      // answers and past HEDGE_MS sent the read to another provider while the answers sat waiting to be parsed); a
+      // parse that throws is still this provider's failed read (the catch below: null)
+      o.delete(sent);
+      answered?.();
       const w = slice();
       if (w !== null) await w;
       const parsed: unknown = JSON.parse(text);
@@ -1552,7 +1571,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     } finally {
       o.delete(sent);
     }
-    return one(url, part);
+    return one(url, part, answered);
   }
   /** Waits for `p` until it settles or one of `urls` has a post out (sent, unanswered) HEDGE_MS or longer. */
   async function hedged(p: Promise<unknown>, urls: readonly string[]): Promise<void> {
