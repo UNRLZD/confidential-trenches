@@ -8,6 +8,11 @@
 // Base maxLag 5, 21:06Z): blastapi 50 back, 10 s of Base's blocks, is never asked in the pair; it fails.
 // bad_shared is main's check at 2e7ec335, every case in one process (2026-11-06 01:01Z): base-blastapi-50 began warm
 // after base-blastapi-5's quotes of the same token and never asked its lagger; it fails.
+// bad_scanlag is release 184's run on GitHub's runner (live app run 44670793512, its log's quote lines): with blastapi
+// held out of the pair, 3 of 10 base-blastapi-50 warm quotes scanned up to the pair's block at Base's tip, which no scan
+// provider held yet, and refused rpc_error; it fails (card evm-quote-rides-a-scan-lag-at-max). good_scanlag is that
+// card's kit from this Mac (2026-11-20 05:2xZ), each case in a process of its own: 10 of 10 warm quotes ok on each; it
+// passes.
 //   node --test scripts/live-checks/evm-quote-lag-held.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -39,6 +44,21 @@ test("the bad answer (e031ad4) fails: Base's warm quotes refused rpc_disagree at
   assert.equal(r.ok, false);
   has(r.lines, /^FAIL base-blastapi-5: 2 of 10 warm quotes end ok \(others: rpc_disagree at quote 1, 598 ms: rpc_disagree: the scan provider's head 53541965 is more than 5 blocks past the agreed block 53541959/);
   has(r.lines, /^FAIL robinhood-publicnode-100: 9 of 10 warm quotes end ok/);
+});
+
+test("good_scanlag (card evm-quote-rides-a-scan-lag-at-max at b1d29a799, this Mac) passes: 10 of 10 warm quotes ok on each case, base-blastapi-50's among them", () => {
+  const r = check(A.good_scanlag);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  has(r.lines, /^PASS base-blastapi-50: base-mainnet\.public\.blastapi\.io answering 50 blocks back was asked for its head \d+ times in the cold quote$/);
+  has(r.lines, /^PASS base-blastapi-50: 10 of 10 warm quotes end ok$/);
+});
+
+test("bad_scanlag (release 184, live app run 44670793512) fails: 3 of 10 base-blastapi-50 warm quotes refused at a pair's block no scan provider held yet (card evm-quote-rides-a-scan-lag-at-max)", () => {
+  const r = check(A.bad_scanlag);
+  assert.equal(r.ok, false);
+  has(r.lines, /^FAIL base-blastapi-50: 7 of 10 warm quotes end ok \(others: rpc_error at quote 2, 2218 ms: rpc_error: the scan provider does not hold block 59783246 yet; rpc_error at quote 3, 2502 ms: .*; rpc_error at quote 4, 6303 ms: /);
+  has(r.lines, /^PASS base-blastapi-5: 10 of 10 warm quotes end ok$/);
+  has(r.lines, /^PASS robinhood-publicnode-100: 10 of 10 warm quotes end ok$/);
 });
 
 test("each rule fails alone on the good answer with one thing changed", () => {

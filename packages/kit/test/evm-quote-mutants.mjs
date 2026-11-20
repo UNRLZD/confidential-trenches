@@ -222,7 +222,12 @@ export const MUTANTS = [
   // on this mutant: SL5 holds it, a lag over one span, so the lower request ends past the backend too
   [QUOTE, "    const top = p === null;", "    const top = p === null && b === head;", R, "SL5 "],
   // review of 22e29c9, B1: a head read on the second sent the scan's requests there too
-  [QUOTE, "headFrom(f)).then((head) => ({ head, first: f })));", "headFrom(f)).then((head) => ({ head, first: f.next ?? f })));", R, "SP6 "],
+  [QUOTE, "headFrom(f)).then((head) => ({ head, first: f, own: ownOf(f) })));", "headFrom(f)).then((head) => ({ head, first: f.next ?? f, own: ownOf(f) })));", R, "SP6 "],
+  // card evm-quote-rides-a-scan-lag-at-max: a scan up to a head no scan provider named reads up to their own head where
+  // its provider does not hold the newest block, within maxLag alone; a follow's pinned block is such a head too
+  [QUOTE, "        if (h !== null && h < b && head - h <= lag) return ((ownTo = h), null);\n", "", R, "LAGMAX1 "],
+  [QUOTE, "if (h !== null && h < b && head - h <= lag) return", "if (h !== null && h < b) return", R, "LAGMAX3 "],
+  [QUOTE, "(a.pin === undefined && spec === null ? undefined :", "(spec === null ? undefined :", R, "LAGMAX4 "],
   // review of 22e29c9, N4: the 2 s hold where no second follows (the head read), and a not-yet block as an answer
   [QUOTE, "      fast &&= spareNext;", "", R, "SP8 "],
   [QUOTE, 'throw on.next !== undefined ? new ScanRefused("rpc_error", m) : new NotHeldYet("rpc_error", m);', "return out;", R, "SP3 "],

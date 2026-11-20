@@ -2240,8 +2240,9 @@ async function scanHeadOf(rpc: EvmRpc, gate: ScanGate): Promise<bigint> {
 type ScanOn = { rpc: EvmRpc; gate: ScanGate; span: number; parallel: number; orSpan?: number | undefined; next?: ScanOn | undefined };
 /** The quote's scan providers: the head every scan reads up to and the provider asked first, the rest behind it in
  *  order (`next`). A first that answered no head still carries the requests: the head is the first of the rest that
- *  answered one. */
-type ScanFrom = { head: bigint; first: ScanOn };
+ *  answered one. `own`, where the head is a block no scan provider named (a warm buy's held head, a follow's pinned
+ *  block): the scan providers' own head, as `head` is read where none is given (card evm-quote-rides-a-scan-lag-at-max). */
+type ScanFrom = { head: bigint; first: ScanOn; own?: (() => Promise<bigint>) | undefined };
 /** The scan of the currencies `cs` up to the scan provider's head, then the agreed block `agreed()`, picked once those
  *  logs are in (card evm-quote-head-watch: a block picked before a long scan had aged past what Robinhood's providers
  *  keep of state by the reads). The head must not be more than `maxLag` blocks past the agreed block (review of
@@ -2286,7 +2287,7 @@ async function scanPools(
     const all = await Promise.all(cs.map(async (c) => [c, [...new Map([...(indexScanOf(chain, kind, c, weth, floor)?.pools ?? []), ...(tail0?.byCurrency.get(c) ?? []).filter(ofKind(c)), ...(await servedOf(chain, kind, c, weth))].map((k) => [poolId(k), k])).values()]] as [string, EvmPoolKey[]]));
     return { pools: new Map(all), commit: () => {} };
   }
-  const { head: scanHead, first } = await from;
+  const { head: scanHead, first, own } = await from;
   const second = first.next;
   // the logs up to the scan provider's head are read beside the round before (at most depth / span requests for each
   // SCAN_OR currencies), and used only once that head is found within maxLag of the agreed block
@@ -2456,12 +2457,15 @@ async function scanPools(
     // a provider that answers it holds no such block (null: not yet) is asked again whole, as a failure: its next try
     // may reach a backend that does; one with another behind it passes the request to the next at once. Any other
     // answer without the block counts as an answer with no logs (logsOf)
+    let unheld = false;
     const rpc: EvmRpc = !top
       ? on.rpc
       : async (cs, signal) => {
+          unheld = false;
           const out = await on.rpc(cs, signal);
           const h = (out[filters.length] as { result?: unknown } | null)?.result;
           if (Array.isArray(out) && h === null && !out.some(limited)) {
+            unheld = true;
             const m = `the scan provider does not hold block ${b} yet`;
             throw on.next !== undefined ? new ScanRefused("rpc_error", m) : new NotHeldYet("rpc_error", m);
           }
@@ -2537,7 +2541,21 @@ async function scanPools(
       return typeof h?.hash === "string" && out.slice(0, filters.length).some((x) => logsBehind((x as { error?: unknown } | null)?.error));
     };
     let behind = false;
-    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast).then((out) => (behindIn(out) ? ((behind = true), null) : logsOf(out)), (e) => {
+    // A scan up to a head no scan provider named (`own`: a warm buy's held head, the quote pair's block, or a follow's
+    // pinned one) whose provider does not hold the request's newest block: the request is asked of it again up to the
+    // scan providers' own head, where that is within maxLag of the scan's, and the blocks past it are the lag the quote
+    // accepts where it reads up to a provider's own head (scanPools above: missed by this quote alone, read by a later
+    // one, never kept as read). Card evm-quote-rides-a-scan-lag-at-max: release 184's live app run 44670793512, with
+    // blastapi 50 blocks back held out of the pair, held a pair's block at Base's tip, and 3 of 10 warm quotes asked
+    // every scan provider for it, each a few blocks behind, and ended rpc_error "the scan provider does not hold block
+    // 59783246 yet" in 2,218 to 6,303 ms. One further behind refuses as before; the provider answering holds the request's
+    // own last block in its batch as any request's
+    let ownTo: number | null = null;
+    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast).then((out) => (behindIn(out) ? ((behind = true), null) : logsOf(out)), async (e) => {
+      if (unheld && own !== undefined && (e instanceof NotHeldYet || e instanceof ScanRefused)) {
+        const h = await own().then(Number, () => null);
+        if (h !== null && h < b && head - h <= lag) return ((ownTo = h), null);
+      }
       if (e instanceof ScanAnswered) {
         answered = true;
         return null;
@@ -2546,6 +2564,7 @@ async function scanPools(
       notYet = e instanceof NotHeldYet;
       return null;
     });
+    if (ownTo !== null) return a > ownTo ? undefined : one({ part, a, b: ownTo, on }, splits);
     // the tail's answer past 4 times the pools the venue's measured rate makes of its blocks (and past one): a flood of
     // pools (independent review of 266cca1b4, M3: 50,000 made-up pools of other currencies in the tail's blocks cost a
     // quote 15 getLogs and 50,001 logs where main asked 2), so this quote drops the tail and scans by currency, as main
@@ -3734,7 +3753,12 @@ async function routeSetOf(a: {
   // as before: a held head more than maxLag below it runs the quote again at a block agreed now (agreedAt). Read before
   // the logs, it was a trip of its own on the warm quote's path: Tenderly's eth_blockNumber, 306-411 ms from the Mac,
   // then the getLogs, which ended warm Base quotes at 920-1,197 ms (2026-11-19 13:0xZ, main 3d415aa83)
-  const scanFromOf = (f: ScanOn) => (scanFrom ??= (a.pin !== undefined ? Promise.resolve(a.pin.number) : spec !== null ? Promise.resolve(spec.number) : headFrom(f)).then((head) => ({ head, first: f })));
+  // Either head is a block no scan provider named: `own` is the scan providers' own head, the warm buy's read beside its
+  // logs (`specHead`), a follow's read only once a request finds its provider without its block (scanPools `ownTo`; card
+  // evm-quote-rides-a-scan-lag-at-max)
+  let ownRead: Promise<bigint> | undefined;
+  const ownOf = (f: ScanOn) => (a.pin === undefined && spec === null ? undefined : () => (ownRead ??= specHead ?? headFrom(f)));
+  const scanFromOf = (f: ScanOn) => (scanFrom ??= (a.pin !== undefined ? Promise.resolve(a.pin.number) : spec !== null ? Promise.resolve(spec.number) : headFrom(f)).then((head) => ({ head, first: f, own: ownOf(f) })));
   // a scan the quote waits for that fails refuses the quote, so it may pick the agreed block to keep its spans; a kept
   // scan started early waits for the quote to pick it, whether it ends or fails (review of bc189de, L-3: one that ended
   // before the token's scan picked the block itself, before the token's logs were in)
@@ -3756,7 +3780,7 @@ async function routeSetOf(a: {
     // quote's own gates: a provider the quote found down or throttled is passed over, and nothing is sent past the
     // quote's bound and deadline
     const on = (o: ScanOn): ScanOn => ({ ...o, rpc: laterOf(o.rpc) ?? o.rpc, next: o.next === undefined ? undefined : on(o.next) });
-    const from = scanFromOf(firstOn).then(({ head }) => ({ head, first: on(firstOn) }));
+    const from = scanFromOf(firstOn).then(({ head, own }) => ({ head, own, first: on(firstOn) }));
     const go = () => evmTailFill(chain, firstOn.rpc, () => scanPools(chain, [...toFill], "all", lower(v.weth), v.poolManager!, v.scan!, agreedHead, v.maxLag, from, agreedHead, undefined, false, firstOn.rpc, v.indexMargin, false, undefined, true));
     go();
   });
