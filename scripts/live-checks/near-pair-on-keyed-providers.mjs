@@ -69,7 +69,7 @@ export function judge({ health, fees }) {
   say(parsed.length === 2 && company(parsed[0]) !== undefined && company(parsed[0]) !== company(parsed[1]), `${HEADER}: two different companies (${parsed.map(company).join(", ")})`);
   for (const [i, m] of parsed.entries()) say(m !== null && m[3] === undefined, `${HEADER}: ${pair[i]} is a keyed provider, not a free endpoint`);
   const near = json(health?.body ?? "")?.rpc?.near;
-  const listed = Array.isArray(near) ? near.filter((e) => typeof e === "string").map((e) => e.replace(/ (answers|wrong chain|held|down|unread)$/, "")) : [];
+  const listed = Array.isArray(near) ? near.filter((e) => typeof e === "string").map((e) => e.replace(/ (answers|wrong chain|held|spent|down|unread)$/, "")) : [];
   for (const p of pair) say(listed.includes(p), `rpc.near lists ${p} (${JSON.stringify(near ?? null)})`);
   const list = Array.isArray(fees) ? fees : [];
   say(list.length === FEE_CALLS, `${list.length} of ${FEE_CALLS} fee calls read`);

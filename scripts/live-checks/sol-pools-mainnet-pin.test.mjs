@@ -4,8 +4,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { MARKS_A_ENV, RPC_UPSTREAMS } from "../../apps/helper/src/rpc/rpc.ts";
-import { A_NAME, B_NAMES, bucket0, judge, providerOf, read } from "./sol-pools-mainnet-pin.mjs";
+import { MARKS_A_ENV, MARKS_A_SLOTS, RPC_UPSTREAMS } from "../../apps/helper/src/rpc/rpc.ts";
+import { A_NAME, A_NAMES, B_NAMES, bucket0, judge, providerOf, read } from "./sol-pools-mainnet-pin.mjs";
 import { RETRY } from "./provider-answer.mjs";
 
 RETRY.ms = 0;
@@ -15,6 +15,8 @@ const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 
 test("the check's names and shape are the helper's: route A's one name, route B's list, the scan's bucket 0 bytes", () => {
   assert.equal(A_NAME, MARKS_A_ENV);
+  // card helper-solana-off-a-spent-key: route A's candidates, the helper's aCandidates order
+  assert.deepEqual(A_NAMES, [...new Set([...MARKS_A_SLOTS, ...RPC_UPSTREAMS.solana.keyed])]);
   assert.deepEqual(B_NAMES, [...RPC_UPSTREAMS["solana-marks"].keyed]);
   // bucket 0's bytes in the two requests the wallet's lister sends (solanaMarksListed; apps/helper/src/rpc/rpc.test.ts SPENT and PRE)
   assert.equal(bucket0(13), "1112");
@@ -38,7 +40,13 @@ test("recorded bad run: the deployed helper before this card, route B 404: FAIL"
 
 test("planted: each rule FAILs on its own", () => {
   const planted = {
-    "route A answered by a spare": (g) => (g.reads.find((x) => x.route === "A").headers["server-timing"] = 'rpc;dur=5;desc="SOLANA_RPC_URL_QUICKNODE"'),
+    "route A on route B's company (both QuickNode)": (g) => {
+      for (const x of g.reads) x.headers["server-timing"] = 'rpc;dur=5;desc="SOLANA_RPC_URL_QUICKNODE"';
+    },
+    "route A and route B two keys of dRPC, one company": (g) => {
+      for (const x of g.reads) x.headers["server-timing"] = `rpc;dur=5;desc="SOLANA_RPC_URL_DRPC_${x.route === "A" ? 1 : 2}"`;
+    },
+    "route A answered by the public endpoint": (g) => (g.reads.find((x) => x.route === "A").headers["server-timing"] = 'rpc;dur=5;desc="public"'),
     "route B answered by route A's name": (g) => (g.reads.find((x) => x.route === "B").headers["server-timing"] = 'rpc;dur=5;desc="SOLANA_RPC_URL"'),
     "route B answered by the public endpoint": (g) => (g.reads.find((x) => x.route === "B").headers["server-timing"] = 'rpc;dur=5;desc="public"'),
     "the two lists differ": (g) => g.reads.find((x) => x.route === "B" && x.size === 17).answer.result.value.push({ pubkey: "x" }),
@@ -55,6 +63,14 @@ test("planted: each rule FAILs on its own", () => {
     plant(g);
     assert.equal(judge(g).verdict, "FAIL", name);
   }
+});
+
+test("card helper-solana-off-a-spent-key: route A off a spent SOLANA_RPC_URL, on the holders slot's key with B on QuickNode, PASSes", () => {
+  const g = copy(A.good);
+  for (const x of g.reads) x.headers["server-timing"] = `rpc;dur=5;desc="${x.route === "A" ? "SOLANA_HOLDERS_RPC_URL" : "SOLANA_RPC_URL_QUICKNODE"}"`;
+  const r = judge(g);
+  assert.deepEqual(bad(r), []);
+  assert.ok(r.lines.some((l) => /A \(SOLANA_HOLDERS_RPC_URL\) and B \(SOLANA_RPC_URL_QUICKNODE\) on two companies/.test(l)), r.lines.join("\n"));
 });
 
 test("a route with no usable answer is named and not judged: INCONCLUSIVE, and FAIL beside a wrong answer", () => {

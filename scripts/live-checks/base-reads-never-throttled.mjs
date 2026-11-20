@@ -64,9 +64,9 @@ export const RETRY_EVERY_MS = 30_000;
 export const TIMEOUT_MS = 15_000;
 /** Each chain's pool, the kit's pin (its eth_getLogs is what a sign-in's pool sync reads). */
 export const POOLS = Object.fromEntries(CHAINS.map((c) => [c, mainnetVenues()[c].pool]));
-const DRPC = /^drpc\.live( key[1-9])?( keyless)? (answers|wrong chain|held|down|unread)$/;
+const DRPC = /^drpc\.live( key[1-9])?( keyless)? (answers|wrong chain|held|spent|down|unread)$/;
 const HEX = /^0x[0-9a-f]{1,16}$/i;
-const STATE_LINE = /^BAD health [a-z]+: drpc\.live( key[1-9])? (wrong chain|held|down|unread)$/;
+const STATE_LINE = /^BAD health [a-z]+: drpc\.live( key[1-9])? (wrong chain|held|spent|down|unread)$/;
 const KEPT = /^pool logs kept to block (\d+)$/;
 
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -6,16 +6,18 @@
 // alone, dataSlice { offset: 0, length: 0 }).
 // No keyless mainnet provider answers that scan (publicnode 403 "Indexed requests require a personal token",
 // api.mainnet-beta 403, read 9 Nov 17:23Z), so both are the helper's (apps/helper/src/rpc/rpc.ts marksRoutes):
-//   A: POST /v1/rpc/solana, getProgramAccounts sent to SOLANA_RPC_URL alone;
+//   A: POST /v1/rpc/solana, getProgramAccounts sent to one provider of A_NAMES (card helper-solana-off-a-spent-key:
+//      the first of the Solana slots, then the keyed spares, whose plan is not spent and that has a B off its company);
 //   B: POST /v1/rpc/solana-marks, that scan alone, from Solana's keyed spares off A's company, no public fallback.
 // For bucket 0 of each mark size (13, a spent mark; 17, a pre-mark), in the exact shape rpc.ts scanAllowed admits, on
 // the program contracts/pool-solana/deployments/mainnet.json names, it reads both routes with Origin SIGN_HOST and
 // passes only when:
 //   - each answers 200 with a list and its finalized slot, a full-sha X-Helper-Commit and SIGN_HOST in
 //     Access-Control-Allow-Origin;
-//   - the provider each names in its Server-Timing rpc entry (the environment NAME, never a URL) is SOLANA_RPC_URL for A
-//     and one of route B's names, never SOLANA_RPC_URL, for B (the start check, apps/helper/src/env-check.ts
-//     checkMarksRoute, refuses a B on A's company before the helper starts);
+//   - the provider each names in its Server-Timing rpc entry (the environment NAME, never a URL) is one of A_NAMES for A
+//     and one of route B's names for B, the two on two companies by name (companyOfName: QuickNode's and dRPC's names
+//     are theirs, a slot's its own; the helper picks B off A's company by URL, and the start check,
+//     apps/helper/src/env-check.ts checkMarksRoute, refuses a pair on one company before the helper starts);
 //   - the two routes' lists are the same accounts, byte for byte (sha256 of the value; a pair that differs is read
 //     again once, since a mark that lands between the two reads differs for a moment);
 //   - route B refuses any other method: getSlot answers 400.
@@ -37,6 +39,10 @@ export const BASE = "https://ct-api.unrealized.trade";
 export const SIGN = "https://confidential.unrealized.trade";
 /** apps/helper/src/rpc/rpc.ts MARKS_A_ENV and RPC_UPSTREAMS["solana-marks"].keyed, held equal by this check's test. */
 export const A_NAME = "SOLANA_RPC_URL";
+/** Route A's providers by name (apps/helper/src/rpc/rpc.ts aCandidates): the Solana slots, then the keyed spares. */
+export const A_NAMES = [A_NAME, "SOLANA_TRADES_RPC_URL", "SOLANA_HOLDERS_RPC_URL", "SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC_1", "SOLANA_RPC_URL_DRPC_2", "SOLANA_RPC_URL_DRPC_3"];
+/** The company a provider's name says: QuickNode's and dRPC's names theirs (dRPC's three keys one company), a slot its own name. */
+export const companyOfName = (name) => (name === "SOLANA_RPC_URL_QUICKNODE" ? "quicknode" : /^SOLANA_RPC_URL_DRPC_[1-9]$/.test(name) ? "drpc" : name);
 export const B_NAMES = ["SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC_1", "SOLANA_RPC_URL_DRPC_2", "SOLANA_RPC_URL_DRPC_3"];
 const SHA = /^[0-9a-f]{40}$/;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -60,6 +66,7 @@ export function judge(run) {
   const of = (route, size) => (run.reads ?? []).filter((r) => r.route === route && r.size === size).at(-1);
   for (const size of SIZES) {
     const got = {};
+    const names = {};
     for (const route of ["A", "B"]) {
       const r = of(route, size);
       const tag = `[${route} size ${size}]`;
@@ -79,10 +86,12 @@ export function judge(run) {
       say(SHA.test(h["x-helper-commit"] ?? ""), `${tag} X-Helper-Commit: ${h["x-helper-commit"] ?? "none"}`);
       say(h["access-control-allow-origin"] === SIGN, `${tag} allow-origin: ${h["access-control-allow-origin"] ?? "none"}`);
       const name = providerOf(h["server-timing"]);
-      const right = route === "A" ? name === A_NAME : name !== null && B_NAMES.includes(name);
-      say(right, `${tag} answered by ${name ?? "no named provider"}${right ? "" : route === "A" ? `, not ${A_NAME}` : `, not one of ${B_NAMES.join(", ")}`}`);
+      const right = name !== null && (route === "A" ? A_NAMES : B_NAMES).includes(name);
+      say(right, `${tag} answered by ${name ?? "no named provider"}${right ? "" : `, not one of ${(route === "A" ? A_NAMES : B_NAMES).join(", ")}`}`);
+      if (right) names[route] = name;
       if (listed) got[route] = sha(v);
     }
+    if (names.A !== undefined && names.B !== undefined) say(companyOfName(names.A) !== companyOfName(names.B), `[size ${size}] A (${names.A}) and B (${names.B}) on two companies`);
     if (got.A !== undefined && got.B !== undefined) say(got.A === got.B, `[size ${size}] the two routes' lists are the same: ${got.A === got.B ? got.A.slice(0, 16) : `A ${got.A.slice(0, 16)}, B ${got.B.slice(0, 16)}`}`);
   }
   const f = run.refusal ?? {};
