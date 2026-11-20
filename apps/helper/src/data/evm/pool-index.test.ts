@@ -281,3 +281,31 @@ test("the helper keeps Robinhood's index only by default: Base's is off until it
     rmSync(d, { recursive: true, force: true });
   }
 });
+
+test("card helper-loop-never-held-by-a-write: a span at the log cap (9,999 pools) is checked and written without one turn of the loop past 100 ms, and lands whole: every pool, then the next block (red at e35007152: keep wrote the span in one turn, 300 to 376 ms in the copy's profile)", async () => {
+  const d = dir();
+  const logs = Array.from({ length: POOL_INDEX_SPAN_LOGS - 1 }, (_, i) => logOf(keyOf(tok(1), tok(i + 2)), i));
+  const ix = createPoolIndex(join(d, "p.sqlite"), cfg({ span: POOL_INDEX_SPAN_LOGS }), deps(chain(() => 50_000, logs)));
+  let worst = 0;
+  let due = performance.now() + 2;
+  const t = setInterval(() => {
+    const n = performance.now();
+    worst = Math.max(worst, n - due);
+    due = n + 2;
+  }, 2);
+  // a caller's read of the index while the span is written answers at once, from what has landed (never a later block)
+  let mid: ReturnType<typeof ix.pools> | null = null;
+  const reader = setTimeout(() => void (mid = ix.pools(tok(1))), 5);
+  const n = await ix.step();
+  // the turn the span ended in is measured too: the timer's next firing
+  await new Promise((r) => setTimeout(r, 5));
+  clearInterval(t);
+  clearTimeout(reader);
+  assert.equal(n, POOL_INDEX_SPAN_LOGS);
+  assert.ok(worst < 100, `a turn of ${Math.round(worst)} ms`);
+  for (const i of [0, 4_999, POOL_INDEX_SPAN_LOGS - 2]) assert.equal(ix.pools(tok(i + 2)).pools.length, 1, `pool ${i}`);
+  assert.equal(ix.pools(tok(1)).through, POOL_INDEX_SPAN_LOGS - 1, "the next block moves only once every pool of the span is in the file");
+  if (mid !== null) assert.equal((mid as { through: number }).through, -1, "mid-span the index still says it holds no block of it");
+  ix.close();
+  rmSync(d, { recursive: true });
+});

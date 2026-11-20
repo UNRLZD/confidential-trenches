@@ -12,7 +12,7 @@ import { fakeChain, open, REC, timeAt, URLS } from "../../../test/evm-swaps/robi
 import { callsIn, pocketRefusal } from "../../../test/pocket.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { providerHolds } from "../../limits/limits.ts";
-import { ROBINHOOD_VENUES, TOPIC } from "./swaps.ts";
+import { keyFromReceipt, ROBINHOOD_VENUES, TOPIC, v4KeySliced } from "./swaps.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
 const w = (a: string) => `0x${a.slice(2).padStart(64, "0")}`;
@@ -182,4 +182,33 @@ test("card helper-restart-fresh: a cold v4 token whose PoolManager receipts no p
   assert.deepEqual(JSON.parse(unread.body), { error: { code: "upstream" } });
   assert.equal(read.status, 200, read.body);
   assert.equal((JSON.parse(read.body) as { trades: unknown[] }).trades.length, SWAPS, "the token's own tape, found once its receipts read");
+});
+
+/** The longest a 2 ms timer fired late while `work` ran: the longest turn of the loop it took. */
+async function longestTurn(work: () => Promise<unknown>): Promise<number> {
+  let worst = 0;
+  let due = performance.now() + 2;
+  const t = setInterval(() => {
+    const n = performance.now();
+    worst = Math.max(worst, n - due);
+    due = n + 2;
+  }, 2);
+  try {
+    await work();
+    // the turn the work ended in is measured too: the timer's next firing
+    await new Promise((r) => setTimeout(r, 5));
+  } finally {
+    clearInterval(t);
+  }
+  return worst;
+}
+
+test("card helper-loop-never-held-by-a-write: a burst's cold opens, 32 v4 key searches that miss at once (and 32 receipt key searches), never hold one turn of the loop past 100 ms (red at e35007152: each search let the loop run every 1,000 keys, but all of them resumed in the same turn: 81 ms a turn for 16 here, 160 ms for 32, 132 to 171 ms a turn in the copy's profile)", async () => {
+  const ids = Array.from({ length: 32 }, (_, i) => `0x${(i + 1).toString(16).padStart(64, "0")}`);
+  const v4 = await longestTurn(() => Promise.all(ids.map((id) => v4KeySliced(id, TOKEN, 3000, AROUND, "base"))));
+  assert.ok(v4 < 100, `v4KeySliced: a turn of ${Math.round(v4)} ms`);
+  const receipt = await longestTurn(() => Promise.all(ids.map((id) => keyFromReceipt(id, TOKEN, 3000, AROUND, [USDG]))));
+  assert.ok(receipt < 100, `keyFromReceipt: a turn of ${Math.round(receipt)} ms`);
+  // the search still finds a key that hashes to its id
+  assert.equal(await v4KeySliced(MAIN, TOKEN, 3000, [], "robinhood"), MAIN_KEY);
 });
