@@ -1,0 +1,16 @@
+{
+  "good": {
+    "base": "http://127.0.0.1:18283",
+    "status": 200,
+    "origin": "https://ct-app.unrealized.trade",
+    "expose": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After, Server-Timing",
+    "commit": "095b595842d1099133f811708b7779b40db2142c"
+  },
+  "bad": {
+    "base": "https://ct-api.unrealized.trade",
+    "status": 200,
+    "origin": "https://ct-app.unrealized.trade",
+    "expose": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+    "commit": "f5639e5bb70f9b8e3592035d79cd2c243cc32e69"
+  }
+}
