@@ -78,6 +78,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { BUCKETS_MAX, change4h, createBook, fixed, joinBars, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
+import { pass } from "../../limits/turn.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
 import { BATCH_SIZES, batchRefusal, readWords } from "../../rpc/batch-sizes.ts";
 import { HELD_WAIT_MS, isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, TF as GT_TF, type DataAnswer, type TapeIds, type TapeRow } from "../solana/token.ts";
@@ -649,17 +650,15 @@ function* keysOf(token: string, others: readonly string[], hooks: readonly strin
     for (const ts of ALL_SPACINGS) for (const h of hooks) for (const f of fees) yield `0x${a(c0)}${a(c1)}${w(BigInt(f))}${w(BigInt(ts))}${a(h)}`;
   }
 }
-/** Keys v4KeySliced hashes between two turns of the event loop. [design: 1,000, about 60 ms on the Mac (a miss of
- *  92,000 tries, ten hook candidates, took 5.4 s there, 2026-11-05 16:3xZ), so a box twice as slow stays well under the
- *  second swaps-v4key.test.ts allows.] */
-const V4_KEY_SLICE = 1_000;
-/** v4Key, the event loop let run every V4_KEY_SLICE tries: a search that misses takes seconds of hashing, and in one go it
- *  held every other read of the helper (card robinhood-cold-open-fast: four cold opens' posts all aborted at 14 s). */
+/** v4Key, the event loop given back once a turn's slice is spent (limits/turn.ts pass): a search that misses takes seconds
+ *  of hashing, and in one go it held every other read of the helper (card robinhood-cold-open-fast: four cold opens' posts
+ *  all aborted at 14 s); sliced every 1,000 keys, the searches of a burst's cold opens resumed in one turn together (card
+ *  helper-loop-never-held-by-a-write: 132 to 171 ms a turn in a copy's profile), so the slice is the turn's time, shared. */
 export async function v4KeySliced(id: string, token: string, swapFee: number, around: readonly string[], chain: EvmChain = "base"): Promise<string | null> {
-  let n = 0;
   for (const k of v4Tries(token, swapFee, around, chain)) {
     if (keccakHex(k) === id) return k;
-    if (++n % V4_KEY_SLICE === 0) await new Promise((go) => setImmediate(go));
+    const w = pass();
+    if (w !== null) await w;
   }
   return null;
 }
@@ -693,14 +692,14 @@ export async function provenHooks(f: Facts, token: string, keyOf: KeyOf): Promis
 /** The key of v4 pool `id` worked out from a receipt, for a pool the PositionManager never made (Zora's, Doppler's): a
  *  key of `token` and native ETH or one of `currencies` (the first HOOKS_MAX), a fee (the swap's own, the dynamic-fee
  *  flag or a standard tier), any tick spacing to TICK_SPACING_MAX and one of `hooks` (no hook, or a sender of the pool's
- *  swaps) hashes to the id; null when none does. Hashed V4_KEY_SLICE at a time between turns of the event loop, once a
+ *  swaps) hashes to the id; null when none does. Hashed a turn's slice at a time (limits/turn.ts pass), once a
  *  pool (createSwaps poolKeyOf holds it). */
 export async function keyFromReceipt(id: string, token: string, fee: number, hooks: readonly string[], currencies: readonly string[]): Promise<string | null> {
   const others = [ZERO, ...currencies.filter((c) => c !== token && c !== ZERO).slice(0, HOOKS_MAX)];
-  let n = 0;
   for (const k of keysOf(token, others, [ZERO, ...hooks.slice(0, HOOKS_MAX)], fee)) {
     if (keccakHex(k) === id) return k;
-    if (++n % V4_KEY_SLICE === 0) await new Promise((go) => setImmediate(go));
+    const w = pass();
+    if (w !== null) await w;
   }
   return null;
 }

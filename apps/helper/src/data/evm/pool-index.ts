@@ -23,6 +23,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import type { ProviderHolds } from "../../limits/limits.ts";
+import { pass } from "../../limits/turn.ts";
 
 /** Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing,
  *  address hooks, uint160 sqrtPriceX96, int24 tick). */
@@ -163,17 +164,33 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
     return w;
   };
 
-  /** Writes a span's pools and the block after it, in one transaction. */
-  const keep = (pools: (ServedPool & { block: number })[], to: number) => {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      for (const p of pools) put.run(bytesOf(p.id), bytesOf(p.key.currency0), bytesOf(p.key.currency1), p.key.fee, p.key.tickSpacing, bytesOf(p.key.hooks), p.block);
-      set.run("next", String(to + 1));
-      set.run("head", String(head));
-      db.exec("COMMIT");
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
+  /** Writes a span's pools, then the block after it, a turn's slice at a time (limits/turn.ts pass; card
+   *  helper-loop-never-held-by-a-write: a span at the log cap written in one transaction held the loop 300 to 376 ms in a
+   *  copy's profile). Each slice is its own transaction and the last also moves `next`, so a span lands whole before any
+   *  answer counts it: a stop part way leaves `next` at the span's start, and the restart's INSERT OR IGNORE keeps each
+   *  pool once. A pool written before `next` moves is a real pool of the chain, and the device proves each it is served. */
+  const keep = async (pools: (ServedPool & { block: number })[], to: number): Promise<void> => {
+    let i = 0;
+    for (;;) {
+      let w: Promise<void> | null = null;
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        while (i < pools.length && w === null) {
+          const p = pools[i++]!;
+          put.run(bytesOf(p.id), bytesOf(p.key.currency0), bytesOf(p.key.currency1), p.key.fee, p.key.tickSpacing, bytesOf(p.key.hooks), p.block);
+          w = pass();
+        }
+        if (i >= pools.length) {
+          set.run("next", String(to + 1));
+          set.run("head", String(head));
+        }
+        db.exec("COMMIT");
+      } catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+      }
+      if (w !== null) await w;
+      if (i >= pools.length) break;
     }
     next = to + 1;
   };
@@ -218,8 +235,15 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
     }
     // the span's last block from the same batch: a provider that does not hold it answers no span
     if (typeof blk !== "object" || blk === null || !isQty(blk.number) || Number(blk.number) !== b) return 0;
-    const pools = logs.map((l) => poolOfLog(l, pm, a, b)).filter((p) => p !== null);
-    keep(pools, b);
+    // each log's key hashed to its id, a turn's slice at a time (limits/turn.ts pass)
+    const pools: (ServedPool & { block: number })[] = [];
+    for (const l of logs) {
+      const p = poolOfLog(l, pm, a, b);
+      if (p !== null) pools.push(p);
+      const w = pass();
+      if (w !== null) await w;
+    }
+    await keep(pools, b);
     // a span answered whole: grow back toward the starting span
     if (want < c.span) spans.set(url, Math.max(1, Math.min(c.span, want * 2, limits.get(url) ?? Infinity)));
     return b - a + 1;
