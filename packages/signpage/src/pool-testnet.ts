@@ -1838,8 +1838,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // a page whose pool RPCs are planted (tests) syncs only through a planted sync, never on the public readers
     if (over.evmIndexSync === undefined && (over.evmRpcs !== undefined || ix === undefined || v?.poolManager === undefined || v.scan === undefined)) return;
     const signal = evmStop.signal;
-    // each reader's request waits for a pass's turn on its host, so a trade's reads there go first
-    const passFetch = (async (url: string, init?: RequestInit) => (await hostLane(url).turn("pass", signal), laneFetch()(url, init))) as typeof fetch;
+    // each reader's request waits for a pass's turn on its host, so a trade's reads there go first; a sign out ends it
+    // before the turn, in its wait, and after a turn that resolved past it (its continuation runs a tick later: card
+    // signpage-index-keep-ends-at-sign-out), and the request in flight
+    const passFetch = (async (url: string, init?: RequestInit) => {
+      await hostLane(url).turn("pass", signal);
+      signal.throwIfAborted();
+      return laneFetch()(url, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
+    }) as typeof fetch;
     const sync = async (): Promise<void> => {
       // a device that holds nothing syncs none past it (evmMoney)
       if (!evmMoney) return;
