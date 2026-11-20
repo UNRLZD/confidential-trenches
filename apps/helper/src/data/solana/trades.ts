@@ -1735,7 +1735,11 @@ export function createSolanaTrades(deps: {
       const fill = (e.state === "cold" && rows.length < limit) || late ? { filling: true } : {};
       // how far back the tape holds every trade (Entry.whole), only while no gap is being walked and the stream is heard
       const whole = e.state === "live" && !late && e.whole !== undefined ? { whole_ms: Math.max(e.whole, e.cut?.to ?? 0) } : {};
-      return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing: readTo(e) };
+      // card helper-sol-tape-checks-hold: a tape past the budget that names no reach (its walk still reading, or behind)
+      // names the cut, as the vendor's rows do: it lacks the unread trade and nothing else in it says so (a local helper
+      // at 321baac8c, 20 Nov 05:36Z: CARDSccU's tape cold, no whole_ms, its DLMM trade 4vEPr51yjSyE unread)
+      const timing = cut && !("whole_ms" in whole) ? `${readTo(e)}, sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago"` : readTo(e);
+      return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing };
     },
   };
 

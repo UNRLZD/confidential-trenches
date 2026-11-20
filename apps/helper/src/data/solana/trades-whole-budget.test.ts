@@ -36,7 +36,7 @@ function pyth(price: bigint, pub: number): Buffer {
 
 /** A helper's Solana trades over a recorded chain: every coin in `coins` is TTW's twin (each answers as a mint), every
  *  getTransaction answers dlmm-buy whatever its signature; each request kept as "<url> <method>". */
-function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: number; body: string; src?: string; asOfMs?: number }> } = {}) {
+function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>; sigsHeld?: () => Promise<void> | null } = {}) {
   let ms = TS * 1000;
   const sent: string[] = [];
   const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
@@ -54,7 +54,10 @@ function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: 
     const p = MT.pools[req.params[0]];
     if (req.method === "getAccountInfo" && p !== undefined) return acct(p.owner, Buffer.from(p.data, "base64"));
     if (req.method === "getAccountInfo") return ok({ context: { slot: 100 }, value: null });
-    if (req.method === "getSignaturesForAddress") return ok([]);
+    if (req.method === "getSignaturesForAddress") {
+      await opts.sigsHeld?.();
+      return ok([]);
+    }
     if (req.method === "getTransaction") return ok(TX.result);
     throw new Error(`unexpected ${req.method}`);
   };
@@ -67,6 +70,7 @@ function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: 
     wholeRpcs: [WHOLE],
     source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
     tickMs: 0,
+    coldWait: () => settle(),
     ...(opts.tape === undefined ? {} : { tape: opts.tape }),
   } as Parameters<typeof T.createSolanaTrades>[0]);
   let n = 0;
@@ -138,5 +142,37 @@ test("card sol-meteora-tape-inside-rpc-budget: a coin with no rows of its own wh
   const va = await c.t.trades(TTW, 50);
   assert.equal((JSON.parse(va.body) as { src: string }).src, "geckoterminal");
   assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago"/, "the vendor's rows name the cut");
+  c.t.stop();
+});
+
+// card helper-sol-tape-checks-hold: a coin past the budget whose vendor rows are not served is answered its own chain
+// tape, which lacks the unread trade. A live tape names its reach after the cut (whole_ms, above); one whose walk still
+// reads (cold) or that is behind names no reach, so before this card nothing in its answer told it from a whole chain
+// tape: a local helper at 321baac8c on mainnet, 20 Nov 05:36Z, answered CARDSccU's tape src chain, cold, filling, 14
+// rows, no whole_ms, no sol-whole-cut, its DLMM trade 4vEPr51yjSyE unread (the whole reads 1,023 past the budget in a
+// minute), and index-sol-trades judged it ("not in its 14 rows"; the deployed helper's 19 Nov run: "not in its 8 rows").
+test("card helper-sol-tape-checks-hold: past the budget, a chain tape that names no reach (its walk still reading) names the cut (red at c6f82f3bc: no sol-whole-cut)", async () => {
+  let release = () => undefined as void;
+  let gate: Promise<void> | null = new Promise<void>((r) => (release = r));
+  const c = chain([TTW], { tape: async () => ({ status: 503, body: "{}" }), sigsHeld: () => gate });
+  assert.equal((await c.t.trades(TTW, 50)).status, 200);
+  for (let i = 0; i < 40; i++) c.stream(TTW);
+  await settle();
+  // past the vendor's wait: the vendor down, so the coin's own rows
+  c.step(31_000);
+  const va = await c.t.trades(TTW, 50);
+  const a = JSON.parse(va.body) as { src: string; whole_ms?: number; filling?: boolean; trades: unknown[] };
+  assert.equal(a.src, "chain");
+  assert.ok(a.trades.length > 0);
+  assert.equal(a.filling, true, "its first walk still reads");
+  assert.equal(a.whole_ms, undefined, "no reach named");
+  assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 31 s ago"/, "the cut named");
+  // its walk done: live, its reach after the cut names it, as before
+  gate = null;
+  release();
+  await settle();
+  c.t.tick();
+  const vb = await c.t.trades(TTW, 50);
+  assert.equal((JSON.parse(vb.body) as { whole_ms?: number }).whole_ms, (TS + 1) * 1000);
   c.t.stop();
 });
