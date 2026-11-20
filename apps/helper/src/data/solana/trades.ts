@@ -1118,10 +1118,11 @@ export function createSolanaTrades(deps: {
       if (t - e.touched > IDLE_MS) {
         entries.delete(e.mint);
         source.unwatch(e.mint);
-        // a cold tape (its first walk still reading) is folded too while the stream is heard: the stream holds each of its
-        // trades from the subscription on, so it is current, and dated so (card helper-sol-tape-checks-hold: a quiet coin
-        // whose walk waited on a slow read answered rows dated by its last round, past 15 s); a gap's (refilling) is behind
-      } else if (e.state === "live" || (e.state === "cold" && !behind(e))) fold(e);
+        // a tape whose walk still reads (its first, cold, or a gap's after a drop) is folded too while the stream is heard:
+        // the stream holds each of its trades as they land, so its newest rows are current and dated so, its older ones
+        // `filling` (card helper-sol-tape-checks-hold: a quiet coin whose walk waited on a slow read answered rows dated
+        // by its last round, past 15 s); with the stream silent or down, a tape keeps the date of its last fold
+      } else if (e.state === "live" || heardNow()) fold(e);
     }
     if (entries.size === 0 && timer !== null) {
       clearInterval(timer);
@@ -1134,12 +1135,13 @@ export function createSolanaTrades(deps: {
   const UPSTREAM = err(503, "upstream");
   /** Whether a token's tape is behind the chain (SOL_BEHIND_MS): its dropped stream's gap still walked, or the stream
    *  silent past the bound or not connected. Its tape is then no complete list and its live chart not current. */
-  const behind = (e: Entry): boolean => {
-    if (e.state === "refilling") return true;
-    if (source.heard === undefined) return false;
+  const behind = (e: Entry): boolean => e.state === "refilling" || !heardNow();
+  /** Whether the stream is connected and heard within SOL_BEHIND_MS (a source without `heard`, a test's, is live). */
+  function heardNow(): boolean {
+    if (source.heard === undefined) return true;
     const h = source.heard();
-    return h === null || now() - h.at > SOL_BEHIND_MS;
-  };
+    return h !== null && now() - h.at <= SOL_BEHIND_MS;
+  }
   /** The slot a token is held to with no gap and the stream's newest slot, for the answer's Server-Timing. */
   const readTo = (e: Entry): string => {
     const h = source.heard?.() ?? null;

@@ -1624,12 +1624,13 @@ test("card helper-sol-tape-checks-hold: a walk's transaction whose event's clock
 // folded every tick; a cold one only at its walk's rounds and the stream's notes, so a quiet coin whose first walk waits
 // on a slow read answered rows dated by its last round while the stream held it current (live helper f5639e5bb, 20 Nov
 // 03:15Z: GM8EysYT's DLMM tape "X-Fetched-At 03:14:52.003Z", past 15 s at the read).
-test("card helper-sol-tape-checks-hold: a cold tape whose walk waits on a read is dated by the tick while the stream is heard, never by its last round; with the stream silent, by its last fold (red at f5639e5bb: dated by its open)", async () => {
+test("card helper-sol-tape-checks-hold: a tape whose walk waits on a read (its first, or a gap's after a drop) is dated by the tick while the stream is heard, never by its last round; with the stream silent or down, by its last fold (red at f5639e5bb: dated by its open)", async () => {
   const clock = { t: TS * 1000 };
   let gate: Promise<void> | null = null;
   let release = () => undefined as void;
   const chain = rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
   let heard: { at: number; slot: number | null } | null = { at: clock.t, slot: 100 };
+  let on: SourceEvents | null = null;
   const t = createSolanaTrades({
     fetch: async (url, init) => {
       if (String(init.body).includes("getSignaturesForAddress") && gate !== null) await gate;
@@ -1638,7 +1639,7 @@ test("card helper-sol-tape-checks-hold: a cold tape whose walk waits on a read i
     now: () => clock.t,
     listed: async (m) => m === MINT,
     rpcs: ["https://rpc.test"],
-    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined, heard: () => heard }),
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined, heard: () => heard }),
     tickMs: 0,
     coldWait: () => settle(),
   });
@@ -1657,6 +1658,30 @@ test("card helper-sol-tape-checks-hold: a cold tape whose walk waits on a read i
   clock.t += 20_000;
   t.tick();
   assert.equal((await asOf()).as_of_ms, held, "a silent stream moves no date");
+  // the walk done; then the stream drops (no date moves while it is down) and comes back, its gap's walk waiting
+  gate = null;
+  release();
+  heard = { at: clock.t, slot: 160 };
+  await settle();
+  t.tick();
+  assert.equal((await asOf()).filling, undefined, "the first walk done");
+  gate = new Promise<void>((r) => (release = r));
+  on!.down();
+  heard = null;
+  const down = clock.t;
+  clock.t += 20_000;
+  t.tick();
+  assert.equal((await asOf()).as_of_ms, down, "a dropped stream moves no date");
+  heard = { at: clock.t, slot: 210 };
+  on!.up();
+  await settle();
+  clock.t += 20_000;
+  heard = { at: clock.t - 100, slot: 260 };
+  t.tick();
+  const back = await asOf();
+  assert.equal(back.filling, true, "its gap still walked");
+  assert.equal(back.as_of_ms, clock.t, "dated by the tick while the stream is heard again");
+  gate = null;
   release();
   t.stop();
 });
