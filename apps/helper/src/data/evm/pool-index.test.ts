@@ -1,7 +1,7 @@
 // card evm-pool-index-from-the-first-pool: the helper's index of every PoolManager pool from its first block.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKFILL_DAY_SHARE, createPoolIndex, INITIALIZE, poolIdOf, POOL_INDEX_SPAN_LOGS, type PoolKey, type PoolIndexConfig } from "./pool-index.ts";
@@ -360,6 +360,31 @@ test("card helper-loop-never-held-by-a-read: a file whose connection never check
     assert.ok(statSync(file).size > 400_000, `the log's pages reached the file: ${small} -> ${statSync(file).size} bytes`);
     assert.equal((db.prepare("SELECT count(*) AS n FROM p").get() as { n: number }).n, 2_000);
     db.close();
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("card helper-loop-never-held-by-a-read: the checkpoint thread never makes a file: one not there is never created, and once stopped it never opens its file again (red at 179ee8d66: the thread opened its path when it started, after the suite's tests had removed it)", async () => {
+  const d = dir();
+  try {
+    const none = join(d, "none.sqlite");
+    let failed: Error | null = null;
+    const a = checkpointAside(none, (e) => void (failed = e), 1);
+    // 200 turns of 5 ms: rounds of the thread's 1 ms checkpoint
+    for (let k = 0; k < 200; k++) await new Promise((r) => setTimeout(r, 5));
+    a.stop();
+    assert.equal(existsSync(none), false, "no file made where none was");
+    const file = join(d, "x.sqlite");
+    const db = new DatabaseSync(file);
+    db.exec("PRAGMA journal_mode = WAL; CREATE TABLE p (id INTEGER PRIMARY KEY);");
+    const b = checkpointAside(file, (e) => void (failed = e), 1);
+    b.stop();
+    db.close();
+    for (const f of [file, `${file}-wal`, `${file}-shm`]) rmSync(f, { force: true });
+    for (let k = 0; k < 200; k++) await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual([file, `${file}-wal`, `${file}-shm`].filter((f) => existsSync(f)), [], "a stopped thread opens nothing again");
+    assert.equal(failed, null);
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
