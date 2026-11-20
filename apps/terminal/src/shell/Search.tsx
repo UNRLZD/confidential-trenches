@@ -8,10 +8,9 @@ import type { MarketChain, MarketRow, MarketSnapshot } from "../screens/discover
 import { change } from "../screens/discover/format.ts";
 import { rowView } from "../screens/discover/model.ts";
 import { chainOf } from "../screens/market/pads.ts";
-import { loadToken } from "../screens/token/source.ts";
 import type { TokenData } from "../screens/token/source.ts";
 import { setPick, usePick } from "./chain-pick.ts";
-import { allRows, chainsWithData, idleRows, plan, SEARCH_LISTS } from "./search.ts";
+import { allRows, chainsWithData, idleRows, plan, readTokens, SEARCH_LISTS } from "./search.ts";
 import type { ChainPick } from "./search.ts";
 import { WORDS } from "./search-words.ts";
 import type { WordId } from "./search-words.ts";
@@ -94,22 +93,15 @@ function useReads(reads: readonly { chain: MarketChain; id: string }[]): Found &
     const keys = key.split(" ");
     if (keys.every((k) => READS.has(k))) return setSt({ key, out: keys.map((k) => READS.get(k)!) });
     let live = true;
+    // a new search or a closed one aborts this search's reads (search.ts readTokens)
+    const wanted = new AbortController();
     const t = setTimeout(() => {
-      void Promise.all(
-        keys.map((k) => {
-          const held = READS.get(k);
-          if (held) return held;
-          const at = k.indexOf("/");
-          return loadToken(k.slice(0, at) as MarketChain, k.slice(at + 1)).then((d) => {
-            if (d.status !== "error") READS.set(k, d);
-            return d;
-          });
-        }),
-      ).then((out) => live && setSt({ key, out }));
+      void readTokens(keys, wanted.signal, READS).then((out) => live && setSt({ key, out }));
     }, READ_AFTER_MS);
     return () => {
       live = false;
       clearTimeout(t);
+      wanted.abort();
     };
   }, [key, attempt]);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
