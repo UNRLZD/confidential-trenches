@@ -4291,6 +4291,53 @@ test("WS1 a warm buy whose blocks since its kept scan are read before its answer
   assert.equal(past, false, `the warm quote ran past 2 posts one after the other: ${scanLog.join(" | ")}`);
 }));
 
+// Card evm-quote-rides-a-scan-lag-at-max: a warm buy's scan reads up to the held head, the quote pair's block, which the
+// scan provider never named. Release 184's live app run 44670793512 (evm-quote-lag-held, base-blastapi-50): with blastapi
+// held out of the pair, the pair's block was at the chain's tip, and 3 of 10 warm quotes ended rpc_error "the scan
+// provider does not hold block 59783246 yet" (and ...255, ...291) in 2,218 to 6,303 ms, every scan provider a few blocks
+// behind it. A scan provider whose own head (read beside the logs) is behind the held head within maxLag reads up to its
+// own head, and the blocks past it are the lag the kit accepts elsewhere: read by a later quote, missed by this one alone.
+// LAGMAX1 one scan provider, LAGMAX2 the chain's list with every spare behind too; LAGMAX3 one past maxLag still refuses.
+const lagMax = async (token: string, scans: (headNo: number, asked: [number, number][]) => EvmRpc | EvmRpc[], heldNo: number) => {
+  const req = { ...warmReq(token), route: seededRoute(token) };
+  const pools = [seeded(token)];
+  let m = 0;
+  let on = [chain(pools, 0), chain(pools, 1)];
+  const watch = quoteMod.evmHeadWatch(() => on, 50n, () => NOW, false, () => m);
+  const v1 = await verdict(evmPoolBuyQuoteWith(req, on, NOW, scans(5_000_000, []), watch, () => m));
+  assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
+  // the pair moves to `heldNo` and the watch holds it; the coin has no pool kept, so its blocks since are read first
+  on = [chain(pools, 0, heldNo), chain(pools, 1, heldNo)];
+  m = quoteMod.EVM_HEAD_REUSE_MS + 1;
+  await (await watch.head(NOW)).confirm();
+  const asked: [number, number][] = [];
+  return { v1, v2: await verdict(evmPoolBuyQuoteWith(req, on, NOW, scans(heldNo - 20, asked), watch, () => m)), asked, req, on, watch, m };
+};
+test("LAGMAX1 a warm buy whose lone scan provider is 20 blocks behind the held head (within maxLag) ends at the held head, its scan read up to the provider's own head", () => onTestClock(async () => {
+  const token = "0x000000000000000000000000000000000fa57a1a";
+  const { v1, v2, asked, req, on, watch, m } = await lagMax(token, (h, asked) => scanner(h, [], asked), 5_000_040);
+  assert.deepEqual(v2, { ...v1, block: 5_000_040n });
+  assert.ok(asked.some(([a, b]) => a <= 5_000_001 && b === 5_000_020), JSON.stringify(asked));
+  // the blocks past the provider's head were never kept as read: the next quote, its provider caught up, asks them
+  const again: [number, number][] = [];
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, on, NOW, scanner(5_000_040, [], again), watch, () => m)), { ...v1, block: 5_000_040n });
+  assert.ok(again.some(([a, b]) => a <= 5_000_021 && b >= 5_000_040), JSON.stringify(again));
+}));
+test("LAGMAX2 a warm buy whose every scan provider of the list is 20 blocks behind the held head ends at the held head, read on the first", () => onTestClock(async () => {
+  const token = "0x000000000000000000000000000000000fa57a1b";
+  const spare: [number, number][] = [];
+  const { v1, v2, asked } = await lagMax(token, (h, asked) => [scanner(h, [], asked), scanner(h, [], spare)], 5_000_040);
+  assert.deepEqual(v2, { ...v1, block: 5_000_040n });
+  assert.ok(asked.some(([a, b]) => a <= 5_000_001 && b === 5_000_020), JSON.stringify(asked));
+}));
+test("LAGMAX3 a warm buy whose lone scan provider is more than maxLag behind the held head still refuses, within the scan's bound", () => onTestClock(async () => {
+  const token = "0x000000000000000000000000000000000fa57a1c";
+  // the provider 70 blocks behind a held head 90 blocks on: past Base's 50
+  const { v2 } = await lagMax(token, (h, asked) => scanner(h - 50, [], asked), 5_000_090);
+  assert.equal(v2.accepted, false);
+  assert.equal((v2 as { code?: string }).code, "rpc_error");
+}));
+
 // Card evm-warm-quote-inside-the-kpi-with-room: a warm round of more calls than a provider of its pair takes at once at
 // its pace (mainnet.base.org: 12 calls a second, 12 at once, pace.ts) waited in that pace for its last posts, one turn
 // after the rest: from the Mac a warm Base partial-fill quote's 16 calls sent mainnet.base.org's sixth post 337-340 ms
@@ -10377,6 +10424,41 @@ test("GS25 card evm-pinned-follow-reads-no-scan-past-its-block: a follow pinned 
     if (keptTo === 5_000_000) assert.deepEqual(logs, [], `the follow read ${JSON.stringify(logs)}`);
     else assert.deepEqual(logs.length > 0 && logs.every(([a, b]) => a === keptTo + 1 && b === 5_000_000), true, `the follow read ${JSON.stringify(logs)}: not the blocks after ${keptTo} up to the pin`);
   }
+});
+
+test("LAGMAX4 card evm-quote-rides-a-scan-lag-at-max: a follow pinned to a block its scan provider does not hold yet, within maxLag, reads up to the provider's own head, read only then, and quotes at the pin", async () => {
+  const token = "0x00000000000000000000000000000000000a5a72";
+  const pools = [seeded(token), betterAt(token, 1_000_000)];
+  const rpcs: [EvmRpc, EvmRpc] = [chain(pools, 0), chain(pools, 1)];
+  let headNo = 4_999_990;
+  const heads: number[] = [];
+  const logs: [number, number][] = [];
+  const scan: EvmRpc = async (calls, signal) => {
+    for (const c of calls) if (c.method === "eth_blockNumber") heads.push(headNo);
+    return scanner(headNo, [seeded(token), betterAt(token, 1_000_000)].map((p) => ({ key: p.key, at: 4_500_000 })), logs)(calls, signal);
+  };
+  const req = { chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as const;
+  const refused = await evmPoolBuyQuoteWith(req, rpcs, NOW, scan).then(
+    () => assert.fail("the seeded route is refused"),
+    (e: unknown) => e as EvmQuoteError & { at: string; reference: { route: EvmRoute } },
+  );
+  assert.equal(refused.code, "below_reference");
+  await new Promise((go) => setTimeout(go, 20));
+  const h = head("0x" + (5_000_000).toString(16), refused.at);
+  const block = { number: BigInt(h.number), hash: h.hash, timestamp: BigInt(h.timestamp), baseFeePerGas: BigInt(h.baseFeePerGas!) };
+  const watch: quoteMod.EvmHeadWatch = { head: () => Promise.reject(new Error("a follow agrees on no new head")), keep: () => {}, peek: () => null, held: (x) => (x === block.hash ? block : null) };
+  // the scan provider 5 blocks short of the pinned block by the follow (the quote pair's block, at the chain's tip)
+  headNo = 4_999_995;
+  heads.length = 0;
+  logs.length = 0;
+  const q = await verdict(evmPoolBuyQuoteWith({ ...req, route: refused.reference.route, at: refused.at }, rpcs, NOW, scan, watch));
+  assert.deepEqual(q, { accepted: true, amountOut: AMOUNT, minOut: (AMOUNT * 99n) / 100n, block: 5_000_000n });
+  // the gap since the kept scan is within maxLag, read once the follow has answered: its head read once, as the pinned
+  // block was not held, and the blocks after the kept scan read up to that head (at main: asked up to the pin 4 times
+  // in about 1.5 s and refused, nothing kept)
+  await new Promise((go) => setTimeout(go, 100));
+  assert.deepEqual(heads, [4_999_995]);
+  assert.ok(logs.some(([a, b]) => a === 4_999_991 && b === 4_999_995), JSON.stringify(logs));
 });
 
 test("GS13 a route above the hidden two-hop whose swap does not fit hides it from no verdict: the buy is refused by name", async () => {
