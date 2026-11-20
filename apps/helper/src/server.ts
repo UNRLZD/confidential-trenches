@@ -172,6 +172,9 @@ export const SHED_PATHS: ReadonlySet<string> = new Set([MARKET_LISTS, MARKET_TOK
 export const shedsPath = (path: string): boolean => SHED_PATHS.has(path) || path.startsWith(LOGO_PREFIX);
 /** The reason a shed names in the refusal log. */
 const SHED_WHY = "loop past capacity";
+/** The shed's cause in the standard Server-Timing header, as every 503 names its own (card helper-loop-never-held-by-a-write:
+ *  live run 44625951937's helper-token-page-cold read a shed 503 as a bare one). */
+const SHED_WAIT = { ...UPSTREAM_WAIT, "Server-Timing": 'loop;desc="past capacity"' } as const;
 
 // The cross-origin rules are the kit's HELPER_CORS (packages/kit/src/helper/v1.ts).
 export const ORIGINS: ReadonlySet<string> = new Set(HELPER_CORS.origins);
@@ -419,7 +422,7 @@ export function handler(
       route = routeOf(path);
       // past capacity a market read is answered at once, a 503 the page reads (its CORS headers, the kit's upstream code
       // and a wait), and costs the loop nothing more (card helper-answers-through-a-burst)
-      if (shedsPath(path) && shed()) return reply({ status: 503, headers: UPSTREAM_WAIT, body: '{"error":{"code":"upstream"}}', why: SHED_WHY });
+      if (shedsPath(path) && shed()) return reply({ status: 503, headers: SHED_WAIT, body: '{"error":{"code":"upstream"}}', why: SHED_WHY });
       // every route but the pool, RPC, proxy and record routes (which have their own windows below) counts in the client's window
       if (path.startsWith(LOGO_PREFIX)) {
         const wait = logoRate.take(clientOf(req));
