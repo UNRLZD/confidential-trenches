@@ -1619,3 +1619,44 @@ test("card helper-sol-tape-checks-hold: a walk's transaction whose event's clock
   assert.deepEqual((await tape(s.t)).trades.map((r) => [r.tx, r.t_ms]), [[BUY.signature, (TS + 1) * 1000]]);
   s.t.stop();
 });
+
+// card helper-sol-tape-checks-hold: a tape's date (as_of_ms, the route's X-Fetched-At) is its last fold. A live tape is
+// folded every tick; a cold one only at its walk's rounds and the stream's notes, so a quiet coin whose first walk waits
+// on a slow read answered rows dated by its last round while the stream held it current (live helper f5639e5bb, 20 Nov
+// 03:15Z: GM8EysYT's DLMM tape "X-Fetched-At 03:14:52.003Z", past 15 s at the read).
+test("card helper-sol-tape-checks-hold: a cold tape whose walk waits on a read is dated by the tick while the stream is heard, never by its last round; with the stream silent, by its last fold (red at f5639e5bb: dated by its open)", async () => {
+  const clock = { t: TS * 1000 };
+  let gate: Promise<void> | null = null;
+  let release = () => undefined as void;
+  const chain = rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  let heard: { at: number; slot: number | null } | null = { at: clock.t, slot: 100 };
+  const t = createSolanaTrades({
+    fetch: async (url, init) => {
+      if (String(init.body).includes("getSignaturesForAddress") && gate !== null) await gate;
+      return chain(url, init);
+    },
+    now: () => clock.t,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined, heard: () => heard }),
+    tickMs: 0,
+    coldWait: () => settle(),
+  });
+  gate = new Promise<void>((r) => (release = r));
+  const asOf = async () => (JSON.parse((await t.trades(MINT, 50)).body) as { as_of_ms: number; filling?: boolean });
+  const first = await asOf();
+  assert.equal(first.as_of_ms, TS * 1000);
+  assert.equal(first.filling, true, "its walk still reads");
+  // 20 s on, the walk's signature read still waiting, the stream heard a moment ago
+  clock.t += 20_000;
+  heard = { at: clock.t - 200, slot: 150 };
+  t.tick();
+  assert.equal((await asOf()).as_of_ms, clock.t, "dated by the tick while the stream holds it current");
+  // the stream silent past SOL_BEHIND_MS: the tape is dated by its last fold, never moved on
+  const held = clock.t;
+  clock.t += 20_000;
+  t.tick();
+  assert.equal((await asOf()).as_of_ms, held, "a silent stream moves no date");
+  release();
+  t.stop();
+});

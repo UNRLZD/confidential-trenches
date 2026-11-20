@@ -43,8 +43,10 @@
 // trade most, decode.ts) are read the same way: the pool account (or CPMM's own event) names the two mints (a pool
 // taken only with that venue's program as its owner), the token is either one and the other is the quote, priced as
 // above; their events carry no clock, so a trade is dated by its block: a transaction read its blockTime, a stream's the
-// slot's own clock, the Clock sysvar the stream sends for each confirmed slot (`SourceEvents.clock`; the clock a pump.fun
-// or PumpSwap event carries is the same one), or the slot's getBlockTime when the stream sent none within CLOCK_WAIT_MS
+// slot's own clock, the Clock sysvar the stream sends for each confirmed slot (`SourceEvents.clock`, getBlockTime's in 18
+// of 18 slots read 20 Nov 05:0xZ; the clock a pump.fun, PumpSwap, DBC or DAMM v2 event carries is a second before it in
+// some slots, so those are dated by their block too: card helper-sol-tape-checks-hold, `dated`), or the slot's
+// getBlockTime when the stream sent none within CLOCK_WAIT_MS
 // (card sol-tape-in-order: dated by the second it arrived, 2 s after its block from the deployed helper, an Orca row sat
 // above a DLMM row of its own block on TTWO's tape). Meteora DLMM, DBC and DAMM v2 (card index-sol-trades-2) send their
 // events only to themselves, so a stream transaction whose log names one running is read whole (`eventsInInner`) and
@@ -1116,7 +1118,10 @@ export function createSolanaTrades(deps: {
       if (t - e.touched > IDLE_MS) {
         entries.delete(e.mint);
         source.unwatch(e.mint);
-      } else if (e.state === "live") fold(e);
+        // a cold tape (its first walk still reading) is folded too while the stream is heard: the stream holds each of its
+        // trades from the subscription on, so it is current, and dated so (card helper-sol-tape-checks-hold: a quiet coin
+        // whose walk waited on a slow read answered rows dated by its last round, past 15 s); a gap's (refilling) is behind
+      } else if (e.state === "live" || (e.state === "cold" && !behind(e))) fold(e);
     }
     if (entries.size === 0 && timer !== null) {
       clearInterval(timer);
