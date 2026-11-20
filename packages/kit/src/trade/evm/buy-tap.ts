@@ -142,7 +142,7 @@ const FAULTS = new Set(["rpc_error", "rpc_disagree", "stale_quote"]);
  *  - then the first standard v3 tier the v3 factory holds a pool at (one read of every tier, evmPoolV3Tiers; card
  *    robinhood-tap-asks-no-missing-v3-tier: a tier with no pool is never asked, so no read of its route reverts); where
  *    no other route is there to ask, the first standard tier still is, once, so the kit's whole search runs and names
- *    the token's market; asked at the block the first try's last refusal was read at, as a follow is;
+ *    the token's market; asked at the block the first try's last refusal was read at, as a follow is, while that block is still the held head;
  *  - a refusal that names the kit's own best route (REQUOTE) asks that route once, where the same hook rule takes it:
  *    the kit's best holds every other shape.
  *  A provider's fault (rpc_error, rpc_disagree, stale_quote) is thrown as the kit's; every route refused throws
@@ -242,7 +242,14 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
     // quote did not agree on there, under the follow's own rules (a block the head watch confirmed, at most
     // EVM_FOLLOW_MAX_AGE_MS old, else a block agreed now; one the chain dropped is asked again at a new head). At no
     // block it ran the kit's whole search again at a new one: ANTc on Base, 3.5 s of a 6.9 s warm tap (mainnet from the
-    // Mac, 2026-11-20 08:4xZ), every round of its first quote once more
+    // Mac, 2026-11-20 08:4xZ), every round of its first quote once more. Pinned only while the held head is still that
+    // block, or none is held: where the head moved, the second try is asked at the head as before, so its refusal is
+    // held for the head the tap ends on (REFUSED) and the next tap at it asks it no more (NOVAAI on Robinhood, release
+    // 185: warm 90/0/0 ms; pinned past a moved head, 771-3262 ms with two quotes each tap)
+    if (k > 0 && at !== null) {
+      const now = held(chain);
+      if (now !== null && now !== at) at = null;
+    }
     let followed = false;
     while (route !== null && left > 0 && !asked.has(JSON.stringify(route))) {
       left--;
