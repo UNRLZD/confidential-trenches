@@ -10,7 +10,6 @@
 //   - no probe takes more than SLOW_MS beyond the run's fastest one (the runner's own round trip): a cached read held
 //     that long waited on the helper's loop.
 // After: helper
-// Budget-exempt: the Solana lists only, no Jupiter call
 //   node scripts/live-checks/helper-loop-never-held-by-a-write.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
