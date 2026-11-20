@@ -17,8 +17,9 @@ const RPCS = ["https://a.test", ONE, "https://c.test"];
 
 /**
  * A cold open whose parse turns are shut from the first eth_getLogs post on: every answer from then waits for its turn
- * until `open()`. `closed` counts, per provider, the eth_getLogs posts sent while shut; `out` and `peak` the posts out to
- * ONE (sent, unanswered) now and at most. `garble`: ONE answers every eth_getLogs post 200 with a body that is no JSON,
+ * until `open()`. `closed` counts, per provider, the eth_getLogs posts sent while shut; `asked`, for each eth_getLogs span
+ * (its filter and blocks), the providers it was sent to while shut, in order; `out` and `peak` the posts out to ONE
+ * (sent, unanswered) now and at most. `garble`: ONE answers every eth_getLogs post 200 with a body that is no JSON,
  * so its parse throws.
  */
 function rig(garble = false) {
@@ -26,16 +27,19 @@ function rig(garble = false) {
   chain.st.head = REC.lastHead; // the discovery walks the cold window for transfers: a step of spans, a post each to ONE
   const gate = { shut: false, opened: false, waiting: [] as (() => void)[] };
   const pass = (): Promise<void> | null => (gate.shut && !gate.opened ? new Promise<void>((go) => gate.waiting.push(go)) : null);
-  const st = { closed: new Map<string, number>(), late: [] as string[], shutAt: 0, out: 0, peak: 0 };
+  const st = { closed: new Map<string, number>(), asked: new Map<string, string[]>(), out: 0, peak: 0 };
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
-    const reqs = JSON.parse(String(init.body)) as { method: string }[];
+    const reqs = JSON.parse(String(init.body)) as { method: string; params: unknown[] }[];
     const logs = reqs.some((r) => r.method === "eth_getLogs");
-    if (logs && !gate.shut) st.shutAt = performance.now();
     if (logs && !gate.opened) gate.shut = true;
     if (logs && gate.shut && !gate.opened) {
       st.closed.set(url, (st.closed.get(url) ?? 0) + 1);
-      const ms = performance.now() - st.shutAt;
-      if (ms >= HEDGE_MS) st.late.push(`${url} at ${Math.round(ms)} ms`);
+      for (const r of reqs.filter((x) => x.method === "eth_getLogs")) {
+        const span = JSON.stringify(r.params[0]);
+        const by = st.asked.get(span) ?? [];
+        if (!by.includes(url)) by.push(url);
+        st.asked.set(span, by);
+      }
     }
     if (url === ONE) st.peak = Math.max(st.peak, ++st.out);
     try {
@@ -57,7 +61,7 @@ function rig(garble = false) {
   return { s, st, gate, openGate };
 }
 
-test(`a post answered while parse turns queue is counted answered, its place held to the parse: with every turn shut ${HEDGE_MS * 2} ms, no read goes out HEDGE_MS or more after the answers began to wait, and ONE is sent no more than INFLIGHT_MAX of the walk's posts (red at 2d1c955f9: past HEDGE_MS the answered posts read as late, and c.test was sent the read at 2000 ms)`, async () => {
+test(`a post answered while parse turns queue is counted answered, its place held to the parse: with every turn shut ${HEDGE_MS * 2} ms, no span of the walk goes to a provider beyond the two it was first asked of (no hedge), and ONE is sent no more than INFLIGHT_MAX of the walk's posts (red at 2d1c955f9: past HEDGE_MS the answered posts read as late, and c.test was sent the spans as a third provider)`, async () => {
   const { s, st, gate, openGate } = rig();
   try {
     const { value } = await onVirtualTime(1_793_918_000_000, async () => {
@@ -65,16 +69,19 @@ test(`a post answered while parse turns queue is counted answered, its place hel
       while (!gate.shut) await new Promise((r) => setTimeout(r, 1));
       await new Promise((r) => setTimeout(r, HEDGE_MS * 2));
       const shut = Object.fromEntries(st.closed);
-      const late = [...st.late];
+      // a span's first round is two providers (agreed: order.slice(0, 2)); a third is asked only when a read out reads as
+      // late (hedged) or the two disagree, and while every answer waits its parse none can disagree
+      const hedged = [...st.asked].filter(([, by]) => by.length > 2).map(([span, by]) => `${span} to ${by.join(", ")}`);
       openGate();
       const r = await read;
-      return { shut, late, r };
+      return { shut, hedged, spans: st.asked.size, r };
     });
-    console.log(`eth_getLogs posts sent while the parse turns were shut: ${JSON.stringify(value.shut)}; HEDGE_MS or more after the shut: ${JSON.stringify(value.late)}; most out to ONE at once ${st.peak}`);
+    console.log(`eth_getLogs posts sent while the parse turns were shut: ${JSON.stringify(value.shut)}; spans ${value.spans}, sent past their first two providers: ${value.hedged.length}; most out to ONE at once ${st.peak}`);
     assert.equal(value.r.status, 200, value.r.body);
     assert.ok((value.shut[ONE] ?? 0) <= INFLIGHT_MAX, `${value.shut[ONE] ?? 0} of the walk's posts reached ONE while its answers waited to parse: the cap on answers read and waiting`);
     assert.ok(st.peak <= INFLIGHT_MAX, `${st.peak} out to ONE at once`);
-    assert.deepEqual(value.late, [], "a read sent HEDGE_MS or more after the answers began to wait their parse: a hedge on answered posts");
+    assert.ok(value.spans > 0, "the walk's spans were sent while the parse turns were shut");
+    assert.deepEqual(value.hedged, [], "a span sent to a third provider while its answers waited to parse: a hedge on answered posts");
   } finally {
     s.stop();
   }
