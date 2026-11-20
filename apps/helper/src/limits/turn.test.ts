@@ -29,9 +29,10 @@ test("waiters resume one a turn of the loop, in the order they asked: a timer du
     while (performance.now() < until);
   };
   const jobs = ["a", "b", "c"].map((k) => s.pass()!.then(() => (order.push(k), work(), (t += TURN_MS))));
-  // a timer set now fires on the loop's next turn: after the first waiter, before the last
+  // a timer set now is due within a turn of the first: it fires before the last waiter resumes, never after all of them
+  // (whether before or after the first depends on the phase the loop is in, which the test does not set)
   setTimeout(() => order.push("timer"), 0);
   await Promise.all(jobs);
   assert.deepEqual(order.filter((k) => k !== "timer"), ["a", "b", "c"]);
-  assert.ok(order.indexOf("timer") > 0 && order.indexOf("timer") < 3, order.join(","));
+  assert.ok(order.indexOf("timer") < order.indexOf("c"), order.join(","));
 });
