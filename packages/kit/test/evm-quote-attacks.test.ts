@@ -9336,6 +9336,48 @@ test("GF12 a second quote of the same token and amount reads the last quote's sw
   assert.ok(rounds1 > reads1 && rounds === reads, `rounds ${rounds1} (reads from ${reads1}) then ${rounds} (reads from ${reads})`);
 }));
 
+// Card robinhood-taps-meet-no-429: a warm quote keeps only the fits that decided the last verdicts; where no route of
+// a list fits, every one of them decided it (none fits), so all are kept and the next quote reads them beside its first
+// round, as GF12's do, never in rounds after it.
+test("GF16 a second quote where no route fits reads the last quote's swap fits in its first round: no round after it, the same verdict", () => onTestClock(async () => {
+  const token = "0x00000000000000000000000000000000000f1f16";
+  const K = 6;
+  const fakes: ModelPool[] = Array.from({ length: K }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a) => a, gas: 600_000n }));
+  const pools = [gfMarket(token, 500_000n), gfSeeded(token, 450_000n), ...fakes];
+  const logs = fakes.map((p) => ({ key: p.key, at: 4_500_000 }));
+  let out = 0;
+  let rounds = 0;
+  let reads = 0;
+  const slow = (rpc: EvmRpc, count: boolean): EvmRpc => async (calls) => {
+    if (count) {
+      if (out === 0) rounds++;
+      const data = calls.map((c) => String((c.params[0] as { data?: string } | undefined)?.data));
+      if (reads === 0 && data.some((d) => d.startsWith("0x82ad56cb"))) reads = rounds;
+    }
+    out++;
+    try {
+      const a = await rpc(calls);
+      await new Promise((go) => setTimeout(go, 250));
+      return a;
+    } finally {
+      out--;
+    }
+  };
+  const ask = () =>
+    evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: marketRoute(token) }, [slow(chain(pools, 0), true), slow(chain(pools, 1), false)], NOW, scanner(5_000_000, logs)).then(
+      () => null,
+      (e: unknown) => e,
+    );
+  const r1 = await ask();
+  assert.ok(r1 instanceof EvmQuoteError && r1.code === "over_gas_floor" && r1.reference === null, show(r1));
+  const [rounds1, reads1] = [rounds, reads];
+  rounds = 0;
+  reads = 0;
+  const r2 = await ask();
+  assert.ok(r2 instanceof EvmQuoteError && r2.code === "over_gas_floor" && r2.reference === null, show(r2));
+  assert.ok(rounds1 > reads1 && rounds === reads, `rounds ${rounds1} (reads from ${reads1}) then ${rounds} (reads from ${reads})`);
+}));
+
 // Card evm-5xx-holds-the-provider-for-the-round, with GF12's early fits: a warm quote reads the last quote's swap fits
 // beside its first round, and a provider that answers HTTP 5xx to one is held in the other. At a87cbd3ff
 // each read held it in its own reads alone, and the first round's batches queued in its gate behind the failed fits

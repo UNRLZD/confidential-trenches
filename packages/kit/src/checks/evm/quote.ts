@@ -3261,11 +3261,11 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
       if (ask.size === 0) {
         const r = lists.map(({ l }) => bestOf(l.filter((c) => fits(c.route) === true)));
         // kept for the next quote: the routes that decided each list's verdict, its best that fits and every route
-        // above it (each read, none fits), never the ones below it, which no verdict read
+        // above it (each read, none fits), never the ones below it, which no verdict read; every route of a list none
+        // of which fits (each read, GF16)
         for (const { l } of lists) {
           const b = best(l.filter((c) => fits(c.route) === true));
-          if (b === null) continue;
-          for (const c of l) if (c.route !== route && c.amountOut >= b.amountOut && fits(c.route) !== undefined) fitsUsed.set(fitOf(c.route)!.data, c.route);
+          for (const c of l) if (c.route !== route && (b === null || c.amountOut >= b.amountOut) && fits(c.route) !== undefined) fitsUsed.set(fitOf(c.route)!.data, c.route);
         }
         FITS.delete(fitsKey);
         FITS.set(fitsKey, { ts: block.timestamp, routes: [...fitsUsed.values()].slice(0, EVM_FITS_KEPT) });
