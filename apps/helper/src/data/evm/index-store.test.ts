@@ -186,3 +186,18 @@ test("the other helper of a deploy mid-write: the new one reads the copy committ
   other.exec("ROLLBACK");
   assert.equal(helper(file).store!.load()!.logs.length, 200);
 });
+
+test("card helper-loop-never-held-by-a-read: the store's file is WAL with synchronous NORMAL, so a write's commit syncs nothing in a turn of the loop (red at c6711e2c3: synchronous FULL)", (t) => {
+  const sql: string[] = [];
+  const exec = DatabaseSync.prototype.exec;
+  t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, q: string) {
+    sql.push(q);
+    return exec.call(this, q);
+  });
+  const store = openIndexStore(join(dir(t), "swaps.sqlite"), [SWAP]);
+  assert.ok(store !== null);
+  const pragmas = sql.join("\n");
+  assert.match(pragmas, /PRAGMA journal_mode = WAL;/);
+  assert.match(pragmas, /PRAGMA synchronous = NORMAL;/);
+  assert.doesNotMatch(pragmas, /synchronous = (FULL|EXTRA)/);
+});

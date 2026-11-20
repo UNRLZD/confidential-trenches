@@ -55,7 +55,11 @@ const BUSY_MS = 5_000;
 function open(file: string, topicsKey: string): DatabaseSync {
   const db = new DatabaseSync(file, { timeout: BUSY_MS });
   try {
-    db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;
+    // synchronous NORMAL, SQLite's own setting for WAL: a write's commit syncs nothing in a turn of the loop (card
+    // helper-loop-never-held-by-a-read: under FULL a pool index commit's sync held a copy's loop 637 and 757 ms). A
+    // crash never tears the file; a power loss rolls back only the newest writes, so the file still holds a whole range
+    // or one before it.
+    db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;
       CREATE TABLE IF NOT EXISTS logs (block INTEGER NOT NULL, idx INTEGER NOT NULL, tx TEXT NOT NULL, address TEXT NOT NULL, topics TEXT NOT NULL, data TEXT NOT NULL, t INTEGER, PRIMARY KEY (block, idx)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID;`);
     const ok = db.prepare("PRAGMA quick_check").all() as { quick_check?: unknown }[];

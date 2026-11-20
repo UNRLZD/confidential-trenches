@@ -8,6 +8,7 @@ import { BACKFILL_DAY_SHARE, createPoolIndex, INITIALIZE, poolIdOf, POOL_INDEX_S
 import { CALLER_ROOM, providerHolds, type Pace } from "../../limits/limits.ts";
 import { turnSlicer } from "../../limits/turn.ts";
 import { call, listening } from "../../../test/servers.ts";
+import { DatabaseSync } from "node:sqlite";
 
 /** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
  *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
@@ -314,4 +315,24 @@ test("card helper-loop-never-held-by-a-write: a span at the log cap (9,999 pools
   if (mid !== null) assert.equal(mid, -1, "mid-span the index still says it holds no block of it");
   ix.close();
   rmSync(d, { recursive: true });
+});
+
+test("card helper-loop-never-held-by-a-read: the index's file is WAL with synchronous NORMAL, so a slice's commit syncs nothing in a turn of the loop (red at c6711e2c3: synchronous FULL, every slice's commit an fsync, 637 and 757 ms holds in a copy's profile)", async (t) => {
+  const d = dir();
+  const sql: string[] = [];
+  const exec = DatabaseSync.prototype.exec;
+  t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, q: string) {
+    sql.push(q);
+    return exec.call(this, q);
+  });
+  try {
+    const ix = createPoolIndex(join(d, "rh.sqlite"), cfg(), deps(chain(() => 10_000, [])));
+    const pragmas = sql.join("\n");
+    assert.match(pragmas, /PRAGMA journal_mode = WAL;/);
+    assert.match(pragmas, /PRAGMA synchronous = NORMAL;/);
+    assert.doesNotMatch(pragmas, /synchronous = (FULL|EXTRA)/);
+    ix.close();
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
 });

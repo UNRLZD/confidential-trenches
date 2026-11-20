@@ -112,7 +112,12 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
   const turn = d.pass ?? pass;
   const pm = c.poolManager.toLowerCase();
   const db = new DatabaseSync(file);
-  db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;
+  // WAL with synchronous NORMAL, SQLite's own setting for WAL: a commit writes the log and syncs nothing, so no slice's
+  // commit waits on the disk in a turn of the loop (card helper-loop-never-held-by-a-read: under FULL each slice's
+  // commit synced, and a copy's profile under the page checks held the loop 637 and 757 ms in keep's commit with no
+  // sample taken). Never corrupt on a crash; a power loss rolls back only the newest commits, in order, and `next`
+  // moves in a span's last one, so a span lost is read again and INSERT OR IGNORE keeps each pool once.
+  db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;
     CREATE TABLE IF NOT EXISTS pools (id BLOB PRIMARY KEY, c0 BLOB NOT NULL, c1 BLOB NOT NULL, fee INTEGER NOT NULL, ts INTEGER NOT NULL, hooks BLOB NOT NULL, block INTEGER NOT NULL) WITHOUT ROWID;
     CREATE INDEX IF NOT EXISTS pools_c0 ON pools (c0);
     CREATE INDEX IF NOT EXISTS pools_c1 ON pools (c1);
