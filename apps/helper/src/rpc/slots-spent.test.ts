@@ -8,8 +8,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createPacer, createRpc } from "./rpc.ts";
-import { solanaTradesRpcs, tradesSlotShown } from "../server.ts";
+import * as server from "../server.ts";
 import { createSlot } from "./slot.ts";
+
+// read off the module, so this file loads at a commit without tradesSlotShown and its tests fail on the behaviour (red runs)
+const { solanaTradesRpcs } = server;
+const tradesSlotShown: typeof server.tradesSlotShown = (server as Partial<typeof server>).tradesSlotShown ?? (() => assert.fail("no tradesSlotShown at this commit"));
 
 const T0 = 1_800_000_000_000;
 const key = (n: string) => `test-key-${n}-not-a-secret`;
