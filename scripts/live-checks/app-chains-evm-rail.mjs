@@ -25,7 +25,7 @@ import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
 import { launchBrowser } from "../browsers.mjs";
 import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
-import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT, helperFetch } from "./helper-misses.mjs";
 
 const KEY = "app-chains-evm-rail";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -64,7 +64,7 @@ const fmt = (counts) => (Object.keys(counts).length ? Object.entries(counts).map
 // ------------------------------------------------------------------------------------------------ the live read
 /** Each chain's top Trending token from the helper's lists, read as the terminal reads them (Origin APP_HOST). */
 async function topOf(chain) {
-  const r = await fetch(`${HELPER_HOST}/v1/market/lists?chain=${chain}`, { headers: { origin: APP_HOST }, signal: AbortSignal.timeout(20_000) });
+  const r = await helperFetch(`${HELPER_HOST}/v1/market/lists?chain=${chain}`, { headers: { origin: APP_HOST }, signal: AbortSignal.timeout(20_000) });
   const b = await r.json().catch(() => null);
   const L = b?.lists ?? {};
   const rows = (k) => (Array.isArray(L[k]) ? L[k].filter((x) => x?.chain === chain && typeof x?.token === "string") : []);

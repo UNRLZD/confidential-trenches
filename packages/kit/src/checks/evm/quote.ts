@@ -1862,11 +1862,16 @@ function atAmount(r: Read, from: bigint, to: bigint): Read {
 export const EVM_WARM_RANGE_S = 60n;
 /** The most tokens whose reads are kept, the oldest dropped first. */
 const PLANS_MAX = 64;
-/** Per chain, token and amount, the routes whose swap fit the last buy quote read or used, and its block's time: the
- *  next quote within EVM_WARM_RANGE_S reads them again at its own block beside its first round (evmPoolBuyQuoteWith). */
+/** Per chain, token and amount, the routes whose swap fit decided the last buy quote's verdicts (each list's best that
+ *  fits and every route above it, card robinhood-taps-meet-no-429), and its block's time: the next quote within
+ *  EVM_WARM_RANGE_S reads them again at its own block beside its first round (evmPoolBuyQuoteWith). */
 const FITS = new Map<string, { ts: bigint; routes: EvmRoute[] }>();
 /** The most fit routes kept a token: one round's worth (a warm Robinhood AI quote asked 15). */
 const EVM_FITS_KEPT = 32;
+/** The routes of a list whose fits the first round of swap-fit reads asks, the best by output (card
+ *  robinhood-taps-meet-no-429): one batch of CALLS_PER_BATCH, so a best that does not fit falls to the next, already
+ *  read, and a list none of them settles is asked whole in the second round. */
+const EVM_FITS_FIRST = 3;
 const readKey = (r: Read) => JSON.stringify([r.to, r.data, r.override ?? null, r.group ?? null, r.state ?? null, r.tx ?? null], (_, x) => (typeof x === "bigint" ? String(x) : x));
 const SCAN_TOKENS = 4096;
 const SCAN_MAX_LOGS = 10_000;
@@ -3225,18 +3230,21 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
   // The others are read at most two rounds more, never one route a round: each pool anyone seeds behind a hook that
   // checks the swap's sender and lets only the quoter through, priced above the route, would add a round to every quote, and some tens of them
   // would age every quote past EVM_QUOTE_MAX_AGE_MS (review of 498eae83, M2). The first asks, of each list whose best
-  // is not known, every route that can change the verdict (`band`): the standard routes at or above the route's value
-  // (all of them where the route does not fit), the native ones at or above it, the listed ones within the slippage of
-  // it; a list still not known after it is asked whole in the second
+  // is not known, the EVM_FITS_FIRST best by output of the routes that can change the verdict (`band`): the standard
+  // routes at or above the route's value (all of them where the route does not fit), the native ones at or above it,
+  // the listed ones within the slippage of it; a list still not known after it is asked whole in the second, so still
+  // two rounds at most. Card robinhood-taps-meet-no-429: the first round asked the whole band, and a cold PONS tap's
+  // whole-list search (a partial_fill route, band all) 28 fits a side, which its warm taps then read again, 24 of their
+  // 47 calls a side, where each list's verdict was its first route by output; with the providers' call limits binding
+  // (bloXroute 15 a second), those 23 more calls were about 1.5 s of a warm tap and a round about 0.2 s
   const fit = new Map<string, boolean>();
   if (ownFit >= 0) fit.set(reads[ownFit]!.data, out(ownFit) !== null);
   const fits = (r: EvmRoute) => {
     const x = fitOf(r);
     if (x === null) return false;
-    const f = fit.get(x.data);
-    if (f !== undefined && r !== route) fitsUsed.set(x.data, r);
-    return f;
+    return fit.get(x.data);
   };
+  const firstFew = (xs: readonly Filled[]) => [...xs].sort((a, b) => (b.amountOut > a.amountOut ? 1 : b.amountOut < a.amountOut ? -1 : 0)).slice(0, EVM_FITS_FIRST);
   const bestFits = async (lists: readonly { l: readonly Filled[]; band: (c: Filled) => boolean }[]) => {
     // the early fits, read at this quote's own block (fitOf builds each at its hash): answered as this reads them
     const early = await fitsEarly;
@@ -3248,13 +3256,17 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
         if (b === null || fits(b.route) !== undefined) continue;
         const unknown = l.filter((c) => fits(c.route) === undefined);
         const first = unknown.filter(band);
-        for (const c of round === 0 && first.length > 0 ? first : unknown) {
-          ask.set(fitOf(c.route)!.data, fitOf(c.route)!);
-          if (c.route !== route) fitsUsed.set(fitOf(c.route)!.data, c.route);
-        }
+        for (const c of round === 0 ? firstFew(first.length > 0 ? first : unknown) : unknown) ask.set(fitOf(c.route)!.data, fitOf(c.route)!);
       }
       if (ask.size === 0) {
         const r = lists.map(({ l }) => bestOf(l.filter((c) => fits(c.route) === true)));
+        // kept for the next quote: the routes that decided each list's verdict, its best that fits and every route
+        // above it (each read, none fits), never the ones below it, which no verdict read; every route of a list none
+        // of which fits (each read, GF16)
+        for (const { l } of lists) {
+          const b = best(l.filter((c) => fits(c.route) === true));
+          for (const c of l) if (c.route !== route && (b === null || c.amountOut >= b.amountOut) && fits(c.route) !== undefined) fitsUsed.set(fitOf(c.route)!.data, c.route);
+        }
         FITS.delete(fitsKey);
         FITS.set(fitsKey, { ts: block.timestamp, routes: [...fitsUsed.values()].slice(0, EVM_FITS_KEPT) });
         while (FITS.size > PLANS_MAX) FITS.delete(FITS.keys().next().value!);
@@ -5061,15 +5073,26 @@ export function evmEvidenceProviders(chain: EvmPoolChain, fetchFn: typeof fetch,
 }
 
 const SEL_SELL = "0c2cb9ca"; // a literal, never a top-level call (the kit's index reaches the signing page's bundle): SellDelegate.sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)
-/** One provider's answer to a replay: its result, or a revert with its data ("" for none); anything else is a refusal. */
-type Replay = { ok: true; result: string } | { ok: false; data: string };
-function replayOf(a: unknown, who: string): Replay {
+/** One provider's answer to a replay: its result, or a revert with its data ("" for none), or the halt the trade's own
+ *  call ended with (`halt`, its error); anything else is a refusal. */
+type Replay = { ok: true; result: string } | { ok: false; data: string; halt?: string };
+/** `a` read as a replay given `gas`; `halt`, the halt the trade's own call ended with at its root, or null for none: a
+ *  replay that halts with that same error failed as the trade did (card evm-sell-ban-reads-a-root-halt), and any other
+ *  halt is a replay broken, never a verdict: a precompile an override names is switched off and its 0xfe runs (card
+ *  evm-replay-reads-an-execution-error-as-run). A halt in a node's words: geth's and Nitro's -32000 and the error itself
+ *  ("out of gas" from rpc.mainnet.chain.robinhood.com, robinhood.drpc.org and robinhood.api.pocket.network), or reth's
+ *  -32003 "out of gas: gas required exceeds: " and the call's own gas (mainnet.base.org, base-rpc.publicnode.com,
+ *  base.api.pocket.network, base.gateway.tenderly.co and base-mainnet.public.blastapi.io, a loop given 975,000 gas,
+ *  2026-11-20 02:2xZ). */
+function replayOf(a: unknown, who: string, halt: string | null = null, gas = 0n): Replay {
   const hex = (x: unknown): x is string => typeof x === "string" && x.length <= MAX_ANSWER_HEX && /^0x([0-9a-fA-F]{2})*$/.test(x);
   if (typeof a !== "object" || a === null) return refuse("rpc_error", `${who} answered no object`);
-  const o = a as { result?: unknown; error?: { data?: unknown } };
+  const o = a as { result?: unknown; error?: { code?: unknown; data?: unknown; message?: unknown } };
   if (Object.hasOwn(o, "result")) return hex(o.result) ? { ok: true, result: o.result.toLowerCase() } : refuse("rpc_error", `${who} answered a replay with a result that is not hex`);
   if (reverted(a)) return { ok: false, data: hex(o.error?.data) ? o.error!.data.toLowerCase() : "" };
-  return refuse("rpc_error", `${who} answered a replay with an error that is no revert: ${String((o.error as { message?: unknown } | undefined)?.message).slice(0, 120)}`);
+  const said = o.error?.code === -32000 ? o.error.message : o.error?.code === -32003 && o.error.message === `out of gas: gas required exceeds: ${gas}` ? "out of gas" : undefined;
+  if (halt !== null && said === halt) return { ok: false, data: "", halt };
+  return refuse("rpc_error", `${who} answered a replay with an error that is no revert: ${String(o.error?.message).slice(0, 120)}`);
 }
 /** A JSON-RPC answer's result as an object, or a refusal. */
 function resultOf(a: unknown, who: string, what: string): Record<string, unknown> {
@@ -5162,7 +5185,7 @@ const EVM_HISTORY = "0x0000f90827f1c53a10cb7a02335b175320002935";
 type Override = { balance?: string; nonce?: string; code?: string; stateDiff?: Record<string, string> };
 /** The trade's pre-state as a state override, and the callees of the trade's own frames that errored (lowercased,
  *  sorted), each read from its trace. */
-type Pre = { over: Record<string, Override>; errored: string[] | undefined };
+type Pre = { over: Record<string, Override>; errored: string[] | undefined; halt: string | null | undefined };
 /** The text in the message of the rpc_error thrown where the trade's trace was not answered and could still change the
  *  answer (step 2b; the message is "rpc_error: " + this + ": " + the trade's hash): its own reason, apart from a provider
  *  that did not answer any other read, so a caller can bound how often it asks again. */
@@ -5317,14 +5340,19 @@ async function tracedPre(trace: readonly (readonly [EvmRpc, EvmRpc])[], sale: Tr
   // of fb923143, 1), or one the two answer apart (rpc_disagree: one provider alone can answer it apart, review of
   // 1ee73a00, 2), leaves the prestate, which gas bounds and two companies agree on, to the replay and step 3: only the
   // as-is leg is unread. A callTracer both answer past its bounds or not the trade's own call drops it all.
-  let errored: string[] | null;
+  let errored: { errored: string[]; halt: string | null } | null;
   try {
-    errored = await read(1, { tracer: "callTracer" }, (r) => erroredOf(r, sale, pm, adapter, hooks, b.frames));
+    errored = await read(1, { tracer: "callTracer" }, (r) => {
+      const e = erroredOf(r, sale, pm, adapter, hooks, b.frames);
+      // the root frame's error where it is no revert: the halt the trade ended with (erroredOf read the root as the trade's)
+      const top = (r as { error?: unknown }).error;
+      return e === null ? null : { errored: e, halt: typeof top === "string" && top.length > 0 && top.length <= 120 && !/^execution reverted/i.test(top) ? top : null };
+    });
   } catch (e) {
-    if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };
+    if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined, halt: undefined };
     throw e;
   }
-  return errored === null ? null : { over, errored };
+  return errored === null ? null : { over, errored: errored.errored, halt: errored.halt };
 }
 /** The true pre-state read of a chain's evidence, the one place it is chosen: a chain whose venue pins a trace pair
  *  (Robinhood: venue traceProviders) reads the trade's own trace there (`trace`, a test's, or the pins', each answer
@@ -5416,13 +5444,20 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   // block (as the device's sale sim runs), or on a chain with a trace the prestate's, so a hook that reads it sees what
   // the trade saw
   const call = { from: sale.from, to: sale.to, data: sale.input, gas: qty(gas), value: sale.value, ...sale.fees };
+  // the halt the trade ended with at its root (card evm-sell-ban-reads-a-root-halt), so a replay that halts the same
+  // failed as the trade did: its callTracer's root error where both trace providers answered it the same; with no
+  // callTracer read, "out of gas" where the trade failed with every unit of its gas spent (a revert hands the rest back,
+  // and a failed sale's root is the pinned SellDelegate, solc 0.8.28, whose asserts and panics revert, so it halts no
+  // other way; a hook's halt reaches it as the PoolManager's revert: v4-core's Hooks.callHook, a7cf038c lines 131-137,
+  // reverts with HookCallFailed on any failed hook call); null for none
+  const halt = p !== undefined && p.halt !== undefined ? p.halt : BigInt(sale.status) === 0n && BigInt(sale.gasUsed) === BigInt(sale.gas) ? "out of gas" : null;
   const replay = async (extra: Record<string, { code: string }>): Promise<Replay> => {
     const state: Record<string, Override> = { ...base };
     for (const [a, o] of Object.entries({ ...asW, ...extra })) state[lower(a)] = { ...state[lower(a)], ...o };
     const { a } = await agreeing(
       rpcs,
-      async (rpc, k, gate) => replayOf((await askAt(rpc, [{ method: "eth_call", params: [call, parent, state, env] }], gate))[0], `provider ${k + 1}`),
-      (x, y) => (x.ok && y.ok && x.result === y.result) || (!x.ok && !y.ok && x.data === y.data),
+      async (rpc, k, gate) => replayOf((await askAt(rpc, [{ method: "eth_call", params: [call, parent, state, env] }], gate))[0], `provider ${k + 1}`, halt, gas),
+      (x, y) => (x.ok && y.ok && x.result === y.result) || (!x.ok && !y.ok && x.data === y.data && x.halt === y.halt),
       () => refuse("rpc_disagree", "the providers answer the sale's replay differently"),
     );
     return a;

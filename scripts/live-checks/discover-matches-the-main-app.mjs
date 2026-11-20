@@ -35,7 +35,7 @@ import { padRing } from "../../apps/terminal/src/screens/market/pads.ts";
 import { launchBrowser } from "../browsers.mjs";
 import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
-import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT, helperFetch } from "./helper-misses.mjs";
 
 const KEY = "discover-matches-the-main-app";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -233,7 +233,7 @@ async function readIcons() {
   const icons = {};
   const pads = new Set();
   for (const c of CHAINS) {
-    const r = await fetch(`${HELPER_HOST}/v1/market/lists?chain=${c}`, { signal: AbortSignal.timeout(15_000) });
+    const r = await helperFetch(`${HELPER_HOST}/v1/market/lists?chain=${c}`, { signal: AbortSignal.timeout(15_000) });
     if (r.status !== 200) throw new Error(`lists ${c}: ${r.status}`);
     const b = await r.json();
     for (const rows of Object.values(b.lists ?? {}))

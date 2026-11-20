@@ -7,7 +7,9 @@
 // The read itself, replayed from the good run: a reader one block behind on a span, then caught up, PASSES (asked
 // again, as the index asks it); one that stays behind past TRIES FAILS; a receipt answered null or with a rate limit
 // once, then present, PASSES (reviews 3 and 4), one null past TRIES FAILS, and any other answer is final and FAILS; the
-// receipts are asked in one batch of at most RECEIPTS.
+// receipts are asked in one batch of at most RECEIPTS. A batch answered HTTP 429 (the helper's keyed route at its
+// caller share) waits its Retry-After without spending a try, as the kit does, up to LIMITED_WAIT_MS; one answered 503,
+// or 2xx with a body that is not a batch, spends a try (card robinhood-index-second-reader-serves-receipts).
 // Card evm-batch-fits-each-reader: `good` is now its run (2026-11-18 20:53Z from this Mac, base.api.pocket.network's
 // receipts asked as parts of 5 after its 413), and `bad413` the run of the check before it (20:51Z), Base's reader 2
 // answering 0 of 10 receipts in every span, each batch of 10 refused 413; a reader that refuses a batch past 5 PASSES
@@ -16,7 +18,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { MOST, RECEIPTS, TRIES, judge, read, sizeRefusal } from "./evm-pool-index.mjs";
+import { LIMITED_WAIT_MS, MOST, RECEIPTS, TRIES, judge, read, sizeRefusal } from "./evm-pool-index.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-pool-index.answers.json", import.meta.url), "utf8"));
 const bad = (run, re) => {
@@ -67,17 +69,21 @@ test("the good run with one thing changed fails", () => {
 
 const INIT = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438";
 /** A fetch that answers as the good run's readers did; `behind(url, b)` true: that reader does not hold block b yet;
- *  `odd(url, tx)`: that reader's answer to the receipt of tx in place of the recorded one (undefined: the recorded). */
+ *  `odd(url, tx)`: that reader's answer to the receipt of tx in place of the recorded one (undefined: the recorded);
+ *  `http(url, body)`: that reader's whole HTTP answer to a POST in place of the recorded one, { status, headers, body }
+ *  (undefined: the recorded). */
 const batches = [];
-function replayFetch(run, behind = () => false, odd = () => undefined) {
+function replayFetch(run, behind = () => false, odd = () => undefined, http = () => undefined) {
   const byUrl = new Map();
   for (const c of Object.values(run.chains)) c.index?.readers.forEach((u, r) => byUrl.set(u, { c, r }));
-  const res = (body, headers = {}) => ({ status: 200, ok: true, headers: { get: (k) => headers[k.toLowerCase()] ?? null }, json: async () => body, text: async () => JSON.stringify(body) });
+  const res = (body, headers = {}, status = 200) => ({ status, ok: status >= 200 && status < 300, headers: { get: (k) => headers[k.toLowerCase()] ?? null }, json: async () => body, text: async () => JSON.stringify(body) });
   return async (url, init) => {
     const { c, r } = byUrl.get(url);
     const p = c.preflight[url];
     if (init.method === "OPTIONS") return { ...res(null, { "access-control-allow-origin": p.allow, "access-control-allow-headers": p.headers }), status: p.status };
     const body = JSON.parse(init.body);
+    const h = http(url, body);
+    if (h !== undefined) return res(h.body, h.headers ?? {}, h.status);
     if (!Array.isArray(body)) return res({ jsonrpc: "2.0", id: 1, result: "0x1" }, { "access-control-allow-origin": p.post });
     if (body[0].method === "eth_getTransactionReceipt") {
       batches.push(body.length);
@@ -168,6 +174,73 @@ test("the waits are the kit's (1, 2 then 4 s): a receipt null on tries 1-3, then
   assert.deepEqual(spanWaits, [1_000, 2_000, 4_000]);
 });
 
+// Card robinhood-index-second-reader-serves-receipts: the helper's keyed route takes 30 requests a caller each 10 s and
+// answered the check's third batch of 10 Robinhood receipts HTTP 429 {"error":{"code":"rate_limited"}}, Retry-After 5
+// (2026-11-20 01:4xZ from this Mac; live app runs 44651054036, 44441930508), which the check read as ten receipts
+// answered null on try 1 and FAILed. The kit waits a 429 out without spending a try (pool-index.ts `ask`), so does this.
+const LIMITED = { status: 429, headers: { "retry-after": "5" }, body: { error: { code: "rate_limited" } } };
+const rhReceipts = (run) => {
+  const c = run.chains.robinhood;
+  const s = c.spans.findLastIndex((x) => x.txs?.length > 0);
+  return { u: c.index.readers[1], s, tx: c.spans[s].txs[0] };
+};
+const receiptBatchOf = (body, tx) => body[0]?.method === "eth_getTransactionReceipt" && body.some((q) => q.params[0] === tx);
+
+test("the helper's keyed route answering a receipt batch 429 with Retry-After 5 once: waited out, no try spent, PASS", async () => {
+  const { u, s, tx } = rhReceipts(A.good);
+  let asked = 0;
+  const waits = [];
+  const run = await read(venuesOf(A.good), replayFetch(A.good, () => false, () => undefined, (url, body) => (url === u && receiptBatchOf(body, tx) && asked++ === 0 ? LIMITED : undefined)), async (ms) => void waits.push(ms));
+  const v = judge(run);
+  assert.equal(v.pass, true, v.lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  const rc = run.chains.robinhood.spans[s].receipts[1][0];
+  assert.equal(rc.tries, 1);
+  assert.equal(rc.limitedMs, 5_000);
+  assert.deepEqual(waits, [5_000]);
+});
+
+test("a 429 on every ask waits at most LIMITED_WAIT_MS a batch, then each 429 spends a try, and FAILs", async () => {
+  const { u, tx } = rhReceipts(A.good);
+  const waits = [];
+  const run = await read(venuesOf(A.good), replayFetch(A.good, () => false, () => undefined, (url, body) => (url === u && receiptBatchOf(body, tx) ? LIMITED : undefined)), async (ms) => void waits.push(ms));
+  bad(run, /robinhood .*reader 2 answered 0 of/);
+  // each try's batch waits its 429s (Retry-After 5 s, never less than the doubling backoff) up to the bound, and the
+  // tries' own waits (1, 2 then 4 s) between them
+  assert.equal(waits.reduce((a, b) => a + b, 0), TRIES * LIMITED_WAIT_MS + 1_000 + 2_000 + 4_000, JSON.stringify(waits));
+});
+
+test("a batch answered HTTP 503, or 2xx with a body that is not a batch, spends a try and is asked again, never read as receipts answered null", async () => {
+  const { u, s, tx } = rhReceipts(A.good);
+  for (const once of [{ status: 503, body: { error: { code: "upstream" } } }, { status: 200, body: { error: { code: "upstream" } } }]) {
+    let asked = 0;
+    const run = await read(venuesOf(A.good), replayFetch(A.good, () => false, () => undefined, (url, body) => (url === u && receiptBatchOf(body, tx) && asked++ === 0 ? once : undefined)), async () => {});
+    const v = judge(run);
+    assert.equal(v.pass, true, `${once.status}: ${v.lines.filter((l) => l.startsWith("BAD")).join("\n")}`);
+    assert.equal(run.chains.robinhood.spans[s].receipts[1][0].tries, 2);
+  }
+  const stays = await read(venuesOf(A.good), replayFetch(A.good, () => false, () => undefined, (url, body) => (url === u && receiptBatchOf(body, tx) ? { status: 503, body: { error: { code: "upstream" } } } : undefined)), async () => {});
+  bad(stays, /robinhood .*reader 2 answered 0 of/);
+  assert.match(stays.chains.robinhood.spans[s].receipts[1][0].error, /HTTP 503/);
+});
+
+test("a span's batch and a head read answered 429 once are waited out too", async () => {
+  const { u } = rhReceipts(A.good);
+  let span = 0;
+  let head = 0;
+  const waits = [];
+  const run = await read(venuesOf(A.good), replayFetch(A.good, () => false, () => undefined, (url, body) => {
+    if (url !== u || !Array.isArray(body)) return undefined;
+    if (body.length === 1 && body[0].method === "eth_blockNumber" && head++ === 0) return LIMITED;
+    if (body[0].method === "eth_getLogs" && span++ === 0) return LIMITED;
+    return undefined;
+  }), async (ms) => void waits.push(ms));
+  const v = judge(run);
+  assert.equal(v.pass, true, v.lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  assert.equal(run.chains.robinhood.spans[0].on[1].tries, 1);
+  assert.equal(run.chains.robinhood.spans[0].on[1].limitedMs, 5_000);
+  assert.deepEqual(waits, [5_000, 5_000]);
+});
+
 /** `inner` with `url`'s batches past `max` calls answered 413 with base.api.pocket.network's own body (2026-11-18). */
 const sizes = [];
 const capped = (inner, url, max) => async (u, init) => {
@@ -201,4 +274,30 @@ test("sizeRefusal reads each mainnet reader's refusal as the kit does, and never
   assert.equal(sizeRefusal(200, JSON.stringify([{ id: 0, error: { code: -32007, message: "25/second request limit reached" } }])), undefined);
   assert.equal(sizeRefusal(502, "batch too large"), undefined);
   assert.equal(sizeRefusal(200, JSON.stringify([{ id: 0, error: { code: 3, message: "execution reverted: batch too large" } }])), undefined);
+});
+
+test("a 429 on a part of a split batch is waited out too: no try spent, the reader's size kept, PASS", async () => {
+  const u = A.good.chains.base.index.readers[1];
+  const i = A.good.chains.base.spans.findIndex((x) => x.txs?.length > 5);
+  const tx = A.good.chains.base.spans[i].txs[6];
+  MOST.clear();
+  let asked = 0;
+  const waits = [];
+  const parts = [];
+  const inner = replayFetch(A.good, () => false, () => undefined, (url, body) => {
+    if (url !== u || !receiptBatchOf(body, tx)) return undefined;
+    parts.push(body.length);
+    return asked++ === 0 ? LIMITED : undefined;
+  });
+  const run = await read(venuesOf(A.good), capped(inner, u, 5), async (ms) => void waits.push(ms));
+  MOST.clear();
+  const v = judge(run);
+  assert.equal(v.pass, true, v.lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  assert.deepEqual(run.chains.base.most, { [u]: 5 });
+  // the part holding tx: answered 429 once (a part of at most 5), then asked again after its Retry-After
+  assert.ok(parts.length >= 2 && parts.every((n) => n <= 5), JSON.stringify(parts));
+  const rc = run.chains.base.spans[i].receipts[1][6];
+  assert.equal(rc.tries, 1);
+  assert.equal(rc.limitedMs, 5_000);
+  assert.ok(waits.includes(5_000), JSON.stringify(waits));
 });

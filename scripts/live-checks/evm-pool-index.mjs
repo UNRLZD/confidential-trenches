@@ -23,6 +23,10 @@
 //     and a receipt answered null or with a rate limit are asked again, anything else is final: review 3 of 7f1ad79a,
 //     base.api.pocket.network answered null for 119 of 500 mined Initialize transactions; review 4 of 43f8e45f), each
 //     in the span and holding the PoolManager's Initialize of its pool.
+//   Every batch is read as the kit reads it (quote.ts evmJsonRpc, pool-index.ts `ask`): an HTTP 429 waits its
+//   Retry-After without spending a try, up to the kit's 60 s a batch, and any other status outside 2xx, or an answer that
+//   is not a batch, spends one (card robinhood-index-second-reader-serves-receipts: the helper's keyed route refused the
+//   third batch of receipts 429 at its 30 requests a caller each 10 s, which the check read as ten receipts answered null).
 // What it proves, and only that: the readers the deployed kit names serve the index's reads and agree. That quotes read
 // their pools from the index is card evm-pool-index-route's check.
 // After: app
@@ -53,6 +57,13 @@ export const TIMEOUT_MS = 10_000;
 export const TRIES = 4;
 export const BACKOFF_MS = 500;
 export const waitBefore = (tries) => BACKOFF_MS * 2 ** (tries - 1);
+/** The longest one batch waits on a reader's HTTP 429s, each its Retry-After and never less than the doubling backoff,
+ *  spending no try, before a 429 spends one as any failure does: the kit's INDEX_LIMITED_WAIT_MS (pool-index.ts `ask`,
+ *  which the kit's entry does not export). Card robinhood-index-second-reader-serves-receipts: the helper's keyed route
+ *  takes 30 requests a caller each 10 s (RateLimit-Policy "client";q=30;w=10) and answered this check's 8th Robinhood
+ *  post, its third batch of 10 receipts, 429 {"error":{"code":"rate_limited"}} with Retry-After 5 (2026-11-20 01:4xZ
+ *  from this Mac; live app runs 44651054036 and 44441930508), which the check read as ten receipts answered null. */
+export const LIMITED_WAIT_MS = 60_000;
 /** Receipts read a span on each reader, in one batch: the kit's INDEX_RECEIPT_BATCH. */
 export const RECEIPTS = 10;
 /** A rate limit answered inside a batch, in the kit's words (pool-index.ts `limited`, which the kit does not export). */
@@ -114,6 +125,14 @@ export function judge(run) {
   return { pass: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
 
+/** A Retry-After header in ms (seconds or an HTTP date), or null. */
+const retryAfterMs = (h) => {
+  if (h === null || h === undefined || h === "") return null;
+  if (/^\d+$/.test(h.trim())) return Number(h.trim()) * 1000;
+  const at = Date.parse(h);
+  return Number.isNaN(at) ? null : Math.max(0, at - Date.now());
+};
+
 /** Each reader's most calls a batch, where it refused one for its size this run: the kit's own (pace.ts evmBatchMost,
  *  kept for the page's life; card evm-batch-fits-each-reader). */
 export const MOST = new Map();
@@ -135,9 +154,12 @@ export function sizeRefusal(status, text) {
   const k = /\b(\d{1,9})\b/.exec(m);
   return k === null ? null : Number(k[1]);
 }
-/** One batch to a reader as the kit's evmJsonRpc sends it: past the reader's kept most calls it leaves as parts, all at
- *  once; a batch of more than one call it refuses for its size is asked again as parts of at most half (or the maximum
- *  its refusal names, where smaller and at least 1), and that size is kept for the run. Answers by the caller's ids. */
+/** One batch to a reader as the kit's evmJsonRpc sends it (quote.ts): past the reader's kept most calls it leaves as
+ *  parts, all at once; a batch of more than one call it refuses for its size (sizeRefusal) is asked again as parts of at
+ *  most half (or the maximum its refusal names, where smaller and at least 1), and that size is kept for the run. Then,
+ *  as the kit reads a status: HTTP 429 is a rate limit, thrown with its Retry-After (ask waits it out, a part's 429 the
+ *  whole batch's, as the kit's); any other status outside 2xx is a failure, never an answer to read; and an answer that
+ *  is not a batch counts only for a batch of one call, by its id. Answers by the caller's ids. */
 async function post(url, body, fetchFn) {
   const t = performance.now();
   const most = MOST.get(url) ?? Infinity;
@@ -156,9 +178,30 @@ async function post(url, body, fetchFn) {
     const again = await post(url, body, fetchFn);
     return { byId: again.byId, ms: Math.round(performance.now() - t) };
   }
+  if (r.status === 429) throw Object.assign(new Error("the reader answered HTTP 429"), { limited: true, afterMs: retryAfterMs(r.headers.get("retry-after")) });
+  if (!(r.status >= 200 && r.status < 300)) throw new Error(`the reader answered HTTP ${r.status}`);
   const j = JSON.parse(text);
+  if (!Array.isArray(j) && !(body.length === 1 && j !== null && typeof j === "object")) throw new Error(`the reader's answer is not a batch: ${String(JSON.stringify(j)).slice(0, 80)}`);
   const arr = Array.isArray(j) ? j : [j];
   return { byId: new Map(arr.map((a) => [a?.id, a])), ms: Math.round(performance.now() - t) };
+}
+
+/** One batch on reader `u` as the kit's pool-index `ask` sends it: an HTTP 429 waits its Retry-After, never less than
+ *  the doubling backoff, and spends no try, up to LIMITED_WAIT_MS of waiting a batch; past it, or on any other failure,
+ *  it throws, which spends the caller's try. `limitedMs`: the time it waited on 429s. */
+export async function ask(u, body, fetchFn, sleep) {
+  let waited = 0;
+  let waits = 0;
+  for (;;) {
+    try {
+      return { ...(await post(u, body, fetchFn)), limitedMs: waited };
+    } catch (e) {
+      if (e?.limited !== true || waited >= LIMITED_WAIT_MS) throw e;
+      const ms = Math.min(Math.max(e.afterMs ?? 0, BACKOFF_MS * 2 ** waits++), LIMITED_WAIT_MS - waited);
+      waited += ms;
+      await sleep(ms);
+    }
+  }
 }
 
 /** One reader's answer to the span a..b: its Initialize logs, its last block and its own head, in one batch, asked
@@ -168,15 +211,15 @@ export async function readSpan(u, pm, a, b, fetchFn, sleep) {
   let last = null;
   for (let tries = 1; tries <= TRIES; tries++) {
     try {
-      const { byId, ms } = await post(u, [
+      const { byId, ms, limitedMs } = await ask(u, [
         { jsonrpc: "2.0", id: 0, method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics: [INITIALIZE] }] },
         { jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["0x" + b.toString(16), false] },
         { jsonrpc: "2.0", id: 2, method: "eth_blockNumber", params: [] },
-      ], fetchFn);
+      ], fetchFn, sleep);
       const logs = byId.get(0)?.result;
       const blk = byId.get(1)?.result;
       const head = byId.get(2)?.result;
-      last = { logs: Array.isArray(logs) ? logs.length : -1, ids: Array.isArray(logs) ? logs.map((l) => String(l?.topics?.[1]).toLowerCase()) : [], firsts: Array.isArray(logs) ? logs.slice(0, RECEIPTS).map((l) => ({ tx: String(l?.transactionHash).toLowerCase(), id: String(l?.topics?.[1]).toLowerCase() })) : [], last: typeof blk?.hash === "string" && Number(blk.number) === b ? blk.hash.toLowerCase() : null, head: typeof head === "string" ? Number(head) : null, ms, tries };
+      last = { logs: Array.isArray(logs) ? logs.length : -1, ids: Array.isArray(logs) ? logs.map((l) => String(l?.topics?.[1]).toLowerCase()) : [], firsts: Array.isArray(logs) ? logs.slice(0, RECEIPTS).map((l) => ({ tx: String(l?.transactionHash).toLowerCase(), id: String(l?.topics?.[1]).toLowerCase() })) : [], last: typeof blk?.hash === "string" && Number(blk.number) === b ? blk.hash.toLowerCase() : null, head: typeof head === "string" ? Number(head) : null, ms, tries, ...(limitedMs > 0 ? { limitedMs } : {}) };
     } catch (e) {
       last = { logs: -1, ids: [], last: null, head: null, ms: TIMEOUT_MS + 1, tries, error: String(e?.message ?? e).slice(0, 120) };
     }
@@ -195,19 +238,20 @@ export async function readReceipts(u, pm, firsts, fetchFn, sleep) {
   for (let tries = 1; tries <= TRIES && left.length > 0; tries++) {
     if (tries > 1) await sleep(waitBefore(tries));
     try {
-      const { byId, ms } = await post(u, left.map((i) => ({ jsonrpc: "2.0", id: i, method: "eth_getTransactionReceipt", params: [firsts[i].tx] })), fetchFn);
+      const { byId, ms, limitedMs } = await ask(u, left.map((i) => ({ jsonrpc: "2.0", id: i, method: "eth_getTransactionReceipt", params: [firsts[i].tx] })), fetchFn, sleep);
+      const lim = limitedMs > 0 ? { limitedMs } : {};
       const again = [];
       for (const i of left) {
         const a = byId.get(i);
         const rc = a?.result;
         const { tx, id } = firsts[i];
         if (rc === null || (rc === undefined && LIMITED.test(String(a?.error?.message ?? "")))) {
-          out[i] = { block: null, init: false, ms, tries, answer: rc === null ? "null" : "limited" };
+          out[i] = { block: null, init: false, ms, tries, answer: rc === null ? "null" : "limited", ...lim };
           again.push(i);
         } else if (rc && typeof rc === "object" && !Array.isArray(rc)) {
           const init = Array.isArray(rc.logs) && rc.logs.some((l) => String(l?.address).toLowerCase() === pm.toLowerCase() && String(l?.topics?.[0]).toLowerCase() === INITIALIZE && String(l?.topics?.[1]).toLowerCase() === id && String(l?.transactionHash).toLowerCase() === tx);
-          out[i] = { block: Number(rc.blockNumber), init, ms, tries };
-        } else out[i] = { block: null, init: false, ms, tries, answer: String(JSON.stringify(a?.error ?? rc ?? null)).slice(0, 120) };
+          out[i] = { block: Number(rc.blockNumber), init, ms, tries, ...lim };
+        } else out[i] = { block: null, init: false, ms, tries, answer: a === undefined ? "none with its id" : String(JSON.stringify(a?.error ?? rc ?? null)).slice(0, 120), ...lim };
       }
       left = again;
     } catch (e) {
@@ -240,7 +284,7 @@ export async function read(venues, fetchFn = fetch, sleep = (ms) => new Promise(
       }
     }
     const heads = await Promise.all(ix.readers.map(async (u) => {
-      const h = (await post(u, [{ jsonrpc: "2.0", id: 0, method: "eth_blockNumber", params: [] }], fetchFn)).byId.get(0)?.result;
+      const h = await ask(u, [{ jsonrpc: "2.0", id: 0, method: "eth_blockNumber", params: [] }], fetchFn, sleep).then((x) => x.byId.get(0)?.result, () => null);
       return typeof h === "string" ? Number(h) : null;
     }));
     const n = Math.min(...heads.filter((h) => h !== null));
