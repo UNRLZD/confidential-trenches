@@ -9,6 +9,7 @@ import { CALLER_ROOM, providerHolds, type Pace } from "../../limits/limits.ts";
 import { turnSlicer } from "../../limits/turn.ts";
 import { call, listening } from "../../../test/servers.ts";
 import { DatabaseSync } from "node:sqlite";
+import { checkpointAside } from "../../store/checkpoint.ts";
 
 /** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
  *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
@@ -331,7 +332,34 @@ test("card helper-loop-never-held-by-a-read: the index's file is WAL with synchr
     assert.match(pragmas, /PRAGMA journal_mode = WAL;/);
     assert.match(pragmas, /PRAGMA synchronous = NORMAL;/);
     assert.doesNotMatch(pragmas, /synchronous = (FULL|EXTRA)/);
+    assert.match(pragmas, /PRAGMA wal_autocheckpoint = 0;/, "no commit runs the log's checkpoint (its sync) in a turn of the loop");
     ix.close();
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("card helper-loop-never-held-by-a-read: a file whose connection never checkpoints is checkpointed by its own thread (store/checkpoint.ts): the log's pages reach the file while the writer goes on, and a stop ends the thread", async () => {
+  const d = dir();
+  try {
+    const file = join(d, "x.sqlite");
+    const db = new DatabaseSync(file);
+    db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA wal_autocheckpoint = 0; CREATE TABLE p (id INTEGER PRIMARY KEY, v BLOB NOT NULL);");
+    const put = db.prepare("INSERT INTO p (id, v) VALUES (?, ?)");
+    db.exec("BEGIN IMMEDIATE");
+    for (let i = 0; i < 2_000; i++) put.run(i, Buffer.alloc(200, i % 256));
+    db.exec("COMMIT");
+    const small = statSync(file).size;
+    assert.ok(statSync(file + "-wal").size > 400_000, "the rows are in the log, not yet in the file");
+    let failed: Error | null = null;
+    const aside = checkpointAside(file, (e) => void (failed = e), 10);
+    // the thread's checkpoint is seen by the file's size, asked once a turn, for at most 2,000 turns of 5 ms
+    for (let k = 0; k < 2_000 && statSync(file).size <= small; k++) await new Promise((r) => setTimeout(r, 5));
+    aside.stop();
+    assert.equal(failed, null);
+    assert.ok(statSync(file).size > 400_000, `the log's pages reached the file: ${small} -> ${statSync(file).size} bytes`);
+    assert.equal((db.prepare("SELECT count(*) AS n FROM p").get() as { n: number }).n, 2_000);
+    db.close();
   } finally {
     rmSync(d, { recursive: true, force: true });
   }

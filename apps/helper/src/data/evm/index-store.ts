@@ -14,6 +14,7 @@
 // read after the start (a copy past its window behind that head is dropped), so a stale copy is never complete.
 import { rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { checkpointAside } from "../../store/checkpoint.ts";
 import type { Log } from "./swaps.ts";
 
 /** The layout this file writes; a file of another is started again. */
@@ -58,8 +59,8 @@ function open(file: string, topicsKey: string): DatabaseSync {
     // synchronous NORMAL, SQLite's own setting for WAL: a write's commit syncs nothing in a turn of the loop (card
     // helper-loop-never-held-by-a-read: under FULL a pool index commit's sync held a copy's loop 637 and 757 ms). A
     // crash never tears the file; a power loss rolls back only the newest writes, so the file still holds a whole range
-    // or one before it.
-    db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;
+    // or one before it. The log's checkpoint, the one sync left, runs on a thread of its own (store/checkpoint.ts).
+    db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA wal_autocheckpoint = 0;
       CREATE TABLE IF NOT EXISTS logs (block INTEGER NOT NULL, idx INTEGER NOT NULL, tx TEXT NOT NULL, address TEXT NOT NULL, topics TEXT NOT NULL, data TEXT NOT NULL, t INTEGER, PRIMARY KEY (block, idx)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID;`);
     const ok = db.prepare("PRAGMA quick_check").all() as { quick_check?: unknown }[];
@@ -99,6 +100,8 @@ export function openIndexStore(file: string, topicList: readonly string[], log: 
       return null;
     }
   }
+  // the store lives as long as the helper: its thread is unref'd and ends with it
+  checkpointAside(file, () => db.isOpen && db.exec("PRAGMA wal_autocheckpoint = 1000"));
   const setMeta = db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v");
   const put = db.prepare("INSERT OR REPLACE INTO logs (block, idx, tx, address, topics, data, t) VALUES (?, ?, ?, ?, ?, ?, ?)");
   const before = db.prepare("DELETE FROM logs WHERE block < ?");

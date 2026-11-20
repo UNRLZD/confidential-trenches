@@ -200,4 +200,5 @@ test("card helper-loop-never-held-by-a-read: the store's file is WAL with synchr
   assert.match(pragmas, /PRAGMA journal_mode = WAL;/);
   assert.match(pragmas, /PRAGMA synchronous = NORMAL;/);
   assert.doesNotMatch(pragmas, /synchronous = (FULL|EXTRA)/);
+  assert.match(pragmas, /PRAGMA wal_autocheckpoint = 0;/, "no write runs the log's checkpoint (its sync) in a turn of the loop");
 });
