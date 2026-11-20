@@ -73,10 +73,15 @@ function helper(o: { lists?: unknown; listsStatus?: number; token?: unknown; tok
   return { fetchFn, calls };
 }
 
+/** A clock only the token read's waits move (source.ts ReadDeps): a 503 is read again inside READY_MS with no real wait. */
+const still = () => {
+  let t = 0;
+  return { now: () => t, sleep: async (ms: number) => void (t += ms) };
+};
 /** loadTopToken on its own reader of every chain's lists (no lists held from another test), on the pick. */
 const load = (fetchFn: typeof fetch, pick: Parameters<typeof source.loadTopToken>[1] = "all") => {
   assert.equal(typeof source.loadTopToken, "function", "source.ts exports loadTopToken (the live read), not a fixture switch");
-  return source.loadTopToken!(fetchFn, pick, allListsReader());
+  return source.loadTopToken!(fetchFn, pick, allListsReader(), still());
 };
 const LISTS_URLS = ["solana", "base", "robinhood", "near"].map((c) => listsUrl(c as "solana"));
 
@@ -247,7 +252,7 @@ test("/ on All opens a coin the private buy fills: mihao, a pump.fun coin on Pum
 /** What / reads on a pick: the app's own home read (loadHome), else the old rule (the top Trending token) it replaces. */
 const home = (fetchFn: typeof fetch, pick: Parameters<typeof source.loadTopToken>[1]) => {
   const s = source as typeof source & { loadHome?: typeof source.loadTopToken };
-  return (s.loadHome ?? source.loadTopToken)(fetchFn, pick, allListsReader());
+  return (s.loadHome ?? source.loadTopToken)(fetchFn, pick, allListsReader(), still());
 };
 
 test("/ on All (a fresh open) opens mihao on Solana, read by its mint alone", async () => {

@@ -60,7 +60,10 @@ const STATES = [
   { id: "S7.1-loading", lists: "hang", state: "loading" },
   { id: "empty", lists: "empty", state: "empty" },
   { id: "error", lists: 503, state: "error" },
-  { id: "error-token", top: "curve", token: 503, state: "error" },
+  // a refusal is the error state; a token read the helper answers 503 is read again and the page opens (card
+  // app-token-page-rides-out-a-slow-token-read: a 503 or no answer is the error state only once READY_MS is spent)
+  { id: "error-token", top: "curve", token: 400, state: "error" },
+  { id: "token-503-rides-out", top: "curve", token: "503-once", state: "ready", curve: true },
   // the chart (card app-token-chart): GeckoTerminal's bars by default (the label shows), our own (no label), none, a
   // failed read, and a read that never ends (the skeleton)
   { id: "chart-chain", top: "pool", state: "ready", curve: false, candles: "chain" },
@@ -154,12 +157,13 @@ function helperAnswer(s, url, calls) {
     calls.tokens++;
     if (!s.top) {
       // a lists state off the phone: / on All reads mihao alone (card mihao-opens-first), so its read answers the
-      // state: never ending (loading), not known (empty) or failed (error)
+      // state: never ending (loading), not known (empty) or refused (error)
       if (url.searchParams.get("token") !== OPEN) return json(404, { error: "unknown token" });
       if (s.lists === "hang") return "hang";
-      return s.lists === "empty" ? json(404, { error: "unknown token" }) : json(s.lists, { error: "unavailable" });
+      return s.lists === "empty" ? json(404, { error: "unknown token" }) : json(400, { error: "refused" });
     }
     if (typeof s.token === "number") return json(s.token, { error: "unavailable" });
+    if (s.token === "503-once" && !calls.failed) return (calls.failed = true), json(503, { error: "unavailable" });
     const row = live(s.top);
     if (url.searchParams.get("token") !== row.token) return json(404, { error: "unknown token" });
     return json(200, { row, decimals: 6, pool: null, risk: {}, route: "ok" });

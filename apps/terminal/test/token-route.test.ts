@@ -90,22 +90,100 @@ test("loadToken: an unknown id (the helper answers 404) is the not-found state, 
   assert.deepEqual(await source.loadToken!("solana", "nope", helper({ status: 404, body: { error: { code: "not_found" } } }).fetchFn), { status: "empty" });
 });
 
-test("loadToken: a failed or wrong read is the error state, never another token", async () => {
+test("loadToken: a refusal (another status, a body that is not this token's row) is the error state at once, never another token", async () => {
   const other = { ...answer, row: { ...row, token: "So11111111111111111111111111111111111111112" } };
-  const cases: [string, Parameters<typeof helper>[0] | "throw"][] = [
-    ["503", { status: 503, body: { error: "unavailable" } }],
-    ["429", { status: 429, body: "slow down" }],
+  const cases: [string, Parameters<typeof helper>[0]][] = [
+    ["400", { status: 400, body: { error: "bad id" } }],
+    ["403", { status: 403, body: { error: "origin" } }],
     ["not JSON", { body: "nope" }],
     ["no row", { body: { ...answer, row: null } }],
     ["a row for another id", { body: other }],
     ["a row of another chain", { body: { ...answer, row: { ...row, chain: "base" } } }],
     ["a row with no symbol", { body: { ...answer, row: { ...row, symbol: "" } } }],
-    ["the network refuses", "throw"],
   ];
   for (const [name, o] of cases) {
-    const fetchFn: typeof fetch = o === "throw" ? async () => Promise.reject(new TypeError("Failed to fetch")) : helper(o).fetchFn;
-    assert.deepEqual(await source.loadToken!("solana", MINT, fetchFn), { status: "error" }, name);
+    const c = still();
+    const { fetchFn, calls } = helper(o);
+    assert.deepEqual(await source.loadToken!("solana", MINT, fetchFn, c), { status: "error" }, name);
+    assert.equal(calls.length, 1, `${name}: read once`);
+    assert.deepEqual(c.waits, [], `${name}: no wait`);
   }
+});
+
+// Card app-token-page-rides-out-a-slow-token-read: merge group 44618685462 drew /token/robinhood/<cbBTC> in the error
+// state after one token read the helper did not answer in 10 s, never read again. A clock handed in (ReadDeps): `sleep`
+// and a read the helper never answers move it, nothing else does.
+function still() {
+  let t = 0;
+  const waits: number[] = [];
+  const timeouts: number[] = [];
+  return {
+    waits,
+    timeouts,
+    now: () => t,
+    sleep: async (ms: number) => void (waits.push(ms), (t += ms)),
+    timeout: (ms: number) => (timeouts.push(ms), new AbortController().signal),
+    /** A read the helper never answers: its whole wait passes, then the read's own timeout ends it. */
+    hang: async (): Promise<Response> => {
+      t += timeouts.at(-1)!;
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    },
+  };
+}
+
+test("loadToken: a read with no answer, a 5xx or a 429 is read again with backoff, and the page opens on the answer", async () => {
+  const c = still();
+  const urls: string[] = [];
+  const answers: (() => Promise<Response>)[] = [
+    c.hang,
+    async () => Promise.reject(new TypeError("Failed to fetch")),
+    async () => new Response(JSON.stringify({ error: "unavailable" }), { status: 503 }),
+    async () => new Response("slow down", { status: 429 }),
+    async () => new Response(JSON.stringify(answer), { status: 200 }),
+  ];
+  const fetchFn: typeof fetch = async (input) => (urls.push(String(input)), answers[urls.length - 1]!());
+  const d = await source.loadToken!("solana", MINT, fetchFn, c);
+  assert.equal(d.status, "ready");
+  assert.equal(d.status === "ready" && d.row.token, MINT);
+  assert.deepEqual(urls, Array(5).fill(source.TOKEN_URL(MINT)), "the same read, five times");
+  assert.deepEqual(c.waits, [500, 1_000, 2_000, 4_000], "the waits back off");
+  assert.ok(c.now() <= source.READY_MS!, `opened at ${c.now()} ms, inside READY_MS`);
+});
+
+test("loadToken: a helper that never answers is read again inside READY_MS, then the error state, never past it", async () => {
+  const c = still();
+  let n = 0;
+  const d = await source.loadToken!("robinhood", "0xcec185eb182c47d1ba1efc84e6959e18cd620be4", async () => (n++, c.hang()), c);
+  assert.deepEqual(d, { status: "error" });
+  assert.deepEqual(c.timeouts, [source.TIMEOUT_MS, source.READY_MS! - source.TIMEOUT_MS! - 500], "the second read waits what READY_MS has left");
+  assert.equal(n, 2);
+  assert.equal(c.now(), source.READY_MS);
+});
+
+test("loadToken: 5xx, 429 and network failures on every read are the error state once READY_MS has no room for another read", async () => {
+  const cases: [string, () => Promise<Response>][] = [
+    ["503", async () => new Response("{}", { status: 503 })],
+    ["502", async () => new Response("<html>", { status: 502 })],
+    ["429", async () => new Response("slow down", { status: 429 })],
+    ["the network refuses", async () => Promise.reject(new TypeError("Failed to fetch"))],
+  ];
+  for (const [name, answer] of cases) {
+    const c = still();
+    let n = 0;
+    assert.deepEqual(await source.loadToken!("solana", MINT, async () => (n++, answer()), c), { status: "error" }, name);
+    assert.ok(n > 1, `${name}: read ${n} time(s)`);
+    assert.ok(c.now() <= source.READY_MS! - source.MIN_READ_MS!, `${name}: the last read started at ${c.now()} ms, with a read's room left`);
+  }
+});
+
+test("loadToken: a closed page reads no more (its signal stops the reads again)", async () => {
+  const c = still();
+  const closed = new AbortController();
+  let n = 0;
+  const d = await source.loadToken!("solana", MINT, async () => (n++, closed.abort(), new Response("{}", { status: 503 })), { ...c, signal: closed.signal });
+  assert.deepEqual(d, { status: "error" });
+  assert.equal(n, 1);
+  assert.deepEqual(c.waits, []);
 });
 
 test("the token route reads the address: Screen.tsx and TokenPage.tsx", () => {
