@@ -2243,7 +2243,13 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const shared = EVM_CHAINS.has(c) ? url : undefined;
     const heldAt = (): number => heldOf(key, shared);
     const deadline = now() + HOLD_WAIT_MS + PACE_MAX_MS;
-    if (!(await holdOver(key, deadline, shared, rest))) return throttled(heldAt(), undefined, `${key} held`);
+    /** Card helper-solana-slots-off-a-spent-key, round 2: the slot's key has no room (its pace past PACE_MAX_MS, or a hold
+     *  past HOLD_WAIT_MS): the read goes on to the next provider (fellBack: the other slot keys, the keyed spares, the
+     *  public endpoint), so a caller's send or simulation is never the helper's own 429 while one of them has room. The
+     *  key's own pace is unchanged (a borrowed key still gets its half only). A slot with no public fallback (the
+     *  holders key's) answers the 429 as before. */
+    const noRoom = (refused: Answer): Promise<Answer> => (viaSlot && publicFallback ? fellBack() : Promise.resolve(refused));
+    if (!(await holdOver(key, deadline, shared, rest))) return noRoom(throttled(heldAt(), undefined, `${key} held`));
     const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
     let r!: Sent;
@@ -2253,16 +2259,16 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       const room = Math.max(0, Math.min(PACE_MAX_MS, deadline - now()));
       // card helper-serves-many-users-at-once: the first Solana key full for this second, a keyed spare with room takes
       // the read now; it drew the chain's budget above and draws nothing again (solanaRest with no key). A spare with
-      // no room: the first key's wait, and its 429 past PACE_MAX_MS, as before
+      // no room: the first key's wait, and past PACE_MAX_MS the next provider (noRoom)
       if (viaSlot && tries === 0 && upstreams.solana.keyed.length > 1 && pace(key, methods.length, room, shared, false) > 0 && spareHasRoom(methods.length)) return solanaRest(forward, methods, client, reserved, by, null, 1, url);
       const paced = pace(key, methods.length, room, shared);
-      if (paced > room) return throttled(Math.max(1, Math.ceil((paced - room) / 1000)), undefined, `${key} pace`);
+      if (paced > room) return noRoom(throttled(Math.max(1, Math.ceil((paced - room) / 1000)), undefined, `${key} pace`));
       if (paced > 0) await rest(paced);
       // the hold is read again right before the send: the provider may have asked us to wait while this one waited
       // for its second (card helper-rpc-hold-queued); a short one is waited out and the send paced again
       if (heldAt() > 0) {
         if (tries < 2 && (await holdOver(key, deadline, shared, rest))) continue;
-        return throttled(Math.max(1, heldAt()), undefined, `${key} held`);
+        return noRoom(throttled(Math.max(1, heldAt()), undefined, `${key} held`));
       }
       // the send counted where it leaves (Pacer.go), within the deadline
       const p = pacedOf(key);
@@ -2270,11 +2276,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       let gate = p === null ? 0 : pacer.go(p.url, methods.length, p.perSecond);
       for (let round = 0; gate > 0; round++) {
         // a few rounds at most: each waits for a send to leave the second, so more mean a crowd past the deadline
-        if (round >= 4 || performance.now() + gate > goBy) return throttled(Math.max(1, Math.ceil(gate / 1000)), undefined, `${key} pace`);
+        if (round >= 4 || performance.now() + gate > goBy) return noRoom(throttled(Math.max(1, Math.ceil(gate / 1000)), undefined, `${key} pace`));
         await rest(gate);
         gate = pacer.go(p!.url, methods.length, p!.perSecond);
       }
-      if (heldAt() > 0) return throttled(Math.max(1, heldAt()), undefined, `${key} held`);
+      if (heldAt() > 0) return noRoom(throttled(Math.max(1, heldAt()), undefined, `${key} held`));
       // review L4: the public endpoint after a walk's spares is sent only inside the read's walk time
       if (by - now() < WALK_SEND_MIN_MS) return UPSTREAM();
       sent = now();
