@@ -7,7 +7,9 @@
 // The read itself, replayed from the good run: a reader one block behind on a span, then caught up, PASSES (asked
 // again, as the index asks it); one that stays behind past TRIES FAILS; a receipt answered null or with a rate limit
 // once, then present, PASSES (reviews 3 and 4), one null past TRIES FAILS, and any other answer is final and FAILS; the
-// receipts are asked in one batch of at most RECEIPTS.
+// receipts are asked in one batch of at most RECEIPTS. A batch answered HTTP 429 (the helper's keyed route at its
+// caller share) waits its Retry-After without spending a try, as the kit does, up to LIMITED_WAIT_MS; one answered 503,
+// or 2xx with a body that is not a batch, spends a try (card robinhood-index-second-reader-serves-receipts).
 //   node --test scripts/live-checks/evm-pool-index.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
