@@ -75,6 +75,10 @@ function decodeAggregate(data: string): string[] {
 // a revert with V4Quoter's NotEnoughLiquidity(bytes32) as its data (card rh-cold-quote: an exact-output quote past what
 // the pool can give)
 const RAN_OUT = Symbol("NotEnoughLiquidity");
+// card evm-sell-ban-reads-a-root-halt: what a pool's `exec` returns for a hook that burns the sale's gas, so SellDelegate's
+// own frame runs out after the swap (BURNS), and what the sale's call then is: halted at its root, "out of gas" (ROOT_OOG)
+const BURNS = -1n;
+const ROOT_OOG = Symbol("out of gas");
 // EVM_READ_GAS_CODE's success word 2: a read that failed having used half its gas or more (card evm-quote-read-gas-starve)
 const STARVED = Symbol("starved");
 // EVM_READ_GAS_CODE as merged at 206d625f, which gave each of a call's n reads the same share, L = ((gas - 100,000) / n
@@ -450,7 +454,7 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
         if (s === undefined) return { jsonrpc: "2.0", id, result: null };
         const block = { hash: s.blockHash, number: "0x" + s.block.toString(16), timestamp: SALE_TIME, parentHash: SALE_PARENT, baseFeePerGas: "0x" + SALE_BASE_FEE.toString(16), mixHash: SALE_MIX };
         if (c.method === "eth_getBlockByHash") return { jsonrpc: "2.0", id, result: block };
-        if (c.method === "eth_getTransactionReceipt") return { jsonrpc: "2.0", id, result: { transactionHash: s.hash, blockHash: s.blockHash, blockNumber: block.number, transactionIndex: s.rcIndex ?? "0x3", gasUsed: "0x" + (((s.gas ?? (s.bought !== undefined ? BUY_GAS : SALE_GAS)) * 4n) / 5n).toString(16), status: who === 1 && s.status1 !== undefined ? s.status1 : s.status, logs: s.logs ?? [], ...(s.l1Gas !== undefined ? { gasUsedForL1: "0x" + s.l1Gas.toString(16) } : {}) } };
+        if (c.method === "eth_getTransactionReceipt") return { jsonrpc: "2.0", id, result: { transactionHash: s.hash, blockHash: s.blockHash, blockNumber: block.number, transactionIndex: s.rcIndex ?? "0x3", gasUsed: "0x" + ((s.halt !== undefined ? 5n : 4n) * (s.gas ?? (s.bought !== undefined ? BUY_GAS : SALE_GAS)) / 5n).toString(16), status: who === 1 && s.status1 !== undefined ? s.status1 : s.status, logs: s.logs ?? [], ...(s.l1Gas !== undefined ? { gasUsedForL1: "0x" + s.l1Gas.toString(16) } : {}) } };
         // a buy is the helper's type 2 transaction with no authorizations (signEvmTx), a sale W's type 4 with one
         const fees = { value: "0x0", maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" };
         if (s.bought !== undefined) return { jsonrpc: "2.0", id, result: { hash: s.hash, type: "0x2", from: SENDER, to: s.to ?? SALE_POOL, input: s.input, gas: "0x" + (s.gas ?? BUY_GAS).toString(16), ...fees, blockHash: s.blockHash, blockNumber: block.number, transactionIndex: "0x3" } };
@@ -573,6 +577,9 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       // replay's two answers can be held equal
       // the pool's buy lands a failed swap (status 1, the chunk back to W) and returns `_bought` (card pool-evm-buy-pays-revert)
       if (isBuy) return o === SWAP_GAS_TOO_LOW ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted", data: SEL_SWAP_GAS_TOO_LOW } } : { jsonrpc: "2.0", id, result: "0x" + W(o === null ? 0n : 1n) };
+      // a hook that burned the sale's gas: SellDelegate's own frame ran out after the swap (card evm-sell-ban-reads-a-root-halt)
+      // in the node's words: Nitro's -32000 "out of gas", reth's (Base) -32003 with the call's own gas (read 2026-11-20)
+      if (o === ROOT_OOG) return { jsonrpc: "2.0", id, error: nitro ? { code: -32000, message: "out of gas" } : { code: -32003, message: `out of gas: gas required exceeds: ${ctx!.gas}` } };
       return o === null || o === RAN_OUT || o === OVERFLOW || o === SWAP_GAS_TOO_LOW ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted", ...(isSim ? { data: "0x81efc143" } : {}) } } : { jsonrpc: "2.0", id, result: "0x" + W(o) + W(0n) };
     });
   // PrivacyPoolSimple.buy (card evm-buy-hook-converge): the Buy at head word 18 through the pinned v4 adapter, its data
@@ -650,7 +657,7 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
   // W's own sell through SellDelegate (card evm-quote-exec-sim), W's code the delegate's 7702 designator: nonce() is 0;
   // sell(sell, fee, signature) swaps hop by hop from the token at each pool's `exec`, reverts below minOut, and returns
   // what W gained (the sim pool's code returns msg.value)
-  function simSell(d: string, o: Record<string, { code: string }>, ctx: SimCtx, overridden: Set<string>): bigint | null {
+  function simSell(d: string, o: Record<string, { code: string }>, ctx: SimCtx, overridden: Set<string>): bigint | null | typeof ROOT_OOG {
     assert.ok(o[SELL_W]!.code.startsWith("0xef0100"), "W's code is a 7702 designator");
     if (d.startsWith("affed0e0")) return 0n;
     assert.ok(d.startsWith(SEL_SELL), d.slice(0, 8));
@@ -679,6 +686,7 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       // a pool whose hook the call replaces with the no-op hook pays as it does with no hook (`neutral`, else `give`)
       const next = p.key.hooks !== NATIVE && overridden.has(p.key.hooks) ? (p.neutral !== undefined ? p.neutral(got, ctx) : p.give(got)) : p.exec !== undefined ? p.exec(got, { ...ctx, over: overridden, dir: "sell" }) : p.key.hooks !== NATIVE && p.lie !== undefined ? p.lie(got) : p.give(got);
       if (next === null) return erred(p, ctx, overridden);
+      if (next === BURNS) return ROOT_OOG;
       [from, got] = [cur, next];
     }
     return got < minOut ? null : got;
@@ -7258,7 +7266,9 @@ function traceOf(s: ModelSale, tracer: string, who: 0 | 1, balances: Record<stri
     const intoPm = { type: "CALL", from: c.via ?? c.by, to: RH_PM, input: "0x", value: "0x0", error: "execution reverted", calls: c.into.map((h) => ({ type: "CALL", from: RH_PM, to: h, input: "0x", value: "0x0", error: "execution reverted" })) };
     inner.push({ type: "CALL", from: RH_PM, to: c.by, input: "0x", value: "0x0", ...(c.errored === true ? { error: "execution reverted" } : {}), calls: [c.via === undefined ? intoPm : { type: "CALL", from: c.by, to: c.via, input: "0x", value: "0x0", error: "execution reverted", calls: [intoPm] }] });
   }
-  return err({ type: "CALL", from: SENDER, to: s.to ?? SELL_W, input: s.input, value: "0x0", ...e.root, calls: [err({ type: "CALL", from: e.pmFrom ?? s.to ?? SELL_W, to: RH_PM, input: "0x", value: "0x0", calls: inner }, failed)] }, s.status === "0x0");
+  const top = { type: "CALL", from: SENDER, to: s.to ?? SELL_W, input: s.input, value: "0x0", ...e.root, calls: [err({ type: "CALL", from: e.pmFrom ?? s.to ?? SELL_W, to: RH_PM, input: "0x", value: "0x0", calls: inner }, failed && s.halt === undefined)] };
+  // a sale that halted at its root: its root frame's error is the halt (the PoolManager's frame done)
+  return s.halt !== undefined ? { ...top, error: s.halt } : err(top, s.status === "0x0");
 }
 const SALE_VENUES = Object.freeze({ ...DELEGATED, base: Object.freeze({ ...DELEGATED.base, pool: SALE_POOL, feeCollector: SALE_COLLECTOR }) }) as builder.EvmPoolVenueList;
 // a buy's `bought`: what the pool's call returned (its swap done), with its log, Bought or Withdrawn, in `logs`
@@ -7267,7 +7277,7 @@ const SALE_VENUES = Object.freeze({ ...DELEGATED, base: Object.freeze({ ...DELEG
 // errored in the real run (the trace's callTracer names them); `trace`: edits to its trace (a provider's answer apart,
 // another call's root frame, extra accounts, errored frames, the caller of the errored frames, more frames, the caller
 // of the frame into the PoolManager)
-type ModelSale = { hash: string; input: string; block: number; blockHash: string; status: string; status1?: string; to?: string; bought?: boolean; gas?: bigint; logs?: { address: string; topics: string[] }[]; l1Gas?: bigint; rcIndex?: string; errored?: string[]; trace?: TraceEdit };
+type ModelSale = { hash: string; input: string; block: number; blockHash: string; status: string; status1?: string; halt?: string; to?: string; bought?: boolean; gas?: bigint; logs?: { address: string; topics: string[] }[]; l1Gas?: bigint; rcIndex?: string; errored?: string[]; trace?: TraceEdit };
 type TraceEdit = { apartOn?: 0 | 1; root?: Record<string, string>; accounts?: number; slots?: number; arbosSlots?: number; code?: number; erroredToo?: string[]; erroredFrom?: string; frames?: number; caught?: { by: string; into: string[]; errored?: true; via?: string }; pmMoved?: true; withArbos?: false; pmFrom?: string };
 const SALES = new Map<string, ModelSale>();
 let saleNo = 0;
@@ -7287,9 +7297,9 @@ const saleInput = (q: HookedQuote, venues = SALE_VENUES): string => {
 const land = async (pools: ModelPool[], q: HookedQuote, block = HEAD_NO + 1, extra: Partial<ModelSale> = {}, edit: (input: string) => string = (x) => x, sn?: SaleNet): Promise<string> => {
   const input = edit(saleInput(q, sn?.venues));
   REAL_ERRORED.length = 0;
-  const run = (await chain(pools, 0)([{ method: "eth_call", params: [{ from: SENDER, to: SELL_W, data: input, gas: "0x" + ((extra.gas ?? SALE_GAS) - 25_000n).toString(16), maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" }, "latest", { [SELL_W]: { code: "0xef0100" + DELEGATED.base!.sellDelegate!.slice(2) } }, { number: "0x" + block.toString(16) }, SALE_RUN] }]))[0] as { result?: string };
+  const run = (await chain(pools, 0)([{ method: "eth_call", params: [{ from: SENDER, to: SELL_W, data: input, gas: "0x" + ((extra.gas ?? SALE_GAS) - 25_000n).toString(16), maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" }, "latest", { [SELL_W]: { code: "0xef0100" + DELEGATED.base!.sellDelegate!.slice(2) } }, { number: "0x" + block.toString(16) }, SALE_RUN] }]))[0] as { result?: string; error?: { code?: number; message?: string } };
   const hash = "0x" + (0x5a1e0000 + ++saleNo).toString(16).padStart(64, "0");
-  SALES.set(hash, { hash, input, block, blockHash: "0x" + (0xb10c0000 + saleNo).toString(16).padStart(64, "0"), status: run.result !== undefined ? "0x1" : "0x0", errored: [...REAL_ERRORED], ...extra });
+  SALES.set(hash, { hash, input, block, blockHash: "0x" + (0xb10c0000 + saleNo).toString(16).padStart(64, "0"), status: run.result !== undefined ? "0x1" : "0x0", errored: [...REAL_ERRORED], ...(run.error?.code === -32000 || run.error?.code === -32003 ? { halt: "out of gas" } : {}), ...extra });
   return hash;
 };
 /** The device's evidence for a ban (the kit's evmSellRevertedPools) on two modelled providers. */
@@ -8679,6 +8689,57 @@ test("card evm-sell-hook-intrablock, HC2 and HIGH 1 (sell, Robinhood) a hook fli
     const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0xd0 + i)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec, ...(exec === earlierHook ? EARLY : {}) };
     const r = await hcConverge([seeded(token), hostile], token, [{ key: hostile.key, at: 4_500_001 }], 6, HEAD_NO + 1, RH_SALE);
     assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT / 10n, banned: [hcPid(hostile.key)] }, `${i}: ${show(r)}`);
+  }
+});
+
+// card evm-sell-ban-reads-a-root-halt: a hook's own halt reaches the sale as the PoolManager's revert (v4-core's
+// Hooks.callHook, a7cf038c lines 131-137, reverts with HookCallFailed on any failed hook call), so a hook halts the sale at
+// its root only by burning its gas: SellDelegate's own frame runs out after the swap, "out of gas", with every unit of the
+// sale's gas spent. Its replay halts the same, which is the sale failed as it did; a halt of another kind, or where the
+// sale reverted, is a replay broken (a precompile an override names, switched off, runs 0xfe), never a ban.
+const burnHook = (a: bigint, ctx: SimCtx) => (later(ctx) ? BURNS : 2n * a);
+test("card evm-sell-ban-reads-a-root-halt (sell, Base and Robinhood) a hook that burns the sale's gas so its root runs out: its replay halts \"out of gas\" as the sale did (the callTracer's root error on Robinhood, every unit of its gas spent on Base), so one failed try bans its pool", async () => {
+  for (const [i, sn] of [undefined, RH_SALE].entries()) {
+    const token = "0x" + (0x1ae5100 + i).toString(16).padStart(40, "0");
+    const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0xf0 + i)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: burnHook };
+    const r = await hcConverge([seeded(token), hostile], token, [{ key: hostile.key, at: 4_500_001 }], 6, HEAD_NO + 1, sn);
+    assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT / 10n, banned: [hcPid(hostile.key)] }, `${sn?.chain ?? "base"}: ${show(r)}`);
+  }
+});
+
+test("card evm-sell-ban-reads-a-root-halt (sell, Base and Robinhood) a halt that is not the sale's own bans nothing: invalid opcode where the sale ran out of gas, out of gas where it reverted, refused (rpc_error); a halt on one provider and a revert on the other, []", async () => {
+  const halted = (rpc: EvmRpc, message: string, code = -32000): EvmRpc => async (calls) => (await rpc(calls)).map((a, i) => (calls[i]!.method === "eth_call" && calls[i]!.params[3] !== undefined && (calls[i]!.params[0] as { to: string }).to.toLowerCase() === SELL_W ? { jsonrpc: "2.0", id: i, error: { code, message } } : a));
+  const refused = (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error" && /an error that is no revert/.test(e.message);
+  for (const [i, sn] of [undefined, RH_SALE].entries()) {
+    const token = "0x" + (0x1ae5200 + i).toString(16).padStart(40, "0");
+    const burn: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0xf2 + i)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: burnHook };
+    const pools = [seeded(token), burn];
+    const q = await hcQuote(pools, token, [{ key: burn.key, at: 4_500_001 }], undefined, sn);
+    assert.ok(!("code" in q) && q.hooked.length === 1, show(q));
+    const hash = await land(pools, q, HEAD_NO + 1, {}, (x) => x, sn);
+    assert.equal(SALES.get(hash)!.halt, "out of gas");
+    const on = (who: 0 | 1) => chain(pools, who, undefined, undefined, undefined, sn?.nitro);
+    const sq = q as unknown as EvmPoolSellQuote;
+    const trace = sn === undefined ? undefined : [on(0), on(1)];
+    const venues = sn?.venues ?? DELEGATED;
+    assert.deepEqual(await evmSellRevertedPoolsWith(sq, hash, [on(0), on(1)], venues, trace), [hcPid(burn.key)], `${i}: control, the sale's own halt`);
+    await assert.rejects(evmSellRevertedPoolsWith(sq, hash, [halted(on(0), "invalid opcode: INVALID"), halted(on(1), "invalid opcode: INVALID")], venues, trace), refused, `${i}: invalid opcode where the sale ran out of gas`);
+    assert.deepEqual(await evmSellRevertedPoolsWith(sq, hash, [on(0), halted(on(1), "execution reverted", 3)], venues, trace), [], `${i}: a halt on one, a revert on the other`);
+    // reth's words for out of gas name the call's own gas (975,000: the sale's less its authorization's): another is not
+    // this replay's halt
+    await assert.rejects(evmSellRevertedPoolsWith(sq, hash, [halted(on(0), "out of gas: gas required exceeds: 1000000", -32003), halted(on(1), "out of gas: gas required exceeds: 1000000", -32003)], venues, trace), refused, `${i}: reth's out of gas at another gas`);
+    // a sale that reverted (its hook reverts: no halt of its own), its replays answered "out of gas" on both
+    const t2 = "0x" + (0x1ae5300 + i).toString(16).padStart(40, "0");
+    const rev: ModelPool = { key: keyOf(t2, NATIVE, 3000, 60, PH(0xf4 + i)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (later(ctx) ? null : 2n * a) };
+    const p2 = [seeded(t2), rev];
+    const q2 = await hcQuote(p2, t2, [{ key: rev.key, at: 4_500_001 }], undefined, sn);
+    assert.ok(!("code" in q2), show(q2));
+    const h2 = await land(p2, q2, HEAD_NO + 1, {}, (x) => x, sn);
+    assert.equal(SALES.get(h2)!.status, "0x0");
+    assert.equal(SALES.get(h2)!.halt, undefined);
+    const on2 = (who: 0 | 1) => chain(p2, who, undefined, undefined, undefined, sn?.nitro);
+    const tr2 = sn === undefined ? undefined : [on2(0), on2(1)];
+    await assert.rejects(evmSellRevertedPoolsWith(q2 as unknown as EvmPoolSellQuote, h2, [halted(on2(0), "out of gas"), halted(on2(1), "out of gas")], venues, tr2), refused, `${i}: out of gas where the sale reverted`);
   }
 });
 

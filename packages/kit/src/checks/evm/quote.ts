@@ -5061,15 +5061,26 @@ export function evmEvidenceProviders(chain: EvmPoolChain, fetchFn: typeof fetch,
 }
 
 const SEL_SELL = "0c2cb9ca"; // a literal, never a top-level call (the kit's index reaches the signing page's bundle): SellDelegate.sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)
-/** One provider's answer to a replay: its result, or a revert with its data ("" for none); anything else is a refusal. */
-type Replay = { ok: true; result: string } | { ok: false; data: string };
-function replayOf(a: unknown, who: string): Replay {
+/** One provider's answer to a replay: its result, or a revert with its data ("" for none), or the halt the trade's own
+ *  call ended with (`halt`, its error); anything else is a refusal. */
+type Replay = { ok: true; result: string } | { ok: false; data: string; halt?: string };
+/** `a` read as a replay given `gas`; `halt`, the halt the trade's own call ended with at its root, or null for none: a
+ *  replay that halts with that same error failed as the trade did (card evm-sell-ban-reads-a-root-halt), and any other
+ *  halt is a replay broken, never a verdict: a precompile an override names is switched off and its 0xfe runs (card
+ *  evm-replay-reads-an-execution-error-as-run). A halt in a node's words: geth's and Nitro's -32000 and the error itself
+ *  ("out of gas" from rpc.mainnet.chain.robinhood.com, robinhood.drpc.org and robinhood.api.pocket.network), or reth's
+ *  -32003 "out of gas: gas required exceeds: " and the call's own gas (mainnet.base.org, base-rpc.publicnode.com,
+ *  base.api.pocket.network, base.gateway.tenderly.co and base-mainnet.public.blastapi.io, a loop given 975,000 gas,
+ *  2026-11-20 02:2xZ). */
+function replayOf(a: unknown, who: string, halt: string | null = null, gas = 0n): Replay {
   const hex = (x: unknown): x is string => typeof x === "string" && x.length <= MAX_ANSWER_HEX && /^0x([0-9a-fA-F]{2})*$/.test(x);
   if (typeof a !== "object" || a === null) return refuse("rpc_error", `${who} answered no object`);
-  const o = a as { result?: unknown; error?: { data?: unknown } };
+  const o = a as { result?: unknown; error?: { code?: unknown; data?: unknown; message?: unknown } };
   if (Object.hasOwn(o, "result")) return hex(o.result) ? { ok: true, result: o.result.toLowerCase() } : refuse("rpc_error", `${who} answered a replay with a result that is not hex`);
   if (reverted(a)) return { ok: false, data: hex(o.error?.data) ? o.error!.data.toLowerCase() : "" };
-  return refuse("rpc_error", `${who} answered a replay with an error that is no revert: ${String((o.error as { message?: unknown } | undefined)?.message).slice(0, 120)}`);
+  const said = o.error?.code === -32000 ? o.error.message : o.error?.code === -32003 && o.error.message === `out of gas: gas required exceeds: ${gas}` ? "out of gas" : undefined;
+  if (halt !== null && said === halt) return { ok: false, data: "", halt };
+  return refuse("rpc_error", `${who} answered a replay with an error that is no revert: ${String(o.error?.message).slice(0, 120)}`);
 }
 /** A JSON-RPC answer's result as an object, or a refusal. */
 function resultOf(a: unknown, who: string, what: string): Record<string, unknown> {
@@ -5162,7 +5173,7 @@ const EVM_HISTORY = "0x0000f90827f1c53a10cb7a02335b175320002935";
 type Override = { balance?: string; nonce?: string; code?: string; stateDiff?: Record<string, string> };
 /** The trade's pre-state as a state override, and the callees of the trade's own frames that errored (lowercased,
  *  sorted), each read from its trace. */
-type Pre = { over: Record<string, Override>; errored: string[] | undefined };
+type Pre = { over: Record<string, Override>; errored: string[] | undefined; halt: string | null | undefined };
 /** The text in the message of the rpc_error thrown where the trade's trace was not answered and could still change the
  *  answer (step 2b; the message is "rpc_error: " + this + ": " + the trade's hash): its own reason, apart from a provider
  *  that did not answer any other read, so a caller can bound how often it asks again. */
@@ -5317,14 +5328,19 @@ async function tracedPre(trace: readonly (readonly [EvmRpc, EvmRpc])[], sale: Tr
   // of fb923143, 1), or one the two answer apart (rpc_disagree: one provider alone can answer it apart, review of
   // 1ee73a00, 2), leaves the prestate, which gas bounds and two companies agree on, to the replay and step 3: only the
   // as-is leg is unread. A callTracer both answer past its bounds or not the trade's own call drops it all.
-  let errored: string[] | null;
+  let errored: { errored: string[]; halt: string | null } | null;
   try {
-    errored = await read(1, { tracer: "callTracer" }, (r) => erroredOf(r, sale, pm, adapter, hooks, b.frames));
+    errored = await read(1, { tracer: "callTracer" }, (r) => {
+      const e = erroredOf(r, sale, pm, adapter, hooks, b.frames);
+      // the root frame's error where it is no revert: the halt the trade ended with (erroredOf read the root as the trade's)
+      const top = (r as { error?: unknown }).error;
+      return e === null ? null : { errored: e, halt: typeof top === "string" && top.length > 0 && top.length <= 120 && !/^execution reverted/i.test(top) ? top : null };
+    });
   } catch (e) {
-    if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };
+    if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined, halt: undefined };
     throw e;
   }
-  return errored === null ? null : { over, errored };
+  return errored === null ? null : { over, errored: errored.errored, halt: errored.halt };
 }
 /** The true pre-state read of a chain's evidence, the one place it is chosen: a chain whose venue pins a trace pair
  *  (Robinhood: venue traceProviders) reads the trade's own trace there (`trace`, a test's, or the pins', each answer
@@ -5416,13 +5432,20 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   // block (as the device's sale sim runs), or on a chain with a trace the prestate's, so a hook that reads it sees what
   // the trade saw
   const call = { from: sale.from, to: sale.to, data: sale.input, gas: qty(gas), value: sale.value, ...sale.fees };
+  // the halt the trade ended with at its root (card evm-sell-ban-reads-a-root-halt), so a replay that halts the same
+  // failed as the trade did: its callTracer's root error where both trace providers answered it the same; with no
+  // callTracer read, "out of gas" where the trade failed with every unit of its gas spent (a revert hands the rest back,
+  // and a failed sale's root is the pinned SellDelegate, solc 0.8.28, whose asserts and panics revert, so it halts no
+  // other way; a hook's halt reaches it as the PoolManager's revert: v4-core's Hooks.callHook, a7cf038c lines 131-137,
+  // reverts with HookCallFailed on any failed hook call); null for none
+  const halt = p !== undefined && p.halt !== undefined ? p.halt : BigInt(sale.status) === 0n && BigInt(sale.gasUsed) === BigInt(sale.gas) ? "out of gas" : null;
   const replay = async (extra: Record<string, { code: string }>): Promise<Replay> => {
     const state: Record<string, Override> = { ...base };
     for (const [a, o] of Object.entries({ ...asW, ...extra })) state[lower(a)] = { ...state[lower(a)], ...o };
     const { a } = await agreeing(
       rpcs,
-      async (rpc, k, gate) => replayOf((await askAt(rpc, [{ method: "eth_call", params: [call, parent, state, env] }], gate))[0], `provider ${k + 1}`),
-      (x, y) => (x.ok && y.ok && x.result === y.result) || (!x.ok && !y.ok && x.data === y.data),
+      async (rpc, k, gate) => replayOf((await askAt(rpc, [{ method: "eth_call", params: [call, parent, state, env] }], gate))[0], `provider ${k + 1}`, halt, gas),
+      (x, y) => (x.ok && y.ok && x.result === y.result) || (!x.ok && !y.ok && x.data === y.data && x.halt === y.halt),
       () => refuse("rpc_disagree", "the providers answer the sale's replay differently"),
     );
     return a;
