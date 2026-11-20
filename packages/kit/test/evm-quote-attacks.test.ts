@@ -477,6 +477,11 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       if (diffs.some((d) => Object.entries(d).some(([k, v]) => !/^0x[0-9a-fA-F]{64}$/.test(k) || typeof v !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(v)))) return { jsonrpc: "2.0", id, error: { code: -32602, message: "invalid argument 2: hex string has length != 64" } };
       // Nitro refuses any override of ArbOS's state account (every pinned Robinhood provider, 2026-11-07 16:22Z)
       if (nitro && c.method === "eth_call" && Object.keys((c.params[2] ?? {}) as object).some((k) => k.toLowerCase() === ARBOS)) return { jsonrpc: "2.0", id, error: { code: -32000, message: "overriding address 0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf  not allowed" } };
+      // card evm-replay-reads-an-execution-error-as-run: Nitro switches a precompile off for a call whose override names
+      // it, even with no field, and runs the account's code instead (0xfe at ArbOS's: ArbSys.arbBlockNumber with
+      // {0x64: {}} answered this on rpc.mainnet.chain.robinhood.com, robinhood.drpc.org and robinhood.api.pocket.network,
+      // 2026-11-20 01:5xZ); the trade's own call reaches the ones its trace holds (RH_PRECOMPILES)
+      if (nitro && c.method === "eth_call" && Object.keys((c.params[2] ?? {}) as object).some((k) => RH_PRECOMPILES.includes(k.toLowerCase()))) return { jsonrpc: "2.0", id, error: { code: -32000, message: "invalid opcode: INVALID" } };
       const { to, data } = c.params[0] as { to: string; data: string };
       // EVM_READ_GAS_CODE at Multicall3 (card evm-quote-read-gas-starve) is the call's own code, no hook's override
       const over = (c.params[2] as Record<string, { code?: string }> | undefined) ?? {};
@@ -7207,6 +7212,10 @@ const [SALE_POOL, SALE_COLLECTOR] = ["0x00000000000000000000000000000000000b0011
 // whose slot 0 an earlier transaction of the trade's block set to SALE_EARLIER (0 at the parent)
 const [ARBOS, EARLIER] = ["0xa4b05fffffffffffffffffffffffffffffffffff", "0x00000000000000000000000000000000000ea911"];
 const ARBOS_BACKLOG = 0x5bn;
+// card evm-replay-reads-an-execution-error-as-run: the precompiles a Robinhood trade's prestate holds: ArbWasm and
+// ArbWasmCache in every trace read (the six of evm-sell-hook-intrablock.answers.json, and 0xdc58b47b and 0xe738ee51 of
+// live run 44651054036), and ecrecover where a signature is checked (0x67f8d99c there)
+const RH_PRECOMPILES = ["0x0000000000000000000000000000000000000001", "0x0000000000000000000000000000000000000071", "0x0000000000000000000000000000000000000072"];
 const SALE_EARLIER = "0x" + "ea".repeat(32);
 /** The hooks whose frames errored in the real run now landing (land and landBuy reset and keep them). */
 const REAL_ERRORED: string[] = [];
@@ -7225,6 +7234,7 @@ function traceOf(s: ModelSale, tracer: string, who: 0 | 1, balances: Record<stri
   if (tracer === "prestateTracer") {
     const out: Record<string, unknown> = {
       [SENDER]: { balance: "0x" + (balances[SENDER] ?? 0n).toString(16), nonce: 7 },
+      ...Object.fromEntries(RH_PRECOMPILES.map((a) => [a, { balance: "0x0" }])),
       ...(e.withArbos === false ? {} : { [ARBOS]: { balance: "0x0", nonce: 1, storage: { ["0x" + W(ARBOS_BACKLOG)]: "0x" + W(RH_START_BACKLOG) } } }),
       [EARLIER]: { balance: "0x0", ...(e.code !== undefined && !noCode ? { code: "0x" + "fe".repeat(e.code) } : {}), storage: { ["0x" + W(0n)]: e.apartOn === who ? "0x" + "eb".repeat(32) : SALE_EARLIER, ...Object.fromEntries(Array.from({ length: e.slots ?? 0 }, (_, i) => ["0x" + W(BigInt(i) + 1n), "0x" + W(0n)])) } },
     };
@@ -8531,12 +8541,12 @@ test("card evm-sell-hook-intrablock, the as-is leg: an errored frame into the ro
 test("card evm-sell-hook-intrablock, a trace that is not two companies' word for the trade adds nothing, so the evidence runs at the parent block (a hook flipped by an earlier transaction goes unbanned): one provider's prestate apart, its root frame another call (from, to, input or value), or past the bounds the trade's gas sets (accounts, slots, ArbOS's slots, frames); the receipt's index not the transaction's bans nothing", async () => {
   const { pools, q, hostile } = await ihBuy(earlierHook, 4, EARLY);
   const at = (t: Partial<ModelSale>) => landBuy(pools, q, HEAD_NO + 1, t, {}, RH_NET);
-  // the buy's gas, 1,400,000, bounds its trace at 647 accounts and 800 slots besides ArbOS's state (the sender, EARLIER
-  // and the PoolManager, with one slot each of the last two, are the model's own), 2,006 of ArbOS's slots (one the
+  // the buy's gas, 1,400,000, bounds its trace at 647 accounts and 800 slots besides ArbOS's state (the sender, EARLIER,
+  // the PoolManager, with one slot each of the last two, and the three precompiles RH_PRECOMPILES are the model's own), 2,006 of ArbOS's slots (one the
   // model's) and 14,002 call frames (the root, the PoolManager's and 14,000 more); an account's code is never read
   // (disableCode)
-  assert.deepEqual(await buyProved(pools, q, await at({ trace: { accounts: 644, slots: 798, arbosSlots: 2005, frames: 14_000, code: 24577 } }), undefined, RH_NET), [hcPid(hostile.key)], "at the bounds");
-  for (const t of [{ apartOn: 1 as const }, { accounts: 645 }, { slots: 799 }, { arbosSlots: 2006 }, { frames: 14_001 }, { root: { input: "0x1234" } }, { root: { from: PH(0xef) } }, { root: { to: PH(0xef) } }, { root: { value: "0x1" } }]) assert.deepEqual(await buyProved(pools, q, await at({ trace: t }), undefined, RH_NET), [], show(t));
+  assert.deepEqual(await buyProved(pools, q, await at({ trace: { accounts: 641, slots: 798, arbosSlots: 2005, frames: 14_000, code: 24577 } }), undefined, RH_NET), [hcPid(hostile.key)], "at the bounds");
+  for (const t of [{ apartOn: 1 as const }, { accounts: 642 }, { slots: 799 }, { arbosSlots: 2006 }, { frames: 14_001 }, { root: { input: "0x1234" } }, { root: { from: PH(0xef) } }, { root: { to: PH(0xef) } }, { root: { value: "0x1" } }]) assert.deepEqual(await buyProved(pools, q, await at({ trace: t }), undefined, RH_NET), [], show(t));
   assert.deepEqual(await buyProved(pools, q, await at({ rcIndex: "0x4" }), undefined, RH_NET), []);
 });
 

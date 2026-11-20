@@ -70,7 +70,6 @@ export const NOT_MOVED = Object.freeze([
   "vault-review-fixes-kit.mjs",
   "vault-testnet-t02.mjs",
   "vault-testnet-usdc.mjs",
-  "wallet-mainnet-relayer-pins.mjs",
   "wallet-refund-move.mjs",
   "wallet-restore-id-reader.mjs",
   "wallet-rpc-hex-case.mjs",
