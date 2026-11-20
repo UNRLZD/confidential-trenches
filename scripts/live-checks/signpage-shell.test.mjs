@@ -545,6 +545,27 @@ test("sign-out-sends-nothing planted: sent before the hearing but routed after i
   }
 });
 
+// this card's own run (chromium, phone, 20 Nov 04:31Z): 433 of its 488 pinned requests matched to their browser send,
+// each before its record's ms ended, the route up to 15 ms behind the send; PASS. Moved by its route lag, the same run
+// FAILs: the price read's wave sent 2 ms before another tab's sign out was heard is routed after it.
+const SENDS = ANSWERS.sends.chromium.phone;
+test("recorded run on this card's check (chromium, phone): PASS, its requests read at their browser sends", () => {
+  const r = judge(SENDS);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  const pinned = SENDS.requests.filter((x) => PINNED_HOSTS.includes(x.host));
+  const sent = pinned.filter((x) => typeof x.sent === "number");
+  assert.ok(sent.length * 2 > pinned.length, `${sent.length} of ${pinned.length} pinned requests matched to a send`);
+  assert.ok(sent.every((x) => x.sent < x.t + 1), "no send after its record's ms");
+  // the hearing's race, planted on this run: the wave sent 2 ms before it, routed 3 ms after it
+  const end = SENDS.steps.wordsOut.doc;
+  const wave = clone(SENDS);
+  wave.requests.push({ t: end + 3, sent: end - 2, host: "rpc.mainnet.chain.robinhood.com", path: "/", method: "POST", rpc: [{ method: "eth_chainId", params: [] }] });
+  assert.equal(judge(wave).ok, true, judge(wave).lines.join("\n"));
+  // without its send (node's clock alone): BAD, as main's check read it
+  delete wave.requests.at(-1).sent;
+  assert.equal(judge(wave).ok, false, judge(wave).lines.join("\n"));
+});
+
 test("stampSends: a record takes its browser send only where its shape's sends and records are as many, in order, and none later than its record", () => {
   const rec = (t, id = 1) => ({ t, host: "base-rpc.publicnode.com", path: "/", method: "POST", rpc: [{ method: "eth_chainId", params: [id] }] });
   const send = (ms, id = 1) => sendOf({ url: "https://base-rpc.publicnode.com/", method: "POST", postData: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [id] }) }, ms / 1000);
