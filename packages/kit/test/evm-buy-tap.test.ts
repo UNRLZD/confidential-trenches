@@ -90,36 +90,80 @@ test("TAPAT2 the second try (a v3 tier after the first route's refusal) is asked
   assert.deepEqual(ats, [undefined, undefined]);
 });
 
-test("TAPHOLD2 the second try is pinned only while the held head is the first refusal's block: where the head moved it is asked at the head, so its refusal is held for it as on main (card evm-warm-tap-ends-inside-two-seconds)", async () => {
-  // NOVAAI on Robinhood (release 185's CI run: warm 90/0/0 ms, both refusals held): at 070c9d026 the second try read at
-  // the first quote's block after the head moved, so its refusal was held for no head and every warm tap asked it again
-  // (771-3262 ms, two quotes, from the Mac 2026-11-20 09:0xZ)
-  const A = "0x" + "aa".repeat(32);
-  const B = "0x" + "bb".repeat(32);
-  const pool = [{ currency0: ZERO, currency1: TOKEN, fee: 3000, tickSpacing: 60, hooks: ZERO }];
+// Card evm-warm-tap-ends-inside-two-seconds, round 5: one tap reads one block. The second try is asked at the first
+// try's block even where the held head moved during the first quote (at 387c0c30a it was asked at the new head: ANTc on
+// Base ran its whole search twice, at two blocks, 142-152 requests and about 4.5 s every warm tap, from the Mac
+// 2026-11-20 11:3xZ), and each refusal is held for the block it was read at, never for the head the tap ends on.
+const A = "0x" + "aa".repeat(32);
+const B = "0x" + "bb".repeat(32);
+const onePool = [{ currency0: ZERO, currency1: TOKEN, fee: 3000, tickSpacing: 60, hooks: ZERO }];
+// a tap whose quotes refuse no_quote, each naming the block it read at (its `at`, else the head), and whose head moves
+// from A to B while the first quote runs where `moves`
+const heldWorld = (moves: boolean) => {
+  let head = A;
+  const asks: { venue: string; at: unknown }[] = [];
+  const quote = async (r: EvmPoolBuyQuoteRequest) => {
+    asks.push({ venue: r.route.venue, at: (r as { at?: unknown }).at });
+    const readAt = (r as { at?: string }).at ?? head;
+    if (moves && asks.length === 1) head = B;
+    const e = new EvmQuoteError("no_quote", "x");
+    (e as { at: string | null }).at = readAt;
+    return Promise.reject(e);
+  };
+  const go = () => evmPoolBuyQuoteTap({ chain: "robinhood", token: TOKEN, amountIn: 10n ** 15n, slippageBps: 300 }, { quote, indexPools: () => onePool, held: () => head });
+  return { asks, go, to: (h: string) => void (head = h) };
+};
+
+test("TAPAT3 the second try is asked at the first try's block when the held head moved during the first quote", async () => {
+  evmBuyTapReset();
+  const w = heldWorld(true);
+  await assert.rejects(w.go(), (e) => e instanceof EvmBuyTapRefused);
+  assert.deepEqual(w.asks.map((a) => a.venue), ["uniswap-v4", "uniswap-v3"]);
+  assert.equal(w.asks[0]!.at, undefined, "the first ask named a block");
+  assert.equal(w.asks[1]!.at, A, "the second try was not asked at the first try's block");
+});
+
+test("TAPHOLD3 the tap's refusals are held for the block they were read at: a tap at that block asks none, one at a later head asks again", async () => {
   for (const moves of [true, false]) {
     evmBuyTapReset();
-    let head = A;
-    const asks: { venue: string; at: unknown }[] = [];
-    const quote = async (r: EvmPoolBuyQuoteRequest) => {
-      asks.push({ venue: r.route.venue, at: (r as { at?: unknown }).at });
-      const readAt = (r as { at?: string }).at ?? head;
-      // the head moves while the tap's first quote runs
-      if (moves && asks.length === 1) head = B;
-      const e = new EvmQuoteError("no_quote", "x");
-      (e as { at: string | null }).at = readAt;
-      return Promise.reject(e);
-    };
-    const go = () => evmPoolBuyQuoteTap({ chain: "robinhood", token: TOKEN, amountIn: 10n ** 15n, slippageBps: 300 }, { quote, indexPools: () => pool, held: () => head });
-    await assert.rejects(go(), (e) => e instanceof EvmBuyTapRefused);
-    assert.equal(asks.length, 2);
-    assert.equal(asks[1]!.at, moves ? undefined : A, `head moved ${moves}: the second try's block`);
-    const first = asks.length;
-    await assert.rejects(go(), (e) => e instanceof EvmBuyTapRefused);
-    // the next tap at the same head: the second try's refusal is held for it (the first's only where it was read there)
-    assert.equal(asks.length - first, moves ? 1 : 0, `head moved ${moves}: the next tap asked ${asks.length - first} quotes`);
-    assert.ok(asks.slice(first).every((a) => a.venue === "uniswap-v4"), "the next tap asked the held v3 tier again");
+    const w = heldWorld(moves);
+    await assert.rejects(w.go(), (e) => e instanceof EvmBuyTapRefused);
+    // a tap at A, the block both refusals were read at: none asked
+    w.to(A);
+    let n = w.asks.length;
+    await assert.rejects(w.go(), (e) => e instanceof EvmBuyTapRefused);
+    assert.equal(w.asks.length - n, 0, `head moved ${moves}: a tap at the refusals' block asked ${w.asks.length - n} quotes`);
+    // a tap at B, a later head: both asked again, at B
+    w.to(B);
+    n = w.asks.length;
+    await assert.rejects(w.go(), (e) => e instanceof EvmBuyTapRefused);
+    assert.deepEqual(w.asks.slice(n).map((a) => a.venue), ["uniswap-v4", "uniswap-v3"], `head moved ${moves}: a tap at a later head`);
   }
+});
+
+test("TAPHOLD4 a refusal is never served for a block it was not read at: read at X while the held head was H, it is served at X alone", async () => {
+  const H = "0x" + "11".repeat(32);
+  const X = "0x" + "22".repeat(32);
+  evmBuyTapReset();
+  let head = H;
+  let n = 0;
+  const quote = async () => {
+    n++;
+    const e = new EvmQuoteError("no_quote", "x");
+    (e as { at: string | null }).at = X;
+    return Promise.reject(e);
+  };
+  const go = () => evmPoolBuyQuoteTap({ chain: "robinhood", token: TOKEN, amountIn: 10n ** 15n, slippageBps: 300 }, { quote, indexPools: () => onePool, held: () => head });
+  await assert.rejects(go());
+  // at H: asked again (the refusals were read at X)
+  let m = n;
+  await assert.rejects(go());
+  assert.ok(n > m, `a tap at H was served a refusal read at X (${m} then ${n} quotes)`);
+  // at X: served, no quote
+  head = X;
+  m = n;
+  await assert.rejects(go());
+  assert.equal(n, m, `a tap at X asked ${n - m} quotes`);
 });
 
 test("TAPHELD a refusal read at the held head is held for it; one read at another block (a follow's) is not, so the next tap asks again (card evm-cold-multihop-quote-inside-the-kpi)", async () => {

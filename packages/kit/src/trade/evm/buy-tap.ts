@@ -124,10 +124,14 @@ const TIERS = new Map<string, { readonly at: number; readonly tiers: Promise<rea
 const TIERS_KEPT = 256;
 /** Each route's refusal per chain, token, amount and slippage, for the one held block it was read at (card
  *  evm-warm-tap-ends-inside-two-seconds): a route refused at a block is refused again at that block (the same reads of
- *  the same block hash), so a tap at that same held block takes the refusal again with no kit quote, and one at any
- *  other block asks it as before. Held only where the held head was the same block before and after the quote, so the
- *  quote read at it; a provider's fault is never held. HOOKR on Robinhood (mainnet from the Mac, 2026-11-15 23:50Z):
- *  its indexed native pool's partial_fill, then the reference's native_first, about 1.8 s and 0.5 s again each warm tap. */
+ *  the same block hash), so a quote of that route at that block (a tap at that held head, or a second try or a follow
+ *  asked at that block) takes the refusal again with no kit quote, and one at any other block asks it as before. Held
+ *  for the block the kit names in it (EvmQuoteError `at`, the block its reads were taken at), never for a head the tap
+ *  ends on (card evm-warm-tap-ends-inside-two-seconds, round 5: the second try is asked at the first try's block, so a
+ *  tap reads one block); a refusal that names none is held for the held head only where it was the same block before
+ *  and after the quote, so the quote read at it; a provider's fault is never held. HOOKR on Robinhood (mainnet from the
+ *  Mac, 2026-11-15 23:50Z): its indexed native pool's partial_fill, then the reference's native_first, about 1.8 s and
+ *  0.5 s again each warm tap. */
 const REFUSED = new Map<string, { readonly at: string; readonly routes: Map<string, unknown> }>();
 const REFUSED_KEPT = 256;
 /** Forgets every token's last route and held refusals (tests). */
@@ -142,7 +146,7 @@ const FAULTS = new Set(["rpc_error", "rpc_disagree", "stale_quote"]);
  *  - then the first standard v3 tier the v3 factory holds a pool at (one read of every tier, evmPoolV3Tiers; card
  *    robinhood-tap-asks-no-missing-v3-tier: a tier with no pool is never asked, so no read of its route reverts); where
  *    no other route is there to ask, the first standard tier still is, once, so the kit's whole search runs and names
- *    the token's market; asked at the block the first try's last refusal was read at, as a follow is, while that block is still the held head;
+ *    the token's market; asked at the block the first try's last refusal was read at, as a follow is, whether or not the head moved since;
  *  - a refusal that names the kit's own best route (REQUOTE) asks that route once, where the same hook rule takes it:
  *    the kit's best holds every other shape.
  *  A provider's fault (rpc_error, rpc_disagree, stale_quote) is thrown as the kit's; every route refused throws
@@ -196,23 +200,27 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
   const ask = async (route: EvmRoute, at: string | null = null) => {
     const k = JSON.stringify(route);
     const pre = held(chain);
+    // the block this quote reads at: the one it is asked at, else the held head (a quote with no `at` reads it while
+    // fresh); a refusal is served only for the block it was read at
+    const reads = at ?? pre;
     const kept = REFUSED.get(refusedKey);
-    if (pre !== null && kept !== undefined && kept.at === pre && kept.routes.has(k)) throw kept.routes.get(k);
+    if (reads !== null && kept !== undefined && kept.at === reads && kept.routes.has(k)) throw kept.routes.get(k);
     try {
       const q = await quote({ chain, token, amountIn, slippageBps, route, ...(at === null ? {} : { at }) });
       LAST_ROUTE.set(known, q.route);
       return q;
     } catch (e) {
       const code = (e as { code?: unknown })?.code;
-      // held for the block it was read at alone: a refusal that names its block (the kit's `at`) another than the held
-      // head, as a follow's read at the refusal it follows, is not this block's
-      const readAt = (e as { at?: unknown })?.at;
-      if (pre !== null && typeof code === "string" && !FAULTS.has(code) && held(chain) === pre && (typeof readAt !== "string" || readAt === pre)) {
-        const at = REFUSED.get(refusedKey);
-        const routes = at !== undefined && at.at === pre ? at.routes : new Map<string, unknown>();
+      // held for the block it was read at alone: the one the kit names (its `at`), else the held head where it was the
+      // same block before and after the quote
+      const named = (e as { at?: unknown })?.at;
+      const readAt = typeof named === "string" ? named : pre !== null && held(chain) === pre ? pre : null;
+      if (readAt !== null && typeof code === "string" && !FAULTS.has(code)) {
+        const was = REFUSED.get(refusedKey);
+        const routes = was !== undefined && was.at === readAt ? was.routes : new Map<string, unknown>();
         routes.set(k, e);
         REFUSED.delete(refusedKey);
-        REFUSED.set(refusedKey, { at: pre, routes });
+        REFUSED.set(refusedKey, { at: readAt, routes });
         if (REFUSED.size > REFUSED_KEPT) REFUSED.delete(REFUSED.keys().next().value!);
       }
       throw e;
@@ -242,14 +250,9 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
     // quote did not agree on there, under the follow's own rules (a block the head watch confirmed, at most
     // EVM_FOLLOW_MAX_AGE_MS old, else a block agreed now; one the chain dropped is asked again at a new head). At no
     // block it ran the kit's whole search again at a new one: ANTc on Base, 3.5 s of a 6.9 s warm tap (mainnet from the
-    // Mac, 2026-11-20 08:4xZ), every round of its first quote once more. Pinned only while the held head is still that
-    // block, or none is held: where the head moved, the second try is asked at the head as before, so its refusal is
-    // held for the head the tap ends on (REFUSED) and the next tap at it asks it no more (NOVAAI on Robinhood, release
-    // 185: warm 90/0/0 ms; pinned past a moved head, 771-3262 ms with two quotes each tap)
-    if (k > 0 && at !== null) {
-      const now = held(chain);
-      if (now !== null && now !== at) at = null;
-    }
+    // Mac, 2026-11-20 08:4xZ), every round of its first quote once more. Pinned whether or not the held head moved
+    // since (round 5): one tap reads one block, and each refusal is held for the block it was read at (REFUSED), so a
+    // tap at a later head asks again
     let followed = false;
     while (route !== null && left > 0 && !asked.has(JSON.stringify(route))) {
       left--;
