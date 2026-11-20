@@ -111,20 +111,24 @@ test("a run says where the time went: the helper's fold between the read without
   assert.equal(r.ok, true);
 });
 
-test("the tokens the check opened stay read while it waits for a trade (the helper closes a token nobody read for a minute)", async () => {
+test("the tokens the check opened stay read while it waits for a trade (the helper closes a token nobody read for a minute)", (t) => {
   // live run 4 Nov 06:27Z (run10): the wait took 66 s, the helper closed the token, and the tape read after the trade
-  // answered 404 because the token had left the lists by then
+  // answered 404 because the token had left the lists by then. Card helper-sol-tape-checks-hold: on the test's clock
+  // (mock timers), so a loaded machine never cuts the count (it read 3 of 4 in 45 ms of the wall clock, 2 of 20 runs at
+  // 10 at once on main 5113ed107)
   assert.equal(typeof check.keepOpen, "function");
+  t.mock.timers.enable({ apis: ["setInterval"] });
   const seen = [];
-  const fetchFn = async (url) => (seen.push(url), new Response("{}", { status: 200 }));
+  const fetchFn = (url) => (seen.push(url), Promise.resolve(new Response("{}", { status: 200 })));
   const stop = check.keepOpen("https://helper.test", ["A1", "B2"], fetchFn, 10);
-  await new Promise((r) => setTimeout(r, 45));
+  t.mock.timers.tick(9);
+  assert.equal(seen.length, 0, "none before the first interval");
+  t.mock.timers.tick(1);
+  t.mock.timers.tick(10);
   stop();
-  const n = seen.length;
-  assert.ok(n >= 4, `${n} reads`);
-  assert.ok(seen.includes(`https://helper.test${TRADES_PATH("A1")}`) && seen.includes(`https://helper.test${TRADES_PATH("B2")}`));
-  await new Promise((r) => setTimeout(r, 30));
-  assert.equal(seen.length, n); // none after stop
+  assert.deepEqual(seen, [TRADES_PATH("A1"), TRADES_PATH("B2"), TRADES_PATH("A1"), TRADES_PATH("B2")].map((p) => `https://helper.test${p}`));
+  t.mock.timers.tick(100);
+  assert.equal(seen.length, 4); // none after stop
 });
 
 // card evm-chart-opens-without-a-vendor-call: the candles read as the token page reads it (candles-read.mjs)
@@ -201,7 +205,8 @@ test("card sol-meteora-tape-inside-rpc-budget: a coin past the helper's whole re
   const dlmm = "meteora-dlmm";
   assert.ok(m.cut[dlmm].length > 0, "the recorded run skipped cut DLMM coins");
   assert.deepEqual(bad(r).filter((l) => l.includes(dlmm)), [], r.lines.join("\n"));
-  assert.ok(r.lines.some((l) => l.startsWith(`ok  ${dlmm}: ${m.cut[dlmm].length} coin(s) past the helper's whole reads' budget skipped`)), r.lines.join("\n"));
+  const coins = new Set(m.cut[dlmm].map((c) => c.coin)).size;
+  assert.ok(r.lines.some((l) => l.startsWith(`ok  ${dlmm}: ${coins} coin(s), ${m.cut[dlmm].length} trade(s): `) && l.endsWith("past the helper's whole reads' budget skipped (sol-whole-cut)")), r.lines.join("\n"));
   assert.ok(r.lines.some((l) => l.startsWith(`ok  ${dlmm}: the trade `)), "a DLMM trade judged beside the skipped ones");
   assert.equal(check.cutOf(m[dlmm].polls.at(-1)), null);
   assert.ok(!m.cut[dlmm].some((c) => c.sig === m[dlmm].sig), "the judged trade is not a skipped one");
@@ -210,7 +215,8 @@ test("card sol-meteora-tape-inside-rpc-budget: a coin past the helper's whole re
 test("card sol-meteora-tape-inside-rpc-budget: every sampled coin cut fails, naming the cut; a judged coin served past the budget fails", () => {
   const r = check.judgeMeteora(A.bad_all_cut.meteora);
   assert.equal(r.ok, false);
-  assert.ok(bad(r).some((l) => /every sampled coin .* past the helper's whole reads' budget \(sol-whole-cut/.test(l)), bad(r).join("\n"));
+  // its cuts were recorded undated: no span read, so judged as cuts inside one keep, a fault naming the cut
+  assert.ok(bad(r).some((l) => /none judged: every trade found .* inside one cut of the helper's whole reads' budget \(sol-whole-cut.*undated/.test(l)), bad(r).join("\n"));
   const m = structuredClone(A.good_cut.meteora);
   const v = VENUES.find((x) => m[x]?.polls);
   m[v].polls.at(-1).headers["server-timing"] = `sol-vendor-read;desc="rows read 1 ms ago", sol-whole-cut;desc="a Meteora trade unread 3 s ago", total;dur=4`;
@@ -339,4 +345,111 @@ test("card helper-sol-tape-checks-hold: a trade's block time is the first public
   assert.equal(t, 1795102227);
   assert.deepEqual(waits, [2_000]);
   assert.equal(await check.blockOf("5".repeat(88), async () => ({ blockTime: null }), async () => undefined), null);
+});
+
+// card helper-sol-tape-checks-hold: live run 44721792317 (job 136239401075, 20 Nov 10:50Z) failed on "BAD meteora-dbc: every
+// sampled coin (13: fZgm5f3J, fZgm5f3J, ... 13 times) was served past the helper's whole reads' budget": one busy DBC coin,
+// sampled again at each of its trades while one cut lasted (trades.ts CUT_KEEP_MS). The judge counts coins once, and calls
+// a venue starved only when its cuts were read more than a cut's keep apart; cuts inside one keep judge nothing, a fault
+// named as that. The run's DBC part rebuilt on bad_all_cut's recorded cut (its coin, sig and Server-Timing), dated.
+const FZ = "fZgm5f3JAqcupMr2mRMUwNnPS8yW4ttagX9AuDbHhR9";
+/** bad_all_cut's Meteora part with its DBC venue cut `n` times on one coin, `stepMs` apart, nothing judged. */
+function dbcCutOnce(n, stepMs) {
+  const m = structuredClone(A.bad_all_cut.meteora);
+  const t0 = 1_795_171_000_000;
+  const timing = 'sol-whole-cut;desc="a Meteora trade unread 1 s ago"';
+  m["meteora-dbc"] = undefined;
+  m.cut["meteora-dbc"] = Array.from({ length: n }, (_, i) => ({ coin: FZ, sig: `${"5".repeat(80)}${String(i).padStart(8, "1")}`, timing, atMs: t0 + i * stepMs }));
+  return m;
+}
+const dbcLines = (m) => check.judgeMeteora(m).lines.filter((l) => l.includes("meteora-dbc"));
+
+test("card helper-sol-tape-checks-hold: one coin cut 13 times inside one cut's keep is named once and is never called a starved venue, a fault named as none judged (red at 5113ed107: \"every sampled coin (13: fZgm5f3J, ... 13 times)\", the budget starved the venue)", () => {
+  const lines = dbcLines(dbcCutOnce(13, 4_000)); // 13 trades over 48 s, inside CUT_KEEP_MS
+  assert.equal(lines.filter((l) => l.startsWith("BAD")).length, 1, lines.join("\n"));
+  assert.ok(!lines.some((l) => /starved/.test(l)), `a cut inside one keep called starved: ${lines.join("\n")}`);
+  assert.ok(lines.some((l) => l.startsWith("BAD meteora-dbc: none judged: every trade found (1 coin(s), 13 trade(s): fZgm5f3J)") && l.includes("all within 48 s")), lines.join("\n"));
+});
+
+test("card helper-sol-tape-checks-hold: cuts read more than a cut's keep apart are a starved venue, each coin named once", () => {
+  const lines = dbcLines(dbcCutOnce(3, check.CUT_KEEP_MS / 2 + 1_000)); // the third read 62 s after the first
+  assert.ok(lines.some((l) => l.startsWith("BAD meteora-dbc: every sampled coin (1 coin(s), 3 trade(s): fZgm5f3J)") && /cut again 62 s after its first, past the 60 s a cut lasts: the budget starved the venue/.test(l)), lines.join("\n"));
+  // and a cut exactly at the keep is still inside it
+  assert.ok(!dbcLines(dbcCutOnce(2, check.CUT_KEEP_MS)).some((l) => /starved/.test(l)));
+});
+
+test("card helper-sol-tape-checks-hold: cuts the coin's own share explains are never a starved venue, however far apart; every coin's second spent, a held or unanswered provider is", () => {
+  const own = dbcCutOnce(3, check.CUT_KEEP_MS / 2 + 1_000);
+  for (const c of own.cut["meteora-dbc"]) c.timing = `sol-whole-cut;desc="a Meteora trade unread 1 s ago: past the coin's own 20 a 10 s"`;
+  const lines = dbcLines(own);
+  assert.ok(!lines.some((l) => /starved/.test(l)), lines.join("\n"));
+  assert.ok(lines.some((l) => l.startsWith("BAD meteora-dbc: none judged: every trade found (1 coin(s), 3 trade(s): fZgm5f3J) was on a coin past its own share")), lines.join("\n"));
+  for (const why of ["past every coin's 10 a second", "its provider held", "its read unanswered"]) {
+    const m = dbcCutOnce(3, check.CUT_KEEP_MS / 2 + 1_000);
+    for (const c of m.cut["meteora-dbc"]) c.timing = `sol-whole-cut;desc="a Meteora trade unread 1 s ago: ${why}"`;
+    assert.ok(dbcLines(m).some((l) => l.includes(`(sol-whole-cut;desc="a Meteora trade unread 1 s ago: ${why}"), cut again 62 s after its first`) && l.endsWith("the budget starved the venue")), `${why}: ${dbcLines(m).join("\n")}`);
+  }
+  // the coin's own cuts set no span: one starving cut beside them is inside one keep
+  own.cut["meteora-dbc"][1].timing = 'sol-whole-cut;desc="a Meteora trade unread 1 s ago: its read unanswered"';
+  assert.ok(dbcLines(own).some((l) => l.startsWith("BAD meteora-dbc: none judged") && l.includes("all within 0 s")), dbcLines(own).join("\n"));
+});
+
+test("card helper-sol-tape-checks-hold: the check's CUT_KEEP_MS is the helper's (trades.ts)", async () => {
+  const trades = await import("../../apps/helper/src/data/solana/trades.ts");
+  assert.equal(check.CUT_KEEP_MS, trades.CUT_KEEP_MS);
+});
+
+test("card helper-sol-tape-checks-hold: a trade of a coin whose cut lasts is passed over by the watch, not read; another coin's is read", async () => {
+  const sent = [];
+  class FakeWs {
+    constructor() {
+      FakeWs.last = this;
+      setImmediate(() => this.onopen?.());
+    }
+    send(m) {
+      sent.push(JSON.parse(m));
+    }
+    close() {}
+  }
+  const realWs = globalThis.WebSocket;
+  const realFetch = globalThis.fetch;
+  const asked = [];
+  globalThis.WebSocket = FakeWs;
+  globalThis.fetch = async (url, init) => {
+    asked.push(JSON.parse(String(init.body)).params[0]);
+    throw new Error("no network in the test");
+  };
+  try {
+    const coins = [FZ, "GM8EysYT8NRSsoULdeYShbRsUdhoUoiB9EN4eW3YETCH"];
+    const done = check.watchMeteora(coins, "ws://fake", 200, async () => true, (coin) => coin === FZ);
+    await new Promise((r) => setImmediate(r));
+    const ws = FakeWs.last;
+    sent.forEach((m, i) => ws.onmessage({ data: JSON.stringify({ jsonrpc: "2.0", id: m.id, result: 100 + i }) }));
+    const note = (sub, sig) => ws.onmessage({ data: JSON.stringify({ method: "logsNotification", params: { subscription: sub, result: { value: { signature: sig, err: null, logs: [`Program ${check.METEORA["meteora-dbc"]} invoke [1]`] } } } }) });
+    note(100, "sigOfTheCutCoin");
+    note(101, "sigOfAnother");
+    await done;
+    // each read asks READ_BACK's two RPCs in turn: the signatures asked, once each
+    assert.deepEqual([...new Set(asked)], ["sigOfAnother"], "only the other coin's trade was read");
+  } finally {
+    globalThis.WebSocket = realWs;
+    globalThis.fetch = realFetch;
+  }
+});
+
+// good_cause: the check at this card against a local helper at this card (5113ed107 with this card's trades.ts), on
+// mainnet, 20 Nov 12:00Z: every venue judged on a fresh trade (DBC on 3A2F3vVE), one DLMM coin skipped, its cut dated and
+// named by its cause, the coin's own share. PASS.
+test("card helper-sol-tape-checks-hold: a recorded run at this card judges every venue, its cut dated and named by its cause", () => {
+  const m = A.good_cause.meteora;
+  const r = check.judgeMeteora(m);
+  assert.deepEqual(bad(r), [], r.lines.join("\n"));
+  for (const v of VENUES) assert.ok(r.lines.some((l) => l.startsWith(`ok  ${v}: the trade `)), `${v} judged`);
+  const cuts = Object.values(m.cut).flat();
+  assert.ok(cuts.length > 0 && cuts.every((c) => Number.isSafeInteger(c.atMs) && / s ago: past the coin's own 20 a 10 s"$/.test(c.timing)), JSON.stringify(cuts));
+  // the same cuts with the DLMM trade unjudged and their cause every coin's second, read past one keep: starved
+  const s = structuredClone(m);
+  s["meteora-dlmm"] = undefined;
+  s.cut["meteora-dlmm"] = [0, check.CUT_KEEP_MS + 1].map((d, i) => ({ ...cuts[0], sig: `${cuts[0].sig.slice(0, -1)}${i + 2}`, atMs: cuts[0].atMs + d, timing: cuts[0].timing.replace("past the coin's own 20 a 10 s", "past every coin's 10 a second") }));
+  assert.ok(bad(check.judgeMeteora(s)).some((l) => l.startsWith("BAD meteora-dlmm: every sampled coin (1 coin(s), 2 trade(s)") && l.endsWith("the budget starved the venue")), bad(check.judgeMeteora(s)).join("\n"));
 });
