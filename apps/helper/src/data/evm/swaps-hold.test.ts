@@ -24,7 +24,7 @@ const rpcError = (error: Record<string, unknown>): Refusal => ({ status: 200, bo
  * was answered; `order` is each `eth_getLogs` ONE was sent, as sent: its filter (address and pool id) and fromBlock;
  * `peak` the most out to ONE at once.
  */
-function rig(refusals: Refusal[]) {
+function rig(refusals: Refusal[], over: Partial<Parameters<typeof open>[2]> = {}) {
   const chain = fakeChain();
   const st = { refused: false, sendsAfter: 0, logsSeen: 0, order: [] as [string, number][], out: 0, peak: 0, peers: 0, peersAfter: 0 };
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
@@ -59,7 +59,7 @@ function rig(refusals: Refusal[]) {
   // INFLIGHT_MAX: the reads by free budget (swaps.ts ranked, card helper-robinhood-capacity fold 2) ask a provider with
   // no pace and one request a batch last
   const holds = providerHolds(() => clock.t, { [ONE]: { perS: 1_000, burst: 1_000, unit: "post" } });
-  const s = open(chain, clock, { pools: new Map(), rpcs: RPCS, fetch: fetch as never, holds });
+  const s = open(chain, clock, { pools: new Map(), rpcs: RPCS, fetch: fetch as never, holds, ...over });
   return { s, st, chain, clock, holds };
 }
 
@@ -68,8 +68,15 @@ for (const [name, refusal] of [
   ["a JSON-RPC -32005 (backoff_seconds 30)", rpcError({ code: -32005, message: "limit exceeded", data: { backoff_seconds: 30 } })],
   ["a JSON-RPC limit message (no code we know, 1 s)", rpcError({ code: -32000, message: "request limit reached" })],
 ] as const) {
-  test(`card helper-rpc-hold-queued: after ${name}, no read queued to that provider is sent while it holds; the other providers answer the read`, async () => {
-    const { s, st } = rig([refusal]);
+  for (const [turns, over] of [
+    ["", {}],
+    // every answer's parse waits a turn (limits/turn.ts, a loaded loop): the place an answer frees goes to the next post
+    // queued only once a refusal its body names is held (card helper-parse-turn-outside-the-slot: red at 8ff9748b5 for
+    // the JSON-RPC two, the place handed on at the answer's arrival, the post behind it sent before the parse held it)
+    [", every parse a turn later", { pass: () => new Promise<void>((go) => setImmediate(go)) }],
+  ] as const)
+  test(`card helper-rpc-hold-queued: after ${name}${turns}, no read queued to that provider is sent while it holds; the other providers answer the read`, async () => {
+    const { s, st } = rig([refusal], over);
     const r = await s.trades(CURVE_TOKEN, 50);
     s.stop();
     assert.ok(st.logsSeen >= 1 && st.refused, "the provider refused a read");

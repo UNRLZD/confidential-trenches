@@ -1530,6 +1530,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // each answer is parsed in a turn of its own once the turn's slice is spent (card helper-loop-never-held-by-a-read:
       // one ANSWER_MAX answer parses in 3.6 ms on the Mac, but a burst's answers landed in one turn together, and a
       // copy's profile held one 155 ms with 39% of it in the stream reads and parses)
+      // the post is answered: out of `out` before its parse waits its turn, so latencyOf and hedged never read an answer
+      // in hand as a provider late with it (card helper-parse-turn-outside-the-slot: with it out, a herd's parse turns
+      // past HEDGE_MS sent the read to a third provider while the answers sat waiting to be parsed). Its place in slot
+      // is held to the parse: the cap on posts out is also the cap on answers read and waiting, and freed at the answer
+      // the burst's answers landed together (helper-answers-through-a-burst on a mainnet copy, p99 4597 and 5106 ms,
+      // FAIL, against 807 ms with the place held, 20 Nov 08:5xZ)
+      o.delete(sent);
       const w = slice();
       if (w !== null) await w;
       const parsed: unknown = JSON.parse(text);
