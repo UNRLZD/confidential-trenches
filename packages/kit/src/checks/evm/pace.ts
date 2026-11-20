@@ -54,12 +54,27 @@ const needOf = (p: EvmPace, calls: EvmPaceCalls): number =>
  *  - mainnet.base.org: 20 calls a second none refused (2026-11-05), its own error "25/second request limit reached",
  *    and 429 at 28 calls in one second (tap runs 2026-11-15 08:13Z and 08:20Z). 12 calls a second, 12 at once: no
  *    second holds more than 24 (the helper's 20 at once and 10 a second holds 30).
+ *  - robinhood.rpc.blxrbdn.com (bloXroute, card robinhood-taps-meet-no-429): a reduced limit for reads, named in its
+ *    refusal, HTTP 429 or a 200 whose calls' error is -32005 "Rate limited. Read-only traffic (eth_call,
+ *    eth_getBlockReceipts, etc.) has a reduced rate limit on this endpoint" (no rate header). Read only from the Mac,
+ *    2026-11-20 01:53-01:58Z, posts of a real cbBTC tap's own 3 eth_call: 4, 8, 12 and 16 calls a second for 10 s none
+ *    refused; 24 a second refused from the 30th call, 20 from the 57th, 18 (posts of 1) from the 153rd: one bucket of
+ *    about 9 at once and 17 a second back. Unpaced, it took the reads a dRPC hold moved and met META's taps 429 31
+ *    times in 93 posts (live sign run 44441959756, 19 Nov) and twice in 18 (run 44651083107, 20 Nov 01:06Z). 15 calls a
+ *    second, 6 at once: inside its 9 and 17 at every instant (test/evm-pace-provider-limits.test.ts); the recorded USDG
+ *    quote's 188 posts in 7.07 s of the clock, as unpaced. Base's base.rpc.blxrbdn.com is not under the same limit: 16,
+ *    20 and 24 calls a second of the same posts for 10 s none refused (01:59Z), and no live run read a 429 from it.
  *  Not paced: robinhood.drpc.org, whose hold is its guard. 33 calls a second for 8 s none refused (2026-11-04); posts
  *  of 3 eth_call at 8 a second for 5 s and 6 at once, none refused (sweep from the Mac, 2026-11-15 08:47Z). In the tap
  *  runs (08:05-08:22Z) its 429s ("You reached Public endpoint rate limit", code 15) came at 1 to 5 posts in flight and
  *  3 to 22 calls a second while 50 calls a second passed: no rate of ours sets them, and they come in a run once one
  *  comes (20 in the 30 s after the first with no hold; 1 in a whole run with it, 09:03Z). Paced at 8 posts a second
- *  it held the recorded USDG quote (test/evm-quote-calls.test.ts) to 15.2 s of its clock, past its 8 s bound.
+ *  it held the recorded USDG quote (test/evm-quote-calls.test.ts) to 15.2 s of its clock, past its 8 s bound. Read
+ *  again 2026-11-20 01:51-02:04Z (Robinhood taps read only from the Mac): unpaced, 3 answers of 429 in 269 posts, at
+ *  43 to 49 calls in the second before and 560 in the minute; paced at 12 calls a second, 12 at once (its page's "25
+ *  RPS"), 13 in 376 posts, at 12 to 14 in the second and 655 in the minute, the warm taps of the heaviest coin 3.0 to
+ *  7.7 s, and the recorded quote 15.5 s (at 20 a second, 4 at once, 12.0 s). Its limit is about 600 calls a minute
+ *  that no pace of ours under the bound holds, so it is not paced here (card robinhood-taps-meet-no-429's report).
  *  - base-rpc.publicnode.com: one limit that weighs an eth_getLogs far above an eth_call. Read-only from the Mac,
  *    2026-11-16 00:57-01:04Z, posts of the scan's own shape (two 10,000-block getLogs of the PoolManager's Initialize
  *    logs and the block): 20 at once, 137 answered in 5 s, then 429 (-32005 "Rate limit exceeded"); 3 and 6 a second
@@ -72,6 +87,7 @@ const needOf = (p: EvmPace, calls: EvmPaceCalls): number =>
 export const EVM_PACE: Readonly<Record<string, EvmPace>> = Object.freeze({
   "https://base-rpc.publicnode.com": Object.freeze({ perS: 36, burst: 2_500, unit: "call", logs: 20, keep: 120 }),
   "https://rpc.mainnet.chain.robinhood.com": Object.freeze({ perS: 6, burst: 18, unit: "call", logs: 8 }),
+  "https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 15, burst: 6, unit: "call" }),
   "https://robinhood.daybreak-rpc.network": Object.freeze({ perS: 7, burst: 7, unit: "post", inflight: 3 }),
   "https://robinhood.api.pocket.network": Object.freeze({ perS: 2, burst: 3, unit: "call" }),
   "https://base.api.pocket.network": Object.freeze({ perS: 2, burst: 3, unit: "call" }),
