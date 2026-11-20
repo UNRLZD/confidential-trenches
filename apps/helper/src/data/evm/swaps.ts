@@ -654,10 +654,10 @@ function* keysOf(token: string, others: readonly string[], hooks: readonly strin
  *  of hashing, and in one go it held every other read of the helper (card robinhood-cold-open-fast: four cold opens' posts
  *  all aborted at 14 s); sliced every 1,000 keys, the searches of a burst's cold opens resumed in one turn together (card
  *  helper-loop-never-held-by-a-write: 132 to 171 ms a turn in a copy's profile), so the slice is the turn's time, shared. */
-export async function v4KeySliced(id: string, token: string, swapFee: number, around: readonly string[], chain: EvmChain = "base"): Promise<string | null> {
+export async function v4KeySliced(id: string, token: string, swapFee: number, around: readonly string[], chain: EvmChain = "base", slice: () => Promise<void> | null = pass): Promise<string | null> {
   for (const k of v4Tries(token, swapFee, around, chain)) {
     if (keccakHex(k) === id) return k;
-    const w = pass();
+    const w = slice();
     if (w !== null) await w;
   }
   return null;
@@ -694,11 +694,11 @@ export async function provenHooks(f: Facts, token: string, keyOf: KeyOf): Promis
  *  flag or a standard tier), any tick spacing to TICK_SPACING_MAX and one of `hooks` (no hook, or a sender of the pool's
  *  swaps) hashes to the id; null when none does. Hashed a turn's slice at a time (limits/turn.ts pass), once a
  *  pool (createSwaps poolKeyOf holds it). */
-export async function keyFromReceipt(id: string, token: string, fee: number, hooks: readonly string[], currencies: readonly string[]): Promise<string | null> {
+export async function keyFromReceipt(id: string, token: string, fee: number, hooks: readonly string[], currencies: readonly string[], slice: () => Promise<void> | null = pass): Promise<string | null> {
   const others = [ZERO, ...currencies.filter((c) => c !== token && c !== ZERO).slice(0, HOOKS_MAX)];
   for (const k of keysOf(token, others, [ZERO, ...hooks.slice(0, HOOKS_MAX)], fee)) {
     if (keccakHex(k) === id) return k;
-    const w = pass();
+    const w = slice();
     if (w !== null) await w;
   }
   return null;

@@ -74,6 +74,8 @@ export type PoolIndexDeps = {
   sleep(ms: number): Promise<void>;
   /** The holds' clock (epoch ms). */
   now(): number;
+  /** The loop's turns (limits/turn.ts pass, the default): null while this turn has room, else when to go on. */
+  pass?: () => Promise<void> | null;
 };
 
 const hexOf = (b: Uint8Array) => "0x" + Buffer.from(b).toString("hex");
@@ -107,6 +109,7 @@ export function poolOfLog(log: unknown, pm: string, a: number, b: number): (Serv
 }
 
 export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDeps) {
+  const turn = d.pass ?? pass;
   const pm = c.poolManager.toLowerCase();
   const db = new DatabaseSync(file);
   db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;
@@ -178,7 +181,7 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
         while (i < pools.length && w === null) {
           const p = pools[i++]!;
           put.run(bytesOf(p.id), bytesOf(p.key.currency0), bytesOf(p.key.currency1), p.key.fee, p.key.tickSpacing, bytesOf(p.key.hooks), p.block);
-          w = pass();
+          w = turn();
         }
         if (i >= pools.length) {
           set.run("next", String(to + 1));
@@ -240,7 +243,7 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
     for (const l of logs) {
       const p = poolOfLog(l, pm, a, b);
       if (p !== null) pools.push(p);
-      const w = pass();
+      const w = turn();
       if (w !== null) await w;
     }
     await keep(pools, b);
