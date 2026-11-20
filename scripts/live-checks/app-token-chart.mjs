@@ -28,7 +28,7 @@ import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { isGecko, toCandleData } from "../../apps/terminal/src/screens/token/candles.ts";
 import { HELPER_HOST, LISTS_URL, pickOf } from "./app-token-route.mjs";
 import { named } from "./record-names.mjs";
-import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT, helperFetch } from "./helper-misses.mjs";
 
 const KEY = "app-token-chart";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -108,7 +108,7 @@ const query = (u) => {
 
 export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
   mkdirSync(shots, { recursive: true });
-  const lr = await fetch(LISTS_URL, { headers: { origin: APP_HOST } });
+  const lr = await helperFetch(LISTS_URL, { headers: { origin: APP_HOST } });
   const lb = await lr.json().catch(() => null);
   const rows = lb?.lists?.trending_1h ?? lb?.lists?.trending ?? null;
   const lists = { url: LISTS_URL, status: lr.status, as_of_ms: lb?.as_of_ms ?? null, trending: Array.isArray(rows) ? rows.map((r) => ({ mint: r?.token, symbol: r?.symbol, vol_1h_usd: r?.vol_1h_usd ?? null })) : null };
@@ -117,7 +117,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
   if (mint) {
     // the helper's GeckoTerminal budget is shared: a 429 is read again at its Retry-After, as the page does
     // (candles-read.mjs, card evm-chart-opens-without-a-vendor-call)
-    const cr = await candlesReader().read(() => fetch(CANDLES_URL(mint), { headers: { origin: APP_HOST } }));
+    const cr = await candlesReader().read(() => helperFetch(CANDLES_URL(mint), { headers: { origin: APP_HOST } }));
     rec.candles = { ...query(CANDLES_URL(mint)), status: cr.status, src: cr.headers.get("x-helper-source"), body: await cr.json().catch(() => null), ...(cr.waits ? { waits: cr.waits } : {}) };
   }
   let harness = null;

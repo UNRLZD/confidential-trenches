@@ -25,7 +25,7 @@ import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
 import { launchBrowser } from "../browsers.mjs";
 import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
-import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
+import { liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT, helperFetch } from "./helper-misses.mjs";
 
 const KEY = "app-near-trading";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -94,7 +94,7 @@ const MEASURE = (phone) => {
 
 export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
   mkdirSync(shots, { recursive: true });
-  const res = await fetch(LISTS_URL);
+  const res = await helperFetch(LISTS_URL);
   const answer = res.ok ? await res.json().catch(() => null) : null;
   const top = topOf(answer);
   let harness = null;

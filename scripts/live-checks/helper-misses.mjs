@@ -97,6 +97,35 @@ export function helperWatch({ origin = HELPER_HOST, missMs = MISS_MS } = {}) {
 
 /** Every watch made in this process: a check run is one process, so its verdict reads them all. */
 const WATCHES = [];
+/** A run on a local build: every check that reads the live helper on one is started with --build (apps/terminal test:e2e). */
+const LOCAL = process.argv.includes("--build");
+/** The misses of a check's own reads of the helper on a local build (helperFetch), in the order seen. */
+const FETCHED = [];
+
+/**
+ * A check's own read of the helper from Node (its lists, a token's candles), as `fetch(url, init)`. Card
+ * app-token-page-rides-out-a-slow-token-read (merge group 44654180636, test-browser (3) job 136016279740):
+ * app-near-trading read "NEAR's lists answered 503" while the helper shed, and judged it a page fault, FAIL. On a local
+ * build (`local`), a 5xx or 429, an answer MISS_MS or more late, or no answer at all is kept as a miss, named as the
+ * watch names one, so the run's FAIL is INCONCLUSIVE (helperMisses, verdictOf). A deployed run (`local` false: no --build)
+ * keeps none: there the helper is part of what is checked. A read of another host is fetch's alone. The answer, or the
+ * failure, is the caller's as fetch gives it.
+ */
+export async function helperFetch(url, init = {}, { local = LOCAL, fetchFn = fetch, now = Date.now, missMs = MISS_MS, into = FETCHED } = {}) {
+  if (!String(url).startsWith(`${HELPER_HOST}/`)) return fetchFn(url, init);
+  const t = now();
+  const p = pathOf(url);
+  const keep = (why) => local && !into.includes(why) && into.push(why);
+  try {
+    const r = await fetchFn(url, init);
+    if (r.status >= 500 || r.status === 429) keep(`${host} HTTP ${r.status}: ${p}`);
+    else if (now() - t >= missMs) keep(`${host}: no answer (${p} answered after ${((now() - t) / 1000).toFixed(1)} s)`);
+    return r;
+  } catch (e) {
+    keep(`${host}: no answer (${p} failed after ${((now() - t) / 1000).toFixed(1)} s: ${String(e?.name ?? e).slice(0, 80)})`);
+    throw e;
+  }
+}
 
 /** Watches `ctx`'s requests to `origin` (Playwright's context events, every frame of every page). */
 export function watchContext(ctx, opts = {}) {
@@ -126,9 +155,10 @@ export async function liveHelper(ctx, harness, opts = {}) {
   return w;
 }
 
-/** The misses of every watch in this process (or of `watches`), each once. */
-export function helperMisses(watches = WATCHES, t = Date.now()) {
-  return [...new Set(watches.flatMap((w) => w.misses(t)))];
+/** The misses of every watch in this process (or of `watches`) and of the check's own helper reads (helperFetch), each
+ *  once. */
+export function helperMisses(watches = WATCHES, t = Date.now(), fetched = FETCHED) {
+  return [...new Set([...watches.flatMap((w) => w.misses(t)), ...fetched])];
 }
 
 /** A check's verdict (PASS | FAIL | INCONCLUSIVE) with the run's misses: { verdict, lines }, a FAIL with a miss made

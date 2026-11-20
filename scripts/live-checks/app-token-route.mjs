@@ -38,7 +38,7 @@ import { launchBrowser } from "../browsers.mjs";
 import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
 import { named } from "./record-names.mjs";
-import { ABORT_MS, helperMisses, liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT } from "./helper-misses.mjs";
+import { ABORT_MS, helperMisses, liveHelper, verdictOf as helperVerdict, EXIT as HELPER_EXIT, helperFetch } from "./helper-misses.mjs";
 
 const KEY = "app-token-route";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -175,7 +175,7 @@ const MEASURE = () => {
 
 export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
   mkdirSync(shots, { recursive: true });
-  const lr = await fetch(LISTS_URL, { headers: { origin: APP_HOST } });
+  const lr = await helperFetch(LISTS_URL, { headers: { origin: APP_HOST } });
   const lb = await lr.json().catch(() => null);
   const rows = lb?.lists?.trending_1h ?? lb?.lists?.trending ?? null;
   // the rows kept to the fields the Trending column's order reads (the id as `mint`: gitleaks reads a long id beside a token key as a secret)
@@ -185,7 +185,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
   const evm = {};
   const ids = { mint, unknown: UNKNOWN };
   for (const c of EVM_CHAINS) {
-    const er = await fetch(listsUrl(c), { headers: { origin: APP_HOST } });
+    const er = await helperFetch(listsUrl(c), { headers: { origin: APP_HOST } });
     const eb = await er.json().catch(() => null);
     const erows = eb?.lists?.trending_1h ?? eb?.lists?.trending ?? null;
     evm[c] = { url: listsUrl(c), status: er.status, as_of_ms: eb?.as_of_ms ?? null, trending: Array.isArray(erows) ? erows.map((r) => ({ mint: r?.token, symbol: r?.symbol, vol_1h_usd: r?.vol_1h_usd ?? null })) : null };

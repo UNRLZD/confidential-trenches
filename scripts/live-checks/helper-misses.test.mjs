@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { ABORT_MS, EXIT, HELPER_HOST, MISS_MS, exitOf, helperMisses, helperWatch, stoppedLines, verdictOf, watchContext } from "./helper-misses.mjs";
+import { ABORT_MS, EXIT, HELPER_HOST, MISS_MS, exitOf, helperFetch, helperMisses, helperWatch, stoppedLines, verdictOf, watchContext } from "./helper-misses.mjs";
 import { judge } from "./app-trade-box-mount.mjs";
 import { noAnswerHosts, rerun } from "../ci/live-rerun.mjs";
 
@@ -160,4 +160,53 @@ test("stopped at its bound (merge queue group 44559433373, 16:06Z): INCONCLUSIVE
   const none = stoppedLines([]);
   assert.equal(none.code, EXIT.FAIL);
   assert.match(none.lines[0], /^BAD stopped at its bound with no helper miss seen/);
+});
+
+// Card app-token-page-rides-out-a-slow-token-read, round 3: merge group 44654180636, test-browser (3) job 136016279740.
+// app-near-trading read NEAR's lists itself from Node ("BAD NEAR's lists answered 503, the top of Trending none", "BAD 0
+// loads of 2") while the helper shed, outside any watch, and FAILed. A check's own helper reads go through helperFetch.
+test("planted (merge group 44654180636): a check's own helper read answered 5xx or 429, late, or not at all is a miss on a local build", async () => {
+  const LISTS_NEAR = `${HELPER_HOST}/v1/market/lists?chain=near`;
+  const answering = (status) => async () => new Response("{}", { status });
+  for (const [why, fetchFn, want, late] of [
+    ["503", answering(503), "ct-api.unrealized.trade HTTP 503: /v1/market/lists", 0],
+    ["502", answering(502), "ct-api.unrealized.trade HTTP 502: /v1/market/lists", 0],
+    ["429", answering(429), "ct-api.unrealized.trade HTTP 429: /v1/market/lists", 0],
+    ["late", answering(200), "ct-api.unrealized.trade: no answer (/v1/market/lists answered after 10.0 s)", MISS_MS],
+  ]) {
+    const into = [];
+    let t = 0;
+    const r = await helperFetch(LISTS_NEAR, {}, { local: true, fetchFn: async (...a) => ((t += late), fetchFn(...a)), now: () => t, into });
+    assert.ok(r instanceof Response, why);
+    assert.deepEqual(into, [want], why);
+    assert.deepEqual(noAnswerHosts(into.join("\n")), ["ct-api.unrealized.trade"], why);
+    assert.equal(verdictOf("FAIL", into).verdict, "INCONCLUSIVE", why);
+  }
+  const into = [];
+  await assert.rejects(helperFetch(LISTS_NEAR, {}, { local: true, fetchFn: async () => Promise.reject(new DOMException("timed out", "TimeoutError")), into }));
+  assert.match(into[0], /^ct-api\.unrealized\.trade: no answer \(\/v1\/market\/lists failed after \d+\.\d s: TimeoutError\)$/);
+  // and helperMisses counts them beside the watches'
+  assert.deepEqual(helperMisses([], 0, ["x HTTP 503: y"]), ["x HTTP 503: y"]);
+});
+
+test("never a miss from helperFetch: a 200 in time, a 404, another host, or a deployed run (no --build)", async () => {
+  for (const [url, status, local] of [[`${HELPER_HOST}/v1/market/lists?chain=near`, 200, true], [`${HELPER_HOST}/v1/market/token?chain=near&token=x`, 404, true], ["https://ct-app.unrealized.trade/", 503, true], [`${HELPER_HOST}/v1/market/lists?chain=near`, 503, false]]) {
+    const into = [];
+    await helperFetch(url, {}, { local, fetchFn: async () => new Response("{}", { status }), into });
+    assert.deepEqual(into, [], `${url} ${status} local=${local}`);
+  }
+});
+
+test("every live check the queue runs on a local build reads the helper from Node only through helperFetch", () => {
+  const e2e = JSON.parse(readFileSync(new URL("../../apps/terminal/package.json", import.meta.url), "utf8")).scripts["test:e2e"];
+  const built = [...e2e.matchAll(/live-checks\/([\w-]+)\.mjs --build\b/g)].map((m) => m[1]);
+  assert.ok(built.length >= 10, `${built.length} checks on a local build`);
+  // a raw fetch of a helper address: HELPER_HOST/HELPER_URL in the call, or a helper URL constant or builder
+  const RAW = /(?<![\w.])fetch\(\s*(?:`\$\{HELPER_(?:HOST|URL)\}|HELPER_|LISTS_URL|listsUrl\(|CANDLES_URL\(|TOKEN_URL\(|`https:\/\/ct-api\.)/;
+  const raw = built.filter((k) => RAW.test(readFileSync(new URL(`./${k}.mjs`, import.meta.url), "utf8")));
+  assert.deepEqual(raw, []);
+  // the planted text: the read app-near-trading made before this card
+  assert.ok(RAW.test("  const res = await fetch(LISTS_URL);"));
+  assert.ok(RAW.test("const r = await fetch(`${HELPER_HOST}/v1/market/lists?chain=${c}`);"));
+  assert.ok(!RAW.test("  const res = await helperFetch(LISTS_URL);"));
 });
