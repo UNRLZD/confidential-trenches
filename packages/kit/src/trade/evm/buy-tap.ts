@@ -142,7 +142,7 @@ const FAULTS = new Set(["rpc_error", "rpc_disagree", "stale_quote"]);
  *  - then the first standard v3 tier the v3 factory holds a pool at (one read of every tier, evmPoolV3Tiers; card
  *    robinhood-tap-asks-no-missing-v3-tier: a tier with no pool is never asked, so no read of its route reverts); where
  *    no other route is there to ask, the first standard tier still is, once, so the kit's whole search runs and names
- *    the token's market;
+ *    the token's market; asked at the block the first try's last refusal was read at, as a follow is;
  *  - a refusal that names the kit's own best route (REQUOTE) asks that route once, where the same hook rule takes it:
  *    the kit's best holds every other shape.
  *  A provider's fault (rpc_error, rpc_disagree, stale_quote) is thrown as the kit's; every route refused throws
@@ -231,18 +231,24 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
   // mainnet, 2026-11-13), which is followed while the bound lasts, each route once
   let left = EVM_BUY_TAP_QUOTES;
   const asked = new Set<string>();
+  // the block the last refusal was read at (the kit's `at`), which its reference and the second try are asked at
+  let at: string | null = null;
   for (let k = 0; k < 2; k++) {
     const first = k === 0 ? head : left > 0 ? await second() : null;
     if (first === null) break;
     let route: EvmRoute | null = first;
+    // the second try is asked at the first's last refusal's block, as a follow is (card
+    // evm-warm-tap-ends-inside-two-seconds): another route at the same block, so the kit reads only what the refused
+    // quote did not agree on there, under the follow's own rules (a block the head watch confirmed, at most
+    // EVM_FOLLOW_MAX_AGE_MS old, else a block agreed now; one the chain dropped is asked again at a new head). At no
+    // block it ran the kit's whole search again at a new one: ANTc on Base, 3.5 s of a 6.9 s warm tap (mainnet from the
+    // Mac, 2026-11-20 08:4xZ), every round of its first quote once more
     let followed = false;
-    // the block the last refusal was read at, which its reference is asked at
-    let at: string | null = null;
     while (route !== null && left > 0 && !asked.has(JSON.stringify(route))) {
       left--;
       asked.add(JSON.stringify(route));
       try {
-        return await ask(route, followed ? at : null);
+        return await ask(route, followed || k > 0 ? at : null);
       } catch (e) {
         const err = e as { code?: unknown; reference?: { route: EvmRoute } | null };
         if (err?.code === "rpc_error" || err?.code === "rpc_disagree" || err?.code === "stale_quote") throw e;
