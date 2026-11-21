@@ -73,6 +73,11 @@ export type EvmPoolIndexConfig = {
   readonly poolManager: string;
   /** The two readers, each of another operator. */
   readonly readers: readonly [EvmRpc, EvmRpc];
+  /** Readers past the two, ranked, each of another operator than both (card evm-first-quote-reads-its-coin-at-any-age):
+   *  a batch a reader's time ran out on hands each of its pieces to the first of them not held, asked whole in a request
+   *  of its own, its answer the timed-out reader's, so every range is still proven by two operators; one that does not
+   *  answer it hands it to the next. A piece no spare answered is asked smaller of its own reader, as with none. */
+  readonly spares?: readonly EvmRpc[];
   /** How far back a new index reads, in blocks from N. */
   readonly depth: number;
   readonly span: number;
@@ -216,6 +221,7 @@ const piecesOf = (a: number, b: number, k: number): [number, number][] => {
   return out;
 };
 /** A request that ran out of its time (evmJsonRpc's AbortSignal.timeout): its batch is split, never asked again whole. */
+const TIMED_OUT = "timed out" as const;
 const timedOut = (e: unknown): boolean => (e as Error | null)?.name === "TimeoutError" || /timeout|timed out/i.test(String((e as Error | null)?.message));
 
 /** One sync of `prev` (or a new index) to the readers' agreed head; see the file's head. Refuses (throws) where nothing
@@ -244,14 +250,14 @@ async function syncOf(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig, aske
   // timeout ends at once (null), so its caller asks it smaller, never again at the same size (card
   // evm-sync-inside-the-kpi-at-any-age: base.rpc.blxrbdn.com's 5-piece batches past the 10 s timeout were asked 4
   // times each, 32 of 80 posts, 142.6 s for 864,000 blocks, 21 Nov 12:5xZ)
-  async function ask(r: 0 | 1, calls: { method: string; params: unknown[] }[], split = false): Promise<readonly unknown[] | null> {
+  async function ask(r: 0 | 1, calls: { method: string; params: unknown[] }[], split = false, rpc: EvmRpc = c.readers[r]): Promise<readonly unknown[] | null | typeof TIMED_OUT> {
     let waited = 0;
     let waits = 0;
     for (let tries = 0; tries < INDEX_TRIES; ) {
       // a reader any reader on the device met a throttle or a refused connection on is held (pace.ts): the index has no
       // other reader to ask, so it waits the hold out, inside the same wait a 429 has, and sends it nothing meanwhile
       // (card evm-taps-meet-no-429: Robinhood's own refused the index's getLogs at 1 to 3 posts a minute, 2026-11-15)
-      const held = evmRpcHeldMs(c.readers[r]);
+      const held = evmRpcHeldMs(rpc);
       if (held > 0 && waited < INDEX_LIMITED_WAIT_MS) {
         const ms = Math.min(held, INDEX_LIMITED_WAIT_MS - waited);
         waited += ms;
@@ -262,7 +268,7 @@ async function syncOf(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig, aske
       stats.requests[r]++;
       stats.getLogs[r] += calls.filter((x) => x.method === "eth_getLogs").length;
       try {
-        return await c.readers[r](calls);
+        return await rpc(calls);
       } catch (e) {
         const after = (e as { afterMs?: unknown } | null)?.afterMs;
         if (/429|rate limit/i.test(String((e as Error)?.message)) && waited < INDEX_LIMITED_WAIT_MS) {
@@ -276,7 +282,7 @@ async function syncOf(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig, aske
           continue;
         }
         stats.failed[r]++;
-        if (split && timedOut(e)) return null;
+        if (split && timedOut(e)) return TIMED_OUT;
         tries++;
         if (tries < INDEX_TRIES) await nap(BACKOFF_MS * 2 ** tries);
       }
@@ -284,11 +290,14 @@ async function syncOf(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig, aske
     return null;
   }
 
+  // a batch never split (a head, a block, the state reads): its answer, or null once its tries are spent
+  const askOne = (r: 0 | 1, calls: { method: string; params: unknown[] }[]) => ask(r, calls) as Promise<readonly unknown[] | null>;
+
   // the newest block both readers agree on, at or past N (F5's state reads): the lower of their heads now, read by number
   // on both with the same hash; null where either answers none, it is below N, or the two hashes differ
   async function agreedNow(): Promise<string | null> {
     const blockOf = async (r: 0 | 1, at: string) => {
-      const h = ((await ask(r, [{ method: "eth_getBlockByNumber", params: [at, false] }]))?.[0] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
+      const h = ((await askOne(r, [{ method: "eth_getBlockByNumber", params: [at, false] }]))?.[0] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
       return h && isQty(h.number) && isHash(h.hash) && (at === "latest" || Number(h.number) === Number(at)) ? { number: Number(h.number), hash: h.hash.toLowerCase() } : null;
     };
     const [x, y] = await Promise.all([blockOf(0, "latest"), blockOf(1, "latest")]);
@@ -303,7 +312,7 @@ async function syncOf(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig, aske
   // for good)
   // (a coin's second read: the N its first read pinned, the heads not read again)
   const heads = asked.pinAt !== undefined ? [asked.pinAt.number, asked.pinAt.number] : await Promise.all(([0, 1] as const).map(async (r) => {
-    const a = (await ask(r, [{ method: "eth_getBlockByNumber", params: ["latest", false] }]))?.[0] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined;
+    const a = (await askOne(r, [{ method: "eth_getBlockByNumber", params: ["latest", false] }]))?.[0] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined;
     const h = a?.result;
     return h && isQty(h.number) && isHash(h.hash) ? Number(h.number) : refuse("rpc_error", `index reader ${r + 1} answered no head`);
   }));
@@ -461,12 +470,27 @@ async function syncOf(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig, aske
     }
   };
   // one batch of pieces on reader r
-  const askPieces = async (r: 0 | 1, g: Piece[]) => {
-    const out = await ask(r, callsOf(g), true);
+  // a piece reader r's time ran out on, asked whole of each spare not held in rank until one answers it: true once one did
+  const handOff = async (r: 0 | 1, p: Piece): Promise<boolean> => {
+    for (const s of c.spares ?? []) {
+      if (evmRpcHeldMs(s) > 0) continue;
+      const out = await ask(r, callsOf([p]), true, s);
+      const a = Array.isArray(out) ? answerOf(out, 0, p) : null;
+      if (a !== null && a !== NO_ANSWER) return answered(r, p, a), true;
+    }
+    return false;
+  };
+  const askPieces = async (r: 0 | 1, g0: Piece[]) => {
+    const got = await ask(r, callsOf(g0), true);
+    // a timeout: each piece to a spare first (none: as below)
+    const handed = got === TIMED_OUT ? await Promise.all(g0.map((p) => handOff(r, p))) : g0.map(() => false);
+    const g = g0.filter((_, k) => !handed[k]);
+    if (g.length === 0) return;
+    const out = got === TIMED_OUT ? null : got;
     // F5 (the review's): tries spent on throws (a body past its size, a 4xx) or a timeout: each piece alone; a piece
     // alone (or a lone piece) that still fails as its span's halves on both, under the halves' budget
     if (out === null) {
-      for (const p of g) if (p.alone || g.length === 1) answered(r, p, NO_ANSWER);
+      for (const p of g) if (p.alone || g0.length === 1) answered(r, p, NO_ANSWER);
         else p.alone = true;
       queues[r].unshift(...g.filter((p) => p.ans === null));
       return;
@@ -562,7 +586,7 @@ async function syncOf(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig, aske
       if (now === null) return calls.map(() => null);
       for (let i = 0; i < calls.length; i += per) {
         const part = calls.slice(i, i + per);
-        all.push(...((await ask(r, part)) ?? part.map(() => null)));
+        all.push(...((await askOne(r, part)) ?? part.map(() => null)));
       }
       return all;
     }));
@@ -603,7 +627,7 @@ async function syncOf(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig, aske
         const again: EvmIndexedPool[] = [];
         for (let i = 0; i < of.length; i += INDEX_RECEIPT_BATCH) {
           const part = of.slice(i, i + INDEX_RECEIPT_BATCH);
-          const out = await ask(r, part.map((p) => ({ method: "eth_getTransactionReceipt", params: [logged.get(p.id)!.f.tx] })));
+          const out = await askOne(r, part.map((p) => ({ method: "eth_getTransactionReceipt", params: [logged.get(p.id)!.f.tx] })));
           part.forEach((p, k) => {
             const e = out?.[k] as { result?: unknown; error?: unknown } | null | undefined;
             const a = e?.result;

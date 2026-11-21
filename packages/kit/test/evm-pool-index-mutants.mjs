@@ -55,6 +55,7 @@ const COIN_X = "COIN the Xs the stored index holds are asked beside the coin";
 const COIN_PIN = "COIN a block N the second read finds on another fork";
 const COIN_WANT = "COIN a reader that ignores the filter";
 const ORSPAN = "ORSPAN a reader that bounds an OR's range";
+const HAND = "HAND a batch a reader timed out on goes whole to the first spare";
 
 /** [find, replace, test]: each a rule removed. */
 export const MUTANTS = [
@@ -148,9 +149,9 @@ export const MUTANTS = [
   ["(a === undefined && limited(e?.error))", "false", S2],
   // F5 (review): a failed batch not asked one span a request; a span alone that fails not asked as halves
   ["else p.alone = true;", "else answered(r, p, NO_ANSWER);", ALONE],
-  ["for (const p of g) if (p.alone || g.length === 1) answered(r, p, NO_ANSWER);", "for (const p of g) if (p.alone || g.length === 1) throw new EvmQuoteError(\"rpc_error\", \"alone\");", ALONE],
+  ["for (const p of g) if (p.alone || g0.length === 1) answered(r, p, NO_ANSWER);", "for (const p of g) if (p.alone || g0.length === 1) throw new EvmQuoteError(\"rpc_error\", \"alone\");", ALONE],
   // card evm-sync-inside-the-kpi-at-any-age: a timed-out batch asked again at its size
-  ["if (split && timedOut(e)) return null;", "", SPLIT],
+  ["if (split && timedOut(e)) return TIMED_OUT;", "", SPLIT],
   // card evm-first-quote-reads-its-coin-at-any-age: a filter of the coin's or of the markets' left out; the Xs held not
   // asked beside the coin, or the new ones never; the second read not at the first's N, or its pin not held; a stray
   // pool kept; the set not cut to the coin's; a piece's ends read at one getLogs a piece
@@ -171,6 +172,11 @@ export const MUTANTS = [
   ["if (c.orSpan !== undefined && xs.length <= INDEX_ONE_X) {", "if (false) {", ORSPAN],
   ["if (c.orSpan !== undefined && xs.length <= INDEX_ONE_X) {", "if (c.orSpan !== undefined) {", ORSPAN],
   ["BigInt(x) > BigInt(weth) ? [INITIALIZE, null, topic(weth), topic(x)] : [INITIALIZE, null, topic(x), topic(weth)]", "[INITIALIZE, null, topic(weth), topic(x)]", ORSPAN],
+  // card evm-first-quote-reads-its-coin-at-any-age: a timeout's pieces to a spare not held, whole
+  ["    const handed = got === TIMED_OUT ? await Promise.all(g0.map((p) => handOff(r, p))) : g0.map(() => false);", "    const handed = g0.map(() => false);", HAND],
+  ["      if (evmRpcHeldMs(s) > 0) continue;", "", HAND],
+  ["        if (split && timedOut(e)) return TIMED_OUT;", "        if (split && timedOut(e)) return null;", HAND],
+  ["      if (a !== null && a !== NO_ANSWER) return answered(r, p, a), true;", "      if (a !== null && a !== NO_ANSWER) return true;", HAND],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([find, , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);

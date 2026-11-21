@@ -1257,3 +1257,71 @@ test("COINR a coin read through the venues: Base's bloXroute asked one piece a s
     evmPoolIndexReset();
   }
 });
+
+// Card evm-first-quote-reads-its-coin-at-any-age: a reader's timeout hands its pieces to the next-ranked reader not held,
+// whole, never asked smaller of the slow one; each range still proven by two operators; with no spare, as before
+test("HAND a batch a reader timed out on goes whole to the first spare not held, never halved; a held spare is never asked; with none it is asked smaller", async () => {
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  const rangesOf = (calls: EvmRpcCall[][]) => calls.flat().filter((x) => x.method === "eth_getLogs").map((x) => {
+    const f = x.params[0] as { fromBlock: string; toBlock: string };
+    return Number(f.toBlock) - Number(f.fromBlock) + 1;
+  });
+  const run = async (withSpares: boolean) => {
+    const a: Reader = { head, pools: ps, calls: [] };
+    const b: Reader = { head, pools: ps, calls: [], throwsOverRange: 2_500 };
+    const s: Reader = { head, pools: ps, calls: [] };
+    const r = await evmPoolIndexSync(null, cfgOf(a, b, { spares: withSpares ? [heldRpc, reader(s)] : [] }));
+    return { r, a, b, s };
+  };
+  evmPaceReset();
+  // a held spare first in rank, then an honest one
+  const held: EvmRpcCall[][] = [];
+  const HELD = "https://held.example";
+  evmProviderHold(HELD, 60_000);
+  const heldRpc = evmJsonRpc(HELD, (async (_u: string, init?: RequestInit) => (held.push(JSON.parse(String(init?.body))), new Response("[]"))) as typeof fetch);
+  try {
+    const on = await run(true);
+    assert.equal(on.r.error, null, String(on.r.error?.message));
+    assert.equal(on.r.coversThrough, head);
+    assert.deepEqual(ids(on.r.pools), new Set(ps.map((p) => evmPoolIdOf(p.key))), "every pool, proven by a and the spare");
+    assert.ok(rangesOf(on.s.calls).length > 0 && rangesOf(on.s.calls).every((n) => n === 10_000), `the spare read each piece whole: ${rangesOf(on.s.calls)}`);
+    assert.ok(rangesOf(on.b.calls).every((n) => n === 10_000), "the slow reader asked nothing smaller");
+    assert.equal(held.length, 0, "a held spare is never asked");
+    // the same with no spare: the slow reader's pieces asked smaller
+    const off = await run(false);
+    assert.equal(off.r.coversThrough, head);
+    assert.ok(rangesOf(off.b.calls).some((n) => n < 10_000), "with no spare the timed-out pieces are halved");
+    assert.equal(rangesOf(off.s.calls).length, 0);
+  } finally {
+    evmPaceReset();
+  }
+});
+
+test("HANDR the venue's readers for a sync: its two in their places, one the device holds replaced by the first spare not held, the rest the spares ranked", async () => {
+  const { evmIndexReadersOf } = (await import("../src/trade/evm/buy-tap.ts")) as unknown as { evmIndexReadersOf?: (ix: unknown, rpcOf: (u: string) => EvmRpc) => { readers: EvmRpc[]; spares: EvmRpc[] } };
+  assert.ok(evmIndexReadersOf !== undefined, "no evmIndexReadersOf");
+  const [A, B, C, D] = ["https://a.example", "https://b.example", "https://c.example", "https://d.example"];
+  const urls = new WeakMap<EvmRpc, string>();
+  const rpcOf = (u: string) => {
+    const f: EvmRpc = async () => [];
+    urls.set(f, u);
+    return f;
+  };
+  const of = (x: { readers: EvmRpc[]; spares: EvmRpc[] }) => ({ readers: x.readers.map((f) => urls.get(f)), spares: x.spares.map((f) => urls.get(f)) });
+  const ix = { readers: [A, B], spares: [C, D] };
+  evmPaceReset();
+  try {
+    assert.deepEqual(of(evmIndexReadersOf(ix, rpcOf)), { readers: [A, B], spares: [C, D] });
+    assert.deepEqual(of(evmIndexReadersOf({ readers: [A, B] }, rpcOf)), { readers: [A, B], spares: [] }, "today's lists: the two, no spare");
+    evmProviderHold(B, 60_000);
+    assert.deepEqual(of(evmIndexReadersOf(ix, rpcOf)), { readers: [A, C], spares: [D] }, "a held reader's place to the first spare");
+    evmProviderHold(C, 60_000);
+    assert.deepEqual(of(evmIndexReadersOf(ix, rpcOf)), { readers: [A, D], spares: [C] }, "never a held spare; the held last");
+    assert.deepEqual(of(evmIndexReadersOf({ readers: [A, B] }, rpcOf)), { readers: [A, B], spares: [] }, "a held reader with no spare free stays");
+    evmProviderHold(D, 60_000);
+    assert.deepEqual(of(evmIndexReadersOf(ix, rpcOf)).readers, [A, B], "every spare held: the held reader keeps its place, never a held spare in it");
+  } finally {
+    evmPaceReset();
+  }
+});
