@@ -191,7 +191,9 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
   // another host while it was out (a spare)
   const waited = (t0of, t1) => {
     const at = (x) => (x.ms === null ? t1 - x.at : x.ms);
-    const w = asked.reduce((m, x) => (m === null || at(x) > at(m) ? x : m), null);
+    // a request still out when the tap ended is one it did not wait for (a hedge's loser, a background read): `left`
+    const ended = asked.filter((x) => x.ms !== null);
+    const w = (ended.length > 0 ? ended : asked).reduce((m, x) => (m === null || at(x) > at(m) ? x : m), null);
     if (w === null) return null;
     const spare = asked.some((x) => x !== w && x.key === w.key && x.host !== w.host && x.at >= w.at && x.at <= w.at + at(w));
     // a tap past 2 s: every request in the order sent (ms from the tap's start, ms out, end) and the time no request
@@ -205,7 +207,7 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
     }
     if (t1 > reach) idle += t1 - reach;
     const timeline = t1 - t0of > 2000 ? all.map((x) => `${Math.round(x.at - t0of)}+${Math.round(at(x))} ${x.host.split(".").slice(-3, -1).join(".")} ${x.methods} ${x.end}`) : undefined;
-    return { methods: w.methods, host: w.host, ms: Math.round(at(w)), end: w.end, spare, idle: Math.round(idle), timeline };
+    return { methods: w.methods, host: w.host, ms: Math.round(at(w)), end: w.end, spare, idle: Math.round(idle), left: asked.length - ended.length, timeline };
   };
   try {
     const chains = {};

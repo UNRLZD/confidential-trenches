@@ -1016,7 +1016,7 @@ function agreeing<T>(
     // the stand-ins (hedged requests): a request out past its provider's own hedge time (evmHedgeAfter) has the next
     // provider asked once in its place, outside `late`'s budget; the two share one seat (`seat`), whose first answer is
     // its one vote, so a stand-in is never a third vote nor a second answer of one provider. `gone`: requests whose
-    // seat had its answer, or whose seat-mate is still out, when they settled: they vote no more. A contested round
+    // seat had its answer when they settled: they vote no more. A contested round
     // asks every provider, and there each provider's answer is its own vote
     let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
     const seat: number[] = [];
@@ -1187,8 +1187,9 @@ function agreeing<T>(
           settledK[k] = true;
           // a request moved to the next provider is no failure: the next was asked in its place
           if (movedK[k]) return done ? undefined : end();
-          // nor one whose seat has its answer, or whose seat-mate is still out: that one answers for the seat
-          if (voted[seat[k]!] || Array.from({ length: started }, (_, n) => n).some((n) => n !== k && seat[n] === seat[k] && !settledK[n])) {
+          // nor one whose seat has its answer: the first answer was the seat's. A failure of a seat whose stand-in is
+          // still out asks the next as any failure does, so a stand-in that hangs too never holds the round
+          if (voted[seat[k]!]) {
             gone++;
             return done ? undefined : end();
           }
