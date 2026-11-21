@@ -32,8 +32,15 @@ function arm(ms, what, name) {
 // asynchronously, so --test-force-exit's process.exit() (node v24.22.3 lib/internal/test_runner/test.js:1468-1492)
 // dropped a file's last results still queued for the runner, and the runner's own last lines: 3,499 to 3,592 of 3,600
 // tests reported beside a CPU load, exit 0. Linux writes a pipe synchronously already; this makes macOS do the same, in
-// the runner and in every file's process (scripts/test-report.mjs refuses a run that still lost one).
-if (isMainThread) for (const s of [process.stdout, process.stderr]) if (s._handle && typeof s._handle.setBlocking === "function") s._handle.setBlocking(true);
+// the runner and in every file's process (scripts/test-report.mjs refuses a run that still lost one). Only those two: a
+// process a test starts inherits this preload (fork's execArgv, NODE_OPTIONS) and NODE_TEST_CONTEXT, and a blocking
+// write to a parent that reads it only after it exits never returns (scripts/ci/test-report.test.mjs plants one: a
+// child that writes 1 MiB and exits held its file until the run's cap). A file's process is the runner's own child,
+// named by the pid the runner leaves in RUNNER_PID; any process past it keeps node's own writes.
+const RUNNER_PID = "TEST_BOUND_RUNNER_PID";
+if (isMainThread && process.execArgv.includes("--test")) process.env[RUNNER_PID] = String(process.pid);
+const reporting = isMainThread && (process.execArgv.includes("--test") || (process.env.NODE_TEST_CONTEXT !== undefined && process.env[RUNNER_PID] === String(process.ppid)));
+if (reporting) for (const s of [process.stdout, process.stderr]) if (s._handle && typeof s._handle.setBlocking === "function") s._handle.setBlocking(true);
 
 // a test file's own process (the runner starts each with NODE_TEST_CONTEXT set), or the run's (node --test itself); a
 // worker thread (a test's own, which inherits --require, or this watch) arms nothing: its process is watched already

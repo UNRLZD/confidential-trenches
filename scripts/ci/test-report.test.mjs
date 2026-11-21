@@ -32,11 +32,18 @@ const DROPPED = ["gone.test.mjs", "cut.test.mjs"];
 // pool-deposit-evm.test.ts's): each test event names the file the test is written in, so a file is counted by the file
 // the runner ran (entryFile), never refused as 0 of its tests beside the other at twice its own
 const USES = { "uses.test.mjs": 'import "./fine.test.mjs";\n' };
+// a process a test starts (fork: it inherits the preload and NODE_TEST_CONTEXT) writes 1 MiB, past what the pipe and its
+// parent's paused stream hold (128 KB fit, read 21 Nov), and exits; the test reads it only after its exit. A blocking
+// write there never returns: only the runner and each file's own process write blocking (test-bound-watch.cjs)
+const CHILD = {
+  "writer.cjs": 'process.stdout.write("x".repeat(1 << 20));\nprocess.exit(0);\n',
+  "child.test.mjs": 'import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { fork } from "node:child_process";\nimport { once } from "node:events";\ntest("a child writes 1 MiB and exits, read after", async () => {\n  const c = fork(new URL("./writer.cjs", import.meta.url).pathname, { stdio: ["ignore", "pipe", "inherit", "ipc"] });\n  c.stdout.pause();\n  const [code] = await once(c, "exit");\n  assert.equal(code, 0);\n});\n',
+};
 
 function plant() {
   // its links resolved, so the names the report prints are the names asserted here
   const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "test-report-")));
-  for (const [f, text] of Object.entries({ ...PLANTS, ...USES })) writeFileSync(path.join(dir, f), text);
+  for (const [f, text] of Object.entries({ ...PLANTS, ...USES, ...CHILD })) writeFileSync(path.join(dir, f), text);
   return dir;
 }
 
@@ -82,6 +89,20 @@ test("every package's test run passes when each file's results arrive whole, a f
       assert.equal(r.status, 0, `${d}\n${r.stdout}${r.stderr}`);
       assert.match(r.stdout, /ℹ tests 4\n/, d);
       assert.ok(!(r.stdout + r.stderr).includes("test-report: FAIL"), d);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("every package's test run ends a file whose child writes past the pipe to a parent that reads after its exit", async () => {
+  const dir = plant();
+  try {
+    const runs = await Promise.all(packages().map(async (p) => ({ ...p, r: await run(process.execPath, ["--test", ...p.flags, path.join(dir, "child.test.mjs")], { cwd: path.join(ROOT, p.dir), env: ENV, timeoutMs: 60_000 }) })));
+    for (const { dir: d, r } of runs) {
+      assert.equal(r.timedOut, false, `${d}: the run is still going at 60 s`);
+      assert.equal(r.status, 0, `${d}\n${r.stdout}${r.stderr}`);
+      assert.match(r.stdout, /ℹ pass 1\n/, d);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
