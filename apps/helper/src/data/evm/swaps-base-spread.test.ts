@@ -93,14 +93,15 @@ test("card base-tapes-fill-inside-their-bound: 12 cold Base coins whose newest 5
   const { value } = await onVirtualTime(9_000_000, async () => {
     const s = createSwaps("base", { fetch: r.fetch as never, now: () => Date.now(), listed: async () => true, rpcs: SWAP_RPCS.base, pools: POOLS, tickMs: 0 });
     // each tape's latest answer, and the page's reads of it so far (3 s apart, as swaps-search.test.ts reads them)
-    const latest = new Map<string, { status: number; filling: boolean; n: number; tx: unknown; reads: number; ms: number }>();
-    const t0 = Date.now();
+    const latest = new Map<string, { status: number; filling: boolean; n: number; tx: unknown; reads: number; tick: number }>();
+    // the helper ticks the loop below has run, each answer's place in the message (no clock read: no-wall-clock-asserts)
+    let ticks = 0;
     let over = false;
     const poll = async (token: string) => {
       for (let reads = 1; !over; reads++) {
         const a = await s.trades(token, 50);
         const j = a.status === 200 ? (JSON.parse(a.body) as { trades: { tx: unknown }[]; filling?: boolean }) : null;
-        latest.set(token, { status: a.status, filling: j?.filling === true, n: j?.trades.length ?? -1, tx: j?.trades[0]?.tx, reads, ms: Date.now() - t0 });
+        latest.set(token, { status: a.status, filling: j?.filling === true, n: j?.trades.length ?? -1, tx: j?.trades[0]?.tx, reads, tick: ticks });
         if (j === null || j.filling !== true) return;
         await sleep(3_000);
       }
@@ -113,6 +114,7 @@ test("card base-tapes-fill-inside-their-bound: 12 cold Base coins whose newest 5
     // the helper's tick, a second apart, until the bound
     for (let i = 0; i < FILLED_MS / 1_000 && !over; i++) {
       await sleep(1_000);
+      ticks = i + 1;
       await s.tick();
     }
     const got = await by;
@@ -120,7 +122,7 @@ test("card base-tapes-fill-inside-their-bound: 12 cold Base coins whose newest 5
     s.stop();
     return got;
   });
-  const line = value.map((g, i) => `${TOKENS[i]!.token.slice(-4)} ${g?.status} ${g?.filling ? "filling" : "done"} n${g?.n} read ${g?.reads} at ${g?.ms} ms`).join(", ");
+  const line = value.map((g, i) => `${TOKENS[i]!.token.slice(-4)} ${g?.status} ${g?.filling ? "filling" : "done"} n${g?.n} read ${g?.reads} after tick ${g?.tick}`).join(", ");
   console.log(`${line}; pool log reads: ${[...r.reads].map(([u, n]) => `${new URL(u).hostname} ${n}`).join(", ")}`);
   TOKENS.forEach(({ pool }, i) => {
     const g = value[i];
