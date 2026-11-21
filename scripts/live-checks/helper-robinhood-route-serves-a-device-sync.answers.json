@@ -1,0 +1,604 @@
+{
+ "_note": "good: planted from bad_live (the refused post answered 200, the kit's hold taken out of every later post, the page's reads cut to the shorter sync at the same pace and all answered); the first live run after the helper deploy is recorded in its place. bad_live: the deployed helper at 19a264d25, 21 Nov 17:4xZ from macOS, the page's other reads at 27 of the share of 30 in each 10 s beside a 6-day sync: one post 429 (Retry-After 3), the sync 43.8 s. bad_alone: the same helper, the page's reads at 18 in 10 s, each after the last one's answer: every post 200, but the share never held at its edge (23 reads in 12.5 s).",
+ "good": {
+  "at": "2026-11-21T17:15:25.025Z",
+  "policy": "\"chain\";q=139;w=10, \"client\";q=30;w=10",
+  "passes": [
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200
+  ],
+  "snapshot": {
+   "status": 200,
+   "through": 119980514,
+   "aged": 115024742
+  },
+  "sync": {
+   "served": true,
+   "coversThrough": 120033515,
+   "ms": 13821,
+   "limited": [
+    0,
+    0
+   ],
+   "failed": [
+    0,
+    0
+   ]
+  },
+  "posts": [
+   {
+    "at": 569,
+    "ms": 579,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 1,
+    "methods": "eth_getBlockByNumber"
+   },
+   {
+    "at": 1148,
+    "ms": 776,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 2466,
+    "ms": 721,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 3371,
+    "ms": 806,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 4381,
+    "ms": 651,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 5252,
+    "ms": 907,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 6386,
+    "ms": 896,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 7500,
+    "ms": 177,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 7727,
+    "ms": 1259,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 9704,
+    "ms": 958,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 11037,
+    "ms": 918,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 12323,
+    "ms": 940,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 13987,
+    "ms": 382,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   }
+  ]
+ },
+ "bad_live": {
+  "at": "2026-11-21T17:15:25.025Z",
+  "policy": "\"chain\";q=139;w=10, \"client\";q=30;w=10",
+  "passes": [
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   429,
+   429,
+   429,
+   429,
+   429,
+   429,
+   429,
+   429,
+   429,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200
+  ],
+  "snapshot": {
+   "status": 200,
+   "through": 119980514,
+   "aged": 115024742
+  },
+  "sync": {
+   "served": true,
+   "coversThrough": 120033515,
+   "ms": 43773,
+   "limited": [
+    0,
+    1
+   ],
+   "failed": [
+    0,
+    0
+   ]
+  },
+  "posts": [
+   {
+    "at": 569,
+    "ms": 579,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 1,
+    "methods": "eth_getBlockByNumber"
+   },
+   {
+    "at": 1148,
+    "ms": 776,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 2466,
+    "ms": 721,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 3371,
+    "ms": 806,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 4381,
+    "ms": 651,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 5252,
+    "ms": 907,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 6386,
+    "ms": 896,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 7500,
+    "ms": 177,
+    "status": 429,
+    "retryAfter": "3",
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 37679,
+    "ms": 1259,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 39656,
+    "ms": 958,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 40989,
+    "ms": 918,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 42275,
+    "ms": 940,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 43939,
+    "ms": 382,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   }
+  ]
+ },
+ "bad_alone": {
+  "at": "2026-11-21T17:11:37.743Z",
+  "policy": "\"chain\";q=139;w=10, \"client\";q=30;w=10",
+  "passes": [
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200,
+   200
+  ],
+  "snapshot": {
+   "status": 200,
+   "through": 119980514,
+   "aged": 115024742
+  },
+  "sync": {
+   "served": true,
+   "coversThrough": 120031746,
+   "ms": 12528,
+   "limited": [
+    0,
+    0
+   ],
+   "failed": [
+    0,
+    0
+   ]
+  },
+  "posts": [
+   {
+    "at": 2,
+    "ms": 578,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 1,
+    "methods": "eth_getBlockByNumber"
+   },
+   {
+    "at": 582,
+    "ms": 785,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 1915,
+    "ms": 881,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 3164,
+    "ms": 869,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 4232,
+    "ms": 906,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 5520,
+    "ms": 918,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 6812,
+    "ms": 939,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 7951,
+    "ms": 976,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 9303,
+    "ms": 885,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 10399,
+    "ms": 441,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 11043,
+    "ms": 719,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   },
+   {
+    "at": 11962,
+    "ms": 384,
+    "status": 200,
+    "retryAfter": null,
+    "wait": "0",
+    "calls": 2,
+    "methods": "eth_getLogs,eth_getBlockByNumber"
+   }
+  ]
+ }
+}

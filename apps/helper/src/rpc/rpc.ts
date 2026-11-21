@@ -236,6 +236,40 @@ const BLOCK_NUMBER = /^0x(0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
  */
 export const POOL_LOGS_CLIENT = "pool-logs";
 /**
+ * A device's pool index sync (card helper-robinhood-route-serves-a-device-sync; the kit's checks/evm/pool-index.ts, whose
+ * second Robinhood reader is this route, buy-unpinned.ts `index`): a read on the keyed-only route whose every request is
+ * an eth_getLogs of the chain's PoolManager (as the kit pins it, evmPoolVenues) for its Initialize event, a coin's read
+ * included (more topics after it), or an eth_getBlockByNumber, the span's last block the kit asks beside each, draws
+ * under its own name for the caller, INDEX_CLIENT and the caller's address: never the caller's share (RPC_PAGE_NEED),
+ * which the page's background passes draw on the same address (packages/wallet/src/pool/buy-wallets.ts, 18 in 10 s).
+ * On 21 Nov a fresh device's first Robinhood quote at a 6-day snapshot age met one 429 from this route on each of three
+ * runs, 34-35 s each: the sync alone is 12 posts and 23 calls in 12.5 s (read from macOS through the deployed route,
+ * 21 Nov 17:02Z, commit 19a264d25, no 429), under the share of 30 in 10 s, but with the passes beside it past it, and
+ * the kit holds a reader 30 s on any 429 (quote.ts EVM_PROVIDER_HOLD_MS). The allowance is the chain's page share again,
+ * 30 per 10 s: an index is read one span at a time (parallel 1, perBatch 1, two calls a post), so a sync of up to 14
+ * spans, 7,000,000 blocks, about 8.5 days of Robinhood, fits one window whatever its speed, and a longer one goes on in
+ * the next after the 429's Retry-After. Every call still draws on the chain's total (139 in 10 s on the deployed
+ * Robinhood list, RateLimit-Policy), so callers together never pass it: at Alchemy's 60 compute units an eth_getLogs
+ * (alchemy.com/docs/reference/compute-unit-costs, read 21 Nov 17:0xZ) the whole total is 834 a second, under Pay As You
+ * Go's 10,000 (alchemy.com/docs/reference/pricing-plans, read the same minute). The risk it opens, bounded: one caller
+ * can spend 30 paid-key calls per 10 s more, only on the PoolManager's Initialize logs and block reads.
+ */
+export const INDEX_CLIENT = "pool-index";
+/** The PoolManager's Initialize event, topic 0 (the kit's pool-index.ts INITIALIZE). */
+export const INITIALIZE_TOPIC = `0x${Buffer.from(keccak_256(Buffer.from("Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)"))).toString("hex")}`;
+/** Whether `out`, one checked request or a batch, is a pool index read of `poolManager` (INDEX_CLIENT): every request an
+ *  eth_getLogs of that address with Initialize as topic 0, or an eth_getBlockByNumber, and at least one eth_getLogs. */
+function indexReadOf(chain: RpcChain, out: unknown, poolManager: string | undefined): boolean {
+  if (!EVM_CHAINS.has(chain) || poolManager === undefined) return false;
+  const reqs = (Array.isArray(out) ? out : [out]) as Record<string, unknown>[];
+  const logs = (r: Record<string, unknown>): boolean => {
+    if (r.method !== "eth_getLogs" || !Array.isArray(r.params) || r.params.length !== 1) return false;
+    const f = r.params[0];
+    return isPlain(f) && typeof f.address === "string" && f.address.toLowerCase() === poolManager && Array.isArray(f.topics) && typeof f.topics[0] === "string" && f.topics[0].toLowerCase() === INITIALIZE_TOPIC;
+  };
+  return reqs.some(logs) && reqs.every((r) => logs(r) || r.method === "eth_getBlockByNumber");
+}
+/**
  * The pool store's fill (card helper-keyed-logs-serve-a-whole-pool-range, pool-logs.ts): the pages it sends a second,
  * every chain's fill and all their providers together, one at a time. A page draws nothing of the route's total (the chain's /v1/rpc
  * budget, keyedBudget and summedTotal: KEYED_ROUTE_SHARE of each key's pace, which is the callers'), so a fill never
@@ -1335,6 +1369,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   };
   /** The chain's own pool, as the kit pins it (lowercase), for POOL_LOGS_CLIENT; undefined off the EVM chains. */
   const poolOf = (c: RpcChain): string | undefined => (EVM_CHAINS.has(c) ? (evmPoolVenues() as Readonly<Record<string, { pool?: string } | undefined>>)[c]?.pool?.toLowerCase() : undefined);
+  /** The chain's PoolManager, as the kit pins it (lowercase), for INDEX_CLIENT; undefined off the EVM chains. */
+  const poolManagerOf = (c: RpcChain): string | undefined => (EVM_CHAINS.has(c) ? (evmPoolVenues() as Readonly<Record<string, { poolManager?: string } | undefined>>)[c]?.poolManager?.toLowerCase() : undefined);
   // each EVM chain's finalized head as the helper last read it (0n: none yet), when, the read in flight, and whether
   // the last read failed (no head named), which the fill waits out instead of ending (card base-reads-never-throttled)
   const finalHeads = new Map<RpcChain, { n: bigint; at: number; reading?: Promise<void>; failed?: boolean }>();
@@ -1813,6 +1849,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (keyedOnly) {
       const own = upstreams[c].keyed.filter((k) => !k.keyless && (c !== "near" || operatorOf(k.url) === NEAR_SEAT)).map((k) => k.url);
       if (own.length === 0) return UPSTREAM();
+      // card helper-robinhood-route-serves-a-device-sync: a pool index read draws its own allowance (INDEX_CLIENT)
+      const mine = client !== undefined && indexReadOf(c, out, poolManagerOf(c)) ? `${INDEX_CLIENT} ${client}` : client;
       // card helper-pool-logs-outside-the-caller-budget: a finalized page of logs kept before is answered here, drawing
       // nothing; a first ask draws as any read, and is kept once its toBlock reads finalized (LOG_CACHE_ENTRIES)
       const logs = Array.isArray(out) ? null : finalLogsOf(c, out as Record<string, unknown>, poolOf(c));
@@ -1827,7 +1865,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         // finalized by the head held, else by a read of it (one at a time, FINAL_HEAD_MS apart): a pool page's first
         // ask then draws on its own allowance (POOL_LOGS_CLIENT), any other on the caller's share as before
         const final = await finalized(c, logs.to, own);
-        const who = final && logs.pool && client !== undefined ? `${POOL_LOGS_CLIENT} ${client}` : client;
+        const who = final && logs.pool && client !== undefined ? `${POOL_LOGS_CLIENT} ${client}` : mine;
         // card helper-keyed-logs-serve-a-whole-pool-range: the pinned pool's finalized range, from its deploy block on, in
         // the caller's address and topics alone: the part the store covers from the store, the rest past it as before.
         // The store holds finalized blocks alone, so its part needs no head read: live 16 Nov the head read was held
@@ -1873,7 +1911,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         if (final) logCachePut(logs.key, a);
         return a;
       }
-      if (c !== "near" || client === undefined) return callList(c, own, forward, methods, client, reserved, by);
+      if (c !== "near" || client === undefined) return callList(c, own, forward, methods, mine, reserved, by);
       // the seat's day (review P3-3 of 997ce7a7f): looked at first, so a read past it costs no share; taken only once the
       // share admits the read (a share refusal spends none of it); given back when the walk answers its own 429 or 503 (no
       // provider answered: every one held past the wait, down or out)
