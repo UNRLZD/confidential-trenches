@@ -81,7 +81,7 @@ export const MUTANTS = [
   [QUOTE, "  shortMax += 2 * jobs.length;\n  // a scan the second carries whole", "  // a scan the second carries whole", R, "card rh-cold-quote: a cold Base scan whose first answers each of its starting requests once"],
   [QUOTE, "        if (shorts > shortMax) throw new ScanStop(", "        if (false) throw new ScanStop(", R, "card rh-cold-quote: a first that answers -32602 to every getLogs"],
   [QUOTE, "if (e instanceof BadAnswer) throw new ScanAnswered(", "if (false) throw new ScanAnswered(", R, "card rh-cold-quote: a first that answers HTTP 413"],
-  [QUOTE, "throw res.status >= 500 ? new Error(m) : new BadAnswer(m);", "throw new Error(m);", R, "card rh-cold-quote: a first that answers HTTP 413"],
+  [QUOTE, "if (text === null || !lagBody(text)) throw new BadAnswer(m);", "if (text === null || !lagBody(text)) throw new Error(m);", R, "card rh-cold-quote: a first that answers HTTP 413"],
   [QUOTE, "throw new ScanStop(\"too_many_pools\",", "throw new EvmQuoteError(\"too_many_pools\",", R, "card rh-cold-quote: one block holding more pools"],
   [QUOTE, "} else if (top && typeof h?.hash !== \"string\") return null;", "} else if (top && typeof h?.hash !== \"string\") return filters.map(() => undefined);", R, "SP3 "],
   [QUOTE, "const at = { blockHash: hash, requireCanonical: true };", "const at = { blockHash: hash };", Q, "Q1 "],
@@ -310,12 +310,12 @@ export const MUTANTS = [
   [QUOTE, "!reverted(a) && /historical state", "/historical state", R, "LH2b "],
   [QUOTE, "  return e?.code === 3 || (typeof e?.message", "  return (typeof e?.message", R, "LH2b "],
   [QUOTE, " || (typeof e?.message === \"string\" && /^execution reverted/i.test(e.message));", ";", R, "LH2b "],
-  [QUOTE, "    if (!res.ok) {", "    if (false) {", R, "LH3 "],
+  [QUOTE, "    if (!res.ok && lagText === null) {", "    if (false) {", R, "LH3 "],
   // the re-review of the fold: drpc's no-longer answer, a revert never a state or a limit, a refused answer's body, a
   // not-yet answer untimed, a compute-units limit
   [QUOTE, "|^unknown state\\b/i", "/i", R, "LH2b "],
   [QUOTE, "|^unknown state\\b/i", "/i", R, "RQ1 "],
-  [QUOTE, "(!reverted(a) && typeof o?.error?.message", "(typeof o?.error?.message", R, "RQ2 "],
+  [QUOTE, "return !reverted(a) && typeof m === \"string\" && evmNotYetWords(m);", "return typeof m === \"string\" && evmNotYetWords(m);", R, "RQ2 "],
   [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ3 "],
   [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ4 "],
   [QUOTE, "      await res.body?.cancel().catch(() => {});\n", "", R, "LQ3 "],
