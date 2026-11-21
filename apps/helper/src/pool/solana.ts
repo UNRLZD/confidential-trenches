@@ -48,7 +48,8 @@
 //   in_flight (429)     mainnet tag 3: this client already holds POOL_JITO_IN_FLIGHT_MAX requests open waiting for a
 //                       fill, repeats of one carry each counted (M369 (M1), M374 (5): the block engines' seconds are
 //                       shared by every caller); Retry-After POOL_IN_FLIGHT_RETRY_S;
-//   rate_limited (429)  a pool provider throttled a read (Retry-After 1, limits.ts throttleOf). A mainnet tag 3 the
+//   rate_limited (429)  a pool provider throttled a read (Retry-After 1, limits.ts throttleOf); for a read only A makes,
+//                       only when B throttles it too (aThenB). A mainnet tag 3 the
 //                       block engines throttle, or an expired nullifier's re-send with no free second (M374 (4)), goes
 //                       plain without a bundle (the line's via=plain first=throttled), never this;
 //   not_landed          mainnet tag 3: the send ended without a fill: expired (503; never landed, the nullifier is free
@@ -504,6 +505,11 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   const { seed, address: feePayer } = feePayerKey(cfg.feePayerSecret);
   const pool = solanaPoolAccount(cfg.program);
   const [a, b] = deps.providers;
+  // card helper-solana-slots-off-a-spent-key, round 2 (live run 44783106750, 20 Nov 17:26:46Z: three simulations answered
+  // 429 rate_limited while B had room): a read only A makes (the simulation, the blockhash, its height and validity) that
+  // A throttles (limits.ts throttleOf) is asked of B once, so a release is a 429 only while both providers throttle. The
+  // reads made on both (the rent, the fills, a landed failure) and the sends keep A and B as they are.
+  const aThenB: SolanaRpc = (method, params, signal) => a(method, params, signal).catch((e: unknown) => (throttleOf(e) > 0 ? b(method, params, signal) : Promise.reject(e)));
   // M356 (6), N3: the fee and the priority budget from the kit's one definition, for the rent both providers read once
   // an epoch, as the device does: a Rent sysvar change moves the fee at the next epoch with no restart. Each epoch's
   // read is kept for a proof's life (a proof made in an earlier epoch carries that epoch's fee); a failed read is
@@ -748,8 +754,8 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         // both reads start at once (one round trip, not two), the simulation's slot checked as it answers
         const [s, h] = await landedRead(after, () =>
           Promise.all([
-            a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", ...at }]).then((r) => atLanded(after, r)),
-            a("getLatestBlockhash", [{ commitment: "processed", ...at }]),
+            aThenB("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", ...at }]).then((r) => atLanded(after, r)),
+            aThenB("getLatestBlockhash", [{ commitment: "processed", ...at }]),
           ]),
         );
         sim = s;
@@ -841,7 +847,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
           for (;;) {
             if (now() > Number(tx.deadlineMs) || !(await wait(5_000, ended.signal))) return `>${Math.max(0, now() - arrived)}`;
             try {
-              const v = (await a("isBlockhashValid", [tx.message.blockhash, { commitment: "processed" }])) as { value?: unknown } | null;
+              const v = (await aThenB("isBlockhashValid", [tx.message.blockhash, { commitment: "processed" }])) as { value?: unknown } | null;
               if (v?.value === false) return String(Math.max(0, now() - arrived));
             } catch {
               // an unread round: read again at the next
@@ -883,7 +889,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         if (state !== "filled") {
           let endSim = "unread";
           try {
-            const r = (await a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" }])) as { value?: { err?: unknown } } | null;
+            const r = (await aThenB("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" }])) as { value?: { err?: unknown } } | null;
             if (r?.value !== undefined && r.value !== null && "err" in r.value) endSim = r.value.err === null ? "ok" : simErrText(r.value.err);
           } catch {
             endSim = "unread";
@@ -1031,7 +1037,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     };
     const first = pageOf(txs[0]!);
     const now_ = Array.from({ length: last }, (_, i) => i === 0 || (first !== null && pageOf(txs[i]!) === first));
-    const simulate = (raw: string) => a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed" }]);
+    const simulate = (raw: string) => aThenB("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed" }]);
     /** A simulation's refusal, or null when it passed. */
     const refusalOf = (sim: unknown): PoolPiecesAnswer | null => {
       const v = (sim as { value?: { err?: unknown } } | null)?.value;
@@ -1043,7 +1049,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     let sims: unknown[];
     let height: number;
     try {
-      const [s, h] = await Promise.all([Promise.all(raws.slice(0, last).filter((_, i) => now_[i]).map(simulate)), a("getLatestBlockhash", [{ commitment: "processed" }])]);
+      const [s, h] = await Promise.all([Promise.all(raws.slice(0, last).filter((_, i) => now_[i]).map(simulate)), aThenB("getLatestBlockhash", [{ commitment: "processed" }])]);
       sims = s;
       height = (h as { value?: { lastValidBlockHeight?: unknown } })?.value?.lastValidBlockHeight as number;
     } catch (e) {
@@ -1115,7 +1121,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       let r: PoolPiecesAnswer | null;
       try {
         const at = landed();
-        r = refusalOf(await landedRead(at, async () => atLanded(at, await a("simulateTransaction", [raws[i]!, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", minContextSlot: at.minSlot }]))));
+        r = refusalOf(await landedRead(at, async () => atLanded(at, await aThenB("simulateTransaction", [raws[i]!, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", minContextSlot: at.minSlot }]))));
       } catch {
         r = no(503, "upstream");
       }

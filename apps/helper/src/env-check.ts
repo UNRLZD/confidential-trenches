@@ -13,7 +13,7 @@
 import { createHash } from "node:crypto";
 import { EVM_POOL_HISTORY, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "@blindfill/kit";
 import { bindSenderFromEnv } from "./bind/env.ts";
-import { aCandidates, MARKS_A_SLOTS, planSpent, marksRoutes, operatorOf, readUpstreams, RPC_SCAN_PROGRAM_ENV, RPC_UPSTREAMS } from "./rpc/rpc.ts";
+import { aCandidates, MARKS_A_SLOTS, MARKS_KEYLESS, planSpent, marksRoutes, operatorOf, readUpstreams, RPC_SCAN_PROGRAM_ENV, RPC_UPSTREAMS } from "./rpc/rpc.ts";
 import { CREDITS } from "./rpc/slot.ts";
 import { RETRY_AFTER_MAX_S } from "./limits/limits.ts";
 import { evmPoolSendersFromEnv } from "./pool/evm.ts";
@@ -141,7 +141,8 @@ export async function checkMarksRoute(env: Record<string, string | undefined>, d
   const cands = aCandidates(env);
   if (cands.length === 0) throw new Error(`marks: none of ${MARKS_A_SLOTS.join(", ")} set, so route A has no provider for the scan`);
   const { bOf } = marksRoutes(up, cands);
-  const nameOf = (url: string): string => [...cands, ...up["solana-marks"].keyed].find((k) => k.url === url)!.env;
+  // card solana-marks-route-answers: route B's keyless providers (rpc.ts MARKS_KEYLESS) by their names
+  const nameOf = (url: string): string => [...cands, ...up["solana-marks"].keyed, ...MARKS_KEYLESS.map((k) => ({ url: k.url, env: k.name }))].find((k) => k.url === url)!.env;
   const bNames = RPC_UPSTREAMS["solana-marks"].keyed;
   const lines: string[] = [];
   const notes: string[] = [];
@@ -201,9 +202,11 @@ export async function checkMarksRoute(env: Record<string, string | undefined>, d
       continue;
     }
     for (const b of bs) {
-      const bSaid = await askBoth(b);
+      // card solana-marks-route-answers: one of route B's providers failing is that one passed for the next, as the
+      // helper's walk passes it; none answering refuses below
+      const bSaid = await askBoth(b).catch((e: Error) => ({ ok: false as const, spent: false, why: e.message }));
       if (!bSaid.ok) {
-        notes.push(bSaid.why);
+        notes.push(`${a.env}'s route B, ${bSaid.why}`);
         lines.push(bSaid.why);
         continue;
       }
