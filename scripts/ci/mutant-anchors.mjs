@@ -42,6 +42,7 @@ export const SWEEPS = {
   "packages/kit/test/near-rhea-mutants.mjs": { list: "M", read: ([name, from], _g, r) => [{ name, file: path.join(r, "packages/kit/src/near/rhea.ts"), finds: [from] }] },
   "packages/kit/test/near-swap-mutants.mjs": { list: "M", read: ([name, from], _g, r) => [{ name, file: path.join(r, "packages/kit/src/trade/near/swap.ts"), finds: Array.isArray(from) ? from : [from] }] },
   "packages/kit/test/pool-deposit-mutants.mjs": { list: "M", read: ([name, from], _g, r) => [{ name, file: path.join(r, "packages/kit/src/trade/solana/pool-deposit.ts"), finds: [from] }] },
+  "packages/kit/test/solana-clmm-mutants.mjs": { list: "M", read: ([name, file, from], _g, r) => [{ name, file: path.join(r, "packages/kit", file), finds: [from] }] },
   "packages/kit/test/vault-settle-mutants.mjs": { list: "M", read: ([name, from], _g, r) => [{ name, file: path.join(r, "packages/kit/src/vault/settle.ts"), finds: [from] }] },
   "packages/signpage/scripts/export-mutants.mjs": { list: "M", read: ([name, file, , from]) => [{ name, file, finds: [from] }] },
   "packages/signpage/scripts/held-mutants.mjs": { list: "M", read: ([name, file, , from]) => [{ name, file, finds: [from] }] },

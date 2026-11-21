@@ -216,21 +216,30 @@ export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: 
     // a coin whose pools are all on a scanned venue waits it out instead of answering quote_check_failed
     let scanFault: SolanaRpcTransportError | null = null;
     let marketFault: unknown = null;
-    const market = (k: string): boolean => (MARKET_FINDER_KINDS as readonly string[]).includes(k);
-    const found = Promise.all(kinds.map((k) => ((o.early ? finders![k]!.early : undefined) ?? finders![k]!)(req.token).catch((e: unknown) => (e instanceof SolanaRpcTransportError && (scanFault ??= e), market(k) && (marketFault ??= e), [] as readonly string[]))));
+    // a market finder's fault is kept apart (beside a transport fault's own keeping below, unchanged)
+    const ask = (k: PoolFinderKind | MarketFinderKind): Promise<readonly string[]> => {
+      const pools = ((o.early ? finders![k]!.early : undefined) ?? finders![k]!)(req.token);
+      return (MARKET_FINDER_KINDS as readonly string[]).includes(k) ? pools.catch((e: unknown) => Promise.reject((marketFault ??= e))) : pools;
+    };
+    const found = Promise.all(kinds.map((k) => ask(k).catch((e: unknown) => (e instanceof SolanaRpcTransportError && (scanFault ??= e), [] as readonly string[]))));
     const pump = readReference(rpcs, req);
     const unfound = async (read: Promise<SolanaReference | null>): Promise<SolanaReference | null> => {
       const ref = await read;
       if (ref === null && scanFault !== null) throw scanFault;
+      return ref;
+    };
+    // a tap's buy whose market scan faulted is refused with that fault; a preview reads on without the markets
+    const marketsRead = async (read: Promise<SolanaReference | null>): Promise<SolanaReference | null> => {
+      const ref = await unfound(read);
       if (ref !== null && marketFault !== null && !o.early) throw marketFault;
       return ref;
     };
     const lists = await found;
-    if (lists.every((l) => l.length === 0)) return unfound(pump);
+    if (lists.every((l) => l.length === 0)) return marketsRead(pump);
     pump.catch(() => {});
     const more: { -readonly [K in PoolFinderKind | MarketFinderKind]?: string[] } = {};
     kinds.forEach((k, i) => void (lists[i]!.length > 0 && (more[k] = [...lists[i]!])));
-    return unfound(readReference(rpcs, { ...req, ...more }));
+    return marketsRead(readReference(rpcs, { ...req, ...more }));
   }
   return readReference(rpcs, req);
 }

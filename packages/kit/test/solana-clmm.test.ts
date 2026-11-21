@@ -224,7 +224,7 @@ test("CL12 the request is checked: two providers that are one, a bad side, amoun
 
 // the set rule (pool.ts solanaReferenceSet): a market only read raises E when its depth reaches the cutoff over every
 // candidate, never lowers it, is never a pool of the set, and alone makes no reference
-const cand = (venue: "pumpswap" | "raydium-clmm", depth: bigint, out: bigint, address = venue) =>
+const cand = (venue: "pumpswap" | "raydium-clmm", depth: bigint, out: bigint, address: string = venue) =>
   ({ venue, address, reads: [{ depth, out, spotOut: out + 1n }, { depth, out, spotOut: out + 1n }] as const });
 test("CL13 the set rule: E is the larger of the traded set's and a counted market's; a market is never a pool", () => {
   const pump = cand("pumpswap", 100n * SOL, 1_000n);
