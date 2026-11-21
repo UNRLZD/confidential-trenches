@@ -775,6 +775,7 @@ function postsOf(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], 
 
 async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, again: number | undefined, down: Set<EvmRpc>): Promise<Answer[]> {
   const { calls, decode, starts, parts, plain } = planOf(hash, reads, lim, again);
+  sizeSeen(rpcs, starts.length);
   const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial && a.overflow === b.overflow);
   // a read that may have run out of gas on one provider and reverted on another is not the same answer, nor one whose
   // gas used differs (readSizes is written from it: card evm-quote-gas-used)
@@ -2841,7 +2842,7 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   let watch = WATCHES.get(chain);
   if (watch === undefined) WATCHES.set(chain, (watch = evmHeadWatch(() => evmProviders(evmRanked(p), fetch), v.maxLag)));
   // a scan's answer is a list of logs, bounded by the scan provider's own cap per request (16 MiB read at most)
-  const q = await evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch, later), Date.now(), scansOf(v.scan, later), watch);
+  const q = await evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p, undefined, sizeOf(v, chain, "buy", asked.token)), fetch, later), Date.now(), scansOf(v.scan, later), watch);
   return scanless ? { ...q, scanless: true } : q;
 }
 
@@ -2851,7 +2852,7 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
 // answer, and the rest are its spares (agreeing).
 // A provider with a request out for longer than EVM_HEDGE_MS is ranked with the held until it answers: the next quote
 // does not wait on it either.
-const SPEED = new Map<string, { ms: number | null; held: number; out: number[] }>();
+const SPEED = new Map<string, { ms: number | null; held: number; out: number[]; last: number }>();
 /** Every venue's `quoteLast`: the providers a quote asks only after every other (evmRanked). */
 let QUOTE_LAST: ReadonlySet<string> | undefined;
 const quoteLastOf = (): ReadonlySet<string> =>
@@ -2860,7 +2861,7 @@ export const EVM_HOLD_MS = 30_000;
 /** Forgets every provider's measured time and hold: for the tests, which share this module's state (not in the index). */
 export const evmSpeedReset = (): void => SPEED.clear();
 const speedOf = (url: string) => {
-  const s = SPEED.get(url) ?? { ms: null, held: 0, out: [] };
+  const s = SPEED.get(url) ?? { ms: null, held: 0, out: [], last: 0 };
   SPEED.set(url, s);
   return s;
 };
@@ -2871,6 +2872,7 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
     s.out.push(t);
     try {
       const out = await rpc(calls);
+      s.last = performance.now();
       // an answer that names a rate limit or a state the provider does not hold is held, never measured: such an error
       // comes back fast, and a provider past its state cut kept first by it failed every quote's reads (card
       // evm-quote-lag-held)
@@ -2892,19 +2894,77 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
  *  measured time (the unmeasured after them, in the venue list's order), then those with a request out, then the held,
  *  each in the same order; a venue's `quoteLast` after all of them, in the same order (card
  *  robinhood-quotes-inside-provider-limits). */
-/** `url`'s class in evmRanked's order, lowest first: 0 free, 1 with a request out past EVM_HEDGE_MS, 2 held, and 3 more
- *  for a venue's `quoteLast`. */
+/** A request of `s` out longer than its own measured time (EVM_HEDGE_MS before its first answer): one it is late on. */
+const lateOf = (s: { ms: number | null; out: number[] } | undefined, now: number): number[] => (s === undefined ? [] : s.out.filter((t) => now - t > (s.ms ?? EVM_HEDGE_MS)));
+/** `url`'s class in evmRanked's order, lowest first: 0 free, 1 stalled (a request out past its own measured time and no
+ *  answer since it was sent), 2 held, and 3 more for a venue's `quoteLast`. One late request of a provider that answers
+ *  the requests sent after it is its load, never its seat (evmRanked): Base's blastapi, one post out 8 s while it answered
+ *  the rest in about 300 ms, sat behind mainnet.base.org for that post's 8 s at a request out past 400 ms, Base's warm
+ *  taps 2.0 to 4.7 s on mainnet.base.org meanwhile (card evm-warm-tap-ends-inside-two-seconds, 2026-11-21 13:0xZ). */
 const rankClass = (u: string, now: number): number => {
   const s = SPEED.get(u);
+  const late = lateOf(s, now);
   // held: by this ranking's own measure, or by any reader's throttle of the provider (pace.ts)
-  return (quoteLastOf().has(u) ? 3 : 0) + ((s !== undefined && s.held > now) || evmProviderHeld(u, now) ? 2 : s?.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0);
+  return (quoteLastOf().has(u) ? 3 : 0) + ((s !== undefined && s.held > now) || evmProviderHeld(u, now) ? 2 : late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);
 };
-export function evmRanked(urls: readonly string[], now: number = performance.now()): string[] {
-  const rank = (u: string, k: number) => [rankClass(u, now), SPEED.get(u)?.ms ?? Number.MAX_VALUE, k] as const;
+/** The size a quote's reads are ranked for (evmRanked): its largest round's posts to each provider, and each provider's
+ *  in-flight pin. */
+export type EvmRankSize = Readonly<{ posts: number; pin: (url: string) => number }>;
+/** `urls` in the order a quote asks them: by class (rankClass), then by the time a round of `size` takes on each, its
+ *  measured time a post times its waves, ceil((posts + its late requests) / its pin) (peak EWMA's load: each request out
+ *  past its measured time is one more post), unmeasured after measured, then in the list's order. With no size, one
+ *  post at a pin of 1: the measured time times one plus the late requests. So a provider faster a post at half the
+ *  pin, mainnet.base.org's 8 beside blastapi's 16, takes a 16-post round's seat only where its two waves beat one. */
+export function evmRanked(urls: readonly string[], now: number = performance.now(), size?: EvmRankSize): string[] {
+  const cost = (u: string) => {
+    const s = SPEED.get(u);
+    if (s?.ms == null) return Number.MAX_VALUE;
+    const pin = size === undefined ? 1 : size.pin(u);
+    return s.ms * Math.ceil(((size?.posts ?? 1) + lateOf(s, now).length) / (Number.isSafeInteger(pin) && pin >= 1 ? pin : 1));
+  };
+  const rank = (u: string, k: number) => [rankClass(u, now), cost(u), k] as const;
   return urls
     .map((u, k) => ({ u, r: rank(u, k) }))
     .sort((x, y) => x.r[0] - y.r[0] || x.r[1] - y.r[1] || x.r[2] - y.r[2])
     .map((e) => e.u);
+}
+/** Each quote's provider list, the key its size is kept under (`chain:buy|sell:token`), and each such key's largest
+ *  round of the last quote, in posts to each provider (readBothSent): the next quote of the token is ranked for it. */
+const SIZE_KEY = new WeakMap<readonly EvmRpc[], string>();
+const SIZE_NOW = new WeakMap<readonly EvmRpc[], number>();
+const SIZES = new Map<string, number>();
+const SIZES_KEPT = 256;
+const sizeKeyOf = (chain: string, side: "buy" | "sell", token: string): string => `${chain}:${side}:${lower(token)}`;
+const sizeSeen = (rpcs: readonly EvmRpc[], posts: number): void => {
+  const k = SIZE_KEY.get(rpcs);
+  if (k === undefined) return;
+  const n = Math.max(SIZE_NOW.get(rpcs) ?? 0, posts);
+  SIZE_NOW.set(rpcs, n);
+  SIZES.delete(k);
+  SIZES.set(k, n);
+  if (SIZES.size > SIZES_KEPT) SIZES.delete(SIZES.keys().next().value!);
+};
+/** The size the next quote of `token` on `v` is ranked for: its last quote's largest round, one post before any. */
+const sizeOf = (v: Venue, chain: string, side: "buy" | "sell", token: string): EvmRankSize => ({
+  posts: SIZES.get(sizeKeyOf(chain, side, token)) ?? 1,
+  pin: (u) => {
+    const pin = v.inflight !== undefined && Object.hasOwn(v.inflight, u) ? v.inflight[u] : undefined;
+    return typeof pin === "number" && Number.isSafeInteger(pin) && pin >= 1 ? pin : (v.scan?.parallel ?? 2);
+  },
+});
+
+/** `chain`'s pinned providers in the order the next quote asks them (evmRanked), each with what ranked it: its class
+ *  (rankClass), its measured time (null before its first answer), its requests out and the oldest one's age, in ms. Read
+ *  only: the live check names why a provider left a quote's pair (card evm-warm-tap-ends-inside-two-seconds). */
+export function evmProviderSeats(chain: EvmPoolChain, now: number = performance.now()): readonly Readonly<{ url: string; rank: number; ms: number | null; out: number; oldestMs: number | null }>[] {
+  const p = venue(chain).providers ?? [];
+  return Object.freeze(
+    evmRanked(p, now).map((url) => {
+      const s = SPEED.get(url);
+      const oldest = s === undefined || s.out.length === 0 ? null : Math.round(now - Math.min(...s.out));
+      return Object.freeze({ url, rank: rankClass(url, now), ms: s?.ms == null ? null : Math.round(s.ms), out: s?.out.length ?? 0, oldestMs: oldest });
+    }),
+  );
 }
 
 /** Each provider evmProviders made, its URL: the gate takes the venue's in-flight pin for it (gated). */
@@ -3069,6 +3129,7 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
   if (!isAddress(token) || lower(token) === NATIVE) return refuse("bad_request", "the token is not an address");
   const v = venue(chain);
   const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2, { until: Infinity, now: () => nowMs + Math.max(0, mono() - start) }, v.inflight);
+  SIZE_KEY.set(rpcs, sizeKeyOf(chain, "buy", token));
   const { token: buys } = evmPoolRouteDataQuoted(chain, route);
   if (lower(buys) !== lower(token)) return refuse("token_mismatch", `the route buys ${buys}, not ${token}`);
   // the pools this device banned for the token, the sale's and the buy's alike (card evm-buy-hook-converge)
@@ -4664,7 +4725,7 @@ export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<Ev
   // W's releases are read on the pool's own list, where the chain has one (Robinhood: the quote list's first two cannot
   // page the pool's logs, buy-unpinned.ts poolProviders)
   const pool = evmPoolProvidersOf(evmPoolVenues()[asked.chain]!);
-  const rpcs = evmProviders(evmRanked(p), fetch);
+  const rpcs = evmProviders(evmRanked(p, undefined, sizeOf(venue(asked.chain), asked.chain, "sell", asked.token)), fetch);
   return evmPoolSellQuoteWith(asked, rpcs, Date.now(), scansOf(venue(asked.chain).scan), undefined, monotonic, pool === undefined || pool === p ? rpcs : evmProviders(evmRanked(pool), fetch));
 }
 
@@ -4713,6 +4774,7 @@ async function sellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmR
   const sent = evmSellSentOf(req.sent) ?? refuse("bad_request", "a sell quote takes `sent`, a list of the device's releases to W, each a note, a nullifier and a deadline");
   if (v.pool === undefined) return refuse("no_quoter", `${chain} pins no pool: W's releases cannot be read`);
   const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2, { until: Infinity, now: () => nowMs + Math.max(0, mono() - start) }, v.inflight);
+  SIZE_KEY.set(rpcs, sizeKeyOf(chain, "sell", token));
   const t = lower(token);
 
   const reads: Read[] = [];
