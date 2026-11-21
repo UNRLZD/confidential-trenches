@@ -7,7 +7,8 @@
 // A test waits through its package's test/settle.ts: settle(until) runs turns until `until()` holds or no immediate is
 // active and no thread-pool job is in flight; quiet() until the latter. What this refuses, in a unit test file of SCOPE:
 // a turn awaited inside a for or while loop's body, where a turn is `new Promise((r) => setImmediate(r))`,
-// `Promise.resolve()`, or a name the file defines as one (`const turn = () => new Promise((r) => setImmediate(r))`).
+// `Promise.resolve()`, node:timers/promises' `setImmediate()` under any name it is imported as, `scheduler.yield()`, or a
+// name the file defines as one (`const turn = () => new Promise((r) => setImmediate(r))`).
 // Strings and comments are left out. LISTED counts the loops still in files the busy-crypto sweep passed (every file's
 // process with eight key derivations always on the thread pool, 21 Nov): a file may hold no more than its count, and
 // a count above what a file holds is only noted. Never a place for a new one.
@@ -84,6 +85,9 @@ const NAME = String.raw`[A-Za-z_$][\w$]*`;
 // `new Promise((r) => setImmediate(r))` in its usual spellings: a typed promise, a bare or wrapped parameter, `void`
 const IMMEDIATE = String.raw`new\s+Promise\s*(?:<[^>]*>)?\s*\(\s*\(?\s*(${NAME})\s*(?::[^)=]*)?\)?\s*=>\s*(?:void\s+)?setImmediate\s*\(\s*\1\s*\)\s*\)`;
 const RESOLVED = String.raw`Promise\.resolve\s*\(\s*\)`;
+// node:timers/promises' setImmediate() (its only zero-argument form: the callback one needs its callback), under any
+// alias an import or a destructuring gives it, and scheduler.yield()
+const PROMISED = String.raw`(?:[\w$]+\.)?(?:setImmediate|scheduler\.yield)\s*\(\s*\)`;
 
 /** The index just past the bracket that closes the one at `open`. */
 function closing(src, open) {
@@ -130,8 +134,9 @@ export function findings(text) {
   const src = code(text);
   // the names the file defines as one turn
   const names = [...src.matchAll(new RegExp(String.raw`(?:const|let|var)\s+(${NAME})\s*(?::[^;]*?)?=\s*(?:async\s*)?\(\s*\)\s*(?::[^=]*)?=>\s*(?:${IMMEDIATE.replace("\\1", "\\2")}|${RESOLVED})`, "g"))].map((m) => m[1]);
+  for (const m of src.matchAll(new RegExp(String.raw`\bsetImmediate\s*(?:as|:)\s*(${NAME})`, "g"))) names.push(m[1]);
   const named = names.length > 0 ? `|(?:${names.map((n) => n.replace(/\$/g, "\\$")).join("|")})\\s*\\(\\s*\\)` : "";
-  const turn = new RegExp(String.raw`\bawait\s+(?:${IMMEDIATE}|${RESOLVED}${named})`, "g");
+  const turn = new RegExp(String.raw`\bawait\s+(?:${IMMEDIATE}|${RESOLVED}|${PROMISED}${named})`, "g");
   const bodies = loopBodies(src);
   const lines = text.split("\n");
   const out = [];

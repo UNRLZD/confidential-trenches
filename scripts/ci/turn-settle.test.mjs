@@ -28,6 +28,11 @@ const REFUSED = {
   "a while loop": "while (!done) await new Promise((res) => setImmediate(res));",
   "microtask turns": "for (let i = 0; i < 8; i++) await Promise.resolve();",
   "a named turn": "const turn = () => new Promise((r) => setImmediate(r));\nfor (let k = 0; k < 400 && !final(); k++) await turn();",
+  "node:timers/promises' setImmediate": 'import { setImmediate } from "node:timers/promises";\nfor (let i = 0; i < 20; i++) await setImmediate();',
+  "an alias of it": 'import { setImmediate as nextTurn } from "node:timers/promises";\nwhile (!done) await nextTurn();',
+  "its namespace": 'import * as tp from "node:timers/promises";\nfor (let i = 0; i < 20; i++) await tp.setImmediate();',
+  "destructured": 'const { setImmediate: later } = require("node:timers/promises");\nfor (let i = 0; i < 20; i++) await later();',
+  "scheduler.yield": 'import { scheduler } from "node:timers/promises";\nfor (let i = 0; i < 20 && !done; i++) await scheduler.yield();',
   "a named typed turn": "const tick: () => Promise<void> = () => new Promise<void>((r) => setImmediate(r));\nwhile (calls.length < 3) await tick();",
 };
 
