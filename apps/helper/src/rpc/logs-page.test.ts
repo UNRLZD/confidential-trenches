@@ -274,7 +274,7 @@ test("card helper-base-trade-reads-429: on the deployed lists (the pinned public
   const clock = testClock();
   const p = providers(BASE_SPANS);
   const holds = providerHolds(clock.now, { ...PROVIDER_PACE, ...keyedPaces(env) } as never);
-  const r = createRpc(env, { ...clock, fetch: p.fetch as never, log: () => undefined, holds, pinned: SWAP_RPCS } as never);
+  const r = createRpc(env, { ...clock, now: clock.now, fetch: p.fetch as never, log: () => undefined, holds, pinned: SWAP_RPCS } as never);
   // three other callers, 15 plain reads each over 6 s: 45, past the keys' 39 (the rest to the public list)
   const t0 = clock.now();
   const plain = await Promise.all([1, 2, 3].map((n) => (async () => {
