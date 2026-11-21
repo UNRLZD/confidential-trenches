@@ -3,7 +3,7 @@
 // kept with its request and the device's clock. Each JSON-RPC call is kept alone, its method and params with the
 // provider's answers in the order they came, each with its host, so test/evm-warm-tap-calls.test.ts answers each quote
 // however it batches its calls, and a head read at "latest" answers the heads in the order the taps read them. Reads only: no key, no transaction, no money moves.
-//   node packages/kit/test/evm-warm-tap-calls-record.ts
+//   node packages/kit/test/evm-warm-tap-calls-record.ts --record
 import { writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,12 @@ export const PONS = "0x39dbed3a2bd333467115de45665cc57f813c4571";
 export const TAP_AMOUNT = 980_000_000_000_000n;
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // it overwrites test/fixtures/evm-warm-tap-calls.json.gz with live mainnet reads: only when asked to (a loop over test/ ran it, and
+  // replaced both recordings, card evm-warm-tap-ends-inside-two-seconds)
+  if (!process.argv.includes("--record")) {
+    console.error("this records test/fixtures/evm-warm-tap-calls.json.gz from mainnet and overwrites it: run it with --record");
+    process.exit(2);
+  }
   const v = evmPoolVenues().robinhood;
   const ix = await evmPoolIndexRefresh("robinhood", null);
   if (!ix.served || ix.sync?.index == null || ix.sync.pools == null) throw new Error("the pool index was not served");

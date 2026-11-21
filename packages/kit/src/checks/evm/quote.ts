@@ -2847,12 +2847,12 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
 }
 
 // Each pinned provider's measured speed (card evm-quote-warm-round): its time to answer a batch, an average that weighs
-// the newest a quarter, and, after a failure (no answer, a 429, a call's error naming a rate limit), the time until
-// which it is asked only after every other. A quote asks the providers in this order, so its two are the fastest that
+// the newest a quarter, and, after a failure (a 429, a call's error naming a rate limit, a stall, a second lost post
+// within EVM_HOLD_MS: `timed`), the time until which it is asked only after every other. A quote asks the providers in this order, so its two are the fastest that
 // answer, and the rest are its spares (agreeing).
 // A provider with a request out for longer than EVM_HEDGE_MS is ranked with the held until it answers: the next quote
 // does not wait on it either.
-const SPEED = new Map<string, { ms: number | null; held: number; out: number[]; last: number }>();
+const SPEED = new Map<string, { ms: number | null; held: number; out: number[]; last: number; failed: number }>();
 /** Every venue's `quoteLast`: the providers a quote asks only after every other (evmRanked). */
 let QUOTE_LAST: ReadonlySet<string> | undefined;
 const quoteLastOf = (): ReadonlySet<string> =>
@@ -2861,7 +2861,7 @@ export const EVM_HOLD_MS = 30_000;
 /** Forgets every provider's measured time and hold: for the tests, which share this module's state (not in the index). */
 export const evmSpeedReset = (): void => SPEED.clear();
 const speedOf = (url: string) => {
-  const s = SPEED.get(url) ?? { ms: null, held: 0, out: [], last: 0 };
+  const s = SPEED.get(url) ?? { ms: null, held: 0, out: [], last: 0, failed: -Infinity };
   SPEED.set(url, s);
   return s;
 };
@@ -2881,7 +2881,14 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
       else if (!out.some(notYet)) s.ms = s.ms === null ? performance.now() - t : s.ms * 0.75 + (performance.now() - t) * 0.25;
       return out;
     } catch (e) {
-      s.held = performance.now() + EVM_HOLD_MS;
+      // a post lost (no answer, a timeout, an HTTP error) holds the provider where it is a stall, nothing answered since
+      // the post was sent, or its second loss within EVM_HOLD_MS (consecutive-failure ejection, as Envoy's outlier
+      // detection): one lost post of a provider that answers the rest was its load while it was out (evmRanked), never
+      // its seat. A lone hung post held Base's blastapi 30 s while it answered every other post in about 300 ms, warm
+      // taps of 2.0 to 4.7 s on mainnet.base.org meanwhile (card evm-warm-tap-ends-inside-two-seconds, 2026-11-21 13:0xZ)
+      const now = performance.now();
+      if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held = now + EVM_HOLD_MS;
+      s.failed = now;
       throw e;
     } finally {
       s.out.splice(s.out.indexOf(t), 1);

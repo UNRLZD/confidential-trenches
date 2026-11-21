@@ -19,11 +19,18 @@ const pin = (u: string) => v.inflight![u]!;
 const one = [{ method: "eth_blockNumber", params: [] }];
 
 /** Base's providers, each answering after `ms[url]` of the clock; `hold(url)` keeps that provider's next answer until
- *  the returned function is called. */
+ *  the returned function is called; `lose(url, ms)` fails its next post `ms` after it is sent, as a post that timed out. */
 function providers(ms: Record<string, number>) {
   const held = new Map<string, Promise<void>>();
+  const lost = new Map<string, number>();
   const fetchFn = (async (url: string | URL, init?: RequestInit) => {
     const u = String(url);
+    const loss = lost.get(u);
+    lost.delete(u);
+    if (loss !== undefined) {
+      await new Promise((go) => setTimeout(go, loss));
+      throw new Error("the post timed out");
+    }
     const wait = held.get(u);
     held.delete(u);
     await (wait ?? new Promise((go) => setTimeout(go, ms[u])));
@@ -37,9 +44,10 @@ function providers(ms: Record<string, number>) {
     held.set(u, new Promise<void>((r) => (go = r)));
     return () => go();
   };
+  const lose = (u: string, ms: number) => void lost.set(u, ms);
   // each provider asked once, so each has its measured time
   const measure = () => Promise.all(rpcs.map((r: EvmRpc) => r(one)));
-  return { of, hold, measure };
+  return { of, hold, lose, measure };
 }
 
 test("R1 a provider faster a post at half the pin never takes a 16-post round's seat: mainnet.base.org's 8 beside blastapi's 16", () => onTestClock(async () => {
@@ -72,4 +80,45 @@ test("R2 a request out past 400 ms but under its provider's own measured time ke
   assert.deepEqual(evmRanked(v.providers!, performance.now(), size).slice(0, 2), [PUBLICNODE, BLASTAPI], "one late post of a provider that answers the rest cost it its seat");
   go();
   await out;
+}));
+
+// round (D): a lost post holds its provider only at a stall or at its second loss within EVM_HOLD_MS (Envoy's
+// outlier detection ejects on consecutive failures); one lost post of a provider that answers the rest is its load
+const lostIn = (p: ReturnType<typeof providers>, ms: number) => {
+  p.lose(BLASTAPI!, ms);
+  return p.of.get(BLASTAPI!)!(one).then(() => assert.fail("the lost post was answered"), () => undefined);
+};
+const pairOf = () => evmRanked(v.providers!, performance.now(), { posts: 16, pin }).slice(0, 2);
+
+test("R3 one lost post of a provider that answers a post sent after it keeps the provider's seat", () => onTestClock(async () => {
+  evmSpeedReset();
+  const p = providers({ [PUBLICNODE!]: 100, [BLASTAPI!]: 600, [BASE_ORG!]: 700, [POCKET!]: 900 });
+  await p.measure();
+  // lost 700 ms after it is sent; a post sent with it is answered at 600
+  await Promise.all([lostIn(p, 700), p.of.get(BLASTAPI!)!(one)]);
+  assert.deepEqual(pairOf(), [PUBLICNODE, BLASTAPI], "one lost post among answers held the provider");
+}));
+
+test("R4 a lost post with no answer since it was sent holds its provider", () => onTestClock(async () => {
+  evmSpeedReset();
+  const p = providers({ [PUBLICNODE!]: 100, [BLASTAPI!]: 600, [BASE_ORG!]: 700, [POCKET!]: 900 });
+  await p.measure();
+  await lostIn(p, 700);
+  assert.deepEqual(pairOf(), [PUBLICNODE, BASE_ORG], "a provider that answered nothing while its post was out kept its seat");
+}));
+
+test("R5 a second lost post within EVM_HOLD_MS holds its provider, though it answers the rest; a loss past it does not", () => onTestClock(async () => {
+  evmSpeedReset();
+  const p = providers({ [PUBLICNODE!]: 100, [BLASTAPI!]: 600, [BASE_ORG!]: 700, [POCKET!]: 900 });
+  await p.measure();
+  await Promise.all([lostIn(p, 700), p.of.get(BLASTAPI!)!(one)]);
+  assert.deepEqual(pairOf(), [PUBLICNODE, BLASTAPI]);
+  // 10 s on, a second loss among answers: held
+  await new Promise((r) => setTimeout(r, 10_000));
+  await Promise.all([lostIn(p, 700), p.of.get(BLASTAPI!)!(one)]);
+  assert.deepEqual(pairOf(), [PUBLICNODE, BASE_ORG], "a second lost post within 30 s left the provider its seat");
+  // past the hold and past EVM_HOLD_MS from the last loss, one more loss among answers: the seat kept
+  await new Promise((r) => setTimeout(r, 31_000));
+  await Promise.all([lostIn(p, 700), p.of.get(BLASTAPI!)!(one)]);
+  assert.deepEqual(pairOf(), [PUBLICNODE, BLASTAPI], "a loss more than 30 s after the last held the provider");
 }));
