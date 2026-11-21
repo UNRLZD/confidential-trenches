@@ -884,7 +884,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
   const notes = []; // a host's 429 not waited because two operators read it ok
   const proven = []; // a NEAR tx read ok on one operator and proven by its light-client proof on the other
   const gone = []; // a Deleted account read gone on two operators
-  const history = []; // a test-network Tx line held before the change: named, never read, never proof
+  const testnetHistory = []; // a test-network Tx line held before the change: named, never read, never proof
   const unread = []; // "could not read: ...": a tx or account no answer decided within ROUND_PAUSES, never a pass
   const jobs = [];
   for (const f of money?.merged ?? []) refusals.push(`${f} changes money code in a merge commit, outside any card's commit`);
@@ -928,7 +928,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       const where = seen.get(`${tx.chain} ${tx.hash}`) ?? [];
       if (where.length > 1) refusals.push(`${path}: ${tx.chain} ${tx.hash} is listed ${where.length} times (${where.join(", ")})`);
       if (TESTNET.has(tx.chain) && !replayTestNetworks) {
-        if (held.has(`${tx.chain} ${tx.hash}`)) history.push(`${path}: ${tx.chain} ${tx.hash}`);
+        if (held.has(`${tx.chain} ${tx.hash}`)) testnetHistory.push(`${path}: ${tx.chain} ${tx.hash}`);
         else refusals.push(`${path}: ${tx.chain} ${tx.hash}: a test network is never money proof; record the run on mainnet`);
         continue;
       }
@@ -940,7 +940,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
     for (const { chain, account } of live.deleted) {
       // a test network's Deleted line as its Tx lines: held before the change, history; the change's own, refused
       if (TESTNET.has(chain) && !replayTestNetworks) {
-        if (heldGone.has(`${chain} ${account}`)) history.push(`${path}: Deleted ${chain} ${account}`);
+        if (heldGone.has(`${chain} ${account}`)) testnetHistory.push(`${path}: Deleted ${chain} ${account}`);
         else refusals.push(`${path}: Deleted ${chain} ${account}: a test network is never money proof; record the run on mainnet`);
         continue;
       }
@@ -969,7 +969,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
   }
   // a could-not-read is a refusal too, so a caller that reads refusals alone never passes it; outcome() tells them apart
   refusals.push(...unread);
-  return { refusals, read, notes, proven, gone, unread, history };
+  return { refusals, read, notes, proven, gone, unread, history: testnetHistory };
 }
 
 // a record is read only when it is a regular file: a symlink (to a file anywhere) or anything else is refused, never
