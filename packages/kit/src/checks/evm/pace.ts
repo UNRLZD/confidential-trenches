@@ -99,6 +99,31 @@ export const EVM_PACE: Readonly<Record<string, EvmPace>> = Object.freeze({
 /** How long a throttle (an HTTP 429, a call's error naming a rate limit) or a refused connection holds a provider for
  *  every reader: quote.ts EVM_HOLD_MS, the quote providers' hold. */
 export const EVM_PROVIDER_HOLD_MS = 30_000;
+/** Our helper's origin: its POST /v1/rpc/{chain} (apps/helper/src/server.ts) is the route the venues give the kit
+ *  (trade/evm/buy-unpinned.ts, Robinhood's second index reader; the signing page's TRADE_HELPER). */
+export const EVM_HELPER_ORIGIN = "https://ct-api.unrealized.trade";
+/** The least a throttle of our helper's route holds it, where its Retry-After is less or absent: the helper names its
+ *  wait in whole seconds (apps/helper/src/limits/limits.ts, the throttling contract). */
+export const EVM_HELPER_HOLD_MIN_MS = 1_000;
+/** Whether `url` is our helper's own /v1/rpc route (exact origin, so no other host can claim its shorter hold). */
+export function evmHelperRoute(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.origin === EVM_HELPER_ORIGIN && u.pathname.startsWith("/v1/rpc/");
+  } catch {
+    return false;
+  }
+}
+/** How long a throttle of `url` holds it, its Retry-After `afterMs` where it named one (card
+ *  evm-helper-429-waits-its-retry-after). Our helper's route answers its own budget's 429 with the wait it means, 1 to 3
+ *  s (RateLimit-Policy "client";q=30;w=10): it is held for that wait, at least EVM_HELPER_HOLD_MIN_MS, never the 30 s
+ *  floor, which cost a fresh device's Robinhood index sync 34-35 s a 429 (vault lead's read at 19a264d25, 2026-11-21
+ *  17:19Z). Every other provider is held at least EVM_PROVIDER_HOLD_MS: a third party's Retry-After is no promise that a
+ *  sooner ask is served. */
+export function evmThrottleHoldMs(url: string, afterMs: number | null): number {
+  const after = afterMs !== null && Number.isFinite(afterMs) && afterMs > 0 ? afterMs : 0;
+  return evmHelperRoute(url) ? Math.max(EVM_HELPER_HOLD_MIN_MS, after) : Math.max(EVM_PROVIDER_HOLD_MS, after);
+}
 
 /** A provider's key: its URL's origin and path, no trailing slash, no query (the helper's PROVIDER_PACE keys). */
 export const evmProviderKey = (url: string): string => {

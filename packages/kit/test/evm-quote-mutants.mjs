@@ -295,7 +295,7 @@ export const MUTANTS = [
   [QUOTE, "[rankClass(u, now), cost(u), k] as const;", "[0, cost(u), k] as const;", R, "V4 "],
   [QUOTE, "late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);", "0);", R, "V4 "],
   [QUOTE, "|| evmProviderHeld(u, now) ? 2 : late", "|| evmProviderHeld(u, now) ? 1 : late", R, "V4 "],
-  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) s.ms", "      s.ms", R, "V4 "],
+  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) s.ms", "      s.ms", R, "V4 "],
   // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
   // is agreed again without it; a 200 carrying a state error holds its provider in the ranking
   [QUOTE, "    if (!(await behind(got.block))) return got;\n    if (got.low === undefined) {", "    return got;\n    if (got.low === undefined) {", R, "LH1 "],
@@ -324,7 +324,7 @@ export const MUTANTS = [
   [QUOTE, "const need = Math.floor(Math.max(of, list.length) / 2) + 1;", "const need = Math.floor(list.length / 2) + 1;", R, "LM2 "],
   [QUOTE, "    if (rest.length < 2) return got;", "", R, "LL4 "],
   [QUOTE, "(waitFrom ??= (a.mono ?? monotonic)())", "(a.mono ?? monotonic)()", R, "LW "],
-  [QUOTE, "      s.held = performance.now() + EVM_HOLD_MS;\n      throw e;", "      throw e;", R, "V4 "],
+  [QUOTE, "      s.held = performance.now() + (e instanceof RateLimited ? throttleHoldMs(url, e.afterMs) : EVM_HOLD_MS);\n      throw e;", "      throw e;", R, "V4 "],
   // the review of bc189de: a contested value needs more than half the listed providers, on the reads (M-1) and the
   // block's confirmation (M-2); a provider that differs from what the quote used is held; the spare's timer counts
   // from its own request (L-2); the pinned quote ranks (M14), a spare is asked while none answered (M15)

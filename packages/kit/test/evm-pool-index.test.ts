@@ -1016,3 +1016,33 @@ test("AGREE two readers that disagree on a range refuse it: a piece end on anoth
     (e: Error & { code?: string }) => e.code === "rpc_disagree",
   );
 });
+
+// Card evm-helper-429-waits-its-retry-after: a fresh device's Robinhood sync met our helper's own route limiter (429,
+// Retry-After 1-3 s) and waited the 30 s provider hold out on each, 34-35 s a run. The helper's reader here is
+// evmJsonRpc on the helper's route over a fetch whose first answer is that 429; the naps are real, so the hold, which
+// runs on the real clock, is what the sync waits.
+test("H429: a 429 from our helper's route with Retry-After 2 holds that reader about 2 s, never 30 s", async () => {
+  evmPaceReset();
+  try {
+    const head = 1_000_000;
+    const ps = pools(3, head);
+    const cfg = cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [] });
+    const honest = cfg.readers[1];
+    let posts = 0;
+    const helperFetch = (async (_u: unknown, init: RequestInit) => {
+      if (posts++ === 0) return new Response("", { status: 429, headers: { "retry-after": "2" } });
+      const asked = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
+      const out = await honest(asked.map((c) => ({ method: c.method, params: c.params })));
+      return new Response(JSON.stringify(out.map((a, i) => ({ jsonrpc: "2.0", id: asked[i]!.id, ...(a as object) }))), { status: 200 });
+    }) as unknown as typeof fetch;
+    const helper = evmJsonRpc("https://ct-api.unrealized.trade/v1/rpc/robinhood?keyed=only", helperFetch);
+    const naps: number[] = [];
+    const nap = (ms: number) => (naps.push(ms), new Promise<void>((r) => setTimeout(r, ms)));
+    const r = await evmPoolIndexSync(null, { ...cfg, readers: [cfg.readers[0], helper], nap });
+    assert.equal(r.coversThrough, head);
+    const waited = naps.reduce((a, b) => a + b, 0);
+    assert.ok(waited >= 2_000 && waited < 4_000, `the sync waited ${Math.round(waited)} ms on the helper's 429 (naps ${naps.map(Math.round).join(", ")})`);
+  } finally {
+    evmPaceReset();
+  }
+});
