@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { MARKS_A_ENV, MARKS_A_SLOTS, RPC_UPSTREAMS } from "../../apps/helper/src/rpc/rpc.ts";
+import { MARKS_A_ENV, MARKS_A_SLOTS, MARKS_KEYLESS, RPC_UPSTREAMS } from "../../apps/helper/src/rpc/rpc.ts";
 import { A_NAME, A_NAMES, B_NAMES, bucket0, judge, providerOf, read } from "./sol-pools-mainnet-pin.mjs";
 import { RETRY } from "./provider-answer.mjs";
 
@@ -17,7 +17,7 @@ test("the check's names and shape are the helper's: route A's one name, route B'
   assert.equal(A_NAME, MARKS_A_ENV);
   // card helper-solana-off-a-spent-key: route A's candidates, the helper's aCandidates order
   assert.deepEqual(A_NAMES, [...new Set([...MARKS_A_SLOTS, ...RPC_UPSTREAMS.solana.keyed])]);
-  assert.deepEqual(B_NAMES, [...RPC_UPSTREAMS["solana-marks"].keyed]);
+  assert.deepEqual(B_NAMES, [...RPC_UPSTREAMS["solana-marks"].keyed, ...MARKS_KEYLESS.map((k) => k.name)]);
   // bucket 0's bytes in the two requests the wallet's lister sends (solanaMarksListed; apps/helper/src/rpc/rpc.test.ts SPENT and PRE)
   assert.equal(bucket0(13), "1112");
   assert.equal(bucket0(17), "11111112");

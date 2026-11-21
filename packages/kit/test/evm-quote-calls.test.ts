@@ -116,13 +116,19 @@ test("each mainnet quote provider has its own in-flight pin, and no pin names an
   for (const chain of ["base", "robinhood"] as const) {
     const v = evmPoolVenues()[chain];
     assert.deepEqual(Object.keys(v.inflight ?? {}).sort(), [...v.providers!].sort(), chain);
-    for (const n of Object.values(v.inflight!)) assert.ok(Number.isSafeInteger(n) && n >= 1 && n <= 8, `${chain}: ${n}`);
+    // 8 at most, but for the two Base providers measured past it (card evm-warm-tap-ends-inside-two-seconds): 16, half
+    // of the 32 at once that publicnode refused, which blastapi never did
+    const measured = chain === "base" ? ["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io"] : [];
+    for (const [u, n] of Object.entries(v.inflight!)) assert.ok(Number.isSafeInteger(n) && n >= 1 && n <= (measured.includes(u) ? 16 : 8), `${chain} ${u}: ${n}`);
   }
+  // one round of a warm Base tap is about 16 posts a provider: at 8 at once it went in two waves of a blastapi round
+  // trip each (about 330 ms)
+  assert.equal(evmPoolVenues().base.inflight!["https://base-mainnet.public.blastapi.io"], 16);
   // the chain's own Robinhood RPC, the scan's seat, stays at the 2 at once the helper's pace records for it
   assert.equal(evmPoolVenues().robinhood.inflight!["https://rpc.mainnet.chain.robinhood.com"], 2);
   // inside the helper's pace in calls at once (apps/helper/src/limits/limits.ts PROVIDER_PACE), a quote's post up to 3 calls
   assert.equal(evmPoolVenues().robinhood.inflight!["https://robinhood.drpc.org"], 5);
-  // Base's publicnode at the 8 at once measured on the device (card evm-first-quote-inside-the-kpi), never the helper's 2:
-  // a cold quote's reads queued behind it at 2 while blastapi answered 8 at once
-  assert.equal(evmPoolVenues().base.inflight!["https://base-rpc.publicnode.com"], 8);
+  // Base's publicnode at the 16 at once measured on the device (card evm-warm-tap-ends-inside-two-seconds; 8 before, card
+  // evm-first-quote-inside-the-kpi), never the helper's 2: a cold quote's reads queued behind it at 2
+  assert.equal(evmPoolVenues().base.inflight!["https://base-rpc.publicnode.com"], 16);
 });
