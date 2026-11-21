@@ -6122,12 +6122,80 @@ test("RQ4 a sell whose token's transfer reverts with a rate-limit string is aske
   assert.equal(probes, 2, `asked ${probes} times; ${big(r.verdict)} after ${r.ms} ms`);
 });
 
-test("LQ3 an answer outside 2xx is refused without its body read, and its body is cancelled, never left open", async () => {
+test("LQ3 an answer outside 2xx that is no not-yet answer is refused, its body read to the bound at most and cancelled, never left open", async () => {
   let cancelled = false;
   const body = new ReadableStream({ pull: (c) => c.enqueue(new TextEncoder().encode("[")), cancel: () => void (cancelled = true) });
   const f = (async () => new Response(body, { status: 403 })) as unknown as typeof fetch;
   await assert.rejects(evmJsonRpc("https://lq3.test", f)([{ method: "eth_blockNumber", params: [] }]), /HTTP 403/);
   assert.equal(cancelled, true);
+});
+
+// card evm-lag-answer-read-again: release 187's sign live run 44912189713 (21 Nov) read robinhood.drpc.org answer HTTP
+// 400 with JSON-RPC code 27 "Unknown state. First available state is 1" to ArbGasInfo's getL1BaseFeeEstimate (0x…6c,
+// 0xf5d6ded7): the answer askAt asks again under a 200 (2026-11-04 06:52Z), refused unread as BadAnswer under a 400
+const UNKNOWN_STATE = (id: number) => ({ jsonrpc: "2.0", id, error: { code: 27, message: "Unknown state. First available state is 1" } });
+const ARB_GAS = { method: "eth_call", params: [{ to: "0x000000000000000000000000000000000000006c", data: "0xf5d6ded7" }, "latest"] };
+
+test("LG1 a 4xx whose body is not-yet answers alone is read as those answers, one call or a batch (red at f02b75c41: HTTP 400 refused unread)", async () => {
+  for (const n of [1, 3]) {
+    const f = (async () => new Response(JSON.stringify(n === 1 ? UNKNOWN_STATE(0) : Array.from({ length: n }, (_, id) => UNKNOWN_STATE(id))), { status: 400, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    const out = await evmJsonRpc(`https://n${n}.lg1.test`, f)(Array.from({ length: n }, () => ARB_GAS));
+    assert.deepEqual(out, Array.from({ length: n }, (_, id) => UNKNOWN_STATE(id)));
+  }
+});
+
+test("LG2 every other 4xx stays a failure: publicnode's 403 archive refusal, a not-yet error beside a result, a revert naming unknown state, an empty or non-JSON body, one past the bound (review MED-1)", async () => {
+  const bodies: [number, string][] = [
+    // robinhood-rpc.publicnode.com, 2026-11-05 11:01Z
+    [403, '[{"jsonrpc":"2.0","error":{"code":-32602,"message":"Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode"},"id":0}]'],
+    [400, JSON.stringify([UNKNOWN_STATE(0), { jsonrpc: "2.0", id: 1, result: "0x01" }])],
+    [400, JSON.stringify([{ jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted: unknown state" } }])],
+    [400, JSON.stringify({ jsonrpc: "2.0", id: 0, error: { code: -32602, message: "invalid params" } })],
+    [403, ""],
+    [400, "Unknown state"],
+    [400, "[]"],
+  ];
+  for (const [status, body] of bodies) {
+    const f = (async () => new Response(body, { status })) as unknown as typeof fetch;
+    await assert.rejects(evmJsonRpc("https://lg2.test", f)([ARB_GAS, ARB_GAS]), new RegExp(`HTTP ${status}`), body.slice(0, 60));
+    await assert.rejects(evmJsonRpc("https://lg2.test", f)([ARB_GAS]), new RegExp(`HTTP ${status}`), body.slice(0, 60));
+  }
+  // a not-yet body past the bound is refused, its rest cancelled
+  let cancelled = false;
+  const one = new TextEncoder().encode(JSON.stringify([UNKNOWN_STATE(0)]));
+  const long = new ReadableStream({ pull: (c) => c.enqueue(one), cancel: () => void (cancelled = true) });
+  await assert.rejects(evmJsonRpc("https://lg2.test", (async () => new Response(long, { status: 400 })) as unknown as typeof fetch, 1_000)([ARB_GAS]), /HTTP 400/);
+  assert.equal(cancelled, true);
+});
+
+test("LG3 a quote whose provider answers its state reads HTTP 400 \"Unknown state\" once asks it again and reads its answer, as under a 200 (red at f02b75c41: the 400 refused, never asked again)", async () => {
+  const run = async (status: number) => {
+    const token = freshToken();
+    const pools = [best(token)];
+    const host = `lag${status}.lg3.test`;
+    const models: Record<string, EvmRpc> = { [host]: chain(pools, 0), [`a${status}.lg3.test`]: chain(pools, 0), [`b${status}.lg3.test`]: chain(pools, 0) };
+    const urls = Object.keys(models).map((h) => "https://" + h);
+    let lagged = 0;
+    let first = "";
+    let again = 0;
+    const f = (async (u: string, init: RequestInit) => {
+      const h = new URL(u).hostname;
+      const calls = JSON.parse(init.body as string) as { id: number; method: string; params: unknown[] }[];
+      if (h === host && calls.some((c) => c.method === "eth_call")) {
+        if (lagged === 0) return ((first = init.body as string), lagged++, new Response(JSON.stringify(calls.map((c) => UNKNOWN_STATE(c.id))), { status }));
+        // the very batch that lagged, posted again (askAt)
+        if (init.body === first) again++;
+      }
+      await pause(h === host ? 1 : 80);
+      const out = await models[h]!(calls.map((c) => ({ method: c.method, params: c.params })));
+      return new Response(JSON.stringify(out.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+    }) as unknown as typeof fetch;
+    const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(urls, f), NOW));
+    return { accepted: (v as { accepted: boolean }).accepted, lagged, askedAgain: again > 0 };
+  };
+  const at200 = await run(200);
+  assert.deepEqual(at200, { accepted: true, lagged: 1, askedAgain: true }, "the 200 answer, as askAt has read it since 2026-11-04");
+  assert.deepEqual(await run(400), at200);
 });
 
 test("LQ4 an answer for a block a provider does not hold yet is neither held nor timed: a fast not-yet answer never ranks a provider first", async () => {

@@ -17,6 +17,7 @@ export {
   evmBuyRevertedPools,
   evmBuySwapFitCall,
   evmIsOutOfGas,
+  evmNotYetWords,
   evmIsDeviceQuote,
   evmIsDeviceSellQuote,
   evmPoolBuyQuote,
