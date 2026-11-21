@@ -45,19 +45,23 @@ const R3 = "R3: a receipt answer that is not a receipt";
 const S1 = "S1: a liar's";
 const S2 = "S2: a receipt answered with a rate limit inside the batch once";
 const BATCHMAX = "F5's state reads take each reader's batchMax";
+// card evm-sync-inside-the-kpi-at-any-age: a timed-out batch split, each reader in its own pieces, every piece end agreed
+const SPLIT = "SPLIT a batch that times out is split at once";
+const PIECE = "PIECE a range one reader never answered refuses the sync";
+const AGREE = "AGREE two readers that disagree on a range refuse it";
 
 /** [find, replace, test]: each a rule removed. */
 export const MUTANTS = [
   // F4a: an answer without its last block counts; a failed span not asked again; one reader's answer enough
-  ["if (!Array.isArray(logs) || !blk || !isHash(blk.hash) || !isQty(blk.number) || Number(blk.number) !== j.b) return null;", "if (!Array.isArray(logs)) return null;", F4A],
+  ["if (!Array.isArray(logs) || ends.some((h) => h === null)) return null;", "if (!Array.isArray(logs)) return null;", F4A],
   ["export const INDEX_TRIES = 4;", "export const INDEX_TRIES = 1;", F4A],
-  ["return js.flatMap((j) => (j.ans[0] !== null && j.ans[1] !== null ? settle(j) : [j]));", "return js.flatMap((j) => (j.ans[0] !== null || j.ans[1] !== null ? ((j.ans[0] ??= j.ans[1]), (j.ans[1] ??= j.ans[0]), settle(j)) : [j]));", F4A],
+  ["if (j.ans[0] !== null && j.ans[1] !== null) {", "if (j.ans[0] !== null || j.ans[1] !== null) {\n      j.ans[0] ??= j.ans[1];\n      j.ans[1] ??= j.ans[0];", F4A],
   // F4b: the higher head; F3 (review): heads any distance apart
   ["const n = Math.min(heads[0]!, heads[1]!);", "const n = Math.max(heads[0]!, heads[1]!);", F4B],
   ["if (Math.max(heads[0]!, heads[1]!) - n > c.margin) return refuse(", "if (false) return refuse(", P4],
   // F4c: no pin at once; the newest span not asked alone first
   ['if (j.b === n && x.hash !== y.hash) return refuse("rpc_disagree", `the index readers do not agree on block ${n}`);', "", F4C],
-  ["let at = queue.shift();\n  while (at !== undefined && pin === null) {", "let at = queue.shift();\n  if (at !== undefined) queue.push(at);\n  at = undefined;\n  while (at !== undefined && pin === null) {", F4C],
+  ["const pinFirst = jobs.length > 0;", "const pinFirst = false;", F4C],
   // F4d: no margin; a lagging sync lowers what an earlier one stored
   ["const stored = Math.max(old?.through ?? from - 1, n - c.margin);", "const stored = n;", F4D],
   ["const stored = Math.max(old?.through ?? from - 1, n - c.margin);", "const stored = Math.max(from - 1, n - c.margin);", LAG],
@@ -73,7 +77,9 @@ export const MUTANTS = [
   // again, or asked once
   ["const sameBlocks = [...x.pools].every(([id, p]) => !y.pools.has(id) || y.pools.get(id)!.block === p.block);", "const sameBlocks = true;", P2],
   ["if (where.has(p.id)) return refuse(", "if (false) return refuse(", P3],
-  ["if (x.hash !== y.hash || !sameBlocks) {", "if (!sameBlocks) {", FORK],
+  ["if (x.hash !== y.hash || x.inner !== y.inner || !sameBlocks) {", "if (x.inner !== y.inner || !sameBlocks) {", FORK],
+  ["if (x.hash !== y.hash || x.inner !== y.inner || !sameBlocks) {", "if (x.hash !== y.hash || !sameBlocks) {", AGREE],
+  ["at: ends.filter((e) => e >= a && e <= b)", "at: [b]", PIECE],
   ["if (++j.disagree >= INDEX_TRIES) return refuse(", "if (++j.disagree >= 1) return refuse(", FORK],
   // F6: no cap; one reader's pools counted before F5; held pools past the cap (F4); more single-reader pools than the cap
   ["count += both.length;\n    if (count > c.cap) return refuse(", "count += both.length;\n    if (false) return refuse(", F6],
@@ -135,8 +141,10 @@ export const MUTANTS = [
   ["if (t === 0) never = Math.max(0, of.length - budget);", "", S1],
   ["(a === undefined && limited(e?.error))", "false", S2],
   // F5 (review): a failed batch not asked one span a request; a span alone that fails not asked as halves
-  ["else j.alone[r] = true;", "else j.ans[r] = NO_ANSWER;", ALONE],
-  ["for (const j of g) if (j.alone[r]) j.ans[r] = NO_ANSWER;", "for (const j of g) if (j.alone[r]) throw new EvmQuoteError(\"rpc_error\", \"alone\");", ALONE],
+  ["else p.alone = true;", "else answered(r, p, NO_ANSWER);", ALONE],
+  ["for (const p of g) if (p.alone || g.length === 1) answered(r, p, NO_ANSWER);", "for (const p of g) if (p.alone || g.length === 1) throw new EvmQuoteError(\"rpc_error\", \"alone\");", ALONE],
+  // card evm-sync-inside-the-kpi-at-any-age: a timed-out batch asked again at its size
+  ["if (split && timedOut(e)) return null;", "", SPLIT],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([find, , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
