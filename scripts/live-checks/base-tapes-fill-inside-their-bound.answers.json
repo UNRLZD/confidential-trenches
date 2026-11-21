@@ -1,0 +1,356 @@
+{
+ "_note": "good: the deployed helper (X-Helper-Commit f28b6bd56, helper-18) read by this check from the Mac at 21 Nov 21:29:12Z with no other check loading it: 12 of 12 listed Base tapes whole inside 45 s, the last 13.6 s after its first read. The branch helper's own run could not be recorded: GeckoTerminal answered 429 to every keyless Base list read from the Mac 21:33-21:46Z. bad_run: live run 44942886709 (21 Nov 20:14:18Z, helper 61fa14a08), robinhood-tapes-read-ahead-bounded's printed Base lines as this check records them: 6 still filling past 45 s, 1 CoinGecko's rows.",
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-21T21:29:12.315Z",
+  "lists": {
+   "status": 200,
+   "ms": 565,
+   "tokens": 12
+  },
+  "answers": [
+   {
+    "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+    "status": 200,
+    "ms": 8185,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 11492,
+     "reads": 3
+    }
+   },
+   {
+    "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+    "status": 200,
+    "ms": 8536,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 5766,
+     "reads": 2
+    }
+   },
+   {
+    "address": "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf",
+    "status": 200,
+    "ms": 8531,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 12623,
+     "reads": 2
+    }
+   },
+   {
+    "address": "0xbf927b841994731c573bdf09ceb0c6b0aa887cdd",
+    "status": 200,
+    "ms": 8544,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 13091,
+     "reads": 4
+    }
+   },
+   {
+    "address": "0xb2000000000000000000002d0ba3164cc74f58b7",
+    "status": 200,
+    "ms": 8530,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 2180,
+     "reads": 1
+    }
+   },
+   {
+    "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+    "status": 200,
+    "ms": 8539,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 2280,
+     "reads": 1
+    }
+   },
+   {
+    "address": "0x6985884c4392d348587b19cb9eaaf157f13271cd",
+    "status": 200,
+    "ms": 8543,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 13610,
+     "reads": 5
+    }
+   },
+   {
+    "address": "0xb200000000000000000000d9192b6b456483c2e8",
+    "status": 200,
+    "ms": 8538,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 5727,
+     "reads": 2
+    }
+   },
+   {
+    "address": "0x29cc30f9d113b356ce408667aa6433589cecbdca",
+    "status": 200,
+    "ms": 8530,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 9635,
+     "reads": 2
+    }
+   },
+   {
+    "address": "0xb2000000000000000000004884b426556b92883d",
+    "status": 200,
+    "ms": 8542,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 6124,
+     "reads": 2
+    }
+   },
+   {
+    "address": "0xb200000000000000000000397293cb8cda9a10c5",
+    "status": 200,
+    "ms": 8537,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 2183,
+     "reads": 1
+    }
+   },
+   {
+    "address": "0xb200000000000000000000fd2f87532b90095211",
+    "status": 200,
+    "ms": 8542,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 12624,
+     "reads": 4
+    }
+   }
+  ]
+ },
+ "bad_run": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-21T20:14:18Z",
+  "run": 44942886709,
+  "helper": "61fa14a08",
+  "lists": {
+   "status": 200,
+   "ms": null,
+   "tokens": 12
+  },
+  "answers": [
+   {
+    "address": "0x0947fb7076bfa307796f8fd533055f6016c6cccc",
+    "status": 200,
+    "ms": 8189,
+    "shape": "src \"coingecko\"",
+    "filling": true
+   },
+   {
+    "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+    "status": 200,
+    "ms": 8172,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 36081,
+     "reads": 12
+    }
+   },
+   {
+    "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+    "status": 200,
+    "ms": 8179,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 45013,
+     "reads": 15
+    }
+   },
+   {
+    "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+    "status": 200,
+    "ms": 8186,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 35095,
+     "reads": 10
+    }
+   },
+   {
+    "address": "0x11030f79109269d796fd0fb956d6244e502757f7",
+    "status": 200,
+    "ms": 8184,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 46668,
+     "reads": 14
+    }
+   },
+   {
+    "address": "0xb2000000000000000000004884b426556b92883d",
+    "status": 200,
+    "ms": 8180,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 45024,
+     "reads": 15
+    }
+   },
+   {
+    "address": "0xb200000000000000000000d9192b6b456483c2e8",
+    "status": 200,
+    "ms": 8189,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 35916,
+     "reads": 12
+    }
+   },
+   {
+    "address": "0xb2000000000000000000002d0ba3164cc74f58b7",
+    "status": 200,
+    "ms": 8188,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 46874,
+     "reads": 14
+    }
+   },
+   {
+    "address": "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf",
+    "status": 200,
+    "ms": 8178,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 45699,
+     "reads": 16
+    }
+   },
+   {
+    "address": "0x311935cd80b76769bf2ecc9d8ab7635b2139cf82",
+    "status": 200,
+    "ms": 8173,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 40097,
+     "reads": 13
+    }
+   },
+   {
+    "address": "0x1111111111166b7fe7bd91427724b487980afc69",
+    "status": 200,
+    "ms": 8189,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": true,
+     "shape": "tape",
+     "ms": 45106,
+     "reads": 13
+    }
+   },
+   {
+    "address": "0xb200000000000000000000c2e324d24d7eecd1fb",
+    "status": 200,
+    "ms": 8172,
+    "shape": "tape",
+    "filling": true,
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 36673,
+     "reads": 10
+    }
+   }
+  ]
+ }
+}
