@@ -420,9 +420,10 @@ export function evmMostWithCash(ready: readonly ReadyProof[], fee: bigint, pays:
  *  and index pools) on the pin's network, and the token's decimals as the tap reads them. */
 export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "v3Tiers" | "decimals"> & {
   network: EvmPoolChain;
-  /** The chain's pool index for this quote (pool-testnet.ts evmIndexReady): started where none runs or is served, and
-   *  settled once its sync ends; the quote waits for it at most EVM_DRY_INDEX_WAIT_MS. None: no wait. */
-  indexed?: () => Promise<boolean>;
+  /** The chain's pool index for this quote of `token` (pool-testnet.ts evmIndexReady): started where none runs or is
+   *  served, with the coin's own read beside it (card evm-first-quote-reads-its-coin-at-any-age), and settled once either
+   *  is served or both end; the quote waits for it at most EVM_DRY_INDEX_WAIT_MS. None: no wait. */
+  indexed?: (token: string) => Promise<boolean>;
 };
 /** The longest a dry's quote waits for the chain's index sync it started (card robinhood-quote-answers-cold): the sync
  *  from the release's snapshot reads only the blocks past it, two to six 500,000-block spans on Robinhood's two index
@@ -453,16 +454,16 @@ export function signedQuote(q: EvmPoolBuyQuote): EvmPoolBuyQuote {
 const pageDecimals = (chain: Chain, rpcs: readonly [EvmRpc, EvmRpc]) => (token: string): Promise<number> => keptTokenDecimals(chain, token, rpcs as readonly [PoolRpc, PoolRpc], { waits: 0 });
 
 /** The dry's quote host on the page: the buy's own quote and decimals (evmBuyHost) on the chain's pinned pool. */
-export function evmDryQuote(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], fetchFn?: typeof fetch, indexed?: () => Promise<boolean>, scanless?: () => boolean): EvmDryQuote {
+export function evmDryQuote(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], fetchFn?: typeof fetch, indexed?: (token: string) => Promise<boolean>, scanless?: () => boolean): EvmDryQuote {
   return { network: pin.network, venues: evmPoolVenues(), quote: pageQuote(fetchFn, true, scanless), indexPools: evmPoolIndexPools, v3Tiers: evmPoolV3Tiers, decimals: pageDecimals(chain, rpcs), ...(indexed === undefined ? {} : { indexed }) };
 }
 
 /** Whether the chain's index sync the dry's host started (`indexed`) has ended, waiting for it at most
  *  EVM_DRY_INDEX_WAIT_MS: true with no sync to wait for, or one that ended in any way; false while it still runs. */
-async function indexEnded(h: EvmDryQuote): Promise<boolean> {
+async function indexEnded(h: EvmDryQuote, token: string): Promise<boolean> {
   if (h.indexed === undefined) return true;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const ended = await Promise.race([h.indexed().then(() => true, () => true), new Promise<false>((r) => (timer = setTimeout(() => r(false), EVM_DRY_INDEX_WAIT_MS)))]);
+  const ended = await Promise.race([h.indexed(token).then(() => true, () => true), new Promise<false>((r) => (timer = setTimeout(() => r(false), EVM_DRY_INDEX_WAIT_MS)))]);
   clearTimeout(timer);
   return ended;
 }
@@ -472,7 +473,7 @@ async function indexEnded(h: EvmDryQuote): Promise<boolean> {
  *  the quote. Null when either read fails, or the quote is not of this token, chain and amount, or gives nothing;
  *  EVM_DRY_SYNCING, with no quote asked, while the chain's index sync still runs past EVM_DRY_INDEX_WAIT_MS. */
 export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint): Promise<string | null | typeof EVM_DRY_SYNCING> {
-  if (!(await indexEnded(h))) return EVM_DRY_SYNCING;
+  if (!(await indexEnded(h, token))) return EVM_DRY_SYNCING;
   try {
     const [q, decimals] = await Promise.all([quoteOf(h, h.network, token, amountIn, 0), h.decimals(token)]);
     if (q.chain !== h.network || typeof q.token !== "string" || lower(q.token) !== lower(token) || q.amountIn !== amountIn) return null;
@@ -494,7 +495,7 @@ export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint)
  *  throws. */
 export async function evmDryWarm(h: EvmDryQuote, token: string): Promise<void> {
   try {
-    if (!(await indexEnded(h))) return;
+    if (!(await indexEnded(h, token))) return;
     await evmPoolBuyWarm({ chain: h.network, token }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null), ...(h.v3Tiers === undefined ? {} : { v3Tiers: h.v3Tiers }) });
   } catch {
     // a warm reads ahead only: what it meets, the tap meets again

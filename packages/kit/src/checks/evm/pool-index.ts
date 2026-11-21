@@ -35,6 +35,15 @@
 // - F4d: what it stores ends `index.margin` blocks below N (a reorg's reach), so the next sync's gap starts there and
 //   reads the margin again; what the sync answers (`pools`) holds the margin's pools too.
 //
+// One coin's read (evmPoolCoinSync, card evm-first-quote-reads-its-coin-at-any-age): the same sync, every rule above
+// held, over the same gap to N, of only the logs a buy of the coin reads: the coin's pools (topic2 or topic3 the coin)
+// and the markets (with the native coin or WETH) of every other currency X of them, the Xs of the stored index's pools
+// asked in the same batches as the coin's and the Xs new in the gap after, pinned to the same N. A quote reads only those
+// (quote.ts indexScanOf: the coin "all", each X "markets"), and they are what a stale snapshot's first quote waits for:
+// 864,000 Base blocks (48 h) of the whole index took 9.0-17.4 s, of one coin's filters 1.6-6.6 s on
+// base-rpc.publicnode.com and 2.4-10.8 s on base.rpc.blxrbdn.com, which answers no getLogs past 100,000 blocks
+// (21 Nov 14:5x-15:0xZ). It answers whole or not at all, and is never stored as the index.
+//
 // The index (EvmPoolIndexData) is plain data: JSON.stringify and JSON.parse give it back whole, with the head it was
 // proven at, for a later card to keep on the device. A sync that fails part way returns the index with what it did
 // prove (newest spans first), `coversThrough` null and no pools, so the next sync reads only what is left.
@@ -64,6 +73,11 @@ export type EvmPoolIndexConfig = {
   readonly poolManager: string;
   /** The two readers, each of another operator. */
   readonly readers: readonly [EvmRpc, EvmRpc];
+  /** Readers past the two, ranked, each of another operator than both (card evm-first-quote-reads-its-coin-at-any-age):
+   *  a batch a reader's time ran out on hands each of its pieces to the first of them not held, asked whole in a request
+   *  of its own, its answer the timed-out reader's, so every range is still proven by two operators; one that does not
+   *  answer it hands it to the next. A piece no spare answered is asked smaller of its own reader, as with none. */
+  readonly spares?: readonly EvmRpc[];
   /** How far back a new index reads, in blocks from N. */
   readonly depth: number;
   readonly span: number;
@@ -76,6 +90,11 @@ export type EvmPoolIndexConfig = {
   /** The pieces each reader asks a span in (default one each), from its own getLogs cost: a span counts only once both
    *  readers answered all of it, every piece's last block with the same hash on both. */
   readonly parts?: readonly [number, number];
+  /** The most blocks a reader answers a getLogs over where a topic position holds more than one value (a coin's markets,
+   *  evmPoolCoinSync): rpc.mainnet.chain.robinhood.com answers such a filter over 500,000 blocks with -32602 "only
+   *  100000 are allowed for this request; ... or send one value per topic position" (21 Nov 15:27Z; the venue's scan
+   *  `orSpan`). Such a read asks that reader's pieces at most this long. None: no such bound. */
+  readonly orSpan?: readonly [number | undefined, number | undefined];
   /** The most calls a reader takes in one batch (the helper's HELPER_RPC_BATCH_MAX where it reads): the state reads
    *  (F5) are asked in batches of at most this many. None: INDEX_STATE_BATCH. */
   readonly batchMax?: number;
@@ -202,14 +221,24 @@ const piecesOf = (a: number, b: number, k: number): [number, number][] => {
   return out;
 };
 /** A request that ran out of its time (evmJsonRpc's AbortSignal.timeout): its batch is split, never asked again whole. */
+const TIMED_OUT = "timed out" as const;
 const timedOut = (e: unknown): boolean => (e as Error | null)?.name === "TimeoutError" || /timeout|timed out/i.test(String((e as Error | null)?.message));
 
 /** One sync of `prev` (or a new index) to the readers' agreed head; see the file's head. Refuses (throws) where nothing
  *  can be proven (the heads, the pin), where the readers disagree, and past the cap; a reader that does not answer
  *  returns what the sync proved. One lying reader may make it refuse, never hide a pool or claim a block it did not
  *  prove. */
-export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig): Promise<EvmPoolIndexSync> {
+export const evmPoolIndexSync = (prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig): Promise<EvmPoolIndexSync> => syncOf(prev, c, EVERY_POOL);
+
+/** What one sync asks: the getLogs topic filters each piece is asked with (one getLogs each, beside its piece ends),
+ *  the pools it keeps of their logs (a reader's log of any other pool is no log), and, for a coin's second read, the
+ *  block N and its hash the first read pinned (no head read; the span ending at N must answer that hash on both). */
+type Read = { readonly filters: readonly (readonly unknown[])[]; readonly want: (k: EvmPoolKey) => boolean; readonly pinAt?: { readonly number: number; readonly hash: string } };
+const EVERY_POOL: Read = { filters: [[INITIALIZE]], want: () => true };
+
+async function syncOf(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig, asked: Read): Promise<EvmPoolIndexSync> {
   const t0 = performance.now();
+  const filters = asked.filters;
   const pm = c.poolManager.toLowerCase();
   const nap = c.nap ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const stats: EvmPoolIndexStats = { requests: [0, 0], getLogs: [0, 0], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 0 };
@@ -221,14 +250,14 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   // timeout ends at once (null), so its caller asks it smaller, never again at the same size (card
   // evm-sync-inside-the-kpi-at-any-age: base.rpc.blxrbdn.com's 5-piece batches past the 10 s timeout were asked 4
   // times each, 32 of 80 posts, 142.6 s for 864,000 blocks, 21 Nov 12:5xZ)
-  async function ask(r: 0 | 1, calls: { method: string; params: unknown[] }[], split = false): Promise<readonly unknown[] | null> {
+  async function ask(r: 0 | 1, calls: { method: string; params: unknown[] }[], split = false, rpc: EvmRpc = c.readers[r]): Promise<readonly unknown[] | null | typeof TIMED_OUT> {
     let waited = 0;
     let waits = 0;
     for (let tries = 0; tries < INDEX_TRIES; ) {
       // a reader any reader on the device met a throttle or a refused connection on is held (pace.ts): the index has no
       // other reader to ask, so it waits the hold out, inside the same wait a 429 has, and sends it nothing meanwhile
       // (card evm-taps-meet-no-429: Robinhood's own refused the index's getLogs at 1 to 3 posts a minute, 2026-11-15)
-      const held = evmRpcHeldMs(c.readers[r]);
+      const held = evmRpcHeldMs(rpc);
       if (held > 0 && waited < INDEX_LIMITED_WAIT_MS) {
         const ms = Math.min(held, INDEX_LIMITED_WAIT_MS - waited);
         waited += ms;
@@ -239,7 +268,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
       stats.requests[r]++;
       stats.getLogs[r] += calls.filter((x) => x.method === "eth_getLogs").length;
       try {
-        return await c.readers[r](calls);
+        return await rpc(calls);
       } catch (e) {
         const after = (e as { afterMs?: unknown } | null)?.afterMs;
         if (/429|rate limit/i.test(String((e as Error)?.message)) && waited < INDEX_LIMITED_WAIT_MS) {
@@ -253,7 +282,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
           continue;
         }
         stats.failed[r]++;
-        if (split && timedOut(e)) return null;
+        if (split && timedOut(e)) return TIMED_OUT;
         tries++;
         if (tries < INDEX_TRIES) await nap(BACKOFF_MS * 2 ** tries);
       }
@@ -261,11 +290,14 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     return null;
   }
 
+  // a batch never split (a head, a block, the state reads): its answer, or null once its tries are spent
+  const askOne = (r: 0 | 1, calls: { method: string; params: unknown[] }[]) => ask(r, calls) as Promise<readonly unknown[] | null>;
+
   // the newest block both readers agree on, at or past N (F5's state reads): the lower of their heads now, read by number
   // on both with the same hash; null where either answers none, it is below N, or the two hashes differ
   async function agreedNow(): Promise<string | null> {
     const blockOf = async (r: 0 | 1, at: string) => {
-      const h = ((await ask(r, [{ method: "eth_getBlockByNumber", params: [at, false] }]))?.[0] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
+      const h = ((await askOne(r, [{ method: "eth_getBlockByNumber", params: [at, false] }]))?.[0] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
       return h && isQty(h.number) && isHash(h.hash) && (at === "latest" || Number(h.number) === Number(at)) ? { number: Number(h.number), hash: h.hash.toLowerCase() } : null;
     };
     const [x, y] = await Promise.all([blockOf(0, "latest"), blockOf(1, "latest")]);
@@ -278,8 +310,9 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
 
   // F4b: the lower of the two proven heads, never more than the margin apart (a reader far behind would set `from`
   // for good)
-  const heads = await Promise.all(([0, 1] as const).map(async (r) => {
-    const a = (await ask(r, [{ method: "eth_getBlockByNumber", params: ["latest", false] }]))?.[0] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined;
+  // (a coin's second read: the N its first read pinned, the heads not read again)
+  const heads = asked.pinAt !== undefined ? [asked.pinAt.number, asked.pinAt.number] : await Promise.all(([0, 1] as const).map(async (r) => {
+    const a = (await askOne(r, [{ method: "eth_getBlockByNumber", params: ["latest", false] }]))?.[0] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined;
     const h = a?.result;
     return h && isQty(h.number) && isHash(h.hash) ? Number(h.number) : refuse("rpc_error", `index reader ${r + 1} answered no head`);
   }));
@@ -311,21 +344,24 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   const perBatch = pair(c.perBatch).map(count1) as [number, number];
   const parallel = pair(c.parallel).map(count1) as [number, number];
   const parts = (c.parts ?? [1, 1]).map(count1) as [number, number];
+  const anyOr = filters.some((f) => f.some(Array.isArray));
 
-  // a piece's calls: its logs, then each piece end inside it (its own last block among them), all in one batch (F4a)
+  // a piece's calls: its logs (one getLogs a filter), then each piece end inside it (its own last block among them), all
+  // in one batch (F4a)
   const callsOf = (ps: readonly Piece[]) =>
     ps.flatMap((p) => [
-      { method: "eth_getLogs", params: [{ address: pm, fromBlock: hx(p.a), toBlock: hx(p.b), topics: [INITIALIZE] }] },
+      ...filters.map((topics) => ({ method: "eth_getLogs", params: [{ address: pm, fromBlock: hx(p.a), toBlock: hx(p.b), topics }] })),
       ...p.at.map((e) => ({ method: "eth_getBlockByNumber", params: [hx(e), false] })),
     ]);
   // one reader's answer to a piece: its logs and each piece end inside it, all from the same batch (F4a); `cut` where the
   // logs were answered with an error or at the cap, which no reader's words explain (M383); null where it gave neither
   const answerOf = (out: readonly unknown[], i: number, p: Piece): Answer | null => {
-    const l = out[i] as { result?: unknown; error?: unknown } | null | undefined;
-    if (l?.error !== undefined && l.result === undefined) return limited(l.error) ? null : NO_ANSWER;
-    const logs = l?.result;
+    const ls = filters.map((_, f) => out[i + f] as { result?: unknown; error?: unknown } | null | undefined);
+    for (const l of ls) if (l?.error !== undefined && l.result === undefined) return limited(l.error) ? null : NO_ANSWER;
+    // each filter's logs, or none where any filter's answer is not a list
+    const logs = ls.every((l) => Array.isArray(l?.result)) ? ls.flatMap((l) => l!.result as unknown[]) : undefined;
     const ends = p.at.map((e, k) => {
-      const blk = (out[i + 1 + k] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
+      const blk = (out[i + filters.length + k] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
       return blk && isHash(blk.hash) && isQty(blk.number) && Number(blk.number) === e ? blk.hash.toLowerCase() : null;
     });
     if (!Array.isArray(logs) || ends.some((h) => h === null)) return null;
@@ -333,14 +369,15 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     const found = new Map<string, Found>();
     for (const x of logs) {
       const f = poolOfLog(x, pm, p.a, p.b);
-      if (f === null) continue;
+      // a pool none of the filters asks for is no log of this read (a reader's made-up or stray one never counts)
+      if (f === null || !asked.want(f.p.key)) continue;
       const q = f.p;
       // F2: one pool at two blocks in one answer is no answer an honest reader gives
       if (pools.has(q.id) && pools.get(q.id)!.block !== q.block) return refuse("rpc_disagree", `index reader answered pool ${q.id} at two blocks`);
       pools.set(q.id, q);
       found.set(q.id, f);
     }
-    return { hash: ends[ends.length - 1]!, inner: ends.slice(0, -1).join(","), pools, logs: found, cut: logs.length >= INDEX_SPAN_LOGS ? "full" : null };
+    return { hash: ends[ends.length - 1]!, inner: ends.slice(0, -1).join(","), pools, logs: found, cut: ls.some((l) => (l!.result as unknown[]).length >= INDEX_SPAN_LOGS) ? "full" : null };
   };
   // a reader's whole answer to a span from its pieces (newest first): the span's last block is the newest piece's, the
   // other ends oldest first; one pool at two blocks in two pieces is a lie; cut where any piece was
@@ -371,6 +408,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
       return [jobOf(mid + 1, j.b), jobOf(j.a, mid)];
     }
     if (j.b === n && x.hash !== y.hash) return refuse("rpc_disagree", `the index readers do not agree on block ${n}`);
+    if (j.b === n && asked.pinAt !== undefined && x.hash !== asked.pinAt.hash) return refuse("rpc_disagree", `the index readers' block ${n} is not the one this coin's read pinned`);
     const sameBlocks = [...x.pools].every(([id, p]) => !y.pools.has(id) || y.pools.get(id)!.block === p.block);
     if (x.hash !== y.hash || x.inner !== y.inner || !sameBlocks) {
       j.ans = [null, null];
@@ -408,8 +446,10 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   const put = (j: Job, front = false) => {
     if (!keep(j)) return void waiting.push(j);
     open++;
-    const ends = [...new Set(([0, 1] as const).flatMap((r) => piecesOf(j.a, j.b, parts[r]).map(([, e]) => e)))].sort((u, v) => u - v);
-    const both = ([0, 1] as const).map((r) => piecesOf(j.a, j.b, parts[r]).map(([a, b]): Piece => ({ j, a, b, at: ends.filter((e) => e >= a && e <= b), ans: null, tries: 0, errs: 0, alone: false }))) as [Piece[], Piece[]];
+    // a reader's pieces: its parts, more where a filter's OR takes it past its orSpan
+    const k = (r: 0 | 1) => Math.max(parts[r], anyOr && count1(c.orSpan?.[r]) > 1 ? Math.ceil((j.b - j.a + 1) / count1(c.orSpan?.[r])) : 1);
+    const ends = [...new Set(([0, 1] as const).flatMap((r) => piecesOf(j.a, j.b, k(r)).map(([, e]) => e)))].sort((u, v) => u - v);
+    const both = ([0, 1] as const).map((r) => piecesOf(j.a, j.b, k(r)).map(([a, b]): Piece => ({ j, a, b, at: ends.filter((e) => e >= a && e <= b), ans: null, tries: 0, errs: 0, alone: false }))) as [Piece[], Piece[]];
     piecesBy.set(j, both);
     for (const r of [0, 1] as const) if (front) queues[r].unshift(...both[r]);
       else queues[r].push(...both[r]);
@@ -430,12 +470,27 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     }
   };
   // one batch of pieces on reader r
-  const askPieces = async (r: 0 | 1, g: Piece[]) => {
-    const out = await ask(r, callsOf(g), true);
+  // a piece reader r's time ran out on, asked whole of each spare not held in rank until one answers it: true once one did
+  const handOff = async (r: 0 | 1, p: Piece): Promise<boolean> => {
+    for (const s of c.spares ?? []) {
+      if (evmRpcHeldMs(s) > 0) continue;
+      const out = await ask(r, callsOf([p]), true, s);
+      const a = Array.isArray(out) ? answerOf(out, 0, p) : null;
+      if (a !== null && a !== NO_ANSWER) return answered(r, p, a), true;
+    }
+    return false;
+  };
+  const askPieces = async (r: 0 | 1, g0: Piece[]) => {
+    const got = await ask(r, callsOf(g0), true);
+    // a timeout: each piece to a spare first (none: as below)
+    const handed = got === TIMED_OUT ? await Promise.all(g0.map((p) => handOff(r, p))) : g0.map(() => false);
+    const g = g0.filter((_, k) => !handed[k]);
+    if (g.length === 0) return;
+    const out = got === TIMED_OUT ? null : got;
     // F5 (the review's): tries spent on throws (a body past its size, a 4xx) or a timeout: each piece alone; a piece
     // alone (or a lone piece) that still fails as its span's halves on both, under the halves' budget
     if (out === null) {
-      for (const p of g) if (p.alone || g.length === 1) answered(r, p, NO_ANSWER);
+      for (const p of g) if (p.alone || g0.length === 1) answered(r, p, NO_ANSWER);
         else p.alone = true;
       queues[r].unshift(...g.filter((p) => p.ans === null));
       return;
@@ -446,7 +501,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     const later: Piece[] = [];
     for (const p of g) {
       const a = answerOf(out, i, p);
-      i += 1 + p.at.length;
+      i += filters.length + p.at.length;
       // an error from one of the reader's backends: the same piece asked of it again at once, as halves only once
       // INDEX_TRIES answers to it were errors
       if (a === NO_ANSWER && ++p.errs < INDEX_TRIES) now.push(p);
@@ -483,7 +538,8 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
 
   // F4c: first the span ending at N alone (and the halves ending at N it settles into), asked until it settles: nothing
   // counts without its pin
-  const pinFirst = jobs.length > 0;
+  // (a coin's second read has its pin, the first read's: each span asked at once, the one ending at N held to its hash)
+  const pinFirst = jobs.length > 0 && asked.pinAt === undefined;
   if (pinFirst) {
     keep = (j) => j.b === n;
     put(jobs[0]!);
@@ -530,7 +586,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
       if (now === null) return calls.map(() => null);
       for (let i = 0; i < calls.length; i += per) {
         const part = calls.slice(i, i + per);
-        all.push(...((await ask(r, part)) ?? part.map(() => null)));
+        all.push(...((await askOne(r, part)) ?? part.map(() => null)));
       }
       return all;
     }));
@@ -571,7 +627,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
         const again: EvmIndexedPool[] = [];
         for (let i = 0; i < of.length; i += INDEX_RECEIPT_BATCH) {
           const part = of.slice(i, i + INDEX_RECEIPT_BATCH);
-          const out = await ask(r, part.map((p) => ({ method: "eth_getTransactionReceipt", params: [logged.get(p.id)!.f.tx] })));
+          const out = await askOne(r, part.map((p) => ({ method: "eth_getTransactionReceipt", params: [logged.get(p.id)!.f.tx] })));
           part.forEach((p, k) => {
             const e = out?.[k] as { result?: unknown; error?: unknown } | null | undefined;
             const a = e?.result;
@@ -620,6 +676,89 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   for (const p of proved) read = withSpan(read, p.a, p.b);
   const whole = error === null && gapsOf(read, from, n).length === 0;
   return done({ index, coversThrough: whole ? n : null, pools: whole ? [...(old?.pools ?? []), ...fresh] : null, error });
+}
+
+/** One coin's read (the file's head): `token`'s pools and the markets of every other currency X of them, from the
+ *  index's `from` to N, each X's market a pool of X with the native coin or WETH. Whole (coversThrough N and `pools`
+ *  every such pool to N, the stored index's among them) or not at all: null, with the error. */
+export type EvmPoolCoinSync = {
+  readonly token: string;
+  /** The Xs whose markets `pools` holds: every other currency of the token's pools to N but the native coin and WETH. */
+  readonly xs: readonly string[] | null;
+  readonly from: number | null;
+  readonly coversThrough: number | null;
+  readonly pools: readonly EvmIndexedPool[] | null;
+  readonly error: EvmQuoteError | null;
+  readonly stats: EvmPoolIndexStats;
+};
+const NATIVE = "0x0000000000000000000000000000000000000000";
+/** The most currencies one getLogs filter names, as the quote's own scan (quote.ts SCAN_OR); ZORA's 339 in one list
+ *  answered on both Base readers (21 Nov 15:00Z), more are asked as more filters. */
+export const INDEX_OR = 256;
+/** The most Xs asked one value a position where a reader bounds an OR's range (EvmPoolIndexConfig.orSpan). */
+export const INDEX_ONE_X = 2;
+const topic = (a: string) => "0x" + a.slice(2).padStart(64, "0");
+
+/** `token`'s read from `prev` (the stored index, or none) to the readers' N: see the file's head. Refuses as the whole
+ *  index's sync does; a read that ends partial answers nothing (coversThrough null). */
+export async function evmPoolCoinSync(prev: EvmPoolIndexData | null, coin: { readonly token: string; readonly weth: string }, c: EvmPoolIndexConfig): Promise<EvmPoolCoinSync> {
+  const t = coin.token.toLowerCase();
+  const weth = coin.weth.toLowerCase();
+  const ofToken = (k: EvmPoolKey) => k.currency0 === t || k.currency1 === t;
+  const xsOf = (ps: readonly EvmIndexedPool[]) => new Set(ps.filter((p) => ofToken(p.key)).map((p) => (p.key.currency0 === t ? p.key.currency1 : p.key.currency0)).filter((x) => x !== NATIVE && x !== weth));
+  // X's markets: (native or WETH, X) where WETH is below X, (X, WETH) where it is above
+  const marketOf = (xs: ReadonlySet<string>) => (k: EvmPoolKey) => ((k.currency0 === NATIVE || k.currency0 === weth) && xs.has(k.currency1)) || (k.currency1 === weth && xs.has(k.currency0));
+  // the coin's two filters (it is either currency), and the markets of each INDEX_OR Xs in one: currency0 the native
+  // coin, WETH or an X, currency1 WETH or an X, whose few other pools (an X with an X, the native coin with WETH) are no
+  // log of the read (`want`). Each filter is a getLogs on every range, and base-rpc.publicnode.com weighs a getLogs at 20
+  // of its 2,500 (pace.ts EVM_PACE), so 3 a range with Xs, not 4
+  // Where a reader bounds an OR's range (`orSpan`), up to INDEX_ONE_X Xs are asked one value a position instead, two
+  // filters each (the native coin's market, and WETH's on its side of X), so their pieces keep the reader's own span
+  const filtersOf = (xs: readonly string[], withToken: boolean): unknown[][] => {
+    const out: unknown[][] = withToken ? [[INITIALIZE, null, topic(t)], [INITIALIZE, null, null, topic(t)]] : [];
+    if (c.orSpan !== undefined && xs.length <= INDEX_ONE_X) {
+      for (const x of xs) out.push([INITIALIZE, null, topic(NATIVE), topic(x)], BigInt(x) > BigInt(weth) ? [INITIALIZE, null, topic(weth), topic(x)] : [INITIALIZE, null, topic(x), topic(weth)]);
+      return out;
+    }
+    for (let i = 0; i < xs.length; i += INDEX_OR) {
+      const part = xs.slice(i, i + INDEX_OR).map(topic);
+      out.push([INITIALIZE, null, [topic(NATIVE), topic(weth), ...part], [topic(weth), ...part]]);
+    }
+    return out;
+  };
+  const stats: EvmPoolIndexStats = { requests: [0, 0], getLogs: [0, 0], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 0 };
+  const add = (s: EvmPoolIndexStats) => {
+    // each count summed by its field, never a list of their names: a quoted method-shaped name reads as one the page
+    // sends (signpage page-rpc.test.ts, card helper-rpc-sell-methods)
+    for (const r of [0, 1] as const) {
+      stats.requests[r] += s.requests[r];
+      stats.getLogs[r] += s.getLogs[r];
+      stats.limited[r] += s.limited[r];
+      stats.failed[r] += s.failed[r];
+      stats.limitedMaxMs[r] = Math.max(stats.limitedMaxMs[r], s.limitedMaxMs[r]);
+    }
+    stats.ms += s.ms;
+  };
+  const none = (error: EvmQuoteError | null): EvmPoolCoinSync => ({ token: t, xs: null, from: null, coversThrough: null, pools: null, error, stats });
+  // the coin's pools and the markets of the Xs the stored index already holds, in the same batches
+  const known = xsOf(prev?.pools ?? []);
+  const first = await syncOf(prev, c, { filters: filtersOf([...known].sort(), true), want: (k) => ofToken(k) || marketOf(known)(k) });
+  add(first.stats);
+  if (first.coversThrough === null || first.pools === null || first.index === null) return none(first.error);
+  // the Xs of the coin's pools new in the gap: their markets over the same gap, pinned to the same N
+  const fresh = [...xsOf(first.pools)].filter((x) => !known.has(x)).sort();
+  let pools = first.pools;
+  if (fresh.length > 0) {
+    const novel = new Set(fresh);
+    const second = await syncOf(prev, c, { filters: filtersOf(fresh, false), want: marketOf(novel), pinAt: first.index.head });
+    add(second.stats);
+    if (second.coversThrough !== first.coversThrough || second.pools === null) return none(second.error ?? new EvmQuoteError("rpc_error", `the markets of ${fresh.length} currencies new beside ${t} were not read to block ${first.coversThrough}`));
+    pools = [...pools, ...second.pools];
+  }
+  const xs = new Set([...known, ...fresh]);
+  const mine = new Map<string, EvmIndexedPool>();
+  for (const p of pools) if (ofToken(p.key) || marketOf(xs)(p.key)) mine.set(p.id, p);
+  return { token: t, xs: [...xs].sort(), from: first.index.from, coversThrough: first.coversThrough, pools: [...mine.values()], error: null, stats };
 }
 
 /** The index as the sign release ships it (card robinhood-quote-answers-cold: packages/signpage/data/evm-index/

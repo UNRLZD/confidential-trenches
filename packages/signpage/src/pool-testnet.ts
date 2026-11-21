@@ -97,9 +97,9 @@ import { WITHDRAW_BOUNDARY_LAG_MS, WITHDRAW_FREE_MS, finishPoolOnward, runPoolRi
 import { EVM_WITHDRAW_BOUNDARY_LAG_MS, evmEpochFeeNow, evmKeptOnwards, evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmFinishState, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
 import { evmPoolSend } from "./evm-send.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
-import { evmPoolIndexFromSnapshot, type EvmPoolIndexData, type EvmPoolIndexSync } from "../../kit/src/checks/evm/pool-index.ts";
-import { evmPoolIndexUse } from "../../kit/src/checks/evm/quote.ts";
-import { EVM_INDEX_KEEP_MS, evmPoolIndexRefresh } from "../../kit/src/trade/evm/buy-tap.ts";
+import { evmPoolIndexFromSnapshot, type EvmPoolCoinSync, type EvmPoolIndexData, type EvmPoolIndexSync } from "../../kit/src/checks/evm/pool-index.ts";
+import { evmPoolCoinUse, evmPoolIndexUse } from "../../kit/src/checks/evm/quote.ts";
+import { EVM_INDEX_KEEP_MS, evmPoolCoinRefresh, evmPoolIndexRefresh } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmIndexStore, type EvmIndexStore } from "./evm-index-store.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
@@ -792,6 +792,9 @@ export type TestnetOver = {
   /** A chain's pool index sync (the kit's evmPoolIndexSync on the venue's two index readers otherwise; tests). `fetch` is
    *  the page's own pass fetch the kit's readers would read through. */
   evmIndexSync?: (chain: "base" | "robinhood", prev: EvmPoolIndexData | null, fetch: typeof globalThis.fetch) => Promise<EvmPoolIndexSync>;
+  /** A coin's read (the kit's evmPoolCoinRefresh) planted in tests: a page with a planted index sync and none of this
+   *  reads no coin. */
+  evmCoinSync?: (chain: "base" | "robinhood", prev: EvmPoolIndexData | null, token: string, fetch: typeof globalThis.fetch) => Promise<EvmPoolCoinSync | null>;
   /** The page's pool index store (src/evm-index-store.ts on the page's IndexedDB otherwise; none with a planted sync;
    *  tests). */
   evmIndexStore?: EvmIndexStore | null;
@@ -914,8 +917,10 @@ export type TestnetPool = {
   evmPoolOf(chain: "base" | "robinhood"): { pin: EvmPoolPin; rpcs: readonly [EvmRpc, EvmRpc] } | null;
   /** The chain's pool index for a coin quote (card robinhood-quote-answers-cold): its sync started where none runs or
    *  is served (from the kept index, else the release's snapshot), and true once one is served to the kit's quote, false
-   *  where the sync ends without one (a partial sync, another tab's, no pin). Never started at a load: only a quote asks. */
-  evmIndexReady(chain: "base" | "robinhood"): Promise<boolean>;
+   *  where the sync ends without one (a partial sync, another tab's, no pin). Never started at a load: only a quote asks.
+   *  With `token` (card evm-first-quote-reads-its-coin-at-any-age), that coin's read beside it, on the tap's lane: true
+   *  once either is served, so a stale snapshot's first quote waits on the coin's blocks, never every pool's. */
+  evmIndexReady(chain: "base" | "robinhood", token?: string): Promise<boolean>;
   /** Whether the device holds money anywhere, as the last state read found it (a held note of any scope, or a buy or
    *  sale record): a device that holds none syncs no pool index and its shown prices read no log. */
   evmMoney(): boolean;
@@ -1777,6 +1782,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const evmIndex = new Map<"base" | "robinhood", EvmPoolIndexData | null>();
   const evmIndexed = new Set<"base" | "robinhood">();
   const evmIndexing = new Map<"base" | "robinhood", Promise<void>>();
+  // each coin's read, by chain and coin, while it runs or once served (true); one that ends unserved is asked again
+  const evmCoinReads = new Map<string, Promise<boolean>>();
   // when each chain's index was last written to the store (evmIndexOf's keep)
   const evmIndexPut = new Map<"base" | "robinhood", number>();
   const keepSet = over.evmIndexKeep ?? ((f: () => void, ms: number) => {
@@ -1828,6 +1835,38 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (signal.aborted) return;
       if (evmPoolIndexUse(network, { index: ix, coversThrough: ix.through, pools: ix.pools })) return void evmIndex.set(chain, ix);
     }
+  };
+  // Card evm-first-quote-reads-its-coin-at-any-age: a coin's read from the index the device has (the kept one or the
+  // release's snapshot) to the readers' head, of the coin's pools and its Xs' markets only, served to the kit's quote. A
+  // snapshot ages through the days no release ships, and the whole sync's gap grows with it: 864,000 Base blocks (48 h)
+  // took 9.0-17.4 s of every pool, 5.3-6.4 s of a coin over six days (21 Nov). Its reads are on the tap's lane: a
+  // quote waits on them; the whole sync's (passFetch, the kit's `later`) go after. Resolves true once served, false
+  // where it ends without (a device that holds nothing, no index to read from, a read that was not whole); never throws
+  const evmCoinOf = (chain: "base" | "robinhood", token: string): Promise<boolean> => {
+    const key = `${chain}:${token.toLowerCase()}`;
+    const held = evmCoinReads.get(key);
+    if (held !== undefined) return held;
+    const e = evmPool(chain);
+    if (e === null || !evmMoney) return Promise.resolve(false);
+    const network = e.pin.network as EvmPoolChain;
+    const v = evmPoolVenues()[network];
+    // a page whose pool RPCs or index sync are planted (tests) reads a coin only through a planted read
+    if (over.evmCoinSync === undefined && (over.evmRpcs !== undefined || over.evmIndexSync !== undefined || v?.index === undefined || v.poolManager === undefined || v.scan === undefined)) return Promise.resolve(false);
+    const signal = evmStop.signal;
+    const fetchFn = ((url: string, init?: RequestInit) => laneFetch()(url, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal })) as typeof fetch;
+    const run = evmIndexServe(chain, network, signal)
+      .catch(() => {})
+      .then(async () => {
+        const prev = evmIndex.get(chain) ?? null;
+        if (prev === null || signal.aborted) return false;
+        if (over.evmCoinSync === undefined) return (await evmPoolCoinRefresh(network, prev, token, fetchFn)).served;
+        const r = await over.evmCoinSync(chain, prev, token, fetchFn);
+        return r !== null && r.coversThrough !== null && evmPoolCoinUse(network, r);
+      })
+      .catch(() => false)
+      .then((served) => (served ? served : (evmCoinReads.delete(key), false)));
+    evmCoinReads.set(key, run);
+    return run;
   };
   const evmIndexOf = (chain: "base" | "robinhood"): Promise<void> | undefined => {
     const e = evmPool(chain);
@@ -3948,10 +3987,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     evmPoolOf: (chain) => ((e) => (e === null ? null : (evmWarm(chain), evmSight(chain), { pin: e.pin, rpcs: e.rpcs })))(evmPool(chain)),
     evmMoney: () => evmMoney,
-    evmIndexReady: async (chain) => {
+    evmIndexReady: async (chain, token) => {
       if (evmIndexed.has(chain)) return true;
-      await evmIndexOf(chain);
-      return evmIndexed.has(chain);
+      const whole = Promise.resolve(evmIndexOf(chain)).then(() => evmIndexed.has(chain));
+      if (token === undefined) return whole;
+      // the first of the two served, or both ended unserved
+      const coin = evmCoinOf(chain, token);
+      return new Promise<boolean>((done) => {
+        let left = 2;
+        for (const p of [coin, whole]) void p.then((ok) => (ok || --left === 0 ? done(ok) : undefined), () => (--left === 0 ? done(false) : undefined));
+      });
     },
     evmFeeNow: async (chain) => {
       const pool = evmPassPoolOf(chain);
