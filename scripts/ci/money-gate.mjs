@@ -69,7 +69,11 @@ export { exactJson };
 // rate-limits, never a second operator.
 export const RPCS = {
   near: ["https://archival-rpc.mainnet.fastnear.com", "https://near.drpc.org", "https://archival-rpc.mainnet.near.org"],
-  solana: ["https://api.mainnet-beta.solana.com", "https://public.rpc.solanavibestation.com"],
+  // card money-gate-solana-reads-past-one-stall: PublicNode, a third operator, so a tx passes on two operators' reads
+  // while one stalls past the rounds. It keeps recent history only (its first available block 471,786,675, 20 Nov
+  // 15:25Z, read 21 Nov 21:12Z; the oldest recorded tx, 5wGExGur at slot 466,032,982, reads null there and ok on the two
+  // others): its null counts only where its history reaches the tx (solanaAbsent)
+  solana: ["https://api.mainnet-beta.solana.com", "https://public.rpc.solanavibestation.com", "https://solana-rpc.publicnode.com"],
   base: ["https://mainnet.base.org", "https://base.drpc.org"],
   robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com"],
   // NEAR testnet, read 2026-10-31 at 16:16Z: the same two operators on three hosts, as for mainnet.
@@ -237,9 +241,31 @@ export function failedReceipts(r) {
 
 const when = (ms, floor) => (ms >= floor ? "ok" : `old: ${new Date(ms).toISOString()} is before ${new Date(floor).toISOString()}`);
 
+// Card money-gate-solana-reads-past-one-stall: a Solana host may keep only recent history (PublicNode: RPCS), and its
+// null for a tx before its first available block says nothing. A null is "missing" (absent) only when the host's
+// getFirstAvailableBlock, read in this run (`history`, url to block), is at or below the tx's slot (`slot`, another
+// host's read of it), or, with no slot read yet, when that block's time is at or before the floor (every tx the gate can
+// pass is after it). Else it is "no history (...)": no answer of absent, never ok, and not asked again.
+async function solanaAbsent(fetchFn, url, slot, floor, sleep, rateWait, history = new Map()) {
+  if (!history.has(url)) {
+    const f = await rpc(fetchFn, url, "getFirstAvailableBlock", [], sleep, rateWait);
+    if (f.error) return `error ${JSON.stringify(f.error).slice(0, 120)}`;
+    if (!Number.isSafeInteger(f.result) || f.result < 0) return "no answer (no first available block)";
+    history.set(url, f.result);
+  }
+  const first = history.get(url);
+  if (Number.isSafeInteger(slot)) return first <= slot ? "missing" : `no history (its first block ${first} is after the tx's slot ${slot})`;
+  if (first === 0) return "missing";
+  const t = await rpc(fetchFn, url, "getBlockTime", [first], sleep, rateWait);
+  if (t.error) return `error ${JSON.stringify(t.error).slice(0, 120)}`;
+  if (typeof t.result !== "number") return "no answer (no time for its first block)";
+  return t.result * 1000 <= floor ? "missing" : `no history (its first block ${first}, ${new Date(t.result * 1000).toISOString()}, is after ${new Date(floor).toISOString()})`;
+}
+
 // One read of one tx on one RPC: "ok", "failed...", "old: ...", or why it could not be read. rateWait off: a 429 is
-// NOT_WAITED at once. A NEAR read puts its EXPERIMENTAL_tx_status answer in out.result.
-export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOOR, sleep = wait, rateWait = true, out = {}) {
+// NOT_WAITED at once. A NEAR read puts its EXPERIMENTAL_tx_status answer in out.result, a Solana read its slot in
+// out.slot. `slot` (Solana): the tx's slot another host read; `history`: the hosts' first available blocks this run.
+export async function readTx(fetchFn, url, { chain, hash, signer, slot, history }, floor = FLOOR, sleep = wait, rateWait = true, out = {}) {
   let j;
   try {
     if (NEAR.has(chain)) {
@@ -265,7 +291,8 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
     if (SOLANA.has(chain)) {
       j = await rpc(fetchFn, url, "getTransaction", [hash, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "finalized" }], sleep, rateWait);
       if (j.error) return `error ${JSON.stringify(j.error).slice(0, 120)}`;
-      if (!j.result) return "missing";
+      if (!j.result) return await solanaAbsent(fetchFn, url, slot, floor, sleep, rateWait, history);
+      if (Number.isSafeInteger(j.result.slot)) out.slot = j.result.slot;
       if (!j.result.meta) return "no meta";
       if (j.result.meta.err != null) return "failed";
       if (typeof j.result.blockTime !== "number") return "no block time";
@@ -758,6 +785,8 @@ export const outcome = ({ refusals = [], unread = [] }) => (refusals.some((x) =>
 // moneyCode() found in the change; sleep: how a wait is waited (a test records it)
 export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every = records, floor = FLOOR, money, sleep = wait } = {}) {
   const lines = () => ({ refusals: [], unread: [], read: [], notes: [], proven: [], gone: [] });
+  // each Solana host's first available block, read once in this run (solanaAbsent)
+  const history = new Map();
   // one tx's reads over the rounds: ask() reads the hosts that gave no answer yet, decide(last) settles the tx or leaves
   // it open for the next round
   const txJob = (path, tx, bytesOf) => {
@@ -782,8 +811,9 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
         // in the listed order; a 429 is waited out only while the host could add a second operator
         const rateWait = okOps().size < 2 && !okOps().has(operatorOf(tx.chain, url));
         const o = {};
-        const r = await readTx(fetchFn, url, tx, floor, sleep, rateWait, o);
-        answers.set(url, { url, r, result: o.result });
+        const slot = all().find((a) => Number.isSafeInteger(a.slot))?.slot;
+        const r = await readTx(fetchFn, url, { ...tx, slot, history }, floor, sleep, rateWait, o);
+        answers.set(url, { url, r, result: o.result, slot: o.slot });
       }
     };
     job.decide = async (last) => {

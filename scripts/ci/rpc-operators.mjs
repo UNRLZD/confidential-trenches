@@ -5,6 +5,10 @@
 //    Mainnet Beta: https://api.mainnet-beta.solana.com").
 //  - public.rpc.solanavibestation.com: Solana Vibe Station, "on hardware we run ourselves" (solanavibestation.com,
 //    "curl https://public.rpc.solanavibestation.com").
+//  - solana-rpc.publicnode.com: PublicNode (solana.publicnode.com, "Endpoint Link ... https://solana-rpc.publicnode.com",
+//    read 2026-11-21 at 21:16Z; its page says "Archive data available", but its getFirstAvailableBlock answered
+//    471,786,675, 20 Nov 15:25Z, at 21:12Z, so the money gate counts its null only where that block reaches the tx:
+//    card money-gate-solana-reads-past-one-stall).
 //  - mainnet.base.org: Base (docs.base.org/base-chain/quickstart/connecting-to-base, "RPC endpoint
 //    https://mainnet.base.org").
 //  - base.drpc.org: dRPC (drpc.org/chainlist/base-mainnet-rpc, "New RPC URL https://base.drpc.org").
@@ -25,7 +29,7 @@
 //    Testnet").
 /** chain -> host -> operator */
 export const RPC_OPERATORS = Object.freeze({
-  solana: Object.freeze({ "api.mainnet-beta.solana.com": "solana", "public.rpc.solanavibestation.com": "solanavibestation" }),
+  solana: Object.freeze({ "api.mainnet-beta.solana.com": "solana", "public.rpc.solanavibestation.com": "solanavibestation", "solana-rpc.publicnode.com": "publicnode" }),
   base: Object.freeze({ "mainnet.base.org": "base", "base.drpc.org": "drpc" }),
   robinhood: Object.freeze({ "rpc.mainnet.chain.robinhood.com": "robinhood", "robinhood-rpc.publicnode.com": "publicnode" }),
   "solana-devnet": Object.freeze({ "api.devnet.solana.com": "solana", "solana-devnet.api.onfinality.io": "onfinality" }),
