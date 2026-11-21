@@ -1200,11 +1200,16 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Pro
 /** ask, up to 3 more times FRESH_RETRY_MS, twice and three times that apart while an answer says the provider does not
  *  hold the block yet: a provider behind a load balancer can send a call to a node one block behind the one that gave
  *  the head ("block not found: canonical hash", base-rpc.publicnode.com, 2026-11-03 19:09Z; "Unknown state. First
- *  available …", robinhood.drpc.org, 20:30Z, and on 8 of one quote's batches 2026-11-04 06:52Z). */
+ *  available …", robinhood.drpc.org, 20:30Z, and on 8 of one quote's batches 2026-11-04 06:52Z).
+ *  The same rule as ask's for a throttle: while agreeing has another provider left (the gate's `spare`), a not-yet
+ *  answer, under a 200 or a 4xx, goes there at once; only the last provider left is asked again (card
+ *  evm-lag-answer-read-again: merge queue run 44936343596 timed warm Base quotes at p95 2,121 and 2,102 ms, a lagging
+ *  provider's 4xx not-yet answers asked again 0.25, 0.5 and 0.75 s on where they had moved on as failures before). */
 async function askAt(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Promise<readonly unknown[]> {
   for (let i = 0; ; i++) {
     const out = await ask(rpc, calls, gate);
     if (!out.some(notYet) || i === 3) return out;
+    if (gate?.spare?.() === true) throw new EvmQuoteError("rpc_error", "a provider does not hold the block yet");
     await new Promise((r) => setTimeout(r, FRESH_RETRY_MS * (i + 1)));
   }
 }

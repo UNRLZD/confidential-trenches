@@ -6306,12 +6306,13 @@ test("LG2 every other 4xx stays a failure: publicnode's 403 archive refusal, a n
   assert.equal(cancelled, true);
 });
 
-test("LG3 a quote whose provider answers its state reads HTTP 400 \"Unknown state\" once asks it again and reads its answer, as under a 200 (red at f02b75c41: the 400 refused, never asked again)", async () => {
+test("LG3 a quote whose last provider left answers its state reads HTTP 400 \"Unknown state\" once asks it again and reads its answer, as under a 200 (red at f02b75c41: the 400 refused, never asked again; with a provider left it moves on, LG5)", async () => {
   const run = async (status: number) => {
     const token = freshToken();
     const pools = [best(token)];
     const host = `lag${status}.lg3.test`;
-    const models: Record<string, EvmRpc> = { [host]: chain(pools, 0), [`a${status}.lg3.test`]: chain(pools, 0), [`b${status}.lg3.test`]: chain(pools, 0) };
+    // two providers: the lagging one is the last left, so it is asked again (askAt)
+    const models: Record<string, EvmRpc> = { [host]: chain(pools, 0), [`a${status}.lg3.test`]: chain(pools, 0) };
     const urls = Object.keys(models).map((h) => "https://" + h);
     let lagged = 0;
     let first = "";
@@ -6334,6 +6335,37 @@ test("LG3 a quote whose provider answers its state reads HTTP 400 \"Unknown stat
   const at200 = await run(200);
   assert.deepEqual(at200, { accepted: true, lagged: 1, askedAgain: true }, "the 200 answer, as askAt has read it since 2026-11-04");
   assert.deepEqual(await run(400), at200);
+});
+
+// card evm-lag-answer-read-again: merge queue run 44936343596 timed warm Base quotes at p95 2,121 ms (base-hook) and 2,102 ms
+// (base-partial-v4) against 194 and 465 ms in the same code's PR run: a lagging provider's not-yet answers, asked again 0.25,
+// 0.5 and 0.75 s on its own provider (askAt), held the quote about 1.5 s where another provider was left to ask
+test("LG5 a provider whose answers are not yet at the block, under a 200 or a 4xx, gives way at once to a provider left: the lagging batch is never posted again, so the quote waits none of the 1.5 s of re-asks (red at 4e6f453ef)", async () => {
+  for (const status of [200, 400]) {
+    const token = freshToken();
+    const pools = [best(token)];
+    const host = `lag${status}.lg5.test`;
+    const models: Record<string, EvmRpc> = { [host]: chain(pools, 0), [`a${status}.lg5.test`]: chain(pools, 0), [`b${status}.lg5.test`]: chain(pools, 0) };
+    const urls = Object.keys(models).map((h) => "https://" + h);
+    const posted = new Map<string, number>();
+    const f = (async (u: string, init: RequestInit) => {
+      const h = new URL(u).hostname;
+      const calls = JSON.parse(init.body as string) as { id: number; method: string; params: unknown[] }[];
+      if (h === host && calls.some((c) => c.method === "eth_call")) {
+        posted.set(init.body as string, (posted.get(init.body as string) ?? 0) + 1);
+        // every state read of the lagging provider: Base's "block not found" under a 200 (null), drpc's code 27 under a 400
+        return new Response(JSON.stringify(calls.map((c) => (status === 200 ? { jsonrpc: "2.0", id: c.id, result: null } : UNKNOWN_STATE(c.id)))), { status });
+      }
+      await pause(20);
+      const out = await models[h]!(calls.map((c) => ({ method: c.method, params: c.params })));
+      return new Response(JSON.stringify(out.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+    }) as unknown as typeof fetch;
+    const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(urls, f), NOW));
+    assert.equal((v as { accepted: boolean }).accepted, true, `${status}: quoted on the two that hold the block`);
+    assert.ok(posted.size > 0, `${status}: the lagging provider was asked`);
+    // the re-asks are the wait (0.25, 0.5 and 0.75 s on, askAt): none sent is none waited
+    assert.deepEqual([...posted.values()].filter((n) => n > 1), [], `${status}: no lagging batch posted again`);
+  }
 });
 
 test("LQ4 an answer for a block a provider does not hold yet is neither held nor timed: a fast not-yet answer never ranks a provider first", async () => {
