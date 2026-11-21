@@ -166,6 +166,54 @@ test("TAPHOLD4 a refusal is never served for a block it was not read at: read at
   assert.equal(n, m, `a tap at X asked ${n - m} quotes`);
 });
 
+// Review of 532641fa3: the serve rule (`reads = at ?? pre`) had no test of its own; `reads = pre` passed all 19. A
+// second try is asked at the first try's block A while the held head is already B: a refusal held for A is served to
+// it, and one held for B, stored by an overlapping tap, is never served to it.
+test("TAPSERVE a second try asked at A while the held head is B is served a refusal held for A, never one held for B", async () => {
+  // a tap whose held head is `heads[k]` at its k-th read of it, and whose quotes refuse at the block they are asked at
+  // (else that head), each naming `ref` as the kit's best route where given
+  const asks: { route: string; at: unknown }[] = [];
+  const tapOf = (heads: string[], ref: () => unknown = () => null, gate?: Promise<void>) => {
+    let k = 0;
+    let now = heads[0]!;
+    const held = () => (now = heads[Math.min(k++, heads.length - 1)]!);
+    const quote = async (r: EvmPoolBuyQuoteRequest) => {
+      asks.push({ route: JSON.stringify(r.route), at: (r as { at?: unknown }).at });
+      const e = new EvmQuoteError("no_quote", "x", ref() as never);
+      (e as { at: string | null }).at = (r as { at?: string }).at ?? now;
+      return Promise.reject(e);
+    };
+    return evmPoolBuyQuoteTap({ chain: "robinhood", token: TOKEN, amountIn: 10n ** 15n, slippageBps: 300 }, { quote, indexPools: () => onePool, held, ...(gate === undefined ? {} : { v3Tiers: async (_c: string, _t: string, fees: readonly number[]) => (await gate, fees.map(() => true)) }) });
+  };
+  // held for A: a tap at A refuses both routes there; the next reads A at its first ask and B at its second try,
+  // asked at A: both served, no quote
+  evmBuyTapReset();
+  await assert.rejects(tapOf([A]), (e) => e instanceof EvmBuyTapRefused);
+  assert.equal(asks.length, 2);
+  const v3 = asks[1]!.route;
+  await assert.rejects(tapOf([A, B]), (e) => e instanceof EvmBuyTapRefused);
+  assert.equal(asks.length, 2, `a second try at A was not served the refusal held for A: ${asks.length - 2} quotes asked`);
+  // held for B: the first tap's first try refuses at A, and while it waits for its second try (the tier read) an
+  // overlapping tap at B refuses the first route there and follows its reference, the second try's route, at B too
+  evmBuyTapReset();
+  asks.length = 0;
+  let open!: () => void;
+  const gate = new Promise<void>((go) => (open = go));
+  const z = tapOf([A, B], () => null, gate);
+  z.catch(() => {});
+  await new Promise((go) => setTimeout(go, 5));
+  assert.equal(asks.length, 1, "the first tap's first try was not asked");
+  const w = tapOf([B], () => ({ amountOut: 1n, route: JSON.parse(v3) }));
+  w.catch(() => {});
+  await new Promise((go) => setTimeout(go, 5));
+  assert.ok(asks.slice(1).some((a) => a.route === v3 && a.at === B), `the overlapping tap did not refuse the second try's route at B: ${JSON.stringify(asks)}`);
+  const n = asks.length;
+  open();
+  await assert.rejects(z, (e) => e instanceof EvmBuyTapRefused);
+  assert.ok(asks.slice(n).some((a) => a.route === v3 && a.at === A), `the second try at A was served the refusal held for B: ${JSON.stringify(asks.slice(n))}`);
+  await w.catch(() => {});
+});
+
 test("TAPHELD a refusal read at the held head is held for it; one read at another block (a follow's) is not, so the next tap asks again (card evm-cold-multihop-quote-inside-the-kpi)", async () => {
   const HEAD = "0x" + "ab".repeat(32);
   for (const [readAt, held] of [[HEAD, true], ["0x" + "cd".repeat(32), false], [null, true]] as const) {
@@ -183,6 +231,31 @@ test("TAPHELD a refusal read at the held head is held for it; one read at anothe
     await assert.rejects(go());
     assert.equal(n === first, held, `read at ${readAt}: ${first} then ${n} quotes`);
   }
+});
+
+test("TAPHELD2 a refusal that names its block (`at`) with no head held is held for that block: a tap whose held head is that block asks nothing (review of 532641fa3)", async () => {
+  const X = "0x" + "33".repeat(32);
+  evmBuyTapReset();
+  let n = 0;
+  const quote = async () => {
+    n++;
+    const e = new EvmQuoteError("no_quote", "x");
+    (e as { at: string | null }).at = X;
+    return Promise.reject(e);
+  };
+  let head: string | null = null;
+  const go = () => evmPoolBuyQuoteTap({ chain: "robinhood", token: TOKEN, amountIn: 10n ** 15n, slippageBps: 300 }, { quote, indexPools: () => onePool, held: () => head });
+  await assert.rejects(go(), (e) => e instanceof EvmBuyTapRefused);
+  const first = n;
+  assert.ok(first > 0);
+  assert.equal(first, 2);
+  // no head held: the first ask names no block, so it is asked again; the second try, asked at X, is served
+  await assert.rejects(go(), (e) => e instanceof EvmBuyTapRefused);
+  assert.equal(n, first + 1);
+  // the held head is X: every refusal read at X is served
+  head = X;
+  await assert.rejects(go(), (e) => e instanceof EvmBuyTapRefused);
+  assert.equal(n, first + 1, `a tap at X asked ${n - first - 1} quotes`);
 });
 
 test("card base-coin-quote-check-names-its-cause: a route refused for another reason than no route anywhere stays quote_check_failed", async () => {
@@ -269,7 +342,8 @@ test("card evm-warm-tap-ends-inside-two-seconds: HOOKR's native_first with no ro
   const next = await timed(hookr());
   assert.ok(named(next.e), String(next.e));
   assert.equal(asked.length, 4);
-  // no held block (no head held fresh): nothing is held
+  // no held block (no head held fresh) and a refusal that names none (no `at`): nothing is held. A kit refusal names the
+  // block its reads were taken at, and is held for it (TAPHELD2)
   evmBuyTapReset();
   const none = () => evmPoolBuyQuoteTap({ chain: "robinhood", token: HOOKR, amountIn: 980_000_000_000_000n, slippageBps: 300 }, { quote, indexPools: () => [native], held: () => null });
   await timed(none());
