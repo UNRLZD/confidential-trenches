@@ -2866,12 +2866,14 @@ const speedOf = (url: string) => {
   return s;
 };
 const timed = (url: string, rpc: EvmRpc): EvmRpc => {
-  const f: EvmRpc = async (calls) => {
+  const f: EvmRpc = async (calls, signal) => {
     const t = performance.now();
     const s = speedOf(url);
     s.out.push(t);
     try {
-      const out = await rpc(calls);
+      // the caller's cut ends the post itself (card evm-pace-holds-units-while-out): a scan request cut at its hold or
+      // the quote's bound gives its provider's units back then (pace.ts), never held to its own 10 s timeout
+      const out = await rpc(calls, signal);
       s.last = performance.now();
       // an answer that names a rate limit or a state the provider does not hold is held, never measured: such an error
       // comes back fast, and a provider past its state cut kept first by it failed every quote's reads (card
@@ -5979,13 +5981,15 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     const turn = evmPaceTake(url, calls, until, later);
     const give = typeof turn === "function" ? turn : await turn;
     let refused: BatchRefused;
+    // whether the provider answered the post (any status): one that did not gives its units back as sent (pace.ts)
+    let answered = false;
     try {
-      return await post(calls, until);
+      return await post(calls, until, () => void (answered = true));
     } catch (e) {
       if (!(e instanceof BatchRefused)) throw e;
       refused = e;
     } finally {
-      give();
+      give(answered);
     }
     // refused for its size: asked again as parts of at most half (or the maximum the refusal named), never a call more
     evmBatchRefused(url, calls.length, refused.said);
@@ -5998,13 +6002,14 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     RPC_TWIN.set(rpc, () => (twin ??= evmJsonRpc(url, fetchFn, maxBytes, timeoutMs, true)));
   }
   return rpc;
-  async function post(calls: readonly EvmRpcCall[], until?: AbortSignal): Promise<unknown[]> {
+  async function post(calls: readonly EvmRpcCall[], until?: AbortSignal, heard?: () => void): Promise<unknown[]> {
     const body = JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params })));
     // a request that never returns is a refusal once its time runs out, never a quote (and a buy button) that hangs
     let res: Response;
     try {
       const signal = until === undefined ? AbortSignal.timeout(timeoutMs) : AbortSignal.any([AbortSignal.timeout(timeoutMs), until]);
       res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal });
+      heard?.();
     } catch (e) {
       // fetch's own TypeError with no response: Node's ("fetch failed") names its connection error as its cause, a
       // browser's names none ("Failed to fetch" in Chrome, "Load failed" in Safari, "NetworkError when attempting to

@@ -62,6 +62,9 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
     const turn = evmPaceTake(href, [{ method }], stop, kind === "pass");
     const give = typeof turn === "function" ? turn : await turn;
     const sentIn = lane.gate.epoch();
+    // whether the provider answered (kit pace.ts: a read that ended with no answer, no connection, its time or the gate's
+    // abort, gives its units back as sent)
+    let answered = true;
     try {
       const r = await once(Math.max(1, Math.floor(end - performance.now())), method, params, stop);
       lane.answered(sentIn);
@@ -73,9 +76,10 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
       // which CORS refuses): the provider held for every EVM reader, as the kit's own transport holds it (quote.ts
       // evmJsonRpc; card robinhood-reads-draw-no-revert), so the kit's quotes ask it after the others meanwhile
       if (e instanceof SolanaRpcTransportError && e.fault === "network" && !stop.aborted) evmProviderHold(href);
+      if (stop.aborted || (e instanceof SolanaRpcTransportError && (e.fault === "network" || e.fault === "timeout"))) answered = false;
       throw e;
     } finally {
-      give();
+      give(answered);
     }
   };
   // asked again once: after the host's pause (a throttle) or the retry's backoff (any other fault), a background read
