@@ -1153,9 +1153,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const keysGated = (c: RpcChain, url: string): boolean => EVM_CHAINS.has(c) && limits[c].total > keysTotals[c] && upstreams[c].keyed.some((k) => k.url === url);
   // card helper-base-logs-page: the most pages one paged eth_getLogs may take on `c` (LOGS_PAGES_MAX, never past the
   // chain's 10 s total, so a read at the cap always fits a window), and the allowance callers' paged reads draw on
-  // (logsKey): the chain's total, each caller this many pages a window, never the caller's own share
-  const pagesMaxOf = (c: RpcChain): number => Math.min(LOGS_PAGES_MAX, limits[c].total);
-  const logsLimits: Record<string, BudgetLimits & { perMethod?: number }> = Object.fromEntries(RPC_CHAINS.map((ch) => [logsKey(ch), { total: limits[ch].total, perClient: pagesMaxOf(ch), reserve: 0, userRoom: userRoomOf(limits[ch].total) }]));
+  // (logsKey): the chain's total, each caller this many pages a window, never the caller's own share. Card
+  // helper-base-trade-reads-429: the keyed URLs' part of it (keysTotals), the only URLs a page goes to (logsSpanByUrl)
+  const pagesMaxOf = (c: RpcChain): number => Math.min(LOGS_PAGES_MAX, keysTotals[c]);
+  const logsLimits: Record<string, BudgetLimits & { perMethod?: number }> = Object.fromEntries(RPC_CHAINS.map((ch) => [logsKey(ch), { total: keysTotals[ch], perClient: pagesMaxOf(ch), reserve: 0, userRoom: userRoomOf(keysTotals[ch]) }]));
   // each keyed URL's eth_getLogs span (KEYED_LOGS_SPAN); none: no known span, asked any range
   const logsSpanByUrl = new Map<string, bigint>();
   for (const ch of RPC_CHAINS) for (const k of upstreams[ch].keyed) {
@@ -2129,7 +2130,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         }
         // card helper-base-trade-reads-429: a keyed URL takes the read only while the keys' part of the total has room;
         // else the walk goes on to the public spares (or, a keyed-only read, waits as for a held one)
-        if (!keysDrawn && keysGated(c, url)) {
+        // (a read that drew elsewhere, key null: a paged read's page on its logs allowance, sized to the keys alone)
+        if (key !== null && !keysDrawn && keysGated(c, url)) {
           const kw = budget.takeEach([[keysKey(c), methods.length]], client, false, reserved);
           if (kw > 0) {
             soonestMs = Math.min(soonestMs, kw * 1000);

@@ -265,3 +265,32 @@ test(`a caller's paged reads draw ${PAGES_MAX} pages a window of their own: a se
   const other = await read(r, JSON.stringify({ jsonrpc: "2.0", id: 73, method: "eth_blockNumber", params: [] }));
   assert.equal(other.status, 200, "the caller's own share untouched by the pages");
 });
+
+test("card helper-base-trade-reads-429: on the deployed lists (the pinned public list too), callers' reads that spend the keys' part of Base's total never refuse a paged read's pages, which draw their own logs allowance as before", async () => {
+  const { SWAP_RPCS } = await import("../data/evm/swaps.ts");
+  const { PROVIDER_PACE, providerHolds } = await import("../limits/limits.ts");
+  const { keyedPaces } = rpcModule as unknown as { keyedPaces: (e: Record<string, string>) => Record<string, unknown> };
+  const env = { BASE_RPC_URL_QUICKNODE: QN, BASE_RPC_URL_DRPC_1: DR[0]!, BASE_RPC_URL_DRPC_2: DR[1]!, BASE_RPC_URL_DRPC_3: DR[2]! };
+  const clock = testClock();
+  const p = providers(BASE_SPANS);
+  const holds = providerHolds(clock.now, { ...PROVIDER_PACE, ...keyedPaces(env) } as never);
+  const r = createRpc(env, { ...clock, fetch: p.fetch as never, log: () => undefined, holds, pinned: SWAP_RPCS } as never);
+  // three other callers, 15 plain reads each over 6 s: 45, past the keys' 39 (the rest to the public list)
+  const t0 = clock.now();
+  const plain = await Promise.all([1, 2, 3].map((n) => (async () => {
+    let s = 0;
+    for (let i = 0; i < 15; i++) {
+      const left = t0 + i * 400 - clock.now();
+      if (left > 0) await clock.sleep(left);
+      if ((await r.handle("base", "application/json", JSON.stringify({ jsonrpc: "2.0", id: n * 100 + i, method: "eth_blockNumber", params: [] }), `198.51.100.${n}`)).status === 200) s++;
+    }
+    return s;
+  })()));
+  assert.deepEqual(plain, [15, 15, 15]);
+  // a paged read of 3 pages on the keyed-only route, in the same window
+  const from = FINAL - 30_000;
+  const a = await read(r, logsBody("pg", from, from + 299));
+  assert.equal(a.status, 200, `answered: ${a.body.slice(0, 200)}`);
+  assert.deepEqual((JSON.parse(a.body) as { result: Log[] }).result, logsIn(from, from + 299));
+  assert.ok(clock.now() - t0 < 10_000, `inside one 10 s window (${clock.now() - t0} ms)`);
+});
