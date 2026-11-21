@@ -1174,5 +1174,1265 @@
     }
    }
   ]
+ },
+ "good_keyless": {
+  "check": "solana-marks-route-answers",
+  "base": "http://127.0.0.1:18511",
+  "at": "2026-11-20T19:03:42.998Z",
+  "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+  "reads": [
+   {
+    "size": 13,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "e8ea676e381165de1877dd889f0e9eb47ba79d2c",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=291;desc=\"SOLANA_MARKS_FOUNDATION\""
+    },
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 471847620,
+       "apiVersion": "4.3.0-beta.2"
+      },
+      "value": [
+       {
+        "pubkey": "2poj1cYev6MCK8URBERx2q1LnsCBti7rZoPJbepRCpxJ",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "4q4gJ2LxSWe3roaXRo5Huq6yLN1R7jTX1vP9QuCMyrwX",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "51puAe2zfHbhwu6CcBYfC6JjdrNhqoXjRNbxPZxeFZwo",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "6PyXvU5hZzHG72gcZietzr73Lq5E6vxTfNNqNAdAGCfc",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "7mVjap1aCvMe5BdKkKdEao4biu1n8wuLKerf5152xHuo",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "8RhWX5yPkPQF1tDmDjTzxWXRzR1E5zXWGdpAi7Q6RFCR",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "8XEKQZzWTUDYkfRGSVBW1RyMfjX2sZvuVRkMDti7Xv3s",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "9CXQY74YjN4y9yzpyowtwHhyPCkQ3fnZf5RLPymP55Lg",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "AV7YG7c2F7cnAnJTCPJZGF7Tg78hmvm15yhL1fpLpgBb",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "AwpeNBaQMKapN834yuKcVvSbyxNsLrNEcCFwxX6uYCqU",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "DSw8PN3zfgEstHcR1xq1n7NbyfnhZKdivPsxwLFxNzDW",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "DnpysENMD2KyRbHicdw9c73Qr9rc8ouTP6Yfy99DPckd",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "HwUfBewvAzbguQJZGagRGDSe83yQUtTnB9LZZ86SRkr9",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "J8MVuH46DDHdrs19a6S2hpErntUY73C7wWog5GPaNNQG",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "size": 17,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "e8ea676e381165de1877dd889f0e9eb47ba79d2c",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=294;desc=\"SOLANA_MARKS_FOUNDATION\""
+    },
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 471847620,
+       "apiVersion": "4.3.0-beta.2"
+      },
+      "value": [
+       {
+        "pubkey": "LEtAFNkdb8iNejugBDjnkkpKST5SbmZx5H1hAZE7c92",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "2Z51Vp72KU5VkYo4nnqEHmxff2HupM6Rk1RqxMGNCxrt",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "3C9sZYHZu7qvmnXRBEcZu4DFxj5uZHnL31bUPmMf1ErQ",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "3phDJRjzrSaMbQiuBRnPZpeptXM6pPo2vVwXFvJZ5PWy",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "4DE36zrGVH4K432iENnDBNEEemNeZGt59pHCqbgYxLXa",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "53qXZL6xeJ4XcsRgYjsVhhh1FUPVs5JGka6N3nnRkB7r",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "6rbtcNMoji3N8cyQYrLo5MPMRJoND2vXB3X7HvMWP34B",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "7GFKqmpBC3RviXAUwXRhz1c9k3iu1bMzoAMmhvZPyvjB",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "7GnL5YmxLM9YXB3UAuaUFxVjvW47GNpz9fVWQ8ExkPaS",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "7oyiY12WSBbDfidgsPnJoCSgAxfZ7Ypoyk6bPaawKBxo",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "8ZxUmXp8yT3Zb6WpQnu6nzzkspkTk1gnNkTTo3CrkuTQ",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "8rcynFp4kSgnHf4KKcPXd4dTcsxWLnqMp9xgPGJ2G83E",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "9Djak1prtndgstyVBFbzPfUQPNpEFHCrVDrFSHnSqtoW",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "9rQ3uDMXbZpXB5XLV1g13zkJqYaqQTYw4a7QG7ex3hLi",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "9xYfwzb8LwpHxWCa8ETSid2jJYScBxwhKuDBEgqgENoA",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "B3DXFHBR6HSHR57dYYyTfQXmJkyj9786ndAnpE6wjYKE",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "C2UC192MmYATdEpra4AtYqYapMqTNGs6htpfQFowjDZh",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "DKcMDX1owNwSdEugA4htjj5nDJnPrGehKFuKU3S9e2iF",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "EMt1bsKH8FoSYo7QEaXjZux28r3Y1EpnXz8sxzzRSKVV",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "EhsNUZv7oBCQo67onCKx7uxLmz7caTzZcembZxR5wWFX",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "FsnkhLRX9NfYSM4iStceQoah1WyaZde2WPBTswJ19cea",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "GJ61ojoB7aDLGWHYCFHVpJN681XLgxPQ2QVfFwShBbvx",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "GeLpQ4Lphv7qSmkYuWZi8exi8yU9Uy63uEaQjpUbrBrc",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "GxhcuUvQ7W3tdoYSbQ3KMBgFGmqTVqGTBjaTFEwafK19",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "GyTUGdPFyj1X53uQNBtuw4QXx7LQfbYtCLjvWM8WY7B2",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "H1H1piUojkPLFDdTDLudhPaei3t1FqaemF2GAoxvgPop",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "size": 13,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "e8ea676e381165de1877dd889f0e9eb47ba79d2c",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=740;desc=\"SOLANA_MARKS_FOUNDATION\""
+    },
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 471847620,
+       "apiVersion": "4.3.0-beta.2"
+      },
+      "value": [
+       {
+        "pubkey": "2poj1cYev6MCK8URBERx2q1LnsCBti7rZoPJbepRCpxJ",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "4q4gJ2LxSWe3roaXRo5Huq6yLN1R7jTX1vP9QuCMyrwX",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "51puAe2zfHbhwu6CcBYfC6JjdrNhqoXjRNbxPZxeFZwo",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "6PyXvU5hZzHG72gcZietzr73Lq5E6vxTfNNqNAdAGCfc",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "7mVjap1aCvMe5BdKkKdEao4biu1n8wuLKerf5152xHuo",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "8RhWX5yPkPQF1tDmDjTzxWXRzR1E5zXWGdpAi7Q6RFCR",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "8XEKQZzWTUDYkfRGSVBW1RyMfjX2sZvuVRkMDti7Xv3s",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "9CXQY74YjN4y9yzpyowtwHhyPCkQ3fnZf5RLPymP55Lg",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "AV7YG7c2F7cnAnJTCPJZGF7Tg78hmvm15yhL1fpLpgBb",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "AwpeNBaQMKapN834yuKcVvSbyxNsLrNEcCFwxX6uYCqU",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "DSw8PN3zfgEstHcR1xq1n7NbyfnhZKdivPsxwLFxNzDW",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "DnpysENMD2KyRbHicdw9c73Qr9rc8ouTP6Yfy99DPckd",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "HwUfBewvAzbguQJZGagRGDSe83yQUtTnB9LZZ86SRkr9",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       },
+       {
+        "pubkey": "J8MVuH46DDHdrs19a6S2hpErntUY73C7wWog5GPaNNQG",
+        "account": {
+         "lamports": 716280,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 13
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "size": 17,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "e8ea676e381165de1877dd889f0e9eb47ba79d2c",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=709;desc=\"SOLANA_MARKS_FOUNDATION\""
+    },
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 471847620,
+       "apiVersion": "4.3.0-beta.2"
+      },
+      "value": [
+       {
+        "pubkey": "LEtAFNkdb8iNejugBDjnkkpKST5SbmZx5H1hAZE7c92",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "2Z51Vp72KU5VkYo4nnqEHmxff2HupM6Rk1RqxMGNCxrt",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "3C9sZYHZu7qvmnXRBEcZu4DFxj5uZHnL31bUPmMf1ErQ",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "3phDJRjzrSaMbQiuBRnPZpeptXM6pPo2vVwXFvJZ5PWy",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "4DE36zrGVH4K432iENnDBNEEemNeZGt59pHCqbgYxLXa",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "53qXZL6xeJ4XcsRgYjsVhhh1FUPVs5JGka6N3nnRkB7r",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "6rbtcNMoji3N8cyQYrLo5MPMRJoND2vXB3X7HvMWP34B",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "7GFKqmpBC3RviXAUwXRhz1c9k3iu1bMzoAMmhvZPyvjB",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "7GnL5YmxLM9YXB3UAuaUFxVjvW47GNpz9fVWQ8ExkPaS",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "7oyiY12WSBbDfidgsPnJoCSgAxfZ7Ypoyk6bPaawKBxo",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "8ZxUmXp8yT3Zb6WpQnu6nzzkspkTk1gnNkTTo3CrkuTQ",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "8rcynFp4kSgnHf4KKcPXd4dTcsxWLnqMp9xgPGJ2G83E",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "9Djak1prtndgstyVBFbzPfUQPNpEFHCrVDrFSHnSqtoW",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "9rQ3uDMXbZpXB5XLV1g13zkJqYaqQTYw4a7QG7ex3hLi",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "9xYfwzb8LwpHxWCa8ETSid2jJYScBxwhKuDBEgqgENoA",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "B3DXFHBR6HSHR57dYYyTfQXmJkyj9786ndAnpE6wjYKE",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "C2UC192MmYATdEpra4AtYqYapMqTNGs6htpfQFowjDZh",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "DKcMDX1owNwSdEugA4htjj5nDJnPrGehKFuKU3S9e2iF",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "EMt1bsKH8FoSYo7QEaXjZux28r3Y1EpnXz8sxzzRSKVV",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "EhsNUZv7oBCQo67onCKx7uxLmz7caTzZcembZxR5wWFX",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "FsnkhLRX9NfYSM4iStceQoah1WyaZde2WPBTswJ19cea",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "GJ61ojoB7aDLGWHYCFHVpJN681XLgxPQ2QVfFwShBbvx",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "GeLpQ4Lphv7qSmkYuWZi8exi8yU9Uy63uEaQjpUbrBrc",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "GxhcuUvQ7W3tdoYSbQ3KMBgFGmqTVqGTBjaTFEwafK19",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "GyTUGdPFyj1X53uQNBtuw4QXx7LQfbYtCLjvWM8WY7B2",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       },
+       {
+        "pubkey": "H1H1piUojkPLFDdTDLudhPaei3t1FqaemF2GAoxvgPop",
+        "account": {
+         "lamports": 736600,
+         "data": [
+          "",
+          "base64"
+         ],
+         "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         "executable": false,
+         "rentEpoch": 18446744073709552000,
+         "space": 17
+        }
+       }
+      ]
+     }
+    }
+   }
+  ]
+ },
+ "bad_day_486d732": {
+  "check": "solana-marks-route-answers",
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-20T18:59:56.224Z",
+  "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+  "reads": [
+   {
+    "size": 13,
+    "status": 503,
+    "headers": {
+     "x-helper-commit": "486d7326275594abf2342880d57c10f49ac2ea6e",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "answer": {
+     "error": {
+      "code": "upstream"
+     }
+    }
+   },
+   {
+    "size": 17,
+    "status": 503,
+    "headers": {
+     "x-helper-commit": "486d7326275594abf2342880d57c10f49ac2ea6e",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "answer": {
+     "error": {
+      "code": "upstream"
+     }
+    }
+   },
+   {
+    "size": 13,
+    "status": 503,
+    "headers": {
+     "x-helper-commit": "486d7326275594abf2342880d57c10f49ac2ea6e",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "answer": {
+     "error": {
+      "code": "upstream"
+     }
+    }
+   },
+   {
+    "size": 17,
+    "status": 503,
+    "headers": {
+     "x-helper-commit": "486d7326275594abf2342880d57c10f49ac2ea6e",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "answer": {
+     "error": {
+      "code": "upstream"
+     }
+    }
+   }
+  ]
  }
 }

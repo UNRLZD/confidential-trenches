@@ -43,7 +43,9 @@ export const A_NAME = "SOLANA_RPC_URL";
 export const A_NAMES = [A_NAME, "SOLANA_TRADES_RPC_URL", "SOLANA_HOLDERS_RPC_URL", "SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC_1", "SOLANA_RPC_URL_DRPC_2", "SOLANA_RPC_URL_DRPC_3"];
 /** The company a provider's name says: QuickNode's and dRPC's names theirs (dRPC's three keys one company), a slot its own name. */
 export const companyOfName = (name) => (name === "SOLANA_RPC_URL_QUICKNODE" ? "quicknode" : /^SOLANA_RPC_URL_DRPC_[1-9]$/.test(name) ? "drpc" : name);
-export const B_NAMES = ["SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC_1", "SOLANA_RPC_URL_DRPC_2", "SOLANA_RPC_URL_DRPC_3"];
+/** Route B's names: its keyed ones, then its keyless providers' (card solana-marks-route-answers: rpc.ts MARKS_KEYLESS,
+ *  each its own company by name, as a slot is). */
+export const B_NAMES = ["SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC_1", "SOLANA_RPC_URL_DRPC_2", "SOLANA_RPC_URL_DRPC_3", "SOLANA_MARKS_FOUNDATION", "SOLANA_MARKS_SVS"];
 const SHA = /^[0-9a-f]{40}$/;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const RECORD = "contracts/pool-solana/deployments/mainnet.json";
