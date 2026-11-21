@@ -85,6 +85,11 @@ export type EvmPoolIndexConfig = {
   /** The pieces each reader asks a span in (default one each), from its own getLogs cost: a span counts only once both
    *  readers answered all of it, every piece's last block with the same hash on both. */
   readonly parts?: readonly [number, number];
+  /** The most blocks a reader answers a getLogs over where a topic position holds more than one value (a coin's markets,
+   *  evmPoolCoinSync): rpc.mainnet.chain.robinhood.com answers such a filter over 500,000 blocks with -32602 "only
+   *  100000 are allowed for this request; ... or send one value per topic position" (21 Nov 15:27Z; the venue's scan
+   *  `orSpan`). Such a read asks that reader's pieces at most this long. None: no such bound. */
+  readonly orSpan?: readonly [number | undefined, number | undefined];
   /** The most calls a reader takes in one batch (the helper's HELPER_RPC_BATCH_MAX where it reads): the state reads
    *  (F5) are asked in batches of at most this many. None: INDEX_STATE_BATCH. */
   readonly batchMax?: number;
@@ -330,6 +335,7 @@ async function syncOf(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig, aske
   const perBatch = pair(c.perBatch).map(count1) as [number, number];
   const parallel = pair(c.parallel).map(count1) as [number, number];
   const parts = (c.parts ?? [1, 1]).map(count1) as [number, number];
+  const anyOr = filters.some((f) => f.some(Array.isArray));
 
   // a piece's calls: its logs (one getLogs a filter), then each piece end inside it (its own last block among them), all
   // in one batch (F4a)
@@ -431,8 +437,10 @@ async function syncOf(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig, aske
   const put = (j: Job, front = false) => {
     if (!keep(j)) return void waiting.push(j);
     open++;
-    const ends = [...new Set(([0, 1] as const).flatMap((r) => piecesOf(j.a, j.b, parts[r]).map(([, e]) => e)))].sort((u, v) => u - v);
-    const both = ([0, 1] as const).map((r) => piecesOf(j.a, j.b, parts[r]).map(([a, b]): Piece => ({ j, a, b, at: ends.filter((e) => e >= a && e <= b), ans: null, tries: 0, errs: 0, alone: false }))) as [Piece[], Piece[]];
+    // a reader's pieces: its parts, more where a filter's OR takes it past its orSpan
+    const k = (r: 0 | 1) => Math.max(parts[r], anyOr && count1(c.orSpan?.[r]) > 1 ? Math.ceil((j.b - j.a + 1) / count1(c.orSpan?.[r])) : 1);
+    const ends = [...new Set(([0, 1] as const).flatMap((r) => piecesOf(j.a, j.b, k(r)).map(([, e]) => e)))].sort((u, v) => u - v);
+    const both = ([0, 1] as const).map((r) => piecesOf(j.a, j.b, k(r)).map(([a, b]): Piece => ({ j, a, b, at: ends.filter((e) => e >= a && e <= b), ans: null, tries: 0, errs: 0, alone: false }))) as [Piece[], Piece[]];
     piecesBy.set(j, both);
     for (const r of [0, 1] as const) if (front) queues[r].unshift(...both[r]);
       else queues[r].push(...both[r]);
@@ -663,6 +671,8 @@ const NATIVE = "0x0000000000000000000000000000000000000000";
 /** The most currencies one getLogs filter names, as the quote's own scan (quote.ts SCAN_OR); ZORA's 339 in one list
  *  answered on both Base readers (21 Nov 15:00Z), more are asked as more filters. */
 export const INDEX_OR = 256;
+/** The most Xs asked one value a position where a reader bounds an OR's range (EvmPoolIndexConfig.orSpan). */
+export const INDEX_ONE_X = 2;
 const topic = (a: string) => "0x" + a.slice(2).padStart(64, "0");
 
 /** `token`'s read from `prev` (the stored index, or none) to the readers' N: see the file's head. Refuses as the whole
@@ -678,8 +688,14 @@ export async function evmPoolCoinSync(prev: EvmPoolIndexData | null, coin: { rea
   // coin, WETH or an X, currency1 WETH or an X, whose few other pools (an X with an X, the native coin with WETH) are no
   // log of the read (`want`). Each filter is a getLogs on every range, and base-rpc.publicnode.com weighs a getLogs at 20
   // of its 2,500 (pace.ts EVM_PACE), so 3 a range with Xs, not 4
+  // Where a reader bounds an OR's range (`orSpan`), up to INDEX_ONE_X Xs are asked one value a position instead, two
+  // filters each (the native coin's market, and WETH's on its side of X), so their pieces keep the reader's own span
   const filtersOf = (xs: readonly string[], withToken: boolean): unknown[][] => {
     const out: unknown[][] = withToken ? [[INITIALIZE, null, topic(t)], [INITIALIZE, null, null, topic(t)]] : [];
+    if (c.orSpan !== undefined && xs.length <= INDEX_ONE_X) {
+      for (const x of xs) out.push([INITIALIZE, null, topic(NATIVE), topic(x)], BigInt(x) > BigInt(weth) ? [INITIALIZE, null, topic(weth), topic(x)] : [INITIALIZE, null, topic(x), topic(weth)]);
+      return out;
+    }
     for (let i = 0; i < xs.length; i += INDEX_OR) {
       const part = xs.slice(i, i + INDEX_OR).map(topic);
       out.push([INITIALIZE, null, [topic(NATIVE), topic(weth), ...part], [topic(weth), ...part]]);

@@ -54,6 +54,7 @@ const COIN = "COIN a coin's read finds every pool of the coin and of its Xs' mar
 const COIN_X = "COIN the Xs the stored index holds are asked beside the coin";
 const COIN_PIN = "COIN a block N the second read finds on another fork";
 const COIN_WANT = "COIN a reader that ignores the filter";
+const ORSPAN = "ORSPAN a reader that bounds an OR's range";
 
 /** [find, replace, test]: each a rule removed. */
 export const MUTANTS = [
@@ -165,6 +166,11 @@ export const MUTANTS = [
   ["const pinFirst = jobs.length > 0 && asked.pinAt === undefined;", "const pinFirst = jobs.length > 0;", COIN_X],
   ["if (j.b === n && asked.pinAt !== undefined && x.hash !== asked.pinAt.hash) return refuse(", "if (false) return refuse(", COIN_PIN],
   ["if (f === null || !asked.want(f.p.key)) continue;", "if (f === null) continue;", COIN_WANT],
+  // an OR asked past a reader's orSpan; up to two Xs asked as an OR, or more as single values
+  ["anyOr && count1(c.orSpan?.[r]) > 1 ? Math.ceil((j.b - j.a + 1) / count1(c.orSpan?.[r])) : 1", "1", ORSPAN],
+  ["if (c.orSpan !== undefined && xs.length <= INDEX_ONE_X) {", "if (false) {", ORSPAN],
+  ["if (c.orSpan !== undefined && xs.length <= INDEX_ONE_X) {", "if (c.orSpan !== undefined) {", ORSPAN],
+  ["BigInt(x) > BigInt(weth) ? [INITIALIZE, null, topic(weth), topic(x)] : [INITIALIZE, null, topic(x), topic(weth)]", "[INITIALIZE, null, topic(weth), topic(x)]", ORSPAN],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([find, , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);

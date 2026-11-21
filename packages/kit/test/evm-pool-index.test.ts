@@ -80,6 +80,9 @@ type Reader = {
   extraLogs?: unknown[];
   /** every Initialize log of the range, its filter's topics ignored */
   ignoresTopics?: boolean;
+  /** a getLogs with a topic position of more than one value over more than this many blocks is answered -32602, as
+   *  rpc.mainnet.chain.robinhood.com answers one over 100,000 (2026-11-21) */
+  orMaxRange?: number;
   /** the receipts answered with an error */
   receiptError?: boolean;
   /** pools this reader's receipts read, where they are not its logs' (default: `pools`) */
@@ -132,6 +135,7 @@ function reader(r: Reader): EvmRpc {
         }
         // the filter's topics, as a node applies them: null any, a word that word, a list any of it
         const ts = (r.ignoresTopics ? [] : ((c.params[0] as { topics?: unknown[] }).topics ?? [])) as (string | string[] | null)[];
+        if (r.orMaxRange !== undefined && ts.some(Array.isArray) && b - a + 1 > r.orMaxRange) return { error: { code: -32602, message: `query spans ${b - a + 1} blocks, but only ${r.orMaxRange} are allowed for this request; narrow the block range, or send one value per topic position` } };
         const fits = (l: { topics: string[] }) => ts.every((x, k) => x === null || (Array.isArray(x) ? x.includes(l.topics[k]!) : x === l.topics[k]));
         const out = { result: [...r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf).filter(fits), ...(r.extraLogs ?? [])] };
         if (r.moves !== undefined) (r.head += r.moves), delete r.moves;
@@ -1169,4 +1173,30 @@ test("COIN a reader that ignores the filter and answers every Initialize log rea
   assert.equal(r.error, null);
   assert.equal(r.coversThrough, H1);
   assert.deepEqual(ids(r.pools), new Set([...ch.before, ...ch.gap].map((p) => evmPoolIdOf(p.key))));
+});
+
+test("ORSPAN a reader that bounds an OR's range is asked its pieces within it, and up to two Xs are asked one value a position", async () => {
+  const ch = coinChain();
+  const X3 = "0x0000000000000000000000000000000000000200";
+  const X4 = "0x0000000000000000000000000000000000000300";
+  // three Xs the stored index holds (X1, X3, X4): one OR of them, in pieces of at most 4,000 blocks on the bounded reader
+  const more = [...ch.all, { key: pk(X3, T), block: H0 - 45_000 }, { key: pk(X4, T), block: H0 - 44_000 }, { key: pk(X3, WETH), block: H0 + 7_000 }];
+  const prev = await storedAt(more);
+  const a: Reader = { head: H1, pools: more, calls: [] };
+  const b: Reader = { head: H1, pools: more, calls: [], orMaxRange: 4_000 };
+  const r = await coinSync(prev, { token: T, weth: WETH }, cfgOf(a, b, { orSpan: [undefined, 4_000] }));
+  assert.equal(r.error, null);
+  assert.equal(r.coversThrough, H1);
+  assert.ok(ids(r.pools).has(evmPoolIdOf(pk(X3, WETH))));
+  const orOver = (rd: Reader, n: number) => rd.calls.flat().filter((c) => c.method === "eth_getLogs" && (c.params[0] as { topics: unknown[] }).topics.some(Array.isArray) && Number((c.params[0] as { toBlock: string }).toBlock) - Number((c.params[0] as { fromBlock: string }).fromBlock) + 1 > n).length;
+  assert.equal(orOver(b, 4_000), 0, "an OR past the bounded reader's range");
+  assert.ok(orOver(a, 4_000) > 0, "the other reader keeps its own span");
+  // one X (the coin chain's X1, then X2): no OR asked at all, each piece the reader's own span
+  const prev1 = await storedAt(ch.all);
+  const b1: Reader = { head: H1, pools: ch.all, calls: [], orMaxRange: 4_000 };
+  const r1 = await coinSync(prev1, { token: T, weth: WETH }, cfgOf({ head: H1, pools: ch.all, calls: [] }, b1, { orSpan: [undefined, 4_000] }));
+  assert.equal(r1.coversThrough, H1);
+  assert.deepEqual(ids(r1.pools), new Set([...ch.before, ...ch.gap].map((p) => evmPoolIdOf(p.key))));
+  assert.equal(b1.calls.flat().filter((c) => c.method === "eth_getLogs" && (c.params[0] as { topics: unknown[] }).topics.some(Array.isArray)).length, 0);
+  assert.ok(b1.calls.flat().some((c) => c.method === "eth_getLogs" && Number((c.params[0] as { toBlock: string }).toBlock) - Number((c.params[0] as { fromBlock: string }).fromBlock) + 1 > 4_000));
 });
