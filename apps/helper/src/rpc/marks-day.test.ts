@@ -51,27 +51,28 @@ test("the trade walks spend quicknode-solana's day as far as they may, and the m
   const a = await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9");
   assert.equal(a.status, 200, `route B: ${a.status} ${a.body}`);
   assert.deepEqual(sent, [QN]);
-  // callers draw the day's last part the walks left them, down to the probe's share, and no further
-  let callers = 1;
+  // callers draw the day's last part the walks left them, down to the probe's share, and no further: past it every scan
+  // is still answered, by route B's keyless providers (card solana-marks-route-answers, reopened)
   for (let i = 0; i < 100; i++) {
     c.t.v += 1_000;
-    if ((await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9")).status === 200) callers++;
+    assert.equal((await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9")).status, 200);
   }
+  const callers = sent.filter((u) => u === QN).length;
   assert.equal(walks + callers, 99, `walks ${walks} + callers ${callers}: every call a caller may reach, never the probe's`);
 });
 
-test("a day spent to its end by callers is the 503 it was, and says why in the refusal log", async () => {
+test("a day spent to its end by callers sends QuickNode nothing more, and the scans go on being answered past it", async () => {
   const env = { SOLANA_RPC_URL: A, SOLANA_RPC_URL_QUICKNODE: QN, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM, RPC_DAY_QUICKNODE: "300" };
   const c = clock();
-  const { f } = fakeFetch();
+  const { sent, f } = fakeFetch();
   const r = createRpc(env, { fetch: f as never, holds: providerHolds(c.now, keyedPaces(env)), now: c.now, sleep: c.sleep, log: () => undefined });
-  let last: { status: number; why?: string } = { status: 200 };
   for (let i = 0; i < 12; i++) {
     c.t.v += 1_000;
-    last = await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9");
+    assert.equal((await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9")).status, 200);
   }
-  assert.equal(last.status, 503);
-  assert.equal(last.why, "solana-marks every provider past its day");
+  // 300 credits at 30 a call: 10 calls, the probe's share a whole call short of one (none kept)
+  assert.equal(sent.filter((u) => u === QN).length, 10);
+  assert.deepEqual(sent.slice(10), ["https://api.mainnet-beta.solana.com", "https://api.mainnet-beta.solana.com"]);
 });
 
 test("ruled out: Base's background reads on a dRPC key hold its pace, and a mark scan on that key is still served", async () => {
@@ -87,4 +88,54 @@ test("ruled out: Base's background reads on a dRPC key hold its pace, and a mark
   const a = await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9");
   assert.equal(a.status, 200, `route B: ${a.status} ${a.body}`);
   assert.deepEqual(sent, [DRPC]);
+});
+
+// card solana-marks-route-answers, reopened: live 20 Nov 18:45Z (helper 486d73262, run 44789835818) route B answered
+// every scan 503 at 0 ms again: the box's day files summed quicknode-solana's day to 321,150 of the 319,370 a caller may
+// reach (232,410 of it by a helper whose plain reads fell onto QuickNode while SOLANA_RPC_URL's plan was spent), while
+// QuickNode itself answered the same scan 200. Two keyless companies answered the restore's exact scan from the box then
+// (api.mainnet-beta.solana.com and public.rpc.solanavibestation.com, 14 and 26 accounts, as QuickNode and Helius), so
+// route B walks on to them (rpc.ts MARKS_KEYLESS), each off route A's company as its keyed names are.
+const FOUNDATION = "https://api.mainnet-beta.solana.com";
+const SVS = "https://public.rpc.solanavibestation.com";
+const timingName = (t: string[] | undefined) => /rpc;[^,]*desc="([^"]+)"/.exec((t ?? []).join(", "))?.[1];
+
+test("QuickNode's day spent by callers: route B's next scan is answered by a keyless company off route A's, named (red at e8ea676e3: 503 at 0 ms)", async () => {
+  const env = { SOLANA_RPC_URL: A, SOLANA_RPC_URL_QUICKNODE: QN, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM, RPC_DAY_QUICKNODE: "300" };
+  const c = clock();
+  const { sent, f } = fakeFetch();
+  const r = createRpc(env, { fetch: f as never, holds: providerHolds(c.now, keyedPaces(env)), now: c.now, sleep: c.sleep, log: () => undefined });
+  for (let i = 0; i < 12; i++) {
+    c.t.v += 1_000;
+    await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9");
+  }
+  sent.length = 0;
+  c.t.v += 1_000;
+  const a = await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9");
+  assert.equal(a.status, 200, `route B: ${a.status} ${a.body}`);
+  assert.deepEqual(sent, [FOUNDATION], "QuickNode's day out: no send to it, the Solana Foundation's keyless endpoint asked");
+  assert.equal(timingName(a.timing), "SOLANA_MARKS_FOUNDATION");
+});
+
+test("route B's keyless providers walk in turn: a 429 or a JSON-RPC error from one asks the next; all refusing is 503, never route A", async () => {
+  const env = { SOLANA_RPC_URL: A, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM };
+  const c = clock();
+  for (const refusal of [() => new Response("{}", { status: 429, headers: { "retry-after": "10", "content-type": "application/json" } }), (id: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32010, message: "excluded from account secondary indexes" } }), { status: 200, headers: { "content-type": "application/json" } })]) {
+    const sent: string[] = [];
+    const f = async (url: string, init: RequestInit) => {
+      sent.push(url);
+      const p = JSON.parse(String(init.body)) as { id: unknown };
+      return url === FOUNDATION ? refusal(p.id) : new Response(JSON.stringify({ jsonrpc: "2.0", id: p.id, result: { context: { slot: 470318358 }, value: [] } }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const r = createRpc(env, { fetch: f as never, now: c.now, sleep: c.sleep, log: () => undefined });
+    const a = await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9");
+    assert.equal(a.status, 200, `${a.status} ${a.body}`);
+    assert.deepEqual(sent, [FOUNDATION, SVS]);
+    assert.equal(timingName(a.timing), "SOLANA_MARKS_SVS");
+  }
+  const sent: string[] = [];
+  const down = async (url: string) => (sent.push(url), new Response("busy", { status: 503 }));
+  const r = createRpc(env, { fetch: down as never, now: c.now, sleep: c.sleep, log: () => undefined });
+  assert.equal((await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9")).status, 503);
+  assert.deepEqual(sent, [FOUNDATION, SVS], "never route A's provider");
 });
