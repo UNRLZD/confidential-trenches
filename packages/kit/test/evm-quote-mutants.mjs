@@ -340,6 +340,8 @@ export const MUTANTS = [
   [QUOTE, "        s.times.push(ms);", "", HP, "H1 "],
   [QUOTE, "if (n + 1 < order.length && (await hedged(", "if (false && (await hedged(", HP, "H1 "],
   [QUOTE, "const by2 = next < rpcs.length ? await hedged(", "const by2 = false ? await hedged(", FH, "H2 "],
+  // a stand-in answering for the other head's provider is a spare's: the block then needs more than half (V12H)
+  [QUOTE, "        [order[n], order[n + 1]] = [order[n + 1]!, order[n]!];\n        if (n === 0) unsure = true;", "        [order[n], order[n + 1]] = [order[n + 1]!, order[n]!];", R, "V12H "],
   // the review of bc189de: a contested value needs more than half the listed providers, on the reads (M-1) and the
   // block's confirmation (M-2); a provider that differs from what the quote used is held; the spare's timer counts
   // from its own request (L-2); the pinned quote ranks (M14), a spare is asked while none answered (M15)

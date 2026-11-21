@@ -5153,6 +5153,35 @@ test("V12 the pair's honest provider gives no confirm (it fails, or holds no suc
   assert.equal(big(v), big({ accepted: false, code: "below_reference" }), "read at the block, priced, refused on its own merits");
 }));
 
+// card evm-warm-tap-ends-inside-two-seconds, round (E): the other head's provider late on its confirm has the next
+// provider asked in its place (a stand-in, evmHedgeAfter); that one is a spare, so the block then needs more than half
+// the providers, as where the other head's provider fails (V12)
+test("V12H the pair's honest provider is late on its confirm: the stand-in asked in its place is a spare, and a colluding spare alone never confirms the liar's block", () => onTestClock(async () => {
+  quoteMod.evmSpeedReset();
+  const late = (): EvmRpc => {
+    const h = honestNode();
+    return async (calls) => {
+      if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] !== "latest")) {
+        await pause(10_000);
+        throw new TypeError("fetch failed");
+      }
+      return h(calls);
+    };
+  };
+  const { f, urls, idle } = hosted({
+    "l1.v12h.test": { rpc: oldNode(), ms: 1 },
+    "h1.v12h.test": { rpc: late(), ms: 5 },
+    "l2.v12h.test": { rpc: oldNode(), ms: 5 },
+    "h2.v12h.test": { rpc: honestNode(), ms: 5 },
+    "h3.v12h.test": { rpc: honestNode(), ms: 5 },
+  });
+  // each answers once, so each has its hedge time
+  const ps = quoteMod.evmProviders(urls, f);
+  await Promise.all(ps.map((p) => p([{ method: "eth_getBlockByNumber", params: ["latest", false] }])));
+  assert.equal(big(await buyN(v3direct, quoteMod.evmProviders(urls, f))), big({ accepted: false, code: "rpc_disagree" }));
+  await idle();
+}));
+
 test("V13 a head is held only when more than maxLag below the lower of the two used: a liar's old head and a lagging honest one never hold the up-to-date provider", async () => {
   // held or not, read off the hold itself, never off the measured speed (re-review of 59a69e2, LOW-4: "not ranked
   // last" rode on it and failed 2 of 30 beside CPU burners; "moves up once the hold ends" rode on it too, and failed in
