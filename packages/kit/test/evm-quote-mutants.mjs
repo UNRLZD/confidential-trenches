@@ -25,6 +25,7 @@ const BUY = "src/trade/evm/buy.ts";
 const BUYU = "src/trade/evm/buy-unpinned.ts";
 const Q = "test/evm-quote.test.ts";
 const R = "test/evm-quote-attacks.test.ts";
+const PR = "test/evm-pair-rank.test.ts";
 const H = "test/evm-quote-head.test.ts";
 // a real cold and warm Robinhood quote's answers, replayed (card evm-quote-gas-used, review of e9b54f71, P2)
 const RP = "test/evm-quote-gas-used-replay.test.ts";
@@ -324,7 +325,12 @@ export const MUTANTS = [
   [QUOTE, "const need = Math.floor(Math.max(of, list.length) / 2) + 1;", "const need = Math.floor(list.length / 2) + 1;", R, "LM2 "],
   [QUOTE, "    if (rest.length < 2) return got;", "", R, "LL4 "],
   [QUOTE, "(waitFrom ??= (a.mono ?? monotonic)())", "(a.mono ?? monotonic)()", R, "LW "],
-  [QUOTE, "      s.held = performance.now() + EVM_HOLD_MS;\n      throw e;", "      throw e;", R, "V4 "],
+  [QUOTE, "      if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held = now + EVM_HOLD_MS;\n      s.failed = now;\n      throw e;", "      s.failed = now;\n      throw e;", R, "V4 "],
+  // card evm-warm-tap-ends-inside-two-seconds, round (D): a lost post holds its provider at a stall (R4) or at its second
+  // loss within EVM_HOLD_MS (R5), never at one loss among answers (R3)
+  [QUOTE, "if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held", "if (now - s.failed < EVM_HOLD_MS) s.held", PR, "R4 "],
+  [QUOTE, "if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held", "if (s.last <= t) s.held", PR, "R5 "],
+  [QUOTE, "if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held", "if (true) s.held", PR, "R3 "],
   // the review of bc189de: a contested value needs more than half the listed providers, on the reads (M-1) and the
   // block's confirmation (M-2); a provider that differs from what the quote used is held; the spare's timer counts
   // from its own request (L-2); the pinned quote ranks (M14), a spare is asked while none answered (M15)
