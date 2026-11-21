@@ -75,23 +75,10 @@ export const NOT_SWEPT = {
 /**
  * Stale plants left to the cards that change their file, each named by its anchor's first line as this gate prints it:
  * a listed anchor still stale passes; any other stale anchor in the file is refused, so no new one enters; a listed one
- * found once again is said, to be taken off the list. The kit's evm-quote sweep and evm-quote.ts are changed by cards
- * evm-unreachable-moves-on and evm-5xx-holds-the-provider-for-the-round, still on their branches (each re-anchors the
- * ask's, the scan's 5xx's and the transport's plants), so this card leaves that file to them.
+ * found once again is said, to be taken off the list. None is listed: the evm-quote sweep's plants that cards
+ * evm-unreachable-moves-on and evm-5xx-holds-the-provider-for-the-round re-anchored are found once on main.
  */
-export const KNOWN_STALE = {
-  "packages/kit/test/evm-quote-mutants.mjs": {
-    why: "re-anchored on cards evm-unreachable-moves-on and evm-5xx-holds-the-provider-for-the-round, not on main yet",
-    // SL1, T7b (three), TH9 and T7 (two): the plants those two branches re-anchor
-    anchors: new Set([
-      "if (spareNext && /^the provider answered HTTP 5",
-      'if (e instanceof TypeError && (cause === undefined || (typeof code === "string" && CONNECT',
-      "if (e instanceof Unreachable) {",
-      "if (res.status === 429) throw new RateLimited(",
-      "if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) {",
-    ]),
-  },
-};
+export const KNOWN_STALE = {};
 
 /** The text of `file` up to the end of its `list` declaration, then an export of the list and `vars`. */
 export function listModule(text, list, vars = []) {

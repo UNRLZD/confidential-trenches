@@ -1692,10 +1692,148 @@ test("RX2 a warm quote reads the routes through X's markets its last quote did n
   assert.equal(rounds, 1, `the warm quote read in ${rounds} rounds (the cold one in ${cold})`);
 });
 
+// Card evm-warm-tap-ends-inside-two-seconds: the routes one level further (Y's market, X's pool with Y, the token's pool
+// with X) were read in a seventh round once the fourth had read X's pools with Y. A warm Base tap of ANTc waited a round
+// for them (about 350 ms of a 2.8 s tap, 2026-11-20 17:0xZ). The model is ANTc's shape: X has no market, so the token's
+// pool with X is priced through X's pool with Y, and Y is also a currency of the token's pools, so Y's markets are read
+// before the fourth round. Rounds are counted on provider 0 as RX counts them.
+const roundsOf = () => {
+  let rounds = 0;
+  let open = 0;
+  const counted = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const reads = calls.some((c) => c.method === "eth_call");
+    if (reads && open++ === 0) rounds++;
+    try {
+      await new Promise((go) => setTimeout(go, 5));
+      return await rpc(calls);
+    } finally {
+      if (reads) open--;
+    }
+  };
+  return { counted, rounds: () => rounds };
+};
+// the reference a buy is held to, as a route of three hops from the native asset into Y, X and the token
+const heldThrough = (y: string, x: string, amountOut: bigint) => (e: unknown) => {
+  assert.ok(e instanceof EvmQuoteError && e.code === "below_reference", String(e));
+  const r = e.reference?.route;
+  assert.ok(r?.venue === "uniswap-v4" && r.currencyIn === NATIVE && r.hops.map((h) => h.currency).join() === [y, x].map((c) => c.toLowerCase()).join() + "," + r.hops[2]!.currency, JSON.stringify(r));
+  assert.equal(e.reference!.amountOut, amountOut);
+  return true;
+};
+const yWorld = (token: string, i: number, extra: ModelPool[] = [], yOwn = true) => {
+  const x = xAt(0x3c00 + i);
+  const y = xAt(0x3d00 + i);
+  const pools: ModelPool[] = [
+    seeded(token),
+    { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a },
+    ...(yOwn ? [{ key: keyOf(token, y, 3000, 60, NATIVE), give: (a: bigint) => a / 1000n }] : []),
+    { key: keyOf(x, y, 2500, 50, NATIVE), give: (a) => a },
+    marketOf(y),
+    ...extra,
+  ];
+  const logs = pools.slice(1).map((p, k) => ({ key: p.key, at: 4_100_000 + k }));
+  return { x, y, pools, logs };
+};
+
+test("VY1 the routes one level further ride the fourth round where Y's markets are already read: one round fewer, held to the same route", async () => {
+  const token = "0x00000000000000000000000000000000000ff1f1";
+  const { x, y, pools, logs } = yWorld(token, 1);
+  const { counted, rounds } = roundsOf();
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [counted(chain(pools, 0)), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0), heldThrough(y, x, AMOUNT));
+  // 7 at 532641fa3: the seventh round read the route through X's pool with Y after the fourth read that pool
+  assert.equal(rounds(), 6, `${rounds()} rounds of reads`);
+});
+
+test("VY2 where Y's markets wait for the fifth round, the routes one level further are read in the seventh as before: the same rounds, held to the same route", async () => {
+  const token = "0x00000000000000000000000000000000000ff1f2";
+  // Y is no currency of the token's pools: its markets are read only once X's pool with Y is found held
+  const { x, y, pools, logs } = yWorld(token, 2, [], false);
+  const { counted, rounds } = roundsOf();
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [counted(chain(pools, 0)), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0), heldThrough(y, x, AMOUNT));
+  assert.equal(rounds(), 8, `${rounds()} rounds of reads, as at 532641fa3`);
+});
+
+test("VY3 a route read early through X's pool with Y that the PoolManager does not hold counts for nothing, though it would give a hundred times more", async () => {
+  const token = "0x00000000000000000000000000000000000ff1f3";
+  const x = xAt(0x3c03);
+  const y = xAt(0x3d03);
+  // a second pool of X with Y, not held (no liquidity), whose quote gives a hundred times more: read in the fourth round
+  // beside the real one, never taken
+  const ghost: ModelPool = { key: keyOf(x, y, 7770, 13, NATIVE), give: (a) => 100n * a, state: [1n << 96n, 0n] };
+  const { pools, logs } = yWorld(token, 3, [ghost]);
+  const w = (n: bigint | string) => BigInt(n).toString(16).padStart(64, "0");
+  let ghostAsked = 0;
+  const p1 = chain(pools, 1);
+  const seen: EvmRpc = (calls, s) => {
+    if (JSON.stringify(calls).toLowerCase().split("ca253dc9").slice(1).some((r) => r.includes(w(7770n) + w(13n)))) ghostAsked++;
+    return p1(calls, s);
+  };
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0), seen], NOW, scanner(5_000_000, logs), undefined, () => 0), heldThrough(y, x, AMOUNT));
+  assert.ok(ghostAsked > 0, "the route through the pool not held was never read early: the test proves nothing");
+});
+
+test("VY4 the routes read early never count toward EVM_QUOTE_MAX_QUOTED: a quote at the bound gives the verdict it gave at 532641fa3, one past it refuses as it did", async () => {
+  // the token's pools with the native asset at the route's own price, each a route that could beat it: at 532641fa3
+  // 1,015 of them leave the quote inside EVM_QUOTE_MAX_QUOTED (below_reference) and 1,016 pass it (too_many_pools). Six
+  // pools of X with Y that cannot carry Q (a millionth of the price) are read early and never taken: counted, they would
+  // refuse the quote at the bound
+  const at = async (i: number, n: number) => {
+    const token = "0x00000000000000000000000000000000000ff2" + i.toString(16).padStart(2, "0");
+    const { x, y } = { x: xAt(0x3c00 + 0x40 + i), y: xAt(0x3d00 + 0x40 + i) };
+    const thin = Array.from({ length: 6 }, (_, k): ModelPool => ({ key: keyOf(x, y, 600 + k, 1, NATIVE), give: (a) => a / 1_000_000n, state: pricedInto1(1_000_000n) }));
+    const could = Array.from({ length: n }, (_, k): ModelPool => ({ key: keyOf(token, NATIVE, 1000 + k, 1, NATIVE), give: (a) => a / 1000n, state: pricedAt(10n) }));
+    const { pools, logs } = yWorld(token, 0x40 + i, [...thin, ...could]);
+    return quoteOnStill(pools, token, seededRoute(token), scanner(5_000_000, logs));
+  };
+  assert.deepEqual(await at(1, 1_015), below);
+  assert.deepEqual(await at(2, 1_016), { accepted: false, code: "too_many_pools" });
+});
+
+// Review of 5452011, S1, kept for the routes read early: a pool's hook goes into a read's override only once this
+// quote's own reads find the pool held, so X's pool with Y behind a hook the venue does not list, whose state the fourth
+// round reads, is never read early (that read would carry its override before its state is known)
+test("VY5 X's pool with Y behind a hook the venue does not list, not held, never puts its hook into an override: held to the route through X's real pool with Y", async () => {
+  const token = "0x00000000000000000000000000000000000ff1f5";
+  const x = xAt(0x3c05);
+  const y = xAt(0x3d05);
+  const H = "0x00000000000000000000000000000000000050cc";
+  const ghost: ModelPool = { key: keyOf(x, y, 7770, 13, H), give: (a) => 100n * a, state: [1n << 96n, 0n] };
+  const { pools, logs } = yWorld(token, 5, [ghost]);
+  const seen: Overridden[] = [];
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0, 5_000_000, seen), chain(pools, 1, 5_000_000, seen)], NOW, scanner(5_000_000, logs), undefined, () => 0), heldThrough(y, x, AMOUNT));
+  assert.ok(!seen.some((o) => o.replaces.includes(H.toLowerCase()) || o.replaces.includes(H)), "the hook of a pool not held went into an override");
+});
+
 // Card evm-5xx-holds-the-provider-for-the-round, with card evm-cold-multihop-quote-inside-the-kpi's early reads: the
 // fourth round reads its own reads and the early routes through X's markets as two reads at once, and a provider that
 // answers HTTP 5xx to one is held in the other. At a87cbd3ff (this card merged with that one) each read held it in its own
 // reads alone, and the early batches queued in its gate behind the round's failed ones were still sent to it (6 of 6).
+// round 7 of card evm-warm-tap-ends-inside-two-seconds: the early routes as first built added posts to the fourth round
+// on every quote, and on Robinhood, whose providers take 2 posts at once, that was a wave more where the seventh round
+// they saved read little: Robinhood's AI about 250 ms slower a warm tap (2026-11-20 17:2xZ)
+test("VY6 where the routes one level further would add a wave of posts to the fourth round on a provider of its pair, they are read in the seventh as before: the rounds as at 532641fa3, the same route", async () => {
+  const token = "0x00000000000000000000000000000000000ff1f6";
+  // two more markets of Y and two more of the token's pools with X: four times the early routes of VY1
+  const fees = [[3000, 60], [10000, 200]] as const;
+  const x = xAt(0x3c06);
+  const y = xAt(0x3d06);
+  const more = [...fees.map(([f, t]): ModelPool => ({ key: keyOf(y, NATIVE, f, t, NATIVE), give: (a) => a })), ...fees.map(([f, t]): ModelPool => ({ key: keyOf(token, x, f, t, NATIVE), give: (a) => a }))];
+  const { pools, logs } = yWorld(token, 6, more);
+  // one read a call, so the early routes' posts pass Robinhood's 2 at once beside the round's own and stay inside
+  // Base's 20 (a provider with no in-flight pin takes the scan's limit, gated())
+  quoteMod.evmReadsPerCall(1);
+  try {
+    for (const [chain_, want] of [["robinhood", 7], ["base", 6]] as const) {
+      const { counted, rounds } = roundsOf();
+      await assert.rejects(evmPoolBuyQuoteWith({ chain: chain_, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [counted(chain(pools, 0)), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0), heldThrough(y, x, AMOUNT));
+      // 7 on both at 532641fa3; 6 on both with every early route read (24fdf6f99)
+      assert.equal(rounds(), want, `${chain_}: ${rounds()} rounds of reads`);
+    }
+  } finally {
+    quoteMod.evmReadsPerCall();
+  }
+});
+
 test("FH4 a provider that answers HTTP 500 to the fourth round's own reads is sent none of the early X reads queued behind them", { timeout: 20_000 }, async () => {
   const token = "0x00000000000000000000000000000000000ff1fc";
   const x0 = xAt(0x182);
