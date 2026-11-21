@@ -57,10 +57,13 @@ import {
   POOL_USD_FEEDS,
   secretScrubber,
   SOLANA_AMM_V4_PROGRAM,
+  SOLANA_CLMM_PROGRAM,
   SOLANA_CPMM_PROGRAM,
+  SOLANA_USDC_MINT,
   SOLANA_DLMM_PROGRAM,
   SOLANA_SOL_MINT,
   solanaAmmV4PoolScan,
+  solanaClmmPoolScan,
   solanaCpmmPoolScan,
   solanaDlmmPairScan,
 } from "@blindfill/kit";
@@ -928,11 +931,16 @@ function scanAllowed(r: Record<string, unknown>, programs: readonly string[]): b
  * program's scan for its two mints, key for key, one of them wSOL and the other another 32-byte address; one mint alone,
  * no size, any bytes of the pools or any other filter would sweep the program on the keyed provider's quota. Anything
  * else is refused before any call. Route A only (the solana route), as every scan there.
+ * Raydium CLMM (solanaClmmPoolScan, readSolanaClmmPools; card solana-buy-never-below-a-hidden-market) the same way, a
+ * coin's markets the page reads but never trades, whose other mint is wSOL or USDC (QUOTES): a coin's USDC markets are
+ * read as its wSOL ones, priced through SOL/USD on the device.
  */
+const QUOTES: Readonly<Record<string, readonly string[]>> = Object.freeze({ [SOLANA_CLMM_PROGRAM]: [SOLANA_SOL_MINT, SOLANA_USDC_MINT] });
 const POOL_SCANS: Readonly<Record<string, (x: string, y: string) => readonly unknown[]>> = Object.freeze({
   [SOLANA_DLMM_PROGRAM]: solanaDlmmPairScan,
   [SOLANA_CPMM_PROGRAM]: solanaCpmmPoolScan,
   [SOLANA_AMM_V4_PROGRAM]: solanaAmmV4PoolScan,
+  [SOLANA_CLMM_PROGRAM]: solanaClmmPoolScan,
 });
 function poolScanAllowed(r: Record<string, unknown>): boolean {
   const p = r.params;
@@ -942,7 +950,8 @@ function poolScanAllowed(r: Record<string, unknown>): boolean {
   const mint = (x: unknown): string | null => (isPlain(x) && isPlain(x.memcmp) && typeof x.memcmp.bytes === "string" && x.memcmp.bytes.length <= 44 && base58Bytes(x.memcmp.bytes)?.length === 32 ? x.memcmp.bytes : null);
   const x = mint(f[1]);
   const y = mint(f[2]);
-  if (x === null || y === null || x === y || (x !== SOLANA_SOL_MINT && y !== SOLANA_SOL_MINT)) return false;
+  const quotes = QUOTES[p[0]] ?? [SOLANA_SOL_MINT];
+  if (x === null || y === null || x === y || (!quotes.includes(x) && !quotes.includes(y))) return false;
   return JSON.stringify(p) === JSON.stringify(POOL_SCANS[p[0]]!(x, y));
 }
 

@@ -17,7 +17,13 @@
 //   min(depth on A, depth on B); every candidate whose depth on either provider is at or above the cutoff is in the
 //   set. E = the largest E over the set, each candidate's from its larger-output read. So a provider that lies inside
 //   the band can only raise the bar, and one that inflates a pool's depth cannot lift the cutoff over an honest pool.
-// - No candidate: null ("no reference pool").
+// - A market the device reads but never trades (card solana-buy-never-below-a-hidden-market): a coin's Raydium CLMM
+//   pools in wSOL or USDC (clmm.ts readSolanaClmmMarket, the request's `clmmPools`), read and agreed on the same two
+//   providers, each priced at its floor (the out of its current tick-spacing cell, exact there, nothing past it). It
+//   only raises the bar: E is the larger of the set's E above and the best floor of the markets whose depth reaches the
+//   cutoff over every candidate, markets included. A market is never in `pools` or `shallow`, so no buy takes it;
+//   `markets` names each one. A market both providers do not agree on refuses the route, as any candidate does.
+// - No candidate the device trades: null ("no reference pool"), whatever markets there are.
 // - Per leg (S12 over a split trade): the request's optional `amounts` a_k get E(a_k) in `expectedOuts`, computed from
 //   the same reads, the same chosen pool and the same provider read that gave `expectedOut` for the whole `amount`,
 //   with no extra RPC. The simulated-out bar of leg k uses E(a_k) from the same read; its minOut keeps
@@ -58,6 +64,8 @@ import {
   solanaMintDisagreement,
 } from "../../checks/solana/checks.ts";
 import { solanaSameProvider, solanaTimedRpc, type SolanaRpc } from "./send.ts";
+import { poolUsdPrice } from "../../price/pool-usd.ts";
+import { readSolanaClmmMarket, SOLANA_CLMM_MAX_POOLS, type SolanaClmmSolUsd } from "./clmm.ts";
 import {
   SOLANA_CLOCK_SYSVAR,
   SOLANA_DLMM_MAX_PAIRS,
@@ -128,6 +136,8 @@ const DISC = {
  *  `ammV4Pools`. */
 export type SolanaPoolVenue = "pump-curve" | "pumpswap" | "dlmm" | "raydium-cpmm" | "raydium-amm-v4";
 export type SolanaReferenceVenue = SolanaPoolVenue;
+/** A market the device reads but never trades (clmm.ts, card solana-buy-never-below-a-hidden-market): never a venue. */
+export type SolanaMarketVenue = "raydium-clmm";
 export type SolanaReference = {
   expectedOut: bigint;
   /** E(a_k) for each of the request's `amounts`, in order, from the read that gave `expectedOut`; [] without them. */
@@ -142,6 +152,10 @@ export type SolanaReference = {
    *  part of E: a buy may take one only on a venue its device trades, held to E less the slippage (the kit's QUOTE
    *  check), so a coin whose deepest pool sits on a venue the device cannot trade still buys on one it can. */
   shallow?: SolanaReference["pools"];
+  /** The markets read but never traded (Raydium CLMM pools, card solana-buy-never-below-a-hidden-market), each with its
+   *  depth in lamports and its floor E; `counted` when its depth reached the cutoff, so it could set E. Never a route.
+   *  Absent when none was read. */
+  markets?: { venue: SolanaMarketVenue; address: string; depth: readonly [bigint, bigint]; expectedOut: bigint; counted: boolean }[];
   /** The oldest slot of the reads it rests on (readSolanaReference), so a check can bound its age. */
   slot?: number;
 };
@@ -152,6 +166,9 @@ export type SolanaReference = {
 export type SolanaReferenceRequest = {
   side: "buy" | "sell"; token: string; amount: bigint; amounts?: readonly bigint[];
   dlmmPairs?: readonly string[]; cpmmPools?: readonly string[]; ammV4Pools?: readonly string[];
+  /** The coin's Raydium CLMM pools (clmm.ts readSolanaClmmPools, at most SOLANA_CLMM_MAX_POOLS): markets read, never
+   *  traded. */
+  clmmPools?: readonly string[];
 };
 /** The most legs one request prices. */
 const MAX_LEGS = 64;
@@ -496,17 +513,21 @@ export function solanaReservesAgree(a: bigint, b: bigint): boolean {
 export type SolanaCandidateRead = { depth: bigint; out: bigint; spotOut: bigint | null; outs?: readonly bigint[] };
 /** One candidate the two providers agree on, with each provider's read. */
 export type SolanaAgreedCandidate = {
-  venue: SolanaReferenceVenue;
+  /** A venue a buy may take, or a market only read (SolanaMarketVenue), which can raise E and is never a pool of the set. */
+  venue: SolanaReferenceVenue | SolanaMarketVenue;
   address: string;
   reads: readonly [SolanaCandidateRead, SolanaCandidateRead];
   /** The coin's cashback flag, from the venue's static bytes (the same on both providers); absent when not read. */
   cashback?: boolean;
 };
+type Traded = SolanaAgreedCandidate & { venue: SolanaReferenceVenue };
+const traded = (c: SolanaAgreedCandidate): c is Traded => c.venue !== "raydium-clmm";
 
 /** The reference set over the agreed candidates (§2.0 LD1): the cutoff from the smaller read of each, every
  * candidate whose depth on either provider reaches it, E the largest over the set from each one's larger-output read,
  * and the per-leg E from that same pool's same read. Null when there is no candidate or no candidate pays anything. */
-export function solanaReferenceSet(candidates: readonly SolanaAgreedCandidate[]): SolanaReference | null {
+export function solanaReferenceSet(all: readonly SolanaAgreedCandidate[]): SolanaReference | null {
+  const candidates = all.filter(traded);
   if (candidates.length === 0) return null;
   const minDepth = (c: SolanaAgreedCandidate): bigint => min(c.reads[0].depth, c.reads[1].depth);
   const maxMin = candidates.reduce((m, c) => (minDepth(c) > m ? minDepth(c) : m), 0n);
@@ -527,7 +548,17 @@ export function solanaReferenceSet(candidates: readonly SolanaAgreedCandidate[])
     if (!best || r.out > best.out) best = r;
   }
   if (!best || best.out <= 0n) return null;
-  return { expectedOut: best.out, expectedOuts: [...(best.outs ?? [])], spotOut: best.spotOut, pools, ...(shallow.length === 0 ? {} : { shallow }) };
+  // the markets read but never traded: each at the cutoff over every candidate, markets included, can only raise E
+  const read = all.filter((c) => !traded(c));
+  const maxAll = all.reduce((m, c) => (minDepth(c) > m ? minDepth(c) : m), 0n);
+  const markets: NonNullable<SolanaReference["markets"]> = [];
+  for (const c of read) {
+    const r = c.reads[0].out >= c.reads[1].out ? c.reads[0] : c.reads[1];
+    const counted = c.reads.some((x) => x.depth * 10_000n >= (10_000n - tol) * maxAll);
+    markets.push({ venue: "raydium-clmm", address: c.address, depth: [c.reads[0].depth, c.reads[1].depth] as const, expectedOut: r.out, counted });
+    if (counted && r.out > best.out) best = r;
+  }
+  return { expectedOut: best.out, expectedOuts: [...(best.outs ?? [])], spotOut: best.spotOut, pools, ...(shallow.length === 0 ? {} : { shallow }), ...(markets.length === 0 ? {} : { markets }) };
 }
 
 // ------------------------------------------------------------------------------------------------- the read
@@ -1003,6 +1034,14 @@ export async function readSolanaReferenceWhy(providers: readonly [SolanaRpc, Sol
     if (k.pools.length > k.max) throw new Error(`at most ${k.max} ${k.plural}`);
     for (const p of k.pools) if (typeof p !== "string" || base58.decode(p).length !== 32) throw new Error(`a ${k.name} is not a 32-byte address`);
   }
+  const clmm = [...new Set(req.clmmPools ?? [])];
+  if (clmm.length > SOLANA_CLMM_MAX_POOLS) throw new Error(`at most ${SOLANA_CLMM_MAX_POOLS} CLMM pools`);
+  for (const p of clmm) if (typeof p !== "string" || base58.decode(p).length !== 32) throw new Error("a CLMM pool is not a 32-byte address");
+  // the device's own SOL/USD (Pyth, agreed on the same two providers), read once and only for a USDC market
+  let usd: Promise<SolanaClmmSolUsd> | null = null;
+  const solUsd = () => (usd ??= poolUsdPrice({ chain: "solana", rpcs: providers }).then((x) => ({ price: x.price, expo: x.expo })));
+  const marketReads = Promise.all(clmm.map((pool) => readSolanaClmmMarket(providers, { token: req.token, pool, side: req.side, amount: req.amount, ...(req.amounts === undefined ? {} : { amounts: req.amounts }) }, solUsd)));
+  marketReads.catch(() => {});
   const heads = await Promise.all(scanned.map((k) => (k.pools.length ? readBoth(k.pools) : null)));
   const lookScanned = async (k: number, i: number): Promise<Verdict> => {
     const kind = scanned[k]!;
@@ -1035,10 +1074,18 @@ export async function readSolanaReferenceWhy(providers: readonly [SolanaRpc, Sol
   let verdicts = await Promise.all(named.map((_, i) => lookAt(i)));
   // one more read on both of a candidate that did not agree; if it still does not, the route is refused
   verdicts = await Promise.all(verdicts.map((v, i) => (v.kind === "bad" ? lookAt(i) : v)));
-  const refused = verdicts.flatMap((v, i) => (v.kind === "bad" ? [`${named[i]}: ${v.why}, after a re-read`] : []));
+  const markets = await marketReads;
+  const refused = [
+    ...verdicts.flatMap((v, i) => (v.kind === "bad" ? [`${named[i]}: ${v.why}, after a re-read`] : [])),
+    ...markets.flatMap((v, i) => (v.kind === "bad" ? [`raydium-clmm ${clmm[i]}: ${v.why}, after a re-read`] : [])),
+  ];
   if (refused.length) return { refused: refused.join("; ") };
-  const candidates = verdicts.flatMap((v) => (v.kind === "ok" ? [v.candidate] : []));
+  for (const v of markets) if (v.kind === "ok") slots.push(...v.market.slots);
+  const candidates = [
+    ...verdicts.flatMap((v) => (v.kind === "ok" ? [v.candidate] : [])),
+    ...markets.flatMap((v): SolanaAgreedCandidate[] => (v.kind === "ok" ? [{ venue: "raydium-clmm", address: v.market.address, reads: [v.market.reads[0], v.market.reads[1]] }] : [])),
+  ];
   const ref = solanaReferenceSet(candidates);
-  if (!ref) return { refused: candidates.length ? "no pool pays out for this amount" : "no reference pool" };
+  if (!ref) return { refused: candidates.some(traded) ? "no pool pays out for this amount" : "no reference pool" };
   return { reference: slots.length ? { ...ref, slot: Math.min(...slots) } : ref };
 }
