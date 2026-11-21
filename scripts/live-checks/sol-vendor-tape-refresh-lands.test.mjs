@@ -21,33 +21,44 @@ test("the recorded good answer, this card's helper: PASS", () => {
 test("the recorded bad answer, main before card sol-vendor-tape-waits-past-reach: FAIL, its gap reads' rows past SOL_VENDOR_REACH_MS", () => {
   const r = judge(A.bad);
   assert.equal(r.ok, false, r.lines.join("\n"));
-  assert.match(r.lines.find((l) => l.startsWith("BAD")), /after 17 s unread.*past it with no word of it$/);
+  assert.match(r.lines.find((l) => l.startsWith("BAD")), /after 17 s unread.*past it$/);
 });
 
-// Card sol-vendor-tape-gap-served-inside-reach: past the reach a gap answer says filling, or it fails.
-test("the recorded answer of the deployed helper before card sol-vendor-tape-gap-served-inside-reach: FAIL, POPCAT's third gap read served rows 19,651 ms old with no word of it", () => {
+// Card sol-vendor-tape-gap-served-inside-reach: rows past the reach are BAD, and an answer past it that does not say
+// filling is a second, separate BAD (the page draws it as live); saying filling never makes rows past the reach pass.
+test("the recorded answer of the deployed helper before card sol-vendor-tape-gap-served-inside-reach: FAIL on both rules, POPCAT's third gap read served rows 19,651 ms old with no word of it", () => {
   const r = judge(A.gapUnsaid);
   assert.equal(r.ok, false, r.lines.join("\n"));
   const badLines = r.lines.filter((l) => l.startsWith("BAD"));
-  assert.equal(badLines.length, 1, badLines.join("\n"));
-  assert.match(badLines[0], /^BAD 7GCihgDB8f: 3 vendor answers after 17 s unread, rows read 1, 0, 19651 ms before \(at most 15000, or saying filling\): 1 past it with no word of it$/);
+  assert.deepEqual(badLines, [
+    "BAD 7GCihgDB8f: 3 vendor answers after 17 s unread, rows read 1, 0, 19651 ms before (at most 15000): 1 past it",
+    "BAD 7GCihgDB8f: 1 gap answers past 15000 ms, each saying filling: 1 with no word of it",
+  ]);
 });
 
-test("planted: the same gap read past the reach, saying filling, passes; a filling read inside the reach passes; a hold read past the reach fails whatever it says", () => {
+test("planted: a gap or hold read past the reach saying filling still FAILs, on the reach alone; without filling it FAILs on both; a filling read inside the reach passes", () => {
   const judged = (r) => r.coins.find((c) => Array.isArray(c.gaps));
   const said = structuredClone(A.gapUnsaid);
   judged(said).gaps[2].filling = true;
   const v = judge(said);
-  assert.equal(v.ok, true, v.lines.join("\n"));
-  assert.ok(v.lines.some((l) => /^ok 7GCihgDB8f: .*1 past it, each saying filling$/.test(l)), v.lines.join("\n"));
+  assert.equal(v.ok, false, v.lines.join("\n"));
+  assert.deepEqual(v.lines.filter((l) => l.startsWith("BAD")), ["BAD 7GCihgDB8f: 3 vendor answers after 17 s unread, rows read 1, 0, 19651 ms before (at most 15000): 1 past it"]);
+  assert.ok(v.lines.includes("ok 7GCihgDB8f: 1 gap answers past 15000 ms, each saying filling: yes"), v.lines.join("\n"));
   const early = structuredClone(A.good);
   judged(early).gaps[0].filling = true;
   assert.equal(judge(early).ok, true);
-  const hold = structuredClone(A.good);
-  const h = judged(hold).reads.find((x) => /rows read \d+ ms ago/.test(x.timing));
-  h.timing = h.timing.replace(/rows read \d+ ms ago/, `rows read ${SOL_VENDOR_REACH_MS + 1} ms ago`);
-  h.filling = true;
-  assert.equal(judge(hold).ok, false, "the hold phase is held to the reach: a page reading every 2 s keeps its tape renewed");
+  for (const filling of [true, false]) {
+    const hold = structuredClone(A.good);
+    const h = judged(hold).reads.find((x) => /rows read \d+ ms ago/.test(x.timing));
+    h.timing = h.timing.replace(/rows read \d+ ms ago/, `rows read ${SOL_VENDOR_REACH_MS + 1} ms ago`);
+    if (filling) h.filling = true;
+    const j = judge(hold);
+    assert.equal(j.ok, false, j.lines.join("\n"));
+    const bad = j.lines.filter((l) => l.startsWith("BAD"));
+    assert.equal(bad.length, filling ? 1 : 2, bad.join("\n"));
+    assert.match(bad[0], /past it$/);
+    if (!filling) assert.match(bad[1], /1 hold answers past 15000 ms, each saying filling: 1 with no word of it$/);
+  }
 });
 
 test("planted gap reads: one at the bound passes, one past it fails, a 503 fails; none from the vendor, or none at all, is no verdict", () => {
