@@ -13,6 +13,7 @@ import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { depositNamer, type DepositNamerDeps } from "../src/deposit-name.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
+import { busyThreads, quiet } from "./settle.ts";
 
 const ENTROPY = () => new Uint8Array(16); // the published all-zero vector (packages/wallet/test/vectors/a8.json)
 const SEED64 = wordsToSeed64(entropyToWords(ENTROPY()));
@@ -316,9 +317,11 @@ test("namings run one at a time, in order", async () => {
       return openNoteStore(st);
     },
   });
+  busyThreads();
   n.name(ENTROPY());
   n.name(ENTROPY());
-  await tick();
+  // everything but a timer run (test/settle.ts): the first naming's store work on busy crypto threads outlasted a 20 ms tick
+  await quiet();
   assert.equal(opened, 1, "the second naming started before the first was done");
   first.open();
   await n.named();

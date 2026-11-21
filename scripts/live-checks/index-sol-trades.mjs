@@ -245,9 +245,10 @@ export const DBC_VOL_USD = 1_000;
  *  (trades.ts CUT_KEEP_MS, held equal by this check's test). A coin's trades are passed over while its cut lasts: read
  *  again inside it they only show the same cut (live run 44721792317: one DBC coin, fZgm5f3J, sampled 13 times). */
 export const CUT_KEEP_MS = 60_000;
-/** A cut the coin's own share of the whole reads explains (trades.ts CUT_WHY.coin): the design's bound for a coin trading
- *  past two a second, never the budget starving other coins. */
-const OWN_SHARE = /: past the coin's own \d+ a \d+ s"$/;
+/** A cut the coin's own share of the whole reads explains (trades.ts CUT_WHY.coin, and round 3's CUT_WHY.busy: a coin with
+ *  5 or more whole reads in its 10 s past the places busy coins share, which a quiet coin is never cut by): the design's
+ *  bound for a busy coin, never the budget starving other coins. */
+export const OWN_SHARE = /: past (the coin's own \d+ a \d+ s|the \d+ a second busy coins share)"$/;
 
 async function call(url, method, params) {
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(10_000) });
@@ -556,7 +557,7 @@ export function judgeMeteora(m) {
     const spanMs = starving.length > 0 && at.every(Number.isSafeInteger) ? Math.max(...at) - Math.min(...at) : null;
     if (!isObj(v) && cut.length > 0) {
       if (spanMs !== null && spanMs > CUT_KEEP_MS) lines.push(`BAD ${venue}: every sampled coin (${named}) was served past the helper's whole reads' budget (${starving.at(-1).timing}), cut again ${Math.round(spanMs / 1_000)} s after its first, past the ${CUT_KEEP_MS / 1_000} s a cut lasts: the budget starved the venue`);
-      else if (starving.length === 0) lines.push(`BAD ${venue}: none judged: every trade found (${named}) was on a coin past its own share of the helper's whole reads (${cut[0].timing}), served its pool's tape as a coin trading past two a second is, and no other coin of the venue traded`);
+      else if (starving.length === 0) lines.push(`BAD ${venue}: none judged: every trade found (${named}) was on a coin past its own share of the helper's whole reads (${cut[0].timing}), served its pool's tape as a busy coin is, and no other coin of the venue traded`);
       else lines.push(`BAD ${venue}: none judged: every trade found (${named}) was on a coin inside one cut of the helper's whole reads' budget (${starving[0].timing}${spanMs === null ? ", undated" : `, all within ${Math.round(spanMs / 1_000)} s`}), and none was read past the ${CUT_KEEP_MS / 1_000} s a cut lasts: a burst and a spent budget look the same`);
       continue;
     }
