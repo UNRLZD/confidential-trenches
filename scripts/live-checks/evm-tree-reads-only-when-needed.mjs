@@ -12,7 +12,10 @@
 // refuses it (refusalsOf): never the page's own cancel. It never presses Buy, Sell, Withdraw or Confirm: the account is new and holds nothing, and the seed stays in
 // the browser's temporary profile, deleted on close. The answer keeps hosts, methods, counts and statuses only;
 // a refused answer is named by its method and, for an eth_call, the contract it asks and its 4-byte selector (callName),
-// never the call's arguments.
+// never the call's arguments. A not-yet answer (the kit's evmNotYetWords: a provider a block behind, whatever its HTTP
+// status) is no refusal when the same call to the same provider is answered later in the walk (askAt asked it again): a
+// lag line; one never answered is BAD (card evm-lag-answer-read-again, release 187's sign run 44912189713: robinhood.drpc.org
+// HTTP 400 code 27 "Unknown state" to ArbGasInfo's getL1BaseFeeEstimate).
 //   --sign-dir <dir>: SIGN_HOST's files answered from a local build (packages/signpage/scripts/build-app.mjs --out),
 //   every other request live: how the good answer was recorded before the deploy. Its headers are not the host's.
 // After: sign
@@ -23,7 +26,7 @@ import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmIsOutOfGas } from "../../packages/kit/src/index.ts";
+import { evmIsOutOfGas, evmNotYetWords } from "../../packages/kit/src/index.ts";
 import { mainnetVenues } from "./mainnet-venues.mjs";
 
 const KEY = "evm-tree-reads-only-when-needed";
@@ -79,6 +82,9 @@ export function summarize(requests, loads, extra = {}) {
   const logs = { index: 0, scan: 0, other: 0 };
   const refused = {};
   const byLoad = {};
+  // card evm-lag-answer-read-again: each provider's call answered not yet, and how many of them it answered later
+  const lag = {};
+  const waiting = {};
   for (const r of requests) {
     const calls = (r.calls ?? []).filter((c) => typeof c?.method === "string" && c.method.startsWith("eth_"));
     if (r.method !== "POST" || calls.length === 0) continue;
@@ -100,8 +106,20 @@ export function summarize(requests, loads, extra = {}) {
       }
     }
     for (const bad of refusalsOf(r)) refused[`${host} ${bad}`] = (refused[`${host} ${bad}`] ?? 0) + 1;
+    const answered = !r.failed && Number.isInteger(r.status) && r.status >= 200 && r.status < 300;
+    for (const [c, e] of callErrors(r)) {
+      const k = `${host} ${callName(c)}`;
+      if (e?.lag && (answered || lagOnly(r))) {
+        lag[k] ??= { asked: 0, answered: 0 };
+        lag[k].asked++;
+        waiting[k] = (waiting[k] ?? 0) + 1;
+      } else if (e === undefined && answered && (waiting[k] ?? 0) > 0) {
+        waiting[k]--;
+        lag[k].answered++;
+      }
+    }
   }
-  return { ...extra, loads, posts, methods, logs, refused, byLoad };
+  return { ...extra, loads, posts, methods, logs, refused, byLoad, ...(Object.keys(lag).length > 0 ? { lag } : {}) };
 }
 
 /** A page's own cancel of a request (a navigation between loads, or its AbortController): never a provider's refusal. */
@@ -132,17 +150,32 @@ export function callName(c) {
   return c.method === "eth_call" && c.to ? `eth_call ${c.to}:${c.sel ?? "?"}` : c.method;
 }
 
+/** Each call of a request log entry with its JSON-RPC error, or undefined where it has none: an error matched by its id,
+ *  or the only call's. */
+function callErrors(r) {
+  const calls = Array.isArray(r.calls) ? r.calls : [];
+  const errs = Array.isArray(r.errors) ? r.errors : [];
+  return calls.map((c) => [c, errs.find((e) => (e?.id !== undefined ? c.id === e.id : calls.length === 1))]);
+}
+/** A 4xx whose body is not-yet answers alone, one for each call (the kit reads it as those answers and asks again). */
+const lagOnly = (r) => !r.failed && Number.isInteger(r.status) && r.status >= 400 && r.status < 500 && r.status !== 429 && Array.isArray(r.errors) && r.errors.length > 0 && r.errors.every((e) => e?.lag) && callErrors(r).every(([, e]) => e !== undefined);
+
 /** Each provider refusal one request log entry holds: a failure of the network (any but the page's own cancel), an HTTP
  *  4xx or 5xx answer, or a JSON-RPC error that is no range cap (`errors`: each one's { code, cap, id }). A failure or an
- *  HTTP refusal names every call of the post; a JSON-RPC error names the call its id answers. */
+ *  HTTP refusal names every call of the post; a JSON-RPC error names the call its id answers. A not-yet answer (`lag`),
+ *  under a 2xx or as a 4xx of them alone (lagOnly), is no refusal here: summarize counts it, and judge holds it BAD
+ *  until the same call is answered. */
 export function refusalsOf(r) {
   const out = [];
   const calls = Array.isArray(r.calls) ? r.calls : [];
   const all = calls.length > 0 ? ` [${calls.map(callName).join(", ")}]` : "";
+  const lagged = lagOnly(r);
+  const ok2xx = !r.failed && Number.isInteger(r.status) && r.status >= 200 && r.status < 300;
   if (r.failed && r.failed !== PAGE_CANCEL) out.push(`failed ${r.failed}${all}`);
-  if (Number.isInteger(r.status) && r.status >= 400) out.push(`${r.status}${all}`);
+  if (Number.isInteger(r.status) && r.status >= 400 && !lagged) out.push(`${r.status}${all}`);
   for (const e of Array.isArray(r.errors) ? r.errors : []) {
     if (e?.cap) continue;
+    if (e?.lag && (ok2xx || lagged)) continue;
     const c = (e?.id !== undefined ? calls.find((x) => x.id === e.id) : undefined) ?? (calls.length === 1 ? calls[0] : undefined);
     // the fit read's revert or out of gas: its answer
     if ((e?.rev || e?.oog) && isFitRead(c)) continue;
@@ -152,8 +185,9 @@ export function refusalsOf(r) {
 }
 
 /** A JSON-RPC answer's errors, shaped to their code, the id they answer, whether they name a block range (`cap`), are a
- *  revert (`rev`: code 3 or a message naming one, the kit's reading) or an out-of-gas error (`oog`, the kit's
- *  evmIsOutOfGas); no message and no revert data is kept. */
+ *  revert (`rev`: code 3 or a message naming one, the kit's reading), an out-of-gas error (`oog`, the kit's
+ *  evmIsOutOfGas) or a not-yet answer (`lag`, the kit's evmNotYetWords, never a revert); no message and no revert data
+ *  is kept. */
 export function errorsOf(text) {
   try {
     const j = JSON.parse(text ?? "");
@@ -161,7 +195,8 @@ export function errorsOf(text) {
       const m = String(x.error.message ?? "");
       const rev = x.error.code === 3 || /revert/i.test(m);
       const oog = evmIsOutOfGas(m);
-      return { code: Number.isInteger(x.error.code) ? x.error.code : null, cap: RANGE_CAP.test(m), ...(rev ? { rev: true } : {}), ...(oog ? { oog: true } : {}), ...(typeof x.id === "number" || typeof x.id === "string" ? { id: x.id } : {}) };
+      const lag = !rev && evmNotYetWords(m);
+      return { code: Number.isInteger(x.error.code) ? x.error.code : null, cap: RANGE_CAP.test(m), ...(rev ? { rev: true } : {}), ...(oog ? { oog: true } : {}), ...(lag ? { lag: true } : {}), ...(typeof x.id === "number" || typeof x.id === "string" ? { id: x.id } : {}) };
     });
   } catch {
     return [];
@@ -174,9 +209,16 @@ export function judge(a) {
   if (!a || typeof a !== "object" || !Number.isInteger(a.loads) || a.loads < 1 || !a.logs || typeof a.logs !== "object") return { ok: false, lines: ["BAD the walk was not read"] };
   if (a.logs.index > 0) lines.push(`BAD the page read the pool index ${a.logs.index} times (the PoolManager's Initialize logs) for an account that holds nothing`);
   for (const [k, n] of Object.entries(a.refused ?? {})) lines.push(`BAD ${k}: ${n} EVM RPC answers refused`);
+  // card evm-lag-answer-read-again: a not-yet answer asked again and answered is a lag line; one never answered is BAD
+  for (const [k, l] of Object.entries(a.lag ?? {})) {
+    const asked = Number.isInteger(l?.asked) ? l.asked : 0;
+    const answered = Number.isInteger(l?.answered) ? l.answered : 0;
+    if (asked > answered) lines.push(`BAD ${k}: ${asked - answered} of ${asked} not-yet answers never answered again`);
+    else lines.push(`lag ${k}: ${asked} not-yet answer(s), each asked again and answered`);
+  }
   const all = a.methods?.eth_getLogs ?? a.logs.index + a.logs.scan + a.logs.other;
   if (all > LOGS_PER_LOAD * a.loads) lines.push(`BAD ${all} eth_getLogs in ${a.loads} loads, over ${LOGS_PER_LOAD} a load`);
-  return { ok: lines.length === 0, lines };
+  return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
 /** What a call keeps beside its method: its JSON-RPC id (to match an error to it) and, for an eth_call, the contract it

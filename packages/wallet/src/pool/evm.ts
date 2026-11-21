@@ -1084,6 +1084,12 @@ export function evmPoolLogPager(): EvmLogPager {
  * main). base-rpc.publicnode.com refuses past 50,000 blocks with one topic too, so Base keeps paging.
  */
 export const EVM_LOG_ONE_VALUE_WIDE: ReadonlySet<string> = new Set(["rpc.mainnet.chain.robinhood.com"]);
+/** The widest span such a provider answers one value a position (card robinhood-reads-past-ten-million-blocks):
+ *  rpc.mainnet.chain.robinhood.com refused the pool's whole history once it passed it, "-32602: query spans 11625818
+ *  blocks (108420674 to 120046491), but only 10000000 are allowed" (live run 44930704040, 21 Nov), and answered it in
+ *  two spans of 10,000,000 (8 logs, the same as the helper's keyed route, 21 Nov 18:4xZ from macOS). A wider read is
+ *  asked in spans of it; a refusal naming a smaller span is asked again once in spans of that. */
+export const EVM_LOG_ONE_VALUE_SPAN = 10_000_000n;
 
 /** The filter's one topic position of several values, on a provider of EVM_LOG_ONE_VALUE_WIDE: one filter per value
  *  (the other positions as they are), or null (the read pages as before). */
@@ -1102,21 +1108,31 @@ export function oneValueFilters(rpc: EvmRpc, filter: EvmLogFilter): EvmLogFilter
   return (filter.topics[at] as readonly string[]).map((v) => ({ ...filter, topics: filter.topics.map((t, i) => (i === at ? v : t)) }));
 }
 
-/** from..to in one call a value (oneValueFilters), all at once, their logs in block order; null on any refusal, throttle,
- *  answer out of shape or two logs at one place (the read then pages as before, from `from`). */
+/** from..to one call a value (oneValueFilters) a span of EVM_LOG_ONE_VALUE_SPAN, the values at once, their logs in block
+ *  order; a refusal naming a smaller span (capSpanOf) asks the read again once in spans of it; null on any other
+ *  refusal, throttle, answer out of shape or two logs at one place (the read then pages as before, from `from`). */
 async function oneValueLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filters: readonly EvmLogFilter[], decode: EvmLogDecode<E>, from: bigint, to: bigint, signal?: AbortSignal): Promise<E[] | null> {
-  let got: E[][];
-  try {
-    got = await Promise.all(
-      filters.map(async (f, n) => {
-        const r = await rpc("eth_getLogs", [{ ...f, fromBlock: tag(from), toBlock: tag(to) }], signal);
-        if (!Array.isArray(r)) throw new Error("not a list");
-        return r.map((g, i) => decode(g, from, to, `rpc ${k}: log ${i} of value ${n}, ${from}..${to}`));
-      }),
-    );
-  } catch {
-    signal?.throwIfAborted();
-    return null;
+  let got: E[][] | null = null;
+  for (let span = EVM_LOG_ONE_VALUE_SPAN, again = true; got === null; again = false) {
+    try {
+      got = await Promise.all(
+        filters.map(async (f, n) => {
+          const rows: E[] = [];
+          for (let a = from; a <= to; a += span) {
+            const b = a + span - 1n < to ? a + span - 1n : to;
+            const r = await rpc("eth_getLogs", [{ ...f, fromBlock: tag(a), toBlock: tag(b) }], signal);
+            if (!Array.isArray(r)) throw new Error("not a list");
+            rows.push(...r.map((g, i) => decode(g, a, b, `rpc ${k}: log ${i} of value ${n}, ${a}..${b}`)));
+          }
+          return rows;
+        }),
+      );
+    } catch (e) {
+      signal?.throwIfAborted();
+      const named = capSpanOf(String((e as { message?: unknown } | null)?.message ?? e));
+      if (!again || named === null || named < 1n || named >= span) return null;
+      span = named;
+    }
   }
   const out = got.flat().sort((a, b) => (a.block !== b.block ? (a.block < b.block ? -1 : 1) : a.logIndex < b.logIndex ? -1 : a.logIndex > b.logIndex ? 1 : 0));
   for (let i = 1; i < out.length; i++) {

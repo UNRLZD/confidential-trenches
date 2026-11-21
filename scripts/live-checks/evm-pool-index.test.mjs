@@ -19,7 +19,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { LIMITED_WAIT_MS, MOST, RECEIPTS, TRIES, judge, read, sizeRefusal } from "./evm-pool-index.mjs";
+import { AGED, LIMITED_WAIT_MS, MOST, RECEIPTS, TRIES, judge, read, readSpan, sizeRefusal } from "./evm-pool-index.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-pool-index.answers.json", import.meta.url), "utf8"));
 const bad = (run, re) => {
@@ -78,7 +78,9 @@ const INIT = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438
  *  `http(url, body)`: that reader's whole HTTP answer to a POST in place of the recorded one, { status, headers, body }
  *  (undefined: the recorded). */
 const batches = [];
-function replayFetch(run, behind = () => false, odd = () => undefined, http = () => undefined) {
+// `slow(url, a, b)`: that getLogs runs out of its time (a TimeoutError, as AbortSignal.timeout throws); `onOf(url, s, r)`:
+// reader r's recorded answer to span s it replays (default its own)
+function replayFetch(run, behind = () => false, odd = () => undefined, http = () => undefined, slow = () => false, onOf = (_u, s, r) => s.on[r]) {
   const byUrl = new Map();
   for (const c of Object.values(run.chains)) c.index?.readers.forEach((u, r) => byUrl.set(u, { c, r }));
   const res = (body, headers = {}, status = 200) => ({ status, ok: status >= 200 && status < 300, headers: { get: (k) => headers[k.toLowerCase()] ?? null }, json: async () => body, text: async () => JSON.stringify(body) });
@@ -105,18 +107,26 @@ function replayFetch(run, behind = () => false, odd = () => undefined, http = ()
       }));
     }
     if (body.length === 1) return res([{ jsonrpc: "2.0", id: 0, result: "0x" + c.heads[r].toString(16) }]);
-    const b = Number(body[1].params[0]);
-    const s = c.spans.find((x) => x.b === b);
-    const on = s.on[r];
+    // a piece's batch of a span or of the aged span (a coin's read: two getLogs, its pools all in the first); a pool
+    // recorded with no block is answered in the piece that ends the span
+    const b = Number(body.find((q) => q.method === "eth_getBlockByNumber").params[0]);
+    const lg = body.find((q) => q.method === "eth_getLogs").params[0];
+    const a = Number(lg.fromBlock);
+    if (slow(url, a, b)) throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    const s = [...c.spans, ...(c.aged ? [c.aged] : [])].find((x) => x.a <= a && b <= x.b);
+    const on = onOf(url, s, r);
     const late = behind(url, b);
-    return res([
-      { jsonrpc: "2.0", id: 0, result: late ? [] : on.ids.map((id, i) => ({ topics: ["0x", id], ...(on.firsts?.[i] ? { transactionHash: on.firsts[i].tx } : {}) })) },
-      { jsonrpc: "2.0", id: 1, result: late ? null : { number: "0x" + b.toString(16), hash: on.last } },
-      { jsonrpc: "2.0", id: 2, result: "0x" + (late ? b - 1 : c.heads[r]).toString(16) },
-    ]);
+    const inPiece = (i) => (Number.isFinite(on.blocks?.[i]) ? on.blocks[i] >= a && on.blocks[i] <= b : b === s.b);
+    return res(body.map((q) =>
+      q.method === "eth_getLogs"
+        ? { jsonrpc: "2.0", id: q.id, result: late || q.id !== 0 ? [] : on.ids.flatMap((id, i) => (inPiece(i) ? [{ topics: ["0x", id], ...(Number.isFinite(on.blocks?.[i]) ? { blockNumber: "0x" + on.blocks[i].toString(16) } : {}), ...(on.firsts?.[i] ? { transactionHash: on.firsts[i].tx } : {}) }] : [])) }
+        : q.method === "eth_getBlockByNumber"
+          ? { jsonrpc: "2.0", id: q.id, result: late ? null : { number: "0x" + b.toString(16), hash: on.last } }
+          : { jsonrpc: "2.0", id: q.id, result: "0x" + (late ? b - 1 : c.heads[r]).toString(16) },
+    ));
   };
 }
-const venuesOf = (run) => Object.fromEntries(Object.entries(run.chains).map(([k, c]) => [k, { poolManager: "0x0", index: c.index }]));
+const venuesOf = (run) => Object.fromEntries(Object.entries(run.chains).map(([k, c]) => [k, { poolManager: "0x0", weth: c.aged?.coin ?? "0x4200000000000000000000000000000000000006", index: c.index }]));
 
 test("a reader one block behind on a span, then caught up, passes; one behind past TRIES fails", async () => {
   const u = A.good.chains.robinhood.index.readers[1];
@@ -305,4 +315,74 @@ test("a 429 on a part of a split batch is waited out too: no try spent, the read
   assert.equal(rc.tries, 1);
   assert.equal(rc.limitedMs, 5_000);
   assert.ok(waits.includes(5_000), JSON.stringify(waits));
+});
+
+// Card evm-first-quote-reads-its-coin-at-any-age: the aged span, a coin's read 48 h below N, on both readers, each span
+// walked as the kit walks it (readWalk). `good` is now its run (2026-11-21 16:38Z from this Mac, in bloXroute's slow hour,
+// its head 1.0 s: every 10,000-block piece answered first try in at most 2.4 s, the aged span 5.2 s), `badAged` the good
+// run before it (13:30Z), which read no aged span: FAIL.
+test("the recorded run before the aged span, the check before this card, fails: no coin's read 48 h below N", () => {
+  bad(A.badAged, /^BAD base aged span/);
+  bad(A.badAged, /^BAD robinhood aged span/);
+});
+test("the aged span: not read, read elsewhere, a pool on one reader only, or answered past the RPC timeout, fails", () => {
+  for (const chain of ["base", "robinhood"]) {
+    bad(changed((r) => delete r.chains[chain].aged), new RegExp(`^BAD ${chain} aged span`));
+    bad(changed((r) => (r.chains[chain].aged.b -= 1)), new RegExp(`^BAD ${chain} aged`));
+    bad(changed((r) => (r.chains[chain].aged.on[1].ids = [...r.chains[chain].aged.on[1].ids, "0x" + "ab".repeat(32)])), /the same last block and the same/);
+    bad(changed((r) => (r.chains[chain].aged.on[1].ms = 10_001)), /answered in/);
+  }
+});
+
+// Release 189's app live run 44924123410 (2026-11-21 16:25Z), its record `red189`: base.rpc.blxrbdn.com ran out of its
+// 10 s on the newest 50,000-block span four times, asked whole, which the device never asks it (the venue's parts
+// [1, 5]: 10,000-block pieces); the kit's own walk read the same newest 150,000 blocks whole three times in 3.1 to 6.0 s
+// at 16:3xZ, bloXroute's head 1.1 s. The record fails as main's check read it. Replayed with a bloXroute that runs out of
+// its time on any getLogs over 10,000 blocks of that span: asked whole (main's check, parts [1, 1]) it FAILS; walked as
+// the kit walks it (parts [1, 5]) it PASSES; and one that runs out of its time at every size FAILS walked too.
+test("release 189's red run: bloXroute timed out on a whole 50,000-block span; asked whole it fails, walked as the kit walks it it passes only where the pieces answer", async () => {
+  bad(A.red189, /^BAD base 60389216-60439215: both readers answered it/);
+  // the run with the aged span main's check did not read: the good run's aged answers at this run's N
+  const R = structuredClone(A.red189);
+  for (const [k, c] of Object.entries(R.chains)) {
+    const b = Math.min(...c.heads) - AGED[k];
+    c.aged = { a: b - c.index.span + 1, b, coin: A.good.chains[k].aged.coin, on: structuredClone(A.good.chains[k].aged.on) };
+  }
+  const span = R.chains.base.spans[0];
+  const BX = R.chains.base.index.readers[1];
+  const inRed = (a, b) => a >= span.a && b <= span.b;
+  // bloXroute's answer to the red span's pieces: the pools publicnode answered, as the kit's walk read them meanwhile
+  const onOf = (u, s, r) => (s === span && u === BX ? s.on[0] : s.on[r]);
+  const venues = (parts) => Object.fromEntries(Object.entries(venuesOf(R)).map(([k, v]) => [k, { ...v, index: { ...v.index, parts: k === "base" ? parts : [1, 1] } }]));
+  const over10k = (u, a, b) => u === BX && inRed(a, b) && b - a + 1 > 10_000;
+  // main's check: the span asked whole of bloXroute, again on every try, never split: the run's own answer back
+  const whole = await readSpan(BX, "0x0", span.a, span.b, replayFetch(R, undefined, undefined, undefined, over10k, onOf), async () => {});
+  assert.deepEqual([whole.last, whole.logs, whole.tries], [null, -1, TRIES], "asked whole, as main's check asks it: no answer in TRIES tries");
+  assert.deepEqual([span.on[1].last, span.on[1].logs, span.on[1].tries], [null, -1, TRIES], "as the run's own record has it");
+  const walked = await read(venues([1, 5]), replayFetch(R, undefined, undefined, undefined, over10k, onOf), async () => {});
+  const v = judge(walked);
+  assert.equal(v.pass, true, v.lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  assert.equal(walked.chains.base.spans[0].on[1].pieces.length, 5, "the kit's five 10,000-block pieces");
+  const never = await read(venues([1, 5]), replayFetch(R, undefined, undefined, undefined, (u, a, b) => u === BX && inRed(a, b), onOf), async () => {});
+  assert.equal(judge(never).pass, false, "a bloXroute that answers no piece of it fails walked too");
+});
+
+test("a piece that runs out of its time is asked as its halves, never again whole, and a venue's spare answers it first", async () => {
+  const R = A.good;
+  const span = R.chains.base.spans[0];
+  const BX = R.chains.base.index.readers[1];
+  const asked = [];
+  const slowOver = (n) => (u, a, b) => (u === BX && a >= span.a && b <= span.b && (asked.push(b - a + 1), b - a + 1 > n));
+  const venues = (more) => Object.fromEntries(Object.entries(venuesOf(R)).map(([k, v]) => [k, { ...v, index: { ...v.index, parts: k === "base" ? [1, 5] : [1, 1], ...(k === "base" ? more : {}) } }]));
+  const halved = await read(venues({}), replayFetch(R, undefined, undefined, undefined, slowOver(5_000)), async () => {});
+  assert.equal(judge(halved).pass, true, judge(halved).lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  assert.equal(asked.filter((n) => n === 10_000).length, 5, "each 10,000-block piece asked once, then as halves");
+  assert.equal(halved.chains.base.spans[0].on[1].pieces.length, 10);
+  // a spare (another reader, answering as publicnode did): each timed-out piece asked of it whole, no halves
+  const SPARE = "https://spare.example";
+  const fetchOf = replayFetch(R, undefined, undefined, undefined, (u, a, b) => u === BX && a >= span.a && b <= span.b);
+  const viaSpare = async (url, init) => (url === SPARE ? fetchOf(R.chains.base.index.readers[0], init) : fetchOf(url, init));
+  const spared = await read(venues({ spares: [SPARE] }), viaSpare, async () => {});
+  assert.equal(judge(spared).pass, true, judge(spared).lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  assert.ok(spared.chains.base.spans[0].on[1].pieces.every((p) => p.by === SPARE && p.b - p.a + 1 === 10_000));
 });

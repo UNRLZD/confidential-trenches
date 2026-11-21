@@ -95,7 +95,7 @@ function judgeQuotes(qs, say) {
       const where = runs.flatMap((u, i) =>
         Object.entries(u.hosts ?? {})
           .filter(([, h]) => (h.s429 ?? 0) > 0)
-          .map(([host, h]) => `${u.kind} ${i} ${host} ${h.s429}/${h.requests ?? "?"}${h.s429Reads ? ` ${Object.entries(h.s429Reads).map(([m, n]) => `${m} x${n}`).join(" ")}` : ""}`),
+          .map(([host, h]) => `${u.kind} ${i} ${host} ${h.s429}/${h.requests ?? "?"}${h.s429Reads ? ` ${Object.entries(h.s429Reads).map(([m, n]) => `${m} x${n}`).join(" ")}` : ""}${h.s429At ? ` (${h.s429At.join("; ")})` : ""}`),
       );
       const most = Math.max(0, ...runs.map((u) => u.quotes ?? Infinity));
       // a refusal as much as a quote: the user waits on either
@@ -136,6 +136,11 @@ export function judge(run) {
  *  the seats the tap's first quote ranks its providers by (evmProviderSeats), read as it starts. */
 export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "robinhood"], coins = {} } = {}) {
   const counts = {};
+  // each host's posts of the last 2 s across taps, kept apart from the tap's own counts: a 429 is named with the calls
+  // sent to its host in the second before it and the posts in flight as it was sent, so a red names its root, the
+  // device's pace or a burst across taps (release 189's sign live run 44924144323: ANT warm 3, one 429 of
+  // robinhood.rpc.blxrbdn.com with no timeline to read it by; card evm-pace-holds-units-while-out)
+  const sends = {};
   const real = globalThis.fetch;
   const counted = async (url, init) => {
     const host = new URL(typeof url === "string" ? url : url.url).host;
@@ -143,11 +148,15 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
     c.requests++;
     let logs = false;
     let methods = ["?"];
+    const req = { at: performance.now(), ms: null, calls: 1 };
+    const recent = (sends[host] = (sends[host] ?? []).filter((x) => x.ms === null || x.at > req.at - 2_000));
+    recent.push(req);
     try {
       const b = JSON.parse(typeof init?.body === "string" ? init.body : "null");
       c.calls += Array.isArray(b) ? b.length : b === null ? 0 : 1;
       logs = (Array.isArray(b) ? b : [b]).some((x) => x?.method === "eth_getLogs");
       methods = (Array.isArray(b) ? b : [b]).map((x) => String(x?.method ?? "?"));
+      req.calls = Array.isArray(b) ? b.length : 1;
     } catch {
       c.calls++;
     }
@@ -157,14 +166,19 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
       r = await fetchFn(url, init);
     } catch (e) {
       c.thrown = (c.thrown ?? 0) + 1;
+      req.ms = performance.now() - req.at;
       throw e;
     }
+    req.ms = performance.now() - req.at;
     if (r.status >= 400 && r.status !== 429) (c.bad ??= {})[r.status] = (c.bad[r.status] ?? 0) + 1;
     if (r.status === 429) {
       c.s429++;
       // the read a 429 answered: its methods, a batch's as one key (eth_call+eth_blockNumber)
       const m = [...new Set(methods)].sort().join("+");
       c.s429Reads[m] = (c.s429Reads[m] ?? 0) + 1;
+      const before = (sends[host] ?? []).filter((x) => x !== req && x.at <= req.at);
+      const fly = before.filter((x) => x.ms === null || x.at + x.ms > req.at);
+      (c.s429At ??= []).push(`${before.filter((x) => x.at > req.at - 1_000).reduce((n, x) => n + x.calls, 0) + req.calls} calls in 1 s, ${fly.length + 1} posts (${fly.reduce((n, x) => n + x.calls, 0) + req.calls} calls) in flight`);
     }
     if (r.status === 429 && logs) c.s429Logs++;
     return r;

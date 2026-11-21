@@ -94,3 +94,39 @@ test("only Robinhood's own RPC, and only a filter with one position of several v
   assert.equal(oneValueFilters(at("not a url"), f), null);
   assert.deepEqual(oneValueFilters(at("https://rpc.mainnet.chain.robinhood.com"), f), TOPICS.map((t) => ({ address: POOL, topics: [t] })));
 });
+
+// Card robinhood-reads-past-ten-million-blocks: the pool's deploy block is now more than 10,000,000 blocks back, and
+// Robinhood's own RPC refuses a one-value read past that span (live run 44930704040, 21 Nov: the pool's whole history,
+// 11,625,840 blocks, "-32602: query spans 11625818 blocks (108420674 to 120046491), but only 10000000 are allowed"). The
+// read is asked in spans of its cap, one call a value each, and returns every log: never the whole read refused and the
+// pool paged at 100,000 to 800,000 blocks.
+const CAP = 10_000_000n;
+const LONG_TO = FROM + 11_625_839n;
+const LONG = planted(FROM, LONG_TO);
+const capped = (cap: bigint) => (c: Call) => (c.span > cap ? `RPC error -32602: query spans ${c.span - 1n} blocks (${FROM} to ${FROM + c.span - 1n}), but only ${cap} are allowed for this request; reduce the range or send one value per position` : null);
+const longRead = (a: Fake, b: Fake): Promise<EvmLogRow[]> => {
+  const anchor = { number: LONG_TO, hash: hash(LONG_TO), timestamp: 0n, baseFeePerGas: null };
+  return evmAgreedLogs(evmPair([a, b]), { address: POOL, topics: [TOPICS] }, (raw) => raw as EvmLogRow, FROM, { fin: anchor, anchor }, evmPoolLogPager(), 0, undefined, async () => {});
+};
+const longRobinhood = (oneValueCap: bigint): Fake =>
+  provider("https://rpc.mainnet.chain.robinhood.com", LONG, (c) =>
+    c.values > 1 && c.span > 100_000n ? `RPC error -32602: query spans ${c.span} blocks, but only 100000 are allowed for this request; reduce the range or send one value per position` : c.values === 1 ? capped(oneValueCap)(c) : null,
+  );
+const longPocket = (): Fake => provider("https://robinhood.api.pocket.network", LONG, (c) => (c.span > 800_000n ? "block range exceeds maximum 800000" : null));
+
+test("Robinhood's own past its 10,000,000-block cap: the pool's 11,625,840 blocks in two spans of the cap, one call a topic each (6 calls), every log in block order", async () => {
+  const own = longRobinhood(CAP);
+  assert.deepEqual(await longRead(own, longPocket()), LONG.map(({ topic: _t, ...l }) => l));
+  const spans = own.calls.map((c) => c.span);
+  assert.ok(spans.every((s) => s <= CAP), `a call past the cap: ${spans.filter((s) => s > CAP)}`);
+  assert.equal(own.calls.length, 6, `${own.calls.length} calls on Robinhood's own`);
+  assert.ok(own.calls.every((c) => c.values === 1));
+});
+
+test("a cap Robinhood's own names under the read's span (its words, read from the refusal): the read is asked again in spans of that cap, every log", async () => {
+  const own = longRobinhood(4_000_000n);
+  assert.deepEqual(await longRead(own, longPocket()), LONG.map(({ topic: _t, ...l }) => l));
+  const answered = own.calls.filter((c) => c.span <= 4_000_000n);
+  assert.equal(answered.length, 9, "three spans of the cap named, a topic each");
+  assert.ok(own.calls.every((c) => c.values === 1), "never paged at three values a call");
+});

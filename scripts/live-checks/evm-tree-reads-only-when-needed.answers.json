@@ -230,5 +230,146 @@
         12
       ]
     }
+  },
+  "release187": {
+    "at": "2026-11-21T14:12:24Z",
+    "browser": "GitHub runner, release 187's sign live run 44912189713 (as the run printed it; no record kept)",
+    "signDir": null,
+    "loads": 6,
+    "posts": {
+      "base.rpc.blxrbdn.com": 255,
+      "ct-api.unrealized.trade": 162,
+      "base-rpc.publicnode.com": 340,
+      "rpc.mainnet.chain.robinhood.com": 179,
+      "base.gateway.tenderly.co": 2,
+      "base-mainnet.public.blastapi.io": 42,
+      "mainnet.base.org": 6,
+      "robinhood-rpc.publicnode.com": 27,
+      "robinhood.drpc.org": 42,
+      "robinhood.api.pocket.network": 8
+    },
+    "logs": {
+      "index": 0,
+      "scan": 0,
+      "other": 46
+    },
+    "refused": {
+      "robinhood.drpc.org 400 [eth_call 0x000000000000000000000000000000000000006c:0xf5d6ded7]": 1,
+      "robinhood.drpc.org rpc error 27 eth_call 0x000000000000000000000000000000000000006c:0xf5d6ded7": 1
+    },
+    "byLoad": {
+      "base": [
+        0,
+        7,
+        3,
+        5,
+        3,
+        8
+      ],
+      "robinhood": [
+        0,
+        0,
+        0,
+        0,
+        11,
+        9
+      ]
+    }
+  },
+  "release187Asked": {
+    "at": "2026-11-21T14:12:24Z",
+    "browser": "planted on release187: its drpc read summarized as this card reads it, asked again and answered",
+    "signDir": null,
+    "loads": 6,
+    "posts": {
+      "base.rpc.blxrbdn.com": 255,
+      "ct-api.unrealized.trade": 162,
+      "base-rpc.publicnode.com": 340,
+      "rpc.mainnet.chain.robinhood.com": 179,
+      "base.gateway.tenderly.co": 2,
+      "base-mainnet.public.blastapi.io": 42,
+      "mainnet.base.org": 6,
+      "robinhood-rpc.publicnode.com": 27,
+      "robinhood.drpc.org": 42,
+      "robinhood.api.pocket.network": 8
+    },
+    "logs": {
+      "index": 0,
+      "scan": 0,
+      "other": 46
+    },
+    "refused": {},
+    "byLoad": {
+      "base": [
+        0,
+        7,
+        3,
+        5,
+        3,
+        8
+      ],
+      "robinhood": [
+        0,
+        0,
+        0,
+        0,
+        11,
+        9
+      ]
+    },
+    "lag": {
+      "robinhood.drpc.org eth_call 0x000000000000000000000000000000000000006c:0xf5d6ded7": {
+        "asked": 1,
+        "answered": 1
+      }
+    }
+  },
+  "release187NeverAnswered": {
+    "at": "2026-11-21T14:12:24Z",
+    "browser": "planted on release187: its drpc read summarized as this card reads it, never answered again",
+    "signDir": null,
+    "loads": 6,
+    "posts": {
+      "base.rpc.blxrbdn.com": 255,
+      "ct-api.unrealized.trade": 162,
+      "base-rpc.publicnode.com": 340,
+      "rpc.mainnet.chain.robinhood.com": 179,
+      "base.gateway.tenderly.co": 2,
+      "base-mainnet.public.blastapi.io": 42,
+      "mainnet.base.org": 6,
+      "robinhood-rpc.publicnode.com": 27,
+      "robinhood.drpc.org": 42,
+      "robinhood.api.pocket.network": 8
+    },
+    "logs": {
+      "index": 0,
+      "scan": 0,
+      "other": 46
+    },
+    "refused": {},
+    "byLoad": {
+      "base": [
+        0,
+        7,
+        3,
+        5,
+        3,
+        8
+      ],
+      "robinhood": [
+        0,
+        0,
+        0,
+        0,
+        11,
+        9
+      ]
+    },
+    "lag": {
+      "robinhood.drpc.org eth_call 0x000000000000000000000000000000000000006c:0xf5d6ded7": {
+        "asked": 1,
+        "answered": 0
+      }
+    }
   }
 }

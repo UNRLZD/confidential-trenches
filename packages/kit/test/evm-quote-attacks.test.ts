@@ -977,6 +977,52 @@ test("F10w a warm buy with a held head (its first round sent beside its scan) on
   }
 });
 
+// card evm-first-quote-reads-its-coin-at-any-age: a coin's read served (pool-index.ts evmPoolCoinSync) holds a quote to the
+// same market a whole index does where the whole index is older: a stale snapshot's first quote reads the coin's own
+// blocks, never every pool's, and its buy below the coin's real market (card evm-buy-never-below-a-hidden-market) is
+// refused as it is on the whole index; a whole index that later leaves out the coin read's pool is refused, both dropped
+test("COINQ a coin's read past a stale whole index holds the buy to the real market the read proved, 0 getLogs; a whole index that leaves its pool out is never served", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset, evmPoolCoinUse, evmPoolCoverOf, evmPoolIndexPools } = quoteMod as unknown as {
+    evmPoolIndexUse: (c: string, s: unknown) => boolean;
+    evmPoolIndexReset: () => void;
+    evmPoolCoinUse?: (c: string, s: unknown) => boolean;
+    evmPoolCoverOf?: (c: string, k: string, x: string, w: string) => { spans: [number, number][]; pools: unknown[] } | undefined;
+    evmPoolIndexPools: (c: string, t: string) => readonly unknown[] | null;
+  };
+  assert.ok(evmPoolCoinUse !== undefined && evmPoolCoverOf !== undefined, "no evmPoolCoinUse");
+  const token = "0x00000000000000000000000000000000000f10c1";
+  const pools = [seeded(token), real(token)];
+  const rpcs = [chain(pools, 0), chain(pools, 1)];
+  const watch = quoteMod.evmHeadWatch(rpcs, 50n, () => NOW, false, () => 0);
+  const asks: unknown[] = [];
+  const empty = scanner(5_000_000, []);
+  const scan: EvmRpc = async (calls, signal) => (asks.push(...getLogsOf(calls)), empty(calls, signal));
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) };
+  const index = { chainId: 8453, poolManager: PM, from: 4_000_001 };
+  const WETH = "0x4200000000000000000000000000000000000006";
+  evmPoolIndexReset();
+  try {
+    // the whole index 864,000 blocks behind, before the coin's real pool
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 4_136_000, pools: [] }), true);
+    // the coin's read to the head: its real pool
+    assert.equal(evmPoolCoinUse("base", { token, xs: [], from: 4_000_001, coversThrough: 5_000_000, pools: [{ key: real(token).key }] }), true);
+    assert.deepEqual(evmPoolIndexPools("base", token), [real(token).key]);
+    assert.deepEqual(evmPoolCoverOf("base", "all", token, WETH)?.spans, [[4_000_001, 5_000_000]]);
+    assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scan, watch, () => 0)), below);
+    assert.deepEqual(asks, [], "no getLogs before the answer");
+    // a whole index to the head that leaves the coin read's pool out: refused, and the coin read dropped with it
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 5_000_000, pools: [] }), false);
+    assert.deepEqual(evmPoolCoverOf("base", "all", token, WETH)?.spans, [[4_000_001, 4_136_000]], "the stale index alone, not the coin read");
+    // and one with other pools than the stale one's (a new index, not its N moved on) that leaves it out: the same
+    assert.equal(evmPoolCoinUse("base", { token, xs: [], from: 4_000_001, coversThrough: 5_000_000, pools: [{ key: real(token).key }] }), true);
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 5_000_000, pools: [{ key: seeded(token).key }] }), false);
+    assert.deepEqual(evmPoolCoverOf("base", "all", token, WETH)?.spans, [[4_000_001, 4_136_000]]);
+
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
 // card evm-index-kept-at-the-head: an index synced once falls past maxLag of the head, and a new coin's cold buy then
 // scans the blocks past its N by currency before its answer (Robinhood 2, 10 and 5 getLogs, Base 6, 19 Nov); the same
 // index synced on to the head (the page's keep, a gap sync from the kept index) serves the next new coin's cold buy whole
@@ -6260,12 +6306,112 @@ test("RQ4 a sell whose token's transfer reverts with a rate-limit string is aske
   assert.equal(probes, 2, `asked ${probes} times; ${big(r.verdict)} after ${r.ms} ms`);
 });
 
-test("LQ3 an answer outside 2xx is refused without its body read, and its body is cancelled, never left open", async () => {
+test("LQ3 an answer outside 2xx that is no not-yet answer is refused, its body read to the bound at most and cancelled, never left open", async () => {
   let cancelled = false;
   const body = new ReadableStream({ pull: (c) => c.enqueue(new TextEncoder().encode("[")), cancel: () => void (cancelled = true) });
   const f = (async () => new Response(body, { status: 403 })) as unknown as typeof fetch;
   await assert.rejects(evmJsonRpc("https://lq3.test", f)([{ method: "eth_blockNumber", params: [] }]), /HTTP 403/);
   assert.equal(cancelled, true);
+});
+
+// card evm-lag-answer-read-again: release 187's sign live run 44912189713 (21 Nov) read robinhood.drpc.org answer HTTP
+// 400 with JSON-RPC code 27 "Unknown state. First available state is 1" to ArbGasInfo's getL1BaseFeeEstimate (0x…6c,
+// 0xf5d6ded7): the answer askAt asks again under a 200 (2026-11-04 06:52Z), refused unread as BadAnswer under a 400
+const UNKNOWN_STATE = (id: number) => ({ jsonrpc: "2.0", id, error: { code: 27, message: "Unknown state. First available state is 1" } });
+const ARB_GAS = { method: "eth_call", params: [{ to: "0x000000000000000000000000000000000000006c", data: "0xf5d6ded7" }, "latest"] };
+
+test("LG1 a 4xx whose body is not-yet answers alone is read as those answers, one call or a batch (red at f02b75c41: HTTP 400 refused unread)", async () => {
+  for (const n of [1, 3]) {
+    const f = (async () => new Response(JSON.stringify(n === 1 ? UNKNOWN_STATE(0) : Array.from({ length: n }, (_, id) => UNKNOWN_STATE(id))), { status: 400, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    const out = await evmJsonRpc(`https://n${n}.lg1.test`, f)(Array.from({ length: n }, () => ARB_GAS));
+    assert.deepEqual(out, Array.from({ length: n }, (_, id) => UNKNOWN_STATE(id)));
+  }
+});
+
+test("LG2 every other 4xx stays a failure: publicnode's 403 archive refusal, a not-yet error beside a result, a revert naming unknown state, an empty or non-JSON body, one past the bound (review MED-1)", async () => {
+  const bodies: [number, string][] = [
+    // robinhood-rpc.publicnode.com, 2026-11-05 11:01Z
+    [403, '[{"jsonrpc":"2.0","error":{"code":-32602,"message":"Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode"},"id":0}]'],
+    [400, JSON.stringify([UNKNOWN_STATE(0), { jsonrpc: "2.0", id: 1, result: "0x01" }])],
+    [400, JSON.stringify([{ jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted: unknown state" } }])],
+    [400, JSON.stringify({ jsonrpc: "2.0", id: 0, error: { code: -32602, message: "invalid params" } })],
+    [403, ""],
+    [400, "Unknown state"],
+    [400, "[]"],
+  ];
+  for (const [status, body] of bodies) {
+    const f = (async () => new Response(body, { status })) as unknown as typeof fetch;
+    await assert.rejects(evmJsonRpc("https://lg2.test", f)([ARB_GAS, ARB_GAS]), new RegExp(`HTTP ${status}`), body.slice(0, 60));
+    await assert.rejects(evmJsonRpc("https://lg2.test", f)([ARB_GAS]), new RegExp(`HTTP ${status}`), body.slice(0, 60));
+  }
+  // a not-yet body past the bound is refused, its rest cancelled
+  let cancelled = false;
+  const one = new TextEncoder().encode(JSON.stringify([UNKNOWN_STATE(0)]));
+  const long = new ReadableStream({ pull: (c) => c.enqueue(one), cancel: () => void (cancelled = true) });
+  await assert.rejects(evmJsonRpc("https://lg2.test", (async () => new Response(long, { status: 400 })) as unknown as typeof fetch, 1_000)([ARB_GAS]), /HTTP 400/);
+  assert.equal(cancelled, true);
+});
+
+test("LG3 a quote whose last provider left answers its state reads HTTP 400 \"Unknown state\" once asks it again and reads its answer, as under a 200 (red at f02b75c41: the 400 refused, never asked again; with a provider left it moves on, LG5)", async () => {
+  const run = async (status: number) => {
+    const token = freshToken();
+    const pools = [best(token)];
+    const host = `lag${status}.lg3.test`;
+    // two providers: the lagging one is the last left, so it is asked again (askAt)
+    const models: Record<string, EvmRpc> = { [host]: chain(pools, 0), [`a${status}.lg3.test`]: chain(pools, 0) };
+    const urls = Object.keys(models).map((h) => "https://" + h);
+    let lagged = 0;
+    let first = "";
+    let again = 0;
+    const f = (async (u: string, init: RequestInit) => {
+      const h = new URL(u).hostname;
+      const calls = JSON.parse(init.body as string) as { id: number; method: string; params: unknown[] }[];
+      if (h === host && calls.some((c) => c.method === "eth_call")) {
+        if (lagged === 0) return ((first = init.body as string), lagged++, new Response(JSON.stringify(calls.map((c) => UNKNOWN_STATE(c.id))), { status }));
+        // the very batch that lagged, posted again (askAt)
+        if (init.body === first) again++;
+      }
+      await pause(h === host ? 1 : 80);
+      const out = await models[h]!(calls.map((c) => ({ method: c.method, params: c.params })));
+      return new Response(JSON.stringify(out.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+    }) as unknown as typeof fetch;
+    const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(urls, f), NOW));
+    return { accepted: (v as { accepted: boolean }).accepted, lagged, askedAgain: again > 0 };
+  };
+  const at200 = await run(200);
+  assert.deepEqual(at200, { accepted: true, lagged: 1, askedAgain: true }, "the 200 answer, as askAt has read it since 2026-11-04");
+  assert.deepEqual(await run(400), at200);
+});
+
+// card evm-lag-answer-read-again: merge queue run 44936343596 timed warm Base quotes at p95 2,121 ms (base-hook) and 2,102 ms
+// (base-partial-v4) against 194 and 465 ms in the same code's PR run: a lagging provider's not-yet answers, asked again 0.25,
+// 0.5 and 0.75 s on its own provider (askAt), held the quote about 1.5 s where another provider was left to ask
+test("LG5 a provider whose answers are not yet at the block, under a 200 or a 4xx, gives way at once to a provider left: the lagging batch is never posted again, so the quote waits none of the 1.5 s of re-asks (red at 4e6f453ef)", async () => {
+  for (const status of [200, 400]) {
+    const token = freshToken();
+    const pools = [best(token)];
+    const host = `lag${status}.lg5.test`;
+    const models: Record<string, EvmRpc> = { [host]: chain(pools, 0), [`a${status}.lg5.test`]: chain(pools, 0), [`b${status}.lg5.test`]: chain(pools, 0) };
+    const urls = Object.keys(models).map((h) => "https://" + h);
+    const posted = new Map<string, number>();
+    const f = (async (u: string, init: RequestInit) => {
+      const h = new URL(u).hostname;
+      const calls = JSON.parse(init.body as string) as { id: number; method: string; params: unknown[] }[];
+      if (h === host && calls.some((c) => c.method === "eth_call")) {
+        posted.set(init.body as string, (posted.get(init.body as string) ?? 0) + 1);
+        // every state read of the lagging provider: Base's "block not found" under a 200 (null), drpc's code 27 under a 400
+        return new Response(JSON.stringify(calls.map((c) => (status === 200 ? { jsonrpc: "2.0", id: c.id, result: null } : UNKNOWN_STATE(c.id)))), { status });
+      }
+      await pause(20);
+      const out = await models[h]!(calls.map((c) => ({ method: c.method, params: c.params })));
+      return new Response(JSON.stringify(out.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+    }) as unknown as typeof fetch;
+    const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), quoteMod.evmProviders(urls, f), NOW));
+    assert.equal((v as { accepted: boolean }).accepted, true, `${status}: quoted on the two that hold the block`);
+    assert.ok(posted.size > 0, `${status}: the lagging provider was asked`);
+    // the re-asks are the wait (0.25, 0.5 and 0.75 s on, askAt): none sent is none waited
+    assert.deepEqual([...posted.values()].filter((n) => n > 1), [], `${status}: no lagging batch posted again`);
+  }
 });
 
 test("LQ4 an answer for a block a provider does not hold yet is neither held nor timed: a fast not-yet answer never ranks a provider first", async () => {
