@@ -306,6 +306,10 @@ export const setPagePoolFinders = (f: PoolFinders | null): void => void (pageFin
 /** How many coins' pools a finder keeps, and how long: a pool made since is found on the next read a minute on. */
 export const POOLS_KEPT = 256;
 export const POOLS_KEEP_MS = 60_000;
+/** How long a market finder (MARKET_FINDER_KINDS) keeps a coin's markets: a CLMM pool for a mint is made rarely, and
+ *  each tap reads each listed pool's state fresh (kit clmm.ts readSolanaClmmMarket), so the list alone is kept, as the
+ *  helper keeps its half for every device (apps/helper rpc.ts MARKET_SCAN_HOLD_MS). [design: 10 min, the CO's floor] */
+export const MARKETS_KEEP_MS = 10 * 60_000;
 type ScanRead = (scan: readonly [SolanaRpc, SolanaRpc], read: readonly [SolanaRpc, SolanaRpc], mint: string) => Promise<string[]>;
 const FIND: Readonly<Record<PoolFinderKind | MarketFinderKind, ScanRead>> = Object.freeze({ dlmmPairs: readSolanaDlmmPairs, cpmmPools: readSolanaCpmmPools, ammV4Pools: readSolanaAmmV4Pools, clmmPools: readSolanaClmmPools });
 /** How many scans each provider answers for one coin: the coin first and second beside wSOL; for the CLMM markets one
@@ -320,9 +324,10 @@ export function keptPools(kind: PoolFinderKind | MarketFinderKind, scan: () => r
   type Kept = { at: number; pools: Promise<readonly string[]>; early: Promise<readonly string[]> };
   const kept = new Map<string, Kept>();
   const find = FIND[kind];
+  const keep = (MARKET_FINDER_KINDS as readonly string[]).includes(kind) ? MARKETS_KEEP_MS : POOLS_KEEP_MS;
   const of = (token: string): Kept => {
     const k = kept.get(token);
-    if (k !== undefined && now() - k.at < POOLS_KEEP_MS) return k;
+    if (k !== undefined && now() - k.at < keep) return k;
     if (kept.size >= POOLS_KEPT) kept.clear();
     // the same scan, each provider's answers seen as they come: the first provider whose two scans (the coin first and
     // second) both answered a list names the early list, as the kit makes the list from both (its union, and past

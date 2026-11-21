@@ -1055,6 +1055,22 @@ export const SHARED_HOLD_MS = 400;
 export const SHARED_HIT_DRAW = 0.25;
 /** Shared reads held at once [design: the two accounts' reads in the few configs the pages send, with room]. */
 const SHARED_MAX = 64;
+/**
+ * A coin's Raydium CLMM market scan (poolScanAllowed on the CLMM program; card solana-buy-never-below-a-hidden-market),
+ * shared between every caller per scan for MARKET_SCAN_HOLD_MS: the signing page asks it for each buy of a coin it has
+ * not read within its own keep, and a CLMM pool for a mint is made rarely, so one read serves every device opening that
+ * coin. The list only names pools: each device reads each pool's state fresh on two providers, and its other provider
+ * (the page's seat) scans fresh, so a pool made since is still found by the union. [design: 10 min, the CO's floor]
+ */
+export const MARKET_SCAN_HOLD_MS = 10 * 60_000;
+/** Market scans held at once [design: two a coin, for 4,096 coins; each a few addresses, under 2 MB in all]. */
+const MARKET_SCAN_MAX = 8_192;
+/** A checked request's key as a market scan to share, or null: one getProgramAccounts on mainnet Solana in the CLMM
+ *  scan's exact shape. */
+export function marketScanKeyOf(chain: RpcChain, req: unknown, keyedOnly: boolean): string | null {
+  if (chain !== "solana" || !isPlain(req) || req.method !== "getProgramAccounts" || !Array.isArray(req.params) || req.params[0] !== SOLANA_CLMM_PROGRAM || !poolScanAllowed(req)) return null;
+  return `${chain}${keyedOnly ? " keyed" : ""} ${JSON.stringify(req.params)}`;
+}
 const SHARED_METHODS: ReadonlySet<string> = new Set(["getMultipleAccounts", "getAccountInfo"]);
 const SHARED_COMMITMENTS: ReadonlySet<unknown> = new Set(["confirmed", "finalized"]);
 /** A checked request's key for sharing (SHARED_ACCOUNTS), or null when it is not one to share: one request (not a
@@ -1688,20 +1704,25 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // card helper-rpc-one-read-many-pages: a read of the named public accounts (SHARED_ACCOUNTS) joins the same read in
     // flight, or is answered from it for SHARED_HOLD_MS after
     const sk = sharedKeyOf(c, out, keyedOnly);
-    if (sk !== null) return sharedRead(sk, (out as { id: unknown }).id, c, client, () => send(c, out, forward, methods, client, reserved, keyedOnly));
+    if (sk !== null) return sharedRead(sharedReads, SHARED_HOLD_MS, SHARED_MAX, sk, (out as { id: unknown }).id, c, client, () => send(c, out, forward, methods, client, reserved, keyedOnly));
+    // a coin's CLMM market scan joins the same scan in flight, or is answered from it for MARKET_SCAN_HOLD_MS after
+    const mk = marketScanKeyOf(c, out, keyedOnly);
+    if (mk !== null) return sharedRead(marketScans, MARKET_SCAN_HOLD_MS, MARKET_SCAN_MAX, mk, (out as { id: unknown }).id, c, client, () => send(c, out, forward, methods, client, reserved, keyedOnly));
     return send(c, out, forward, methods, client, reserved, keyedOnly);
   }
 
   // the shared reads (sharedKeyOf): each one's result as JSON text, null when it gave none to share, and when its answer
   // stops serving (Infinity while it is in flight)
-  const sharedReads = new Map<string, { result: Promise<string | null>; until: number }>();
+  type Shared = Map<string, { result: Promise<string | null>; until: number }>;
+  const sharedReads: Shared = new Map();
+  const marketScans: Shared = new Map();
   /** A shared read: the one in flight or held joined, drawing SHARED_HIT_DRAW of the caller's share and nothing of the
    *  provider's total, answered with the caller's own id; else the caller's own read, held for the next. A held read
    *  that gave no result (a refusal, an error) serves no one: each caller then makes its own. */
-  async function sharedRead(key: string, id: unknown, c: RpcChain, client: string | undefined, go: () => Promise<Answer>): Promise<Answer> {
+  async function sharedRead(reads: Shared, hold: number, max: number, key: string, id: unknown, c: RpcChain, client: string | undefined, go: () => Promise<Answer>): Promise<Answer> {
     const t = now();
-    for (const [k, e] of sharedReads) if (e.until <= t) sharedReads.delete(k);
-    const e = sharedReads.get(key);
+    for (const [k, e] of reads) if (e.until <= t) reads.delete(k);
+    const e = reads.get(key);
     if (e !== undefined) {
       // drawn once the answer is in, so callers joining a read in flight never spend its caller's share before it is sent
       const result = await e.result;
@@ -1712,10 +1733,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       if (tr !== undefined) tr.cached = true;
       return { status: 200, body: `{"jsonrpc":"2.0","id":${JSON.stringify(id)},"result":${result}}` };
     }
-    if (sharedReads.size >= SHARED_MAX) return go();
+    if (reads.size >= max) return go();
     let done!: (r: string | null) => void;
     const entry = { result: new Promise<string | null>((ok) => (done = ok)), until: Infinity };
-    sharedReads.set(key, entry);
+    reads.set(key, entry);
     let a: Answer | undefined;
     try {
       a = await go();
@@ -1723,8 +1744,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       const result = a === undefined ? null : resultOf(a);
       done(result);
       if (result === null) {
-        if (sharedReads.get(key) === entry) sharedReads.delete(key);
-      } else entry.until = now() + SHARED_HOLD_MS;
+        if (reads.get(key) === entry) reads.delete(key);
+      } else entry.until = now() + hold;
     }
     return a;
   }

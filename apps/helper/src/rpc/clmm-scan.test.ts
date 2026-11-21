@@ -3,11 +3,12 @@
 // 1544, and both mints at 73 and 105, addresses only) on POST /v1/rpc/solana. The helper carries that exact shape, the
 // coin and wSOL or USDC in either order, to route A as any scan; any wider scan of the CLMM program (one mint, no size,
 // the pools' bytes, a quote other than wSOL or USDC, another program's scan shape) is refused before any call. A USDC
-// quote stays the CLMM scan's alone: the DLMM, CPMM and AMM v4 scans still need wSOL on one side.
+// quote stays the CLMM scan's alone: the DLMM, CPMM and AMM v4 scans still need wSOL on one side. One read of a coin's
+// market scan serves every caller for MARKET_SCAN_HOLD_MS (10 min); a failed read serves no one.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SOLANA_CLMM_PROGRAM, SOLANA_SOL_MINT, SOLANA_USDC_MINT, solanaClmmPoolScan, solanaCpmmPoolScan } from "@blindfill/kit";
-import { createRpc } from "./rpc.ts";
+import { createRpc, MARKET_SCAN_HOLD_MS } from "./rpc.ts";
 
 const STILL = (): number => 1_800_000_000_000;
 const MPLX = "METAewgxyPbgwsseH8T16a39CQ5VyVxZi9zXiDPY18m";
@@ -63,4 +64,46 @@ test("any wider scan of the CLMM program, or a USDC scan of another program, is 
     assert.equal(a.status, 400, JSON.stringify(params));
     assert.equal(sent.length, 0);
   }
+});
+
+test("a coin's CLMM market scan is one upstream read for every caller for 10 minutes, then read again; another coin's is its own", async () => {
+  let t = 1_800_000_000_000;
+  const { sent, f } = fakeFetch();
+  const r = createRpc(ENV, { now: () => t, fetch: f, log: () => {} });
+  const scan = body(solanaClmmPoolScan(MPLX, SOLANA_SOL_MINT));
+  // two callers at once, then one a while on: one read
+  const [a, b] = await Promise.all([call(r, scan), call(r, { ...scan, id: 10 })]);
+  assert.equal(a.status, 200);
+  assert.equal(b.status, 200);
+  assert.equal(JSON.parse(b.body).id, 10);
+  t += MARKET_SCAN_HOLD_MS - 1_000;
+  assert.equal((await call(r, { ...scan, id: 11 })).status, 200);
+  assert.equal(sent.length, 1);
+  // another coin's scan, or the same coin's USDC one, is its own read
+  await call(r, body(solanaClmmPoolScan(MPLX, SOLANA_USDC_MINT)));
+  assert.equal(sent.length, 2);
+  // past the hold: read again
+  t += 2_000;
+  await call(r, scan);
+  assert.equal(sent.length, 3);
+  assert.equal(MARKET_SCAN_HOLD_MS, 600_000);
+});
+
+test("a market scan whose read failed is held for no one: the next caller reads again", async () => {
+  let n = 0;
+  const sent: string[] = [];
+  const f = async (url: string, init: RequestInit) => {
+    sent.push(url);
+    const p = JSON.parse(String(init.body));
+    return n++ === 0
+      ? new Response(JSON.stringify({ jsonrpc: "2.0", id: p.id, error: { code: -32005, message: "busy" } }), { status: 200, headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ jsonrpc: "2.0", id: p.id, result: { context: { slot: 1 }, value: [] } }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const r = createRpc(ENV, { now: STILL, fetch: f, log: () => {} });
+  const scan = body(solanaClmmPoolScan(MPLX, SOLANA_SOL_MINT));
+  await call(r, scan);
+  const again = await call(r, scan);
+  assert.equal(again.status, 200);
+  assert.ok(sent.length >= 2);
+  assert.ok("result" in JSON.parse(again.body));
 });

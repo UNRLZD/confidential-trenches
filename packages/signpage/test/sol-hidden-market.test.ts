@@ -9,14 +9,15 @@
 // below_reference before any move (HM1). A market priced at the PumpSwap pool's own level changes nothing (HM2); a
 // market under the cutoff never counts (HM3); a market is never a pool to buy (HM4); a provider that lies about the
 // market refuses the read, never prices it (HM5). The page asks its market finder for a buy and never for a sell (HM6),
-// keeps it past the tap's table pin and never routes through it (HM7), and refuses a tap whose market scan failed (HM8).
+// keeps it past the tap's table pin and never routes through it (HM7), refuses a tap whose market scan failed (HM8), and
+// keeps a coin's market list 10 minutes (HM9).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { base58, base64 } from "@scure/base";
 import { readSolanaReferenceWhy, solanaClmmSqrtPriceAtTick, solanaClmmReadList, solanaDecodeClmmPool, SOLANA_CLMM_PROGRAM, type SolanaReference } from "../../kit/src/index.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
-import { pageReference, pinnedPoolFinders, POOL_FINDER_VENUES, solanaBuyVenue, type PoolFinders, type PoolsOf } from "../src/page-rpc.ts";
+import { keptPools, MARKETS_KEEP_MS, pageReference, pinnedPoolFinders, POOL_FINDER_VENUES, POOLS_KEEP_MS, solanaBuyVenue, type PoolFinders, type PoolsOf } from "../src/page-rpc.ts";
 
 type RawAcc = { owner: string; data: [string, string] } | null;
 type Answer = { context: { slot: number }; value: RawAcc[] };
@@ -171,4 +172,34 @@ test("HM8 a market scan that faults refuses the tap's buy with its fault; a prev
   await assert.rejects(pageReference(providers(null), { side: "buy", token: coin.mint, amount: A }, { clmmPools: finder(fault) }), /CLMM scan/);
   const early = await pageReference(providers(null), { side: "buy", token: coin.mint, amount: A }, { clmmPools: Object.assign(finder(fault), { early: finder(fault) }) }, { early: true });
   assert.equal(early?.pools[0]?.venue, "pumpswap");
+});
+
+test("HM9 the device keeps a coin's markets 10 minutes (a venue's pools a minute): one seat scan a coin per 10 min", async () => {
+  let t = 0;
+  let scans = 0;
+  const scanner = (url: string): SolanaRpc => Object.assign(async (method: string) => {
+    assert.equal(method, "getProgramAccounts");
+    scans++;
+    return { context: { slot: 1 }, value: [] };
+  }, { url }) as unknown as SolanaRpc;
+  const pair = () => [scanner("https://a.example"), scanner("https://b.example")] as const;
+  const markets = keptPools("clmmPools", pair, pair, () => t);
+  await markets(coin.mint);
+  const first = scans;
+  assert.equal(first, 4); // wSOL and USDC, once each, on both providers
+  t = MARKETS_KEEP_MS - 1;
+  await markets(coin.mint);
+  assert.equal(scans, first);
+  t = MARKETS_KEEP_MS + 1;
+  await markets(coin.mint);
+  assert.equal(scans, 2 * first);
+  // a venue's finder keeps its pools POOLS_KEEP_MS alone
+  let v = 0;
+  const venue = keptPools("cpmmPools", pair, pair, () => v);
+  await venue(coin.mint);
+  const one = scans;
+  v = POOLS_KEEP_MS + 1;
+  await venue(coin.mint);
+  assert.ok(scans > one);
+  assert.equal(MARKETS_KEEP_MS, 600_000);
 });
