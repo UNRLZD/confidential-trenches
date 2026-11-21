@@ -14,7 +14,6 @@ import assert from "node:assert/strict";
 import { throughApi } from "./api-ends.ts";
 import { after, test } from "node:test";
 import { readFileSync } from "node:fs";
-import { createHook } from "node:async_hooks";
 import { IDBFactory } from "fake-indexeddb";
 import { returningWallets } from "../src/positions.ts";
 import { base58, base64 } from "@scure/base";
@@ -30,6 +29,7 @@ import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { solanaPoolNoteFloor } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { pairDown } from "./outage.ts";
+import { quiet } from "./settle.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
@@ -5234,23 +5234,12 @@ test("card start-reads-wait-out-a-throttle: one tap's waits share one total: a t
 
 // card pool-sell-legs-side-by-side: one wallet's sale reads side by side, each read once, the fee beside the simulations
 
-/** The device's own crypto jobs in flight: WebCrypto runs each one (the note store's AES-GCM reads and writes, digests,
- *  key work) on the thread pool, and its answer comes back on a later turn that no immediate waits for. The sync
- *  random bytes behind getRandomValues never call back (each finishes before its init returns), so they are not
- *  counted. Tracked only while ticked RPCs run (`ticked` enables it, `t.stop()` disables it). */
-const jobs = new Map<number, string>();
-const jobHook = createHook({
-  init: (id, type) => void (/REQUEST$/.test(type) && type !== "RANDOMBYTESREQUEST" && jobs.set(id, type)),
-  before: (id) => void jobs.delete(id),
-  destroy: (id) => void jobs.delete(id),
-});
 /** RPCs that answer only on a tick: each call asked since the last tick answers at the next one, so the ticks a sale
  *  takes to its signature are its read rounds (no clock read anywhere). */
 function ticked(rpcs: readonly [SolanaRpc, SolanaRpc]) {
   const queue: (() => void)[] = [];
   const wrap = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (await new Promise<void>((r) => void queue.push(r)), rpc(m, p))) as SolanaRpc;
-  jobHook.enable();
-  return { rpcs: [wrap(rpcs[0]), wrap(rpcs[1])] as readonly [SolanaRpc, SolanaRpc], queue, stop: () => void (jobHook.disable(), jobs.clear()) };
+  return { rpcs: [wrap(rpcs[0]), wrap(rpcs[1])] as readonly [SolanaRpc, SolanaRpc], queue, stop: () => {} };
 }
 /** Every task the last answers started has run before the next tick: no immediate left (the store's writes, the
  *  checks, the signature and its record run on immediates and microtasks) and no crypto job in flight, however many
@@ -5258,12 +5247,8 @@ function ticked(rpcs: readonly [SolanaRpc, SolanaRpc]) {
  *  jobs, written before it signs) was still on the thread pool, and its signature fell in the next tick: a round that
  *  read nothing, counted on a fast loop (CI job 130573328559 and three more PR runs on 11 Nov: actual 4, expected 3; on
  *  the build box 3 of 3 in the whole file, with the same calls in the same order as a green run). */
-const drain = async (): Promise<void> => {
-  for (let i = 0; i < 30 || jobs.size > 0 || process.getActiveResourcesInfo().includes("Immediate"); i++) {
-    if (i > 1_000_000) throw new Error(`the loop never went quiet: ${[...jobs.values()].join(", ")}`);
-    await new Promise((r) => setImmediate(r));
-  }
-};
+// test/settle.ts's quiet() is that wait, every package's one
+const drain = quiet;
 /** The sale run on ticked RPCs: the rounds before W's first signature, and the answer. */
 async function rounds(w: World, ask: PoolAsk = ASK): Promise<{ rounds: number; a: Awaited<ReturnType<typeof runPoolSell>>; signedAt: number }> {
   const t = ticked(w.c.rpcs);
