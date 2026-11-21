@@ -90,6 +90,10 @@ test("plants on the recorded quotes each fail on their own line", () => {
   // only "6 answers of 429")
   const named = q((runs) => (runs[2].hosts = { "mainnet.base.org": { requests: 9, s429: 2, s429Reads: { eth_call: 2 } }, "base.api.pocket.network": { requests: 4, s429: 0 } }));
   assert.match(named, /taps got 2 answers of 429: warm 2 mainnet\.base\.org 2\/9 eth_call x2$/m);
+  // and each 429 by the calls its host was sent in the second before it and the posts in flight then, across taps (card
+  // evm-pace-holds-units-while-out: release 189's run 44924144323 named bloXroute's one 429 with neither)
+  const timed = q((runs) => (runs[3].hosts = { "robinhood.rpc.blxrbdn.com": { requests: 10, s429: 1, s429Reads: { eth_getBlockByNumber: 1 }, s429At: ["16 calls in 1 s, 4 posts (10 calls) in flight"] } }));
+  assert.match(timed, /warm 3 robinhood\.rpc\.blxrbdn\.com 1\/10 eth_getBlockByNumber x1 \(16 calls in 1 s, 4 posts \(10 calls\) in flight\)$/m);
   assert.doesNotMatch(named, /pocket/);
   assert.deepEqual([...NAMED], ["not_allowed", "too_many_pools", "no_reference"]);
   const none = structuredClone(A.good);
