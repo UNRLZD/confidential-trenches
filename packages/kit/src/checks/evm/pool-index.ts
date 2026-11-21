@@ -728,8 +728,15 @@ export async function evmPoolCoinSync(prev: EvmPoolIndexData | null, coin: { rea
   };
   const stats: EvmPoolIndexStats = { requests: [0, 0], getLogs: [0, 0], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 0 };
   const add = (s: EvmPoolIndexStats) => {
-    for (const k of ["requests", "getLogs", "limited", "failed"] as const) for (const r of [0, 1] as const) stats[k][r] += s[k][r];
-    for (const r of [0, 1] as const) stats.limitedMaxMs[r] = Math.max(stats.limitedMaxMs[r], s.limitedMaxMs[r]);
+    // each count summed by its field, never a list of their names: a quoted method-shaped name reads as one the page
+    // sends (signpage page-rpc.test.ts, card helper-rpc-sell-methods)
+    for (const r of [0, 1] as const) {
+      stats.requests[r] += s.requests[r];
+      stats.getLogs[r] += s.getLogs[r];
+      stats.limited[r] += s.limited[r];
+      stats.failed[r] += s.failed[r];
+      stats.limitedMaxMs[r] = Math.max(stats.limitedMaxMs[r], s.limitedMaxMs[r]);
+    }
     stats.ms += s.ms;
   };
   const none = (error: EvmQuoteError | null): EvmPoolCoinSync => ({ token: t, xs: null, from: null, coversThrough: null, pools: null, error, stats });

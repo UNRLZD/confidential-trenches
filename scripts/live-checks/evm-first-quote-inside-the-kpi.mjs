@@ -33,7 +33,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as kit from "../../packages/kit/src/index.ts";
 import { mainnetVenues } from "./mainnet-venues.mjs";
-import { EXIT } from "./provider-answer.mjs";
+import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 const KEY = "evm-first-quote-inside-the-kpi";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -162,11 +162,16 @@ export async function read(sign = SIGN, helper = HELPER, site = null, venues = m
     // the aged device: the snapshot cut to AGED_BLOCKS below the readers' head (where it holds that block), its coins read
     // and quoted after the others, each coin's read timed from its start to its end and its quote after it
     await new Promise((r) => setTimeout(r, AGED_PAUSE_MS));
-    const post = (url, method) => orig(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: [] }), signal: AbortSignal.timeout(READ_MS) }).then((x) => x.json());
+    // each head read through rpcAnswer (scripts/ci/live-checks-provider-answer.mjs), on the fetch from before the run's
+    // count; a reader with no answer ends the run as before (its words)
+    const head1 = (url) => rpcAnswer(url, "eth_blockNumber", [], { fetchFn: orig, timeoutMs: READ_MS });
     const t1 = performance.now();
-    await post("https://base.rpc.blxrbdn.com", "eth_blockNumber").catch(() => null);
+    await head1("https://base.rpc.blxrbdn.com");
     const headMs = Math.round(performance.now() - t1);
-    const head = Math.min(...(await Promise.all(v.index.readers.map((u) => post(u, "eth_blockNumber").then((x) => Number(x.result))))));
+    const head = Math.min(...(await Promise.all(v.index.readers.map((u) => head1(u).then((x) => {
+      if (x.noAnswer !== undefined) throw new Error(`${u}: ${x.noAnswer}`);
+      return Number(x.result);
+    })))));
     const x = Math.min(ix.through, head - AGED_BLOCKS);
     const old = { ...ix, through: x, head: { number: x, hash: ix.head.hash }, spans: ix.spans.filter(([a]) => a <= x).map(([a, b]) => [a, Math.min(b, x)]), pools: ix.pools.filter((p) => p.block <= x) };
     const coinRead = kit.evmPoolCoinRefresh;
