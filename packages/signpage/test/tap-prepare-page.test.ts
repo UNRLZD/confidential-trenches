@@ -5,8 +5,6 @@
 // read the queue's empty ready list and was refused not_funded.
 //   node --test test/tap-prepare-page.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
-import { createHook } from "node:async_hooks";
-import { pbkdf2 } from "node:crypto";
 import { afterEach, mock, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -19,6 +17,7 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
+import { busyThreads, settle } from "./settle.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { testnetPool } = await import("../src/pool-testnet.ts");
@@ -79,34 +78,17 @@ function gatedProver() {
 const pool = (w: WalletStore, prover: ReturnType<typeof gatedProver>["prover"]) =>
   testnetPool(page(w), { prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => ({ events: async () => assert.fail("no sync read") }), evmQueuePool: () => fakeEvmPool() });
 const tick = () => new Promise((r) => setTimeout(r, 10));
-/** Eight key derivations on the thread pool, each a few hundred ms: WebCrypto's jobs (the note store's AES-GCM) queue
- *  behind them. */
-const busyCryptoThreads = (): void => {
-  for (let i = 0; i < 8; i++) pbkdf2("busy", "threads", 1_000_000, 32, "sha256", () => {});
-};
-/** The device's crypto jobs in flight (as pool-sell.test.ts's): WebCrypto runs each (the note store's AES-GCM reads and
- *  writes, digests, key work) on the thread pool, and its answer comes back on a later turn that no immediate waits for.
- *  The sync random bytes behind getRandomValues never call back, so they are not counted. */
-const jobs = new Map<number, string>();
-createHook({
-  init: (id, type) => void (/REQUEST$/.test(type) && type !== "RANDOMBYTESREQUEST" && jobs.set(id, type)),
-  before: (id) => void jobs.delete(id),
-  destroy: (id) => void jobs.delete(id),
-}).enable();
 /** Whether the tap `f` starts settles with no timer let run: setTimeout held (test/mock-timers.ts, which clears a step
- *  still set) while the loop runs until it settles or nothing is left to run but a timer, no immediate and no crypto
- *  job in flight. A wait that waits for nothing ends there however busy the device's threads are; one 250 ms step
- *  (TAP_PREPARE_STEP_MS) never does. Never a count of turns: a note read is a crypto job, and run 44907577683's busy
- *  runner took past 500 turns for one. */
+ *  still set) while test/settle.ts runs turns until it settles or nothing is left to run but a timer, no immediate and
+ *  no thread-pool job in flight. A wait that waits for nothing ends there however busy the device's threads are; one
+ *  250 ms step (TAP_PREPARE_STEP_MS) never does. Never a count of turns: a note read is a crypto job, and run
+ *  44907577683's busy runner took past 500 turns for one. */
 async function settlesAtOnce(f: () => Promise<unknown>): Promise<boolean> {
   let done = false;
   enableTimers(mock.timers, { apis: ["setTimeout"] });
   try {
     void f().then(() => void (done = true), () => void (done = true));
-    for (let i = 0; !done && (i < 30 || jobs.size > 0 || process.getActiveResourcesInfo().includes("Immediate")); i++) {
-      if (i > 1_000_000) throw new Error(`the loop never went quiet: ${[...jobs.values()].join(", ")}`);
-      await new Promise((r) => setImmediate(r));
-    }
+    await settle(() => done);
   } finally {
     resetTimers(mock.timers);
   }
@@ -134,7 +116,7 @@ test("a tap right after a load waits for the first pass still proving its note, 
   assert.equal(g.proves(), 1, "the tap joined the pass in flight: no second proof of the note");
   // prepared now: a tap waits for nothing and asks no pass, however long the device's crypto threads are busy (its note
   // read is AES-GCM on them): run 44907577683's tap read its note past 500 turns on a busy runner
-  busyCryptoThreads();
+  busyThreads();
   assert.equal(await settlesAtOnce(() => t.prepared("base")), true);
   assert.equal(g.proves(), 1);
   await t.signedOut();

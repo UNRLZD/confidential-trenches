@@ -11,6 +11,7 @@ import { evmPaceReset, evmProviderHold } from "../src/checks/evm/pace.ts";
 const INDEX_LIMITED_WAIT_MS = (poolIndex as { INDEX_LIMITED_WAIT_MS?: number }).INDEX_LIMITED_WAIT_MS;
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
+import { settle } from "./settle.ts";
 
 const PM = "0x498581ff718922c3f8e6a244956af099b2652b2b";
 const INIT = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438";
@@ -971,8 +972,8 @@ test("WALK a slow reader never idles the fast one: the fast reader reads every s
     return slow(calls, until);
   };
   const run = evmPoolIndexSync(null, { ...cfgOf(a, b), readers: [reader(a), held] });
-  let spins = 0;
-  while (logSpans(a).length < 10 && spins++ < 1_000) await new Promise((f) => setImmediate(f));
+  // until the fast reader reads its ten spans or nothing is left to run (test/settle.ts), never a count of turns
+  await settle(() => logSpans(a).length >= 10);
   const fastRead = logSpans(a).length;
   open();
   const r = await run;

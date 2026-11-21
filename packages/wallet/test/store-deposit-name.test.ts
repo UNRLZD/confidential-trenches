@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
+import { busyThreads, settle } from "./settle.ts";
 
 const closers: WalletStore[] = [];
 after(() => closers.forEach((s) => s.close()));
@@ -220,14 +221,9 @@ test("an EVM pool's record: the EIP-55 address beside the 64-hex id, read back a
 // Card deposit-landing-does-not-queue-a-trade: a trade holds the seed lock shared for its run; a seed write asked
 // exclusive waited for it, and Web Locks grant in request order, so the next trade's shared request waited behind that
 // write until the first trade ended. Every seed write takes it shared; only a sign out asks it exclusive.
-/** Polls (no clock) until `f` holds or `n` turns of the event loop pass; whether it held. */
-const until = async (f: () => Promise<boolean>, n = 2_000): Promise<boolean> => {
-  for (let i = 0; i < n; i++) {
-    if (await f()) return true;
-    await new Promise((r) => setImmediate(r));
-  }
-  return false;
-};
+/** Polls (no clock) until `f` holds or nothing is left to run but a timer (test/settle.ts: no immediate, no thread-pool
+ *  job, so a write's AES-GCM on busy threads is waited for, never counted past); whether it held. */
+const until = (f: () => Promise<boolean>): Promise<boolean> => settle(f);
 test("every seed write ends beside a trade's shared hold: none queues an exclusive request, and the next trade's shared request is granted at once; a sign out still waits for the trade", async () => {
   const name = `deposit-name-shared-${process.pid}`;
   const lock = `ct-wallet/seed/${name}`;
@@ -243,6 +239,8 @@ test("every seed write ends beside a trade's shared hold: none queues an exclusi
   ];
   try {
     for (const [what, write] of writes) {
+      // each write's AES-GCM behind eight key derivations, as on a busy machine
+      busyThreads();
       let ended = false;
       const p = write().then(() => (ended = true));
       assert.ok(await until(async () => ended || (await exclusivePending())), what);
