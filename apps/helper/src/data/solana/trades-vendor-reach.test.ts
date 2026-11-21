@@ -65,12 +65,13 @@ test("a Solana vendor tape read within SOL_VENDOR_REACH_MS claims every trade af
     const je = JSON.parse(edge.body) as Tape;
     await settle();
     assert.ok(v.gt.reads > reads, "a held tape past TAPE_FRESH_MS whose pool our reads cannot renew is read again from the vendor");
-    assert.deepEqual([edge.status, je.as_of_ms, je.trades.length, je.whole_ms], [200, read0, v.n, v.oldest + 1_000], "at SOL_VENDOR_REACH_MS the claim still stands");
+    assert.deepEqual([edge.status, je.as_of_ms, je.trades.length, je.whole_ms, je.filling], [200, read0, v.n, v.oldest + 1_000, undefined], "at SOL_VENDOR_REACH_MS the claim still stands");
 
     clock.t = read0 + SOL_VENDOR_REACH_MS + 1;
     const late = await t.trades(v.mint, 50);
     const jl = JSON.parse(late.body) as Tape;
-    assert.deepEqual([late.status, jl.src, jl.as_of_ms, jl.trades.length, jl.filling], [200, "geckoterminal", read0, v.n, undefined], "the held rows are still served");
+    // card sol-vendor-tape-gap-served-inside-reach: still served, and saying filling, as a chain tape behind its head does
+    assert.deepEqual([late.status, jl.src, jl.as_of_ms, jl.trades.length, jl.filling], [200, "geckoterminal", read0, v.n, true], "the held rows are still served, saying filling");
     assert.equal(jl.whole_ms, undefined, "rows read past SOL_VENDOR_REACH_MS are no complete list: the trades since are not in them");
 
     // the vendor answers again: a fresh read, once the budget's refresh slot is free (../gecko.ts WINDOW_MS), claims its
@@ -79,7 +80,7 @@ test("a Solana vendor tape read within SOL_VENDOR_REACH_MS claims every trade af
     clock.t += WINDOW_MS;
     const back = await t.trades(v.mint, 50);
     const jb = JSON.parse(back.body) as Tape;
-    assert.deepEqual([jb.as_of_ms, jb.whole_ms], [clock.t, v.oldest + 1_000]);
+    assert.deepEqual([jb.as_of_ms, jb.whole_ms, jb.filling], [clock.t, v.oldest + 1_000, undefined]);
     // each answer names how long ago its rows were read, the reach the live check judges a vendor tape by
     const named = [a, edge, late, back].map((x) => VENDOR_READ.exec(x.timing ?? "")?.[1] ?? `none in ${JSON.stringify(x.timing)}`);
     assert.deepEqual(named, ["0", String(SOL_VENDOR_REACH_MS), String(SOL_VENDOR_REACH_MS + 1), "0"]);

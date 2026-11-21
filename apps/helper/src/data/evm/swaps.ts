@@ -3498,7 +3498,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // and rows priced through their quote token's own pool at their block say how many (card evm-quote-token-priced-from-our-reads)
     const through = rows.filter((r) => thirdPriced.has(`${token} ${r.tx}`)).length;
     const timing = `evm-vendor-read;desc="rows read ${age} ms ago"${priced.length > 0 ? `, evm-vendor-price;desc="usd read ${Math.max(0, now() - Math.min(...priced))} ms ago"` : ""}${through > 0 ? `, evm-quote-usd;desc="${through} rows priced from chain at their block"` : ""}`;
-    return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at, timing };
+    // rows read past BEHIND_MAX say filling, as a chain tape behind its head does (card sol-vendor-tape-gap-served-inside-reach:
+    // the Solana vendor tape served rows 54 s old with no word of it, live run 44938731300; the same answer here)
+    return { status: 200, body: JSON.stringify({ trades, ...(waiting || age > BEHIND_MAX[chain].ms ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at, timing };
   }
   /** The refresh behind a held vendor tape's rows, one per coin however many callers. A page's read of the tape starts
    *  it (heldTape, noneTrades: `caller`, that read's lane), so it is that caller's read: work callers share (sharedLane),
