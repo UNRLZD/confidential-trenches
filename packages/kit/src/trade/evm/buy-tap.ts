@@ -340,6 +340,6 @@ export async function evmPoolIndexRefresh(chain: EvmPoolChain, prev: EvmPoolInde
   const v = evmPoolVenues()[chain];
   const ix = v?.index;
   if (v === undefined || ix === undefined || v.poolManager === undefined || v.scan === undefined) return { sync: null, served: false };
-  const sync = await evmPoolIndexSync(prev, { chainId: v.chainId, poolManager: v.poolManager, readers: [evmJsonRpc(ix.readers[0], fetchFn, 64 << 20, undefined, true), evmJsonRpc(ix.readers[1], fetchFn, 64 << 20, undefined, true)], depth: v.scan.depth, span: ix.span, margin: ix.margin, cap: ix.cap, perBatch: ix.perBatch, parallel: ix.parallel, ...(ix.batchMax !== undefined ? { batchMax: ix.batchMax } : {}) });
+  const sync = await evmPoolIndexSync(prev, { chainId: v.chainId, poolManager: v.poolManager, readers: [evmJsonRpc(ix.readers[0], fetchFn, 64 << 20, undefined, true), evmJsonRpc(ix.readers[1], fetchFn, 64 << 20, undefined, true)], depth: v.scan.depth, span: ix.span, margin: ix.margin, cap: ix.cap, perBatch: ix.perBatch, parallel: ix.parallel, ...(ix.parts !== undefined ? { parts: ix.parts } : {}), ...(ix.batchMax !== undefined ? { batchMax: ix.batchMax } : {}) });
   return { sync, served: sync.index !== null && sync.coversThrough !== null && evmPoolIndexUse(chain, sync) };
 }

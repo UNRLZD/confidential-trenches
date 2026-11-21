@@ -20,7 +20,9 @@
 //   ten with -32602 "block range exceeds maximum 500" from some of its backends, and the same span asked again answers,
 //   read 2026-11-18 02:4xZ; halving both readers for it took a fresh account's Base sync past 52 s); a span with
 //   INDEX_SPAN_LOGS logs or more on either is asked again as its two halves on both; a batch whose tries are spent on throws (a body past its
-//   size, a 4xx, a timeout) is asked one span a request, then as halves, under one budget of halves;
+//   size, a 4xx) is asked one span a request, then as halves, under one budget of halves; a batch that times out is
+//   split at once, never asked again at its size; each reader walks the spans at its own pace, in its own `parts`
+//   pieces, every piece end asked of both readers with the same hash (card evm-sync-inside-the-kpi-at-any-age);
 // - F2: a pool both readers report is at the same block on both (else the span is asked again, then refused), and one
 //   pool id at two blocks, in two spans or in a span and the stored index is refused rpc_disagree: a pool initializes
 //   once;
@@ -67,9 +69,13 @@ export type EvmPoolIndexConfig = {
   readonly span: number;
   readonly margin: number;
   readonly cap: number;
-  /** Spans in one JSON-RPC batch, and batches in flight on each reader at once. */
-  readonly perBatch: number;
-  readonly parallel: number;
+  /** Pieces in one JSON-RPC batch, and batches in flight on each reader at once; a pair sets each reader's own (card
+   *  evm-sync-inside-the-kpi-at-any-age: base.rpc.blxrbdn.com answers a batch's getLogs one after another). */
+  readonly perBatch: number | readonly [number, number];
+  readonly parallel: number | readonly [number, number];
+  /** The pieces each reader asks a span in (default one each), from its own getLogs cost: a span counts only once both
+   *  readers answered all of it, every piece's last block with the same hash on both. */
+  readonly parts?: readonly [number, number];
   /** The most calls a reader takes in one batch (the helper's HELPER_RPC_BATCH_MAX where it reads): the state reads
    *  (F5) are asked in batches of at most this many. None: INDEX_STATE_BATCH. */
   readonly batchMax?: number;
@@ -176,14 +182,27 @@ function poolOfLog(l: unknown, pm: string, a: number, b: number): Found | null {
   return { p: Object.freeze({ id, key, block: n }), tx: o.transactionHash.toLowerCase(), at: o.blockHash.toLowerCase() };
 }
 
-/** A reader's answer to a span: its last block's hash and its pools; `cut` where its logs were an error or no answer
- *  ("error") or at the cap ("full"), which is asked again as halves. */
-type Answer = { hash: string; pools: Map<string, EvmIndexedPool>; logs: Map<string, Found>; cut: "error" | "full" | null };
-/** `alone`: the reader's batches holding the span spent their tries on throws, so it is asked one span a request.
- *  `errs`: the reader's answers to the span that were errors, asked again at once until INDEX_TRIES of them. */
-type Job = { a: number; b: number; ans: [Answer | null, Answer | null]; tries: [number, number]; errs: [number, number]; alone: [boolean, boolean]; disagree: number };
-const jobOf = (a: number, b: number): Job => ({ a, b, ans: [null, null], tries: [0, 0], errs: [0, 0], alone: [false, false], disagree: 0 });
-const NO_ANSWER: Answer = Object.freeze({ hash: "", pools: new Map(), logs: new Map(), cut: "error" as const });
+/** A reader's answer to a span: its last block's hash, the hashes of the span's other piece ends (`inner`, oldest first,
+ *  both readers' ends) and its pools; `cut` where its logs were an error or no answer ("error") or at the cap ("full"),
+ *  which is asked again as halves. */
+type Answer = { hash: string; inner: string; pools: Map<string, EvmIndexedPool>; logs: Map<string, Found>; cut: "error" | "full" | null };
+/** A span both readers prove, `ans` each reader's whole answer to it once every piece of it is in. */
+type Job = { a: number; b: number; ans: [Answer | null, Answer | null]; disagree: number };
+const jobOf = (a: number, b: number): Job => ({ a, b, ans: [null, null], disagree: 0 });
+/** One reader's piece of a span: its blocks [a, b] and the piece ends of both readers inside it (`at`, oldest first), each
+ *  asked in the same batch as its logs. `alone`: its batch spent its tries on throws, so it is asked one piece a request.
+ *  `errs`: its answers that were errors, asked again at once until INDEX_TRIES of them. */
+type Piece = { j: Job; a: number; b: number; at: number[]; ans: Answer | null; tries: number; errs: number; alone: boolean };
+const NO_ANSWER: Answer = Object.freeze({ hash: "", inner: "", pools: new Map(), logs: new Map(), cut: "error" as const });
+/** [a, b] in at most k pieces of equal size, newest first, each [a, b]. */
+const piecesOf = (a: number, b: number, k: number): [number, number][] => {
+  const size = Math.ceil((b - a + 1) / Math.max(1, k));
+  const out: [number, number][] = [];
+  for (let hi = b; hi >= a; hi -= size) out.push([Math.max(a, hi - size + 1), hi]);
+  return out;
+};
+/** A request that ran out of its time (evmJsonRpc's AbortSignal.timeout): its batch is split, never asked again whole. */
+const timedOut = (e: unknown): boolean => (e as Error | null)?.name === "TimeoutError" || /timeout|timed out/i.test(String((e as Error | null)?.message));
 
 /** One sync of `prev` (or a new index) to the readers' agreed head; see the file's head. Refuses (throws) where nothing
  *  can be proven (the heads, the pin), where the readers disagree, and past the cap; a reader that does not answer
@@ -198,8 +217,11 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   const old = prev !== null && prev.v === 1 && prev.chainId === c.chainId && prev.poolManager === pm ? prev : null;
 
   // one batch on reader r, asked again until answered or its tries are spent (null); a 429 waits and spends no try,
-  // up to INDEX_LIMITED_WAIT_MS of waiting a batch, past which each 429 spends one
-  async function ask(r: 0 | 1, calls: { method: string; params: unknown[] }[]): Promise<readonly unknown[] | null> {
+  // up to INDEX_LIMITED_WAIT_MS of waiting a batch, past which each 429 spends one. `split`: a batch of pieces, which a
+  // timeout ends at once (null), so its caller asks it smaller, never again at the same size (card
+  // evm-sync-inside-the-kpi-at-any-age: base.rpc.blxrbdn.com's 5-piece batches past the 10 s timeout were asked 4
+  // times each, 32 of 80 posts, 142.6 s for 864,000 blocks, 21 Nov 12:5xZ)
+  async function ask(r: 0 | 1, calls: { method: string; params: unknown[] }[], split = false): Promise<readonly unknown[] | null> {
     let waited = 0;
     let waits = 0;
     for (let tries = 0; tries < INDEX_TRIES; ) {
@@ -231,6 +253,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
           continue;
         }
         stats.failed[r]++;
+        if (split && timedOut(e)) return null;
         tries++;
         if (tries < INDEX_TRIES) await nap(BACKOFF_MS * 2 ** tries);
       }
@@ -283,31 +306,57 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   // INDEX_HALVES more, so a reader that answers every span with an error refuses rather than ask 2^14 halves a span
   let halves = 2 * jobs.length + INDEX_HALVES;
 
-  const callsOf = (js: readonly Job[]) =>
-    js.flatMap((j) => [
-      { method: "eth_getLogs", params: [{ address: pm, fromBlock: hx(j.a), toBlock: hx(j.b), topics: [INITIALIZE] }] },
-      { method: "eth_getBlockByNumber", params: [hx(j.b), false] },
+  const pair = (x: number | readonly [number, number]): readonly [number, number] => (typeof x === "number" ? [x, x] : x);
+  const count1 = (x: number | undefined) => (Number.isSafeInteger(x) && x! >= 1 ? x! : 1);
+  const perBatch = pair(c.perBatch).map(count1) as [number, number];
+  const parallel = pair(c.parallel).map(count1) as [number, number];
+  const parts = (c.parts ?? [1, 1]).map(count1) as [number, number];
+
+  // a piece's calls: its logs, then each piece end inside it (its own last block among them), all in one batch (F4a)
+  const callsOf = (ps: readonly Piece[]) =>
+    ps.flatMap((p) => [
+      { method: "eth_getLogs", params: [{ address: pm, fromBlock: hx(p.a), toBlock: hx(p.b), topics: [INITIALIZE] }] },
+      ...p.at.map((e) => ({ method: "eth_getBlockByNumber", params: [hx(e), false] })),
     ]);
-  // one reader's answer to a job: its logs and the job's last block, both from the same batch (F4a); `cut` where the
+  // one reader's answer to a piece: its logs and each piece end inside it, all from the same batch (F4a); `cut` where the
   // logs were answered with an error or at the cap, which no reader's words explain (M383); null where it gave neither
-  const answerOf = (out: readonly unknown[], i: number, j: Job): Answer | null => {
-    const l = out[2 * i] as { result?: unknown; error?: unknown } | null | undefined;
+  const answerOf = (out: readonly unknown[], i: number, p: Piece): Answer | null => {
+    const l = out[i] as { result?: unknown; error?: unknown } | null | undefined;
     if (l?.error !== undefined && l.result === undefined) return limited(l.error) ? null : NO_ANSWER;
     const logs = l?.result;
-    const blk = (out[2 * i + 1] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
-    if (!Array.isArray(logs) || !blk || !isHash(blk.hash) || !isQty(blk.number) || Number(blk.number) !== j.b) return null;
+    const ends = p.at.map((e, k) => {
+      const blk = (out[i + 1 + k] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
+      return blk && isHash(blk.hash) && isQty(blk.number) && Number(blk.number) === e ? blk.hash.toLowerCase() : null;
+    });
+    if (!Array.isArray(logs) || ends.some((h) => h === null)) return null;
     const pools = new Map<string, EvmIndexedPool>();
     const found = new Map<string, Found>();
     for (const x of logs) {
-      const f = poolOfLog(x, pm, j.a, j.b);
+      const f = poolOfLog(x, pm, p.a, p.b);
       if (f === null) continue;
-      const p = f.p;
+      const q = f.p;
       // F2: one pool at two blocks in one answer is no answer an honest reader gives
-      if (pools.has(p.id) && pools.get(p.id)!.block !== p.block) return refuse("rpc_disagree", `index reader answered pool ${p.id} at two blocks`);
-      pools.set(p.id, p);
-      found.set(p.id, f);
+      if (pools.has(q.id) && pools.get(q.id)!.block !== q.block) return refuse("rpc_disagree", `index reader answered pool ${q.id} at two blocks`);
+      pools.set(q.id, q);
+      found.set(q.id, f);
     }
-    return { hash: blk.hash.toLowerCase(), pools, logs: found, cut: logs.length >= INDEX_SPAN_LOGS ? "full" : null };
+    return { hash: ends[ends.length - 1]!, inner: ends.slice(0, -1).join(","), pools, logs: found, cut: logs.length >= INDEX_SPAN_LOGS ? "full" : null };
+  };
+  // a reader's whole answer to a span from its pieces (newest first): the span's last block is the newest piece's, the
+  // other ends oldest first; one pool at two blocks in two pieces is a lie; cut where any piece was
+  const joinOf = (ps: readonly Piece[]): Answer => {
+    const as = ps.map((p) => p.ans!);
+    if (as.some((a) => a.cut !== null)) return as.some((a) => a.cut === "full") ? { ...NO_ANSWER, cut: "full" } : NO_ANSWER;
+    const pools = new Map<string, EvmIndexedPool>();
+    const found = new Map<string, Found>();
+    for (const a of as)
+      for (const [id, q] of a.pools) {
+        if (pools.has(id) && pools.get(id)!.block !== q.block) return refuse("rpc_disagree", `index reader answered pool ${id} at two blocks`);
+        pools.set(id, q);
+        found.set(id, a.logs.get(id)!);
+      }
+    const ends = [...as].reverse().flatMap((a) => [...(a.inner === "" ? [] : a.inner.split(",")), a.hash]);
+    return { hash: ends[ends.length - 1]!, inner: ends.slice(0, -1).join(","), pools, logs: found, cut: null };
   };
 
   // a job both readers answered: asked again as its halves where either was cut; the same last block and every pool
@@ -323,9 +372,9 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     }
     if (j.b === n && x.hash !== y.hash) return refuse("rpc_disagree", `the index readers do not agree on block ${n}`);
     const sameBlocks = [...x.pools].every(([id, p]) => !y.pools.has(id) || y.pools.get(id)!.block === p.block);
-    if (x.hash !== y.hash || !sameBlocks) {
+    if (x.hash !== y.hash || x.inner !== y.inner || !sameBlocks) {
       j.ans = [null, null];
-      if (++j.disagree >= INDEX_TRIES) return refuse("rpc_disagree", x.hash !== y.hash ? `the index readers do not agree on block ${j.b}` : `the index readers report a pool of blocks ${j.a}-${j.b} at two blocks`);
+      if (++j.disagree >= INDEX_TRIES) return refuse("rpc_disagree", x.hash !== y.hash || x.inner !== y.inner ? `the index readers do not agree on block ${j.b}` : `the index readers report a pool of blocks ${j.a}-${j.b} at two blocks`);
       return [j];
     }
     if (j.b === n) pin = x.hash;
@@ -339,62 +388,115 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     proved.push({ a: j.a, b: j.b, pools: both, one });
     return [];
   };
-  // one round of `js` on both readers (each asked only what it has not answered: its alone spans one a request, the
-  // rest in one batch); the jobs to ask again
-  const round = async (js: Job[]): Promise<Job[]> => {
-    await Promise.all(([0, 1] as const).map(async (r) => {
-      const want = js.filter((j) => j.ans[r] === null);
-      const rest = want.filter((j) => !j.alone[r]);
-      const groups = [...want.filter((j) => j.alone[r]).map((j) => [j]), ...(rest.length > 0 ? [rest] : [])];
-      let missed = 0;
-      await Promise.all(groups.map(async (g) => {
-        const out = await ask(r, callsOf(g));
-        // F5 (the review's): tries spent on throws (a body past its size, a 4xx, a timeout): each span alone, then a
-        // span alone that still fails as its halves, under the halves' budget
-        if (out === null) {
-          for (const j of g) if (j.alone[r]) j.ans[r] = NO_ANSWER;
-            else j.alone[r] = true;
-          return;
-        }
-        g.forEach((j, i) => {
-          const a = answerOf(out, i, j);
-          // an error from one of the reader's backends: the same span asked of it again at once, as halves only once
-          // INDEX_TRIES answers to it were errors
-          if (a === NO_ANSWER && ++j.errs[r] < INDEX_TRIES) return;
-          if (a !== null) j.ans[r] = a;
-          else if (++j.tries[r] >= INDEX_TRIES) throw new EvmQuoteError("rpc_error", `index reader ${r + 1} did not answer blocks ${j.a}-${j.b}`);
-          else missed = Math.max(missed, j.tries[r]);
-        });
-      }));
-      if (missed > 0) await nap(BACKOFF_MS * 2 ** missed);
-    }));
-    return js.flatMap((j) => (j.ans[0] !== null && j.ans[1] !== null ? settle(j) : [j]));
+  // Each reader walks its own pieces at its own pace (card evm-sync-inside-the-kpi-at-any-age: in rounds that waited for
+  // both readers, base-rpc.publicnode.com sat idle while base.rpc.blxrbdn.com read, 21 Nov 12:5xZ): reader r asks
+  // `parallel[r]` batches at once of at most `perBatch[r]` pieces (its alone pieces one a request), each piece until it is
+  // answered; a span settles once both readers answered every piece of it, and what settling asks again (its halves, or
+  // the span itself) goes to the front of both readers' queues. A span neither reader proved stays unproven.
+  const queues: [Piece[], Piece[]] = [[], []];
+  const piecesBy = new Map<Job, [Piece[], Piece[]]>();
+  let open = 0;
+  let wakes: (() => void)[] = [];
+  const wake = () => {
+    const ws = wakes;
+    wakes = [];
+    for (const f of ws) f();
   };
-
-  // F4c: the first round is the job ending at N alone, asked until it settles: nothing counts without its pin
-  const queue = [...jobs];
-  let at = queue.shift();
-  while (at !== undefined && pin === null) {
-    const again = await round([at]);
-    at = again.find((j) => j.b === n);
-    queue.unshift(...again.filter((j) => j !== at));
-  }
-  if (jobs.length > 0 && pin === null) return refuse("rpc_error", `the index readers' block ${n} was not pinned`);
-
-  // every other job, perBatch a batch and `parallel` batches at once on each reader; the first failure stops them all
+  // while the pin is read, the spans its settling asks that do not end at N wait in `held` for the walk after it
+  let keep: (j: Job) => boolean = () => true;
+  const waiting: Job[] = [];
+  const put = (j: Job, front = false) => {
+    if (!keep(j)) return void waiting.push(j);
+    open++;
+    const ends = [...new Set(([0, 1] as const).flatMap((r) => piecesOf(j.a, j.b, parts[r]).map(([, e]) => e)))].sort((u, v) => u - v);
+    const both = ([0, 1] as const).map((r) => piecesOf(j.a, j.b, parts[r]).map(([a, b]): Piece => ({ j, a, b, at: ends.filter((e) => e >= a && e <= b), ans: null, tries: 0, errs: 0, alone: false }))) as [Piece[], Piece[]];
+    piecesBy.set(j, both);
+    for (const r of [0, 1] as const) if (front) queues[r].unshift(...both[r]);
+      else queues[r].push(...both[r]);
+    wake();
+  };
+  // a piece answered: once every piece of its span is in on reader r, that is r's answer to the span; once both are in,
+  // the span settles
+  const answered = (r: 0 | 1, p: Piece, a: Answer) => {
+    p.ans = a;
+    const j = p.j;
+    const mine = piecesBy.get(j)![r];
+    if (mine.some((q) => q.ans === null)) return;
+    j.ans[r] = joinOf(mine);
+    if (j.ans[0] !== null && j.ans[1] !== null) {
+      open--;
+      for (const k of settle(j).reverse()) put(k, true);
+      wake();
+    }
+  };
+  // one batch of pieces on reader r
+  const askPieces = async (r: 0 | 1, g: Piece[]) => {
+    const out = await ask(r, callsOf(g), true);
+    // F5 (the review's): tries spent on throws (a body past its size, a 4xx) or a timeout: each piece alone; a piece
+    // alone (or a lone piece) that still fails as its span's halves on both, under the halves' budget
+    if (out === null) {
+      for (const p of g) if (p.alone || g.length === 1) answered(r, p, NO_ANSWER);
+        else p.alone = true;
+      queues[r].unshift(...g.filter((p) => p.ans === null));
+      return;
+    }
+    let i = 0;
+    let missed = 0;
+    const now: Piece[] = [];
+    const later: Piece[] = [];
+    for (const p of g) {
+      const a = answerOf(out, i, p);
+      i += 1 + p.at.length;
+      // an error from one of the reader's backends: the same piece asked of it again at once, as halves only once
+      // INDEX_TRIES answers to it were errors
+      if (a === NO_ANSWER && ++p.errs < INDEX_TRIES) now.push(p);
+      else if (a !== null) answered(r, p, a);
+      else if (++p.tries >= INDEX_TRIES) throw new EvmQuoteError("rpc_error", `index reader ${r + 1} did not answer blocks ${p.a}-${p.b}`);
+      else (missed = Math.max(missed, p.tries)), later.push(p);
+    }
+    queues[r].unshift(...now);
+    if (missed > 0) await nap(BACKOFF_MS * 2 ** missed);
+    queues[r].unshift(...later);
+  };
   let fatal: unknown = null;
-  const worker = async () => {
-    while (queue.length > 0 && error === null && fatal === null) {
-      const js = queue.splice(0, c.perBatch);
+  const walker = async (r: 0 | 1) => {
+    for (;;) {
+      if (error !== null || fatal !== null) return;
+      const q = queues[r];
+      if (q.length === 0) {
+        if (open === 0) return;
+        await new Promise<void>((f) => wakes.push(f));
+        continue;
+      }
+      const g = q[0]!.alone ? q.splice(0, 1) : [];
+      if (g.length === 0) while (g.length < perBatch[r] && q.length > 0 && !q[0]!.alone) g.push(q.shift()!);
       try {
-        queue.unshift(...(await round(js)));
+        await askPieces(r, g);
       } catch (e) {
         if (e instanceof EvmQuoteError && e.code === "rpc_error") error ??= e;
         else fatal ??= e;
       }
+      wake();
     }
   };
-  await Promise.all(Array.from({ length: c.parallel }, worker));
+  const walk = () => Promise.all(([0, 1] as const).flatMap((r) => Array.from({ length: parallel[r] }, () => walker(r))));
+
+  // F4c: first the span ending at N alone (and the halves ending at N it settles into), asked until it settles: nothing
+  // counts without its pin
+  const pinFirst = jobs.length > 0;
+  if (pinFirst) {
+    keep = (j) => j.b === n;
+    put(jobs[0]!);
+    await walk();
+    if (fatal !== null) throw fatal;
+    if (error !== null) throw error;
+    if (pin === null) return refuse("rpc_error", `the index readers' block ${n} was not pinned`);
+    keep = () => true;
+  }
+
+  // every other span; the first failure stops both readers
+  for (const j of [...waiting, ...jobs.slice(pinFirst ? 1 : 0)]) put(j);
+  await walk();
   if (fatal !== null) throw fatal;
 
   // F2: a pool initializes once, so one id at two blocks or in two spans (or in a span and the stored index) is a lie
