@@ -20,7 +20,9 @@
 //   ten with -32602 "block range exceeds maximum 500" from some of its backends, and the same span asked again answers,
 //   read 2026-11-18 02:4xZ; halving both readers for it took a fresh account's Base sync past 52 s); a span with
 //   INDEX_SPAN_LOGS logs or more on either is asked again as its two halves on both; a batch whose tries are spent on throws (a body past its
-//   size, a 4xx, a timeout) is asked one span a request, then as halves, under one budget of halves;
+//   size, a 4xx) is asked one span a request, then as halves, under one budget of halves; a batch that times out is
+//   split at once, never asked again at its size; each reader walks the spans at its own pace, in its own `parts`
+//   pieces, every piece end asked of both readers with the same hash (card evm-sync-inside-the-kpi-at-any-age);
 // - F2: a pool both readers report is at the same block on both (else the span is asked again, then refused), and one
 //   pool id at two blocks, in two spans or in a span and the stored index is refused rpc_disagree: a pool initializes
 //   once;
