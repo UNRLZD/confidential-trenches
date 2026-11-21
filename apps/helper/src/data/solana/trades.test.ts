@@ -967,7 +967,7 @@ test("card helper-listed-charts-own-reads: a Raydium CPMM trade names its own mi
     if (req.method === "getAccountInfo" && req.params[0] === DLMM_POOL) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: null } }));
     return chain(url, init);
   };
-  const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === FCAT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: async (m) => (m === WXMR ? "300" : null), tickMs: 0 });
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === FCAT, rpcs: ["https://rpc.test"], wholeWait: () => Promise.resolve(), source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: async (m) => (m === WXMR ? "300" : null), tickMs: 0 });
   assert.equal((await t.trades(FCAT, 50)).status, 200);
   withClock(on!).note(FCAT, { sig: "F1", slot: 10, err: false, logs: V.txs["cpmm-buy-fee"]!.result.meta.logMessages });
   await settle();
@@ -1429,7 +1429,7 @@ function meteoraChain(mints: Record<string, number>, opts: { sigs?: (p: Record<s
     return inner(url, init);
   };
   let on: SourceEvents | null = null;
-  const t = createSolanaTrades({ fetch: fetchFn, now: () => MTS * 1000, listed: async (m) => m in mints, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: opts.quoteUsd, tickMs: 0 });
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => MTS * 1000, listed: async (m) => m in mints, rpcs: ["https://rpc.test"], wholeWait: () => Promise.resolve(), source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: opts.quoteUsd, tickMs: 0 });
   const rows = async (m: string) => (JSON.parse((await t.trades(m, 50)).body) as { trades: { t_ms: number; side: string; usd: string; amt: string; trader: string | null; tx: string }[] }).trades;
   const stream = (m: string, k: string) => withClock(on!).note(m, { sig: MT.txs[k]!.signature, slot: MT.txs[k]!.result.slot, err: false, logs: MT.txs[k]!.result.meta.logMessages });
   return { t, rows, stream, reads };
@@ -1528,7 +1528,7 @@ function orderChain(opts: { sigs?: (p: Record<string, unknown>) => unknown[]; tx
     return inner(url, init);
   };
   let on: SourceEvents | null = null;
-  const t = createSolanaTrades({ fetch: fetchFn, now: () => nowMs, listed: async (m) => m === TTW_MINT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), ...(opts.noHistory ? { history: async () => ({ status: 404, body: '{"error":{"code":"not_found"}}' }) } : {}), tickMs: 0 });
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => nowMs, listed: async (m) => m === TTW_MINT, rpcs: ["https://rpc.test"], wholeWait: () => Promise.resolve(), source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), ...(opts.noHistory ? { history: async () => ({ status: 404, body: '{"error":{"code":"not_found"}}' }) } : {}), tickMs: 0 });
   const rows = async () => (JSON.parse((await t.trades(TTW_MINT, 50)).body) as { trades: { t_ms: number; tx: string }[] }).trades;
   const stream = (k: string) => on!.note(TTW_MINT, { sig: TO.txs[k]!.signature, slot: TO.txs[k]!.result.slot, err: false, logs: TO.txs[k]!.result.meta.logMessages });
   return { t, rows, stream, reads, on: () => on!, at: (ms: number) => void (nowMs = ms) };

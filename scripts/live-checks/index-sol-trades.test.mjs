@@ -394,6 +394,24 @@ test("card helper-sol-tape-checks-hold: cuts the coin's own share explains are n
   assert.ok(dbcLines(own).some((l) => l.startsWith("BAD meteora-dbc: none judged") && l.includes("all within 0 s")), dbcLines(own).join("\n"));
 });
 
+// round 3: live run 44901581973 (helper 4e03fcbac) cut a quiet DBC coin "past every coin's 10 a second" 136 s apart,
+// while busy coins filled each second; the helper now keeps 3 places a second from busy coins and names a busy coin's
+// cut by the busy share. That cut is the busy coin's own load: never starved, still none judged (BAD, never a pass).
+test("card helper-sol-tape-checks-hold: a busy coin's cut by the busy share is its own share, never a starved venue, still none judged", () => {
+  const busy = dbcCutOnce(3, check.CUT_KEEP_MS / 2 + 1_000);
+  for (const c of busy.cut["meteora-dbc"]) c.timing = `sol-whole-cut;desc="a Meteora trade unread 1 s ago: past the 7 a second busy coins share"`;
+  const lines = dbcLines(busy);
+  assert.ok(!lines.some((l) => /starved/.test(l)), lines.join("\n"));
+  assert.ok(lines.some((l) => l.startsWith("BAD meteora-dbc: none judged: every trade found (1 coin(s), 3 trade(s): fZgm5f3J) was on a coin past its own share")), lines.join("\n"));
+  assert.ok(!lines.some((l) => l.startsWith("ok  meteora-dbc") || l.startsWith("PASS")), lines.join("\n"));
+});
+
+test("card helper-sol-tape-checks-hold: the check's own-share causes are the helper's texts, and no other cause is (trades.ts)", async () => {
+  const t = await import("../../apps/helper/src/data/solana/trades.ts");
+  for (const why of [`past the coin's own ${t.WHOLE_COIN_MAX} a ${t.WHOLE_WINDOW_MS / 1_000} s`, `past the ${t.WHOLE_PER_S - t.WHOLE_QUIET_ROOM} a second busy coins share`]) assert.match(`desc="a Meteora trade unread 1 s ago: ${why}"`, check.OWN_SHARE, why);
+  for (const why of [`past every coin's ${t.WHOLE_PER_S} a second`, "its provider held", "its read unanswered"]) assert.doesNotMatch(`desc="a Meteora trade unread 1 s ago: ${why}"`, check.OWN_SHARE, why);
+});
+
 test("card helper-sol-tape-checks-hold: the check's CUT_KEEP_MS is the helper's (trades.ts)", async () => {
   const trades = await import("../../apps/helper/src/data/solana/trades.ts");
   assert.equal(check.CUT_KEEP_MS, trades.CUT_KEEP_MS);
