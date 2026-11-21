@@ -77,20 +77,21 @@ function planted(c: Case) {
     from.set(tx, TRADER(k));
     mains.push({ b, tx, q, amt });
   }
-  // the quote token's own pool: its swaps (two a block, 30 blocks) and its transfers, found as the coin's pools are
+  // the quote token's own pool: its swaps (30 blocks) and its transfers, found as the coin's pools are; log places 7 and 8,
+  // past the coin's, as a block's logs never share one
   const [t0, t1] = c.other < c.quote ? [c.other, c.quote] : [c.quote, c.other];
   for (let k = 0; k < 30; k++) {
     const b = HEAD - 1_200 + k * 30;
     const tx = `0x${"5b".repeat(30)}${k.toString(16).padStart(4, "0")}`;
     const mine = [
-      log(b, 1, tx, QPOOL, [TOPIC.swap3, `0x${w(TRADER(900))}`, `0x${w(TRADER(900))}`], `0x${int(1_000n)}${int(-1_000n)}${int(c.sqrt)}${int(10n ** 18n)}${int(0n)}`),
-      transfer(b, 2, tx, c.quote, QPOOL, TRADER(900 + k), 1_000n),
+      log(b, 7, tx, QPOOL, [TOPIC.swap3, `0x${w(TRADER(900))}`, `0x${w(TRADER(900))}`], `0x${int(1_000n)}${int(-1_000n)}${int(c.sqrt)}${int(10n ** 18n)}${int(0n)}`),
+      transfer(b, 8, tx, c.quote, QPOOL, TRADER(900 + k), 1_000n),
     ];
     logs.push(...mine);
     receipts.set(tx, mine);
     from.set(tx, TRADER(900 + k));
   }
-  const calls = new Map<string, string>([
+  const calls = new Map<string, string | ((n: number) => string)>([
     [`${COIN} 0x313ce567`, word(18n)],
     [`${c.quote} 0x313ce567`, word(c.name === "cbBTC" ? 8n : 18n)],
     [`${BASE_VENUES.positionManager} 0x86b6be7d${MAIN.slice(2, 52).padEnd(64, "0")}`, mainKey],
@@ -109,8 +110,12 @@ function planted(c: Case) {
   return { MAIN, SIDE, logs, receipts, from, calls, mains };
 }
 
+/** The planted chain's provider, every answer the same on each URL; `counts`: the requests each method was asked, and
+ *  the posts. An eth_call's answer may be a function of its block. */
 function rig(p: ReturnType<typeof planted>) {
+  const counts: Record<string, number> = { posts: 0 };
   const one = (r: { method: string; params: unknown[] }): object => {
+    counts[r.method] = (counts[r.method] ?? 0) + 1;
     if (r.method === "eth_blockNumber") return { result: `0x${HEAD.toString(16)}` };
     if (r.method === "eth_chainId") return { result: "0x2105" };
     if (r.method === "eth_getBlockByNumber") {
@@ -128,7 +133,9 @@ function rig(p: ReturnType<typeof planted>) {
     }
     if (r.method === "eth_call") {
       const c = r.params[0] as { to: string; data: string };
-      return { result: p.calls.get(`${c.to.toLowerCase()} ${c.data.toLowerCase()}`) ?? "0x" };
+      const v = p.calls.get(`${c.to.toLowerCase()} ${c.data.toLowerCase()}`);
+      const n = r.params[1] === "latest" ? HEAD : parseInt(r.params[1] as string, 16);
+      return { result: (typeof v === "function" ? v(n) : v) ?? "0x" };
     }
     if (r.method === "eth_getLogs") {
       const q = r.params[0] as { address?: string | string[]; topics?: (string | string[] | null)[]; fromBlock: string; toBlock: string };
@@ -139,13 +146,15 @@ function rig(p: ReturnType<typeof planted>) {
     }
     return { error: { code: -32601, message: "the method does not exist" } };
   };
-  return async (url: string, init: RequestInit): Promise<Response> => {
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     if (!URLS.includes(url)) return new Response("{}", { status: 500 });
+    counts.posts!++;
     await new Promise((go) => setTimeout(go, 50));
     const body = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] } | { id: number; method: string; params: unknown[] }[];
     const out = [body].flat().map((r) => ({ jsonrpc: "2.0", id: r.id, ...one(r) }));
     return new Response(JSON.stringify(Array.isArray(body) ? out : out[0]), { status: 200, headers: { "content-type": "application/json" } });
   };
+  return Object.assign(fetch, { counts });
 }
 
 const CASES: Case[] = [
@@ -159,8 +168,9 @@ const CASES: Case[] = [
 for (const c of CASES)
   test(`card index-evm-swaps-v4-route-tape (${c.name}): a coin whose market is its v4 pool quoted in ${c.name}, with an arbitrage's USDC side pool, has that pool's whole tape, each row priced through the quote's own pool our discovery found (red at 3fa850c8c: the USDC side pool's 12 rows)`, async () => {
     const p = planted(c);
+    const f = rig(p);
     const { value } = await onVirtualTime(9_000_000, async () => {
-      const s = createSwaps("base", { fetch: rig(p) as never, now: () => Date.now(), listed: async () => true, rpcs: URLS, pools: new Map(), tickMs: 0, sleep: async () => undefined });
+      const s = createSwaps("base", { fetch: f as never, now: () => Date.now(), listed: async () => true, rpcs: URLS, pools: new Map(), tickMs: 0, sleep: async () => undefined });
       let a = await s.trades(COIN, 50);
       for (let i = 0; i < 40 && a.status === 200 && JSON.parse(a.body).filling === true; i++) {
         await new Promise((go) => setTimeout(go, 1_000));
@@ -170,6 +180,8 @@ for (const c of CASES)
       s.stop();
       return a;
     });
+    // the reads of one open to its whole tape, on each of the three providers together (card index-evm-swaps-v4-route-tape)
+    console.log(`calls per open (${c.name}): ${JSON.stringify(f.counts)}`);
     assert.equal(value.status, 200, value.body);
     const j = JSON.parse(value.body) as { trades: { tx: string; usd: string; amt: string; side: string }[]; filling?: boolean };
     const want = p.mains.slice(-TRADES_MAX).reverse();
@@ -183,7 +195,7 @@ for (const c of CASES)
     });
   });
 
-test("card index-evm-swaps-v4-route-tape (guard): a busier third-token pool whose quote's route was not read (the vendor refused, its own pool too shallow to price) is no answer, never the USDC side pool's rows in its place", async () => {
+test("card index-evm-swaps-v4-route-tape (guard): a busier third-token pool whose quote's route was not read (the vendor refused, its own pool too shallow to price) is answered as a coin with no pool of ours, 200 and no rows: never the USDC side pool's rows in its place (3fa850c8c), never a 503 (c3b72179a)", async () => {
   const p = planted(CASES[0]!);
   // the quote's own pool holds 999 USDC: under LIQ_MIN_USD (1,000), so no route is picked, and the vendor's list was refused
   p.calls.set(`${USDC} 0x70a08231${w(`0x${"f7".repeat(20)}`)}`, word(999n * 10n ** 6n));
@@ -193,8 +205,56 @@ test("card index-evm-swaps-v4-route-tape (guard): a busier third-token pool whos
     s.stop();
     return a;
   });
-  const rows = value.status === 200 ? (JSON.parse(value.body) as { trades: { tx: string }[] }).trades : [];
-  assert.equal(rows.length, 0, `${value.status} ${value.body.slice(0, 200)}`);
+  assert.equal(value.status, 200, value.body);
+  assert.deepEqual((JSON.parse(value.body) as { trades: unknown[] }).trades, [], value.body);
+});
+
+test("card index-evm-swaps-v4-route-tape (no route): a coin whose only pool is quoted in a token with no route read answers as the build without third quotes does, 200 and no rows, never a 503 (red at c3b72179a: 503)", async () => {
+  const p = planted(CASES[0]!);
+  // no arbitrage through the USDC pool: the third-token pool is the coin's only one
+  for (let i = p.logs.length - 1; i >= 0; i--) if (p.logs[i]!.topics[1] === p.SIDE) p.logs.splice(i, 1);
+  for (const ls of p.receipts.values()) for (let i = ls.length - 1; i >= 0; i--) if (ls[i]!.topics[1] === p.SIDE) ls.splice(i, 1);
+  p.calls.set(`${USDC} 0x70a08231${w(`0x${"f7".repeat(20)}`)}`, word(999n * 10n ** 6n));
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const s = createSwaps("base", { fetch: rig(p) as never, now: () => Date.now(), listed: async () => true, rpcs: URLS, pools: new Map(), tickMs: 0, sleep: async () => undefined });
+    const a = await s.trades(COIN, 50);
+    s.stop();
+    return a;
+  });
+  assert.equal(value.status, 200, value.body);
+  assert.deepEqual((JSON.parse(value.body) as { trades: unknown[] }).trades, [], value.body);
+});
+
+test("card index-evm-swaps-v4-route-tape (moving quote): each row is priced at the quote's price in force at its own log, from the quote pool's own Swap logs: a coin swap in the block where cbBTC's price moves, but before that move's log, keeps the old price (red at c3b72179a: priced at the block's end state)", async () => {
+  const c = CASES[0]!;
+  const p = planted(c);
+  // from the quote pool's 17th swap (block HEAD - 720, log 7, after the coin's swap at log 1 of the same block) cbBTC is
+  // worth four times as much: sqrtPriceX96 halved (USDC is token0: the price is 2^192 / sqrt^2 USDC units a satoshi)
+  const MOVE = HEAD - 720;
+  const sqrt2 = c.sqrt / 2n;
+  for (const l of p.logs) if (l.address === `0x${"f7".repeat(20)}` && parseInt(l.blockNumber, 16) >= MOVE) l.data = `0x${int(1_000n)}${int(-1_000n)}${int(sqrt2)}${int(10n ** 18n)}${int(0n)}`;
+  p.calls.set(`0x${"f7".repeat(20)} ${sel("slot0()")}`, (n: number) => `${word(n >= MOVE ? sqrt2 : c.sqrt)}${"0".repeat(64 * 6)}`);
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const s = createSwaps("base", { fetch: rig(p) as never, now: () => Date.now(), listed: async () => true, rpcs: URLS, pools: new Map(), tickMs: 0, sleep: async () => undefined });
+    let a = await s.trades(COIN, 50);
+    for (let i = 0; i < 40 && a.status === 200 && JSON.parse(a.body).filling === true; i++) {
+      await new Promise((go) => setTimeout(go, 1_000));
+      await s.tick();
+      a = await s.trades(COIN, 50);
+    }
+    s.stop();
+    return a;
+  });
+  assert.equal(value.status, 200, value.body);
+  const j = JSON.parse(value.body) as { trades: { tx: string; usd: string }[] };
+  const want = p.mains.slice(-TRADES_MAX).reverse();
+  assert.equal(j.trades.length, TRADES_MAX, value.body.slice(0, 200));
+  assert.ok(want.some((m) => m.b === MOVE), "a coin swap in the move's block");
+  j.trades.forEach((t, i) => {
+    const m = want[i]!;
+    const usd = Number(m.q) * c.usdPerQuoteUnit * (m.b > MOVE ? 4 : 1);
+    assert.ok(Math.abs(Number(t.usd) - usd) <= usd * 1e-9, `row ${i} (block ${HEAD - m.b} under the head): usd ${t.usd}, want ${usd}`);
+  });
 });
 
 test("card index-evm-swaps-v4-route-tape: seedQuotes finds each QUOTE_SEEDS token's route by our own reads at start (cbBTC's own USDC pool here; ZORA and VIRTUAL, with no pool on this chain and the vendor refused, not read)", async () => {
