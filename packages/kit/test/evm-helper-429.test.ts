@@ -2,7 +2,9 @@
 // Retry-After (at least EVM_HELPER_HOLD_MIN_MS), never the 30 s provider hold; every other provider keeps its 30 s.
 // The pool index's end-to-end case is H429 in evm-pool-index.test.ts.
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { evmJsonRpc, evmProviders, evmRanked, evmRpcHeldMs, evmSpeedReset } from "../src/checks/evm/quote.ts";
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import * as pace from "../src/checks/evm/pace.ts";
@@ -71,6 +73,25 @@ test("a quote's providers: past the helper's Retry-After it is asked first again
   } finally {
     fresh();
   }
+});
+
+// The helper's origin, written once in the kit's EVM reads: pace.ts EVM_HELPER_ORIGIN. A quoted copy anywhere else
+// under checks/evm/ or trade/evm/ (a reader URL written out again) is refused, so the route the venues give the kit and
+// the route its hold rule names never drift apart. The sign page's TRADE_HELPER is held to it in its own test
+// (packages/signpage/test/helper-origin-one.test.ts).
+const ORIGIN_QUOTED = /["'`]https:\/\/ct-api\.unrealized\.trade(?=[/:"'`])/g;
+const copiesIn = (src: string): number => (src.match(ORIGIN_QUOTED) ?? []).length;
+test("the helper's origin is written once in the kit's EVM reads, in pace.ts; a copy put back is refused", () => {
+  const src = fileURLToPath(new URL("../src/", import.meta.url));
+  const files = ["checks/evm", "trade/evm"].flatMap((d) => readdirSync(src + d).filter((f) => f.endsWith(".ts")).map((f) => `${d}/${f}`));
+  assert.ok(files.includes("trade/evm/buy-unpinned.ts") && files.includes("checks/evm/pace.ts"), files.join(", "));
+  const found = files.map((f) => [f, copiesIn(readFileSync(src + f, "utf8"))] as const).filter(([, n]) => n > 0);
+  assert.deepEqual(found, [["checks/evm/pace.ts", 1]]);
+  // the plants: the reader written out again, single-quoted, with a port; the constant's own use is no copy
+  assert.equal(copiesIn('readers: ["https://rpc.example", "https://ct-api.unrealized.trade/v1/rpc/robinhood?keyed=only"]'), 1);
+  assert.equal(copiesIn("const h = 'https://ct-api.unrealized.trade';"), 1);
+  assert.equal(copiesIn('"https://ct-api.unrealized.trade:443/v1/rpc/base"'), 1);
+  assert.equal(copiesIn("`${EVM_HELPER_ORIGIN}/v1/rpc/robinhood?keyed=only`"), 0);
 });
 
 test("only our helper's own /v1/rpc route is the helper's: the venue's reader is, a lookalike is not", () => {
