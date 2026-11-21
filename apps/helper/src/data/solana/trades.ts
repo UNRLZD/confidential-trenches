@@ -156,8 +156,11 @@ const TX_PARALLEL = 5;
 export const SIG_PAGE = 100;
 export const REFILL_MAX = 1_000;
 export const SETTLE_SLOTS = 150;
-/** A first read answers after its walk, or after this with what it holds by then. */
-export const COLD_WAIT_MS = 3_000;
+/** A first read answers after its walk, its first trade held, or this long after the read began, with what it holds by
+ *  then (filling). [design: 1.5 s: a token page's first screen answers within 3 s at p99 (the live check
+ *  helper-answers-through-a-burst) with the way to it; at 3 s a cold coin with no trade held answered at 3.2 to 3.7 s
+ *  (card helper-stays-fast-under-the-live-run, local helper 21 Nov 21:30Z)] */
+export const COLD_WAIT_MS = 1_500;
 /** How long after a first read its answers name its phases (sol-open): the reads that joined it. */
 export const OPEN_NAMED_MS = 1_000;
 export const SILENT_MS = 30_000;
@@ -1859,7 +1862,15 @@ export function createSolanaTrades(deps: {
       // with no row of its own yet included (every trade of a fresh coin past the budget)
       const cut = e.cut !== undefined && now() - e.cut.at <= CUT_KEEP_MS;
       const named = (v: DataAnswer): DataAnswer => (cut && v.status === 200 && v.src !== "chain" ? { ...v, timing: `${v.timing === undefined ? "" : `${v.timing}, `}sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` } : v);
-      if (rows.length === 0 && deps.tape !== undefined) return named(await poolTape(mint, limit, e));
+      // card helper-stays-fast-under-the-live-run: a tape with no row of ours while its walk still reads its newest
+      // signatures (a first read past its bound) says so: filling, never whole, whoever's rows it carries; the next read
+      // after the walk's first round is our own rows
+      const reading = (v: DataAnswer): DataAnswer => {
+        if (e.state !== "cold" || v.status !== 200) return v;
+        const { whole_ms: _, ...b } = JSON.parse(v.body) as Record<string, unknown>;
+        return { ...v, body: JSON.stringify({ ...b, filling: true }) };
+      };
+      if (rows.length === 0 && deps.tape !== undefined) return named(reading(await poolTape(mint, limit, e)));
       if (cut && deps.tape !== undefined) {
         const v = await poolTape(mint, limit, null);
         if (v.status === 200 && v.src !== "chain") return named(v);

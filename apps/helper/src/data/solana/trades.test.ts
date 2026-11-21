@@ -782,6 +782,37 @@ test("card helper-stays-fast-under-the-live-run: a first read's bound runs from 
   t.stop();
 });
 
+test("card helper-stays-fast-under-the-live-run: a first answer at its bound with no row of ours says filling and claims no whole tape, whoever's rows it carries; the next read after the walk is our own rows, every one walked", async () => {
+  const sigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
+  const base = rpcFetch({ sigs: () => sigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse(), txs: Object.fromEntries(sigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  let open = 0;
+  let letGo = () => {};
+  const held = new Promise<void>((go) => (letGo = go));
+  const hang = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string };
+    if (req.method === "getTransaction") {
+      open++;
+      await held;
+      open--;
+    }
+    return base(url, init);
+  };
+  // the vendor's tape answers fresh rows: on their own they would claim a whole tape (whole_ms)
+  const vendor = async () => ({ status: 200, body: JSON.stringify(POOL_ROWS), src: "geckoterminal", asOfMs: TS * 1000 });
+  const t = createSolanaTrades({ fetch: hang, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: vendor, coldWait: () => settle() });
+  const first = JSON.parse((await t.trades(MINT, 50)).body) as { trades: unknown[]; src: string; filling?: boolean; whole_ms?: number };
+  assert.equal(open, 5, "the walk's first round still reads");
+  assert.deepEqual([first.src, first.trades.length > 0, first.filling, first.whole_ms], ["geckoterminal", true, true, undefined], "the vendor's rows, filling, no whole tape claimed");
+  letGo();
+  for (let i = 0; i < 100 && open > 0; i++) await settle();
+  await settle();
+  const next = JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[]; src: string; filling?: boolean };
+  assert.equal(next.src, "chain", "our own rows once the walk holds them");
+  assert.deepEqual(next.trades.map((r) => r.tx).sort(), [...sigs].sort(), "every trade walked, none missing");
+  assert.equal(next.filling, undefined, "the walk ended: no mark");
+  t.stop();
+});
+
 // card solana-trades-show-on-every-token: a token whose newest signatures are failed bot transactions
 /** A token's signature list, newest first, as getSignaturesForAddress pages it (`limit`, `before`); `ok(i)` whether the
  *  i-th newest succeeded. Each call's `limit` is kept in `asked`. */
@@ -862,9 +893,20 @@ test("a cold walk whose signature reads fail three times is walked again: the ta
 const POOL_ROWS = [
   { t_ms: Date.parse("2026-11-14T17:22:05Z"), side: "s", usd: "427.037807197591623106", amt: "648306.777831", trader: "EiSEokSBEa9iHSN3gEUKbyCriKMkzqUfr5nLazkkHZki", tx: NK.signature },
 ];
+/** A first read's bound that a walk of one recorded transaction ends well inside: the bound runs from the read's start
+ *  (card helper-stays-fast-under-the-live-run), so one settle() could end it before the walk. */
+const walked = () => new Promise<void>((r) => setTimeout(r, 200));
 function nearkat(tape?: () => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>) {
-  const fetchFn = rpcFetch({ sigs: () => [{ signature: NK.signature, slot: NK.tx.slot, err: null }], txs: { [NK.signature]: NK.tx }, price: 9_342_267_796n, pub: TS, slot: NK.tx.slot }, { [NK.mint]: 6 });
-  return createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === NK.mint, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => settle(), ...(tape === undefined ? {} : { tape }) });
+  const chain = rpcFetch({ sigs: () => [{ signature: NK.signature, slot: NK.tx.slot, err: null }], txs: { [NK.signature]: NK.tx }, price: 9_342_267_796n, pub: TS, slot: NK.tx.slot }, { [NK.mint]: 6 });
+  // the trade's pool account (4w2cysot..., read since the tape decodes Raydium CPMM) answers no account: the walk ends
+  // with no trade placed, as on a venue the tape does not decode; thrown, the walk retried for good and the first read
+  // answered at its bound, still reading (card helper-stays-fast-under-the-live-run)
+  const fetchFn = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    if (req.method === "getAccountInfo" && req.params[0] !== NK.mint && req.params[0] !== PYTH_SOL_USD) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: NK.tx.slot }, value: null } }), { status: 200 });
+    return chain(url, init);
+  };
+  return createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === NK.mint, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: walked, ...(tape === undefined ? {} : { tape }) });
 }
 
 test("card solana-trades-show-on-every-token: a listed token on a venue the chain tape does not decode (Raydium CPMM, recorded) is served its top pool's trades, never an empty tape", async () => {
