@@ -21,9 +21,9 @@
 // block (a state miss is judged a wrong answer, judgeStateMiss) is read again the same way, from a newer block, as the
 // page's next pass reads it. Either fails the check only if it is still so on the last read. A seat that does not know a
 // block yet, one at or below the newest block both reported (a null block by number, or a state read at it answered
-// with the words of a block not held: NOT_YET, not a pruned state's STATELESS), is read again the same way, and still
-// behind on the last read is INCONCLUSIVE naming that seat (Lag): Base makes a block every 200 ms and a provider's
-// backends lag one another (release 116's sign live run 43024665974: "base.api.pocket.network: block 56057255: not a
+// with the words of a block not held: the kit's evmNotYetWords, not a pruned state's STATELESS), is read again the same
+// way, and still behind on the last read is INCONCLUSIVE naming that seat (Lag): Base makes a block every 200 ms and a
+// provider's backends lag one another (release 116's sign live run 43024665974: "base.api.pocket.network: block 56057255: not a
 // block", a block below both seats' latest). A seat that knows the block and answers it wrong still fails.
 // What the bundle rule (OLD_STATE_READ) sees: a state method named as a string literal, then within one list of params
 // with no nested list, a "finalized" or "safe" literal as the last param, in any quote style, with no space after the
@@ -48,7 +48,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolProvidersOf } from "../../packages/kit/src/index.ts";
 import { mainnetVenues } from "./mainnet-venues.mjs";
-import { EXIT, NOT_YET, rpcAnswer, STATELESS } from "./provider-answer.mjs";
+import { EXIT, notYetWords, rpcAnswer, STATELESS } from "./provider-answer.mjs";
 
 const KEY = "evm-deposit-note-stays-incoming";
 export const SIGN_HOST = "https://confidential.unrealized.trade/";
@@ -152,7 +152,7 @@ class ReadFailed extends Error {
   }
 }
 /** A JSON-RPC error that says the seat does not hold the block yet (not that it pruned the block's state). */
-const notYet = (e) => typeof e?.message === "string" && NOT_YET.test(e.message) && !STATELESS.test(e.message);
+const notYet = (e) => notYetWords(e?.message) && !STATELESS.test(e.message);
 const host = (u) => new URL(u).host;
 async function ask(transport, url, method, params, what) {
   let a;

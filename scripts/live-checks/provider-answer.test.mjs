@@ -2,10 +2,11 @@
 // re-read once, and the kit's words held equal to these (read from the files the kit's entry loads, never a deep path).
 //   node --test scripts/live-checks/provider-answer.test.mjs
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { classify, LIMIT_CODES, NOT_YET, PAGE_THROTTLE_CODES, pageRefuses, preflight, preflightRefuses, RATE_LIMIT, RETRY, rpcAnswer, rpcBatchAnswer, STATELESS } from "./provider-answer.mjs";
+import { classify, LIMIT_CODES, notYetWords, PAGE_THROTTLE_CODES, pageRefuses, preflight, preflightRefuses, RATE_LIMIT, RETRY, rpcAnswer, rpcBatchAnswer, STATELESS } from "./provider-answer.mjs";
 import { NO_ANSWERS } from "./provider-answer.plants.mjs";
 
 // a no-answer is read again at once here, not after provider-answer.mjs's pause
@@ -270,8 +271,22 @@ test("the rate-limit, not-yet and stateless words are the kit's own", () => {
   };
   // the EVM quote's limited (the pool index's copy is not among the entry's files)
   assert.deepEqual(words("limited"), [String(RATE_LIMIT)]);
-  assert.deepEqual(words("notYet"), [String(NOT_YET)]);
   assert.deepEqual(words("stateless"), [String(STATELESS)]);
+  // the not-yet words have one copy, the kit's exported evmNotYetWords (card evm-lag-answer-read-again), which its EVM
+  // quote's notYet reads and this module calls: no other file the entry loads holds them, and this module copies none
+  const NOT_YET_WORDS = "/(block|header).*not found|unknown block|unknown state/i";
+  const holders = files.filter((f) => f.text.includes(NOT_YET_WORDS));
+  assert.deepEqual(holders.map((f) => f.fileName.replace(/.*\/packages\//, "packages/")), ["packages/kit/src/checks/evm/quote.ts"]);
+  assert.equal(holders[0].text.split(NOT_YET_WORDS).length, 2);
+  assert.match(holders[0].text, /\nexport const evmNotYetWords = \(m: string\): boolean => \/\(block\|header\)\.\*not found\|unknown block\|unknown state\/i\.test\(m\);\n/);
+  assert.match(holders[0].text, /\nconst notYetError = [\s\S]*?evmNotYetWords\(m\);\n/);
+  const self = readFileSync(new URL("./provider-answer.mjs", import.meta.url), "utf8");
+  assert.equal(self.includes("not found|unknown block"), false);
+  assert.match(self, /\nimport \{ evmNotYetWords \} from "\.\.\/\.\.\/packages\/kit\/src\/index\.ts";\n/);
+  for (const m of ["header not found", "Unknown state. First available state is 1", "unknown block", "block 5 not found", "execution reverted", "rate limit", ""]) {
+    assert.equal(notYetWords(m), /(block|header).*not found|unknown block|unknown state/i.test(m), m);
+  }
+  assert.equal(notYetWords(undefined), false);
 });
 
 test("keep: the named answer headers come back beside the answer, each its value or null; without keep nothing is added", async () => {
