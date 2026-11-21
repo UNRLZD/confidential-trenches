@@ -12,7 +12,9 @@
 // With no slot key serving, "fallback" is the truth and nothing here is judged: INCONCLUSIVE (exit 3). A run that fails
 // only on a slot's state reads the health again every 30 s for up to 3 min (the slot retries its key each SLOT_RETRY_MS
 // and the probe each minute). Its other end states are helper-gives-a-trade-its-reads (42 of 42 Solana reads served)
-// and solana-marks-route-answers (route B not out of its day).
+// and solana-marks-route-answers (route B not out of its day); and, round 2 (live run 44783106750, 20 Nov 17:26:46Z),
+// relayer-cost-guards and sol-pool-buy-lands-on-mainnet-helper: a release's simulation in a crowd answers 422, never a
+// 429 while the pool's other provider has room (pool/solana.ts aThenB; rpc.ts noRoom for /v1/rpc/solana).
 // After: helper
 //   node scripts/live-checks/helper-solana-slots-off-a-spent-key.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, for the test's replay.

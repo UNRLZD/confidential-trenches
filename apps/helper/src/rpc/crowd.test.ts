@@ -91,7 +91,9 @@ test("card helper-crowd-429: a hold past PACE_MAX_MS is still the caller's 429 w
   const a = await r.handle("solana", JSON_T, read(1), "198.51.100.1");
   const b = await r.handle("solana", JSON_T, read(2), "198.51.100.2");
   assert.ok(mono() - t0 < 500, "nothing waited");
-  assert.deepEqual([a.status, a.why, b.status, b.why], [429, "solana provider 429", 429, "solana held"]);
+  // card helper-solana-slots-off-a-spent-key, round 2: the held key's next read goes on to the public endpoint, which
+  // throttles too here (every URL answers 429): the 429 is the provider's, at once
+  assert.deepEqual([a.status, a.why, b.status, b.why], [429, "solana provider 429", 429, "solana-public provider 429"]);
   assert.ok(Number(b.headers?.["Retry-After"]) >= 29);
 });
 

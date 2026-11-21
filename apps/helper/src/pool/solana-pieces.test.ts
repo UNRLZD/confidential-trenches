@@ -158,7 +158,7 @@ type EngineCall = { url: string; method: string; params: unknown[] };
 /** A sender on `cluster` whose kit sender records each set and, for a set with a block engine path, drives it twice
  *  (the first send, then one rebroadcast) before the set's end `end` gives. */
 /** `clock`: the sender's now, moved by each pause (and by the test); NOW when absent. */
-function rig(cluster: "devnet" | "mainnet", o: { end?: (n: number) => Promise<string>; result?: unknown; simErr?: unknown; fail?: (method: string, params: readonly unknown[]) => Error | null; stale?: (method: string, params: readonly unknown[]) => boolean; hold?: (method: string, params: readonly unknown[]) => Promise<void> | undefined; clock?: { t: number } } = {}) {
+function rig(cluster: "devnet" | "mainnet", o: { end?: (n: number) => Promise<string>; result?: unknown; simErr?: unknown; fail?: (method: string, params: readonly unknown[]) => Error | null; stale?: (method: string, params: readonly unknown[]) => boolean; hold?: (method: string, params: readonly unknown[]) => Promise<void> | undefined; clock?: { t: number }; failB?: boolean } = {}) {
   const calls: Calls = [];
   const sets: Set[] = [];
   const pauses: number[] = [];
@@ -179,7 +179,8 @@ function rig(cluster: "devnet" | "mainnet", o: { end?: (n: number) => Promise<st
         })
       : null;
   const deps: SolanaPoolSenderDeps = {
-    providers: [rpcStub(calls, o.simErr, o.fail, o.stale, o.hold), rpcStub(calls)],
+    // failB: provider b fails as a does (pool/solana.ts asks b a read a throttled: card helper-solana-slots-off-a-spent-key)
+    providers: [rpcStub(calls, o.simErr, o.fail, o.stale, o.hold), o.failB ? rpcStub(calls, undefined, o.fail) : rpcStub(calls)],
     now: () => o.clock?.t ?? NOW,
     readRent: async () => TEST_RENT,
     log: () => {},
@@ -440,14 +441,15 @@ test("RED at ed9ec97a: once the tag 2s landed, the tag 3's simulation is read at
   for (const cluster of ["mainnet", "devnet"] as const) {
     const ws = two();
     let n = 0;
-    const r = rig(cluster, { fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) && n++ === 0 ? throttle() : null) });
+    // both providers throttle the first ask (a's throttle is asked of b at once), then a answers
+    const r = rig(cluster, { failB: true, fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) && n++ < 2 ? throttle() : null) });
     const a = await r.s.carryPieces(bodyOf(ws));
     assert.equal(a.status, 200, `${cluster}: ${JSON.stringify(a.body)}`);
     assert.equal(r.sets.length, 2, cluster);
     assert.deepEqual(r.pauses, [LANDED_READ_PACE_MS], cluster);
-    // set 0 (the tag 2) landed at slot 100: both asks of the tag 3's simulation and its blockhash read ask for it
+    // set 0 (the tag 2) landed at slot 100: every ask of the tag 3's simulation (a then b, then a again) asks for it
     const sims = simsOf(r.calls, ws[1]!);
-    assert.equal(sims.length, 2, cluster);
+    assert.equal(sims.length, 3, cluster);
     for (const c of sims) assert.equal((c.params[1] as { minContextSlot?: number }).minContextSlot, 100, cluster);
     // the tag 2's own simulation came before anything landed: no slot asked
     assert.equal((simsOf(r.calls, ws[0]!)[0]!.params[1] as { minContextSlot?: number }).minContextSlot, undefined, cluster);
@@ -471,11 +473,12 @@ test("RED at ed9ec97a: a later page's tag 2 whose simulation meets a node behind
 
 test("a provider that keeps failing after the tag 2s landed: asked again a bounded number of times, then 503 not_landed with its code, the tag 3 never sent", async () => {
   const ws = two();
-  const r = rig("mainnet", { fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) ? throttle() : null) });
+  // both providers keep throttling (a's throttle is asked of b each time)
+  const r = rig("mainnet", { failB: true, fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) ? throttle() : null) });
   const a = await r.s.carryPieces(bodyOf(ws));
   assert.deepEqual([a.status, a.body], [503, { error: { code: "not_landed", detail: "rate_limited" } }]);
   assert.equal(r.sets.length, 1);
-  assert.equal(simsOf(r.calls, ws[1]!).length, POOL_LANDED_READ_MS / LANDED_READ_PACE_MS);
+  assert.equal(simsOf(r.calls, ws[1]!).length, 2 * (POOL_LANDED_READ_MS / LANDED_READ_PACE_MS));
 });
 
 test("RED at ed9ec97a: first-page tag 2s, one failed and one with an end the providers did not agree on: 503 not_landed in either order, never a 4xx", async () => {
@@ -556,7 +559,7 @@ test("the reads after the tag 2s landed stop at the carry's arrival plus a block
   {
     const ws = two();
     const clock = { t: NOW };
-    const r = rig("mainnet", { clock, fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) ? throttle() : null) });
+    const r = rig("mainnet", { clock, failB: true, fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) ? throttle() : null) });
     const a = await r.s.carryPieces(bodyOf(ws));
     assert.deepEqual([a.status, a.body], [503, { error: { code: "not_landed", detail: "rate_limited" } }]);
     assert.ok(clock.t <= NOW + POOL_LANDED_READ_MS, `${clock.t - NOW} ms`);
@@ -575,6 +578,7 @@ test("the reads after the tag 2s landed stop at the carry's arrival plus a block
         if (n === 0) clock.t = NOW + took;
         return "filled";
       },
+      failB: true,
       fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) ? throttle() : null),
     });
     const a = await r.s.carryPieces(bodyOf(ws));
@@ -768,4 +772,18 @@ test("PIN: every body that ends in a tag 3 (or is no lone round) answers, reads 
   const h = await buyTranscript();
   assert.equal(await buyTranscript(), h, "the transcript is the same on a second run");
   assert.equal(h, "3533748bb0c15d9b5a0ce90ce061e5abaaed7c8da7a274b23b9a201303747756");
+});
+
+test("card helper-solana-slots-off-a-spent-key, round 2: provider a throttling every simulation of the tag 3 after the tag 2s landed: b simulates it at their slot at once, so the buy lands with no wait", async () => {
+  for (const cluster of ["mainnet", "devnet"] as const) {
+    const ws = two();
+    const r = rig(cluster, { fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) ? throttle() : null) });
+    const a = await r.s.carryPieces(bodyOf(ws));
+    assert.equal(a.status, 200, `${cluster}: ${JSON.stringify(a.body)}`);
+    assert.equal(r.sets.length, 2, cluster);
+    assert.deepEqual(r.pauses, [], cluster);
+    const sims = simsOf(r.calls, ws[1]!);
+    assert.equal(sims.length, 2, `${cluster}: a's throttled ask, then b's`);
+    for (const c of sims) assert.equal((c.params[1] as { minContextSlot?: number }).minContextSlot, 100, cluster);
+  }
 });

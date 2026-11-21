@@ -902,11 +902,13 @@ test("review R-S2: a mainnet tag 3 whose sendSolanaSet throws synchronously free
 });
 // R-S3: end state 1 on the pool route: the pool provider's own 429 (what the kit's solanaJsonRpc throws: "HTTP 429")
 // is an upstream throttle, so it should answer 429 with a Retry-After; it answers 503 upstream (fatal for the device).
-test("review R-S3: a pool provider's 429 on the simulation answers 429 rate_limited with a wait (end state 1)", async () => {
+test("review R-S3: both pool providers' 429 on the simulation answers 429 rate_limited with a wait (end state 1)", async () => {
   const throttling: SolanaRpc = Object.assign(async () => { throw new Error("HTTP 429"); }, { url: "https://stub.invalid/429" });
+  // card helper-solana-slots-off-a-spent-key, round 2: A's throttle is asked of B (pool/solana.ts aThenB), so the 429 is
+  // the release's answer only while B throttles too (solana.test.ts: A alone throttled, B answers)
   const s = solanaPoolSender(
     { cluster: "devnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
-    { providers: [throttling, stub([])], now: () => NOW, readRent: async () => MAINNET, send: () => { throw new Error("not reached"); } },
+    { providers: [throttling, throttling], now: () => NOW, readRent: async () => MAINNET, send: () => { throw new Error("not reached"); } },
   );
   const a = await s.carry(body(wire()), "x");
   assert.deepEqual([a.status, code(a), a.retryAfterS !== undefined], [429, "rate_limited", true], `got ${a.status} ${code(a)}`);

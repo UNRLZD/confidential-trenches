@@ -498,20 +498,32 @@ test("a provider that fails answers 503 upstream: 5xx, 401, 403, a redirect, not
 // card helper-abuse-limits (M367 (3), review finding 3): the helper is the provider's one client, so a provider's 429
 // holds the chain until the reset it named and every caller is told the seconds left as a 429 (at be4b353 the pause
 // answered 503, which the device reads as fatal; at 06a656f the next caller still reached the provider)
-test("a provider's 429 holds that chain until the reset it named (at most RETRY_AFTER_MAX_S): every caller, the helper's own reads included, gets 429 with the seconds left and nothing reaches the provider", async () => {
+test("a provider's 429 holds that chain until the reset it named (at most RETRY_AFTER_MAX_S): nothing reaches the provider; the Solana slot's callers, the helper's own reads included, go on to the public endpoint, and a slot without one answers 429 with the seconds left", async () => {
   let t = 1_800_000_000_000;
-  const r = createRpc({ SOLANA_RPC_URL: base, NEAR_RPC_URL: base }, { now: () => t });
+  // card helper-solana-slots-off-a-spent-key, round 2: the Solana slot's reads the held key cannot take go on to the
+  // public endpoint (here the stub's /public path), so the held key gets nothing and a caller is no helper-made 429
+  const toStub = (u: string, i: RequestInit) => fetch(u === RPC_UPSTREAMS.solana.fallback ? `${base}/public` : u, i);
+  const r = createRpc({ SOLANA_RPC_URL: base, NEAR_RPC_URL: base }, { now: () => t, fetch: toStub as never });
   const ok = { jsonrpc: "2.0", id: 1, method: "getBalance", params: ["x"] };
   next = { status: 429, type: JSON_T, body: () => JSON.stringify({ error: "slow down from the provider" }), headers: { "retry-after": "5" } };
   seen.length = 0;
   const a = await r.handle("solana", JSON_T, JSON.stringify(ok), "heavy");
-  assert.deepEqual([a.status, a.headers, JSON.parse(a.body)], [429, { "Retry-After": "5" }, { error: { code: "rate_limited" } }], "the code only: no provider text");
+  assert.deepEqual([a.status, a.headers?.["Retry-After"], JSON.parse(a.body)], [429, "5", { error: { code: "rate_limited" } }], "the code only: no provider text");
   next = { status: 200, type: JSON_T, body: echo };
   t += 2_000;
   const b = await r.handle("solana", JSON_T, JSON.stringify(ok), "honest");
-  assert.deepEqual([b.status, b.headers?.["Retry-After"]], [429, "3"], "another caller waits out the provider's reset too");
-  assert.equal((await call(r, "solana", ok)).status, 429, "and so does the helper's own read");
-  assert.equal(seen.length, 1, "nothing reached the provider inside its reset");
+  assert.equal(b.status, 200, "another caller is answered by the public endpoint while the key is held");
+  assert.equal((await call(r, "solana", ok)).status, 200, "and so is the helper's own read");
+  assert.deepEqual(seen.filter((x) => x.url !== "/public").length, 1, "nothing reached the held key inside its reset");
+  // with no public endpoint to go to (a slot without one, the holders key's), the held key is every caller's 429
+  let u = t;
+  const held = createRpc({ SOLANA_RPC_URL: base }, { now: () => u, slot: "holders", publicFallback: false });
+  next = { status: 429, type: JSON_T, body: () => "{}", headers: { "retry-after": "5" } };
+  assert.equal((await held.handle("solana", JSON_T, JSON.stringify(ok), "heavy")).status, 429);
+  next = { status: 200, type: JSON_T, body: echo };
+  u += 2_000;
+  const c = await held.handle("solana", JSON_T, JSON.stringify(ok), "honest");
+  assert.deepEqual([c.status, c.headers?.["Retry-After"]], [429, "3"], "another caller waits out the provider's reset too");
   assert.equal((await call(r, "near", { ...ok, method: "block" })).status, 200, "another chain is not held");
   t += 3_000;
   assert.equal((await r.handle("solana", JSON_T, JSON.stringify(ok), "honest")).status, 200, "at the reset the chain is open");
@@ -774,7 +786,11 @@ const keepsPerSecond = (perSecond: number) => {
 test("card app-console-429: one caller's burst of 35 on a keyed provider (Helius free, 100 per 10 s = 10 a second) is paced to the provider's second, so it never throttles, nothing is held, and another caller's read answers 200", async () => {
   const provider = keepsPerSecond(10);
   const lines: string[] = [];
-  const r = createRpc({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}`, RPC_BUDGET_SOLANA: `100,${SOL_SHARE}` }, { now: STILL, fetch: provider.fetch as never, log: (l) => lines.push(l) });
+  // the public endpoint is its own provider (card helper-solana-slots-off-a-spent-key, round 2: the burst past the
+  // key's PACE_MAX_MS goes there, never the caller's 429 while it has room)
+  const pub = keepsPerSecond(100);
+  const both = (u: string, i: RequestInit) => (u === RPC_UPSTREAMS.solana.fallback ? pub.fetch(u, i) : provider.fetch(u, i));
+  const r = createRpc({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}`, RPC_BUDGET_SOLANA: `100,${SOL_SHARE}` }, { now: STILL, fetch: both as never, log: (l) => lines.push(l) });
   const burst = await Promise.all(Array.from({ length: 35 }, (_, i) => r.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), "203.0.113.7")));
   const other = await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "203.0.113.8");
   assert.equal(provider.p.throttled, 0, `the provider never throttled (${provider.p.calls} sent)`);
@@ -782,8 +798,8 @@ test("card app-console-429: one caller's burst of 35 on a keyed provider (Helius
   assert.equal(other.status, 200, "another caller is served");
   // under its share of 42, the provider's second bounds a burst sent at once: 10 now, 10 a PACE_SECOND_MS later, within
   // PACE_MAX_MS (the page's busiest 10 s is spread over the window; scripts/live-checks/helper-gives-a-trade-its-reads.mjs)
-  assert.equal(burst.filter((a) => a.status === 200).length, 20, "the burst's caller gets the provider's room within PACE_MAX_MS");
-  for (const a of burst.filter((x) => x.status !== 200)) assert.equal(a.status, 429, "the rest of the burst is that caller's own 429");
+  assert.equal(provider.p.calls, 21, "the burst's caller gets the provider's room within PACE_MAX_MS (20), and the other caller its read");
+  assert.deepEqual([burst.filter((a) => a.status === 200).length, pub.p.calls], [35, 15], "the rest of the burst is answered by the public endpoint");
 });
 
 test("card app-console-429: past PACE_MAX_MS of queued sends, only the caller over it gets a 429 with no hold; the public endpoint is not paced", async () => {
@@ -797,12 +813,16 @@ test("card app-console-429: past PACE_MAX_MS of queued sends, only the caller ov
   const all = await Promise.all(Array.from({ length: 40 }, (_, i) => r.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `198.51.100.${i}`)));
   assert.equal(all.filter((a) => a.status === 200).length, 40);
   assert.deepEqual(waits, [], "within the plan's second nothing waits");
-  const tight = createRpc({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, RPC_BUDGET_SOLANA: "100,90" }, { now: STILL, fetch: keepsPerSecond(10).fetch as never, log: (l) => lines.push(l) });
+  // card helper-solana-slots-off-a-spent-key, round 2: the reads past the key's PACE_MAX_MS go on to the public endpoint
+  // (its own provider here), so no caller is the helper's own 429 while it has room
+  const key10 = keepsPerSecond(10);
+  const pub10 = keepsPerSecond(100);
+  const both = (u: string, i: RequestInit) => (u === RPC_UPSTREAMS.solana.fallback ? pub10.fetch(u, i) : key10.fetch(u, i));
+  const tight = createRpc({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, RPC_BUDGET_SOLANA: "100,90" }, { now: STILL, fetch: both as never, log: (l) => lines.push(l) });
   const many = await Promise.all(Array.from({ length: 40 }, (_, i) => tight.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `198.51.100.${i}`)));
-  const refused = many.filter((a) => a.status === 429);
-  assert.equal(many.filter((a) => a.status === 200).length, 20, "10 now, 10 a PACE_SECOND_MS later: the room within PACE_MAX_MS");
-  assert.equal(refused.length, 20, "the rest are refused, each its own caller's 429");
-  for (const a of refused) assert.equal(a.why, "solana pace", "named as the pace, not the provider");
+  assert.equal(key10.p.calls, 20, "10 now, 10 a PACE_SECOND_MS later: the key's room within PACE_MAX_MS");
+  assert.equal(key10.p.throttled, 0, "the key never throttled");
+  assert.deepEqual([many.filter((a) => a.status === 200).length, pub10.p.calls], [40, 20], "the rest are answered by the public endpoint, none refused");
   // the public endpoint (no SOLANA_RPC_URL): its limit is per 10 s, so 20 callers at once all go now
   const pub = createRpc({}, { now: STILL, fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l), sleep });
   const open = await Promise.all(Array.from({ length: 20 }, (_, i) => pub.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `192.0.2.${i}`)));
