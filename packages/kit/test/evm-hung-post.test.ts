@@ -17,6 +17,7 @@ import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
 import { callKey } from "./evm-quote-calls-record.ts";
 import { onTestClock } from "./test-clock.ts";
+import { untilAborted } from "../src/abort.ts";
 
 const F = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/evm-warm-tap-calls.json.gz", import.meta.url))).toString("utf8"));
 const POST_MS = 200;
@@ -67,8 +68,7 @@ const run = async (hang?: Hang) => {
       const calls: Call[] = Array.isArray(body) ? body : [body];
       if (hang !== undefined && hung === 0 && quote === hang.quote && hang.is(calls)) {
         hung++;
-        const signal = init?.signal;
-        await new Promise((_, no) => signal?.addEventListener("abort", () => no(signal.reason)));
+        await untilAborted(init?.signal);
       }
       await new Promise((go) => setTimeout(go, POST_MS));
       const one = (c: Call) => {

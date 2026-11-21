@@ -11,6 +11,7 @@ import { evmAgreeing, evmProviders, evmSpeedReset, type EvmGated, type EvmRpc } 
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
 import { onTestClock } from "./test-clock.ts";
+import { untilAborted } from "../src/abort.ts";
 
 const v = evmPoolVenues().base;
 const [PUBLICNODE, BLASTAPI, BASE_ORG, POCKET] = v.providers!;
@@ -28,7 +29,7 @@ function providers(ms: (url: string, calls: { method: string }[]) => number) {
     posts.set(u, (posts.get(u) ?? 0) + 1);
     const body = JSON.parse(String(init?.body)) as { id: number; method: string }[];
     const next = plan.get(u)?.shift();
-    if (next === "hang") await new Promise((_, no) => init?.signal?.addEventListener("abort", () => no(init.signal!.reason)));
+    if (next === "hang") await untilAborted(init?.signal);
     if (typeof next === "number") {
       await new Promise((go) => setTimeout(go, next));
       throw new TypeError("fetch failed");

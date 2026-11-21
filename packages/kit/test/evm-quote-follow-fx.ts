@@ -10,6 +10,7 @@ import { evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolIndexUse, ev
 const evmAgreedReset = (): void => (Q as { evmAgreedReset?: () => void }).evmAgreedReset?.();
 const evmQuoteWarmReset = (): void => (Q as { evmQuoteWarmReset?: () => void }).evmQuoteWarmReset?.();
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
+import { untilAborted } from "../src/abort.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
 import { callKey, withEventOnly } from "./evm-quote-calls-record.ts";
 
@@ -34,8 +35,7 @@ const replay = (lie?: (k: string, a: unknown) => unknown, hang?: (k: string) => 
     if (hang !== undefined && only !== undefined && hang(callKey(only))) {
       hang = undefined;
       hung++;
-      const signal = init?.signal;
-      await new Promise((_, no) => signal?.addEventListener("abort", () => no(signal.reason)));
+      await untilAborted(init?.signal);
     }
     await new Promise((go) => setTimeout(go, POST_MS));
     const one = (c: { id: unknown; method: string; params: unknown }) => {

@@ -76,6 +76,7 @@ import { EVM_POOL_MIN_DEPOSIT, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainF
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmPoolSellFeeMax, evmPoolSellTip, evmSellCallData, evmSellRouteCheck, evmSellRouteOf as evmSignedSellRouteOf, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { evmSellReleasesAt, evmSellSentOf, type EvmReleaseLog, type EvmSellReleases, type EvmSellSent } from "../../trade/evm/sell-releases.ts";
 import { EVM_PROVIDER_HOLD_MS, evmBatchMost, evmBatchRefused, evmPaceAdvised, evmPaceReady, evmPaceTake, evmPaceWaitMs, evmProviderHeld, evmProviderHeldMs, evmProviderHold } from "./pace.ts";
+import { untilAborted } from "../../abort.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -2821,7 +2822,7 @@ async function scanPools(
       let firstOut: { e: unknown } | undefined;
       let nextOut: { e: unknown } | undefined;
       const stop = new AbortController();
-      const lost = new Promise<never>((_, no) => stop.signal.addEventListener("abort", () => no(stop.signal.reason)));
+      const lost = untilAborted(stop.signal);
       lost.catch(() => undefined);
       const lose = (e: unknown) => stop.abort(e);
       const end = (go: () => void) => {
