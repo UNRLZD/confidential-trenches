@@ -1200,21 +1200,32 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Pro
 /** ask, up to 3 more times FRESH_RETRY_MS, twice and three times that apart while an answer says the provider does not
  *  hold the block yet: a provider behind a load balancer can send a call to a node one block behind the one that gave
  *  the head ("block not found: canonical hash", base-rpc.publicnode.com, 2026-11-03 19:09Z; "Unknown state. First
- *  available …", robinhood.drpc.org, 20:30Z, and on 8 of one quote's batches 2026-11-04 06:52Z). */
+ *  available …", robinhood.drpc.org, 20:30Z, and on 8 of one quote's batches 2026-11-04 06:52Z).
+ *  The same rule as ask's for a throttle: while agreeing has another provider left (the gate's `spare`), a not-yet
+ *  answer, under a 200 or a 4xx, goes there at once; only the last provider left is asked again (card
+ *  evm-lag-answer-read-again: merge queue run 44936343596 timed warm Base quotes at p95 2,121 and 2,102 ms, a lagging
+ *  provider's 4xx not-yet answers asked again 0.25, 0.5 and 0.75 s on where they had moved on as failures before). */
 async function askAt(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Promise<readonly unknown[]> {
   for (let i = 0; ; i++) {
     const out = await ask(rpc, calls, gate);
     if (!out.some(notYet) || i === 3) return out;
+    if (gate?.spare?.() === true) throw new EvmQuoteError("rpc_error", "a provider does not hold the block yet");
     await new Promise((r) => setTimeout(r, FRESH_RETRY_MS * (i + 1)));
   }
 }
 const FRESH_RETRY_MS = 250;
 /** An answer for a block the provider does not hold yet (askAt's): no result, or an error naming the block or its
  *  state; never a revert, whose string is the called contract's own. */
-const notYet = (a: unknown) => {
-  const o = a as { result?: unknown; error?: { message?: unknown } } | null;
-  return o?.result === null || (!reverted(a) && typeof o?.error?.message === "string" && /(block|header).*not found|unknown block|unknown state/i.test(o.error.message));
+const notYet = (a: unknown) => (a as { result?: unknown } | null)?.result === null || notYetError(a);
+/** A not-yet answer's error (notYet), whatever HTTP status it came with (card evm-lag-answer-read-again). */
+const notYetError = (a: unknown) => {
+  const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
+  return !reverted(a) && typeof m === "string" && evmNotYetWords(m);
 };
+/** Words of a provider's answer that it does not hold the block or its state yet: "block not found: canonical hash",
+ *  "header not found", "unknown block", "Unknown state. First available state is 1" (askAt's notYet). One copy, read by
+ *  the live checks too. */
+export const evmNotYetWords = (m: string): boolean => /(block|header).*not found|unknown block|unknown state/i.test(m);
 
 /** A block header from a provider's answer: number, hash, timestamp and base fee (null when it gives none), or a
  *  refusal. */
@@ -5950,6 +5961,45 @@ export function sizeRefusal(body: unknown): number | null | undefined {
 /** A provider's answer that is no batch of answers to read: an HTTP status outside 2xx other than 429 and 5xx, a body
  *  past its size or not JSON, or JSON that is not a batch. It answered, so a scan asks its halves of it (ScanAnswered). */
 class BadAnswer extends Error {}
+/** How much of a 4xx body is read for not-yet answers (lagBody): 64 KiB, some 700 of them (each about 90 bytes); a body
+ *  past it stays a failure, as every 4xx was before, so a batch of more not-yet answers is refused and asked again as
+ *  any refused read is. [design: 64 KiB, bounded so a 4xx cannot hold the reader on an endless body (LQ3)] */
+const LAG_BODY_MAX = 64 * 1024;
+/** A body as text, read to `max` bytes at most: null past them, the rest cancelled, never left open. */
+async function bounded(res: Response, max: number): Promise<string | null> {
+  if (Number(res.headers.get("content-length") ?? "0") > max) return (await res.body?.cancel().catch(() => {}), null);
+  if (res.body === null) return "";
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > max) return (await reader.cancel().catch(() => {}), null);
+    parts.push(value);
+  }
+  const all = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) {
+    all.set(p, o);
+    o += p.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}
+/** A body of JSON-RPC answers each an error for a block or state the provider does not hold yet (notYetError), one or a
+ *  batch: a 4xx with it is read as those answers (card evm-lag-answer-read-again). Any other body, a result among them
+ *  included, keeps its status a failure (review MED-1). */
+function lagBody(text: string): boolean {
+  let p: unknown;
+  try {
+    p = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  const arr = Array.isArray(p) ? p : [p];
+  return arr.length > 0 && arr.every(notYetError);
+}
 /** A call's error naming state the provider no longer keeps (its state cut), read from the pinned providers:
  *  - "historical state <root> is not available": a Robinhood provider of the quote's list answering a TORCH quote's
  *    reads at its agreed block, 2026-11-05 10:00Z and 10:03Z (card evm-quote-lag-held's live runs);
@@ -6082,12 +6132,15 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     if (Number.isFinite(left)) evmPaceAdvised(url, left);
     // a batch refused for its size (card evm-batch-fits-each-reader): HTTP 413 whatever its body, or a 429, another 4xx or
     // a 200 whose error names a batch maximum (sizeRefusal); never a batch of one call, which no split makes smaller
+    // card evm-lag-answer-read-again: a 4xx whose body is only not-yet answers, read to LAG_BODY_MAX at most (lagBody)
+    let lagText: string | null = null;
     if (calls.length > 1 && res.status >= 400 && res.status < 500) {
-      const text = await res.text().catch(() => "");
-      const said = sizeRefusal(text.length > maxBytes ? "" : text);
+      const text = (await bounded(res, Math.min(maxBytes, LAG_BODY_MAX)).catch(() => null)) ?? "";
+      const said = sizeRefusal(text);
       if (res.status === 413 || said !== undefined) throw new BatchRefused(said ?? null);
       // not a size refusal: the status is read as before, the body already read
-      if (res.status !== 429) throw new BadAnswer(`the provider answered HTTP ${res.status}`);
+      if (res.status !== 429 && !lagBody(text)) throw new BadAnswer(`the provider answered HTTP ${res.status}`);
+      if (res.status !== 429) lagText = text;
     }
     if (res.status === 429) {
       const after = retryAfterMs(res.headers.get("retry-after"));
@@ -6095,14 +6148,23 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
       throw new RateLimited("the provider answered 429 Too Many Requests", after);
     }
     // any other status outside 2xx is a failure, never an answer to read (review MED-1: robinhood-rpc.publicnode.com
-    // answers a read past its state cut 403 with a JSON-RPC error inside, which was timed as a fast answer)
-    if (!res.ok) {
-      // the body is never read, so it is let go, never left holding the connection (re-review INFO 3)
-      await res.body?.cancel().catch(() => {});
+    // answers a read past its state cut 403 with a JSON-RPC error inside, which was timed as a fast answer). Only a 4xx
+    // whose body is not-yet answers alone is read as those answers, which askAt asks again and timed never times (card
+    // evm-lag-answer-read-again: robinhood.drpc.org answered HTTP 400, code 27 "Unknown state. First available state is
+    // 1", to ArbGasInfo's getL1BaseFeeEstimate, release 187's sign live run 44912189713, 21 Nov)
+    if (!res.ok && lagText === null) {
       const m = `the provider answered HTTP ${res.status}`;
-      throw res.status >= 500 ? new Error(m) : new BadAnswer(m);
+      if (res.status >= 500) {
+        // the body is never read, so it is let go, never left holding the connection (re-review INFO 3)
+        await res.body?.cancel().catch(() => {});
+        throw new Error(m);
+      }
+      // a 4xx body read to LAG_BODY_MAX at most, then let go
+      const text = await bounded(res, Math.min(maxBytes, LAG_BODY_MAX)).catch(() => null);
+      if (text === null || !lagBody(text)) throw new BadAnswer(m);
+      lagText = text;
     }
-    const text = await res.text();
+    const text = lagText ?? (await res.text());
     if (text.length > maxBytes) throw new BadAnswer("the answer is too long");
     let parsed: unknown;
     try {

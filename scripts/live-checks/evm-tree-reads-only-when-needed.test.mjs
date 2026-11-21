@@ -151,3 +151,55 @@ test("recorded answer robinhoodNoRevertLocal (this card's SIGN_HOST build): PASS
   assert.deepEqual(ANSWERS.robinhoodNoRevertLocal.refused, {});
   assert.equal(ANSWERS.robinhoodNoRevertLocal.signDir, "local build");
 });
+
+// card evm-lag-answer-read-again: release 187's sign live run 44912189713 (21 Nov 14:12Z) FAILed on robinhood.drpc.org
+// answering HTTP 400, code 27 "Unknown state. First available state is 1", to ArbGasInfo's getL1BaseFeeEstimate. The
+// kit now reads it as the provider a block behind and asks again; the check counts it as a lag line once the same call
+// is answered, and BAD while it never is.
+const DRPC = "https://robinhood.drpc.org/";
+const ARB = { method: "eth_call", id: 0, to: "0x000000000000000000000000000000000000006c", sel: "0xf5d6ded7" };
+const LAG_KEY = "robinhood.drpc.org eth_call 0x000000000000000000000000000000000000006c:0xf5d6ded7";
+const UNKNOWN = JSON.stringify({ jsonrpc: "2.0", id: 0, error: { code: 27, message: "Unknown state. First available state is 1" } });
+const entry = (status, text) => ({ url: DRPC, method: "POST", status, load: 6, calls: [ARB], ...(errorsOf(text).length > 0 ? { errors: errorsOf(text) } : {}) });
+const ANSWER = JSON.stringify({ jsonrpc: "2.0", id: 0, result: "0x" + "00".repeat(31) + "07" });
+
+test("recorded answer release187 (sign live run 44912189713, as it printed): FAIL, its drpc 400 refused", () => {
+  const v = judge(ANSWERS.release187);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines.filter((l) => l.startsWith("BAD")), [`BAD robinhood.drpc.org 400 [eth_call 0x000000000000000000000000000000000000006c:0xf5d6ded7]: 1 EVM RPC answers refused`, `BAD robinhood.drpc.org rpc error 27 eth_call 0x000000000000000000000000000000000000006c:0xf5d6ded7: 1 EVM RPC answers refused`]);
+});
+
+test("planted on release187: its not-yet answer asked again and answered PASSes with a lag line; never answered FAILs (red at f02b75c41: no lag read)", () => {
+  const ok = judge(ANSWERS.release187Asked);
+  assert.equal(ok.ok, true, ok.lines.join("\n"));
+  assert.deepEqual(ok.lines, [`lag ${LAG_KEY}: 1 not-yet answer(s), each asked again and answered`]);
+  const never = judge(ANSWERS.release187NeverAnswered);
+  assert.equal(never.ok, false);
+  assert.deepEqual(never.lines, [`BAD ${LAG_KEY}: 1 of 1 not-yet answers never answered again`]);
+});
+
+test("the summary: a not-yet answer, under a 400 or a 200, then the same call answered on the same provider is a lag; never answered, answered by another provider, or beside another error stays BAD (red at f02b75c41)", () => {
+  assert.deepEqual(errorsOf(UNKNOWN), [{ code: 27, cap: false, lag: true, id: 0 }]);
+  for (const status of [400, 200]) {
+    const s = summarize([entry(status, UNKNOWN), entry(200, ANSWER)], 6);
+    assert.deepEqual(s.refused, {}, `${status}`);
+    assert.deepEqual(s.lag, { [LAG_KEY]: { asked: 1, answered: 1 } }, `${status}`);
+    assert.equal(judge({ ...ANSWERS.release187, ...s, posts: ANSWERS.release187.posts }).ok, true);
+    const alone = summarize([entry(status, UNKNOWN)], 6);
+    assert.deepEqual(alone.lag, { [LAG_KEY]: { asked: 1, answered: 0 } });
+    assert.equal(judge({ ...ANSWERS.release187, ...alone }).ok, false);
+  }
+  // answered by another provider: the lagging one never answered
+  const other = summarize([entry(400, UNKNOWN), { ...entry(200, ANSWER), url: "https://rpc.mainnet.chain.robinhood.com/" }], 6);
+  assert.deepEqual(other.lag, { [LAG_KEY]: { asked: 1, answered: 0 } });
+  // a 400 with any other error, or a revert naming unknown state, or a 403 archive refusal: refused as before
+  for (const text of [JSON.stringify({ jsonrpc: "2.0", id: 0, error: { code: -32602, message: "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode" } }), JSON.stringify({ jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted: unknown state" } }), ""]) {
+    for (const status of [400, 403]) {
+      const s = summarize([entry(status, text), entry(200, ANSWER)], 6);
+      assert.ok(Object.keys(s.refused).some((k) => k.startsWith(`robinhood.drpc.org ${status}`)), `${status} ${text.slice(0, 40)}: ${JSON.stringify(s.refused)}`);
+      assert.equal(s.lag, undefined);
+    }
+  }
+  // a 429 whose body names unknown state is a throttle, refused
+  assert.ok(Object.keys(summarize([entry(429, UNKNOWN), entry(200, ANSWER)], 6).refused).some((k) => k.startsWith("robinhood.drpc.org 429")));
+});

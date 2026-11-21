@@ -7,7 +7,7 @@
 // A no-answer is: a fetch that failed or timed out; HTTP 429; an empty body; a body that is not JSON or not a JSON-RPC
 // answer; a status outside 2xx with no JSON-RPC error inside; a JSON-RPC error that is a rate limit (codes 429 and
 // -32005, or the kit's own words, RATE_LIMIT); a JSON-RPC error naming a block or state the provider does not hold yet or
-// at all (the kit's NOT_YET and STATELESS: a lagging backend's "header not found", drpc's code 27 "Unknown state. First
+// at all (the kit's evmNotYetWords and STATELESS: a lagging backend's "header not found", drpc's code 27 "Unknown state. First
 // available state is 1", helper live run 42556116812, 9 Nov 03:54Z). A revert (code 3 or "execution reverted…") is
 // never one of these: its string is the called contract's. Any other JSON-RPC error is an answer and is judged, on a
 // status outside 2xx too (robinhood-rpc.publicnode.com answers a read past its state 403 with a JSON-RPC error inside).
@@ -15,11 +15,15 @@
 // Runs: once, no check: the shared module the RPC-reading checks import; each of them runs after its own host's deploy
 
 import "../net-window.mjs";
+import { evmNotYetWords } from "../../packages/kit/src/index.ts";
 
-// The kit's words, copied (they are module-private in packages/kit/src/checks/evm/quote.ts: `limited`, `notYet`,
-// `stateless`); provider-answer.test.mjs fails when the kit's and these drift apart.
+// The not-yet words are the kit's own function (evmNotYetWords, the one copy its EVM quote reads too: card
+// evm-lag-answer-read-again). The rate-limit and stateless words are copied (module-private in
+// packages/kit/src/checks/evm/quote.ts: `limited`, `stateless`); provider-answer.test.mjs fails when the kit's and these
+// drift apart.
 export const RATE_LIMIT = /request limit|rate limit|too many requests|exceeded its compute units per second/i;
-export const NOT_YET = /(block|header).*not found|unknown block|unknown state/i;
+/** A message naming a block or state the provider does not hold yet: the kit's evmNotYetWords. */
+export const notYetWords = (m) => typeof m === "string" && evmNotYetWords(m);
 export const STATELESS = /historical state \S+ is not available|archive requests require a personal token|^unknown state\b/i;
 /** The JSON-RPC codes that are a rate limit whatever their words, on every read. */
 export const LIMIT_CODES = new Set([429, -32005]);
@@ -65,10 +69,10 @@ export function classify(host, status, text, { nullNoAnswer = false, judgeStateM
   if (e !== undefined && e !== null) {
     const m = typeof e?.message === "string" ? e.message : "";
     // a check that judges state misses judges one whatever else its words say ("... not available: rate limit tier")
-    if (judgeStateMiss && !reverted(e) && (NOT_YET.test(m) || STATELESS.test(m))) return { error: e };
+    if (judgeStateMiss && !reverted(e) && (notYetWords(m) || STATELESS.test(m))) return { error: e };
     const throttle = page && status >= 200 && status <= 299 && PAGE_THROTTLE_CODES.has(e?.code);
     if (!reverted(e) && (LIMIT_CODES.has(e?.code) || throttle || RATE_LIMIT.test(m))) return no(`rate limit ${cut(JSON.stringify(e))}`);
-    if (!judgeStateMiss && !reverted(e) && (NOT_YET.test(m) || STATELESS.test(m))) return no(`no state for the read ${cut(JSON.stringify(e))}`);
+    if (!judgeStateMiss && !reverted(e) && (notYetWords(m) || STATELESS.test(m))) return no(`no state for the read ${cut(JSON.stringify(e))}`);
     return { error: e };
   }
   if (status < 200 || status > 299) return no("not a success");
