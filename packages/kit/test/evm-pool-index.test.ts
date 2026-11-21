@@ -1200,3 +1200,60 @@ test("ORSPAN a reader that bounds an OR's range is asked its pieces within it, a
   assert.equal(b1.calls.flat().filter((c) => c.method === "eth_getLogs" && (c.params[0] as { topics: unknown[] }).topics.some(Array.isArray)).length, 0);
   assert.ok(b1.calls.flat().some((c) => c.method === "eth_getLogs" && Number((c.params[0] as { toBlock: string }).toBlock) - Number((c.params[0] as { fromBlock: string }).fromBlock) + 1 > 4_000));
 });
+
+// Card evm-first-quote-reads-its-coin-at-any-age: the tap's coin read through the venue's readers (buy-tap.ts
+// evmPoolCoinRefresh): its own shape on each chain, and served to the quote
+test("COINR a coin read through the venues: Base's bloXroute asked one piece a span, Robinhood's own never an OR past 100,000 blocks, each served", async () => {
+  const tap = (await import("../src/trade/evm/buy-tap.ts")) as { evmPoolCoinRefresh?: (c: string, p: EvmPoolIndexData | null, t: string, f: typeof fetch) => Promise<{ read: { coversThrough: number | null } | null; served: boolean }> };
+  assert.ok(tap.evmPoolCoinRefresh !== undefined, "no evmPoolCoinRefresh");
+  const { evmPoolVenues } = await import("../src/trade/evm/buy-unpinned.ts");
+  const { evmPoolIndexReset } = await import("../src/checks/evm/quote.ts");
+  evmPaceReset();
+  evmPoolIndexReset();
+  const asked: { url: string; a: number; b: number; or: boolean }[] = [];
+  const fakeAt = (head: number) =>
+    (async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] }[];
+      const out = body.map((c) => {
+        if (c.method === "eth_getLogs") {
+          const f = c.params[0] as { fromBlock: string; toBlock: string; topics: unknown[] };
+          const [a, b] = [Number(f.fromBlock), Number(f.toBlock)];
+          const or = f.topics.some(Array.isArray);
+          asked.push({ url, a, b, or });
+          if (or && url === "https://rpc.mainnet.chain.robinhood.com" && b - a + 1 > 100_000) return { jsonrpc: "2.0", id: c.id, error: { code: -32602, message: "only 100000 are allowed for this request" } };
+          return { jsonrpc: "2.0", id: c.id, result: [] };
+        }
+        if (c.method === "eth_getBlockByNumber") {
+          const n = c.params[0] === "latest" ? head : Number(c.params[0]);
+          return { jsonrpc: "2.0", id: c.id, result: { number: hx(n), hash: blockHash(n) } };
+        }
+        return { jsonrpc: "2.0", id: c.id, error: { code: -32601, message: "no" } };
+      });
+      return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+  const prevOf = (chain: "base" | "robinhood", through: number, t: string): EvmPoolIndexData => {
+    const v = evmPoolVenues()[chain]!;
+    const xs = ["0x0000000000000000000000000000000000000101", "0x0000000000000000000000000000000000000102", "0x0000000000000000000000000000000000000103"];
+    const pools = xs.map((x, i) => {
+      const k = pk(x, t);
+      return { id: evmPoolIdOf(k), key: k, block: through - 1_000 - i };
+    });
+    return { v: 1, chainId: v.chainId, poolManager: v.poolManager!.toLowerCase(), from: through - 200_000, through, head: { number: through, hash: blockHash(through) }, spans: [[through - 200_000, through]], pools };
+  };
+  try {
+    const rh = await tap.evmPoolCoinRefresh!("robinhood", prevOf("robinhood", 119_000_000, T), T, fakeAt(119_300_000));
+    assert.equal(rh.served, true);
+    assert.equal(rh.read!.coversThrough, 119_300_000);
+    const own = asked.filter((x) => x.url === "https://rpc.mainnet.chain.robinhood.com");
+    assert.ok(own.some((x) => x.or) && own.every((x) => !x.or || x.b - x.a + 1 <= 100_000), JSON.stringify(own.slice(0, 4)));
+    asked.length = 0;
+    const base = await tap.evmPoolCoinRefresh!("base", prevOf("base", 60_000_000, T), T, fakeAt(60_100_000));
+    assert.equal(base.served, true);
+    const bx = asked.filter((x) => x.url === "https://base.rpc.blxrbdn.com");
+    const pn = asked.filter((x) => x.url === "https://base-rpc.publicnode.com");
+    assert.ok(bx.length > 0 && pn.length > 0);
+    assert.deepEqual([...new Set(bx.map((x) => `${x.a}-${x.b}`))].sort(), [...new Set(pn.map((x) => `${x.a}-${x.b}`))].sort(), "bloXroute one piece a span, as publicnode");
+  } finally {
+    evmPoolIndexReset();
+  }
+});
