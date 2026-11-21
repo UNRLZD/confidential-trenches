@@ -24,6 +24,8 @@
 //         as SIGN_HOST's: fresh and aged priced and tapped, stale and none shut, 8 runs: PASS;
 //   agedBad: the deployed APP_HOST then (still on 60 s): the aged runs show no USD and Buy off: FAIL. So a run against
 //         the deployed app proves it holds 75 s (deploy APP_HOST before SIGN_HOST).
+// The harness (card signpage-pool-price-harness-reads-no-live-rpc) reads nothing live: with every network read planted
+// to stall, its price read comes from the kit's recorded Pyth answers and the verdict passes.
 // Planted from the good run: a wrong amount, a vault buy, Buy on or USD drawn with a stale price, a disagreeing or
 // stale read, the page's pair changed, a missing run.
 import assert from "node:assert/strict";
@@ -33,7 +35,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { POOL_USD_FEEDS } from "../../packages/kit/src/index.ts";
 import { MINT } from "./app-sell-mount.mjs";
-import { AGED_S, CHAIN, expectedSol, judge, PAGE_PAIR, pageFeed, poolWith } from "./signpage-pool-price.mjs";
+import { AGED_S, CHAIN, expectedSol, judge, PAGE_PAIR, pageFeed, harnessPyth, poolWith } from "./signpage-pool-price.mjs";
+import { treeCsp } from "./signpage-pool-pins.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-pool-price.answers.json"), "utf8"));
@@ -160,6 +163,36 @@ test("pageFeed (card pool-usd-price-never-stale): part 1 follows the feed on the
   const down = pageFeed({ read: async () => Promise.reject(new Error("the two RPCs disagree")), now, sleep });
   assert.equal((await down.first()).error, "the two RPCs disagree");
   await down.stop();
+});
+
+test("harness (card signpage-pool-price-harness-reads-no-live-rpc): with every network read planted to never answer, the page's price is read from the recorded Pyth answers through the kit, fresh at the run's clock, and the verdict is not FAIL", async () => {
+  const real = globalThis.fetch;
+  const asked = [];
+  // a public provider's stall, as PR 1133's merge-queue run 44938644132 met on publicnode: no answer until the caller gives up
+  globalThis.fetch = (url, init) => {
+    asked.push(String(url));
+    return new Promise((_, no) => init?.signal?.addEventListener("abort", () => no(init.signal.reason)));
+  };
+  try {
+    const feed = pageFeed({ fetch: harnessPyth(), firstMs: 5_000 });
+    const read = await feed.first();
+    await feed.stop();
+    assert.equal(read.error, undefined, read.error);
+    assert.deepEqual(read.rpcs, PAGE_PAIR);
+    assert.equal(read.expo, -8);
+    const age = Math.floor(Date.now() / 1000) - read.published_s;
+    assert.ok(age >= 0 && age <= POOL_USD_FEEDS.solana.maxAgeS, `the recorded price, moved to the run's clock, is ${age} s old`);
+    const rec = { ...structuredClone(ANSWERS.good), read, at: new Date().toISOString(), signCsp: treeCsp() };
+    const v = judge(rec);
+    assert.equal(v.ok, true, v.lines.join("\n"));
+    assert.deepEqual(asked, [], "the harness asked the network nothing");
+  } finally {
+    globalThis.fetch = real;
+  }
+  // the recording answers only the page's own read: any other call is an RPC error, never the network
+  const f = harnessPyth();
+  const other = await (await f(PAGE_PAIR[0], { body: JSON.stringify({ jsonrpc: "2.0", id: "1", method: "getSlot", params: [] }) })).json();
+  assert.match(other.error.message, /not recorded for the harness: getSlot/);
 });
 
 test("a run's own price (card pool-usd-price-never-stale): a fresh run is judged on the price it sent, not the first read", () => {

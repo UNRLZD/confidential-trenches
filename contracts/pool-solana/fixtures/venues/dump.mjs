@@ -12,7 +12,8 @@
 //
 // - Every account is read on two public RPCs at `confirmed`; provider A's copy is written, and the accounts whose two
 //   copies differ (moving state) are listed in `providers_differed`.
-// - A program's code is its programdata after the 45-byte header, and must hash the same on both providers.
+// - A program's code is its programdata after the 45-byte header, read on every provider of RPCS at once and taken
+//   from the first two that answer, which must agree byte for byte.
 import { readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
@@ -28,7 +29,14 @@ const CASHBACK_MINT = "2hbzoDxzvyspvXhxFkHkuxRNDyo3j2Z6aXUDy1A7pump";
 const REFRESH = "pnpm install --frozen-lockfile && node contracts/pool-solana/fixtures/venues/dump.mjs && " +
   `node contracts/pool-solana/fixtures/venues/dump.mjs --pumpswap ${CASHBACK_MINT} --out pumpswap-cashback.json`;
 // VENUE_RPCS and VENUE_RPC_BACKOFF_MS are for dump.test.mjs, which points the script at local fake RPCs.
-const RPCS = process.env.VENUE_RPCS ? process.env.VENUE_RPCS.split(",") : ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
+// A program's code is read on every one of these at once and taken from the first two that answer, which must agree
+// byte for byte; one that fails every try is passed over (card signpage-pool-price-harness-reads-no-live-rpc: PR 1130's
+// pool-solana job, run 44944433221, failed on publicnode giving no answer in 60,000 ms 4 times while its pair answered).
+// The third is the signing page's own (packages/signpage/public/_headers connect-src); it answered all three fixture
+// programs as the JSON hashes them on 21 Nov 20:3xZ (114 s, the slowest), and solana.api.pocket.network refused the
+// read (HTTP 400). The venue dump below reads the first two only (PAIR), as before.
+const RPCS = process.env.VENUE_RPCS ? process.env.VENUE_RPCS.split(",") : ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com", "https://public.rpc.solanavibestation.com"];
+const PAIR = RPCS.slice(0, 2);
 // An RPC's error or rate limit is retried 3 times, after 0.5, 1 and 2 s, before the run fails as an RPC failure.
 const RETRIES = 3;
 const BACKOFF_MS = Number(process.env.VENUE_RPC_BACKOFF_MS ?? 500);
@@ -53,12 +61,14 @@ if (process.argv.includes("--out")) {
 /** An RPC that did not answer, rate-limited or answered with an error, every try: no read of mainnet's code. */
 class RpcFailure extends Error {}
 
-async function rpc(url, method, params) {
+async function rpc(url, method, params, stop) {
   let last = "";
   for (let i = 0; i <= RETRIES; i++) {
     if (i > 0) await new Promise((x) => setTimeout(x, BACKOFF_MS * 2 ** (i - 1)));
+    if (stop?.aborted) throw new RpcFailure(`${url} ${method}: not needed, two providers answered`);
     try {
-      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
+      const deadline = AbortSignal.timeout(RPC_TIMEOUT_MS);
+      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: stop ? AbortSignal.any([deadline, stop]) : deadline });
       if (!r.ok) { last = `HTTP ${r.status}`; continue; }
       const j = await r.json();
       if (j.error) { last = `error ${JSON.stringify(j.error)}`; continue; }
@@ -72,28 +82,52 @@ async function rpc(url, method, params) {
 
 // A program's ELF on one provider: the program account's programdata address (jsonParsed, so no base58 library is
 // needed and --programs-only runs on a bare checkout), then that account's data after its 45-byte header.
-async function programElf(url, address) {
-  const prog = await rpc(url, "getAccountInfo", [address, { encoding: "jsonParsed", commitment: "confirmed" }]);
+async function programElf(url, address, stop) {
+  const prog = await rpc(url, "getAccountInfo", [address, { encoding: "jsonParsed", commitment: "confirmed" }], stop);
   if (!prog?.value?.executable) throw new Error(`${address}: not an executable account on ${url}`);
   const pd = prog.value.data?.parsed?.type === "program" ? prog.value.data.parsed.info.programData : null;
   if (typeof pd !== "string") throw new Error(`${address}: not an upgradeable program account`);
-  const pdAcc = await rpc(url, "getAccountInfo", [pd, { encoding: "base64", commitment: "confirmed" }]);
+  const pdAcc = await rpc(url, "getAccountInfo", [pd, { encoding: "base64", commitment: "confirmed" }], stop);
   const data = Buffer.from(pdAcc.value.data[0], "base64");
   if (data.length <= 45 || data.readUInt32LE(0) !== 3) throw new Error(`${pd}: not a programdata account`);
   return data.subarray(45);
 }
 
+/** A program's code from the first two providers of RPCS that answer, read on all at once; the rest are stopped then.
+ *  Fewer than two answering (each failing every try) is an RpcFailure naming each; any other fault ends the read. */
+function twoAnswers(p) {
+  const stop = new AbortController();
+  return new Promise((ok, no) => {
+    const got = [];
+    const failed = [];
+    for (const url of RPCS) {
+      programElf(url, p, stop.signal).then(
+        (elf) => {
+          got.push({ url, elf });
+          if (got.length === 2) (stop.abort(), ok(got));
+        },
+        (e) => {
+          if (stop.signal.aborted && got.length === 2) return;
+          if (!(e instanceof RpcFailure)) return (stop.abort(), no(e));
+          failed.push(e.message);
+          if (failed.length > RPCS.length - 2) (stop.abort(), no(new RpcFailure(failed.join("; "))));
+        },
+      );
+    }
+  });
+}
+
 async function dumpPrograms(addresses) {
   const out = [];
   for (const p of addresses) {
-    const elfs = [];
-    for (const url of RPCS) elfs.push(await programElf(url, p));
+    const two = await twoAnswers(p);
+    const elfs = two.map((x) => x.elf);
     const hashes = elfs.map(sha);
-    if (hashes[0] !== hashes[1]) throw new Error(`${p}: the providers' code differs`);
+    if (!elfs[0].equals(elfs[1])) throw new Error(`${p}: the providers' code differs`);
     const file = `programs/${p}.so`;
     mkdirSync(join(HERE, "programs"), { recursive: true });
     writeFileSync(join(HERE, file), elfs[0]);
-    console.log(`program ${p}: ${elfs[0].length} B, sha256 ${hashes[0]} (equal on both providers)`);
+    console.log(`program ${p}: ${elfs[0].length} B, sha256 ${hashes[0]} (equal on ${two.map((x) => new URL(x.url).host).join(" and ")})`);
     out.push({ address: p, sha256: hashes[0], file });
   }
   return out;
@@ -141,7 +175,7 @@ const KNOWN_PROGRAMS = [PUMP, AMM, FEES];
 if ([...BUILTINS, ...KNOWN_PROGRAMS].some((k) => typeof k !== "string" || base58.decode(k).length !== 32)) throw new Error("the kit does not export a program id");
 const poolFx = JSON.parse(readFileSync(process.env.POOL_FIXTURE ?? join(HERE, "..", "release-spends.json"), "utf8"));
 const W = base58.encode(Buffer.from(poolFx.w, "hex"));
-const providers = RPCS.map((url) => (method, params) => rpc(url, method, params));
+const providers = PAIR.map((url) => (method, params) => rpc(url, method, params));
 
 const hexOf = (b) => Buffer.from(b).toString("hex");
 const stepJson = (s) => ({ program: s.program, accounts: s.accounts.map((a) => ({ address: a.key, signer: a.signer, writable: a.writable })), data: hexOf(s.data) });
@@ -239,7 +273,7 @@ async function dumpVenue(kind, mint) {
   let slot = null;
   for (let i = 0; i < toRead.length; i += 10) {
     const list = toRead.slice(i, i + 10);
-    const [a, b] = await Promise.all(RPCS.map((url) => rpc(url, "getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }])));
+    const [a, b] = await Promise.all(PAIR.map((url) => rpc(url, "getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }])));
     if (slot === null) slot = a.context.slot;
     list.forEach((k, j) => {
       const va = a.value[j], vb = b.value[j];
@@ -263,7 +297,7 @@ async function dumpVenue(kind, mint) {
   const out = {
     venue: kind, mint, token_program: venue.tokenProgram,
     read_at: new Date().toISOString(), unix_timestamp: String(unix), slot: String(slot),
-    providers: RPCS, wallet: W,
+    providers: PAIR, wallet: W,
     spend: String(SPEND), min_out: String(minOut), expected_out: String(expectedOut),
     accounts, programs: progs, builtins: BUILTINS,
     buy: buy.map(stepJson), sell: sell.map(stepJson),
