@@ -28,8 +28,9 @@
 //     test's replay.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { evmPoolIndexFromSnapshot, evmPoolIndexRefresh, evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { EXIT } from "./provider-answer.mjs";
+import { evmPoolIndexFromSnapshot, evmPoolIndexRefresh } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
+import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 const KEY = "helper-robinhood-route-serves-a-device-sync";
 export const HELPER = "https://ct-api.unrealized.trade";
@@ -55,8 +56,11 @@ export const shareOf = (policy) => {
  *  posts: [{ at, ms, status, retryAfter, calls, methods }] } (posts: the sync's to the route alone). */
 export async function read(helper = HELPER, sign = SIGN, fetchFn = fetch) {
   const route = `${helper.replace(/\/$/, "")}/v1/rpc/robinhood?keyed=only`;
-  const ask = (id) => fetchFn(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id, method: "eth_blockNumber", params: [] }), signal: AbortSignal.timeout(READ_MS) });
-  const v = evmPoolVenues().robinhood;
+  // one of the page's other reads, through rpcAnswer: its status as the judge reads it, 200 for an answer, 429 for the
+  // route's refusal (a no-answer rpcAnswer names "HTTP 429"), else its words
+  const statusOf = (a) => (a.noAnswer !== undefined ? (/\bHTTP 429\b/.test(a.noAnswer) ? 429 : `no answer (${a.noAnswer})`) : a.error !== undefined ? `error ${JSON.stringify(a.error).slice(0, 80)}` : 200);
+  const ask = (id) => rpcAnswer(route, "eth_blockNumber", [], { fetchFn, timeoutMs: READ_MS, keep: ["ratelimit-policy"], id });
+  const v = mainnetVenues().robinhood;
   const s = await fetchFn(`${sign.replace(/\/$/, "")}/evm-index/robinhood.json`, { signal: AbortSignal.timeout(READ_MS) }).catch(() => null);
   const snap = s !== null && s.status === 200 ? await s.json().catch(() => null) : null;
   if (snap === null || !Number.isSafeInteger(snap.through)) return { policy: null, passes: [], snapshot: { status: s?.status ?? "not read" }, sync: null, posts: [] };
@@ -87,18 +91,17 @@ export async function read(helper = HELPER, sign = SIGN, fetchFn = fetch) {
   };
   // the page's other reads beside the sync: the share less ROOM in each 10 s, spread evenly, from its start to its end
   const first = await ask(0);
-  await first.text();
-  const policy = first.headers.get("ratelimit-policy");
+  const policy = first.kept?.["ratelimit-policy"] ?? null;
   const share = shareOf(policy);
-  if (share === null || share <= ROOM) return { policy, passes: [first.status], snapshot: { status: s.status, through: snap.through, aged: cut }, sync: null, posts: [] };
-  const passes = [first.status];
+  if (share === null || share <= ROOM) return { policy, passes: [statusOf(first)], snapshot: { status: s.status, through: snap.through, aged: cut }, sync: null, posts: [] };
+  const passes = [statusOf(first)];
   let syncing = true;
   // each read sent on its turn, not after the last one's answer: the answers' time never slows the pace
   const sent = [];
   const passing = (async () => {
     const start = performance.now();
     for (let i = 1; syncing; i++) {
-      sent.push(ask(i).then(async (r) => (await r.text().catch(() => ""), r.status), () => "no answer"));
+      sent.push(ask(i).then(statusOf, () => "no answer"));
       const left = start + (i * 10_000) / (share - ROOM) - performance.now();
       if (left > 0 && syncing) await new Promise((f) => setTimeout(f, left));
     }
