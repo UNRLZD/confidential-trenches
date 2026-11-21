@@ -16,7 +16,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { timeOf } from "../../../test/evm-swaps/base.ts";
-import { BASE_VENUES, createSwaps, QUOTE_SEEDS, REF_POOL_ID, TOPIC, TRADES_MAX } from "./swaps.ts";
+// one namespace, so each test fails for its own reason where an export is missing (the red run at 3fa850c8c)
+import * as S from "./swaps.ts";
+import { BASE_VENUES, createSwaps, REF_POOL_ID, TOPIC, TRADES_MAX } from "./swaps.ts";
 
 const hex = (b: Uint8Array) => `0x${Buffer.from(b).toString("hex")}`;
 const sel = (s: string) => hex(keccak_256(new TextEncoder().encode(s))).slice(0, 10);
@@ -203,5 +205,5 @@ test("card index-evm-swaps-v4-route-tape: seedQuotes finds each QUOTE_SEEDS toke
     s.stop();
     return r;
   });
-  assert.deepEqual(value, { [QUOTE_SEEDS.base[0]!]: `0x${"f7".repeat(20)}`, [QUOTE_SEEDS.base[1]!]: undefined, [QUOTE_SEEDS.base[2]!]: undefined });
+  assert.deepEqual(value, { [S.QUOTE_SEEDS.base[0]!]: `0x${"f7".repeat(20)}`, [S.QUOTE_SEEDS.base[1]!]: undefined, [S.QUOTE_SEEDS.base[2]!]: undefined });
 });
