@@ -8,7 +8,8 @@
 //     device reaches it directly) and the second at most the helper's keyed route for the chain,
 //     /v1/rpc/{chain}?keyed=only (card signpage-evm-reads-draw-no-refusal: the money rule's attacker is a broken-in
 //     helper, which as one of two readers can make the index refuse, never add or hide a pool), each chain's span (Base
-//     10,000 blocks; Robinhood 500,000, which only Robinhood's own and the helper's keyed route serve), the card's margin
+//     50,000 blocks since card evm-sync-inside-the-kpi-at-any-age, which the device asks bloXroute in 25,000-block
+//     pieces; Robinhood 500,000, which only Robinhood's own and the helper's keyed route serve), the card's margin
 //     (Base 474, Robinhood 7,119) and a cap;
 //   - each reader answers the browser's CORS preflight of a JSON POST from the app's origin, and its POST, allowing it
 //     (the device reads them from the page);
@@ -44,7 +45,7 @@ import { mainnetVenues } from "./mainnet-venues.mjs";
 export const KEY = "evm-pool-index";
 export const APP_ORIGIN = "https://ct-app.unrealized.trade";
 export const OURS = /(^|\.)unrealized\.trade$/i;
-export const CHAINS = Object.freeze({ base: { margin: 474, span: 10_000 }, robinhood: { margin: 7_119, span: 500_000 } });
+export const CHAINS = Object.freeze({ base: { margin: 474, span: 50_000 }, robinhood: { margin: 7_119, span: 500_000 } });
 /** The one reader of ours an index may name: the helper's keyed route for the chain, second, never first. */
 export const HELPER_READER = (chain) => `https://ct-api.unrealized.trade/v1/rpc/${chain}?keyed=only`;
 export const SPANS = 3;

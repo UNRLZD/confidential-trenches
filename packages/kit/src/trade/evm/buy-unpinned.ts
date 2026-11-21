@@ -403,11 +403,13 @@ export const evmMainnetVenues = () =>
       // mainnet.base.org (-32011 "request limit reached" to 50 of 51 batches), both read in the same 3 minutes.
       // Each reader its own pieces and pace (card evm-sync-inside-the-kpi-at-any-age): publicnode a span of 50,000 blocks,
       // its read maximum ("exceed maximum block range: 50000" at 100,000, 50,000 in 0.5 s, 21 Nov 12:5xZ), 5 a batch;
-      // bloXroute each span as two pieces of 25,000, one a request (it answers a batch's getLogs one after another), 4 at
-      // once: the Initialize getLogs read on it at the device's pace (13:08Z) took 297, 404 and 524 ms alone at 10,000,
-      // 25,000 and 50,000 blocks, and 4 at once read 59k, 80k and 65k blocks a second. Its 5-span batches of 10,000 took
-      // 1.5 to 8.7 s and passed the 10 s timeout on 32 of 80 posts in a 48 h gap (12:5xZ).
-      index: bare({ readers: Object.freeze(["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com"] as const), span: 50_000, parts: Object.freeze([1, 2] as const), perBatch: Object.freeze([5, 1] as const), parallel: Object.freeze([4, 4] as const), margin: 474, cap: 131_072 }),
+      // bloXroute each span as five pieces of 10,000, one a request (it answers a batch's getLogs mostly one after
+      // another: its 5-span batches of 10,000 took 1.5 to 8.7 s and passed the 10 s timeout on 32 of 80 posts in a 48 h
+      // gap, 12:5xZ), 8 at once: 8 getLogs in flight where the batches of 5 at 4 at once put 20. Release 186's 348k-block
+      // gap, one sync each, interleaved (13:2xZ): 10,000 one a request at 8 at once 7.2, 7.0, 4.2 and 6.7 s; 25,000 at 8
+      // 8.0 and 7.2 s; 25,000 at 4 11.0 and 9.3 s; the batches of 5 at 4 15.4 and 11.5 s. At 864k blocks (48 h): 15.0 and
+      // 9.1 s at 8 at once, 8.4 and 8.0 s at 12 (past the 16 to 24 calls a second it was read to take, pace.ts).
+      index: bare({ readers: Object.freeze(["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com"] as const), span: 50_000, parts: Object.freeze([1, 5] as const), perBatch: Object.freeze([5, 1] as const), parallel: Object.freeze([4, 8] as const), margin: 474, cap: 131_072 }),
     }),
     robinhood: bare({
       chainId: 4663,
