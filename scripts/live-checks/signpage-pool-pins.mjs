@@ -156,7 +156,7 @@ export async function rentRead() {
 }
 
 /** `/`'s CSP in this checkout's public/_headers (the rule for every path). */
-function treeCsp() {
+export function treeCsp() {
   const m = /^\s*Content-Security-Policy:\s*(.+)$/m.exec(readFileSync(TREE_HEADERS, "utf8"));
   return m ? m[1].trim() : null;
 }

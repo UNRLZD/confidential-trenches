@@ -149,12 +149,41 @@ for (const mid of [false, true]) {
   });
 }
 
+// Card signpage-pool-price-harness-reads-no-live-rpc: PR 1130's pool-solana job (run 44944433221) failed on one public
+// RPC giving no answer in 60,000 ms 4 times while the other answered. With a third provider, one that stalls is passed
+// over: the code is taken from the first two that answer, which must agree byte for byte.
+for (const mid of [false, true]) {
+  test(`one of three RPCs ${mid ? "stopping mid-body" : "never answering"} at the script's own 60 s deadline: the other two agree and the run passes at once, never waiting on it (red at 61fa14a08)`, { timeout: 20_000 }, async () => {
+    const stalled = await stallingRpc(mid);
+    const [b, c] = [await fakeRpc(() => "ok"), await fakeRpc(() => "ok")];
+    const t = performance.now();
+    const r = await run([stalled.url, b.url, c.url], { killMs: 10_000 });
+    stalled.close(), b.close(), c.close();
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /PASS: every program's sha256 equals the JSON's/);
+    assert.ok(performance.now() - t < 10_000, "no 60 s wait on the stalled provider");
+  });
+}
+
+test("of three RPCs, two failing every try is an RPC failure naming both; two that answer different code fail as a code change", async () => {
+  const [a, b, c] = [await fakeRpc(() => 429), await fakeRpc(() => 503), await fakeRpc(() => "ok")];
+  const r = await run([a.url, b.url, c.url]);
+  a.close(), b.close(), c.close();
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /FAIL \(RPC, not a code change\): .*HTTP 429, after 4 tries; .*HTTP 503, after 4 tries\. Mainnet's code was not read/);
+  const [x, y, z] = [await fakeRpc(() => "wrong-code"), await fakeRpc(() => "ok"), await fakeRpc(() => 503)];
+  const d = await run([x.url, y.url, z.url]);
+  x.close(), y.close(), z.close();
+  assert.equal(d.code, 1, d.out);
+  assert.match(d.out, /FAIL \(code change\): A: the providers' code differs/);
+});
+
 test("an --out fixture beside the two is checked too: its code as dumped passes, changed code fails", async () => {
   const cashback = (hash) => ({ "pumpswap-cashback.json": { programs: [{ address: "C", sha256: hash, file: "programs/C.so" }] } });
   const [a, b] = [await fakeRpc(() => "ok"), await fakeRpc(() => "ok")];
   const ok = await run([a.url, b.url], { extra: cashback(sha(ELF.C)) });
   assert.equal(ok.code, 0, ok.out);
-  assert.match(ok.out, /program C: .* \(equal on both providers\)/);
+  assert.match(ok.out, /program C: .* \(equal on 127\.0\.0\.1:\d+ and 127\.0\.0\.1:\d+\)/);
   const bad = await run([a.url, b.url], { extra: cashback(sha(Buffer.from("older code of program C"))) });
   a.close(), b.close();
   assert.equal(bad.code, 1, bad.out);
