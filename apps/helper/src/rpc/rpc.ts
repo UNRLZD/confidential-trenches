@@ -216,6 +216,8 @@ const LOGS_CAP_CODE = -32602;
 const LOGS_PAGE_TRIES = 3;
 /** The budget key callers' paged eth_getLogs draw on (LOGS_PAGES_MAX), one per chain; no space, so never a method's. */
 const logsKey = (c: RpcChain): string => `${c}:logs`;
+/** Card helper-base-trade-reads-429: the budget a walk's send to one of `c`'s keyed URLs draws (createRpc keysGated). */
+const keysKey = (c: RpcChain): string => `${c}:keys`;
 /** A block number as an EVM node writes it: 0x, lowercase or uppercase hex, no leading zero, at most 64 bits. */
 const BLOCK_NUMBER = /^0x(0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
 /**
@@ -505,8 +507,14 @@ const SUMMED: ReadonlySet<RpcChain> = new Set(["solana", "base", "robinhood"]);
 /** A route's 10 s total on its keyed providers: its first key's plan (`own`: RPC_BUDGET_<CHAIN>'s total, else the
  *  default, when an existing name such as SOLANA_RPC_URL is set; none when only company keys are) plus
  *  KEYED_ROUTE_SHARE of each company key's 10 s pace; never under the share and the reserve (a one-key route whose
- *  key's pace is smaller still sends no more than that pace: callList takes each send from its bucket). */
-export function summedTotal(chain: RpcChain, keyed: readonly { env: string }[], own: number, share: number, env: Record<string, string | undefined> = {}): number {
+ *  key's pace is smaller still sends no more than that pace: callList takes each send from its bucket).
+ *  `spares` (card helper-base-trade-reads-429): the other providers the route's walk sends to (listOf: an EVM chain's
+ *  pinned public list and its fallback) with their paces, each counted as a company key is, at KEYED_ROUTE_SHARE (the
+ *  same lists serve the market-data reads, swaps.ts SWAP_RPCS), one bucket once; one with no pace counts none. Live run
+ *  44930704040 (21 Nov 17:34Z): Base's total was the keys' 39 alone (QuickNode 35, dRPC 4 at base-reads-never-throttled's
+ *  pace), one page's share of 30 left 9 for every other caller, and two checks' draws in the same seconds refused a
+ *  page's 12th read, while the walk's public providers had room. */
+export function summedTotal(chain: RpcChain, keyed: readonly { env: string }[], own: number, share: number, env: Record<string, string | undefined> = {}, spares: readonly (readonly [string, Pace | undefined])[] = []): number {
   const companies = keyed.filter((k) => KEYED_PROVIDER[k.env] !== undefined);
   if (!SUMMED.has(chain) || companies.length === 0) return own;
   const plan = keyed.some((k) => KEYED_PROVIDER[k.env] === undefined) ? own : 0;
@@ -516,6 +524,7 @@ export function summedTotal(chain: RpcChain, keyed: readonly { env: string }[], 
     const p: Pace = keyedPaceOf(env, KEYED_PROVIDER[k.env]!);
     buckets.set(p.rate ?? keyedAccountOf(k.env)!, p.perS);
   }
+  for (const [url, p] of spares) if (p !== undefined) buckets.set(p.rate ?? url, p.perS);
   const room = [...buckets.values()].reduce((n, perS) => n + Math.floor(perS * (LIMIT_WINDOW_MS / 1000) * KEYED_ROUTE_SHARE), 0);
   return Math.max(plan + room, share + RPC_RESERVE[chain] + 1);
 }
@@ -1106,6 +1115,20 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   // card near-seat-pace-fits-one-quote: an existing name's keyed URL (ownPace) keeps the plan with no company's
   // published rate in it (RPC_KEYED_TOTAL), RPC_BUDGET_<CHAIN>'s total else the default
   const ownPlans = {} as Record<RpcChain, number>;
+  // card helper-base-trade-reads-429: each EVM chain's keyed URLs' part of its total (summedTotal without the spares),
+  // which every send of a walk to one of them draws too (keysKey), when the total counts spares past it
+  const keysTotals = {} as Record<RpcChain, number>;
+  // card rpc-keyed-lists: the one hold and pace per provider a list walk draws on (server.ts passes the helper's, with
+  // every keyed URL's company pace); a client made without one (a test, the holders client) keeps its own
+  const holdsAll: ProviderHolds = deps.holds ?? providerHolds(now, { ...PROVIDER_PACE, ...keyedPaces(env) });
+  // card helper-base-trade-reads-429: the providers an EVM chain's walk sends to past its keyed URLs (listOf's pinned list
+  // and fallback), with their paces, which its total counts (summedTotal)
+  const sparesOf = (ch: RpcChain): [string, Pace | undefined][] => {
+    if (!EVM_CHAINS.has(ch)) return [];
+    const fb = RPC_UPSTREAMS[ch].fallback;
+    const keyedUrls = new Set(upstreams[ch].keyed.map((k) => k.url));
+    return [...new Set([...(deps.pinned?.[ch] ?? []), ...(fb === null ? [] : [fb])])].filter((u) => !keyedUrls.has(u)).map((u) => [u, holdsAll.paceOf(u)]);
+  };
   const limits = Object.fromEntries(
     RPC_CHAINS.map((ch) => {
       // a share under what one page draws is refused (RPC_PAGE_NEED), as deploy/redeploy.sh budget_ok refuses it first
@@ -1114,11 +1137,20 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       const b = budgetFromEnv(env, rpcBudgetEnv(ch), ks.length > 0 ? keyedBudget(ch, KEYED_PROVIDER[ks[0]!.env]) : RPC_BUDGETS[ch], opts);
       plans[ch] = b.total;
       ownPlans[ch] = ks.length > 0 ? budgetFromEnv(env, rpcBudgetEnv(ch), keyedBudget(ch), opts).total : b.total;
-      // the route's total: the first key's plan and its share of each company key it holds (summedTotal)
-      const total = summedTotal(ch, upstreams[ch].keyed, b.total, b.perClient, env);
+      // the route's total: the first key's plan and its share of each company key it holds and of each paced provider
+      // its walk sends to past them (summedTotal)
+      const total = summedTotal(ch, upstreams[ch].keyed, b.total, b.perClient, env, sparesOf(ch));
+      keysTotals[ch] = summedTotal(ch, upstreams[ch].keyed, b.total, b.perClient, env);
       return [ch, { ...b, total, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(total) }];
     }),
   ) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
+  // the keyed URLs' budget (keysKey): their part of the total, no share of its own (the chain's bounds a caller)
+  const keysLimits: Record<string, BudgetLimits & { perMethod?: number }> = Object.fromEntries(RPC_CHAINS.map((ch) => [keysKey(ch), { total: keysTotals[ch], perClient: Infinity, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(keysTotals[ch]) }]));
+  /** Whether a walk's send to `url` on `c` draws the keyed URLs' budget too: an EVM chain's keyed URL, when the chain's
+   *  total counts spares past its keys (summedTotal `spares`). The keys are then sent no more of the callers' reads than
+   *  before the spares counted, and the market-data reads keep their other half (KEYED_ROUTE_SHARE); the rest of the
+   *  total is the public spares', each held to its own pace. */
+  const keysGated = (c: RpcChain, url: string): boolean => EVM_CHAINS.has(c) && limits[c].total > keysTotals[c] && upstreams[c].keyed.some((k) => k.url === url);
   // card helper-base-logs-page: the most pages one paged eth_getLogs may take on `c` (LOGS_PAGES_MAX, never past the
   // chain's 10 s total, so a read at the cap always fits a window), and the allowance callers' paged reads draw on
   // (logsKey): the chain's total, each caller this many pages a window, never the caller's own share
@@ -1134,7 +1166,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   /** Whether `url` serves an eth_getLogs of `span` blocks: no known span, or one at least that. */
   const covers = (url: string, span: bigint): boolean => (logsSpanByUrl.get(url) ?? span) >= span;
   // a key is a chain, or "<chain> <method>" for one method's budget on it (no share: the chain's share bounds a caller)
-  const limitsOf = (k: string) => (k === PUBLIC_KEY ? publicLimits : k === SPARES_KEY ? limits.solana : (logsLimits[k] ?? limits[k as RpcChain]));
+  const limitsOf = (k: string) => (k === PUBLIC_KEY ? publicLimits : k === SPARES_KEY ? limits.solana : (logsLimits[k] ?? keysLimits[k] ?? limits[k as RpcChain]));
   const budget = upstreamBudget((key) => {
     const [k, method] = key.split(" ") as [string, string | undefined];
     const l = limitsOf(k);
@@ -1147,9 +1179,6 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     log(`rpc hold ${c} ${whose} ${budget.heldFor(c, whose === "background")} s${shapeTail()}`);
   };
   const pacer = deps.pacer ?? createPacer();
-  // card rpc-keyed-lists: the one hold and pace per provider a list walk draws on (server.ts passes the helper's, with
-  // every keyed URL's company pace); a client made without one (a test, the holders client) keeps its own
-  const holdsAll: ProviderHolds = deps.holds ?? providerHolds(now, { ...PROVIDER_PACE, ...keyedPaces(env) });
   /** Each keyed URL's secret forms, whatever chain it serves: an answer holding any of them is never kept. */
   // card helper-solana-off-a-spent-key: route A's candidates (aCandidates: the Solana slots, then the keyed spares)
   const aKeyed = aCandidates(env);
@@ -2067,6 +2096,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     let nulled: { status: number; body: string; n: number } | undefined;
     let nullTries = 0;
     const forgot = new Set<string>();
+    // card helper-base-trade-reads-429: this read drew the keyed URLs' budget (keysGated), once whichever of them it asks
+    let keysDrawn = false;
     for (let tries = 0; ; tries++) {
       let soonestMs = Infinity;
       let down = false;
@@ -2095,6 +2126,16 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         if (h > 0) {
           soonestMs = Math.min(soonestMs, h);
           continue;
+        }
+        // card helper-base-trade-reads-429: a keyed URL takes the read only while the keys' part of the total has room;
+        // else the walk goes on to the public spares (or, a keyed-only read, waits as for a held one)
+        if (!keysDrawn && keysGated(c, url)) {
+          const kw = budget.takeEach([[keysKey(c), methods.length]], client, false, reserved);
+          if (kw > 0) {
+            soonestMs = Math.min(soonestMs, kw * 1000);
+            continue;
+          }
+          keysDrawn = true;
         }
         // review L2: NEAR's existing names keep their chain's pacer on the walk, as call() paced them
         const own = ownPace(c, url);
