@@ -36,11 +36,14 @@ import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/
  *  reader went from Pocket to bloXroute's base.rpc.blxrbdn.com (card evm-index-kept-at-the-head: 100 of 100 posts
  *  answered at the gap sync's rate where Pocket answered 7 of 101 429; 6,742 characters before it): the list with
  *  Pocket put back hashes to the pin before it, cec5fcd8ee010c5043cac23cb21ee3ff6d9ba3195f542c19ca62b89726849760, so
- *  nothing else moved. Then Base's index read 50,000-block spans, each reader its own pieces and pace (card
- *  evm-sync-inside-the-kpi-at-any-age: parts, perBatch and parallel per reader; 6,739 characters before it): the list
+ *  nothing else moved. Then Base's publicnode and blastapi went from 8 posts at once to 16 (card
+ *  evm-warm-tap-ends-inside-two-seconds, measured; 6,739 characters before it): the list with the two put back at 8
+ *  hashes to the pin before it, d913eec85caaec57b2db40fd469a9d2772a19385e8bf3118c217a684a9e20023, so nothing else
+ *  moved. Then Base's index read 50,000-block spans, each reader its own pieces and pace (card
+ *  evm-sync-inside-the-kpi-at-any-age: parts, perBatch and parallel per reader; 6,741 characters before it): the list
  *  with its index put back as { span 10,000, perBatch 5, parallel 4 } hashes to the pin before it,
- *  d913eec85caaec57b2db40fd469a9d2772a19385e8bf3118c217a684a9e20023, so nothing else moved. */
-const BEFORE = "a2ebb3fe3d10d00bcac2039b04b0c483e755be3608cbd935aa4ffb45cc66d7b8";
+ *  c1b10c22de65c9a8042e0e87a1c0db8b6d8849a0fcb42c87e80fc8697daa69c9, so nothing else moved. */
+const BEFORE = "f65d0a54be350de090712004f20fe9c46de4d3dbaba6e01b16ea19a1c1d2f245";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
   const all = evmPoolVenues();
@@ -49,7 +52,7 @@ test("the two halves together are the venue list before the split, entry for ent
   assert.deepEqual(Object.keys(evmTestnetVenues()), ["base-sepolia", "robinhood-testnet"]);
   assert.deepEqual({ ...all }, { ...evmMainnetVenues(), ...evmTestnetVenues() });
   const json = JSON.stringify(all);
-  assert.equal(json.length, 6_761);
+  assert.equal(json.length, 6_763);
   assert.equal(createHash("sha256").update(json).digest("hex"), BEFORE);
 });
 

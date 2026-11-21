@@ -255,9 +255,21 @@ export const evmMainnetVenues = () =>
       // alone 900 in 25 s none refused). At 2 a cold Base quote's reads queued behind it while blastapi answered 8 at once:
       // a fresh account's first quote of a coin whose market is a WETH-USDC-coin v3 route took 10.1 s, its first round
       // 1.56 s on publicnode against 0.54 s on blastapi; at 8 the same quote took 6.6 s and seven cold coins in a row
-      // drew no 429 (2026-11-18 02:5xZ from this Mac). mainnet.base.org 8, under its 20; blastapi and Pocket's Base
-      // endpoint 8 (the helper names neither: the measurement alone)
-      inflight: bare<Record<string, number>>({ "https://base-rpc.publicnode.com": 8, "https://base-mainnet.public.blastapi.io": 8, "https://mainnet.base.org": 8, "https://base.api.pocket.network": 8 }),
+      // drew no 429 (2026-11-18 02:5xZ from this Mac). mainnet.base.org 8, under its 20; Pocket's Base endpoint 8 (the
+      // helper names it not: the measurement alone).
+      // publicnode and blastapi 16 (card evm-warm-tap-ends-inside-two-seconds): a warm tap's first round is about 16 posts
+      // a provider and its X prune about 13, so at 8 at once each went in two waves of a blastapi round trip (about 330 ms
+      // a post). 10 bursts each of 8, 16, 24 and 32 posts at once, in turn, 1.5 s apart, in the post above, from the Mac
+      // 2026-11-20 17:07-17:10Z, wall median / p90 / max in ms: publicnode 8: 272 / 433 / 481, 16: 447 / 524 / 545, 24:
+      // 549 / 603 / 605, none refused; 32: 50 of 320 posts refused (HTTP 429, -32005 "Rate limit exceeded") in 4 of 10
+      // bursts, 1,290 / 3,558 / 3,806. blastapi 8: 415 / 516 / 835, 16: 477 / 519 / 615, 24: 642 / 693 / 712, 32: 723 /
+      // 856 / 929, none refused. Half the smallest size refused, so a second quote, tab or user behind the same address
+      // stays under the 32: publicnode 16; blastapi, never refused, 16 as well. The pin is each quote's own: two quotes at
+      // once on one device (the coin page's warm beside a tap) can reach publicnode's 32, and a post it answers 429 moves
+      // at once to the next provider of this list, which answers it in its place; slower, never a wrong answer or a
+      // refusal while a provider is left (test/evm-quote-attacks.test.ts T7c, and T7: one that keeps answering 429 with
+      // no other left is rpc_error)
+      inflight: bare<Record<string, number>>({ "https://base-rpc.publicnode.com": 16, "https://base-mainnet.public.blastapi.io": 16, "https://mainnet.base.org": 8, "https://base.api.pocket.network": 8 }),
       // 6 reads a call: aggregate3 shares one call's gas, and 64 of a 100 ETH buy's exact-out reads (8 of them 8.4-9.4M gas
       // each) needed 77.3M, past base-rpc.publicnode.com's 50M eth_call cap (3/3 refused "out of gas: gas required exceeds:
       // 50000000"; at 6 a call 30/30 answered; review of 2c02f7df, Base block 54,810,601). 24,000 bytes a request:
