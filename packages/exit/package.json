@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test --require=../../scripts/test-bound-watch.cjs --test-timeout=300000 --test-force-exit \"test/*.test.ts\"",
+    "test": "node --test --require=../../scripts/test-bound-watch.cjs --test-timeout=300000 --test-force-exit --test-reporter=../../scripts/test-report.mjs \"test/*.test.ts\"",
     "start": "node src/bin.ts",
     "live-sol": "node scripts/sol-live.ts",
     "typecheck": "tsc -p tsconfig.json"
