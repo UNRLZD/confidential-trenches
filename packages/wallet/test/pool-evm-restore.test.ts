@@ -10,7 +10,7 @@ import { solanaJsonRpc, VaultTree, vaultLabelOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { refKey } from "../src/notes/store.ts";
-import { EVM_LAG_TRIES, EVM_LOG_PAGE_BLOCKS, EVM_LOG_THROTTLE_TRIES, EVM_LOG_THROTTLE_WAIT_MAX_MS, EVM_POOL_EVENTS, EVM_TRANSFER_RPCS, EVM_TRANSFER_TOPIC, EvmLagError, evmHoldsAnchor, evmTokensSentTo, evmTokensSentToOne, evmPoolScopeOf, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_LAG_TRIES, EVM_LOG_PAGE_BLOCKS, EVM_LOG_THROTTLE_TRIES, EVM_LOG_THROTTLE_WAIT_MAX_MS, EVM_POOL_EVENTS, EVM_TRANSFER_RPCS, EVM_TRANSFER_TOPIC, EvmLagError, evmHoldsAnchor, evmTokensSentTo, evmTokensSentToOne, evmPoolScopeOf, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
 import { evmRestore, evmRestoreNotes } from "../src/pool/evm-restore.ts";
 import { RESTORE_LANES, WALK_SLICE_MS } from "../src/notes/restore.ts";
 
@@ -44,7 +44,7 @@ const STRANGER = "0x0000000000000000000000000000000000005555";
 
 type PoolEv = { block: number; kind: "deposit" | "withdraw" | "buy"; state: bigint; label?: bigint; value: bigint; pre?: bigint; nul?: bigint; to?: string; token?: string };
 type Xfer = { block: number; token: string; from: string; to: string; nft?: boolean };
-type World = { scope: bigint; pool: PoolEv[]; xfers: Xfer[]; head: number; finalized: number; hashOf: (n: number) => string };
+type World = { scope: bigint; pool: PoolEv[]; xfers: Xfer[]; head: number; finalized: number; hashOf: (n: number) => string; numberOf?: (hash: string) => number };
 
 const P = (ref: NoteRef) => noteSecrets(SEED, ref).precommitment;
 const N = (ref: NoteRef) => noteSecrets(SEED, ref).nullifierHash;
@@ -139,6 +139,8 @@ type Over = {
   url?: string; chainId?: bigint;
   /** a provider's cap on a getLogs call's blocks, and on its results */
   cap?: number; resultCap?: number;
+  /** a provider's refusal of a pool read by its span and the values in its topic position (null: answered) */
+  refuse?: (span: number, values: number) => string | null;
   pool?: (l: Record<string, unknown>[], call: number) => Record<string, unknown>[];
   /** a Transfer read's logs, those to the W asked (`to`, its topic) before the range filter */
   xfer?: (l: Record<string, unknown>[], call: number, to: string) => Record<string, unknown>[];
@@ -163,8 +165,15 @@ function rpc(w: World, o: Over = {}): EvmRpc {
         let out: Record<string, unknown>[];
         if (p.address !== undefined) {
           assert.equal(p.address, POOL);
-          assert.deepEqual(p.topics, [[TOPIC.deposit, TOPIC.withdraw, TOPIC.buy]]);
-          out = (o.pool ?? ((x) => x))(poolLogs(w), poolCalls++).filter(inRange);
+          // the pool's three events in one position, or one of them alone (a provider read one value a call:
+          // oneValueFilters)
+          const values = Array.isArray(p.topics[0]) ? p.topics[0] : [p.topics[0]];
+          assert.equal(p.topics.length, 1);
+          if (values.length !== 1) assert.deepEqual(values, [TOPIC.deposit, TOPIC.withdraw, TOPIC.buy]);
+          else assert.ok([TOPIC.deposit, TOPIC.withdraw, TOPIC.buy].includes(values[0] as string));
+          const why = o.refuse?.(to - from + 1, values.length) ?? null;
+          if (why !== null) throw new Error(why);
+          out = (o.pool ?? ((x) => x))(poolLogs(w), poolCalls++).filter(inRange).filter((l) => values.includes((l.topics as string[])[0]!));
         } else {
           assert.equal(p.topics.length, 3);
           assert.equal(p.topics[0], EVM_TRANSFER_TOPIC);
@@ -178,8 +187,8 @@ function rpc(w: World, o: Over = {}): EvmRpc {
       case "eth_call": {
         const [{ to, data }, { blockHash }] = params as [{ to: string; data: string }, { blockHash: string }];
         assert.equal(to, POOL);
-        let n = -1;
-        for (let k = 0; k <= w.head; k++) if (w.hashOf(k) === blockHash) n = k;
+        let n = w.numberOf?.(blockHash) ?? -1;
+        if (w.numberOf === undefined) for (let k = 0; k <= w.head; k++) if (w.hashOf(k) === blockHash) n = k;
         if (n < 0) throw new Error("RPC error -32000: header not found");
         const v = viewsAt(w, n);
         const s = data.slice(2, 10);
@@ -1443,4 +1452,40 @@ test("card sign-out-stops-the-pages-reads: an abort while any one of the restore
     assert.ok(atAbort > 0, `call ${k + 1} was made`);
     assert.equal(started - atAbort, 0, `aborted at call ${k + 1}: no call after it`);
   }
+});
+
+// Card robinhood-reads-past-ten-million-blocks: the exit tool's restore (packages/exit/src/evm-out.ts, evmRestoreNotes
+// with `wallets: false`) on Robinhood once the pool's history is past Robinhood's own 10,000,000-block cap (live run
+// 44930704040, 21 Nov: the whole history refused, "-32602: query spans 11625818 blocks ..., but only 10000000 are
+// allowed"). The seeded chain spread over 11,625,800 blocks from the pool's deploy block; Robinhood's own refuses the
+// pool's three events in one position past 100,000 blocks and one value past 10,000,000, in its words; Pocket past
+// 800,000. The restore pages both and finds every note as the same chain read at its own small height.
+test("the exit tool's Robinhood restore over an 11,625,800-block history past Robinhood's own 10,000,000-block cap: every note, no read past a provider's cap", async () => {
+  const FROM_RH = 108_420_674;
+  const STEP = 116_258; // the seeded chain's 100 blocks spread to 11,625,800
+  const chainId = EVM_CHAIN_IDS.robinhood;
+  const scope = evmPoolScopeOf(POOL, chainId);
+  const { world } = seeded(scope);
+  const at = (b: number) => FROM_RH + b * STEP;
+  const big: World = {
+    ...world,
+    pool: world.pool.map((e) => ({ ...e, block: at(e.block) })),
+    xfers: [],
+    head: at(world.head),
+    finalized: at(world.finalized),
+    hashOf: (n) => `0x${n.toString(16).padStart(64, "0")}`,
+    numberOf: (h) => Number(BigInt(h)),
+  };
+  const words = (span: number, cap: number) => `RPC error -32602: query spans ${span - 1} blocks (${FROM_RH} to ${FROM_RH + span - 1}), but only ${cap} are allowed for this request; try a smaller range or send one value per position`;
+  const asked: { span: number; values: number }[] = [];
+  const own = rpc(big, { url: "https://rpc.mainnet.chain.robinhood.com", chainId, refuse: (span, values) => (asked.push({ span, values }), values > 1 && span > 100_000 ? words(span, 100_000) : values === 1 && span > 10_000_000 ? words(span, 10_000_000) : null) });
+  const pocket = rpc(big, { url: "https://robinhood.api.pocket.network", chainId, refuse: (span) => (span > 800_000 ? "block range exceeds maximum 800000" : null) });
+  const pin: EvmPoolPin = { network: "robinhood", pool: POOL, feeRecipient: FEE_TO, fromBlock: BigInt(FROM_RH) };
+  const r = await evmRestoreNotes({ seed64: SEED, pin, rpcs: [own, pocket], wallets: false, sleep: async () => {} });
+  const small = await evmRestoreNotes({ seed64: SEED, pin: { ...pin, fromBlock: 1n }, rpcs: pair(world, world, { chainId }, { chainId }), wallets: false, sleep: async () => {} });
+  assert.ok(small.notes.length > 0);
+  assert.deepEqual(byKey(r), byKey(small), "every note, in the state the small chain gives");
+  assert.equal(r.spends.length, small.spends.length);
+  const past = asked.filter((c) => (c.values === 1 ? c.span > 10_000_000 : c.span > 100_000));
+  assert.deepEqual(past, [], "no read past Robinhood's own cap");
 });

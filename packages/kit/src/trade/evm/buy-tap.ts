@@ -2,10 +2,11 @@
 // and any app or check: the route order a tap asks the kit's evmPoolBuyQuote in, and the device's pool index sync that
 // serves the quote (checks/evm/pool-index.ts, on the venue's two index readers, never the helper). The quote it returns
 // is the kit's own, checked as every quote is; the order only decides which route the kit is asked first.
-import { evmHeldHead, evmJsonRpc, evmPoolBuyQuote, evmPoolIndexPools, evmPoolIndexUse, evmProviders, evmRanked, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../checks/evm/quote.ts";
-import { evmPoolIndexSync, type EvmPoolIndexData, type EvmPoolIndexSync } from "../../checks/evm/pool-index.ts";
+import { evmHeldHead, evmJsonRpc, evmPoolBuyQuote, evmPoolCoinUse, evmPoolIndexPools, evmPoolIndexUse, evmProviders, evmRanked, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey, type EvmRpc } from "../../checks/evm/quote.ts";
+import { evmPoolCoinSync, evmPoolIndexSync, type EvmPoolCoinSync, type EvmPoolIndexConfig, type EvmPoolIndexData, type EvmPoolIndexSync } from "../../checks/evm/pool-index.ts";
 import { evmPoolVenues, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "./buy-unpinned.ts";
 import { evmHookListed } from "./sell-unpinned.ts";
+import { evmProviderHeldMs } from "../../checks/evm/pace.ts";
 
 /** The standard v4 (fee, tick spacing) pairs and v3 fee tiers (the kit's own standard set, checks/evm/quote.ts V4_KEYS
  *  and V3_FEES), first of each asked where no index is served. */
@@ -333,6 +334,16 @@ export function evmPoolBuyWarm(req: { readonly chain: EvmPoolChain; readonly tok
  *  Robinhood 2.2 s), so 3 s keeps N within about 7 s of the head. */
 export const EVM_INDEX_KEEP_MS = 3_000;
 
+/** An index sync's readers (card evm-first-quote-reads-its-coin-at-any-age): the venue's spares ranked by measured speed
+ *  (evmRanked, the held last), and the venue's two readers, each in its own place (its own parts and batches), save one
+ *  the device holds (a 429 or a refused connection, pace.ts), whose place the first spare not held takes: a provider that
+ *  refused is never one of the two while another is free. Not on the kit's entry (its tests). */
+export function evmIndexReadersOf(ix: NonNullable<EvmPoolVenueList[EvmPoolChain]>["index"] & object, rpcOf: (url: string) => EvmRpc): { readers: readonly [EvmRpc, EvmRpc]; spares: EvmRpc[] } {
+  const free = evmRanked(ix.spares ?? []).filter((u) => evmProviderHeldMs(u) === 0);
+  const pair = ix.readers.map((u) => (evmProviderHeldMs(u) > 0 && free.length > 0 ? free.shift()! : u)) as [string, string];
+  return { readers: [rpcOf(pair[0]), rpcOf(pair[1])], spares: evmRanked((ix.spares ?? []).filter((u) => !pair.includes(u))).map(rpcOf) };
+}
+
 /** One sync of the chain's pool index from `prev` (none: cold) on the venue's two index readers through `fetchFn`, and a
  *  whole one served to the kit's quote (evmPoolIndexUse). `served` is false where the sync ended partial or the chain
  *  has no index. Its reads are a background read's (pace.ts `later`): a tap's posts go before them. */
@@ -340,6 +351,28 @@ export async function evmPoolIndexRefresh(chain: EvmPoolChain, prev: EvmPoolInde
   const v = evmPoolVenues()[chain];
   const ix = v?.index;
   if (v === undefined || ix === undefined || v.poolManager === undefined || v.scan === undefined) return { sync: null, served: false };
-  const sync = await evmPoolIndexSync(prev, { chainId: v.chainId, poolManager: v.poolManager, readers: [evmJsonRpc(ix.readers[0], fetchFn, 64 << 20, undefined, true), evmJsonRpc(ix.readers[1], fetchFn, 64 << 20, undefined, true)], depth: v.scan.depth, span: ix.span, margin: ix.margin, cap: ix.cap, perBatch: ix.perBatch, parallel: ix.parallel, ...(ix.parts !== undefined ? { parts: ix.parts } : {}), ...(ix.batchMax !== undefined ? { batchMax: ix.batchMax } : {}) });
+  const sync = await evmPoolIndexSync(prev, { chainId: v.chainId, poolManager: v.poolManager, ...evmIndexReadersOf(ix, (u) => evmJsonRpc(u, fetchFn, 64 << 20, undefined, true)), depth: v.scan.depth, span: ix.span, margin: ix.margin, cap: ix.cap, perBatch: ix.perBatch, parallel: ix.parallel, ...(ix.parts !== undefined ? { parts: ix.parts } : {}), ...(ix.batchMax !== undefined ? { batchMax: ix.batchMax } : {}) });
   return { sync, served: sync.index !== null && sync.coversThrough !== null && evmPoolIndexUse(chain, sync) };
+}
+
+/** A coin's read's own shape on each chain's index readers (card evm-first-quote-reads-its-coin-at-any-age), where it is
+ *  not the whole sync's: Base asks base.rpc.blxrbdn.com one piece a span (a coin's filters are cheap where every pool's
+ *  are not: the whole sync's five 10,000-block pieces a span made 181 posts of a 48 h coin read against 37, 21 Nov
+ *  15:13Z); rpc.mainnet.chain.robinhood.com answers a filter with more than one value a position over at most 100,000
+ *  blocks (-32602, 15:27Z), the venue's scan `orSpan`. */
+export const EVM_COIN_READ: Readonly<Partial<Record<EvmPoolChain, Partial<Pick<EvmPoolIndexConfig, "parts" | "orSpan">>>>> = Object.freeze({
+  base: Object.freeze({ parts: Object.freeze([1, 1] as const) }),
+  robinhood: Object.freeze({ orSpan: Object.freeze([100_000, undefined] as const) }),
+});
+
+/** One coin's read (pool-index.ts evmPoolCoinSync) from `prev` on the venue's two index readers through `fetchFn`, and a
+ *  whole one served to the kit's quote (evmPoolCoinUse). Its reads are a tap's, not a background read's: a quote waits on
+ *  them, so the whole sync (evmPoolIndexRefresh, pace.ts `later`) goes after them. */
+export async function evmPoolCoinRefresh(chain: EvmPoolChain, prev: EvmPoolIndexData | null, token: string, fetchFn: typeof fetch = fetch): Promise<{ readonly read: EvmPoolCoinSync | null; readonly served: boolean }> {
+  const v = evmPoolVenues()[chain];
+  const ix = v?.index;
+  if (v === undefined || ix === undefined || v.poolManager === undefined || v.scan === undefined) return { read: null, served: false };
+  const shape = EVM_COIN_READ[chain] ?? {};
+  const read = await evmPoolCoinSync(prev, { token, weth: v.weth }, { chainId: v.chainId, poolManager: v.poolManager, ...evmIndexReadersOf(ix, (u) => evmJsonRpc(u, fetchFn, 64 << 20)), depth: v.scan.depth, span: ix.span, margin: ix.margin, cap: ix.cap, perBatch: ix.perBatch, parallel: ix.parallel, ...(ix.parts !== undefined ? { parts: ix.parts } : {}), ...(ix.batchMax !== undefined ? { batchMax: ix.batchMax } : {}), ...shape });
+  return { read, served: read.coversThrough !== null && evmPoolCoinUse(chain, read) };
 }

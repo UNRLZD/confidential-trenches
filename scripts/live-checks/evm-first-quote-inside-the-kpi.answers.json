@@ -1,99 +1,124 @@
 {
  "good": {
-  "note": "this branch (card evm-first-quote-inside-the-kpi) at 2026-11-18 02:57Z, the repo's Base snapshot (release 172's) read from a build folder: the sync whole in 4359 ms, its first reader asking 5 getLogs for 6 spans, six coins' first quotes ended inside 3 s, no 429: PASS",
+  "note": "this branch (card evm-first-quote-reads-its-coin-at-any-age) at 2026-11-21T16:16Z, the repo's Base snapshot (release 188's) read from a build folder: the sync whole in 2085 ms; the aged device (an index 864,000 blocks, 48 h, behind) read two coins in 4287 and 3663 ms, 5630 and 5531 ms with the first quote, in bloXroute's slow hour (its head 1009 ms); no 429: PASS",
   "run": {
    "sign": "https://confidential.unrealized.trade",
    "helper": "https://ct-api.unrealized.trade",
    "site": "a build folder at SIGN_HOST's name",
-   "at": "2026-11-18T02:56:50.781Z",
+   "at": "2026-11-21T16:16:05.598Z",
    "snapshot": {
     "status": 200,
-    "through": 58859903,
-    "pools": 6148
+    "through": 60415630,
+    "pools": 7296
    },
    "sync": {
-    "ms": 4359,
+    "ms": 2085,
     "served": true,
-    "coversThrough": 58901177,
-    "span": 10000,
+    "coversThrough": 60436950,
+    "span": 50000,
     "getLogs": [
-     5,
+     1,
      5
     ],
     "requests": [
-     3,
-     3
+     2,
+     6
     ]
    },
    "coins": [
     {
-     "coin": "0x68cda1f9bce8e03c374b20c66a8abb6af37fec7b",
+     "coin": "0x2987e36eb2ef946dda5525553de68927a37fde50",
      "first": {
-      "ms": 2984,
-      "code": "not_allowed"
-     },
-     "again": {
-      "ms": 991,
-      "code": "not_allowed"
-     }
-    },
-    {
-     "coin": "0xc17b757b6e7ff85941d51a561b011451a7d92e78",
-     "first": {
-      "ms": 929,
-      "code": "quote_check_failed"
+      "ms": 2380,
+      "code": "no_reference"
      },
      "again": {
       "ms": 0,
-      "code": "quote_check_failed"
+      "code": "no_reference"
      }
     },
     {
-     "coin": "0x8c07ee37aec6ce1cabfcbebd9b69db4fb4865fbf",
+     "coin": "0x116178fcaef0891372bb58762571a66b4053e87f",
      "first": {
-      "ms": 1274,
+      "ms": 1925,
       "code": "no_reference"
      },
      "again": {
-      "ms": 459,
+      "ms": 730,
       "code": "no_reference"
      }
     },
     {
-     "coin": "0xb20000000000000000000064951127bd5154c048",
+     "coin": "0xd62633ec36e6a93dd372d51327cf8d74661f0e2f",
      "first": {
-      "ms": 2124,
+      "ms": 871,
+      "code": "no_reference"
+     },
+     "again": {
+      "ms": 0,
+      "code": "no_reference"
+     }
+    },
+    {
+     "coin": "0xd8a7e5f169e1a2bbfe038dd9ec204bb90c9be8d3",
+     "first": {
+      "ms": 1977,
       "code": "not_allowed"
      },
      "again": {
-      "ms": 673,
+      "ms": 1216,
       "code": "not_allowed"
      }
     },
     {
-     "coin": "0xb7853e3ccebdabdb83f7c5ae13f62bd41970d751",
+     "coin": "0x51066ecbfd7c66375e7b6a691838d98c6fb7cccc",
      "first": {
-      "ms": 1343,
-      "code": "no_reference"
+      "ms": 4585,
+      "code": "not_allowed"
      },
      "again": {
-      "ms": 517,
-      "code": "no_reference"
+      "ms": 2740,
+      "code": "not_allowed"
      }
     },
     {
-     "coin": "0x5ee7aa8f2ac604ea9191914d367ab48d97384368",
+     "coin": "0xb200000000000000000000f0ad7e98dd8cac01c0",
      "first": {
-      "ms": 1597,
-      "code": "no_reference"
+      "ms": 2097,
+      "code": "not_allowed"
      },
      "again": {
-      "ms": 1032,
-      "code": "no_reference"
+      "ms": 2113,
+      "code": "not_allowed"
      }
     }
    ],
-   "s429": {}
+   "s429": {},
+   "aged": {
+    "behind": 864000,
+    "headMs": 1009,
+    "mode": "coin",
+    "coins": [
+     {
+      "coin": "0xb2000000000000000000007d4fbbcc4d96c3f50a",
+      "served": true,
+      "readMs": 4287,
+      "first": {
+       "ms": 1343,
+       "code": "not_allowed"
+      }
+     },
+     {
+      "coin": "0xb2000000000000000000004b6d5152bbfb5c1b8e",
+      "served": true,
+      "readMs": 3663,
+      "first": {
+       "ms": 1868,
+       "code": "not_allowed"
+      }
+     }
+    ]
+   }
   }
  },
  "bad": {
@@ -191,6 +216,128 @@
     }
    ],
    "s429": {}
+  }
+ },
+ "badAged": {
+  "note": "origin/main 3ebf12bae's kit with this check, at 2026-11-21T16:17Z, the same snapshot and the same two aged coins: it reads the whole index from the aged one, 18057 and 10173 ms (its head 1051 ms): FAIL",
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "helper": "https://ct-api.unrealized.trade",
+   "site": "a build folder at SIGN_HOST's name",
+   "at": "2026-11-21T16:17:28.162Z",
+   "snapshot": {
+    "status": 200,
+    "through": 60415630,
+    "pools": 7296
+   },
+   "sync": {
+    "ms": 2220,
+    "served": true,
+    "coversThrough": 60437363,
+    "span": 50000,
+    "getLogs": [
+     1,
+     5
+    ],
+    "requests": [
+     2,
+     6
+    ]
+   },
+   "coins": [
+    {
+     "coin": "0x2987e36eb2ef946dda5525553de68927a37fde50",
+     "first": {
+      "ms": 1468,
+      "code": "no_reference"
+     },
+     "again": {
+      "ms": 0,
+      "code": "no_reference"
+     }
+    },
+    {
+     "coin": "0x116178fcaef0891372bb58762571a66b4053e87f",
+     "first": {
+      "ms": 771,
+      "code": "no_reference"
+     },
+     "again": {
+      "ms": 0,
+      "code": "no_reference"
+     }
+    },
+    {
+     "coin": "0xd62633ec36e6a93dd372d51327cf8d74661f0e2f",
+     "first": {
+      "ms": 796,
+      "code": "no_reference"
+     },
+     "again": {
+      "ms": 598,
+      "code": "no_reference"
+     }
+    },
+    {
+     "coin": "0xd8a7e5f169e1a2bbfe038dd9ec204bb90c9be8d3",
+     "first": {
+      "ms": 1548,
+      "code": "not_allowed"
+     },
+     "again": {
+      "ms": 685,
+      "code": "not_allowed"
+     }
+    },
+    {
+     "coin": "0x51066ecbfd7c66375e7b6a691838d98c6fb7cccc",
+     "first": {
+      "ms": 3192,
+      "code": "not_allowed"
+     },
+     "again": {
+      "ms": 1507,
+      "code": "not_allowed"
+     }
+    },
+    {
+     "coin": "0xb200000000000000000000f0ad7e98dd8cac01c0",
+     "first": {
+      "ms": 1516,
+      "code": "not_allowed"
+     },
+     "again": {
+      "ms": 876,
+      "code": "not_allowed"
+     }
+    }
+   ],
+   "s429": {},
+   "aged": {
+    "behind": 864000,
+    "headMs": 1051,
+    "mode": "whole",
+    "coins": [
+     {
+      "coin": "0xb2000000000000000000007d4fbbcc4d96c3f50a",
+      "served": true,
+      "readMs": 18057,
+      "first": {
+       "ms": 2191,
+       "code": "not_allowed"
+      }
+     },
+     {
+      "coin": "0xb2000000000000000000004b6d5152bbfb5c1b8e",
+      "served": true,
+      "readMs": 10173,
+      "first": {
+       "ms": 1979,
+       "code": "not_allowed"
+      }
+     }
+    ]
+   }
   }
  }
 }

@@ -1721,6 +1721,7 @@ export function evmPoolIndexUse(chain: EvmPoolChain, sync: { readonly index: { r
   const held = INDEXES.get(chain);
   if (held !== undefined && held.through >= n) return held.through === n && held.from === ix.from;
   if (held !== undefined && held.from === ix.from && held.count === sync.pools.length && sync.pools.every((p) => held.ids.has(indexedName(p)))) {
+    if (!coinsAgree(chain, held.byCurrency, n)) return false;
     held.through = n;
     return true;
   }
@@ -1733,20 +1734,68 @@ export function evmPoolIndexUse(chain: EvmPoolChain, sync: { readonly index: { r
     if (k === null) continue;
     for (const c of new Set([k.currency0, k.currency1])) append(byCurrency, c, k);
   }
+  if (!coinsAgree(chain, byCurrency, n)) return false;
   INDEXES.set(chain, { from: ix.from, through: n, byCurrency, count: sync.pools.length, ids });
   return true;
+}
+/** A whole index to N that leaves out a pool a served coin read proved to its N at or below it: the two proofs are
+ *  apart, which no honest pair of readers gives, so neither is served (every coin read of the chain is dropped and the
+ *  index refused): the quote reads those blocks by its own scan. */
+function coinsAgree(chain: EvmPoolChain, byCurrency: ReadonlyMap<string, readonly EvmPoolKey[]>, n: number): boolean {
+  const mine = [...COINS].filter(([k, v]) => k.startsWith(`${chain}:`) && v.through <= n);
+  const ok = mine.every(([k, v]) => {
+    const ids = new Set((byCurrency.get(k.slice(chain.length + 1)) ?? []).map(poolId));
+    return v.pools.every((p) => ids.has(poolId(p)));
+  });
+  if (!ok) for (const k of [...COINS.keys()]) if (k.startsWith(`${chain}:`)) COINS.delete(k);
+  return ok;
 }
 /** The pools of `token` the chain's served index holds (every pool of the PoolManager to its N that pairs the token),
  *  or null where no index is served: what a buy may ask a quote of, never a pool the quote then trusts unread (each is
  *  read at the agreed block on both providers like any candidate). */
 export function evmPoolIndexPools(chain: EvmPoolChain, token: string): readonly EvmPoolKey[] | null {
+  if (typeof token !== "string") return null;
+  const ix = coverOf(chain, "all", lower(token));
+  return ix === undefined ? null : [...ix.pools];
+}
+// A coin's read, served (pool-index.ts evmPoolCoinSync, card evm-first-quote-reads-its-coin-at-any-age): the coin's pools
+// (its "all") and each X's markets, every one to its N, proven on the index's two readers like the whole index. A quote
+// reads a currency from it where it covers that currency and kind past the whole index's N: a fresh device on a stale
+// snapshot reads its coin's 864,000 Base blocks, not every pool's. Keyed by chain and currency; a newer read replaces it.
+const COINS = new Map<string, { kind: ScanKind; from: number; through: number; pools: EvmPoolKey[] }>();
+/** The served cover of currency `c` of `kind` on `chain`: the whole index's or a coin read's, the one with the higher
+ *  N; the whole index where they tie. */
+function coverOf(chain: EvmPoolChain, kind: ScanKind, c: string): { from: number; through: number; pools: EvmPoolKey[] } | undefined {
   const ix = INDEXES.get(chain);
-  return ix === undefined || typeof token !== "string" ? null : [...(ix.byCurrency.get(lower(token)) ?? [])];
+  const coin = COINS.get(`${chain}:${c}`);
+  const own = coin !== undefined && (kind === "markets" || coin.kind === "all") ? coin : undefined;
+  if (own !== undefined && (ix === undefined || own.through > ix.through)) return own;
+  return ix === undefined ? undefined : { from: ix.from, through: ix.through, pools: ix.byCurrency.get(c) ?? [] };
+}
+/** Serves `read`, a whole coin read of `chain` (pool-index.ts evmPoolCoinSync: coversThrough N, its Xs and every pool of
+ *  its sets to N): the coin "all", each X "markets". A read that is not whole, of a chain with no PoolManager pinned, or
+ *  not newer than what is held changes nothing. Returns whether it is served. */
+export function evmPoolCoinUse(chain: EvmPoolChain, read: { readonly token: string; readonly xs: readonly string[] | null; readonly from: number | null; readonly coversThrough: number | null; readonly pools: readonly { readonly key: EvmPoolKey }[] | null }): boolean {
+  const all = evmPoolVenues();
+  if (typeof chain !== "string" || !Object.hasOwn(all, chain) || venue(chain).poolManager === undefined) return false;
+  const { token, xs, from, coversThrough: n, pools } = read ?? ({} as typeof read);
+  if (typeof token !== "string" || !Array.isArray(xs) || !Array.isArray(pools) || !Number.isSafeInteger(from) || !Number.isSafeInteger(n) || from! < 0 || n! < from!) return false;
+  const t = lower(token);
+  const keys = pools.map((p) => (typeof (p?.key as { currency0?: unknown } | undefined)?.currency0 === "string" ? keyOf(p.key, (p.key as { currency0: string }).currency0) : null)).filter((k): k is EvmPoolKey => k !== null);
+  const ofC = (c: string) => keys.filter((k) => k.currency0 === c || k.currency1 === c);
+  for (const [c, kind] of [[t, "all"], ...xs.map((x) => [lower(x), "markets"])] as [string, ScanKind][]) {
+    const held = COINS.get(`${chain}:${c}`);
+    if (held !== undefined && held.through >= n! && (held.kind === "all" || kind === "markets")) continue;
+    COINS.set(`${chain}:${c}`, { kind, from: from!, through: n!, pools: ofC(c) });
+  }
+  return true;
 }
 /** For the tests (not in the kit's index): the chain's served index as held, or undefined. */
 export const evmPoolIndexHeld = (chain: EvmPoolChain): { readonly from: number; readonly through: number } | undefined => INDEXES.get(chain);
+/** For the tests (not in the kit's index): what a scan of `c` of `kind` reads from the served index or coin read. */
+export const evmPoolCoverOf = (chain: EvmPoolChain, kind: ScanKind, c: string, weth: string, floor = 0) => indexScanOf(chain, kind, lower(c), lower(weth), floor);
 /** For the tests: forgets every chain's index (not in the kit's index). */
-export const evmPoolIndexReset = (): void => (INDEXES.clear(), SERVED.clear());
+export const evmPoolIndexReset = (): void => (INDEXES.clear(), SERVED.clear(), COINS.clear());
 /** For the tests (not in the kit's index): `rpc` reads and keeps the tail `as` does (one chain's history behind two rpc
  *  objects, a provider that turns hostile between two quotes). */
 export const evmScanTailAlias = (rpc: EvmRpc, as: EvmRpc): void => void SOURCE_OF.set(rpc, SOURCE_OF.get(as) ?? as);
@@ -1801,9 +1850,9 @@ const servedOf = async (chain: EvmPoolChain, kind: ScanKind, c: string, weth: st
 /** The scan of currency `c` the index holds, from `floor` (the scan's oldest block) to its N, kept as a scan keeps its
  *  own: none where no index covers past `floor`. */
 const indexScanOf = (chain: EvmPoolChain, kind: ScanKind, c: string, weth: string, floor: number): { spans: Spans; pools: EvmPoolKey[] } | undefined => {
-  const ix = INDEXES.get(chain);
+  const ix = coverOf(chain, kind, c);
   if (ix === undefined || ix.through < floor) return undefined;
-  const pools = (ix.byCurrency.get(c) ?? []).filter((k) => {
+  const pools = ix.pools.filter((k) => {
     const other = k.currency0 === c ? k.currency1 : k.currency0;
     return kind === "all" || other === NATIVE || other === weth;
   });
@@ -2870,12 +2919,14 @@ const speedOf = (url: string) => {
   return s;
 };
 const timed = (url: string, rpc: EvmRpc): EvmRpc => {
-  const f: EvmRpc = async (calls) => {
+  const f: EvmRpc = async (calls, signal) => {
     const t = performance.now();
     const s = speedOf(url);
     s.out.push(t);
     try {
-      const out = await rpc(calls);
+      // the caller's cut ends the post itself (card evm-pace-holds-units-while-out): a scan request cut at its hold or
+      // the quote's bound gives its provider's units back then (pace.ts), never held to its own 10 s timeout
+      const out = await rpc(calls, signal);
       s.last = performance.now();
       // an answer that names a rate limit or a state the provider does not hold is held, never measured: such an error
       // comes back fast, and a provider past its state cut kept first by it failed every quote's reads (card
@@ -5983,13 +6034,15 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     const turn = evmPaceTake(url, calls, until, later);
     const give = typeof turn === "function" ? turn : await turn;
     let refused: BatchRefused;
+    // whether the provider answered the post (any status): one that did not gives its units back as sent (pace.ts)
+    let answered = false;
     try {
-      return await post(calls, until);
+      return await post(calls, until, () => void (answered = true));
     } catch (e) {
       if (!(e instanceof BatchRefused)) throw e;
       refused = e;
     } finally {
-      give();
+      give(answered);
     }
     // refused for its size: asked again as parts of at most half (or the maximum the refusal named), never a call more
     evmBatchRefused(url, calls.length, refused.said);
@@ -6002,13 +6055,14 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     RPC_TWIN.set(rpc, () => (twin ??= evmJsonRpc(url, fetchFn, maxBytes, timeoutMs, true)));
   }
   return rpc;
-  async function post(calls: readonly EvmRpcCall[], until?: AbortSignal): Promise<unknown[]> {
+  async function post(calls: readonly EvmRpcCall[], until?: AbortSignal, heard?: () => void): Promise<unknown[]> {
     const body = JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params })));
     // a request that never returns is a refusal once its time runs out, never a quote (and a buy button) that hangs
     let res: Response;
     try {
       const signal = until === undefined ? AbortSignal.timeout(timeoutMs) : AbortSignal.any([AbortSignal.timeout(timeoutMs), until]);
       res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal });
+      heard?.();
     } catch (e) {
       // fetch's own TypeError with no response: Node's ("fetch failed") names its connection error as its cause, a
       // browser's names none ("Failed to fetch" in Chrome, "Load failed" in Safari, "NetworkError when attempting to

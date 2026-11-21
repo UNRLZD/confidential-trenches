@@ -121,8 +121,11 @@ export type EvmPoolVenue = {
    *  and `parallel` batches at once on each (a pair: each reader its own), each reader asking a span in `parts` pieces
    *  (default one each), at most `batchMax` calls in any one batch (the helper's
    *  HELPER_RPC_BATCH_MAX where it reads); stored to `margin` blocks below the head (a reorg's reach); past `cap` pools
-   *  it refuses too_many_pools. */
-  readonly index?: Readonly<{ readers: readonly [string, string]; span: number; perBatch: number | readonly [number, number]; parallel: number | readonly [number, number]; parts?: readonly [number, number]; margin: number; cap: number; batchMax?: number }>;
+   *  it refuses too_many_pools. `spares`, each of another operator than both: ranked by measured speed, each takes a
+   *  piece a reader timed out on, and the place of a reader the device holds (card
+   *  evm-first-quote-reads-its-coin-at-any-age); none listed today, no third public Base reader answering filtered
+   *  getLogs over 50,000 blocks (21 Nov 15:4xZ). */
+  readonly index?: Readonly<{ readers: readonly [string, string]; spares?: readonly string[]; span: number; perBatch: number | readonly [number, number]; parallel: number | readonly [number, number]; parts?: readonly [number, number]; margin: number; cap: number; batchMax?: number }>;
 };
 export type EvmScanSpare = Readonly<{ url: string; span: number; parallel: number; orSpan?: number }>;
 export type EvmHookedPool = { readonly pad: string; readonly from: "native" | "weth"; readonly fee: number; readonly tickSpacing: number; readonly hooks: string };

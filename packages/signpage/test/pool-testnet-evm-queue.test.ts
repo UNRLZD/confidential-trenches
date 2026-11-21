@@ -1907,6 +1907,66 @@ test("a dry's quote on a device that holds nothing, in a tab without the chain's
   }
 });
 
+// Card evm-first-quote-reads-its-coin-at-any-age: a coin's quote on a stale index waits on that coin's read, never the
+// whole sync: the coin's read starts beside the whole sync on the tap's lane, from the index the device has, and the
+// quote's wait ends once it is served while the whole sync still runs
+test("a coin's quote on a stale index waits on the coin's read, served while the whole sync still runs, from the index the device has", async () => {
+  const { w, ns } = await wallet();
+  await landed(ns);
+  evmPoolIndexReset();
+  const PM = evmPoolVenues()["base-sepolia"].poolManager!;
+  const T = "0x00000000000000000000000000000000000000aa";
+  const key = { currency0: "0x0000000000000000000000000000000000000000", currency1: T, fee: 3000, tickSpacing: 60, hooks: "0x0000000000000000000000000000000000000000" };
+  const kept = new Map<string, unknown>([["base-sepolia", { v: 1, chainId: 84532, poolManager: PM, from: 1, through: 50, head: { number: 50, hash: "0x" + "0".repeat(64) }, spans: [[1, 50]], pools: [] }]]);
+  const stats = { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 };
+  let wholeEnds!: () => void;
+  const whole = new Promise<void>((r) => (wholeEnds = r));
+  const coins: { prev: number | null; token: string; fetch: unknown }[] = [];
+  const wholeFetch: unknown[] = [];
+  const tt = turnTimers({ now: 1_800_000_000_000 + 20_000 });
+  const t = testnetPool({ ...page(w), held: async () => w }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c: string) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    evmHelper: (c: string) => (c === "base" ? (async () => null) as EvmRpc : undefined),
+    evmTurn: tt.evmTurn,
+    evmIndexStore: { get: async (c: string) => (kept.get(c) ?? null) as never, put: async () => {} },
+    evmIndexKeep: () => {},
+    evmIndexSync: async (_chain: string, _prev: unknown, f: typeof fetch) => {
+      wholeFetch.push(f);
+      await whole;
+      return { index: null, coversThrough: null, pools: null, error: { code: "rpc_failed", message: "x" }, stats };
+    },
+    evmCoinSync: async (_chain: string, prev: { through: number } | null, token: string, f: typeof fetch) => {
+      coins.push({ prev: prev?.through ?? null, token, fetch: f });
+      return { token, xs: [], from: 1, coversThrough: 100, pools: [{ id: "0x" + "1".repeat(64), key, block: 80 }], error: null, stats };
+    },
+  } as unknown as Parameters<typeof testnetPool>[1]);
+  try {
+    await t.stateRead();
+    assert.equal(t.evmMoney(), true);
+    const ready = t.evmIndexReady("base", T);
+    let ended = false;
+    void ready.then(() => (ended = true));
+    await indexSettle();
+    assert.equal(ended, true, "the quote's wait ended while the whole sync still runs");
+    assert.equal(await ready, true);
+    assert.deepEqual(coins.map((c) => [c.prev, c.token]), [[50, T]], "one coin read, from the device's index");
+    assert.equal(wholeFetch.length, 1, "the whole sync started beside it");
+    assert.notEqual(coins[0]!.fetch, wholeFetch[0], "the coin read is not on the whole sync's later lane");
+    assert.deepEqual(evmPoolIndexPools("base-sepolia", T), [key], "the coin's pool served to the quote");
+    assert.equal(await t.evmIndexReady("base", T), true, "a second quote of the coin reads nothing again");
+    assert.equal(coins.length, 1);
+  } finally {
+    wholeEnds();
+    await indexSettle();
+    evmPoolIndexReset();
+    await t.signedOut();
+  }
+});
+
 // Card evm-index-served-before-lock (review of 6c8a6dd30): the first serve took the kept index whenever there was
 // one, even one older than the release's snapshot, so a device back after days synced on from an old release's index
 // end, not the snapshot's. The first serve takes the newer of the two by its through.

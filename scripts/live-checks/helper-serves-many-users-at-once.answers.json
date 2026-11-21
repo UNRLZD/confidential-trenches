@@ -34,5 +34,23 @@
     "policy": null
    }
   }
+ },
+ "red429": {
+  "at": "2026-11-21T17:34:22Z",
+  "helper": "https://ct-api.unrealized.trade at 8713b1ca3, live run 44930704040 (its job log's three lines; the status is not in the log: 200, as the same helper answered each route from a Mac at 18:21Z): Base's total the company keys' halves alone, 39 (card helper-base-trade-reads-429)",
+  "routes": {
+   "solana": {
+    "status": 200,
+    "policy": "\"chain\";q=135;w=10, \"client\";q=42;w=10"
+   },
+   "base": {
+    "status": 200,
+    "policy": "\"chain\";q=39;w=10, \"client\";q=30;w=10"
+   },
+   "robinhood": {
+    "status": 200,
+    "policy": "\"chain\";q=139;w=10, \"client\";q=30;w=10"
+   }
+  }
  }
 }

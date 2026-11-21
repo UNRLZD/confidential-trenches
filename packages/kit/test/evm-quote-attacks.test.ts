@@ -977,6 +977,52 @@ test("F10w a warm buy with a held head (its first round sent beside its scan) on
   }
 });
 
+// card evm-first-quote-reads-its-coin-at-any-age: a coin's read served (pool-index.ts evmPoolCoinSync) holds a quote to the
+// same market a whole index does where the whole index is older: a stale snapshot's first quote reads the coin's own
+// blocks, never every pool's, and its buy below the coin's real market (card evm-buy-never-below-a-hidden-market) is
+// refused as it is on the whole index; a whole index that later leaves out the coin read's pool is refused, both dropped
+test("COINQ a coin's read past a stale whole index holds the buy to the real market the read proved, 0 getLogs; a whole index that leaves its pool out is never served", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset, evmPoolCoinUse, evmPoolCoverOf, evmPoolIndexPools } = quoteMod as unknown as {
+    evmPoolIndexUse: (c: string, s: unknown) => boolean;
+    evmPoolIndexReset: () => void;
+    evmPoolCoinUse?: (c: string, s: unknown) => boolean;
+    evmPoolCoverOf?: (c: string, k: string, x: string, w: string) => { spans: [number, number][]; pools: unknown[] } | undefined;
+    evmPoolIndexPools: (c: string, t: string) => readonly unknown[] | null;
+  };
+  assert.ok(evmPoolCoinUse !== undefined && evmPoolCoverOf !== undefined, "no evmPoolCoinUse");
+  const token = "0x00000000000000000000000000000000000f10c1";
+  const pools = [seeded(token), real(token)];
+  const rpcs = [chain(pools, 0), chain(pools, 1)];
+  const watch = quoteMod.evmHeadWatch(rpcs, 50n, () => NOW, false, () => 0);
+  const asks: unknown[] = [];
+  const empty = scanner(5_000_000, []);
+  const scan: EvmRpc = async (calls, signal) => (asks.push(...getLogsOf(calls)), empty(calls, signal));
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) };
+  const index = { chainId: 8453, poolManager: PM, from: 4_000_001 };
+  const WETH = "0x4200000000000000000000000000000000000006";
+  evmPoolIndexReset();
+  try {
+    // the whole index 864,000 blocks behind, before the coin's real pool
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 4_136_000, pools: [] }), true);
+    // the coin's read to the head: its real pool
+    assert.equal(evmPoolCoinUse("base", { token, xs: [], from: 4_000_001, coversThrough: 5_000_000, pools: [{ key: real(token).key }] }), true);
+    assert.deepEqual(evmPoolIndexPools("base", token), [real(token).key]);
+    assert.deepEqual(evmPoolCoverOf("base", "all", token, WETH)?.spans, [[4_000_001, 5_000_000]]);
+    assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scan, watch, () => 0)), below);
+    assert.deepEqual(asks, [], "no getLogs before the answer");
+    // a whole index to the head that leaves the coin read's pool out: refused, and the coin read dropped with it
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 5_000_000, pools: [] }), false);
+    assert.deepEqual(evmPoolCoverOf("base", "all", token, WETH)?.spans, [[4_000_001, 4_136_000]], "the stale index alone, not the coin read");
+    // and one with other pools than the stale one's (a new index, not its N moved on) that leaves it out: the same
+    assert.equal(evmPoolCoinUse("base", { token, xs: [], from: 4_000_001, coversThrough: 5_000_000, pools: [{ key: real(token).key }] }), true);
+    assert.equal(evmPoolIndexUse("base", { index, coversThrough: 5_000_000, pools: [{ key: seeded(token).key }] }), false);
+    assert.deepEqual(evmPoolCoverOf("base", "all", token, WETH)?.spans, [[4_000_001, 4_136_000]]);
+
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
 // card evm-index-kept-at-the-head: an index synced once falls past maxLag of the head, and a new coin's cold buy then
 // scans the blocks past its N by currency before its answer (Robinhood 2, 10 and 5 getLogs, Base 6, 19 Nov); the same
 // index synced on to the head (the page's keep, a gap sync from the kept index) serves the next new coin's cold buy whole

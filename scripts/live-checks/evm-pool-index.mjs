@@ -8,12 +8,15 @@
 //     device reaches it directly) and the second at most the helper's keyed route for the chain,
 //     /v1/rpc/{chain}?keyed=only (card signpage-evm-reads-draw-no-refusal: the money rule's attacker is a broken-in
 //     helper, which as one of two readers can make the index refuse, never add or hide a pool), each chain's span (Base
-//     50,000 blocks since card evm-sync-inside-the-kpi-at-any-age, which the device asks bloXroute in 25,000-block
-//     pieces; Robinhood 500,000, which only Robinhood's own and the helper's keyed route serve), the card's margin
+//     50,000 blocks since card evm-sync-inside-the-kpi-at-any-age, which the device asks bloXroute in 10,000-block
+//     pieces, the venue's parts [1, 5]; Robinhood 500,000, which only Robinhood's own and the helper's keyed route serve), the card's margin
 //     (Base 474, Robinhood 7,119) and a cap;
 //   - each reader answers the browser's CORS preflight of a JSON POST from the app's origin, and its POST, allowing it
 //     (the device reads them from the page);
-//   - every span is answered on both readers, within TRIES tries each (the kit's INDEX_TRIES: a reader a block behind
+//   - every span is answered on both readers as the kit walks it (readWalk, card
+//     evm-first-quote-reads-its-coin-at-any-age): each reader in the venue's `parts` pieces, a piece that runs out of
+//     its time asked of each spare, then as its halves, never again at its size; each piece within TRIES tries (the
+//     kit's INDEX_TRIES: a reader a block behind
 //     is asked again, its own head read in the same batch), with its last block in the same batch, under INDEX_SPAN_LOGS logs, the
 //     same last-block hash on both (block N's is the pin) and the same pools on both (by pool id), at least one pool in
 //     all, each batch within the kit's RPC timeout (10 s);
@@ -28,6 +31,10 @@
 //   Retry-After without spending a try, up to the kit's 60 s a batch, and any other status outside 2xx, or an answer that
 //   is not a batch, spends one (card robinhood-index-second-reader-serves-receipts: the helper's keyed route refused the
 //   third batch of receipts 429 at its 30 requests a caller each 10 s, which the check read as ten receipts answered null).
+// - aged (card evm-first-quote-reads-its-coin-at-any-age): one span AGED[chain] blocks (48 h) below N, asked as a
+//   coin's read asks it (pool-index.ts evmPoolCoinSync): a getLogs a topic position, its coin (here the chain's WETH,
+//   whose pools every span holds) as currency0 and as currency1, with the span's last block, in one batch; both readers
+//   answer it within the kit's RPC timeout, try TRIES at most, the same last block and the same pools on both.
 // What it proves, and only that: the readers the deployed kit names serve the index's reads and agree. That quotes read
 // their pools from the index is card evm-pool-index-route's check.
 // After: app
@@ -49,6 +56,8 @@ export const CHAINS = Object.freeze({ base: { margin: 474, span: 50_000 }, robin
 /** The one reader of ours an index may name: the helper's keyed route for the chain, second, never first. */
 export const HELPER_READER = (chain) => `https://ct-api.unrealized.trade/v1/rpc/${chain}?keyed=only`;
 export const SPANS = 3;
+/** The aged span's end below N: 48 h of blocks (Base 0.2 s blocks; Robinhood's own 1,641,600 is 47.7 h, read 21 Nov). */
+export const AGED = Object.freeze({ base: 864_000, robinhood: 1_641_600 });
 export const SPAN_LOGS = 10_000;
 export const TIMEOUT_MS = 10_000;
 /** A span's or a receipt's tries on one reader, and the wait before each try past the first: the kit's own (pool-index.ts
@@ -122,6 +131,15 @@ export function judge(run) {
       }
     }
     say(pools > 0, `${chain}: ${pools} pools in the newest ${SPANS * want.span} blocks`);
+    const g = c.aged;
+    const [x, y] = g?.on ?? [];
+    const both = g !== undefined && g.b === n - AGED[chain] && x && y && typeof x.last === "string" && typeof y.last === "string" && x.logs >= 0 && y.logs >= 0;
+    say(both, `${chain} aged ${g ? `${g.a}-${g.b}` : "span"}: ${AGED[chain]} blocks below N, a coin's read answered on both readers with its last block${g ? "" : " (not read)"}`);
+    if (both) {
+      const same = x.last === y.last && JSON.stringify([...x.ids].sort()) === JSON.stringify([...y.ids].sort());
+      say(same, `${chain} aged ${g.a}-${g.b}: the same last block and the same ${x.ids.length} pools of its coin on both${same ? "" : ` (${y.ids.length} on the second)`}`);
+      say(x.ms <= TIMEOUT_MS && y.ms <= TIMEOUT_MS && (x.tries ?? 1) <= TRIES && (y.tries ?? 1) <= TRIES, `${chain} aged ${g.a}-${g.b}: answered in ${x.ms} and ${y.ms} ms, try ${x.tries ?? 1} and ${y.tries ?? 1}`);
+    }
   }
   return { pass: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -208,26 +226,87 @@ export async function ask(u, body, fetchFn, sleep) {
 /** One reader's answer to the span a..b: its Initialize logs, its last block and its own head, in one batch, asked
  *  again up to TRIES times (the kit's INDEX_TRIES) while it does not hold the last block yet, as the index asks it, so a
  *  supplier a block behind that catches up does not fail a good deploy. */
-export async function readSpan(u, pm, a, b, fetchFn, sleep) {
+export async function readSpan(u, pm, a, b, fetchFn, sleep, coin = null, split = false) {
   let last = null;
+  // a coin's read (the aged span): its two filters, the coin as currency0 and as currency1, their logs as one answer
+  const word = coin === null ? null : "0x" + coin.toLowerCase().slice(2).padStart(64, "0");
+  const filters = word === null ? [[INITIALIZE]] : [[INITIALIZE, null, word], [INITIALIZE, null, null, word]];
   for (let tries = 1; tries <= TRIES; tries++) {
     try {
       const { byId, ms, limitedMs } = await ask(u, [
-        { jsonrpc: "2.0", id: 0, method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics: [INITIALIZE] }] },
+        ...filters.map((topics, k) => ({ jsonrpc: "2.0", id: k === 0 ? 0 : 10 + k, method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics }] })),
         { jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["0x" + b.toString(16), false] },
         { jsonrpc: "2.0", id: 2, method: "eth_blockNumber", params: [] },
       ], fetchFn, sleep);
-      const logs = byId.get(0)?.result;
+      const parts = filters.map((_, k) => byId.get(k === 0 ? 0 : 10 + k)?.result);
+      const logs = parts.every(Array.isArray) ? parts.flat() : undefined;
       const blk = byId.get(1)?.result;
       const head = byId.get(2)?.result;
-      last = { logs: Array.isArray(logs) ? logs.length : -1, ids: Array.isArray(logs) ? logs.map((l) => String(l?.topics?.[1]).toLowerCase()) : [], firsts: Array.isArray(logs) ? logs.slice(0, RECEIPTS).map((l) => ({ tx: String(l?.transactionHash).toLowerCase(), id: String(l?.topics?.[1]).toLowerCase() })) : [], last: typeof blk?.hash === "string" && Number(blk.number) === b ? blk.hash.toLowerCase() : null, head: typeof head === "string" ? Number(head) : null, ms, tries, ...(limitedMs > 0 ? { limitedMs } : {}) };
+      last = { logs: Array.isArray(logs) ? logs.length : -1, ids: Array.isArray(logs) ? logs.map((l) => String(l?.topics?.[1]).toLowerCase()) : [], blocks: Array.isArray(logs) ? logs.map((l) => Number(l?.blockNumber)) : [], firsts: Array.isArray(logs) ? logs.slice(0, RECEIPTS).map((l) => ({ tx: String(l?.transactionHash).toLowerCase(), id: String(l?.topics?.[1]).toLowerCase() })) : [], last: typeof blk?.hash === "string" && Number(blk.number) === b ? blk.hash.toLowerCase() : null, head: typeof head === "string" ? Number(head) : null, ms, tries, ...(limitedMs > 0 ? { limitedMs } : {}) };
     } catch (e) {
       last = { logs: -1, ids: [], last: null, head: null, ms: TIMEOUT_MS + 1, tries, error: String(e?.message ?? e).slice(0, 120) };
+      // the kit's walk: a batch that ran out of its time is never asked again at its size (pool-index.ts `ask` split)
+      if (split && (e?.name === "TimeoutError" || /timeout|timed out/i.test(String(e?.message)))) return { ...last, timedOut: true };
     }
     if (last.last !== null && last.logs >= 0) return last;
     if (tries < TRIES) await sleep(waitBefore(tries + 1));
   }
   return last;
+}
+
+/** The kit's pieces of a..b on a reader that asks a span in `k` (pool-index.ts piecesOf): newest first. */
+export const piecesOf = (a, b, k) => {
+  const size = Math.ceil((b - a + 1) / Math.max(1, k));
+  const out = [];
+  for (let hi = b; hi >= a; hi -= size) out.push([Math.max(a, hi - size + 1), hi]);
+  return out;
+};
+/** Splits of timed-out pieces one span may take on a reader (the kit's INDEX_HALVES a sync; a span here). */
+export const HALVES = 16;
+/** One reader's answer to the span a..b as the kit walks it (card evm-first-quote-reads-its-coin-at-any-age: the check
+ *  asked base.rpc.blxrbdn.com for a whole 50,000-block span, which the device never asks, and failed release 189's
+ *  deploy where the kit's own walk read the same three spans whole in 3.1 to 6.0 s, 21 Nov 16:3xZ): the span in the
+ *  venue's `parts` pieces for the reader, each its own batch (readSpan); a piece whose batch ran out of time is asked
+ *  whole of each spare reader the venue ranks, then as its two halves, never again at its size. Joined: every piece's
+ *  logs, the span's last block and head the newest piece's, its time and tries the slowest piece's; the first piece no
+ *  reader answered is the span's answer. */
+export async function readWalk(u, pm, a, b, parts, fetchFn, sleep, coin = null, spares = []) {
+  let halves = HALVES;
+  const queue = piecesOf(a, b, parts);
+  const done = [];
+  while (queue.length > 0) {
+    const [x, y] = queue.shift();
+    let r = await readSpan(u, pm, x, y, fetchFn, sleep, coin, true);
+    for (const s of r.timedOut ? spares : []) {
+      const t = await readSpan(s, pm, x, y, fetchFn, sleep, coin, true);
+      if (t.last !== null && t.logs >= 0) {
+        r = { ...t, by: s };
+        break;
+      }
+    }
+    if (r.timedOut && r.last === null && y > x && halves-- > 0) {
+      const m = x + Math.floor((y - x) / 2);
+      queue.unshift([m + 1, y], [x, m]);
+      continue;
+    }
+    done.push({ a: x, b: y, ...r });
+    if (r.last === null || r.logs < 0) return { ...r, pieces: done.map((p) => ({ a: p.a, b: p.b, ms: p.ms, tries: p.tries, ...(p.error ? { error: p.error } : {}) })) };
+  }
+  done.sort((p, q) => q.b - p.b);
+  const newest = done[0];
+  const ids = done.flatMap((p) => p.ids);
+  return {
+    logs: done.reduce((n, p) => n + p.logs, 0),
+    ids,
+    blocks: done.flatMap((p) => p.blocks ?? p.ids.map(() => null)),
+    firsts: done.flatMap((p) => p.firsts ?? []).slice(0, RECEIPTS),
+    last: newest.last,
+    head: newest.head,
+    ms: Math.max(...done.map((p) => p.ms)),
+    tries: Math.max(...done.map((p) => p.tries ?? 1)),
+    ...(done.some((p) => p.limitedMs > 0) ? { limitedMs: Math.max(...done.map((p) => p.limitedMs ?? 0)) } : {}),
+    pieces: done.map((p) => ({ a: p.a, b: p.b, ms: p.ms, tries: p.tries, ...(p.by ? { by: p.by } : {}) })),
+  };
 }
 
 /** One reader's receipts of `firsts` ({ tx, id }), in one batch as the kit asks them: each one's block and whether it
@@ -272,7 +351,9 @@ export async function read(venues, fetchFn = fetch, sleep = (ms) => new Promise(
       chains[chain] = { index: null };
       continue;
     }
-    const index = { readers: [...ix.readers], span: ix.span, margin: ix.margin, cap: ix.cap };
+    const parts = ix.parts ?? [1, 1];
+    const spares = [...(ix.spares ?? [])];
+    const index = { readers: [...ix.readers], span: ix.span, margin: ix.margin, cap: ix.cap, parts: [...parts], ...(spares.length > 0 ? { spares } : {}) };
     const preflight = {};
     for (const u of ix.readers) {
       try {
@@ -293,14 +374,17 @@ export async function read(venues, fetchFn = fetch, sleep = (ms) => new Promise(
     for (let i = 0; i < SPANS; i++) {
       const b = n - i * ix.span;
       const a = b - ix.span + 1;
-      const on = await Promise.all(ix.readers.map((u) => readSpan(u, v.poolManager, a, b, fetchFn, sleep)));
+      const on = await Promise.all(ix.readers.map((u, r) => readWalk(u, v.poolManager, a, b, parts[r], fetchFn, sleep, null, spares)));
       const firsts = on[0]?.firsts ?? [];
       const receipts = firsts.length > 0 ? await Promise.all(ix.readers.map((u) => readReceipts(u, v.poolManager, firsts, fetchFn, sleep))) : undefined;
       spans.push({ a, b, on, ...(receipts ? { txs: firsts.map((f) => f.tx), receipts } : {}) });
     }
+    // the aged span: a coin's read 48 h below N
+    const ab = n - AGED[chain];
+    const aged = { a: ab - ix.span + 1, b: ab, coin: v.weth.toLowerCase(), on: await Promise.all(ix.readers.map((u, r) => readWalk(u, v.poolManager, ab - ix.span + 1, ab, parts[r], fetchFn, sleep, v.weth, spares))) };
     // each reader's most calls a batch where it refused one for its size (the kit splits its batches to it)
     const most = Object.fromEntries(ix.readers.filter((u) => MOST.has(u)).map((u) => [u, MOST.get(u)]));
-    chains[chain] = { index, preflight, heads, spans, ...(Object.keys(most).length > 0 ? { most } : {}) };
+    chains[chain] = { index, preflight, heads, spans, aged, ...(Object.keys(most).length > 0 ? { most } : {}) };
   }
   return { at: new Date().toISOString(), chains };
 }
