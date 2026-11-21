@@ -58,6 +58,7 @@ export * from "./trade/solana/pool-buy.ts";
 export * from "./trade/solana/dlmm.ts";
 export * from "./trade/solana/cpmm.ts";
 export * from "./trade/solana/amm-v4.ts";
+export * from "./trade/solana/clmm.ts";
 // the same-chain pool deposit of one note of the ladder plan (card pool-deposits)
 export * from "./trade/solana/pool-deposit.ts";
 export * from "./trade/evm/pool-fee.ts";
