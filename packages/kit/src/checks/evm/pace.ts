@@ -112,11 +112,12 @@ export const evmProviderKey = (url: string): string => {
 
 type Ask = { readonly need: number; readonly go: () => void };
 // `queue` the trades' posts, `later` the background reads'; each first come first served
-type Lane = { tokens: number; at: number; out: number; queue: Ask[]; later: Ask[]; heldUntil: number; timer: ReturnType<typeof setTimeout> | null };
+/** `owed`: the units of the posts out, not yet answered: spent from `tokens` as each is answered. */
+type Lane = { tokens: number; at: number; out: number; owed: number; queue: Ask[]; later: Ask[]; heldUntil: number; timer: ReturnType<typeof setTimeout> | null };
 const LANES = new Map<string, Lane>();
 const laneOf = (key: string): Lane => {
   let l = LANES.get(key);
-  if (l === undefined) LANES.set(key, (l = { tokens: EVM_PACE[key]?.burst ?? 0, at: performance.now(), out: 0, queue: [], later: [], heldUntil: 0, timer: null }));
+  if (l === undefined) LANES.set(key, (l = { tokens: EVM_PACE[key]?.burst ?? 0, at: performance.now(), out: 0, owed: 0, queue: [], later: [], heldUntil: 0, timer: null }));
   return l;
 };
 /** The units in the bucket a background post of `need` waits for: its own and the provider's `keep`, never past the
@@ -188,9 +189,10 @@ function pump(l: Lane, p: EvmPace): void {
     const a = l.queue[0];
     // a trade's post waiting its turn: nothing leaves before it
     const b = a === undefined ? l.later[0] : undefined;
-    if (!room() || (a !== undefined && l.tokens < a.need) || (a === undefined && (b === undefined || l.tokens < laterNeed(p, b.need)))) break;
+    const free = l.tokens - l.owed;
+    if (!room() || (a !== undefined && free < a.need) || (a === undefined && (b === undefined || free < laterNeed(p, b.need)))) break;
     const go = a !== undefined ? l.queue.shift()! : l.later.shift()!;
-    l.tokens -= go.need;
+    l.owed += go.need;
     l.out++;
     go.go();
   }
@@ -201,7 +203,7 @@ function pump(l: Lane, p: EvmPace): void {
   // no place free: the next post given back pumps again; else the time its units take to come in
   if (want === undefined || !room()) return;
   // a post waiting its turn is work under way: its wake holds a Node process open as its fetch would (never unref'd)
-  l.timer = setTimeout(() => ((l.timer = null), pump(l, p)), Math.max(1, Math.ceil(((want - l.tokens) / p.perS) * 1000)));
+  l.timer = setTimeout(() => ((l.timer = null), pump(l, p)), Math.max(1, Math.ceil(((want - (l.tokens - l.owed)) / p.perS) * 1000)));
 }
 
 /** Whether a post of `calls` to `url` would leave now, with no wait for its turn (an unpaced provider: always); `later`:
@@ -214,7 +216,7 @@ export function evmPaceReady(url: string, calls: EvmPaceCalls, now: number = per
   if (l === undefined) return true;
   const tokens = Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS);
   const need = needOf(p, calls);
-  return l.queue.length === 0 && (!later || l.later.length === 0) && (p.inflight === undefined || l.out < p.inflight) && tokens >= (later ? laterNeed(p, need) : need);
+  return l.queue.length === 0 && (!later || l.later.length === 0) && (p.inflight === undefined || l.out < p.inflight) && tokens - l.owed >= (later ? laterNeed(p, need) : need);
 }
 
 /** How long a trade's post of `calls` to `url` would wait for its turn, in ms, if sent now after the trade's posts
@@ -226,7 +228,7 @@ export function evmPaceWaitMs(url: string, calls: EvmPaceCalls, before: readonly
   const p = EVM_PACE[key];
   if (p === undefined) return 0;
   const l = LANES.get(key);
-  const tokens = l === undefined ? p.burst : Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS);
+  const tokens = l === undefined ? p.burst : Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS) - l.owed;
   const queued = (l?.queue ?? []).reduce((n, a) => n + a.need, 0);
   const short = queued + before.reduce((n, c) => n + needOf(p, c), 0) + needOf(p, calls) - tokens;
   return short <= 0 ? 0 : (short / p.perS) * 1000;
@@ -272,6 +274,13 @@ async function paced(key: string, p: EvmPace, calls: EvmPaceCalls, signal: Abort
     if (given) return;
     given = true;
     l.out--;
+    // the post's units are spent as it is answered, the latest it can have reached the provider: until then they are
+    // held, so no post leaves on units the provider may not have counted yet (card evm-warm-tap-ends-inside-two-seconds,
+    // round F: posts held on a connection arrive together, test/evm-pace-provider-limits.test.ts)
+    const now = performance.now();
+    l.tokens = Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS) - need;
+    l.at = now;
+    l.owed -= need;
     pump(l, p);
   };
 }

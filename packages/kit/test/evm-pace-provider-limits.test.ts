@@ -38,15 +38,18 @@ const LIMITS: readonly Limit[] = [
   { name: "robinhood.rpc.blxrbdn.com", url: "https://robinhood.rpc.blxrbdn.com", refuses: bucket(9, 17) },
 ];
 
-/** `posts` posts of `size` eth_call to `url`, all asked at once through the lane, each answered `ms` after it leaves:
- *  how many calls the provider's limit refused. */
-async function drive(limit: Limit, posts: number, size: number, ms: number): Promise<number> {
+/** `posts` posts of `size` eth_call to `url`, all asked at once through the lane, each reaching the provider `path(n)`
+ *  ms after it leaves (its n-th) and answered `ms` after that: how many calls the provider's limit refused. */
+async function drive(limit: Limit, posts: number, size: number, ms: number, path: (n: number) => number = () => 0): Promise<number> {
   const judge = limit.refuses();
   const calls = Array.from({ length: size }, () => ({ method: "eth_call" }));
   let refused = 0;
+  let sent = 0;
   await Promise.all(
     Array.from({ length: posts }, async () => {
       const give = await evmPaceTake(limit.url, calls);
+      const wait = path(sent++);
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       if (judge(performance.now(), size)) refused += size;
       await new Promise((r) => setTimeout(r, ms));
       give();
@@ -68,3 +71,28 @@ for (const limit of LIMITS) {
     }),
   );
 }
+
+// Card evm-warm-tap-ends-inside-two-seconds, round F: release 189's sign live run 44924144323 (ANT warm 3: one 429 of
+// robinhood.rpc.blxrbdn.com, an eth_getBlockByNumber, 1 of 10 posts). The lane counts a call as it leaves the device;
+// the provider's bucket counts it as it arrives. A post that opens a new connection (TCP and TLS, two or three round
+// trips: 300 to 600 ms from a runner far from the provider) arrives behind the posts sent after it, and they arrive
+// together: the lane's 6 at once and 15 a second absorb 200 ms of such a lag at most (6 + 15 x 0.2 = 9). Here the
+// connection is lost 1 s in and back 600 ms later: every post sent meanwhile waits for it and arrives as it opens (one
+// connection per origin, HTTP/2 in a browser), as each post of a sustained burst behind it.
+for (const limit of LIMITS) {
+  test(`card evm-warm-tap-ends-inside-two-seconds: posts to ${limit.name} that reach it late on a new connection still arrive inside its own limit`, { timeout: 60_000 }, () =>
+    onTestClock(async () => {
+      for (const [posts, size] of [[60, 3], [120, 1]] as const) {
+        evmPaceReset();
+        const t0 = performance.now();
+        const refused = await drive(limit, posts, size, 100, () => {
+          const at = performance.now() - t0;
+          return at >= 1_000 && at < 1_600 ? 1_600 - at : 0;
+        });
+        evmPaceReset();
+        assert.equal(refused, 0, `${limit.name}: ${refused} of ${posts * size} calls in posts of ${size} past its limit as they arrive`);
+      }
+    }),
+  );
+}
+
