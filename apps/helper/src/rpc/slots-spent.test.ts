@@ -109,3 +109,25 @@ test("/v1/health's solana.trades is keyed while, fallen back off its spent key, 
   // with no other slot key set, the slot's own state
   assert.equal(tradesSlotShown({ SOLANA_TRADES_RPC_URL: A, SOLANA_RPC_URL_QUICKNODE: QN }, trades, () => false).state(), "fallback");
 });
+
+// Card helper-solana-slots-off-a-spent-key, round 2 (live run 44783106750, 20 Nov 17:26Z): a user's send or simulation
+// never gets a 429 the helper made itself while a provider still has room. The rpc slot on the holders key reads it at
+// half its second (5 a second), so past PACE_MAX_MS of that pace a burst used to answer 429 "solana pace" while the
+// public endpoint had room (QuickNode's day spent): now the overflow goes on to the next provider in the same read.
+const relayShaped = (id: number) =>
+  JSON.stringify({ jsonrpc: "2.0", id, method: id % 2 === 0 ? "simulateTransaction" : "sendTransaction", params: ["AQ==", { encoding: "base64" }] });
+
+test("the live host's shape, QuickNode's day spent: a burst of 24 device sends and simulations at once gets no 429 from the helper's own pace; the holders key keeps its half, the rest go on to the public endpoint", async () => {
+  const w = world();
+  const r = createRpc(DAY_OUT, { now: w.now, sleep: w.sleep, fetch: w.f, log: () => {}, pacer: createPacer(w.now) });
+  // the spent key is found first, so the slot reads the holders key
+  assert.equal((await r.handle("solana", "application/json", getSlot(0), "device-0")).status, 200);
+  const answers = await Promise.all(Array.from({ length: 24 }, (_, i) => r.handle("solana", "application/json", relayShaped(i + 1), `device-${i % 8}`)));
+  const statuses = answers.map((a) => a.status);
+  assert.deepEqual(statuses.filter((s) => s !== 200), [], `answers: ${statuses.join(",")}`);
+  // the holders key at most 5 in any second (its half), and the overflow on the public endpoint
+  const at = w.sent.filter((s) => s.url === HOLDERS).map((s) => s.at);
+  assert.ok(Math.max(...at.map((x) => at.filter((y) => y >= x && y < x + 1_000).length)) <= 5);
+  assert.ok(w.sent.some((s) => s.url === PUBLIC), "the overflow reached the public endpoint");
+  assert.equal(w.sent.filter((s) => s.url === QN).length, 0, "QuickNode's day is spent: not sent");
+});
