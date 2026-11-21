@@ -25,16 +25,29 @@ export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const Q = "[`\"']";
-// the Robinhood venue's index: its two readers, its span, one span a batch, one batch at once, the helper's batch cap
+// the Robinhood venue's index: its two readers, its span, one span a batch, one batch at once, the helper's batch cap.
+// The helper's route is written out, or built from the kit's one copy of the helper's origin (pace.ts EVM_HELPER_ORIGIN,
+// card evm-helper-429-waits-its-retry-after), which the minified bundle names `${<name>}/v1/rpc/...`: then that name
+// must be bound once in the bundle, to the helper's origin.
+const HELPER_ORIGIN = "https://ct-api\\.unrealized\\.trade";
 const READERS = new RegExp(
-  `readers:Object\\.freeze\\(\\[${Q}https://rpc\\.mainnet\\.chain\\.robinhood\\.com${Q},${Q}https://ct-api\\.unrealized\\.trade/v1/rpc/robinhood\\?keyed=only${Q}\\]\\),span:5e5,perBatch:1,parallel:1,margin:7119,cap:131072,batchMax:10\\}`,
+  `readers:Object\\.freeze\\(\\[${Q}https://rpc\\.mainnet\\.chain\\.robinhood\\.com${Q},${Q}(?:${HELPER_ORIGIN}|\\$\\{([\\w$]+)\\})/v1/rpc/robinhood\\?keyed=only${Q}\\]\\),span:5e5,perBatch:1,parallel:1,margin:7119,cap:131072,batchMax:10\\}`,
 );
+/** Whether `js` holds the Robinhood index's readers: written out, or through one name bound once to the helper's origin. */
+function readersIn(js) {
+  const m = READERS.exec(js);
+  if (m === null) return false;
+  if (m[1] === undefined) return true;
+  const name = m[1].replace(/\$/g, "\\$");
+  const binds = js.match(new RegExp(`(?:^|[^\\w$.])${name}=(?!=)[^,;]*`, "g")) ?? [];
+  return binds.length === 1 && new RegExp(`=${Q}${HELPER_ORIGIN}${Q}$`).test(binds[0]);
+}
 // the page's index sync under the device's one Web Lock a chain
 const LOCK = new RegExp(`\\.request\\(${Q}ct-evm-index/\\$\\{[\\w$]+\\}${Q},\\{ifAvailable:!0\\}`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
-  return { index, sha384: sha384(js), readers: READERS.test(js), lock: LOCK.test(js) };
+  return { index, sha384: sha384(js), readers: readersIn(js), lock: LOCK.test(js) };
 }
 
 export const NO_READERS = "BAD the Robinhood index does not read Robinhood's own and the helper's keyed route in 500,000-block spans, one batch of at most 10 at a time";
