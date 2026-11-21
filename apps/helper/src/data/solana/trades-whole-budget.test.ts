@@ -81,7 +81,7 @@ function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: 
   let n = 0;
   const stream = (m: string) => on!.note(m, { sig: `S${++n}`, slot: TX.result.slot, err: false, logs: TX.result.meta.logMessages });
   const reads = (url?: string) => sent.filter((s) => s.endsWith(" getTransaction") && (url === undefined || s.startsWith(`${url} `))).length;
-  return { t, stream, reads, step: (d: number) => void (ms += d), now: () => ms };
+  return { t, stream, reads, step: (d: number) => void (ms += d), to: (at: number) => void (ms = Math.max(ms, at)), now: () => ms };
 }
 
 test("card sol-meteora-tape-inside-rpc-budget: a burst of Meteora stream trades sends at most the budget's whole reads, on their own providers only", async () => {
@@ -298,5 +298,67 @@ test("card helper-sol-tape-checks-hold: a stream trade's whole read is sent WHOL
   go();
   await settle();
   assert.equal(c.reads(WHOLE), 1);
+  c.t.stop();
+});
+
+// Card helper-sol-tape-first-answer-chain: round 3 cut a lone busy coin at its 7th whole read of a second though no quiet coin
+// waited for the 3 reserved places: coin 7R4MP6VX7n3R (a pump coin routing ~70% of its transactions through Meteora DLMM, bursts
+// of 7+ in one second) answered src vendor on its first answer at 8713b1ca3 in 2 of 3 local runs (never at 19a264d25), and
+// solana-tape-rows-at-first-answer went red. A busy coin's read past its share now waits for the next second's place (at most
+// WHOLE_BUSY_WAIT_MS), and is cut only past that bound or past its own 20 a 10 s. A busy wait is any wholeWait that is neither
+// the read's own (WHOLE_READ_WAIT_MS) nor the null read's (WHOLE_NULL_WAIT_MS, never asked here: every read answers).
+const busyWait = (ms: number) => ms !== T.WHOLE_READ_WAIT_MS;
+
+test("card helper-sol-tape-first-answer-chain: a lone busy coin's 8 Meteora trades in one second are all read whole, the late ones in the next second, and its first answer is its chain tape (red at 9905e1da1: the 8th cut as busy, src vendor)", async () => {
+  const vendor = { status: 200, body: JSON.stringify([{ t_ms: TS * 1000, side: "b", usd: "1", amt: "1", trader: null, tx: "V1" }]), src: "geckoterminal", asOfMs: TS * 1000 };
+  const c: ReturnType<typeof chain> = chain([TTW], { tape: async () => vendor, wholeWait: async (ms) => void (busyWait(ms) && c.to(TS * 1000 + ms)) });
+  assert.equal((await c.t.trades(TTW, 50)).status, 200);
+  for (let i = 0; i < 8; i++) c.stream(TTW);
+  await settle();
+  assert.equal(c.reads(WHOLE), 8, "every one read whole");
+  const va = await c.t.trades(TTW, 50);
+  const a = JSON.parse(va.body) as { src: string; trades: unknown[] };
+  assert.equal(a.src, "chain", "its own tape at its first answer");
+  assert.equal(a.trades.length, 8);
+  assert.doesNotMatch(va.timing ?? "", /sol-whole-cut/, "no cut");
+  c.t.stop();
+});
+
+test("card helper-sol-tape-first-answer-chain: a quiet coin arriving in a busy coin's burst second still takes its reserved place at once, while the busy coin's excess waits", async () => {
+  const vendor = { status: 200, body: JSON.stringify([{ t_ms: TS * 1000, side: "b", usd: "1", amt: "1", trader: null, tx: "V1" }]), src: "geckoterminal", asOfMs: TS * 1000 };
+  const B = "8HuYsEpBS2WZACBCbAKcoh8XmbNYYqRjoJrCqC3Cmoon";
+  const held: (() => void)[] = [];
+  const waits: number[] = [];
+  const c = chain([TTW, B], { tape: async () => vendor, wholeWait: (ms) => (busyWait(ms) ? (waits.push(ms), new Promise<void>((r) => held.push(r))) : Promise.resolve()) });
+  for (const m of [TTW, B]) assert.equal((await c.t.trades(m, 50)).status, 200);
+  for (let i = 0; i < 10; i++) c.stream(B);
+  c.stream(TTW);
+  await settle();
+  assert.equal(c.reads(WHOLE), 8, "B's 7 and the quiet coin's one, the second's 8th place, at once");
+  assert.equal(held.length, 3, "B's other 3 wait");
+  assert.deepEqual(waits, [1_000, 1_000, 1_000], "for the next second's place");
+  assert.doesNotMatch((await c.t.trades(TTW, 50)).timing ?? "", /sol-whole-cut/);
+  c.step(1_000);
+  for (const r of held) r();
+  await settle();
+  assert.equal(c.reads(WHOLE), 11, "B's 3 read in the next second");
+  c.t.stop();
+});
+
+test("card helper-sol-tape-first-answer-chain: a read whose wait would pass WHOLE_BUSY_WAIT_MS is cut as busy, and a coin past its own 20 a 10 s is still cut as the coin's", async () => {
+  const vendor = { status: 200, body: JSON.stringify([{ t_ms: TS * 1000, side: "b", usd: "1", amt: "1", trader: null, tx: "V1" }]), src: "geckoterminal", asOfMs: TS * 1000 };
+  const c: ReturnType<typeof chain> = chain([TTW], { tape: async () => vendor, wholeWait: async (ms) => void (busyWait(ms) && c.to(TS * 1000 + ms)) });
+  assert.equal((await c.t.trades(TTW, 50)).status, 200);
+  // 15 in one second: 7 now, 7 in the next second, the 15th has waited its second and finds no place again
+  for (let i = 0; i < 15; i++) c.stream(TTW);
+  await settle();
+  assert.equal(c.reads(WHOLE), 14);
+  assert.match((await c.t.trades(TTW, 50)).timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago: past the 7 a second busy coins share"/);
+  // 6 more read in the second after (14 and 6 are its 20 a 10 s), the 7th cut as the coin's
+  c.step(1_001);
+  for (let i = 0; i < 7; i++) c.stream(TTW);
+  await settle();
+  assert.equal(c.reads(WHOLE), T.WHOLE_COIN_MAX);
+  assert.match((await c.t.trades(TTW, 50)).timing ?? "", /past the coin's own 20 a 10 s/);
   c.t.stop();
 });
