@@ -85,7 +85,7 @@ export const MUTANTS = [
   [QUOTE, "  shortMax += 2 * jobs.length;\n  // a scan the second carries whole", "  // a scan the second carries whole", R, "card rh-cold-quote: a cold Base scan whose first answers each of its starting requests once"],
   [QUOTE, "        if (shorts > shortMax) throw new ScanStop(", "        if (false) throw new ScanStop(", R, "card rh-cold-quote: a first that answers -32602 to every getLogs"],
   [QUOTE, "if (e instanceof BadAnswer) throw new ScanAnswered(", "if (false) throw new ScanAnswered(", R, "card rh-cold-quote: a first that answers HTTP 413"],
-  [QUOTE, "throw res.status >= 500 ? new Error(m) : new BadAnswer(m);", "throw new Error(m);", R, "card rh-cold-quote: a first that answers HTTP 413"],
+  [QUOTE, "if (text === null || !lagBody(text)) throw new BadAnswer(m);", "if (text === null || !lagBody(text)) throw new Error(m);", R, "card rh-cold-quote: a first that answers HTTP 413"],
   [QUOTE, "throw new ScanStop(\"too_many_pools\",", "throw new EvmQuoteError(\"too_many_pools\",", R, "card rh-cold-quote: one block holding more pools"],
   [QUOTE, "} else if (top && typeof h?.hash !== \"string\") return null;", "} else if (top && typeof h?.hash !== \"string\") return filters.map(() => undefined);", R, "SP3 "],
   [QUOTE, "const at = { blockHash: hash, requireCanonical: true };", "const at = { blockHash: hash };", Q, "Q1 "],
@@ -184,6 +184,12 @@ export const MUTANTS = [
   [QUOTE, "    const ixs = indexScanOf(chain, kind, c, weth, floor);\n", "    const ixs = undefined as ReturnType<typeof indexScanOf>;\n", R, "F10w "],
   [QUOTE, "if (ix === undefined || ix.through < floor) return undefined;", "if (ix === undefined || ix.through < floor || kind === \"markets\") return undefined;", R, "F10 "],
   [QUOTE, "  const n = sync?.coversThrough;", "  const n = sync?.coversThrough ?? 5_000_000;", R, "F10p "],
+  // card evm-first-quote-reads-its-coin-at-any-age: a coin's read past a stale whole index not read; a whole index that
+  // leaves out its pool served
+  [QUOTE, "  if (own !== undefined && (ix === undefined || own.through > ix.through)) return own;", "", R, "COINQ "],
+  [QUOTE, "  if (!coinsAgree(chain, byCurrency, n)) return false;\n  INDEXES.set(", "  INDEXES.set(", R, "COINQ "],
+  [QUOTE, "    return v.pools.every((p) => ids.has(poolId(p)));", "    return true;", R, "COINQ "],
+  [QUOTE, "    if (!coinsAgree(chain, held.byCurrency, n)) return false;\n", "", R, "COINQ "],
   // card evm-index-kept-at-the-head: an index synced on to the head serves a new coin's cold buy with no getLogs
   [QUOTE, "    const ixs = indexScanOf(chain, kind, c, weth, floor);\n", "    const ixs = undefined as ReturnType<typeof indexScanOf>;\n", R, "F10k "],
   [QUOTE, "  if (held !== undefined && held.through >= n) return held.through === n && held.from === ix.from;", "  if (held !== undefined) return held.through === n && held.from === ix.from;", R, "F10k "],
@@ -314,12 +320,12 @@ export const MUTANTS = [
   [QUOTE, "!reverted(a) && /historical state", "/historical state", R, "LH2b "],
   [QUOTE, "  return e?.code === 3 || (typeof e?.message", "  return (typeof e?.message", R, "LH2b "],
   [QUOTE, " || (typeof e?.message === \"string\" && /^execution reverted/i.test(e.message));", ";", R, "LH2b "],
-  [QUOTE, "    if (!res.ok) {", "    if (false) {", R, "LH3 "],
+  [QUOTE, "    if (!res.ok && lagText === null) {", "    if (false) {", R, "LH3 "],
   // the re-review of the fold: drpc's no-longer answer, a revert never a state or a limit, a refused answer's body, a
   // not-yet answer untimed, a compute-units limit
   [QUOTE, "|^unknown state\\b/i", "/i", R, "LH2b "],
   [QUOTE, "|^unknown state\\b/i", "/i", R, "RQ1 "],
-  [QUOTE, "(!reverted(a) && typeof o?.error?.message", "(typeof o?.error?.message", R, "RQ2 "],
+  [QUOTE, "return !reverted(a) && typeof m === \"string\" && evmNotYetWords(m);", "return typeof m === \"string\" && evmNotYetWords(m);", R, "RQ2 "],
   [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ3 "],
   [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ4 "],
   [QUOTE, "      await res.body?.cancel().catch(() => {});\n", "", R, "LQ3 "],
@@ -508,6 +514,10 @@ export const MUTANTS = [
   // card evm-unreachable-moves-on: a request that made no connection goes to the next at once while one is left
   [QUOTE, " || i === 3 || gate?.spare?.() === true) {", " || i === 3 || (e instanceof RateLimited && gate?.spare?.() === true)) {", R, "FU1 "],
   [QUOTE, "      if (i < 3 && Array.isArray(out) && out.some(limited)) throw", "      if (false) throw", R, "T7 "],
+  // card evm-lag-answer-read-again: a not-yet answer goes to the next provider at once while one is left (LG5); the last
+  // provider left is asked again (LG3)
+  [QUOTE, "    if (gate?.spare?.() === true) throw new EvmQuoteError(\"rpc_error\", \"a provider does not hold the block yet\");\n", "", R, "LG5 "],
+  [QUOTE, "    if (gate?.spare?.() === true) throw new EvmQuoteError(\"rpc_error\", \"a provider does not hold the block yet\");", "    if (true) throw new EvmQuoteError(\"rpc_error\", \"a provider does not hold the block yet\");", R, "LG3 "],
   [QUOTE, "    GATED.set(f as unknown as EvmRpc, (calls, gate) =>\n      g(() => {", "    GATED.set(f as unknown as EvmRpc, (calls, gate) =>\n      ((x: () => Promise<readonly unknown[]>) => x())(() => {", R, "T8 "],
   // each read's own gas (card evm-quote-read-gas-starve): the code at Multicall3 and the call's gas, success word 2,
   // the read again alone, the agreement on it, and the buy's own route refused by name

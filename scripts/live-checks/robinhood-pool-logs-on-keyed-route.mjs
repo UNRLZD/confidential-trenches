@@ -17,6 +17,11 @@
 //     (Robinhood's own RPC logs 0x0 on every log, apps/helper/src/data/evm/swaps.ts Log), and where both give one the
 //     two are the same;
 //   - the route's Server-Timing names the keyed name that answered (rpc;desc="<NAME>"), never "none".
+// Robinhood's own RPC answers one eth_getLogs over at most its cap: live run 44930704040 (21 Nov, helper 8713b1ca3) read
+// the whole history, 11,625,840 blocks, refused -32602 "query spans 11625818 blocks (108420674 to 120046491), but only
+// 10000000 are allowed", the pool's deploy block more than 10M blocks back for good. A refusal that names its cap is
+// read again in pages of that cap, in block order, and their logs joined (ownLogs); a page's own refusal or no-answer is
+// that side's, as before.
 // Every read goes through provider-answer.mjs's rpcAnswer, the route's with no Origin (the helper answers it so, read 13
 // Nov 16:3xZ): with the page's Origin a 5xx is a passing fault, so the route's upstream would never be judged. A no-answer
 // (a 429, a failed fetch, a body that is no JSON-RPC answer) after its one retry is INCONCLUSIVE, never PASS.
@@ -37,6 +42,8 @@ export const POOL = "0x9306359433127c4f3be426f6faeb00a3c41f66db";
 export const FROM = 108_420_674;
 export const RECENT = 100_000;
 const TIMEOUT_MS = 30_000;
+/** The cap Robinhood's own RPC names in its refusal of a wider eth_getLogs (-32602 "... but only N are allowed"). */
+const CAP = /but only (\d{1,12}) are allowed/i;
 
 const hex = (n) => `0x${n.toString(16)}`;
 /** One run: the head on Robinhood's own RPC, then each span on the route and on Robinhood's own. */
@@ -48,9 +55,29 @@ export async function read(base = BASE, fetchFn = fetch) {
   const spans = [];
   for (const [name, from] of [[`newest ${RECENT}`, h - RECENT + 1], ["whole history", FROM]]) {
     const params = [{ address: POOL, fromBlock: hex(from), toBlock: hex(h) }];
-    spans.push({ name, from, to: h, route: await rpcAnswer(route, "eth_getLogs", params, { fetchFn, timeoutMs: TIMEOUT_MS, keep: ["server-timing"] }), own: await rpcAnswer(OWN, "eth_getLogs", params, { fetchFn, timeoutMs: TIMEOUT_MS }) });
+    spans.push({ name, from, to: h, route: await rpcAnswer(route, "eth_getLogs", params, { fetchFn, timeoutMs: TIMEOUT_MS, keep: ["server-timing"] }), own: await ownLogs(from, h, fetchFn) });
   }
   return { base, head: h, spans };
+}
+
+/** The pool's logs over from..to on Robinhood's own RPC: one read, and where it refuses the span naming its cap, pages
+ *  of that cap in block order, their logs joined, with `capped` kept ({ refusal, cap, pages }) for the replay. */
+export async function ownLogs(from, to, fetchFn = fetch) {
+  const ask = (a, b) => rpcAnswer(OWN, "eth_getLogs", [{ address: POOL, fromBlock: hex(a), toBlock: hex(b) }], { fetchFn, timeoutMs: TIMEOUT_MS });
+  const whole = await ask(from, to);
+  const m = whole.error !== undefined ? CAP.exec(String(whole.error?.message ?? "")) : null;
+  const cap = m === null ? 0 : Number(m[1]);
+  if (!(cap > 0 && cap < to - from + 1)) return whole;
+  const result = [];
+  const pages = [];
+  for (let a = from; a <= to; a += cap) {
+    const b = Math.min(a + cap - 1, to);
+    const p = await ask(a, b);
+    pages.push([a, b]);
+    if (!Array.isArray(p.result)) return { ...p, capped: { refusal: whole.error, cap, pages } };
+    result.push(...p.result);
+  }
+  return { result, capped: { refusal: whole.error, cap, pages } };
 }
 
 const sorted = (v) => (Array.isArray(v) ? v.map(sorted) : v !== null && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted(v[k])])) : v);
@@ -75,7 +102,7 @@ export function logsDiffer(route, own) {
   }
   return null;
 }
-const said = (a) => (a?.noAnswer !== undefined ? `no answer (${a.noAnswer})` : a?.error !== undefined ? `error ${JSON.stringify(a.error).slice(0, 120)}` : Array.isArray(a?.result) ? `${a.result.length} log(s)` : `no log list (${JSON.stringify(a?.result).slice(0, 60)})`);
+const said = (a) => (a?.noAnswer !== undefined ? `no answer (${a.noAnswer})` : a?.error !== undefined ? `error ${JSON.stringify(a.error).slice(0, 120)}` : Array.isArray(a?.result) ? `${a.result.length} log(s)` : `no log list (${JSON.stringify(a?.result).slice(0, 60)})`) + (a?.capped ? ` in ${a.capped.pages.length} page(s) of its cap ${a.capped.cap}` : "");
 
 /** The check on one recorded run: PASS, FAIL, or INCONCLUSIVE when a side gave no answer and nothing else failed. */
 export function judge({ spans }) {

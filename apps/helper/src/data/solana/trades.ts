@@ -89,12 +89,39 @@ export const WHOLE_WINDOW_MS = 10_000;
 /** How long a coin whose Meteora trade went unread (past the budget) is served its top pool's tape (trades): a minute,
  *  so a coin at the budget's edge never flips between the two tapes read to read. */
 export const CUT_KEEP_MS = 60_000;
+/** Card helper-sol-tape-checks-hold, round 3: the places of each second (of WHOLE_PER_S) a busy coin (WHOLE_QUIET_MAX or
+ *  more whole reads in its WHOLE_WINDOW_MS) may not take, kept for the quiet coins. Live run 44901581973 (helper
+ *  4e03fcbac, 21 Nov 12:0xZ): a DBC coin trading 3 times in 136 s was cut "past every coin's 10 a second" each time,
+ *  while 10 busy DLMM and DAMM v2 coins past their own 20 a 10 s kept every second full. [design: 3 of 10, a quiet coin's
+ *  trade a second for three coins at once; the busy coins keep 7 a second, each still at most WHOLE_COIN_MAX a window,
+ *  and the second's total stays WHOLE_PER_S] */
+export const WHOLE_QUIET_ROOM = 3;
+/** A coin with this many whole reads in its WHOLE_WINDOW_MS is busy: past one every two seconds. [design: 5, a
+ *  quarter of WHOLE_COIN_MAX] */
+export const WHOLE_QUIET_MAX = 5;
+/** How long after a whole read publicnode answered null it is asked once more, in a place of its own (card
+ *  helper-sol-tape-checks-hold, round 3). Read from the box 21 Nov 12:3xZ: a DBC or DLMM transaction asked the moment the
+ *  public websocket named it (confirmed) answered null 36 times of 40, and all 36 answered a second later; the helper
+ *  logged 71 of 156 whole reads unanswered in a minute. [design: 1 s, that read] */
+export const WHOLE_NULL_WAIT_MS = 1_000;
+/** How long after the stream names a Meteora transaction its whole read is sent (its place in the budget taken when it
+ *  arrives). Read from the box 21 Nov 12:5xZ, fresh DBC and DLMM transactions asked of publicnode once each: at once 2
+ *  answered of 10, at 150 ms 31 of 33, at 250 ms 42 of 42 over two runs, at 400 ms 32 of 32. A read sent at once is
+ *  mostly null and spends a second place (WHOLE_NULL_WAIT_MS). [design: 250 ms, that read] */
+export const WHOLE_READ_WAIT_MS = 250;
+/** Card helper-sol-tape-first-answer-chain: how long a busy coin's read past its share waits for the next second's place
+ *  before it is cut. Round 3 cut it at once, though no quiet coin waited for the reserved places: coin 7R4MP6VX7n3R (a pump
+ *  coin routing ~70% of its transactions through Meteora DLMM, bursts of 7+ in one second) answered src vendor on its
+ *  first answer in 2 of 3 local runs at 8713b1ca3. A place frees at most a second after the second's oldest, so one
+ *  wait is all a read gets. [design: 1 s, the second] */
+export const WHOLE_BUSY_WAIT_MS = 1_000;
 /** Card helper-sol-tape-checks-hold: why a coin's trade went unread, named in its cut (Server-Timing sol-whole-cut), so a
  *  reader tells a busy coin past its own share (the design's bound past two trades a second) from every coin's second
  *  spent or its provider failing: live run 44721792317 named one DBC coin's cut 13 times as a starved budget. No comma:
  *  the entry ends at one. */
 const CUT_WHY = {
   coin: `past the coin's own ${WHOLE_COIN_MAX} a ${WHOLE_WINDOW_MS / 1_000} s`,
+  busy: `past the ${WHOLE_PER_S - WHOLE_QUIET_ROOM} a second busy coins share`,
   all: `past every coin's ${WHOLE_PER_S} a second`,
   held: "its provider held",
   unanswered: "its read unanswered",
@@ -631,6 +658,9 @@ export function createSolanaTrades(deps: {
   rpcs?: readonly string[];
   /** The whole reads' providers (WHOLE_RPCS), a test's own. */
   wholeRpcs?: readonly string[];
+  /** The waits before a whole read (WHOLE_READ_WAIT_MS) and before a null one is asked again (WHOLE_NULL_WAIT_MS), a
+   *  test's own. */
+  wholeWait?: (ms: number) => Promise<void>;
   wsUrl?: string;
   source?: (on: SourceEvents) => Source;
   /** The token's top pool's newest trades (token.ts tape: a JSON array of tape rows, newest first), served while this
@@ -866,6 +896,7 @@ export function createSolanaTrades(deps: {
   const wholeSent: number[] = [];
   let wholeHeldTo = 0;
   const wholeCount = { sent: 0, over: 0, unread: 0 };
+  const wholeWait = deps.wholeWait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref?.()));
   const wholeLane = { urls: deps.wholeRpcs ?? WHOLE_RPCS, throttled: (s: number) => void (wholeHeldTo = now() + s * 1_000) };
   /** Whether a stream transaction of `e` may be read whole now: a place in the second's WHOLE_PER_S (every coin) and in
    *  the coin's WHOLE_COIN_MAX a WHOLE_WINDOW_MS, taken when there is one (null); else what it is past (CUT_WHY). */
@@ -877,9 +908,25 @@ export function createSolanaTrades(deps: {
     while (mine.length > 0 && mine[0]! <= t - WHOLE_WINDOW_MS) mine.shift();
     if (mine.length >= WHOLE_COIN_MAX) return "coin";
     if (wholeSent.length >= WHOLE_PER_S) return "all";
+    // round 3: a busy coin leaves the second's last WHOLE_QUIET_ROOM places to the quiet ones
+    if (mine.length >= WHOLE_QUIET_MAX && wholeSent.length >= WHOLE_PER_S - WHOLE_QUIET_ROOM) return "busy";
     wholeSent.push(t);
     mine.push(t);
     return null;
+  }
+
+  /** wholeTake, but a read past the busy share waits (wholeWait) for the second's oldest place to free and asks again, at
+   *  most WHOLE_BUSY_WAIT_MS in all; a quiet coin and every other cause answer at once. */
+  async function wholePlace(e: Entry): Promise<CutWhy | null> {
+    let waited = 0;
+    for (;;) {
+      const why = wholeTake(e);
+      if (why !== "busy") return why;
+      const wait = wholeSent[0]! + 1_000 - now();
+      if (waited + wait > WHOLE_BUSY_WAIT_MS) return why;
+      waited += wait;
+      await wholeWait(wait);
+    }
   }
 
   /** A stream transaction's trades: from its log, or its inner instructions when the log was cut; each dated by its
@@ -892,13 +939,22 @@ export function createSolanaTrades(deps: {
     // unanswered, the log's own trades are held and the coin's tape names its reach from this transaction (cut)
     if (!f.truncated) {
       const e = entries.get(mint);
-      const past = e === undefined ? "all" : wholeTake(e);
+      const past = e === undefined ? "all" : await wholePlace(e);
       const ok = e !== undefined && past === null;
-      const w = ok ? ((await rpc("getTransaction", [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }], wholeLane).catch(() => null)) as Record<string, unknown> | null) : null;
-      if (ok) wholeCount.sent++;
+      const whole = async () => (wholeCount.sent++, (await rpc("getTransaction", [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }], wholeLane).catch(() => null)) as Record<string, unknown> | null);
+      let w = ok ? (await wholeWait(WHOLE_READ_WAIT_MS), await whole()) : null;
+      let why: CutWhy = past ?? "unanswered";
+      // round 3: a read before publicnode holds the transaction answers null; asked once more WHOLE_NULL_WAIT_MS on, in a
+      // place of its own (a 429 holds the lane, so its second ask is cut as held)
+      if (ok && (w === null || w === undefined)) {
+        await wholeWait(WHOLE_NULL_WAIT_MS);
+        const again = await wholePlace(e!);
+        if (again === null) w = await whole();
+        else why = again;
+      }
       if (w === null || w === undefined) {
-        wholeCount[ok ? "unread" : "over"]++;
-        if (e !== undefined) e.cut = { at: now(), to: Math.max(e.cut?.to ?? 0, (Math.floor(now() / 1_000) + 1) * 1_000), why: past ?? "unanswered" };
+        wholeCount[why === "unanswered" ? "unread" : "over"]++;
+        if (e !== undefined) e.cut = { at: now(), to: Math.max(e.cut?.to ?? 0, (Math.floor(now() / 1_000) + 1) * 1_000), why };
         return dated(await forMint(mint, f.trades), slot, null);
       }
       return dated(await forMint(mint, cutTrades(f, w)), slot, blockTime(w));

@@ -163,6 +163,7 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
       c.calls += Array.isArray(b) ? b.length : b === null ? 0 : 1;
       logs = (Array.isArray(b) ? b : [b]).some((x) => x?.method === "eth_getLogs");
       methods = (Array.isArray(b) ? b : [b]).map((x) => String(x?.method ?? "?"));
+      req.calls = Array.isArray(b) ? b.length : 1;
     } catch {
       c.calls++;
     }

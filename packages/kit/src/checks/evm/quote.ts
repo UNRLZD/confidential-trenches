@@ -1303,21 +1303,32 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Pro
 /** ask, up to 3 more times FRESH_RETRY_MS, twice and three times that apart while an answer says the provider does not
  *  hold the block yet: a provider behind a load balancer can send a call to a node one block behind the one that gave
  *  the head ("block not found: canonical hash", base-rpc.publicnode.com, 2026-11-03 19:09Z; "Unknown state. First
- *  available …", robinhood.drpc.org, 20:30Z, and on 8 of one quote's batches 2026-11-04 06:52Z). */
+ *  available …", robinhood.drpc.org, 20:30Z, and on 8 of one quote's batches 2026-11-04 06:52Z).
+ *  The same rule as ask's for a throttle: while agreeing has another provider left (the gate's `spare`), a not-yet
+ *  answer, under a 200 or a 4xx, goes there at once; only the last provider left is asked again (card
+ *  evm-lag-answer-read-again: merge queue run 44936343596 timed warm Base quotes at p95 2,121 and 2,102 ms, a lagging
+ *  provider's 4xx not-yet answers asked again 0.25, 0.5 and 0.75 s on where they had moved on as failures before). */
 async function askAt(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Promise<readonly unknown[]> {
   for (let i = 0; ; i++) {
     const out = await ask(rpc, calls, gate);
     if (!out.some(notYet) || i === 3) return out;
+    if (gate?.spare?.() === true) throw new EvmQuoteError("rpc_error", "a provider does not hold the block yet");
     await new Promise((r) => setTimeout(r, FRESH_RETRY_MS * (i + 1)));
   }
 }
 const FRESH_RETRY_MS = 250;
 /** An answer for a block the provider does not hold yet (askAt's): no result, or an error naming the block or its
  *  state; never a revert, whose string is the called contract's own. */
-const notYet = (a: unknown) => {
-  const o = a as { result?: unknown; error?: { message?: unknown } } | null;
-  return o?.result === null || (!reverted(a) && typeof o?.error?.message === "string" && /(block|header).*not found|unknown block|unknown state/i.test(o.error.message));
+const notYet = (a: unknown) => (a as { result?: unknown } | null)?.result === null || notYetError(a);
+/** A not-yet answer's error (notYet), whatever HTTP status it came with (card evm-lag-answer-read-again). */
+const notYetError = (a: unknown) => {
+  const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
+  return !reverted(a) && typeof m === "string" && evmNotYetWords(m);
 };
+/** Words of a provider's answer that it does not hold the block or its state yet: "block not found: canonical hash",
+ *  "header not found", "unknown block", "Unknown state. First available state is 1" (askAt's notYet). One copy, read by
+ *  the live checks too. */
+export const evmNotYetWords = (m: string): boolean => /(block|header).*not found|unknown block|unknown state/i.test(m);
 
 /** A block header from a provider's answer: number, hash, timestamp and base fee (null when it gives none), or a
  *  refusal. */
@@ -1857,6 +1868,7 @@ export function evmPoolIndexUse(chain: EvmPoolChain, sync: { readonly index: { r
   const held = INDEXES.get(chain);
   if (held !== undefined && held.through >= n) return held.through === n && held.from === ix.from;
   if (held !== undefined && held.from === ix.from && held.count === sync.pools.length && sync.pools.every((p) => held.ids.has(indexedName(p)))) {
+    if (!coinsAgree(chain, held.byCurrency, n)) return false;
     held.through = n;
     return true;
   }
@@ -1869,20 +1881,68 @@ export function evmPoolIndexUse(chain: EvmPoolChain, sync: { readonly index: { r
     if (k === null) continue;
     for (const c of new Set([k.currency0, k.currency1])) append(byCurrency, c, k);
   }
+  if (!coinsAgree(chain, byCurrency, n)) return false;
   INDEXES.set(chain, { from: ix.from, through: n, byCurrency, count: sync.pools.length, ids });
   return true;
+}
+/** A whole index to N that leaves out a pool a served coin read proved to its N at or below it: the two proofs are
+ *  apart, which no honest pair of readers gives, so neither is served (every coin read of the chain is dropped and the
+ *  index refused): the quote reads those blocks by its own scan. */
+function coinsAgree(chain: EvmPoolChain, byCurrency: ReadonlyMap<string, readonly EvmPoolKey[]>, n: number): boolean {
+  const mine = [...COINS].filter(([k, v]) => k.startsWith(`${chain}:`) && v.through <= n);
+  const ok = mine.every(([k, v]) => {
+    const ids = new Set((byCurrency.get(k.slice(chain.length + 1)) ?? []).map(poolId));
+    return v.pools.every((p) => ids.has(poolId(p)));
+  });
+  if (!ok) for (const k of [...COINS.keys()]) if (k.startsWith(`${chain}:`)) COINS.delete(k);
+  return ok;
 }
 /** The pools of `token` the chain's served index holds (every pool of the PoolManager to its N that pairs the token),
  *  or null where no index is served: what a buy may ask a quote of, never a pool the quote then trusts unread (each is
  *  read at the agreed block on both providers like any candidate). */
 export function evmPoolIndexPools(chain: EvmPoolChain, token: string): readonly EvmPoolKey[] | null {
+  if (typeof token !== "string") return null;
+  const ix = coverOf(chain, "all", lower(token));
+  return ix === undefined ? null : [...ix.pools];
+}
+// A coin's read, served (pool-index.ts evmPoolCoinSync, card evm-first-quote-reads-its-coin-at-any-age): the coin's pools
+// (its "all") and each X's markets, every one to its N, proven on the index's two readers like the whole index. A quote
+// reads a currency from it where it covers that currency and kind past the whole index's N: a fresh device on a stale
+// snapshot reads its coin's 864,000 Base blocks, not every pool's. Keyed by chain and currency; a newer read replaces it.
+const COINS = new Map<string, { kind: ScanKind; from: number; through: number; pools: EvmPoolKey[] }>();
+/** The served cover of currency `c` of `kind` on `chain`: the whole index's or a coin read's, the one with the higher
+ *  N; the whole index where they tie. */
+function coverOf(chain: EvmPoolChain, kind: ScanKind, c: string): { from: number; through: number; pools: EvmPoolKey[] } | undefined {
   const ix = INDEXES.get(chain);
-  return ix === undefined || typeof token !== "string" ? null : [...(ix.byCurrency.get(lower(token)) ?? [])];
+  const coin = COINS.get(`${chain}:${c}`);
+  const own = coin !== undefined && (kind === "markets" || coin.kind === "all") ? coin : undefined;
+  if (own !== undefined && (ix === undefined || own.through > ix.through)) return own;
+  return ix === undefined ? undefined : { from: ix.from, through: ix.through, pools: ix.byCurrency.get(c) ?? [] };
+}
+/** Serves `read`, a whole coin read of `chain` (pool-index.ts evmPoolCoinSync: coversThrough N, its Xs and every pool of
+ *  its sets to N): the coin "all", each X "markets". A read that is not whole, of a chain with no PoolManager pinned, or
+ *  not newer than what is held changes nothing. Returns whether it is served. */
+export function evmPoolCoinUse(chain: EvmPoolChain, read: { readonly token: string; readonly xs: readonly string[] | null; readonly from: number | null; readonly coversThrough: number | null; readonly pools: readonly { readonly key: EvmPoolKey }[] | null }): boolean {
+  const all = evmPoolVenues();
+  if (typeof chain !== "string" || !Object.hasOwn(all, chain) || venue(chain).poolManager === undefined) return false;
+  const { token, xs, from, coversThrough: n, pools } = read ?? ({} as typeof read);
+  if (typeof token !== "string" || !Array.isArray(xs) || !Array.isArray(pools) || !Number.isSafeInteger(from) || !Number.isSafeInteger(n) || from! < 0 || n! < from!) return false;
+  const t = lower(token);
+  const keys = pools.map((p) => (typeof (p?.key as { currency0?: unknown } | undefined)?.currency0 === "string" ? keyOf(p.key, (p.key as { currency0: string }).currency0) : null)).filter((k): k is EvmPoolKey => k !== null);
+  const ofC = (c: string) => keys.filter((k) => k.currency0 === c || k.currency1 === c);
+  for (const [c, kind] of [[t, "all"], ...xs.map((x) => [lower(x), "markets"])] as [string, ScanKind][]) {
+    const held = COINS.get(`${chain}:${c}`);
+    if (held !== undefined && held.through >= n! && (held.kind === "all" || kind === "markets")) continue;
+    COINS.set(`${chain}:${c}`, { kind, from: from!, through: n!, pools: ofC(c) });
+  }
+  return true;
 }
 /** For the tests (not in the kit's index): the chain's served index as held, or undefined. */
 export const evmPoolIndexHeld = (chain: EvmPoolChain): { readonly from: number; readonly through: number } | undefined => INDEXES.get(chain);
+/** For the tests (not in the kit's index): what a scan of `c` of `kind` reads from the served index or coin read. */
+export const evmPoolCoverOf = (chain: EvmPoolChain, kind: ScanKind, c: string, weth: string, floor = 0) => indexScanOf(chain, kind, lower(c), lower(weth), floor);
 /** For the tests: forgets every chain's index (not in the kit's index). */
-export const evmPoolIndexReset = (): void => (INDEXES.clear(), SERVED.clear());
+export const evmPoolIndexReset = (): void => (INDEXES.clear(), SERVED.clear(), COINS.clear());
 /** For the tests (not in the kit's index): `rpc` reads and keeps the tail `as` does (one chain's history behind two rpc
  *  objects, a provider that turns hostile between two quotes). */
 export const evmScanTailAlias = (rpc: EvmRpc, as: EvmRpc): void => void SOURCE_OF.set(rpc, SOURCE_OF.get(as) ?? as);
@@ -1937,9 +1997,9 @@ const servedOf = async (chain: EvmPoolChain, kind: ScanKind, c: string, weth: st
 /** The scan of currency `c` the index holds, from `floor` (the scan's oldest block) to its N, kept as a scan keeps its
  *  own: none where no index covers past `floor`. */
 const indexScanOf = (chain: EvmPoolChain, kind: ScanKind, c: string, weth: string, floor: number): { spans: Spans; pools: EvmPoolKey[] } | undefined => {
-  const ix = INDEXES.get(chain);
+  const ix = coverOf(chain, kind, c);
   if (ix === undefined || ix.through < floor) return undefined;
-  const pools = (ix.byCurrency.get(c) ?? []).filter((k) => {
+  const pools = ix.pools.filter((k) => {
     const other = k.currency0 === c ? k.currency1 : k.currency0;
     return kind === "all" || other === NATIVE || other === weth;
   });
@@ -3096,7 +3156,7 @@ export function evmHedgeAfter(url: string | undefined, kind: string): number | n
   return Math.max(EVM_HEDGE_MS, sorted[Math.ceil(0.95 * sorted.length) - 1]!);
 }
 const timed = (url: string, rpc: EvmRpc): EvmRpc => {
-  const f: EvmRpc = async (calls, _signal, sent) => {
+  const f: EvmRpc = async (calls, signal, sent) => {
     const t = performance.now();
     const s = speedOf(url);
     s.out.push(t);
@@ -3104,7 +3164,9 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
     // evm-warm-tap-ends-inside-two-seconds, round F)
     let wire: number | undefined;
     try {
-      const out = await rpc(calls, undefined, (c) => {
+      // the caller's cut ends the post itself (card evm-pace-holds-units-while-out): a scan request cut at its hold or
+      // the quote's bound gives its provider's units back then (pace.ts), never held to its own 10 s timeout
+      const out = await rpc(calls, signal, (c) => {
         wire = performance.now();
         sent?.(c);
       });
@@ -6146,6 +6208,45 @@ export function sizeRefusal(body: unknown): number | null | undefined {
 /** A provider's answer that is no batch of answers to read: an HTTP status outside 2xx other than 429 and 5xx, a body
  *  past its size or not JSON, or JSON that is not a batch. It answered, so a scan asks its halves of it (ScanAnswered). */
 class BadAnswer extends Error {}
+/** How much of a 4xx body is read for not-yet answers (lagBody): 64 KiB, some 700 of them (each about 90 bytes); a body
+ *  past it stays a failure, as every 4xx was before, so a batch of more not-yet answers is refused and asked again as
+ *  any refused read is. [design: 64 KiB, bounded so a 4xx cannot hold the reader on an endless body (LQ3)] */
+const LAG_BODY_MAX = 64 * 1024;
+/** A body as text, read to `max` bytes at most: null past them, the rest cancelled, never left open. */
+async function bounded(res: Response, max: number): Promise<string | null> {
+  if (Number(res.headers.get("content-length") ?? "0") > max) return (await res.body?.cancel().catch(() => {}), null);
+  if (res.body === null) return "";
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > max) return (await reader.cancel().catch(() => {}), null);
+    parts.push(value);
+  }
+  const all = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) {
+    all.set(p, o);
+    o += p.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}
+/** A body of JSON-RPC answers each an error for a block or state the provider does not hold yet (notYetError), one or a
+ *  batch: a 4xx with it is read as those answers (card evm-lag-answer-read-again). Any other body, a result among them
+ *  included, keeps its status a failure (review MED-1). */
+function lagBody(text: string): boolean {
+  let p: unknown;
+  try {
+    p = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  const arr = Array.isArray(p) ? p : [p];
+  return arr.length > 0 && arr.every(notYetError);
+}
 /** A call's error naming state the provider no longer keeps (its state cut), read from the pinned providers:
  *  - "historical state <root> is not available": a Robinhood provider of the quote's list answering a TORCH quote's
  *    reads at its agreed block, 2026-11-05 10:00Z and 10:03Z (card evm-quote-lag-held's live runs);
@@ -6230,13 +6331,15 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     const turn = evmPaceTake(url, calls, until, later);
     const give = typeof turn === "function" ? turn : await turn;
     let refused: BatchRefused;
+    // whether the provider answered the post (any status): one that did not gives its units back as sent (pace.ts)
+    let answered = false;
     try {
-      return await post(calls, until, sent);
+      return await post(calls, until, sent, () => void (answered = true));
     } catch (e) {
       if (!(e instanceof BatchRefused)) throw e;
       refused = e;
     } finally {
-      give();
+      give(answered);
     }
     // refused for its size: asked again as parts of at most half (or the maximum the refusal named), never a call more
     evmBatchRefused(url, calls.length, refused.said);
@@ -6249,7 +6352,7 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     RPC_TWIN.set(rpc, () => (twin ??= evmJsonRpc(url, fetchFn, maxBytes, timeoutMs, true)));
   }
   return rpc;
-  async function post(calls: readonly EvmRpcCall[], until?: AbortSignal, sent?: (calls: readonly EvmRpcCall[]) => void): Promise<unknown[]> {
+  async function post(calls: readonly EvmRpcCall[], until?: AbortSignal, sent?: (calls: readonly EvmRpcCall[]) => void, heard?: () => void): Promise<unknown[]> {
     const body = JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params })));
     // a request that never returns is a refusal once its time runs out, never a quote (and a buy button) that hangs
     let res: Response;
@@ -6257,6 +6360,7 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
       const signal = until === undefined ? AbortSignal.timeout(timeoutMs) : AbortSignal.any([AbortSignal.timeout(timeoutMs), until]);
       sent?.(calls);
       res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal });
+      heard?.();
     } catch (e) {
       // fetch's own TypeError with no response: Node's ("fetch failed") names its connection error as its cause, a
       // browser's names none ("Failed to fetch" in Chrome, "Load failed" in Safari, "NetworkError when attempting to
@@ -6276,12 +6380,15 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     if (Number.isFinite(left)) evmPaceAdvised(url, left);
     // a batch refused for its size (card evm-batch-fits-each-reader): HTTP 413 whatever its body, or a 429, another 4xx or
     // a 200 whose error names a batch maximum (sizeRefusal); never a batch of one call, which no split makes smaller
+    // card evm-lag-answer-read-again: a 4xx whose body is only not-yet answers, read to LAG_BODY_MAX at most (lagBody)
+    let lagText: string | null = null;
     if (calls.length > 1 && res.status >= 400 && res.status < 500) {
-      const text = await res.text().catch(() => "");
-      const said = sizeRefusal(text.length > maxBytes ? "" : text);
+      const text = (await bounded(res, Math.min(maxBytes, LAG_BODY_MAX)).catch(() => null)) ?? "";
+      const said = sizeRefusal(text);
       if (res.status === 413 || said !== undefined) throw new BatchRefused(said ?? null);
       // not a size refusal: the status is read as before, the body already read
-      if (res.status !== 429) throw new BadAnswer(`the provider answered HTTP ${res.status}`);
+      if (res.status !== 429 && !lagBody(text)) throw new BadAnswer(`the provider answered HTTP ${res.status}`);
+      if (res.status !== 429) lagText = text;
     }
     if (res.status === 429) {
       const after = retryAfterMs(res.headers.get("retry-after"));
@@ -6289,14 +6396,23 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
       throw new RateLimited("the provider answered 429 Too Many Requests", after);
     }
     // any other status outside 2xx is a failure, never an answer to read (review MED-1: robinhood-rpc.publicnode.com
-    // answers a read past its state cut 403 with a JSON-RPC error inside, which was timed as a fast answer)
-    if (!res.ok) {
-      // the body is never read, so it is let go, never left holding the connection (re-review INFO 3)
-      await res.body?.cancel().catch(() => {});
+    // answers a read past its state cut 403 with a JSON-RPC error inside, which was timed as a fast answer). Only a 4xx
+    // whose body is not-yet answers alone is read as those answers, which askAt asks again and timed never times (card
+    // evm-lag-answer-read-again: robinhood.drpc.org answered HTTP 400, code 27 "Unknown state. First available state is
+    // 1", to ArbGasInfo's getL1BaseFeeEstimate, release 187's sign live run 44912189713, 21 Nov)
+    if (!res.ok && lagText === null) {
       const m = `the provider answered HTTP ${res.status}`;
-      throw res.status >= 500 ? new Error(m) : new BadAnswer(m);
+      if (res.status >= 500) {
+        // the body is never read, so it is let go, never left holding the connection (re-review INFO 3)
+        await res.body?.cancel().catch(() => {});
+        throw new Error(m);
+      }
+      // a 4xx body read to LAG_BODY_MAX at most, then let go
+      const text = await bounded(res, Math.min(maxBytes, LAG_BODY_MAX)).catch(() => null);
+      if (text === null || !lagBody(text)) throw new BadAnswer(m);
+      lagText = text;
     }
-    const text = await res.text();
+    const text = lagText ?? (await res.text());
     if (text.length > maxBytes) throw new BadAnswer("the answer is too long");
     let parsed: unknown;
     try {

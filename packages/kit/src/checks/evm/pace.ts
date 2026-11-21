@@ -234,19 +234,22 @@ export function evmPaceWaitMs(url: string, calls: EvmPaceCalls, before: readonly
   return short <= 0 ? 0 : (short / p.perS) * 1000;
 }
 
+/** A post's place given back as it ends: `answered`, the provider answered it (any status); false where it ended with
+ *  none (no connection, a timeout, an abort). */
+export type EvmPaceGive = (answered?: boolean) => void;
 /** Waits for `url`'s turn for a post of `calls` at its pace (an unpaced provider: at once), first come first
  *  served among its kind, a trade's before any background read's (`later`); the answer gives the post's place back
  *  once it settles. A post of more units than the burst waits for a full bucket and spends it. `signal` ends the wait
  *  with its reason. */
-export function evmPaceTake(url: string, calls: EvmPaceCalls, signal?: AbortSignal, later = false): (() => void) | Promise<() => void> {
+export function evmPaceTake(url: string, calls: EvmPaceCalls, signal?: AbortSignal, later = false): EvmPaceGive | Promise<EvmPaceGive> {
   const key = evmProviderKey(url);
   const p = EVM_PACE[key];
   // an unpaced provider is sent at once, in the same turn (no wait at all)
   if (p === undefined) return NONE;
   return paced(key, p, calls, signal, later);
 }
-const NONE = (): void => {};
-async function paced(key: string, p: EvmPace, calls: EvmPaceCalls, signal: AbortSignal | undefined, later: boolean): Promise<() => void> {
+const NONE: EvmPaceGive = () => {};
+async function paced(key: string, p: EvmPace, calls: EvmPaceCalls, signal: AbortSignal | undefined, later: boolean): Promise<EvmPaceGive> {
   signal?.throwIfAborted();
   const l = laneOf(key);
   const need = needOf(p, calls);
@@ -270,19 +273,24 @@ async function paced(key: string, p: EvmPace, calls: EvmPaceCalls, signal: Abort
     pump(l, p);
   });
   let given = false;
-  return () => {
+  const sentAt = performance.now();
+  return (answered = true) => {
     if (given) return;
     given = true;
     l.out--;
     // the post's units are spent as it is answered, the latest it can have reached the provider: until then they are
     // held, so no post leaves on units the provider may not have counted yet, and no more than the burst is ever out at
-    // once (card evm-warm-tap-ends-inside-two-seconds, round F: release 189's sign live run 44924144323 met one 429 of
+    // once (card evm-pace-holds-units-while-out, from evm-warm-tap-ends-inside-two-seconds round F: release 189's sign live run 44924144323 met one 429 of
     // robinhood.rpc.blxrbdn.com; read only from the Mac, 2026-11-21 16:5xZ, main met 4 refusals there, -32005 x3 and
     // HTTP 429, each with 15 to 17 calls in the second before it, inside its 17 a second, and 9 or 10 calls out at once,
     // 3 or 4 posts answered in 226 to 508 ms: spent as each was sent, the lane let them pile up past bloXroute's 9.
     // Posts held on a connection that arrive together are the same case: test/evm-pace-provider-limits.test.ts)
+    // A post that ended with no answer (no connection, its time or its caller's bound run out, an abort) is spent as it
+    // was sent, its units given back at once: the hung post's slot is held to its own cut, never past it, so a hung
+    // bloXroute post cut at the quote's bound lets the next leave then, not a refill later
     const now = performance.now();
-    l.tokens = Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS) - need;
+    const tokens = Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS);
+    l.tokens = answered ? tokens - need : Math.min(tokens, tokens - need + ((now - sentAt) / 1000) * p.perS);
     l.at = now;
     l.owed -= need;
     pump(l, p);
