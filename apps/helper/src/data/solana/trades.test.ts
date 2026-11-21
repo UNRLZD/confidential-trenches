@@ -710,6 +710,78 @@ test("card helper-live-run-green-after-122: a token none of whose newest transac
   t.stop();
 });
 
+test("card helper-stays-fast-under-the-live-run: a busy token's first tape read answers at the first trade the stream sends, while its walk's first round still reads, not at the bound", async () => {
+  // the live helper at f28b6bd56, 21 Nov 21:04Z: three cold trending coins' first tapes answered at 2.5, 3.1 and 3.6 s,
+  // their streams sending trades all the while, the answer waiting on the walk's first round or the bound
+  const sigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
+  const base = rpcFetch({ sigs: () => sigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse(), txs: Object.fromEntries(sigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  // every transaction read of the walk hangs until the test lets it go
+  let open = 0;
+  let letGo = () => {};
+  const held = new Promise<void>((go) => (letGo = go));
+  const hang = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string };
+    if (req.method === "getTransaction") {
+      open++;
+      await held;
+      open--;
+    }
+    return base(url, init);
+  };
+  let on: SourceEvents | null = null;
+  let bound = () => {};
+  const t = createSolanaTrades({ fetch: hang, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => new Promise<void>((go) => (bound = go)) });
+  let answer: { trades: { tx: string }[]; filling?: boolean } | null = null;
+  const reading = t.trades(MINT, 50).then((a) => (answer = JSON.parse(a.body)));
+  for (let i = 0; i < 100 && open < 5; i++) await settle();
+  assert.equal(open, 5, "the walk's first round is reading");
+  const streamed = `${BUY.signature.slice(0, -2)}99`;
+  withClock(on!).note(MINT, { sig: streamed, slot: 465_000_100, err: false, logs: BUY.result.meta.logMessages });
+  for (let i = 0; i < 50 && answer === null; i++) await settle();
+  assert.notEqual(answer, null, "answered at the streamed trade, the bound not reached");
+  assert.deepEqual([answer!.trades.map((r) => r.tx), answer!.filling, open], [[streamed], true, 5], "the streamed row, filling, the walk's reads still open");
+  bound();
+  await reading;
+  letGo();
+  for (let i = 0; i < 100 && open > 0; i++) await settle();
+  t.stop();
+});
+
+test("card helper-stays-fast-under-the-live-run: a first read's bound runs from the read's start, so a slow subscription is inside it, not on top", async () => {
+  // the live run's 2j5SaS7x on a local helper at main, 21 Nov 21:07Z: subscribed at 1.3 s, answered at 4.3 s (the bound
+  // counted from the subscription)
+  const sigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
+  const base = rpcFetch({ sigs: () => sigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse(), txs: Object.fromEntries(sigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  let open = 0;
+  let letGo = () => {};
+  const held = new Promise<void>((go) => (letGo = go));
+  const hang = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string };
+    if (req.method === "getTransaction") {
+      open++;
+      await held;
+      open--;
+    }
+    return base(url, init);
+  };
+  let subscribed = () => {};
+  const subscribing = new Promise<void>((go) => (subscribed = go));
+  let bound: (() => void) | null = null;
+  const t = createSolanaTrades({ fetch: hang, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: () => subscribing, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => new Promise<void>((go) => (bound = go)) });
+  let answer = null as { trades: unknown[]; filling?: boolean } | null;
+  const reading = t.trades(MINT, 50).then((a) => (answer = JSON.parse(a.body)));
+  for (let i = 0; i < 20 && bound === null; i++) await settle();
+  assert.notEqual(bound, null, "the bound is running while the subscription still waits");
+  bound!();
+  subscribed();
+  for (let i = 0; i < 100 && (answer === null || open < 5); i++) await settle();
+  assert.deepEqual([answer?.trades.length, answer?.filling], [0, true], "answered once subscribed, the bound already past");
+  await reading;
+  letGo();
+  for (let i = 0; i < 100 && open > 0; i++) await settle();
+  t.stop();
+});
+
 // card solana-trades-show-on-every-token: a token whose newest signatures are failed bot transactions
 /** A token's signature list, newest first, as getSignaturesForAddress pages it (`limit`, `before`); `ok(i)` whether the
  *  i-th newest succeeded. Each call's `limit` is kept in `asked`. */

@@ -72,6 +72,32 @@ test("the check sends PAGES pages of the first screen's reads and SOCKETS push s
   assert.ok(SOCKETS < 8, "under one client's sockets at once (the helper's PUSH_CLIENT_MAX)");
 });
 
+test("each route's p50, p99 and max are printed, and the SLOWEST reads with the helper's Server-Timing; --coin reads the coin asked in place of the lists' first", async () => {
+  const asked = "So11111111111111111111111111111111111111112";
+  const seen = [];
+  const fetchFn = async (url) => {
+    const u = new URL(url);
+    seen.push(u.pathname + u.search);
+    if (seen.length === 1) return new Response(JSON.stringify({ lists: { trending: [{ token: A.good.coin }] } }), { status: 200, headers: { "access-control-allow-origin": APP } });
+    const slow = u.pathname === "/v1/market/trades";
+    return new Response("{}", { status: 200, headers: { "access-control-allow-origin": APP, ...(slow ? { "server-timing": 'sol-read-to;desc="cold", total;dur=2500' } : {}) } });
+  };
+  const got = await read("https://ct-api.unrealized.trade", fetchFn, () => 0, async () => ({ route: PUSH, status: 101, ms: 0 }), asked);
+  assert.equal(got.coin, asked);
+  assert.deepEqual(seen.slice(1), Array.from({ length: PAGES }, () => pagePaths(asked)).flat());
+  assert.ok(got.answers.filter((a) => a.route === "/v1/market/trades").every((a) => a.timing === 'sol-read-to;desc="cold", total;dur=2500'));
+  // a trades read takes 3,200 ms, every other read 100 ms
+  const run = { ...got, answers: got.answers.map((a) => ({ ...a, ms: a.route === "/v1/market/trades" ? 3_200 : 100 })) };
+  const v = judge(run);
+  assert.ok(v.lines.includes(`    /v1/market/trades: ${PAGES} answered, p50 3200 ms, p99 3200 ms, max 3200 ms`), v.lines.join("\n"));
+  const slow = v.lines.filter((l) => l.startsWith("    slow: "));
+  assert.equal(slow.length, 5);
+  assert.ok(slow.every((l) => l === '    slow: /v1/market/trades 200 3200 ms (sol-read-to;desc="cold", total;dur=2500)'), slow.join("\n"));
+  // the printed lines carry no verdict of their own: the run fails on its p99 alone
+  assert.deepEqual(v.lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" ")[1]), ["p99"]);
+  assert.equal(judge(got).ok, true, judge(got).lines.join("\n"));
+});
+
 test("upgrade(): 101 from a server that upgrades with Origin APP_HOST, the status from one that answers instead, null when nothing listens", async (t) => {
   const seen = [];
   const up = http.createServer((_q, res) => res.writeHead(502).end());
