@@ -305,7 +305,7 @@ export const MUTANTS = [
   [QUOTE, "[rankClass(u, now), cost(u), k] as const;", "[0, cost(u), k] as const;", R, "V4 "],
   [QUOTE, "late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);", "0);", R, "V4 "],
   [QUOTE, "|| evmProviderHeld(u, now) ? 2 : late", "|| evmProviderHeld(u, now) ? 1 : late", R, "V4 "],
-  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) {", "      {", R, "V4 "],
+  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) {", "      {", R, "V4 "],
   // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
   // is agreed again without it; a 200 carrying a state error holds its provider in the ranking
   [QUOTE, "    if (!(await behind(got.block))) return got;\n    if (got.low === undefined) {", "    return got;\n    if (got.low === undefined) {", R, "LH1 "],
@@ -334,7 +334,7 @@ export const MUTANTS = [
   [QUOTE, "const need = Math.floor(Math.max(of, list.length) / 2) + 1;", "const need = Math.floor(list.length / 2) + 1;", R, "LM2 "],
   [QUOTE, "    if (rest.length < 2) return got;", "", R, "LL4 "],
   [QUOTE, "(waitFrom ??= (a.mono ?? monotonic)())", "(a.mono ?? monotonic)()", R, "LW "],
-  [QUOTE, "      if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held = now + EVM_HOLD_MS;\n      s.failed = now;\n      throw e;", "      s.failed = now;\n      throw e;", R, "V4 "],
+  [QUOTE, "      if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held = now + (e instanceof RateLimited ? throttleHoldMs(url, e.afterMs) : EVM_HOLD_MS);\n      s.failed = now;\n      throw e;", "      s.failed = now;\n      throw e;", R, "V4 "],
   // card evm-warm-tap-ends-inside-two-seconds, round (D): a lost post holds its provider at a stall (R4) or at its second
   // loss within EVM_HOLD_MS (R5), never at one loss among answers (R3)
   [QUOTE, "if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held", "if (now - s.failed < EVM_HOLD_MS) s.held", PR, "R4 "],
