@@ -71,8 +71,9 @@ export type Event = Swap | Ref;
 export type BookConfig = {
   /** The token's decimals, 0 to 77. */
   decimals: number;
-  /** `usd`: the quote is a dollar stablecoin; `eth`: the quote is ETH or WETH. */
-  quote: { kind: "usd" | "eth"; decimals: number };
+  /** `usd`: the quote is a dollar stablecoin; `eth`: the quote is ETH or WETH; `token`: any other token, its USD price
+   *  each Ref's `ethUsd` (USD per 10^decimals of its smallest units, times 10^VALUE_SCALE), as ETH's is. */
+  quote: { kind: "usd" | "eth" | "token"; decimals: number };
 };
 
 /** A pool's own state at `block` (time `t`, whole seconds) as two legs, priced as a swap of them (the header's MARK). */

@@ -997,6 +997,12 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       busy: loopBusy,
     });
     out[chain] = swaps;
+    // the quote tokens many coins are quoted in (swaps.ts QUOTE_SEEDS) priced from start, so their coins' first opens
+    // wait on no route search; logged once with the pool each reached (card index-evm-swaps-v4-route-tape)
+    void swaps
+      .seedQuotes()
+      .then((r) => Object.keys(r).length > 0 && console.log(`helper: ${chain} quote seeds ${JSON.stringify(r)}`))
+      .catch(() => undefined);
     // the lists' tokens' pools looked for as each answer loads, not at each token's first open (card
     // helper-robinhood-search-ahead)
     lists.onAnswer?.(() => void snapshot().then((x) => (x === null ? undefined : swaps.ahead([...x.tokens]))).catch(() => undefined));

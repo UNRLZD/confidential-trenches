@@ -532,6 +532,16 @@ export const WARM_RETRY_MS = 3_600_000;
 /** Books read at once in a tick. */
 const READ_PARALLEL = 8;
 const POOLS_MAX = 5_000;
+/** Quote tokens whose routes are found at start (seedQuotes): only a cache of what discovery finds, each priced through
+ *  the pool our own reads pick. Base: cbBTC, ZORA and VIRTUAL (symbols read on base-rpc.publicnode.com 21 Nov 22:44Z);
+ *  ZORA quotes Zora's coins, VIRTUAL Virtuals' agents, cbBTC run 44942886709's 0x86fb3335. */
+export const QUOTE_SEEDS: Record<EvmChain, readonly string[]> = {
+  base: ["0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", "0x1111111111166b7fe7bd91427724b487980afc69", "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b"],
+  robinhood: [],
+};
+/** The blocks a third quote token's price is held at (quoteAt): a tape's TRADES_MAX rows over many books. [design: 20,000,
+ *  some 40 bytes each with the map's cost, under 2 MB a token.] */
+const QUOTE_BLOCKS_MAX = 20_000;
 /** A pool trade's ids on an EVM chain (../solana/token.ts toTape): a 32-byte hash and an address, lower case. */
 const EVM_IDS: TapeIds = { tx: (v) => (typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v) ? v.toLowerCase() : null), address: evmAddress };
 /** The bytes of GeckoTerminal answers one chain's swap reads hand the next process (data/warm.ts) [design: 2 MB, a
@@ -850,7 +860,10 @@ export type Pool = {
   id: string;
   token: string;
   tokenIs0: boolean;
-  quote: { kind: "usd" | "eth"; decimals: number };
+  /** `usd`: the chain's USD token; `eth`: WETH or native ETH; `token`: any other token, priced through its own deepest
+   *  pool against the USD token or WETH (quotePool, card index-evm-swaps-v4-route-tape), its price a Ref of 10^18 of its
+   *  smallest units, so `decimals` is 18 whatever the token's own. */
+  quote: { kind: "usd" | "eth"; decimals: number } | { kind: "token"; decimals: 18; token: string };
   /** A v4 pool's hook, any its key names (hookOf): a swap it sends itself is no trader's (its fees sold in its own pool).
    *  When its address carries a return-delta flag (deltaHook) it may also take from or add to what the swapper pays or
    *  gets, after the `Swap` log is written. */
@@ -1981,8 +1994,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const wordAddr = (r: string | undefined, i = 0): string | null => (r !== undefined && /^0x([0-9a-f]{64})+$/.test(r) && r.length >= 2 + 64 * (i + 1) ? `0x${r.slice(2 + 64 * i + 24, 2 + 64 * (i + 1))}` : null);
 
   /** A pool's quote by the other token: USD, or ETH (WETH, or native ETH where `native`). */
+  // any other token is a quote too, priced through its own pool (card index-evm-swaps-v4-route-tape: run 44942886709,
+  // Base 0x86fb3335's market was its cbBTC v4 pool, 332 swap transactions in the window, and the tape read the USDC pool
+  // an arbitrage passed through, 18)
   const quoteOf = (other: string, native: boolean): Pool["quote"] | null =>
-    other === V.usd ? { kind: "usd", decimals: 6 } : other === V.weth || (native && other === ZERO) ? { kind: "eth", decimals: 18 } : null;
+    other === V.usd ? { kind: "usd", decimals: 6 } : other === V.weth || (native && other === ZERO) ? { kind: "eth", decimals: 18 } : other === ZERO ? null : { kind: "token", decimals: 18, token: other };
   /** A v2 or v3 pool of the token: its factory one of the chain's venues, the token one of its two, quoted in USD or WETH. */
   function pairPool(token: string, a: string, factory: string | undefined, token0: string | undefined, token1: string | undefined): Pool | null {
     const [f, t0, t1] = [wordAddr(factory), wordAddr(token0), wordAddr(token1)];
@@ -2153,7 +2169,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return n;
   }
 
-  async function findPool(token: string, hint: string | null = null): Promise<Found | null> {
+  /** `base`: only its pools against the chain's USD token or WETH (pickEnd's, a quote token's own price). */
+  async function findPool(token: string, hint: string | null = null, base = false): Promise<Found | null> {
     const head = await agreedHead();
     if (head === null) throw new Error("no agreed head");
     // each read is asked with every other no answer it waits for names, and no read more (card
@@ -2232,6 +2249,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // a Pons token: the factory's own record of it names its curve and its quote (zero: native ETH), or once it has
     // graduated its v4 pool (ponsPools), a candidate whatever the window's transfers show (found there too: once)
     for (const c of ponsPools(token, recs)) if (!cands.some((x) => x.id === c.id)) cands.push(c);
+    if (base) for (let i = cands.length - 1; i >= 0; i--) if (cands[i]!.quote.kind === "token") cands.splice(i, 1);
     if (cands.length === 0) {
       if (missed.any) throw new Error("pools not read");
       return null;
@@ -2247,7 +2265,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (score.every((x) => x < 0)) throw new Error("swaps not agreed");
     // a candidate whose swaps went unread may be the main pool: no "no pool" from the rest
     if (score.some((x) => x < 0)) missed.any = true;
-    let best = cands.map((c, i) => ({ c, i, n: score[i]! })).sort((x, y) => y.n - x.n || (x.c.id < y.c.id ? -1 : 1))[0]!;
+    const ranked = cands.map((c, i) => ({ c, i, n: score[i]! })).sort((x, y) => y.n - x.n || (x.c.id < y.c.id ? -1 : 1));
+    // the busiest pool the tape can price: one quoted in a third token only once that token's own route to USD or WETH
+    // is known (quotePool), else the next (card index-evm-swaps-v4-route-tape: Base 0x86fb3335's cbBTC pool, 332 swap
+    // transactions in the window, over the USDC pool an arbitrage passed through, 18)
+    let best = ranked[0]!;
+    for (const x of ranked) {
+      if (x.c.quote.kind !== "token" || (await quotePool(x.c.quote.token)) !== null) {
+        best = x;
+        break;
+      }
+      // a busier pool whose quote's route was not read: no answer (asked again), never the next pool kept in its place
+      if (quoteUnread.has(x.c.quote.token)) throw new Error("quote route not read");
+    }
     // no swap in the window on the pools found: a pool its factory or key confirmed is still the token's, its book's
     // price the pool's own state (markQuiet; card evm-chart-opens-without-a-vendor-call: 10 of the 20 GeckoTerminal
     // trending Base pools had no swap in the 1,500-block window, 2026-11-11 07:3xZ, and each was "none"). The list's
@@ -2278,7 +2308,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const ref = best.c.quote.kind === "eth" ? await readRef(head.with, head.n, from) : true;
     const decimals = decimalsOf(d);
     if (decimals === null) throw new Error("decimals not agreed");
-    return { pool: best.c, decimals, swaps: n, seed: (refOk && ref) || best.c.quote.kind !== "eth" ? { from, to: head.n, head, logs } : undefined };
+    const priced = await quoteReady(best.c, logs);
+    return { pool: best.c, decimals, swaps: n, seed: ((refOk && ref) || best.c.quote.kind !== "eth") && priced ? { from, to: head.n, head, logs } : undefined };
   }
 
   /** A listed token's main pool, null when our reads find none (served as an empty chart), "unlisted" when no lists
@@ -2737,6 +2768,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const before = [...refEvents].reverse().find((r) => r.block < from);
       merged = [...(before === undefined ? [] : [{ ...before, block: from, index: -1 }]), ...inRange, ...events].sort((a, b) => a.block - b.block || a.index - b.index);
       if (before === undefined && inRange.length === 0 && events.length > 0) return false;
+    } else if (e.pool.quote.kind === "token") {
+      // a third token's quote: its price at each swap's block (quoteReady), read before the fold
+      const w = withQuotes(e.pool, events);
+      if (w === null) return false;
+      merged = w;
     }
     const lo = Math.max(from, e.book.settledTo + 1);
     e.book.ingest(lo, merged.filter((x) => x.block >= lo), Math.max(Math.min(to, headN - REWIND_BLOCKS), e.book.settledTo));
@@ -2756,6 +2792,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (w == null) return false;
       tradersAhead(e.pool, w.logs);
       if (e.pool.quote.kind === "eth" && !((await refReady) && (await readRef(urls, head.n, w.from)))) return false;
+      if (!(await quoteReady(e.pool, w.logs))) return false;
       const ok = apply(e, w.from, head.n, head, w.logs);
       if (ok) e.from ??= w.from;
       return ok;
@@ -2766,6 +2803,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (from > to) return true;
     const logs = await agreedRange(urls, (lo, hi) => poolFilters(e.pool, lo, hi, chain), from, to);
     if (logs == null || (e.pool.quote.kind === "eth" && !(await refReady))) return false;
+    if (!(await quoteReady(e.pool, logs))) return false;
     return apply(e, from, to, head, logs);
   }
 
@@ -2792,7 +2830,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const own = e.pool.hook !== undefined && l.topics.length === 3 && addrOf(l.topics[2]!.slice(2)) === e.pool.hook;
       events.push({ ...sw, t, ...(got === undefined ? {} : { got }), ...(own ? { tape: false as const } : {}) });
     }
-    if (events.length > 0) b.ingest(events[0]!.block, events, events.at(-1)!.block);
+    // a third token's quote: its price before each block's swaps (quoteReady read them before this fold)
+    const all = withQuotes(e.pool, events) ?? events;
+    if (all.length > 0) b.ingest(all[0]!.block, all, all.at(-1)!.block);
     return b;
   }
 
@@ -2977,6 +3017,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         return;
       }
       const logs = read.flatMap((b) => unitsOf(b).flatMap((k) => got.get(k)!));
+      // a third token's quote priced at these blocks first: unread, the agreed reads are kept for the next try
+      if (!(await quoteReady(e.pool, logs))) return failed({ ...back, got });
       for (const b of read) for (const k of unitsOf(b)) if (!k.startsWith("r ")) got.delete(k);
       const all = [...logs, ...back.logs].sort((a, b) => a.block - b.block || a.index - b.index).filter((l, i, xs) => i === 0 || l.block !== xs[i - 1]!.block || l.index !== xs[i - 1]!.index);
       const born = logs.some((l) => isBirth(e.pool, l, chain));
@@ -3009,6 +3051,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const logs = swaps == null || extra.some((x) => x == null) ? null : swaps.concat(...(extra as Log[][])).sort((a, b) => a.block - b.block || a.index - b.index);
     if (logs == null) return failed();
     const all = logs.concat(back.logs);
+    if (!(await quoteReady(e.pool, all))) return failed();
     tradersAhead(e.pool, logs);
     e.back = { lo, logs: all, tape: backBook(e, all), done: lo <= end || born, ...(back.located === true ? { located: true as const } : {}), ...(born ? { born: true as const } : {}) };
   }
@@ -3240,12 +3283,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const head = await agreedHead();
       if (head === null) return;
       const eth = e.pool.quote.kind === "eth";
+      const q = e.pool.quote.kind === "token" ? e.pool.quote.token : null;
       const missed = { any: false };
-      const got = await callsAgreed(head.n, eth ? [...calls, refStateCall(chain)] : calls, missed);
-      if (missed.any) return;
+      // a third token's quote: its price at the same block, through its own route (quoteRead)
+      const [got, quoted] = await Promise.all([callsAgreed(head.n, eth ? [...calls, refStateCall(chain)] : calls, missed), q === null ? true : quoteRead(q, [head.n])]);
+      if (missed.any || !quoted) return;
       const legs = poolStateLegs(e.pool, got.slice(0, calls.length));
-      const ethUsd = eth ? refStateUsd(got.at(-1)) : null;
-      if (legs === null || (eth && ethUsd === null) || !e.book.mark({ block: head.n, t: head.t, ...legs, ethUsd })) e.noMark = true;
+      const ethUsd = eth ? refStateUsd(got.at(-1)) : q !== null ? (quoteAt.get(q)?.get(head.n) ?? null) : null;
+      if (legs === null || ((eth || q !== null) && ethUsd === null) || !e.book.mark({ block: head.n, t: head.t, ...legs, ethUsd })) e.noMark = true;
     })()
       .catch(() => undefined)
       .finally(() => (e.marking = undefined));
@@ -3753,6 +3798,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const thirdPriced = new Set<string>();
   const quotePools = new Map<string, { route: Route | null; at: number }>();
   const quotePicking = new Map<string, Promise<Route | null>>();
+  /** The third quote tokens whose last pick was not read (the vendor refused, a read not agreed): a book's discovery is
+   *  then unfinished, never settled on a pool that is not the token's busiest (findPool). */
+  const quoteUnread = new Set<string>();
   /** v4 pools whose key was asked and none hashed to the id, by id, with when: asked again once GT_POOL_FRESH_MS old. */
   const keyless = new Map<string, number>();
   /** Each v4 layout's quote currency from its pool's key: the PositionManager's record or the coin's own getPoolKey()
@@ -3825,6 +3873,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         .catch(() => undefined)
         .then((route) => {
           const keep = route === undefined ? { route: held?.route ?? null, at: now() - GT_POOL_FRESH_MS + STALE_MS } : { route, at: now() };
+          if (route === undefined && keep.route === null) quoteUnread.add(q);
+          else quoteUnread.delete(q);
           if (!quotePools.has(q) && quotePools.size >= POOLS_MAX) quotePools.delete(quotePools.keys().next().value!);
           quotePools.set(q, keep);
           return keep.route;
@@ -3833,6 +3883,63 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       quotePicking.set(q, p);
     }
     return p;
+  }
+  /** Each third quote token's USD price at a block, by token then block: USD per 10^18 of its smallest units, times
+   *  10^18 (the book's Ref of a `token` quote, Pool.quote), read through its route (quotePool) on two agreeing providers
+   *  (card index-evm-swaps-v4-route-tape). QUOTE_BLOCKS_MAX blocks a token, the oldest read dropped first. */
+  const quoteAt = new Map<string, Map<number, bigint>>();
+  /** Whether every block of `logs` that holds a swap of `pool` has its quote's price (a `token` quote; any other: true),
+   *  the missing ones read in one post at their own blocks; false when the quote's route is not known (none at or above
+   *  LIQ_MIN_USD within two pools, or its pick not read) or a block's read did not agree: the fold waits, as an
+   *  ETH-quoted one waits for the ETH price, and the read is made again. */
+  async function quoteReady(pool: Pool, logs: readonly Log[]): Promise<boolean> {
+    if (pool.quote.kind !== "token") return true;
+    return quoteRead(pool.quote.token, logs.filter((l) => decodeSwap(pool, l, chain) !== null).map((l) => l.block));
+  }
+  /** Whether third quote token `q` has its price at each of `blocks` (quoteAt), the missing ones read in one post. */
+  async function quoteRead(q: string, blocks: readonly number[]): Promise<boolean> {
+    const have = quoteAt.get(q) ?? new Map<number, bigint>();
+    const want = [...new Set(blocks)].filter((n) => !have.has(n));
+    if (want.length === 0) return true;
+    const route = await quotePool(q);
+    const end = route === null ? null : poolStateCalls(route.end, chain);
+    const hop = route?.hop == null ? [] : poolStateCalls(route.hop, chain);
+    if (route === null || end === null || hop === null) return false;
+    const eth = route.end.quote.kind === "eth";
+    const per = [...hop, ...end, ...(eth ? [refStateCall(chain)] : [])];
+    const got = await callsAgreed(want[0]!, want.flatMap((n) => per.map((c) => ({ ...c, n }))));
+    const ONE = 10n ** 18n;
+    want.forEach((n, i) => {
+      const a = got.slice(i * per.length, (i + 1) * per.length);
+      const h = route.hop === null ? null : poolStateLegs(route.hop, a.slice(0, hop.length));
+      const legs = poolStateLegs(route.end, a.slice(hop.length, hop.length + end.length));
+      // through the hop first (10^18 of the quote as the hop's other token at the hop's price), then the end pool
+      const raw = route.hop === null ? ONE : h !== null && h.amt > 0n ? (ONE * h.quote) / h.amt : null;
+      const usd = raw === null || legs === null ? null : usdThrough(route.end, legs, raw, eth ? refStateUsd(a.at(-1)) : null);
+      if (usd !== null && usd > 0n) have.set(n, usd);
+    });
+    while (have.size > QUOTE_BLOCKS_MAX) have.delete(have.keys().next().value!);
+    if (!quoteAt.has(q) && quoteAt.size >= POOLS_MAX) quoteAt.delete(quoteAt.keys().next().value!);
+    quoteAt.set(q, have);
+    return want.every((n) => have.has(n));
+  }
+  /** A `token`-quoted pool's events with its quote's price before each block's swaps (a Ref at index -1, read by
+   *  quoteReady); null when a block's price is not held. Any other pool's events as they are. */
+  function withQuotes(pool: Pool, events: readonly Event[]): Event[] | null {
+    if (pool.quote.kind !== "token") return [...events];
+    const have = quoteAt.get(pool.quote.token);
+    const out: Event[] = [];
+    let last = -1;
+    for (const x of events) {
+      if (x.kind === "swap" && x.block !== last) {
+        const usd = have?.get(x.block);
+        if (usd === undefined) return null;
+        out.push({ kind: "ref", block: x.block, index: -1, ethUsd: usd });
+        last = x.block;
+      }
+      out.push(x);
+    }
+    return out;
   }
   /** The vendor's list of `q`'s pools (GeckoTerminal's answer shape), undefined when not had: one call, the key's
    *  background share first, else the keyless refresh lane (renamePool's). */
@@ -3900,13 +4007,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // pick is made while the vendor refuses
     const own = (async (): Promise<Pool | null | undefined> => {
       const kept = pools.get(q);
-      if (kept?.found != null && now() - kept.at < POOL_KEEP_MS) return kept.found.pool;
-      const f = await findPool(q).catch(() => undefined);
+      if (kept?.found != null && now() - kept.at < POOL_KEEP_MS && kept.found.pool.quote.kind !== "token") return kept.found.pool;
+      const f = await findPool(q, null, true).catch(() => undefined);
       return f === undefined ? undefined : (f?.pool ?? null);
     })();
     const ids = j === undefined ? null : quoteCands(j, q, [V.usd, V.weth]).slice(0, CANDIDATES_MAX);
     const found = await Promise.all([own, ...(ids ?? []).map((id) => fromHint(q, id).then((f) => f?.pool ?? null).catch(() => undefined))]);
-    const cands = found.filter((p): p is Pool => p != null && p.venue !== "curve");
+    const cands = found.filter((p): p is Pool => p != null && p.venue !== "curve" && p.quote.kind !== "token");
     const picked = cands.filter((p, i) => cands.findIndex((x) => x.id === p.id) === i);
     const unread = ids === null || found.some((f) => f === undefined);
     if (picked.length === 0) return unread ? undefined : null;
@@ -4536,9 +4643,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       typeof p.tokenIs0 === "boolean" &&
       typeof q === "object" &&
       q !== null &&
-      Object.keys(q).length === 2 &&
-      (q.kind === "usd" || q.kind === "eth") &&
-      decimalsOk(q.decimals) &&
+      ((Object.keys(q).length === 2 && (q.kind === "usd" || q.kind === "eth") && decimalsOk(q.decimals)) ||
+        (Object.keys(q).length === 3 && q.kind === "token" && q.decimals === 18 && typeof q.token === "string" && evmAddress(q.token) === q.token && q.token !== token)) &&
       (p.hook === undefined || (p.venue === "v4" && typeof p.hook === "string" && evmAddress(p.hook) === p.hook)) &&
       (p.siblings === undefined || (Array.isArray(p.siblings) && p.siblings.length <= HANDOVER_ENTRIES_MAX && p.siblings.every((s) => typeof s === "string" && /^0x[0-9a-f]{64}$/.test(s)))) &&
       (p.log === undefined || p.log === "pancake" || p.log === "univ2")
@@ -4673,6 +4779,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     /** The lists' tokens, looked for ahead of a first open (card helper-robinhood-search-ahead); settles when the search
      *  it joined is done. The lists call it as each new answer loads (server.ts evmSwapsFromEnv). */
     ahead,
+    /** QUOTE_SEEDS' routes found at start, before a list's first answer (whose coins' discovery finds the rest): each
+     *  token's own deepest pool against USD or WETH, at or above LIQ_MIN_USD, by our own reads, held as any quote's
+     *  (quotePool); the pool each reached, null when none did, undefined when not read (card index-evm-swaps-v4-route-tape). */
+    async seedQuotes(): Promise<Record<string, string | null | undefined>> {
+      const out: Record<string, string | null | undefined> = {};
+      await Promise.all(
+        QUOTE_SEEDS[chain].map(async (q) => {
+          const r = await quotePool(q);
+          out[q] = r !== null ? r.end.id : quoteUnread.has(q) ? undefined : null;
+        }),
+      );
+      return out;
+    },
     /** The token's main pool (a pool's address or a v4 pool id) and decimals as an earlier read found and checked them on
      *  chain, with no read; undefined when none is kept (card market-data-evm-token: the token page's `pool`, `decimals`). */
     kept(token: string): { pool: string; decimals: number } | undefined {
