@@ -2,15 +2,16 @@
 // (index-evm-swaps-v4-route-tape.answers.json). bad_run_44942886709: live run 44942886709's tape of Base 0x86fb3335, its
 // USDC side pool's rows while its cbBTC pool traded 214 swaps over the scan: FAIL by name. good_*: a helper with the
 // card's change, the coin the scan picked, its whole third-quoted pool's tape and index-evm-swaps's own verdict on it:
-// PASS. Made from the answers: a scan whose busiest third-quoted coin trades more in a v2 or v3 pool, or with none at
-// all, judges no coin (INCONCLUSIVE); a run that judged another coin than the scan picks, a tape from the vendor, or
+// PASS. Made from the answers: a scan whose busiest third-quoted coin trades more in a v2 or v3 pool, whose pool is near
+// a tie with the coin's other trading (Base 0x95669a65's two third-quoted pools, 5 against 14 swaps over 1,500 blocks and
+// 65 against 53 over 12,000, read 21 Nov 23:4xZ), or with none at all, judges no coin (INCONCLUSIVE); a run that judged another coin than the scan picks, a tape from the vendor, or
 // index-evm-swaps's FAIL: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { candidates, judge, pick } from "./index-evm-swaps-v4-route-tape.mjs";
+import { candidates, DOMINANCE, judge, pick } from "./index-evm-swaps-v4-route-tape.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "index-evm-swaps-v4-route-tape.answers.json"), "utf8"));
@@ -39,6 +40,11 @@ test("pick: a coin a v2 or v3 pool outtrades is never judged; a scan with no thi
   r.scan.elsewhere[r.coin] = { pool: `0x${"aa".repeat(20)}`, transfers: 999 };
   assert.equal(pick(r.scan), null);
   assert.equal(judge(r).verdict, "INCONCLUSIVE");
+  const tie = copy(BAD);
+  tie.scan.others[tie.coin] = Math.floor(tie.scan.pools.find((p) => p.id === tie.pool).n / DOMINANCE) + 1;
+  assert.equal(pick(tie.scan), null, "a pool near a tie with the coin's other trading is not judged");
+  tie.scan.others[tie.coin]--;
+  assert.deepEqual(pick(tie.scan), { coin: tie.coin, pool: tie.pool });
   const none = copy(BAD);
   none.scan.pools = none.scan.pools.filter((p) => p.id !== none.pool);
   assert.equal(candidates(none.scan).length, 0);

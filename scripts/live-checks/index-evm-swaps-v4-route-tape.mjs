@@ -29,10 +29,14 @@ const KEY = "index-evm-swaps-v4-route-tape";
 /** The scan: 1,500 blocks (5 min of Base's 200 ms blocks), the helper's own cold window (swaps.ts VENUES.base.cold). */
 export const SCAN_BLOCKS = 1_500;
 export const SCAN_STEP = 500;
-export const SCAN_POOLS = 60;
-export const KEY_BATCH = 10;
+export const SCAN_POOLS = 40;
+/** Key reads KEY_BATCH a post, KEY_EVERY_MS apart: sentio refuses a batch over 5, tenderly paces each call in one at 2/s
+ *  (base-tapes' PROVIDER_PACE; live, 21 Nov 23:4xZ, a batch of 10 was 429 on both). */
+export const KEY_BATCH = 5;
+export const KEY_EVERY_MS = 2_500;
 /** The candidates read for a busier pool outside the PoolManager, busiest first. */
 export const ELSEWHERE_COINS = 5;
+export const DOMINANCE = 2;
 /** Every v2 and v3 factory the helper reads on Base (swaps.ts VENUES.base). */
 const FACTORIES = new Set([...VENUES.base.v2, ...VENUES.base.v3]);
 export const FILL_MS = 45_000;
@@ -67,9 +71,13 @@ export function candidates(scan) {
   }
   return out.sort((a, b) => b.n - a.n || (a.coin < b.coin ? -1 : 1));
 }
-/** The coin to judge: the busiest candidate the scan read outside the PoolManager and found no busier pool of. */
+/** The coin to judge: the busiest candidate the scan read outside the PoolManager and found no busier pool of, whose
+ *  pool clearly carries its trading: the coin's other transactions in the scan (`others[coin]`: those with a Transfer of
+ *  it that are not the pool's swaps) are at most 1/DOMINANCE of the pool's swaps. Two pools of a coin near a tie are
+ *  each the busier by the window read (live, 21 Nov 23:4xZ: Base 0x95669a65's two third-quoted pools, 5 against 14 swaps
+ *  over 1,500 blocks and 65 against 53 over 12,000), so neither is judged. */
 export function pick(scan) {
-  const c = candidates(scan).find((x) => scan.elsewhere?.[x.coin] === null);
+  const c = candidates(scan).find((x) => scan.elsewhere?.[x.coin] === null && typeof scan.others?.[x.coin] === "number" && scan.others[x.coin] * DOMINANCE <= x.n);
   return c === undefined ? null : { coin: c.coin, pool: c.pool };
 }
 
@@ -87,7 +95,7 @@ export function judge(run) {
   if (run.scan == null) return { ok: false, verdict: "FAIL", lines: [`BAD the scan was not read on two agreeing providers: ${run.scanError ?? "no answer"}`] };
   const chosen = pick(run.scan);
   if (chosen === null) return { ok: false, verdict: "INCONCLUSIVE", lines: [`-- no third-quoted coin in ${run.scan.pools.length} pools over ${SCAN_BLOCKS} blocks to ${run.scan.head}`] };
-  let good = chosen.coin === run.coin && chosen.pool === run.pool ? ok(`the coin ${run.coin}: its busiest pool ${run.pool} is quoted in a third token (${run.scan.pools.find((p) => p.id === run.pool).n} swaps in the scan; no v2 or v3 pool of it busier)`) : bad(`the run judged ${run.coin} ${run.pool}, the scan picks ${chosen.coin} ${chosen.pool}`);
+  let good = chosen.coin === run.coin && chosen.pool === run.pool ? ok(`the coin ${run.coin}: its busiest pool ${run.pool} is quoted in a third token (${run.scan.pools.find((p) => p.id === run.pool).n} swaps in the scan, ${run.scan.others[run.coin]} other transactions of the coin; no v2 or v3 pool of it busier)`) : bad(`the run judged ${run.coin} ${run.pool}, the scan picks ${chosen.coin} ${chosen.pool}`);
   const t = run.trades;
   let rows = [];
   try {
@@ -168,6 +176,7 @@ export async function scan(fetchFn = fetch, rpcs = SWAP_RPCS.base.filter((u) => 
   // KEY_BATCH calls a post (the keyless providers cap a batch)
   const keys = [];
   for (let i = 0; i < top.length; i += KEY_BATCH) {
+    if (i > 0) await sleep(KEY_EVERY_MS);
     const part = await agreed(top.slice(i, i + KEY_BATCH).map((p, k) => ({ jsonrpc: "2.0", id: k, method: "eth_call", params: [{ to: POSM, data: `0x86b6be7d${p.id.slice(2, 52).padEnd(64, "0")}` }, hex(head)] })), fetchFn, rpcs);
     if (part === null) return null;
     keys.push(...part);
@@ -179,20 +188,25 @@ export async function scan(fetchFn = fetch, rpcs = SWAP_RPCS.base.filter((u) => 
   // the candidates' Transfers over the same blocks: a counterparty with more of them than the v4 pool has swaps, whose
   // factory is a v2 or v3 venue's, is a busier pool of the coin outside the PoolManager (its tape is that pool's)
   const elsewhere = {};
+  const others = {};
   for (const c of candidates({ head, pools: top }).slice(0, ELSEWHERE_COINS)) {
     const n = new Map();
+    const txs = new Set();
     for (let lo = head - SCAN_BLOCKS + 1; lo <= head; lo += SCAN_STEP) {
-      const part = await agreed({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: c.coin, topics: [TOPIC.transfer], fromBlock: hex(lo), toBlock: hex(Math.min(head, lo + SCAN_STEP - 1)) }] }, fetchFn, rpcs, (ls) => (Array.isArray(ls) ? ls.map((l) => l.topics) : ls));
+      const part = await agreed({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: c.coin, topics: [TOPIC.transfer], fromBlock: hex(lo), toBlock: hex(Math.min(head, lo + SCAN_STEP - 1)) }] }, fetchFn, rpcs, (ls) => (Array.isArray(ls) ? ls.map((l) => [l.transactionHash, l.topics]) : ls));
       if (!Array.isArray(part)) return null;
-      for (const t of part) for (const a of [t[1], t[2]]) if (typeof a === "string") n.set(`0x${a.slice(26)}`, (n.get(`0x${a.slice(26)}`) ?? 0) + 1);
+      for (const [tx] of part) txs.add(tx);
+      for (const [, t] of part) for (const a of [t[1], t[2]]) if (typeof a === "string") n.set(`0x${a.slice(26)}`, (n.get(`0x${a.slice(26)}`) ?? 0) + 1);
     }
     const busier = [...n].filter(([a, k]) => a !== PM && a !== `0x${"0".repeat(40)}` && k > c.n).sort((x, y) => y[1] - x[1]).slice(0, 3);
     const f = busier.length === 0 ? [] : await agreed(busier.map(([a], i) => ({ jsonrpc: "2.0", id: i, method: "eth_call", params: [{ to: a, data: "0xc45a0155" }, hex(head)] })), fetchFn, rpcs);
     if (f === null) return null;
     const pool = busier.find((_, i) => typeof f[i] === "string" && f[i].length === 66 && FACTORIES.has(`0x${f[i].slice(26)}`));
     elsewhere[c.coin] = pool === undefined ? null : { pool: pool[0], transfers: pool[1] };
+    const own = new Set(top.find((p) => p.id === c.pool).txs.map(([tx]) => tx));
+    others[c.coin] = [...txs].filter((tx) => !own.has(tx)).length;
   }
-  return { head, pools: top, elsewhere };
+  return { head, pools: top, elsewhere, others };
 }
 
 export async function read(base = BASE, fetchFn = fetch) {

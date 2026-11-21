@@ -1,6 +1,6 @@
 {
  "bad_run_44942886709": {
-  "_note": "run 44942886709 (live.yml, 21 Nov 20:05Z, helper 61fa14a08): the tape it served for Base 0x86fb3335 at head 60505660 (its lines: Server-Timing evm-read-to block 60505660; sampled trades 0x9ac65494, 0x015c530c, 0x2988bae8, 0x96e8fcb8, 0x09b1f227, each a swap of the USDC pool 0xb26e93a3 and of the cbBTC pool 0xc265b42f), as this check reads it: the scan of the coin's two v4 pools over the 1,500 blocks to 10 under that head, their Swap logs and the coin's Transfers (no counterparty outside the PoolManager past 110 of them, under the cbBTC pool's 214 swaps) read on base-rpc.publicnode.com 21 Nov 23:2xZ (the second providers refused this Mac), and the tape the USDC pool's swaps in that window (each row's tx, and its time by Base's block clock).",
+  "_note": "run 44942886709 (live.yml, 21 Nov 20:05Z, helper 61fa14a08): the tape it served for Base 0x86fb3335 at head 60505660 (its lines: Server-Timing evm-read-to block 60505660; sampled trades 0x9ac65494, 0x015c530c, 0x2988bae8, 0x96e8fcb8, 0x09b1f227, each a swap of the USDC pool 0xb26e93a3 and of the cbBTC pool 0xc265b42f), as this check reads it: the scan of the coin's two v4 pools over the 1,500 blocks to 10 under that head, their Swap logs and the coin's Transfers (no counterparty outside the PoolManager past 110 of them, under the cbBTC pool's 214 swaps; 204 transactions moved it, 2 of them not that pool's swaps) read on base-rpc.publicnode.com 21 Nov 23:2xZ (the second providers refused this Mac), and the tape the USDC pool's swaps in that window (each row's tx, and its time by Base's block clock).",
   "base": "https://ct-api.unrealized.trade",
   "scan": {
    "head": 60505650,
@@ -928,6 +928,9 @@
    ],
    "elsewhere": {
     "0x86fb333541a6cd4a728e1d5cce1d4d52deeb9701": null
+   },
+   "others": {
+    "0x86fb333541a6cd4a728e1d5cce1d4d52deeb9701": 2
    }
   },
   "coin": "0x86fb333541a6cd4a728e1d5cce1d4d52deeb9701",
