@@ -12,6 +12,8 @@
 // A file's process sends, after its tests, one test:summary event naming the file and its counts; it is the last thing
 // the file sends, so a report cut short has none. Each file named (the runner's own arguments, globs expanded as the
 // runner expands them) must send it, and its counts.tests must equal the tests (not suites) the run saw end for it.
+// Each event is the file's the runner ran (data.entryFile, runner.js #handleReportItem), never the file a test is written
+// in (data.file): a file that imports another test file runs that file's tests as its own.
 import { globSync, realpathSync, writeSync } from "node:fs";
 import path from "node:path";
 import { Transform } from "node:stream";
@@ -67,7 +69,8 @@ const reals = new Map();
 export default new Transform({
   writableObjectMode: true,
   transform(event, encoding, done) {
-    const file = event.data?.file;
+    // the overall summary names no file: entryFile and file both undefined
+    const file = event.data?.entryFile ?? event.data?.file;
     seen.push({ type: event.type, data: { file: file === undefined ? undefined : (reals.get(file) ?? reals.set(file, real(file)).get(file)), counts: event.data?.counts, details: event.data?.details && { type: event.data.details.type } } });
     inner._transform(event, encoding, done);
   },

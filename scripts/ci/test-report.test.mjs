@@ -28,11 +28,15 @@ const PLANTS = {
   "cut.test.mjs": 'import { test } from "node:test";\ntest("ran", () => {});\ntest("ends the process", () => process.exit(0));\ntest("never runs", () => {});\n',
 };
 const DROPPED = ["gone.test.mjs", "cut.test.mjs"];
+// a file that runs another file's tests by importing it (signpage's pool-deposit-evm-base-mainnet.test.ts runs
+// pool-deposit-evm.test.ts's): each test event names the file the test is written in, so a file is counted by the file
+// the runner ran (entryFile), never refused as 0 of its tests beside the other at twice its own
+const USES = { "uses.test.mjs": 'import "./fine.test.mjs";\n' };
 
 function plant() {
   // its links resolved, so the names the report prints are the names asserted here
   const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "test-report-")));
-  for (const [f, text] of Object.entries(PLANTS)) writeFileSync(path.join(dir, f), text);
+  for (const [f, text] of Object.entries({ ...PLANTS, ...USES })) writeFileSync(path.join(dir, f), text);
   return dir;
 }
 
@@ -70,13 +74,13 @@ test("every package's test run fails a file whose results did not arrive, names 
   }
 });
 
-test("every package's test run passes when each file's results arrive whole", async () => {
+test("every package's test run passes when each file's results arrive whole, a file that runs another's tests included", async () => {
   const dir = plant();
   try {
-    const runs = await Promise.all(packages().map(async (p) => ({ ...p, r: await run(process.execPath, ["--test", ...p.flags, path.join(dir, "fine.test.mjs")], { cwd: path.join(ROOT, p.dir), env: ENV, timeoutMs: 90_000 }) })));
+    const runs = await Promise.all(packages().map(async (p) => ({ ...p, r: await run(process.execPath, ["--test", ...p.flags, ...["fine.test.mjs", "uses.test.mjs"].map((f) => path.join(dir, f))], { cwd: path.join(ROOT, p.dir), env: ENV, timeoutMs: 90_000 }) })));
     for (const { dir: d, r } of runs) {
       assert.equal(r.status, 0, `${d}\n${r.stdout}${r.stderr}`);
-      assert.match(r.stdout, /ℹ tests 2\n/, d);
+      assert.match(r.stdout, /ℹ tests 4\n/, d);
       assert.ok(!(r.stdout + r.stderr).includes("test-report: FAIL"), d);
     }
   } finally {
