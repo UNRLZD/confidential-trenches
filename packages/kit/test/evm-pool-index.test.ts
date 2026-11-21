@@ -70,6 +70,8 @@ type Reader = {
   throwsOverCalls?: number;
   /** a batch with a getLogs over more than this many blocks throws (a timeout) */
   throwsOverRange?: number;
+  /** a batch of more than this many getLogs runs out of its time, as evmJsonRpc's AbortSignal.timeout throws */
+  timeoutOverLogs?: number;
   /** a block whose hash this reader answers as another fork's, this many times */
   forkAt?: { b: number; times: number };
   /** the state reads answered with an error */
@@ -99,6 +101,7 @@ function reader(r: Reader): EvmRpc {
     }
     if (r.throws?.has(req)) throw new Error("the provider answered HTTP 502");
     if (r.throwsOverCalls !== undefined && calls.length > r.throwsOverCalls) throw new Error("the answer is too long");
+    if (r.timeoutOverLogs !== undefined && calls.filter((c) => c.method === "eth_getLogs").length > r.timeoutOverLogs) throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
     if (r.throwsOverRange !== undefined && calls.some((c) => c.method === "eth_getLogs" && Number((c.params[0] as { toBlock: string }).toBlock) - Number((c.params[0] as { fromBlock: string }).fromBlock) + 1 > r.throwsOverRange!)) throw new Error("The operation was aborted due to timeout");
     const h = r.hash ?? ((n: number) => blockHash(n));
     return calls.map((c) => {
@@ -696,7 +699,7 @@ test("BF1: a reader that answers a batch past 5 calls 413 still answers every re
   assert.equal(r.coversThrough, head);
   assert.equal(gaps.filter((g) => ids(r.pools).has(evmPoolIdOf(g.key))).length, 12, "every one-reader pool's receipt is answered");
   // only the batches in flight at once (parallel 2) when the first refusal comes back meet it; every later post fits
-  assert.ok(log.refused >= 1 && log.refused <= cfg.parallel, `refused ${log.refused}: ${log.sizes.join(",")}`);
+  assert.ok(log.refused >= 1 && log.refused <= (cfg.parallel as number), `refused ${log.refused}: ${log.sizes.join(",")}`);
   const last = log.sizes.length - 1 - [...log.sizes].reverse().findIndex((n) => n > 5);
   assert.ok(log.sizes.slice(last + 1).every((n) => n <= 5) && log.sizes.length - last > 10, log.sizes.join(","));
 });
@@ -929,4 +932,87 @@ test("SNAP2 a snapshot that is not the chain's whole proven shape is refused (nu
     ["more pools than the cap", (s) => s],
   ];
   for (const [why, make] of bad) assert.equal(fromSnapshot(make(good), why === "more pools than the cap" ? { ...WANT, cap: 9 } : WANT), null, why);
+});
+
+// Card evm-sync-inside-the-kpi-at-any-age: a fresh device's Base sync from a 48 h old snapshot took 15 to 142.6 s (21 Nov
+// 12:5x-13:05Z): base.rpc.blxrbdn.com answered 5-span batches one getLogs after another, past the 10 s timeout on 32 of
+// 80 posts, each asked again whole up to 4 times, and every round waited for it while base-rpc.publicnode.com sat idle.
+const logSpans = (x: Reader) => x.calls.flat().filter((c) => c.method === "eth_getLogs").map((c) => c.params[0] as { fromBlock: string; toBlock: string });
+const blocksOf = (f: { fromBlock: string; toBlock: string }) => Number(f.toBlock) - Number(f.fromBlock) + 1;
+
+test("SPLIT a batch that times out is split at once, never asked again at its size, and the sync ends whole", async () => {
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  const b: Reader = { head, pools: ps, calls: [], timeoutOverLogs: 1 };
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, b));
+  assert.equal(r.coversThrough, head);
+  assert.deepEqual(ids(r.pools), new Set(ps.map((p) => evmPoolIdOf(p.key))));
+  const many = b.calls.filter((cs) => cs.filter((c) => c.method === "eth_getLogs").length > 1).map((cs) => JSON.stringify(cs));
+  assert.ok(many.length > 0, "the plant met no batch");
+  assert.equal(new Set(many).size, many.length, `a timed-out batch asked again at its size: ${many.length} posts, ${new Set(many).size} batches`);
+  assert.equal(r.stats.failed[1], many.length, "each timed-out batch failed once");
+});
+
+test("WALK a slow reader never idles the fast one: the fast reader reads every span while the slow one has its first batch out", async () => {
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  const a: Reader = { head, pools: ps, calls: [] };
+  const b: Reader = { head, pools: ps, calls: [] };
+  let open: () => void = () => {};
+  const gate = new Promise<void>((f) => {
+    open = f;
+  });
+  const slow = reader(b);
+  let logsPosts = 0;
+  // the slow reader answers its head and the pin, then holds every batch until the gate opens
+  const held: EvmRpc = async (calls, until) => {
+    if (calls.some((c) => c.method === "eth_getLogs")) logsPosts++;
+    if (logsPosts > 1) await gate;
+    return slow(calls, until);
+  };
+  const run = evmPoolIndexSync(null, { ...cfgOf(a, b), readers: [reader(a), held] });
+  let spins = 0;
+  while (logSpans(a).length < 10 && spins++ < 1_000) await new Promise((f) => setImmediate(f));
+  const fastRead = logSpans(a).length;
+  open();
+  const r = await run;
+  assert.equal(fastRead, 10, `the fast reader read ${fastRead} of 10 spans while the slow one held its batch`);
+  assert.equal(r.coversThrough, head);
+  assert.deepEqual(ids(r.pools), new Set(ps.map((p) => evmPoolIdOf(p.key))));
+});
+
+test("PIECE a range one reader never answered refuses the sync: whole-or-refuse holds with each reader in its own pieces", async () => {
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  const spanEnd = head - 30_000;
+  const inner = spanEnd - 5_000; // the second reader's piece end inside that span, which the first is asked too
+  const a: Reader = { head, pools: ps, calls: [] };
+  const b: Reader = { head, pools: ps, calls: [], noBlock: { b: inner, times: Infinity } };
+  const r = await evmPoolIndexSync(null, cfgOf(a, b, { parts: [1, 2], perBatch: [3, 1], parallel: [2, 4] }));
+  assert.ok(logSpans(b).every((f) => blocksOf(f) === 5_000), "the second reader asked in its own pieces");
+  assert.ok(logSpans(a).every((f) => blocksOf(f) === 10_000), "the first reader asked whole spans");
+  assert.equal(r.coversThrough, null);
+  assert.equal(r.pools, null);
+  assert.equal(r.error?.code, "rpc_error");
+  assert.ok(r.index!.spans.every(([x, y]) => inner < x || inner > y), JSON.stringify(r.index!.spans));
+  // answered once it comes: whole
+  const ok = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [], noBlock: { b: inner, times: 1 } }, { parts: [1, 2] }));
+  assert.equal(ok.coversThrough, head);
+  assert.deepEqual(ids(ok.pools), new Set(ps.map((p) => evmPoolIdOf(p.key))));
+});
+
+test("AGREE two readers that disagree on a range refuse it: a piece end on another fork, or a pool at another block", async () => {
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  const inner = head - 30_000 - 5_000;
+  await assert.rejects(
+    evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [], forkAt: { b: inner, times: Infinity } }, { parts: [1, 2] })),
+    (e: Error & { code?: string }) => e.code === "rpc_disagree" && /do not agree/.test(e.message),
+  );
+  // the same pool at another block of its span on the reader that reads it in pieces: asked again, then refused
+  const moved = ps.map((p, i) => (i === 3 ? { ...p, block: p.block - 4_000 } : p));
+  await assert.rejects(
+    evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: moved, receipts: moved, calls: [] }, { parts: [1, 2] })),
+    (e: Error & { code?: string }) => e.code === "rpc_disagree",
+  );
 });
