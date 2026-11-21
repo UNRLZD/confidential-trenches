@@ -31,6 +31,7 @@ export {
   type EvmPoolSellQuoteRequest,
   type EvmPoolKey,
   type EvmQuoteErrorCode,
+  evmProviderSeats,
 } from "./checks/evm/quote.ts";
 // a buy tap's quote on Base and Robinhood (its route order, three kit quotes at most) and the pool index sync it reads
 export { EVM_BUY_TAP_QUOTES, EVM_BUY_WARM_EVERY_MS, EVM_BUY_WARM_IN, EVM_INDEX_KEEP_MS, EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolBuyWarm, evmPoolIndexRefresh, type EvmBuyTapHost } from "./trade/evm/buy-tap.ts";

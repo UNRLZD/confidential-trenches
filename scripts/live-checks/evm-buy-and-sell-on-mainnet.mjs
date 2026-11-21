@@ -36,7 +36,7 @@ import { pageFacts as depositFacts } from "./evm-deposit-on-mainnet.mjs";
 import { PINS } from "./evm-pools-on-mainnet.mjs";
 import { WITHDRAW_MARKS } from "./evm-withdraw-mainnet.mjs";
 import { EXIT } from "./provider-answer.mjs";
-import { EVM_BUY_TAP_QUOTES, evmPoolBuyQuote, evmPoolBuyQuoteTap, evmPoolIndexRefresh } from "../../packages/kit/src/index.ts";
+import { EVM_BUY_TAP_QUOTES, evmPoolBuyQuote, evmPoolBuyQuoteTap, evmPoolIndexRefresh, evmProviderSeats } from "../../packages/kit/src/index.ts";
 import { HELPER } from "./evm-deposit-on-mainnet.mjs";
 
 export const KEY = "evm-buy-and-sell-on-mainnet";
@@ -132,7 +132,8 @@ export function judge(run) {
 /** The quotes part of a run (see the header), real mainnet reads only: { chains: { base, robinhood } }. `chains` the
  *  chains read, `coins` each chain's coins quoted beside the helper's top rows (card
  *  robinhood-quotes-inside-provider-limits: FRONG, the owner's). Each tap's hosts: its posts (requests), the JSON-RPC
- *  calls in them and the answers of 429. */
+ *  calls in them, the answers of 429, of another HTTP error (`bad`, by status) and the requests that threw (`thrown`); and
+ *  the seats the tap's first quote ranks its providers by (evmProviderSeats), read as it starts. */
 export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "robinhood"], coins = {} } = {}) {
   const counts = {};
   const real = globalThis.fetch;
@@ -151,7 +152,14 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
       c.calls++;
     }
     if (logs) c.logs++;
-    const r = await fetchFn(url, init);
+    let r;
+    try {
+      r = await fetchFn(url, init);
+    } catch (e) {
+      c.thrown = (c.thrown ?? 0) + 1;
+      throw e;
+    }
+    if (r.status >= 400 && r.status !== 429) (c.bad ??= {})[r.status] = (c.bad[r.status] ?? 0) + 1;
     if (r.status === 429) {
       c.s429++;
       // the read a 429 answered: its methods, a batch's as one key (eth_call+eth_blockNumber)
@@ -187,6 +195,7 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
         for (const kind of ["cold", ...Array(WARM_RUNS).fill("warm")]) {
           let quotes = 0;
           take();
+          const seats = evmProviderSeats(chain).map((s) => ({ ...s, url: new URL(s.url).host }));
           const t0 = performance.now();
           let end;
           try {
@@ -195,7 +204,7 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
           } catch (e) {
             end = { ok: false, code: e?.code ?? "thrown", message: String(e?.message ?? e).slice(0, 200) };
           }
-          runs.push({ kind, ms: Math.round(performance.now() - t0), quotes, ...end, hosts: take() });
+          runs.push({ kind, ms: Math.round(performance.now() - t0), quotes, ...end, hosts: take(), seats });
         }
         rows.push({ coin: x.token, symbol: String(x.symbol ?? "").slice(0, 32), liq_usd: x.liq_usd ?? null, runs });
       }

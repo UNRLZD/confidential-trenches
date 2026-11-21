@@ -292,9 +292,9 @@ export const MUTANTS = [
   [QUOTE, "            first = performance.now() - (sentAt[k] ?? t0[k]!);\n            arm();", "            first = performance.now() - (sentAt[k] ?? t0[k]!);", R, "V1 "],
   [QUOTE, "        order.forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));", "", R, "V1 "],
   [QUOTE, "        failed ??= { e };\n        if (n === 0) unsure = true;\n        continue;", "        throw e;", R, "V3 "],
-  [QUOTE, "[rankClass(u, now), SPEED.get(u)?.ms ?? Number.MAX_VALUE, k] as const;", "[0, SPEED.get(u)?.ms ?? Number.MAX_VALUE, k] as const;", R, "V4 "],
-  [QUOTE, "s?.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0);", "0);", R, "V4 "],
-  [QUOTE, "|| evmProviderHeld(u, now) ? 2 : s?.out", "|| evmProviderHeld(u, now) ? 1 : s?.out", R, "V4 "],
+  [QUOTE, "[rankClass(u, now), cost(u), k] as const;", "[0, cost(u), k] as const;", R, "V4 "],
+  [QUOTE, "late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);", "0);", R, "V4 "],
+  [QUOTE, "|| evmProviderHeld(u, now) ? 2 : late", "|| evmProviderHeld(u, now) ? 1 : late", R, "V4 "],
   [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) s.ms", "      s.ms", R, "V4 "],
   // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
   // is agreed again without it; a 200 carrying a state error holds its provider in the ranking
@@ -340,7 +340,7 @@ export const MUTANTS = [
   [QUOTE, "        against.push(others[n]!);\n      } else holds++;", "        return refuse(\"rpc_disagree\", \"another block\");\n      } else holds++;", R, "V7 "],
   [QUOTE, "            first = performance.now() - (sentAt[k] ?? t0[k]!);", "            first = performance.now() - (sentAt[0] ?? t0[0]!);", R, "V8 "],
   [QUOTE, "      if (started >= 2) arm();\n", "", R, "V8 "],
-  [QUOTE, "const q = await evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch, later),", "const q = await evmPoolBuyQuoteWith(asked, evmProviders(p, fetch, later),", R, "V9 "],
+  [QUOTE, "const q = await evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p, undefined, sizeOf(v, chain, \"buy\", asked.token)), fetch, later),", "const q = await evmPoolBuyQuoteWith(asked, evmProviders(p, fetch, later),", R, "V9 "],
   // the re-review of fd9dd16: no confirm from the other head's provider asks a majority (MEDIUM-1); a head is held only
   // more than maxLag below the pair, and heads are no vote (LOW-1, U6); a contested round out of reach ends at once
   // (U1), and so does a confirm (U5)
