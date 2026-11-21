@@ -1013,9 +1013,20 @@ function agreeing<T>(
     let contested = false;
     let failed: { e: unknown } | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // the stand-ins (hedged requests): a request out past its provider's own hedge time (evmHedgeAfter) has the next
+    // provider asked once in its place, outside `late`'s budget; the two share one seat (`seat`), whose first answer is
+    // its one vote, so a stand-in is never a third vote nor a second answer of one provider. `gone`: requests whose
+    // seat had its answer, or whose seat-mate is still out, when they settled: they vote no more. A contested round
+    // asks every provider, and there each provider's answer is its own vote
+    let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
+    const seat: number[] = [];
+    const voted: boolean[] = [];
+    const hedgedK: boolean[] = [];
+    let gone = 0;
     const lose = () => {
       done = true;
       clearTimeout(timer);
+      clearTimeout(hedgeTimer);
       const x = got[0];
       const y = x === undefined ? undefined : (got.find((g) => !same(x.v, g.v)) ?? got[1]);
       if (x !== undefined && y !== undefined) {
@@ -1029,13 +1040,14 @@ function agreeing<T>(
     const end = () => {
       if (done) return;
       // contested: a value no count of the providers left can bring to `need` is never used
-      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails < need) return lose();
+      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails - gone < need) return lose();
       if (settled < started || started < list.length) return;
       lose();
     };
     const win = (g: { k: number; v: T }, h: { k: number; v: T }) => {
       done = true;
       clearTimeout(timer);
+      clearTimeout(hedgeTimer);
       // the quote's next rounds ask these two first: one that was slow, failed or differed is a spare from now on
       // (`rpcs` is the quote's own list, gated(); reordered only while no other round has)
       if (!Object.isFrozen(rpcs) && list.every((r, n) => rpcs[n] === r)) {
@@ -1063,7 +1075,8 @@ function agreeing<T>(
       const stuck = ks.find((n) => STALLED.get(list[n]!)?.() === true);
       if (stuck !== undefined) {
         movedK[stuck] = true;
-        return start(true);
+        // a stand-in moved keeps its seat
+        return start(true, seat[stuck] === stuck ? undefined : seat[stuck]);
       }
       if (ks.length > 0) return arm();
       // every request out was sent: late once the newest of them has been out lateAfter()
@@ -1085,8 +1098,36 @@ function agreeing<T>(
     // unheld one later in the list goes first, else the round waits on the two; a contested round asks every provider
     const heldK = (n: number) => HELD_OF.get(list[n]!)?.() === true;
     const failedK: boolean[] = [];
-    const live = () => Array.from({ length: started }, (_, n) => n).filter((n) => !heldK(n) && !movedK[n] && !failedK[n]).length;
-    const start = (backup = false) => {
+    const live = () => Array.from({ length: started }, (_, n) => n).filter((n) => !heldK(n) && !movedK[n] && !failedK[n] && !hedgedK[n]).length;
+    // when request `n` is late: sent (a gated provider says when it leaves its gate) plus its provider's hedge time
+    const hedgeAt = (n: number): number | null => {
+      const after = evmHedgeAfter(GATED_URL.get(list[n]!) ?? URL_OF.get(list[n]!));
+      const at = sentAt[n] ?? (GATED.has(list[n]!) ? undefined : t0[n]);
+      return after === null || at === undefined ? null : at + after;
+    };
+    // the requests a stand-in may still be asked for: each its own seat, out, never moved and none asked for it yet
+    const hedgeable = () => Array.from({ length: started }, (_, n) => n).filter((n) => seat[n] === n && !settledK[n] && !movedK[n] && !hedgedK[n] && !voted[n]);
+    const armHedge = () => {
+      clearTimeout(hedgeTimer);
+      if (done || started >= list.length) return;
+      const at = hedgeable()
+        .map(hedgeAt)
+        .filter((x): x is number => x !== null);
+      if (at.length === 0) return;
+      hedgeTimer = setTimeout(standIn, Math.max(1, Math.min(...at) - performance.now()));
+      (hedgeTimer as { unref?: () => void }).unref?.();
+    };
+    const standIn = () => {
+      if (done) return;
+      const now = performance.now();
+      const n = hedgeable().find((x) => (hedgeAt(x) ?? Infinity) <= now);
+      if (n !== undefined && started < list.length) {
+        hedgedK[n] = true;
+        start(true, n);
+      }
+      armHedge();
+    };
+    const start = (backup = false, of?: number) => {
       if (done || started >= list.length) return;
       if (backup && !contested && started >= 2 && heldK(started)) {
         const j = list.findIndex((_, n) => n > started && !heldK(n));
@@ -1095,6 +1136,7 @@ function agreeing<T>(
       }
       const k = started++;
       t0[k] = performance.now();
+      seat[k] = of ?? k;
       // read as the request would leave its gate: one whose provider answered 5xx in this round moves to the next now,
       // or is dropped unsent where its batch is already agreed
       const moved = () => {
@@ -1103,11 +1145,11 @@ function agreeing<T>(
         if (done) return (movedK[k] = true);
         if (started >= list.length) return false;
         movedK[k] = true;
-        start(true);
+        start(true, seat[k] === k ? undefined : seat[k]);
         return true;
       };
       const gate: Gated = {
-        sent: () => void ((sentK[k] = true), (sentAt[k] = performance.now())),
+        sent: () => void ((sentK[k] = true), (sentAt[k] = performance.now()), armHedge()),
         moved,
         spare: () => !done && started < list.length,
         down: () => void down?.add(list[k]!),
@@ -1117,6 +1159,13 @@ function agreeing<T>(
           settled++;
           settledK[k] = true;
           if (done) return;
+          // the seat's second answer: its first was its vote (a contested round asks every provider, each its own vote)
+          if (voted[seat[k]!] && !contested) {
+            gone++;
+            return end();
+          }
+          voted[seat[k]!] = true;
+          armHedge();
           const now = { k, v };
           got.push(now);
           const peers = got.filter((x) => same(x.v, v));
@@ -1138,6 +1187,11 @@ function agreeing<T>(
           settledK[k] = true;
           // a request moved to the next provider is no failure: the next was asked in its place
           if (movedK[k]) return done ? undefined : end();
+          // nor one whose seat has its answer, or whose seat-mate is still out: that one answers for the seat
+          if (voted[seat[k]!] || Array.from({ length: started }, (_, n) => n).some((n) => n !== k && seat[n] === seat[k] && !settledK[n])) {
+            gone++;
+            return done ? undefined : end();
+          }
           fails++;
           failedK[k] = true;
           failed ??= { e };
@@ -1147,6 +1201,7 @@ function agreeing<T>(
         },
       );
       if (started >= 2) arm();
+      armHedge();
     };
     start();
     start();
@@ -1158,6 +1213,27 @@ function agreeing<T>(
  *  `down`: the provider answered HTTP 5xx (gated), held for the rest of the round (agreeing's `down`). */
 type Gated = { readonly sent: () => void; readonly moved: () => boolean; readonly spare?: () => boolean; readonly down?: () => void };
 const MOVED = new Error("moved to the next provider before it was sent");
+/** A request and its stand-in (hedged requests): `a`, and where it is still out past its provider's hedge time
+ *  (evmHedgeAfter of `url`; none before its first answer) `b()` asked once too. Which answers first: 0 for `a`, 1 for
+ *  `b`; a failure waits for the other, and with both failed `a` is the one read. Nothing is thrown here. */
+async function hedged<T>(a: Promise<T>, url: string | undefined, b: () => Promise<T>): Promise<0 | 1> {
+  const after = evmHedgeAfter(url);
+  if (after === null) return 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = await new Promise<boolean>((go) => {
+    timer = setTimeout(() => go(true), after);
+    a.then(() => go(false), () => go(false));
+  });
+  clearTimeout(timer);
+  if (!late) return 0;
+  const second = b();
+  return new Promise<0 | 1>((go) => {
+    let left = 2;
+    const failed = () => void (--left === 0 && go(0));
+    a.then(() => go(0), failed);
+    second.then(() => go(1), failed);
+  });
+}
 // a gated provider's call with a request's hooks, and whether the provider is stalled (gated, ask)
 const GATED = new WeakMap<EvmRpc, (calls: readonly EvmRpcCall[], gate?: Gated) => Promise<readonly unknown[]>>();
 const STALLED = new WeakMap<EvmRpc, () => boolean>();
@@ -1295,19 +1371,30 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
     let unsure = false;
     const strict = () => unsure || against.length > 0;
     const enough = () => holds >= (strict() ? need : 2);
-    for (let n = 0; n < others.length && !enough(); n++) {
+    // each provider asked once (a stand-in's answer is its own provider's, never asked again)
+    const asked = new Map<number, Promise<Block>>();
+    const of = (k: number) => asked.get(k) ?? asked.set(k, askAt(list[k]!, [by]).then((x) => header(x[0], `provider ${k + 1}`))).get(k)!;
+    const order = [...others];
+    for (let n = 0; n < order.length && !enough(); n++) {
       // too few left to bring it to `need`
-      if (strict() && holds + others.length - n < need) break;
+      if (strict() && holds + order.length - n < need) break;
+      // a stand-in (agreeing's): where this one is out past its provider's hedge time the next is asked too, and the
+      // first to answer takes this place; the late one keeps the next place, its answer read only if the confirm gets
+      // there. One answered by a stand-in for the other head's provider is a spare's: the block then needs `need`
+      if (n + 1 < order.length && (await hedged(of(order[n]!), GATED_URL.get(list[order[n]!]!) ?? URL_OF.get(list[order[n]!]!), () => of(order[n + 1]!))) === 1) {
+        [order[n], order[n + 1]] = [order[n + 1]!, order[n]!];
+        if (n === 0) unsure = true;
+      }
       let back: Block;
       try {
-        back = header((await askAt(list[others[n]!]!, [by]))[0], `provider ${others[n]! + 1}`);
+        back = await of(order[n]!);
       } catch (e) {
         failed ??= { e };
         if (n === 0) unsure = true;
         continue;
       }
       if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {
-        against.push(others[n]!);
+        against.push(order[n]!);
       } else holds++;
     }
     if (enough()) return against.forEach((k) => HOLD.get(list[k]!)?.());
@@ -1331,7 +1418,9 @@ function pinConfirm(rpcs: readonly EvmRpc[], pin: Block, grant: () => void): () 
   grant();
   return async () => {
     const by = { method: "eth_getBlockByNumber", params: ["0x" + pin.number.toString(16), false] };
-    const one = async (k: number) => header((await askAt(rpcs[k]!, [by]))[0], `provider ${k + 1}`);
+    // each provider asked once (a stand-in's answer is its own provider's)
+    const asked = new Map<number, Promise<Block>>();
+    const one = (k: number) => asked.get(k) ?? asked.set(k, askAt(rpcs[k]!, [by]).then((x) => header(x[0], `provider ${k + 1}`))).get(k)!;
     let holds = 0;
     let failed = null as { e: unknown } | null;
     const judge = (r: PromiseSettledResult<Block>, k: number) => {
@@ -1343,8 +1432,17 @@ function pinConfirm(rpcs: readonly EvmRpc[], pin: Block, grant: () => void): () 
       }
       holds++;
     };
-    (await Promise.allSettled([0, 1].filter((k) => k < rpcs.length).map(one))).forEach(judge);
-    for (let k = 2; k < rpcs.length && holds < 2; k++) judge((await Promise.allSettled([one(k)]))[0]!, k);
+    // the first two at once; one out past its provider's hedge time has the next in the order asked in its place (a
+    // stand-in, agreeing's), and the first of the two to answer is read
+    let next = 2;
+    const seat = async (k: number) => {
+      let j = k;
+      const by2 = next < rpcs.length ? await hedged(one(k), GATED_URL.get(rpcs[k]!) ?? URL_OF.get(rpcs[k]!), () => one((j = next++))) : 0;
+      const at = by2 === 1 ? j : k;
+      judge((await Promise.allSettled([one(at)]))[0]!, at);
+    };
+    await Promise.all([0, 1].filter((k) => k < rpcs.length).map(seat));
+    for (let k = next; k < rpcs.length && holds < 2; k++) judge((await Promise.allSettled([one(k)]))[0]!, k);
     if (holds < 2) {
       // fewer than two hold it (one failed, or lags): the pin is not used; the quote is asked again at a block agreed now
       const e = new EvmQuoteError("rpc_error", `fewer than two providers hold block ${pin.number}: ${String((failed?.e as Error | undefined)?.message ?? "no answer")}`);
@@ -2852,7 +2950,7 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
 // answer, and the rest are its spares (agreeing).
 // A provider with a request out for longer than EVM_HEDGE_MS is ranked with the held until it answers: the next quote
 // does not wait on it either.
-const SPEED = new Map<string, { ms: number | null; held: number; out: number[]; last: number; failed: number }>();
+const SPEED = new Map<string, { ms: number | null; held: number; out: number[]; last: number; failed: number; times: number[] }>();
 /** Every venue's `quoteLast`: the providers a quote asks only after every other (evmRanked). */
 let QUOTE_LAST: ReadonlySet<string> | undefined;
 const quoteLastOf = (): ReadonlySet<string> =>
@@ -2861,10 +2959,23 @@ export const EVM_HOLD_MS = 30_000;
 /** Forgets every provider's measured time and hold: for the tests, which share this module's state (not in the index). */
 export const evmSpeedReset = (): void => SPEED.clear();
 const speedOf = (url: string) => {
-  const s = SPEED.get(url) ?? { ms: null, held: 0, out: [], last: 0, failed: -Infinity };
+  const s = SPEED.get(url) ?? { ms: null, held: 0, out: [], last: 0, failed: -Infinity, times: [] };
   SPEED.set(url, s);
   return s;
 };
+/** The answered posts a provider's hedge time is read from: its newest EVM_HEDGE_KEPT. */
+const EVM_HEDGE_KEPT = 32;
+/** How long a post to `url` is out before it is late and a spare stands in for it (hedged requests, Dean and Barroso,
+ *  "The Tail at Scale", CACM 2013: a second request once the first is out past the 95th percentile of its kind): the 95th
+ *  percentile of the provider's newest answered posts, never under EVM_HEDGE_MS; null before its first answer. A hung
+ *  post held a warm tap until its 10 s timeout where the round's spares were spent (card
+ *  evm-warm-tap-ends-inside-two-seconds, round E). */
+export function evmHedgeAfter(url: string | undefined): number | null {
+  const t = url === undefined ? undefined : SPEED.get(url)?.times;
+  if (t === undefined || t.length === 0) return null;
+  const sorted = [...t].sort((a, b) => a - b);
+  return Math.max(EVM_HEDGE_MS, sorted[Math.ceil(0.95 * sorted.length) - 1]!);
+}
 const timed = (url: string, rpc: EvmRpc): EvmRpc => {
   const f: EvmRpc = async (calls) => {
     const t = performance.now();
@@ -2878,7 +2989,12 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
       // evm-quote-lag-held)
       if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;
       // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)
-      else if (!out.some(notYet)) s.ms = s.ms === null ? performance.now() - t : s.ms * 0.75 + (performance.now() - t) * 0.25;
+      else if (!out.some(notYet)) {
+        const ms = performance.now() - t;
+        s.ms = s.ms === null ? ms : s.ms * 0.75 + ms * 0.25;
+        s.times.push(ms);
+        if (s.times.length > EVM_HEDGE_KEPT) s.times.shift();
+      }
       return out;
     } catch (e) {
       // a post lost (no answer, a timeout, an HTTP error) holds the provider where it is a stall, nothing answered since

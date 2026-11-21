@@ -136,6 +136,8 @@ export function judge(run) {
  *  the seats the tap's first quote ranks its providers by (evmProviderSeats), read as it starts. */
 export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "robinhood"], coins = {} } = {}) {
   const counts = {};
+  // each request of the tap: its host, its calls (method and params, ids left out), when it left and ended, and how
+  const asked = [];
   const real = globalThis.fetch;
   const counted = async (url, init) => {
     const host = new URL(typeof url === "string" ? url : url.url).host;
@@ -143,8 +145,13 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
     c.requests++;
     let logs = false;
     let methods = ["?"];
+    const req = { host, key: "", methods: "?", at: performance.now(), ms: null, end: "out" };
+    asked.push(req);
     try {
       const b = JSON.parse(typeof init?.body === "string" ? init.body : "null");
+      const list = Array.isArray(b) ? b : [b];
+      req.key = JSON.stringify(list.map((x) => [x?.method, x?.params]));
+      req.methods = [...new Set(list.map((x) => String(x?.method ?? "?")))].sort().join("+");
       c.calls += Array.isArray(b) ? b.length : b === null ? 0 : 1;
       logs = (Array.isArray(b) ? b : [b]).some((x) => x?.method === "eth_getLogs");
       methods = (Array.isArray(b) ? b : [b]).map((x) => String(x?.method ?? "?"));
@@ -157,8 +164,12 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
       r = await fetchFn(url, init);
     } catch (e) {
       c.thrown = (c.thrown ?? 0) + 1;
+      req.ms = Math.round(performance.now() - req.at);
+      req.end = "thrown";
       throw e;
     }
+    req.ms = Math.round(performance.now() - req.at);
+    req.end = String(r.status);
     if (r.status >= 400 && r.status !== 429) (c.bad ??= {})[r.status] = (c.bad[r.status] ?? 0) + 1;
     if (r.status === 429) {
       c.s429++;
@@ -173,7 +184,28 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
   const take = () => {
     const out = structuredClone(counts);
     for (const k of Object.keys(counts)) delete counts[k];
+    asked.length = 0;
     return out;
+  };
+  // the request a tap waited on longest: its methods, host, time out and end, and whether the same calls were asked of
+  // another host while it was out (a spare)
+  const waited = (t0of, t1) => {
+    const at = (x) => (x.ms === null ? t1 - x.at : x.ms);
+    const w = asked.reduce((m, x) => (m === null || at(x) > at(m) ? x : m), null);
+    if (w === null) return null;
+    const spare = asked.some((x) => x !== w && x.key === w.key && x.host !== w.host && x.at >= w.at && x.at <= w.at + at(w));
+    // a tap past 2 s: every request in the order sent (ms from the tap's start, ms out, end) and the time no request
+    // was out, the device's own waits (a retry's sleep, a gate, the event loop)
+    let idle = 0;
+    let reach = t0of;
+    const all = [...asked].sort((x, y) => x.at - y.at);
+    for (const x of all) {
+      if (x.at > reach) idle += x.at - reach;
+      reach = Math.max(reach, x.at + at(x));
+    }
+    if (t1 > reach) idle += t1 - reach;
+    const timeline = t1 - t0of > 2000 ? all.map((x) => `${Math.round(x.at - t0of)}+${Math.round(at(x))} ${x.host.split(".").slice(-3, -1).join(".")} ${x.methods} ${x.end}`) : undefined;
+    return { methods: w.methods, host: w.host, ms: Math.round(at(w)), end: w.end, spare, idle: Math.round(idle), timeline };
   };
   try {
     const chains = {};
@@ -204,7 +236,9 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
           } catch (e) {
             end = { ok: false, code: e?.code ?? "thrown", message: String(e?.message ?? e).slice(0, 200) };
           }
-          runs.push({ kind, ms: Math.round(performance.now() - t0), quotes, ...end, hosts: take(), seats });
+          const t1 = performance.now();
+          const longest = waited(t0, t1);
+          runs.push({ kind, ms: Math.round(t1 - t0), quotes, ...end, hosts: take(), seats, waited: longest });
         }
         rows.push({ coin: x.token, symbol: String(x.symbol ?? "").slice(0, 32), liq_usd: x.liq_usd ?? null, runs });
       }

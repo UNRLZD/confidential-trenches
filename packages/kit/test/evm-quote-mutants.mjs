@@ -26,6 +26,8 @@ const BUYU = "src/trade/evm/buy-unpinned.ts";
 const Q = "test/evm-quote.test.ts";
 const R = "test/evm-quote-attacks.test.ts";
 const PR = "test/evm-pair-rank.test.ts";
+const HP = "test/evm-hung-post.test.ts";
+const FH = "test/evm-quote-follow-hung.test.ts";
 const H = "test/evm-quote-head.test.ts";
 // a real cold and warm Robinhood quote's answers, replayed (card evm-quote-gas-used, review of e9b54f71, P2)
 const RP = "test/evm-quote-gas-used-replay.test.ts";
@@ -296,7 +298,7 @@ export const MUTANTS = [
   [QUOTE, "[rankClass(u, now), cost(u), k] as const;", "[0, cost(u), k] as const;", R, "V4 "],
   [QUOTE, "late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);", "0);", R, "V4 "],
   [QUOTE, "|| evmProviderHeld(u, now) ? 2 : late", "|| evmProviderHeld(u, now) ? 1 : late", R, "V4 "],
-  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) s.ms", "      s.ms", R, "V4 "],
+  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) {", "      {", R, "V4 "],
   // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
   // is agreed again without it; a 200 carrying a state error holds its provider in the ranking
   [QUOTE, "    if (!(await behind(got.block))) return got;\n    if (got.low === undefined) {", "    return got;\n    if (got.low === undefined) {", R, "LH1 "],
@@ -320,7 +322,7 @@ export const MUTANTS = [
   [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ3 "],
   [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ4 "],
   [QUOTE, "      await res.body?.cancel().catch(() => {});\n", "", R, "LQ3 "],
-  [QUOTE, "      else if (!out.some(notYet)) s.ms", "      else s.ms", R, "LQ4 "],
+  [QUOTE, "      else if (!out.some(notYet)) {", "      else {", R, "LQ4 "],
   [QUOTE, "|too many requests|exceeded its compute units per second/i", "|too many requests/i", R, "LQ5 "],
   [QUOTE, "const need = Math.floor(Math.max(of, list.length) / 2) + 1;", "const need = Math.floor(list.length / 2) + 1;", R, "LM2 "],
   [QUOTE, "    if (rest.length < 2) return got;", "", R, "LL4 "],
@@ -331,6 +333,13 @@ export const MUTANTS = [
   [QUOTE, "if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held", "if (now - s.failed < EVM_HOLD_MS) s.held", PR, "R4 "],
   [QUOTE, "if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held", "if (s.last <= t) s.held", PR, "R5 "],
   [QUOTE, "if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held", "if (true) s.held", PR, "R3 "],
+  // round (E): a post out past its provider's hedge time has a stand-in asked, in agreeing (H4), in the block's confirm
+  // (H1) and in the follow's pin confirm (H2); the hedge time is read from the provider's answers (H1)
+  [QUOTE, "        hedgedK[n] = true;\n        start(true, n);", "        hedgedK[n] = true;", HP, "H4 "],
+  [QUOTE, "  if (t === undefined || t.length === 0) return null;", "  return null;", HP, "H1 "],
+  [QUOTE, "        s.times.push(ms);", "", HP, "H1 "],
+  [QUOTE, "if (n + 1 < order.length && (await hedged(", "if (false && (await hedged(", HP, "H1 "],
+  [QUOTE, "const by2 = next < rpcs.length ? await hedged(", "const by2 = false ? await hedged(", FH, "H2 "],
   // the review of bc189de: a contested value needs more than half the listed providers, on the reads (M-1) and the
   // block's confirmation (M-2); a provider that differs from what the quote used is held; the spare's timer counts
   // from its own request (L-2); the pinned quote ranks (M14), a spare is asked while none answered (M15)
@@ -343,7 +352,7 @@ export const MUTANTS = [
   [QUOTE, "  HOLD.set(f, () => void (speedOf(url).held = performance.now() + EVM_HOLD_MS));", "", R, "V11 "],
   [QUOTE, "    const enough = () => holds >= (strict() ? need : 2);", "    const enough = () => holds >= 2;", R, "V10 "],
   [QUOTE, "    if (enough()) return against.forEach((k) => HOLD.get(list[k]!)?.());", "    if (enough()) return;", R, "V7 "],
-  [QUOTE, "        against.push(others[n]!);\n      } else holds++;", "        return refuse(\"rpc_disagree\", \"another block\");\n      } else holds++;", R, "V7 "],
+  [QUOTE, "        against.push(order[n]!);\n      } else holds++;", "        return refuse(\"rpc_disagree\", \"another block\");\n      } else holds++;", R, "V7 "],
   [QUOTE, "            first = performance.now() - (sentAt[k] ?? t0[k]!);", "            first = performance.now() - (sentAt[0] ?? t0[0]!);", R, "V8 "],
   [QUOTE, "      if (started >= 2) arm();\n", "", R, "V8 "],
   [QUOTE, "const q = await evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p, undefined, sizeOf(v, chain, \"buy\", asked.token)), fetch, later),", "const q = await evmPoolBuyQuoteWith(asked, evmProviders(p, fetch, later),", R, "V9 "],
@@ -351,18 +360,18 @@ export const MUTANTS = [
   // more than maxLag below the pair, and heads are no vote (LOW-1, U6); a contested round out of reach ends at once
   // (U1), and so does a confirm (U5)
   [QUOTE, "    const enough = () => holds >= (strict() ? need : 2);", "    const enough = () => holds >= (against.length > 0 ? need : 2);", R, "V12 "],
-  [QUOTE, "        if (n === 0) unsure = true;", "", R, "V12 "],
+  [QUOTE, "        failed ??= { e };\n        if (n === 0) unsure = true;\n", "        failed ??= { e };\n", R, "V12 "],
   [QUOTE, "    let holds = 1;\n", "    let holds = 2;\n", R, "V12 "],
   [QUOTE, "    let holds = 1;\n", "    let holds = 0;\n", R, "V3 "],
   [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => !near(x, a) && !near(x, b),", R, "V13 "],
   [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    () => false,", R, "V13 "],
   [QUOTE, "      // a head past maxLag is a missing answer, not a vote\n      false,\n", "", R, "V13 "],
-  [QUOTE, "      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails < need) return lose();\n", "", R, "V14 "],
-  [QUOTE, "      if (strict() && holds + others.length - n < need) break;\n", "", R, "V15 "],
+  [QUOTE, "      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails - gone < need) return lose();\n", "", R, "V14 "],
+  [QUOTE, "      if (strict() && holds + order.length - n < need) break;\n", "", R, "V15 "],
   // the re-review of 47109a7: the held head's edges (E3, E4) and the confirm's early stop without a vote against (E6)
   [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => x.number + maxLag <= (a.number <= b.number ? a.number : b.number),", R, "V13 "],
   [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? b.number : a.number),", R, "V13 "],
-  [QUOTE, "      if (strict() && holds + others.length - n < need) break;", "      if (against.length > 0 && holds + others.length - n < need) break;", R, "V15 "],
+  [QUOTE, "      if (strict() && holds + order.length - n < need) break;", "      if (against.length > 0 && holds + order.length - n < need) break;", R, "V15 "],
   // the scan's spans: each that came back is kept, also when another failed, never past a head named beyond maxLag;
   // a throttled span is asked again whole
   [QUOTE, "  await settle(jobs.map(run)).catch((e) => failing(e));", "  await settle(jobs.map(run));", R, "J1 "],
