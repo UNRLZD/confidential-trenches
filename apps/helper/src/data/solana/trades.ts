@@ -157,10 +157,10 @@ export const SIG_PAGE = 100;
 export const REFILL_MAX = 1_000;
 export const SETTLE_SLOTS = 150;
 /** A first read answers after its walk, its first trade held, or this long after the read began, with what it holds by
- *  then (filling). [design: 1.5 s: a token page's first screen answers within 3 s at p99 (the live check
- *  helper-answers-through-a-burst) with the way to it; at 3 s a cold coin with no trade held answered at 3.2 to 3.7 s
- *  (card helper-stays-fast-under-the-live-run, local helper 21 Nov 21:30Z)] */
-export const COLD_WAIT_MS = 1_500;
+ *  then (filling). [design: 3 s, for now: at 1.5 s a local helper on the public lanes answered 6 of 6 busy coins'
+ *  first tapes at the bound with no row (solana-tape-rows-at-first-answer FAIL, 21 Nov 22:20Z); the bound comes down
+ *  with the walk's first round, sized on the keyed lanes' sol-open times (card helper-stays-fast-under-the-live-run)] */
+export const COLD_WAIT_MS = 3_000;
 /** How long after a first read its answers name its phases (sol-open): the reads that joined it. */
 export const OPEN_NAMED_MS = 1_000;
 export const SILENT_MS = 30_000;
