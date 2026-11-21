@@ -78,6 +78,8 @@ type Reader = {
   stateError?: boolean;
   /** more logs this reader answers to every getLogs */
   extraLogs?: unknown[];
+  /** every Initialize log of the range, its filter's topics ignored */
+  ignoresTopics?: boolean;
   /** the receipts answered with an error */
   receiptError?: boolean;
   /** pools this reader's receipts read, where they are not its logs' (default: `pools`) */
@@ -128,7 +130,10 @@ function reader(r: Reader): EvmRpc {
           r.limitedInBody--;
           return { error: { code: -32005, message: "25/second request limit reached" } };
         }
-        const out = { result: [...r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf), ...(r.extraLogs ?? [])] };
+        // the filter's topics, as a node applies them: null any, a word that word, a list any of it
+        const ts = (r.ignoresTopics ? [] : ((c.params[0] as { topics?: unknown[] }).topics ?? [])) as (string | string[] | null)[];
+        const fits = (l: { topics: string[] }) => ts.every((x, k) => x === null || (Array.isArray(x) ? x.includes(l.topics[k]!) : x === l.topics[k]));
+        const out = { result: [...r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf).filter(fits), ...(r.extraLogs ?? [])] };
         if (r.moves !== undefined) (r.head += r.moves), delete r.moves;
         return out;
       }
@@ -1015,4 +1020,153 @@ test("AGREE two readers that disagree on a range refuse it: a piece end on anoth
     evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: moved, receipts: moved, calls: [] }, { parts: [1, 2] })),
     (e: Error & { code?: string }) => e.code === "rpc_disagree",
   );
+});
+
+// Card evm-first-quote-reads-its-coin-at-any-age: one coin's read (evmPoolCoinSync), the coin's pools and its Xs'
+// markets over the gap from a stored index to N, on both readers, every rule of the whole sync held. Read off the module,
+// so the file loads on a build without it and each test fails on its own.
+type CoinSync = (prev: EvmPoolIndexData | null, coin: { token: string; weth: string }, c: EvmPoolIndexConfig) => Promise<{ token: string; xs: readonly string[] | null; from: number | null; coversThrough: number | null; pools: readonly { id: string; key: EvmPoolKey; block: number }[] | null; error: EvmQuoteError | null }>;
+const coinSync: CoinSync = (...a) => {
+  const f = (poolIndex as { evmPoolCoinSync?: CoinSync }).evmPoolCoinSync;
+  if (f === undefined) throw new Error("no evmPoolCoinSync");
+  return f(...a);
+};
+const WETH = "0x4200000000000000000000000000000000000006";
+const NAT = "0x0000000000000000000000000000000000000000";
+const T = "0x7000000000000000000000000000000000000007"; // the coin, above WETH
+const X1 = "0x0000000000000000000000000000000000000100"; // an X the stored index holds, below WETH
+const X2 = "0x9000000000000000000000000000000000000009"; // an X new in the gap, above the coin
+const pk = (currency0: string, currency1: string, fee = 3000): EvmPoolKey => ({ currency0, currency1, fee, tickSpacing: 60, hooks: NAT });
+const H0 = 1_000_000;
+const H1 = 1_050_000;
+/** The chain: the coin's pools and its Xs' markets, before H0 (the stored index) and in the gap to H1, with pools of no
+ *  buy of the coin beside them (other coins' markets, an X with an X, the native coin with WETH). */
+const coinChain = () => {
+  const before = [
+    { key: pk(WETH, T), block: H0 - 50_000 },
+    { key: pk(X1, T), block: H0 - 40_000 },
+    { key: pk(X1, WETH), block: H0 - 30_000 },
+  ];
+  const gap = [
+    { key: pk(NAT, T), block: H0 + 5_000 },
+    { key: pk(T, X2), block: H0 + 12_000 },
+    { key: pk(X1, WETH, 500), block: H0 + 21_000 },
+    { key: pk(WETH, X2), block: H0 + 33_000 },
+    { key: pk(NAT, X2), block: H0 + 44_000 },
+  ];
+  const other = [
+    ...pools(6, H1),
+    { key: pk(X1, X2), block: H0 + 15_000 },
+    { key: pk(NAT, WETH), block: H0 + 25_000 },
+    { key: pk(X1, "0x8000000000000000000000000000000000000008"), block: H0 - 20_000 },
+  ];
+  return { before, gap, other, all: [...before, ...gap, ...other] };
+};
+/** The stored index at H0 of two honest readers of the chain. */
+const storedAt = async (all: Pool[]): Promise<EvmPoolIndexData> => {
+  const at = all.filter((p) => p.block <= H0);
+  const r = await evmPoolIndexSync(null, cfgOf({ head: H0, pools: at, calls: [] }, { head: H0, pools: at, calls: [] }));
+  assert.equal(r.coversThrough, H0);
+  return r.index!;
+};
+const isWanted = (k: EvmPoolKey, xs: Set<string>) => k.currency0 === T || k.currency1 === T || (((k.currency0 === NAT || k.currency0 === WETH) && xs.has(k.currency1)) || (k.currency1 === WETH && xs.has(k.currency0)));
+const logsAsked = (r: Reader) => r.calls.flat().filter((c) => c.method === "eth_getLogs").map((c) => (c.params[0] as { topics: unknown[] }).topics);
+
+test("COIN a coin's read finds every pool of the coin and of its Xs' markets to N, the same set the whole index holds, and asks no unfiltered getLogs", async () => {
+  const ch = coinChain();
+  const prev = await storedAt(ch.all);
+  const a: Reader = { head: H1, pools: ch.all, calls: [] };
+  const b: Reader = { head: H1, pools: ch.all, calls: [] };
+  const r = await coinSync(prev, { token: T, weth: WETH }, cfgOf(a, b));
+  assert.equal(r.error, null);
+  assert.equal(r.coversThrough, H1);
+  assert.equal(r.from, prev.from);
+  assert.deepEqual(r.xs, [X1, X2]);
+  const want = [...ch.before, ...ch.gap].map((p) => evmPoolIdOf(p.key));
+  assert.deepEqual(ids(r.pools), new Set(want));
+  // the whole index of the same chain, to the same N, filtered to the coin's sets, is the very same set
+  const whole = await evmPoolIndexSync(prev, cfgOf({ head: H1, pools: ch.all, calls: [] }, { head: H1, pools: ch.all, calls: [] }));
+  assert.deepEqual(ids(r.pools), ids(whole.pools!.filter((p) => isWanted(p.key, new Set([X1, X2])))));
+  // every getLogs names the coin or the Xs: none reads the event alone
+  for (const t of [...logsAsked(a), ...logsAsked(b)]) assert.ok(t.length >= 3 && (t[2] !== null || t[3] !== null), JSON.stringify(t));
+  // and every range of every filter is asked once on each reader: each answer read at its own place in its batch
+  for (const rd of [a, b]) {
+    const asked = rd.calls.flat().filter((c) => c.method === "eth_getLogs").map((c) => JSON.stringify(c.params[0]));
+    assert.equal(new Set(asked).size, asked.length, "a range asked twice");
+  }
+});
+
+test("COIN the Xs the stored index holds are asked beside the coin; an X new in the gap is asked after, at the same N, its heads not read again", async () => {
+  const ch = coinChain();
+  const prev = await storedAt(ch.all);
+  const a: Reader = { head: H1, pools: ch.all, calls: [] };
+  const b: Reader = { head: H1, pools: ch.all, calls: [] };
+  await coinSync(prev, { token: T, weth: WETH }, cfgOf(a, b));
+  const x = (s: string) => "0x" + s.slice(2).padStart(64, "0");
+  const tWord = x(T);
+  const batches = a.calls.filter((cs) => cs.some((c) => c.method === "eth_getLogs"));
+  const isFirst = (cs: EvmRpcCall[]) => cs.some((c) => c.method === "eth_getLogs" && (c.params[0] as { topics: unknown[] }).topics[2] === tWord);
+  // X1's markets in the very batches of the coin's
+  for (const cs of batches.filter(isFirst)) assert.ok(cs.some((c) => c.method === "eth_getLogs" && JSON.stringify((c.params[0] as { topics: unknown[] }).topics).includes(x(X1))), "X1's markets beside the coin's");
+  // X2's in a read after, every one of its batches past the first read's, none reading a head
+  // every request after the first read's last batch
+  const lastFirst = a.calls.map((cs, i) => (isFirst(cs) ? i : -1)).reduce((m, i) => Math.max(m, i), -1);
+  const second = a.calls.slice(lastFirst + 1);
+  assert.ok(second.length > 0 && second.every((cs) => !isFirst(cs)), "the second read after the first");
+  assert.ok(second.some((cs) => cs.some((c) => c.method === "eth_getLogs" && JSON.stringify((c.params[0] as { topics: unknown[] }).topics).includes(x(X2)))), "X2's markets asked");
+  assert.ok(second.every((cs) => cs.every((c) => !(c.method === "eth_getBlockByNumber" && c.params[0] === "latest"))), "no head read again");
+  // its pin is the first read's: its first batch is not the span ending at N alone
+  assert.ok(second[0]!.filter((c) => c.method === "eth_getLogs").length > 1, "the second read's spans asked at once");
+  assert.ok(second.every((cs) => cs.every((c) => c.method !== "eth_getLogs" || Number((c.params[0] as { toBlock: string }).toBlock) <= H1)));
+});
+
+test("COIN a block N the second read finds on another fork than the first pinned refuses the coin's read", async () => {
+  const ch = coinChain();
+  const prev = await storedAt(ch.all);
+  const tWord = "0x" + T.slice(2).padStart(64, "0");
+  // both readers move block N to another fork once the first read is in (a reorg at N between the two reads)
+  const forkOnSecond = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const out = await rpc(calls);
+    const second = calls.some((c) => c.method === "eth_getLogs") && !calls.some((c) => c.method === "eth_getLogs" && (c.params[0] as { topics: unknown[] }).topics[2] === tWord);
+    return second ? out.map((o, i) => (calls[i]!.method === "eth_getBlockByNumber" && Number(calls[i]!.params[0]) === H1 ? { result: { number: hx(H1), hash: blockHash(H1, "fork") } } : o)) : out;
+  };
+  const c = cfgOf({ head: H1, pools: ch.all, calls: [] }, { head: H1, pools: ch.all, calls: [] });
+  await assert.rejects(coinSync(prev, { token: T, weth: WETH }, { ...c, readers: [forkOnSecond(c.readers[0]), forkOnSecond(c.readers[1])] }), (e: Error & { code?: string }) => e.code === "rpc_disagree" && /pinned/.test(e.message));
+});
+
+test("COIN a reader that leaves out one of the coin's pools never hides it: logged by the other, its state and receipt keep it; its state 0 too refuses", async () => {
+  const ch = coinChain();
+  const prev = await storedAt(ch.all);
+  const hidden = ch.gap[1]!; // (T, X2): X2 then known only from the other reader
+  const without = ch.all.filter((p) => p !== hidden);
+  // logs only: the state and the receipt on the omitting reader prove it, so it is kept, and X2's markets with it
+  const kept = await coinSync(prev, { token: T, weth: WETH }, cfgOf({ head: H1, pools: ch.all, calls: [] }, { head: H1, pools: without, receipts: ch.all, state: new Set(ch.all.map((p) => evmPoolIdOf(p.key))), calls: [] }));
+  assert.equal(kept.coversThrough, H1);
+  assert.ok(ids(kept.pools).has(evmPoolIdOf(hidden.key)));
+  assert.ok(ids(kept.pools).has(evmPoolIdOf(pk(WETH, X2))));
+  // its state 0 as well: the two readers' state of it is apart, which refuses
+  await assert.rejects(
+    coinSync(prev, { token: T, weth: WETH }, cfgOf({ head: H1, pools: ch.all, calls: [] }, { head: H1, pools: without, calls: [] })),
+    (e: Error & { code?: string }) => e.code === "rpc_disagree",
+  );
+});
+
+test("COIN a range one reader never answered leaves the coin's read partial: nothing served", async () => {
+  const ch = coinChain();
+  const prev = await storedAt(ch.all);
+  const r = await coinSync(prev, { token: T, weth: WETH }, cfgOf({ head: H1, pools: ch.all, calls: [] }, { head: H1, pools: ch.all, calls: [], noBlock: { b: H1 - 30_000, times: Infinity } }));
+  assert.equal(r.coversThrough, null);
+  assert.equal(r.pools, null);
+  assert.equal(r.xs, null);
+  assert.equal(r.error?.code, "rpc_error");
+});
+
+test("COIN a reader that ignores the filter and answers every Initialize log reads the coin whole: a pool outside the coin's sets is no log of its read", async () => {
+  const ch = coinChain();
+  const prev = await storedAt(ch.all);
+  const many = [...ch.all, ...Array.from({ length: 12 }, (_, i) => ({ key: key(100 + i), block: H0 + 1_000 + i * 3_000 }))];
+  const r = await coinSync(prev, { token: T, weth: WETH }, cfgOf({ head: H1, pools: many, calls: [], ignoresTopics: true }, { head: H1, pools: many, calls: [] }, { cap: 15 }));
+  assert.equal(r.error, null);
+  assert.equal(r.coversThrough, H1);
+  assert.deepEqual(ids(r.pools), new Set([...ch.before, ...ch.gap].map((p) => evmPoolIdOf(p.key))));
 });

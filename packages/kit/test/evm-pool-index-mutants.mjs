@@ -49,6 +49,11 @@ const BATCHMAX = "F5's state reads take each reader's batchMax";
 const SPLIT = "SPLIT a batch that times out is split at once";
 const PIECE = "PIECE a range one reader never answered refuses the sync";
 const AGREE = "AGREE two readers that disagree on a range refuse it";
+// card evm-first-quote-reads-its-coin-at-any-age: one coin's read, its filters, its two reads at one N, its set
+const COIN = "COIN a coin's read finds every pool of the coin and of its Xs' markets to N";
+const COIN_X = "COIN the Xs the stored index holds are asked beside the coin";
+const COIN_PIN = "COIN a block N the second read finds on another fork";
+const COIN_WANT = "COIN a reader that ignores the filter";
 
 /** [find, replace, test]: each a rule removed. */
 export const MUTANTS = [
@@ -61,7 +66,7 @@ export const MUTANTS = [
   ["if (Math.max(heads[0]!, heads[1]!) - n > c.margin) return refuse(", "if (false) return refuse(", P4],
   // F4c: no pin at once; the newest span not asked alone first
   ['if (j.b === n && x.hash !== y.hash) return refuse("rpc_disagree", `the index readers do not agree on block ${n}`);', "", F4C],
-  ["const pinFirst = jobs.length > 0;", "const pinFirst = false;", F4C],
+  ["const pinFirst = jobs.length > 0 && asked.pinAt === undefined;", "const pinFirst = false;", F4C],
   // F4d: no margin; a lagging sync lowers what an earlier one stored
   ["const stored = Math.max(old?.through ?? from - 1, n - c.margin);", "const stored = n;", F4D],
   ["const stored = Math.max(old?.through ?? from - 1, n - c.margin);", "const stored = Math.max(from - 1, n - c.margin);", LAG],
@@ -145,6 +150,21 @@ export const MUTANTS = [
   ["for (const p of g) if (p.alone || g.length === 1) answered(r, p, NO_ANSWER);", "for (const p of g) if (p.alone || g.length === 1) throw new EvmQuoteError(\"rpc_error\", \"alone\");", ALONE],
   // card evm-sync-inside-the-kpi-at-any-age: a timed-out batch asked again at its size
   ["if (split && timedOut(e)) return null;", "", SPLIT],
+  // card evm-first-quote-reads-its-coin-at-any-age: a filter of the coin's or of the markets' left out; the Xs held not
+  // asked beside the coin, or the new ones never; the second read not at the first's N, or its pin not held; a stray
+  // pool kept; the set not cut to the coin's; a piece's ends read at one getLogs a piece
+  ["[[INITIALIZE, null, topic(t)], [INITIALIZE, null, null, topic(t)]]", "[[INITIALIZE, null, topic(t)]]", COIN],
+  ["out.push([INITIALIZE, null, [topic(NATIVE), topic(weth), ...part], [topic(weth), ...part]]);", "out.push([INITIALIZE, null, [topic(NATIVE), topic(weth)], part]);", COIN],
+  ["out.push([INITIALIZE, null, [topic(NATIVE), topic(weth), ...part], [topic(weth), ...part]]);", "out.push([INITIALIZE, null, part, [topic(weth)]]);", COIN],
+  ["filtersOf([...known].sort(), true)", "filtersOf([], true)", COIN],
+  ["if (fresh.length > 0) {", "if (false) {", COIN],
+  ["for (const p of pools) if (ofToken(p.key) || marketOf(xs)(p.key)) mine.set(p.id, p);", "for (const p of pools) mine.set(p.id, p);", COIN],
+  ["out[i + filters.length + k]", "out[i + 1 + k]", COIN],
+  ["i += filters.length + p.at.length;", "i += 1 + p.at.length;", COIN],
+  [", pinAt: first.index.head });", " });", COIN_X],
+  ["const pinFirst = jobs.length > 0 && asked.pinAt === undefined;", "const pinFirst = jobs.length > 0;", COIN_X],
+  ["if (j.b === n && asked.pinAt !== undefined && x.hash !== asked.pinAt.hash) return refuse(", "if (false) return refuse(", COIN_PIN],
+  ["if (f === null || !asked.want(f.p.key)) continue;", "if (f === null) continue;", COIN_WANT],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([find, , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
