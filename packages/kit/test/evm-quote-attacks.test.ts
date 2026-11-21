@@ -6998,8 +6998,17 @@ test("SP6 a first scan provider whose head read takes 2.5 s: the head is the sec
     return inner(calls);
   };
   const second: [number, number][] = [];
-  const { v } = await pairQuote(token, slowHead, scanner(5_000_000, realAt(token, 4_999_000), second));
+  const secondModel = scanner(5_000_000, realAt(token, 4_999_000), second);
+  // the head read is the one fast ask the scan still cuts at EVM_SCAN_HOLD_MS (its logs are raced, SP2H): the head is
+  // the second's, read once the first's is cut at 2 s, never waited for to 2.5 s
+  let secondHeads = 0;
+  const secondRpc: EvmRpc = async (calls) => {
+    if (calls.some((c) => c.method === "eth_blockNumber")) secondHeads++;
+    return secondModel(calls);
+  };
+  const { v } = await pairQuote(token, slowHead, secondRpc);
   assert.deepEqual(v, below);
+  assert.ok(secondHeads > 0, "the head was the first's, waited for past the 2 s cut");
   assert.ok(firstLogs.length > 0, "the first was asked no getLogs");
   assert.equal(second.length, 0, `the second read ${second.length} of a cold scan's requests`);
 }));
