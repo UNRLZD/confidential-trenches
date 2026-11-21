@@ -535,6 +535,8 @@ const POOLS_MAX = 5_000;
 /** Quote tokens whose routes are found at start (seedQuotes): only a cache of what discovery finds, each priced through
  *  the pool our own reads pick. Base: cbBTC, ZORA and VIRTUAL (symbols read on base-rpc.publicnode.com 21 Nov 22:44Z);
  *  ZORA quotes Zora's coins, VIRTUAL Virtuals' agents, cbBTC run 44942886709's 0x86fb3335. */
+/** One v4 pool of the device's pool index (kit EvmIndexedPool's id and key, lowercase addresses). */
+export type IndexedPool = { readonly id: string; readonly key: { readonly currency0: string; readonly currency1: string; readonly fee: number; readonly tickSpacing: number; readonly hooks: string } };
 export const QUOTE_SEEDS: Record<EvmChain, readonly string[]> = {
   base: ["0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", "0x1111111111166b7fe7bd91427724b487980afc69", "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b"],
   robinhood: [],
@@ -1298,7 +1300,7 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null; indexFile?: string; writable?: Promise<unknown>; restMax?: number; busy?: () => boolean; pass?: () => Promise<void> | null }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null; indexFile?: string; writable?: Promise<unknown>; restMax?: number; busy?: () => boolean; pass?: () => Promise<void> | null; quoteIndex?: (token: string) => readonly IndexedPool[] }) {
   const now = deps.now ?? Date.now;
   /** Whether the helper's event loop is busy now (limits/loop-busy.ts): the reads ahead stand down while it is. */
   const busy = deps.busy ?? ((): boolean => false);
@@ -4127,7 +4129,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     })();
     const ids = j === undefined ? null : quoteCands(j, q, [V.usd, V.weth]).slice(0, CANDIDATES_MAX);
     const found = await Promise.all([own, ...(ids ?? []).map((id) => fromHint(q, id).then((f) => f?.pool ?? null).catch(() => undefined))]);
-    const cands = found.filter((p): p is Pool => p != null && p.venue !== "curve" && p.quote.kind !== "token");
+    // and the device's own index of the PoolManager's pools (the sign release's snapshot, read through the kit's entry,
+    // server.ts): the token's v4 pools against USD, WETH or ETH, each key hashed to its id here, no read of its own
+    const indexed = (deps.quoteIndex?.(q) ?? []).flatMap((x) => {
+      const other = x.key.currency0 === q ? x.key.currency1 : x.key.currency1 === q ? x.key.currency0 : null;
+      if (other !== V.usd && other !== V.weth && other !== ZERO) return [];
+      const k = `0x${[x.key.currency0, x.key.currency1].map(pad32).join("")}${pad32(`0x${x.key.fee.toString(16)}`)}${pad32(`0x${x.key.tickSpacing.toString(16)}`)}${pad32(x.key.hooks)}`;
+      const p = v4Pool(q, x.id, k);
+      return p === null ? [] : [p];
+    }).slice(0, CANDIDATES_MAX);
+    const cands = [...found, ...indexed].filter((p): p is Pool => p != null && p.venue !== "curve" && p.quote.kind !== "token");
     const picked = cands.filter((p, i) => cands.findIndex((x) => x.id === p.id) === i);
     const unread = ids === null || found.some((f) => f === undefined);
     if (picked.length === 0) return unread ? undefined : null;

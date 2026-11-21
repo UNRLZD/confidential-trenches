@@ -23,12 +23,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { monitorEventLoopDelay } from "node:perf_hooks";
-import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
+import { evmPoolIndexFromSnapshot, HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import { withChange4h } from "./data/candles.ts";
 import { address as solanaAddress, createSolanaLists } from "./data/solana/lists.ts";
 import { LOGO_NONE_MS, LOGOS, type LogoChain, type Logos } from "./data/logo.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
-import { createSwaps, INDEX_RPCS, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
+import { createSwaps, INDEX_RPCS, SWAP_RPCS, TRADES_MAX, VENUES, type EvmSwaps, type IndexedPool } from "./data/evm/swaps.ts";
 import { createPoolIndex, jsonRpcPost, type PoolIndex, type PoolIndexConfig } from "./data/evm/pool-index.ts";
 import { createEvmToken, holdersDay, type EvmToken } from "./data/evm/token.ts";
 import { createHeld, DEX_LIMITS, parseHeld, type Held } from "./data/held.ts";
@@ -947,7 +947,43 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
  */
 /** `disk` (card helper-evm-tapes-survive-a-restart): each chain's swap index kept in `storeDir` (swap-index-<chain>.sqlite,
  *  data/evm/index-store.ts), written once `writable` settles (the senders this helper's, as the pool index waits). */
-export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}, disk?: { storeDir: string; writable: Promise<unknown> }): Swaps {
+/** Where the sign release serves the device's pool index snapshots (packages/signpage/src/shell.ts SERVED_FILES
+ *  "/evm-index/"): the sign page's origin, HELPER_CORS's second (https://confidential.unrealized.trade/evm-index/base.json
+ *  answered 200, 1,139,189 bytes, 21 Nov 23:2xZ, the bytes of packages/signpage/data/evm-index/base.json). */
+const SIGN_ORIGIN = HELPER_CORS.origins[1];
+/** The snapshot's bound, as the page reads it (signpage pool-testnet.ts EVM_INDEX_SNAPSHOT_MAX, 32 MiB), and its read's
+ *  wait; it is asked again every QUOTE_INDEX_EVERY_MS, as a sign release may ship a newer one. */
+const QUOTE_INDEX_MAX = 32 << 20;
+const QUOTE_INDEX_MS = 30_000;
+const QUOTE_INDEX_EVERY_MS = 6 * 3_600_000;
+/** The index's pool cap the kit's Base venue sets (kit trade/evm/buy-unpinned.ts, index.cap 131,072). */
+const QUOTE_INDEX_CAP = 131_072;
+/**
+ * A chain's v4 pools by currency from the device's own pool index (card index-evm-swaps-v4-route-tape), the snapshot the
+ * sign release serves, read as any app reads it: through the kit's entry (evmPoolIndexFromSnapshot checks its shape,
+ * chain and PoolManager, and hashes each key to its id). The tape's quote routes take a third quote token's pools against
+ * USD, WETH or ETH from it as candidates beside its own discovery (swaps.ts pickEnd); none until the first read, and the
+ * last one kept when a read fails.
+ */
+export function quoteIndexFromSign(chain: "base", fetchFn: typeof fetch = fetch): (token: string) => readonly IndexedPool[] {
+  let by = new Map<string, IndexedPool[]>();
+  const read = async (): Promise<void> => {
+    const r = await fetchFn(`${SIGN_ORIGIN}/evm-index/${chain}.json`, { signal: AbortSignal.timeout(QUOTE_INDEX_MS) });
+    if (!r.ok || Number(r.headers.get("content-length") ?? "0") > QUOTE_INDEX_MAX) return;
+    const t = await r.text();
+    if (t.length > QUOTE_INDEX_MAX) return;
+    const x = evmPoolIndexFromSnapshot(JSON.parse(t), { chainId: 8453, poolManager: VENUES[chain].poolManager, cap: QUOTE_INDEX_CAP });
+    if (x === null) return;
+    const next = new Map<string, IndexedPool[]>();
+    for (const p of x.pools) for (const c of new Set([p.key.currency0, p.key.currency1])) next.set(c, [...(next.get(c) ?? []), p]);
+    by = next;
+  };
+  void read().catch(() => undefined);
+  setInterval(() => void read().catch(() => undefined), QUOTE_INDEX_EVERY_MS).unref();
+  return (token) => by.get(token) ?? [];
+}
+
+export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}, disk?: { storeDir: string; writable: Promise<unknown> }, quoteIndex: Partial<Record<EvmChain, (token: string) => readonly IndexedPool[]>> = {}): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
@@ -995,6 +1031,7 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       price: (token) => seen?.prices.get(token) ?? named?.price(token) ?? null,
       // the reads ahead stand down while callers wait on the loop (card robinhood-tapes-read-ahead-bounded)
       busy: loopBusy,
+      ...(quoteIndex[chain] === undefined ? {} : { quoteIndex: quoteIndex[chain] }),
     });
     out[chain] = swaps;
     // the quote tokens many coins are quoted in (swaps.ts QUOTE_SEEDS) priced from start, so their coins' first opens
@@ -1482,7 +1519,7 @@ if (import.meta.main) {
     // card evm-token-page-opens-any-coin: a token no list carries is named by DexScreener, on the budget held reads draw
     const dex = upstreamBudget(() => DEX_LIMITS, Date.now);
     const evmNamed = evmNamedFrom(SERVED_EVM, dex);
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed, { storeDir, writable: senders.held }), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed, { storeDir, writable: senders.held }, { base: quoteIndexFromSign("base") }), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info CoinGecko's keyed
     // on-chain read, never GeckoTerminal's keyless window (card evm-token-page-off-the-5-call-window), its pool and
     // decimals the swap reads' when they hold them

@@ -267,3 +267,41 @@ test("card index-evm-swaps-v4-route-tape: seedQuotes finds each QUOTE_SEEDS toke
   });
   assert.deepEqual(value, { [S.QUOTE_SEEDS.base[0]!]: `0x${"f7".repeat(20)}`, [S.QUOTE_SEEDS.base[1]!]: undefined, [S.QUOTE_SEEDS.base[2]!]: undefined });
 });
+
+test("card index-evm-swaps-v4-route-tape (device index): a quote token whose only USD pool our discovery does not see (no transfer of it in the window) is priced through the v4 pool the device's pool index names, its depth read on chain (red at c3b72179a: no route, no rows)", async () => {
+  const Q3 = `0x${"e0".repeat(20)}`;
+  const c: Case = { name: "Q3", quote: Q3, other: USDC, sqrt: 0n, usdPerQuoteUnit: 1e-18 };
+  const p = planted(c);
+  // the quote's own v3 pool gone: none of its logs, none of its answers
+  const QPOOL = `0x${"f7".repeat(20)}`;
+  for (let i = p.logs.length - 1; i >= 0; i--) if (p.logs[i]!.address === QPOOL || p.logs[i]!.address === Q3) p.logs.splice(i, 1);
+  for (const k of [...p.calls.keys()]) if (k.startsWith(QPOOL) || k.includes(QPOOL.slice(2))) p.calls.delete(k);
+  // its v4 pool against USDC (currency0), fee 500, tick spacing 10, no hook: 1 Q3 = 1 USD, so 10^12 of its units a USDC
+  // unit (sqrtPriceX96 = 10^6 * 2^96), in-range liquidity 10^24
+  const key = keyOf(USDC, Q3, 500n, 10n);
+  const id = idOf(key);
+  const slot = stateSlot(id);
+  p.calls.set(`${PM} ${sel("extsload(bytes32)")}${slot.slice(2)}`, word(10n ** 6n << 96n));
+  p.calls.set(`${PM} ${sel("extsload(bytes32)")}${(BigInt(slot) + 3n).toString(16).padStart(64, "0")}`, word(10n ** 24n));
+  const index = (t: string) => (t === Q3 ? [{ id, key: { currency0: USDC, currency1: Q3, fee: 500, tickSpacing: 10, hooks: ZERO } }] : []);
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const s = createSwaps("base", { fetch: rig(p) as never, now: () => Date.now(), listed: async () => true, rpcs: URLS, pools: new Map(), tickMs: 0, sleep: async () => undefined, quoteIndex: index } as never);
+    let a = await s.trades(COIN, 50);
+    for (let i = 0; i < 40 && a.status === 200 && JSON.parse(a.body).filling === true; i++) {
+      await new Promise((go) => setTimeout(go, 1_000));
+      await s.tick();
+      a = await s.trades(COIN, 50);
+    }
+    s.stop();
+    return a;
+  });
+  assert.equal(value.status, 200, value.body);
+  const j = JSON.parse(value.body) as { trades: { tx: string; usd: string }[] };
+  const want = p.mains.slice(-TRADES_MAX).reverse();
+  assert.equal(j.trades.length, TRADES_MAX, value.body.slice(0, 200));
+  j.trades.forEach((t, i) => {
+    const usd = Number(want[i]!.q) * 1e-18;
+    assert.equal(t.tx, want[i]!.tx, `row ${i}`);
+    assert.ok(Math.abs(Number(t.usd) - usd) <= usd * 1e-9, `row ${i}: usd ${t.usd}, want ${usd}`);
+  });
+});
