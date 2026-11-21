@@ -68,3 +68,17 @@ test("live read on fakes: the burst is sent at once, each the wallet lister's ex
   assert.deepEqual(seen.map((s) => s.body.params[1].filters[0].dataSize).sort(), [13, 13, 17, 17]);
   assert.equal(judge(run).verdict, "PASS");
 });
+
+// card solana-marks-route-answers, reopened. bad_day_486d732: the deployed helper at 486d73262, 20 Nov 19:0xZ, its one
+// route B provider (QuickNode) past the day the helper allows it, every scan 503 at 0 ms naming no provider: FAIL.
+// good_keyless: a local helper at this card with no key at all (route B its keyless pair, rpc.ts MARKS_KEYLESS) and the
+// mainnet pool program, on mainnet: every scan listed (14 and 26 accounts) by SOLANA_MARKS_FOUNDATION: PASS.
+test("recorded runs of the reopened card: the deployed helper with QuickNode past its day FAILs, a keyless helper at this card PASSes on the Foundation's endpoint", () => {
+  const b = judge(A.bad_day_486d732);
+  assert.equal(b.verdict, "FAIL");
+  assert.equal(bad(b).filter((l) => /a list with its slot: HTTP 503/.test(l)).length, BURST, bad(b).join("\n"));
+  const g = judge(A.good_keyless);
+  assert.deepEqual(bad(g), [], g.lines.join("\n"));
+  assert.equal(g.verdict, "PASS");
+  assert.equal(g.lines.filter((l) => l.endsWith("answered by SOLANA_MARKS_FOUNDATION")).length, BURST);
+});
