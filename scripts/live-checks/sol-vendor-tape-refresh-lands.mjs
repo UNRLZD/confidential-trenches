@@ -14,7 +14,10 @@
 // Then the gap (card sol-vendor-tape-waits-past-reach): the judged coin is left unread for GAP_MS, past
 // SOL_VENDOR_REACH_MS and under STALE_MS, as a page opening a coin another reader held, and read again, GAPS times:
 //   - every gap answer is 200 and the vendor's rows, read at most SOL_VENDOR_REACH_MS before (before that card the held
-//     rows were served at once, as old as the gap: a local helper on mainnet served BONK's 17 s and more).
+//     rows were served at once, as old as the gap: a local helper on mainnet served BONK's 17 s and more), or, when no
+//     refresh landed within the helper's bound, saying so (`filling`: card sol-vendor-tape-gap-served-inside-reach; live
+//     run 44938731300 served BONK's 33,606 and 54,172 ms old, and on 21 Nov POPCAT's 19,651 ms old in 1 ms, each with
+//     no word of it, so the page drew them as live).
 // No coin served from the vendor long enough to judge, or no gap answer from the vendor: error (exit 2), never a pass.
 // After: helper
 //   node scripts/live-checks/sol-vendor-tape-refresh-lands.mjs [--base <url>] [--record <file>]
@@ -91,7 +94,7 @@ export async function read(base = BASE, fetchFn = fetch, wait = (ms) => new Prom
       await wait(GAP_MS);
       const t = await get(`/v1/market/trades?chain=solana&token=${encodeURIComponent(coin)}&limit=50`);
       const a = obj(t.body);
-      gaps.push({ at: t.at, ms: now() - t.at, status: t.status, timing: t.timing, src: a.src ?? null, n: arr(a.trades).length, as_of_ms: a.as_of_ms ?? null, ...(Object.hasOwn(a, "whole_ms") ? { whole_ms: a.whole_ms } : {}) });
+      gaps.push({ at: t.at, ms: now() - t.at, status: t.status, timing: t.timing, src: a.src ?? null, n: arr(a.trades).length, as_of_ms: a.as_of_ms ?? null, ...(Object.hasOwn(a, "whole_ms") ? { whole_ms: a.whole_ms } : {}), ...(a.filling === true ? { filling: true } : {}) });
     }
     coins.push({ coin, reads, gaps });
     break;
@@ -132,8 +135,11 @@ export function judge(r) {
     return { ok: bad ? false : null, lines: [...lines, `--  ${String(c.coin).slice(0, 10)}: no gap answer from the vendor's rows (${gaps.length} gap reads)`] };
   }
   const gAges = gv.map((x) => vendorReadOf(ENTRY, x.timing));
-  const gOver = gAges.filter((a) => a > SOL_VENDOR_REACH_MS);
-  say(gOver.length === 0, `${String(c.coin).slice(0, 10)}: ${gv.length} vendor answers after ${GAP_MS / 1000} s unread, rows read ${gAges.join(", ")} ms before (at most ${SOL_VENDOR_REACH_MS}): ${gOver.length ? `${gOver.length} past it` : "every one"}`);
+  // past the reach, an answer that says filling says no refresh came: the page marks it, never draws it as live
+  const gOver = gv.filter((x, i) => gAges[i] > SOL_VENDOR_REACH_MS);
+  const gUnsaid = gOver.filter((x) => x.filling !== true);
+  const said = gOver.length - gUnsaid.length;
+  say(gUnsaid.length === 0, `${String(c.coin).slice(0, 10)}: ${gv.length} vendor answers after ${GAP_MS / 1000} s unread, rows read ${gAges.join(", ")} ms before (at most ${SOL_VENDOR_REACH_MS}, or saying filling): ${gUnsaid.length ? `${gUnsaid.length} past it with no word of it` : said ? `${said} past it, each saying filling` : "every one"}`);
   return { ok: lines.every((l) => !l.startsWith("BAD")), lines };
 }
 

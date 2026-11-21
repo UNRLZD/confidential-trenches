@@ -17,7 +17,7 @@ const T = "dragons-2.nearlytrade.near";
 const VENDOR_READ = /(?:^|,)\s*near-vendor-read;desc="rows read (\d+) ms ago"/;
 const rhea = { trades: { trades: async () => ({ status: 200, body: '{"rhea":"trades"}' }) } } as unknown as NearMarket;
 
-type Tape = { trades: { t_ms: number }[]; whole_ms?: number; src: string; as_of_ms: number };
+type Tape = { trades: { t_ms: number }[]; whole_ms?: number; filling?: true; src: string; as_of_ms: number };
 
 test("a NEAR engine tape read within NEAR_VENDOR_REACH_MS claims every trade after its oldest row and names its read's age; one held past it (its renewal failed) claims none, its rows still served", async () => {
   assert.equal(NEAR_VENDOR_REACH_MS, FRESH_MS + RHEA_FRESH_MS, "a read renewed past FRESH_MS, overdue by at most the bound the NEAR chain tape is read again at");
@@ -56,18 +56,20 @@ test("a NEAR engine tape read within NEAR_VENDOR_REACH_MS claims every trade aft
   const late = await read();
   assert.deepEqual([late.a.status, late.j.src, late.j.as_of_ms, late.j.trades.length], [200, "unrealized", read0, first.j.trades.length], "the held rows are still served");
   assert.equal(late.j.whole_ms, undefined, "rows read past NEAR_VENDOR_REACH_MS are no complete list: the trades since are not in them");
+  // card sol-vendor-tape-gap-served-inside-reach: and they say so, as a chain tape behind its head does (red at 61fa14a08)
+  assert.deepEqual([edge.j.filling, late.j.filling], [undefined, true], "rows past NEAR_VENDOR_REACH_MS say filling; at it, none");
 
   // ten minutes on, the same
   clock.t = read0 + 600_000;
   const old = await read();
-  assert.deepEqual([old.j.trades.length, old.j.whole_ms], [first.j.trades.length, undefined]);
+  assert.deepEqual([old.j.trades.length, old.j.whole_ms, old.j.filling], [first.j.trades.length, undefined, true]);
 
   // the engine answers again: the renewal this read starts lands, and the next read claims its reach again
   engine.up = true;
   clock.t += 1;
   await read();
   const back = await read();
-  assert.deepEqual([back.j.as_of_ms, back.j.whole_ms], [clock.t, oldest + 1_000]);
+  assert.deepEqual([back.j.as_of_ms, back.j.whole_ms, back.j.filling], [clock.t, oldest + 1_000, undefined]);
   // each answer names how long ago its rows were read, the reach the live check judges a NEAR tape by
   const named = [first, edge, late, back].map((x) => VENDOR_READ.exec(x.a.timing ?? "")?.[1] ?? `none in ${JSON.stringify(x.a.timing)}`);
   assert.deepEqual(named, ["0", String(NEAR_VENDOR_REACH_MS), String(NEAR_VENDOR_REACH_MS + 1), "0"]);

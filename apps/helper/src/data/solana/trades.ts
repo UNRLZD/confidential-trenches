@@ -1279,13 +1279,18 @@ export function createSolanaTrades(deps: {
   }
   /** A pool's newest trades (newest first), read at `at`, as the trades answer: the newest `limit`, every one after the
    *  oldest (card token-stats-count-every-trade) claimed complete only while that read is within SOL_VENDOR_REACH_MS,
-   *  its age always named (card vendor-tapes-name-their-reach-every-chain), the vendor's rows and ours alike. */
+   *  its age always named (card vendor-tapes-name-their-reach-every-chain), the vendor's rows and ours alike. Past the
+   *  reach the tape says filling, as this chain's own tape says it behind its stream (token.ts SOL_BEHIND_MS): card
+   *  sol-vendor-tape-gap-served-inside-reach, live run 44938731300 served BONK's rows 33,606 and 54,172 ms old with no
+   *  word of it, the refresh past the reach refused or not landed within TAPE_OPEN_BOUND_MS, and the page drew them as
+   *  live (apps/terminal screens/token/trades.ts marks a tape only by `filling`). */
   function rowsAnswer(all: unknown[], src: string, at: number, limit: number, holed = false): DataAnswer {
     const age = Math.max(0, now() - at);
     const oldest = (all.at(-1) as { t_ms?: unknown } | undefined)?.t_ms;
     const whole = typeof oldest === "number" && Number.isSafeInteger(oldest) && age <= SOL_VENDOR_REACH_MS && !holed ? { whole_ms: oldest + 1_000 } : {};
+    const behind = age > SOL_VENDOR_REACH_MS ? { filling: true } : {};
     const timing = `sol-vendor-read;desc="rows read ${age} ms ago"`;
-    return { status: 200, body: JSON.stringify({ trades: all.slice(0, limit), ...whole, src, as_of_ms: at }), src, asOfMs: at, timing };
+    return { status: 200, body: JSON.stringify({ trades: all.slice(0, limit), ...behind, ...whole, src, as_of_ms: at }), src, asOfMs: at, timing };
   }
 
   // Card sol-vendor-tape-refresh-from-our-reads: the vendor names a coin's pool once (its first answer); while a page

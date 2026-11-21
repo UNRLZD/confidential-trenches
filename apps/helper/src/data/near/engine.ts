@@ -407,7 +407,10 @@ export function createEngineNear(deps: EngineDeps = {}) {
       const oldest = Array.isArray(listed) && all !== null && all.length === listed.length && age <= NEAR_VENDOR_REACH_MS ? all.at(-1)?.t_ms : undefined;
       const whole = oldest === undefined ? {} : { whole_ms: oldest + 1_000 };
       const timing = `near-vendor-read;desc="rows read ${age} ms ago"`;
-      return { status: 200, body: JSON.stringify({ trades: rows, ...whole, src: SRC, as_of_ms: h.at }), src: SRC, asOfMs: h.at, timing };
+      // rows read past NEAR_VENDOR_REACH_MS say filling, as a chain tape behind its head does (card
+      // sol-vendor-tape-gap-served-inside-reach: the Solana vendor tape served rows 54 s old with no word of it)
+      const behind = age > NEAR_VENDOR_REACH_MS ? { filling: true } : {};
+      return { status: 200, body: JSON.stringify({ trades: rows, ...behind, ...whole, src: SRC, as_of_ms: h.at }), src: SRC, asOfMs: h.at, timing };
     },
     async candles(id: string, tf: string, to: number | null, limit: number): Promise<DataAnswer | null> {
       if (!Object.hasOwn(TF_SECONDS, tf)) return NOT_FOUND;
