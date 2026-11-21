@@ -117,10 +117,11 @@ export type EvmPoolVenue = {
    *  readers, each of another operator, the first always one the device reaches directly, the second at most the
    *  helper's keyed route (POST /v1/rpc/{chain}?keyed=only, as the NEAR seat: the helper can make the sync refuse,
    *  never add or hide a pool, F4a and F5), `span` blocks a request over the scan's `depth`, `perBatch` spans a batch
-   *  and `parallel` batches at once on each, at most `batchMax` calls in any one batch (the helper's
+   *  and `parallel` batches at once on each (a pair: each reader its own), each reader asking a span in `parts` pieces
+   *  (default one each), at most `batchMax` calls in any one batch (the helper's
    *  HELPER_RPC_BATCH_MAX where it reads); stored to `margin` blocks below the head (a reorg's reach); past `cap` pools
    *  it refuses too_many_pools. */
-  readonly index?: Readonly<{ readers: readonly [string, string]; span: number; perBatch: number; parallel: number; margin: number; cap: number; batchMax?: number }>;
+  readonly index?: Readonly<{ readers: readonly [string, string]; span: number; perBatch: number | readonly [number, number]; parallel: number | readonly [number, number]; parts?: readonly [number, number]; margin: number; cap: number; batchMax?: number }>;
 };
 export type EvmScanSpare = Readonly<{ url: string; span: number; parallel: number; orSpan?: number }>;
 export type EvmHookedPool = { readonly pad: string; readonly from: "native" | "weth"; readonly fee: number; readonly tickSpacing: number; readonly hooks: string };
@@ -412,7 +413,15 @@ export const evmMainnetVenues = () =>
       // 204, allow-origin *. Its operator is not publicnode's; its history starts at block 52,500,000 (above), under the
       // depth's floor. Passed over for this seat: base-mainnet.public.blastapi.io (getLogs of 10 blocks at most) and
       // mainnet.base.org (-32011 "request limit reached" to 50 of 51 batches), both read in the same 3 minutes.
-      index: bare({ readers: Object.freeze(["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com"] as const), span: 10_000, perBatch: 5, parallel: 4, margin: 474, cap: 131_072 }),
+      // Each reader its own pieces and pace (card evm-sync-inside-the-kpi-at-any-age): publicnode a span of 50,000 blocks,
+      // its read maximum ("exceed maximum block range: 50000" at 100,000, 50,000 in 0.5 s, 21 Nov 12:5xZ), 5 a batch;
+      // bloXroute each span as five pieces of 10,000, one a request (it answers a batch's getLogs mostly one after
+      // another: its 5-span batches of 10,000 took 1.5 to 8.7 s and passed the 10 s timeout on 32 of 80 posts in a 48 h
+      // gap, 12:5xZ), 8 at once: 8 getLogs in flight where the batches of 5 at 4 at once put 20. Release 186's 348k-block
+      // gap, one sync each, interleaved (13:2xZ): 10,000 one a request at 8 at once 7.2, 7.0, 4.2 and 6.7 s; 25,000 at 8
+      // 8.0 and 7.2 s; 25,000 at 4 11.0 and 9.3 s; the batches of 5 at 4 15.4 and 11.5 s. At 864k blocks (48 h): 15.0 and
+      // 9.1 s at 8 at once, 8.4 and 8.0 s at 12 (past the 16 to 24 calls a second it was read to take, pace.ts).
+      index: bare({ readers: Object.freeze(["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com"] as const), span: 50_000, parts: Object.freeze([1, 5] as const), perBatch: Object.freeze([5, 1] as const), parallel: Object.freeze([4, 8] as const), margin: 474, cap: 131_072 }),
     }),
     robinhood: bare({
       chainId: 4663,

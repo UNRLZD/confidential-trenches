@@ -1,6 +1,7 @@
 // Replays evm-pool-index.answers.json through the live check: `good`, a real run on the kit of card
-// signpage-evm-reads-draw-no-refusal (Robinhood's own and the helper's keyed route, 500,000-block spans; 2026-11-13
-// from this Mac), passes; `bad`, the run on the kit before it (2026-11-08, Robinhood's own and Pocket in 10,000-block
+// evm-sync-inside-the-kpi-at-any-age (Base's publicnode and bloXroute in 50,000-block spans, Robinhood's own and the
+// helper's keyed route in 500,000; 2026-11-21 13:30Z from this Mac), passes; `bad10k`, the good run before it
+// (2026-11-18, Base in 10,000-block spans), fails; `bad`, the run on the kit before it (2026-11-08, Robinhood's own and Pocket in 10,000-block
 // spans, the reads release 130's page drew 429s on), fails; and the good run with one thing changed fails: no index,
 // the readers' block N differs (no pin), one reader misses a pool, a span answered without its last block, two readers
 // of one operator, a reader of ours that is not the helper's keyed route second, another span, another margin.
@@ -41,9 +42,13 @@ test("the recorded bad run, the kit before this card, fails: Robinhood's 10,000-
   bad(A.bad, /robinhood: span 10000 \(the card's 500000\)/);
 });
 
+test("the recorded run of 18 Nov, Base in 10,000-block spans, fails since card evm-sync-inside-the-kpi-at-any-age: Base reads 50,000", () => {
+  bad(A.bad10k, /base: span 10000 \(the card's 50000\)/);
+});
 test("the recorded 413 run, the check before card evm-batch-fits-each-reader, fails: Base's reader 2 answers 0 of 10 receipts", () => {
   bad(A.bad413, /base .*reader 2 answered 0 of 10 receipts/);
-  assert.deepEqual(A.good.chains.base.most, { "https://base.api.pocket.network": 5 }, "the good run split Pocket's batches at 5");
+  // the run of 18 Nov (Pocket still Base's second reader, the good run until card evm-sync-inside-the-kpi-at-any-age)
+  assert.deepEqual(A.bad10k.chains.base.most, { "https://base.api.pocket.network": 5 }, "the 18 Nov run split Pocket's batches at 5");
 });
 
 test("the good run with one thing changed fails", () => {
