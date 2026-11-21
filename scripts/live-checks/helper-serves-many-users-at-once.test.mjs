@@ -29,6 +29,12 @@ test("recorded bad run: the deployed helper before this card reports no budget: 
   assert.equal(r.lines.filter((l) => l.startsWith("BAD") && l.includes("no budget reported")).length, 3);
 });
 
+test("recorded red run 44930704040 (card helper-base-trade-reads-429): Base's total the company keys' halves alone, 39 with a page's 30 (one page at once): FAIL on Base alone", () => {
+  const r = judge(A.red429);
+  assert.equal(r.verdict, "FAIL");
+  assert.deepEqual(r.lines, ["ok  [solana] total 135, share 42 (a page's 42): 3 pages at once", "BAD [base] total 39, share 30 (a page's 30): 1 pages at once, under 3", "ok  [robinhood] total 139, share 30 (a page's 30): 4 pages at once"]);
+});
+
 test("made from the good run: the first key's plan alone (100,42: two pages), a share under a page's, a malformed field: each FAIL", () => {
   assert.equal(judge(withPolicy("solana", '"chain";q=100;w=10, "client";q=42;w=10')).verdict, "FAIL");
   assert.equal(judge(withPolicy("base", '"chain";q=155;w=10, "client";q=16;w=10')).verdict, "FAIL");
