@@ -28,6 +28,13 @@ function arm(ms, what, name) {
   new Worker(WATCH, { eval: true, workerData: { pid: process.pid, ms, what, name }, stdout: false, stderr: false }).unref();
 }
 
+// Card test-count-never-short: stdout and stderr written in full before any exit. On macOS a pipe is written
+// asynchronously, so --test-force-exit's process.exit() (node v24.22.3 lib/internal/test_runner/test.js:1468-1492)
+// dropped a file's last results still queued for the runner, and the runner's own last lines: 3,499 to 3,592 of 3,600
+// tests reported beside a CPU load, exit 0. Linux writes a pipe synchronously already; this makes macOS do the same, in
+// the runner and in every file's process (scripts/test-report.mjs refuses a run that still lost one).
+if (isMainThread) for (const s of [process.stdout, process.stderr]) if (s._handle && typeof s._handle.setBlocking === "function") s._handle.setBlocking(true);
+
 // a test file's own process (the runner starts each with NODE_TEST_CONTEXT set), or the run's (node --test itself); a
 // worker thread (a test's own, which inherits --require, or this watch) arms nothing: its process is watched already
 if (isMainThread && process.env.NODE_TEST_CONTEXT !== undefined) arm(lower("TEST_BOUND_FILE_MS", FILE_MS), "the test file", process.argv[1] ?? "?");
