@@ -21,8 +21,11 @@ import { onTestClock } from "./test-clock.ts";
 const F = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/evm-warm-tap-calls.json.gz", import.meta.url))).toString("utf8"));
 const POST_MS = 200;
 /** What a hung post may add to its quote: the hedge time (EVM_HEDGE_MS's 400 ms here, every answer 200 ms) and the
- *  stand-in's answer, with a margin; a hang waited out adds its 10 s. */
-const HUNG_ADDS_MAX = 1_000;
+ *  stand-in's answer, with a margin; a hang waited out adds its 10 s. A head's stand-in that answers joins the quote's
+ *  pair for its reads (agreeing's `win`), and where it is a paced provider (Robinhood's bloXroute here), its pace sets
+ *  the reads' rounds: H4's 1,400 ms. A post waiting at its provider's pace is never late (round F), so no stand-in
+ *  takes it. */
+const HUNG_ADDS_MAX = 1_500;
 
 type Call = { id: unknown; method: string; params: unknown[] };
 type Q = { phase: string; now: number; request: Record<string, unknown> & { buys: string; amountIn: string }; outcome: string };

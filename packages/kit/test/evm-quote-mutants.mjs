@@ -28,6 +28,7 @@ const R = "test/evm-quote-attacks.test.ts";
 const PR = "test/evm-pair-rank.test.ts";
 const HP = "test/evm-hung-post.test.ts";
 const FH = "test/evm-quote-follow-hung.test.ts";
+const HC = "test/evm-hedge-clock.test.ts";
 const H = "test/evm-quote-head.test.ts";
 // a real cold and warm Robinhood quote's answers, replayed (card evm-quote-gas-used, review of e9b54f71, P2)
 const RP = "test/evm-quote-gas-used-replay.test.ts";
@@ -217,7 +218,7 @@ export const MUTANTS = [
   // a fast request held at a slot when another request's Retry-After lands (the chain's tail read beside a `later` one,
   // after the answer): SP4's warm request is refused by its hold before it reaches the gate's slot
   [QUOTE, "      if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw", "      if (false) throw", R, "SP4b "],
-  [QUOTE, "    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP2 "],
+  [QUOTE, "    const left = fast && hedge === undefined ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP6 "],
   [QUOTE, "  const fast = second !== undefined && jobs.reduce(", "  const fast = second !== undefined && 0 * jobs.reduce(", R, "SP2 "],
   [QUOTE, "    const top = p === null;", "    const top = false;", R, "SP3 "],
   // review of 22e29c9, B2: the block check on the request up to the head alone; since card evm-rpc-spare-list a not-yet
@@ -237,7 +238,7 @@ export const MUTANTS = [
   [QUOTE, "    if (fast && on.next !== undefined) throw new ScanRefused(", "    if (false) throw new ScanRefused(", R, "SP5 "],
   // card evm-rpc-spare-list: a request the second fails goes to the third, the head too; a 5xx passes on at once; a
   // not-yet block is asked again whole; a one-call batch's bare answer is read
-  [QUOTE, "      await settle(rest.map(run));", "      await settle(rest.map((r) => one(r)));", R, "SL1 "],
+  [QUOTE, "      await settle(rest.map((r) => run({ ...r, into: j.into })));", "      await settle(rest.map((r) => one({ ...r, into: j.into })));", R, "SL1 "],
   [QUOTE, "(o.next === undefined ? Promise.reject(e) : headFrom(o.next))", "(o.next === undefined || o !== firstOn ? Promise.reject(e) : headFrom(o.next))", R, "SL1 "],
   // re-anchored (card evm-unreachable-moves-on): the 5xx test is serverFault's since card evm-5xx-holds-the-provider-
   // for-the-round; SL1 passes on it (the request still reaches the next after its tries), SP5xx does not
@@ -337,9 +338,17 @@ export const MUTANTS = [
   // (H1) and in the follow's pin confirm (H2); the hedge time is read from the provider's answers (H1)
   [QUOTE, "        hedgedK[n] = true;\n        start(true, n);", "        hedgedK[n] = true;", HP, "H4 "],
   [QUOTE, "  if (t === undefined || t.length === 0) return null;", "  return null;", HP, "H1 "],
-  [QUOTE, "        s.times.push(ms);", "", HP, "H1 "],
+  [QUOTE, "        times.push(ms);\n", "", HP, "H1 "],
   [QUOTE, "if (n + 1 < order.length && (await hedged(", "if (false && (await hedged(", HP, "H1 "],
   [QUOTE, "const by2 = next < rpcs.length ? await hedged(", "const by2 = false ? await hedged(", FH, "H2 "],
+  // round (F): the hedge clock runs from the post's send, past its gate and pace (W1), against its own kind's time (W2);
+  // a seat's failure while its stand-in is out asks the next (W3)
+  [QUOTE, "wire: (calls) => void ((wireAt[k] = performance.now()),", "wire: (calls) => void ((wireAt[k] = sentAt[k] ?? performance.now()),", HC, "W1 "],
+  [QUOTE, "\"logs\" : calls.every((c) => c.method === \"eth_getBlockByNumber\"", "\"logs\" : \"all\" || calls.every((c) => c.method === \"eth_getBlockByNumber\"", HC, "W2 "],
+  [QUOTE, "          if (voted[seat[k]!]) {\n            gone++;", "          if (voted[seat[k]!] || Array.from({ length: started }, (_, n) => n).some((n) => n !== k && seat[n] === seat[k] && !settledK[n])) {\n            gone++;", HC, "W3 "],
+  // round (F): a warm scan request out past its provider's own getLogs time from its send has the next raced (SP2H)
+  [QUOTE, "    fast && j.on.next !== undefined ? raced(j) :", "    false ? raced(j) :", R, "SP2H "],
+  [QUOTE, "timer = setTimeout(standIn, evmHedgeAfter(url, \"logs\") ?? EVM_SCAN_HOLD_MS);", "timer = setTimeout(standIn, EVM_SCAN_HOLD_MS);", R, "SP2H "],
   // a stand-in answering for the other head's provider is a spare's: the block then needs more than half (V12H)
   [QUOTE, "        [order[n], order[n + 1]] = [order[n + 1]!, order[n]!];\n        if (n === 0) unsure = true;", "        [order[n], order[n + 1]] = [order[n + 1]!, order[n]!];", R, "V12H "],
   // the review of bc189de: a contested value needs more than half the listed providers, on the reads (M-1) and the

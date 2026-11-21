@@ -6394,9 +6394,10 @@ test("SP2 a first scan provider that does not answer a warm scan: the second has
       : head(calls);
   const { v, asked } = await warmPair(token, hangs);
   assert.deepEqual(v, below);
-  // the first's one getLogs was ended at the 2 s hold, never at its own 10 s timeout or the quote's 60 s bound, and
-  // never asked again
-  assert.deepEqual(why, ["rpc_error: the scan provider did not answer within 2000 ms"]);
+  // the first's one getLogs, a provider with no measured time (a model here), raced by the second from 2 s on
+  // (EVM_SCAN_HOLD_MS) and ended by the second's answer, never at its own 10 s timeout or the quote's 60 s bound, and
+  // never asked again (round F: a hedge, not a cut, SP2H)
+  assert.deepEqual(why, ["rpc_error: the next scan provider answered first"]);
   assert.deepEqual(asked, [[5_000_001, 5_000_010], [5_000_001, 5_000_010]]);
   // a cold scan the second cannot carry in one round stays on the first while it answers: its newest request, answered
   // after 2.5 s, is waited for, never passed over at 2 s
@@ -6410,6 +6411,46 @@ test("SP2 a first scan provider that does not answer a warm scan: the second has
   const cold = await pairQuote(token2, late, scanner(5_000_000, [], second));
   assert.deepEqual(cold.v, below);
   assert.equal(second.length, 0, "the second read a cold scan's blocks");
+}));
+
+test("SP2H card evm-warm-tap-ends-inside-two-seconds: a warm scan's request out past its first provider's own getLogs time from its send has the second asked for its blocks then, and the first answer whole is kept", { timeout: 30_000 }, () => onTestClock(async () => {
+  // The --record read, 2026-11-21 15:5xZ: a warm Robinhood ANT tap held 1,994 ms on daybreak's getLogs, the fixed cut,
+  // then Pocket answered in 1,673: 4,811 ms. The first here answers its getLogs in 100 ms as measured, then 1,500 ms
+  const token = "0x00000000000000000000000000000000005c45f2";
+  let logsMs = 100;
+  let firstLogsAt = -1;
+  // both providers hold the token's real pool, made at 5,000,005: either answer finds it
+  const model = scanner(5_000_010, realAt(token, 5_000_005));
+  const viaUrl = (async (_u: string | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] }[] | { id: number; method: string; params: unknown[] };
+    const list = Array.isArray(body) ? body : [body];
+    if (list.some((c) => c.method === "eth_getLogs")) {
+      if (firstLogsAt < 0 && logsMs > 100) firstLogsAt = performance.now();
+      await pause(logsMs);
+    }
+    const out = (await model(list.map((c) => ({ method: c.method, params: c.params })))) as { result?: unknown; error?: unknown }[];
+    const ans = out.map((r, i) => ({ ...r, jsonrpc: "2.0", id: list[i]!.id }));
+    return new Response(JSON.stringify(Array.isArray(body) ? ans : ans[0]), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const first = quoteMod.evmProviders(["https://first.sp2h.test", "https://other.sp2h.test"], viaUrl)[0]!;
+  const logs = { method: "eth_getLogs", params: [{ address: NATIVE, fromBlock: "0x1", toBlock: "0x1", topics: [] }] };
+  for (let i = 0; i < 3; i++) await first([logs, logs]);
+  logsMs = 1_500;
+  const inner = scanner(5_000_010, realAt(token, 5_000_005));
+  let secondLogsAt = -1;
+  const second: EvmRpc = async (calls) => {
+    if (secondLogsAt < 0 && calls.some((c) => c.method === "eth_getLogs")) secondLogsAt = performance.now();
+    return inner(calls);
+  };
+  const warm = scanner(5_000_000, []);
+  quoteMod.evmScanTailAlias(first, warm);
+  await pairQuote(token, warm, scanner(5_000_000, []));
+  const { v } = await pairQuote(token, first, second, "base", 5_000_010);
+  assert.deepEqual(v, below);
+  assert.ok(firstLogsAt >= 0 && secondLogsAt >= 0, `the first's getLogs at ${firstLogsAt}, the second's at ${secondLogsAt}`);
+  // asked at the first's own time (EVM_HEDGE_MS's 400 ms, its 100 ms measured below it), never the fixed 2 s cut
+  const after = secondLogsAt - firstLogsAt;
+  assert.ok(after >= 300 && after < 1_000, `the second was asked ${Math.round(after)} ms after the first's send`);
 }));
 
 test("SP3 a first scan provider that answers no logs from behind the head: the second's answer counts; one that answers an error for blocks it holds: never the second's", { timeout: 30_000 }, async () => {
