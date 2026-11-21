@@ -28,6 +28,10 @@
 //   Retry-After without spending a try, up to the kit's 60 s a batch, and any other status outside 2xx, or an answer that
 //   is not a batch, spends one (card robinhood-index-second-reader-serves-receipts: the helper's keyed route refused the
 //   third batch of receipts 429 at its 30 requests a caller each 10 s, which the check read as ten receipts answered null).
+// - aged (card evm-first-quote-reads-its-coin-at-any-age): one span AGED[chain] blocks (48 h) below N, asked as a
+//   coin's read asks it (pool-index.ts evmPoolCoinSync): a getLogs a topic position, its coin (here the chain's WETH,
+//   whose pools every span holds) as currency0 and as currency1, with the span's last block, in one batch; both readers
+//   answer it within the kit's RPC timeout, try TRIES at most, the same last block and the same pools on both.
 // What it proves, and only that: the readers the deployed kit names serve the index's reads and agree. That quotes read
 // their pools from the index is card evm-pool-index-route's check.
 // After: app
@@ -49,6 +53,8 @@ export const CHAINS = Object.freeze({ base: { margin: 474, span: 50_000 }, robin
 /** The one reader of ours an index may name: the helper's keyed route for the chain, second, never first. */
 export const HELPER_READER = (chain) => `https://ct-api.unrealized.trade/v1/rpc/${chain}?keyed=only`;
 export const SPANS = 3;
+/** The aged span's end below N: 48 h of blocks (Base 0.2 s blocks; Robinhood's own 1,641,600 is 47.7 h, read 21 Nov). */
+export const AGED = Object.freeze({ base: 864_000, robinhood: 1_641_600 });
 export const SPAN_LOGS = 10_000;
 export const TIMEOUT_MS = 10_000;
 /** A span's or a receipt's tries on one reader, and the wait before each try past the first: the kit's own (pool-index.ts
@@ -122,6 +128,15 @@ export function judge(run) {
       }
     }
     say(pools > 0, `${chain}: ${pools} pools in the newest ${SPANS * want.span} blocks`);
+    const g = c.aged;
+    const [x, y] = g?.on ?? [];
+    const both = g !== undefined && g.b === n - AGED[chain] && x && y && typeof x.last === "string" && typeof y.last === "string" && x.logs >= 0 && y.logs >= 0;
+    say(both, `${chain} aged ${g ? `${g.a}-${g.b}` : "span"}: ${AGED[chain]} blocks below N, a coin's read answered on both readers with its last block${g ? "" : " (not read)"}`);
+    if (both) {
+      const same = x.last === y.last && JSON.stringify([...x.ids].sort()) === JSON.stringify([...y.ids].sort());
+      say(same, `${chain} aged ${g.a}-${g.b}: the same last block and the same ${x.ids.length} pools of its coin on both${same ? "" : ` (${y.ids.length} on the second)`}`);
+      say(x.ms <= TIMEOUT_MS && y.ms <= TIMEOUT_MS && (x.tries ?? 1) <= TRIES && (y.tries ?? 1) <= TRIES, `${chain} aged ${g.a}-${g.b}: answered in ${x.ms} and ${y.ms} ms, try ${x.tries ?? 1} and ${y.tries ?? 1}`);
+    }
   }
   return { pass: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -208,16 +223,20 @@ export async function ask(u, body, fetchFn, sleep) {
 /** One reader's answer to the span a..b: its Initialize logs, its last block and its own head, in one batch, asked
  *  again up to TRIES times (the kit's INDEX_TRIES) while it does not hold the last block yet, as the index asks it, so a
  *  supplier a block behind that catches up does not fail a good deploy. */
-export async function readSpan(u, pm, a, b, fetchFn, sleep) {
+export async function readSpan(u, pm, a, b, fetchFn, sleep, coin = null) {
   let last = null;
+  // a coin's read (the aged span): its two filters, the coin as currency0 and as currency1, their logs as one answer
+  const word = coin === null ? null : "0x" + coin.toLowerCase().slice(2).padStart(64, "0");
+  const filters = word === null ? [[INITIALIZE]] : [[INITIALIZE, null, word], [INITIALIZE, null, null, word]];
   for (let tries = 1; tries <= TRIES; tries++) {
     try {
       const { byId, ms, limitedMs } = await ask(u, [
-        { jsonrpc: "2.0", id: 0, method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics: [INITIALIZE] }] },
+        ...filters.map((topics, k) => ({ jsonrpc: "2.0", id: k === 0 ? 0 : 10 + k, method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics }] })),
         { jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["0x" + b.toString(16), false] },
         { jsonrpc: "2.0", id: 2, method: "eth_blockNumber", params: [] },
       ], fetchFn, sleep);
-      const logs = byId.get(0)?.result;
+      const parts = filters.map((_, k) => byId.get(k === 0 ? 0 : 10 + k)?.result);
+      const logs = parts.every(Array.isArray) ? parts.flat() : undefined;
       const blk = byId.get(1)?.result;
       const head = byId.get(2)?.result;
       last = { logs: Array.isArray(logs) ? logs.length : -1, ids: Array.isArray(logs) ? logs.map((l) => String(l?.topics?.[1]).toLowerCase()) : [], firsts: Array.isArray(logs) ? logs.slice(0, RECEIPTS).map((l) => ({ tx: String(l?.transactionHash).toLowerCase(), id: String(l?.topics?.[1]).toLowerCase() })) : [], last: typeof blk?.hash === "string" && Number(blk.number) === b ? blk.hash.toLowerCase() : null, head: typeof head === "string" ? Number(head) : null, ms, tries, ...(limitedMs > 0 ? { limitedMs } : {}) };
@@ -298,9 +317,12 @@ export async function read(venues, fetchFn = fetch, sleep = (ms) => new Promise(
       const receipts = firsts.length > 0 ? await Promise.all(ix.readers.map((u) => readReceipts(u, v.poolManager, firsts, fetchFn, sleep))) : undefined;
       spans.push({ a, b, on, ...(receipts ? { txs: firsts.map((f) => f.tx), receipts } : {}) });
     }
+    // the aged span: a coin's read 48 h below N
+    const ab = n - AGED[chain];
+    const aged = { a: ab - ix.span + 1, b: ab, coin: v.weth.toLowerCase(), on: await Promise.all(ix.readers.map((u) => readSpan(u, v.poolManager, ab - ix.span + 1, ab, fetchFn, sleep, v.weth))) };
     // each reader's most calls a batch where it refused one for its size (the kit splits its batches to it)
     const most = Object.fromEntries(ix.readers.filter((u) => MOST.has(u)).map((u) => [u, MOST.get(u)]));
-    chains[chain] = { index, preflight, heads, spans, ...(Object.keys(most).length > 0 ? { most } : {}) };
+    chains[chain] = { index, preflight, heads, spans, aged, ...(Object.keys(most).length > 0 ? { most } : {}) };
   }
   return { at: new Date().toISOString(), chains };
 }
