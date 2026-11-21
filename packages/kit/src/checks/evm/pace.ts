@@ -275,8 +275,12 @@ async function paced(key: string, p: EvmPace, calls: EvmPaceCalls, signal: Abort
     given = true;
     l.out--;
     // the post's units are spent as it is answered, the latest it can have reached the provider: until then they are
-    // held, so no post leaves on units the provider may not have counted yet (card evm-warm-tap-ends-inside-two-seconds,
-    // round F: posts held on a connection arrive together, test/evm-pace-provider-limits.test.ts)
+    // held, so no post leaves on units the provider may not have counted yet, and no more than the burst is ever out at
+    // once (card evm-warm-tap-ends-inside-two-seconds, round F: release 189's sign live run 44924144323 met one 429 of
+    // robinhood.rpc.blxrbdn.com; read only from the Mac, 2026-11-21 16:5xZ, main met 4 refusals there, -32005 x3 and
+    // HTTP 429, each with 15 to 17 calls in the second before it, inside its 17 a second, and 9 or 10 calls out at once,
+    // 3 or 4 posts answered in 226 to 508 ms: spent as each was sent, the lane let them pile up past bloXroute's 9.
+    // Posts held on a connection that arrive together are the same case: test/evm-pace-provider-limits.test.ts)
     const now = performance.now();
     l.tokens = Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS) - need;
     l.at = now;

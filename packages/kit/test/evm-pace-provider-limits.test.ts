@@ -96,3 +96,27 @@ for (const limit of LIMITS) {
   );
 }
 
+
+// The same read from the Mac, 2026-11-21 16:5xZ (main 2a5ec6980, round F's A/B): bloXroute refused 4 posts, each with
+// 15 to 17 calls in the second before it (inside its 17 a second) and 9 or 10 calls out at once, answered in 226 to
+// 508 ms. Here each post of 3 is answered 500 ms after it leaves, and bloXroute refuses a call past 9 out at once.
+test("card evm-warm-tap-ends-inside-two-seconds: slow answers never leave more of a tap's calls out at once at robinhood.rpc.blxrbdn.com than it takes", { timeout: 60_000 }, () =>
+  onTestClock(async () => {
+    evmPaceReset();
+    let out = 0;
+    let most = 0;
+    const calls = Array.from({ length: 3 }, () => ({ method: "eth_call" }));
+    await Promise.all(
+      Array.from({ length: 60 }, async () => {
+        const give = await evmPaceTake("https://robinhood.rpc.blxrbdn.com", calls);
+        out += 3;
+        most = Math.max(most, out);
+        await new Promise((r) => setTimeout(r, 500));
+        out -= 3;
+        give();
+      }),
+    );
+    evmPaceReset();
+    assert.ok(most <= 6, `${most} calls out at once at bloXroute, which refuses past 9 (its burst, 6, is the most the lane lets out)`);
+  }),
+);
