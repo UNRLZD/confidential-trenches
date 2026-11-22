@@ -1280,6 +1280,10 @@ export const MUTANTS = [
   [QUOTE, "      const spare = () => (theirs ??= inTurn(next));", "      const spare = () => (theirs ??= headFrom(next));", R, "KPI3 "],
   // bloXroute's Robinhood endpoint paced to 16 calls in any second, its 429 from a runner at 17 (live run 45043534742)
   ["src/checks/evm/pace.ts", '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 10, burst: 6, unit: "call" }),', '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 15, burst: 6, unit: "call" }),', "test/evm-pace-provider-limits.test.ts", "card robinhood-taps-meet-no-429: a burst of a tap's posts to robinhood.rpc.blxrbdn.com from a runner"],
+  // card evm-quote-fewer-rounds: a request waiting at its provider's pace past the late time moves, unsent, to the next
+  // provider with a place now, and only there
+  [QUOTE, "      if (paced !== undefined && !heldK(started) && room?.(list[started]!) === true) {", "      if (false && paced !== undefined && !heldK(started) && room?.(list[started]!) === true) {", "test/evm-quorum.test.ts", "Q9 "],
+  [QUOTE, "      if (paced !== undefined && !heldK(started) && room?.(list[started]!) === true) {", "      if (paced !== undefined && !heldK(started)) {", "test/evm-quorum.test.ts", "Q10 "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
