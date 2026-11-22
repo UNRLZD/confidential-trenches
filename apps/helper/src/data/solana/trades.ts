@@ -1128,6 +1128,35 @@ export function createSolanaTrades(deps: {
     let listedAll = false;
     const gap: { t: number | null } = { t: null };
     const below = (t: number | null): void => void (gap.t = Math.max(gap.t ?? 0, t ?? Math.floor(now() / 1000)));
+    /** One transaction read and its trades held in its place (`order`). */
+    const readOne = async (s: { signature: string; slot: number; t: number | null; order: number }): Promise<void> => {
+      const r = (await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
+      if (r === null) return below(s.t);
+      e.seen++;
+      const meta = (r.meta ?? {}) as Record<string, unknown>;
+      const f = fromLogs(meta.logMessages);
+      // dated by its block: the transaction's block time, its signature's, else its slot's (never the walk's clock)
+      const got = await dated(await forMint(e.mint, f.truncated || eventsInInner(meta.logMessages) ? cutTrades(f, r) : f.trades), s.slot, blockTime(r) ?? s.t);
+      if (got === null) return below(s.t);
+      hold(e, s.signature, s.slot, s.order, got);
+    };
+    /** Reads `list` (oldest first) newest first, TX_PARALLEL at a time, the tape folded after each round. */
+    const readAll = async (list: readonly { signature: string; slot: number; t: number | null; order: number }[]): Promise<void> => {
+      for (let k = list.length; k > 0; k -= TX_PARALLEL) {
+        await Promise.all(list.slice(Math.max(0, k - TX_PARALLEL), k).map(readOne));
+        if (round !== undefined) {
+          fold(e);
+          round();
+        }
+      }
+    };
+    // card solana-flooded-coin-first-answer-holds-rows: a first page of a flooded coin with some successful signatures
+    // has them read at once, while the COLD_PAGE before them is listed, not after it (helper update 22's live run
+    // 45011614034: 5o7AFuoN...pump, 1 of its newest 30 successful, answered 0 rows at its bound: the COLD_PAGE of 1000
+    // signatures, 235 KB, read 1,599 ms from the Mac on api.mainnet-beta, stood before its one successful read). Their
+    // places are held above every older page's (`reserve`), as the list's order is.
+    let early: { sigs: Set<string>; read: Promise<void> } | null = null;
+    let reserve = -1;
     while (cold ? sigs.filter(ok).length < COLD_SIGS : sigs.length < REFILL_MAX) {
       // a first read's newest COLD_SIGS, then once, when they were not all successful, one COLD_PAGE before them: a
       // bot-flooded token's newest signatures are failed transactions, and a first read of them alone held no trade
@@ -1141,37 +1170,32 @@ export function createSolanaTrades(deps: {
       if (page.length < limit) listedAll = true;
       if (page.length < limit || sigs.length === 0 || (cold && before !== undefined)) break;
       before = sigs[sigs.length - 1]!.signature;
+      const first = sigs.filter((x) => ok(x) && !e.held.has(x.signature));
+      if (cold && early === null && first.length > 0) {
+        // the next page's places below these: reserve + 1 .. reserve + COLD_SIGS; these above them, newest highest
+        reserve = seq;
+        seq += 2 * COLD_SIGS + 1;
+        const mine = first.map((x, i) => ({ ...x, order: reserve + 2 * COLD_SIGS + 1 - i })).reverse();
+        early = { sigs: new Set(first.map((x) => x.signature)), read: readAll(mine) };
+        early.read.catch(() => undefined);
+      }
     }
     sigs.reverse();
     // each transaction's place is the list's (oldest first), taken before the reads, which go TX_PARALLEL at a time; a
-    // first read keeps the newest COLD_SIGS successful
+    // first read keeps the newest COLD_SIGS successful (those read early among them)
+    const fresh = (x: { signature: string; err: unknown }): boolean => ok(x) && (early?.sigs.has(x.signature) === true || !e.held.has(x.signature));
     const todo = sigs
-      .filter((s) => ok(s) && !e.held.has(s.signature))
+      .filter(fresh)
       .slice(cold ? -COLD_SIGS : 0)
-      .map((s) => ({ ...s, order: ++seq }));
+      .map((s, k) => ({ ...s, order: early !== null && !early.sigs.has(s.signature) ? reserve + 1 + k : ++seq }));
     // a first walk that listed the mint's every signature and reads each successful one not held: the tape from its birth
-    const everyOne = cold && listedAll && todo.length === sigs.filter((x) => ok(x) && !e.held.has(x.signature)).length;
+    const everyOne = cold && listedAll && todo.length === sigs.filter(fresh).length;
     // the read back starts before the oldest the first walk reads (its older page's signatures not read included)
     if (cold) e.oldest = todo[0]?.signature ?? sigs[0]?.signature ?? null;
-    for (let k = todo.length; k > 0; k -= TX_PARALLEL) {
-      await Promise.all(
-        todo.slice(Math.max(0, k - TX_PARALLEL), k).map(async (s) => {
-          const r = (await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
-          if (r === null) return below(s.t);
-          e.seen++;
-          const meta = (r.meta ?? {}) as Record<string, unknown>;
-          const f = fromLogs(meta.logMessages);
-          // dated by its block: the transaction's block time, its signature's, else its slot's (never the walk's clock)
-          const got = await dated(await forMint(e.mint, f.truncated || eventsInInner(meta.logMessages) ? cutTrades(f, r) : f.trades), s.slot, blockTime(r) ?? s.t);
-          if (got === null) return below(s.t);
-          hold(e, s.signature, s.slot, s.order, got);
-        }),
-      );
-      if (round !== undefined) {
-        fold(e);
-        round();
-      }
-    }
+    // those read early first (the newest), then the rest: never more than TX_PARALLEL reads at once, as before; a failed
+    // read fails the walk, as any read does
+    if (early !== null) await early.read;
+    await readAll(early === null ? todo : todo.filter((x) => !early!.sigs.has(x.signature)));
     for (const s of sigs) e.covered = Math.max(e.covered, s.slot);
     // the reach (Entry.whole): a first walk's oldest read, 0 when it read every successful signature the mint has; a gap's
     // walk that stopped at REFILL_MAX leaves the signatures below its oldest unread

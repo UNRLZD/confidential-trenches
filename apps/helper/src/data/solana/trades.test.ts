@@ -990,6 +990,42 @@ test("card solana-tape-rows-at-first-answer: a busy token whose newest signature
   t.stop();
 });
 
+// card solana-flooded-coin-first-answer-holds-rows: helper update 22's live run 45011614034 opened 5o7AFuoN...pump cold, 1
+// of its newest 30 signatures successful, and answered 0 rows at its bound: the walk read that one only after the
+// COLD_PAGE before it was listed (1000 signatures, 235 KB: 1,599 ms from the Mac on api.mainnet-beta, 22 Nov 12:2xZ).
+test("card solana-flooded-coin-first-answer-holds-rows: a flooded coin with 1 successful in its newest 30 answers its first read with that trade, src chain, while the COLD_PAGE is still listed; the walk then holds the newest 30 successful, each read once, in the list's order (red at ef813c927: 0 rows at the bound)", async () => {
+  // as read live: the 8th newest succeeded, then one in 34 past the first page
+  const f = botFlood(1_030, (i) => i === 7 || (i >= 30 && i % 34 === 0));
+  let tx = 0;
+  let pageGo = () => {};
+  const page = new Promise<void>((go) => (pageGo = go));
+  let bound = () => {};
+  const base = rpcFetch({ sigs: f.sigs, txs: f.txs, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  const fetchFn = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string, Record<string, unknown>] };
+    if (req.method === "getTransaction") tx++;
+    // the COLD_PAGE answers only once the test lets it go, after the first answer
+    if (req.method === "getSignaturesForAddress" && req.params[1].limit === 1_000) await page;
+    return base(url, init);
+  };
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => new Promise<void>((go) => (bound = go)) });
+  const answer = t.trades(MINT, 50);
+  // the first page listed and its one successful read, the COLD_PAGE still out; then the bound
+  for (let i = 0; i < 30; i++) await settle();
+  bound();
+  const first = JSON.parse((await answer).body) as { trades: { tx: string }[]; src: string; filling?: boolean };
+  const ok = f.list.filter((s) => s.err === null).map((s) => s.signature);
+  assert.deepEqual([first.src, first.trades.map((r) => r.tx)], ["chain", [ok[0]]], "the first page's one trade at the first answer, ours");
+  assert.equal(first.filling, true, "more to come: filling");
+  pageGo();
+  for (let i = 0; i < 60; i++) await settle();
+  const all = (JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[] }).trades.map((r) => r.tx);
+  assert.deepEqual(all, ok.slice(0, 30), "the newest 30 successful, newest first: the early one above every older page's");
+  assert.deepEqual(f.asked, [30, 1_000]);
+  assert.equal(tx, 30, "each read once");
+  t.stop();
+});
+
 test("card solana-tape-rows-at-first-answer, guard: a token whose newest COLD_SIGS signatures succeeded asks its one page, as before", async () => {
   const f = botFlood(1_030, (i) => i < 40 || i % 3 === 0);
   const { t, tx } = reads(f);
