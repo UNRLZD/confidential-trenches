@@ -112,7 +112,7 @@ function planted(c: Case) {
 
 /** The planted chain's provider, every answer the same on each URL; `counts`: the requests each method was asked, and
  *  the posts. An eth_call's answer may be a function of its block. */
-function rig(p: ReturnType<typeof planted>) {
+function rig(p: ReturnType<typeof planted>, urls: readonly string[] = URLS) {
   const counts: Record<string, number> = { posts: 0 };
   const one = (r: { method: string; params: unknown[] }): object => {
     counts[r.method] = (counts[r.method] ?? 0) + 1;
@@ -147,7 +147,7 @@ function rig(p: ReturnType<typeof planted>) {
     return { error: { code: -32601, message: "the method does not exist" } };
   };
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
-    if (!URLS.includes(url)) return new Response("{}", { status: 500 });
+    if (!urls.includes(url)) return new Response("{}", { status: 500 });
     counts.posts!++;
     await new Promise((go) => setTimeout(go, 50));
     const body = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] } | { id: number; method: string; params: unknown[] }[];
@@ -540,4 +540,132 @@ test("card robinhood-third-quote-tape-fills-inside-45s: a read back whose state 
   assert.ok(most <= URLS.length, `a block's state asked ${most} times`);
   // the route's own logs: the forward reads' and a short window before each read back block, never the 15,000 between
   assert.ok(qBlocks <= 20_000, `the quote pool's logs read over ${qBlocks} blocks on the providers; the read back spans 15,000`);
+});
+
+test("card robinhood-old-state-from-keepers: where 2 of 5 providers keep old state, a read back's state posts go to those two once the others refused, each refuser asked old state in one post at most, every read back block priced from its state and no route log walked back (red on main 77a1056ac and at 0ee2a26a5: a.test and b.test, which keep no old state, asked it in 8 posts each)", async () => {
+  const c = CASES[0]!;
+  const p = planted(c);
+  const QPOOL = `0x${"f7".repeat(20)}`;
+  const DEEP = HEAD - 2_000;
+  const FIVE = ["https://a.test", "https://b.test", "https://c.test", "https://d.test", "https://e.test"];
+  const KEEP = new Set(["https://c.test", "https://e.test"]);
+  const blockOf = new Map(p.mains.map((m, k) => [m.tx, HEAD - 15_000 + (k + 1) * 250]));
+  for (const l of p.logs) {
+    const b = blockOf.get(l.transactionHash);
+    if (b === undefined) continue;
+    l.blockNumber = `0x${b.toString(16)}`;
+    l.blockTimestamp = `0x${timeOf(b).toString(16)}`;
+  }
+  for (const m of p.mains) m.b = blockOf.get(m.tx)!;
+  // the quote's own pool, quiet: one swap at the start of the read back, so a walk back of its logs would be long
+  p.logs.push(log(HEAD - 15_300, 7, `0x${"6c".repeat(32)}`, QPOOL, [TOPIC.swap3, `0x${w(TRADER(800))}`, `0x${w(TRADER(800))}`], `0x${int(1_000n)}${int(-1_000n)}${int(c.sqrt)}${int(10n ** 18n)}${int(0n)}`));
+  const f = rig(p, FIVE);
+  let qBlocks = 0;
+  const refusedPosts = new Map<string, number>();
+  const asked = new Map<string, number>();
+  const old = (r: { method: string; params: unknown[] }) => r.method === "eth_call" && typeof r.params[1] === "string" && r.params[1] !== "latest" && parseInt(r.params[1], 16) < DEEP;
+  const one = Object.assign(async (url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] } | { id: number; method: string; params: unknown[] }[];
+    const list = [body].flat();
+    for (const r of list) {
+      const q = r.params[0] as { address?: string; to?: string; data?: string; fromBlock?: string; toBlock?: string };
+      if (r.method === "eth_getLogs" && [q?.address].flat().includes(QPOOL)) qBlocks += parseInt(q.toBlock!, 16) - parseInt(q.fromBlock!, 16) + 1;
+      if (old(r) && q?.to === QPOOL) asked.set(`${url} ${r.params[1]}`, (asked.get(`${url} ${r.params[1]}`) ?? 0) + 1);
+    }
+    if (KEEP.has(url) || !list.some(old)) return f(url, init);
+    refusedPosts.set(url, (refusedPosts.get(url) ?? 0) + 1);
+    const res = (await (await f(url, init)).json()) as { id: number }[] | { id: number };
+    const out = [res].flat().map((x, i) => (old(list[i]!) ? { jsonrpc: "2.0", id: x.id, error: { code: -32000, message: "historical state not available" } } : x));
+    return new Response(JSON.stringify(Array.isArray(body) ? out : out[0]), { status: 200, headers: { "content-type": "application/json" } });
+  }, { counts: f.counts });
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const s = createSwaps("base", { fetch: one as never, now: () => Date.now(), listed: async () => true, rpcs: FIVE, pools: new Map(), tickMs: 0, sleep: async () => undefined });
+    let a = await s.trades(COIN, 50);
+    for (let i = 0; i < 60 && a.status === 200 && JSON.parse(a.body).filling === true; i++) {
+      await new Promise((go) => setTimeout(go, 1_000));
+      await s.tick();
+      a = await s.trades(COIN, 50);
+    }
+    s.stop();
+    return a;
+  });
+  assert.equal(value.status, 200, value.body);
+  const j = JSON.parse(value.body) as { trades: { tx: string; usd: string }[]; filling?: boolean };
+  const want = p.mains.slice(-TRADES_MAX).reverse();
+  assert.equal(j.trades.length, TRADES_MAX, value.body.slice(0, 200));
+  assert.notEqual(j.filling, true);
+  j.trades.forEach((t, i) => {
+    assert.equal(t.tx, want[i]!.tx, `row ${i}`);
+    const usd = Number(want[i]!.q) * c.usdPerQuoteUnit;
+    assert.ok(Math.abs(Number(t.usd) - usd) <= usd * 1e-9, `row ${i}: usd ${t.usd}, want ${usd}`);
+  });
+  const blocks = new Set([...asked.keys()].map((k) => k.split(" ")[1]));
+  console.log(`refused posts ${JSON.stringify(Object.fromEntries(refusedPosts))}; ${blocks.size} old blocks asked, at most ${Math.max(0, ...asked.values())} a provider; the quote pool's logs over ${qBlocks} blocks`);
+  for (const [u, n] of refusedPosts) assert.ok(n <= 1, `${u} asked old state in ${n} posts after it refused`);
+  // each read back block's state asked of each keeper once
+  assert.ok(Math.max(0, ...asked.values()) <= 1, "a block's state asked of one provider twice");
+  // no walk back: the quote pool's logs only as the forward reads take them, never the read back's 15,000 blocks
+  assert.ok(qBlocks <= 6_000, `the quote pool's logs read over ${qBlocks} blocks`);
+});
+
+test("card robinhood-old-state-from-keepers: a keeper of old state that answers a read back's state post with a throttle is waited for and asked again, never the route's logs walked back over the read back (pocket's 429 on Robinhood, 22 Nov 10:0xZ; red before the wait: the quote pool's logs walked back)", async () => {
+  const c = CASES[0]!;
+  const p = planted(c);
+  const QPOOL = `0x${"f7".repeat(20)}`;
+  const DEEP = HEAD - 2_000;
+  const FIVE = ["https://a.test", "https://b.test", "https://c.test", "https://d.test", "https://e.test"];
+  const KEEP = new Set(["https://c.test", "https://e.test"]);
+  const blockOf = new Map(p.mains.map((m, k) => [m.tx, HEAD - 15_000 + (k + 1) * 250]));
+  for (const l of p.logs) {
+    const b = blockOf.get(l.transactionHash);
+    if (b === undefined) continue;
+    l.blockNumber = `0x${b.toString(16)}`;
+    l.blockTimestamp = `0x${timeOf(b).toString(16)}`;
+  }
+  for (const m of p.mains) m.b = blockOf.get(m.tx)!;
+  p.logs.push(log(HEAD - 15_300, 7, `0x${"6c".repeat(32)}`, QPOOL, [TOPIC.swap3, `0x${w(TRADER(800))}`, `0x${w(TRADER(800))}`], `0x${int(1_000n)}${int(-1_000n)}${int(c.sqrt)}${int(10n ** 18n)}${int(0n)}`));
+  const f = rig(p, FIVE);
+  let qBlocks = 0;
+  let throttled = 0;
+  const old = (r: { method: string; params: unknown[] }) => r.method === "eth_call" && typeof r.params[1] === "string" && r.params[1] !== "latest" && parseInt(r.params[1], 16) < DEEP;
+  const one = Object.assign(async (url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] } | { id: number; method: string; params: unknown[] }[];
+    const list = [body].flat();
+    for (const r of list) {
+      const q = r.params[0] as { address?: string; fromBlock?: string; toBlock?: string };
+      if (r.method === "eth_getLogs" && [q?.address].flat().includes(QPOOL)) qBlocks += parseInt(q.toBlock!, 16) - parseInt(q.fromBlock!, 16) + 1;
+    }
+    if (!list.some(old)) return f(url, init);
+    // e keeps old state but throttles every other post of it, as pocket did; a, b and d keep none
+    const throttle = url === "https://e.test" && throttled++ % 2 === 0;
+    if (KEEP.has(url) && !throttle) return f(url, init);
+    const res = (await (await f(url, init)).json()) as { id: number }[] | { id: number };
+    const err = throttle ? { code: -32005, message: "rate limit exceeded", data: { backoff_seconds: 1 } } : { code: -32000, message: "historical state not available" };
+    const out = [res].flat().map((x, i) => (old(list[i]!) ? { jsonrpc: "2.0", id: x.id, error: err } : x));
+    return new Response(JSON.stringify(Array.isArray(body) ? out : out[0]), { status: 200, headers: { "content-type": "application/json" } });
+  }, { counts: f.counts });
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const s = createSwaps("base", { fetch: one as never, now: () => Date.now(), listed: async () => true, rpcs: FIVE, pools: new Map(), tickMs: 0, sleep: (ms: number) => new Promise((go) => setTimeout(go, ms)) });
+    let a = await s.trades(COIN, 50);
+    for (let i = 0; i < 60 && a.status === 200 && JSON.parse(a.body).filling === true; i++) {
+      await new Promise((go) => setTimeout(go, 1_000));
+      await s.tick();
+      a = await s.trades(COIN, 50);
+    }
+    s.stop();
+    return a;
+  });
+  assert.equal(value.status, 200, value.body);
+  const j = JSON.parse(value.body) as { trades: { tx: string; usd: string }[]; filling?: boolean };
+  const want = p.mains.slice(-TRADES_MAX).reverse();
+  assert.equal(j.trades.length, TRADES_MAX, value.body.slice(0, 200));
+  assert.notEqual(j.filling, true);
+  j.trades.forEach((t, i) => {
+    assert.equal(t.tx, want[i]!.tx, `row ${i}`);
+    const usd = Number(want[i]!.q) * c.usdPerQuoteUnit;
+    assert.ok(Math.abs(Number(t.usd) - usd) <= usd * 1e-9, `row ${i}: usd ${t.usd}, want ${usd}`);
+  });
+  console.log(`throttled posts ${Math.ceil(throttled / 2)}; the quote pool's logs over ${qBlocks} blocks`);
+  assert.ok(throttled > 0, "e was never asked old state");
+  assert.ok(qBlocks <= 6_000, `the quote pool's logs read over ${qBlocks} blocks: walked back`);
 });
