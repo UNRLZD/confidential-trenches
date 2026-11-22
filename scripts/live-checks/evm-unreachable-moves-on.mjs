@@ -7,6 +7,7 @@
 // before. What it holds on what is deployed, and only that: the served /app.js is the one index.html pins (its sha384),
 // and in it, as minified, ask's refusal reads the request's spare for a throttle and a refused connection alike:
 //   if(!(e instanceof A||e instanceof B)||i===3||n?.spare?.()===!0)throw   (before: ||e instanceof A&&n?.spare?.()===!0)
+//   (card evm-warm-tap-ends-inside-two-seconds: then ||n?.done?.()===!0, a round already agreed asks no more)
 // That the request moves and the last one is still retried is the kit's tests FU1 and FU2
 // (packages/kit/test/evm-quote-attacks.test.ts); this check holds that the deployed page carries that code.
 // The recorded answers: facts() over this card's SIGN_HOST build (scripts/signpage-built.mjs on its branch) and
@@ -25,7 +26,7 @@ export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const ID = "[\\w$]+";
 // ask: a refusal whose spare clause stands alone, for any failure that reaches it (a throttle or a refused connection)
-const MOVES = new RegExp(`if\\(!\\((${ID}) instanceof ${ID}\\|\\|\\1 instanceof ${ID}\\)\\|\\|${ID}===3\\|\\|${ID}\\?\\.spare\\?\\.\\(\\)===!0\\)throw`);
+const MOVES = new RegExp(`if\\(!\\((${ID}) instanceof ${ID}\\|\\|\\1 instanceof ${ID}\\)\\|\\|${ID}===3\\|\\|${ID}\\?\\.spare\\?\\.\\(\\)===!0(?:\\|\\|${ID}\\?\\.done\\?\\.\\(\\)===!0)?\\)throw`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and whether the bundle holds the mark. */
 export function facts(index, js) {
