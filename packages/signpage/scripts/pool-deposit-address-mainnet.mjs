@@ -14,7 +14,8 @@
 //   key; on Base and Robinhood exactly --refund-id), from a USDC or coin on Solana or Base (a chain the money gate reads)
 //   other than the pool's coin, with one origin tx and one delivery tx, nothing refunded (refundedAmount "0") and the
 //   whole quoted amount deposited (depositedAmount = amountIn). Anything else: refused, nothing written.
-// - The delivery and then the pool tx must read, on both of X's public RPCs (the money gate's RPCS), alike, as 1Click's
+// - The delivery and then the pool tx must read, on two operators of X's public RPCs (the money gate's own list,
+//   scripts/ci/money-gate-reads.mjs RPCS, imported) and alike on every one that answers, as 1Click's
 //   delivery to U_X and then U_X's deposit into the pinned pool. On Solana both finalized with no error: the delivery
 //   credits U_X (post- less pre-balance) at least the quote's minAmountOut; the pool tx is in a later slot, signed by U_X,
 //   and every tag 1 instruction of the pinned program (SOL_MAINNET_DEPLOY), at least one, has U_X as its depositor
@@ -38,6 +39,7 @@ import { base58, hex } from "@scure/base";
 import { EVM_POOL_EVENTS, EVM_POOLS } from "../../wallet/src/pool/evm.ts";
 import { isRung } from "../../wallet/src/pool/ladder.ts";
 import { SOL_LADDER, SOL_MAINNET_DEPLOY } from "../../wallet/src/pool/solana.ts";
+import { RPCS } from "../../../scripts/ci/money-gate-reads.mjs";
 
 export const STATUS_URL = "https://1click.chaindefuser.com/v0/status";
 /** The pools' coins on 1Click (packages/wallet/src/deposit/quote.ts POOL_DEPOSIT_DESTINATION). */
@@ -49,12 +51,9 @@ export function originChainOf(asset) {
   if (asset === "nep141:base.omft.near" || asset.startsWith("nep141:base-")) return "base";
   return null;
 }
-/** X's two public RPCs, of two operators: the money gate's (scripts/ci/money-gate.mjs RPCS; its test holds them equal). */
-export const POOL_RPCS = Object.freeze({
-  solana: ["https://api.mainnet-beta.solana.com", "https://public.rpc.solanavibestation.com"],
-  base: ["https://mainnet.base.org", "https://base.drpc.org"],
-  robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com"],
-});
+/** X's public RPCs, each its own operator: the money gate's own lists (scripts/ci/money-gate-reads.mjs RPCS), imported,
+ *  so the record's reads and the gate's never drift. */
+export const POOL_RPCS = Object.freeze({ solana: RPCS.solana, base: RPCS.base, robinhood: RPCS.robinhood });
 const enc = new TextEncoder();
 const TOPIC_DEPOSITED = `0x${hex.encode(keccak_256(enc.encode(EVM_POOL_EVENTS.Deposited)))}`;
 /** An EIP-55 address: its letters' case is keccak-256 of its lowercase hex (high nibble >= 8: upper). */
@@ -125,14 +124,23 @@ export function recordOf(chain, depositAddress, status, poolTx, own) {
   return ["CARD pool-deposit-address / live: PASS", "Money path: yes", `Tx: ${origin} ${s}`, `Tx: ${chain} ${g}`, `Tx: ${chain} ${poolTx}`];
 }
 
+/** An RPC that gave no answer (a failed fetch, a status not 200, a JSON-RPC error, or no result): that RPC is left out of
+ *  the read, never a refusal on its own. */
+class NoAnswer extends Error {}
 const rpcPost = async (fetchFn, url, method, params, what) => {
-  const r = await fetchFn(url, {
-    method: "POST", headers: { "content-type": "application/json" }, redirect: "error", signal: AbortSignal.timeout(15_000),
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  if (r.status !== 200) throw new Error(`${new URL(url).host}: HTTP ${r.status}`);
-  const j = await r.json();
-  if (j?.error !== undefined || j?.result == null) throw new Error(`${new URL(url).host}: ${method} of the ${what} has no answer`);
+  const host = new URL(url).host;
+  let r, j;
+  try {
+    r = await fetchFn(url, {
+      method: "POST", headers: { "content-type": "application/json" }, redirect: "error", signal: AbortSignal.timeout(15_000),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    if (r.status !== 200) throw new NoAnswer(`${host}: HTTP ${r.status}`);
+    j = await r.json();
+  } catch (e) {
+    throw e instanceof NoAnswer ? e : new NoAnswer(`${host}: ${method} of the ${what}: ${e.message}`);
+  }
+  if (j?.error !== undefined || j?.result == null) throw new NoAnswer(`${host}: ${method} of the ${what} has no answer`);
   return j.result;
 };
 
@@ -211,18 +219,24 @@ async function readOne(chain, url, { poolTx, delivery, minOut }, u, pin, fetchFn
   return `delivery block ${dBlock} ${dr.blockHash} +${sent}, pool block ${pBlock} ${r.blockHash}`;
 }
 
-/** Reads, on X's two RPCs, the delivery (1Click's, crediting U_X at least the quote's minAmountOut, a digit string in base
- *  units) and then the pool tx as U_X's deposit into the pinned pool; throws unless both read them so, alike. */
+/** Reads, on X's RPCs, the delivery (1Click's, crediting U_X at least the quote's minAmountOut, a digit string in base
+ *  units) and then the pool tx as U_X's deposit into the pinned pool; throws unless two of them read them so, every RPC
+ *  that answers reads them alike, and none refuses them. An RPC with no answer is left out: { read, left } names each. */
 export async function readPoolTx(chain, { poolTx, delivery, minOut }, u, opts = {}) {
   const fetchFn = opts.fetch ?? fetch;
   const rpcs = opts.rpcs ?? POOL_RPCS[chain];
   const pin = opts.pin !== undefined ? opts.pin : chain === "solana" ? SOL_MAINNET_DEPLOY?.program : EVM_POOLS[chain]?.pool?.toLowerCase();
   if (typeof pin !== "string") throw new Error(`no pool pinned on ${chain}: the pool tx cannot be read as a deposit into it`);
-  if (!Array.isArray(rpcs) || rpcs.length !== 2) throw new Error(`${chain}: not two RPCs`);
+  if (!Array.isArray(rpcs) || rpcs.length < 2) throw new Error(`${chain}: fewer than two RPCs`);
   if (typeof minOut !== "string" || !/^[1-9][0-9]{0,77}$/.test(minOut)) throw new Error(`the quote's minAmountOut ${minOut} is not a whole number above 0`);
   const txs = { poolTx, delivery, minOut: BigInt(minOut) };
-  const [a, b] = await Promise.all(rpcs.map((url) => readOne(chain, url, txs, u, pin, fetchFn)));
-  if (a !== b) throw new Error(`the two RPCs read the pool tx apart (${a}, ${b})`);
+  const got = await Promise.allSettled(rpcs.map((url) => readOne(chain, url, txs, u, pin, fetchFn)));
+  for (const g of got) if (g.status === "rejected" && !(g.reason instanceof NoAnswer)) throw g.reason;
+  const reads = rpcs.map((url, i) => ({ host: new URL(url).host, s: got[i].status === "fulfilled" ? got[i].value : null, why: got[i].reason?.message }));
+  const ok = reads.filter((x) => x.s !== null);
+  if (new Set(ok.map((x) => x.s)).size > 1) throw new Error(`the RPCs read the pool tx apart (${ok.map((x) => `${x.host}: ${x.s}`).join("; ")})`);
+  if (new Set(ok.map((x) => x.host)).size < 2) throw new Error(`fewer than two RPCs read the pool tx (${reads.filter((x) => x.s === null).map((x) => x.why).join("; ")})`);
+  return { read: ok.map((x) => x.host), left: reads.filter((x) => x.s === null).map((x) => x.why) };
 }
 
 /** One read of the deposit address's status: true once the record is written, false while it is not yet SUCCESS; throws
@@ -238,7 +252,8 @@ export async function onePass({ chain, address, poolTx, own, out }, deps = {}) {
   if (s !== "SUCCESS") return false;
   const lines = recordOf(chain, address, status, poolTx, own);
   const delivery = status.swapDetails.destinationChainTxHashes[0].hash; // recordOf: exactly one, of X's shape
-  await readPoolTx(chain, { poolTx, delivery, minOut: status.quoteResponse.quote.minAmountOut }, own.u, { fetch: fetchFn, rpcs: deps.rpcs, pin: deps.pin });
+  const read = await readPoolTx(chain, { poolTx, delivery, minOut: status.quoteResponse.quote.minAmountOut }, own.u, { fetch: fetchFn, rpcs: deps.rpcs, pin: deps.pin });
+  console.log(`pool-deposit-address: the delivery and the pool tx read alike on ${read.read.join(", ")}${read.left.length ? `; left out, no answer: ${read.left.join("; ")}` : ""}`);
   (deps.append ?? appendFileSync)(out, `\n${lines.join("\n")}\n`);
   console.log(`pool-deposit-address: wrote ${out}; now run: node scripts/ci/money-gate.mjs --all`);
   return true;
