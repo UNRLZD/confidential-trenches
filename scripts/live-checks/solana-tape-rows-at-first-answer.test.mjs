@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { COLD_SIGS as HELPER_COLD_SIGS, TRADES_RPCS } from "../../apps/helper/src/data/solana/trades.ts";
 import { EXIT as EXIT_OF, RETRY } from "./provider-answer.mjs";
-import { COLD_SIGS, judge, read, RPCS } from "./solana-tape-rows-at-first-answer.mjs";
+import { COLD_SIGS, judge, pathOf, read, RPCS } from "./solana-tape-rows-at-first-answer.mjs";
 
 RETRY.ms = 0;
 
@@ -64,7 +64,8 @@ function replay(run) {
       const json = { "content-type": "application/json" };
       if (u.pathname === "/v1/market/lists") return new Response(JSON.stringify({ lists: { new: run.picks.map((p) => ({ token: p.mint, launchpad: "pump.fun", buys_5m: p.buys_5m })) } }), { status: run.lists.status, headers: json });
       const t = run.tapes.find((x) => x.mint === u.searchParams.get("token"));
-      return new Response(JSON.stringify({ trades: Array.from({ length: t.rows }, () => ({})), ...(t.filling ? { filling: true } : {}), src: t.src, as_of_ms: 0 }), { status: t.status, headers: json });
+      const timing = typeof t.path === "string" ? { "server-timing": `${t.path}, total;dur=${t.ms}` } : {};
+      return new Response(JSON.stringify({ trades: Array.from({ length: t.rows }, () => ({})), ...(t.filling ? { filling: true } : {}), src: t.src, as_of_ms: 0 }), { status: t.status, headers: { ...json, ...timing } });
     }
     assert.ok(RPCS.includes(url), url);
     const q = JSON.parse(init.body);
@@ -75,9 +76,37 @@ function replay(run) {
 }
 
 test("read() asks the helper and the providers what judge() judges: each recorded run read again judges the same", async () => {
-  for (const k of ["good", "bad"]) {
+  for (const k of ["good", "bad", "path_run"]) {
     const again = await read(A[k].base, replay(A[k]));
     const strip = (lines) => lines.map((l) => l.replace(/, \d+ ms$/, ""));
     assert.deepEqual(strip(judge(again).lines), strip(judge(A[k]).lines), k);
   }
+});
+
+// card solana-flooded-coin-first-answer-holds-rows: each tape's line names its path (its Server-Timing's sol-open,
+// sol-whole-cut and sol-vendor-read), so a red says how the helper answered. path_run: the deployed helper read with this
+// card's check, every tape's path recorded and named.
+test("path_run: each tape's line names how its first read was answered (sol-open); a recorded run without paths names none", () => {
+  const r = judge(A.path_run);
+  assert.equal(r.verdict, "INCONCLUSIVE");
+  const tapes = r.lines.filter((l) => l.slice(4).startsWith("tape "));
+  assert.equal(tapes.length, A.path_run.tapes.length);
+  for (const l of tapes) assert.match(l, /, path \[sol-open;desc="listed \d, account \d+, watch \d+, answer by [a-z]+ after \d+ rounds \d+"\], \d+ ms$/, l);
+  assert.ok(judge(A.bad).lines.every((l) => !l.includes("path [")));
+  // planted from the bad answer: its flooded coin's vendor rows past a cut name the cut in the red line
+  const run = structuredClone(A.bad);
+  run.tapes[0].path = 'sol-vendor-read;desc="rows read 3 ms ago", sol-whole-cut;desc="a Meteora trade unread 2 s ago: past the 7 a second busy coins share"';
+  const red = bad(judge(run));
+  assert.equal(red.length, 1);
+  assert.match(red[0], /src coingecko, path \[sol-vendor-read;desc="rows read 3 ms ago", sol-whole-cut;desc="a Meteora trade unread 2 s ago: past the 7 a second busy coins share"\], \d+ ms$/);
+});
+
+test("pathOf: only the tape's own parts, each bounded, null when it names none", () => {
+  assert.equal(pathOf('sol-open;desc="listed 0, account 33, watch 46, answer by bound after 0 rounds 1999", sol-read-to;desc="x", total;dur=2001'), 'sol-open;desc="listed 0, account 33, watch 46, answer by bound after 0 rounds 1999"');
+  assert.equal(pathOf("total;dur=3"), null);
+  assert.equal(pathOf(""), null);
+  assert.equal(pathOf(null), null);
+  // a hostile header: a desc past 200 characters is not taken, and at most four parts
+  assert.equal(pathOf(`sol-open;desc="${"x".repeat(201)}"`), null);
+  assert.equal(pathOf(Array.from({ length: 9 }, () => 'sol-open;desc="a"').join(", ")), Array.from({ length: 4 }, () => 'sol-open;desc="a"').join(", "));
 });

@@ -98,6 +98,20 @@ export const NEAR_PAIR_HEADER = "X-Helper-Near-Pair";
 /** GET /v1/health's header naming when this process started, in ms (card helper-evm-tapes-survive-a-restart): the live
  *  check that reads a coin's tape right after a deploy knows the helper it reads is the new one, and how new. */
 export const STARTED_HEADER = "X-Helper-Started";
+/** GET /v1/health's header naming what the warm file handed this process (card helper-tape-handover-judges-handed-books):
+ *  "<chain> books held <n> restored <m>" per EVM chain and "solana tapes held <n> restored <m>", counts only, never a
+ *  coin. The handover live check fails a deploy whose warm file held books this process did not restore. */
+export const HANDOVER_HEADER = "X-Helper-Handover";
+/** The HANDOVER_HEADER value of a server's market parts (each part's handover(); one without it is not named). */
+export function handoverNamed(swaps: Swaps): string {
+  const named: string[] = [];
+  for (const [chain, part] of Object.entries(swaps) as [string, { handover?: () => { held: number; restored: number } } | undefined][]) {
+    if (typeof part?.handover !== "function") continue;
+    const h = part.handover();
+    named.push(`${chain} ${chain === "solana" ? "tapes" : "books"} held ${h.held} restored ${h.restored}`);
+  }
+  return named.join(", ");
+}
 /** GET /v1/health's header naming each mainnet EVM pool's fee for the running period (card helper-start-residuals;
  *  pool/evm.ts feeNow): "<network> <fee in wei>", "<network> reading" while its read ahead is under way, or "<network>
  *  none", ", "-joined by network; "" with no pool. `ready` is false while one names none. A header, as the near pair:
@@ -456,7 +470,7 @@ export function handler(
         const period = epochStartOf(now());
         const fees = [...evmPools.values()].filter((p) => isMainnetEvm(p.network)).map((p) => ({ network: p.network, fee: p.feeNow(period) })).sort((x, y) => (x.network < y.network ? -1 : 1));
         const named = fees.map((f) => `${f.network} ${f.fee === null ? "none" : String(f.fee)}`).join(", ");
-        return send(200, health(commit, SERVED, release, ready() && fees.every((f) => f.fee !== null), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", "), [STARTED_HEADER]: String(STARTED_MS), [POOL_FEES_HEADER]: named });
+        return send(200, health(commit, SERVED, release, ready() && fees.every((f) => f.fee !== null), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", "), [STARTED_HEADER]: String(STARTED_MS), [POOL_FEES_HEADER]: named, [HANDOVER_HEADER]: handoverNamed(evmSwaps) });
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
@@ -1296,6 +1310,30 @@ function unsettledOf(body: string): { open: number; listed: number } | null {
 export const READY_SETTLE_MAX_MS = 240_000;
 /** The client the warm-up's token reads draw as (a caller's share, the callers' room). */
 const READY_CLIENT = "helper-ready";
+/** The Solana pool's provider reads (card helper-pool-fee-never-a-client-429): a provider's 429 to one holds the market's
+ *  and the background's reads of it for its wait (rpc.ts backgroundThrottled), as their own 429 does, so the pool's next
+ *  read finds the provider's window theirs. helper-25 on ee5c7dac4 (live run 45032297159) ran 104 "rpc hold
+ *  solana-public background" and 103 "rpc hold solana publicnode.com market" lines while the pool's fee read was refused
+ *  on the same two providers: the market's holds came only from its own refusals, so it kept drawing each window the
+ *  pool needed. */
+export function poolFetchAhead(rpc: Pick<Rpc, "backgroundThrottled">, f: typeof fetch = fetch): typeof fetch {
+  return async (input, init) => {
+    const r = await f(input, init);
+    if (r.status === 429) {
+      // the market's spelling of the provider (data/solana/trades.ts TRADES_RPCS): no trailing slash on a bare host
+      const u = new URL(input instanceof Request ? input.url : String(input));
+      rpc.backgroundThrottled("solana", `${u.origin}${u.pathname === "/" ? "" : u.pathname}${u.search}`, r.headers);
+    }
+    return r;
+  };
+}
+
+/** The Solana pool senders the environment sets (pool/solana.ts solanaPoolSendersFromEnv), their provider reads through
+ *  poolFetchAhead, so a 429 to one holds the market's reads of that provider. */
+export function poolSendersOf(env: Record<string, string | undefined>, rpc: Pick<Rpc, "backgroundThrottled">, f: typeof fetch = fetch): Map<string, SolanaPoolSender> {
+  return solanaPoolSendersFromEnv(env, poolFetchAhead(rpc, f));
+}
+
 /** Asks isReady every READY_EVERY_MS until it is true, then resolves. */
 export async function warmUntilReady(p: Ready, everyMs = READY_EVERY_MS): Promise<void> {
   const started = Date.now();
@@ -1491,7 +1529,9 @@ if (import.meta.main) {
       }
     } else if (senders.peer) gecko.seed(Array.from({ length: GT_LIMIT_PER_MIN }, () => Date.now()));
     let solanaState = (): unknown => undefined;
-    saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), geckoLists: gecko.calls("lists"), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])), solana: solanaState(), evmMarket: evmMarketOf(SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] })) }));
+    // card helper-tape-handover: the Solana tapes, set once they are made (below)
+    let solanaTradesState = (): unknown => undefined;
+    saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), geckoLists: gecko.calls("lists"), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])), solana: solanaState(), solanaTrades: solanaTradesState(), evmMarket: evmMarketOf(SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] })) }));
     // card helper-solana-failover: every Solana slot's state, for /v1/health
     const slots = new Map<SlotName, Slot>([["rpc", rpc.slot]]);
     const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko, slots, keyed);
@@ -1507,7 +1547,7 @@ if (import.meta.main) {
     const bind = bindSenderFromEnv(process.env, watches);
     // a Solana pool whose configured fee is not the kit's for the rent both providers read stops the helper (at the
     // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
-    const pools = solanaPoolSendersFromEnv(process.env);
+    const pools = poolSendersOf(process.env, rpc);
     // card helper-ready-without-gt: every part read from the environment is read here, at the start, so a value the
     // helper refuses stops it at once (exit 2, naming the variable). Left to handler()'s defaults they were read only at
     // listen(), which a peer runs once warm, inside a promise: an unhandled rejection, exit 1 with no line of ours, and
@@ -1538,6 +1578,12 @@ if (import.meta.main) {
     const day = holdersDay(Date.now, dayFiles(storeDir, randomUUID()));
     const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, named: evmNamed[c], keyed, kept: swaps[c]?.kept, day, goplus })]));
     if (warm !== null) restoreEvmMarket(warm, SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] }));
+    // card helper-tape-handover: the Solana tapes the previous helper held, at the start and again at the handover (the
+    // file it wrote at its stop; a tape this one already holds keeps its own), each walked on from where it was held to
+    const solTapes = swaps.solana!;
+    solanaTradesState = () => solTapes.state();
+    if (warm !== null) solTapes.restore(warm.solanaTrades);
+    if (senders.peer) void senders.held.then(() => solTapes.restore(readWarm(storeDir, Date.now())?.solanaTrades));
     const held = heldFrom(token, evmLists, dex);
     // card helper-near-lists-and-token: NEAR's lists from Rhea classic's views, read now and on their cadence; card
     // every-cell-shows-a-value: the unrealized.trade engine's reads first, Rhea's whenever the engine has no good answer

@@ -17,7 +17,10 @@
 // answered from a vendor's tape (the helper's own first read held none of its trades, and the tape fell back to its top
 // pool's vendor rows, trades.ts poolTape: 0d308d3bc served 9nxbR8JV...pump CoinGecko's 50 rows at 08:54:53Z, its newest 30
 // signatures 0 successful; with no vendor answer that is the 0 rows of run 43689567273): FAIL. No flooded coin among the
-// busy ones: INCONCLUSIVE (the run proves nothing about the root either way).
+// busy ones: INCONCLUSIVE (the run proves nothing about the root either way). Card
+// solana-flooded-coin-first-answer-holds-rows: each tape's line names its path, the sol-open, sol-whole-cut and
+// sol-vendor-read parts of its Server-Timing (trades.ts: how its first read was answered, a cut, a vendor's rows), so a
+// red says which way the helper answered (helper-23 run 45018729954's BAD named 9WB75GUz src coingecko and nothing else).
 // After: helper
 //   node scripts/live-checks/solana-tape-rows-at-first-answer.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3.
@@ -40,6 +43,13 @@ export const TAPES = 3;
 /** The helper's public Solana providers (trades.ts TRADES_RPCS): a test holds them equal. */
 export const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/** The parts of a tape answer's Server-Timing that name how it was answered (trades.ts: sol-open, sol-whole-cut,
+ *  sol-vendor-read), each bounded, joined; null when it names none. */
+export function pathOf(timing) {
+  const parts = String(timing ?? "").slice(0, 4_000).match(/sol-(open|whole-cut|vendor-read);desc="[^"]{0,200}"/g) ?? [];
+  return parts.length === 0 ? null : parts.slice(0, 4).join(", ");
+}
 
 const parse = (s) => {
   try {
@@ -64,7 +74,7 @@ export async function read(base = BASE, fetchFn = fetch) {
   const get = async (path) => {
     const t0 = performance.now();
     const r = await fetchFn(base + path, { headers: { Origin: APP }, signal: AbortSignal.timeout(20_000) });
-    return { status: r.status, type: r.headers.get("content-type") ?? "", body: await r.text(), ms: Math.round(performance.now() - t0) };
+    return { status: r.status, type: r.headers.get("content-type") ?? "", timing: r.headers.get("server-timing") ?? "", body: await r.text(), ms: Math.round(performance.now() - t0) };
   };
   const l = await get("/v1/market/lists?chain=solana");
   const seen = new Map();
@@ -81,7 +91,7 @@ export async function read(base = BASE, fetchFn = fetch) {
     chosen.map(async (p) => {
       const a = await get(`/v1/market/trades?chain=solana&token=${p.mint}&limit=50`);
       const b = parse(a.body);
-      return { mint: p.mint, flooded: flooded(p), status: a.status, json: /^application\/json/i.test(a.type), rows: Array.isArray(b?.trades) ? b.trades.length : null, src: typeof b?.src === "string" ? b.src : null, filling: b?.filling === true, ms: a.ms };
+      return { mint: p.mint, flooded: flooded(p), status: a.status, json: /^application\/json/i.test(a.type), rows: Array.isArray(b?.trades) ? b.trades.length : null, src: typeof b?.src === "string" ? b.src : null, filling: b?.filling === true, ms: a.ms, path: pathOf(a.timing) };
     }),
   );
   return { base, readAt: new Date().toISOString(), lists: { status: l.status, busy: busy.length }, picks: picks.map((p) => ({ mint: p.mint, buys_5m: p.buys_5m, newest: p.newest })), tapes };
@@ -97,7 +107,7 @@ export function judge(run) {
   for (const t of tapes) {
     const p = (run.picks ?? []).find((x) => x.mint === t.mint);
     const newest = p?.newest == null ? "newest signatures not read" : `${p.newest.ok} of its newest ${p.newest.sigs} signatures successful`;
-    say(t.status === 200 && t.json === true && Number.isSafeInteger(t.rows) && t.rows > 0 && (!t.flooded || t.src === "chain"), `tape ${t.mint} (${newest}${t.flooded ? ", flooded" : ""}): first answer ${t.status}, ${t.rows ?? "no"} row(s)${t.src ? `, src ${t.src}` : ""}${t.filling ? ", filling" : ""}, ${t.ms} ms`);
+    say(t.status === 200 && t.json === true && Number.isSafeInteger(t.rows) && t.rows > 0 && (!t.flooded || t.src === "chain"), `tape ${t.mint} (${newest}${t.flooded ? ", flooded" : ""}): first answer ${t.status}, ${t.rows ?? "no"} row(s)${t.src ? `, src ${t.src}` : ""}${t.filling ? ", filling" : ""}${typeof t.path === "string" ? `, path [${t.path}]` : ""}, ${t.ms} ms`);
   }
   const floodedSeen = tapes.filter((t) => t.flooded).length;
   say(floodedSeen > 0 ? true : null, floodedSeen > 0 ? `${floodedSeen} flooded coin(s) judged at the first answer` : "no busy coin's newest signatures were mostly failed: the root is not exercised");

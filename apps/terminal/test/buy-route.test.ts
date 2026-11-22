@@ -317,6 +317,32 @@ test("card one-balance-buys-on-every-chain: the kit's route event { move: \"cash
 // card evm-buy-end-carries-its-tx: a Base or Robinhood buy's answer is the early "sent" with no transaction, so its end's
 // stage event carries the transaction: the toast's link reads it (route.tx); an owed_back end fails the pool step and
 // keeps the release's transaction too.
+// Card evm-buy-late-fill-reaches-app: a buy the helper's word refused whose transaction landed anyway. The page posts
+// its late end as progress under the same id (packages/signpage/src/pool-buy-evm.ts `late`); a late filled checks
+// every step of the refused strip, the move from Cash with them, and its transaction is the toast's link. Only a
+// refused strip: a strip another end failed moves on nothing, and another id moves nothing.
+test("evm-buy-late-fill-reaches-app: a refused strip whose late progress is filled is done, every step checked, with its tx", () => {
+  const refused = fromOutcome(fromStage(tap(), "b1", "sent"), "b1", { ok: false, error: { code: "down" } }, T0 + 2_000);
+  assert.equal(refused.k, "failed");
+  assert.deepEqual(steps(refused), ["done", "done", "error", "off"]);
+  const late = fromProgress(refused, "b1", "filled", T0 + 41_000, [{ hash: "0xlate" }]);
+  assert.equal(late.k, "done");
+  assert.deepEqual(steps(late), ["done", "done", "done", "done"]);
+  assert.deepEqual(late.links, [true, true, true]);
+  assert.equal(late.tx, "0xlate");
+  // refused at the take, the move from Cash running: every step and the move checked, the move's time not known
+  const moving = fromOutcome(routeEvent(tap(), { t: "move", id: "b1", at: T0 + 100 }), "b1", { ok: false, error: { code: "down" } }, T0 + 2_000);
+  assert.deepEqual(moving.move, { st: "error", at: T0 + 100, ms: 1_900 });
+  const movedLate = fromProgress(moving, "b1", "filled", T0 + 41_000);
+  assert.deepEqual(steps(movedLate), ["done", "done", "done", "done"]);
+  assert.deepEqual(movedLate.move, { st: "done", at: T0 + 100, ms: null });
+  // another id, another failure, another late stage: nothing moves
+  assert.equal(fromProgress(refused, "b2", "filled", T0 + 41_000), refused);
+  const notLanded = fromStage(fromStage(tap(), "b1", "sent"), "b1", "not_landed");
+  assert.deepEqual(steps(fromProgress(notLanded, "b1", "filled", T0 + 41_000)), ["done", "done", "error", "off"]);
+  for (const s of ["part_filled", "owed_back", "not_landed", "sent"] as const) assert.equal(fromProgress(refused, "b1", s, T0 + 41_000).k, "failed", s);
+});
+
 test("an end stage's transaction fills the route's tx (the toast link); a tx the answer named stays", () => {
   const TX = `0x${"ab".repeat(32)}`;
   const sent = fromOutcome(routeTap("b1", 1, 2_500n), "b1", { ok: true, result: { stage: "sent", txs: [] } });

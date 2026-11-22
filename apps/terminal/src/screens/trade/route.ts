@@ -70,6 +70,9 @@ export interface Route {
   /** The move from Cash before the buy (card one-balance-buys-on-every-chain): null when none was told; its state, when
    *  it started (Unix ms) and, once it ended, how long it ran (null when its end came with no time). */
   move: { st: "active" | "done" | "error"; at: number; ms: number | null } | null;
+  /** Failed by a refusal (card evm-buy-late-fill-reaches-app): the one failure the signing page may still follow to a
+   *  late end of the same buy (a transaction that landed after the helper's word refused it). */
+  refused?: true;
 }
 
 export const IDLE: Route = { side: "buy", k: "idle", id: null, at: 0, cents: null, walletIn: false, st: ["off", "off", "off", "off"], links: [false, false, false], wallet: null, venue: null, pool: null, out: null, tx: null, sold: null, back: null, move: null };
@@ -155,6 +158,13 @@ const unfill = (r: Route): Route => ({ ...r, st: set(set(r.st, 2, "active"), 3, 
  */
 export function fromProgress(r: Route, id: string, stage: Stage | "refused", at?: number, txs?: readonly { hash: string }[]): Route {
   if (stage === "sent" && r.id === id && filledOnly(r)) return unfill(r);
+  // a buy refused whose transaction landed anyway (card evm-buy-late-fill-reaches-app): the page's late filled under the
+  // same id (pool-buy-evm.ts `late`) checks every step, the move from Cash with them (its time not known); the end's
+  // transaction below. Only a refused strip: every other failure is an end the page never follows
+  if (stage === "filled" && r.id === id && r.k === "failed" && r.refused === true) {
+    const { refused: _r, ...was } = r;
+    r = { ...was, k: "done", st: ["done", "done", "done", "done"], links: [true, true, true], move: r.move?.st === "error" ? { st: "done", at: r.move.at, ms: null } : r.move };
+  }
   // the end's transaction (card evm-buy-end-carries-its-tx): a Base or Robinhood buy's early answer names none, so its end
   // stage does, filled or owed back; a transaction the answer named stays
   const tx = txs?.[0]?.hash;
@@ -180,7 +190,7 @@ export function fromStage(r: Route, id: string, stage: Stage | "refused", tx?: s
     ev({ t: "sent", id, ...(tx ? { tx } : {}) });
     ev({ t: "filled", id });
   } else if (stage === "part_filled" || stage === "not_landed" || stage === "refused" || stage === "owed_back") ev({ t: "fail", id, ...when });
-  return n;
+  return stage === "refused" && n !== r && n.k === "failed" ? { ...n, refused: true } : n;
 }
 
 /** The buy request's own answer as events: its stage (with the transaction it names), or a refusal. The client's own
