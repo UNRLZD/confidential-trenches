@@ -174,6 +174,8 @@ export const M = [
   ["a17d a found pass names its record's mints", SELL, T, "(o.found === true ? { bare: true as const, mints: [] } :", "(o.found === true ? { bare: true as const } :"],
   // review of 359f71639, L4: both RPCs' heights far apart before round 1, not refused (round 1 pays into a sure refusal)
   ["a17e heights far apart give a floor", BUY, TB, "return Math.abs(a - b) > HEIGHT_APART_MAX ? null : Math.min(a, b);", "return Math.min(a, b);", "a-found-wallet-sweeps"],
+  // re-review of 696e71176, LOW 1: the floor the greater of both heights (one RPC alone lifts the buy round's bound)
+  ["a17g floor the greater height", BUY, TB, "return Math.abs(a - b) > HEIGHT_APART_MAX ? null : Math.min(a, b);", "return Math.abs(a - b) > HEIGHT_APART_MAX ? null : Math.max(a, b);", "a-found-wallet-sweeps"],
   ["a17f no floor refuses nothing before round 1", BUY, TB, "      if (landed === null && floor === null) return { error: \"failed\" };\n", "", "a-found-wallet-sweeps"],
   ["a18 the proven buy not kept on the record", SELL, T, ", ...(kept.buy === undefined ? {} : { buy: kept.buy })", ""],
   ["a19 the record's proven buy proven again", SELL, T, "  let proven = o.buy;\n", "  let proven: SolanaBuy | null | undefined = undefined;\n"],

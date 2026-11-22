@@ -2867,7 +2867,7 @@ async function twoRounds(round1: "lands" | "never", gap?: number, liar?: 0 | 1, 
       }
       if (method === "getLatestBlockhash" && stage === 2 && gap !== undefined) {
         const a = (await rpc(method, params)) as { context: unknown; value: { blockhash: string; lastValidBlockHeight: number } };
-        return { ...a, value: { ...a.value, lastValidBlockHeight: (liar === undefined ? Number((await owed.list())[0]!.lastHeight) : 151) + gap } };
+        return { ...a, value: { ...a.value, lastValidBlockHeight: (liar === undefined && apart === undefined ? Number((await owed.list())[0]!.lastHeight) : 151) + gap } };
       }
       return rpc(method, params);
     }) as SolanaRpc;
@@ -2957,6 +2957,19 @@ test("card a-found-wallet-sweeps-past-a-strangers-coin: both RPCs' confirmed hei
   assert.deepEqual([far.log, far.sent.length, (await far.owed.list()).length], [[], 0, 0], "nothing taken, signed or owed");
   const near = await twoRounds("lands", undefined, undefined, HEIGHT_APART_MAX);
   const b = await runPoolBuy(near.w.host, { ...ASK, amount: near.spend });
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
+});
+
+// Re-review of 696e71176, LOW 1: inside the window, RPC 1 answering its height 150 above RPC 0's still never lifts the
+// floor: the buy round's bound is the honest floor (RPC 0's 0) + 151 + FOUND_ROUND_GAP, so a round-two blockhash one past
+// it is refused with no tag 3 taken or signed, and one at it fills (a floor of the greater height would sign it).
+test("card a-found-wallet-sweeps-past-a-strangers-coin: RPC 1 150 above RPC 0 in round 1 never lifts the floor: a buy round one past the honest floor + 151 + FOUND_ROUND_GAP is refused; at it, filled", async () => {
+  const past = await twoRounds("lands", FOUND_ROUND_GAP + 1, undefined, HEIGHT_APART_MAX);
+  assert.deepEqual(await runPoolBuy(past.w.host, { ...ASK, amount: past.spend }), { error: "failed" });
+  assert.deepEqual(past.log.filter((l) => !l.startsWith("settle")), ["takeSet:note-2", "sendPieces:1:owed", "prove:note-2->W"], "round 1 alone: the buy round takes and signs nothing");
+  assert.equal(past.sent.length, 1);
+  const at = await twoRounds("lands", FOUND_ROUND_GAP, undefined, HEIGHT_APART_MAX);
+  const b = await runPoolBuy(at.w.host, { ...ASK, amount: at.spend });
   assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
 });
 
