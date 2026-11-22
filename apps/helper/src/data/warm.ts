@@ -19,13 +19,13 @@ import { randomBytes } from "node:crypto";
 import { STALE_MS } from "./evm/lists.ts";
 import type { GeckoBudget } from "./gecko.ts";
 import { HANDOVER_MAX } from "./solana/token.ts";
-import { EVM_HANDOVER_MAX } from "./evm/swaps.ts";
+import { BOOKS_HANDOVER_MAX, EVM_HANDOVER_MAX } from "./evm/swaps.ts";
 
 export const WARM_DIR = "market";
 export const WARM_FILE = "warm.json";
 /** The file's size limit on read: six GeckoTerminal answers of at most 2 MB each, the Solana token page's handover
- *  (HANDOVER_MAX), and the rest. */
-export const WARM_MAX = 16 * 1024 * 1024 + HANDOVER_MAX + 2 * (EVM_HANDOVER_MAX + 1024 * 1024);
+ *  (HANDOVER_MAX), each EVM chain's swap reads and books (card helper-tape-handover: BOOKS_HANDOVER_MAX), and the rest. */
+export const WARM_MAX = 16 * 1024 * 1024 + HANDOVER_MAX + 2 * (EVM_HANDOVER_MAX + BOOKS_HANDOVER_MAX + 1024 * 1024);
 
 /** `solana`: the token page's answers (solana/token.ts state), checked entry by entry by its restore. `geckoLists`: the
  *  times among `gecko` of the lists lane's calls, so the next helper's lists count them in their LIST_FLOOR (card

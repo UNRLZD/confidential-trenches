@@ -261,6 +261,35 @@ export function createBook(cfg: BookConfig) {
       return (tailPriced().at(-1) ?? settledTape.at(-1))?.price ?? marked?.price ?? null;
     },
 
+    /** The book whole, for the next process to take over (load; card helper-tape-handover): its settled block, its ETH
+     *  price there, its settled tape and bars, its unsettled tail and its mark, every bigint a decimal string. */
+    state(): BookState {
+      const swap = (w: Swap): SwapRow => ["s", w.block, w.index, w.tx, w.t, w.side, w.amt.toString(), w.quote.toString(), w.got === undefined ? null : w.got.toString(), w.tape === false ? 0 : 1];
+      return {
+        settledTo,
+        ethUsd: ethUsd === null ? null : ethUsd.toString(),
+        tape: settledTape.map((p) => [...swap(p.swap).slice(1), p.usd.toString(), p.price.toString()] as PricedRow),
+        tail: tail.map((e) => (e.kind === "ref" ? ["r", e.block, e.index, e.ethUsd.toString()] : swap(e))),
+        bars: Object.fromEntries(TFS.map((tf) => [tf, [...bars[tf]].map(([k, b]) => [k, b.o.toString(), b.h.toString(), b.l.toString(), b.c.toString(), b.v.toString()] as BarRow)])) as Record<Tf, BarRow[]>,
+        marked: marked === null ? null : [marked.t, marked.price.toString()],
+      };
+    },
+    /** A previous process's book (state) into this new one: hostile input, checked whole (every number in range, every
+     *  list in order and within its bound, every bar on its bucket and inside its own high and low), loaded only into a
+     *  book that holds nothing yet. False, and nothing loaded, when any part fails. */
+    load(st: unknown): boolean {
+      if (settledTo !== -1 || tail.length > 0 || marked !== null) return false;
+      const v = bookState(st);
+      if (v === null) return false;
+      settledTo = v.settledTo;
+      ethUsd = v.ethUsd;
+      settledTape = v.tape;
+      tail = v.tail;
+      for (const tf of TFS) for (const [k, b] of v.bars[tf]) bars[tf].set(k, b);
+      marked = v.marked;
+      return true;
+    },
+
     /** The newest `limit` swaps, newest first; `trader` is filled by the caller (null here). */
     tape(limit: number): (TapeRow & { block: number; index: number })[] {
       const all = settledTape.concat(tailPriced()).filter((p) => p.swap.tape !== false);
@@ -281,6 +310,83 @@ export function createBook(cfg: BookConfig) {
   };
 }
 export type Book = ReturnType<typeof createBook>;
+
+/** A swap as the handover writes it: kind, block, index, tx, time, side, amt, quote, got (null: none), on the tape (1/0). */
+type SwapRow = ["s", number, number, string, number, "b" | "s", string, string, string | null, 0 | 1];
+/** A settled swap: a SwapRow without its kind, then its USD value and price. */
+type PricedRow = [number, number, string, number, "b" | "s", string, string, string | null, 0 | 1, string, string];
+type RefRow = ["r", number, number, string];
+type BarRow = [number, string, string, string, string, string];
+/** What Book.state() hands over and Book.load() takes back. */
+export type BookState = { settledTo: number; ethUsd: string | null; tape: PricedRow[]; tail: (SwapRow | RefRow)[]; bars: Record<Tf, BarRow[]>; marked: [number, string] | null };
+
+/** A whole number of at most 100 digits as written by state(); null otherwise. `min`: its least. */
+const big = (v: unknown, min: bigint): bigint | null => (typeof v === "string" && /^[0-9]{1,100}$/.test(v) && BigInt(v) >= min ? BigInt(v) : null);
+const int = (v: unknown, min: number): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= min;
+/** A SwapRow's fields from `at` on (block, index, tx, t, side, amt, quote, got, tape) as a Swap; null when any is off. */
+function swapOf(r: readonly unknown[], at: number): Swap | null {
+  const [block, index, tx, t, side, amt, quote, got, onTape] = r.slice(at, at + 9);
+  if (!int(block, 0) || !int(index, 0) || typeof tx !== "string" || !/^0x[0-9a-f]{64}$/.test(tx) || !int(t, 0) || (side !== "b" && side !== "s") || (onTape !== 0 && onTape !== 1)) return null;
+  const a = big(amt, 1n);
+  const q = big(quote, 1n);
+  const g = got === null ? undefined : big(got, 1n);
+  if (a === null || q === null || g === null) return null;
+  return { kind: "swap", block, index, tx, t, side, amt: a, quote: q, ...(g === undefined ? {} : { got: g }), ...(onTape === 0 ? { tape: false as const } : {}) };
+}
+/** state()'s answer checked whole as hostile input (Book.load); null when any part is off. */
+function bookState(st: unknown): { settledTo: number; ethUsd: bigint | null; tape: Priced[]; tail: Event[]; bars: Record<Tf, [number, Bar][]>; marked: { t: number; price: bigint } | null } | null {
+  if (typeof st !== "object" || st === null || Array.isArray(st)) return null;
+  const o = st as Record<string, unknown>;
+  if (!int(o.settledTo, -1)) return null;
+  const settled = o.settledTo;
+  const ethUsd = o.ethUsd === null ? null : big(o.ethUsd, 1n);
+  if (ethUsd === null && o.ethUsd !== null) return null;
+  if (!Array.isArray(o.tape) || o.tape.length > TAPE_MAX || !Array.isArray(o.tail) || o.tail.length > TAPE_MAX * 100) return null;
+  const tape: Priced[] = [];
+  for (const r of o.tape as unknown[]) {
+    if (!Array.isArray(r) || r.length !== 11) return null;
+    const w = swapOf(r, 0);
+    const usd = big(r[9], 1n);
+    const p = big(r[10], 1n);
+    if (w === null || usd === null || p === null || w.block > settled || (tape.length > 0 && order(tape.at(-1)!.swap, w) >= 0)) return null;
+    tape.push({ swap: w, usd, price: p });
+  }
+  const tail: Event[] = [];
+  for (const r of o.tail as unknown[]) {
+    if (!Array.isArray(r)) return null;
+    let e: Event | null = null;
+    if (r[0] === "s" && r.length === 10) e = swapOf(r, 1);
+    else if (r[0] === "r" && r.length === 4 && int(r[1], 0) && int(r[2], -1)) {
+      const u = big(r[3], 1n);
+      e = u === null ? null : { kind: "ref", block: r[1], index: r[2], ethUsd: u };
+    }
+    if (e === null || e.block <= settled || (tail.length > 0 && order(tail.at(-1)!, e) >= 0)) return null;
+    tail.push(e);
+  }
+  if (typeof o.bars !== "object" || o.bars === null || Array.isArray(o.bars)) return null;
+  const rows = o.bars as Record<string, unknown>;
+  const bars = {} as Record<Tf, [number, Bar][]>;
+  for (const tf of TFS) {
+    const l = rows[tf];
+    if (!Array.isArray(l) || l.length > BUCKETS_MAX[tf]) return null;
+    const out: [number, Bar][] = [];
+    for (const r of l as unknown[]) {
+      if (!Array.isArray(r) || r.length !== 6 || !int(r[0], 0) || r[0] % TF_SECONDS[tf] !== 0 || (out.length > 0 && r[0] <= out.at(-1)![0])) return null;
+      const [ob, hb, lb, cb, vb] = [big(r[1], 1n), big(r[2], 1n), big(r[3], 1n), big(r[4], 1n), big(r[5], 0n)];
+      if (ob === null || hb === null || lb === null || cb === null || vb === null || lb > ob || lb > cb || hb < ob || hb < cb) return null;
+      out.push([r[0], { o: ob, h: hb, l: lb, c: cb, v: vb }]);
+    }
+    bars[tf] = out;
+  }
+  let marked: { t: number; price: bigint } | null = null;
+  if (o.marked !== null) {
+    const m = o.marked;
+    const p = Array.isArray(m) && m.length === 2 && int(m[0], 0) ? big(m[1], 1n) : null;
+    if (p === null) return null;
+    marked = { t: (m as [number, string])[0], price: p };
+  }
+  return { settledTo: settled, ethUsd, tape, tail, bars, marked };
+}
 
 export const CHANGE_4H_S = 4 * 3_600;
 /**
