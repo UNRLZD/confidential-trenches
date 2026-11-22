@@ -285,7 +285,7 @@ export const MUTANTS = [
   [QUOTE, "      const i = kept.get(readKey(r));", "      const i = undefined as number | undefined;", R, "W1 "],
   [QUOTE, "  if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {", "  if (plan !== undefined) {", R, "W4 "],
   [QUOTE, "  PLANS.set(planKey, {", "  if (false) PLANS.set(planKey, {", R, "W1 "],
-  [QUOTE, "(!kept.has(readKey(r)) || hit.has(first + j))", "(!kept.has(readKey(r)) || true)", R, "W5 "],
+  [QUOTE, 'r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j))', 'r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || true)', R, "W5 "],
   [QUOTE, "filter((r, j) => r.override === undefined && !r.data.startsWith(", "filter((r, j) => !r.data.startsWith(", R, "W6 "],
   [QUOTE, "  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind, true));", "  const early: ReturnType<typeof scanAt>[] = [];", R, "W4 "],
   [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (false) {", R, "T7b "],
@@ -1285,6 +1285,13 @@ export const MUTANTS = [
   [QUOTE, '  if (till > now) return 20 + last;', '  if (till > now) return 2 + last;', "test/evm-pair-rank.test.ts", "R6 "],
   [QUOTE, '  if (till > 0 && (s?.last ?? 0) < till) return 10 + last;', '  if (false && till > 0 && (s?.last ?? 0) < till) return 10 + last;', "test/evm-pair-rank.test.ts", "R7 "],
   [QUOTE, '  const till = Math.max(s?.held ?? 0, evmProviderHeldMs(u, 0));', '  const till = s?.held ?? 0;', "test/evm-pair-rank.test.ts", "R6 "],
+  // card evm-quote-fewer-rounds, S1 as the rule it holds: a speculative read's answer is used only for a pool held at the
+  // quote's block (W6), only by the very same read (W6e), only from the quote's own block (W6c), and a hook that is an
+  // address the reads call is still dropped (W6d)
+  [QUOTE, "  const held = found.filter(holds);", "  const held = found;", R, "W6 "],
+  [QUOTE, "const readKey = (r: Read) => JSON.stringify([r.to, r.data, r.override ?? null, r.group ?? null,", "const readKey = (r: Read) => JSON.stringify([r.to, r.data, null, null,", R, "W6e "],
+  [QUOTE, "readBoth(rpcs, block.hash, earlyFirst, v.reads, undefined, firstDown)", "readBoth(rpcs, block.parentHash, earlyFirst, v.reads, undefined, firstDown)", R, "W6c "],
+  [QUOTE, "const droppable = (k: EvmPoolKey) => k.hooks !== NATIVE && (v.called.has(k.hooks) ||", "const droppable = (k: EvmPoolKey) => k.hooks !== NATIVE && (false ||", R, "W6d "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);

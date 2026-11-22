@@ -4511,7 +4511,7 @@ async function routeSetOf(a: {
   const earlyFirst: Read[] = [];
   if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {
     const own = new Set(reads.map(readKey));
-    // the plan holds no read with a state override (below)
+    // the plan's own reads hold no read with a state override (below); its early ones may, read apart
     for (const kept0 of plan.reads) {
       const r = atAmount(kept0, plan.amount, amountIn);
       const k = readKey(r);
@@ -5042,12 +5042,22 @@ async function routeSetOf(a: {
   }
   // what the next quote of the token asks in its first round: this one's later reads, and the kept ones it asked again
   PLANS.delete(planKey);
-  // never a read with a state override: it is asked only once this quote's own reads find its pool held (review of
-  // 5452011, S1), so a pool that vanished since never puts its hook's override into a read
+  // never a read with a state override in the first round's own reads: no override answer is used before the
+  // PoolManager holds the pool on both providers at the quote's block (review of 5452011, S1), and a first round's
+  // failure ends the quote
   const planReads = reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j));
   const inPlan = new Set(planReads.map(readKey));
-  // the early reads not in the first round's reads: never one with a state override, as above
-  const planEarly = earlyRead.flatMap((i) => (reads[i] === undefined ? [] : [reads[i]!])).filter((r) => r.override === undefined && !inPlan.has(readKey(r)));
+  // the early reads not in the first round's reads: the early routes' (never one with a state override: they go only
+  // through hooks none or listed), and the reads with a state override this quote used, of pools it found held (card
+  // evm-quote-fewer-rounds). Speculate, then validate: the next quote reads them beside its first round at its own block,
+  // their own read, so a failure or a disagreement on one ends nothing, and uses an answer only where a later round of
+  // its own asks the very same read (readKey: the pool, the hook, the replaced code and slots, the amount), which it does
+  // only for a pool its first round's state reads find held on both providers at that block (S1); any other answer is
+  // never used, and a read not kept is asked in its round as before. A warm ANT tap on Robinhood read its pools with
+  // their hooks replaced in 2 to 4 rounds after its first, about 0.2 to 0.5 s each (read only from macOS, 2026-11-22
+  // 17:1xZ)
+  const usedHeld = reads.slice(first).filter((r, j) => r.override !== undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j));
+  const planEarly = [...earlyRead.flatMap((i) => (reads[i] === undefined ? [] : [reads[i]!])).filter((r) => r.override === undefined), ...usedHeld].filter((r, k, all) => !inPlan.has(readKey(r)) && all.findIndex((x) => readKey(x) === readKey(r)) === k);
   PLANS.set(planKey, { ts: block.timestamp, amount: amountIn, reads: planReads, scans: asked, xs: [...xPools.keys()], early: planEarly });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled, outOfGas: [...outOfGas.values()] };
