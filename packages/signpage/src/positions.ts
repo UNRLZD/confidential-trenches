@@ -626,18 +626,6 @@ export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBu
   });
 }
 
-/**
- * A Solana pool buy's op a closed or reloaded page left at "sent" (card signpage-sent-end-recorded): its end read from
- * its own txs, each on both RPCs by trade.ts txEnd (the kit's readSolanaTxEnd: filled or failed only on both reads,
- * not_landed only once both read its blockhash past its last height), each tx's end noted on it (trade.ts noted()), and
- * the op's stage the one the page would have shown: failed is refused, as the run answers it, and the legs' stages make
- * the op's by pool-buy.ts legsStage (every tx filled: filled; some: part_filled; every one refused: refused; else
- * not_landed). Any tx unknown leaves the op as it is, read again at the next
- * state read. Only ops of kind buy, chain solana, at "sent", every tx with its blockhash and last height (recordPoolBuy);
- * an op from before them, another chain's (an EVM buy's sent op has no tx), or one `running` names (this page's own
- * run, whose end is its own) is never read. Written in one update that writes only while the op is still "sent", so a
- * run's own end that came first stays. A filled end here has no units: src/trade-fill.ts reads them from its tx.
- */
 /** The marks a sent buy's notes carry on this device, read as the run reads them (review 5 of 59a86ef49): `note`, a
  *  note's record as the page's settle pass left it (the note store); `owner`, whose spend a note's is (pool-spend.ts
  *  spendOwner on both RPCs at finalized, as the page's follow reads a buy's), null when it cannot tell. */
@@ -669,6 +657,19 @@ async function legEnd(end: LegEnd, n: SentNote, marks: SentMarks): Promise<"fill
   return states.some((s) => s === undefined || s === "RESERVED") ? null : "refused";
 }
 
+/**
+ * A Solana pool buy's op a closed or reloaded page left at "sent" (card signpage-sent-end-recorded): its end read from
+ * its own txs, each on both RPCs by trade.ts txEnd (the kit's readSolanaTxEnd: filled or failed only on both reads,
+ * not_landed only once both read its blockhash past its last height), each tx's end noted on it (trade.ts noted()), and
+ * the op's stage the one the page would have shown: each leg's end as the run gives it from its notes' marks (legEnd),
+ * the op's by pool-buy.ts legsStage (every leg filled: filled; some: part_filled; every one refused: refused; else
+ * not_landed). Any tx unknown, or a leg's mark not known, leaves the op as it is, read again at the next state read
+ * (past SENT_SETTLE_PAST_MS from its first read, once each SENT_SETTLE_SLOW_MS). Only ops of kind buy, chain solana, at
+ * "sent", every tx with its blockhash, last height and notes (recordPoolBuy); an op from before them, another chain's
+ * (an EVM buy's sent op has no tx), one `running` names (this page's own run) or one whose trade lock another tab holds
+ * (its live run) is never read. Written in one update that writes only while the op is still "sent", so a run's own end
+ * that came first stays. A filled end here has no units: src/trade-fill.ts reads them from its legs' txs.
+ */
 export async function settleSentBuys(
   store: Pick<TradeStore, "get" | "keys" | "update">, providers: readonly [SolanaRpc, SolanaRpc], marks: SentMarks,
   o: { running?: (id: string) => boolean; locks?: Locks | null; now?: () => number; reads?: SentReads } = {},
