@@ -480,6 +480,7 @@ export const MUTANTS = [
   [QUOTE, " && (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", " && (tail0?.spans.length ?? 0) === 0;", R, "GUARD "],
   // a band block counts as read only within maxLag of the head (independent review of c6cf1927d, HIGH 1, HIGH 2, MEDIUM 3)
   [QUOTE, "    const unread = e.tail ? gapsOf(lagged.reduce(", "    const unread = e.tail ? gapsOf((tail0?.band ?? []).reduce(", R, "TAIL11 "],
+  [QUOTE, ".filter(([, y]) => y > head - lag).map(([x, y]): [number, number] => [Math.max(x, head - lag + 1), y]) : [];", ".filter(([, y]) => y > head - lag) : [];", R, "TAIL2 "],
   // past maxLag, only the unread spans that start past it go before the answer; those within it go after, counted from
   // their first block (P2-1)
   [QUOTE, "      const now = unread.filter(([a]) => a <= head - lag);", "      const now = unread;", R, "W2b "],
