@@ -460,9 +460,12 @@ if (SCENARIO === "found") {
     const from = told.length;
     await p.t.stateRead();
     await sleep(LOAD_MS);
-    const load = { at: new Date().toISOString(), told: told.slice(from).map((x) => x.line), holds: await wHolds(FOUND_W), clock: await wClock(FOUND_W) };
+    // the page's own state behind its verdict: its rent back records (found ones among them) and the scope's notes
+    const owedNow = Object.values((await p.w.get("meta", "owed/rentback-sol")) ?? {}).map((r) => ({ address: r?.address, found: r?.found ?? false, passes: r?.passes, seen: r?.seen !== undefined }));
+    const notesNow = (await p.notesOf()).filter((n) => n.scope === scope).map((n) => `${n.ref.kind}:${n.state}${n.leaf ? "" : ":noleaf"}`);
+    const load = { at: new Date().toISOString(), told: told.slice(from).map((x) => x.line), holds: await wHolds(FOUND_W), clock: await wClock(FOUND_W), owed: owedNow, notes: notesNow };
     out.loads.push(load);
-    log(`load ${i}: W ${JSON.stringify(load.holds)}; latest ${load.clock.latest[0]} at height ${JSON.stringify(load.clock.height)}, finalized ${load.clock.finalized.join("/")} (past + 151: ${load.clock.past})`);
+    log(`load ${i}: W ${JSON.stringify(load.holds)}; latest ${load.clock.latest[0]} at height ${JSON.stringify(load.clock.height)}, finalized ${load.clock.finalized.join("/")} (past + 151: ${load.clock.past}); rent back records ${JSON.stringify(owedNow)}; notes ${JSON.stringify(notesNow)}; lines ${JSON.stringify(load.told)}`);
     // swept: W at 0 on both RPCs; with a stranger's unit planted (token), W keeps that account's close cost (the page's
     // keepOf, card a-found-wallet-sweeps-past-a-strangers-coin), so swept is W down by at least 2,000,000 lamports (a
     // sweep's least note; W otherwise only pays fees) on both RPCs from the first load's read
