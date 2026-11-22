@@ -1738,7 +1738,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               signal,
               ...(idle ? { idle: helper } : {}),
               // a rest leg's end onto its buy's request op, in the store while it is open (card signpage-sent-end-recorded-evm)
-              ops: async (id, change) => void (await (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))).update("ops", id, change)),
+              ops: async (id, change) => void (await (await (page.held ? page.held() : Promise.reject(new Error("no wallet store is open")))).update("ops", id, change)),
             });
             if (signal.aborted) return;
             // an idle pass's reads are what is shown, each chain's whole; a pass after the tap read its W on both RPCs,

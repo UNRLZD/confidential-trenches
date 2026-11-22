@@ -1524,7 +1524,7 @@ test("card signpage-sent-end-recorded-evm (9): the rest leg's record names the r
   const box = opsBox();
   const { h, ch, rests } = restHost();
   const got = await runEvmPoolBuy(withOp(h, box), { ...ASK, amount: AMOUNT_IN });
-  assert.equal(got.stage, "filled");
+  assert.equal("stage" in got ? got.stage : got.error, "filled");
   assert.ok(ch.sent.length > 0);
   assert.deepEqual([rests[0]!.op, rests[0]!.leg], [REQ, 0], "written before the release leaves");
   assert.equal(rests.find((r) => r.hash !== undefined)?.adapter, A_V3.toLowerCase());
