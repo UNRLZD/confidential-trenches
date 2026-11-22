@@ -13,7 +13,7 @@
 // Retry, or part filled, with the button back to its ready label (`showsRetry`); a trade still Sending or Landing past 5 s is Slow (S8.11), which never ends it. The sell side
 // (src/screens/positions/) runs the same machine.
 import { POOL_ASSET_DECIMALS, POOL_CHAINS, POOL_USD_FEEDS, POOL_USD_MAX_AHEAD_S, poolUsdGoodUntilS } from "@blindfill/kit";
-import type { Chain, ErrorCode, PoolAsset, PoolChain, PoolUsdChain, PoolUsdPrice, SignpageParams, SignpageState, Stage } from "@blindfill/kit";
+import type { Chain, ErrorCode, Operation, PoolAsset, PoolChain, PoolUsdChain, PoolUsdPrice, SignpageParams, SignpageState, Stage, TxRef } from "@blindfill/kit";
 
 /** USD cents. */
 export type Cents = bigint;
@@ -168,6 +168,28 @@ export function progress(p: Phase, id: string, stage: Stage, now: number): Phase
 export function filledOut(p: Phase, id: string, now: number): Phase {
   if (!busy(p) || p.id !== id) return p;
   return { k: "filled", id, at: p.at, ms: Math.max(0, now - p.at), provisional: true };
+}
+
+/** The stages that end a trade's op (the kit's TradeStage ends). */
+const OP_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed", "refused", "owed_back"]);
+
+/** The end the signing page recorded for the trade of request `id` (card signpage-sent-end-recorded: its op in
+ *  state.ops under the request's id, kind buy or sell), with its transactions; null while it names none. */
+export function opEnd(ops: readonly Operation[] | null | undefined, id: string): { stage: Stage; txs: readonly TxRef[] } | null {
+  const o = ops?.find((x): x is Extract<Operation, { kind: "buy" | "sell" }> => x.id === id && (x.kind === "buy" || x.kind === "sell"));
+  return o && OP_ENDS.has(o.stage) ? { stage: o.stage, txs: o.txs } : null;
+}
+
+/**
+ * A trade the box shows as sent ends from its op (card signpage-sent-end-known): a run that threw after answering sent,
+ * or ended sent with its landing unknown, posts no end, but the page records the end its settle or follow reaches under
+ * the request's id; that end goes through progress() as a progress event's would, so an end shown stays, but for a
+ * refused one a later filled moves (as a late progress does). Never a timer: only what the op names.
+ */
+export function endFromOps(p: Phase, ops: readonly Operation[] | null | undefined, now: number): Phase {
+  if (p.k === "ready") return p;
+  const e = opEnd(ops, p.id);
+  return e === null ? p : progress(p, p.id, e.stage, now);
 }
 
 /** The kit's client codes for a request that ended without the page's answer (messages client.ts). */
