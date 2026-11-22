@@ -2,7 +2,8 @@
  "_about": {
   "good": "node scripts/live-checks/sol-vendor-tape-refresh-lands.mjs --base <local> --record, 18 Nov 2026 16:31:52-16:33:30Z: a local helper at 58b2424c3 (card sol-vendor-tape-waits-past-reach) on mainnet reads with the CoinGecko key, a fresh store; BONK from the vendor, 21 answers over 44 s, rows read at most 9,081 ms before, then 3 reads each after 17 s unread, rows read 0, 0, 0 ms before: PASS; the helper host given as http://helper.local",
   "bad": "the same run at the same time against a local helper at 576a3baef (main before card sol-vendor-tape-waits-past-reach) with the same key: BONK's hold passes (rows at most 9,316 ms), its 3 reads after 17 s unread served the held rows read 19,768, 15,991 and 15,351 ms before: FAIL; the helper host given as http://helper.local",
-  "gapUnsaid": "node scripts/live-checks/sol-vendor-tape-refresh-lands.mjs --record, 2026-11-21T20:09:51.879Z: the deployed helper (card sol-vendor-tape-gap-served-inside-reach, before it): BONK, WIF and JUP answered from our own chain reads; POPCAT from the vendor, 17 answers over 42 s, rows read at most 12,379 ms before, then 3 reads each after 17 s unread, rows read 1, 0 and 19,651 ms before, the last answered in 1 ms (Server-Timing total;dur=1, its refresh refused at once) with no filling: FAIL"
+  "gapUnsaid": "node scripts/live-checks/sol-vendor-tape-refresh-lands.mjs --record, 2026-11-21T20:09:51.879Z: the deployed helper (card sol-vendor-tape-gap-served-inside-reach, before it): BONK, WIF and JUP answered from our own chain reads; POPCAT from the vendor, 17 answers over 42 s, rows read at most 12,379 ms before, then 3 reads each after 17 s unread, rows read 1, 0 and 19,651 ms before, the last answered in 1 ms (Server-Timing total;dur=1, its refresh refused at once) with no filling: FAIL",
+  "allListed": "the deployed helper (helper update 22, main 63c911d5b) read once on 22 Nov 11:02Z by this check at fd4d3d39a; BONK, WIF, JUP, POPCAT and the trending coins each answered from our own chain reads (held by the lists), nothing to judge."
  },
  "good": {
   "base": "http://helper.local",
@@ -697,6 +698,139 @@
       "src": "coingecko",
       "n": 50,
       "as_of_ms": 1795291772138
+     }
+    ]
+   }
+  ]
+ },
+ "allListed": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-22T11:02:22.972Z",
+  "lists_status": 200,
+  "coins": [
+   {
+    "coin": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "reads": [
+     {
+      "at": 1795345336893,
+      "status": 200,
+      "timing": "sol-read-to;desc=\"slot 0 of head 472516842, heard 0 s ago, cold\", sol-open;desc=\"listed 0, account 87, watch 109, answer by trade after 1 round 633\", total;dur=633",
+      "src": "chain",
+      "n": 5,
+      "as_of_ms": 1795345337638,
+      "filling": true
+     }
+    ]
+   },
+   {
+    "coin": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+    "reads": [
+     {
+      "at": 1795345337722,
+      "status": 200,
+      "timing": "sol-read-to;desc=\"slot 0 of head 472516855, heard 0 s ago, cold\", sol-open;desc=\"listed 0, account 137, watch 161, answer by trade after 1 round 2839\", total;dur=2840",
+      "src": "chain",
+      "n": 2,
+      "as_of_ms": 1795345340669,
+      "filling": true
+     }
+    ]
+   },
+   {
+    "coin": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+    "reads": [
+     {
+      "at": 1795345340754,
+      "status": 200,
+      "timing": "sol-read-to;desc=\"slot 472516848 of head 472516858, heard 0 s ago\", total;dur=0",
+      "src": "chain",
+      "n": 50,
+      "as_of_ms": 1795345341205,
+      "whole_ms": 1795345275000
+     }
+    ]
+   },
+   {
+    "coin": "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr",
+    "reads": [
+     {
+      "at": 1795345341294,
+      "status": 200,
+      "timing": "sol-read-to;desc=\"slot 0 of head 472516861, heard 0 s ago, cold\", sol-open;desc=\"listed 0, account 81, watch 102, answer by trade after 1 round 568\", total;dur=569",
+      "src": "chain",
+      "n": 2,
+      "as_of_ms": 1795345341959,
+      "filling": true
+     }
+    ]
+   },
+   {
+    "coin": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
+    "reads": [
+     {
+      "at": 1795345342041,
+      "status": 200,
+      "timing": "sol-read-to;desc=\"slot 472516841 of head 472516862, heard 0 s ago\", total;dur=0",
+      "src": "chain",
+      "n": 27,
+      "as_of_ms": 1795345341280,
+      "whole_ms": 1795345273000
+     }
+    ]
+   },
+   {
+    "coin": "98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g",
+    "reads": [
+     {
+      "at": 1795345342227,
+      "status": 200,
+      "timing": "sol-read-to;desc=\"slot 472516839 of head 472516863, heard 0 s ago\", total;dur=0",
+      "src": "chain",
+      "n": 50,
+      "as_of_ms": 1795345342262,
+      "whole_ms": 1795345254000
+     }
+    ]
+   },
+   {
+    "coin": "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+    "reads": [
+     {
+      "at": 1795345342413,
+      "status": 200,
+      "timing": "sol-read-to;desc=\"slot 472516836 of head 472516863, heard 0 s ago\", total;dur=0",
+      "src": "chain",
+      "n": 50,
+      "as_of_ms": 1795345342262,
+      "whole_ms": 1795345273000
+     }
+    ]
+   },
+   {
+    "coin": "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82",
+    "reads": [
+     {
+      "at": 1795345342599,
+      "status": 200,
+      "timing": "sol-read-to;desc=\"slot 472516779 of head 472516864, heard 0 s ago\", total;dur=0",
+      "src": "chain",
+      "n": 2,
+      "as_of_ms": 1795345342230,
+      "whole_ms": 1795345165000
+     }
+    ]
+   },
+   {
+    "coin": "3ZLekZYq2qkZiSpnSvabjit34tUkjSwD1JFuW9as9wBG",
+    "reads": [
+     {
+      "at": 1795345342780,
+      "status": 200,
+      "timing": "sol-read-to;desc=\"slot 472516836 of head 472516865, heard 0 s ago\", total;dur=0",
+      "src": "chain",
+      "n": 50,
+      "as_of_ms": 1795345342262,
+      "whole_ms": 1795345233000
      }
     ]
    }
