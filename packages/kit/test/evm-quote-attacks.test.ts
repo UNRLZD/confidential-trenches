@@ -11720,6 +11720,58 @@ test("TAIL5 a Robinhood quote whose index ends past the tail's budget scans by c
   }
 });
 
+// Card evm-pool-index-currencies: a warm quote (the chain's tail read, the index served within what EVM_INDEX_KEEP_MS
+// keeps of the head: "3 s keeps N within about 7 s of the head", buy-tap.ts, so 4 Base blocks of 2 s and 70 Robinhood
+// blocks of 0.1 s) sends no getLogs that names a currency, before its answer or after it, on either chain: its pools
+// are the index's and the tail's. The scans by currency stay for the cold tail and the stale index, where they are the
+// measured faster path (TAILF1, TAIL5); this guards that a warm quote never takes them. The planted case, the tail
+// forced cold (a scan provider whose tail no quote read), does name currencies, and the guard refuses it.
+/** The index a day behind the head (the release's snapshot): 43,200 Base blocks of 2 s, 864,000 Robinhood ones of 0.1 s. */
+const DAY_BEHIND = { base: 5_000_000 - 43_200, robinhood: RC_HEAD - 864_000 };
+const namedCurrencies = (fs: { topics: unknown[] }[]): number => fs.filter((f) => f.topics.slice(1).some((t) => t !== null && t !== undefined)).length;
+const warmGuard = (chainName: string, fs: { topics: unknown[] }[]): void => assert.equal(namedCurrencies(fs), 0, `${chainName}: a warm quote sent ${namedCurrencies(fs)} getLogs naming a currency of ${fs.length}`);
+test("GUARD a warm quote on Base and on Robinhood, its chain's tail read and its index within EVM_INDEX_KEEP_MS of the head, sends no getLogs naming a currency, before or after its answer; planted: the tail forced cold names them and the guard refuses it", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const cases = [
+    { name: "base" as const, head: 5_000_000, behind: 4, index: { chainId: 8453, poolManager: PM, from: 4_000_001 } },
+    { name: "robinhood" as const, head: RC_HEAD, behind: 70, index: { chainId: 4663, poolManager: RH_PM, from: RC_HEAD - 10_000_000 } },
+  ];
+  // one quote of coin `t`, whose real pool the index holds, on `scan`, every getLogs it sends kept (the reads after its
+  // answer included)
+  const quoteOf = async (c: (typeof cases)[number], t: string, scan: ReturnType<typeof moving>, fs: { topics: unknown[] }[]) => {
+    const pools = [seeded(t), real(t)];
+    const inner = scanner(c.head, []);
+    const v = await quoteOnStill(pools, t, seededRoute(t), scan.to(async (calls, signal) => (fs.push(...getLogsOf(calls)), inner(calls, signal))), undefined, c.name, c.head);
+    assert.deepEqual(v, below, `${c.name}: ${big(v)}`);
+    await pause(50);
+    await evmTailFills(scan.rpc);
+  };
+  try {
+    for (const c of cases) {
+      evmPoolIndexReset();
+      const [tw, tc] = [freshToken(), freshToken()];
+      const serve = (n: number) => assert.equal(evmPoolIndexUse(c.name, { index: c.index, coversThrough: n, pools: [{ key: real(tw).key }, { key: real(tc).key }] }), true);
+      // warm: another coin's quote with the index a day behind (the release's snapshot), then the chain's tail read after
+      // its answer (onTail); then the index synced to within EVM_INDEX_KEEP_MS of the head
+      serve(DAY_BEHIND[c.name]);
+      const warm = await onTail([], c.head, c.name);
+      serve(c.head - c.behind);
+      const fs: { topics: unknown[] }[] = [];
+      await quoteOf(c, tw, warm, fs);
+      warmGuard(c.name, fs);
+      // planted: the same quote on a scan provider whose tail no quote read: it scans by currency, and the guard fails
+      const cold = moving();
+      evmScanFillable(cold.rpc);
+      const planted: { topics: unknown[] }[] = [];
+      await quoteOf(c, tc, cold, planted);
+      assert.ok(namedCurrencies(planted) > 0, `${c.name}: the cold tail named no currency (${planted.length} getLogs)`);
+      assert.throws(() => warmGuard(c.name, planted), /a warm quote sent \d+ getLogs naming a currency/);
+    }
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
 // main's kept-scan tests (card evm-scan-chain-tail restores main's scan by currency beside the tail)
 
 test("J4 a kept scan started early that ends before the token's scan waits for the quote to pick the block: the heads are asked after the token's logs", async () => {

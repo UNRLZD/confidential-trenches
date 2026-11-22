@@ -75,7 +75,7 @@
 // opposite signs; counts, ranges and the books are bounded.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { BUCKETS_MAX, change4h, createBook, fixed, joinBars, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
+import { BUCKETS_MAX, change4h, createBook, fixed, joinBars, PRICE_SCALE, TFS, type Book, type BookState, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { pass } from "../../limits/turn.ts";
@@ -560,14 +560,42 @@ const QUOTE_TOKENS_MAX = 16;
  *  state read there (routeStatesFromLogs); each further window ten times the last, to the chain's read back depth.
  *  [design: a deep route pool logs every few blocks; a quiet one is found in a few windows, shared by every block] */
 const QUOTE_SEED_NEAR = 100;
-/** How long a quote whose state post for old blocks was not agreed prices its next read back blocks from its route's logs
- *  without posting again (quoteBlocks). [design: a provider's kept state depth does not change in minutes; 10 min] */
-const QUOTE_STATE_REFUSED_MS = 600_000;
+/** The longest, in all, a read back's state posts wait for a throttled keeper of old state before their blocks are priced
+ *  from the route's logs (quoteBlocks). [design: pocket's holds read 1 to 4 s, 22 Nov 10:2xZ; a walk back of the route's
+ *  logs cost 0xaa07a0e9's rounds 4 s on a busy route pool and 48 s on a quiet one] */
+const QUOTE_HOLD_WAIT_S = 5;
+/** How long a provider's refusal of old state keeps it off old-state reads (goneBlock): after it, it is asked again, so a
+ *  wrong mark or a provider that came to keep the state heals though no post was sent it meanwhile. [design: as a held
+ *  pick, GT_POOL_FRESH_MS's 10 min; one re-ask a provider a period costs one refused post] */
+const QUOTE_STATE_GONE_MS = 600_000;
+/** Whether a provider's mark of old state gone, made at `at`, still holds at `now` (createSwaps' goneBlock). */
+export function stateMarkHolds(at: number, now: number): boolean {
+  return now - at < QUOTE_STATE_GONE_MS;
+}
+/** The posts a read back's state may take in a round: the first, then again while its refusals taught a provider gone or
+ *  a keeper's throttle is waited out (quoteBlocks). [design: 22 Nov 10:1xZ a round's one retry after pocket's 1 s hold
+ *  was throttled again and its blocks walked the route's logs; a quiet route pool's walk held 0xaa07a0e9 at 34 rows 48 s] */
+const QUOTE_POST_TRIES = 4;
 /** A pool trade's ids on an EVM chain (../solana/token.ts toTape): a 32-byte hash and an address, lower case. */
 const EVM_IDS: TapeIds = { tx: (v) => (typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v) ? v.toLowerCase() : null), address: evmAddress };
 /** The bytes of GeckoTerminal answers one chain's swap reads hand the next process (data/warm.ts) [design: 2 MB, a
  *  hundred charts' last bars at about 20 KB each; the warm file's limit counts it, WARM_MAX]. */
 export const EVM_HANDOVER_MAX = 2 * 1024 * 1024;
+/** The bytes of books (each tape's pool, settled block, swaps and bars, its done read back, its rows' traders) one chain
+ *  hands the next process (data/warm.ts; card helper-tape-handover), the most recently asked first; a book past what is
+ *  left is skipped (it opens cold, as every book did before) and a smaller one after it still goes. [design: a book of
+ *  100 swaps and 175 bars is 49 KB and a bar about 170 bytes (swaps-books-handover.test fixture, ICNT on Base), so a
+ *  quiet coin's book is tens of KB and a busy one's, every timeframe at BUCKETS_MAX (about 15,600 bars), at most about
+ *  2.7 MB; 8 MB a chain holds OPEN_MAX quiet books, the ones a cold open leaves empty, beside two busy ones] */
+export const BOOKS_HANDOVER_MAX = 8 * 1024 * 1024;
+/** How old a handed over book's last read may be for the next process to take it (restore): its next tick reads the
+ *  blocks since from its settled block, so a book older than a cold open's window is opened afresh instead. [design:
+ *  a deploy's overlap is a minute or two; 10 min is Base's VENUES.cold twice] */
+export const BOOK_HANDOVER_AGE_MS = 600_000;
+/** How old a handed over book at rest (rest) may be: a reopen reads the blocks since as on the helper that rested it
+ *  (gapHeld), and opens the coin cold past that, so its age is bounded only as hostile input. [design: a day, the
+ *  bars' own reach at 1m (BUCKETS_MAX two days); an older rest is a coin nobody asked for since] */
+export const REST_HANDOVER_AGE_MS = 86_400_000;
 /** The most entries of each kind a handed-over state may hold (the bars' maps keep 500, the pools POOLS_MAX). */
 export const HANDOVER_ENTRIES_MAX = 500;
 const ANSWER_MAX = 4 * 1024 * 1024;
@@ -1305,7 +1333,17 @@ export const SCALE_BOUND = 100;
 // ---------------------------------------------------------------------------------------------------------------
 
 type Call = { method: string; params: unknown[] };
-type Reply = { ok: true; result: unknown } | { ok: false; wait: number; reverted?: true };
+type Reply = { ok: true; result: unknown } | { ok: false; wait: number; reverted?: true; gone?: true };
+/** A provider's refusal of a read at a block whose state it no longer keeps, as each Robinhood provider words it (read
+ *  22 Nov 10:0xZ at 400,000 blocks back): daybreak's and the chain's own "historical state <root> is not available",
+ *  blockmachine's "missing trie node", blockvectra's -32011 "block reference is outside the public history window"
+ *  (data.reason "state_window"). Only these words, as read: a provider behind the head answers "header not found" for a
+ *  recent block, which is no word on the state it keeps. */
+const isStateGone = (e: unknown): boolean => {
+  const o = obj(e);
+  const m = typeof o.message === "string" ? o.message : "";
+  return /historical state \S+ is not available|missing trie node|outside the public history window/i.test(m) || obj(o.data).reason === "state_window";
+};
 /** An `eth_call` the provider ran and the contract reverted: geth's code 3 (a revert with data) or a message naming the
  *  revert (-32000 "execution reverted", as daybreak, blockmachine, drpc and the chain's own RPC answer one). It is the
  *  call's answer at that block, as a result is, never a failed read. */
@@ -1588,7 +1626,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           // the helper's one rule for a provider's error (limits.ts evmThrottleS): a throttle is held for the wait it names
           const wait = evmThrottleS(o.error);
           if (wait > 0) holds.hold(url, wait);
-          got[o.id as number] = wait === 0 && isRevert(o.error) ? { ok: false, wait, reverted: true } : { ok: false, wait };
+          got[o.id as number] = wait === 0 && isRevert(o.error) ? { ok: false, wait, reverted: true } : wait === 0 && isStateGone(o.error) ? { ok: false, wait, gone: true } : { ok: false, wait };
         } else if (Object.hasOwn(o, "result")) got[o.id as number] = { ok: true, result: o.result };
       }
       return got;
@@ -1957,6 +1995,24 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return parts.some((x) => x == null) ? null : (parts as Log[][]).flat().sort((a, b) => a.block - b.block || a.index - b.index);
   }
 
+  /** Each provider that refused a state read for want of the state, with the newest block it refused: it keeps no state
+   *  that old (Robinhood 22 Nov 08:5xZ: daybreak refuses state 1,000 blocks back, the chain's own RPC and blockmachine
+   *  20,000, blockvectra any; pocket and drpc keep 400,000), learned from the answers alone (callsAgreed). */
+  const stateGone = new Map<string, { b: number; at: number }>();
+  /** The newest block `u` refused for want of the state, -1 when none or the mark is QUOTE_STATE_GONE_MS old (dropped:
+   *  a wrong mark, or a provider that came to keep the state, is asked again). */
+  function goneBlock(u: string): number {
+    const g = stateGone.get(u);
+    if (g === undefined) return -1;
+    if (!stateMarkHolds(g.at, now())) return (stateGone.delete(u), -1);
+    return g.b;
+  }
+  /** The providers a state read at blocks from `oldest` up skips: those that refused a block at or above it, while two
+   *  others are left to agree; none otherwise. */
+  function stateSkip(oldest: number): ReadonlySet<string> | undefined {
+    const gone = new Set(rpcs.filter((u) => goneBlock(u) >= oldest));
+    return gone.size === 0 || rpcs.filter((u) => !gone.has(u)).length < 2 ? undefined : gone;
+  }
   /** The same `eth_call`s at block `n`: each result two providers gave alike, else undefined. A call at a mined block
    *  never answers otherwise, so each agreed one is kept by (to, data, block) (`called`, at most CALLED_MAX, oldest out
    *  first) and every tape and tick asks it once (card helper-robinhood-capacity fold 5). */
@@ -1970,23 +2026,44 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const out: (string | undefined)[] = calls.map((c) => called.get(key(c)));
     const ask = [...new Set(calls.filter((_, i) => out[i] === undefined).map(key))].map((k) => calls.find((c) => key(c) === k)!);
     if (ask.length === 0) return out;
+    const blockOf = (i: number) => ask[i]!.n ?? n;
+    // each provider's answer to each call: it ran it (a result or a revert) or refused it for state it no longer keeps
+    // (isStateGone), so what each keeps is learned below
+    const ran = new Map<string, Set<number>>();
+    const refused = new Map<string, Set<number>>();
+    const oldest = Math.min(...ask.map((_, i) => blockOf(i)));
     const got = await agreed<string>(
       rpcs,
       ask.length,
       async (u, idx, patient) => {
-        const r = await batchTo(u, idx.map((i) => ({ method: "eth_call", params: [{ to: ask[i]!.to, data: ask[i]!.data }, `0x${(ask[i]!.n ?? n).toString(16)}`] })), patient);
+        const r = await batchTo(u, idx.map((i) => ({ method: "eth_call", params: [{ to: ask[i]!.to, data: ask[i]!.data }, `0x${blockOf(i).toString(16)}`] })), patient);
         // a revert is the call's answer, alike between providers, so a call that reverts is agreed by two as a result is,
         // never asked of every provider and again patiently (fold 9: a discovery's factory() of six transfer addresses,
         // routers among them, took 9.1 to 13.9 s of 12 cold tapes at once, 06:25Z)
-        return idx.map((_, k) => {
+        return idx.map((i, k) => {
           const x = r?.[k];
+          if (x !== undefined && (x.ok || x.reverted === true)) (ran.get(u) ?? ran.set(u, new Set()).get(u)!).add(i);
+          else if (x !== undefined && !x.ok && x.gone === true) (refused.get(u) ?? refused.set(u, new Set()).get(u)!).add(i);
           if (x?.ok) return typeof x.result === "string" ? x.result.toLowerCase() : null;
           return x?.reverted === true ? REVERTED : null;
         });
       },
       (a, b) => a === b,
       false,
+      false,
+      stateSkip(oldest),
     );
+    // what each provider keeps, learned from its answers: a call at a block it refused for want of the state marks it as
+    // keeping no state that old (stateGone: its newest such block); a call it ran at or under that block takes the mark
+    // off (card robinhood-old-state-from-keepers)
+    for (const [u, is] of refused) {
+      const b = Math.max(-1, ...[...is].map(blockOf));
+      if (b >= 0 && b > goneBlock(u)) stateGone.set(u, { b, at: now() });
+    }
+    for (const [u, is] of ran) {
+      const gone = goneBlock(u);
+      if (gone >= 0 && [...is].some((i) => blockOf(i) <= gone)) stateGone.delete(u);
+    }
     ask.forEach((c, i) => {
       const x = got[i];
       if (x == null) return;
@@ -2688,6 +2765,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  of the ETH price), kept while the newer blocks' reads are still to agree. */
   type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number; located?: true; marks?: readonly number[]; until?: number; born?: true; got?: Map<string, Log[]>; heldSince?: number };
   const books = new Map<string, Entry>();
+  /** A book as state() hands it over (card helper-tape-handover). */
+  type HandedBook = { rest?: true; pool: Pool; decimals: number; touched: number; readAt: number; headN: number; headAt?: number; from?: number; book: BookState; back?: { lo: number; tape: BookState | null; located?: true; born?: true } };
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
   let refTo: number | null = null;
@@ -4198,8 +4277,6 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  180 s in live run 44989861313 and at 160 s on 77bfa8030, b09ba8178 and 5c2e7d385 alike), where its 50 trades need 50
    *  states at most. False when the route is not known or the post was not agreed. */
   const quoteAt = new Map<string, Map<number, bigint>>();
-  /** The quotes whose state post for old blocks was last not agreed, with when (quoteBlocks). */
-  const stateRefused = new Map<string, number>();
   async function quoteBlocks(q: string, blocks: readonly number[]): Promise<boolean> {
     const s = quoteSeries.get(q);
     const held = quoteAt.get(q) ?? new Map<number, bigint>();
@@ -4212,15 +4289,35 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (end === null || hop === null) return false;
     const eth = route.end.quote.kind === "eth";
     const per = [...hop, ...end, ...(eth ? [refStateCall(chain)] : [])];
-    // a quote whose last state post for old blocks was not agreed: its next blocks priced from the logs at once, the post
-    // not sent again within QUOTE_STATE_REFUSED_MS (a refused post cost 0xaa07a0e9's round 2.4 s on five providers)
-    const refusedAt = stateRefused.get(q);
-    const skip = refusedAt !== undefined && now() - refusedAt < QUOTE_STATE_REFUSED_MS;
-    const missed = { any: skip };
-    const got = skip ? [] : await callsAgreed(want[0]! - 1, want.flatMap((n) => per.map((c) => ({ ...c, n: n - 1 }))), missed);
-    if (missed.any && !skip) {
-      if (!stateRefused.has(q) && stateRefused.size >= QUOTE_TOKENS_MAX) stateRefused.delete(stateRefused.keys().next().value!);
-      stateRefused.set(q, now());
+    // the post goes to the providers that keep state that old (stateSkip, learned from their answers); none is sent while
+    // fewer than two are left (the blocks then priced from the route's logs). A post whose refusals taught a provider
+    // gone is sent once more, to the keepers alone (card robinhood-old-state-from-keepers: on Robinhood pocket and drpc
+    // keep it, and a first post that asked daybreak and blockvectra first was not agreed)
+    const oldest = Math.min(...want) - 1;
+    const keepers = () => rpcs.filter((u) => goneBlock(u) < oldest).length;
+    const post = () => want.flatMap((n) => per.map((c) => ({ ...c, n: n - 1 })));
+    const missed = { any: keepers() < 2 };
+    let got: (string | undefined)[] = [];
+    if (!missed.any) {
+      const before = keepers();
+      got = await callsAgreed(oldest, post(), missed);
+      // a keeper that answered a throttle (pocket's 429 on a 5-call post, 22 Nov 10:0xZ) is waited for, at most
+      // QUOTE_HOLD_WAIT_S: its answer is the second of the pair, where the route's logs walked back cost the round some 4 s
+      // each try asks only the calls not agreed yet (callsAgreed keeps each agreed one), so a throttled keeper is asked
+      // fewer each time; QUOTE_HOLD_WAIT_S in all
+      let waitedS = 0;
+      for (let tries = 1, was = before; missed.any && keepers() >= 2 && tries < QUOTE_POST_TRIES; tries++) {
+        const held = Math.min(...rpcs.filter((u) => goneBlock(u) < oldest).map((u) => holds.heldFor(u)).filter((x) => x > 0));
+        const taught = keepers() < was;
+        if (!taught && !(Number.isFinite(held) && waitedS + held <= QUOTE_HOLD_WAIT_S)) break;
+        if (Number.isFinite(held) && waitedS + held <= QUOTE_HOLD_WAIT_S) {
+          await (deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms))))(held * 1_000);
+          waitedS += held;
+        }
+        was = keepers();
+        missed.any = false;
+        got = await callsAgreed(oldest, post(), missed);
+      }
     }
     // a block whose state was not agreed (on Robinhood only pocket and drpc keep old state; daybreak, the chain's own RPC
     // and blockvectra refuse it, 22 Nov 09:0xZ): its price from the route's own newest logs before it
@@ -4987,6 +5084,46 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  latter), a hook a v4 pool's address, siblings v4 ids, decimals in createBook's range. */
   const POOL_FIELDS = new Set(["venue", "id", "token", "tokenIs0", "quote", "hook", "siblings", "log"]);
   const decimalsOk = (d: unknown): d is number => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 77;
+  /** A handed over transaction's traders (index.ts Traders): a sender, or at most a block's worth of user operations. */
+  const tradersOk = (v: unknown): v is Traders => {
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o);
+    if (keys.length === 1 && keys[0] === "from") return evmAddress(o.from) === o.from;
+    return keys.length === 1 && keys[0] === "ops" && Array.isArray(o.ops) && o.ops.length <= 1_000 && o.ops.every((x: unknown) => {
+      const y = x as Record<string, unknown> | null;
+      return typeof y === "object" && y !== null && Number.isSafeInteger(y.lo) && Number.isSafeInteger(y.hi) && (y.lo as number) <= (y.hi as number) && evmAddress(y.sender) === y.sender;
+    });
+  };
+  /** A handed over book (state's `books` entry) as a new Entry, every part checked as a read of ours would be: the token
+   *  its pool's, read within BOOK_HANDOVER_AGE_MS and not ahead of now, its settled block at or under the head it read,
+   *  its book and its done read back's whole (Book.load). Null when any part is off. */
+  const handedBook = (x: unknown, t: number): [string, Entry, boolean] | null => {
+    if (!Array.isArray(x) || x.length !== 2 || typeof x[0] !== "string" || evmAddress(x[0]) !== x[0] || typeof x[1] !== "object" || x[1] === null) return null;
+    const tk = x[0];
+    const v = x[1] as Record<string, unknown>;
+    if (v.rest !== undefined && v.rest !== true) return null;
+    if (!isPool(tk, v.pool) || !decimalsOk(v.decimals) || !timed(v.readAt, t, v.rest === true ? REST_HANDOVER_AGE_MS : BOOK_HANDOVER_AGE_MS) || !timed(v.touched, t, Number.MAX_SAFE_INTEGER) || !Number.isSafeInteger(v.headN) || (v.headN as number) < 0) return null;
+    if (v.headAt !== undefined && !timed(v.headAt, t, Number.MAX_SAFE_INTEGER)) return null;
+    if (v.from !== undefined && (!Number.isSafeInteger(v.from) || (v.from as number) < 0 || (v.from as number) > (v.headN as number))) return null;
+    const pool = v.pool as Pool;
+    const book = createBook({ decimals: v.decimals, quote: pool.quote });
+    if (!book.load(v.book) || book.settledTo > (v.headN as number)) return null;
+    let back: Back | undefined;
+    if (v.back !== undefined) {
+      const b = v.back as Record<string, unknown> | null;
+      if (typeof b !== "object" || b === null || !Number.isSafeInteger(b.lo) || (b.lo as number) < 0) return null;
+      if ((b.located !== undefined && b.located !== true) || (b.born !== undefined && b.born !== true)) return null;
+      let tape: Book | null = null;
+      if (b.tape !== null) {
+        tape = createBook({ decimals: v.decimals, quote: pool.quote });
+        if (!tape.load(b.tape)) return null;
+      }
+      back = { lo: b.lo as number, logs: [], tape, done: true, ...(b.located === true ? { located: true as const } : {}), ...(b.born === true ? { born: true as const } : {}) };
+    }
+    const e: Entry = { pool, decimals: v.decimals, book, touched: v.touched as number, readAt: v.readAt, headN: v.headN as number, ...(v.headAt === undefined ? {} : { headAt: v.headAt as number }), ...(v.from === undefined ? {} : { from: v.from as number }), ...(back === undefined ? {} : { back }) };
+    return [tk, e, v.rest === true];
+  };
   const isPool = (token: string, v: unknown): v is Pool => {
     if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
     const p = v as Record<string, unknown>;
@@ -5048,7 +5185,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
      * list's word (`hint`) or a token with none is left out: the next helper decides those itself. `v4Hooks: "any"` says
      * each v4 pool holds its key's hook whatever its flags (hookOf, card helper-v4-hook-trade-is-what-its-trader-paid).
      */
-    state(): { v4Hooks: "any"; found: [string, { pool: Pool; decimals: number; at: number }][]; kept: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; history: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; pools: [string, { id: string | null; at: number }][] } {
+    state(): { v4Hooks: "any"; books: [string, HandedBook][]; traders: [string, Traders][]; found: [string, { pool: Pool; decimals: number; at: number }][]; kept: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; history: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; pools: [string, { id: string | null; at: number }][] } {
       const t = now();
       let room = EVM_HANDOVER_MAX;
       const fit = <T>(list: [string, T][]): [string, T][] => {
@@ -5063,8 +5200,38 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       };
       const found: [string, { pool: Pool; decimals: number; at: number }][] = [];
       for (const [tk, v] of pools) if (v.found !== null && v.hint === undefined && t - v.at < POOL_KEEP_MS) found.push([tk, { pool: v.found.pool, decimals: v.found.decimals, at: v.at }]);
+      // card helper-tape-handover: each read book, the most recently asked first, within BOOKS_HANDOVER_MAX bytes, and
+      // the traders of the rows it serves
+      let bookRoom = BOOKS_HANDOVER_MAX;
+      const handed: [string, HandedBook][] = [];
+      const txs = new Set<string>();
+      const tradersOfBooks: [string, Traders][] = [];
+      // the open books, then those at rest (rest: a book idle past IDLE_MS, reopened by reopen as on this helper, so a coin
+      // last asked minutes before the deploy opens as full as one asked in its last minute)
+      const restOf = [...resting].filter(([k]) => k.startsWith(`${chain}:`)).map(([k, e]): [string, Entry, boolean] => [k.slice(chain.length + 1), e, true]);
+      const open = [...books].map(([k, e]): [string, Entry, boolean] => [k, e, false]);
+      const byTouch = (a: [string, Entry, boolean], b: [string, Entry, boolean]) => b[1].touched - a[1].touched;
+      for (const [tk, e, atRest] of [...open.sort(byTouch).slice(0, OPEN_MAX), ...restOf.sort(byTouch).slice(0, REST_MAX)]) {
+        if (e.readAt === null || t - e.readAt > (atRest ? REST_HANDOVER_AGE_MS : BOOK_HANDOVER_AGE_MS)) continue;
+        const back = e.back?.done === true ? { lo: e.back.lo, tape: e.back.tape?.state() ?? null, ...(e.back.located === true ? { located: true as const } : {}), ...(e.back.born === true ? { born: true as const } : {}) } : undefined;
+        const h: HandedBook = { ...(atRest ? { rest: true as const } : {}), pool: e.pool, decimals: e.decimals, touched: Math.min(e.touched, t), readAt: e.readAt, headN: e.headN, ...(e.headAt === undefined ? {} : { headAt: e.headAt }), ...(e.from === undefined ? {} : { from: e.from }), book: e.book.state(), ...(back === undefined ? {} : { back }) };
+        const mine = tapeOf(e, TRADES_MAX).flatMap((r): [string, Traders][] => {
+          const v = txs.has(r.tx) ? undefined : traders.get(r.tx);
+          return v === undefined ? [] : [[r.tx, v]];
+        });
+        const n = JSON.stringify([tk, h]).length + JSON.stringify(mine).length;
+        if (n > bookRoom) continue;
+        bookRoom -= n;
+        handed.push([tk, h]);
+        for (const [x, v] of mine) if (!txs.has(x)) {
+          txs.add(x);
+          tradersOfBooks.push([x, v]);
+        }
+      }
       return {
         v4Hooks: "any",
+        books: handed,
+        traders: tradersOfBooks,
         found: fit(found.slice(-HANDOVER_ENTRIES_MAX)),
         pools: fit([...gtPools].filter(([, v]) => t - v.at <= KEPT_HANDOVER_MS).slice(-HANDOVER_ENTRIES_MAX)),
         kept: fit([...kept].filter(([, v]) => t - v.at <= KEPT_HANDOVER_MS).slice(-HANDOVER_ENTRIES_MAX)),
@@ -5085,6 +5252,22 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const list = (v: unknown): unknown[] | null => (v === undefined ? [] : Array.isArray(v) && v.length <= HANDOVER_ENTRIES_MAX ? v : null);
       const [f, p, k, h] = [list(o.found), list(o.pools), list(o.kept), list(o.history)];
       if (f === null || p === null || k === null || h === null) return false;
+      // card helper-tape-handover: the books, each loaded whole into a new book (Book.load checks it), and their rows'
+      // traders; any one off and nothing is restored
+      const B = o.books === undefined ? [] : Array.isArray(o.books) && o.books.length <= OPEN_MAX + REST_MAX ? (o.books as unknown[]) : null;
+      const T = o.traders === undefined ? [] : Array.isArray(o.traders) && o.traders.length <= TRADES_MAX * OPEN_MAX * 2 ? (o.traders as unknown[]) : null;
+      if (B === null || T === null) return false;
+      const restored: [string, Entry, boolean][] = [];
+      for (const x of B) {
+        const e = handedBook(x, t);
+        if (e === null) return false;
+        restored.push(e);
+      }
+      const tradersIn: [string, Traders][] = [];
+      for (const x of T) {
+        if (!Array.isArray(x) || x.length !== 2 || typeof x[0] !== "string" || !EVM_IDS.tx(x[0]) || x[0] !== x[0].toLowerCase() || !tradersOk(x[1])) return false;
+        tradersIn.push([x[0], x[1] as Traders]);
+      }
       const pairs = (l: unknown[]) => l.every((e) => Array.isArray(e) && e.length === 2 && typeof e[0] === "string" && typeof e[1] === "object" && e[1] !== null);
       if (!pairs(f) || !pairs(p) || !pairs(k) || !pairs(h)) return false;
       const F = f as [string, { pool?: unknown; decimals?: unknown; at?: unknown }][];
@@ -5111,6 +5294,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         if (gtPools.size >= POOLS_MAX) gtPools.delete(gtPools.keys().next().value!);
         gtPools.set(tk, { id: v.id as string | null, at: v.at as number });
       }
+      for (const [tk, e, atRest] of restored) {
+        if (books.has(tk) || resting.has(restKey(tk))) continue;
+        if (!atRest && books.size < OPEN_MAX) books.set(tk, e);
+        else if (atRest && resting.size < (deps.restMax ?? REST_MAX)) resting.set(restKey(tk), e);
+      }
+      for (const [x, v] of tradersIn) if (!traders.has(x)) {
+        if (traders.size >= TRADERS_MAX) traders.delete(traders.keys().next().value!);
+        traders.set(x, v);
+      }
+      if (restored.some(([, , atRest]) => !atRest)) ensureTimer();
       for (const [map, entries] of [[kept, K], [history, H]] as const)
         for (const [key, v] of entries) {
           const had = map.get(key);
