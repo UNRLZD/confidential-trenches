@@ -57,7 +57,7 @@
 // Display only: nothing here feeds a signature. Every provider value is hostile: bounded answers, decoders that check
 // every byte they read (decode.ts), PumpSwap pools taken only when the PumpSwap program owns them and their base mint
 // is the token, bounded books, subscriptions and caches.
-import { change4h, createBook, fixed, joinBars, TF_SECONDS, TFS, VALUE_SCALE, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
+import { change4h, createBook, fixed, joinBars, TF_SECONDS, TFS, VALUE_SCALE, type Book, type BookState, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
 import { address, b58decode } from "./lists.ts";
 import { HELD_WAIT_MS, SOL_BEHIND_MS, SOL_VENDOR_REACH_MS, TAPE_OPEN_BOUND_MS, type DataAnswer, type TapeRow } from "./token.ts";
 import { cutTrades, dbcPair, eventsInInner, fromLogs, poolMints, poolPair, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
@@ -232,6 +232,23 @@ const POOLS_MAX = 5_000;
 const ANSWER_MAX = 4 * 1024 * 1024;
 const TIMEOUT_MS = 8_000;
 const HELD_MAX = 20_000;
+/** The bytes of tapes (each live token's book, its unsettled trades and price refs, the signature its tape is held to,
+ *  its done read back and its rows' traders) handed to the next process in the warm file (../warm.ts; card
+ *  helper-tape-handover), the most recently asked first; a tape past what is left is skipped (it opens cold, as every
+ *  tape did before). [design: one bound with the EVM chains' books, evm/swaps.ts BOOKS_HANDOVER_MAX] */
+export const TAPES_HANDOVER_MAX = 8 * 1024 * 1024;
+/** How old a handed over tape's last fold may be for the next process to take it: its gap from the signature it is held
+ *  to is walked as a dropped stream's is (REFILL_MAX at most, past it a hole named). [design: one with evm/swaps.ts
+ *  BOOK_HANDOVER_AGE_MS] */
+export const TAPE_HANDOVER_AGE_MS = 600_000;
+const VENUES_READ: readonly RawTrade["venue"][] = ["pump", "pumpswap", "orca", "raydium-clmm", "raydium-cpmm", "raydium-launchlab", "meteora-dlmm", "meteora-dbc", "meteora-damm2"];
+/** A transaction signature as an RPC lists it: base58, 64 bytes (87 or 88 characters; shorter only in a test's). */
+const SIG_RE = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/;
+/** A held trade as the handover writes it: venue, side, amt, quote, quote mint, user ("" none), time, on the tape (1/0). */
+type HeldRow = [RawTrade["venue"], "b" | "s", string, string, string | null, string, number, 0 | 1];
+/** A tape as state() hands it over. `from`: the signature its tape is held to with no gap (a dropped stream's gap
+ *  start while one was walked), where the next process walks on from. */
+type HandedTape = { decimals: number; quoteMint: string; quote: { kind: "usd" | "eth"; decimals: number }; book: BookState; held: [string, number, number, HeldRow[]][]; refs: [number, string][]; from: string; covered: number; touched: number; readAt: number; whole?: number; holed?: true; oldest?: string | null; back?: { book: BookState | null; born: boolean } };
 const RECONNECT_MS = [500, 1_000, 2_000, 5_000];
 
 /** A transaction's logs as the stream sends them. */
@@ -1923,8 +1940,142 @@ export function createSolanaTrades(deps: {
     return e;
   }
 
+  /** A handed over tape (state's `tapes` entry) as a new Entry, every part checked as hostile input: its mint an
+   *  address, read within TAPE_HANDOVER_AGE_MS and not ahead of now, its quote the one its quote mint is priced in, its
+   *  book and done read back whole (Book.load), each held trade a venue's with legs above zero, after the settled slot.
+   *  Null when any part is off. */
+  function handedTape(x: unknown, t: number): [string, Entry, number] | null {
+    if (!Array.isArray(x) || x.length !== 2 || address(x[0]) !== x[0] || typeof x[1] !== "object" || x[1] === null) return null;
+    const mint = x[0] as string;
+    const v = x[1] as Record<string, unknown>;
+    const int = (n: unknown, min = 0): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= min;
+    const big = (n: unknown): bigint | null => (typeof n === "string" && /^[0-9]{1,100}$/.test(n) && BigInt(n) > 0n ? BigInt(n) : null);
+    const at = (n: unknown, max: number): n is number => typeof n === "number" && Number.isFinite(n) && n <= t && t - n <= max;
+    if (!int(v.decimals) || (v.decimals as number) > 77 || typeof v.quoteMint !== "string" || address(v.quoteMint) !== v.quoteMint || !at(v.readAt, TAPE_HANDOVER_AGE_MS) || !at(v.touched, Number.MAX_SAFE_INTEGER)) return null;
+    if (typeof v.from !== "string" || !SIG_RE.test(v.from) || !int(v.covered)) return null;
+    const q = v.quote as { kind?: unknown; decimals?: unknown } | null;
+    if (typeof q !== "object" || q === null || !int(q.decimals) || (q.decimals as number) > 77) return null;
+    const qm = v.quoteMint;
+    if (qm === WSOL ? q.kind !== "eth" || q.decimals !== 9 : qm === USDC ? q.kind !== "usd" || q.decimals !== 6 : q.kind !== "eth") return null;
+    const quote = { kind: q.kind as "usd" | "eth", decimals: q.decimals as number };
+    const book = createBook({ decimals: v.decimals as number, quote });
+    if (!book.load(v.book)) return null;
+    if (!Array.isArray(v.held) || v.held.length > HELD_MAX || !Array.isArray(v.refs) || v.refs.length > HELD_MAX) return null;
+    const held = new Map<string, Held>();
+    let seqMax = 0;
+    for (const h of v.held as unknown[]) {
+      if (!Array.isArray(h) || h.length !== 4 || typeof h[0] !== "string" || !SIG_RE.test(h[0]) || held.has(h[0]) || !int(h[1]) || (h[1] as number) <= book.settledTo || !int(h[2], 1) || !Array.isArray(h[3]) || h[3].length > 64) return null;
+      const trades: RawTrade[] = [];
+      for (const r of h[3] as unknown[]) {
+        if (!Array.isArray(r) || r.length !== 8 || !VENUES_READ.includes(r[0]) || (r[1] !== "b" && r[1] !== "s") || (r[4] !== null && address(r[4]) !== r[4]) || typeof r[5] !== "string" || (r[5] !== "" && address(r[5]) !== r[5]) || !int(r[6]) || (r[7] !== 0 && r[7] !== 1)) return null;
+        const [amt, qt] = [big(r[2]), big(r[3])];
+        if (amt === null || qt === null) return null;
+        trades.push({ venue: r[0], mint, pool: null, side: r[1], amt, quote: qt, quoteMint: r[4], user: r[5], ts: r[6], ...(r[7] === 0 ? { tape: false as const } : {}) });
+      }
+      held.set(h[0], { slot: h[1] as number, seq: h[2] as number, t: trades });
+      seqMax = Math.max(seqMax, h[2] as number);
+    }
+    const refs = new Map<number, bigint>();
+    for (const r of v.refs as unknown[]) {
+      const u = Array.isArray(r) && r.length === 2 && int(r[0]) && !refs.has(r[0]) ? big(r[1]) : null;
+      if (u === null) return null;
+      refs.set((r as [number, string])[0], u);
+    }
+    if (v.whole !== undefined && !(typeof v.whole === "number" && Number.isFinite(v.whole) && v.whole >= 0)) return null;
+    if ((v.holed !== undefined && v.holed !== true) || (v.oldest !== undefined && v.oldest !== null && (typeof v.oldest !== "string" || !SIG_RE.test(v.oldest)))) return null;
+    let back: Back | undefined;
+    if (v.back !== undefined) {
+      const b = v.back as { book?: unknown; born?: unknown } | null;
+      if (typeof b !== "object" || b === null || typeof b.born !== "boolean") return null;
+      let bb: Book | null = null;
+      if (b.book !== null) {
+        bb = createBook({ decimals: v.decimals as number, quote });
+        if (!bb.load(b.book)) return null;
+      }
+      back = { before: null, events: [], book: bb, done: true, born: b.born, txs: 0, n: 0, want: { tf: "1d", limit: 1 } };
+    }
+    // a restored tape is one whose stream dropped at the handover: behind (filling) until its gap from `from` is walked
+    const e: Entry = { mint, decimals: v.decimals as number, quoteMint: qm, book, held, refs, lastSig: v.from, covered: v.covered as number, state: "refilling", gapFrom: v.from, refilling: null, inflight: new Map(), touched: v.touched as number, readAt: v.readAt as number, seen: 0, traded: 0, ...(v.whole === undefined ? {} : { whole: v.whole as number }), ...(v.holed === true ? { holed: true as const } : {}), ...(v.oldest === undefined ? {} : { oldest: v.oldest as string | null }), ...(back === undefined ? {} : { back }) };
+    return [mint, e, seqMax];
+  }
+
   return {
     tick,
+    /** Each live tape for the next process (../warm.ts; card helper-tape-handover): its book whole, its unsettled trades
+     *  and refs, the signature its tape is held to, its done read back, and its rows' traders, the most recently asked
+     *  first, within TAPES_HANDOVER_MAX bytes. A tape still on its first walk (cold) or with no priced trade is not
+     *  handed over: it opens cold, as before. */
+    state(): { tapes: [string, HandedTape][]; traders: [string, (string | null)[]][] } {
+      const t = now();
+      let room = TAPES_HANDOVER_MAX;
+      const tapes: [string, HandedTape][] = [];
+      const tr: [string, (string | null)[]][] = [];
+      for (const e of [...entries.values()].sort((a, b) => b.touched - a.touched)) {
+        const from = e.gapFrom ?? e.lastSig;
+        if (e.state === "cold" || e.book === null || e.quoteMint === null || from === null || e.readAt === null || t - e.readAt > TAPE_HANDOVER_AGE_MS) continue;
+        const cfg = quoteCfg(e.quoteMint);
+        const quote = e.quoteMint === WSOL ? { kind: "eth" as const, decimals: 9 } : e.quoteMint === USDC ? { kind: "usd" as const, decimals: 6 } : cfg === null ? null : cfg.quote;
+        if (quote === null) continue;
+        const held: [string, number, number, HeldRow[]][] = [...e.held].map(([sig, h]) => [sig, h.slot, h.seq, h.t.map((r): HeldRow => [r.venue, r.side, r.amt.toString(), r.quote.toString(), r.quoteMint, r.user, r.ts, r.tape === false ? 0 : 1])]);
+        const back = e.back?.done === true ? { book: e.back.book?.state() ?? null, born: e.back.born } : undefined;
+        const h: HandedTape = { decimals: e.decimals, quoteMint: e.quoteMint, quote, book: e.book.state(), held, refs: [...e.refs].map(([k, u]) => [k, u.toString()]), from, covered: e.covered, touched: Math.min(e.touched, t), readAt: e.readAt, ...(e.whole === undefined ? {} : { whole: e.whole }), ...(e.holed === true ? { holed: true as const } : {}), ...(e.oldest === undefined ? {} : { oldest: e.oldest }), ...(back === undefined ? {} : { back }) };
+        const mine = e.book.tape(TRADES_MAX).concat(e.back?.book?.tape(TRADES_MAX) ?? []).flatMap((r): [string, (string | null)[]][] => {
+          const u = traders.get(`${e.mint} ${r.tx}`);
+          return u === undefined ? [] : [[`${e.mint} ${r.tx}`, u]];
+        });
+        const n = JSON.stringify([e.mint, h]).length + JSON.stringify(mine).length;
+        if (n > room) continue;
+        room -= n;
+        tapes.push([e.mint, h]);
+        for (const m of mine) if (!tr.some(([k]) => k === m[0])) tr.push(m);
+      }
+      return { tapes, traders: tr };
+    },
+    /** A previous process's tapes (state) into this one, hostile input checked whole: any tape or trader off and nothing
+     *  is restored (false). A token this one already holds keeps its own. Each restored tape is watched on the stream and
+     *  its gap walked from the signature it was held to, as after a dropped stream (refill); behind (filling) till then. */
+    restore(st: unknown): boolean {
+      if (typeof st !== "object" || st === null || Array.isArray(st)) return false;
+      const o = st as Record<string, unknown>;
+      if (!Array.isArray(o.tapes) || o.tapes.length > OPEN_MAX || !Array.isArray(o.traders) || o.traders.length > OPEN_MAX * TRADES_MAX * 2) return false;
+      const t = now();
+      const got: [string, Entry, number][] = [];
+      for (const x of o.tapes as unknown[]) {
+        const e = handedTape(x, t);
+        if (e === null) return false;
+        got.push(e);
+      }
+      const tr: [string, (string | null)[]][] = [];
+      for (const x of o.traders as unknown[]) {
+        if (!Array.isArray(x) || x.length !== 2 || typeof x[0] !== "string" || !Array.isArray(x[1]) || x[1].length > 8) return false;
+        const [m, sig] = x[0].split(" ");
+        if (address(m) !== m || sig === undefined || !SIG_RE.test(sig) || x[0] !== `${m} ${sig}` || !x[1].every((u: unknown) => u === null || address(u) === u)) return false;
+        tr.push([x[0], x[1] as (string | null)[]]);
+      }
+      for (const [k, u] of tr) if (!traders.has(k)) {
+        if (traders.size >= HELD_MAX) traders.delete(traders.keys().next().value!);
+        traders.set(k, u);
+      }
+      for (const [mint, e, s] of got) {
+        if (entries.has(mint) || opening.has(mint) || entries.size >= OPEN_MAX) continue;
+        seq = Math.max(seq, s);
+        entries.set(mint, e);
+        // watched first, so no trade falls between the stream and the gap's walk (as a first read's walk waits on it)
+        void source.watch(mint).then(
+          () => refill(e),
+          () => {
+            if (entries.get(mint) !== e) return;
+            entries.delete(mint);
+            source.unwatch(mint);
+          },
+        );
+      }
+      if (got.length > 0 && timer === null && deps.tickMs !== 0) {
+        timer = setInterval(tick, deps.tickMs ?? 1_000);
+        timer.unref?.();
+      }
+      return true;
+    },
     stop(): void {
       stopped = true;
       if (timer !== null) clearInterval(timer);

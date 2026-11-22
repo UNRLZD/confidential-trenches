@@ -1491,7 +1491,9 @@ if (import.meta.main) {
       }
     } else if (senders.peer) gecko.seed(Array.from({ length: GT_LIMIT_PER_MIN }, () => Date.now()));
     let solanaState = (): unknown => undefined;
-    saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), geckoLists: gecko.calls("lists"), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])), solana: solanaState(), evmMarket: evmMarketOf(SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] })) }));
+    // card helper-tape-handover: the Solana tapes, set once they are made (below)
+    let solanaTradesState = (): unknown => undefined;
+    saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), geckoLists: gecko.calls("lists"), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])), solana: solanaState(), solanaTrades: solanaTradesState(), evmMarket: evmMarketOf(SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] })) }));
     // card helper-solana-failover: every Solana slot's state, for /v1/health
     const slots = new Map<SlotName, Slot>([["rpc", rpc.slot]]);
     const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko, slots, keyed);
@@ -1538,6 +1540,12 @@ if (import.meta.main) {
     const day = holdersDay(Date.now, dayFiles(storeDir, randomUUID()));
     const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, named: evmNamed[c], keyed, kept: swaps[c]?.kept, day, goplus })]));
     if (warm !== null) restoreEvmMarket(warm, SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] }));
+    // card helper-tape-handover: the Solana tapes the previous helper held, at the start and again at the handover (the
+    // file it wrote at its stop; a tape this one already holds keeps its own), each walked on from where it was held to
+    const solTapes = swaps.solana!;
+    solanaTradesState = () => solTapes.state();
+    if (warm !== null) solTapes.restore(warm.solanaTrades);
+    if (senders.peer) void senders.held.then(() => solTapes.restore(readWarm(storeDir, Date.now())?.solanaTrades));
     const held = heldFrom(token, evmLists, dex);
     // card helper-near-lists-and-token: NEAR's lists from Rhea classic's views, read now and on their cadence; card
     // every-cell-shows-a-value: the unrealized.trade engine's reads first, Rhea's whenever the engine has no good answer

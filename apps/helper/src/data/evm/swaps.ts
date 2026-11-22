@@ -75,7 +75,7 @@
 // opposite signs; counts, ranges and the books are bounded.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { BUCKETS_MAX, change4h, createBook, fixed, joinBars, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
+import { BUCKETS_MAX, change4h, createBook, fixed, joinBars, PRICE_SCALE, TFS, type Book, type BookState, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { pass } from "../../limits/turn.ts";
@@ -581,6 +581,21 @@ const EVM_IDS: TapeIds = { tx: (v) => (typeof v === "string" && /^0x[0-9a-fA-F]{
 /** The bytes of GeckoTerminal answers one chain's swap reads hand the next process (data/warm.ts) [design: 2 MB, a
  *  hundred charts' last bars at about 20 KB each; the warm file's limit counts it, WARM_MAX]. */
 export const EVM_HANDOVER_MAX = 2 * 1024 * 1024;
+/** The bytes of books (each tape's pool, settled block, swaps and bars, its done read back, its rows' traders) one chain
+ *  hands the next process (data/warm.ts; card helper-tape-handover), the most recently asked first; a book past what is
+ *  left is skipped (it opens cold, as every book did before) and a smaller one after it still goes. [design: a book of
+ *  100 swaps and 175 bars is 49 KB and a bar about 170 bytes (swaps-books-handover.test fixture, ICNT on Base), so a
+ *  quiet coin's book is tens of KB and a busy one's, every timeframe at BUCKETS_MAX (about 15,600 bars), at most about
+ *  2.7 MB; 8 MB a chain holds OPEN_MAX quiet books, the ones a cold open leaves empty, beside two busy ones] */
+export const BOOKS_HANDOVER_MAX = 8 * 1024 * 1024;
+/** How old a handed over book's last read may be for the next process to take it (restore): its next tick reads the
+ *  blocks since from its settled block, so a book older than a cold open's window is opened afresh instead. [design:
+ *  a deploy's overlap is a minute or two; 10 min is Base's VENUES.cold twice] */
+export const BOOK_HANDOVER_AGE_MS = 600_000;
+/** How old a handed over book at rest (rest) may be: a reopen reads the blocks since as on the helper that rested it
+ *  (gapHeld), and opens the coin cold past that, so its age is bounded only as hostile input. [design: a day, the
+ *  bars' own reach at 1m (BUCKETS_MAX two days); an older rest is a coin nobody asked for since] */
+export const REST_HANDOVER_AGE_MS = 86_400_000;
 /** The most entries of each kind a handed-over state may hold (the bars' maps keep 500, the pools POOLS_MAX). */
 export const HANDOVER_ENTRIES_MAX = 500;
 const ANSWER_MAX = 4 * 1024 * 1024;
@@ -2750,6 +2765,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  of the ETH price), kept while the newer blocks' reads are still to agree. */
   type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number; located?: true; marks?: readonly number[]; until?: number; born?: true; got?: Map<string, Log[]>; heldSince?: number };
   const books = new Map<string, Entry>();
+  /** A book as state() hands it over (card helper-tape-handover). */
+  type HandedBook = { rest?: true; pool: Pool; decimals: number; touched: number; readAt: number; headN: number; headAt?: number; from?: number; book: BookState; back?: { lo: number; tape: BookState | null; located?: true; born?: true } };
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
   let refTo: number | null = null;
@@ -5067,6 +5084,46 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  latter), a hook a v4 pool's address, siblings v4 ids, decimals in createBook's range. */
   const POOL_FIELDS = new Set(["venue", "id", "token", "tokenIs0", "quote", "hook", "siblings", "log"]);
   const decimalsOk = (d: unknown): d is number => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 77;
+  /** A handed over transaction's traders (index.ts Traders): a sender, or at most a block's worth of user operations. */
+  const tradersOk = (v: unknown): v is Traders => {
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o);
+    if (keys.length === 1 && keys[0] === "from") return evmAddress(o.from) === o.from;
+    return keys.length === 1 && keys[0] === "ops" && Array.isArray(o.ops) && o.ops.length <= 1_000 && o.ops.every((x: unknown) => {
+      const y = x as Record<string, unknown> | null;
+      return typeof y === "object" && y !== null && Number.isSafeInteger(y.lo) && Number.isSafeInteger(y.hi) && (y.lo as number) <= (y.hi as number) && evmAddress(y.sender) === y.sender;
+    });
+  };
+  /** A handed over book (state's `books` entry) as a new Entry, every part checked as a read of ours would be: the token
+   *  its pool's, read within BOOK_HANDOVER_AGE_MS and not ahead of now, its settled block at or under the head it read,
+   *  its book and its done read back's whole (Book.load). Null when any part is off. */
+  const handedBook = (x: unknown, t: number): [string, Entry, boolean] | null => {
+    if (!Array.isArray(x) || x.length !== 2 || typeof x[0] !== "string" || evmAddress(x[0]) !== x[0] || typeof x[1] !== "object" || x[1] === null) return null;
+    const tk = x[0];
+    const v = x[1] as Record<string, unknown>;
+    if (v.rest !== undefined && v.rest !== true) return null;
+    if (!isPool(tk, v.pool) || !decimalsOk(v.decimals) || !timed(v.readAt, t, v.rest === true ? REST_HANDOVER_AGE_MS : BOOK_HANDOVER_AGE_MS) || !timed(v.touched, t, Number.MAX_SAFE_INTEGER) || !Number.isSafeInteger(v.headN) || (v.headN as number) < 0) return null;
+    if (v.headAt !== undefined && !timed(v.headAt, t, Number.MAX_SAFE_INTEGER)) return null;
+    if (v.from !== undefined && (!Number.isSafeInteger(v.from) || (v.from as number) < 0 || (v.from as number) > (v.headN as number))) return null;
+    const pool = v.pool as Pool;
+    const book = createBook({ decimals: v.decimals, quote: pool.quote });
+    if (!book.load(v.book) || book.settledTo > (v.headN as number)) return null;
+    let back: Back | undefined;
+    if (v.back !== undefined) {
+      const b = v.back as Record<string, unknown> | null;
+      if (typeof b !== "object" || b === null || !Number.isSafeInteger(b.lo) || (b.lo as number) < 0) return null;
+      if ((b.located !== undefined && b.located !== true) || (b.born !== undefined && b.born !== true)) return null;
+      let tape: Book | null = null;
+      if (b.tape !== null) {
+        tape = createBook({ decimals: v.decimals, quote: pool.quote });
+        if (!tape.load(b.tape)) return null;
+      }
+      back = { lo: b.lo as number, logs: [], tape, done: true, ...(b.located === true ? { located: true as const } : {}), ...(b.born === true ? { born: true as const } : {}) };
+    }
+    const e: Entry = { pool, decimals: v.decimals, book, touched: v.touched as number, readAt: v.readAt, headN: v.headN as number, ...(v.headAt === undefined ? {} : { headAt: v.headAt as number }), ...(v.from === undefined ? {} : { from: v.from as number }), ...(back === undefined ? {} : { back }) };
+    return [tk, e, v.rest === true];
+  };
   const isPool = (token: string, v: unknown): v is Pool => {
     if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
     const p = v as Record<string, unknown>;
@@ -5128,7 +5185,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
      * list's word (`hint`) or a token with none is left out: the next helper decides those itself. `v4Hooks: "any"` says
      * each v4 pool holds its key's hook whatever its flags (hookOf, card helper-v4-hook-trade-is-what-its-trader-paid).
      */
-    state(): { v4Hooks: "any"; found: [string, { pool: Pool; decimals: number; at: number }][]; kept: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; history: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; pools: [string, { id: string | null; at: number }][] } {
+    state(): { v4Hooks: "any"; books: [string, HandedBook][]; traders: [string, Traders][]; found: [string, { pool: Pool; decimals: number; at: number }][]; kept: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; history: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; pools: [string, { id: string | null; at: number }][] } {
       const t = now();
       let room = EVM_HANDOVER_MAX;
       const fit = <T>(list: [string, T][]): [string, T][] => {
@@ -5143,8 +5200,38 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       };
       const found: [string, { pool: Pool; decimals: number; at: number }][] = [];
       for (const [tk, v] of pools) if (v.found !== null && v.hint === undefined && t - v.at < POOL_KEEP_MS) found.push([tk, { pool: v.found.pool, decimals: v.found.decimals, at: v.at }]);
+      // card helper-tape-handover: each read book, the most recently asked first, within BOOKS_HANDOVER_MAX bytes, and
+      // the traders of the rows it serves
+      let bookRoom = BOOKS_HANDOVER_MAX;
+      const handed: [string, HandedBook][] = [];
+      const txs = new Set<string>();
+      const tradersOfBooks: [string, Traders][] = [];
+      // the open books, then those at rest (rest: a book idle past IDLE_MS, reopened by reopen as on this helper, so a coin
+      // last asked minutes before the deploy opens as full as one asked in its last minute)
+      const restOf = [...resting].filter(([k]) => k.startsWith(`${chain}:`)).map(([k, e]): [string, Entry, boolean] => [k.slice(chain.length + 1), e, true]);
+      const open = [...books].map(([k, e]): [string, Entry, boolean] => [k, e, false]);
+      const byTouch = (a: [string, Entry, boolean], b: [string, Entry, boolean]) => b[1].touched - a[1].touched;
+      for (const [tk, e, atRest] of [...open.sort(byTouch).slice(0, OPEN_MAX), ...restOf.sort(byTouch).slice(0, REST_MAX)]) {
+        if (e.readAt === null || t - e.readAt > (atRest ? REST_HANDOVER_AGE_MS : BOOK_HANDOVER_AGE_MS)) continue;
+        const back = e.back?.done === true ? { lo: e.back.lo, tape: e.back.tape?.state() ?? null, ...(e.back.located === true ? { located: true as const } : {}), ...(e.back.born === true ? { born: true as const } : {}) } : undefined;
+        const h: HandedBook = { ...(atRest ? { rest: true as const } : {}), pool: e.pool, decimals: e.decimals, touched: Math.min(e.touched, t), readAt: e.readAt, headN: e.headN, ...(e.headAt === undefined ? {} : { headAt: e.headAt }), ...(e.from === undefined ? {} : { from: e.from }), book: e.book.state(), ...(back === undefined ? {} : { back }) };
+        const mine = tapeOf(e, TRADES_MAX).flatMap((r): [string, Traders][] => {
+          const v = txs.has(r.tx) ? undefined : traders.get(r.tx);
+          return v === undefined ? [] : [[r.tx, v]];
+        });
+        const n = JSON.stringify([tk, h]).length + JSON.stringify(mine).length;
+        if (n > bookRoom) continue;
+        bookRoom -= n;
+        handed.push([tk, h]);
+        for (const [x, v] of mine) if (!txs.has(x)) {
+          txs.add(x);
+          tradersOfBooks.push([x, v]);
+        }
+      }
       return {
         v4Hooks: "any",
+        books: handed,
+        traders: tradersOfBooks,
         found: fit(found.slice(-HANDOVER_ENTRIES_MAX)),
         pools: fit([...gtPools].filter(([, v]) => t - v.at <= KEPT_HANDOVER_MS).slice(-HANDOVER_ENTRIES_MAX)),
         kept: fit([...kept].filter(([, v]) => t - v.at <= KEPT_HANDOVER_MS).slice(-HANDOVER_ENTRIES_MAX)),
@@ -5165,6 +5252,22 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const list = (v: unknown): unknown[] | null => (v === undefined ? [] : Array.isArray(v) && v.length <= HANDOVER_ENTRIES_MAX ? v : null);
       const [f, p, k, h] = [list(o.found), list(o.pools), list(o.kept), list(o.history)];
       if (f === null || p === null || k === null || h === null) return false;
+      // card helper-tape-handover: the books, each loaded whole into a new book (Book.load checks it), and their rows'
+      // traders; any one off and nothing is restored
+      const B = o.books === undefined ? [] : Array.isArray(o.books) && o.books.length <= OPEN_MAX + REST_MAX ? (o.books as unknown[]) : null;
+      const T = o.traders === undefined ? [] : Array.isArray(o.traders) && o.traders.length <= TRADES_MAX * OPEN_MAX * 2 ? (o.traders as unknown[]) : null;
+      if (B === null || T === null) return false;
+      const restored: [string, Entry, boolean][] = [];
+      for (const x of B) {
+        const e = handedBook(x, t);
+        if (e === null) return false;
+        restored.push(e);
+      }
+      const tradersIn: [string, Traders][] = [];
+      for (const x of T) {
+        if (!Array.isArray(x) || x.length !== 2 || typeof x[0] !== "string" || !EVM_IDS.tx(x[0]) || x[0] !== x[0].toLowerCase() || !tradersOk(x[1])) return false;
+        tradersIn.push([x[0], x[1] as Traders]);
+      }
       const pairs = (l: unknown[]) => l.every((e) => Array.isArray(e) && e.length === 2 && typeof e[0] === "string" && typeof e[1] === "object" && e[1] !== null);
       if (!pairs(f) || !pairs(p) || !pairs(k) || !pairs(h)) return false;
       const F = f as [string, { pool?: unknown; decimals?: unknown; at?: unknown }][];
@@ -5191,6 +5294,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         if (gtPools.size >= POOLS_MAX) gtPools.delete(gtPools.keys().next().value!);
         gtPools.set(tk, { id: v.id as string | null, at: v.at as number });
       }
+      for (const [tk, e, atRest] of restored) {
+        if (books.has(tk) || resting.has(restKey(tk))) continue;
+        if (!atRest && books.size < OPEN_MAX) books.set(tk, e);
+        else if (atRest && resting.size < (deps.restMax ?? REST_MAX)) resting.set(restKey(tk), e);
+      }
+      for (const [x, v] of tradersIn) if (!traders.has(x)) {
+        if (traders.size >= TRADERS_MAX) traders.delete(traders.keys().next().value!);
+        traders.set(x, v);
+      }
+      if (restored.some(([, , atRest]) => !atRest)) ensureTimer();
       for (const [map, entries] of [[kept, K], [history, H]] as const)
         for (const [key, v] of entries) {
           const had = map.get(key);
