@@ -3341,6 +3341,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** The timer fired while a tick ran: the next starts as soon as it ends, never a skipped period. */
   let again = false;
   async function tick(): Promise<void> {
+    // a tick begins on a later turn of the loop, as its timer's does: a sliced job waiting its turn (limits/turn.ts pass,
+    // one waiter a turn) gets it first, however the tick was started. Ticks started one after another with no turn
+    // between (an open's retry, the caller's ticks with tickMs 0) left a read back whose slice was spent waiting until
+    // they ended: its book is read forward only every FILLING_TICK_MS while it fills, so a chart stayed filling with no
+    // bar (card swaps-recorded-stretch-same-every-run: merge queue run 44971651003, swaps.test.ts's recorded stretch
+    // 11 blocks a tick, ICNT's 1m bars [] against the rebuild; 7 of 50 runs at fd52a4c54 under load)
+    await new Promise<void>((go) => setImmediate(go));
     for (const [t, e] of books)
       // a book read ahead is the read ahead's to rest (tapeAhead)
       if (now() - e.touched > IDLE_MS && e.ahead === undefined) {

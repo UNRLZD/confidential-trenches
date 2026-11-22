@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBook, TFS, type Event } from "../candles.ts";
 import { FAST_SHIFT, fakeChain, ICNT, open, POOL_ICNT, POOL_VVV, REC, timeOf, toLog, URLS, VVV, KNOWN } from "../../../test/evm-swaps/base.ts";
+import { turnSlicer } from "../../limits/turn.ts";
 import { BASE_VENUES, createSwaps, decodeRef, decodeSwap, hookTakes, LAG_MAX, parseLog, parseLogs, REF_POOL_ID, sameLogs, swapFilter, TOPIC, traderLeg, v4Key, type Log, type Pool } from "./swaps.ts";
 
 /** The book the same logs make rebuilt in one go: every swap and ETH price in order, all settled. */
@@ -170,6 +171,31 @@ const reading = (steps: number) =>
     }
   });
 for (const n of [1, 3, 11]) reading(n);
+
+test("card swaps-recorded-stretch-same-every-run: the recorded stretch read 11 blocks a tick, with one turn spent before tick 0, 1, 2 or 3 (the slicer on a still clock of its own), gives the bars of the rebuild: the read back waiting its turn gets it before the next tick (red at fd52a4c54: 1m [] filling)", async () => {
+  for (const at of [0, 1, 2, 3]) {
+    const chain = fakeChain();
+    const turn = { ms: 0 };
+    const s = open(chain, undefined, { pass: turnSlicer(() => turn.ms, 20).pass });
+    try {
+      await s.candles(ICNT, "1m", null, 500);
+      await s.candles(VVV, "1m", null, 500);
+      let head = REC.firstHead;
+      for (let i = 0; head < REC.lastHead; i++) {
+        head = Math.min(REC.lastHead, head + 11);
+        chain.st.head = head;
+        if (i === at) turn.ms += 20;
+        await s.tick();
+      }
+    } finally {
+      s.stop();
+    }
+    for (const [token, pool] of [[ICNT, POOL_ICNT], [VVV, POOL_VVV]] as const) {
+      const live = await bodyOf(s.candles(token, "1m", null, 500));
+      assert.deepEqual(live.candles, rebuild(pool, REC.lastHead).candles("1m", null, 500), `a turn spent before tick ${at}: ${token} 1m (filling ${live.filling})`);
+    }
+  }
+});
 
 test("the newest blocks are read again every tick: a fork of the last blocks replaces them", async () => {
   const chain = fakeChain();
