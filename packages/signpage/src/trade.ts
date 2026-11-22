@@ -485,7 +485,7 @@ export function tradeKind(host: TradeHost): TradeKind {
   });
 }
 
-type LegEnd = "filled" | "failed" | "not_landed";
+export type LegEnd = "filled" | "failed" | "not_landed";
 
 /** A Base or Robinhood trade's op (card signpage-sent-end-recorded-evm): a pool buy's reads "sent" with no tx until its
  *  release is read back, and its end comes from the chain's read, the run's or a later load's follow
@@ -596,7 +596,10 @@ async function noteLeg(store: TradeStore, op: string, sig: string, end: LegEnd):
   });
 }
 
-function noted(rec: { stage?: unknown; txs?: unknown }, sig: string, end: LegEnd): object {
+/** A tx's end noted on its op record: its txs entry's state, and the op's stage once every tx has one (all filled:
+ *  filled; some: part_filled; else not_landed); an op already at an end keeps it. Also a Solana pool buy's end after a
+ *  reload (positions.ts settleSentBuys, card signpage-sent-end-recorded). */
+export function noted(rec: { stage?: unknown; txs?: unknown }, sig: string, end: LegEnd): object {
   const txs = (Array.isArray(rec.txs) ? rec.txs : []).filter((t): t is { hash: string; state?: string } => !!t && typeof t === "object" && typeof (t as { hash?: unknown }).hash === "string");
   const i = txs.findIndex((t) => t.hash === sig);
   if (i >= 0) txs[i] = { ...txs[i]!, state: end };

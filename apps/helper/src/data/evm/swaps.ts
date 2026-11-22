@@ -3496,8 +3496,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   function wholeOf(e: Entry): number | undefined {
     if (backing(e) || e.from === undefined) return undefined;
     if (e.back?.born === true) return 0;
-    const low = e.back?.lo ?? e.from;
-    const clocked = e.back?.located === true ? null : blockSecondMs(chain, low);
+    // a located read back short of TRADES_MAX read every block its day read named from tapeBack before the first read
+    // (locate covers end to the first read), so it holds every swap since that block's second; its own lowest block
+    // read is only the oldest swap's (card helper-fresh-tapes-whole-from-the-first-minute: a quiet Base coin's day read
+    // named none, and its tape answered done with no trade and no reach, live run 45032297159)
+    const located = e.back?.located === true;
+    const low = located ? (tapeOf(e, TRADES_MAX).length < TRADES_MAX ? Math.max(0, e.from - V.tapeBack) : null) : (e.back?.lo ?? e.from);
+    const clocked = low === null ? null : blockSecondMs(chain, low);
     if (clocked !== null) return clocked + 1_000;
     const oldest = tapeOf(e, TRADES_MAX).at(-1);
     return oldest === undefined ? undefined : oldest.t_ms + 1_000;

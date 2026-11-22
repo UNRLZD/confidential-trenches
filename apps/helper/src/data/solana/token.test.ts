@@ -485,6 +485,19 @@ test("holders: the holders provider refuses getTokenLargestAccounts: no rows, Ju
   assert.equal(a.src, "jupiter");
 });
 
+// card helper-fresh-tapes-whole-from-the-first-minute: live run 45050809291 read a New coin's holders as 200 with no rows
+// and the helper's log named no cause; a failed holders read now says its cause and the slot's name, never a URL or key
+test("holders: a failed holders read names its cause and the holders slot in one log line, never a URL (red at c5992a9be: no line)", async () => {
+  const lines: string[] = [];
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => NOW, holdersRpc: fakeRpc(), log: (l: string) => void lines.push(l) } as never);
+  const a = await t.holders(PUMP);
+  assert.equal(JSON.parse(a.body).src, "jupiter");
+  const line = lines.find((l) => l.startsWith("solana holders read failed"));
+  assert.ok(line !== undefined, `a line for the failed read: ${JSON.stringify(lines)}`);
+  assert.match(line!, /\(solana rpc: 503\) on SOLANA_HOLDERS_RPC_URL for [1-9A-HJ-NP-Za-km-z]{8}: served Jupiter's count, no rows$/);
+  assert.doesNotMatch(line!, /https?:|key|token=/i);
+});
+
 test("toHolders: a row with a bad amount, a bad owner, an account no token program owns, or a count mismatch is refused", () => {
   assert.equal(toHolders(largest.value, owners.value.slice(0, 2), 1000n), null);
   assert.equal(toHolders([{ ...largest.value[0], amount: "-1" }], [owners.value[0]], 1000n), null);

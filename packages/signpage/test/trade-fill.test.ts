@@ -452,3 +452,17 @@ test("D17: at most FEED_READS_MAX feed transactions are read for one sale: the w
   assert.equal(await blockUsd(write5(), async () => [...readers(FEED_READS_MAX - 1), W5]), "0.04768764243129345", "the write the last read");
   assert.equal(await blockUsd(write5(), async () => [...readers(FEED_READS_MAX), W5]), undefined, "one read past");
 });
+
+// card signpage-sent-end-recorded, review 2 of 59a86ef49: a split tap settled after a reload (or ended with no `out`)
+// reads every leg its op marks, summed, and never a piece's tag 2 release beside them; an op with none marked reads its
+// first tx, as before
+test("card signpage-sent-end-recorded (review 2): a split tap's filled op sums its marked legs' units and SOL, each its own W; a release between them is never read", async () => {
+  const ops = new Map<string, Record<string, unknown>>([
+    ["t", { kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: SIG.buy1, leg: true }, { chain: "solana", hash: SIG.sell1 }, { chain: "solana", hash: SIG.buy2, leg: true }], created_ms: 1, chain: "solana", token: MINT, amount_usd: "0.2" }],
+  ]);
+  const s: FillStore = { keys: async () => [...ops.keys()], get: async (_s, k) => ops.get(k), update: async (_s, k, f) => void ops.set(k, f(ops.get(k)) as Record<string, unknown>) };
+  const reads: string[] = [];
+  assert.equal(await fillTradeOps({ store: s, read: async (sig) => (reads.push(sig), TX[sig]), price: () => null, now: () => OLD }), true);
+  assert.deepEqual(reads, [SIG.buy1, SIG.buy2], "the legs alone");
+  assert.deepEqual([ops.get("t")!.units, ops.get("t")!.pool_amount], ["50195.961847", "0.002410439"]);
+});

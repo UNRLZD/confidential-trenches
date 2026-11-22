@@ -2154,6 +2154,16 @@ const throwingEnd = () => {
   throw new Error("the host's end throws");
 };
 
+test("card signpage-sent-end-recorded part 1: with its sent signature the run tells the host the blockhash its signed bytes carry and the last height it holds them to, once", async () => {
+  const w = await world();
+  const told: [string, string, number][] = [];
+  const { answer } = await kindRun({ ...w.host, sendAt: (s, b, l) => void told.push([s, b, l]) });
+  assert.deepEqual(answer, { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
+  assert.equal(told.length, 1);
+  assert.deepEqual(told[0]!.slice(0, 2), [SIG, BLOCKHASH]);
+  assert.ok(Number.isSafeInteger(told[0]![2]) && told[0]![2] >= 100, `the last height at least the blockhash's own (100): ${told[0]![2]}`);
+});
+
 test("card sol-buy-reads-side-by-side: a run refused with nothing sent posts no sent when the host's end throws", async () => {
   const w = await world({ blockhashReads: [{ slotAhead: 2, blockhash: BLOCKHASH }, { slotAhead: 30, blockhash: BLOCKHASH }] });
   const c = clocked(w, holdVenue);
@@ -2980,6 +2990,25 @@ test("card buy-spends-its-change-in-the-same-tap: round 1 that the helper answer
   assert.deepEqual(x.log.filter((l) => !l.startsWith("settle")), ["takeSet:note-2", "sendPieces:1:owed"], "round 1 alone: no change proved, no buy taken or sent");
   assert.equal(x.sent.length, 1);
   assert.equal((await x.owed.list()).length, 1, "W stays found");
+});
+
+test("card signpage-sent-end-recorded (review 1): a two-round tap's round 1 is never told as the buy: neither sent nor sendAt names its release, and the kind's early answer names only the buy's own transaction", async () => {
+  const x = await twoRounds("lands");
+  const round1 = base58.encode(new Uint8Array(64).fill(20)); // the first signature the helper names: round 1's release
+  const told: string[] = [];
+  const at: string[] = [];
+  x.w.host.sent = async (s) => void told.push(s);
+  x.w.host.sendAt = (s) => void at.push(s);
+  const a = await runPoolBuy(x.w.host, { ...ASK, amount: x.spend });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.ok(!told.includes(round1) && !at.includes(round1), `round 1 told: sent ${JSON.stringify(told)}, sendAt ${JSON.stringify(at)}`);
+  assert.deepEqual([told, at], [[(a as { txs: { hash: string }[] }).txs[0]!.hash], [(a as { txs: { hash: string }[] }).txs[0]!.hash]], "the buy's own, once each");
+  // the kind (poolBuyKind): its early "sent" answer is the page's op; it never names round 1's release
+  const y = await twoRounds("lands");
+  const stages: string[] = [];
+  const k = poolBuyKind(() => y.w.host, lockOnce)({ ...ASK, amount: y.spend }, { id: "r2", sha: "00", progress: (s: string) => void stages.push(s) } as never) as { after: Promise<void>; answer: () => { result?: { txs: { hash: string }[] } } };
+  await k.after;
+  assert.ok(!(k.answer().result?.txs ?? []).some((t) => t.hash === round1), `the answer names round 1: ${JSON.stringify(k.answer())}`);
 });
 
 test("card buy-spends-its-change-in-the-same-tap: between a first round that landed and the buy's round (own note HELD, a piece SPENT) a state read keeps W's record while a tap holds a note of it; once no tap does, W is swept back", async () => {
