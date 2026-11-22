@@ -419,7 +419,10 @@ const ataCreate = (owner, mint, tp) => ({ program: SOLANA_ATA_PROGRAM, accounts:
 
 // ---------- found: a fresh device from the words alone ----------
 if (SCENARIO === "found") {
-  const restore = poolRestore({ store: async () => store, seed64: async () => seed64.slice(), signedIn: async () => true, ended: () => {} });
+  // the run's own Solana pool on the run's pair (the copy's, or devnet's): with no pools given the restore walked the
+  // build's own pins and providers (pagePools), which a copy refuses, and wrote no note; no deposit id read (step 5's
+  // NEAR pair is out of the copy); each reason a walk is not done logged
+  const restore = poolRestore({ store: async () => store, seed64: async () => seed64.slice(), signedIn: async () => true, ended: (stage, why) => log(`the restore: ${stage}${why.length ? ` (${why.join("; ")})` : ""}`), pools: () => [{ chain: "solana", program: PIN.program, scope, rpcs: () => [rpcs[0], rpcs[1]] }], ids: null });
   out.restore = await restore.auto();
   log(`the restore ended ${out.restore}`);
   // F's plant on W, right after the restore
