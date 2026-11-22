@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeChain, ICNT, open, REC, VVV } from "../../../test/evm-swaps/base.ts";
-import { IDLE_MS } from "./swaps.ts";
+import { HANDED_TIMING, IDLE_MS } from "./swaps.ts";
 
 const bodyOf = async (p: Promise<{ body: string }>) => JSON.parse((await p).body);
 const handed = (s: { state(): unknown }) => JSON.parse(JSON.stringify(s.state())) as Record<string, unknown>;
@@ -118,5 +118,61 @@ test("card helper-tape-handover (hostile): a book whose bars, swaps or blocks ar
     assert.ok(logsAsked(c) > 0, `${what}: the tape read again`);
     assert.ok(Array.isArray(a.trades) && a.trades.length > 0, `${what}: the tape answered from its own read`);
     next.stop();
+  }
+});
+
+test("card helper-tape-handover-judges-handed-books: a restored book's trades answer names the handover in its Server-Timing, and a cold one names nothing, so the live check judges only a book the old helper handed over (red at main 5d7c3a99d: no answer said where its book came from)", async () => {
+  const { clock, head, st } = await warmOld();
+  clock.t += 30_000;
+  const c = fakeChain();
+  c.st.head = head;
+  const next = open(c, clock, { pools: new Map() });
+  assert.equal(next.restore(st), true);
+  const handedOver = await next.trades(ICNT, 50);
+  assert.ok((JSON.parse(handedOver.body).trades as unknown[]).length > 0, "the restored book answers its rows");
+  assert.ok((handedOver.timing ?? "").includes(HANDED_TIMING), `a handed book is named: ${handedOver.timing}`);
+  // a coin the old helper never held opens cold on the same helper, and an old helper's own book is never named
+  const c2 = fakeChain();
+  c2.st.head = head;
+  const cold = open(c2, { t: clock.t });
+  await cold.candles(ICNT, "1m", null, 500);
+  const coldAnswer = await cold.trades(ICNT, 50);
+  assert.ok((JSON.parse(coldAnswer.body).trades as unknown[]).length > 0, "the cold book answers its rows");
+  assert.ok(!(coldAnswer.timing ?? "").includes("handed"), `a cold book is not named: ${coldAnswer.timing}`);
+  next.stop();
+  cold.stop();
+});
+
+test("card helper-tape-handover-judges-handed-books: the swaps name what the warm file held and what they restored (handover(), on /v1/health): after a restore 2 of 2, at a cold start 0 of 0, after a file with a hostile book 0 of 2 (a restore is whole or nothing), so the live check fails a deploy that dropped books (red at main 5d7c3a99d: no counts)", async () => {
+  const { clock, head, st } = await warmOld();
+  const at = () => {
+    const c = fakeChain();
+    c.st.head = head;
+    return open(c, clock, { pools: new Map() });
+  };
+  const cold = at();
+  assert.deepEqual(cold.handover(), { held: 0, restored: 0 }, "a cold start");
+  assert.equal(cold.restore(undefined), false);
+  assert.deepEqual(cold.handover(), { held: 0, restored: 0 }, "no swaps part handed over: nothing held");
+  cold.stop();
+  const next = at();
+  assert.equal(next.restore(st), true);
+  assert.deepEqual(next.handover(), { held: 2, restored: 2 }, "after a restore");
+  // the same file read again at the handover (server.ts restores at the start and once the senders are held) counts its
+  // books once: they are held already
+  assert.equal(next.restore(st), true);
+  assert.deepEqual(next.handover(), { held: 2, restored: 2 }, "the same file again");
+  next.stop();
+  const hostile = JSON.parse(JSON.stringify(st)) as { books: [string, Record<string, unknown>][] };
+  (hostile.books[1]![1].book as { tape: unknown[] }).tape.reverse();
+  const after = at();
+  assert.equal(after.restore(hostile), false);
+  assert.deepEqual(after.handover(), { held: 2, restored: 0 }, "a hostile book: the file held 2, none restored");
+  after.stop();
+  for (const [what, part] of [["no state", 7], ["books that are no list", { books: {} }]] as const) {
+    const odd = at();
+    assert.equal(odd.restore(part), false, what);
+    assert.deepEqual(odd.handover(), { held: 1, restored: 0 }, `${what}: something held, nothing restored`);
+    odd.stop();
   }
 });

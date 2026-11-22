@@ -393,7 +393,7 @@ export const MUTANTS = [
   [QUOTE, "      if (strict() && holds + order.length - n < need) break;", "      if (against.length > 0 && holds + order.length - n < need) break;", R, "V15 "],
   // the scan's spans: each that came back is kept, also when another failed, never past a head named beyond maxLag;
   // a throttled span is asked again whole
-  [QUOTE, "  await settle(jobs.map(run)).catch((e) => failing(e));", "  await settle(jobs.map(run));", R, "J1 "],
+  [QUOTE, "  await settle(jobs.map(shared)).catch((e) => failing(e));", "  await settle(jobs.map(shared));", R, "J1 "],
   [QUOTE, "    if (a > at) out.push([at, a - 1]);", "", R, "J1 "],
   [QUOTE, "      if (!(e instanceof TailFlood) && scanHead - b.number <= maxLag) commit();", "      if (!(e instanceof TailFlood)) commit();", R, "J3 "],
   // the review of bc189de: a kept scan started early waits for the quote's pick when it ends (L-3) and when it fails
@@ -448,7 +448,7 @@ export const MUTANTS = [
   // card evm-buy-and-sell-on-mainnet: the blocks within maxLag of a kept scan read beside the quote, not before it
   [QUOTE, "    const held = (e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === \"markets\";", "    const held = true;", R, "card evm-buy-and-sell-on-mainnet: a coin the served index holds no pool of"],
   [QUOTE, "    if (held && e.gaps.length > 0 && unread.every(([a]) => a > head - lag)) {", "    if (held && e.gaps.length > 0) {", R, "W2g "],
-  [QUOTE, "      e.later = kept;\n      e.gaps = [];\n", "", R, "W2c "],
+  [QUOTE, "      e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), kept);\n      e.gaps = [];\n", "", R, "W2c "],
   // card evm-scan-chain-tail: the tail of the chain, read from a near start with the event alone, kept per provider
   [QUOTE, "  for (const c of new Set([k.currency0, k.currency1])) append(t.byCurrency, c, k);", "  for (const c of new Set([k.currency0])) append(t.byCurrency, c, k);", R, "X4 "],
   [QUOTE, "  return other === NATIVE || other === weth;\n};\n", "  return other === weth;\n};\n", R, "S3 "],
@@ -466,17 +466,36 @@ export const MUTANTS = [
   // quote scans by currency; the budget of no measured pools is the depth (L2)
   [QUOTE, "        const top = head - tailLag;", "        const top = head;", R, "TAIL7 "],
   [QUOTE, "(tail0?.band ?? []).filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y])", "([] as Spans)", R, "TAIL2 "],
-  [QUOTE, "    } else if (e.tail && held && unread.length > 0) {", "    } else if (false) {", R, "TAIL10 "],
+  [QUOTE, "    } else if (e.tail && held && unread.length > 0) {", "    } else if (false) {", R, "W2b "],
   [QUOTE, "          if (g.b > top) t.band = withSpan(", "          if (false) t.band = withSpan(", R, "W2b "],
   [QUOTE, "          if (g.spare) continue;\n", "", R, "TAIL4b "],
-  [QUOTE, "      if (e.tail && unread.length > 0) e.laterFrom = unread[0]![0];", "", R, "W2b "],
   [QUOTE, "n.length > Math.max(1, (TAIL_FLOOD * (b - a + 1) * s.initialized.pools) / s.initialized.blocks)", "n.length > Math.max(1, (1000 * TAIL_FLOOD * (b - a + 1) * s.initialized.pools) / s.initialized.blocks)", R, "TAIL8 "],
   [QUOTE, "    if (flooded) throw new TailFlood(", "    if (false) throw new TailFlood(", R, "TAIL8 "],
   [QUOTE, "Math.max(1, Math.min(on.span, Math.floor(tailBudgetOf(s) / TAIL_FLOOD)))", "on.span", R, "TAIL8 "],
   [QUOTE, "    again[14] = true;", "    again[14] = false;", R, "X4f "],
   // card evm-scan-chain-tail, round 5: a chain's tail with no block read is read after the answer (TAILF1 to TAILF6)
-  [QUOTE, "  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0;", "  const cold = false;", R, "TAILF1 "],
-  [QUOTE, "  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0;", "  const cold = (tail0?.spans.length ?? 0) === 0;", R, "TAILF1 "],
+  [QUOTE, "  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", "  const cold = false;", R, "TAILF1 "],
+  [QUOTE, "  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", "  const cold = (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", R, "TAILF1 "],
+  // card evm-tail-warms-with-the-index-at-the-head: a tail read only inside the index's margin is no cold tail
+  [QUOTE, " && (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", " && (tail0?.spans.length ?? 0) === 0;", R, "GUARD "],
+  // a band block counts as read only within maxLag of the head (independent review of c6cf1927d, HIGH 1, HIGH 2, MEDIUM 3)
+  [QUOTE, "    const unread = e.tail ? gapsOf(lagged.reduce(", "    const unread = e.tail ? gapsOf((tail0?.band ?? []).reduce(", R, "TAIL11 "],
+  [QUOTE, ".filter(([, y]) => y > head - lag).map(([x, y]): [number, number] => [Math.max(x, head - lag + 1), y]) : [];", ".filter(([, y]) => y > head - lag) : [];", R, "TAIL2 "],
+  // past maxLag, only the unread spans that start past it go before the answer; those within it go after, counted from
+  // their first block (P2-1)
+  [QUOTE, "      const now = unread.filter(([a]) => a <= head - lag);", "      const now = unread;", R, "W2b "],
+  // a quote's tail scans that read the same blocks before the answer at once share one request (TAIL_READING)
+  [QUOTE, "  await settle(jobs.map(shared)).catch((e) => failing(e));", "  await settle(jobs.map(run)).catch((e) => failing(e));", R, "TAILF12 "],
+  // the shared answer is the taker's whole, a stand-in's included, and a spare's stays a spare's
+  [QUOTE, "g.a >= j.a && g.b <= j.b && j.part.every((e) => g.part.includes(e))", "g.part === j.part && g.a >= j.a && g.b <= j.b", R, "TAIL11g "],
+  [QUOTE, "void got.push(...gs.map((g) => ({ ...g, part: j.part })))", "void got.push(...gs.map((g) => ({ ...g, spare: false, part: j.part })))", R, "TAIL11g "],
+  // the band counted read within maxLag of the scan head goes with the read after the answer, and P2-1 counts from its
+  // first block against the agreed block (independent review of 7ed7d86f9, H1); a taker waits EVM_SCAN_HOLD_MS (M1)
+  [QUOTE, "      e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), kept);", "      e.later = kept;", R, "RVW5 "],
+  [QUOTE, "      const from = Math.min(unread[0]?.[0] ?? Infinity, laggedFrom ?? Infinity);", "      const from = unread[0]?.[0] ?? Infinity;", R, "RVW5 "],
+  [QUOTE, "      e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(now.reduce(", "      e.later = ([] as Spans).reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(now.reduce(", R, "RVW3 "],
+  [QUOTE, "      e.laterFrom = Math.min(unread.find(([a]) => a > head - lag)?.[0] ?? head + 1, laggedFrom ?? head + 1);", "      e.laterFrom = unread.find(([a]) => a > head - lag)?.[0] ?? head + 1;", R, "RVW6 "],
+  [QUOTE, "      return Promise.race([led, held]).then((gs) => {", "      return led.then((gs) => {", R, "TAIL11j "],
   [QUOTE, "reach(fill === true ? e.ix : e.spans)", "reach(e.spans)", R, "TAILF1 "],
   [QUOTE, "      if (wantFill && !got.some((g) => g.spare)) (fill", "      if (wantFill) (fill", R, "TAILF6 "],
   [QUOTE, "  if (running.has(chain) || FLOODED.get(src)?.has(chain) === true) return;", "  if (FLOODED.get(src)?.has(chain) === true) return;", R, "TAILF2 "],
