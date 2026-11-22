@@ -342,6 +342,9 @@ async function openAt(browser, route, w, s, calls) {
     if (!f) await page.waitForTimeout(100);
   }
   if (!f) throw new Error(`${w.name} ${s.id}: no APP_HOST frame inside the shell (top at ${page.url()})`);
+  // the terminal's frame runs in its own process (an out-of-process frame: the page's throttle never reached it, its loop
+  // 9 ms at rate 1 and at 4): its own target throttled too, from here on
+  if (CPU_THROTTLE > 1) await (await ctx.newCDPSession(f)).send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE });
   if (w.isMobile && !s.lists) {
     // the phone's / is the Trenches list (owner 12 Nov, "Phone home: Trenches list"): the token page is a row's tap away
     const row = f.locator('[data-testid="phone-trenches-row"]').first();
