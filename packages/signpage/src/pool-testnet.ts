@@ -73,7 +73,7 @@ import { heldWs, ownWs } from "./pool-found.ts";
 import { boughtSincePass, keptHeldOf, type StoreWs } from "./pool-sell-dry.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, legCause, owedRentBacks, poolSellKind, POOL_RENT_BACK_SPACE_MAX_MS, READS_NONE, rentBackGapDrawn, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type OwedRentBack, type PoolSellKindHost } from "./pool-sell.ts";
 import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, evmHelperShownRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
-import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, solanaAssetHeld, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
+import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, solanaAssetHeld, recordPoolBuy, routeInto, settleSentBuys, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_POOLS, evmFeeHold, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmFeeHold, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleOpen, evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
@@ -1197,6 +1197,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   function stopReads(): void {
     buyRecords.stop();
     lateBuys.clear();
+    buyIds.clear();
+    sendsAt.clear();
     stopTurn();
     stopHostLaneWaits();
     signOuts++;
@@ -2442,6 +2444,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         lateBuys.set(taken.noteId, { r: taken, post, places: new Map() });
         void lateFollow();
       },
+      // the sent tx's blockhash and last height, for the request's "sent" op (recordedBuy)
+      sendAt: (signature, blockhash, lastHeight) => void sendsAt.set(signature, { blockhash, lvbh: lastHeight }),
       seed64: page.seed64,
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
@@ -2537,6 +2541,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // closed-positions-show-every-trade): the rebuild of trades reads no such W, so it never writes an op beside the one the
   // run is about to write
   const runningBuys = new Set<string>();
+  // the request ids of the pool buys this page runs, until their records are written: the reload settle of "sent" buy
+  // ops (settleSentBuys) leaves each to its own run (card signpage-sent-end-recorded)
+  const buyIds = new Set<string>();
+  // each sent buy tx's blockhash and last height, by signature, as its run told them (pool-buy.ts sendAt), until the
+  // request's "sent" op takes them
+  const sendsAt = new Map<string, { blockhash: string; lvbh: number }>();
   // each buy whose run ended "sent" (its end not known), by note id: its taken proof, where to post its end, and W's
   // history places read so far (card pool-buy-record-never-stays-sent)
   const lateBuys = new Map<string, { r: ReadyProof<SolanaReleaseRequest>; post: (stage: "filled" | "not_landed") => void; places: HistoryPlaces }>();
@@ -3021,7 +3031,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const sent = (txs: TxRef[]): void => {
       if (done || sentOp || txs.length === 0) return;
       sentOp = true;
-      const a = { result: { stage: "sent", txs } };
+      // each tx's blockhash and last height as its run told them (pool-buy.ts sendAt), so a reload ends the op from its
+      // txs (settleSentBuys)
+      const a = { result: { stage: "sent", txs: txs.map((t) => ({ ...t, ...sendsAt.get(t.hash) })) } };
+      for (const t of txs) sendsAt.delete(t.hash);
       opened = inTurn(facts.wallet, async () => recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, a));
     };
     const finish = (end: Parameters<typeof recordPoolBuy>[3]): void => {
@@ -3038,7 +3051,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         await opened;
         await early;
         await recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end);
-      }).finally(() => (ran !== undefined && runningBuys.delete(ran), positions.refresh(), fillTrades()));
+      }).finally(() => (ran !== undefined && runningBuys.delete(ran), buyIds.delete(ctx.id), positions.refresh(), fillTrades()));
     };
     const txsOf = (): TxRef[] => {
       const a = r && "answer" in r ? (r.answer() as { result?: { txs?: TxRef[] } }) : null;
@@ -3061,6 +3074,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (!done && facts.wallet !== undefined) runningBuys.add(facts.wallet);
       ctx.route?.(x);
     });
+    // its op is this run's to end until its records are written: the reload settle (settleSentBuys) leaves it
+    buyIds.add(ctx.id);
     r = buy(ask, { ...ctx, progress, route: (x) => (into(x), "out" in x && out()) });
     const run = r;
     if ("after" in run)
@@ -3230,6 +3245,23 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     };
   };
   const sell = (over.tradeKinds?.sell ?? poolSellKind)(() => sellHost(true));
+  // the pool buys a closed or reloaded page left "sent" (card signpage-sent-end-recorded, positions.ts settleSentBuys):
+  // each ended from its own txs on both seats (a buy in flight, as a sell's verdict above), never one this page runs
+  // (buyIds); one pass at a time, a state read during it asks none. An end written reads the positions again, fills
+  // its figures from its tx (fillTrades) and tells the app's state watchers
+  let sentSettling: Promise<void> | null = null;
+  const settleSent = (): void => {
+    if (sentSettling) return;
+    sentSettling = (async () => {
+      const ended = await settleSentBuys(timedStore(await within(page.store(), TRADE_STORE_MS, "the wallet store"), TRADE_STORE_MS), rpcs("pass"), (id) => buyIds.has(id));
+      if (ended.length === 0) return;
+      positions.refresh();
+      fillTrades();
+      for (const f of watchers) f();
+    })()
+      .catch(() => {})
+      .finally(() => (sentSettling = null));
+  };
   // the sells a closed or reloaded page left INCOMING: each settled by the run's own verdict rules, its ops record's
   // stage written; under the seed's shared lock, as every pass that writes the store (a sign out waits for it).
   // On both seats at a load (card load-reads-name-no-w-to-the-public-seat): a sell in flight, its verdict (filled,
@@ -3531,6 +3563,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // waits or fails holds it back, as main.ts settles a dead trade (trade.ts tradeSettleDue). Its unrun legs are
         // refused "failed" (nothing was sent for them), and its id is never id_reused for good
         if (locks) await within(page.store(), TRADE_STORE_MS, "the wallet store").then((ops) => settleDeadSellOps(timedStore(ops, TRADE_STORE_MS), locks)).catch(() => {});
+        // a pool buy a closed or reloaded page left "sent": its end read from its own txs on both RPCs, in the
+        // background, never holding the read back (card signpage-sent-end-recorded)
+        settleSent();
         if (settling) return await settling;
         if (mine.some((n) => n.state === "INCOMING")) {
           const coming = new Set(mine.filter((n) => n.state === "INCOMING" && n.ref.kind === "deposit").map((n) => n.id));

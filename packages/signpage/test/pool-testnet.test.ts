@@ -1637,6 +1637,40 @@ test("the page's buy host writes W's buy record in the wallet store's meta/owed/
   }
 });
 
+// Card signpage-sent-end-recorded, part 1: a pool buy whose page closed after its "sent" answer left its op at sent; the
+// next page's state read ends it from its own txs on both RPCs (positions.ts settleSentBuys), and the fill reads its
+// figures from its tx (trade-fill.ts: a filled buy with no pool_amount)
+test("card signpage-sent-end-recorded part 1: a reload (a fresh page on the same store) ends a buy op left at sent whose tx both RPCs read filled, and its fill reads that tx", async () => {
+  const seed64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
+  (await openNoteStore(w)).close();
+  try {
+    const sig = base58.encode(new Uint8Array(64).fill(4));
+    const blockhash = base58.encode(new Uint8Array(32).fill(7));
+    await w.put("ops", "pb1", { kind: "buy", stage: "sent", txs: [{ chain: "solana", hash: sig, blockhash, lvbh: 1_000 }], created_ms: 1, chain: "solana", token: base58.encode(new Uint8Array(32).fill(5)), amount_usd: "1.5" });
+    const asked: string[] = [];
+    const rpc = () => async (m: string, p?: readonly unknown[]) => {
+      if (m === "getLatestBlockhash") return { context: { slot: 50 }, value: { blockhash, lastValidBlockHeight: 1_050 } };
+      if (m === "isBlockhashValid") return { context: { slot: 52 }, value: true };
+      if (m === "getSignatureStatuses") return { context: { slot: 53 }, value: [{ confirmationStatus: "finalized", err: null, slot: 40 }] };
+      if (m === "getTransaction") return (asked.push(String(p?.[0])), null);
+      throw new Error("offline");
+    };
+    const t = testnetPool({ store: async () => w, seed64: async () => seed64.slice() }, { rpcs: [rpc(), rpc()] as never, prover: { vault: signalsProver(), stop: () => {} } });
+    await t.stateRead();
+    for (let i = 0; i < 200 && ((await w.get("ops", "pb1")) as { stage: string }).stage === "sent"; i++) await new Promise((r) => setTimeout(r, 10));
+    const op = (await w.get("ops", "pb1")) as { stage: string; txs: { hash: string }[]; units?: string };
+    assert.equal(op.stage, "filled");
+    assert.deepEqual(op.txs.map((x) => x.hash), [sig]);
+    assert.equal(op.units, undefined, "no units from the settle");
+    for (let i = 0; i < 200 && !asked.includes(sig); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(asked.includes(sig), "the fill reads its units from the buy's own tx");
+  } finally {
+    w.close();
+  }
+});
+
 // Review of fcd67b72, P1: a sell with no deposit back makes no note, so a state read that settles sells only on an
 // INCOMING return or R note never read its record: a page closed after its send (or a sell that ended "sent" past its
 // read budget) left the op "sent" for good. The state read settles sells when a kept record is there too.

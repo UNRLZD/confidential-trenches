@@ -34,12 +34,14 @@ test("recorded bad answer: main 2d870021c's build: FAIL, naming each missing mar
   fails(r, /^BAD sent:/);
   fails(r, /^BAD asked:/);
   fails(r, /^BAD end:/);
+  fails(r, /^BAD settle:/);
 });
 
 test("planted: each mark alone, and the index's pin", () => {
   fails(mut((a) => (a.sent = false)), /^BAD sent:/);
   fails(mut((a) => (a.asked = false)), /^BAD asked:/);
   fails(mut((a) => (a.end = false)), /^BAD end:/);
+  fails(mut((a) => (a.settle = false)), /^BAD settle:/);
   fails(mut((a) => (a.two = false)), /^BAD two:/);
   fails(mut((a) => (a.sha384 = ANSWERS.bad.sha384)), /not the one index\.html pins/);
   fails(mut((a) => (a.index = "<html></html>")), /pins no \/app\.js/);
@@ -47,33 +49,46 @@ test("planted: each mark alone, and the index's pin", () => {
 
 // the build's own minified shapes (read from the good build), and a near miss of each
 const INDEX = '<script src="/app.js" integrity="x"></script>';
-const SENT = "if(s===`sent`){if(l.length===0)return;await e.put(`ops`,t,{kind:`buy`,stage:s,txs:l,created_ms:n.createdMs,chain:`solana`});return}";
+const SENT = "if(s===`sent`){if(l.length===0||`error`in r)return;let i=r.result.txs.map(e=>$Q(e)),a=i.every(e=>e!==null)?l.map((e,t)=>({...e,...i[t]})):l;await e.put(`ops`,t,{kind:`buy`,stage:s,txs:a,created_ms:n.createdMs,chain:`solana`});return}";
 const ASKED = "e!==null&&e.result.stage===`sent`&&u(e.result.txs.map(e=>({chain:e.chain,hash:e.hash})))";
+const AT = "let a={result:{stage:`sent`,txs:t.map(e=>({...e,...Ut.get(e.hash)}))}};for(let e of t)Ut.delete(e.hash)";
+const TOLD = "try{e.sendAt?.(R,ts(i).message.blockhash,a)}catch{}";
 const END = "a=i!==void 0&&i.kind===`buy`&&i.stage===`sent`;if(i!==void 0&&(!a||`error`in r))return;let o=n.price===null?null:QQ(n.spend,n.spendDecimals,n.price),s=`error`in r?`refused`:r.result.stage;if(s===`sent`?a:!Xge.has(s))return;let c=`error`in r?[]:r.result.txs.map(e=>({chain:e.chain,hash:e.hash})),l=c.length===0&&a&&Array.isArray(i.txs)?i.txs:c;";
+const SETTLE = "if(a?.kind!==`buy`||a.chain!==`solana`||a.stage!==`sent`||!Array.isArray(a.txs)||a.txs.length===0)continue;let o=a.txs,s=o.map(e=>typeof e==`object`&&e&&typeof e.hash==`string`?$Q(e):null);if(s.some(e=>e===null))continue;let c=await Promise.all(o.map((e,n)=>nW(t,{sig:e.hash,lvbh:s[n].lvbh,blockhash:s[n].blockhash})));if(c.some(e=>e===`unknown`))continue;let l=!1;await e.update(`ops`,i,e=>{let t=e;return t?.kind!==`buy`||t.stage!==`sent`?e:(l=!0,o.reduce((e,t,n)=>iW(e,t.hash,c[n]),t))})";
 const TWO = "l=c===null?void 0:BigInt(Math.min(c[0].height,c[1].height))";
+const ALL = { SENT, ASKED, AT, TOLD, END, SETTLE, TWO };
 
 test("facts() reads each mark from the minified code as the build writes it", () => {
-  const all = facts(INDEX, [SENT, ASKED, END, TWO].join(";"));
-  assert.deepEqual([all.sent, all.asked, all.end, all.two], [true, true, true, true]);
+  const all = facts(INDEX, Object.values(ALL).join(";"));
+  assert.deepEqual([all.sent, all.asked, all.end, all.settle, all.two], [true, true, true, true, true]);
 });
 
 test("planted near misses: each mark's shape one step off is no mark", () => {
-  const near = {
+  // [mark, part of ALL it changes, the near miss]
+  const near = [
     // a sent put with no transaction check (a sent op with none would be refused by trade.ts as a trade-box one)
-    sent: SENT.replace("if(l.length===0)return;", ""),
+    ["sent", "SENT", SENT.replace("if(l.length===0||`error`in r)return;", "")],
+    // the blockhash fields never kept beside the sent op
+    ["sent", "SENT", SENT.replace("a=i.every(e=>e!==null)?l.map((e,t)=>({...e,...i[t]})):l;", "a=l;")],
     // the sent answer seen but no write asked with its transactions
-    asked: ASKED.replace("&&u(e.result.txs.map(", "&&u(e.result.map("),
+    ["asked", "ASKED", ASKED.replace("&&u(e.result.txs.map(", "&&u(e.result.map(")],
+    // the run's blockhash not carried into the op
+    ["asked", "AT", AT.replace("...Ut.get(e.hash)", "...e")],
+    // the run tells no blockhash from its signed bytes
+    ["asked", "TOLD", TOLD.replace("ts(i).message.blockhash", "R")],
     // an op already there written over by any answer, or sent's txs dropped at an end with none
-    end: END.replace("(!a||`error`in r)", "!a"),
-    endTxs: END.replace("l=c.length===0&&a&&Array.isArray(i.txs)?i.txs:c;", "l=c;"),
+    ["end", "END", END.replace("(!a||`error`in r)", "!a")],
+    ["end", "END", END.replace("l=c.length===0&&a&&Array.isArray(i.txs)?i.txs:c;", "l=c;")],
+    // an unknown read ending the op, an end written over, or another chain's op read
+    ["settle", "SETTLE", SETTLE.replace("if(c.some(e=>e===`unknown`))continue;", "")],
+    ["settle", "SETTLE", SETTLE.replace("t?.kind!==`buy`||t.stage!==`sent`?e:", "t?.kind!==`buy`?e:")],
+    ["settle", "SETTLE", SETTLE.replace("||a.chain!==`solana`", "")],
     // the higher height: one RPC's word frees the note
-    two: TWO.replace("Math.min", "Math.max"),
-  };
-  const others = { sent: [ASKED, END, TWO], asked: [SENT, END, TWO], end: [SENT, ASKED, TWO], endTxs: [SENT, ASKED, TWO], two: [SENT, ASKED, END] };
-  for (const [k, js] of Object.entries(near)) {
-    const f = facts(INDEX, [...others[k], js].join(";"));
-    const mark = k === "endTxs" ? "end" : k;
-    assert.equal(f[mark], false, `${k}: the near miss is read as no mark`);
-    for (const m of ["sent", "asked", "end", "two"].filter((x) => x !== mark)) assert.equal(f[m], true, `${k}: ${m} still read`);
+    ["two", "TWO", TWO.replace("Math.min", "Math.max")],
+  ];
+  for (const [mark, part, js] of near) {
+    const f = facts(INDEX, Object.entries(ALL).map(([k, v]) => (k === part ? js : v)).join(";"));
+    assert.equal(f[mark], false, `${mark} (${part}): the near miss is read as no mark`);
+    for (const m of ["sent", "asked", "end", "settle", "two"].filter((x) => x !== mark)) assert.equal(f[m], true, `${mark} (${part}): ${m} still read`);
   }
 });

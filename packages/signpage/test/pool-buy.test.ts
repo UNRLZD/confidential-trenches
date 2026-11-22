@@ -2152,6 +2152,16 @@ const throwingEnd = () => {
   throw new Error("the host's end throws");
 };
 
+test("card signpage-sent-end-recorded part 1: with its sent signature the run tells the host the blockhash its signed bytes carry and the last height it holds them to, once", async () => {
+  const w = await world();
+  const told: [string, string, number][] = [];
+  const { answer } = await kindRun({ ...w.host, sendAt: (s, b, l) => void told.push([s, b, l]) });
+  assert.deepEqual(answer, { result: { stage: "sent", txs: [{ chain: "solana", hash: SIG }] } });
+  assert.equal(told.length, 1);
+  assert.deepEqual(told[0]!.slice(0, 2), [SIG, BLOCKHASH]);
+  assert.ok(Number.isSafeInteger(told[0]![2]) && told[0]![2] >= 100, `the last height at least the blockhash's own (100): ${told[0]![2]}`);
+});
+
 test("card sol-buy-reads-side-by-side: a run refused with nothing sent posts no sent when the host's end throws", async () => {
   const w = await world({ blockhashReads: [{ slotAhead: 2, blockhash: BLOCKHASH }, { slotAhead: 30, blockhash: BLOCKHASH }] });
   const c = clocked(w, holdVenue);

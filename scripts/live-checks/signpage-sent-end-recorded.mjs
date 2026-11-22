@@ -2,12 +2,15 @@
 // Live check of card signpage-sent-end-recorded on SIGN_HOST (https://confidential.unrealized.trade). What it holds,
 // signed out, moving no money and signing nothing: the served /app.js is the one index.html pins (its sha384), and in
 // it, as minified:
-//   - sent: a Solana pool buy's op is written at "sent" under the request's id with its transaction (src/positions.ts
-//     recordPoolBuy: a sent with no transaction writes nothing);
-//   - asked: the page asks that write at the run's "sent" answer, with the answer's transactions (src/pool-testnet.ts
-//     recordedBuy);
+//   - sent: a Solana pool buy's op is written at "sent" under the request's id with its transaction, each tx's blockhash
+//     and last height kept beside it on the device (src/positions.ts recordPoolBuy: a sent with no transaction writes
+//     nothing);
+//   - asked: the page asks that write at the run's "sent" answer, with the answer's transactions and the blockhash and
+//     last height the run told for each (src/pool-testnet.ts recordedBuy; src/pool-buy.ts sendAt, from the signed bytes);
 //   - end: the end is written onto that same op only while it reads "sent", never over an end, never a refusal over
 //     sent, and an end with no transactions keeps sent's (recordPoolBuy);
+//   - settle: a reload ends a Solana buy op left at sent from its own txs, each read on both RPCs (src/positions.ts
+//     settleSentBuys over trade.ts txEnd and noted()), any unknown left as it is;
 //   - two: a RESERVED note is freed (the follow's not_landed) only once the lower of both RPCs' finalized heights is past
 //     its last height (../../wallet/src/pool/solana-restore.ts solanaSettleReserved), never on one RPC's word.
 // What each does is held by packages/signpage/test/positions.test.ts (the card's tests and their mutants); a real
@@ -28,10 +31,17 @@ export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const ID = "[\\w$]+";
-// recordPoolBuy's sent put: the op at "sent" under the request's id, with its transaction
-const SENT = new RegExp(`if\\(${ID}===\`sent\`\\)\\{if\\(${ID}\\.length===0\\)return;await ${ID}\\.put\\(\`ops\`,${ID},\\{kind:\`buy\`,stage:${ID},txs:${ID},`);
-// recordedBuy: the sent answer's transactions handed to that write
+// recordPoolBuy's sent put: the op at "sent" under the request's id, with its transaction and each tx's blockhash and
+// last height beside it (device-only), kept only when every tx has them
+const SENT = new RegExp(`if\\(${ID}===\`sent\`\\)\\{if\\(${ID}\\.length===0\\|\\|\`error\`in ${ID}\\)return;let ${ID}=${ID}\\.result\\.txs\\.map\\(${ID}=>${ID}\\(${ID}\\)\\),${ID}=${ID}\\.every\\(${ID}=>${ID}!==null\\)\\?${ID}\\.map\\(\\(${ID},${ID}\\)=>\\(\\{\\.\\.\\.${ID},\\.\\.\\.${ID}\\[${ID}\\]\\}\\)\\):${ID};await ${ID}\\.put\\(\`ops\`,${ID},\\{kind:\`buy\`,stage:${ID},txs:${ID},`);
+// recordedBuy: the sent answer's transactions handed to that write, each with the blockhash and last height its run told
+// (pool-buy.ts sendAt, called with the signature from the signed bytes' own blockhash)
 const ASKED = new RegExp(`${ID}\\.result\\.stage===\`sent\`&&${ID}\\(${ID}\\.result\\.txs\\.map\\(`);
+const AT = new RegExp(`txs:${ID}\\.map\\(${ID}=>\\(\\{\\.\\.\\.${ID},\\.\\.\\.${ID}\\.get\\(${ID}\\.hash\\)\\}\\)\\)\\}\\};for\\(let ${ID} of ${ID}\\)${ID}\\.delete\\(${ID}\\.hash\\)`);
+const TOLD = new RegExp(`${ID}\\.sendAt\\?\\.\\(${ID},${ID}\\(${ID}\\)\\.message\\.blockhash,${ID}\\)`);
+// settleSentBuys: a Solana buy op at sent, every tx with its fields, ended from both RPCs' reads (txEnd), any unknown
+// left, the end written by noted() only while the op still reads sent
+const SETTLE = new RegExp(`if\\(${ID}\\?\\.kind!==\`buy\`\\|\\|${ID}\\.chain!==\`solana\`\\|\\|${ID}\\.stage!==\`sent\`\\|\\|!Array\\.isArray\\(${ID}\\.txs\\)\\|\\|${ID}\\.txs\\.length===0\\)continue;.{0,240}\\{sig:${ID}\\.hash,lvbh:${ID}\\[${ID}\\]\\.lvbh,blockhash:${ID}\\[${ID}\\]\\.blockhash\\}\\)\\)\\);if\\(${ID}\\.some\\(${ID}=>${ID}===\`unknown\`\\)\\)continue;.{0,80}\\?\\.kind!==\`buy\`\\|\\|${ID}\\.stage!==\`sent\`\\?${ID}:\\(${ID}=!0,${ID}\\.reduce\\(`);
 // recordPoolBuy: an op already there is written over only while it is this buy's "sent", and never by a refusal; an
 // end with no transactions keeps sent's
 const END = new RegExp(`${ID}\\.kind===\`buy\`&&${ID}\\.stage===\`sent\`;if\\(${ID}!==void 0&&\\(!${ID}\\|\\|\`error\`in ${ID}\\)\\)return;[^;]*;if\\(${ID}===\`sent\`\\?${ID}:!${ID}\\.has\\(${ID}\\)\\)return;let ${ID}=[^;]*,${ID}=${ID}\\.length===0&&${ID}&&Array\\.isArray\\(${ID}\\.txs\\)\\?${ID}\\.txs:${ID};`);
@@ -40,10 +50,10 @@ const TWO = new RegExp(`BigInt\\(Math\\.min\\(${ID}\\[0\\]\\.height,${ID}\\[1\\]
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
-  return { index, sha384: sha384(js), sent: SENT.test(js), asked: ASKED.test(js), end: END.test(js), two: TWO.test(js) };
+  return { index, sha384: sha384(js), sent: SENT.test(js), asked: ASKED.test(js) && AT.test(js) && TOLD.test(js), end: END.test(js), settle: SETTLE.test(js), two: TWO.test(js) };
 }
 
-/** The verdict on an answer { index, sha384, sent, asked, end, two }. */
+/** The verdict on an answer { index, sha384, sent, asked, end, settle, two }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
@@ -53,6 +63,7 @@ export function judge(a) {
   if (a?.sent !== true) bad("sent: no op is written at sent under the request's id: a buy whose end is not known has no record");
   if (a?.asked !== true) bad("asked: the page asks no op write at the run's sent answer");
   if (a?.end !== true) bad("end: the end is not written onto the sent op alone (an end written over, or sent's txs dropped)");
+  if (a?.settle !== true) bad("settle: no reload ends a sent buy op from its txs on both RPCs: a closed page's buy stays sent");
   if (a?.two !== true) bad("two: a reserved note is freed on one RPC's height, so not_landed is not both RPCs' word");
   if (lines.length === 0) lines.push("ok  a pool buy's op reads sent with its transaction from its send, then its one end, not_landed only on both RPCs' word");
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };

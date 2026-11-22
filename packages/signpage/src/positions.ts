@@ -81,6 +81,7 @@ import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/sr
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { ANSWER_ROOM, pickOps } from "./state.ts";
 import { poolUnits } from "./rules/pool.ts";
+import { noted, txEnd, type LegEnd, type TradeStore } from "./trade.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 
 export type Position = SignpageState["positions"][number];
@@ -522,7 +523,11 @@ export type BuyRecordStore = {
 };
 /** What a pool buy run told and asked, for its records. */
 export type PoolBuyFacts = { token: string; spend: bigint; spendDecimals: number; price: PoolStatePrice | null; createdMs: number; wallet?: string; out?: string; decimals?: number };
-type BuyAnswer = { result: { stage: string; txs: readonly TxRef[] } } | { error: string };
+/** A sent tx's blockhash and the last height the run held it to (pool-buy.ts sendAt), device-only beside its TxRef. */
+export type SentAt = { blockhash: string; lvbh: number };
+type BuyAnswer = { result: { stage: string; txs: readonly (TxRef & Partial<SentAt>)[] } } | { error: string };
+const BLOCKHASH = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const sentAtOf = (t: Partial<SentAt>): SentAt | null => (typeof t.blockhash === "string" && BLOCKHASH.test(t.blockhash) && Number.isSafeInteger(t.lvbh) && t.lvbh! > 0 ? { blockhash: t.blockhash, lvbh: t.lvbh! } : null);
 
 const FINAL = new Set(["filled", "part_filled", "refused", "not_landed"]);
 
@@ -571,8 +576,12 @@ export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBu
   // the end's own txs; an end with none keeps sent's
   const txs = own.length === 0 && open && Array.isArray(had.txs) ? (had.txs as TxRef[]) : own;
   if (stage === "sent") {
-    if (txs.length === 0) return;
-    return void (await store.put("ops", id, { kind: "buy", stage, txs, created_ms: f.createdMs, chain: "solana", token: f.token, ...(usd === null ? {} : { amount_usd: usd }) }));
+    if (txs.length === 0 || "error" in answer) return;
+    // each tx's blockhash and last height beside it, device-only (state.ts opOf sends chain and hash): a reload ends the
+    // op from them (settleSentBuys); one with none keeps only the run's own end
+    const at = answer.result.txs.map((t) => sentAtOf(t));
+    const kept = at.every((x) => x !== null) ? txs.map((t, i) => ({ ...t, ...at[i] })) : txs;
+    return void (await store.put("ops", id, { kind: "buy", stage, txs: kept, created_ms: f.createdMs, chain: "solana", token: f.token, ...(usd === null ? {} : { amount_usd: usd }) }));
   }
   // a filled buy's own figures (kit 1.10 OpDetail, card portfolio-shows-pool-trades): the token W received, read back on
   // both RPCs, and the SOL its request spent at the venue; with no `out` told, src/trade-fill.ts reads both from the
@@ -590,6 +599,39 @@ export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBu
     if (had?.mint === rec.mint && had.received === rec.received) delete all[f.wallet!];
     return all;
   });
+}
+
+/**
+ * A Solana pool buy's op a closed or reloaded page left at "sent" (card signpage-sent-end-recorded): its end read from
+ * its own txs, each on both RPCs by trade.ts txEnd (the kit's readSolanaTxEnd: filled or failed only on both reads,
+ * not_landed only once both read its blockhash past its last height), and written by trade.ts's noted() rule (every tx
+ * filled: filled; some: part_filled; else not_landed). Any tx unknown leaves the op as it is, read again at the next
+ * state read. Only ops of kind buy, chain solana, at "sent", every tx with its blockhash and last height (recordPoolBuy);
+ * an op from before them, another chain's (an EVM buy's sent op has no tx), or one `running` names (this page's own
+ * run, whose end is its own) is never read. Written in one update that writes only while the op is still "sent", so a
+ * run's own end that came first stays. A filled end here has no units: src/trade-fill.ts reads them from its tx.
+ */
+export async function settleSentBuys(store: Pick<TradeStore, "get" | "keys" | "update">, providers: readonly [SolanaRpc, SolanaRpc], running: (id: string) => boolean = () => false): Promise<string[]> {
+  const ended: string[] = [];
+  for (const k of await store.keys("ops")) {
+    if (running(k)) continue;
+    const rec = (await store.get("ops", k)) as { kind?: unknown; chain?: unknown; stage?: unknown; txs?: unknown } | undefined;
+    if (rec?.kind !== "buy" || rec.chain !== "solana" || rec.stage !== "sent" || !Array.isArray(rec.txs) || rec.txs.length === 0) continue;
+    const txs = rec.txs as (Partial<TxRef> & Partial<SentAt>)[];
+    const at = txs.map((t) => (t !== null && typeof t === "object" && typeof t.hash === "string" ? sentAtOf(t) : null));
+    if (at.some((x) => x === null)) continue;
+    const ends = await Promise.all(txs.map((t, i) => txEnd(providers, { sig: t.hash!, lvbh: at[i]!.lvbh, blockhash: at[i]!.blockhash })));
+    if (ends.some((e) => e === "unknown")) continue;
+    let wrote = false;
+    await store.update("ops", k, (v) => {
+      const r = v as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
+      if (r?.kind !== "buy" || r.stage !== "sent") return v;
+      wrote = true;
+      return txs.reduce<object>((o, t, i) => noted(o as { stage?: unknown; txs?: unknown }, t.hash!, ends[i] as LegEnd), r);
+    });
+    if (wrote) ended.push(k);
+  }
+  return ended;
 }
 
 export type PositionsCache = {
