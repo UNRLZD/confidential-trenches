@@ -51,7 +51,7 @@ const ROUND = "!l&&!ne&&V[0]&&V[1])try{e.sendAt?.(R,Yo(i).message.blockhash,a,{i
 const END = "a=i!==void 0&&i.kind===`buy`&&i.stage===`sent`;if(i!==void 0&&(!a||`error`in r))return;let o=n.price===null?null:QQ(n.spend,n.spendDecimals,n.price),s=`error`in r?`refused`:r.result.stage;if(s===`sent`?a:!e_e.has(s))return;let c=new Set(a&&Array.isArray(i.txs)?i.txs.flatMap(e=>e?.leg===!0&&typeof e.hash==`string`?[e.hash]:[]):[]),l=`error`in r?[]:r.result.txs.map(e=>({chain:e.chain,hash:e.hash,...s===`sent`||c.has(e.hash)?{leg:!0}:{}})),u=l.length===0&&a&&Array.isArray(i.txs)?i.txs:l;";
 const FILL_LEGS = "let n=i.txs.filter(e=>e.leg===!0),a=i.kind===`buy`?(n.length>0?n:i.txs.slice(0,1)).map(e=>e.hash):i.txs.map(e=>e.hash)";
 const SETTLE = "if(s?.kind!==`buy`||s.chain!==`solana`||s.stage!==`sent`||!Array.isArray(s.txs)||s.txs.length===0)continue;let c=s.txs,l=c.map(e=>typeof e==`object`&&e&&typeof e.hash==`string`?$Q(e):null);if(l.some(e=>e===null))continue;let u=a(),d=r.reads?.get(o);if(d!==void 0&&u-d.first>=r_e&&u-d.last<6e4||r.locks&&await r.locks.request(qU(o),{mode:`exclusive`,ifAvailable:!0},async e=>e===null))continue;r.reads?.set(o,{first:d?.first??u,last:u});let f=await Promise.all(c.map((e,n)=>nW(t,{sig:e.hash,lvbh:l[n].lvbh,blockhash:l[n].blockhash})));if(f.some(e=>e===`unknown`))continue;let p=await Promise.all(f.map((e,t)=>i_e(e,l[t].note,n).catch(()=>null)));if(p.some(e=>e===null))continue;let m=sG(p),h=!1;await e.update(`ops`,o,e=>{let t=e;return t?.kind!==`buy`||t.stage!==`sent`?e:(h=!0,{...c.reduce((e,t,n)=>iW(e,t.hash,f[n]),t),stage:m})})";
-const LEG_END = "async function i_e(e,t,n){if(e===`not_landed`)return`not_landed`;if(e===`filled`)return aG(await n.note(t.id),t.attempt,()=>n.owner(t));let r=await Promise.all([t.id,...t.pieces].map(async e=>(await n.note(e))?.state));return r.some(e=>e===`SPENT`)?`not_landed`:r.some(e=>e===void 0||e===`RESERVED`)?null:`refused`}";
+const LEG_END = "async function i_e(e,t,n){if(e===`not_landed`){let e=await n.note(t.id);return e===void 0?`not_landed`:aG(e,t.attempt,()=>n.owner(t))}if(e===`filled`)return aG(await n.note(t.id),t.attempt,()=>n.owner(t));let r=await Promise.all([t.id,...t.pieces].map(async e=>(await n.note(e))?.state));return r.some(e=>e===`SPENT`)?`not_landed`:r.some(e=>e===void 0||e===`RESERVED`)?null:`refused`}";
 const PAST = "var r_e=uW+13e3";
 const LIFE = "var uW=9e4,dW=1";
 const LEGS = "function sG(e){let t=e.filter(e=>e!==null);return t.length===0?null:t.length===e.length&&t.every(e=>e===`filled`)?`filled`:t.includes(`sent`)||t.includes(`signed`)?`sent`:t.some(e=>e===`filled`||e===`part_filled`)?`part_filled`:t.every(e=>e===`refused`)?`refused`:`not_landed`}";
@@ -105,6 +105,10 @@ test("planted near misses: each mark's shape one step off is no mark", () => {
     // review 5: a landed leg filled with no owner read, a failed one's spent note read refused, a reserved one ended
     ["marks", "LEG_END", LEG_END.replace("return aG(await n.note(t.id),t.attempt,()=>n.owner(t))", "return`filled`")],
     ["marks", "LEG_END", LEG_END.replace("r.some(e=>e===`SPENT`)?`not_landed`:", "")],
+    // past its blockhash on both: the expiry alone decides (re-review Q2 d), or a missing note record waits for good
+    ["marks", "LEG_END", LEG_END.replace("{let e=await n.note(t.id);return e===void 0?`not_landed`:aG(e,t.attempt,()=>n.owner(t))}", "return`not_landed`;")],
+    ["marks", "LEG_END", LEG_END.replace("return e===void 0?`not_landed`:aG(e,", "return aG(e,")],
+    ["marks", "LEG_END", LEG_END.replace(":aG(e,t.attempt,()=>n.owner(t))}if", ":Zz(e,t.attempt,()=>n.owner(t))}if")],
     ["marks", "LEG_END", LEG_END.replace("[t.id,...t.pieces]", "[t.id]")],
     ["marks", "LEG_END", LEG_END.replace("r.some(e=>e===void 0||e===`RESERVED`)?null:`refused`", "`refused`")],
     // the higher height: one RPC's word frees the note

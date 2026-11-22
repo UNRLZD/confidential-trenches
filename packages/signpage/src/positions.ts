@@ -647,9 +647,14 @@ export type SentReads = Map<string, { first: number; last: number }>;
 /** A leg's end as the run would answer it, from its tx's end on both RPCs and its notes' marks (null: not known yet,
  *  the op left "sent"): failed on chain is refused, unless the note or a piece's note reads spent (pool-buy.ts: a spend
  *  found then is not this buy's, not_landed); landed is filled only once the note is SPENT and its spend read as this
- *  attempt's (pool-buy.ts lateBuyEnd, the page's follow's rule), another's not_landed; past its blockhash, not_landed. */
+ *  attempt's (pool-buy.ts lateBuyEnd, the page's follow's rule), another's not_landed; past its blockhash on both, by its
+ *  note as the follow ends it (re-review Q2 d of 655a5c742: lateBuyEnd, so SPENT as this attempt's is filled and RESERVED
+ *  by it waits), and with no note record not_landed, so the op never stays sent for want of one. */
 async function legEnd(end: LegEnd, n: SentNote, marks: SentMarks): Promise<"filled" | "refused" | "not_landed" | null> {
-  if (end === "not_landed") return "not_landed";
+  if (end === "not_landed") {
+    const note = await marks.note(n.id);
+    return note === undefined ? "not_landed" : lateBuyEnd(note, n.attempt, () => marks.owner(n));
+  }
   if (end === "filled") return lateBuyEnd(await marks.note(n.id), n.attempt, () => marks.owner(n));
   const states = await Promise.all([n.id, ...n.pieces].map(async (id) => (await marks.note(id))?.state));
   if (states.some((s) => s === "SPENT")) return "not_landed";

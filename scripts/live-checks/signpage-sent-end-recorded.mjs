@@ -19,8 +19,8 @@
 //     pool-buy.ts legsStage;
 //   - lock: the page holds a buy's trade lock (trade.ts tradeLock) while its run lives, and the settle leaves an op whose
 //     lock another tab holds;
-//   - marks: each leg's end read as the run reads it: landed, by pool-buy.ts lateBuyEnd over the note's mark and whose
-//     spend it is; failed on chain, not_landed when the note or a piece's note reads SPENT, not known while one is
+//   - marks: each leg's end read as the run reads it: landed, and past its blockhash on both with a note record, by
+//     pool-buy.ts lateBuyEnd over the note's mark and whose spend it is (none: not_landed); failed on chain, not_landed when the note or a piece's note reads SPENT, not known while one is
 //     RESERVED, else refused;
 //   - two: a RESERVED note is freed (the follow's not_landed) only once the lower of both RPCs' finalized heights is past
 //     its last height (../../wallet/src/pool/solana-restore.ts solanaSettleReserved), never on one RPC's word.
@@ -71,8 +71,9 @@ const LEGS = (f) => new RegExp(`function ${esc(f)}\\(${ID}\\)\\{let ${ID}=${ID}\
 // trade.ts tradeLock, and the page's hold of it for the run (released at its records, or at once with no run)
 const TRADE_LOCK = (f) => new RegExp(`(?:^|[^\\w$])${esc(f)}=${ID}=>\`ct-wallet/trade/\\$\\{${ID}\\}\``);
 const HOLD = (f) => new RegExp(`${ID}&&${ID}\\.request\\(${esc(f)}\\(${ID}\\.id\\),\\{mode:\`exclusive\`\\},\\(\\)=>${ID}\\)\\.catch\\(\\(\\)=>\\{\\}\\)`);
-// legEnd: the run's marks (lateBuyEnd for a landed leg; a failed one's notes SPENT, RESERVED or not read)
-const LEG_END = (f) => new RegExp(`async function ${esc(f)}\\((${ID}),(${ID}),(${ID})\\)\\{if\\(\\1===\`not_landed\`\\)return\`not_landed\`;if\\(\\1===\`filled\`\\)return ${ID}\\(await \\3\\.note\\(\\2\\.id\\),\\2\\.attempt,\\(\\)=>\\3\\.owner\\(\\2\\)\\);let (${ID})=await Promise\\.all\\(\\[\\2\\.id,\\.\\.\\.\\2\\.pieces\\]\\.map\\(async ${ID}=>\\(await \\3\\.note\\(${ID}\\)\\)\\?\\.state\\)\\);return \\4\\.some\\(${ID}=>${ID}===\`SPENT\`\\)\\?\`not_landed\`:\\4\\.some\\(${ID}=>${ID}===void 0\\|\\|${ID}===\`RESERVED\`\\)\\?null:\`refused\`\\}`);
+// legEnd: the run's marks (lateBuyEnd for a landed leg, and for one past its blockhash on both whose note has a record,
+// the same function: re-review Q2 d; a failed one's notes SPENT, RESERVED or not read)
+const LEG_END = (f) => new RegExp(`async function ${esc(f)}\\((${ID}),(${ID}),(${ID})\\)\\{if\\(\\1===\`not_landed\`\\)\\{let (${ID})=await \\3\\.note\\(\\2\\.id\\);return \\4===void 0\\?\`not_landed\`:(${ID})\\(\\4,\\2\\.attempt,\\(\\)=>\\3\\.owner\\(\\2\\)\\)\\}if\\(\\1===\`filled\`\\)return \\5\\(await \\3\\.note\\(\\2\\.id\\),\\2\\.attempt,\\(\\)=>\\3\\.owner\\(\\2\\)\\);let (${ID})=await Promise\\.all\\(\\[\\2\\.id,\\.\\.\\.\\2\\.pieces\\]\\.map\\(async ${ID}=>\\(await \\3\\.note\\(${ID}\\)\\)\\?\\.state\\)\\);return \\6\\.some\\(${ID}=>${ID}===\`SPENT\`\\)\\?\`not_landed\`:\\6\\.some\\(${ID}=>${ID}===void 0\\|\\|${ID}===\`RESERVED\`\\)\\?null:\`refused\`\\}`);
 // solanaSettleReserved: the lower of both RPCs' finalized heights
 const TWO = new RegExp(`BigInt\\(Math\\.min\\(${ID}\\[0\\]\\.height,${ID}\\[1\\]\\.height\\)\\)`);
 

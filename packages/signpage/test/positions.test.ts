@@ -1412,6 +1412,29 @@ test("card signpage-sent-end-recorded (review 5): a reload reads the notes' mark
   }
 });
 
+// The re-review of 655a5c742, Q2 (d): a tx both RPCs read past its blockhash is ended by its note as the page's own
+// follow ends it (pool-buy.ts lateBuyEnd), never not_landed on the expiry alone: its note SPENT as this attempt's,
+// filled (the bytes landed under another name the RPCs did not show); SPENT as another's, not_landed; RESERVED by this
+// attempt, not known yet (sent, read at the next pass); any other mark, not_landed; no note record, not_landed, so the
+// op never sticks.
+test("card signpage-sent-end-recorded (re-review Q2 d): past its blockhash on both, the note decides as the page's follow does: spent as mine, filled; another's, not_landed; reserved by this attempt, sent; else or no record, not_landed", async () => {
+  const past = [txReads({}, 1_200), txReads({}, 1_200)] as never;
+  const otherAttempt: SentMarks = { note: async () => ({ state: "RESERVED", attempt: "a0" }), owner: async () => ({ mine: "x", accounts: [] }) };
+  const cases: [string, SentMarks, string][] = [
+    ["its note spent as this attempt's", marksOf(notesAt("SPENT", "E1")), "filled"],
+    ["its note spent as another's", marksOf(notesAt("SPENT", "E1"), true), "not_landed"],
+    ["its note reserved by this attempt", marksOf(notesAt("RESERVED", "E1")), "sent"],
+    ["its note reserved by another attempt", otherAttempt, "not_landed"],
+    ["its note unspent", marksOf(notesAt("UNSPENT", "E1")), "not_landed"],
+    ["no note record", marksOf({}), "not_landed"],
+  ];
+  for (const [what, marks, stage] of cases) {
+    const s = opsStore({ b: sentOp(["E1"]) });
+    await settleSentBuys(s, past, marks);
+    assert.equal((s.m.get("b") as { stage: string }).stage, stage, what);
+  }
+});
+
 test("card signpage-sent-end-recorded part 1: the settle reads only a Solana buy op at sent with its blockhash fields: an op from before them, an EVM buy's sent op with no tx, a sell, an end, or this page's own run is left as it is", async () => {
   const both = [txReads({ S1: "ok" }, 900), txReads({ S1: "ok" }, 900)] as never;
   const old = sentOp(["S1"], false);
