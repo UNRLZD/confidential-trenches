@@ -663,6 +663,15 @@ export const BACK_AT_ONCE = 4;
  *  (freshRuns): kept between ticks too, a coin opened alone filled a tick late (8.8 s against 5.8). So kept, the 12
  *  coins' worst answer stood 120 blocks and 11 s behind and the slowest tape filled at 42.0 s.] */
 export const FRESH_ROOM = 0.6;
+/** Each chain's read back share: `atOnce` read backs at once (backTurn), `room` of each paced bucket kept for the ticks
+ *  while one runs (draw). Robinhood's is BACK_AT_ONCE and FRESH_ROOM, sized above from its 12 coins. Base keeps none:
+ *  its read backs each ask base-rpc.publicnode.com for the whole day at once (locate) beside four providers, and at
+ *  Robinhood's share swaps-base-spread.test.ts's 12 coins went past its 45 s bound (3 still filling at 45 s at
+ *  780b502a9, with the cap alone or the room alone too), while with none they fill inside it, as they did before. */
+export const READ_BACK_SHARE: Readonly<Record<EvmChain, { atOnce: number; room: number }>> = {
+  base: { atOnce: Number.POSITIVE_INFINITY, room: 0 },
+  robinhood: { atOnce: BACK_AT_ONCE, room: FRESH_ROOM },
+};
 /** How long a tape's locate may wait out its provider's holds before the steps read the day (readBack). [design: 30 s:
  *  a dozen tapes' locates refused for our own rate are each sent within a few holds, and a provider refusing longer
  *  leaves the tape to the steps inside the live checks' 45 s] */
@@ -1601,9 +1610,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   function draw(url: string, calls: number): number {
     const l = lanes.getStore();
     const p = holds.paceOf(url);
-    if (freshRuns > 0 && p !== undefined && l?.fg !== true && l?.fresh !== true) {
-      const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst * (1 - FRESH_ROOM));
-      const short = p.burst * FRESH_ROOM + units - holds.room(url) * p.burst;
+    const room = READ_BACK_SHARE[chain].room;
+    if (room > 0 && freshRuns > 0 && p !== undefined && l?.fg !== true && l?.fresh !== true) {
+      const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst * (1 - room));
+      const short = p.burst * room + units - holds.room(url) * p.burst;
       if (short > 0) return Math.max(1, Math.ceil((short * 1000) / p.perS));
     }
     return holds.take(url, calls, !fgNow());
@@ -3454,7 +3464,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   let backsOut = 0;
   const backsWaiting: (() => void)[] = [];
   async function backTurn(run: () => Promise<void>): Promise<void> {
-    if (backsOut >= BACK_AT_ONCE) await new Promise<void>((go) => backsWaiting.push(go));
+    if (backsOut >= READ_BACK_SHARE[chain].atOnce) await new Promise<void>((go) => backsWaiting.push(go));
     else backsOut++;
     try {
       await run();
