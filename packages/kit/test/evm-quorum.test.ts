@@ -27,14 +27,17 @@ const call = (n: number): Call[] => Array.from({ length: n }, (_, i) => ({ metho
 
 /** Base's four providers on the test clock (evmProviders over evmJsonRpc, so each post takes its turn at its
  *  provider's pace): each post answered `ms(url)` after it leaves the device with `answer(url)` as each call's result.
- *  Every post the fetch sees is logged: its provider, its time and its calls. */
-function providers(ms: (url: string) => number, answer: (url: string) => string = () => "0x1") {
+ *  Every post the fetch sees is logged: its provider, its time and its calls. An answer of LOST is no connection, a
+ *  fetch's own TypeError with no response. */
+const LOST = "lost";
+function providers(ms: (url: string) => number, answer: (url: string) => string | null = () => "0x1") {
   const log: { url: string; at: number; calls: number }[] = [];
   const fetchFn = (async (url: string | URL, init?: RequestInit) => {
     const u = String(url);
     const body = JSON.parse(String(init?.body)) as { id: number }[];
     log.push({ url: u, at: performance.now(), calls: body.length });
     await new Promise((go) => setTimeout(go, ms(u)));
+    if (answer(u) === LOST) throw new TypeError("fetch failed");
     return new Response(JSON.stringify(body.map((c) => ({ jsonrpc: "2.0", id: c.id, result: answer(u) }))), { status: 200, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   const rpcs = Q.evmProviders(v.providers!, fetchFn);
@@ -202,4 +205,54 @@ test("Q5 Base's four providers end to end, publicnode answering in 1,400 ms: eac
   assert.ok(most <= 12, `mainnet.base.org was sent ${most} calls in one second`);
   assert.equal(p.posts(POCKET, t0), 0, "Pocket was asked: a round went past its three");
   evmPaceReset();
+}));
+
+/** A round of Base's four providers whose third answers `third` 400 ms after it is asked, after the first two agree at
+ *  300 ms, asked as a quote's reads ask (askAt, over ask): the third's posts from the round's start, at its end and 5 s
+ *  later. A not-yet answer is asked again 0.25, 0.5 and 0.75 s on, a lost connection 0.5, 1 and 1.5 s on, while agreeing
+ *  has no spare for the request, and a round already agreed has none. */
+async function lateThird(third: string | null): Promise<{ atEnd: number; later: number }> {
+  Q.evmSpeedReset();
+  evmPaceReset();
+  let late = false;
+  const p = providers((u) => (late && u === BASE_ORG ? 400 : 300), (u) => (late && u === BASE_ORG ? third : "0x1"));
+  await warm(p, call(3));
+  late = true;
+  const list = [PUBLICNODE, BLASTAPI, BASE_ORG, POCKET].map((u) => p.of.get(u)!);
+  const askAt = (Q as unknown as Record<string, unknown>).evmAskAt as ((rpc: Rpc, calls: Call[], gate?: Gate) => Promise<readonly unknown[]>) | undefined;
+  assert.ok(askAt !== undefined, "no evmAskAt to ask through");
+  const t0 = performance.now();
+  await (Q.evmAgreeing as unknown as (...a: unknown[]) => Promise<unknown>)(
+    list,
+    (rpc: Rpc, _k: number, gate: Gate) => askAt!(rpc, call(3), gate).then((a) => JSON.stringify(a)),
+    (a: string, b: string) => a === b,
+    () => {
+      throw new Error("differ");
+    },
+    true,
+    undefined,
+    true,
+    () => false,
+    undefined,
+    roomOf?.(call(3)),
+  );
+  const atEnd = p.posts(BASE_ORG, t0);
+  await new Promise((go) => setTimeout(go, 5_000));
+  const later = p.posts(BASE_ORG, t0);
+  evmPaceReset();
+  return { atEnd, later };
+}
+
+// the recorded PONS warm tap (test/evm-warm-tap-calls.test.ts): robinhood.rpc.blxrbdn.com, the cold quote's third,
+// answered for a block it did not hold yet after the round was agreed and was asked again after the quote had ended
+test("Q6 a round won while its third waits to ask again (it answered for a block it does not hold yet): the third is never asked again after the round is agreed", () => onTestClock(async () => {
+  const { atEnd, later } = await lateThird(null);
+  assert.equal(atEnd, 1, "the third was not asked at once");
+  assert.equal(later, 1, "the third was asked again after its round was agreed");
+}));
+
+test("Q6b a round won while its third waits to ask again (its post made no connection): the third is never asked again after the round is agreed", () => onTestClock(async () => {
+  const { atEnd, later } = await lateThird(LOST);
+  assert.equal(atEnd, 1, "the third was not asked at once");
+  assert.equal(later, 1, "the third was asked again after its round was agreed");
 }));

@@ -1194,6 +1194,7 @@ function agreeing<T>(
         spare: () => !done && started < list.length,
         down: () => void down?.add(list[k]!),
         until: stops[k]!.signal,
+        done: () => done,
       };
       one(list[k]!, k, gate).then(
         (v) => {
@@ -1254,15 +1255,20 @@ function agreeing<T>(
 
 /** agreeing, for the tests of its hedges (test/evm-hedge-clock.test.ts). Not in the index. */
 export const evmAgreeing = agreeing;
+/** askAt, for the quorum's tests (test/evm-quorum.test.ts). Not in the index. */
+export const evmAskAt = (rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Promise<readonly unknown[]> => askAt(rpc, calls, gate);
 export type EvmGated = Gated;
 
 /** A request's hooks in its provider's gate (agreeing's `moving`): `sent` as it leaves the gate, and `moved`, read as it
  *  would leave: true, it is not sent (MOVED). `spare`: agreeing has a provider left to ask in this one's place (ask).
  *  `down`: the provider answered HTTP 5xx (gated), held for the rest of the round (agreeing's `down`). `wire`: the post
  *  left the device (evmJsonRpc, past its gate and its pace), with its calls: its hedge clock starts there. */
-type Gated = { readonly sent: () => void; readonly moved: () => boolean; readonly spare?: () => boolean; readonly down?: () => void; readonly wire?: (calls: readonly EvmRpcCall[]) => void; readonly until?: AbortSignal };
+type Gated = { readonly sent: () => void; readonly moved: () => boolean; readonly spare?: () => boolean; readonly down?: () => void; readonly wire?: (calls: readonly EvmRpcCall[]) => void; readonly until?: AbortSignal; readonly done?: () => boolean };
 // `until`: aborted (DROPPED) where the request's round is done before its post left the device, so its wait at its
 // provider's pace ends there (agreeing's drop); a post already sent is never cut by it
+// `done`: the request's round is agreed (or lost): ask and askAt never ask its provider again for it (the recorded PONS
+// warm tap, test/evm-warm-tap-calls.test.ts: robinhood.rpc.blxrbdn.com, the cold quote's third, answered for a block it
+// did not hold yet after the round was agreed and was asked again 0.25, 0.5 and 0.75 s on, after the quote had ended)
 const MOVED = new Error("moved to the next provider before it was sent");
 const DROPPED = new Error("dropped unsent: its round was already agreed");
 /** One provider asked once for `calls`, with the time its post left the device: `wire` resolves with the post's kind
@@ -1324,7 +1330,7 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Pro
     } catch (e) {
       // moved, dropped, or the quote's deadline passed in the gate (gated): nothing was sent
       if (e === MOVED || e === DROPPED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;
-      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || gate?.spare?.() === true) {
+      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || gate?.spare?.() === true || gate?.done?.() === true) {
         throw new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
       }
       await new Promise((r) => setTimeout(r, 500 * (i + 1)));
@@ -1345,7 +1351,7 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Pro
 async function askAt(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Promise<readonly unknown[]> {
   for (let i = 0; ; i++) {
     const out = await ask(rpc, calls, gate);
-    if (!out.some(notYet) || i === 3) return out;
+    if (!out.some(notYet) || i === 3 || gate?.done?.() === true) return out;
     if (gate?.spare?.() === true) throw new EvmQuoteError("rpc_error", "a provider does not hold the block yet");
     await new Promise((r) => setTimeout(r, FRESH_RETRY_MS * (i + 1)));
   }

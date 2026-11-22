@@ -271,7 +271,9 @@ export const MUTANTS = [
   // review of 2afa8b6 (fold 8): every held pool and X priced at the user's amount within fixed-order bounds that never
   // refuse; a hooked route counts at the lower of its hook replaced and as it is; unlisted v4 middles of a device quote
   // build; scans as ORs within a provider's span; 429s asked again; each provider at most its limit at once
-  [QUOTE, "    if (!out.some(notYet) || i === 3) return out;", "    return out;", R, "R10 "],
+  [QUOTE, "    if (!out.some(notYet) || i === 3 || gate?.done?.() === true) return out;", "    return out;", R, "R10 "],
+  // card evm-warm-tap-ends-inside-two-seconds: a seat whose round is agreed is asked again for a not-yet answer (Q6)
+  [QUOTE, "    if (!out.some(notYet) || i === 3 || gate?.done?.() === true) return out;", "    if (!out.some(notYet) || i === 3) return out;", "test/evm-quorum.test.ts", "Q6 "],
   [QUOTE, "for (const { k, id } of ordered) {", "for (const { k, id } of [] as typeof ordered) {", R, "N1a "],
   [QUOTE, "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(", "    if (false) f.quotes.push(", R, "A1 "],
   // (no mutant reads `found` for `held` here: a buy's pool the PoolManager does not hold reads a price of 0, which the
@@ -510,9 +512,11 @@ export const MUTANTS = [
   [QUOTE, "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]))", "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [p.key]))", R, "S3c "],
   [QUOTE, "hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)]", "hops: [hopTo(x, via.key), hopTo(lower(token), p.key)]", R, "T5 "],
   [QUOTE, "    if (res.status === 429) {", "    if (false) {", R, "T7 "],
-  [QUOTE, "      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || gate?.spare?.() === true) {", "      if (true) {", R, "T7 "],
+  [QUOTE, "      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || gate?.spare?.() === true || gate?.done?.() === true) {", "      if (true) {", R, "T7 "],
   // card evm-unreachable-moves-on: a request that made no connection goes to the next at once while one is left
-  [QUOTE, " || i === 3 || gate?.spare?.() === true) {", " || i === 3 || (e instanceof RateLimited && gate?.spare?.() === true)) {", R, "FU1 "],
+  [QUOTE, " || i === 3 || gate?.spare?.() === true || gate?.done?.() === true) {", " || i === 3 || (e instanceof RateLimited && gate?.spare?.() === true) || gate?.done?.() === true) {", R, "FU1 "],
+  // card evm-warm-tap-ends-inside-two-seconds: a seat whose round is agreed is asked again after a lost connection (Q6b)
+  [QUOTE, " || i === 3 || gate?.spare?.() === true || gate?.done?.() === true) {", " || i === 3 || gate?.spare?.() === true) {", "test/evm-quorum.test.ts", "Q6b "],
   [QUOTE, "      if (i < 3 && Array.isArray(out) && out.some(limited)) throw", "      if (false) throw", R, "T7 "],
   // card evm-lag-answer-read-again: a not-yet answer goes to the next provider at once while one is left (LG5); the last
   // provider left is asked again (LG3)
