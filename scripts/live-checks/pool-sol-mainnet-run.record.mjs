@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // The run record of card pool-sol-mainnet-run, from chain reads alone: no signature is typed by hand. Given the run's
 // start time (and its end, else now), it lists every finalized signature of the Solana pool account in that window on
-// the two RPCs the money gate reads (money-gate.mjs RPCS: on mainnet api.mainnet-beta.solana.com and
-// public.rpc.solanavibestation.com; publicnode keeps no signature history for the pool), reads each on both, and sorts
-// the run's steps by what the pool instruction is and who signed it:
+// the RPCs the money gate reads (money-gate.mjs RPCS, imported: on mainnet api.mainnet-beta.solana.com,
+// public.rpc.solanavibestation.com and solana-rpc.publicnode.com), reads each on them, and sorts the run's steps by what
+// the pool instruction is and who signed it:
 //   - tag 1 signed by U (a deposit wallet): "deposit"; U's own incoming payments in the window: "U funded" (the NEAR
 //     Intents delivery, or a plain send);
 //   - tag 3: "buy on pump.fun's curve" or "buy on PumpSwap", by the venue program the pool invokes; its W is the signer
@@ -12,13 +12,15 @@
 //   - tag 2: "exit release"; its W's own payment out: "exit to <address>";
 //   - a W's own payment that runs a venue and lowers W's tokens: "sell, no deposit back"; every other payment a W signed
 //     in the window: "teardown" (closing W's emptied accounts, which may run the venue to close its volume account).
-// Each must read finalized with no error and in the same slot on both RPCs; the signature lists must match. A buy
+// Each must read finalized with no error and in the same slot on two operators, and alike on every RPC that holds it; a
+// signature counts when two operators list it, and one only one lists fails (a host that keeps no history that far, as
+// PublicNode's day or so, lists none and is not counted; a host with no answer is named and left out). A buy
 // or sell carries its chain times; tap to filled is the trade box's own figure ("Filled 7.7s"), given with --filled.
 //   node scripts/live-checks/pool-sol-mainnet-run.record.mjs --since <ISO> [--until <ISO>] [--cluster mainnet|devnet]
 //     [--u <address,...>] [--filled buy1=7.7,sell1=5.2,...] [--out <file.md>] [--record <answers.json>]
 //     --u adds deposit wallets the window does not show (U's deposit is found by its tag 1 signer otherwise).
 //     --out writes the record (default: print it); --record writes every RPC answer read.
-//   PASS exit 0 (every step read alike on both), FAIL exit 1, error exit 2.
+//   PASS exit 0 (every step read alike on two operators), FAIL exit 1, error exit 2.
 // Runs: once, the run record's tool, run by hand right after the owner's run; it reads no host
 //   INCONCLUSIVE exit 3: a provider gave no answer after five reads (provider-answer.mjs names why).
 import "../net-window.mjs";
@@ -27,6 +29,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { operatorOf, RPCS } from "../ci/money-gate.mjs";
 import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 // @noble/curves from the helper's own dependencies, as pool-sol-deploy.mjs takes it (a static name, read by check:imports)
@@ -37,14 +40,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MAINNET = JSON.parse(readFileSync(path.join(HERE, "../../contracts/pool-solana/deployments/mainnet.json"), "utf8"));
 const DEVNET = JSON.parse(readFileSync(path.join(HERE, "pool-sol-deploy.devnet.json"), "utf8"));
 export const KEY = "pool-sol-mainnet-run";
-/** The money gate's two Solana RPCs per cluster (scripts/ci/money-gate.mjs RPCS; the test holds them equal), written
- *  here since a live check may not import a module that builds its own JSON-RPC request. */
-export const GATE_RPCS = Object.freeze({
-  solana: ["https://api.mainnet-beta.solana.com", "https://public.rpc.solanavibestation.com"],
-  "solana-devnet": ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"],
-});
+/** The money gate's Solana RPCs per cluster: its own list, imported, so the two never drift (the test holds them one). */
+export const GATE_RPCS = Object.freeze({ solana: RPCS.solana, "solana-devnet": RPCS["solana-devnet"] });
 /** Per cluster: the pinned program and pool, the helper's fee payer (packages/wallet/src/pool/solana.ts SOL_POOLS, the
- *  one GET /v1/pool/fee names), the record's chain name and the money gate's two RPCs. */
+ *  one GET /v1/pool/fee names), the record's chain name and the money gate's RPCs. */
 export const CLUSTERS = Object.freeze({
   mainnet: { program: MAINNET.program_id, pool: MAINNET.pool, feePayer: "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU", chain: "solana", rpcs: GATE_RPCS.solana },
   devnet: { program: DEVNET.program_id, pool: DEVNET.pool, feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb", chain: "solana-devnet", rpcs: GATE_RPCS["solana-devnet"] },
@@ -109,6 +108,21 @@ export async function answer(fetchFn, url, method, params, sleep) {
     await sleep(1000 * (i + 1));
   }
 }
+/** One read on every host of `urls`: { answers: [{ url, result }] of the hosts that answered, none: a line per host
+ *  that gave no answer, left out }. Fewer than two operators answering: NoAnswer (INCONCLUSIVE); a JSON-RPC error
+ *  throws, as answer's does. */
+export async function onHosts(fetchFn, chain, urls, method, params, sleep) {
+  const got = await Promise.allSettled(urls.map((url) => answer(fetchFn, url, method, params, sleep)));
+  const answers = [];
+  const none = [];
+  for (const [i, g] of got.entries()) {
+    if (g.status === "fulfilled") answers.push({ url: urls[i], result: g.value });
+    else if (g.reason instanceof NoAnswer) none.push(g.reason.message);
+    else throw g.reason;
+  }
+  if (new Set(answers.map((a) => operatorOf(chain, a.url))).size < 2) throw new NoAnswer(`${method}: fewer than two operators answered (${none.join("; ")})`);
+  return { answers, none };
+}
 /** A fetch that keeps every answer it reads (url, method, params, status, body) for a recorded answers file. */
 export function recorder(fetchFn = fetch) {
   const answers = [];
@@ -153,7 +167,7 @@ export function facts(tx, program) {
   return { signers, tag, venue, to: transfer?.accounts[1] ?? null, tokens: sold, slot: tx.slot, time: tx.blockTime, err: tx.meta.err };
 }
 
-/** The run in the window, read on both RPCs: { steps, lines (ok/FAIL), ok }. */
+/** The run in the window, read on the gate's RPCs: { steps, lines (ok/FAIL, and a note per host left out), ok }. */
 export async function findRun({ cluster = "mainnet", since, until, u = [], fetchFn = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), rpcs }) {
   const c = CLUSTERS[cluster];
   if (!c) throw new Error(`no cluster ${cluster}`);
@@ -162,20 +176,41 @@ export async function findRun({ cluster = "mainnet", since, until, u = [], fetch
   const say = (ok, text) => lines.push(`${ok ? "ok  " : "FAIL"} ${text}`);
   const s = Math.floor(since / 1000);
   const e = Math.floor(until / 1000);
-  /** The signatures of `address` both RPCs list, and a FAIL line for any only one lists. */
+  const left = (method, none) => none.forEach((n) => lines.push(`note ${method}: ${n}, left out`));
+  /** The signatures of `address` two operators list, and a FAIL line for any only one lists. */
   const listed = async (address, what) => {
-    const [a, b] = await Promise.all(urls.map((url) => signatures(fetchFn, url, address, s, e, sleep)));
-    const sa = new Set(a.map((x) => x.signature));
-    const sb = new Set(b.map((x) => x.signature));
-    const one = [...sa].filter((x) => !sb.has(x)).concat([...sb].filter((x) => !sa.has(x)));
-    say(one.length === 0, `${what}: ${sa.size} / ${sb.size} signatures in the window on the two RPCs${one.length ? `, on one only: ${one.join(" ")}` : ""}`);
-    return a.filter((x) => sb.has(x.signature)).map((x) => x.signature);
+    const got = await Promise.allSettled(urls.map((url) => signatures(fetchFn, url, address, s, e, sleep)));
+    const lists = [];
+    const none = [];
+    for (const [i, g] of got.entries()) {
+      if (g.status === "fulfilled") lists.push({ url: urls[i], sigs: g.value });
+      else if (g.reason instanceof NoAnswer) none.push(g.reason.message);
+      else throw g.reason;
+    }
+    if (new Set(lists.map((l) => operatorOf(c.chain, l.url))).size < 2) throw new NoAnswer(`${what}: fewer than two operators listed its signatures (${none.join("; ")})`);
+    left("getSignaturesForAddress", none);
+    const by = new Map(); // signature -> the operators that list it
+    const slotOf = new Map();
+    for (const l of lists)
+      for (const x of l.sigs) {
+        by.set(x.signature, (by.get(x.signature) ?? new Set()).add(operatorOf(c.chain, l.url)));
+        slotOf.set(x.signature, x.slot);
+      }
+    const one = [...by].filter(([, ops]) => ops.size < 2).map(([sig]) => sig);
+    say(one.length === 0, `${what}: ${lists.map((l) => l.sigs.length).join(" / ")} signatures in the window on ${lists.map((l) => new URL(l.url).host).join(" / ")}${one.length ? `, on one only: ${one.join(" ")}` : ""}`);
+    // newest first, as each host lists them
+    return [...by].filter(([, ops]) => ops.size >= 2).map(([sig]) => sig).sort((x, y) => slotOf.get(y) - slotOf.get(x));
   };
   const read = new Map();
+  /** A signature's facts on the hosts that hold it: { a, b } of two operators' reads (b one that differs from a, if
+   *  any does), or null when fewer than two operators hold it. */
   const both = async (sig) => {
     if (!read.has(sig)) {
-      const [ta, tb] = await Promise.all(urls.map((url) => answer(fetchFn, url, "getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }], sleep)));
-      read.set(sig, ta && tb ? { a: facts(ta, c.program), b: facts(tb, c.program) } : null);
+      const { answers, none } = await onHosts(fetchFn, c.chain, urls, "getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }], sleep);
+      left("getTransaction", none);
+      const held = answers.filter((x) => x.result);
+      const fs = held.map((x) => facts(x.result, c.program));
+      read.set(sig, new Set(held.map((x) => operatorOf(c.chain, x.url))).size >= 2 ? { a: fs[0], b: fs.find((f) => f.err !== null || f.slot !== fs[0].slot) ?? fs[1] } : null);
     }
     return read.get(sig);
   };
@@ -186,7 +221,7 @@ export async function findRun({ cluster = "mainnet", since, until, u = [], fetch
   for (const sig of (await listed(c.pool, `the pool ${c.pool}`)).reverse()) {
     const r = await both(sig);
     if (!r) {
-      say(false, `${sig}: not read on both RPCs`);
+      say(false, `${sig}: not read on two operators`);
       continue;
     }
     const { a, b } = r;
@@ -215,7 +250,7 @@ export async function findRun({ cluster = "mainnet", since, until, u = [], fetch
       if (seen.has(sig)) continue;
       const r = await both(sig);
       if (!r || r.a.err !== null || r.b.err !== null || r.a.slot !== r.b.slot) {
-        say(false, `${sig} (W ${w}): not read alike with no error on both RPCs`);
+        say(false, `${sig} (W ${w}): not read alike with no error on two operators`);
         continue;
       }
       if (!r.a.signers.includes(w)) continue; // a stranger's payment to W is not the run's
@@ -279,7 +314,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     for (const [k, v] of Object.entries(filled)) if (!/^(buy|sell)\d+$/.test(k) || !/^\d+(\.\d+)?$/.test(v ?? "")) throw new Error(`--filled ${k}=${v}: want buy1=7.7`);
     const rec = recorder();
     const run = await findRun({ cluster: opt("--cluster", "mainnet"), since, until, u: (opt("--u", "") || "").split(",").filter(Boolean), fetchFn: opt("--record") ? rec.fetchFn : fetch });
-    if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify({ cluster: run.cluster, since, until, answers: rec.answers }) + "\n");
+    if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify({ cluster: run.cluster, since, until, rpcs: run.urls, answers: rec.answers }) + "\n");
     for (const l of run.lines) console.log(`${KEY} record: ${l}`);
     const text = recordText(run, filled);
     if (opt("--out")) writeFileSync(opt("--out"), text);

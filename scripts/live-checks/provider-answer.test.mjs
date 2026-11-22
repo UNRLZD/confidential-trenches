@@ -36,6 +36,17 @@ test("an answer is judged: a result, a revert (whatever its words), any other JS
   assert.deepEqual(classify("p", 403, rpcErr(-32601, "method not allowed")), { error: { code: -32601, message: "method not allowed" } });
 });
 
+test("a read the provider serves only with a key (PublicNode's indexed refusal, 403 -32602) is its no-answer, whatever the check judges", () => {
+  const body = rpcErr(-32602, "Indexed requests require a personal token. Get one at: https://www.allnodes.com/publicnode");
+  for (const o of [{}, { judgeStateMiss: true }]) {
+    const a = classify("solana-rpc.publicnode.com", 403, body, o);
+    assert.match(a.noAnswer, /^solana-rpc\.publicnode\.com HTTP 403: served only with a key /);
+    assert.equal("error" in a || "result" in a, false);
+  }
+  // any other -32602 stays an answer, judged
+  assert.deepEqual(classify("p", 403, rpcErr(-32602, "Invalid params")), { error: { code: -32602, message: "Invalid params" } });
+});
+
 test("nullNoAnswer: a null result is a provider not holding the block yet, only when asked", () => {
   assert.equal(typeof classify("p", 200, ok(null), { nullNoAnswer: true }).noAnswer, "string");
   assert.deepEqual(classify("p", 200, ok("0x0"), { nullNoAnswer: true }), { result: "0x0" });

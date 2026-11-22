@@ -41,6 +41,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { RPCS as MONEY_RPCS } from "../ci/money-gate.mjs";
 import { recorder } from "./notes-per-pool-evm.mjs";
 import { BUILD, CHAINS as DEPLOYED, pinnedBuild } from "./pool-evm-deploy.mjs";
 import { POOL_REDEPLOYS } from "./pool-redeploys.mjs";
@@ -109,10 +110,8 @@ const pinsOf = (chain, at) => {
     router: c.router?.address ? c.router.address.toLowerCase() : null,
   };
 };
-export const RPCS = Object.freeze({
-  "base-sepolia": ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],
-  "robinhood-testnet": ["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"],
-});
+// the money gate's own lists, imported, so the two never drift
+export const RPCS = Object.freeze({ "base-sepolia": MONEY_RPCS["base-sepolia"], "robinhood-testnet": MONEY_RPCS["robinhood-testnet"] });
 
 const lower = (a) => String(a).toLowerCase();
 const words = (data) => (String(data).slice(2).match(/.{64}/g) ?? []).map((w) => BigInt(`0x${w}`));

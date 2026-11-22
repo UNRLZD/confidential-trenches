@@ -145,14 +145,40 @@ test("a record generation past the pins is the named state not pinned yet, its t
 
 test("a generation's tx that failed, or that one reader does not hold, fails the row", async () => {
   const sig = REC.devnet.tables.pumpswap[0].txs[1].signature;
+  const reader = TX_RPCS.devnet[1];
+  // the reader's history reaches every block (its first available block 0), so its null counts against the tx
+  const reaches = { url: reader, method: "getFirstAvailableBlock", params: [], status: 200, json: { jsonrpc: "2.0", id: 1, result: 0 } };
   for (const edit of [(a) => (a.json.result.meta.err = { InstructionError: [0, "Custom"] }), (a) => (a.json.result = null)]) {
     const answers = structuredClone(A.answers);
-    const a = answers.find((x) => x.method === "getTransaction" && x.params[0] === sig && x.url === TX_RPCS.devnet[1] && x.json?.result);
+    const a = answers.find((x) => x.method === "getTransaction" && x.params[0] === sig && x.url === reader && x.json?.result);
     edit(a);
-    assert.match(failLines(await run(answers)), new RegExp(`^FAIL devnet pumpswap g1: lookup table: extend with 4 addresses ${sig.slice(0, 12)}\\.\\.\\. reads back succeeded at finalized on .*: false$`, "m"));
+    answers.push(reaches);
+    assert.match(failLines(await run(answers)), new RegExp(`^FAIL devnet pumpswap g1: lookup table: extend with 4 addresses ${sig.slice(0, 12)}\\.\\.\\. reads back succeeded at finalized on two operators of .*: false$`, "m"));
   }
-  // the readers are the money gate's own
-  assert.deepEqual(TX_RPCS, { mainnet: MONEY_RPCS.solana, devnet: MONEY_RPCS["solana-devnet"] });
+  // the readers are the money gate's own list, imported
+  assert.equal(TX_RPCS.mainnet, MONEY_RPCS.solana);
+  assert.equal(TX_RPCS.devnet, MONEY_RPCS["solana-devnet"]);
+});
+
+test("the gate's rule: a reader whose history does not reach the tx is left out; two other operators holding it pass, one alone is quiet", async () => {
+  // mainnet's curve table txs, on the gate's three readers: PublicNode answers null (it keeps blocks from 471,786,675
+  // only, read 2026-11-21 21:12Z, above every table tx's slot); the other two operators hold each, so the row passes
+  const [, , PN] = TX_RPCS.mainnet;
+  const txs = REC.mainnet.tables["pump-curve"].flatMap((g) => g.txs.map((t) => t.signature));
+  const answers = structuredClone(A.answers);
+  for (const sig of txs) answers.push({ url: PN, method: "getTransaction", params: [sig, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }], status: 200, json: { jsonrpc: "2.0", id: 1, result: null } });
+  const good = await run(answers);
+  assert.equal(failLines(good), "");
+  assert.match(good.lines.join("\n"), /^ok {3}mainnet pump-curve g1: .* reads back succeeded at finalized on two operators of .*solana-rpc\.publicnode\.com: true$/m);
+  // devnet: OnFinality's null, its history from a block above the tx's slot: one operator holds it, the row is quiet
+  const sig = REC.devnet.tables.pumpswap[0].txs[1].signature;
+  const reader = TX_RPCS.devnet[1];
+  const pruned = structuredClone(A.answers);
+  pruned.find((x) => x.method === "getTransaction" && x.params[0] === sig && x.url === reader && x.json?.result).json.result = null;
+  pruned.push({ url: reader, method: "getFirstAvailableBlock", params: [], status: 200, json: { jsonrpc: "2.0", id: 1, result: 523247104 } });
+  const quiet = await run(pruned);
+  assert.equal(failLines(quiet), "");
+  assert.match(quiet.lines.join("\n"), new RegExp(`^quiet devnet pumpswap g1: .*${sig.slice(0, 12)}\\.\\.\\. held by fewer than two operators that answered \\(solana-devnet\\.api\\.onfinality\\.io: no history at \\d+ \\(first block 523247104\\)\\)`, "m"));
 });
 
 test("a tree past 80 percent of the newest pinned generation fails, naming the entries left", async () => {

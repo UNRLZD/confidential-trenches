@@ -8,7 +8,8 @@
 // answer; a status outside 2xx with no JSON-RPC error inside; a JSON-RPC error that is a rate limit (codes 429 and
 // -32005, or the kit's own words, RATE_LIMIT); a JSON-RPC error naming a block or state the provider does not hold yet or
 // at all (the kit's evmNotYetWords and STATELESS: a lagging backend's "header not found", drpc's code 27 "Unknown state. First
-// available state is 1", helper live run 42556116812, 9 Nov 03:54Z). A revert (code 3 or "execution reverted…") is
+// available state is 1", helper live run 42556116812, 9 Nov 03:54Z); a JSON-RPC error saying the read is served only with
+// a key (KEYED_ONLY: PublicNode's getProgramAccounts). A revert (code 3 or "execution reverted…") is
 // never one of these: its string is the called contract's. Any other JSON-RPC error is an answer and is judged, on a
 // status outside 2xx too (robinhood-rpc.publicnode.com answers a read past its state 403 with a JSON-RPC error inside).
 // A lying provider can fake a no-answer and so make a check INCONCLUSIVE, never PASS.
@@ -25,6 +26,10 @@ export const RATE_LIMIT = /request limit|rate limit|too many requests|exceeded i
 /** A message naming a block or state the provider does not hold yet: the kit's evmNotYetWords. */
 export const notYetWords = (m) => typeof m === "string" && evmNotYetWords(m);
 export const STATELESS = /historical state \S+ is not available|archive requests require a personal token|^unknown state\b/i;
+/** A read the provider serves only with a key: solana-rpc.publicnode.com answers getProgramAccounts 403 with code -32602
+ *  "Indexed requests require a personal token. Get one at: https://www.allnodes.com/publicnode" (read 2026-11-22
+ *  00:00Z). It says nothing of the chain, so it is that provider's no-answer: the read is judged on the others. */
+export const KEYED_ONLY = /indexed requests require a personal token/i;
 /** The JSON-RPC codes that are a rate limit whatever their words, on every read. */
 export const LIMIT_CODES = new Set([429, -32005]);
 /** The page's Solana throttle codes (packages/kit/src/trade/solana/send.ts RPC_THROTTLE_CODES: -32029, -32429, -429 and
@@ -73,6 +78,7 @@ export function classify(host, status, text, { nullNoAnswer = false, judgeStateM
     const throttle = page && status >= 200 && status <= 299 && PAGE_THROTTLE_CODES.has(e?.code);
     if (!reverted(e) && (LIMIT_CODES.has(e?.code) || throttle || RATE_LIMIT.test(m))) return no(`rate limit ${cut(JSON.stringify(e))}`);
     if (!judgeStateMiss && !reverted(e) && (notYetWords(m) || STATELESS.test(m))) return no(`no state for the read ${cut(JSON.stringify(e))}`);
+    if (!reverted(e) && KEYED_ONLY.test(m)) return no(`served only with a key ${cut(JSON.stringify(e))}`);
     return { error: e };
   }
   if (status < 200 || status > 299) return no("not a success");
