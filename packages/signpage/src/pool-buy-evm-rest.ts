@@ -25,7 +25,7 @@ import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { checkEvmRestRelease, checkEvmWBuy, evmAdapterBuyData, evmOnwardCodeGas, poolUnits, signEvmWBuy, signEvmWithdraw, type EvmBuyPlan, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
 import { evmWithdrawCalldata } from "./evm-send.ts";
 import { evmReleaseOf, EVM_ONWARD_TIP, l1Of, onwardReceipt } from "./pool-withdraw-evm.ts";
-import type { EvmHolding, EvmPoolBuyHost } from "./pool-buy-evm.ts";
+import type { EvmHolding, EvmLegEnd, EvmPoolBuyHost } from "./pool-buy-evm.ts";
 
 type Ready = ReadyProof<EvmPoolRequest>;
 type Chain = "base" | "robinhood";
@@ -145,7 +145,7 @@ export async function finishRest(
   wait: (ms: number) => Promise<void>,
   clock: () => bigint,
   hold: <T>(f: () => Promise<T>) => Promise<T>,
-): Promise<{ stage: TradeStage; txs: TxRef[] } | null> {
+): Promise<EvmLegEnd | null> {
   const { r, w } = leg;
   const p = { nullifier: BigInt(r.publicSignals[1]!).toString(), from: leg.from.toString(), deadlineMs: r.binding.request.relay.deadlineMs.toString(), chunk: r.chunk.toString(), fee: r.binding.feeCap.toString() };
   for (let i = 0; st.release === null; i++) {
@@ -208,7 +208,8 @@ export async function finishRest(
       await h.record(w, { ...leg.holding, state: "filled", ...(received === null ? {} : { received: poolUnits(received, leg.decimals) }), route: route(s.hash) }).catch(() => {});
       await writeRest(h, w, { end: "filled" }).catch(() => {});
       carry();
-      return { stage: "filled", txs };
+      // what it moved, for the request's op (card signpage-sent-end-recorded-evm): W's token as read, and the rest W spent
+      return { stage: "filled", txs, ...(received === null ? {} : { out: received.toString() }), decimals: leg.decimals, wei: plan.rest!.spend.toString() };
     }
     if (got === "failed") {
       await h.record(w, { ...leg.holding, state: "withdrawn", route: route(s.hash) }).catch(() => {});

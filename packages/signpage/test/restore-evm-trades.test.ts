@@ -108,3 +108,20 @@ test("a deposit back before the buy, under another note, or with no block read i
     w.close();
   }
 });
+
+// card signpage-sent-end-recorded-evm: the device that bought keeps the buy's one op under its request's id (pool-buy-evm.ts
+// EvmBuyOp); a load's restore that reads the buy again writes no trade/<chain>/<tx> op beside it, so Activity shows one
+// row per buy. A sale of it is still written.
+test("a buy this device's own request op already names (by its transaction) gets no trade op from the restore", async () => {
+  const restoreEvmTrades = (evmSell as Record<string, unknown>).restoreEvmTrades as typeof evmSell.restoreEvmTrades;
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  try {
+    const own = { kind: "buy", stage: "filled", txs: [{ chain: "robinhood", hash: BUY }], created_ms: 1, chain: "robinhood", token: FIX.erc20, legs: [{ w: W }] };
+    await w.put("ops", "3f1c2b8e-0d4a-4b7e-9c1a-2e5f6a7b8c9d", own);
+    assert.equal(await restoreEvmTrades({ chain: "robinhood", read: recorded([]) as never, store: w, spends: [spend], returns: [back] }), 1, "the sale only");
+    assert.equal(await w.get("ops", evmTradeKey("robinhood", BUY)), undefined, "no second op of the buy");
+    assert.deepEqual(await w.get("ops", "3f1c2b8e-0d4a-4b7e-9c1a-2e5f6a7b8c9d"), own);
+  } finally {
+    w.close();
+  }
+});

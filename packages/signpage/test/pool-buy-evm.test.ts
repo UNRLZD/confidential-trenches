@@ -1402,3 +1402,120 @@ test("card buy-any-amount-on-every-chain: a leg read back past the tap's time: t
   await turns(50);
   assert.equal(following.size, 0, "no W left followed");
 });
+
+// ---- card signpage-sent-end-recorded-evm: one op per buy, under its request's id ----
+// A Base or Robinhood pool buy wrote no op until a leg read filled, and then one keyed by that leg's transaction
+// (trade/<chain>/<tx>): a buy whose end never came on the page that sent it had no row at all, and a buy of two legs had
+// one per filled leg. Now the run writes the request's op at "sent" (no tx until the release is read) and its one end
+// onto it: the run's own on the same page, or the load's follow's from W's holding, which names the op (holding.buy.op).
+const REQ = "req-evm-1";
+type OpsBox = { m: Map<string, unknown>; ops: (id: string, f: (v: unknown) => unknown) => Promise<void> };
+/** The wallet store's ops records as the page's host writes them (WalletStore.update: undefined writes nothing). */
+const opsBox = (): OpsBox => {
+  const m = new Map<string, unknown>();
+  return { m, ops: async (id, f) => void ((n) => n !== undefined && m.set(id, structuredClone(n)))(f(structuredClone(m.get(id)))) };
+};
+const withOp = (h: EvmPoolBuyHost, box: OpsBox, extra: Record<string, unknown> = {}): EvmPoolBuyHost => ({ ...h, opId: REQ, ops: box.ops, ...extra }) as EvmPoolBuyHost;
+const opNow = (box: OpsBox) => box.m.get(REQ) as Record<string, unknown> | undefined;
+const ETH_USD = { price: "300000000000", expo: -8, published_s: 1, read_ms: 1 };
+const FILLED_FIGURES = { units: "40", pool_amount: R.poolUnits(CHUNK - FEE, 18), amount_usd: R.poolUnits((CHUNK - FEE) * 300_000_000_000n, 26) };
+
+test("card signpage-sent-end-recorded-evm (1): the op reads sent, with no tx, under the request's id when the run answers sent; its end goes onto that op, no trade op beside it", async () => {
+  const box = opsBox();
+  const traded: unknown[] = [];
+  let atSent: Record<string, unknown> | undefined;
+  const { h } = host(both([release()]));
+  const got = await runEvmPoolBuy(withOp(h, box, { sent: () => void (atSent = structuredClone(opNow(box))), traded: async (op: unknown) => void traded.push(op), price: () => ETH_USD }), ASK);
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.ok(atSent !== undefined, "an op under the request's id when the run answers sent");
+  const created_ms = atSent.created_ms;
+  assert.ok(Number.isSafeInteger(created_ms), "its time");
+  assert.deepEqual(opOf(REQ, atSent), { id: REQ, kind: "buy", stage: "sent", txs: [], created_ms, chain: "base", token: TOKEN.toLowerCase() }, "sent: no tx until the release is read");
+  assert.deepEqual(opOf(REQ, opNow(box)), { id: REQ, kind: "buy", stage: "filled", txs: [{ chain: "base", hash: TX }], created_ms, chain: "base", token: TOKEN.toLowerCase(), ...FILLED_FIGURES });
+  assert.deepEqual(traded, [], "no trade/<chain>/<tx> op beside the request's");
+});
+
+test("card signpage-sent-end-recorded-evm (2): a run that throws after answering sent leaves its op at sent, and the next load's follow ends it from W's holding", async () => {
+  const box = opsBox();
+  const kept = new Map<string, EvmHolding>();
+  const first = host({ holdings: kept, ...both([release()]) });
+  const got = await runEvmPoolBuy(withOp(first.h, box, { landed: () => { throw new Error("a fault of the page"); } }), ASK);
+  assert.deepEqual(got, { stage: "sent", txs: [] });
+  assert.equal(opNow(box)?.stage, "sent", "the op at sent");
+  assert.equal(kept.get(W)?.state, "pending");
+  const next = host({ holdings: kept, ...both([release()]) });
+  await followPending!(withOp(next.h, box));
+  assert.equal(opNow(box)?.stage, "filled", "the load's follow ends the request's op");
+  assert.deepEqual(opNow(box)?.txs, [{ chain: "base", hash: TX }]);
+});
+
+test("card signpage-sent-end-recorded-evm (3): sent with the landing unknown, then the next load's follow reads filled: the op is filled with its txs and figures, and no trade/<chain>/<tx> op is written beside it", async () => {
+  const box = opsBox();
+  const kept = new Map<string, EvmHolding>();
+  // a sign out while the tap's reads run: the run answers sent, its end unknown
+  const first = host({ holdings: kept, a: { logs: () => (stops.at(-1)!.abort(), []) }, b: {} });
+  assert.deepEqual(await runEvmPoolBuy(withOp(first.h, box), ASK), { stage: "sent", txs: [] });
+  assert.equal(opNow(box)?.stage, "sent");
+  const traded: unknown[] = [];
+  const next = host({ holdings: kept, ...both([release()]) });
+  await followPending!(withOp(next.h, box, { traded: async (op: unknown) => void traded.push(op), price: () => ETH_USD }));
+  const op = opOf(REQ, opNow(box));
+  assert.deepEqual({ ...op, created_ms: 0 }, { id: REQ, kind: "buy", stage: "filled", txs: [{ chain: "base", hash: TX }], created_ms: 0, chain: "base", token: TOKEN.toLowerCase(), ...FILLED_FIGURES });
+  assert.deepEqual(traded, [], "one row per buy: no trade/<chain>/<tx> op");
+  assert.equal(kept.get(W)?.state, "filled");
+});
+
+test("card signpage-sent-end-recorded-evm (4): a buy answered refused on the helper's word, then read filled by its follow: the op moves from refused to filled", async () => {
+  const box = opsBox();
+  const { h } = host({ send: () => Promise.reject(new EvmSendRefused(422, "simulation_failed")), ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(withOp(h, box), ASK), { stage: "refused", txs: [] });
+  assert.equal(opNow(box)?.stage, "refused", "the op ends refused with the answer");
+  assert.ok(await until(() => opNow(box)?.stage === "filled"), `the chain's read moves it: ${JSON.stringify(opNow(box))}`);
+  assert.deepEqual(opNow(box)?.txs, [{ chain: "base", hash: TX }]);
+});
+
+test("card signpage-sent-end-recorded-evm (5): a two-leg buy, one leg filled and one owed back: the op ends with the stage the run answers (legsEnd), both transactions", async () => {
+  const box = opsBox();
+  const { h, seen } = host({ ready: [readyOf(), readyTwo()], ...both([release(), release({ kind: "withdrawn", w: W2, nullifier: N2, tx: TX2 })]) });
+  const got = await runEvmPoolBuy(withOp(h, box), TWO);
+  assert.deepEqual(got, { stage: "part_filled", txs: [{ chain: "base", hash: TX }, { chain: "base", hash: TX2 }] });
+  const op = opNow(box)!;
+  assert.equal(op.stage, "part_filled", "the run's own rule over the legs");
+  assert.deepEqual(op.txs, [{ chain: "base", hash: TX }, { chain: "base", hash: TX2 }]);
+  // each leg's holding names the op and its leg
+  const pend = seen.records.filter(([, r]) => r.state === "pending").map(([w, r]) => [w, (r.buy as Record<string, unknown> | undefined)?.op, (r.buy as Record<string, unknown> | undefined)?.leg]);
+  assert.deepEqual(pend, [[W, REQ, 0], [W2, REQ, 1]]);
+});
+
+test("card signpage-sent-end-recorded-evm (6): the load's follow ends the op not_landed only on the two-round final-block rule: one round leaves it sent", async () => {
+  const box = opsBox();
+  const kept = new Map<string, EvmHolding>();
+  const first = host({ holdings: kept, a: { logs: () => (stops.at(-1)!.abort(), []) }, b: {} });
+  assert.deepEqual(await runEvmPoolBuy(withOp(first.h, box), ASK), { stage: "sent", txs: [] });
+  // one round past the deadline with no release, then a sign out before the second
+  const once = host({ holdings: kept, ...pastAll() });
+  const c = stops.at(-1)!;
+  await followPending!(withOp(once.h, box, { wait: async () => c.abort() }));
+  assert.equal(opNow(box)?.stage, "sent", "one round is never not_landed");
+  assert.equal(kept.get(W)?.state, "pending");
+  const twice = host({ holdings: kept, ...pastAll() });
+  await followPending!(withOp(twice.h, box));
+  assert.equal(opNow(box)?.stage, "not_landed", "two rounds a lag margin apart");
+  assert.deepEqual(opNow(box)?.txs, []);
+  assert.equal(kept.has(W), false);
+});
+
+test("card signpage-sent-end-recorded-evm (8): a holding with no op id (a record from before this card) still writes its trade/<chain>/<tx> op as today, and no request op", async () => {
+  const box = opsBox();
+  const kept = new Map<string, EvmHolding>();
+  const first = host({ holdings: kept, a: { logs: () => (stops.at(-1)!.abort(), []) }, b: {} });
+  // a run with no request id: its holding names no op
+  assert.deepEqual(await runEvmPoolBuy(first.h, ASK), { stage: "sent", txs: [] });
+  assert.equal((kept.get(W)?.buy as Record<string, unknown> | undefined)?.op, undefined);
+  const traded: Record<string, unknown>[] = [];
+  const next = host({ holdings: kept, ...both([release()]) });
+  await followPending!(withOp(next.h, box, { traded: async (op: Record<string, unknown>) => void traded.push(op) }));
+  assert.equal(traded.length, 1, "the trade op as today");
+  assert.equal(evmTradeKey("base", (traded[0]!.txs as { hash: string }[])[0]!.hash), `trade/base/${TX}`);
+  assert.equal(box.m.size, 0, "no request op");
+});
