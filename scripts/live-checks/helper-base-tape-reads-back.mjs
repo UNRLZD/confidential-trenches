@@ -12,13 +12,19 @@
 // It passes only when every answer is 200 JSON in the tape's fields {trades, src, as_of_ms[, filling: true]} with rows
 // {t_ms, side, usd, amt, trader, tx}, X-Helper-Commit a full sha; each tape ends within BOUND_MS, never holding fewer
 // trades than at its first answer; and at least one tape said filling and then ended (a read back seen end to end).
-// No tape saying filling while one answered short is the helper before part C: FAIL. Every tape full at its first
-// answer leaves nothing to read back: INCONCLUSIVE.
+// A short tape done at its first answer counts as read back only when the helper says so, naming whole_ms
+// (apps/helper/src/data/evm/swaps.ts trades: every swap since then held, the tape not filling); one naming neither
+// filling nor whole_ms is the helper before part C: FAIL. Short tapes that all named whole_ms at once were read back
+// before this check's read (the lists read their tapes ahead): PASS. Every tape full at its first answer leaves nothing
+// to read back: INCONCLUSIVE. Card evm-tape-check-counts-read-ahead-warm: helper live run 44989861313 (22 Nov 05:3xZ)
+// read new's two tapes short and done at their first answer (5 trades at 1,835 ms and 5 at 825 ms), trending_1h's two
+// full, and FAILed with no read back to see; the run before passed only because one tape happened to be cold.
 // After: helper
 // Serial: evm-keyed 110
 //   node scripts/live-checks/helper-base-tape-reads-back.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read (each answer's
-//   status, commit, row count, filling and fault, not its rows; each tape's token as `address`), for the test's replay.
+//   status, commit, row count, filling, whether it named whole_ms and fault, not its rows; each tape's token as
+//   `address`), for the test's replay.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { EXIT } from "./provider-answer.mjs";
@@ -81,11 +87,12 @@ async function get(url, fetchFn) {
   return { status: r.status, type: r.headers.get("content-type") ?? "", commit: r.headers.get("x-helper-commit") ?? "", body };
 }
 
-/** One answer as recorded: its time from the tape's first read, status, commit, rows, filling and first fault. */
+/** One answer as recorded: its time from the tape's first read, status, commit, rows, filling, whether it named
+ *  whole_ms (the helper's word that it holds every swap since then) and first fault. */
 function answer(a, t) {
   const b = parse(a.body);
   const fault = a.status !== 200 ? `HTTP ${a.status}` : !/^application\/json/i.test(a.type) ? `Content-Type ${a.type}` : bodyFault(b);
-  return { t, status: a.status, commit: a.commit, n: Array.isArray(b?.trades) ? b.trades.length : null, filling: b?.filling === true, fault };
+  return { t, status: a.status, commit: a.commit, n: Array.isArray(b?.trades) ? b.trades.length : null, filling: b?.filling === true, whole: Number.isSafeInteger(b?.whole_ms), fault };
 }
 /** Whether a tape's answer ends it: TRADES_MAX trades, or no longer filling. */
 const ends = (a) => a.fault !== null || a.n >= TRADES_MAX || !a.filling;
@@ -133,10 +140,19 @@ export function judge(run) {
     const ended = last.fault === null && (last.n >= TRADES_MAX || !last.filling);
     say(ended, `${token}: first ${first.n} trade(s)${first.filling ? " filling" : ""}, ${ended ? `${last.n} and ${last.n >= TRADES_MAX ? "full" : "done"} at ${last.t} ms` : `still filling at ${last.t} ms`}${said ? " (read back)" : ""}`);
     say(last.n !== null && first.n !== null && last.n >= first.n, `${token}: never fewer trades than at its first answer (${first.n} then ${last.n})`);
+    // a short tape done at once was read back only when the helper says so (whole_ms)
+    if (ended && !said && last.n < TRADES_MAX) say(last.whole === true, `${token}: short and done at its first answer, ${last.whole === true ? "naming whole_ms: read back before this read" : "naming neither filling nor whole_ms: never read back (the helper before part C)"}`);
   }
   const back = tapes.some(({ answers }) => answers.some((a) => a.filling) && answers.at(-1)?.filling === false && answers.at(-1)?.fault === null);
+  const whole = tapes.filter(({ answers }) => (answers[0]?.n ?? 0) < TRADES_MAX && !answers.some((a) => a.filling) && answers.at(-1)?.whole === true).map((t) => t.address);
   const allFull = tapes.length > 0 && tapes.every(({ answers }) => (answers[0]?.n ?? 0) >= TRADES_MAX);
-  say(back || (allFull ? null : false), back ? "a short tape said filling, then ended: read back seen end to end" : allFull ? "every tape full at its first answer: nothing to read back" : "no tape said filling while a tape answered short: no read back (the helper before part C)");
+  say(
+    back || whole.length > 0 || (allFull ? null : false),
+    back ? "a short tape said filling, then ended: read back seen end to end"
+    : whole.length > 0 ? `short tape(s) whole at the first answer (whole_ms: ${whole.join(", ")}): read back before this check's read`
+    : allFull ? "every tape full at its first answer: nothing to read back"
+    : "no tape said filling while a tape answered short: no read back (the helper before part C)",
+  );
   const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : lines.some((l) => l.startsWith("N/A")) ? "INCONCLUSIVE" : "PASS";
   return { ok: verdict === "PASS", verdict, lines };
 }
