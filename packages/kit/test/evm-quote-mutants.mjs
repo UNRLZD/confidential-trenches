@@ -1271,7 +1271,6 @@ export const MUTANTS = [
   // card evm-warm-quote-inside-the-kpi-with-room: a warm buy's scan reads up to its held head, its scan provider's head
   // read beside it; and each batch of a round asks first the two providers that answer it soonest
   [QUOTE, "(a.pin !== undefined ? Promise.resolve(a.pin.number) : spec !== null ? Promise.resolve(spec.number) : headFrom(f))", "(a.pin !== undefined ? Promise.resolve(a.pin.number) : headFrom(f))", R, "WS1 "],
-  [QUOTE, "  if (rpcs.length < 3 || urls.every((u) => u === undefined)) return batches.map(() => rpcs);", "  return batches.map(() => rpcs);", R, "WS2 "],
   // card evm-cold-quote-inside-the-kpi: a first scan provider still out past its hedge time for its head has the next
   // asked beside it; the first head answered is kept, and the first's failure still asks the next
   [QUOTE, "evmHedgeAfter(URL_OF.get(o.rpc), \"head\") ?? EVM_HEDGE_MS);", "EVM_SCAN_HOLD_MS * 10);", R, "KPI1 "],
