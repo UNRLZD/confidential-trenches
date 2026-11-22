@@ -154,6 +154,11 @@ export const COLD_RETRY_MAX_MS = 30_000;
 export const COLD_PAGE = 1_000;
 const TX_PARALLEL = 5;
 export const SIG_PAGE = 100;
+/** The page listed beside a flooded first read's COLD_PAGE when its first page held no successful signature, so some
+ *  are read before the COLD_PAGE lands (card solana-flooded-coin-first-answer-holds-rows). [design: one in 34 succeeded
+ *  past CjRGc8wH...pump's newest 30 (live run 43689567273), so 100 holds about 3; a page's time grows with its size
+ *  (1000: 1,599 ms from the Mac)] */
+export const SHORT_PAGE = 100;
 export const REFILL_MAX = 1_000;
 export const SETTLE_SLOTS = 150;
 /** A first read answers after its walk, its first trade held, or this long after the read began, with what it holds by
@@ -638,6 +643,8 @@ type Entry = {
   /** While a first read waits (first()): told after each fold, so a trade the stream sends answers it as a walk's round
    *  that holds one does. */
   onFold?: () => void;
+  /** Reads waiting on this cold tape's first row of ours (trades: rowOrBound), told after each fold that holds one. */
+  rowWaits?: Set<() => void>;
   /** The vendor's tape read VENDOR_EARLY_MS into a first read that held no row (first()), and when: the vendor reads
    *  within COLD_WAIT_MS of it take it (vendorTape), so the answers at the bound with no row of ours, every read joined
    *  on the first, never wait on the vendor or ask it again. */
@@ -1111,6 +1118,7 @@ export function createSolanaTrades(deps: {
     for (const slot of e.refs.keys()) if (slot <= e.book.settledTo) e.refs.delete(slot);
     e.readAt = now();
     e.onFold?.();
+    if (e.rowWaits !== undefined && e.book.tape(1).length > 0) for (const go of e.rowWaits) go();
   }
 
   /** Walks `mint`'s signatures newer than `until` (the newest COLD_SIGS successful ones when null) and holds each
@@ -1153,10 +1161,15 @@ export function createSolanaTrades(deps: {
     // card solana-flooded-coin-first-answer-holds-rows: a first page of a flooded coin with some successful signatures
     // has them read at once, while the COLD_PAGE before them is listed, not after it (helper update 22's live run
     // 45011614034: 5o7AFuoN...pump, 1 of its newest 30 successful, answered 0 rows at its bound: the COLD_PAGE of 1000
-    // signatures, 235 KB, read 1,599 ms from the Mac on api.mainnet-beta, stood before its one successful read). Their
-    // places are held above every older page's (`reserve`), as the list's order is.
-    let early: { sigs: Set<string>; read: Promise<void> } | null = null;
+    // signatures, 235 KB, read 1,599 ms from the Mac on api.mainnet-beta, stood before its one successful read); a first
+    // page with none has a SHORT_PAGE listed beside the COLD_PAGE, from the same signature, and its successful ones read as
+    // soon as it lands (live run 43689567273: CjRGc8wH...pump, 0 of its newest 30 successful, 29 of its newest 1000).
+    // Each place is the list's: a signature's order is its position from the newest (`at`), counted down from `reserve`.
+    let early: { sigs: Set<string>; listed: Promise<void>; read: Promise<void> } | null = null;
     let reserve = -1;
+    const TOP = COLD_SIGS + COLD_PAGE + 1;
+    const placeOf = new Map<string, number>();
+    const at = (p: number): number => reserve + TOP - p;
     while (cold ? sigs.filter(ok).length < COLD_SIGS : sigs.length < REFILL_MAX) {
       // a first read's newest COLD_SIGS, then once, when they were not all successful, one COLD_PAGE before them: a
       // bot-flooded token's newest signatures are failed transactions, and a first read of them alone held no trade
@@ -1170,16 +1183,39 @@ export function createSolanaTrades(deps: {
       if (page.length < limit) listedAll = true;
       if (page.length < limit || sigs.length === 0 || (cold && before !== undefined)) break;
       before = sigs[sigs.length - 1]!.signature;
-      const first = sigs.filter((x) => ok(x) && !e.held.has(x.signature));
-      if (cold && early === null && first.length > 0) {
-        // the next page's places below these: reserve + 1 .. reserve + COLD_SIGS; these above them, newest highest
+      // only a first page with another to come (not all of its newest COLD_SIGS successful) reads ahead of it
+      if (cold && early === null && sigs.filter(ok).length < COLD_SIGS) {
         reserve = seq;
-        seq += 2 * COLD_SIGS + 1;
-        const mine = first.map((x, i) => ({ ...x, order: reserve + 2 * COLD_SIGS + 1 - i })).reverse();
-        early = { sigs: new Set(first.map((x) => x.signature)), read: readAll(mine) };
+        seq += TOP + 1;
+        sigs.forEach((x, i) => placeOf.set(x.signature, i));
+        const first = sigs.filter((x) => ok(x) && !e.held.has(x.signature));
+        const set = new Set(first.map((x) => x.signature));
+        let read: Promise<void>;
+        let listed: Promise<void> = Promise.resolve();
+        if (first.length > 0) read = readAll(first.map((x) => ({ ...x, order: at(placeOf.get(x.signature)!) })).reverse());
+        else {
+          // the short page beside the COLD_PAGE (asked next, from the same `before`): its positions are the COLD_PAGE's
+          const top = sigs.length;
+          const mine = (rpc("getSignaturesForAddress", [e.mint, { limit: SHORT_PAGE, commitment: "confirmed", before }]) as Promise<unknown>).then((short) =>
+            !Array.isArray(short)
+              ? []
+              : (short as Record<string, unknown>[])
+                  .map((x, j) => ({ x, j }))
+                  .filter(({ x }) => typeof x?.signature === "string" && Number.isSafeInteger(x.slot) && (x.err === null || x.err === undefined) && !e.held.has(x.signature as string))
+                  .slice(0, COLD_SIGS)
+                  .map(({ x, j }) => ({ signature: x.signature as string, slot: x.slot as number, t: Number.isSafeInteger(x.blockTime) && (x.blockTime as number) > 0 ? (x.blockTime as number) : null, order: at(top + j) })),
+          );
+          // the short page is a head start only: its listing failing leaves the COLD_PAGE's walk as it was
+          listed = mine.then((m) => void m.forEach((x) => set.add(x.signature)), () => undefined);
+          read = mine.then((m) => readAll(m.slice().reverse()), () => undefined);
+        }
+        early = { sigs: set, listed, read };
         early.read.catch(() => undefined);
       }
     }
+    // the short page's signatures known before the list's places are taken (its reads go on)
+    if (early !== null) await early.listed;
+    if (reserve >= 0) sigs.forEach((x, i) => placeOf.set(x.signature, i));
     sigs.reverse();
     // each transaction's place is the list's (oldest first), taken before the reads, which go TX_PARALLEL at a time; a
     // first read keeps the newest COLD_SIGS successful (those read early among them)
@@ -1187,13 +1223,13 @@ export function createSolanaTrades(deps: {
     const todo = sigs
       .filter(fresh)
       .slice(cold ? -COLD_SIGS : 0)
-      .map((s, k) => ({ ...s, order: early !== null && !early.sigs.has(s.signature) ? reserve + 1 + k : ++seq }));
+      .map((s) => ({ ...s, order: reserve >= 0 ? at(placeOf.get(s.signature)!) : ++seq }));
     // a first walk that listed the mint's every signature and reads each successful one not held: the tape from its birth
     const everyOne = cold && listedAll && todo.length === sigs.filter(fresh).length;
     // the read back starts before the oldest the first walk reads (its older page's signatures not read included)
     if (cold) e.oldest = todo[0]?.signature ?? sigs[0]?.signature ?? null;
-    // those read early first (the newest), then the rest: never more than TX_PARALLEL reads at once, as before; a failed
-    // read fails the walk, as any read does
+    // those read early first (the newest): never more than TX_PARALLEL reads at once, as before; a failed read fails the
+    // walk, as any read does
     if (early !== null) await early.read;
     await readAll(early === null ? todo : todo.filter((x) => !early!.sigs.has(x.signature)));
     for (const s of sigs) e.covered = Math.max(e.covered, s.slot);
@@ -1674,6 +1710,8 @@ export function createSolanaTrades(deps: {
         }
       }
       fold(e);
+      // the walk is done: a read waiting on its first row answers now with what it holds
+      for (const go of e.rowWaits ?? []) go();
       return "walk";
     });
     // the first answer waits for the walk's first round that holds a trade (its newest trades), a streamed trade, the
@@ -1819,6 +1857,21 @@ export function createSolanaTrades(deps: {
     if (backQueue.length < OPEN_MAX) backQueue.push(e);
     else e.back.done = true;
     startBacks();
+  }
+  /** Resolves once `e` holds a row of ours, its first walk ends, or `ms` pass. */
+  function rowOrBound(e: Entry, ms: number): Promise<void> {
+    if (ms <= 0) return Promise.resolve();
+    return new Promise<void>((done) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const go = (): void => {
+        clearTimeout(timer);
+        e.rowWaits?.delete(go);
+        done();
+      };
+      (e.rowWaits ??= new Set()).add(go);
+      timer = setTimeout(go, ms);
+      timer.unref?.();
+    });
   }
   /** Whether `e`'s read back is still reading. */
   const backing = (e: Entry): boolean => e.back !== undefined && !e.back.done;
@@ -1968,7 +2021,15 @@ export function createSolanaTrades(deps: {
       // tape a token page reads is never a 404 while its page and chart answer (card solana-trades-show-on-every-token:
       // the live helper at 837d9d810 answered NEARKAT's and BONK's trades 404, neither on the lists, their pages 200)
       if (!entries.has(mint) && deps.tape !== undefined && (await deps.listed(mint)) !== true) return poolTape(mint, limit, null, client);
+      const began = performance.now();
+      // a read that joins or starts a first read waits on that read's own bound (first); one on a tape already held does not
+      const held = entries.has(mint) && !opening.has(mint);
       const e = await open(mint);
+      // card solana-flooded-coin-first-answer-holds-rows: a tape still on its first walk (cold) with no row of ours waits
+      // for its first row up to COLD_WAIT_MS from this read's start, as its first read does, before the vendor's rows
+      // answer: a read joining a tape another read opened (its chart, an earlier caller) got the vendor's rows at once
+      // while the walk read on (a coin opened before its tape was asked answered src coingecko at 145 ms)
+      if (held && "mint" in e && e.state === "cold" && (folded(e).book === null || e.book!.tape(1).length === 0)) await rowOrBound(e, COLD_WAIT_MS - (performance.now() - began));
       // card helper-stays-fast-under-the-live-run: a listed coin whose first read failed (its subscription, its account)
       // answers the vendor's rows, filling, else an empty tape, filling: never a 503 (app-console-429 on helper-20, 25 of
       // 25 reads of one cold coin 503 at 3.6 s while its page, holders and bars answered); the next read opens it again
