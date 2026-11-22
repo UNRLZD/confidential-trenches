@@ -7,13 +7,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CURVE_TOKEN, fakeChain, MAG, open, REC, URLS } from "../../../test/evm-swaps/robinhood.ts";
+import { INFLIGHT_MAX } from "./swaps.ts";
 
 const WINDOW = 850;
 const VECTRA = "https://c.test";
 
 /** The fake chain as Robinhood's providers were read (swaps-robinhood.test.ts card helper-chart-fresh): one history
  *  provider down, the third keeping WINDOW blocks of logs, the chain's own RPC logging no time; and the log reads the
- *  third was asked from past its window. */
+ *  third was asked from past its window, counted by post. */
 function rig() {
   const chain = fakeChain();
   chain.st.head = REC.lastHead;
@@ -24,7 +25,7 @@ function rig() {
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     if (url === VECTRA) {
       const reqs = [JSON.parse(String(init.body))].flat() as { method: string; params: { fromBlock?: string }[] }[];
-      past += reqs.filter((r) => r.method === "eth_getLogs" && parseInt(r.params[0]?.fromBlock ?? "0x0", 16) < chain.st.head - WINDOW).length;
+      if (reqs.some((r) => r.method === "eth_getLogs" && parseInt(r.params[0]?.fromBlock ?? "0x0", 16) < chain.st.head - WINDOW)) past++;
     }
     return chain.fetch(url, init);
   };
@@ -41,5 +42,15 @@ test("card robinhood-tapes-inside-their-bounds-on-live: once a provider refused 
   const second = await s.trades(MAG, 50);
   assert.equal(second.status, 200, second.body);
   s.stop();
-  assert.equal(past() - afterFirst, 0, `the second tape asked past the window ${past() - afterFirst} more times`);
+  assert.equal(past() - afterFirst, 0, `the second tape sent ${past() - afterFirst} more posts past the window`);
+});
+
+test("card robinhood-tapes-inside-their-bounds-on-live: tapes opened at once, their cold reads queued together at the provider, send it no read from past its window once its first refusal is back: each queued post is looked at again at its turn (red at main ee5c7dac4: every queued read was sent and refused)", async () => {
+  const { s, past } = rig();
+  const both = await Promise.all([CURVE_TOKEN, MAG].map((t) => s.trades(t, 50)));
+  s.stop();
+  for (const a of both) assert.equal(a.status, 200, a.body);
+  // the first refusals: the posts out to it at once (INFLIGHT_MAX) before one came back, a wave for each of the two
+  // reads at most; never the posts queued behind them (main: 13)
+  assert.ok(past() <= 2 * INFLIGHT_MAX, `${past()} posts asked past its window`);
 });

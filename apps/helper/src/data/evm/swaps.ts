@@ -1466,8 +1466,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (!ok && unsent !== undefined && holds.heldFor(url) === 0) unsent.paced = true;
       return ok;
     };
-    const send = (part: Call[]) => async () => ((await paceOk(part.length)) ? one(url, part) : null);
-    const got = await Promise.all(parts.map(async (part) => (fgNow() ? slot(url, part.length, wait, send(part)) : (await paceOk(part.length)) ? slot(url, part.length, wait, () => one(url, part)) : null)));
+    // a part of log reads from as far back as the provider refused for its history window (pastWindow) is its refusal
+    // again, never sent: looked at before its pace and again at its turn, as a refusal of a post queued with it may
+    // have come meanwhile (card robinhood-tapes-inside-their-bounds-on-live: 12 tapes' cold reads queued 30 spans each
+    // at blockvectra before its first refusal came back)
+    const known = (part: Call[]): Reply[] | null => (part.every((c) => pastWindow(url, c)) ? part.map((): Reply => ({ ok: false, wait: 0, gone: true })) : null);
+    // each answer read for the window as it comes, so the posts still queued behind it know it (noteLogs)
+    const sent = async (part: Call[]): Promise<Reply[] | null> => {
+      const r = await one(url, part);
+      if (r !== null) noteLogs(url, part, r);
+      return r;
+    };
+    const send = (part: Call[]) => async () => known(part) ?? ((await paceOk(part.length)) ? sent(part) : null);
+    const got = await Promise.all(parts.map(async (part) => (fgNow() ? slot(url, part.length, wait, send(part)) : (known(part) ?? ((await paceOk(part.length)) ? slot(url, part.length, wait, async () => known(part) ?? sent(part)) : null)))));
     if (unsent !== undefined && got.some((g) => g === GAVE_UP)) unsent.paced = true;
     // a part given back from the queue (slot) is no answer for its requests alone: the parts answered are kept, and only
     // its requests are asked of the next provider
@@ -1882,11 +1893,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const at = (f: Record<string, unknown>): [number, number] => [hexInt(f.fromBlock) ?? -1, hexInt(f.toBlock) ?? -1];
     const rest = (f: Record<string, unknown>) => JSON.stringify({ ...f, fromBlock: null, toBlock: null });
     const groups: { f: Record<string, unknown>; from: number; to: number; of: number[] }[] = [];
-    // a range as old as one this provider refused for its history window (logsGoneDepth) is not asked of it: no answer
-    const depth = logsGoneDepth(u);
+    // a range as old as one this provider refused for its history window (pastWindow) is not asked of it: no answer
     fs.forEach((f, i) => {
       const [from, to] = at(f);
-      if (depth !== null && newest !== null && from >= 0 && newest.n - from >= depth) return;
+      if (pastWindow(u, { method: "eth_getLogs", params: [f] })) return;
       const g = groups.at(-1);
       // a run of the same filter is joined over the spans between too (those another pair already agreed), its answer
       // split back by each one's own blocks: the spans a busy filter still lacks after a first pair lie apart (card
@@ -1899,8 +1909,6 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (groups.length === 0) return out;
     const r = await batchTo(u, groups.map((g) => ({ method: "eth_getLogs", params: [g.of.length === 1 ? g.f : { ...g.f, fromBlock: `0x${g.from.toString(16)}`, toBlock: `0x${g.to.toString(16)}` }] })), patient);
     for (const [k, g] of groups.entries()) {
-      const no = r?.[k];
-      if (no !== undefined && !no.ok && no.gone === true && newest !== null && g.from >= 0) markLogsGone(u, newest.n - g.from);
       const logs = r?.[k]?.ok ? await parseLogs((r[k] as { result: unknown }).result, slice) : null;
       if (logs === null) continue;
       for (const i of g.of) {
@@ -1913,12 +1921,28 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** Card robinhood-tapes-inside-their-bounds-on-live: each provider that refused a log read for its history window
    *  (isStateGone: api.blockvectra.com's -32011 "block reference is outside the public history window", about 850
-   *  blocks), with how far behind the newest head that read began, the least such: a read from as far back is never
-   *  asked of it again while the mark holds (stateMarkHolds). A window follows the head, so the mark is a depth, never a
-   *  block. 12 Robinhood tapes opened at once from the Mac on the keyless providers (22 Nov 14:0xZ) sent blockvectra
-   *  62 log reads, 41 refused so and 19 more 429: each a post spent and a pair waited on, on the reads every tape fills
-   *  from. */
+   *  blocks), with how far behind the newest head that read began, the least such, and how far back the deepest log
+   *  read it served began (logsDeepest): while the mark holds (stateMarkHolds) it is asked no read from deeper than it
+   *  served, so a cold read's 30 spans, refused one by one deepest first, are not each sent to learn the next. A window
+   *  follows the head, so the marks are depths, never blocks. 12 Robinhood tapes opened at once from the Mac on the
+   *  keyless providers (22 Nov 14:0xZ) sent blockvectra 62 log reads, 41 refused so and 19 more 429: each a post spent
+   *  and a pair waited on, on the reads every tape fills from. */
   const logsGone = new Map<string, { depth: number; at: number }>();
+  const logsDeepest = new Map<string, number>();
+  /** A post's answers to its log reads, read for `u`'s window: the depth of each read it served, and of each it refused
+   *  for its window from shallower than the mark (a refusal past the mark is the mark's own, batchTo `known`). */
+  function noteLogs(u: string, part: Call[], r: Reply[]): void {
+    if (newest === null) return;
+    part.forEach((c, i) => {
+      const from = c.method === "eth_getLogs" ? hexInt(obj(c.params[0]).fromBlock) : null;
+      const a = r[i];
+      if (from === null || from < 0 || a === undefined) return;
+      const depth = newest!.n - from;
+      if (a.ok) {
+        if (depth > (logsDeepest.get(u) ?? -1)) logsDeepest.set(u, depth);
+      } else if (a.gone === true && depth < (logsGoneDepth(u) ?? Infinity)) markLogsGone(u, depth);
+    });
+  }
   function markLogsGone(u: string, depth: number): void {
     const had = logsGone.get(u);
     const keep = had !== undefined && stateMarkHolds(had.at, now()) ? Math.min(had.depth, depth) : depth;
@@ -1929,6 +1953,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (g === undefined) return null;
     if (!stateMarkHolds(g.at, now())) return (logsGone.delete(u), null);
     return g.depth;
+  }
+  /** Whether `c` is a log read from as far back as `u` refused for its history window (logsGone). */
+  function pastWindow(u: string, c: Call): boolean {
+    if (c.method !== "eth_getLogs") return false;
+    const gone = logsGoneDepth(u);
+    const from = hexInt(obj(c.params[0]).fromBlock);
+    if (gone === null || newest === null || from === null || from < 0) return false;
+    return newest.n - from > Math.min(gone - 1, logsDeepest.get(u) ?? 0);
   }
 
   /** For each filter, its logs when two providers return the same ones; null where they do not agree. */
