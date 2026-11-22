@@ -120,7 +120,8 @@ test("a refund is moved: the quote asked as §2.4 point 8 names it, checked, the
   assert.equal(Date.parse(p.deadline), BLOCK_MS + 120_000);
   const n = base64.decode(p.nonce);
   assert.equal(Buffer.from(n.subarray(0, 9)).toString("hex"), `5628f6c600${SALT}`, "a V1 nonce under the read salt");
-  assert.deepEqual(h.records, [{ nonce: p.nonce, deadline_ms: BLOCK_MS + 120_000, asset: SOL_USDC, amount: AMOUNT.toString(), height: 223_478_949 }]);
+  // the refund quote's deposit address kept with the move: the follow reads 1Click's status of it (card held-move-follow-resume)
+  assert.deepEqual(h.records, [{ nonce: p.nonce, deadline_ms: BLOCK_MS + 120_000, asset: SOL_USDC, address: DEPOSIT, amount: AMOUNT.toString(), height: 223_478_949 }]);
   assert.ok(h.keys.every((k) => k.every((b) => b === 0)), "U's key zeroed");
 });
 

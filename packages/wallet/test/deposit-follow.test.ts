@@ -20,6 +20,8 @@ import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { DepositAccountRefused, depositAccount, HEIGHT_SPREAD_MAX, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
 import { type BindOutcome, bindDeposit, POLL_MS, resetBindSession } from "../src/deposit/bind.ts";
 import { encodeDelegateAction, RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
+import { TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
+import * as followTs from "../src/deposit/follow.ts";
 import { DEPOSIT_STATUS_URL, type DepositOp, REFUND_FINAL_BLOCKS, followEnded, readMoveAt, type FollowArgs, type FollowDeps, type FollowMoveAsk, type FollowRecord, followDeposit, type FollowRpc, MOVE_RETRY_MIN_MS, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, SLOW_MS, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
 import * as d from "../src/derive/index.ts";
 import { depositId } from "../src/derive/keys.ts";
@@ -27,7 +29,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.
 import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { replayDepositReads } from "./replay-deposit-reads.ts";
-import { REFUND_INTENT_WINDOW_MS, type MoveRecord, type RefundMoveResult, versionedNonce } from "../src/deposit/refund.ts";
+import { REFUND_INTENT_WINDOW_MS, REFUND_QUOTE_DEADLINE_MS, type MoveRecord, type RefundMoveResult, versionedNonce } from "../src/deposit/refund.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const PAGES = JSON.parse(readFileSync(new URL("./vectors/deposit-bind-pages.json", import.meta.url), "utf8"));
@@ -315,6 +317,57 @@ test("the address to the note with no tap: waiting, in transit, into the vault, 
   assert.equal(op.amount_usd, "2.003117");
   assert.deepEqual(op.follow.notes, [t.note.id]);
   assert.equal((await t.store.get(t.note.id))!.state, "UNSPENT");
+});
+
+// another op of U, held, whose way out's move record (moveout.ts follow.out) is signed at `nonce` over block `height`
+async function heldWithMove(t: Awaited<ReturnType<typeof setup>>, nonce: bigint, height: bigint) {
+  const out = { to: "alice.testnet", amount: "2999999", nonce: nonce.toString(), height: Number(height), register: false, hash: "h", signed: "AA==" };
+  const follow: FollowRecord = { network: "testnet", s: "1", i: t.i, u: t.u, address: "other-addr", deadline_ms: DEADLINE, origin: ORIGIN, min_out: MIN_OUT, why: "sender_struck", out };
+  await t.w.put("ops", "op-held", { kind: "deposit", stage: "held", txs: [], created_ms: 0, follow, held_id: t.u } satisfies DepositOp);
+}
+
+test("MOVE-OUT a round while another op of U has its move out (nonce above U's, within validity) signs no bind; once U's nonce reads it used, the round binds what U holds after the move (re-review FIX FIRST 2)", async () => {
+  const t = await setup(["SUCCESS"]);
+  const n = t.chain.a.nonce;
+  await heldWithMove(t, n + 1n, t.chain.a.height);
+  // before the move: U holds the held op's 3 USDC and this op's delivery; the move takes the 3 USDC
+  t.chain.credit(CREDIT + 3_000_000n);
+  // the move lands at the first key read after round 3 (a debit landing between two reads of one round)
+  let armed = false;
+  const rpcs = t.chain.rpcs().map((r) => ({
+    ...r,
+    query: async (p: Parameters<FollowRpc["query"]>[0]) => {
+      if (armed && p.request_type === "view_access_key_list") {
+        armed = false;
+        t.chain.a.nonce = t.chain.b.nonce = n + 1n;
+        t.chain.credit(CREDIT);
+      }
+      return r.query(p);
+    },
+  })) as unknown as [FollowRpc, FollowRpc];
+  t.onTick.fn = (k) => {
+    if (k !== 3) return;
+    assert.deepEqual(t.binds, [], "no bind while the move is out");
+    assert.equal(t.seeds.length, 0, "the seed is not opened while the move is out");
+    armed = true;
+  };
+  const out = await followDeposit(t.args, { ...t.deps, rpcs });
+  assert.equal(out.kind, "done");
+  assert.deepEqual(t.binds, [{ noteId: t.note.id, amount: CREDIT }]);
+});
+
+test("MOVE-OVER a round while another op of U has a move record that is over (final height past its block + TX_VALIDITY_BLOCKS, nonce unused) binds at once", async () => {
+  const t = await setup(["SUCCESS"]);
+  await heldWithMove(t, t.chain.a.nonce + 1n, t.chain.a.height - 86_401n);
+  t.chain.credit(CREDIT);
+  t.onTick.fn = (k) => k === 1 && assert.deepEqual(t.binds, [{ noteId: t.note.id, amount: CREDIT }], "bound in the first round");
+  const out = await followDeposit(t.args, t.deps);
+  assert.equal(out.kind, "done");
+  assert.deepEqual(t.binds, [{ noteId: t.note.id, amount: CREDIT }]);
+});
+
+test("MOVE_VALIDITY_BLOCKS is moveout.ts's TX_VALIDITY_BLOCKS (follow.ts cannot import moveout.ts: moveout.ts imports it)", () => {
+  assert.equal(followTs.MOVE_VALIDITY_BLOCKS, TX_VALIDITY_BLOCKS);
 });
 
 test("planted: done is never shown before both RPCs' pages hold the note; one RPC's row is no read", async () => {
@@ -2559,4 +2612,300 @@ test("refunded-needs-the-refund: NEAR USDC counts as an op's refund (a failed de
     await assert.rejects(followDeposit({ ...t.args, refund_min: REFUND_MIN.toString() }, { ...t.deps, signal: stop(t, 3) }), /stop/);
     assert.equal((await opOf(t.w)).stage === "refunded", shown, `NEAR USDC ${usdc}`);
   }
+});
+
+// ---------- card held-move-follow-resume: a held op whose refund move went through is followed to its end ----------
+
+/** The op as held-move-forgotten-tx leaves it: held (the bind struck U) after its own refund move read through, its USDC
+ *  not yet read under U (no 1Click delivery of its own: it read REFUNDED), `moved_ms` the move's deadline. */
+async function heldMoved(t: Awaited<ReturnType<typeof setup>>, movedMs: number, extra: Partial<FollowRecord> = {}) {
+  const a = t.args;
+  const follow: FollowRecord = { network: a.network, s: a.s.toString(), i: a.i, u: a.u, address: a.address, deadline_ms: a.deadline_ms, origin: a.origin, min_out: a.min_out, status: "REFUNDED", sent: true, moved: true, moved_ms: movedMs, why: "sender_struck", ...extra };
+  await t.w.put("ops", "dq-1", { kind: "deposit", stage: "held", txs: [], created_ms: NOW, held_id: a.u, since_ms: NOW, follow });
+}
+/** The follow's RPCs with each view method's calls counted. */
+function counted(rpcs: readonly [FollowRpc, FollowRpc]) {
+  const calls: string[] = [];
+  const wrap = (r: FollowRpc): FollowRpc => ({ ...r, query: async (p) => (typeof p.method_name === "string" && calls.push(`${p.method_name}${p.method_name === "mt_balance_of" ? ` ${JSON.parse(Buffer.from(p.args_base64 as string, "base64").toString()).token_id}` : ""}`), r.query(p)) });
+  return { rpcs: [wrap(rpcs[0]), wrap(rpcs[1])] as const, calls };
+}
+
+test("held-move-follow-resume 1: a held op whose refund move went through and whose USDC has not reached U is not ended; its round reads U's USDC and U's intents.near holdings (no bind, no seed), and it ends once the USDC reads under U", async () => {
+  const t = await setup(["REFUNDED"]);
+  const movedMs = t.chain.a.timeMs;
+  await heldMoved(t, movedMs);
+  assert.equal(followEnded(await opOf(t.w)), false, "held, moved, no delivery: not ended (SIGN_HOST's settle resumes it)");
+  const c = counted(t.deps.rpcs);
+  t.onTick.fn = (n) => {
+    t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000;
+    // 1Click delivers the move's USDC to U on the token
+    if (n === 3) t.chain.credit(CREDIT);
+  };
+  const out = await followDeposit(t.args, { ...t.deps, rpcs: c.rpcs, untilFinal: true, signal: stop(t, 40) }).catch((e) => ({ kind: `threw ${e.message}` }));
+  const op = await opOf(t.w);
+  assert.ok(c.calls.includes("ft_balance_of"), `U's USDC read: ${c.calls.join()}`);
+  assert.ok(c.calls.includes(`mt_balance_of ${ORIGIN}`) && c.calls.includes(`mt_balance_of nep141:${NET.usdc}`), `U's intents.near holdings read: ${c.calls.join()}`);
+  assert.equal(out.kind, "held", "the follow ends held once the USDC is under U, for the way out");
+  assert.deepEqual([op.stage, op.follow.why, op.follow.move_end], ["held", "sender_struck", "arrived"]);
+  assert.equal(followEnded(op), true);
+  assert.deepEqual([t.binds.length, t.seeds.length], [0, 0], "no bind and no seed for a held U");
+});
+
+test("held-move-follow-resume risk: a held moved op whose money left by another path (U and intents.near both empty) ends only past the move's window on both RPCs", async () => {
+  const t = await setup(["REFUNDED"]);
+  const movedMs = t.chain.a.timeMs;
+  await heldMoved(t, movedMs);
+  let rounds = 0;
+  t.onTick.fn = () => (rounds++, (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000));
+  const out = await followDeposit(t.args, { ...t.deps, untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+  const op = await opOf(t.w);
+  assert.equal(out.kind, "held", "ended, not stopped by the test");
+  assert.equal(op.follow.move_end, "left");
+  // the round that wrote the end read the chain's time as it is now (no tick after the last round)
+  assert.ok(rounds > 1 && t.chain.a.timeMs > movedMs + REFUND_QUOTE_DEADLINE_MS && t.chain.a.timeMs <= movedMs + REFUND_QUOTE_DEADLINE_MS + 60_000, `ended at ${t.chain.a.timeMs - movedMs} ms past the move after ${rounds} waits, its window ${REFUND_QUOTE_DEADLINE_MS}`);
+});
+
+test("held-move-follow-resume 3: 1Click returns the move's money into intents.near under U (its origin asset): the refund move is offered for the held op, as for a refunded op, and its USDC then reaching U ends it", async () => {
+  const t = await setup(["REFUNDED"]);
+  await heldMoved(t, t.chain.a.timeMs, { why: "struck" });
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const log: string[] = [];
+  const refundMove = mover((_u, m) => {
+    log.push(`moved ${m.asset} ${m.amount}`);
+    t.chain.used.add(m.nonce);
+    t.chain.a.held = t.chain.b.held = 0n;
+    t.chain.credit(CREDIT);
+  });
+  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
+  const out = await followDeposit(t.args, { ...t.deps, refundMove, untilFinal: true, signal: stop(t, 60) }).catch((e) => ({ kind: `threw ${e.message}` }));
+  const op = await opOf(t.w);
+  assert.deepEqual(log, [`moved ${ORIGIN} ${CREDIT}`], "the refund under U is moved, once");
+  assert.equal(out.kind, "held");
+  assert.deepEqual([op.stage, op.follow.move_end, op.follow.move], ["held", "arrived", undefined]);
+});
+
+test("held-move-follow-resume 3b: once U is struck at the intents route, a refund back under U is not signed for; the held op ends past the move's window, its money waiting for the way out", async () => {
+  const t = await setup(["REFUNDED"]);
+  const movedMs = t.chain.a.timeMs;
+  await heldMoved(t, movedMs, { intents_struck: true });
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const log: string[] = [];
+  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
+  const out = await followDeposit(t.args, { ...t.deps, refundMove: mover(() => void log.push("moved")), untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+  assert.deepEqual(log, []);
+  assert.equal(out.kind, "held");
+  assert.equal((await opOf(t.w)).follow.move_end, "left");
+});
+
+test("held-move-follow-resume 3c: a refund back under U that a move may still take (the route refused it for now) keeps the held op followed past the move's window: no end while there is money to move", async () => {
+  const t = await setup(["REFUNDED"]);
+  // the move's window long past at the first round
+  await heldMoved(t, t.chain.a.timeMs - 2 * REFUND_QUOTE_DEADLINE_MS);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const log: string[] = [];
+  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
+  const out = await followDeposit(t.args, { ...t.deps, refundMove: answered(log, 404, null), untilFinal: true, signal: stop(t, 20) }).catch((e) => ({ kind: `threw ${e.message}` }));
+  assert.equal(out.kind, "threw stop", "followed on to the test's stop");
+  assert.deepEqual(log, ["move probe=true"], "the move is offered (the route asked first)");
+  assert.equal((await opOf(t.w)).follow.move_end, undefined);
+});
+
+// ---------- card held-move-follow-resume, the money review's FIX FIRST 2-4: the end reads 1Click, then U afresh ----------
+
+/** The refund quote's own deposit address (what the move sent to). */
+const MOVED_ADDR = "d".repeat(64);
+/** 1Click's statuses for whichever address is asked, in turn (the last one repeats): a status, 429 (a retry), or null (a
+ *  500: no read). `onAnswer` runs as each answer leaves, so a test can change the chain after the status read. */
+function movedStatus(u: string, script: (OneClickStatus | 429 | null)[], onAnswer: (st: OneClickStatus | 429 | null) => void = () => {}) {
+  const reads: string[] = [];
+  const fetchFn = (async (url: string) => {
+    const addr = new URL(url).searchParams.get("depositAddress")!;
+    reads.push(addr);
+    const next = script.length > 1 ? script.shift()! : script[0]!;
+    onAnswer(next);
+    if (next === 429) return new Response("", { status: 429, headers: { "retry-after": "1" } });
+    if (next === null) return new Response("", { status: 500 });
+    return Response.json(statusAnswer(next, u, addr));
+  }) as typeof fetch;
+  return { fetchFn, reads };
+}
+/** The follow's RPCs with `fail(side, method, token_id)` answering an error for the reads it names. */
+function failing(rpcs: readonly [FollowRpc, FollowRpc], fail: (side: number, method: string, token: string | undefined) => boolean) {
+  const wrap = (r: FollowRpc, side: number): FollowRpc => ({
+    ...r,
+    query: async (p) => {
+      const m = typeof p.method_name === "string" ? p.method_name : "";
+      const tok = m === "mt_balance_of" ? JSON.parse(Buffer.from(p.args_base64 as string, "base64").toString()).token_id : undefined;
+      return fail(side, m, tok) ? { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "TIMEOUT_ERROR" } } } : r.query(p);
+    },
+  });
+  return [wrap(rpcs[0], 0), wrap(rpcs[1], 1)] as const;
+}
+const tick60 = (t: Awaited<ReturnType<typeof setup>>) => () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
+
+test("held-move-follow-resume T1: a moved held op whose refund quote's status reads PENDING_DEPOSIT or PROCESSING is never ended, past the move's window on both RPCs with U empty", async () => {
+  for (const st of ["PENDING_DEPOSIT", "PROCESSING"] as const) {
+    const t = await setup(["REFUNDED"]);
+    const movedMs = t.chain.a.timeMs;
+    await heldMoved(t, movedMs, { moved_address: MOVED_ADDR });
+    const oc = movedStatus(t.u, [st]);
+    t.onTick.fn = tick60(t);
+    const out = await followDeposit(t.args, { ...t.deps, fetchFn: oc.fetchFn, untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+    assert.equal((await opOf(t.w)).follow.move_end, undefined, `${st}: no end while 1Click still holds the move's money`);
+    assert.equal(out.kind, "threw stop", `${st}: followed on to the test's stop`);
+    assert.ok(t.chain.a.timeMs > movedMs + REFUND_QUOTE_DEADLINE_MS, "the move's window is past on both RPCs");
+    assert.ok(oc.reads.length > 0 && oc.reads.every((a) => a === MOVED_ADDR), `the refund quote's own address read: ${oc.reads.slice(0, 3).join()}`);
+  }
+});
+
+test("held-move-follow-resume T2: the refund quote reads REFUNDED and its money is back under U inside intents.near (the origin, or NEAR USDC): held, never left", async () => {
+  for (const where of ["origin", "usdc"] as const) {
+    const t = await setup(["REFUNDED"]);
+    await heldMoved(t, t.chain.a.timeMs, { moved_address: MOVED_ADDR });
+    if (where === "origin") t.chain.a.held = t.chain.b.held = CREDIT;
+    else t.chain.heldUsdc = CREDIT;
+    const oc = movedStatus(t.u, ["REFUNDED"]);
+    t.onTick.fn = tick60(t);
+    const out = await followDeposit(t.args, { ...t.deps, fetchFn: oc.fetchFn, untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+    const op = await opOf(t.w);
+    assert.equal(op.follow.move_end, "held", `${where}: what waits under U is the way out's`);
+    assert.equal(out.kind, "held");
+    assert.equal(followEnded(op), true);
+  }
+});
+
+test("held-move-follow-resume T3: the refund quote reads SUCCESS and U's USDC reads MIN_DEPOSIT or more: arrived; a final status with U empty on every read: left, once the move's window is past on both RPCs", async () => {
+  const t = await setup(["REFUNDED"]);
+  await heldMoved(t, t.chain.a.timeMs, { moved_address: MOVED_ADDR });
+  t.chain.credit(CREDIT);
+  const oc = movedStatus(t.u, ["SUCCESS"]);
+  t.onTick.fn = tick60(t);
+  const out = await followDeposit(t.args, { ...t.deps, fetchFn: oc.fetchFn, untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+  assert.equal((await opOf(t.w)).follow.move_end, "arrived");
+  assert.equal(out.kind, "held");
+  for (const st of ["SUCCESS", "REFUNDED", "FAILED"] as const) {
+    const e = await setup(["REFUNDED"]);
+    const movedMs = e.chain.a.timeMs;
+    await heldMoved(e, movedMs, { moved_address: MOVED_ADDR });
+    const ec = movedStatus(e.u, [st]);
+    e.onTick.fn = tick60(e);
+    const end = await followDeposit(e.args, { ...e.deps, fetchFn: ec.fetchFn, untilFinal: true, signal: stop(e, 80) }).catch((x) => ({ kind: `threw ${x.message}` }));
+    assert.equal((await opOf(e.w)).follow.move_end, "left", `${st}, U empty`);
+    assert.equal(end.kind, "held");
+    // left is no end on the helper's word alone: the move's window past on both RPCs too (re-review of 98c86663d, M1)
+    assert.ok(e.chain.a.timeMs > movedMs + REFUND_QUOTE_DEADLINE_MS && e.chain.a.timeMs <= movedMs + REFUND_QUOTE_DEADLINE_MS + 60_000, `${st}: left ${e.chain.a.timeMs - movedMs} ms past the move, the first round past its window`);
+  }
+});
+
+// re-review of 98c86663d, M1 (PROBE-LAG): a final status is the helper's unsigned word, and nothing orders U's read
+// after the money is final on NEAR. The status reads final once, U reads empty that round, the money lands on U the next
+// round: left would end the follow with the money never seen (a REFUNDED origin under U has no app path out).
+test("held-move-follow-resume T8 (PROBE-LAG): a final status with U empty, the money under U a round later: arrived or held, never left", async () => {
+  for (const [st, where] of [["SUCCESS", "token"], ["REFUNDED", "origin"], ["FAILED", "usdc"]] as const) {
+    const t = await setup(["REFUNDED"]);
+    await heldMoved(t, t.chain.a.timeMs, { moved_address: MOVED_ADDR });
+    let landed = false;
+    const oc = movedStatus(t.u, [st]);
+    t.onTick.fn = () => {
+      tick60(t)();
+      if (landed || oc.reads.length === 0) return;
+      landed = true;
+      if (where === "token") t.chain.credit(CREDIT);
+      else if (where === "origin") t.chain.a.held = t.chain.b.held = CREDIT;
+      else t.chain.heldUsdc = CREDIT;
+    };
+    const out = await followDeposit(t.args, { ...t.deps, fetchFn: oc.fetchFn, untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+    assert.equal((await opOf(t.w)).follow.move_end, where === "token" ? "arrived" : "held", `${st}: the money a round after the final status`);
+    assert.equal(out.kind, "held");
+  }
+});
+
+test("held-move-follow-resume T4: a status read that fails (no read, or 429) ends nothing; a final status with the fresh read of U failing on one RPC ends nothing", async () => {
+  for (const st of [null, 429] as const) {
+    const t = await setup(["REFUNDED"]);
+    await heldMoved(t, t.chain.a.timeMs, { moved_address: MOVED_ADDR });
+    const oc = movedStatus(t.u, [st]);
+    t.onTick.fn = tick60(t);
+    const out = await followDeposit(t.args, { ...t.deps, fetchFn: oc.fetchFn, untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+    assert.equal((await opOf(t.w)).follow.move_end, undefined, `status ${st}: no end`);
+    assert.equal(out.kind, "threw stop");
+  }
+  // each read of U after the status: its USDC on the token, its origin and its NEAR USDC inside intents.near
+  for (const [what, fails] of [["USDC on the token", (m: string) => m === "ft_balance_of"], ["the origin inside intents.near", (m: string, tok?: string) => m === "mt_balance_of" && tok === ORIGIN], ["NEAR USDC inside intents.near", (m: string, tok?: string) => m === "mt_balance_of" && tok === USDC_ID]] as const) {
+    const t = await setup(["REFUNDED"]);
+    await heldMoved(t, t.chain.a.timeMs, { moved_address: MOVED_ADDR });
+    const flag = { on: false };
+    const oc = movedStatus(t.u, ["FAILED"], () => (flag.on = true));
+    t.onTick.fn = tick60(t);
+    const rpcs = failing(t.deps.rpcs, (side, m, tok) => flag.on && side === 1 && fails(m, tok));
+    const out = await followDeposit(t.args, { ...t.deps, rpcs, fetchFn: oc.fetchFn, untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+    assert.equal((await opOf(t.w)).follow.move_end, undefined, `${what} unread on one RPC: no end`);
+    assert.equal(out.kind, "threw stop");
+  }
+});
+
+test("held-move-follow-resume T5: the money reaches U between the round's first read and 1Click's final status: arrived, never left (U is read again after the status)", async () => {
+  const t = await setup(["REFUNDED"]);
+  await heldMoved(t, t.chain.a.timeMs, { moved_address: MOVED_ADDR });
+  // U's USDC reads 0 until the status answers, then the delivery is there
+  const oc = movedStatus(t.u, ["SUCCESS"], () => t.chain.credit(CREDIT));
+  t.onTick.fn = tick60(t);
+  const out = await followDeposit(t.args, { ...t.deps, fetchFn: oc.fetchFn, untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+  assert.equal((await opOf(t.w)).follow.move_end, "arrived");
+  assert.equal(out.kind, "held");
+  // the same inside intents.near: the refund lands under U as the status answers REFUNDED (the round read U empty before)
+  for (const where of ["origin", "usdc"] as const) {
+    const r = await setup(["REFUNDED"]);
+    await heldMoved(r, r.chain.a.timeMs, { moved_address: MOVED_ADDR });
+    const rc = movedStatus(r.u, ["REFUNDED"], () => (where === "origin" ? (r.chain.a.held = r.chain.b.held = CREDIT) : (r.chain.heldUsdc = CREDIT)));
+    r.onTick.fn = tick60(r);
+    await followDeposit(r.args, { ...r.deps, fetchFn: rc.fetchFn, untilFinal: true, signal: stop(r, 80) }).catch(() => {});
+    assert.equal((await opOf(r.w)).follow.move_end, "held", `${where}: read again after the status`);
+  }
+});
+
+test("held-move-follow-resume T6 (review item 3, X1): a record with no refund address (before this card) whose U's USDC read fails on one RPC writes no end, past the move's window", async () => {
+  const t = await setup(["REFUNDED"]);
+  await heldMoved(t, t.chain.a.timeMs);
+  t.onTick.fn = tick60(t);
+  const rpcs = failing(t.deps.rpcs, (side, m) => side === 1 && m === "ft_balance_of");
+  const out = await followDeposit(t.args, { ...t.deps, rpcs, untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+  assert.equal((await opOf(t.w)).follow.move_end, undefined);
+  assert.equal(out.kind, "threw stop");
+});
+
+test("held-move-follow-resume T7 (review item 3, X2): a record with no refund address whose intents.near read fails for one asset on one RPC never writes left, past the move's window", async () => {
+  for (const asset of [ORIGIN, USDC_ID]) {
+    const t = await setup(["REFUNDED"]);
+    await heldMoved(t, t.chain.a.timeMs);
+    t.onTick.fn = tick60(t);
+    const rpcs = failing(t.deps.rpcs, (side, m, tok) => side === 1 && m === "mt_balance_of" && tok === asset);
+    const out = await followDeposit(t.args, { ...t.deps, rpcs, untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+    assert.equal((await opOf(t.w)).follow.move_end, undefined, `${asset} unread`);
+    assert.equal(out.kind, "threw stop");
+  }
+});
+
+test("held-move-follow-resume: the move's record keeps the refund quote's deposit address, and the op keeps it once the move reads through", async () => {
+  const t = await setup(["REFUNDED"]);
+  await heldMoved(t, t.chain.a.timeMs, { why: "struck" });
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const recorded: MoveRecord[] = [];
+  const refundMove = async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
+    const tm = ask.reads.map((r) => r.blockTimeNs / 1_000_000n);
+    const deadline_ms = Number(tm[0]! < tm[1]! ? tm[0]! : tm[1]!) + REFUND_INTENT_WINDOW_MS;
+    const m: MoveRecord = { nonce: versionedNonce(ask.salt, deadline_ms), deadline_ms, asset: ask.asset, address: MOVED_ADDR, amount: ask.reads[0].held.toString(), height: ask.height };
+    await ask.record(m);
+    recorded.push(m);
+    t.chain.used.add(m.nonce);
+    t.chain.a.held = t.chain.b.held = 0n;
+    return { kind: "sent", move: m, status: 200, code: null, tx: null };
+  };
+  const oc = movedStatus(t.u, ["PROCESSING"]);
+  t.onTick.fn = tick60(t);
+  await followDeposit(t.args, { ...t.deps, fetchFn: oc.fetchFn, refundMove, untilFinal: true, signal: stop(t, 10) }).catch(() => {});
+  const op = await opOf(t.w);
+  assert.equal(recorded.length, 1);
+  assert.deepEqual([op.follow.moved, op.follow.moved_ms, op.follow.moved_address], [true, recorded[0]!.deadline_ms, MOVED_ADDR]);
+  assert.equal(op.follow.move_end, undefined, "PROCESSING: followed on");
 });

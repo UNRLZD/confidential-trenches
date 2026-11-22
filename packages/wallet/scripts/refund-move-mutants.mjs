@@ -16,6 +16,9 @@ const WR = ["wallet", "test/deposit-refund.test.ts"];
 const ST = ["signpage", "test/refund-move.test.ts"];
 const PF = "signpage/src/pool-deposit-follow.ts";
 const PC = ["signpage", "test/pool-refund-carry.test.ts"];
+const SF = ["signpage", "test/deposit-follow.test.ts"];
+const MOVEOUT = "wallet/src/deposit/moveout.ts";
+const WM = ["wallet", "test/deposit-moveout.test.ts"];
 // [name, file, [[the source as written, the plant]...], [package, test file], test name pattern]
 const M = [
   ["through only on a used nonce (a pruned nonce never through)", FOLLOW,
@@ -29,7 +32,7 @@ const M = [
   ["the two RPCs' balances not compared", FOLLOW,
     [["a.timeNs !== b.timeNs || a.held !== b.held ||", "a.timeNs !== b.timeNs ||"]], WT, "readMoveAt"],
   ["no new move for what U holds after a move (D1)", FOLLOW,
-    [["op.follow.status === \"REFUNDED\" && op.stage !== \"held\" && op.follow.final !== true", "op.follow.status === \"REFUNDED\" && op.stage !== \"held\" && op.follow.final !== true && !op.follow.moved"]], WT, "D1: the move is through"],
+    [["op.follow.status === \"REFUNDED\" && (op.stage !== \"held\" || heldFollowed(op)) && op.follow.final !== true", "op.follow.status === \"REFUNDED\" && (op.stage !== \"held\" || heldFollowed(op)) && op.follow.final !== true && !op.follow.moved"]], WT, "D1: the move is through"],
   ["final while a move is out", FOLLOW,
     [["if (deps.untilFinal && idle && !movable && !moveOut)", "if (deps.untilFinal && idle)"]], WT, "D1: the move is through"],
   ["a refund under MIN_DEPOSIT not held", FOLLOW,
@@ -136,7 +139,7 @@ const M = [
   ["L2: the block that read a pruned move through not kept", FOLLOW,
     [["            // pruned nonce (intents.near's cleanup_nonces) of a move that landed\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: at.height }", "            // pruned nonce (intents.near's cleanup_nonces) of a move that landed\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: undefined }"]], WT, "REVIEW2 L2b"],
   ["L3: the block that read a held op's move through not kept", FOLLOW,
-    [["{ move: undefined, prior_ms: undefined, prior_height: at.height, ...(its ? { moved: true as const, why: undefined } : {}) }", "{ move: undefined, prior_ms: undefined, ...(its ? { moved: true as const, why: undefined } : {}) }"]], WT, "REVIEW2 L3b"],
+    [["{ move: undefined, prior_ms: undefined, prior_height: at.height, ...(its ? { moved: true as const, moved_ms: m.deadline_ms, why: undefined } : op.follow.moved ? { moved_ms: m.deadline_ms } : {})", "{ move: undefined, prior_ms: undefined, ...(its ? { moved: true as const, moved_ms: m.deadline_ms, why: undefined } : op.follow.moved ? { moved_ms: m.deadline_ms } : {})"]], WT, "REVIEW2 L3b"],
   // card refunded-needs-the-refund (pool-deposit-stages' delta review P3): the one refunded rule, refundIsThere
   ["refunded on any speck: the floor read as more than 0", FOLLOW,
     [["return typeof floor === \"string\" && DIGITS.test(floor) && floor !== \"0\" && held >= BigInt(floor);", "return held > 0n;"]], WT, "refunded-needs-the-refund"],
@@ -152,6 +155,61 @@ const M = [
     [["asset === usdcId && refundIsThere(h, op.follow.refund_min === undefined ? undefined : op.follow.min_out)", "asset === usdcId && h > 0n"]], WT, "refunded-needs-the-refund"],
   ["the pool carry moves a speck as the op's refund", PF,
     [["if (!(m !== undefined && r.used === true) && !refundIsThere(r.held, f.refund_min)) return \"speck\";", ""]], PC, "refunded-needs-the-refund"],
+  // card held-move-follow-resume, the money review's FIX FIRST 2-4: a held moved op ends on 1Click's final status of the
+  // refund quote's address, then U read again on both RPCs; the old rule (no address) on every read of U
+  ["X1 (review item 3) the old rule ends on a failed read of U's USDC", FOLLOW,
+    [["        if (c === null) continue;\n        if (c >= VAULT_CONSTANTS.MIN_DEPOSIT) await write(id, \"held\", factsOf(op), { move_end: \"arrived\" });", "        if (c >= VAULT_CONSTANTS.MIN_DEPOSIT) await write(id, \"held\", factsOf(op), { move_end: \"arrived\" });"]], WT, "held-move-follow-resume T6"],
+  ["X2 (review item 3) the old rule writes left with an intents.near read missing", FOLLOW,
+    [[" && (intents === null || (holds.has(op.follow.origin) && holds.has(usdcId)))", ""]], WT, "held-move-follow-resume T7"],
+  ["the end with no status read of the refund quote's address", FOLLOW,
+    [["const st = await readDepositStatus(addr, U, fetchFn, signal, now());", "const st: StatusRead | null = { status: \"SUCCESS\", delivered: null };"]], WT, "held-move-follow-resume T1"],
+  ["a status that is not final read as final", FOLLOW,
+    [["          if (st.status !== \"SUCCESS\" && st.status !== \"REFUNDED\" && st.status !== \"FAILED\") continue;\n", ""]], WT, "held-move-follow-resume T1"],
+  ["PROCESSING read as final", FOLLOW,
+    [["if (st.status !== \"SUCCESS\" && st.status !== \"REFUNDED\" && st.status !== \"FAILED\") continue;", "if (st.status !== \"SUCCESS\" && st.status !== \"REFUNDED\" && st.status !== \"FAILED\" && st.status !== \"PROCESSING\") continue;"]], WT, "held-move-follow-resume T1"],
+  ["U's USDC not read again after the status (the round's first read, c)", FOLLOW,
+    [["const usdc = await readCredit(U, token, rpcs);", "const usdc = c;"]], WT, "held-move-follow-resume T5"],
+  ["U's intents.near holdings not read again after the status (the round's holds)", FOLLOW,
+    [["await Promise.all([op.follow.origin, usdcId].map(async (a) => (await readAt(null, a))?.held ?? null))", "[op.follow.origin, usdcId].map((a) => holds.get(a) ?? 0n)"]], WT, "held-move-follow-resume T5"],
+  ["held collapsed into left", FOLLOW,
+    [["? \"held\" : \"left\"", "? \"left\" : \"left\""]], WT, "held-move-follow-resume T2"],
+  ["a failed read of U after the status taken as 0", FOLLOW,
+    [["          if (usdc === null || inside.some((h) => h === null)) continue;\n", "          if (usdc === null) continue;\n"]], WT, "held-move-follow-resume T4"],
+  ["the refund quote's address not kept on the op when its move reads through", FOLLOW,
+    [["is moved by a new move\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: at.height }, move.asset, { moved: true, moved_ms: move.deadline_ms, moved_address: move.address });", "is moved by a new move\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: at.height }, move.asset, { moved: true, moved_ms: move.deadline_ms });"]], WT, "keeps the refund quote's deposit address"],
+  ["the refund quote's address not recorded with the move", REFUND,
+    [["asset: ask.asset, address: r.depositAddress, amount:", "asset: ask.asset, amount:"]], ST, "a refund is moved"],
+  // card held-move-follow-resume, the money review's M1: U's own lock (FOLLOW_LOCK) only around each round, never
+  // across the waits between rounds, so a tap between rounds takes it and moves; a round waits for a tap
+  ["M1 the follower body under U's own lock (the fault: a tap answers busy for the whole follow)", HOST,
+    [["lm.request(`${FOLLOWER_LOCK}${key}`, { mode: \"exclusive\", signal }, hold)", "lm.request(`${FOLLOW_LOCK}${key}`, { mode: \"exclusive\", signal }, hold)"]], SF, "held-move-follow-resume M1"],
+  ["M1 the round run with no lock (a round beside a tap's move)", FOLLOW,
+    [["fast = await roundLock(round);", "fast = await round();"]], SF, "held-move-follow-resume M1"],
+  ["M1 U's lock not handed to the follow", HOST,
+    [["            roundLock,\n", ""]], SF, "held-move-follow-resume M1"],
+  // re-review of 98c86663d, M1: left needs the move's window past on both RPCs too, never the helper's status alone
+  ["R1 left on a final status alone (PROBE-LAG)", FOLLOW,
+    [["          if (end === \"left\" && !(await pastOnBoth(rpcs, (op.follow.moved_ms ?? 0) + REFUND_QUOTE_DEADLINE_MS))) continue;\n", ""]], WT, "held-move-follow-resume T8"],
+  ["R1b left on a final status alone, read by T3", FOLLOW,
+    [["          if (end === \"left\" && !(await pastOnBoth(rpcs, (op.follow.moved_ms ?? 0) + REFUND_QUOTE_DEADLINE_MS))) continue;\n", ""]], WT, "held-move-follow-resume T3"],
+  // card held-move-follow-resume, re-review FIX FIRST 2: a tap and a round's bind never sign from U's key at once; the
+  // tap waits while U's bind call is out, the round signs no bind while a held op's move is out
+  ["FF2 the tap's wait for a bind call removed (a move signed at the call's nonce)", MOVEOUT,
+    [["    if (live) return { wait: true };\n", ""]], WM, "BIND-OUT"],
+  ["FF2 the tap waits on a bind call past max_block_height + LAPSE_MARGIN (over never ends the wait)", MOVEOUT,
+    [["return calls.some((c) => c.nonce > u.nonce && low <= c.max_block_height + LAPSE_MARGIN);", "return calls.some((c) => c.nonce > u.nonce);"]], WM, "BIND-OVER"],
+  ["FF2 the tap reads no notes", MOVEOUT,
+    [["const calls = deps.notes === undefined ? [] : (await deps.notes.list())", "const calls = deps.notes === undefined || true ? [] : (await deps.notes.list())"]], WM, "BIND-OUT"],
+  // the follow-up: the tap never waits while it holds U's lock (a call written but unsent goes out only in a round)
+  ["FF2 the tap's wait kept inside U's lock", MOVEOUT,
+    [["    if (live) return { wait: true };\n", "    if (live) for (let l = live; l === true; l = await bindOut()) await sleep(deps.pollMs ?? 1_000);\n"]], WM, "BIND-UNSENT"],
+  ["FF2 the round's wait for a held op's move removed (a bind beside the move)", FOLLOW,
+    [["const moving = !heldOnly && (await moveOutLive());", "const moving = false;"]], WT, "MOVE-OUT"],
+  ["FF2 the round waits on a move past its block + MOVE_VALIDITY_BLOCKS (over never ends the wait)", FOLLOW,
+    [["u.nonce < BigInt(r.nonce) && low <= BigInt(r.height) + MOVE_VALIDITY_BLOCKS", "u.nonce < BigInt(r.nonce)"]], WT, "MOVE-OVER"],
+  ["FF2 the round's move check after readCredit (U's USDC bound as read before the move's debit)", FOLLOW,
+    [["    const moving = !heldOnly && (await moveOutLive());\n    if (moving) fast = true;\n", ""],
+     ["    const c = await readCredit(U, token, rpcs);\n", "    const c = await readCredit(U, token, rpcs);\n    const moving = !heldOnly && (await moveOutLive());\n    if (moving) fast = true;\n"]], WT, "MOVE-OUT"],
 ];
 let ok = 0;
 for (const [name, file, edits, [pkg, test], pat] of M) {

@@ -108,6 +108,9 @@ export interface MoveRecord {
   nonce: string;
   deadline_ms: number;
   asset: string;
+  /** The refund quote's signed deposit address (the intent's receiver): 1Click's status of it says when the move's money
+   *  has reached U, or come back to it (card held-move-follow-resume). Absent on a move recorded before it. */
+  address?: string;
   amount: string;
   /** The block both RPCs' reads were made at: a later read of the move below it is no read (a provider's final that
    *  steps back answers from before the refund arrived). */
@@ -261,7 +264,7 @@ export async function runRefundMove<Q, I>(ask: RefundMoveAsk, deps: RefundMoveDe
     const nonce = versionedNonce(ask.salt, deadlineMs);
     const payload = transferPayload({ u: ask.u, deadlineMs, nonce, receiver: r.depositAddress, asset: ask.asset, amount: r.amountIn });
     intent = deps.check.intent(payload, q, ask.reads, ask.priorMs === null ? null : new Date(ask.priorMs).toISOString());
-    move = { nonce, deadline_ms: deadlineMs, asset: ask.asset, amount: r.amountIn.toString(), height: ask.height };
+    move = { nonce, deadline_ms: deadlineMs, asset: ask.asset, address: r.depositAddress, amount: r.amountIn.toString(), height: ask.height };
   } catch {
     return { kind: "refused", why: "intent" };
   }
