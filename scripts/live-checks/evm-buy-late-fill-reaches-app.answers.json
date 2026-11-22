@@ -1,0 +1,131 @@
+{
+ "_note": "good: card app-shell-posts-a-late-end's terminal build (on 3d98025fe, card evm-buy-late-fill-reaches-app's model and route) at APP_HOST's name, read by evm-buy-late-fill-reaches-app.mjs --harness --record on 2026-11-22 in headless Chrome 158: PASS, both widths ended refused, then Filled with the toast on basescan after the late ends. bad: main 5d7c3a99d's build, before card evm-buy-late-fill-reaches-app, the same run: FAIL, the box stays ended refused (Retry) with no toast after the late ends.",
+ "good": {
+  "check": "evm-buy-late-fill-reaches-app",
+  "at": "2026-11-22T14:32:02.560Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in, its Base buy refused then filled late",
+  "browser": "158.0.8127.36",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "ready": true,
+    "symbol": "PROS",
+    "buyOn": true,
+    "buys": 1,
+    "chain": "base",
+    "before": {
+     "stage": "refused",
+     "cta": "Retry",
+     "toast": false,
+     "href": null,
+     "lateOut": false
+    },
+    "late": true,
+    "after": {
+     "stage": null,
+     "cta": "Filled 1.5sFinal",
+     "toast": true,
+     "href": "https://basescan.org/tx/0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+    },
+    "shots": [
+     "phone-typed.png",
+     "phone-refused.png",
+     "phone-filled.png"
+    ]
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "ready": true,
+    "symbol": "PROS",
+    "buyOn": true,
+    "buys": 1,
+    "chain": "base",
+    "before": {
+     "stage": "refused",
+     "cta": "Retry",
+     "toast": false,
+     "href": null,
+     "lateOut": false
+    },
+    "late": true,
+    "after": {
+     "stage": null,
+     "cta": "Filled 1.5sFinal",
+     "toast": true,
+     "href": "https://basescan.org/tx/0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+    },
+    "shots": [
+     "desktop-typed.png",
+     "desktop-refused.png",
+     "desktop-filled.png"
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "check": "evm-buy-late-fill-reaches-app",
+  "at": "2026-11-22T14:33:32.282Z",
+  "source": "harness, terminal build main 5d7c3a99d, the stand-in shell signed in, its Base buy refused then filled late",
+  "browser": "158.0.8127.36",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "ready": true,
+    "symbol": "PROS",
+    "buyOn": true,
+    "buys": 1,
+    "chain": "base",
+    "before": {
+     "stage": "refused",
+     "cta": "Retry",
+     "toast": false,
+     "href": null,
+     "lateOut": false
+    },
+    "late": true,
+    "after": {
+     "stage": "refused",
+     "cta": "Retry",
+     "toast": false,
+     "href": null
+    },
+    "shots": [
+     "phone-typed.png",
+     "phone-refused.png",
+     "phone-filled.png"
+    ]
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "ready": true,
+    "symbol": "PROS",
+    "buyOn": true,
+    "buys": 1,
+    "chain": "base",
+    "before": {
+     "stage": "refused",
+     "cta": "Retry",
+     "toast": false,
+     "href": null,
+     "lateOut": false
+    },
+    "late": true,
+    "after": {
+     "stage": "refused",
+     "cta": "Retry",
+     "toast": false,
+     "href": null
+    },
+    "shots": [
+     "desktop-typed.png",
+     "desktop-refused.png",
+     "desktop-filled.png"
+    ]
+   }
+  ]
+ }
+}
