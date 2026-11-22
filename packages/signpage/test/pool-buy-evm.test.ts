@@ -1533,3 +1533,34 @@ test("card signpage-sent-end-recorded-evm (9): the rest leg's record names the r
   assert.deepEqual(op.txs, (got as { txs: unknown }).txs);
   assert.equal(op.pool_amount, R.poolUnits(AMOUNT_IN, 18), "what W spent at the venue");
 });
+
+test("card signpage-sent-end-recorded-evm (review 1): a page that dies while the helper holds the bytes (its POST never answers) leaves the request's op at sent, so the next load's follow ends that op: the buy has its row", async () => {
+  const box = opsBox();
+  const kept = new Map<string, EvmHolding>();
+  let posting = false;
+  const first = host({ holdings: kept, send: () => ((posting = true), new Promise<string>(() => {})) });
+  void runEvmPoolBuy(withOp(first.h, box), ASK);
+  assert.ok(await until(() => posting), "the POST went out");
+  assert.equal(kept.get(W)?.state, "pending");
+  assert.equal(opNow(box)?.stage, "sent", "the op at sent before the bytes leave");
+  const next = host({ holdings: kept, ...both([release()]) });
+  await followPending!(withOp(next.h, box));
+  assert.equal(opNow(box)?.stage, "filled", "the load's follow ends the request's op");
+  assert.deepEqual(opNow(box)?.txs, [{ chain: "base", hash: TX }]);
+});
+
+test("card signpage-sent-end-recorded-evm (review 2): a page that dies between a leg's end and its holding's write leaves the holding pending, so the next load's follow ends the op (the op is noted first)", async () => {
+  const box = opsBox();
+  const kept = new Map<string, EvmHolding>();
+  let n = 0;
+  // the first ops write (sent) lands; the next (the leg's end) never returns: the page died there
+  const dying = { ops: (id: string, f: (v: unknown) => unknown) => (n++ === 0 ? box.ops(id, f) : new Promise<void>(() => {})) };
+  const first = host({ holdings: kept, ...both([release()]) });
+  void runEvmPoolBuy(withOp(first.h, box, dying), ASK);
+  assert.ok(await until(() => n >= 2), "the leg's end was being noted");
+  assert.equal(kept.get(W)?.state, "pending", "the holding is not ended before its op");
+  const next = host({ holdings: kept, ...both([release()]) });
+  await followPending!(withOp(next.h, box));
+  assert.equal(opNow(box)?.stage, "filled", "the load's follow ends the request's op");
+  assert.equal(kept.get(W)?.state, "filled");
+});

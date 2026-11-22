@@ -1062,11 +1062,15 @@ export async function restoreEvmHoldings(a: { chain: Chain; testnet: boolean; pi
 /** The trade ops of a restore's spends and deposits back (see above); returns how many it wrote. */
 export async function restoreEvmTrades(a: { chain: Chain; read: EvmRpc; store: Pick<WalletStore, "update" | "keys" | "get">; spends: readonly EvmRestoredSpend[]; returns: readonly EvmRestoredReturn[]; signal?: AbortSignal }): Promise<number> {
   // the buys this device's own request ops already name (pool-buy-evm.ts EvmBuyOp, card signpage-sent-end-recorded-evm):
-  // their transaction gets no trade op beside that op, so a buy is one row
+  // their transaction gets no trade op beside that op, so a buy is one row. An op not ended yet (sent, or refused on the
+  // helper's word, which its chain's end still moves) has no tx until its release is read: it names its legs' Ws
   const named = new Set<string>();
+  const open = new Set<string>();
   for (const k of await a.store.keys("ops")) {
-    const r = (await a.store.get("ops", k).catch(() => undefined)) as { kind?: unknown; chain?: unknown; txs?: unknown } | undefined;
-    if (r?.kind === "buy" && r.chain === a.chain && Array.isArray(r.txs)) for (const t of r.txs) if (typeof (t as { hash?: unknown })?.hash === "string") named.add(((t as { hash: string }).hash).toLowerCase());
+    const r = (await a.store.get("ops", k).catch(() => undefined)) as { kind?: unknown; chain?: unknown; stage?: unknown; txs?: unknown; legs?: unknown } | undefined;
+    if (r?.kind !== "buy" || r.chain !== a.chain) continue;
+    if (Array.isArray(r.txs)) for (const t of r.txs) if (typeof (t as { hash?: unknown })?.hash === "string") named.add(((t as { hash: string }).hash).toLowerCase());
+    if ((r.stage === "sent" || r.stage === "refused") && Array.isArray(r.legs)) for (const l of r.legs) if (typeof (l as { w?: unknown })?.w === "string") open.add(((l as { w: string }).w).toLowerCase());
   }
   const times = new Map<bigint, Promise<number>>();
   const timeOf = (block: bigint): Promise<number> => {
@@ -1091,7 +1095,7 @@ export async function restoreEvmTrades(a: { chain: Chain; read: EvmRpc; store: P
     if (s.token === null || s.tx === null || s.fee === null || s.out === null || s.fee > s.withdrawn) continue;
     a.signal?.throwIfAborted();
     try {
-      if (!named.has(s.tx.toLowerCase())) {
+      if (!named.has(s.tx.toLowerCase()) && !open.has(s.w.toLowerCase())) {
         const decimals = await keptTokenDecimals(a.chain, s.token, [a.read, a.read] as unknown as readonly [PoolRpc, PoolRpc], a.signal ? { signal: a.signal } : {});
         await put(evmTradeOp("buy", a.chain, s.tx, s.token, s.out, decimals, s.withdrawn - s.fee, null, await timeOf(s.block)));
       }

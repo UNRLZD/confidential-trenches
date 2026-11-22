@@ -77,7 +77,13 @@ export async function restRecordEnd(rpcs: readonly [EvmRpc, EvmRpc], w: string, 
   }
   if (typeof rec.adapter !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(rec.adapter)) return null;
   const got = await onwardReceipt(rpcs, hash, w, rec.adapter).catch(() => null);
-  return got === "ok" ? { stage: "filled", txs, ...spend } : got === "failed" ? { stage: "owed_back", txs } : null;
+  if (got !== null) return got === "ok" ? { stage: "filled", txs, ...spend } : { stage: "owed_back", txs };
+  // past the carry's window (EVM_WBUY_CARRY_AFTER_MS: by then W's one buy has landed or never will), a buy neither RPC
+  // has a receipt of never landed: owed_back, W's change carried back
+  const by = typeof rec.signBy === "string" && /^[0-9]{1,20}$/.test(rec.signBy) ? BigInt(rec.signBy) : null;
+  if (by === null || now <= by + EVM_WBUY_CARRY_AFTER_MS) return null;
+  const none = await Promise.all(rpcs.map((rpc) => Promise.resolve().then(() => rpc("eth_getTransactionReceipt", [hash])).then((r) => r === null, () => false)));
+  return none.every(Boolean) ? { stage: "owed_back", txs } : null;
 }
 /** How long past its release's deadline W's own buy may still be signed: past it the run signs nothing and the change
  *  is carried back whole as rungs. */

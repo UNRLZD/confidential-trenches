@@ -795,16 +795,17 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
         taken = true;
         if (got.attempt !== l.r.attempt) return no();
       }
-      // the sends: a busy helper waited out while the proof has more than the send margin left and no sign out started
-      posted = true;
-      const ends = await Promise.all(legs.map((l) => sendLeg(h, l.data, l.r, clock, wait, stopped)));
-      const out = legs.map((l, i) => ({ ...l, refused: ends[i] === "refused" }));
-      // the request's op at "sent", before the run answers it (card signpage-sent-end-recorded-evm): no tx until a
-      // release is read, each leg's W; never over an op already there. A write that fails leaves the buy with no op
+      // the request's op at "sent", before any byte leaves (card signpage-sent-end-recorded-evm): a page that dies while
+      // the helper holds the bytes leaves an op the next load's follow ends from W's holding. No tx until a release is
+      // read, each leg's W; never over an op already there. A write that fails leaves the buy with no op
       if (opId !== undefined) {
         const op: EvmBuyOp = { kind: "buy", stage: "sent", txs: [], created_ms: Number(clock()), chain: h.chain, token: lower(token), legs: legs.map((l) => ({ w: lower(l.kind === "whole" ? l.x.w : l.leg.w) })) };
         await h.ops!(opId, (v) => (v === undefined ? op : undefined)).catch(() => {});
       }
+      // the sends: a busy helper waited out while the proof has more than the send margin left and no sign out started
+      posted = true;
+      const ends = await Promise.all(legs.map((l) => sendLeg(h, l.data, l.r, clock, wait, stopped)));
+      const out = legs.map((l, i) => ({ ...l, refused: ends[i] === "refused" }));
       if (out.every((l) => l.refused)) return { legs: out, plan, quoted };
       h.sent?.();
       // a sign out started during the busy wait: the run ends "sent", and the settle pass decides at the next sign in
@@ -969,39 +970,46 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
       if (x.none === null) x.none = at;
       if (at - x.none < BigInt(EVM_BUY_LAG_MS)) continue;
       // the chain said it never landed: this run's pending record is removed with the verdict, so the note can buy
-      // again (a removal that fails leaves it: the next buy is refused and the next load's follow tries again)
+      // again (a removal that fails leaves it: the next buy is refused and the next load's follow tries again). The op
+      // is noted first: a page that dies between the two leaves the record pending, and the next load's follow ends it
+      const end = await ended({ stage: "not_landed", txs: [] });
       await h.unrecord(x.w, x.want.nullifier, x.want.deadlineMs).catch(() => {});
-      return ended({ stage: "not_landed", txs: [] });
+      return end;
     }
     x.none = null;
     if (v === null) continue;
     if (v.end === "not_landed") {
       // the nullifier released to another W (the note spent elsewhere: another device on the same words): nothing of
-      // it is W's, so the record ends too (review P3-D)
+      // it is W's, so the record ends too (review P3-D), after the op is noted
+      const end = await ended({ stage: "not_landed", txs: [] });
       await h.unrecord(x.w, x.want.nullifier, x.want.deadlineMs).catch(() => {});
-      return ended({ stage: "not_landed", txs: [] });
+      return end;
     }
     const txs: TxRef[] = [{ chain: h.chain, hash: v.release.tx }];
     const at = { ...x.holding.route, tx: v.release.tx, block: v.release.block.toString() };
     // this run's own release landed: its note's chunk (the device's, never the chain's word) is out of the pool
     if (x.mine !== undefined) h.landed?.(x.mine.noteId, x.mine.attempt, x.mine.chunk, v.release.block);
     if (v.end === "filled") {
-      await h.record(x.w, { ...x.holding, state: "filled", received: poolUnits(v.release.out, x.holding.decimals), route: at }).catch(() => {});
       // the figures: the token W received, and the chunk less the fee the sender charged, what went into the venue; on the
-      // request's op, or by its tx where the holding names none
-      if (ref !== null) return ended({ stage: "filled", txs, out: v.release.out.toString(), decimals: x.holding.decimals, wei: intoVenue(v.release).toString() });
+      // request's op, noted before the holding leaves pending (a page that dies between the two leaves it pending, and
+      // the next load's follow ends the op), or by its tx where the holding names none
+      const end = ref === null ? null : await ended({ stage: "filled", txs, out: v.release.out.toString(), decimals: x.holding.decimals, wei: intoVenue(v.release).toString() });
+      await h.record(x.w, { ...x.holding, state: "filled", received: poolUnits(v.release.out, x.holding.decimals), route: at }).catch(() => {});
+      if (end !== null) return end;
       await h.traded?.(evmTradeOp("buy", h.chain, v.release.tx, x.holding.mint, v.release.out, x.holding.decimals, intoVenue(v.release), h.price?.() ?? null, Number(clock()))).catch(() => {});
       return { stage: "filled", txs };
     }
     // withdrawn: W holds the chunk less the fee in ETH; the buy did not fill. The carry puts it back into the pool, from
-    // the chain's own release (no record of this run is its source: a write that fails here loses nothing)
+    // the chain's own release (no record of this run is its source: a write that fails here loses nothing). The op is
+    // noted first, as on filled
+    const end = await ended({ stage: "owed_back", txs });
     await h.record(x.w, { ...x.holding, state: "withdrawn", route: at }).catch(() => {});
     try {
       h.carry?.();
     } catch {
       /* the next state read runs it */
     }
-    return ended({ stage: "owed_back", txs });
+    return end;
   }
   return null;
 }
