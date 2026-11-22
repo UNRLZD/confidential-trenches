@@ -26,7 +26,8 @@
 //                         stop            the process ends at the helper's answer to the pieces; W is left holding the
 //                                         pieces' SOL, for `found`. Its out.json names W.
 //   found               FLOW_RESUME=<seed of a tag3-fail stop run> FLOW_W=<its W>: a fresh store signed in with those
-//                       words, the page's restore, then a load every LOAD_MS: each load's rent back lines, W's lamports,
+//                       words, the page's restore, one page tapped once (a refused sell: rent backs pass a W only after a
+//                       tap), then a state read of it every LOAD_MS: each load's rent back lines, W's lamports,
 //                       W's latest transaction, its block's height and each RPC's finalized height. FLOW_PLANT, sent by F
 //                       right after the restore (F funded first):
 //                         none (default)  nothing: held while + 151 is not past, then swept;
@@ -445,18 +446,21 @@ if (SCENARIO === "found") {
     }
   }
   out.loads = [];
+  // the rent backs pass a W only after the page's first tap (card rent-backs-resume-private: before it a run reads the
+  // Ws on the helper's seat and passes none), so the restored device's page stays open and is tapped once, as its user
+  // does (card a-found-wallet-sweeps-past-a-strangers-coin): a sell of a coin no W of the user holds, refused; each load
+  // is then a state read of that page
+  const p = page("found", await openWalletStore({ indexedDB: idb }));
+  const tapped = await once(p, "pool.sell", { chain: "solana", token: base58.encode(new Uint8Array(32).fill(9)), share_bps: 10_000, slippage_bps: 300 }, true);
+  out.tap = tapped.answer;
   const t0 = Date.now();
-  let prev = null;
   for (let i = 0; Date.now() - t0 < SWEEP_WAIT_MS; i++) {
-    prev?.cut();
-    const p = page(`load${i}`, await openWalletStore({ indexedDB: idb }));
     const from = told.length;
     await p.t.stateRead();
     await sleep(LOAD_MS);
     const load = { at: new Date().toISOString(), told: told.slice(from).map((x) => x.line), holds: await wHolds(FOUND_W), clock: await wClock(FOUND_W) };
     out.loads.push(load);
     log(`load ${i}: W ${JSON.stringify(load.holds)}; latest ${load.clock.latest[0]} at height ${JSON.stringify(load.clock.height)}, finalized ${load.clock.finalized.join("/")} (past + 151: ${load.clock.past})`);
-    prev = p;
     // swept: W at 0 on both RPCs; with a stranger's unit planted (token), W keeps that account's close cost (the page's
     // keepOf, card a-found-wallet-sweeps-past-a-strangers-coin), so swept is W down by at least 2,000,000 lamports (a
     // sweep's least note; W otherwise only pays fees) on both RPCs from the first load's read
