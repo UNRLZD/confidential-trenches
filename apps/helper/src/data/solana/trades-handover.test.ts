@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD } from "./trades.ts";
+import { createSolanaTrades, HANDED_TIMING, PYTH_RECEIVER, PYTH_SOL_USD } from "./trades.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"), "utf8")) as { txs: Record<string, { signature: string; result: { slot: number; meta: { logMessages: string[] } } }> };
@@ -131,4 +131,52 @@ test("card helper-tape-handover (hostile): a Solana tape whose book, held trades
     assert.ok(c.asked.includes("sigs cold"), `${what}: the coin opened cold`);
     next.t.stop();
   }
+});
+
+test("card helper-tape-handover-judges-handed-books: a restored Solana tape's trades answer names the handover in its Server-Timing, and a cold one names nothing (red at main 5d7c3a99d: no answer said where its tape came from)", async () => {
+  const clock = { ms: TS * 1000 };
+  const old = helper(chain(), clock);
+  const coldAnswer = await old.t.trades(MINT, 50);
+  await settle();
+  const again = await old.t.trades(MINT, 50);
+  assert.ok(!(coldAnswer.timing ?? "").includes("handed") && !(again.timing ?? "").includes("handed"), `a cold tape is not named: ${coldAnswer.timing} / ${again.timing}`);
+  const st = JSON.parse(JSON.stringify(old.t.state()));
+  old.t.stop();
+  clock.ms += 30_000;
+  const next = helper(chain(), clock);
+  assert.equal(next.t.restore(st), true);
+  await settle();
+  const handedOver = await next.t.trades(MINT, 50);
+  assert.ok((JSON.parse(handedOver.body).trades as unknown[]).length > 0, "the restored tape answers its rows");
+  assert.ok((handedOver.timing ?? "").includes(HANDED_TIMING), `a handed tape is named: ${handedOver.timing}`);
+  next.t.stop();
+});
+
+test("card helper-tape-handover-judges-handed-books: the Solana tapes name what the warm file held and what they restored (handover(), on /v1/health): after a restore all of them, at a cold start 0 of 0, after a file with a hostile tape 0 of all (a restore is whole or nothing) (red at main 5d7c3a99d: no counts)", async () => {
+  const { clock, st } = await warmOld();
+  const n = st.tapes.length;
+  assert.ok(n > 0, "the old helper handed tapes over");
+  clock.ms += 30_000;
+  const cold = helper(chain(), clock);
+  assert.deepEqual(cold.t.handover(), { held: 0, restored: 0 }, "a cold start");
+  assert.equal(cold.t.restore(undefined), false);
+  assert.deepEqual(cold.t.handover(), { held: 0, restored: 0 }, "no tapes part handed over: nothing held");
+  cold.t.stop();
+  const next = helper(chain(), clock);
+  assert.equal(next.t.restore(st), true);
+  assert.deepEqual(next.t.handover(), { held: n, restored: n }, "after a restore");
+  assert.equal(next.t.restore(st), true);
+  assert.deepEqual(next.t.handover(), { held: n, restored: n }, "the same file again counts its tapes once");
+  await settle();
+  next.t.stop();
+  const hostile = JSON.parse(JSON.stringify(st)) as typeof st;
+  hostile.tapes.push(["not-a-mint", {}]);
+  const after = helper(chain(), clock);
+  assert.equal(after.t.restore(hostile), false);
+  assert.deepEqual(after.t.handover(), { held: n + 1, restored: 0 }, "a hostile tape: the file held them all, none restored");
+  after.t.stop();
+  const odd = helper(chain(), clock);
+  assert.equal(odd.t.restore({ tapes: {}, traders: [] }), false);
+  assert.deepEqual(odd.t.handover(), { held: 1, restored: 0 }, "tapes that are no list: something held, nothing restored");
+  odd.t.stop();
 });

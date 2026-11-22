@@ -2751,7 +2751,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** `marking`: its mark's read in flight (markQuiet); `noMark`: its pool gives none; `offLogged`: its close off the
    *  list's price is logged (offScale). */
   /** `ahead`: the lane of the read ahead building it (tapeAhead), until a caller's open takes it over. */
-  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; headAt?: number; first?: Promise<void>; marking?: Promise<void>; noMark?: boolean; offLogged?: boolean; from?: number; back?: Back; backing?: Promise<void>; ahead?: Lane };
+  // `handed`: the book came from the previous process's handover (restore), named in its trades answer (HANDED_TIMING)
+  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; handed?: true; headAt?: number; first?: Promise<void>; marking?: Promise<void>; noMark?: boolean; offLogged?: boolean; from?: number; back?: Back; backing?: Promise<void>; ahead?: Lane };
   /** A tape's trades before its book's first read (`from`: that read's first block; readBack): the blocks read back to
    *  `lo`, their logs (the pool's and the ETH price's), the book they fold into (only its tape is served: the bars
    *  before ours are CoinGecko's or GeckoTerminal's), and whether the read back is done (TRADES_MAX trades held, or
@@ -3517,6 +3518,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return running;
   }
   let timer: ReturnType<typeof setInterval> | null = null;
+  // card helper-tape-handover-judges-handed-books: the books the last warm file held and how many of them this process
+  // holds after its restore (handover(), named on /v1/health)
+  let handedCount = { held: 0, restored: 0 };
   function ensureTimer(): void {
     if (timer !== null || deps.tickMs === 0) return; // tickMs 0: no timer, the caller ticks (tests)
     timer = setInterval(() => {
@@ -5121,7 +5125,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
       back = { lo: b.lo as number, logs: [], tape, done: true, ...(b.located === true ? { located: true as const } : {}), ...(b.born === true ? { born: true as const } : {}) };
     }
-    const e: Entry = { pool, decimals: v.decimals, book, touched: v.touched as number, readAt: v.readAt, headN: v.headN as number, ...(v.headAt === undefined ? {} : { headAt: v.headAt as number }), ...(v.from === undefined ? {} : { from: v.from as number }), ...(back === undefined ? {} : { back }) };
+    const e: Entry = { pool, decimals: v.decimals, book, touched: v.touched as number, readAt: v.readAt, headN: v.headN as number, handed: true, ...(v.headAt === undefined ? {} : { headAt: v.headAt as number }), ...(v.from === undefined ? {} : { from: v.from as number }), ...(back === undefined ? {} : { back }) };
     return [tk, e, v.rest === true];
   };
   const isPool = (token: string, v: unknown): v is Pool => {
@@ -5246,7 +5250,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
      * they would have in the old process. Returns whether it restored.
      */
     restore(st: unknown): boolean {
+      // no part handed over (no warm file, or one before this part) counts nothing; a part that is no state, or `books`
+      // that is no list, held something and restores nothing
+      if (st === undefined) return false;
       const o = typeof st === "object" && st !== null && !Array.isArray(st) ? (st as Record<string, unknown>) : null;
+      const held = o === null ? 1 : Array.isArray(o.books) ? o.books.length : o.books === undefined ? 0 : 1;
+      handedCount = { held, restored: 0 };
       if (o === null) return false;
       const t = now();
       const list = (v: unknown): unknown[] | null => (v === undefined ? [] : Array.isArray(v) && v.length <= HANDOVER_ENTRIES_MAX ? v : null);
@@ -5294,11 +5303,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         if (gtPools.size >= POOLS_MAX) gtPools.delete(gtPools.keys().next().value!);
         gtPools.set(tk, { id: v.id as string | null, at: v.at as number });
       }
+      // a book this process already holds (its own open, or the same file's book restored before) counts restored
+      let took = 0;
       for (const [tk, e, atRest] of restored) {
-        if (books.has(tk) || resting.has(restKey(tk))) continue;
-        if (!atRest && books.size < OPEN_MAX) books.set(tk, e);
-        else if (atRest && resting.size < (deps.restMax ?? REST_MAX)) resting.set(restKey(tk), e);
+        if (books.has(tk) || resting.has(restKey(tk))) took++;
+        else if (!atRest && books.size < OPEN_MAX) (books.set(tk, e), took++);
+        else if (atRest && resting.size < (deps.restMax ?? REST_MAX)) (resting.set(restKey(tk), e), took++);
       }
+      handedCount = { held, restored: took };
       for (const [x, v] of tradersIn) if (!traders.has(x)) {
         if (traders.size >= TRADERS_MAX) traders.delete(traders.keys().next().value!);
         traders.set(x, v);
@@ -5312,6 +5324,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           map.set(key, { at: v.at as number, bars: tagged(v.bars as Candle[], v.src === CG_SRC ? CG_SRC : undefined), ...(v.src === CG_SRC ? { src: CG_SRC } : {}) });
         }
       return true;
+    },
+    /** Card helper-tape-handover-judges-handed-books: the books the last warm file held and how many this process holds
+     *  after restoring it (0 and 0 with none read), counts only, for /v1/health. */
+    handover(): { held: number; restored: number } {
+      return { ...handedCount };
     },
     tick: start,
     stop(): void {
@@ -5494,7 +5511,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a book behind the chain (behind) is no complete list: filling, no reach, as the rows were taken (card
       // base-tape-never-complete-behind-the-index: live run 44228233209 served a Base tape 46 s behind as complete)
       const late = behind(e);
-      const timing = readTo(e);
+      // card helper-tape-handover-judges-handed-books: a book the handover gave names it, so a reader judges its first
+      // answer against the old helper's (helper-tape-handover); a cold one names nothing
+      const timing = e.handed === true ? `${readTo(e)}, ${HANDED_TIMING}` : readTo(e);
       await within(lanes.run(lane, () => tradersOf(rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
       const at = e.readAt ?? now();
       const waiting = rows.some((r) => unread(r.tx));
@@ -5506,6 +5525,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   };
 }
 export type EvmSwaps = ReturnType<typeof createSwaps>;
+/** Card helper-tape-handover-judges-handed-books: the Server-Timing part of a trades answer whose book the previous
+ *  process handed over (restore), read by the helper-tape-handover live check. */
+export const HANDED_TIMING = 'evm-handed;desc="book from the handover"';
 
 /** The start of block `n`'s second on a chain with a fixed block clock (BLOCK_CLOCK), in ms; null off one. Every block in
  *  an era is `blockMs` after the one before (card token-stats-count-every-trade: the tape's reach, wholeOf). */

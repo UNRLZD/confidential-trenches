@@ -19,7 +19,7 @@ import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, upstreamBudget } from "./
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
-import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, LISTEN_BACKLOG, listenAt, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, STARTED_HEADER, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
+import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, HANDOVER_HEADER, handler, LISTEN_BACKLOG, listenAt, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, STARTED_HEADER, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
 import { pairNames } from "./token-status/status.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
@@ -82,6 +82,24 @@ test("GET /v1/health names mainnet NEAR's agreement pair in X-Helper-Near-Pair, 
   assert.equal(r.status, 200);
   assert.equal(r.headers[NEAR_PAIR_HEADER.toLowerCase()], "fastnear.com, drpc.live");
   assert.ok(!JSON.stringify(r.headers).includes("f".repeat(16)) && !JSON.stringify(r.headers).includes("d".repeat(16)) && !r.body.includes("f".repeat(16)), "no key in the answer");
+});
+
+// card helper-tape-handover-judges-handed-books: GET /v1/health names, in X-Helper-Handover, what the warm file handed
+// this process per kind (each part's handover(): held and restored), counts only, so the handover live check fails a
+// deploy whose file held books it did not restore. A header, as the start: the body has 11 B left under the kit's 1 KB.
+test("GET /v1/health names the warm file's books and tapes held and restored in X-Helper-Handover, counts only (red at main 5d7c3a99d: no header)", async (t) => {
+  const counts = (held: number, restored: number) => ({ handover: () => ({ held, restored }) });
+  const swaps = { base: counts(3, 3), robinhood: counts(2, 1), solana: counts(0, 0) };
+  const helper = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), undefined, {}, swaps as never));
+  t.after(() => closeServer(helper));
+  await listening(helper.listen(0, "127.0.0.1"), "the helper");
+  const r = await call("GET", "/v1/health", { origin: APP }, undefined, (helper.address() as AddressInfo).port);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers[HANDOVER_HEADER.toLowerCase()], "base books held 3 restored 3, robinhood books held 2 restored 1, solana tapes held 0 restored 0");
+  assert.ok(Buffer.byteLength(r.body) <= 1024, "the body is untouched (1 KB limit, H7)");
+  // a server with no market parts names none
+  const bare = await call("GET", "/v1/health");
+  assert.equal(bare.headers[HANDOVER_HEADER.toLowerCase()], "");
 });
 
 // card helper-release-bump: the release HELPER_RELEASE names (deploy/redeploy.sh raises it per new commit) is in the
