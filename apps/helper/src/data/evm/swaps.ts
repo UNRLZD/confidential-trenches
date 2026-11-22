@@ -647,6 +647,19 @@ export const BACK_FAILS_MAX = 3;
  *  their other filters and ETH price spans. [design: 2, as Base's window rounds (card base-tape-fills-inside-45s): a
  *  tape holds no more of daybreak's 3 in-flight places than a step did, and a dozen fill side by side, newest first] */
 export const BACK_ROUND_SPANS = 2;
+/** Tapes read back at once on a chain (backFrom); the rest wait their turn in the order their books opened (card
+ *  robinhood-tapes-inside-their-bounds-on-live: 12 tapes opened at once read back side by side, and on the live helper
+ *  the burst held the ticks' head and forward reads behind them, "19 of 35 ready; no room 15, held 64, busy 37").
+ *  [design: 3, from the Mac rig's posts (12 cold Robinhood tapes, ten runs on ee5c7dac4, 22 Nov): the providers
+ *  accepted 11.0 posts a second (median), 6.8 of them the ticks' head, forward and other reads, so read backs had 4.3; a
+ *  spread tape's read back is about 57 posts, 1.27 a second to fill inside 45 s, and 4.3 / 1.27 = 3.3 fill side by side
+ *  inside it. Twelve at once each had 0.35 a second, and none filled inside 45 s.] */
+export const BACK_AT_ONCE = 3;
+/** The share of each paced provider's bucket a read back or the lists' read ahead leaves for the ticks and the index's
+ *  follow (paceFor), above the CALLER_ROOM every background read leaves callers. [design: 0.6, so the ticks' reads draw
+ *  their 6.8 of the 11.0 posts a second the rig's providers accepted (BACK_AT_ONCE), 0.62 of them, from a bucket no read
+ *  back took below it.] */
+export const FRESH_ROOM = 0.6;
 /** How long a tape's locate may wait out its provider's holds before the steps read the day (readBack). [design: 30 s:
  *  a dozen tapes' locates refused for our own rate are each sent within a few holds, and a provider refusing longer
  *  leaves the tape to the steps inside the live checks' 45 s] */
@@ -1407,15 +1420,24 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // tape 503 at OPEN_BOUND_MS, and index-evm-swaps BAD). Work a caller joins that another started (a pool search, the
   // shared head, the ETH price read) is lifted to foreground by the join (join), the standard priority inheritance.
   // A lane also counts the ms its reads waited for a pace or a queue, for the answer's Server-Timing (laneTiming).
-  type Lane = { fg: boolean; paceMs: number; slotMs: number; posts: number; joined?: Set<Lane> };
+  // The ticks and the index's follow run in a fresh lane (card robinhood-tapes-inside-their-bounds-on-live): background
+  // still, but ahead of the other background reads (read backs, the lists' read ahead) in each provider's in-flight
+  // queue, and with FRESH_ROOM of each paced bucket theirs, so a burst of opens never holds a tick's head and forward
+  // reads past BEHIND_MAX.
+  type Lane = { fg: boolean; fresh?: boolean; paceMs: number; slotMs: number; posts: number; joined?: Set<Lane> };
   /** An agreed head (agreedHead): its block, that block's time (s), when it was read (now(), ms), the providers that have it. */
   type Head = { n: number; t: number; at: number; with: string[] };
   const lanes = new AsyncLocalStorage<Lane>();
   const newLane = (fg: boolean): Lane => ({ fg, paceMs: 0, slotMs: 0, posts: 0 });
   /** The lane a read runs in now: none set is background. */
   const fgNow = (): boolean => lanes.getStore()?.fg === true;
-  /** Work that callers may share, started now: a lane of its own, foreground when its starter is. */
-  const sharedLane = (): Lane => newLane(fgNow());
+  /** A tick's or the index follow's lane: background, fresh. */
+  const freshLane = (): Lane => ({ ...newLane(false), fresh: true });
+  /** A post's rank in a provider's in-flight queue: foreground, then fresh, then the rest of background. */
+  const rankOf = (l: Lane | undefined): number => (l?.fg === true ? 0 : l?.fresh === true ? 1 : 2);
+  /** Work that callers may share, started now: a lane of its own, foreground when its starter is, fresh when its
+   *  starter is. */
+  const sharedLane = (): Lane => (lanes.getStore()?.fresh === true ? freshLane() : newLane(fgNow()));
   /** A caller joins shared work: a foreground one lifts it to foreground, and counts its waits as its own. */
   const join = (l: Lane): void => {
     const me = lanes.getStore();
@@ -1505,9 +1527,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const queuedAt = performance.now();
       const sent = await new Promise<boolean>((go) => {
         const entry = { go: () => go(true), calls, fg, lane: lanes.getStore() };
-        // a foreground post goes ahead of every background one queued (card helper-deploy-reads-fast), behind the
-        // foreground ones before it
-        const at = fg ? q.queue.findIndex((x) => !x.fg) : -1;
+        // a foreground post goes ahead of every background one queued (card helper-deploy-reads-fast), a fresh one (a
+        // tick's, the index follow's) ahead of the rest of background (card robinhood-tapes-inside-their-bounds-on-live),
+        // each behind the ones of its rank before it
+        const rank = fg ? 0 : rankOf(entry.lane);
+        const at = rank < 2 ? q.queue.findIndex((x) => (x.fg ? 0 : rankOf(x.lane)) > rank) : -1;
         if (at < 0) q.queue.push(entry);
         else q.queue.splice(at, 0, entry);
         timer = setTimeout(() => {
@@ -1554,11 +1578,24 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  its units, the hold read again after each wait; past PACE_WAIT_MAX_MS of waits it is another provider's, past
    *  PACE_PATIENT_MS when no other provider answered it (agreed's last round). False when it is not to be sent here. A
    *  foreground read (a caller's, card helper-deploy-reads-fast) also draws the CALLER_ROOM background leaves. */
+  /** A draw of the provider's pace (holds.take): 0, or the ms to wait. A background read neither fresh nor a caller's (a
+   *  read back, the lists' read ahead) waits while the bucket holds no more than FRESH_ROOM besides its units, the
+   *  ticks' and the index follow's (card robinhood-tapes-inside-their-bounds-on-live). */
+  function draw(url: string, calls: number): number {
+    const l = lanes.getStore();
+    const p = holds.paceOf(url);
+    if (p !== undefined && l?.fg !== true && l?.fresh !== true) {
+      const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst * (1 - FRESH_ROOM));
+      const short = p.burst * FRESH_ROOM + units - holds.room(url) * p.burst;
+      if (short > 0) return Math.max(1, Math.ceil((short * 1000) / p.perS));
+    }
+    return holds.take(url, calls, !fgNow());
+  }
   async function paceFor(url: string, calls: number, patient: boolean): Promise<boolean> {
     if (holds.heldFor(url) > 0) return false;
     // the lane's priority read at each wait: a background read a caller joins meanwhile (join) draws as the caller's
     let slept = 0;
-    for (let w = holds.take(url, calls, !fgNow()); w > 0; w = holds.take(url, calls, !fgNow())) {
+    for (let w = draw(url, calls); w > 0; w = draw(url, calls)) {
       if (slept + w > (patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS)) return (waited(slept), paced.set(url, (paced.get(url) ?? 0) + 1), false);
       await new Promise((go) => setTimeout(go, w));
       slept += w;
@@ -2858,8 +2895,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
   let follower: ReturnType<typeof setInterval> | null = null;
   if (index !== null && deps.tickMs !== 0) {
-    void follow();
-    follower = setInterval(() => void follow(), INDEX_FOLLOW_MS);
+    // fresh: ahead of the read backs and the read ahead (freshLane)
+    void lanes.run(freshLane(), follow);
+    follower = setInterval(() => void lanes.run(freshLane(), follow), INDEX_FOLLOW_MS);
     follower.unref();
   }
 
@@ -3394,9 +3432,24 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (head !== null) backFrom(e, head.with);
     }).catch(() => undefined);
   }
-  /** A read book's read back started, once (backAll): its own background read, never a caller's or the tick's wait. */
+  /** BACK_AT_ONCE read backs at once, the rest waiting their turn in order. */
+  let backsOut = 0;
+  const backsWaiting: (() => void)[] = [];
+  async function backTurn(run: () => Promise<void>): Promise<void> {
+    if (backsOut >= BACK_AT_ONCE) await new Promise<void>((go) => backsWaiting.push(go));
+    else backsOut++;
+    try {
+      await run();
+    } finally {
+      const next = backsWaiting.shift();
+      if (next !== undefined) next();
+      else backsOut--;
+    }
+  }
+  /** A read book's read back started, once (backAll): its own background read, never a caller's or the tick's wait;
+   *  at most BACK_AT_ONCE at once (backTurn). */
   function backFrom(e: Entry, urls: readonly string[]): void {
-    if (e.readAt !== null && e.from !== undefined && e.back?.done !== true && e.backing === undefined) e.backing = lanes.run(newLane(false), () => backAll(e, urls)).finally(() => (e.backing = undefined));
+    if (e.readAt !== null && e.from !== undefined && e.back?.done !== true && e.backing === undefined) e.backing = lanes.run(newLane(false), () => backTurn(() => backAll(e, urls))).finally(() => (e.backing = undefined));
   }
   /** Whether a book's tape is still reading back (readBack): the answer says `filling`, so the page shows it loading,
    *  not empty, and reads it again every TRADES_POLL_MS (apps/terminal/src/screens/token/trades.ts) until it is done. */
@@ -3563,7 +3616,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   function start(): Promise<void> {
     // a tick is the helper's own read, background whoever starts it (an open whose first read failed, a stale book)
     if (!running)
-      running = lanes.run(newLane(false), tick)
+      running = lanes.run(freshLane(), tick)
         .catch(() => undefined)
         .finally(() => {
           running = null;
