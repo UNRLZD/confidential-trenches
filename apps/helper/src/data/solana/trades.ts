@@ -2108,10 +2108,12 @@ export function createSolanaTrades(deps: {
           })();
         if (kept === undefined && f !== undefined) f.answer = { a: answer, limit };
         const a = await answer;
-        // a kept answer is the read's own: the bars a limit asks for, the timing of this read's wait
+        // a kept answer is the read's own: the bars a limit asks for, the timing of this read's wait, and the vendor rows'
+        // age as of this read (from their read, asOfMs), never the age they had when the answer was kept
         const { trades: rows, ...rest } = JSON.parse(a.body) as Record<string, unknown>;
         const body = JSON.stringify({ trades: Array.isArray(rows) ? rows.slice(0, limit) : rows, ...rest });
-        return { ...a, body, timing: [a.timing, e.timing].filter((x) => x !== undefined && x !== "").join(", ") };
+        const aged = a.asOfMs === undefined ? a.timing : a.timing?.replace(/(sol-vendor-read;desc="rows read )\d+( ms ago")/, `$1${Math.max(0, now() - a.asOfMs)}$2`);
+        return { ...a, body, timing: [aged, e.timing].filter((x) => x !== undefined && x !== "").join(", ") };
       }
       const rows = folded(e).book === null ? [] : e.book!.tape(limit);
       // a token with no trade of a venue this tape decodes (Raydium's other pools, Meteora's older pools, the other launchpads: a
