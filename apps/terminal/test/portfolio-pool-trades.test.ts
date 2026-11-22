@@ -136,3 +136,19 @@ test("the same rows from Base, Robinhood and NEAR records: ETH on the EVM pools,
     assert.equal(c!.realizedAsset, asset ? "0.001" : null, chain);
   }
 });
+
+// card evm-buy-late-end-names-tx: a Base or Robinhood buy that ended filled on a later load reaches the app as the op the
+// load's follow wrote (packages/signpage/src/pool-buy-evm.ts writeEvmTradeOp under trade/<chain>/<tx>, sent by
+// src/state.ts opOf; packages/signpage/test/pool-buy-evm.test.ts "(pending end, later load)"), and its Activity row
+// links its transaction on the chain's explorer.
+test("a Base or Robinhood buy filled on a later load: its Activity row names its transaction and links it", async () => {
+  const { txLink } = await import("../src/screens/withdraw/model.ts");
+  for (const [chain, at] of [["base", "https://basescan.org/tx/"], ["robinhood", "https://robinhoodchain.blockscout.com/tx/"]] as const) {
+    const hash = `0x${"cd".repeat(32)}`;
+    const op = { id: `trade/${chain}/${hash}`, kind: "buy", stage: "filled", txs: [{ chain, hash }], created_ms: T("05:20:00"), chain, token: "0xabc0000000000000000000000000000000000001", units: "40", pool_amount: "0.000979" } as Operation;
+    const d = heldData(base([op], []), [], new Map(), NOW);
+    const [row] = activity([op], d);
+    assert.deepEqual([row!.id, row!.kind, row!.stage, row!.txs], [op.id, "buy", "filled", [{ chain, hash }]], chain);
+    assert.equal(txLink(row!.txs), `${at}${hash}`, chain);
+  }
+});
