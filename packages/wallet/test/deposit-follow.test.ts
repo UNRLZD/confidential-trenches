@@ -2864,6 +2864,26 @@ test("held-move-follow-resume T5: the money reaches U between the round's first 
   }
 });
 
+// T5 runs inside the move's window, where a wrong left only waits a round. Past it, left ends the follow at once: the
+// read of U after the status is what keeps money that landed as the status answered from being called gone.
+test("held-move-follow-resume T5b: past the move's window on both RPCs, the money reaching U as 1Click's final status answers: arrived or held, never left", async () => {
+  for (const [st, where] of [["SUCCESS", "token"], ["REFUNDED", "origin"], ["REFUNDED", "usdc"]] as const) {
+    const t = await setup(["REFUNDED"]);
+    const movedMs = t.chain.a.timeMs - 2 * REFUND_QUOTE_DEADLINE_MS;
+    await heldMoved(t, movedMs, { moved_address: MOVED_ADDR });
+    const oc = movedStatus(t.u, [st], () => {
+      if (where === "token") t.chain.credit(CREDIT);
+      else if (where === "origin") t.chain.a.held = t.chain.b.held = CREDIT;
+      else t.chain.heldUsdc = CREDIT;
+    });
+    t.onTick.fn = tick60(t);
+    const out = await followDeposit(t.args, { ...t.deps, fetchFn: oc.fetchFn, untilFinal: true, signal: stop(t, 80) }).catch((e) => ({ kind: `threw ${e.message}` }));
+    assert.equal((await opOf(t.w)).follow.move_end, where === "token" ? "arrived" : "held", `${st} ${where}: U read again after the status`);
+    assert.equal(out.kind, "held");
+    assert.ok(oc.reads.length > 0, `${st} ${where}: the status was read`);
+  }
+});
+
 test("held-move-follow-resume T6 (review item 3, X1): a record with no refund address (before this card) whose U's USDC read fails on one RPC writes no end, past the move's window", async () => {
   const t = await setup(["REFUNDED"]);
   await heldMoved(t, t.chain.a.timeMs);
