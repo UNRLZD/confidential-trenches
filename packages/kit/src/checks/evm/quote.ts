@@ -2107,7 +2107,7 @@ const gapsOf = (spans: Spans, lo: number, hi: number): Spans => {
 // twice it, is asked at the next quote's own amount, or twice it (atAmount)
 // `early`: the reads of its routes through X's markets that its fourth round did not take (card
 // evm-warm-tap-reads-in-one-round), asked beside the next quote's first round as their own read (earlyFirst)
-const PLANS = new Map<string, { ts: bigint; amount: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[]; early: Read[] }>();
+const PLANS = new Map<string, { ts: bigint; amount: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[]; early: Read[]; held: Read[] }>();
 /** A kept read of a quote at `from` as the same read at `to` (card evm-quote-warm-from-the-coin-page: the coin page's
  *  warm quotes the coin before the amount is typed): each 32-byte word of its calldata that is `from` becomes `to`, and
  *  each that is twice `from` becomes twice `to`, so a route's quote at the amount and at twice it (quoteCall, v4Read,
@@ -4509,6 +4509,7 @@ async function routeSetOf(a: {
   // warm tap of Base 0x07b3d9 read its two in a round of their own after its second (about 0.3 s from the Mac,
   // 2026-11-19 03:2xZ)
   const earlyFirst: Read[] = [];
+  const heldFirst: Read[] = [];
   if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {
     const own = new Set(reads.map(readKey));
     // the plan's own reads hold no read with a state override (below); its early ones may, read apart
@@ -4523,8 +4524,14 @@ async function routeSetOf(a: {
       const k = readKey(r);
       if (!own.has(k) && !kept.has(k) && !earlyFirst.some((e) => readKey(e) === k)) earlyFirst.push(r);
     }
+    for (const kept0 of plan.held) {
+      const r = atAmount(kept0, plan.amount, amountIn);
+      const k = readKey(r);
+      if (!own.has(k) && !kept.has(k) && !earlyFirst.some((e) => readKey(e) === k) && !heldFirst.some((e) => readKey(e) === k)) heldFirst.push(r);
+    }
   }
   const earlyReading = earlyFirst.length === 0 ? Promise.resolve(null) : readBoth(rpcs, block.hash, earlyFirst, v.reads, undefined, firstDown).catch(() => null);
+  const heldReading = heldFirst.length === 0 ? Promise.resolve(null) : readBoth(rpcs, block.hash, heldFirst, v.reads, undefined, firstDown).catch(() => null);
   // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
   const reading = readAgreed(confirm, rpcs, block.hash, reads, v.reads, firstDown);
   if (spec !== null) {
@@ -4542,6 +4549,14 @@ async function routeSetOf(a: {
     earlyFirst.forEach((r, i) => {
       kept.set(readKey(r), reads.push(r) - 1);
       ans.push(earlyAns[i]!);
+    });
+  }
+  // and the reads with a state override (`held`), taken only as kept answers of a later round's very same read
+  const heldAns = await heldReading;
+  if (heldAns !== null) {
+    heldFirst.forEach((r, i) => {
+      kept.set(readKey(r), reads.push(r) - 1);
+      ans.push(heldAns[i]!);
     });
   }
   // the block is the same on both providers: the scan keeps what it read up to it
@@ -5047,18 +5062,20 @@ async function routeSetOf(a: {
   // failure ends the quote
   const planReads = reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j));
   const inPlan = new Set(planReads.map(readKey));
-  // the early reads not in the first round's reads: the early routes' (never one with a state override: they go only
-  // through hooks none or listed), and the reads with a state override this quote used, of pools it found held (card
-  // evm-quote-fewer-rounds). Speculate, then validate: the next quote reads them beside its first round at its own block,
-  // their own read, so a failure or a disagreement on one ends nothing, and uses an answer only where a later round of
+  // the early reads not in the first round's reads: never one with a state override, as above (the early routes go only
+  // through hooks none or listed)
+  // and the reads with a state override this quote used, of pools it found held (`held`, card evm-quote-fewer-rounds).
+  // Speculate, then validate: the next quote reads them beside its first round at its own block, their own read apart
+  // from the early routes', so a failure or a disagreement on one ends nothing, and uses an answer only where a later round of
   // its own asks the very same read (readKey: the pool, the hook, the replaced code and slots, the amount), which it does
   // only for a pool its first round's state reads find held on both providers at that block (S1); any other answer is
   // never used, and a read not kept is asked in its round as before. A warm ANT tap on Robinhood read its pools with
   // their hooks replaced in 2 to 4 rounds after its first, about 0.2 to 0.5 s each (read only from macOS, 2026-11-22
   // 17:1xZ)
   const usedHeld = reads.slice(first).filter((r, j) => r.override !== undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j));
-  const planEarly = [...earlyRead.flatMap((i) => (reads[i] === undefined ? [] : [reads[i]!])).filter((r) => r.override === undefined), ...usedHeld].filter((r, k, all) => !inPlan.has(readKey(r)) && all.findIndex((x) => readKey(x) === readKey(r)) === k);
-  PLANS.set(planKey, { ts: block.timestamp, amount: amountIn, reads: planReads, scans: asked, xs: [...xPools.keys()], early: planEarly });
+  const planEarly = earlyRead.flatMap((i) => (reads[i] === undefined ? [] : [reads[i]!])).filter((r) => r.override === undefined && !inPlan.has(readKey(r)));
+  const planHeld = usedHeld.filter((r, k, all) => all.findIndex((x) => readKey(x) === readKey(r)) === k);
+  PLANS.set(planKey, { ts: block.timestamp, amount: amountIn, reads: planReads, scans: asked, xs: [...xPools.keys()], early: planEarly, held: planHeld });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled, outOfGas: [...outOfGas.values()] };
 }

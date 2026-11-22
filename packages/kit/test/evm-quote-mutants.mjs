@@ -1290,7 +1290,7 @@ export const MUTANTS = [
   // address the reads call is still dropped (W6d)
   [QUOTE, "  const held = found.filter(holds);", "  const held = found;", R, "W6 "],
   [QUOTE, "const readKey = (r: Read) => JSON.stringify([r.to, r.data, r.override ?? null, r.group ?? null,", "const readKey = (r: Read) => JSON.stringify([r.to, r.data, null, null,", R, "W6e "],
-  [QUOTE, "readBoth(rpcs, block.hash, earlyFirst, v.reads, undefined, firstDown)", "readBoth(rpcs, block.parentHash, earlyFirst, v.reads, undefined, firstDown)", R, "W6c "],
+  [QUOTE, "readBoth(rpcs, block.hash, heldFirst, v.reads, undefined, firstDown)", "readBoth(rpcs, block.parentHash, heldFirst, v.reads, undefined, firstDown)", R, "W6c "],
   [QUOTE, "const droppable = (k: EvmPoolKey) => k.hooks !== NATIVE && (v.called.has(k.hooks) ||", "const droppable = (k: EvmPoolKey) => k.hooks !== NATIVE && (false ||", R, "W6d "],
 ];
 // every mutant's name, in the order the parts take them
