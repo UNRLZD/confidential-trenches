@@ -5063,8 +5063,16 @@ test("V9 the pinned quote asks the kit's providers in their measured order: the 
     });
     return new Response(JSON.stringify(dated.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
   });
+  // the device's pool index, served and whole to the head, holds the case's pools, as the sign page's does: with none the
+  // quote's cold scan asked base-rpc.publicnode.com 192 getLogs posts, 125 at its burst and the rest at its 1.8 a second
+  // (pace.ts), and ended stale_quote at 37.8 s on the test's clock, so v1 was never accepted and the provider was ranked
+  // last by a scan post still waiting at its pace, not by its failed reads
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  evmPoolIndexReset();
   try {
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 5_000_000, pools: pools.map((q) => ({ key: q.key })) }), true);
     const v1 = await verdict(evmPoolBuyQuote(warmReq(token)));
+    assert.equal((v1 as { accepted: boolean }).accepted, true, big(v1));
     assert.equal(hostOf(quoteMod.evmRanked(p).at(-1)!), hostOf(p[0]!), `the provider that failed is ranked last (${big(v1)})`);
     reads = 0;
     const v = await verdict(evmPoolBuyQuote(warmReq(token)));
@@ -5072,6 +5080,7 @@ test("V9 the pinned quote asks the kit's providers in their measured order: the 
     assert.equal(reads, 0, "the held provider is not asked while the others agree");
   } finally {
     net.mock.restore();
+    evmPoolIndexReset();
     evmPaceReset();
   }
 }));
