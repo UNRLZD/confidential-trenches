@@ -124,13 +124,39 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["e>=t?void 0:t)", "!1?void 0:t)", 13],
     ["e.state===`UNSPENT`)&&At()", "e.state===`UNSPENT`)", 13],
     ["_(b.stage,b.txs,b.pending,b.arrived),At()", "_(b.stage,b.txs,b.pending,b.arrived)", 13],
-    // tokens keep W whole only on W's own coins' accounts
+    // tokens keep W whole only on W's own accounts: a bought W's coins', a found W's every one until its notes' spend is
+    // read on the pool's whole mark list (card a-found-wallet-sweeps-past-a-strangers-coin)
     ["e.some(e=>e.tokens===!0&&t(e.address))", "e.some(e=>e.tokens===!0)", 14],
-    ["r=e=>t.bare===!0||n.has(e)", "r=e=>t.bare===!0", 14],
-    ["r=e=>t.bare===!0||n.has(e)", "r=e=>n.has(e)", 14],
+    // the old forms (a found W's every account always, no note read; a set read by the note's own mark): FAIL
+    ["i,r=e=>t.bare===!0?i!==!1:n.has(e)", "r=e=>t.bare===!0||n.has(e)", 14],
+    ["i,r=e=>t.bare===!0?i!==!1:n.has(e)", "i,r=e=>t.bare===!0?i===void 0||i===`any`||i.has(e):n.has(e)", 14],
+    // a found W that sweeps on an unread spend (its note read skipped or not yet answered): FAIL
+    ["?i!==!1:", "?i===!0:", 14],
+    // a bought W that keeps on no coin of its own
+    [":n.has(e)", ":!1", 14],
+    // the note read: not cleared first, its no-answer hold dropped, its answer never taken, read on no slots
+    ["if(o!==void 0){i=void 0;let n", "if(o!==void 0){let n", 14],
+    [";if(n===null)return{young:u||`its note's spend not read`,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0};i=n}", ";i=n}", 14],
+    [";i=n}", ";i=!1}", 14],
+    ["t.scope,c,o.slots)", "t.scope,c)", 14],
+    // the reader: no host settle read as unspent, a note's refusal read as unspent, unspent read as spent, a short answer,
+    // every note of the store, a note's mark read by its address
+    ["if(e.settleSet===void 0)return null;", "if(e.settleSet===void 0)return!1;", 14],
+    ["o.some(e=>`error`in e)?null:", "", 14],
+    ["o.some(e=>e.kind===`spent`)}", "o.some(e=>e.kind===`unspent`)}", 14],
+    ["return o.length!==a.length||", "return ", 14],
+    ["filter(e=>e.scope===n&&e.leaf!==void 0&&e.leaf.label===r.l&&TR(e.ref)===r.j)", "filter(e=>e.scope===n)", 14],
+    ["let o=await e.settleSet(a.map(e=>e.id),i);", "let o=await Promise.all(a.map(e=>e.read(e.mark)));", 14],
     ["zY(y.ok.keep,r)", "zY(y.ok.keep,()=>!1)", 14],
     ["zY(d.plan.keep,r)", "zY(d.plan.keep,()=>!1)", 14],
   ];
+  // the note read removed whole: FAIL on that mark alone
+  {
+    const read = JS.split("\n").find((l) => l.startsWith("if(o!==void 0){i=void 0;"));
+    assert.ok(read);
+    const c = facts("", JS.replace(read, "")).carries;
+    assert.deepEqual(Object.keys(MARKS).filter((k) => !c[k]), [Object.keys(MARKS)[14]]);
+  }
   for (const [from, to, i] of planted) {
     assert.ok(JS.includes(from), `the excerpt holds ${from}`);
     const c = facts("", JS.replace(from, to)).carries;

@@ -10,7 +10,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { SOLANA_ATA_PROGRAM, solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_CLAIM_CASHBACK, SOLANA_CLOSE_VOLUME_ACCUMULATOR, SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_TOKEN_2022_PROGRAM as TOKEN_2022, SOLANA_TOKEN_PROGRAM, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
-import { solanaPoolPage, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
+import { solanaPoolPage, solanaPoolSpentMark, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
@@ -69,6 +69,10 @@ export const beInt = (b: Uint8Array): bigint => b.reduce((a, x) => (a << 8n) | B
 export const FRONT_RUN = 1_000_000n;
 export const markOf = (pre: bigint, program = PROGRAM): string => solanaProgramAddress([enc.encode("pre"), be32(pre)], program);
 export const RETURN: NoteRef = { kind: "return", c: "sol", l: L, j: J };
+/** The deposit note whose own W is W (label L, jOf = J): a found W's note (pool-found.ts ownWs), and the pool's spent
+ *  mark of its nullifier hash, the account its tag 3 writes (card a-found-wallet-sweeps-past-a-strangers-coin). */
+export const W_NOTE: NoteRef = { kind: "deposit", s: SCOPE, i: 70 };
+export const W_NOTE_MARK = solanaPoolSpentMark(PROGRAM, be32(noteSecrets(SEED64, W_NOTE).nullifierHash));
 export const SECOND = (n: number): NoteRef => ({ kind: "second", id: { id: "R", c: "sol", l: L, j: J }, n });
 export const preOf = (ref: NoteRef): bigint => noteSecrets(SEED64, ref).precommitment;
 
@@ -205,7 +209,8 @@ export type Plant = {
   statusLagOn1?: boolean;
   /** RPC p's finalized block height (1,000 when not given: past the blockhash's last height, 151) */
   finalHeight?: number;
-  /** the block height of W's latest transaction, before the test's own sends (500 when not given: 1,000 is past it + 151) */
+  /** the block height of W's latest transaction, before the test's own sends (0 when not given: 1,000 is past it + 151 +
+   *  FOUND_ROUND_GAP, 750) */
   wLastHeight?: number;
   /** another deposit takes the return note's precommitment just before the sell lands */
   frontRun?: boolean;
@@ -291,6 +296,13 @@ export type Plant = {
   /** W's buy record (pool-buy.ts BuyMints): the venue's mint when not given; null, none (a buy from before it was
    *  written, or a restored device) */
   buy?: { mint: string; program: string; rebuilt?: true } | null;
+  /** W's own note's spent mark (W_NOTE_MARK), as the host's settle (settleSet, the pool's whole mark list) reads it and
+   *  as the chain holds it: no account when not given (unspent); "spent", an account the pool owns on both RPCs (its tag
+   *  3 landed); `spentOn`, on that RPC alone (the settle refuses); "paid", lamports a stranger sent to the address, owned
+   *  by the system program, on both (no mark: unspent) */
+  wNote?: "spent" | "paid" | { spentOn: 0 | 1 };
+  /** Strangers' transactions on W after its release (W_PAST), each long final: anyone can send W lamports or a token */
+  wStrangers?: number;
   /** More of the user's buy wallets holding the venue's token (card pool-sell-share-across-wallets: each buy lands in a
    *  fresh W): each at (l, j), its token account holding `held`, its lamports (ENOUGH when not given) */
   others?: { l: bigint; j: number; held: bigint; lamports?: number }[];
@@ -372,7 +384,12 @@ export function chain(plant: Plant = {}) {
   // transaction at wLastHeight; one the test lands on W is its latest, in a block at the finalized height
   const W_PAST = base58.encode(new Uint8Array(64).fill(7));
   const wHistory = [{ signature: W_PAST, slot: VF[v].slot - 300 }];
-  const heightAt = new Map<number, number>([[wHistory[0]!.slot, plant.wLastHeight ?? 500]]);
+  const heightAt = new Map<number, number>([[wHistory[0]!.slot, plant.wLastHeight ?? 0]]);
+  // strangers' transactions on W after W_PAST (wStrangers), newest first, each in a block at wLastHeight
+  for (let k = 1; k <= (plant.wStrangers ?? 0); k++) {
+    wHistory.unshift({ signature: base58.encode(new Uint8Array(64).fill(100 + k)), slot: VF[v].slot - 300 + k });
+    heightAt.set(VF[v].slot - 300 + k, plant.wLastHeight ?? 0);
+  }
 
   /** The program's deposit of `value` on `pre`: the next nonce's label, both leaves, the mark. */
   const deposit = (pre: bigint, value: bigint): void => {
@@ -637,6 +654,11 @@ export function chain(plant: Plant = {}) {
 
   const rpc = (p: 0 | 1): SolanaRpc => {
     const answer = (address: string): unknown => {
+      if (address === W_NOTE_MARK) {
+        const n = plant.wNote;
+        if (n === "paid") return { owner: "11111111111111111111111111111111", lamports: 1_000_000, data: ["", "base64"], executable: false, rentEpoch: 0, space: 0 };
+        return n === "spent" || (typeof n === "object" && n.spentOn === p) ? { owner: PROGRAM, lamports: 890_880, data: ["", "base64"], executable: false, rentEpoch: 0, space: 0 } : null;
+      }
       if (p === 1 && plant.hideOn1 === address) return null;
       if (p === 1 && plant.ammHiddenOn1 && (address === ammVol || address === ammAta)) return null;
       if (p === 1 && plant.owedOn1BeforeSell && !sellLanded && (address === ammVol || address === solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM))) {

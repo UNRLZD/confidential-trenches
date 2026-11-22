@@ -73,9 +73,12 @@ test("heldWs: an answer out of shape throws, so nothing is found on it", async (
   await assert.rejects(heldWs(ws(1), (async () => ({ value: [{ lamports: 1.5 }] })) as unknown as SolanaRpc), /not a count/);
 });
 
-// The found W's rule sweeps only a W whose owed record says `found: true` (pool-sell.ts rentBackRun's `bare`): one writer
-// of that key, pool-testnet.ts's findHeldWs, after both RPCs read W holding SOL and its own note UNSPENT or HELD. A second
-// writer anywhere in the page or the wallet would make a W the rule never read the same way.
+// The found W's rule sweeps only a W whose owed record says `found: true` (pool-sell.ts rentBackRun's `bare`): two writers
+// of that key. pool-testnet.ts's findHeldWs, after both RPCs read W holding SOL and its own note UNSPENT or HELD; and
+// pool-sell.ts's strandOwed (review of dec80ea5b, H1), called only as the page's `strand` of resumePieces, when a buy of
+// pieces can no longer land and a piece of it paid W (W holds SOL its buy never spent, as findHeldWs would find it on a
+// restore). A third writer, or another caller of strandOwed, anywhere in the page or the wallet would make a W the rule
+// never read the same way.
 const FOUND_WRITE = /\bfound\s*:\s*(?:true|!0)\b/g;
 /** Each `found: true` written in `files` ({ path: source }), as "path:line". */
 function foundWriters(files: Record<string, string>): string[] {
@@ -92,13 +95,23 @@ const sources = (dir: URL): Record<string, string> => {
   for (const f of readdirSync(dir, { recursive: true }) as string[]) if (f.endsWith(".ts")) out[`${dir.pathname.split("/packages/")[1]}${f}`] = readFileSync(new URL(f, dir), "utf8");
   return out;
 };
-test("an owed rent back is written found: true in one place only, pool-testnet.ts's findHeldWs", () => {
+test("an owed rent back is written found: true in two places only, pool-testnet.ts's findHeldWs and pool-sell.ts's strandOwed, the strand of resumePieces its one caller", () => {
   const files = { ...sources(new URL("../src/", import.meta.url)), ...sources(new URL("../../wallet/src/", import.meta.url)) };
   const got = foundWriters(files);
-  assert.equal(got.length, 1, got.join(", "));
-  assert.match(got[0]!, /^signpage\/src\/pool-testnet\.ts:\d+$/);
-  const line = files["signpage/src/pool-testnet.ts"]!.split("\n")[Number(got[0]!.split(":")[1]) - 1]!;
+  assert.equal(got.length, 2, got.join(", "));
+  const at = (f: string, n: string) => files[f]!.split("\n")[Number(n) - 1]!;
+  const [sell, net] = [got.find((g) => g.startsWith("signpage/src/pool-sell.ts:")), got.find((g) => g.startsWith("signpage/src/pool-testnet.ts:"))];
+  assert.ok(sell && net, got.join(", "));
+  assert.match(at("signpage/src/pool-sell.ts", sell.split(":")[1]!), /^  await owed\.put\(\{ \.\.\.\(had \?\? \{ passes: 0 \}\), address: r\.address, l: r\.l, j: r\.j, mints: had\?\.mints \?\? \[\], found: true \}\);$/);
+  assert.ok(at("signpage/src/pool-sell.ts", String(Number(sell.split(":")[1]) - 3)).startsWith("export async function strandOwed("), "the pool-sell.ts writer is strandOwed's");
+  const callers = (fs: Record<string, string>) => Object.entries(fs).flatMap(([f, src]) => src.split("\n").flatMap((l, i) => (/\bstrandOwed\(/.test(l) && !l.startsWith("export async function strandOwed(") ? [`${f}:${i + 1}`] : [])));
+  const calls = callers(files);
+  assert.equal(calls.length, 1, calls.join(", "));
+  // planted: another caller of strandOwed is named
+  assert.equal(callers({ ...files, "x.ts": "await strandOwed(o, r);" }).length, 2);
+  assert.match(at(calls[0]!.split(":")[0]!, calls[0]!.split(":")[1]!), /^      strand: \(r\) => strandOwed\(owedNoted\(page\.store\), r\),$/);
+  const line = at("signpage/src/pool-testnet.ts", net.split(":")[1]!);
   assert.match(line, /for \(const w of await heldWs\(ws, rpcs\("pass"\)\[1\]\)\) await o\.put\(\{ address: w\.address, l: w\.l\.toString\(\), j: w\.j, mints: \[\], passes: 0, found: true \}\);/);
   // planted: a second writer, as written or as minified, is named
-  assert.deepEqual(foundWriters({ ...files, "x.ts": "await o.put({ ...r, found: true });\nconst y = { found: !0 };" }).length, 3);
+  assert.deepEqual(foundWriters({ ...files, "x.ts": "await o.put({ ...r, found: true });\nconst y = { found: !0 };" }).length, 4);
 });

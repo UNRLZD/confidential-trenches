@@ -129,8 +129,26 @@ const JS = [
   ";let M=v-xm-sj(l,b,j)-cj(l,p,h),N=v-xm-sj(l,b,{...j,state:[uX,uX],label:[uX,uX]})-cj(l,p,h),Q=sk(l,cj(l,p,h)),{value:P}=lj(M,Q),I=lj(N,Q).value,L=NY(M,w,Q);if(P<w&&L===0n&&t.unlisted?.(),P<w&&L>0n&&(t.buy||S!==void 0)&&t.read?.(L),P<w)return{end:p>0?`owed`:`floor`,steady:I<w,detail:`W's ${v} would leave ${M} for a note, under ${w}: kept on W${p>0?`, owed ${p} cashback claim${p>1?`s`:``}`:``}`};let R=await ZH(s),{message:z}=Ku(c.address,[jY(t.program,t.pool,c.address,b,k,P)],R.blockhash,[]),te=MY(z),ne=await AJ(s,async e=>BigInt(TJ((await e(`getFeeForMessage`,[B.encode(z),{commitment:`confirmed`}]))?.value)));if(ne[0]!==xm||ne[1]!==xm)throw Error(`the sweep's fee reads ${ne[0]} and ${ne[1]}`);",
   ";if(S.end!==`sent`)return`steady`in S?g(S.end,S.detail,S.end===`floor`&&S.steady):g(S.end,S.detail);",
   ";I||(be.mints=iz((await Promise.resolve(e.owed?.list()).then(e=>e?.find(e=>e.address===f.address),()=>void 0))?.mints,be.mints),await e.owed?.put(be)",
-  // review P1-2 of 1d3b96d9c: W's own coins' accounts (a found W's every account), the keep count's caller
-  ";let n=new Set(t.mints.map(e=>oc(c.address,e.mint,e.program))),r=e=>t.bare===!0||n.has(e);if(IY(y.ok.keep,r)===null)return g(`kept`,``);",
+  // card a-found-wallet-sweeps-past-a-strangers-coin: the tap's buy round signed at most 750 blocks past its first round's
+  // review of dec80ea5b, M1 and L3: the bound from the least of both RPCs' heights before the first round (HW, whole
+  // heights CW), checked on the blockhash (zW, VW: never under the true last height) the tag 3 is built on; the sell
+  // host's settleSet handing the seed to the pool's whole-list reader (tz), as the release build spells them
+  "T=null;for(let n=0;;n++){let[E,D,,O]=await Promise.all([AW(e,d,s),lH(e.rpcs,{side:`buy`,token:u,amount:t.amount}),n===0?g.then(e=>void(_=e,v=nh(e))):null,T===null?HW(e.rpcs):null]);if(T===null&&O===null)return{error:`failed`};let k=fH(D,new Set(y.keys()),t.slippageBps);if(`error`in k)return SW(k.error);let I=mh(e.rpcs,j,u,A.address,`buy`,...e.pick?[e.pick]:[]),L=0,R=[((t,n,r)=>e.rpcs[0](t,n,r).then(e=>(L=c(),e))),e.rpcs[1]],[,z,B]=await Promise.all([Promise.all(F),I,zW(R)]),V=c()-L>1e3?await zW(e.rpcs):B;if(T!==null&&V.lastHeight>T.floor+RW+750)return{error:`failed`};let ee=A.expectedOut;he=Hre(me,ue,R,pe,{blockhash:V.blockhash,lastValidBlockHeight:V.lastValidBlockHeight,stateSize:E.stateSize+ce-1,",
+  ";T={releases:u,wallet:W.wallet.address,floor:O};continue}",
+  ";var RW=151;async function HW(e){let[t,n]=(await Promise.all(e.map(e=>e(`getBlockHeight`,[{commitment:`confirmed`}])))).map(CW);return Math.abs(t-n)>150?null:Math.min(t,n)}",
+  ",CW=e=>Number.isSafeInteger(e)&&e>=0?e:SW(),",
+  "async function zW(e){return VW(e,await BW(e))}async function VW(e,t){let[n,r]=await Promise.all([e[1](`isBlockhashValid`,[t.blockhash,{commitment:`confirmed`}]),e[1](`getEpochInfo`,[{commitment:`confirmed`}])]);if(n?.value!==!0)return SW();let i=CW(n.context?.slot);if(i===0)return SW();let a=r?.absoluteSlot,o=r?.blockHeight,s=Number.isSafeInteger(a)&&Number.isSafeInteger(o)&&a>=0&&o>=0?Math.max(0,i-a):1/0,c=s<=RW?o+s:await e[1](`getBlockHeight`,[{commitment:`confirmed`,minContextSlot:i}]),l=t.lastValidBlockHeight,u=CW(c)+RW;return{blockhash:t.blockhash,lastValidBlockHeight:l,slot:t.slot,lastHeight:l>u?l:u}}",
+  "settleSet:async(t,r)=>{let i=await e.seed64();try{return await tz({seed64:i,notes:await _(),noteIds:t,program:n.program,minSlots:r,rpcs:a(),lister:s(),signal:h,cache:l,markBatches:w8})}finally{i.fill(0)}},ops:e.store,",
+  "async function tz(e){if(!(e.seed64 instanceof Uint8Array)||e.seed64.length!==64)throw Error(`seed64: not 64 bytes`);let t=fA(e.program).scope,n=await Promise.all(e.noteIds.map(async n=>{let r=await e.notes.get(n);return r===void 0||r.leaf===void 0||r.scope!==t?{error:Error(`note ${n}: not a landed note of this pool`)}:{note:r}}));if(n.every(e=>`error`in e))return n.map(e=>({error:e.error}));let r=e.cache??{},i=r.pages??=OA(e.rpcs,e.program,e.lagWait),a=XR(r,e),o,s;try{o=await a(e.minSlots),s=await i.leaves(o.slot,e.signal,e.rpcs);}catch(e){throw e}}",
+  // review of 359f71639, M1 and L3: the strand's record found with no mint of the tap's, wired as the page's strand; a
+  // found pass naming no mint, and a young hold booking the next run
+  "async function pK(e,t){let n=(await e.list()).find(e=>e.address===t.address);await e.put({...n??{passes:0},address:t.address,l:t.l,j:t.j,mints:n?.mints??[],found:!0})}",
+  ",strand:t=>pK(mn(e.store),t)}).catch(()=>0)>0&&An.again()},",
+  "async function oq(e,t,n,r,i){let a=await eq(e,t.w.address),o=a.rec&&a.rec.rebuilt!==!0?{mint:a.rec.mint,program:a.rec.program}:void 0,s=n.buy,c=n.differs??0;if(o===void 0&&s===void 0&&(a.rec!==void 0||a.none)){let e=await aq(t.rpcs[0],t.program,t.w.address,a.rec?{mint:a.rec.mint,program:a.rec.program}:null);e===`differs`?c++:s=e}o===void 0&&s&&(o=s);let l=o===void 0&&s===void 0&&n.found!==!0?(a.rec===void 0&&!a.none?n.passes+1:c)>=3?`steady`:`again`:void 0,u=o?{...t,mints:Nq(t.mints,[o]),buy:o}:{...t,buy:null,...n.found===!0?{bare:!0,mints:[]}:l?{unproven:l}:{}},d,f=!1,p,m,h=await ZK(e,{...u,...n.spaced===void 0?{}:{own:n.spaced},read:e=>(d=e,f=!1),unlisted:()=>(d=void 0,f=!0),stamped:e=>p=e,swept:async(t,r)=>{m=t,(u.buy||u.bare===!0)&&(d=r);let i=(await e.owed.list()).find(e=>e.address===n.address)??n;await e.owed.put({...i,sweep:t,...d===void 0?{}:{lamports:d.toString()}})}},r);return await cq(e,n,h.end,h.steady&&u.bare!==!0?i:void 0,{...c===(n.differs??0)?{}:{differs:c},...s===void 0?{}:{buy:s},...d===void 0?{}:{lamports:d},...f?{unlisted:!0}:{},...p===void 0?{}:{spaced:p},...m===void 0?{}:{sweep:m}}),h.end===`gave_up`||h.end===`sent`||h.end===`owed`||l===`again`||h.end===`holds`&&!h.steady}",
+  // review P1-2 of 1d3b96d9c: W's own coins' accounts, the keep count's caller; card
+  // a-found-wallet-sweeps-past-a-strangers-coin: a found W's every account until its note's spend reads alike, then none
+  // while unspent
+  ";let n=new Set(t.mints.map(e=>oc(c.address,e.mint,e.program))),oz,r=e=>t.bare===!0?oz!==!1:n.has(e);if(IY(y.ok.keep,r)===null)return g(`kept`,``);",
   ";if(n.k===`refused`)return{end:`refused`,detail:n.why};let a=IY(n.plan.keep,r)",
   ";for(let n=0;n<30&&(n===0||f()<p);n++){n>0&&await u(lR);try{return{ok:await",
   ";e++){e>0&&await u(lR);for(let e of[...h]){let t=await TR(s,t=>zP(t,e.signature,e.wire))",
@@ -141,7 +159,7 @@ const JS = [
   "{r.fill(0)}},owed:GR(e.store),bought:KR(e.store),buyNone:async t=>Object.hasOwn(Qe(await(await e.store()).get(`meta`,gJ)),t),preempt:()=>{let e=Ke.preempt();return()=>e.release()},told:e=>console.warn(`rent back`),",
   // card buy-spends-several-pieces: the found W's rule, as that card's build spells it (its teardown gated on the rule's
   // time part, review P3-5 of c7b85ba3a, and reading every token account both RPCs list W owning, review P2)
-  ";let tk=e.tokenRpcs??s;let n=e=>[...new Set([...Yl(c.address,t.mints),...e])],a=async(e,i)=>{let a=n(i),o=new Map;let l=await _K(s,e=>bK(e,[c.address,...a])),u=Object.fromEntries(a.map((e,t)=>[e,[l[0][t+1],l[1][t+1]]]));try{return{k:`plan`,held:l,accounts:u,addresses:a,burn:p,plan:Zl(c.address,u,e,p)}}catch(e){throw e}},h=await v(`teardown`,async()=>{let ww=``,e=t.bare===!0?await wq(s,c.address).catch(t=>(ww=`its latest transaction not read on both RPCs (${fq(t)})`,null)):void 0;if(e===null)return{young:ww||`not yet past its last transaction's blockhash on both RPCs, or the two not reading that transaction alike`,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0};let n=e===void 0?[]:await jq(tk,c.address).catch(t=>(ww=`its token accounts not read alike on both RPCs (${fq(t)})`,null));if(n===null)return{young:ww,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0};let r=await a(void 0,n);if(r.k===`holds`)return{holds:r.steady,keep:[],signed:[],last:0,unclaimed:void 0,since:e};if(r.k===`refused`)return{refused:r.why,keep:[],signed:[],last:0,unclaimed:void 0,since:e};let{held:i,accounts:l,addresses:u,plan:d}=r;if(d.close.length===0)return{keep:d.keep,signed:[],last:0,unclaimed:void 0,since:e};let f=await uB(s),p=await td(c.address,d,l,[i[0][0]?.lamports??0n,i[1][0]?.lamports??0n],{blockhash:f.blockhash,lastValidBlockHeight:f.lastHeight},async e=>{let t=[];for(let n of e)t.push(await _K(s,e=>nd(e,n.wire,c.address,u)));return t},r.burn);pA(p.wires,m,p.reads);let h=await o(p.wires);return e!==void 0&&await Dq(s,c.address).catch(()=>null)!==e?{young:`a transaction landed on W since the rule's read`,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0}:{keep:p.plan.keep,signed:h,last:f.lastHeight,unclaimed:p.reads.unclaimed,since:e}});if(h===null)return g(`gave_up`,`the teardown`);if(h.ok.young!==void 0)return g(`holds`,`a found W: ${h.ok.young}`,!1);let b=h.ok.unclaimed,x=h.ok.since,S=new Set(h.ok.signed.map(e=>e.signature)),C=cA(l)>1000000n?cA(l):tA,w=await v(`sweep`,async()=>{let wy=``,n=x===void 0?[]:await jq(tk,c.address).catch(e=>(wy=fq(e),null));if(n===null)return{end:`holds`,steady:!1,detail:`a found W: its token accounts not read alike on both RPCs (${wy})`};let r=await a(b,n);let ru=x===void 0||await Oq(tk,s,c.address,x,S).catch(e=>fq(e));if(ru!==!0)return{end:`holds`,steady:!1,detail:`a found W: owning a token account, or a transaction on W since the rule's read, on either RPC`};let[ee]=await o([N]);return x!==void 0&&!await kq(s,c.address,x,S).catch(()=>!1)?{end:`holds`,steady:!1,detail:`a found W: a transaction landed on W after the rule's read`}:{end:`sent`};async function wq(e,t){let n=await Eq(e,t);if(n===null)return null;let r=(await _K(e,async e=>await e(`getBlock`,[n.slot,iu]))).map(e=>e?.blockHeight);return!r.every(e=>Number.isSafeInteger(e))||r[0]!==r[1]?null:(await _K(e,async e=>await e(`getBlockHeight`,[{commitment:`finalized`}]))).every(e=>Number.isSafeInteger(e)&&e>r[0]+Tq)?n.signature:null}async function Eq(e,t){let n=(await _K(e,async e=>await e(`getSignaturesForAddress`,[t,{limit:1,commitment:`confirmed`}]))).map(e=>{let t=Array.isArray(e)&&e.length===1?e[0]:null;return t&&typeof t.signature==`string`&&/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(t.signature)&&Number.isSafeInteger(t.slot)&&t.slot>=0?{signature:t.signature,slot:t.slot}:null});return n[0]&&n[1]&&n[0].signature===n[1].signature&&n[0].slot===n[1].slot?n[0]:null}var Dq=async(e,t)=>(await Eq(e,t))?.signature??null;async function Oq(z1,e,t,n,r){return await Mq(z1,t)&&await kq(e,t,n,r)}async function kq(e,t,n,r){return(await _K(e,async e=>await e(`getSignaturesForAddress`,[t,{until:n,limit:r.size+1,commitment:`confirmed`}]))).every(e=>Array.isArray(e)&&e.length<=r.size&&e.every(e=>typeof e?.signature==`string`&&r.has(e.signature)))}var Aq=e=>{if(e.length<32||e.length>44)return!1;try{return z.decode(e).length===32}catch{return!1}};async function jq(e,t){let n=await _K(e,async e=>{let n=new Set;for(let r of[dc,fc]){let i=await e(`getTokenAccountsByOwner`,[t,{programId:r},{encoding:`base64`,commitment:`confirmed`}]);if(!Array.isArray(i?.value))throw Error(`getTokenAccountsByOwner answered no list`);for(let e of i.value){let t=e?.pubkey;if(typeof t!=`string`||!Aq(t))throw Error(`getTokenAccountsByOwner answered an entry with no address`);n.add(t)}}return[...n].sort()});if(n[0].join(`,`)!==n[1].join(`,`))throw Error(`the two RPCs list W's token accounts apart`);return n[0].slice(0,16)}async function Mq(e,t){return(await Promise.all(e.flatMap(e=>[dc,fc].map(n=>e(`getTokenAccountsByOwner`,[t,{programId:n},{encoding:`base64`,commitment:`confirmed`}]))))).every(e=>Array.isArray(e?.value)&&e.value.length===0)}var Tq=151,iu=Object.freeze({commitment:`finalized`,encoding:`json`,transactionDetails:`none`,rewards:!1,maxSupportedTransactionVersion:0});var _K=(e,t)=>Promise.all([t(e[0]),t(e[1])]),dc=`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`,fc=`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`;",
+  ";let tk=e.tokenRpcs??s;let n=e=>[...new Set([...Yl(c.address,t.mints),...e])],a=async(e,i)=>{let a=n(i),o=new Map;let l=await _K(s,e=>bK(e,[c.address,...a])),u=Object.fromEntries(a.map((e,t)=>[e,[l[0][t+1],l[1][t+1]]]));try{return{k:`plan`,held:l,accounts:u,addresses:a,burn:p,plan:Zl(c.address,u,e,p)}}catch(e){throw e}},h=await v(`teardown`,async()=>{let ww=``,pz=t.bare===!0?await wq(s,c.address).catch(t=>(ww=`its latest transaction not read on both RPCs (${fq(t)})`,null)):void 0;if(pz===null)return{young:ww||`not yet past its last transaction's blockhash on both RPCs, or the two not reading that transaction alike`,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0};let e=pz?.signature;if(pz!==void 0){oz=void 0;let n=await bq(hz,t.store,t.scope,c,pz.slots).catch(t=>(ww=`its note's spend not read (${fq(t)})`,null));if(n===null)return{young:ww||`its note's spend not read`,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0};oz=n}let n=e===void 0?[]:await jq(tk,c.address).catch(t=>(ww=`its token accounts not read alike on both RPCs (${fq(t)})`,null));if(n===null)return{young:ww,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0};let r=await a(void 0,n);if(r.k===`holds`)return{holds:r.steady,keep:[],signed:[],last:0,unclaimed:void 0,since:e};if(r.k===`refused`)return{refused:r.why,keep:[],signed:[],last:0,unclaimed:void 0,since:e};let{held:i,accounts:l,addresses:u,plan:d}=r;if(d.close.length===0)return{keep:d.keep,signed:[],last:0,unclaimed:void 0,since:e};let f=await uB(s),p=await td(c.address,d,l,[i[0][0]?.lamports??0n,i[1][0]?.lamports??0n],{blockhash:f.blockhash,lastValidBlockHeight:f.lastHeight},async e=>{let t=[];for(let n of e)t.push(await _K(s,e=>nd(e,n.wire,c.address,u)));return t},r.burn);pA(p.wires,m,p.reads);let h=await o(p.wires);return e!==void 0&&await Dq(s,c.address).catch(()=>null)!==e?{young:`a transaction landed on W since the rule's read`,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0}:{keep:p.plan.keep,signed:h,last:f.lastHeight,unclaimed:p.reads.unclaimed,since:e}});if(h===null)return g(`gave_up`,`the teardown`);if(h.ok.young!==void 0)return g(`holds`,`a found W: ${h.ok.young}`,!1);let b=h.ok.unclaimed,x=h.ok.since,S=new Set(h.ok.signed.map(e=>e.signature)),C=cA(l)>1000000n?cA(l):tA,w=await v(`sweep`,async()=>{let wy=``,n=x===void 0?[]:await jq(tk,c.address).catch(e=>(wy=fq(e),null));if(n===null)return{end:`holds`,steady:!1,detail:`a found W: its token accounts not read alike on both RPCs (${wy})`};let r=await a(b,n);let ru=x===void 0||await Oq(tk,s,c.address,x,S,oz!==!1).catch(e=>fq(e));if(ru!==!0)return{end:`holds`,steady:!1,detail:`a found W: owning a token account, or a transaction on W since the rule's read, on either RPC`};let[ee]=await o([N]);return x!==void 0&&!await kq(s,c.address,x,S).catch(()=>!1)?{end:`holds`,steady:!1,detail:`a found W: a transaction landed on W after the rule's read`}:{end:`sent`};async function wq(e,t){let n=await Eq(e,t);if(n===null)return null;let r=(await _K(e,async e=>await e(`getBlock`,[n.slot,iu]))).map(e=>e?.blockHeight);if(!r.every(e=>Number.isSafeInteger(e))||r[0]!==r[1])return null;let i=(await _K(e,async e=>await e(`getEpochInfo`,[{commitment:`finalized`}]))).map(e=>({height:e?.blockHeight,slot:e?.absoluteSlot}));return i.every(e=>Number.isSafeInteger(e.height)&&Number.isSafeInteger(e.slot)&&e.slot>=0&&e.height>r[0]+Tq+750)?{signature:n.signature,slots:[i[0].slot,i[1].slot]}:null}async function Eq(e,t){let n=(await _K(e,async e=>await e(`getSignaturesForAddress`,[t,{limit:1,commitment:`confirmed`}]))).map(e=>{let t=Array.isArray(e)&&e.length===1?e[0]:null;return t&&typeof t.signature==`string`&&/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(t.signature)&&Number.isSafeInteger(t.slot)&&t.slot>=0?{signature:t.signature,slot:t.slot}:null});return n[0]&&n[1]&&n[0].signature===n[1].signature&&n[0].slot===n[1].slot?n[0]:null}var Dq=async(e,t)=>(await Eq(e,t))?.signature??null;async function Oq(z1,e,t,n,r,cz){return await Mq(z1,t,cz)&&await kq(e,t,n,r)}async function bq(e,t,n,r,i){if(e.settleSet===void 0)return null;let a=(await t.list()).filter(e=>e.scope===n&&e.leaf!==void 0&&e.leaf.label===r.l&&TR(e.ref)===r.j);if(a.length===0)return null;let o=await e.settleSet(a.map(e=>e.id),i);return o.length!==a.length||o.some(e=>`error`in e)?null:o.some(e=>e.kind===`spent`)}async function kq(e,t,n,r){return(await _K(e,async e=>await e(`getSignaturesForAddress`,[t,{until:n,limit:r.size+1,commitment:`confirmed`}]))).every(e=>Array.isArray(e)&&e.length<=r.size&&e.every(e=>typeof e?.signature==`string`&&r.has(e.signature)))}var Aq=e=>{if(e.length<32||e.length>44)return!1;try{return z.decode(e).length===32}catch{return!1}};async function jq(e,t){let n=await _K(e,async e=>{let n=new Set;for(let r of[dc,fc]){let i=await e(`getTokenAccountsByOwner`,[t,{programId:r},{encoding:`base64`,commitment:`confirmed`}]);if(!Array.isArray(i?.value))throw Error(`getTokenAccountsByOwner answered no list`);for(let e of i.value){let t=e?.pubkey;if(typeof t!=`string`||!Aq(t))throw Error(`getTokenAccountsByOwner answered an entry with no address`);n.add(t)}}return[...n].sort()});if(n[0].join(`,`)!==n[1].join(`,`))throw Error(`the two RPCs list W's token accounts apart`);return n[0].slice(0,16)}async function Mq(e,t,n){return(await Promise.all(e.flatMap(e=>[dc,fc].map(n=>e(`getTokenAccountsByOwner`,[t,{programId:n},{encoding:`base64`,commitment:`confirmed`}]))))).every(e=>{let t=e?.value;return Array.isArray(t)&&t.every(e=>typeof e?.pubkey==`string`&&!n)})}var Tq=151,iu=Object.freeze({commitment:`finalized`,encoding:`json`,transactionDetails:`none`,rewards:!1,maxSupportedTransactionVersion:0});var _K=(e,t)=>Promise.all([t(e[0]),t(e[1])]),dc=`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`,fc=`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`;",
 ].join("");
 test("the facts read from a bundle; a planted line with its rule changed FAILs", () => {
   assert.deepEqual(Object.values(facts("", JS).carries), Object.keys(MARKS).map(() => true));
@@ -206,8 +224,12 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("e.filter(e=>e.cashback===!0)", "e.filter(e=>e.cashback!==!1)"), 9],
     // review P1-2 of 1d3b96d9c: only tokens on W's own coins' accounts keep W whole, every account a found W's
     [JS.replace("e.some(e=>e.tokens===!0&&t(e.address))", "e.some(e=>e.tokens===!0)"), 9],
-    [JS.replace("r=e=>t.bare===!0||n.has(e)", "r=e=>t.bare===!0"), 9],
-    [JS.replace("r=e=>t.bare===!0||n.has(e)", "r=e=>n.has(e)"), 9],
+    // the old form (a found W's every account always, no note read), a found W that sweeps on an unread set, past a spent
+    // note's accounts or past its own set, a bought W that keeps on no coin of its own: each FAIL
+    [JS.replace("oz,r=e=>t.bare===!0?oz!==!1:n.has(e)", "r=e=>t.bare===!0||n.has(e)"), 9],
+    [JS.replace("oz,r=e=>t.bare===!0?oz!==!1:n.has(e)", "oz,r=e=>t.bare===!0?oz===void 0||oz===`any`||oz.has(e):n.has(e)"), 9],
+    [JS.replace("?oz!==!1:", "?oz===!0:"), 9],
+    [JS.replace(":n.has(e);if(IY", ":!1;if(IY"), 9],
     [JS.replace("IY(y.ok.keep,r)", "IY(y.ok.keep,q)"), 9],
     [JS.replace("IY(n.plan.keep,r)", "IY(n.plan.keep,q)"), 9],
     // the floor end's steadiness mark holds the same owed-or-floor end, so both go
@@ -256,9 +278,11 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("if(!t.buy&&t.bare!==!0)return g(`holds`", "if(!t.buy&&t.bare===void 0)return g(`holds`"), 25],
     [JS.replace("return(await Promise.all(e.flatMap(e=>[dc,fc]", "return(await Promise.all(e.slice(0,1).flatMap(e=>[dc,fc]"), 26],
     [JS.replace("_K=(e,t)=>Promise.all([t(e[0]),t(e[1])])", "_K=(e,t)=>Promise.all([t(e[0]),t(e[0])])"), 26],
-    [JS.replace("&&e.value.length===0)}", "&&e.value.every(e=>e.account.lamports===0))}"), 26],
+    [JS.replace("&&!n)})}", ")})}"), 26],
+    [JS.replace("&&!n)})}", "&&n!==!1)})}"), 26],
+    [JS.replace("return Array.isArray(t)&&t.every(e=>typeof e?.pubkey==`string`&&", "return Array.isArray(t)&&t.every(e=>"), 26],
     [JS.replace("[dc,fc].map(n=>e(`getTokenAccountsByOwner`", "[dc].map(n=>e(`getTokenAccountsByOwner`"), 26],
-    [JS.replace("e>r[0]+Tq)?n.signature:null", "e>r[0])?n.signature:null"), 26],
+    [JS.replace("e.height>r[0]+Tq+750)", "e.height>r[0]+750)"), 26],
     [JS.replace("var Tq=151,", "var Tq=150,"), 26],
     // the getBlock config, whole (the helper forwards exactly this one): each field changed, one dropped, not frozen
     [JS.replace("transactionDetails:`none`,rewards:!1", "transactionDetails:`full`,rewards:!1"), 26],
@@ -266,16 +290,16 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("{commitment:`finalized`,encoding:`json`,transactionDetails", "{commitment:`confirmed`,encoding:`json`,transactionDetails"), 26],
     [JS.replace(",maxSupportedTransactionVersion:0});", "});"), 26],
     [JS.replace("iu=Object.freeze({commitment", "iu=({commitment"), 26],
-    [JS.replace(".every(e=>Number.isSafeInteger(e)&&e>r[0]+Tq)", ".some(e=>Number.isSafeInteger(e)&&e>r[0]+Tq)"), 26],
+    [JS.replace("return i.every(e=>Number.isSafeInteger(e.height)", "return i.some(e=>Number.isSafeInteger(e.height)"), 26],
     [JS.replace("n[0]&&n[1]&&n[0].signature===n[1].signature&&n[0].slot===n[1].slot?n[0]:null", "n[0]&&n[1]?n[0]:null"), 26],
     [JS.replace("n[0]&&n[1]&&n[0].signature===n[1].signature&&n[0].slot===n[1].slot?n[0]:null", "n[0]??null"), 26],
-    [JS.replace("||r[0]!==r[1]?null:", "?null:"), 26],
+    [JS.replace("||r[0]!==r[1])return null;", ")return null;"), 26],
     [JS.replace("[n.slot,iu]", "[n.slot,{...iu,commitment:`confirmed`}]"), 26],
     [JS.replace("[{commitment:`finalized`}]", "[{commitment:`confirmed`}]"), 26],
     // nothing signed for a found W, a close included, before the rule's time part (review P3-5 of c7b85ba3a); the
     // sweep reads W owning no token account and its history since that transaction holding only the teardown's frames
-    [JS.replace(",e=t.bare===!0?await wq(", ",e=t.bare===!1?await wq("), 26],
-    [JS.replace("if(e===null)return{young:ww||", "if(e===void 0)return{young:ww||"), 26],
+    [JS.replace(",pz=t.bare===!0?await wq(", ",pz=t.bare===!1?await wq("), 26],
+    [JS.replace("if(pz===null)return{young:ww||", "if(pz===void 0)return{young:ww||"), 26],
     [JS.replace("if(n===null)return{young:ww,", "if(!1)return{young:ww,"), 26],
     [JS.replace("return e!==void 0&&await Dq(s,c.address).catch(()=>null)!==e?{young:`a transaction landed on W since the rule's read`,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0}:{keep:", "return{keep:"), 26],
     [JS.replace("if(h.ok.young!==void 0)return g(", "if(!1)return g("), 26],
@@ -287,14 +311,72 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("{until:n,limit:r.size+1,", "{limit:r.size+1,"), 26],
     [JS.replace("e.length<=r.size&&", ""), 26],
     [JS.replace("&&r.has(e.signature)", ""), 26],
-    [JS.replace("return await Mq(z1,t)&&await kq(e,t,n,r)", "return await kq(e,t,n,r)"), 26],
+    [JS.replace("return await Mq(z1,t,cz)&&await kq(e,t,n,r)", "return await kq(e,t,n,r)"), 26],
+    [JS.replace("return await Mq(z1,t,cz)&&", "return await Mq(z1,t,null)&&"), 26],
     // card found-wallet-sweep-reads-on-a-pair-that-answers: a found W's token accounts on the host's token pair (the
     // page's public seat answers no getTokenAccountsByOwner), each read's fault named in why W holds
     [JS.replace(";let tk=e.tokenRpcs??s;", ";let tk=s;"), 26],
     [JS.replace("await jq(tk,c.address).catch(t=>(ww=", "await jq(s,c.address).catch(t=>(ww="), 26],
     [JS.replace("await jq(tk,c.address).catch(e=>(wy=", "await jq(s,c.address).catch(e=>(wy="), 26],
-    [JS.replace("await Oq(tk,s,c.address,x,S)", "await Oq(s,s,c.address,x,S)"), 26],
-    [JS.replace("return await Mq(z1,t)&&", "return await Mq(e,t)&&"), 26],
+    [JS.replace("await Oq(tk,s,c.address,x,S,", "await Oq(s,s,c.address,x,S,"), 26],
+    [JS.replace("return await Mq(z1,t,cz)&&", "return await Mq(e,t,cz)&&"), 26],
+    // card a-found-wallet-sweeps-past-a-strangers-coin: whether W's own notes are spent, read after the time part on the
+    // host's settle of the pool's whole mark list at the time part's finalized slots (no read names a note's mark), no
+    // answer W held young, the answer passed to the sweep's rule; the tap's buy round at most 750 blocks past its first
+    // round's blockhash, and the time part past W's latest + 151 + 750; each broken FAILs
+    [JS.replace(/if\(pz!==void 0\)\{oz=void 0;[^]*?oz=n\}/, ""), 26],
+    [JS.replace("if(pz!==void 0){oz=void 0;", "if(pz!==void 0){"), 26],
+    [JS.replace("if(n===null)return{young:ww||`its note's", "if(!1)return{young:ww||`its note's"), 26],
+    [JS.replace("since:void 0};oz=n}", "since:void 0};oz=!1}"), 26],
+    [JS.replace("t.scope,c,pz.slots)", "t.scope,c)"), 26],
+    [JS.replace("oz!==!1).catch(", "!1).catch("), 26],
+    [JS.replace("oz!==!1).catch(", "oz===!0).catch("), 26],
+    [JS.replace("if(e.settleSet===void 0)return null;", "if(e.settleSet===void 0)return!1;"), 26],
+    [JS.replace("o.some(e=>`error`in e)?null:", ""), 26],
+    [JS.replace("o.some(e=>e.kind===`spent`)}", "o.some(e=>e.kind===`unspent`)}"), 26],
+    [JS.replace("return o.length!==a.length||", "return "), 26],
+    [JS.replace("e.leaf.label===r.l&&", ""), 26],
+    [JS.replace("&&TR(e.ref)===r.j)", ")"), 26],
+    [JS.replace("filter(e=>e.scope===n&&", "filter(e=>"), 26],
+    [JS.replace("if(a.length===0)return null;", ""), 26],
+    [JS.replace("let o=await e.settleSet(a.map(e=>e.id),i);", "let o=await e.settleSet(a.map(e=>e.id));"), 26],
+    [JS.replace("let o=await e.settleSet(a.map(e=>e.id),i);", "let o=await Promise.all(a.map(e=>WG(e.rpc,[e.mark])));"), 26],
+    [JS.replace("&&e.height>r[0]+Tq+750)", "&&e.height>r[0]+Tq)"), 26],
+    [JS.replace("&&e.height>r[0]+Tq+750)", "&&e.height>r[0]+Tq+749)"), 26],
+    [JS.replace("slots:[i[0].slot,i[1].slot]", "slots:[0,0]"), 26],
+    [JS.replace("e.slot>=0&&", ""), 26],
+    [JS.replace("if(T!==null&&V.lastHeight>T.floor+RW+750)return{error:`failed`};", ""), 26],
+    [JS.replace("V.lastHeight>T.floor+RW+750)", "V.lastHeight>T.floor+RW+751)"), 26],
+    [JS.replace("V.lastHeight>T.floor+RW+750)", "V.lastHeight>T.floor+750)"), 26],
+    [JS.replace("var RW=151;", "var RW=1151;"), 26],
+    // review of dec80ea5b, M1: the bound from round 1's own last height (one RPC's word lifts it), a floor that is the
+    // greater of the two heights, a floor of heights not checked whole, a floor read after the first round (each round),
+    // the tag 3 built on another blockhash than the one checked, a last height under the true one (RPC 0's word alone)
+    [JS.replace("V.lastHeight>T.floor+RW+750)", "V.lastHeight>T.lastHeight+750)").replace("floor:O};continue}", "lastHeight:V.lastHeight};continue}"), 26],
+    [JS.replace("floor:O};continue}", "floor:V.lastHeight-RW};continue}"), 26],
+    [JS.replace("?null:Math.min(t,n)}", "?null:Math.max(t,n)}"), 26],
+    [JS.replace(".map(CW);return Math.abs(", ".map(Number);return Math.abs("), 26],
+    // review of 359f71639, L4: both heights more than 150 apart not refused, or refused only further apart, or the floor's
+    // none not refusing the tap before round 1
+    [JS.replace("return Math.abs(t-n)>150?null:Math.min(t,n)", "return Math.min(t,n)"), 26],
+    [JS.replace("Math.abs(t-n)>150?null:", "Math.abs(t-n)>151?null:"), 26],
+    [JS.replace("if(T===null&&O===null)return{error:`failed`};let k=fH(", "let k=fH("), 26],
+    // review of 359f71639, M1 and L3: the strand naming the tap's mint, or not found, or not wired; a found pass naming
+    // its record's mints, or no run booked after a young hold
+    [JS.replace("j:t.j,mints:n?.mints??[],found:!0}", "j:t.j,mints:[...n?.mints??[],{mint:t.mint,program:t.program}],found:!0}"), 26],
+    [JS.replace("j:t.j,mints:n?.mints??[],found:!0}", "j:t.j,mints:n?.mints??[]}"), 26],
+    [JS.replace("strand:t=>pK(mn(e.store),t)}", "strand:async()=>{}}"), 26],
+    [JS.replace("...n.found===!0?{bare:!0,mints:[]}:l?", "...n.found===!0?{bare:!0}:l?"), 26],
+    [JS.replace("||l===`again`||h.end===`holds`&&!h.steady}", "||l===`again`}"), 26],
+    [JS.replace("n===0?g.then(e=>void(_=e,v=nh(e))):null,T===null?HW(e.rpcs):null]", "n===0?g.then(e=>void(_=e,v=nh(e))):null,null]"), 26],
+    [JS.replace("T===null?HW(e.rpcs):null]);if(T===null&&O===null)return{error:`failed`};let k=fH(", "null]),k=fH(").replace("zW(R)]),V=", "zW(R),T===null?HW(e.rpcs):null]),V=").replace("[,z,B]=", "[,z,B,O]="), 26],
+    [JS.replace("{blockhash:V.blockhash,lastValidBlockHeight:V.lastValidBlockHeight,stateSize", "{blockhash:z.blockhash,lastValidBlockHeight:z.lastValidBlockHeight,stateSize"), 26],
+    [JS.replace("lastHeight:l>u?l:u}}", "lastHeight:l}}"), 26],
+    // review of dec80ea5b, L3: the sell host's settleSet reading the note's own mark, or no settleSet at all
+    [JS.replace("try{return await tz({seed64:i,", "try{return await Az({seed64:i,"), 26],
+    [JS.replace(/settleSet:async\(t,r\)=>\{[^]*?\}finally\{i\.fill\(0\)\}\},ops:/, "ops:"), 26],
+    [JS.replace("s=await i.leaves(o.slot,e.signal,e.rpcs)", "s=await i.marksOf(o.slot,e.signal,e.rpcs)"), 26],
+    [JS.replace("}finally{i.fill(0)}},ops:", "}finally{}},ops:"), 26],
     [JS.replace("await jq(tk,c.address).catch(t=>(ww=`its token accounts not read alike on both RPCs (${fq(t)})`,null))", "await jq(tk,c.address).catch(()=>null)"), 26],
     [JS.replace("if(h.ok.young!==void 0)return g(`holds`,`a found W: ${h.ok.young}`,!1);", "if(h.ok.young!==void 0)return g(`holds`,`a found W`,!1);"), 26],
     // every token account both RPCs list W owning, both programs, the same sorted list, each an address, 16 a pass, read

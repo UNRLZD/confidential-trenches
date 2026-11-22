@@ -785,8 +785,9 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   // the buy's set settle (card buy-spends-several-pieces: every piece's note on one read of the marks) one more site
   const calls = [...src.matchAll(/solanaSettle(?:SpentSet|Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
-  // and the sale's ride (card every-lamport-can-move T3), inside the sell host: on the host's own stop, taken when it is made
-  assert.equal(calls.length, 6);
+  // and the sale's ride (card every-lamport-can-move T3), inside the sell host: on the host's own stop, taken when it is made;
+  // and a found W's set settle there too (card a-found-wallet-sweeps-past-a-strangers-coin), on that same stop
+  assert.equal(calls.length, 7);
   // the reserved pass's on the pair's pass reads (card signpage-passes-yield-to-a-trade), the rest on its trade reads, and
   // the buy's on its own kind: a trade's to its release, a pass's after it (card sell-right-after-a-buy), its one call so
   for (const c of calls) assert.match(c, /, rpcs: settleRpcs\((?:"pass"|kind)?\), lister: lister\((?:"pass"|kind)?\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
@@ -797,9 +798,9 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   // settle, the sale's ride, the withdraw): passed straight, never swapped, lowered or dropped (the wallet's own test of
   // a low slot: ../../wallet/test/pool-solana.test.ts W1)
   assert.equal([...src.matchAll(/settle: async \(noteId, minSlots\) => \{/g)].length, 3, "the buy's, the ride's and the withdraw's settle take the slots");
-  assert.equal([...src.matchAll(/settleSet: async \(noteIds, minSlots\) => \{/g)].length, 1, "the buy's set settle takes them");
-  assert.equal(calls.filter((c) => c.includes(", minSlots, rpcs: settleRpcs(")).length, 4, "each hands them on as it got them");
-  assert.equal([...src.matchAll(/\bminSlots\b/g)].length, 9, "and nowhere else: the four params, the four hand-offs and the one comment");
+  assert.equal([...src.matchAll(/settleSet: async \(noteIds, minSlots\) => \{/g)].length, 2, "the buy's set settle and a found W's take them");
+  assert.equal(calls.filter((c) => c.includes(", minSlots, rpcs: settleRpcs(")).length, 5, "each hands them on as it got them");
+  assert.equal([...src.matchAll(/\bminSlots\b/g)].length, 11, "and nowhere else: the five params, the five hand-offs and the one comment");
   // each site's signal is the stop's when the call began: four takes, and the stop read elsewhere only where a trade's
   // reads wait before a signature (card start-reads-wait-out-a-throttle): the buy's and the sell's host, each taken when
   // the host is made, and a pool kind's request (outSignal), each ending its waits at the next sign out. The sell host's

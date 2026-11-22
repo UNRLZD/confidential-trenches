@@ -537,6 +537,18 @@ test("harness: a kind named in late is answered, then its late ends go out as pr
     plain.ask("pool.buy", "buy-2");
     assert.deepEqual(plain.posts.map((p) => p.m), [{ v: 1, id: "buy-2", ok: true, result: { stage: "refused", txs: [] } }]);
     assert.equal(plain.win.__ctShellLate, undefined);
+    // card signpage-sent-end-known: a late end marked op is recorded as the page's settle records it, the request's op
+    // in the state's ops under its id (kind buy for pool.buy, sell for pool.sell), and the state goes to the frame; no
+    // progress event
+    const rec = await shellOf({ answers: { "pool.buy": { stage: "sent", txs: [] }, "pool.sell": { stage: "sent", txs: [] } }, late: { "pool.buy": [{ stage: "filled", txs: [TX], op: true }], "pool.sell": [{ stage: "not_landed", op: true }] } });
+    rec.ask("pool.buy", "buy-3");
+    assert.deepEqual(rec.posts.map((p) => p.m.type ?? "answer"), ["answer", "state"]);
+    assert.equal(rec.posts[1].at, LATE_END_MS);
+    assert.deepEqual(rec.posts[1].m.state.ops, [{ id: "buy-3", kind: "buy", stage: "filled", txs: [TX] }]);
+    assert.equal(rec.posts[1].m.state.signed_in, true, "the rest of the state as it was");
+    rec.ask("pool.sell", "sell-3");
+    assert.deepEqual(rec.posts.at(-1).m.state.ops, [{ id: "buy-3", kind: "buy", stage: "filled", txs: [TX] }, { id: "sell-3", kind: "sell", stage: "not_landed", txs: [] }]);
+    assert.equal(rec.win.__ctShellLate, 2);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

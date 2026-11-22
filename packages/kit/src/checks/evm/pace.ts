@@ -62,7 +62,10 @@ const needOf = (p: EvmPace, calls: EvmPaceCalls): number =>
  *    about 9 at once and 17 a second back. Unpaced, it took the reads a dRPC hold moved and met META's taps 429 31
  *    times in 93 posts (live sign run 44441959756, 19 Nov) and twice in 18 (run 44651083107, 20 Nov 01:06Z). 15 calls a
  *    second, 6 at once: inside its 9 and 17 at every instant (test/evm-pace-provider-limits.test.ts); the recorded USDG
- *    quote's 188 posts in 7.07 s of the clock, as unpaced. Base's base.rpc.blxrbdn.com is not under the same limit: 16,
+ *    quote's 188 posts in 7.07 s of the clock, as unpaced. Release 192's sign live run 45043534742 (attempt 2, 22 Nov)
+ *    met its 429 at 17 calls in the second before, 3 out at once, from a runner: its limit there is lower than the one
+ *    read from the Mac, and 15 a second with 6 at once let 21 into one second. So 10 calls a second, 6 at once: no
+ *    second holds more than 16 (card evm-cold-quote-inside-the-kpi). Base's base.rpc.blxrbdn.com is not under the same limit: 16,
  *    20 and 24 calls a second of the same posts for 10 s none refused (01:59Z), and no live run read a 429 from it.
  *  Not paced: robinhood.drpc.org, whose hold is its guard. 33 calls a second for 8 s none refused (2026-11-04); posts
  *  of 3 eth_call at 8 a second for 5 s and 6 at once, none refused (sweep from the Mac, 2026-11-15 08:47Z). In the tap
@@ -87,7 +90,7 @@ const needOf = (p: EvmPace, calls: EvmPaceCalls): number =>
 export const EVM_PACE: Readonly<Record<string, EvmPace>> = Object.freeze({
   "https://base-rpc.publicnode.com": Object.freeze({ perS: 36, burst: 2_500, unit: "call", logs: 20, keep: 120 }),
   "https://rpc.mainnet.chain.robinhood.com": Object.freeze({ perS: 6, burst: 18, unit: "call", logs: 8 }),
-  "https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 15, burst: 6, unit: "call" }),
+  "https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 10, burst: 6, unit: "call" }),
   "https://robinhood.daybreak-rpc.network": Object.freeze({ perS: 7, burst: 7, unit: "post", inflight: 3 }),
   "https://robinhood.api.pocket.network": Object.freeze({ perS: 2, burst: 3, unit: "call" }),
   "https://base.api.pocket.network": Object.freeze({ perS: 2, burst: 3, unit: "call" }),
