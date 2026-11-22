@@ -1182,7 +1182,7 @@ export function createSolanaTrades(deps: {
    *  is folded after each round (`round`), so a first read serves the newest trades after one round, not after the whole
    *  walk (card token-page-data-complete-and-fast: 30 reads at 5 a time held a cold tape 3.8 to 7.9 s on public
    *  endpoints). */
-  async function walk(e: Entry, until: string | null, round?: () => void): Promise<void> {
+  async function walk(e: Entry, until: string | null, round?: () => void, clientOf?: () => string | undefined): Promise<void> {
     const sigs: { signature: string; slot: number; err: unknown; t: number | null }[] = [];
     const ok = (s: { err: unknown }): boolean => s.err === null || s.err === undefined;
     let before: string | undefined;
@@ -1194,7 +1194,7 @@ export function createSolanaTrades(deps: {
     const below = (t: number | null): void => void (gap.t = Math.max(gap.t ?? 0, t ?? Math.floor(now() / 1000)));
     /** One transaction read and its trades held in its place (`order`). */
     const readOne = async (s: { signature: string; slot: number; t: number | null; order: number }): Promise<void> => {
-      const r = (await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }], undefined, undefined, true)) as Record<string, unknown> | null;
+      const r = (await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }], undefined, clientOf?.(), true)) as Record<string, unknown> | null;
       if (r === null) return below(s.t);
       e.seen++;
       const meta = (r.meta ?? {}) as Record<string, unknown>;
@@ -1231,7 +1231,7 @@ export function createSolanaTrades(deps: {
       // bot-flooded token's newest signatures are failed transactions, and a first read of them alone held no trade
       // (card solana-tape-rows-at-first-answer: live run 43689567273 read CjRGc8wH...pump 0 rows at +0 ms)
       const limit = cold ? (before === undefined ? COLD_SIGS : COLD_PAGE) : Math.min(SIG_PAGE, REFILL_MAX - sigs.length);
-      const page = (await rpc("getSignaturesForAddress", [e.mint, { limit, commitment: "confirmed", ...(until !== null ? { until } : {}), ...(before !== undefined ? { before } : {}) }], undefined, undefined, true)) as unknown;
+      const page = (await rpc("getSignaturesForAddress", [e.mint, { limit, commitment: "confirmed", ...(until !== null ? { until } : {}), ...(before !== undefined ? { before } : {}) }], undefined, clientOf?.(), true)) as unknown;
       if (!Array.isArray(page)) throw new Error("signatures");
       for (const s of page as Record<string, unknown>[]) {
         if (typeof s?.signature === "string" && Number.isSafeInteger(s.slot)) sigs.push({ signature: s.signature, slot: s.slot as number, err: s.err, t: Number.isSafeInteger(s.blockTime) && (s.blockTime as number) > 0 ? (s.blockTime as number) : null });
@@ -1252,7 +1252,7 @@ export function createSolanaTrades(deps: {
         else {
           // the short page beside the COLD_PAGE (asked next, from the same `before`): its positions are the COLD_PAGE's
           const top = sigs.length;
-          const mine = (rpc("getSignaturesForAddress", [e.mint, { limit: SHORT_PAGE, commitment: "confirmed", before }], undefined, undefined, true) as Promise<unknown>).then((short) =>
+          const mine = (rpc("getSignaturesForAddress", [e.mint, { limit: SHORT_PAGE, commitment: "confirmed", before }], undefined, clientOf?.(), true) as Promise<unknown>).then((short) =>
             !Array.isArray(short)
               ? []
               : (short as Record<string, unknown>[])
@@ -1673,8 +1673,16 @@ export function createSolanaTrades(deps: {
   }
 
   /** A first read: the token's decimals, its subscription in force, then its newest COLD_SIGS signatures walked. */
-  async function first(mint: string): Promise<Entry | DataAnswer> {
+  async function first(mint: string, client?: string): Promise<Entry | DataAnswer> {
     const began = now();
+    // card helper-fresh-tapes-whole-from-the-first-minute: the reads the first answer waits on (the mint's account, the
+    // SOL price, the cold walk until the answer) are the opening page's, drawn on its share, as a pool round a page waits
+    // on is (card sol-follow-round-draws-the-callers-share); past the answer the walk is the helper's background read.
+    // Drawn on the background share, a fresh helper's first answers under a held budget had no row (live run
+    // 45050809291, helper-26: v4GK8f24 "listed 0, account unread" at 3191 ms; 7R4MP6VX "answer by bound after 0
+    // rounds" at 2536 ms; the public endpoint's background held 169 times in its log)
+    let waiter = client;
+    const clientOf = (): string | undefined => waiter;
     const marks: string[] = [];
     const mark = (name: string): void => void marks.push(`${name} ${Math.round(now() - began)}`);
     // card helper-stays-fast-under-the-live-run: the first answer's bound runs from the read's start and nothing it
@@ -1692,11 +1700,11 @@ export function createSolanaTrades(deps: {
     if (entries.size >= OPEN_MAX) return { ...err(429, "rate_limited"), retryAfterS: 5, why: "solana trades open" };
     let decimals: number;
     try {
-      const a = await account(mint);
+      const a = await account(mint, client);
       if (a === null || !TOKEN_PROGRAMS.includes(a.owner as string) || a.data.length < 82 || a.data[45] !== 1) return NOT_FOUND;
       decimals = a.data[44]!;
       mark("account");
-      if (solUsd === null) (await readRef(), mark("price"));
+      if (solUsd === null) (await readRef(client), mark("price"));
     } catch {
       return failed("account unread");
     }
@@ -1758,7 +1766,7 @@ export function createSolanaTrades(deps: {
       e.readAt ??= now();
       for (let attempt = 0; !stopped && entries.get(mint) === e; attempt++) {
         try {
-          await walk(e, null, () => (rounds++, traded()));
+          await walk(e, null, () => (rounds++, traded()), clientOf);
           if (e.state === "cold") e.state = "live";
           break;
         } catch {
@@ -1774,6 +1782,7 @@ export function createSolanaTrades(deps: {
     // whole walk, or the bound, COLD_WAIT_MS from the read's start: at the bound the tape is served cold (filling) with
     // what it holds, the subscription still asked if it is not yet in force
     const by = await Promise.race([cold, rounded.then(() => "trade" as const), bound.then(() => "bound" as const)]);
+    waiter = undefined;
     e.onFold = undefined;
     if (by === "failed") return { ...UPSTREAM, why: FIRST_FAILED, timing: `sol-open;desc="${marks.join(", ")}"` };
     if (by !== "bound") e.early = undefined;
@@ -1936,7 +1945,7 @@ export function createSolanaTrades(deps: {
   /** Each listed coin whose first read failed: when it may be opened again, and how many have failed in a row (at most
    *  OPEN_MAX kept, the oldest dropped). */
   const failedOpens = new Map<string, { until: number; n: number; desc: string; answer?: { a: Promise<DataAnswer>; limit: number } }>();
-  async function open(mint: string): Promise<Entry | DataAnswer> {
+  async function open(mint: string, client?: string): Promise<Entry | DataAnswer> {
     // card helper-stays-fast-under-the-live-run: a coin whose first read failed waits FAILED_OPEN_MS, doubling, before
     // it is read again; the reads in between are answered as the failed one was, with no read of their own
     const held = opening.has(mint) || entries.has(mint) ? undefined : failedOpens.get(mint);
@@ -1948,7 +1957,7 @@ export function createSolanaTrades(deps: {
     if (e === undefined) {
       let p = opening.get(mint);
       if (p === undefined) {
-        p = first(mint)
+        p = first(mint, client)
           .then((got) => {
             if ("mint" in got) failedOpens.delete(mint);
             else if (got.why === FIRST_FAILED) {
@@ -2227,7 +2236,7 @@ export function createSolanaTrades(deps: {
       const began = performance.now();
       // a read that joins or starts a first read waits on that read's own bound (first); one on a tape already held does not
       const held = entries.has(mint) && !opening.has(mint);
-      const e = await open(mint);
+      const e = await open(mint, client);
       // card solana-flooded-coin-first-answer-holds-rows: a tape still on its first walk (cold) with no row of ours waits
       // for its first row up to COLD_WAIT_MS from this read's start, as its first read does, before the vendor's rows
       // answer: a read joining a tape another read opened (its chart, an earlier caller) got the vendor's rows at once

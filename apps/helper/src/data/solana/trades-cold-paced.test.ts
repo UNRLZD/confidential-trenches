@@ -103,3 +103,50 @@ test(`a cold walk of ${COLD_SIGS} transactions on a background budget of ${PER_S
   console.log(line);
   assert.equal(value.latest?.filling, false, `still filling at ${FILLED_MS} ms: ${line}`);
 });
+
+// card helper-fresh-tapes-whole-from-the-first-minute: helper-26's live run 45050809291 (136b51565, 22 Nov 17:42Z),
+// solana-tape-rows-at-first-answer: v4GK8f24...pump's first answer "listed 0, account unread" at 3191 ms, 7R4MP6VX...pump's
+// "answer by bound after 0 rounds" at 2536 ms, both 0 rows, while the public endpoint's background budget was held (169
+// holds in the helper's log, the trades key spent at boot). The reads a first answer waits on drew the helper's
+// background share; they are the opening page's, drawn on its own share, as a pool round a page waits on is.
+test("the background share held, a page's first read of a cold coin draws its own share for the reads its answer waits on and answers the coin's trades at once (red at c5992a9be: account unread, 0 rows)", async () => {
+  const start = TS * 1000;
+  const sigs = Array.from({ length: COLD_SIGS }, (_, i) => ({ signature: `${BUY.signature.slice(0, 80)}${String(i).padStart(8, "1")}`, slot: BUY.result.slot - i, err: null, blockTime: TS - i }));
+  const { value } = await onVirtualTime(start, async () => {
+    const mintData = Buffer.alloc(82);
+    mintData[44] = 6;
+    mintData[45] = 1;
+    const drew: (string | undefined)[] = [];
+    const fetch = async (_url: string, init: RequestInit): Promise<Response> => {
+      const req = JSON.parse(String(init.body)) as { method: string; params: [string, Record<string, unknown>] };
+      const ok = (result: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
+      const acct = (owner: string, data: Buffer) => ok({ context: { slot: BUY.result.slot }, value: { owner, data: [data.toString("base64"), "base64"] } });
+      if (req.method === "getAccountInfo" && req.params[0] === PYTH_SOL_USD) return acct(PYTH_RECEIVER, pyth(9_342_267_796n, Math.floor(Date.now() / 1000)));
+      if (req.method === "getAccountInfo" && req.params[0] === MINT) return acct(TOKEN_PROGRAM, mintData);
+      if (req.method === "getSignaturesForAddress") return ok(req.params[1]?.before === undefined ? sigs : []);
+      if (req.method === "getTransaction") {
+        const s = sigs.find((x) => x.signature === req.params[0]);
+        return ok(s === undefined ? null : { ...BUY.result, slot: s.slot, blockTime: s.blockTime, transaction: { signatures: [s.signature] } });
+      }
+      throw new Error(`unexpected ${req.method}`);
+    };
+    const t = createSolanaTrades({
+      fetch: fetch as never,
+      now: () => Date.now(),
+      listed: async (m) => m === MINT,
+      rpcs: ["https://keyed.test", "https://public.test"],
+      // the helper's background share held for good; a page's own share open
+      budget: (_u, _m, client) => (drew.push(client), client === undefined ? 10 : 0),
+      source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+      tickMs: 0,
+    });
+    const a = await t.trades(MINT, 50, "page");
+    t.stop();
+    return { status: a.status, body: a.status === 200 ? (JSON.parse(a.body) as { trades: unknown[]; src?: string }) : null, timing: a.timing, drew };
+  });
+  const line = `${value.status} ${value.body?.trades.length ?? "-"} rows src ${value.body?.src} ${value.timing ?? ""}`;
+  console.log(line);
+  assert.equal(value.status, 200, line);
+  assert.ok((value.body?.trades.length ?? 0) > 0, `the first answer holds the coin's trades: ${line}`);
+  assert.ok(value.drew.includes("page"), `the reads it waited on drew the page's share: ${line}`);
+});
