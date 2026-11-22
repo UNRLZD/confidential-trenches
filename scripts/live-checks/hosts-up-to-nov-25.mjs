@@ -9,6 +9,7 @@
 // After: app
 // After: sign
 // After: helper
+// Bundle: out the three live hosts themselves (it reads no build)
 //   node scripts/live-checks/hosts-up-to-nov-25.mjs [--app <url>] [--sign <url>] [--helper <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read (each host's status, content type, ok
 //   field, error and time; no body), for the test's replay.
