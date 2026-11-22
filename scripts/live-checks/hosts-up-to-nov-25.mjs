@@ -2,12 +2,10 @@
 // Live check of card hosts-up-to-nov-25: the three hosts of the live demo answer through 2026-11-25 (judging Nov 16-18,
 // the demo kept up to Nov 25). It reads each host's public face with no key: APP_HOST and SIGN_HOST GET / (200 HTML from
 // Cloudflare Pages), HELPER_HOST GET /v1/health (200 JSON with ok true). A host that fails is read again after RETRY_MS
-// and counts as down only when that read fails too, so one dropped connection opens no issue.
+// and counts as down only when that read fails too, so one dropped connection turns no run red.
 // It passes only when every host answers so. A host down: FAIL, naming its status or error.
 // .github/workflows/hosts-up.yml runs it every 15 minutes on GitHub's runners through 2026-11-25; a host down turns
-// that run red. No key is read. report() turns a FAIL into one issue per host down, labelled LABEL and titled
-// `<host> is down`, or a comment on that host's issue while one is open, through githubIssues(); it is not yet called
-// by the workflow, whose token holds contents: read alone (scripts/ci/live-workflow.mjs refuses any other permission).
+// that run red, the notice that a host is down. No key is read; the workflow's token holds contents: read alone.
 // After: app
 // After: sign
 // After: helper
@@ -29,8 +27,6 @@ export const HOSTS = Object.freeze([
 export const RETRY_MS = 20_000;
 /** One read's bound [design: 15 s; the helper's health answered in under a second, 22 Nov 09:2xZ]. */
 export const READ_MS = 15_000;
-/** The issue label every probe issue carries, so an open one is found again. */
-export const LABEL = "host-down";
 /** The last day the scheduled probe reads (UTC): the workflow's window job skips every later run. */
 export const LAST_DAY = "2026-11-25";
 
@@ -94,50 +90,6 @@ export function judge(run) {
   }
   const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : "PASS";
   return { ok: verdict === "PASS", verdict, lines, down };
-}
-
-/** A host's issue title: one open issue per host down. */
-export const titleOf = (d) => `${new URL(d.url).host} is down`;
-
-/**
- * Opens an issue for each host down, or comments on its open one. `gh`: { open(label) -> [{number, title}],
- * create(title, body, label) -> number, comment(number, body) }. Returns what it did, one entry per host down.
- */
-export async function report(run, { down }, gh, where = "") {
-  if (down.length === 0) return [];
-  const open = await gh.open(LABEL);
-  const done = [];
-  for (const d of down) {
-    const title = titleOf(d);
-    const body = `${d.name} (${d.url}) did not answer as it should at ${run.readAt}: ${d.why}.${where ? `\n\nProbe run: ${where}` : ""}\n\nRead by scripts/live-checks/${KEY}.mjs (card ${KEY}).`;
-    const had = open.find((i) => i.title === title);
-    if (had !== undefined) {
-      await gh.comment(had.number, body);
-      done.push(`commented on #${had.number}: ${title}`);
-    } else {
-      const n = await gh.create(title, body, LABEL);
-      done.push(`opened #${n}: ${title}`);
-    }
-  }
-  return done;
-}
-
-/** The GitHub REST calls report() makes, with a token that may write issues, in `repo` ("org/name"). */
-export function githubIssues(repo, token, fetchFn = fetch) {
-  const call = async (method, path, body) => {
-    const r = await fetchFn(`https://api.github.com/repos/${repo}${path}`, {
-      method,
-      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body ? { "content-type": "application/json" } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!r.ok) throw new Error(`GitHub ${method} ${path}: HTTP ${r.status}`);
-    return r.json();
-  };
-  return {
-    open: async (label) => (await call("GET", `/issues?state=open&labels=${encodeURIComponent(label)}&per_page=100`)).map((i) => ({ number: i.number, title: i.title })),
-    create: async (title, body, label) => (await call("POST", "/issues", { title, body, labels: [label] })).number,
-    comment: async (number, body) => void (await call("POST", `/issues/${number}/comments`, { body })),
-  };
 }
 
 if (import.meta.main) {
