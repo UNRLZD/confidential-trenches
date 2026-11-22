@@ -9,7 +9,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { replayer } from "./notes-per-pool-evm.mjs";
-import { CHAINS, SELL_SELECTOR, SELL_SELECTOR_10, TOPICS, VIEWS, check, poolRecordAt, recordFileOf, recordFiles, runRecord, sellSelectorOf, sellTarget, spoil } from "./pool-evm-testnet-run.mjs";
+import { RPCS as MONEY_RPCS } from "../ci/money-gate.mjs";
+import { CHAINS, RPCS, SELL_SELECTOR, SELL_SELECTOR_10, TOPICS, VIEWS, check, poolRecordAt, recordFileOf, recordFiles, runRecord, sellSelectorOf, sellTarget, spoil } from "./pool-evm-testnet-run.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-evm-testnet-run.answers.json", import.meta.url), "utf8"));
 const RECS = recordFiles().map((f) => JSON.parse(readFileSync(f, "utf8")));
@@ -221,4 +222,8 @@ test("planted: an RPC behind the newest agreed block is read again, INCONCLUSIVE
   assert.equal(r3.ok, false);
   assert.notEqual(r3.inconclusive, true, "a block both hold with two hashes");
   assert.match(r3.lines.at(-1), /two hashes on the two RPCs$/);
+});
+
+test("each chain's two RPCs are the money gate's own list, imported", () => {
+  for (const chain of ["base-sepolia", "robinhood-testnet"]) assert.equal(RPCS[chain], MONEY_RPCS[chain], chain);
 });

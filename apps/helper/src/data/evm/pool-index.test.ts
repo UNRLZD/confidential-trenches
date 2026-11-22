@@ -4,12 +4,13 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BACKFILL_DAY_SHARE, createPoolIndex, INITIALIZE, poolIdOf, POOL_INDEX_SPAN_LOGS, type PoolKey, type PoolIndexConfig } from "./pool-index.ts";
+import { BACKFILL_DAY_SHARE, createPoolIndex, WRITE_PRAGMAS, INITIALIZE, poolIdOf, POOL_INDEX_SPAN_LOGS, type PoolKey, type PoolIndexConfig } from "./pool-index.ts";
 import { CALLER_ROOM, providerHolds, type Pace } from "../../limits/limits.ts";
 import { turnSlicer } from "../../limits/turn.ts";
 import { call, listening } from "../../../test/servers.ts";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import { checkpointAside } from "../../store/checkpoint.ts";
+import { writerAside } from "../../store/writer.ts";
 
 /** A still clock: a caller's share and a provider's budget are fixed windows on the helper's clock (limits.ts
  *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
@@ -285,10 +286,11 @@ test("the helper keeps Robinhood's index only by default: Base's is off until it
   }
 });
 
-test("card helper-loop-never-held-by-a-write: a span at the log cap (9,999 pools) is checked and written a turn's slice at a time, and lands whole: every pool, then the next block (red at e35007152: keep wrote the span in one turn, 300 to 376 ms in the copy's profile)", async () => {
+test("card helper-loop-never-held-by-a-write: a span at the log cap (9,999 pools) is checked a turn's slice at a time and written on the writer's thread (card pool-index-writer-off-the-main-thread), and lands whole: every pool, then the next block (red at e35007152: keep wrote the span in one turn, 300 to 376 ms in the copy's profile)", async () => {
   const d = dir();
   const logs = Array.from({ length: POOL_INDEX_SPAN_LOGS - 1 }, (_, i) => logOf(keyOf(tok(1), tok(i + 2)), i));
-  // work counted a turn: a slicer on a counting clock (each log checked and each pool written asks it once, one unit),
+  // work counted a turn: a slicer on a counting clock (each log checked asks it once, one unit; the writes are the
+  // writer thread's and ask it nothing),
   // and the most items asked between two turns, read by an immediate that sets itself again every turn
   let items = 0;
   let atTick = 0;
@@ -309,13 +311,126 @@ test("card helper-loop-never-held-by-a-write: a span at the log cap (9,999 pools
   on = false;
   clearTimeout(reader);
   assert.equal(n, POOL_INDEX_SPAN_LOGS);
-  assert.ok(items >= 2 * (POOL_INDEX_SPAN_LOGS - 1), `every log and every write asked the slicer: ${items} items`);
+  assert.ok(items >= POOL_INDEX_SPAN_LOGS - 1, `every log asked the slicer: ${items} items`);
   assert.ok(most <= 2 * 22, `${most} items in one turn`);
   for (const i of [0, 4_999, POOL_INDEX_SPAN_LOGS - 2]) assert.equal(ix.pools(tok(i + 2)).pools.length, 1, `pool ${i}`);
   assert.equal(ix.pools(tok(1)).through, POOL_INDEX_SPAN_LOGS - 1, "the next block moves only once every pool of the span is in the file");
   if (mid !== null) assert.equal(mid, -1, "mid-span the index still says it holds no block of it");
   ix.close();
   rmSync(d, { recursive: true });
+});
+
+test("card pool-index-writer-off-the-main-thread: a span is written by the writer's thread: no BEGIN, COMMIT or INSERT runs on the loop's thread while it lands (red at daa00c5c9: keep's transactions ran on the loop, single commits 100 to 601 ms in a 300k-pool bench)", async (t) => {
+  const d = dir();
+  const logs = Array.from({ length: 500 }, (_, i) => logOf(keyOf(tok(1), tok(i + 2)), i));
+  const ix = createPoolIndex(join(d, "p.sqlite"), cfg({ span: 500 }), deps(chain(() => 50_000, logs)));
+  // from here on: every statement run and every exec on this thread's connections
+  const seen: string[] = [];
+  const exec = DatabaseSync.prototype.exec;
+  t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, q: string) {
+    seen.push(q);
+    return exec.call(this, q);
+  });
+  const run = StatementSync.prototype.run;
+  t.mock.method(StatementSync.prototype, "run", function (this: StatementSync, ...a: Parameters<StatementSync["run"]>) {
+    seen.push(this.sourceSQL);
+    return run.apply(this, a);
+  });
+  try {
+    assert.equal(await ix.step(), 500);
+    assert.deepEqual(seen.filter((q) => /^\s*(BEGIN|COMMIT|INSERT|UPDATE|DELETE)/i.test(q)), [], "no write on the loop's thread");
+    assert.equal(ix.pools(tok(1)).through, 499, "the span landed, read on this thread's connection");
+    assert.equal(ix.pools(tok(250)).pools.length, 1);
+  } finally {
+    t.mock.restoreAll();
+    ix.close();
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("card pool-index-writer-off-the-main-thread: a writer stalled 500 ms (another connection holds the file's write lock) never holds the loop: the loop turns all the while, inside helper-loop-never-held-by-a-write's bound, and the span lands once the lock is let go (red at daa00c5c9: the write is the loop's, and its BEGIN refused the held lock, the span lost)", async () => {
+  const d = dir();
+  const file = join(d, "p.sqlite");
+  const logs = Array.from({ length: 2_000 }, (_, i) => logOf(keyOf(tok(1), tok(i + 2)), i));
+  // work counted a turn, as helper-loop-never-held-by-a-write does: a slicer on a counting clock, and the most items
+  // asked between two turns, read by an immediate that sets itself again every turn (which also counts the turns)
+  let items = 0;
+  let atTick = 0;
+  let most = 0;
+  let turns = 0;
+  let on = true;
+  const tick = (): void => {
+    turns++;
+    most = Math.max(most, items - atTick);
+    atTick = items;
+    if (on) setImmediate(tick);
+  };
+  const slicer = turnSlicer(() => items++, 20);
+  // the turns the loop takes between the span's transaction posted to the writer and its commit
+  let during = -1;
+  const writer: typeof writerAside = (f, p, st) => {
+    const w = writerAside(f, p, st);
+    return {
+      ...w,
+      tx: (ops) => {
+        const at = turns;
+        return w.tx(ops).then(() => void (ops.length > 2 && (during = turns - at)));
+      },
+    };
+  };
+  const ix = createPoolIndex(file, cfg({ span: 2_000 }), { ...deps(chain(() => 50_000, logs)), pass: () => slicer.pass(), writer });
+  // the stall: another connection takes the write lock and lets it go 500 ms on, by a timer of the loop
+  const blocker = new DatabaseSync(file);
+  blocker.exec("BEGIN IMMEDIATE");
+  let held = true;
+  const letGo = setTimeout(() => {
+    blocker.exec("ROLLBACK");
+    held = false;
+  }, 500);
+  try {
+    setImmediate(tick);
+    let landed = false;
+    const stepping = ix.step().then((n) => void (landed = n === 2_000));
+    while (held) await new Promise((r) => setImmediate(r));
+    await stepping;
+    on = false;
+    assert.equal(landed, true, "the span landed once the lock was let go");
+    assert.ok(during >= 10, `the loop turned ${during} times while the writer held the span`);
+    assert.ok(most <= 2 * 22, `${most} items in one turn`);
+    assert.equal(ix.pools(tok(1)).through, 1_999);
+  } finally {
+    on = false;
+    clearTimeout(letGo);
+    if (held) blocker.exec("ROLLBACK");
+    blocker.close();
+    ix.close();
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("card pool-index-writer-off-the-main-thread: the writer runs each transaction whole, in the order posted: one that fails rolls back every write in it and rejects, naming the file, and the next goes on; once closed it writes nothing", async () => {
+  const d = dir();
+  const file = join(d, "w.sqlite");
+  const db = new DatabaseSync(file);
+  try {
+    db.exec("PRAGMA journal_mode = WAL; CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);");
+    const w = writerAside(file, WRITE_PRAGMAS, ["INSERT INTO kv (k, v) VALUES (?, ?)", "UPDATE kv SET v = ? WHERE k = ?"]);
+    const first = w.tx([[0, ["a", "1"]], [0, ["b", "2"]]]);
+    // the second fails at its second write (a null into NOT NULL): its first write is rolled back with it
+    const second = w.tx([[0, ["c", "3"]], [0, ["d", null]]]);
+    const third = w.tx([[1, ["9", "a"]]]);
+    await first;
+    await assert.rejects(second, /write of .*w\.sqlite: .*NOT NULL/);
+    await third;
+    const rows = db.prepare("SELECT k, v FROM kv ORDER BY k").all() as { k: string; v: string }[];
+    assert.deepEqual(rows.map((r) => `${r.k}=${r.v}`), ["a=9", "b=2"], "the failed transaction left nothing; the third ran after the first");
+    w.close();
+    await assert.rejects(w.tx([[0, ["e", "5"]]]), /closed/);
+    assert.equal((db.prepare("SELECT count(*) AS n FROM kv").get() as { n: number }).n, 2);
+  } finally {
+    db.close();
+    rmSync(d, { recursive: true, force: true });
+  }
 });
 
 test("card helper-loop-never-held-by-a-read: the index's file is WAL with synchronous NORMAL, so a slice's commit syncs nothing in a turn of the loop (red at c6711e2c3: synchronous FULL, every slice's commit an fsync, 637 and 757 ms holds in a copy's profile)", async (t) => {
@@ -405,14 +520,15 @@ test("card helper-loop-never-held-by-a-read: a checkpoint that fails is told to 
     assert.match(told[0]!.message, /checkpoint of .*bad\.sqlite/);
     // the pool index: its file moved aside and a directory put at its path once it is open, so its thread's first
     // checkpoint (CHECKPOINT_MS in) cannot open it
+    // the writer's connection (card pool-index-writer-off-the-main-thread: it is the file's one writer) is the one
+    // whose checkpoint comes back on
     const sql: string[] = [];
-    const exec = DatabaseSync.prototype.exec;
-    t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, q: string) {
-      sql.push(q);
-      return exec.call(this, q);
-    });
+    const writer: typeof writerAside = (f, p, st) => {
+      const w = writerAside(f, p, st);
+      return { ...w, exec: (q: string) => (sql.push(q), w.exec(q)) };
+    };
     const file = join(d, "rh.sqlite");
-    const ix = createPoolIndex(file, cfg(), deps(chain(() => 10_000, [])));
+    const ix = createPoolIndex(file, cfg(), { ...deps(chain(() => 10_000, [])), writer });
     renameSync(file, join(d, "moved.sqlite"));
     mkdirSync(file);
     // 1,000 turns of 5 ms at most: the thread's first round is a second in

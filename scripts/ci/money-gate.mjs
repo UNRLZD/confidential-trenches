@@ -41,6 +41,11 @@
 // read on the mainnet RPCs, where it does not exist, and is refused. solana-devnet, base-sepolia and robinhood-testnet
 // are read the same way, each on its own RPCs (TESTNET below). A testnet tx is never real-money proof: parseLive's
 // `real` lists the mainnet txs only, and a release counts those alone.
+// Card money-gate-test-networks-never-proof (owner, 12 Nov: no test networks, mainnet is the proof): a change whose record
+// adds a Tx line on a test network is refused, and a test-network Tx line a record held before the change (all of them
+// under --all) is never read: it is named as test-network history, not proof, so the gate judges mainnet records only.
+// Before it, --all failed on 215 solana-devnet txs whose only second operator, OnFinality's devnet host, keeps history
+// from block 523,247,104 (read 21 Nov).
 // A change (a pull request, or a push to main) that touches money code (MONEY below) may merge with no record: when a
 // card whose commit touches money code changes its record in the same change, that record must be true, so "Money
 // path: no" in it, a last live verdict of FAIL or no live section is refused. Money code in a commit that names no card,
@@ -59,38 +64,17 @@ import { readFileSync, readdirSync, existsSync, realpathSync, lstatSync } from "
 import { fileURLToPath } from "node:url";
 import { operatorOf as nearOperatorOf } from "./near-rpc-operators.mjs";
 import { RPC_OPERATORS } from "./rpc-operators.mjs";
+import { FLOOR, RPCS } from "./money-gate-reads.mjs";
 import { NOT_WAITED, exactJson, hostOf, rpc, wait } from "./rpc-wait.mjs";
 
 export { exactJson };
 
-// Public RPCs, none ours; each answered a tx read on 2026-10-26 between 11:48 and 11:54Z. NEAR lists two operators on
-// three hosts: FastNEAR's archival RPC, dRPC (which keeps only recent txs, enough for a fresh live record), and
-// near.org's archival RPC, which FastNEAR runs (near-rpc-operators.mjs): a second door to FastNEAR when its own host
-// rate-limits, never a second operator.
-export const RPCS = {
-  near: ["https://archival-rpc.mainnet.fastnear.com", "https://near.drpc.org", "https://archival-rpc.mainnet.near.org"],
-  solana: ["https://api.mainnet-beta.solana.com", "https://public.rpc.solanavibestation.com"],
-  base: ["https://mainnet.base.org", "https://base.drpc.org"],
-  robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com"],
-  // NEAR testnet, read 2026-10-31 at 16:16Z: the same two operators on three hosts, as for mainnet.
-  // test.rpc.fastnear.com and near-testnet.drpc.org keep only recent txs (each answered UNKNOWN_TRANSACTION for a
-  // 2026-10-26 tx that both archival RPCs read), so FastNEAR's archival RPC stands in for its test.rpc.
-  "near-testnet": ["https://archival-rpc.testnet.fastnear.com", "https://near-testnet.drpc.org", "https://archival-rpc.testnet.near.org"],
-  // Solana devnet, read 2026-11-02 between 23:12 and 23:14Z: the cluster's public RPC and OnFinality's public devnet
-  // endpoint each answered getTransaction for one devnet signature (rpc-operators.mjs names both).
-  "solana-devnet": ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"],
-  // Base Sepolia and Robinhood's testnet, read 2026-11-03 between 03:07:14 and 03:07:19Z: each host answered its
-  // chain's eth_chainId (0x14a34, 0xb626) and eth_getTransactionReceipt with status 0x1 for one testnet tx, which the
-  // mainnet RPCs above answered as unknown (rpc-operators.mjs names each host's operator).
-  "base-sepolia": ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],
-  "robinhood-testnet": ["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"],
-};
+// Public RPCs and FLOOR: money-gate-reads.mjs, the one list the gate and the live checks read.
+export { FLOOR, RPCS };
 // test networks: read back like any chain, never real-money proof
 export const TESTNET = new Set(["near-testnet", "solana-devnet", "base-sepolia", "robinhood-testnet"]);
 const SOLANA = new Set(["solana", "solana-devnet"]);
 const NEAR = new Set(["near", "near-testnet"]);
-// The build starts here: a tx before it is not this repo's (a pasted research tx, say).
-export const FLOOR = Date.parse("2026-11-01T00:00:00Z");
 // The folders that hold money code, from the kit layout (README.md "Layout": contracts/vault/ the vault, packages/kit/
 // the kit, packages/wallet/ the wallets) and the terminal's trade code (docs/plan1/app.md:128 and :141 cite the UNRLZD
 // terminal's apps/terminal/src/trading/, which the terminal is rebuilt from), and the pool programs on Solana and EVM
@@ -237,9 +221,31 @@ export function failedReceipts(r) {
 
 const when = (ms, floor) => (ms >= floor ? "ok" : `old: ${new Date(ms).toISOString()} is before ${new Date(floor).toISOString()}`);
 
+// Card money-gate-solana-reads-past-one-stall: a Solana host may keep only recent history (PublicNode: RPCS), and its
+// null for a tx before its first available block says nothing. A null is "missing" (absent) only when the host's
+// getFirstAvailableBlock, read in this run (`history`, url to block), is at or below the tx's slot (`slot`, another
+// host's read of it), or, with no slot read yet, when that block's time is at or before the floor (every tx the gate can
+// pass is after it). Else it is "no history (...)": no answer of absent, never ok, and not asked again.
+async function solanaAbsent(fetchFn, url, slot, floor, sleep, rateWait, history = new Map()) {
+  if (!history.has(url)) {
+    const f = await rpc(fetchFn, url, "getFirstAvailableBlock", [], sleep, rateWait);
+    if (f.error) return `error ${JSON.stringify(f.error).slice(0, 120)}`;
+    if (!Number.isSafeInteger(f.result) || f.result < 0) return "no answer (no first available block)";
+    history.set(url, f.result);
+  }
+  const first = history.get(url);
+  if (Number.isSafeInteger(slot)) return first <= slot ? "missing" : `no history (its first block ${first} is after the tx's slot ${slot})`;
+  if (first === 0) return "missing";
+  const t = await rpc(fetchFn, url, "getBlockTime", [first], sleep, rateWait);
+  if (t.error) return `error ${JSON.stringify(t.error).slice(0, 120)}`;
+  if (typeof t.result !== "number") return "no answer (no time for its first block)";
+  return t.result * 1000 <= floor ? "missing" : `no history (its first block ${first}, ${new Date(t.result * 1000).toISOString()}, is after ${new Date(floor).toISOString()})`;
+}
+
 // One read of one tx on one RPC: "ok", "failed...", "old: ...", or why it could not be read. rateWait off: a 429 is
-// NOT_WAITED at once. A NEAR read puts its EXPERIMENTAL_tx_status answer in out.result.
-export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOOR, sleep = wait, rateWait = true, out = {}) {
+// NOT_WAITED at once. A NEAR read puts its EXPERIMENTAL_tx_status answer in out.result, a Solana read its slot in
+// out.slot. `slot` (Solana): the tx's slot another host read; `history`: the hosts' first available blocks this run.
+export async function readTx(fetchFn, url, { chain, hash, signer, slot, history }, floor = FLOOR, sleep = wait, rateWait = true, out = {}) {
   let j;
   try {
     if (NEAR.has(chain)) {
@@ -265,7 +271,8 @@ export async function readTx(fetchFn, url, { chain, hash, signer }, floor = FLOO
     if (SOLANA.has(chain)) {
       j = await rpc(fetchFn, url, "getTransaction", [hash, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "finalized" }], sleep, rateWait);
       if (j.error) return `error ${JSON.stringify(j.error).slice(0, 120)}`;
-      if (!j.result) return "missing";
+      if (!j.result) return await solanaAbsent(fetchFn, url, slot, floor, sleep, rateWait, history);
+      if (Number.isSafeInteger(j.result.slot)) out.slot = j.result.slot;
       if (!j.result.meta) return "no meta";
       if (j.result.meta.err != null) return "failed";
       if (typeof j.result.blockTime !== "number") return "no block time";
@@ -756,8 +763,14 @@ export const outcome = ({ refusals = [], unread = [] }) => (refusals.some((x) =>
 
 // records: the records to read back; every: all records in the repo (for the twice-listed check); money: what
 // moneyCode() found in the change; sleep: how a wait is waited (a test records it)
-export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every = records, floor = FLOOR, money, sleep = wait } = {}) {
+// `replayTestNetworks`: test-network Tx lines are read as before, for a test or a live check (money-gate-testnet,
+// delete-refund-readback) that replays recorded test-network txs
+// through the reading paths mainnet uses (NEAR's light-client proof, tx rebuild, a host's chain id); the command line
+// never sets it, so the gate CI runs never reads a test network (card money-gate-test-networks-never-proof)
+export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every = records, floor = FLOOR, money, sleep = wait, replayTestNetworks = false } = {}) {
   const lines = () => ({ refusals: [], unread: [], read: [], notes: [], proven: [], gone: [] });
+  // each Solana host's first available block, read once in this run (solanaAbsent)
+  const history = new Map();
   // one tx's reads over the rounds: ask() reads the hosts that gave no answer yet, decide(last) settles the tx or leaves
   // it open for the next round
   const txJob = (path, tx, bytesOf) => {
@@ -782,8 +795,9 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
         // in the listed order; a 429 is waited out only while the host could add a second operator
         const rateWait = okOps().size < 2 && !okOps().has(operatorOf(tx.chain, url));
         const o = {};
-        const r = await readTx(fetchFn, url, tx, floor, sleep, rateWait, o);
-        answers.set(url, { url, r, result: o.result });
+        const slot = all().find((a) => Number.isSafeInteger(a.slot))?.slot;
+        const r = await readTx(fetchFn, url, { ...tx, slot, history }, floor, sleep, rateWait, o);
+        answers.set(url, { url, r, result: o.result, slot: o.slot });
       }
     };
     job.decide = async (last) => {
@@ -846,6 +860,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
   const notes = []; // a host's 429 not waited because two operators read it ok
   const proven = []; // a NEAR tx read ok on one operator and proven by its light-client proof on the other
   const gone = []; // a Deleted account read gone on two operators
+  const testnetHistory = []; // a test-network Tx line held before the change: named, never read, never proof
   const unread = []; // "could not read: ...": a tx or account no answer decided within ROUND_PAUSES, never a pass
   const jobs = [];
   for (const f of money?.merged ?? []) refusals.push(`${f} changes money code in a merge commit, outside any card's commit`);
@@ -872,7 +887,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       seen.set(id, [...(seen.get(id) ?? []), path]);
     }
   }
-  for (const { path, key, text, notFile, bytes: bytesOf, bytesProblem } of records) {
+  for (const { path, key, text, before, notFile, bytes: bytesOf, bytesProblem } of records) {
     if (bytesProblem) refusals.push(`${path.replace(/\.md$/, BYTES)}: ${bytesProblem}`);
     if (notFile) {
       refusals.push(`${path}: ${notFile}, not a regular file`);
@@ -882,14 +897,31 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
     if (!live) continue;
     for (const p of live.problems) refusals.push(`${path}: ${p}`);
     if (!live.moneyPath) continue;
+    // the record's test-network Tx lines before the change (`before`: its text at the change's base; none given, every
+    // line is the change's own, so a caller that names no base is refused, never passed)
+    const held = new Set((parseLive(before ?? "", key)?.txs ?? []).map((t) => `${t.chain} ${t.hash}`));
     for (const tx of live.txs) {
       const where = seen.get(`${tx.chain} ${tx.hash}`) ?? [];
       if (where.length > 1) refusals.push(`${path}: ${tx.chain} ${tx.hash} is listed ${where.length} times (${where.join(", ")})`);
+      if (TESTNET.has(tx.chain) && !replayTestNetworks) {
+        if (held.has(`${tx.chain} ${tx.hash}`)) testnetHistory.push(`${path}: ${tx.chain} ${tx.hash}`);
+        else refusals.push(`${path}: ${tx.chain} ${tx.hash}: a test network is never money proof; record the run on mainnet`);
+        continue;
+      }
       jobs.push(txJob(path, tx, bytesOf));
     }
     // a bad Deleted line is a problem above and reads nothing
     if (live.problems.length) continue;
-    for (const { chain, account } of live.deleted) jobs.push(goneJob(path, chain, account));
+    const heldGone = new Set((parseLive(before ?? "", key)?.deleted ?? []).map((d) => `${d.chain} ${d.account}`));
+    for (const { chain, account } of live.deleted) {
+      // a test network's Deleted line as its Tx lines: held before the change, history; the change's own, refused
+      if (TESTNET.has(chain) && !replayTestNetworks) {
+        if (heldGone.has(`${chain} ${account}`)) testnetHistory.push(`${path}: Deleted ${chain} ${account}`);
+        else refusals.push(`${path}: Deleted ${chain} ${account}: a test network is never money proof; record the run on mainnet`);
+        continue;
+      }
+      jobs.push(goneJob(path, chain, account));
+    }
   }
   // Rounds: every job reads its hosts; one that no answer decides is read again, on the hosts that gave none, after a
   // pause, at most ROUND_PAUSES.length more times. Each job's lines land in its own slot, in the record's order.
@@ -913,7 +945,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
   }
   // a could-not-read is a refusal too, so a caller that reads refusals alone never passes it; outcome() tells them apart
   refusals.push(...unread);
-  return { refusals, read, notes, proven, gone, unread };
+  return { refusals, read, notes, proven, gone, unread, history: testnetHistory };
 }
 
 // a record is read only when it is a regular file: a symlink (to a file anywhere) or anything else is refused, never
@@ -979,7 +1011,18 @@ export function recordsFrom(cwd, args) {
       .filter(isRecord);
     money = moneyCode(cwd, base, head);
   }
-  return { records: paths.map((p) => load(cwd, p)), every: all.map((p) => load(cwd, p)), money };
+  // each record's text before the change: under --all its own (every line held), else at the base the diff above
+  // reads from (base...head: their merge base), none for a record the change adds (or one git cannot show)
+  const from = args[0] === "--all" ? null : execFileSync("git", ["merge-base", args[0], args[1]], { cwd, encoding: "utf8" }).trim();
+  const before = (p) => {
+    try {
+      return execFileSync("git", ["show", `${from}:${p}`], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    } catch {
+      return "";
+    }
+  };
+  const records = paths.map((p) => load(cwd, p)).map((r) => ({ ...r, before: args[0] === "--all" ? r.text : before(r.path) }));
+  return { records, every: all.map((p) => load(cwd, p)), money };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -990,7 +1033,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   }
   const { records, every, money } = recordsFrom(process.cwd(), args);
   const result = await moneyGate(records, fetch, RPCS, { every, money });
-  const { refusals, read, notes, proven, gone, unread } = result;
+  const { refusals, read, notes, proven, gone, unread, history } = result;
+  for (const h of history) console.log(`money-gate: test-network history, not proof: ${h}`);
   for (const r of read) console.log(`money-gate: ${r}`);
   for (const n of notes) console.log(`money-gate: ${n}`);
   for (const p of proven) console.log(`money-gate: ${p}`);
@@ -1000,5 +1044,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const code = outcome(result);
   if (code === 3) console.error(`money-gate: COULD NOT READ (${unread.length}): no answer from enough providers within ${ROUND_PAUSES.length + 1} rounds; nothing refused, nothing passed: run it again`);
   if (code) process.exit(code);
-  console.log(`money-gate: PASS (${records.length} record(s) read, ${read.length} tx read(s))`);
+  // the PASS line as before when no test-network line is named (base-gate.test.mjs reads it)
+  console.log(`money-gate: PASS (${records.length} record(s) read, ${read.length} tx read(s)${history.length ? `, ${history.length} test-network line(s) named, not read` : ""})`);
 }

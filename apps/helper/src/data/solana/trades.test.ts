@@ -546,9 +546,10 @@ test("card helper-live-bars-no-503: a held token's tape and live candles (limit 
   assert.equal(fresh.asOfMs, ms, "read again once the stream and its walk are back");
 });
 
-test("card helper-live-bars-no-503, control: a listed Solana token the helper holds nothing for answers 503 upstream when its first read fails, so the page reads again", async () => {
+test("card helper-stays-fast-under-the-live-run (was helper-live-bars-no-503's control): a listed Solana token whose first read fails, with no vendor rows, answers an empty tape, filling, never a 503, its phases named; the next read opens it again (the page polls a filling tape every 3 s and backs a failed one off to 30 s)", async () => {
+  let accounts = 0;
   const t = createSolanaTrades({
-    fetch: (async () => new Response("down", { status: 503 })) as never,
+    fetch: (async (_u: string, init: RequestInit) => ((JSON.parse(String(init.body)) as { method: string }).method === "getAccountInfo" && accounts++, new Response("down", { status: 503 }))) as never,
     now: () => TS * 1000,
     listed: async (m) => m === MINT,
     rpcs: ["https://rpc.test"],
@@ -556,9 +557,12 @@ test("card helper-live-bars-no-503, control: a listed Solana token the helper ho
     tickMs: 0,
   });
   const a = await t.trades(MINT, 50);
+  assert.equal(a.status, 200);
+  assert.deepEqual(JSON.parse(a.body), { trades: [], filling: true, src: "chain", as_of_ms: TS * 1000 });
+  assert.match(a.timing ?? "", /sol-open;desc="listed 0, account unread 0"/);
+  await t.trades(MINT, 50);
+  assert.equal(accounts, 2, "the next read opens the token again");
   t.stop();
-  assert.equal(a.status, 503);
-  assert.deepEqual(JSON.parse(a.body), { error: { code: "upstream" } });
 });
 
 // card token-page-data-complete-and-fast: a coin launched against another coin (BUBBLE against FRONTIER, 11 Nov) had
@@ -747,34 +751,92 @@ test("card helper-stays-fast-under-the-live-run: a busy token's first tape read 
   t.stop();
 });
 
-test("card helper-stays-fast-under-the-live-run: a flooded coin's walk keeps its whole bound after a slow subscription: the bound runs from the subscription, and the first answer is the walk's rows, ours, never the vendor's", async () => {
-  // helper-19's live run 44962533217 (the bound run from the read's start, 88bb881e5): three flooded coins' first tapes
-  // answered at 4.0 to 4.2 s with CoinGecko's 50 rows, none of ours (solana-tape-rows-at-first-answer BAD); a flooded
-  // walk reads a page of COLD_PAGE signatures past its newest COLD_SIGS before any transaction. Here the newest 30
-  // failed and the 10 before them succeeded; the subscription takes the bound's whole time
+/** A flooded coin (its newest COLD_SIGS failed, the 10 before them succeeded) whose transactions are read only once let
+ *  go, a vendor tape of rows, a bound and a vendor wait the test ends, and a stream the test drives: each `watch` asked
+ *  is kept, to be dropped (rejected as the stream's drop does) or put in force. */
+function joinedCold() {
   const okSigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
   const failed = Array.from({ length: COLD_SIGS }, (_, i) => ({ signature: `${BUY.signature.slice(0, -3)}f${String(i).padStart(2, "0")}`, slot: 465_000_100 + i, err: { InstructionError: [0, "Custom"] } }));
   const list = [...failed.slice().reverse(), ...okSigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse()];
-  const fetchFn = rpcFetch({ sigs: (o) => list.slice(0, Number(o.limit ?? list.length)), txs: Object.fromEntries(okSigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
-  let subscribed = () => {};
-  const subscribing = new Promise<void>((go) => (subscribed = go));
-  let bound: (() => void) | null = null;
-  const vendor = async () => ({ status: 200, body: JSON.stringify(POOL_ROWS), src: "coingecko", asOfMs: TS * 1000 });
-  const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: () => subscribing, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: vendor, coldWait: () => new Promise<void>((go) => (bound = go)) });
-  let answer = null as { trades: { tx: string }[]; src: string; filling?: boolean } | null;
-  const reading = t.trades(MINT, 50).then((a) => (answer = JSON.parse(a.body)));
+  const base = rpcFetch({ sigs: (o) => list.slice(0, Number(o.limit ?? list.length)), txs: Object.fromEntries(okSigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  let letGo = () => {};
+  const held = new Promise<void>((go) => (letGo = go));
+  const fetchFn = async (url: string, init: RequestInit) => {
+    if ((JSON.parse(String(init.body)) as { method: string }).method === "getTransaction") await held;
+    return base(url, init);
+  };
+  const asks: { ok: () => void; no: (e: Error) => void }[] = [];
+  let vendorReads = 0;
+  let bound = () => {};
+  let vendorWait = () => {};
+  const t = createSolanaTrades({
+    fetch: fetchFn,
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: () => new Promise<void>((ok, no) => void asks.push({ ok, no })), unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+    tape: async () => (vendorReads++, { status: 200, body: JSON.stringify(POOL_ROWS), src: "coingecko", asOfMs: TS * 1000 }),
+    coldWait: () => new Promise<void>((go) => (bound = go)),
+    vendorWait: () => new Promise<void>((go) => (vendorWait = go)),
+  });
+  return { t, okSigs, asks, letGo, vendorReads: () => vendorReads, bound: () => bound(), vendorWait: () => vendorWait() };
+}
+type TapeBody = { trades: { tx: string }[]; src: string; filling?: boolean; whole_ms?: number };
+/** 25 reads of the coin's tape at once (app-console-429's page opens), each answer kept as it lands. */
+function joined25(t: ReturnType<typeof createSolanaTrades>) {
+  const answers: ({ status: number; body: TapeBody | null; timing?: string } | null)[] = Array.from({ length: 25 }, () => null);
+  const all = Promise.all(answers.map((_, i) => t.trades(MINT, 50).then((a) => (answers[i] = { status: a.status, body: a.status === 200 ? (JSON.parse(a.body) as TapeBody) : null, timing: a.timing }))));
+  return { answers, all };
+}
+
+test("card helper-stays-fast-under-the-live-run: 25 reads joined on a cold coin whose stream drops before its subscription is in force all answer 200, never 503: the subscription is asked again and the walk's rows come once it is in force (red at 77bfa8030: app-console-429 on helper-20, 25 of 25 reads 503 at 3.6 s)", async () => {
+  const c = joinedCold();
+  const { answers, all } = joined25(c.t);
+  for (let i = 0; i < 20 && c.asks.length === 0; i++) await settle();
+  assert.equal(c.asks.length, 1, "one subscription for the 25 joined reads");
+  // the stream drops before the subscription is in force, as wsSource's drop rejects every watch still waiting
+  c.asks[0]!.no(new Error(`stream dropped before ${MINT} was subscribed`));
   for (let i = 0; i < 20; i++) await settle();
-  // the subscription takes the bound's whole time: a bound already running has run out by the time it is in force
-  const early = bound !== null;
-  (bound as (() => void) | null)?.();
-  subscribed();
-  for (let i = 0; i < 100 && answer === null; i++) await settle();
-  assert.notEqual(answer, null);
-  assert.equal(answer!.src, "chain", `the walk's rows, not the vendor's (${answer!.src})`);
-  assert.ok(answer!.trades.length > 0, "rows of ours at the first answer");
-  assert.equal(early, false, "no bound runs before the subscription is in force");
-  await reading;
-  t.stop();
+  assert.deepEqual(answers.filter((a) => a !== null).map((a) => a!.status), [], "no read answered on the drop");
+  assert.equal(c.asks.length, 2, "the subscription asked again");
+  // the stream is back and the subscription in force: the walk's transactions read, its rows answer every joined read
+  c.asks[1]!.ok();
+  c.letGo();
+  await all;
+  assert.deepEqual([...new Set(answers.map((a) => a!.status))], [200], "every joined read answered 200");
+  assert.deepEqual([...new Set(answers.map((a) => a!.body!.src))], ["chain"], "the walk's rows, ours");
+  assert.ok(answers.every((a) => a!.body!.trades.length > 0));
+  c.bound();
+  c.t.stop();
+});
+
+test("card helper-stays-fast-under-the-live-run: 25 reads joined on a flooded cold coin whose subscription is slow answer at the bound, 200, filling, with the vendor's rows read before it, the subscription still asked; once it is in force the next read is the walk's rows (red at 77bfa8030: the bound ran from the subscription, so no answer came before it, and live run 44979250087 answered a flooded coin at 5.5 s, 12 joined tapes at 3.9 s)", async () => {
+  const c = joinedCold();
+  const { answers, all } = joined25(c.t);
+  for (let i = 0; i < 20 && c.asks.length === 0; i++) await settle();
+  // half the bound in, no row held: the vendor's tape is read then, once for every joined read
+  c.vendorWait();
+  for (let i = 0; i < 5; i++) await settle();
+  const readBefore = c.vendorReads();
+  // the bound, from the read's start, with the subscription not yet in force
+  c.bound();
+  for (let i = 0; i < 20 && answers.some((a) => a === null); i++) await settle();
+  assert.equal(answers.filter((a) => a !== null).length, 25, "every joined read answered at the bound, the subscription still asked");
+  assert.equal(readBefore, 1, "the vendor read before the bound, once");
+  await all;
+  assert.deepEqual([...new Set(answers.map((a) => a!.status))], [200]);
+  assert.deepEqual([...new Set(answers.map((a) => `${a!.body!.src} ${a!.body!.filling} ${a!.body!.whole_ms}`))], ["coingecko true undefined"], "the vendor's rows, filling, no whole tape claimed");
+  assert.equal(c.vendorReads(), 1, "the answers took the vendor read made before the bound, none after");
+  assert.match(answers[0]!.timing ?? "", /sol-open;desc="listed 0, account 0, price 0, answer by bound after 0 rounds 0"/);
+  // the subscription in force, the walk read: the next read is our own rows
+  c.asks[0]!.ok();
+  c.letGo();
+  for (let i = 0; i < 50; i++) await settle();
+  const next = JSON.parse((await c.t.trades(MINT, 50)).body) as TapeBody;
+  assert.equal(next.src, "chain");
+  assert.deepEqual(next.trades.map((r) => r.tx).sort(), [...c.okSigs].sort());
+  c.t.stop();
 });
 
 test("card helper-stays-fast-under-the-live-run: a first answer at its bound with no row of ours says filling and claims no whole tape, whoever's rows it carries; the next read after the walk is our own rows, every one walked", async () => {

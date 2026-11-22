@@ -223,6 +223,10 @@ export function mountShell(
   Object.assign(veil.style, { position: "fixed", inset: "0", zIndex: "1", pointerEvents: "none", transition: "opacity 160ms ease-out" });
   veil.hidden = true;
   doc.body.insertBefore(veil, layer);
+  // the ground (in the body before the veil, src/main.ts) stacks over the new frame and under the dim until that frame's
+  // painted, then fades out with the dim: the frame's first paint (a phone's sparse boot frame, its logo not yet loaded)
+  // never shows under the full dim, where it is one colour (card signin-e2e-step-timing-same-every-run: 117 ms in CI)
+  if (host.ground) Object.assign(host.ground.style, { zIndex: veil.style.zIndex, transition: veil.style.transition });
 
   let frame: HTMLIFrameElement | null = null;
   let peer: PostTarget = NO_FRAME;
@@ -236,11 +240,17 @@ export function mountShell(
     veiled = null;
     if (veilCap !== null) clearTimeout(veilCap);
     veilCap = null;
-    // the new frame has painted over the ground (or never will): it goes with the dim, and stays where the frame left again
-    if (frame === f && host.ground) host.ground.hidden = true;
-    if (frame !== f || !layer.hidden) return;
+    // the new frame has painted under the ground (or never will): the ground goes with the dim, faded with it and gone
+    // when it is, and stays where the frame left again; under a sheet opened since, it goes at once
+    const ground = frame === f ? host.ground : undefined;
+    if (frame !== f || !layer.hidden) return void (ground && (ground.hidden = true));
     veil.style.opacity = "0";
-    setTimeout(() => layer.hidden && (veil.hidden = true), 200);
+    if (ground) ground.style.opacity = "0";
+    setTimeout(() => {
+      if (!layer.hidden) return;
+      veil.hidden = true;
+      if (ground && frame === f) ground.hidden = true;
+    }, 200);
   };
   const add = (): void => {
     if (popup) return;
@@ -323,7 +333,7 @@ export function mountShell(
     frame = null;
     peer = NO_FRAME;
     // the page's own ground under the sealed screen, in the same task (src/backdrop.ts drawSealedGround)
-    if (host.ground) host.ground.hidden = false;
+    if (host.ground) Object.assign(host.ground, { hidden: false }).style.opacity = "1";
     const draw = pending;
     pending = null;
     draw?.();

@@ -300,6 +300,26 @@ export async function check(pkg = PKG, committed = pkg) {
   return p;
 }
 
+/**
+ * Writes a build's files (path under `dir` -> bytes). Each is written whole to a temporary file at `dir`'s top, outside
+ * every folder a reader copies (public/), and renamed into place, so a reader in another process (node --test runs test
+ * files at once, each building; harnesses copy public/ whole) reads a whole file and never lists a temporary one that
+ * another build renames away under it (card signin-e2e-step-timing-same-every-run: cpSync of public/ failed ENOENT with
+ * three harnesses at once). Every build of one tree is the same bytes. Returns the temporary paths it used.
+ */
+export function writeOutputs(dir, files, { pid = process.pid, write = writeFileSync, rename = renameSync } = {}) {
+  const used = [];
+  for (const [rel, bytes] of Object.entries(files)) {
+    const to = join(dir, rel);
+    mkdirSync(dirname(to), { recursive: true });
+    const tmp = join(dir, `.${rel.replaceAll("/", "_")}.${pid}.tmp`);
+    used.push(tmp);
+    write(tmp, bytes);
+    rename(tmp, to);
+  }
+  return used;
+}
+
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--check")) {
     const p = await check();
@@ -338,16 +358,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   // a testnet build's folder is served by its run's own server: it gets its policy beside it (signHeadersFor), since
   // SIGN_HOST's public/_headers names no testnet EVM provider
   if (network === "testnet") files._headers = signHeadersFor("testnet", readFileSync(join(pkg, "public/_headers"), "utf8"));
-  const dir = out ?? pkg;
-  // each file is written beside itself and renamed into place, so a reader in another process (node --test runs test
-  // files at once, each building) reads a whole file, never a half-written one; every build of one tree is the same bytes
-  for (const [rel, bytes] of Object.entries(files)) {
-    const to = join(dir, rel);
-    mkdirSync(dirname(to), { recursive: true });
-    const tmp = `${to}.${process.pid}.tmp`;
-    writeFileSync(tmp, bytes);
-    renameSync(tmp, to);
-  }
+  writeOutputs(out ?? pkg, files);
   console.log(`build-app: ${out ? "app.js" : "public/app.js"} ${js.length} bytes, ${sha384(js)}${out ? ` (in ${out})` : ""}`);
   console.log(`build-app: ${WORKER} ${worker.length} bytes, sha256 ${sha256(worker)}`);
   console.log(`build-app: ${THREAD} ${thread.length} bytes, sha256 ${sha256(thread)}`);

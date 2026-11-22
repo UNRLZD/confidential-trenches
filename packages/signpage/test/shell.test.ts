@@ -461,11 +461,11 @@ test("a typed screen's close keeps the sheet's dim over the new frame until that
   }
 });
 
-test("the page's own ground shows from the task the frame leaves (a sealed open, a seal on a shown sheet) until the frame made at the close paints; a kept sheet never shows it", () => {
+test("the page's own ground shows from the task the frame leaves (a sealed open, a seal on a shown sheet) until the frame made at the close paints, then goes with the dim; a kept sheet never shows it", () => {
   enableTimers(mock.timers, { apis: ["setTimeout"] });
   try {
     const d = fakeDom();
-    const ground = { hidden: true } as HTMLElement;
+    const ground = { hidden: true, style: {} } as HTMLElement;
     const sh = mountShell(d.doc, { state: () => signedOutState(), ground });
     // a kept sheet: the frame stays, no ground
     sh.open();
@@ -485,7 +485,9 @@ test("the page's own ground shows from the task the frame leaves (a sealed open,
     mock.timers.tick(300);
     assert.equal(ground.hidden, false, "kept until the new frame paints");
     d.send(PAINTED, f.contentWindow);
-    assert.equal(ground.hidden, true, "gone in the task the new frame's painted came");
+    assert.equal(ground.style.opacity, "0", "fading from the task the new frame's painted came");
+    mock.timers.tick(200);
+    assert.equal(ground.hidden, true, "gone with the dim");
     mock.timers.tick(1000);
     // a seal on a sheet opened kept (Recovery code on I already have one): the ground in the seal's task
     sh.open();
@@ -495,7 +497,9 @@ test("the page's own ground shows from the task the frame leaves (a sealed open,
     // a frame that never says it painted: the ground goes with the dim at its cap
     sh.close();
     mock.timers.tick(VEIL_CAP_MS);
-    assert.equal(ground.hidden, true, "gone at the dim's cap");
+    assert.equal(ground.style.opacity, "0", "fading with the dim at its cap");
+    mock.timers.tick(200);
+    assert.equal(ground.hidden, true, "gone with the dim at its cap");
     // a painted that comes after the next sealed open took that frame out again changes nothing
     mock.timers.tick(1000);
     sh.open(true);
@@ -504,6 +508,53 @@ test("the page's own ground shows from the task the frame leaves (a sealed open,
     sh.open(true);
     d.send(PAINTED, g.contentWindow);
     assert.equal(ground.hidden, false, "still shown: the frame that painted is out again");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+// card signin-e2e-step-timing-same-every-run: the new frame's first paint (the phone boot frame, its logo not yet loaded)
+// sat over the ground and under the full dim, one colour for 117 ms in CI; the ground stays over the new frame, under
+// the dim, until that frame's painted, then fades out with the dim and is gone only when the dim is
+test("the ground stacks over the new frame and under the dim, and fades out with the dim, never gone while the dim shows", () => {
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const d = fakeDom();
+    // as src/main.ts: the ground in the body before the shell mounts
+    const ground = d.doc.createElement("div") as unknown as HTMLElement;
+    ground.hidden = true;
+    d.doc.body.append(ground);
+    const sh = mountShell(d.doc, { state: () => signedOutState(), ground });
+    const veil = d.part("veil") as unknown as HTMLElement;
+    const z = (e: unknown) => Number((e as HTMLElement).style.zIndex || 0);
+    sh.open(true);
+    sh.close();
+    const f = d.frames()[0]!;
+    const at = (e: unknown) => d.children.indexOf(e as never);
+    // over the frame: a higher stack level; under the dim: the same level, earlier in the body
+    assert.ok(z(ground) > z(f), "the ground stacks over the new frame");
+    assert.equal(z(ground), z(veil));
+    assert.ok(at(ground) < at(veil), "the dim over the ground");
+    assert.equal(ground.style.transition, veil.style.transition, "the ground fades as the dim does");
+    f.fire("load");
+    d.send(PAINTED, f.contentWindow);
+    assert.equal(veil.style.opacity, "0");
+    assert.equal(ground.hidden, false, "not gone while the dim still shows");
+    assert.equal(ground.style.opacity, "0", "fading out with the dim, from the task the painted came");
+    mock.timers.tick(200);
+    assert.equal(veil.hidden, true);
+    assert.equal(ground.hidden, true, "gone with the dim");
+    // the next time the frame leaves, the ground shows whole again
+    mock.timers.tick(1000);
+    sh.open(true);
+    assert.equal(ground.hidden, false);
+    assert.equal(ground.style.opacity, "1");
+    // a sheet opened over the new frame before its painted: the ground goes at once under that sheet
+    sh.close();
+    const g = d.frames()[0]!;
+    sh.open();
+    d.send(PAINTED, g.contentWindow);
+    assert.equal(ground.hidden, true);
   } finally {
     resetTimers(mock.timers);
   }

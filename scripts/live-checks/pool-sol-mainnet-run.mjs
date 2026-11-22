@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Live check of card pool-sol-mainnet-run: the Solana pool's books after a run of deposits, buys, sells and an exit, read
-// at finalized on two RPCs of two operators (the money gate's: money-gate.mjs RPCS). Each read must give the same
-// answer on both:
+// at finalized on the money gate's RPCs (money-gate.mjs RPCS, imported through the record tool's CLUSTERS). Each read
+// must be answered by two operators and give the same answer on every host that answers; a host with no answer
+// (provider-answer.mjs: PublicNode serves getProgramAccounts only with a key) is named and left out:
 //   - the pool account: the program's, 2,179 bytes, "bfpool01"; its counters: deposits (nonce), deposited, spent, and
 //     each tree's size; the label tree holds one leaf per deposit, and the state tree one more per release;
 //   - the balance: the pool holds its own rent plus deposited less spent, every lamport of every note, and no less (a
@@ -19,7 +20,7 @@ import "../net-window.mjs";
 import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { EXIT } from "./provider-answer.mjs";
-import { answer, CLUSTERS, KEY, NoAnswer, pda, recorder } from "./pool-sol-mainnet-run.record.mjs";
+import { CLUSTERS, KEY, NoAnswer, onHosts, pda, recorder } from "./pool-sol-mainnet-run.record.mjs";
 
 const POOL_LEN = 2179;
 const PRE_LEN = 17;
@@ -50,41 +51,49 @@ export async function check({ cluster = "mainnet", expect = {}, fetchFn = fetch,
   const urls = rpcs ?? c.rpcs;
   const lines = [];
   const say = (ok, t) => lines.push(`${ok ? "PASS" : "FAIL"} ${t}`);
-  const on = (method, params) => Promise.all(urls.map((u) => answer(fetchFn, u, method, params, sleep)));
-  const acct = async (addr) => (await on("getAccountInfo", [addr, { encoding: "base64", commitment: "finalized" }])).map((r) => (r?.value ? { owner: r.value.owner, lamports: r.value.lamports, data: b64(r.value.data[0]) } : null));
+  // each read on every host: the answers of those that gave one, in order; a host with none is noted and left out
+  const on = async (method, params) => {
+    const { answers, none } = await onHosts(fetchFn, c.chain, urls, method, params, sleep);
+    for (const n of none) lines.push(`note ${method}: ${n}, left out`);
+    return answers;
+  };
+  const hosts = (xs) => xs.map((x) => new URL(x.url).host).join(" and ");
+  const allAlike = (xs, key) => xs.every((x) => same(key(x), key(xs[0])));
+  const acct = async (addr) => (await on("getAccountInfo", [addr, { encoding: "base64", commitment: "finalized" }])).map(({ url, result: r }) => ({ url, v: r?.value ? { owner: r.value.owner, lamports: r.value.lamports, data: b64(r.value.data[0]) } : null }));
+  const bytes = (x) => x.v && [...x.v.data, x.v.lamports];
 
-  // the pool, the same bytes and lamports on both (read again once: an insert may land between the two reads)
+  // the pool, the same bytes and lamports on every host (read again once: an insert may land between the reads)
   let pools = await acct(c.pool);
-  if (!same(pools[0] && [...pools[0].data, pools[0].lamports], pools[1] && [...pools[1].data, pools[1].lamports])) pools = await acct(c.pool);
-  const [pa, pb] = pools;
-  const alike = pa && pb && pa.lamports === pb.lamports && Buffer.compare(Buffer.from(pa.data), Buffer.from(pb.data)) === 0;
-  say(alike, `the pool ${c.pool}: the same bytes and lamports on ${urls.map((u) => new URL(u).host).join(" and ")}`);
+  if (!allAlike(pools, bytes)) pools = await acct(c.pool);
+  const pa = pools[0].v;
+  const alike = pools.every((x) => x.v) && allAlike(pools, bytes);
+  say(alike, `the pool ${c.pool}: the same bytes and lamports on ${hosts(pools)}`);
   const p = pa && pa.owner === c.program ? poolOf(pa.data) : null;
   say(p !== null, `the pool is the program's, ${POOL_LEN} bytes, bfpool01`);
   if (!alike || !p) return { ok: false, lines };
   const releases = p.state.size - p.label.size;
   say(p.label.size === p.nonce && p.state.size >= p.label.size, `trees: label ${p.label.size} = deposits ${p.nonce}; state ${p.state.size} = deposits + ${releases} releases`);
 
-  // the balance: rent(POOL_LEN) at the Rent sysvar both read, plus deposited less spent
-  const rents = (await on("getMinimumBalanceForRentExemption", [POOL_LEN, { commitment: "finalized" }])).map(BigInt);
+  // the balance: rent(POOL_LEN) at the Rent sysvar every host read, plus deposited less spent
+  const rents = (await on("getMinimumBalanceForRentExemption", [POOL_LEN, { commitment: "finalized" }])).map((x) => BigInt(x.result));
   const held = p.deposited - p.spent;
   const want = rents[0] + held;
   const have = BigInt(pa.lamports);
-  say(rents[0] === rents[1] && have >= want, `the balance: ${have} lamports held, rent ${rents[0]} + deposited ${p.deposited} - spent ${p.spent} = ${want}${have > want ? ` (${have - want} more: a stranger's send)` : ""}`);
+  say(rents.every((x) => x === rents[0]) && have >= want, `the balance: ${have} lamports held, rent ${rents[0]} + deposited ${p.deposited} - spent ${p.spent} = ${want}${have > want ? ` (${have - want} more: a stranger's send)` : ""}`);
 
-  // the marks, by size and tag, the same set on both
+  // the marks, by size and tag, the same set on every host that answers
   const marks = async (len) => {
     const r = await on("getProgramAccounts", [c.program, { encoding: "base64", commitment: "finalized", filters: [{ dataSize: len }] }]);
-    const sets = r.map((list) => list.map((a) => ({ k: a.pubkey, d: b64(a.account.data[0]) })).filter((a) => a.d[len - 1] === TAG).sort((x, y) => (x.k < y.k ? -1 : 1)));
-    return { alike: same(sets[0].map((a) => [a.k, [...a.d]]), sets[1].map((a) => [a.k, [...a.d]])), list: sets[0] };
+    const sets = r.map((x) => x.result.map((a) => ({ k: a.pubkey, d: b64(a.account.data[0]) })).filter((a) => a.d[len - 1] === TAG).sort((x, y) => (x.k < y.k ? -1 : 1)));
+    return { alike: allAlike(sets, (set) => set.map((a) => [a.k, [...a.d]])), list: sets[0] };
   };
   const pre = await marks(PRE_LEN);
   const sum = (l) => l.reduce((s, a) => s + u64(a.d, 0), 0n);
-  say(pre.alike && BigInt(pre.list.length) === p.nonce && sum(pre.list) === p.deposited, `deposit marks: ${pre.list.length} for ${p.nonce} deposits, values ${sum(pre.list)} for deposited ${p.deposited}${pre.alike ? "" : ", the two RPCs list different marks"}`);
+  say(pre.alike && BigInt(pre.list.length) === p.nonce && sum(pre.list) === p.deposited, `deposit marks: ${pre.list.length} for ${p.nonce} deposits, values ${sum(pre.list)} for deposited ${p.deposited}${pre.alike ? "" : ", the RPCs list different marks"}`);
   const spent = await marks(SPENT_LEN);
-  say(spent.alike && BigInt(spent.list.length) === releases && sum(spent.list) === p.spent, `spent marks: ${spent.list.length} for ${releases} releases, withdrawn ${sum(spent.list)} for spent ${p.spent}${spent.alike ? "" : ", the two RPCs list different marks"}`);
+  say(spent.alike && BigInt(spent.list.length) === releases && sum(spent.list) === p.spent, `spent marks: ${spent.list.length} for ${releases} releases, withdrawn ${sum(spent.list)} for spent ${p.spent}${spent.alike ? "" : ", the RPCs list different marks"}`);
 
-  // the roots: each tree's newest page, its entries as many as the size says, its last root not zero, alike on both
+  // the roots: each tree's newest page, its entries as many as the size says, its last root not zero, alike on every host
   for (const [name, tree, t] of [["state", 0, p.state], ["label", 1, p.label]]) {
     if (t.size === 0n) {
       say(true, `${name} tree: empty, no page`);
@@ -92,10 +101,11 @@ export async function check({ cluster = "mainnet", expect = {}, fetchFn = fetch,
     }
     const no = Number((t.size - 1n) / BigInt(PAGE_ENTRIES));
     const n = Number(t.size - BigInt(no) * BigInt(PAGE_ENTRIES));
-    const [ga, gb] = await acct(pda([Buffer.from("page"), Buffer.of(tree), le32(no)], c.program).address);
-    const ok = ga && gb && ga.owner === c.program && Buffer.compare(Buffer.from(ga.data), Buffer.from(gb.data)) === 0 && ga.data.length === PAGE_HEADER + ENTRY * n;
+    const pages = await acct(pda([Buffer.from("page"), Buffer.of(tree), le32(no)], c.program).address);
+    const ga = pages[0].v;
+    const ok = pages.every((x) => x.v) && allAlike(pages, bytes) && ga.owner === c.program && ga.data.length === PAGE_HEADER + ENTRY * n;
     const root = ok ? Buffer.from(ga.data.subarray(PAGE_HEADER + ENTRY * (n - 1) + 32, PAGE_HEADER + ENTRY * (n - 1) + 64)) : null;
-    say(ok && root.some((x) => x !== 0), `${name} tree: page ${no} holds ${n} entries alike on both, newest root ${root ? root.toString("hex") : "none"}`);
+    say(ok && root.some((x) => x !== 0), `${name} tree: page ${no} holds ${n} entries alike on ${hosts(pages)}, newest root ${root ? root.toString("hex") : "none"}`);
   }
 
   // the run's own: at least its deposits and releases

@@ -17,7 +17,8 @@ const SOL_TX = "2z6qyzLaN9dV3SUaNyCGXm4zPQTQ61vuJJnTvbn3vzPkZNwQ8KJhCEETJeN7vtM9
 function stub(answer) {
   return async (url, init) => {
     const { method } = JSON.parse(init.body);
-    const result = answer(url, method);
+    // a stub host keeps every block (card money-gate-solana-reads-past-one-stall) unless its answer says otherwise
+    const result = answer(url, method) ?? (method === "getFirstAvailableBlock" ? { result: 0 } : undefined);
     return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, ...result }) };
   };
 }
@@ -30,12 +31,16 @@ const chainAnswers = (t) => (url, method) => {
   if (method === "eth_getTransactionReceipt") return { result: { status: "0x1", blockNumber: "0x10" } };
   if (method === "eth_getBlockByNumber") return { result: { timestamp: "0x" + t.toString(16) } };
   if (method === "getTransaction") return { result: { meta: { err: null }, blockTime: t } };
+  if (method === "getFirstAvailableBlock") return { result: 0 };
   if (method === "EXPERIMENTAL_tx_status")
     return { result: { final_execution_status: "FINAL", status: { SuccessValue: "" }, receipts: [], receipts_outcome: [], transaction_outcome: { block_hash: "h" } } };
   if (method === "block") return { result: { header: { timestamp_nanosec: String(BigInt(t) * 1000000000n) } } };
 };
 const good = stub(chainAnswers(NOV2));
 const rec = (body) => [{ path: "scripts/live-checks/demo.md", key: "demo", text: `CARD demo / live: PASS\n${body}` }];
+// a recorded test-network tx replayed through the reading paths mainnet uses (card money-gate-test-networks-never-proof:
+// the gate CI runs names test-network lines as history and never reads them)
+const moneyGateReplay = (records, fetchFn, rpcs, o = {}) => moneyGate(records, fetchFn, rpcs, { ...o, replayTestNetworks: true });
 
 test("every chain read as succeeded on two RPCs passes", async () => {
   const r = await moneyGate(
@@ -90,7 +95,7 @@ test("an EVM RPC on the wrong chain is refused", async () => {
 
 test("a record that is not a money path reads nothing", async () => {
   const r = await moneyGate(rec("Money path: no\n"), good, RPCS);
-  assert.deepEqual(r, { refusals: [], read: [], notes: [], proven: [], gone: [], unread: [] });
+  assert.deepEqual(r, { refusals: [], read: [], notes: [], proven: [], gone: [], unread: [], history: [] });
 });
 
 test("a tx from before the build is refused on every chain", async () => {
@@ -720,7 +725,7 @@ const urlsOf = (fetchFn) => {
 
 test("a near-testnet tx reads ok on both testnet RPCs, and on no mainnet RPC", async () => {
   const seen = urlsOf(good);
-  const r = await moneyGate(rec(`Money path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\n`), seen.fetchFn, RPCS);
+  const r = await moneyGateReplay(rec(`Money path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\n`), seen.fetchFn, RPCS);
   assert.deepEqual(r.refusals, []);
   assert.deepEqual(r.read, ["t1", "t2"].map((u) => `near-testnet ${NEAR_TX} ok on ${u} (testnet, not real-money proof)`));
   assert.deepEqual([...seen.urls].sort(), ["t1", "t2"]);
@@ -730,7 +735,7 @@ test("a near-testnet tx reads ok on both testnet RPCs, and on no mainnet RPC", a
 });
 
 test("a near-testnet tx from before FLOOR is refused as old", async () => {
-  const r = await moneyGate(rec(`Money path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\n`), stub(chainAnswers(OCT1)), RPCS);
+  const r = await moneyGateReplay(rec(`Money path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\n`), stub(chainAnswers(OCT1)), RPCS);
   assert.equal(r.refusals.length, 1, r.refusals.join("\n"));
   assert.match(r.refusals[0], /near-testnet \S+: old: 2026-10-01T00:00:00\.000Z is before 2026-11-01T00:00:00\.000Z on t1, old: .* on t2$/);
   assert.deepEqual(r.read, []);
@@ -741,10 +746,10 @@ test('a testnet hash written as "Tx: near" is refused on the mainnet RPCs', asyn
   const split = stub((url, method) =>
     url.startsWith("t") ? chainAnswers(NOV2)(url, method) : { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" }, code: -32000 } },
   );
-  const asMainnet = await moneyGate(rec(`Money path: yes\nTx: near ${NEAR_TX} ${TESTNET_SIGNER}\n`), split, RPCS);
+  const asMainnet = await moneyGateReplay(rec(`Money path: yes\nTx: near ${NEAR_TX} ${TESTNET_SIGNER}\n`), split, RPCS);
   assert.match(asMainnet.refusals.join("\n"), new RegExp(`near ${NEAR_TX}: missing on n1, missing on n2$`));
   assert.deepEqual(asMainnet.read, []);
-  const asTestnet = await moneyGate(rec(`Money path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\n`), split, RPCS);
+  const asTestnet = await moneyGateReplay(rec(`Money path: yes\nTx: near-testnet ${NEAR_TX} ${TESTNET_SIGNER}\n`), split, RPCS);
   assert.deepEqual(asTestnet.refusals, []);
   assert.equal(asTestnet.read.length, 2);
 });
@@ -760,7 +765,7 @@ test("a near-testnet record never counts as real-money proof", () => {
 
 test("a solana-devnet tx reads ok on both devnet RPCs, on no mainnet RPC, and is never real-money proof", async () => {
   const seen = urlsOf(good);
-  const r = await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), seen.fetchFn, RPCS);
+  const r = await moneyGateReplay(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), seen.fetchFn, RPCS);
   assert.deepEqual(r.refusals, []);
   assert.deepEqual(r.read, ["d1", "d2"].map((u) => `solana-devnet ${SOL_TX} ok on ${u} (testnet, not real-money proof)`));
   assert.deepEqual([...seen.urls].sort(), ["d1", "d2"]);
@@ -772,17 +777,18 @@ test("a solana-devnet tx reads ok on both devnet RPCs, on no mainnet RPC, and is
 
 test("a solana-devnet tx failed, missing or old on one devnet RPC is refused", async () => {
   const failed = stub((url, method) => (method === "getTransaction" ? { result: { meta: { err: url === "d2" ? { InstructionError: [0, "x"] } : null }, blockTime: NOV2 } } : undefined));
-  assert.match((await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), failed, RPCS)).refusals.join("\n"), /ok on d1, failed on d2/);
+  assert.match((await moneyGateReplay(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), failed, RPCS)).refusals.join("\n"), /ok on d1, failed on d2/);
   const missing = stub((url, method) => (method === "getTransaction" ? { result: url === "d1" ? null : { meta: { err: null }, blockTime: NOV2 } } : undefined));
-  assert.match((await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), missing, RPCS)).refusals.join("\n"), /missing on d1, ok on d2/);
-  const old = await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), stub(chainAnswers(OCT1)), RPCS);
+  assert.match((await moneyGateReplay(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), missing, RPCS)).refusals.join("\n"), /missing on d1, ok on d2/);
+  const old = await moneyGateReplay(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), stub(chainAnswers(OCT1)), RPCS);
   assert.match(old.refusals.join("\n"), /solana-devnet \S+: old: 2026-10-01T00:00:00\.000Z is before 2026-11-01T00:00:00\.000Z on d1, old: .* on d2$/);
 });
 
 test('a devnet signature written as "Tx: solana" is refused on the mainnet RPCs, and a malformed one is refused', async () => {
-  const split = stub((url, method) => (url.startsWith("d") ? chainAnswers(NOV2)(url, method) : { result: null }));
-  assert.match((await moneyGate(rec(`Money path: yes\nTx: solana ${SOL_TX}\n`), split, RPCS)).refusals.join("\n"), /missing on s1, missing on s2/);
-  assert.deepEqual((await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), split, RPCS)).refusals, []);
+  // the mainnet hosts: no such tx (each keeps every block: stub's getFirstAvailableBlock 0)
+  const split = stub((url, method) => (url.startsWith("d") ? chainAnswers(NOV2)(url, method) : method === "getTransaction" ? { result: null } : undefined));
+  assert.match((await moneyGateReplay(rec(`Money path: yes\nTx: solana ${SOL_TX}\n`), split, RPCS)).refusals.join("\n"), /missing on s1, missing on s2/);
+  assert.deepEqual((await moneyGateReplay(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), split, RPCS)).refusals, []);
   assert.match(parseLive(`CARD demo / live: PASS\nMoney path: yes\nTx: solana-devnet ${NEAR_TX}\n`, "demo").problems.join(), /bad solana-devnet hash/);
 });
 
@@ -795,7 +801,7 @@ for (const [chain, [u1, u2], mainnet, [m1, m2]] of [
   const one = `Money path: yes\nTx: ${chain} ${BASE_TX}\n`;
   test(`a ${chain} tx reads ok on both of its RPCs, on no other chain's, and is never real-money proof`, async () => {
     const seen = urlsOf(good);
-    const r = await moneyGate(rec(one), seen.fetchFn, RPCS);
+    const r = await moneyGateReplay(rec(one), seen.fetchFn, RPCS);
     assert.deepEqual(r.refusals, []);
     assert.deepEqual(r.read, [u1, u2].map((u) => `${chain} ${BASE_TX} ok on ${u} (testnet, not real-money proof)`));
     assert.deepEqual([...seen.urls].sort(), [u1, u2]);
@@ -809,10 +815,10 @@ for (const [chain, [u1, u2], mainnet, [m1, m2]] of [
 
   test(`a ${chain} tx failed, missing or old on one of its RPCs is refused`, async () => {
     const on = (url, answer) => stub((u, method) => (u === url && method === "eth_getTransactionReceipt" ? answer : chainAnswers(NOV2)(u, method)));
-    assert.match((await moneyGate(rec(one), on(u2, { result: { status: "0x0", blockNumber: "0x10" } }), RPCS)).refusals.join("\n"), new RegExp(`${chain} \\S+: ok on ${u1}, failed on ${u2}$`));
-    assert.match((await moneyGate(rec(one), on(u1, { result: null }), RPCS)).refusals.join("\n"), new RegExp(`${chain} \\S+: missing on ${u1}, ok on ${u2}$`));
+    assert.match((await moneyGateReplay(rec(one), on(u2, { result: { status: "0x0", blockNumber: "0x10" } }), RPCS)).refusals.join("\n"), new RegExp(`${chain} \\S+: ok on ${u1}, failed on ${u2}$`));
+    assert.match((await moneyGateReplay(rec(one), on(u1, { result: null }), RPCS)).refusals.join("\n"), new RegExp(`${chain} \\S+: missing on ${u1}, ok on ${u2}$`));
     const old = stub((u, method) => chainAnswers(u === u1 ? OCT1 : NOV2)(u, method));
-    const r = await moneyGate(rec(one), old, RPCS);
+    const r = await moneyGateReplay(rec(one), old, RPCS);
     assert.match(r.refusals.join("\n"), new RegExp(`${chain} \\S+: old: 2026-10-01T00:00:00\\.000Z is before 2026-11-01T00:00:00\\.000Z on ${u1}, ok on ${u2}$`));
     assert.deepEqual(r.read, [`${chain} ${BASE_TX} ok on ${u2} (testnet, not real-money proof)`]);
   });
@@ -821,10 +827,10 @@ for (const [chain, [u1, u2], mainnet, [m1, m2]] of [
     const id = (u) => chainAnswers(NOV2)(u, "eth_chainId").result;
     // one of the testnet's RPCs answers the mainnet's chain id (a mainnet host listed as a testnet one)
     const asMainnet = stub((u, method) => (u === u2 && method === "eth_chainId" ? { result: id(m1) } : chainAnswers(NOV2)(u, method)));
-    assert.match((await moneyGate(rec(one), asMainnet, RPCS)).refusals.join("\n"), new RegExp(`ok on ${u1}, wrong chain \\(${id(m1)}\\) on ${u2}$`));
+    assert.match((await moneyGateReplay(rec(one), asMainnet, RPCS)).refusals.join("\n"), new RegExp(`ok on ${u1}, wrong chain \\(${id(m1)}\\) on ${u2}$`));
     // and the reverse: a mainnet RPC that answers the testnet's chain id
     const asTestnet = stub((u, method) => (u === m1 && method === "eth_chainId" ? { result: id(u1) } : chainAnswers(NOV2)(u, method)));
-    assert.match((await moneyGate(rec(`Money path: yes\nTx: ${mainnet} ${BASE_TX}\n`), asTestnet, RPCS)).refusals.join("\n"), new RegExp(`wrong chain \\(${id(u1)}\\) on ${m1}, ok on ${m2}$`));
+    assert.match((await moneyGateReplay(rec(`Money path: yes\nTx: ${mainnet} ${BASE_TX}\n`), asTestnet, RPCS)).refusals.join("\n"), new RegExp(`wrong chain \\(${id(u1)}\\) on ${m1}, ok on ${m2}$`));
   });
 
   test(`a ${chain} hash in any other shape is refused`, () => {
@@ -837,11 +843,11 @@ for (const [chain, [u1, u2], mainnet, [m1, m2]] of [
     // for a hash it never saw
     const only = (knows) => stub((u, method) => (method === "eth_getTransactionReceipt" && !knows.includes(u) ? { result: null } : chainAnswers(NOV2)(u, method)));
     const testnetTx = only([u1, u2]);
-    assert.match((await moneyGate(rec(`Money path: yes\nTx: ${mainnet} ${BASE_TX}\n`), testnetTx, RPCS)).refusals.join("\n"), new RegExp(`${mainnet} \\S+: missing on ${m1}, missing on ${m2}$`));
-    assert.deepEqual((await moneyGate(rec(one), testnetTx, RPCS)).refusals, []);
+    assert.match((await moneyGateReplay(rec(`Money path: yes\nTx: ${mainnet} ${BASE_TX}\n`), testnetTx, RPCS)).refusals.join("\n"), new RegExp(`${mainnet} \\S+: missing on ${m1}, missing on ${m2}$`));
+    assert.deepEqual((await moneyGateReplay(rec(one), testnetTx, RPCS)).refusals, []);
     const mainnetTx = only([m1, m2]);
-    assert.match((await moneyGate(rec(one), mainnetTx, RPCS)).refusals.join("\n"), new RegExp(`${chain} \\S+: missing on ${u1}, missing on ${u2}$`));
-    assert.deepEqual((await moneyGate(rec(`Money path: yes\nTx: ${mainnet} ${BASE_TX}\n`), mainnetTx, RPCS)).refusals, []);
+    assert.match((await moneyGateReplay(rec(one), mainnetTx, RPCS)).refusals.join("\n"), new RegExp(`${chain} \\S+: missing on ${u1}, missing on ${u2}$`));
+    assert.deepEqual((await moneyGateReplay(rec(`Money path: yes\nTx: ${mainnet} ${BASE_TX}\n`), mainnetTx, RPCS)).refusals, []);
   });
 }
 
@@ -985,7 +991,7 @@ function proofHosts(fx = LP) {
 }
 const gateOn = async (fx, rpcs = T_RPCS) => {
   const s = proofHosts(fx);
-  return { ...(await moneyGate(lpRec(fx), s.fetchFn, rpcs, { sleep: s.sleep })), log: s.log };
+  return { ...(await moneyGateReplay(lpRec(fx), s.fetchFn, rpcs, { sleep: s.sleep })), log: s.log };
 };
 
 test("light proof: the recorded real testnet tx, read on FastNEAR alone, is proven on dRPC's final block and passes", async () => {
@@ -1356,7 +1362,7 @@ const NOT_WAITED = `near-testnet ${NEAR_TX} on t3: rate limited, not waited: its
 
 test("two hosts read ok and the third answers 429 with Retry-After 279: passes, never sleeps, names the skip", async () => {
   const s = threeHosts((url) => (url === "t3" ? 429 : null));
-  const r = await moneyGate(testnetRec, s.fetchFn, T3, { sleep: s.sleep });
+  const r = await moneyGateReplay(testnetRec, s.fetchFn, T3, { sleep: s.sleep });
   assert.deepEqual(r.refusals, []);
   assert.deepEqual(r.read, ["t1", "t2"].map((u) => `near-testnet ${NEAR_TX} ok on ${u} (testnet, not real-money proof)`));
   assert.deepEqual(s.log.filter((l) => l.startsWith("sleep")), []);
@@ -1370,14 +1376,14 @@ test("two hosts read ok and the third reads the tx as failed: refused", async ()
       ? { result: { final_execution_status: "FINAL", status: { Failure: {} }, receipts: [], receipts_outcome: [], transaction_outcome: { block_hash: "h" } } }
       : null,
   );
-  const r = await moneyGate(testnetRec, s.fetchFn, T3, { sleep: s.sleep });
+  const r = await moneyGateReplay(testnetRec, s.fetchFn, T3, { sleep: s.sleep });
   assert.match(r.refusals.join("\n"), new RegExp(`near-testnet ${NEAR_TX}: ok on t1, ok on t2, failed on t3$`));
 });
 
 test("one host read ok and the second answers 429 then ok: the gate waits out its Retry-After and passes", async () => {
   let second = 0;
   const s = threeHosts((url) => (url === "t2" && second++ === 0 ? 429 : null));
-  const r = await moneyGate(testnetRec, s.fetchFn, T3, { sleep: s.sleep });
+  const r = await moneyGateReplay(testnetRec, s.fetchFn, T3, { sleep: s.sleep });
   assert.deepEqual(r.refusals, []);
   assert.equal(r.read.length, 3);
   assert.deepEqual(s.log.slice(s.log.indexOf("ask t2 EXPERIMENTAL_tx_status"), s.log.indexOf("ask t2 EXPERIMENTAL_tx_status") + 3), ["ask t2 EXPERIMENTAL_tx_status", "sleep 279000", "ask t2 EXPERIMENTAL_tx_status"]);
@@ -1441,7 +1447,7 @@ function sweepHosts(views) {
 }
 const sweepGate = async (views, record = sweepRec()) => {
   const s = sweepHosts(views);
-  return { ...(await moneyGate(record, s.fetchFn, T_RPCS, { sleep: s.sleep })), log: s.log };
+  return { ...(await moneyGateReplay(record, s.fetchFn, T_RPCS, { sleep: s.sleep })), log: s.log };
 };
 
 test("delete sweep: the Transfer passes on its proof alone and the account reads gone on dRPC and FastNEAR: PASS", async () => {
@@ -1924,12 +1930,78 @@ test("planted: a NEAR proof whose dRPC reads throttle is proven again next round
     return { ...s, fetchFn };
   };
   const once = throttledHead(1);
-  const r = await moneyGate(lpRec(LP), once.fetchFn, T_RPCS, { sleep: once.sleep });
+  const r = await moneyGateReplay(lpRec(LP), once.fetchFn, T_RPCS, { sleep: once.sleep });
   assert.deepEqual([r.refusals, r.unread, r.proven.length], [[], [], 1]);
   assert.deepEqual(once.log.filter((l) => GATE_PAUSE.test(l)), ["sleep 30000"]);
   const always = throttledHead(Infinity);
-  const g = await moneyGate(lpRec(LP), always.fetchFn, T_RPCS, { sleep: always.sleep });
+  const g = await moneyGateReplay(lpRec(LP), always.fetchFn, T_RPCS, { sleep: always.sleep });
   assert.equal(g.unread.length, 1);
   assert.match(g.unread[0], /not proven: near-testnet\.drpc\.org status: no answer \(rate limited 6 times in a row\)$/);
   assert.equal(outcome(g), 3);
+});
+
+// Card money-gate-solana-reads-past-one-stall: a third Solana operator, PublicNode, which keeps recent history only (its
+// first available block 471,786,675, 20 Nov 15:25Z, read 21 Nov 21:12Z). One operator's stall past the rounds no
+// longer leaves a landed tx could not read, and PublicNode's null for a tx before its first block is never absent.
+const [MB, SVS, PN] = REAL_RPCS.solana;
+const PN_FIRST = 471786675;
+const PN_FIRST_TIME = Date.parse("2026-11-20T15:25:20Z") / 1000;
+const TX_SLOT = 466032982; // the oldest recorded mainnet Solana tx, 5wGExGur (pool-sol-deploy-mainnet.md)
+const okAt = (slot) => ({ result: { slot, meta: { err: null }, blockTime: NOV2 } });
+// PublicNode as read: its history from PN_FIRST, a null for any tx before it
+const prunedPN = (method) =>
+  method === "getTransaction" ? { result: null } : method === "getFirstAvailableBlock" ? { result: PN_FIRST } : method === "getBlockTime" ? { result: PN_FIRST_TIME } : null;
+
+test("the Solana hosts are three operators, PublicNode the third", async () => {
+  const { operatorOf } = await import("./money-gate.mjs");
+  assert.equal(PN, "https://solana-rpc.publicnode.com");
+  assert.equal(new Set(REAL_RPCS.solana.map((u) => operatorOf("solana", u))).size, 3);
+});
+
+test("planted: one Solana operator stalled past every round, a landed tx passes on the other two in the first round (red with two operators: COULD NOT READ, exit 3)", async () => {
+  for (const stalled of REAL_RPCS.solana) {
+    const s = flaky((url, method) => (url === stalled ? "a transport error" : method === "getTransaction" ? okAt(470000000 + 1) : null));
+    const r = await moneyGate(oneTx("solana"), s.fetchFn, { solana: REAL_RPCS.solana }, { sleep: s.sleep });
+    assert.deepEqual(r.unread, [], stalled);
+    assert.deepEqual(r.refusals, [], stalled);
+    assert.equal(r.read.length, 2, stalled);
+    assert.equal(outcome(r), 0, stalled);
+    // before the 30/60/120 s rounds: no gate pause at all
+    assert.deepEqual(s.log.filter((l) => GATE_PAUSE.test(l)), [], stalled);
+  }
+});
+
+test("planted: PublicNode's null for a tx before its first block is never absent: beside one absent operator and one stalled it is COULD NOT READ, never a refusal", async () => {
+  // no host read the tx: its slot unknown, PublicNode's first block after the floor
+  const none = flaky((url, method) => (url === SVS ? "a transport error" : url === PN ? prunedPN(method) : missingOn("solana", method)));
+  const a = await moneyGate(oneTx("solana"), none.fetchFn, { solana: REAL_RPCS.solana }, { sleep: none.sleep });
+  assert.equal(a.unread.length, 1, a.refusals.join("\n"));
+  assert.match(a.unread[0], /missing on https:\/\/api\.mainnet-beta\.solana\.com, .*no history \(its first block 471786675, 2026-11-20T15:25:20\.000Z, is after 2026-11-01T00:00:00\.000Z\) on https:\/\/solana-rpc\.publicnode\.com$/);
+  assert.equal(outcome(a), 3);
+  // one host read it at TX_SLOT, before PublicNode's first block: its null is no history, and the stall leaves it unread
+  const one = flaky((url, method) => (url === SVS ? "a transport error" : url === PN ? prunedPN(method) : method === "getTransaction" ? okAt(TX_SLOT) : null));
+  const b = await moneyGate(oneTx("solana"), one.fetchFn, { solana: REAL_RPCS.solana }, { sleep: one.sleep });
+  assert.equal(b.unread.length, 1, b.refusals.join("\n"));
+  assert.match(b.unread[0], /no history \(its first block 471786675 is after the tx's slot 466032982\) on https:\/\/solana-rpc\.publicnode\.com$/);
+  // the same, both full-history operators reading it ok: a pass, PublicNode's null beside it no refusal
+  const both = flaky((url, method) => (url === PN ? prunedPN(method) : method === "getTransaction" ? okAt(TX_SLOT) : null));
+  const c = await moneyGate(oneTx("solana"), both.fetchFn, { solana: REAL_RPCS.solana }, { sleep: both.sleep });
+  assert.deepEqual([c.refusals, c.unread, outcome(c)], [[], [], 0]);
+});
+
+test("planted: absent on two Solana operators is still refused with PublicNode stalled, and PublicNode's null inside its history is absent", async () => {
+  const s = flaky((url, method) => (url === PN ? "a transport error" : missingOn("solana", method)));
+  const r = await moneyGate(oneTx("solana"), s.fetchFn, { solana: REAL_RPCS.solana }, { sleep: s.sleep });
+  assert.deepEqual(r.unread, []);
+  assert.match(r.refusals.join("\n"), /missing on https:\/\/api\.mainnet-beta\.solana\.com, missing on https:\/\/public\.rpc\.solanavibestation\.com, /);
+  assert.equal(outcome(r), 1);
+  // a tx inside PublicNode's history that one full-history host reads ok and PublicNode and the other read null: absent
+  // on two operators, refused
+  const inside = flaky((url, method) =>
+    url === MB ? (method === "getTransaction" ? okAt(PN_FIRST + 10) : null) : url === PN ? (method === "getTransaction" ? { result: null } : prunedPN(method)) : missingOn("solana", method),
+  );
+  const q = await moneyGate(oneTx("solana"), inside.fetchFn, { solana: REAL_RPCS.solana }, { sleep: inside.sleep });
+  assert.deepEqual(q.unread, []);
+  assert.match(q.refusals.join("\n"), /ok on https:\/\/api\.mainnet-beta\.solana\.com, missing on https:\/\/public\.rpc\.solanavibestation\.com, missing on https:\/\/solana-rpc\.publicnode\.com$/);
+  assert.equal(outcome(q), 1);
 });

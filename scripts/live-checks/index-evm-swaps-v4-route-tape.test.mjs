@@ -11,7 +11,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { candidates, DOMINANCE, judge, pick, read, scan } from "./index-evm-swaps-v4-route-tape.mjs";
+import { TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
+import { candidates, DOMINANCE, judge, pick, read, scan, unpriced } from "./index-evm-swaps-v4-route-tape.mjs";
 import { RETRY } from "./provider-answer.mjs";
 
 RETRY.ms = 0;
@@ -110,4 +111,52 @@ test("a scan every provider but one throttles is unread: INCONCLUSIVE naming the
   const v = judge(run);
   assert.equal(v.verdict, "INCONCLUSIVE", v.lines.join("\n"));
   assert.equal(asked, 0);
+});
+
+test("a coin whose quote traded against no USDC, WETH or ETH pool on Base in the scan (live run 44979250087: Base RALLY's pool quoted in ELEVATE, whose one USD market is on Ethereum) is judged on its status alone: 503 FAIL by name, 200 PASS; never judged on a tape no read can price", () => {
+  const r = copy(BAD);
+  const p = r.scan.pools.find((x) => x.id === r.pool);
+  const quote = p.c0 === r.coin ? p.c1 : p.c0;
+  r.scan.markets = { [quote]: null };
+  assert.equal(pick(r.scan), null, "a coin whose quote has no market here is not judged on its tape");
+  assert.deepEqual(unpriced(r.scan), { coin: r.coin, pool: r.pool, quote });
+  const { coin, pool } = r;
+  delete r.coin, delete r.pool, delete r.trades;
+  r.unpriced = { coin, pool, trades: { status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' } };
+  const v = judge(r);
+  assert.equal(v.verdict, "FAIL", v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => /^BAD the coin 0x86fb3335\w+, whose quote \w+ has no market on Base .*: trades 503/.test(l)), v.lines.join("\n"));
+  r.unpriced.trades = { status: 200, headers: { "x-helper-source": "chain" }, body: '{"trades":[],"src":"chain"}' };
+  assert.equal(judge(r).verdict, "PASS", judge(r).lines.join("\n"));
+  // a quote with a market read: the coin is judged on its whole tape, as before
+  const m = copy(BAD);
+  m.scan.markets = { [quote]: { pool: `0x${"cc".repeat(20)}`, venue: "v3" } };
+  assert.deepEqual(pick(m.scan), { coin: m.coin, pool: m.pool });
+  assert.equal(unpriced(m.scan), null);
+  assert.equal(judge(m).verdict, "FAIL");
+});
+
+test("the scan reads a quote's market by its Transfers: a counterparty whose factory is a Base venue's and whose tokens are the quote and USDC; a quote with no transfer has none", async () => {
+  const PARTY = `0x${"33".repeat(20)}`;
+  const V3 = VENUES.base.v3[0];
+  const base = chain([]);
+  const withMarket = async (url, o) => {
+    const b = JSON.parse(o.body);
+    const one = (q) => {
+      const p = q.params[0];
+      if (q.method === "eth_getLogs" && p.address === QUOTE) return { jsonrpc: "2.0", id: q.id, result: [{ topics: [TOPIC.transfer, `0x${w(PARTY)}`, `0x${w(`0x${"44".repeat(20)}`)}`] }] };
+      if (q.method === "eth_call" && p.to === PARTY) return { jsonrpc: "2.0", id: q.id, result: `0x${w({ "0xc45a0155": V3, "0x0dfe1681": VENUES.base.usd, "0xd21220a7": QUOTE }[p.data])}` };
+      return null;
+    };
+    const mine = [b].flat().map(one);
+    if (mine.every((x) => x === null)) return base(url, o);
+    const rest = mine.some((x) => x === null) ? JSON.parse(await (await base(url, { ...o, body: JSON.stringify([b].flat()) })).text()) : [];
+    const out = mine.map((x, i) => x ?? rest[i]);
+    return new Response(JSON.stringify(Array.isArray(b) ? out : out[0]), { status: 200 });
+  };
+  const s = await scan(withMarket, RPCS);
+  assert.equal(s.unread, undefined, s.unread);
+  assert.deepEqual(s.markets[QUOTE], { pool: PARTY, venue: V3 });
+  const none = await scan(chain([]), RPCS);
+  assert.equal(none.markets[QUOTE], null);
 });
