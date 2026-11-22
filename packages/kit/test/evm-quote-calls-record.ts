@@ -3,7 +3,7 @@
 // index), with the index served as the signing page serves it. Each JSON-RPC call is kept alone, its method and params
 // with the provider's answer, so test/evm-quote-calls.test.ts answers it however the quote batches it; and the device's
 // clock, the index and the quote's result. An answer is kept as the provider gave it, a result or an error. Reads only: no key, no transaction, no money moves.
-//   node packages/kit/test/evm-quote-calls-record.ts [kept index, a v8-serialized Map of chain to the index data] [route]
+//   node packages/kit/test/evm-quote-calls-record.ts --record [kept index, a v8-serialized Map of chain to the index data] [route]
 // Without a kept index the pool index is synced from none, which takes minutes.
 import { readFileSync, writeFileSync } from "node:fs";
 import { deserialize } from "node:v8";
@@ -45,8 +45,16 @@ export const withEventOnly = (calls: readonly [string, unknown][]): [string, unk
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // it overwrites test/fixtures/evm-quote-calls.json.gz with live mainnet reads: only when asked to (a loop over test/ ran it, and
+  // replaced both recordings, card evm-warm-tap-ends-inside-two-seconds)
+  if (!process.argv.includes("--record")) {
+    console.error("this records test/fixtures/evm-quote-calls.json.gz from mainnet and overwrites it: run it with --record");
+    process.exit(2);
+  }
+  // the positional arguments, the flag left out
+  const args = process.argv.slice(2).filter((x) => x !== "--record");
   const v = evmPoolVenues().robinhood;
-  const kept = process.argv[2] === undefined ? null : (deserialize(readFileSync(process.argv[2])) as Map<string, unknown>).get("robinhood") ?? null;
+  const kept = args[0] === undefined ? null : (deserialize(readFileSync(args[0])) as Map<string, unknown>).get("robinhood") ?? null;
   const ix = await evmPoolIndexRefresh("robinhood", kept as never);
   if (!ix.served || ix.sync?.index == null || ix.sync.pools == null) throw new Error("the pool index was not served");
   const answers = new Map<string, unknown>();
@@ -80,7 +88,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   };
   // the route the device's own best was at the last run (its printed reference), where given: a recording is one quote
   // in a fresh process, so its scans and reads are a cold quote's, as the replay's are
-  const req: EvmPoolBuyQuoteRequest = process.argv[3] === undefined ? CALLS_REQUEST : { ...CALLS_REQUEST, route: JSON.parse(process.argv[3]) };
+  const req: EvmPoolBuyQuoteRequest = args[1] === undefined ? CALLS_REQUEST : { ...CALLS_REQUEST, route: JSON.parse(args[1]) };
   const scans = [v.scan!.url, ...(v.scan!.spares ?? []).map((s) => s.url)].map((u) => evmJsonRpc(u, recording, 16 << 20));
   const now = Date.now();
   let outcome: Record<string, unknown>;

@@ -40,6 +40,10 @@ test("the mark as the build minifies it, and not the code before the card", () =
   assert.equal(facts("", "if(!(e instanceof wS||e instanceof TS)||i===3||n?.spare?.()===!0)throw new Oy(`rpc_error`").moves, true);
   // before: the spare read for a throttle alone
   assert.equal(facts("", "if(!(e instanceof wS||e instanceof TS)||i===3||e instanceof wS&&n?.spare?.()===!0)throw new Oy(`rpc_error`").moves, false);
+  // card evm-warm-tap-ends-inside-two-seconds: the spare clause still alone, then the round's done clause
+  assert.equal(facts("", "if(!(e instanceof wS||e instanceof TS)||i===3||n?.spare?.()===!0||n?.done?.()===!0)throw new Oy(`rpc_error`").moves, true);
+  // the spare read for a throttle alone, with the done clause after it: still the code before the card
+  assert.equal(facts("", "if(!(e instanceof wS||e instanceof TS)||i===3||e instanceof wS&&n?.spare?.()===!0||n?.done?.()===!0)throw new Oy(`rpc_error`").moves, false);
 });
 
 test("read() asks SIGN_HOST's / and /app.js and nothing else", async () => {
