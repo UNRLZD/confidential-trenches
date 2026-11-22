@@ -122,11 +122,17 @@ export const MARKS = Object.freeze({
       R`${I}\(${I}\.stage,${I}\.txs,${I}\.pending,${I}\.arrived\),${esc(g.bk)}\(\)`,
     ],
   ),
-  // review P1-2 of 1d3b96d9c: tokens keep W whole only on W's own coins' accounts (every account of a found W's)
-  "the sweep goes on around kept accounts but never around tokens on W's own coins' accounts, a found W's all": tied(
+  // review P1-2 of 1d3b96d9c: tokens keep W whole only on W's own coins' accounts; card
+  // a-found-wallet-sweeps-past-a-strangers-coin: a found W's own accounts come from its own note's spend read on both
+  // RPCs (none while unspent, every one once spent), every one while unread, and a read with no answer alike holds W
+  // young before any sweep
+  "the sweep goes on around kept accounts but never around tokens on W's own accounts: a bought W's coins', a found W's every one until its note's spend reads alike on both RPCs, then none while unspent, and a found W whose note gives no answer alike held young before any sweep": tied(
     re(R`function (?<k>${I})\((${I}),(${I})\)\{let (${I})=\2\.filter\((${I})=>\5\.cashback===!0\)\.length;return \4>2\|\|\2\.some\((${I})=>\6\.tokens===!0&&\3\(\6\.address\)\)\?null:\{owed:\4,kept:\2\.length-\4\}\}`),
     (g) => [
-      R`(${I})=new Set\((${I})\.mints\.map\((${I})=>${I}\((${I})\.address,\3\.mint,\3\.program\)\)\),(${I})=(${I})=>\2\.bare===!0\|\|\1\.has\(\6\)[^]*?${esc(g.k)}\(${I}\.ok\.keep,\5\)[^]*?${esc(g.k)}\(${I}\.plan\.keep,\5\)`,
+      // a bought W keeps on its coins' accounts (`mine`); a found W on every one while its set is unread or "any", and on
+      // its own set once read; the set read from its note in the teardown, a read with no answer alike held young, and
+      // only then the sweep's keep (keepOf on the teardown's and on the plan's)
+      R`(${I})=new Set\((${I})\.mints\.map\((${I})=>${I}\((${I})\.address,\3\.mint,\3\.program\)\)\),(${I}),(${I})=(${I})=>\2\.bare===!0\?\5===void 0\|\|\5===` + "`any`" + R`\|\|\5\.has\(\7\):\1\.has\(\7\)[^]*?if\(${I}!==void 0\)\{\5=void 0;let (${I})=await ${I}\(${I},\2\.program,\2\.store,\2\.scope,\4,${I}\)\.catch\([^]{0,200}?,null\)\);if\(\8===null\)return\{young:[^]{0,200}?\};\5=\8\}[^]*?${esc(g.k)}\(${I}\.ok\.keep,\6\)[^]*?${esc(g.k)}\(${I}\.plan\.keep,\6\)`,
     ],
   ),
 });

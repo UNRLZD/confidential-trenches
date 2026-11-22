@@ -124,13 +124,33 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["e>=t?void 0:t)", "!1?void 0:t)", 13],
     ["e.state===`UNSPENT`)&&At()", "e.state===`UNSPENT`)", 13],
     ["_(b.stage,b.txs,b.pending,b.arrived),At()", "_(b.stage,b.txs,b.pending,b.arrived)", 13],
-    // tokens keep W whole only on W's own coins' accounts
+    // tokens keep W whole only on W's own accounts: a bought W's coins', a found W's every one until its note's spend
+    // reads alike on both RPCs (card a-found-wallet-sweeps-past-a-strangers-coin)
     ["e.some(e=>e.tokens===!0&&t(e.address))", "e.some(e=>e.tokens===!0)", 14],
-    ["r=e=>t.bare===!0||n.has(e)", "r=e=>t.bare===!0", 14],
-    ["r=e=>t.bare===!0||n.has(e)", "r=e=>n.has(e)", 14],
+    // the old form (a found W's every account always, no note read): FAIL
+    ["i,r=e=>t.bare===!0?i===void 0||i===`any`||i.has(e):n.has(e)", "r=e=>t.bare===!0||n.has(e)", 14],
+    // a found W that sweeps on an unread set (its note read skipped or not yet answered): FAIL
+    ["i===void 0||i===`any`||i.has(e)", "i!==void 0&&(i===`any`||i.has(e))", 14],
+    ["i===void 0||i===`any`||", "i===`any`||", 14],
+    // a found W that sweeps past a spent note's accounts, or past its own set
+    ["||i===`any`||", "||", 14],
+    ["||i.has(e):", ":", 14],
+    // a bought W that keeps on no coin of its own
+    [":n.has(e)", ":!1", 14],
+    // the note read skipped, its no-answer hold dropped, or its set never taken
+    ["if(o!==void 0){i=void 0;let n=await bq(s,t.program,t.store,t.scope,c,a)", "if(o!==void 0){i=void 0;let n=await bq(s,t.program,t.mints,t.scope,c,a)", 14],
+    [";if(n===null)return{young:u||`its note's spend not read alike on both RPCs`,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0};i=n}", ";i=n}", 14],
+    [";i=n}", ";i=new Set}", 14],
     ["zY(y.ok.keep,r)", "zY(y.ok.keep,()=>!1)", 14],
     ["zY(d.plan.keep,r)", "zY(d.plan.keep,()=>!1)", 14],
   ];
+  // the note read removed whole: FAIL on that mark alone
+  {
+    const read = JS.split("\n").find((l) => l.startsWith("if(o!==void 0){i=void 0;"));
+    assert.ok(read);
+    const c = facts("", JS.replace(read, "")).carries;
+    assert.deepEqual(Object.keys(MARKS).filter((k) => !c[k]), [Object.keys(MARKS)[14]]);
+  }
   for (const [from, to, i] of planted) {
     assert.ok(JS.includes(from), `the excerpt holds ${from}`);
     const c = facts("", JS.replace(from, to)).carries;
