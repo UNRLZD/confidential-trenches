@@ -133,6 +133,29 @@ test("recorded bad run, a history mismatch: the view at the blocklist's block di
   assert.match(bad(r)[0], /^BAD \[mainnet\] is_blocklisted read at \[99022746,99022747,99023052,99023053\] answers \["false","false","true","false"\]/);
 });
 
+test("the indexer names no account (NearBlocks' args null, live runs 44989861313 to 45006783900): the receipts' archival logs name it: PASS; a log or an indexer naming another account: FAIL (red at fd4d3d39a)", () => {
+  const strip = (run) => {
+    const r = structuredClone(run);
+    for (const m of ["blocklist", "unblocklist"]) for (const x of r.history.indexer[m]) delete x.account;
+    return r;
+  };
+  const live = strip(A.good);
+  assert.equal(live.history.indexer.blocklist[0].account, undefined);
+  const r = judge(live);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.ok(r.lines.includes("ok  [mainnet] the indexer lists one blocklist 99022747 and one unblocklist 99023053, of \"the account its log names\""), r.lines.join("\n"));
+  const other = "a".repeat(64);
+  const relog = structuredClone(live);
+  relog.history.logs.blocklist.log = relog.history.logs.blocklist.log.replace(HISTORY_ACCOUNT, other);
+  assert.deepEqual(bad(judge(relog)).map((l) => l.slice(0, 50)), [`BAD [mainnet] https://archival-rpc.mainnet.fastnear.com the blocklist receipt`.slice(0, 50)]);
+  const named = structuredClone(A.good);
+  named.history.indexer.unblocklist[0].account = other;
+  assert.deepEqual(bad(judge(named)), [`BAD [mainnet] the indexer lists one blocklist 99022747 and one unblocklist 99023053, of "${HISTORY_ACCOUNT}"`]);
+  const two = structuredClone(live);
+  two.history.indexer.blocklist.push({ ...two.history.indexer.blocklist[0], height: 99030000 });
+  assert.match(bad(judge(two))[0] ?? "", /\(2 and 1 listed\)/);
+});
+
 test("made from the good run, the probe: never halted, another code, a failed transaction, an answer of another block, not read: each FAIL on its line", () => {
   const atPause = (f) => {
     const r = copy(A.good);

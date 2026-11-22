@@ -13,16 +13,18 @@
 //     the pin; the two providers' blocks are within MAX_SKEW of each other;
 // and on mainnet, that a view at a height equals the event history: the indexer's list of USDC's blocklist and
 // unblocklist receipts (NearBlocks) holds the one pair, each receipt's log on the archival provider is that x-fiat-token
-// event for the same account, and is_blocklisted of that account reads false, true, true, false at the blocklist's block
+// event for the same account (the log names the account; the indexer's own copy of the call's arguments, when it gives
+// one, must name it too: NearBlocks answers `args: null` since at least 22 Nov 05:40Z, card
+// helper-usdc-event-watch-live, helper live runs 44989861313, 44992969378 and 45006783900), and is_blocklisted of that account reads false, true, true, false at the blocklist's block
 // less one, its block, the unblocklist's block less one and its block (a view at block h includes h's receipts).
 // Then the helper itself (HELPER_HOST's GET /v1/token-status, read with Origin APP_HOST before the providers): on each
 // network it carries (CARRIED: mainnet, mainnet's watch on the v1 vault the host's WITHDRAW_VAULT_MAINNET names once the
 // env cutover moves it, apps/helper/deploy/vault-lines.sh), caught_up true, not halted, the vault not blocked, the pin,
 // at a block no more than MAX_LAG behind the providers' final reads that follow it. A network not in CARRIED would be
 // read for the kit's not-caught-up answer (halted, vault_blocked and code_hash_ok null: with no vault named the watch
-// never answers caught up); CARRIED names mainnet, so that branch runs on none. Until the env cutover the
-// deployed helper answers no caught-up watch on the v1 vault, and this check FAILs on it (as its recorded
-// bad_mainnet_not_carried run does), so the helper redeploy for it goes with the cutover, never before.
+// never answers caught up); CARRIED names mainnet, so that branch runs on none. A helper with no caught-up watch on the v1
+// vault (before the env cutover) FAILs here, as its recorded bad_mainnet_not_carried run does; helper 77bfa8030
+// answered caught up on it (live run 45006783900, 22 Nov).
 // It reads no test network (card live-checks-read-mainnet-only). The halt itself, seen once on a testnet probe token
 // (paused and unpaused 2026-11-03), was a one-off proof no helper deploy can change: the check's test replays it, the
 // probe passed to judge() and read() as `probe` (the watch's pausedAt rule: block h's header, ft_balance_of at its
@@ -138,7 +140,9 @@ export function judge(run, { nets = NETS, carried = CARRIED, probe = null } = {}
   const bl = h?.indexer?.blocklist ?? [];
   const ub = h?.indexer?.unblocklist ?? [];
   const who = HISTORY_ACCOUNT;
-  say(bl.length === 1 && ub.length === 1 && bl[0].account === who && ub[0].account === who && bl[0].height < ub[0].height, `[mainnet] the indexer lists one blocklist ${show(bl[0]?.height)} and one unblocklist ${show(ub[0]?.height)} of ${who}`);
+  // the account is the receipt's own log's (judged below); an indexer that copies the call's arguments must agree
+  const theirs = (r) => r.account === undefined || r.account === null || r.account === who;
+  say(bl.length === 1 && ub.length === 1 && theirs(bl[0]) && theirs(ub[0]) && bl[0].height < ub[0].height, `[mainnet] the indexer lists one blocklist ${show(bl[0]?.height)} and one unblocklist ${show(ub[0]?.height)}${bl.length > 1 || ub.length > 1 ? ` (${bl.length} and ${ub.length} listed)` : ""}, of ${show(bl[0]?.account ?? "the account its log names")}${bl[0]?.account === undefined || bl[0]?.account === who ? "" : `, not ${who}`}`);
   for (const [name, rec] of [["blocklist", bl[0]], ["unblocklist", ub[0]]]) {
     const log = h?.logs?.[name];
     let ev;
