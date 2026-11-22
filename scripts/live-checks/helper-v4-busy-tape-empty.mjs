@@ -19,7 +19,11 @@
 //   test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+
+// keccak from the helper's own dependencies (apps/ is outside Blindfill), as evm-pool-search-stable reads it
+const { keccak_256 } = createRequire(new URL("../../apps/helper/package.json", import.meta.url))("@noble/hashes/sha3.js");
 
 const KEY = "helper-v4-busy-tape-empty";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -39,6 +43,21 @@ export const CHAINS = {
   robinhood: { poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951", rpcs: [["https://robinhood.api.pocket.network", 25_000], ["https://robinhood.daybreak-rpc.network", 2_000]], window: 11_000, spanMax: 120_000 },
 };
 const ID = /^0x[0-9a-f]{64}$/;
+/** The hook of v4 pool `id` from `key` (the pool's PoolKey, as the helper's GET /v1/market/pools names it: currency0,
+ *  currency1, fee, tickSpacing, hooks), only when its keccak-256 is the id, so the helper's word proves nothing by
+ *  itself; null otherwise. A swap the hook sends is its own (fees it sells), never a trade: the helper keeps it off the
+ *  tape (swaps.ts hookTakes, backBook). Live run 44989861313: Robinhood 0x94641b97's pool 0x338fce55, hook 0xe5e70264
+ *  sold the fee coins it held in tx 0xc25ae71f (log 0, the coin from the hook into the PoolManager, USDG out to it and
+ *  on to a fee splitter), and this check counted it, and one more, as swaps missing from the tape. */
+export function hookOf(id, key) {
+  const k = key ?? {};
+  const word = (v) => (typeof v === "string" && /^0x[0-9a-f]{40}$/.test(v) ? v.slice(2).padStart(64, "0") : null);
+  const num = (v) => (Number.isSafeInteger(v) && v >= 0 ? v.toString(16).padStart(64, "0") : null);
+  const parts = [word(k.currency0), word(k.currency1), num(k.fee), num(k.tickSpacing), word(k.hooks)];
+  if (parts.some((p) => p === null)) return null;
+  const h = Buffer.from(keccak_256(Buffer.from(parts.join(""), "hex"))).toString("hex");
+  return `0x${h}` === id ? k.hooks : null;
+}
 const TX = /^0x[0-9a-f]{64}$/;
 const arr = (v) => (Array.isArray(v) ? v : []);
 
@@ -58,7 +77,7 @@ async function swapsOn(url, span, pm, id, from, to, fetchFn) {
       }
       return { noAnswer: r.noAnswer ?? JSON.stringify(r.error ?? r).slice(0, 200) };
     }
-    for (const l of r.result) out.push({ tx: l.transactionHash, b: parseInt(l.blockNumber, 16), ts: parseInt(l.blockTimestamp ?? "0x0", 16) });
+    for (const l of r.result) out.push({ tx: l.transactionHash, b: parseInt(l.blockNumber, 16), ts: parseInt(l.blockTimestamp ?? "0x0", 16), s: typeof l.topics?.[2] === "string" ? `0x${l.topics[2].slice(26)}` : null });
     a = b + 1;
   }
   return { logs: out };
@@ -111,6 +130,10 @@ export async function readRun(base = BASE, { fetchFn = fetch, sleep = (ms) => ne
         coin.tooWide = coin.head - coin.from + 1;
         continue;
       }
+      // the pool's key as the helper's index names it, proven by its hash at the verdict (hookOf)
+      const pr = await fetchFn(`${base}/v1/market/pools?chain=${chain}&token=${addr}`, { headers: { Origin: APP } }).catch(() => null);
+      const pa = pr?.status === 200 ? await pr.json().catch(() => null) : null;
+      coin.key = arr(pa?.pools).find((p) => p?.id === pool)?.key ?? null;
       coin.reads = [];
       for (const [url, span] of c.rpcs) coin.reads.push({ host: new URL(url).host, ...(await swapsOn(url, span, c.poolManager, pool, coin.from, coin.head, fetchFn)) });
     }
@@ -160,7 +183,10 @@ export function judge(run) {
         quiet = true;
         continue;
       }
-      const logs = reads[0].logs;
+      // the hook's own swaps are no trades (hookOf): left out, counted in the line
+      const hook = hookOf(coin.pool, coin.key);
+      const logs = reads[0].logs.filter((l) => hook === null || l.s !== hook);
+      const own = reads[0].logs.length - logs.length;
       const tape = new Set(last.txs);
       if (tape.size === 0) {
         if (logs.length > 0) {
@@ -184,7 +210,7 @@ export function judge(run) {
       if (missing.length > 0 || late.length > 0) {
         lines.push(`BAD ${name}: the tape's ${tape.size} rows against the pool's ${inside.size} swaps in blocks ${coin.from}-${newest}: ${missing.length} missing${late.length > 0 ? `, and ${late.length} swaps past its newest row older than its time by ${LAG_S} s` : ""} (${missing.concat(late.map((l) => l.tx)).slice(0, 3).join(", ")})`);
         bad = true;
-      } else lines.push(`ok  ${name}: ${tape.size} trades, the pool's ${inside.size} swaps in blocks ${coin.from}-${newest} on ${reads.map((r) => r.host).join(" and ")}`);
+      } else lines.push(`ok  ${name}: ${tape.size} trades, the pool's ${inside.size} swaps in blocks ${coin.from}-${newest} on ${reads.map((r) => r.host).join(" and ")}${own > 0 ? `, ${own} swaps its hook sent itself left out` : ""}`);
     }
     if (judged === 0) {
       lines.push(`--  ${chain}: no busy v4 tape judged: INCONCLUSIVE`);
