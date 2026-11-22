@@ -320,13 +320,15 @@ type BarRow = [number, string, string, string, string, string];
 /** What Book.state() hands over and Book.load() takes back. */
 export type BookState = { settledTo: number; ethUsd: string | null; tape: PricedRow[]; tail: (SwapRow | RefRow)[]; bars: Record<Tf, BarRow[]>; marked: [number, string] | null };
 
+/** A swap's transaction: an EVM chain's hash, or a Solana signature (base58, 64 bytes; shorter only in a test's). */
+const TX_RE = /^(0x[0-9a-f]{64}|[1-9A-HJ-NP-Za-km-z]{32,88})$/;
 /** A whole number of at most 100 digits as written by state(); null otherwise. `min`: its least. */
 const big = (v: unknown, min: bigint): bigint | null => (typeof v === "string" && /^[0-9]{1,100}$/.test(v) && BigInt(v) >= min ? BigInt(v) : null);
 const int = (v: unknown, min: number): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= min;
 /** A SwapRow's fields from `at` on (block, index, tx, t, side, amt, quote, got, tape) as a Swap; null when any is off. */
 function swapOf(r: readonly unknown[], at: number): Swap | null {
   const [block, index, tx, t, side, amt, quote, got, onTape] = r.slice(at, at + 9);
-  if (!int(block, 0) || !int(index, 0) || typeof tx !== "string" || !/^0x[0-9a-f]{64}$/.test(tx) || !int(t, 0) || (side !== "b" && side !== "s") || (onTape !== 0 && onTape !== 1)) return null;
+  if (!int(block, 0) || !int(index, 0) || typeof tx !== "string" || !TX_RE.test(tx) || !int(t, 0) || (side !== "b" && side !== "s") || (onTape !== 0 && onTape !== 1)) return null;
   const a = big(amt, 1n);
   const q = big(quote, 1n);
   const g = got === null ? undefined : big(got, 1n);

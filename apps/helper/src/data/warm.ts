@@ -20,17 +20,20 @@ import { STALE_MS } from "./evm/lists.ts";
 import type { GeckoBudget } from "./gecko.ts";
 import { HANDOVER_MAX } from "./solana/token.ts";
 import { BOOKS_HANDOVER_MAX, EVM_HANDOVER_MAX } from "./evm/swaps.ts";
+import { TAPES_HANDOVER_MAX } from "./solana/trades.ts";
 
 export const WARM_DIR = "market";
 export const WARM_FILE = "warm.json";
 /** The file's size limit on read: six GeckoTerminal answers of at most 2 MB each, the Solana token page's handover
- *  (HANDOVER_MAX), each EVM chain's swap reads and books (card helper-tape-handover: BOOKS_HANDOVER_MAX), and the rest. */
-export const WARM_MAX = 16 * 1024 * 1024 + HANDOVER_MAX + 2 * (EVM_HANDOVER_MAX + BOOKS_HANDOVER_MAX + 1024 * 1024);
+ *  (HANDOVER_MAX), each EVM chain's swap reads and books and the Solana tapes (card helper-tape-handover:
+ *  BOOKS_HANDOVER_MAX, TAPES_HANDOVER_MAX), and the rest. */
+export const WARM_MAX = 16 * 1024 * 1024 + HANDOVER_MAX + TAPES_HANDOVER_MAX + 2 * (EVM_HANDOVER_MAX + BOOKS_HANDOVER_MAX + 1024 * 1024);
 
-/** `solana`: the token page's answers (solana/token.ts state), checked entry by entry by its restore. `geckoLists`: the
+/** `solanaTrades`: the Solana tapes (solana/trades.ts state; card helper-tape-handover), checked whole by its restore.
+ *  `solana`: the token page's answers (solana/token.ts state), checked entry by entry by its restore. `geckoLists`: the
  *  times among `gecko` of the lists lane's calls, so the next helper's lists count them in their LIST_FLOOR (card
  *  helper-restart-fresh); a file without it (a helper before that card) seeds every call with no lane. */
-export type Warm = { at: number; gecko: number[]; geckoLists?: number[]; evm: Record<string, unknown>; solana?: unknown; evmMarket?: Record<string, unknown> };
+export type Warm = { at: number; gecko: number[]; geckoLists?: number[]; evm: Record<string, unknown>; solana?: unknown; solanaTrades?: unknown; evmMarket?: Record<string, unknown> };
 /** What evmMarketOf hands over and restoreEvmMarket takes back, per chain. */
 type EvmMarket = { tokens?: { state(): unknown; restore(st: unknown): boolean }; swaps?: { state(): unknown; restore(st: unknown): boolean } };
 
@@ -73,7 +76,7 @@ export function readWarm(storeDir: string, now: number): Warm | null {
   const gecko = times(w.gecko);
   const evm = typeof w.evm === "object" && w.evm !== null && !Array.isArray(w.evm) ? (w.evm as Record<string, unknown>) : {};
   const market = typeof w.evmMarket === "object" && w.evmMarket !== null && !Array.isArray(w.evmMarket) ? { evmMarket: w.evmMarket as Record<string, unknown> } : {};
-  return { at: w.at, gecko, ...(w.geckoLists === undefined ? {} : { geckoLists: times(w.geckoLists) }), evm, ...(w.solana === undefined ? {} : { solana: w.solana }), ...market };
+  return { at: w.at, gecko, ...(w.geckoLists === undefined ? {} : { geckoLists: times(w.geckoLists) }), evm, ...(w.solana === undefined ? {} : { solana: w.solana }), ...(w.solanaTrades === undefined ? {} : { solanaTrades: w.solanaTrades }), ...market };
 }
 
 /** Seeds `b` with a warm file's GeckoTerminal calls: its lists calls in the lists lane, the rest with no lane. A seed
