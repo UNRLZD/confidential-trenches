@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
-import { evmAgreedReset, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolIndexUse, evmProviders, evmQuoteWarmReset, evmRanked, evmSpeedReset, type EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
+import { EVM_NOOP_HOOK_CODE, evmAgreedReset, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolIndexUse, evmProviders, evmQuoteWarmReset, evmRanked, evmSpeedReset, type EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
 import { callKey } from "./evm-quote-calls-record.ts";
@@ -32,9 +32,11 @@ const MC3 = "0xca11bde05977b3631167028862be2a173976ca11";
  *  its quote's own recorded head (the recording reads two a quote, in the quotes' order), so a quote that reads its head
  *  more or fewer times than the recording did still holds the recording's block; a getLogs span the recording does not
  *  hold is answered from a recorded span of the same filter that covers it whole, its logs inside the span; and a read
- *  with a hook's code replaced (a state override other than Multicall3's own) that the recording predates is answered
- *  as a provider's error (`spec`), as the read a warm quote speculates beside its first round, whose failure ends
- *  nothing. Any other call the recording does not hold is missed, as before. */
+ *  with a hook's code replaced that the recording predates is answered as a provider's error (`spec`), as the read a warm
+ *  quote speculates beside its first round, whose failure ends nothing: only where every override but Multicall3's is
+ *  the no-op hook's code (EVM_NOOP_HOOK_CODE) at a hook the recording's own reads replaced (a pool of its plan), named
+ *  in the read's own data, and the read is no swap fit (review of A+B, 1: a fit read overrides a balance, and one the
+ *  recording lacks is missed). Any other call the recording does not hold is missed, as before. */
 const replay = (rec: Rec = F) => {
   let phase: Phase = "cold";
   let quote = 0;
@@ -42,6 +44,17 @@ const replay = (rec: Rec = F) => {
   const latest = answers.get(JSON.stringify(["eth_getBlockByNumber", ["latest", false]])) ?? [];
   if (latest.length !== 2 * rec.quotes.length) throw new Error(`the recording holds ${latest.length} heads at "latest" for ${rec.quotes.length} quotes, not two a quote`);
   const spec: string[] = [];
+  type Overrides = Record<string, Record<string, unknown>>;
+  const noopAt = (o: Overrides): string[] | null => {
+    const at = Object.keys(o).filter((a) => a.toLowerCase() !== MC3);
+    const noop = at.every((a) => Object.keys(o[a]!).length === 1 && o[a]!.code === EVM_NOOP_HOOK_CODE);
+    return at.length > 0 && noop ? at.map((a) => a.toLowerCase()) : null;
+  };
+  // the hooks the recording's own reads replaced: the plan's pools' hooks
+  const planHooks = new Set([...answers.keys()].flatMap((k) => {
+    const [m, ps] = JSON.parse(k) as [string, unknown[]];
+    return m === "eth_call" && ps[2] !== undefined ? (noopAt(ps[2] as Overrides) ?? []) : [];
+  }));
   // each recorded getLogs: its filter without the span, and the span
   const spans = [...answers.entries()].flatMap(([k, all]) => {
     const [m, ps] = JSON.parse(k) as [string, { fromBlock?: string; toBlock?: string }[]];
@@ -92,7 +105,10 @@ const replay = (rec: Rec = F) => {
           }
         }
       }
-      const hooked = c.method === "eth_call" && Object.keys((c.params?.[2] ?? {}) as object).some((a) => a.toLowerCase() !== MC3);
+      const tx = (c.params?.[0] ?? {}) as { data?: string };
+      const hooks = c.method === "eth_call" && c.params?.[2] !== undefined ? noopAt(c.params[2] as Overrides) : null;
+      const data = String(tx.data).toLowerCase();
+      const hooked = hooks !== null && !data.startsWith(SEL_BUY_SWAP) && hooks.every((h) => planHooks.has(h) && data.includes(h.slice(2)));
       if (all === undefined && hooked) {
         spec.push(`${sentIn} ${k.slice(0, 140)}`);
         return { jsonrpc: "2.0", id: c.id, error: { code: -32000, message: "not in the recording" } };
@@ -164,9 +180,14 @@ const LOGS_FILTER = { address: "0x8366a39cc670b4001a1121b8f6a443a643e40951", top
 const logsCall = (from: number, to: number) => ({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ ...LOGS_FILTER, fromBlock: "0x" + from.toString(16), toBlock: "0x" + to.toString(16) }] });
 const headCall = { jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["latest", false] };
 const HEAD = { number: "0x64", hash: "0x01" };
+const HOOK = "0xe5e7000000000000000000000000000000000044";
+const STRANGER = "0x5e5e000000000000000000000000000000000044";
+const call = (data: string, overrides: Record<string, unknown>) => ({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: MC3, data }, "0x64", overrides] });
+const quoteOf = (hook: string, n: number) => "0x82ad56cb" + hook.slice(2).padStart(64, "0") + n.toString(16).padStart(64, "0");
 const tiny = (): Rec => ({
   quotes: [{}],
   calls: [
+    [JSON.stringify(["eth_call", call(quoteOf(HOOK, 1), { [HOOK]: { code: EVM_NOOP_HOOK_CODE } }).params]), [["robinhood-rpc.publicnode.com", { result: "0x" }]]],
     [JSON.stringify(["eth_getBlockByNumber", ["latest", false]]), [["robinhood-rpc.publicnode.com", { result: HEAD }], ["robinhood.drpc.org", { result: HEAD }]]],
     [JSON.stringify(["eth_getLogs", logsCall(10, 20).params]), [["robinhood-rpc.publicnode.com", { result: [{ blockNumber: "0xc" }, { blockNumber: "0x12" }] }]]],
   ],
@@ -189,4 +210,22 @@ test("RP2 the replay answers a head at latest with its quote's own recorded head
   r.at("warm", 1);
   assert.ok((await post(r, headCall)).error !== undefined, "a head outside every recorded quote was answered");
   assert.equal(r.missed.length, 1);
+}));
+
+test("RP3 the replay sets apart only a read with a hook of its plan replaced by the no-op hook, and misses a swap-fit read or a read replacing any other code that the recording lacks", () => onTestClock(async () => {
+  const r = replay(tiny());
+  r.at("warm", 0);
+  // a read of the plan's hook the recording predates: a provider's error, set apart
+  assert.ok((await post(r, call(quoteOf(HOOK, 2), { [HOOK]: { code: EVM_NOOP_HOOK_CODE } }))).error !== undefined);
+  assert.deepEqual([r.spec.length, r.missed], [1, []]);
+  // a swap fit the recording lacks (its override a balance): missed
+  await post(r, call(SEL_BUY_SWAP + HOOK.slice(2).padStart(64, "0"), { "0x9306359400000000000000000000000000000001": { balance: "0x1" } }));
+  assert.equal(r.missed.length, 1, "a swap-fit read the recording lacks was set apart");
+  // a swap fit with the plan's hook replaced: still missed
+  await post(r, call(SEL_BUY_SWAP + HOOK.slice(2).padStart(64, "0"), { [HOOK]: { code: EVM_NOOP_HOOK_CODE } }));
+  assert.equal(r.missed.length, 2, "a swap-fit read with a hook replaced was set apart");
+  // the no-op at a hook outside the plan, or other code at the plan's hook: missed
+  await post(r, call(quoteOf(STRANGER, 2), { [STRANGER]: { code: EVM_NOOP_HOOK_CODE } }));
+  await post(r, call(quoteOf(HOOK, 3), { [HOOK]: { code: "0x00" } }));
+  assert.deepEqual([r.spec.length, r.missed.length], [1, 4], "a read replacing a hook outside the plan, or other code, was set apart");
 }));
