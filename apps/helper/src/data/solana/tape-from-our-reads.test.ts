@@ -16,6 +16,7 @@ import { fixed } from "../candles.ts";
 import { b58encode } from "./lists.ts";
 import { createSolanaToken, POOL_FRESH_MS, TAPE_OPEN_BOUND_MS, type TapeRow } from "./token.ts";
 import { createSolanaTrades, FOLLOW_MS, IDLE_MS, poolLeg, SOL_VENDOR_REACH_MS, TRADES_MAX } from "./trades.ts";
+import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
 
 const VENDOR_READ = /(?:^|,)\s*sol-vendor-read;desc="rows read (\d+) ms ago"/;
 const ageOf = (timing: string | undefined) => Number(VENDOR_READ.exec(timing ?? "")?.[1] ?? NaN);
@@ -29,7 +30,7 @@ const QUOTE_USD = "3.0832";
 /** The vendor's first answer: its rows from 37A3xnWr back (the three newer ones are the chain's to find). */
 const SEEDED = 3;
 const poolData = Buffer.from(C.pool.value.data[0], "base64");
-type Tape = { trades: TapeRow[]; whole_ms?: number; src: string; as_of_ms: number };
+type Tape = { trades: TapeRow[]; whole_ms?: number; filling?: true; src: string; as_of_ms: number };
 
 /** The vendor (GeckoTerminal): the coin's top pool, and its trades once; then, with `up` false, every call refused. */
 function vendor() {
@@ -363,6 +364,63 @@ test("the top pool is asked of the vendor at POOL_FRESH_MS while a page holds th
 // the bound is judged by the test's own timeout, never the machine's clock (scripts/ci/no-wall-clock-asserts.mjs): the
 // vendor's wait is 5 s on the helper's clock, so the round may hold the answer 3 s more; a round's own full
 // TAPE_OPEN_BOUND_MS after it (8 s) is past the test's 7 s
+// Card sol-vendor-tape-gap-served-inside-reach: live run 44938731300 (job 136951170388) read BONK 17 s after its last
+// reader three times and was served rows 33,606 and 54,172 ms old; a read of the deployed helper on 21 Nov 20:2xZ served
+// POPCAT's rows 19,651 ms old in 1 ms (Server-Timing total;dur=1), its refresh refused at once. Each answer looked like
+// any live one: no `filling`, which is all the page marks a tape by. A read past the reach is now served rows inside it,
+// or says filling. Red at 61fa14a08: filling undefined.
+test("a gap past the reach on a pool our reads cannot place, its refresh refused by the vendor at once: the held rows are served saying filling, their age named; inside the reach no filling (red at 61fa14a08)", async () => {
+  const h = harness(Buffer.alloc(poolData.length));
+  try {
+    const first = await h.read();
+    assert.deepEqual([first.j.src, first.j.filling, first.age], ["geckoterminal", undefined, 0]);
+    h.clock.t += FOLLOW_MS;
+    const inside = await h.read();
+    await settle();
+    assert.equal(inside.j.filling, undefined, "rows inside the reach are live");
+    // the gap: no reader for 17 s, the vendor's budget refusing every refresh
+    h.v.gt.up = false;
+    h.v.gt.throttle = true;
+    h.clock.t += 17_000;
+    const gap = await h.read();
+    assert.equal(gap.a.status, 200);
+    assert.ok(gap.age > SOL_VENDOR_REACH_MS, `rows read ${gap.age} ms before`);
+    assert.deepEqual([gap.j.filling, gap.j.whole_ms, gap.j.trades.length], [true, undefined, V.trades.length - SEEDED], "rows past the reach say filling");
+  } finally {
+    h.trades.stop();
+  }
+});
+
+test("a gap past the reach on a followed pool whose round holds open past TAPE_OPEN_BOUND_MS: the caller is answered at the bound with the held rows saying filling (red at 61fa14a08)", async (t) => {
+  const h = harness();
+  try {
+    await h.read();
+    for (let i = 0; i < 3; i++) {
+      h.clock.t += FOLLOW_MS;
+      await h.read();
+      await settle();
+    }
+    const held = await h.read();
+    assert.equal(held.j.src, "chain,geckoterminal");
+    assert.equal(held.j.filling, undefined);
+    // our provider holds every call open and the vendor refuses: no refresh lands
+    h.c.net.hang = true;
+    h.v.gt.up = false;
+    enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+    h.clock.t += 17_000;
+    const pending = h.read();
+    await settle();
+    t.mock.timers.tick(TAPE_OPEN_BOUND_MS);
+    const gap = await pending;
+    assert.equal(gap.a.status, 200);
+    assert.ok(gap.age > SOL_VENDOR_REACH_MS, `rows read ${gap.age} ms before`);
+    assert.deepEqual([gap.j.filling, gap.j.whole_ms], [true, undefined], "rows past the reach say filling");
+  } finally {
+    resetTimers(t.mock.timers);
+    h.trades.stop();
+  }
+});
+
 test("a page opening a coin whose follow went idle is answered within one TAPE_OPEN_BOUND_MS in all, the vendor's wait and the round's together: the vendor slow and refusing, our provider holding every call open (card helper-tapes-refresh-holds-live; red at 0092e5692: the vendor's wait and then the round's own TAPE_OPEN_BOUND_MS, past the 15 s a page and sol-tape-in-order give a read once the vendor waits its page wait)", { timeout: 7_000 }, async () => {
   const h = harness();
   const first = await h.read();

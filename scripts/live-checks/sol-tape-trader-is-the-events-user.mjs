@@ -11,10 +11,12 @@
 // our own reads (src "chain"), until JUDGE_ENOUGH rows are judged. Each row's transaction and its token's decimals are
 // read on the helper's two public Solana providers (TRADES_RPCS), which must give them alike. The check walks the
 // transaction's log invoke stack itself and decodes each venue event's bytes (decode.ts decodeEvent: the event layouts,
-// cited there); a row is judged when both reads agree and the log is whole: its amt must be a leg of a venue event of
-// the transaction; that event must not be logged while another decoded venue runs below it in the stack (a venue's own
-// swap); and the row's trader must be that event's user (null only for an event that names none: Orca, Raydium CPMM,
-// LaunchLab). It passes when a row is judged and none is wrong; none judged is INCONCLUSIVE (exit 3); no tape of our
+// cited there); the Meteora venues (DLMM, DBC, DAMM v2) send their events only to themselves (Anchor's event CPI), so a
+// transaction whose log shows one running is also read in its inner instructions, each such event CPI decoded the same
+// way. A row is judged when both reads agree and the log (and those inner instructions) are whole: its amt must be a leg
+// of a venue event of the transaction; that event must not be sent while another decoded venue runs below it in the
+// stack (a venue's own swap); and the row's trader must be that event's user (null only for an event that names none:
+// Orca, Raydium CPMM, LaunchLab, Meteora DBC and DAMM v2; DLMM's Swap names `from`). It passes when a row is judged and none is wrong; none judged is INCONCLUSIVE (exit 3); no tape of our
 // own reads to read is a FAIL.
 // After: helper
 //   node scripts/live-checks/sol-tape-trader-is-the-events-user.mjs [--base <url>] [--record <file>]
@@ -22,7 +24,7 @@
 //   test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { decodeEvent, ORCA, PUMP, PUMP_AMM, RAY_CLMM, RAY_CPMM, RAY_LAUNCHLAB } from "../../apps/helper/src/data/solana/decode.ts";
+import { b58data, decodeEvent, METEORA_DAMM2, METEORA_DBC, METEORA_DLMM, ORCA, PUMP, PUMP_AMM, RAY_CLMM, RAY_CPMM, RAY_LAUNCHLAB } from "../../apps/helper/src/data/solana/decode.ts";
 import { TRADES_RPCS } from "../../apps/helper/src/data/solana/trades.ts";
 import { rpcAnswer } from "./provider-answer.mjs";
 
@@ -35,7 +37,15 @@ export const JUDGE_ENOUGH = 8;
 export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, ERROR: 2, INCONCLUSIVE: 3 });
 // the venue programs whose events the tape decodes, written out here so the check does not take the rule it checks
 // (decode.ts VENUES) from the helper
-export const VENUE_PROGRAMS = [PUMP, PUMP_AMM, ORCA, RAY_CLMM, RAY_CPMM, RAY_LAUNCHLAB];
+export const VENUE_PROGRAMS = [PUMP, PUMP_AMM, ORCA, RAY_CLMM, RAY_CPMM, RAY_LAUNCHLAB, METEORA_DLMM, METEORA_DBC, METEORA_DAMM2];
+// card sol-tape-row-only-from-a-decoded-event: the venues that send their swap event only to themselves (Anchor's event
+// CPI; decode.ts names each one's IDL): their log holds no event, so a transaction whose log shows one running is judged
+// on its inner instructions too. Live run 44938731300 judged three Meteora DBC rows of coin 9c2gwAWx on the log alone
+// and found "no leg of a venue event (none)", though each row's amt is its EvtSwap2's output_amount.
+export const INNER_ONLY = [METEORA_DLMM, METEORA_DBC, METEORA_DAMM2];
+/** Anchor's event-CPI instruction tag, the first 8 bytes of an event a program sends to itself: anchor-lang's
+ *  EVENT_IX_TAG, the u64 0x1d9acb512ea545e4 (the first 8 bytes of sha256("anchor:event")), sent little-endian. */
+const EVENT_IX_TAG = "e445a52e51cb9a1d";
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/;
 const INVOKE = /^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) invoke \[(\d+)\]$/;
 const END = /^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) (success|failed.*)$/;
@@ -49,18 +59,64 @@ export function units(amt, decimals) {
   return BigInt(m[1] + (m[2] ?? "").padEnd(decimals, "0"));
 }
 
+/** A transaction's inner instructions as the check judges them (`run.inner`): per group, its top-level program and each
+ *  inner instruction's program and stack height, with its data when an INNER_ONLY venue ran it; null when the answer
+ *  lacks them or names an account key that is no string. */
+export function innerOf(r) {
+  const meta = r?.meta;
+  const msg = r?.transaction?.message;
+  const loaded = isObj(meta?.loadedAddresses) ? meta.loadedAddresses : {};
+  const keys = [msg?.accountKeys, loaded.writable, loaded.readonly].flatMap((k) => (Array.isArray(k) ? k : []));
+  if (!keys.every((k) => typeof k === "string") || !Array.isArray(meta?.innerInstructions)) return null;
+  const top = Array.isArray(msg?.instructions) ? msg.instructions : [];
+  const at = (i) => (Number.isSafeInteger(i) ? (keys[i] ?? null) : null);
+  return meta.innerInstructions.map((g) => ({
+    top: at(top[g?.index]?.programIdIndex),
+    ixs: (Array.isArray(g?.instructions) ? g.instructions : []).map((ix) => {
+      const p = at(ix?.programIdIndex);
+      const h = Number.isSafeInteger(ix?.stackHeight) ? ix.stackHeight : null;
+      return INNER_ONLY.includes(p) && typeof ix.data === "string" ? { p, h, d: ix.data } : { p, h };
+    }),
+  }));
+}
+
+/** The INNER_ONLY venues' events in `inner` (innerOf), each event CPI decoded by its program, `nested` true when a
+ *  decoded venue runs below the swap that sent it; null when a group's stack heights do not build one invoke stack. */
+export function innerEvents(inner) {
+  if (!Array.isArray(inner)) return null;
+  const out = [];
+  for (const g of inner) {
+    const frames = [g?.top ?? null];
+    for (const ix of Array.isArray(g?.ixs) ? g.ixs : []) {
+      if (!Number.isSafeInteger(ix?.h) || ix.h < 2 || ix.h > frames.length + 1) return null;
+      frames.length = ix.h - 1;
+      frames.push(ix.p);
+      if (!INNER_ONLY.includes(ix.p) || typeof ix.d !== "string") continue;
+      const bytes = b58data(ix.d);
+      if (bytes === null || Buffer.from(bytes.subarray(0, 8)).toString("hex") !== EVENT_IX_TAG) continue;
+      const t = decodeEvent(ix.p, Buffer.from(bytes.subarray(8)));
+      // the event CPI's frame is the venue's own, the one under it the swap that sent it, below that the swap's callers
+      if (t !== null) out.push({ venue: t.venue, user: t.user, legs: [t.amt.toString(), t.quote.toString()], nested: frames.slice(0, -2).some((p) => VENUE_PROGRAMS.includes(p)) });
+    }
+  }
+  return out;
+}
+
 /** Each venue event a whole log holds, with `nested` true when another decoded venue runs below the frame that logged
- *  it; null for a log that is cut or builds no invoke stack. */
-export function events(logs) {
+ *  it, and, when the log shows an INNER_ONLY venue running, each of its events in `inner` (innerOf); null for a log that
+ *  is cut or builds no invoke stack, or such a log with no whole inner instructions read. */
+export function events(logs, inner) {
   if (!Array.isArray(logs)) return null;
   const stack = [];
   const out = [];
+  let innerOnly = false;
   for (const line of logs) {
     if (typeof line !== "string" || line === "Log truncated") return null;
     let m = INVOKE.exec(line);
     if (m !== null) {
       if (Number(m[2]) !== stack.length + 1) return null;
       stack.push(m[1]);
+      if (INNER_ONLY.includes(m[1])) innerOnly = true;
       continue;
     }
     m = END.exec(line);
@@ -74,7 +130,10 @@ export function events(logs) {
     const t = decodeEvent(stack.at(-1), Buffer.from(m[1], "base64"));
     if (t !== null) out.push({ venue: t.venue, user: t.user, legs: [t.amt.toString(), t.quote.toString()], nested: stack.slice(0, -1).some((p) => VENUE_PROGRAMS.includes(p)) });
   }
-  return stack.length === 0 ? out : null;
+  if (stack.length !== 0) return null;
+  if (!innerOnly) return out;
+  const more = innerEvents(inner);
+  return more === null ? null : [...out, ...more];
 }
 
 /** The check on one run: { base, lists, tapes: [{ coin, status, src, rows }], decimals: { coin: n }, logs: { tx: [..] } }. */
@@ -88,9 +147,9 @@ export function judge(run) {
     const dec = run.decimals?.[tape.coin];
     for (const row of tape.rows) {
       const name = `${tape.coin.slice(0, 8)} trade ${row.tx.slice(0, 12)} (${row.side}, amt ${row.amt}, trader ${row.trader ?? "null"})`;
-      const ev = events(run.logs?.[row.tx]);
+      const ev = events(run.logs?.[row.tx], run.inner?.[row.tx]);
       if (!Number.isSafeInteger(dec) || ev === null) {
-        lines.push(`--  ${name}: ${!Number.isSafeInteger(dec) ? "the token's decimals" : run.logs?.[row.tx] == null ? "its transaction" : "its whole log"} not given alike by two providers`);
+        lines.push(`--  ${name}: ${!Number.isSafeInteger(dec) ? "the token's decimals" : run.logs?.[row.tx] == null ? "its transaction" : "its whole log and inner instructions"} not given alike by two providers`);
         continue;
       }
       judged++;
@@ -150,10 +209,17 @@ const decimalsOf = (r) => {
   return d.length >= 82 && d[45] === 1 ? d[44] : null;
 };
 const logsOf = (r) => (isObj(r?.meta) && r.meta.err === null && Array.isArray(r.meta.logMessages) ? r.meta.logMessages : null);
+/** A successful transaction's log, and its inner instructions (innerOf) when the log shows an INNER_ONLY venue running. */
+const txOf = (r) => {
+  const logs = logsOf(r);
+  if (logs === null) return null;
+  const shows = logs.some((l) => typeof l === "string" && INNER_ONLY.includes(INVOKE.exec(l)?.[1]));
+  return { logs, inner: shows ? innerOf(r) : null };
+};
 
 /** What the check reads at `base`. */
 export async function read(base = BASE, fetchFn = fetch, rpcs = TRADES_RPCS) {
-  const run = { base, at: new Date().toISOString(), tapes: [], decimals: {}, logs: {} };
+  const run = { base, at: new Date().toISOString(), tapes: [], decimals: {}, logs: {}, inner: {} };
   const l = await getJson(base, "/v1/market/lists?chain=solana", fetchFn);
   if (l.status !== 200 || !isObj(l.body?.lists)) {
     run.lists = `lists ${l.status}`;
@@ -175,7 +241,9 @@ export async function read(base = BASE, fetchFn = fetch, rpcs = TRADES_RPCS) {
     run.decimals[coin] = await agreed("getAccountInfo", [coin, { encoding: "base64", commitment: "confirmed" }], decimalsOf, fetchFn, rpcs);
     for (const tx of new Set(rows.map((r) => r.tx))) {
       if (tx in run.logs) continue;
-      run.logs[tx] = await agreed("getTransaction", [tx, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }], logsOf, fetchFn, rpcs);
+      const g = await agreed("getTransaction", [tx, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }], txOf, fetchFn, rpcs);
+      run.logs[tx] = g?.logs ?? null;
+      if (g?.inner != null) run.inner[tx] = g.inner;
     }
     if (Number.isSafeInteger(run.decimals[coin])) judged += rows.filter((r) => Array.isArray(run.logs[r.tx])).length;
   }

@@ -158,7 +158,52 @@ test("a 17 s gap between two readers of a held tape: the second waits for the on
     assert.ok(h.t.t - x.asOfMs! <= SOL_VENDOR_REACH_MS, `rows served ${h.t.t - x.asOfMs!} ms after their read (bound ${SOL_VENDOR_REACH_MS})`);
   }
   assert.equal(h.cg("/trades") - before, 1, "one refresh for both readers");
-  assert.match(h.keyed.minute() ?? "", /served trades background \d+/, "the refresh stays the helper's background read");
+  // the read both wait for is a page's, in the callers' share (card sol-vendor-tape-gap-served-inside-reach)
+  assert.match(h.keyed.minute() ?? "", /served trades \d+/, "the refresh past the reach is the page's read");
+  assert.doesNotMatch(h.keyed.minute() ?? "", /served trades background/, "never the helper's background read");
+});
+
+// card sol-vendor-tape-gap-served-inside-reach: past the reach the refresh was still the helper's background read, so
+// with the key's background share of the day spent it was refused at once and the page was served the held rows, 19.7 s
+// old (the deployed helper, POPCAT 7GCihgDB8f, 21 Nov: the live check's gap read answered in 1 ms). A read a page waits
+// for is the page's: it draws the callers' share. Red at 3300c7d41: the held rows, 17,000 ms old.
+const spend = async (h: ReturnType<typeof harness>, background: boolean) => {
+  let n = 0;
+  for (let i = 0; i < 4_000; i++) if ((await h.keyed.read(`/networks/solana/tokens/${o.mint}`, () => true, background)) === undefined) break; else n++;
+  return n;
+};
+test("the key's background share spent, a 17 s gap: the page's read draws the callers' share and is served rows under SOL_VENDOR_REACH_MS old (red: refused as background, the held rows 17 s old)", async () => {
+  const h = harness("100000");
+  assert.equal((await h.tape(o.mint)).src, "coingecko");
+  h.t.t += 1_100;
+  const spent = await spend(h, true);
+  assert.ok(spent > 2_000 && spent < 2_500, `background share ${spent}`);
+  const before = h.cg("/trades");
+  h.t.t += 17_000;
+  h.fill();
+  const a = await h.tape(o.mint);
+  assert.equal(a.status, 200, a.body.slice(0, 80));
+  assert.ok(h.t.t - a.asOfMs! <= SOL_VENDOR_REACH_MS, `rows served ${h.t.t - a.asOfMs!} ms after their read (bound ${SOL_VENDOR_REACH_MS})`);
+  assert.equal(a.src, "coingecko");
+  assert.equal(h.cg("/trades") - before, 1, "one read, the page's");
+});
+
+test("the key's whole day spent and the keyless refresh lane full, a 17 s gap: the page's read takes a keyless page call and is served rows under SOL_VENDOR_REACH_MS old (red: refused in the refresh lane, the held rows 17 s old)", async () => {
+  const h = harness("100000");
+  assert.equal((await h.tape(o.mint)).src, "coingecko");
+  h.t.t += 1_100;
+  assert.ok((await spend(h, true)) > 2_000);
+  h.t.t += 1_100;
+  assert.ok((await spend(h, false)) > 0);
+  assert.match(h.keyed.minute() ?? "", /day \d+/, "the key's day is spent");
+  h.t.t += 17_000;
+  h.fill();
+  const before = h.gt("/trades");
+  const a = await h.tape(o.mint);
+  assert.equal(a.status, 200, a.body.slice(0, 80));
+  assert.ok(h.t.t - a.asOfMs! <= SOL_VENDOR_REACH_MS, `rows served ${h.t.t - a.asOfMs!} ms after their read (bound ${SOL_VENDOR_REACH_MS})`);
+  assert.equal(a.src, "geckoterminal");
+  assert.equal(h.gt("/trades") - before, 1, "one keyless page call");
 });
 
 test("inside SOL_VENDOR_REACH_MS a held tape is served at once and its refresh runs behind it, as before", async () => {

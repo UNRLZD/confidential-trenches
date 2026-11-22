@@ -834,7 +834,7 @@ function packageJobProblems(ci) {
   const inputs = job.split("\n").filter((l) => /^ {10}INDEX: \$\{\{ strategy\.job-index \}\}$/.test(l)).length;
   const totals = job.split("\n").filter((l) => /^ {10}TOTAL: \$\{\{ strategy\.job-total \}\}$/.test(l)).length;
   if (inputs !== 3 || totals !== 3) p.push("test-packages takes a part from strategy.job-index and strategy.job-total in fewer than its three split steps");
-  for (const [key, cmd] of [["deploy_gate", "node --test apps/terminal/scripts/check-deploy.test.ts"], ["replays", "node --test scripts/live-checks/*.test.mjs"], ["bundle", "pnpm --filter terminal build && node scripts/ci/bundle-checks.mjs"]]) {
+  for (const [key, cmd] of [["deploy_gate", "node --test --test-reporter=./scripts/test-report.mjs apps/terminal/scripts/check-deploy.test.ts"], ["replays", "node --test --test-reporter=./scripts/test-report.mjs scripts/live-checks/*.test.mjs"], ["bundle", "pnpm --filter terminal build && node scripts/ci/bundle-checks.mjs"]]) {
     const lines = job.split("\n");
     const at = lines.map((l, i) => (l.trim() === `run: ${cmd}` ? i : -1)).filter((i) => i >= 0);
     if (at.length !== 1) p.push(`test-packages runs "${cmd}" ${at.length} time(s), not once`);

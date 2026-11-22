@@ -609,7 +609,8 @@ export const HELD_WAIT_MS = 50;
  *  for this read, with nothing served meanwhile (card helper-token-page-cold); a joiner that would wait on a read
  *  begun as a refresh waits on it as it is. `opts.reachMs`: a revalidated answer whose data is past it is not answered
  *  at once; the caller waits for the refresh up to TAPE_OPEN_BOUND_MS, then is answered the newest good answer held
- *  (card sol-vendor-tape-waits-past-reach). */
+ *  (card sol-vendor-tape-waits-past-reach), and the refresh it waits for is begun as its read (`waits`), never the
+ *  helper's background one (card sol-vendor-tape-gap-served-inside-reach). */
 function cached(freshMs: number | ((key: string) => number), now: () => number, read: (key: string, client?: string, held?: boolean, waits?: boolean) => Promise<DataAnswer>, opts: { revalidate?: boolean; view?: (key: string, a: DataAnswer) => DataAnswer; keepHeld?: boolean; reachMs?: number } = {}) {
   // what the next process takes over: answers this one would still serve. keepHeld serves a held answer at any age when
   // a refresh is refused, so it hands over for KEPT_HANDOVER_MS, the rest under STALE_MS (card helper-restart-fresh: a
@@ -647,10 +648,11 @@ function cached(freshMs: number | ((key: string) => number), now: () => number, 
       const hit = last.get(key);
       if (hit !== undefined && now() - hit.at < (typeof freshMs === "number" ? freshMs : freshMs(key))) return Promise.resolve(held(view(key, hit.a)));
       const usable = opts.revalidate === true && hit !== undefined && hit.a.status === 200 && now() - (hit.a.asOfMs ?? hit.at) <= STALE_MS;
+      const past = usable && opts.reachMs !== undefined && now() - (hit.a.asOfMs ?? hit.at) > opts.reachMs;
       let p = running.get(key);
       if (p === undefined) {
         const started = now(); // fresh from when the read began, so a refresh answered in the background is never fresher than its data
-        p = read(key, client, hit !== undefined && hit.a.status === 200, !usable)
+        p = read(key, client, hit !== undefined && hit.a.status === 200, !usable || past)
           .then((a) => {
             if (a.status === 200 || a.status === 404) last.set(key, { a, at: started });
             return a;
@@ -660,7 +662,7 @@ function cached(freshMs: number | ((key: string) => number), now: () => number, 
         running.set(key, p);
       }
       if (!usable) return p.then((a) => view(key, a));
-      if (opts.reachMs === undefined || now() - (hit.a.asOfMs ?? hit.at) <= opts.reachMs) return Promise.resolve(held(view(key, hit.a)));
+      if (!past) return Promise.resolve(held(view(key, hit.a)));
       // past the reach: the refresh's rows when it lands within the bound, else (or refused, or failed) the newest held
       return within(p, TAPE_OPEN_BOUND_MS).then(() => {
         const n = last.get(key);
@@ -1249,8 +1251,12 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         throw new Upstream();
       }
       const ok = (j: unknown) => toTape(j, mint, TAPE_MAX, now()) !== null;
-      // the refresh behind held rows under STALE_MS is the key's background (a caller past SOL_VENDOR_REACH_MS waits
-      // for it within TAPE_OPEN_BOUND_MS, cached reachMs)
+      // the refresh behind held rows inside SOL_VENDOR_REACH_MS is the helper's background read; a read a page waits for
+      // (its rows past the reach: cached reachMs) is the page's, in the callers' share of the key and the keyless pages
+      // lane (card sol-vendor-tape-gap-served-inside-reach: as background, with the key's background share of the day
+      // spent and the keyless refresh lane full, it was refused at once and the deployed helper served POPCAT's rows
+      // 19.7 s old, 21 Nov). Its cost: one call a gap a page meets, inside the caller's own share (PAGE_PER_CLIENT,
+      // CALLER_DAY_ROOM); a page that keeps reading renews its rows inside the reach, as the background
       const background = held === true && waits === false;
       // card sol-vendor-tape-refresh-lands: a held tape's refresh asks the key first, as the helper's background read
       // (it stops CALLER_DAY_ROOM short of the key's day, so a cold read always finds the callers' quarter), then the
@@ -1264,7 +1270,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       // refresh runs behind the held rows (revalidate), so a page inside the reach never waits on CoinGecko's answer
       // (0.4 to 0.9 s from the box, up to 3.1 s from a Mac), one past it waits within TAPE_OPEN_BOUND_MS, and a slow
       // one is not cut at CG_TIMEOUT_MS
-      const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, p.body)}/trades?token=${mint}`, held === true ? "refresh" : "pages", "sol trades", ok, undefined, client, false, background);
+      const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, p.body)}/trades?token=${mint}`, background ? "refresh" : "pages", "sol trades", ok, undefined, client, false, background);
       const rows = a === null ? [] : toTape(a, mint, TAPE_MAX, now());
       if (rows === null) throw new Upstream();
       return { status: 200, body: JSON.stringify(rows), src, asOfMs: now() };
@@ -1274,7 +1280,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     // is served the newest rows held, so a page that opens a coin another reader held 17 s before is not served rows
     // past the reach while the vendor answers (revalidate served them at once up to STALE_MS: card
     // evm-vendor-tape-refresh-keyed's live check met it on Base, 0x1668cd48 served 18.9 s old, 18 Nov 15:13:45Z). The
-    // refresh stays the background read (waits false): the caller is bounded here, not by the key's CG_TIMEOUT_MS
+    // refresh it waits for is the page's read (waits true, above); the caller is bounded here, not by CG_TIMEOUT_MS
     { keepHeld: true, revalidate: true, reachMs: SOL_VENDOR_REACH_MS },
   );
 
