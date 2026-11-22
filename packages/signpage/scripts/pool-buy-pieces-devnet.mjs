@@ -478,7 +478,9 @@ if (SCENARIO === "found") {
     if (EXPECT === "held" && (swept || heldPast >= 2)) finish(!swept, swept ? `W swept, expected held (${PLANT})` : `W held ${heldPast} loads past + 151 (${PLANT}): ${JSON.stringify(load.holds)}; the rent back's lines ${JSON.stringify(load.told)}`);
     if (EXPECT === "swept" && swept) {
       const early = out.loads.filter((x) => !x.clock.past && !sweptAt(x));
-      const sweptEarly = out.loads.some((x) => !x.clock.past && sweptAt(x));
+      // swept early: a load reads W swept before any load read past + 151 (the swept load's own clock reads the sweep as
+      // W's latest, so its own `past` says nothing of when the sweep was sent)
+      const sweptEarly = out.loads.some((x, k) => sweptAt(x) && !out.loads.slice(0, k).some((y) => y.clock.past));
       const notes = (await p.notesOf()).filter((n) => n.scope === scope).map((n) => ({ ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null }));
       out.notes = notes;
       // pay: a held load read the plant as W's latest; empty: the planted account is gone on both RPCs
