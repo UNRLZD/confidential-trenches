@@ -1,4 +1,5 @@
-// node --test apps/helper/src/rpc/pool-fee-first.test.ts (card helper-pool-fee-first-in-the-solana-budget): the pool's
+// node --test apps/helper/src/rpc/pool-fee-first.test.ts (cards helper-pool-fee-first-in-the-solana-budget and
+// helper-pool-fee-never-a-client-429): the pool's
 // fee read (the Rent sysvar on its two providers, pool/solana.ts readRent) answers while the helper's market reads load
 // the same public Solana providers. helper-24 on 47d3aa851 (live run 45022630048) answered GET /v1/pool/fee 429
 // "provider limit" to five checks: the pool's providers are api.mainnet-beta.solana.com and solana-rpc.publicnode.com
@@ -96,4 +97,18 @@ test("card helper-pool-fee-first-in-the-solana-budget: a market hold ends at the
   assert.ok(r.caller("solana", BETA, "getTransaction", CLIENTS[1]!) > 0, "the public endpoint's hold holds a page-waited round too");
   w.step(3_100);
   assert.equal(r.caller("solana", BETA, "getTransaction", CLIENTS[1]!), 0);
+});
+
+test("card helper-pool-fee-never-a-client-429: a 429 to the pool's own read (its URL as the host spells it, a trailing slash or none) holds the market's and the background's reads of that provider for its wait, so the pool's next read finds the window its own (red at ee5c7dac4: the market drew on, held only by its own refusals)", async () => {
+  const { poolFetchAhead } = await import("../server.ts");
+  const w = world();
+  const r = createRpc({ SOLANA_RPC_URL: KEYED }, { fetch: w.fetch as never, now: w.now, log: () => {} });
+  const refusing = async () => new Response("Too many requests", { status: 429, headers: { "retry-after": "10" } });
+  const pool = poolFetchAhead(r, refusing as never);
+  for (const url of [BETA, NODE]) assert.equal(r.caller("solana", url, "getTransaction", CLIENTS[0]!), 0, `${url} free before the pool's refusal`);
+  for (const url of [`${BETA}/`, NODE]) assert.equal((await pool(url, { method: "POST", body: "{}" })).status, 429, "the pool's read is answered as the provider answered it");
+  w.step(1_000);
+  for (const url of [BETA, NODE]) assert.ok(r.background("solana", url, "getTransaction") > 0 && r.caller("solana", url, "getTransaction", CLIENTS[0]!) > 0, `${url}: the market's reads held`);
+  w.step(9_100);
+  for (const url of [BETA, NODE]) assert.equal(r.caller("solana", url, "getTransaction", CLIENTS[0]!), 0, `${url} free at the wait's end`);
 });
