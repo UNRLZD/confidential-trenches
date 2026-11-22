@@ -163,13 +163,14 @@ function evmBuyFigures(ends: readonly EvmLegEnd[], price: PoolStatePrice | null)
   return { ...(units === null ? {} : { units }), ...(wei === null ? {} : { pool_amount: poolUnits(wei, 18) }), ...(usd === null ? {} : { amount_usd: usd }) };
 }
 
-/** The request's op and leg a holding names (EvmPendingBuy.op), held to the shapes this device writes; null: none. */
-const opRef = (b: Partial<EvmPendingBuy> | undefined): { id: string; leg: number } | null =>
-  typeof b?.op === "string" && /^[\w-]{1,64}$/.test(b.op) && Number.isInteger(b.leg) && b.leg! >= 0 && b.leg! < 256 ? { id: b.op, leg: b.leg! } : null;
+/** The request's op and leg a record names (W's holding's EvmPendingBuy.op, or a rest record's: pool-buy-evm-rest.ts
+ *  EvmWBuyRecord.op), held to the shapes this device writes; null: none. */
+export const opRef = (b: { op?: unknown; leg?: unknown } | undefined): { id: string; leg: number } | null =>
+  typeof b?.op === "string" && /^[\w-]{1,64}$/.test(b.op) && Number.isInteger(b.leg) && (b.leg as number) >= 0 && (b.leg as number) < 256 ? { id: b.op, leg: b.leg as number } : null;
 
 /** Notes leg `leg`'s end on the request's op `id` (evmBuyOpNoted) at the page's price; a write that fails leaves the op
- *  as it was (a holding still pending is followed again at the next load). */
-const noteLeg = (h: Pick<EvmPoolBuyHost, "ops" | "price">, id: string, leg: number, end: EvmLegEnd): Promise<void> =>
+ *  as it was (a holding still pending is followed again at the next load; a rest leg, at the carry's next pass). */
+export const noteLeg = (h: Pick<EvmPoolBuyHost, "ops" | "price">, id: string, leg: number, end: EvmLegEnd): Promise<void> =>
   h.ops === undefined ? Promise.resolve() : h.ops(id, (v) => evmBuyOpNoted(v, leg, end, h.price?.() ?? null)).catch(() => {});
 
 /** A filled Base or Robinhood trade's op (card closed-positions-show-every-trade), src/state.ts's op contract, so the
@@ -784,7 +785,8 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       }
       if (plan.rest !== null) {
         const r = proofs[plan.whole.length]!;
-        const leg = await prepRest(h, ask, plan, r, quoted, from, clock);
+        // the rest's record names the request's op and this leg, so a later load's carry pass ends it (pool-carry-evm.ts)
+        const leg = await prepRest(h, ask, plan, r, quoted, from, clock, opId === undefined ? undefined : { id: opId, leg: legs.length });
         legs.push({ kind: "rest", leg, st: restState(), data: leg.data, r, nullifier: BigInt(r.publicSignals[1]!) });
       }
       // the takes, awaited before anything leaves: each this very attempt, or refused with the notes HELD

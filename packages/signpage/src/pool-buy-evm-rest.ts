@@ -35,7 +35,50 @@ type Chain = "base" | "robinhood";
  *  be sent. The carry pass carries a W of this record only (src/pool-carry-evm.ts), and only once it has its end or
  *  its `signBy` is EVM_WBUY_CARRY_AFTER_MS past. */
 export const EVM_WBUY_KEY = "owed/wbuy-evm";
-export type EvmWBuyRecord = { chain: Chain; l: string; j: number; nullifier: string; deadlineMs: string; signBy: string; spend: string; token: string; hash?: string; end?: "filled" | "reverted" | "unsent" };
+export type EvmWBuyRecord = {
+  chain: Chain;
+  l: string;
+  j: number;
+  nullifier: string;
+  deadlineMs: string;
+  signBy: string;
+  spend: string;
+  token: string;
+  hash?: string;
+  /** The adapter W's buy (`hash`) went to, kept with it: a page that did not see that buy's end reads its receipt by it
+   *  (restRecordEnd; card signpage-sent-end-recorded-evm). */
+  adapter?: string;
+  end?: "filled" | "reverted" | "unsent";
+  /** The request's op this leg's end goes onto and its leg in it (pool-buy-evm.ts EvmBuyOp; card
+   *  signpage-sent-end-recorded-evm), device-only, as W's holding keeps them for a whole leg: the carry pass ends that
+   *  leg when the page that ran the buy did not (src/pool-carry-evm.ts). */
+  op?: string;
+  leg?: number;
+};
+
+/**
+ * A rest leg's end from its record and its release's transaction, for a page that did not see the leg end (the carry
+ * pass, which reads a rest W only once its release paid W: card signpage-sent-end-recorded-evm), as finishRest ends it:
+ * W's buy filled on its record, or its receipt ok on both RPCs at a safe block (onwardReceipt): filled; reverted, its
+ * receipt failed, or never signed (no hash once `signBy`, its window, is past; or unsent on the record): owed_back, W's
+ * change on its way back. Null while not known (a receipt not yet read the same on both): the next pass reads it again.
+ * Its transactions: the release's, then W's buy's when signed. On filled, `wei` the rest W spent (no units: W's token
+ * is not read here).
+ */
+export async function restRecordEnd(rpcs: readonly [EvmRpc, EvmRpc], w: string, rec: Partial<EvmWBuyRecord>, releaseTx: string, chain: Chain, now: bigint): Promise<EvmLegEnd | null> {
+  const hash = typeof rec.hash === "string" && /^0x[0-9a-fA-F]{64}$/.test(rec.hash) ? rec.hash : null;
+  const txs: TxRef[] = [{ chain, hash: releaseTx }, ...(hash === null ? [] : [{ chain, hash }])];
+  const spend = typeof rec.spend === "string" && /^[0-9]{1,78}$/.test(rec.spend) ? { wei: rec.spend } : {};
+  if (rec.end === "filled") return { stage: "filled", txs, ...spend };
+  if (rec.end === "reverted" || rec.end === "unsent") return { stage: "owed_back", txs };
+  if (hash === null) {
+    const by = typeof rec.signBy === "string" && /^[0-9]{1,20}$/.test(rec.signBy) ? BigInt(rec.signBy) : null;
+    return by !== null && now > by ? { stage: "owed_back", txs } : null;
+  }
+  if (typeof rec.adapter !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(rec.adapter)) return null;
+  const got = await onwardReceipt(rpcs, hash, w, rec.adapter).catch(() => null);
+  return got === "ok" ? { stage: "filled", txs, ...spend } : got === "failed" ? { stage: "owed_back", txs } : null;
+}
 /** How long past its release's deadline W's own buy may still be signed: past it the run signs nothing and the change
  *  is carried back whole as rungs. */
 export const EVM_WBUY_SEND_MS = 120_000n;
@@ -88,6 +131,7 @@ export async function prepRest(
   quoted: RestQuote,
   from: bigint,
   clock: () => bigint,
+  op?: { id: string; leg: number },
 ): Promise<RestLeg> {
   if (plan.rest === null || plan.rest.piece.noteId !== r.noteId) return stop("plan");
   const token = ask.token ?? stop("token");
@@ -122,7 +166,7 @@ export async function prepRest(
   // holding, pending with no pool buy of its own (the load's follow reads only a pool buy's), once the release paid W
   // and before W signs its buy
   const holding: EvmHolding = { mint: lower(token), decimals, chain: h.chain, state: "pending", route: { venue: q.route.venue, adapter: lower(adapter), path: q.route } };
-  await writeRest(h, w, { chain: h.chain, l: r.wallet.l.toString(), j: r.wallet.j, nullifier: binding.nullifier.toString(), deadlineMs: relay.deadlineMs.toString(), signBy: signBy.toString(), spend: plan.rest.spend.toString(), token: lower(token) });
+  await writeRest(h, w, { chain: h.chain, l: r.wallet.l.toString(), j: r.wallet.j, nullifier: binding.nullifier.toString(), deadlineMs: relay.deadlineMs.toString(), signBy: signBy.toString(), spend: plan.rest.spend.toString(), token: lower(token), ...(op === undefined ? {} : { op: op.id, leg: op.leg }) });
   return { r, w, data, from, token, decimals, signBy, holding };
 }
 
@@ -276,6 +320,6 @@ async function signRest(h: EvmPoolBuyHost, ask: PoolAsk, plan: EvmBuyPlan, leg: 
   }
   const hash = hexOf(keccak_256(raw));
   // its hash kept before the bytes leave: a reload reads this very send back
-  await writeRest(h, w, { hash });
+  await writeRest(h, w, { hash, adapter: lower(built.adapter) });
   return { raw, hash, adapter: built.adapter };
 }

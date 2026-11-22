@@ -743,3 +743,47 @@ test("evmSellVerdict: a sale's deposit of the rung of its least is filled; under
   assert.equal(end(dep(10_000_000_000_000_000n - 1n)), "taken", "under the rung");
   assert.equal(end(dep(10_000_000_000_000_000n, "0x2222222222222222222222222222222222222222")), "taken", "another depositor");
 });
+
+// ---- card signpage-sent-end-recorded-evm: a rest leg whose page died after the send ----
+// The rest W's own buy has no read-back of a load's follow (W's holding names no pool buy), so the carry pass, which
+// reads the rest record, notes that leg's end onto the request's op by the run's own path (pool-buy-evm.ts
+// evmBuyOpNoted): the op reaches the stage the same page's run answers from its legs (legsEnd).
+const OP_ID = "6a4f1c2e-1b7d-4c9a-8e3f-0d2b5a6c7e8f";
+const WHOLE_TX = "0x" + "aa".repeat(32);
+const opsWith = (ws: WalletStore) => async (id: string, f: (v: unknown) => unknown): Promise<void> => void (await ws.update("ops", id, f));
+const twoLegOp = (whole: string) => ({ kind: "buy", stage: "sent", txs: [], created_ms: 1, chain: "base", token: "0x" + "11".repeat(20), legs: [{ w: "0x" + "22".repeat(20), end: { stage: whole, txs: [{ chain: "base", hash: WHOLE_TX }] } }, { w: W }] });
+const restRec = (o: Record<string, unknown> = {}) => ({ chain: "base", l: LABEL.toString(), j: 0, nullifier: "1", deadlineMs: "1", signBy: "2", spend: "1", token: "0x" + "11".repeat(20), op: OP_ID, leg: 1, ...o });
+
+test("card signpage-sent-end-recorded-evm: a two-leg buy whose rest leg's page died after the send: the next load's carry pass ends that leg, and the op reaches the stage the same-page run answers", async () => {
+  const legsEnd = ((await import("../src/pool-buy-evm.ts")) as unknown as { legsEnd: (e: { stage: string; txs: unknown[] }[]) => { stage: string } }).legsEnd;
+  // W never signed its buy (no hash), its window long past: its change is the user's money on its way back, owed_back
+  {
+    const ch = chain();
+    ch.c.release = releaseTxOf(POOL, WITHDRAW_INPUT);
+    ch.c.balance = [CHUNK - FEE, CHUNK - FEE];
+    const { ns, ws } = await stores();
+    await refused(ch, ns);
+    await ws.update("meta", WBUY_KEY, () => ({ [W]: restRec() }));
+    await ws.put("ops", OP_ID, twoLegOp("filled"));
+    const h = hostOf(ch, ns, ws, "base", { ops: opsWith(ws) } as Partial<EvmCarryHost>);
+    await carryEvmOwed(h);
+    const op = (await ws.get("ops", OP_ID)) as { stage: string; txs: { hash: string }[]; legs: { end?: { stage: string } }[] };
+    assert.equal(op.legs[1]!.end?.stage, "owed_back", "the rest leg ended by the carry pass");
+    assert.equal(op.stage, legsEnd([{ stage: "filled", txs: [] }, { stage: "owed_back", txs: [] }]).stage, "part_filled, as the same page answers");
+    assert.deepEqual(op.txs.map((t) => t.hash), [WHOLE_TX, ch.c.release.hash], "every leg's transactions");
+  }
+  // W's buy ended filled on its record (the page wrote that end and died before the op's): filled
+  {
+    const ch = chain();
+    ch.c.release = releaseTxOf(POOL, WITHDRAW_INPUT);
+    ch.c.balance = [CHUNK - FEE, CHUNK - FEE];
+    const { ns, ws } = await stores();
+    await refused(ch, ns);
+    await ws.update("meta", WBUY_KEY, () => ({ [W]: restRec({ end: "filled", hash: "0x" + "bb".repeat(32), adapter: "0x" + "ad".repeat(20) }) }));
+    await ws.put("ops", OP_ID, twoLegOp("filled"));
+    await carryEvmOwed(hostOf(ch, ns, ws, "base", { ops: opsWith(ws) } as Partial<EvmCarryHost>));
+    const op = (await ws.get("ops", OP_ID)) as { stage: string; txs: { hash: string }[] };
+    assert.equal(op.stage, "filled");
+    assert.deepEqual(op.txs.map((t) => t.hash), [WHOLE_TX, ch.c.release.hash, "0x" + "bb".repeat(32)]);
+  }
+});

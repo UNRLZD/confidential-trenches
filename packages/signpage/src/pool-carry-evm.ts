@@ -61,7 +61,8 @@ import { evmClaimTaken, evmNextNote, EvmNotFinalError } from "../../wallet/src/p
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import type { WalletStore } from "@blindfill/wallet/store";
 import { checkEvmCarry, EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom, signEvmDeposit, type EvmOnwardSend } from "./rules/pool.ts";
-import { EVM_WBUY_CARRY_AFTER_MS, EVM_WBUY_KEY, type EvmWBuyRecord } from "./pool-buy-evm-rest.ts";
+import { EVM_WBUY_CARRY_AFTER_MS, EVM_WBUY_KEY, restRecordEnd, type EvmWBuyRecord } from "./pool-buy-evm-rest.ts";
+import { noteLeg, opRef } from "./pool-buy-evm.ts";
 import { depthsOf, EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS, l1FeesOf, spentFinal } from "./pool-deposit-evm.ts";
 import { evmBuyCalldataRead } from "./evm-send.ts";
 import { evmAgreedTx, evmRowTx } from "./evm-tx-hash.ts";
@@ -123,6 +124,9 @@ export type EvmCarryHost = {
    *  (its release's kind the helper's word, as every pass takes it) answers `idle` with its balance there, display alone,
    *  never signed on; a pass after the tap reads W on both RPCs before W signs. */
   idle?: EvmRpc;
+  /** Read-modify-write of one ops record (WalletStore.update): a rest leg's end onto its buy's request op (card
+   *  signpage-sent-end-recorded-evm). None: no op is written. */
+  ops?(id: string, change: (v: unknown) => unknown): Promise<void>;
 };
 
 /** One W's outcome in a pass. */
@@ -384,6 +388,19 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
     if (h.idle !== undefined) return await idleReads(h, h.idle, owed);
     const o = shuffled(owed, h.random)[0];
     if (o === undefined || h.signal?.aborted) return [];
+    // a rest W's leg whose buy's page did not end it (card signpage-sent-end-recorded-evm): its end from its record and
+    // its release (restRecordEnd, finishRest's ends) onto the request's op the record names, by the run's own leg-noting
+    // path (pool-buy-evm.ts noteLeg: each leg its own, the op's stage by legsEnd); an end not known yet is read again at
+    // the next pass. Only the drawn W: its receipt is the one read of a W this pass names
+    if (o.rest) {
+      const rec = rests[o.w] as Partial<EvmWBuyRecord> | undefined;
+      const ref = opRef(rec);
+      const tx = evmRowTx(o.release);
+      if (ref !== null && tx !== null && h.ops !== undefined) {
+        const end = await restRecordEnd(h.rpcs, o.w, rec!, tx, h.chain, now()).catch(() => null);
+        if (end !== null && !h.signal?.aborted) await noteLeg({ ops: h.ops }, ref.id, ref.leg, end);
+      }
+    }
     const p: Pass = { h, store, seed, sleep, now };
     let end: EvmCarryOutcome["end"];
     let landed = false;

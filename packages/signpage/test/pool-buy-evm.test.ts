@@ -1519,3 +1519,17 @@ test("card signpage-sent-end-recorded-evm (8): a holding with no op id (a record
   assert.equal(evmTradeKey("base", (traded[0]!.txs as { hash: string }[])[0]!.hash), `trade/base/${TX}`);
   assert.equal(box.m.size, 0, "no request op");
 });
+
+test("card signpage-sent-end-recorded-evm (9): the rest leg's record names the request's op and its leg, and the hash W signed keeps the adapter it was sent to, so a later load's carry pass ends that leg (pool-carry-evm.ts)", async () => {
+  const box = opsBox();
+  const { h, ch, rests } = restHost();
+  const got = await runEvmPoolBuy(withOp(h, box), { ...ASK, amount: AMOUNT_IN });
+  assert.equal(got.stage, "filled");
+  assert.ok(ch.sent.length > 0);
+  assert.deepEqual([rests[0]!.op, rests[0]!.leg], [REQ, 0], "written before the release leaves");
+  assert.equal(rests.find((r) => r.hash !== undefined)?.adapter, A_V3.toLowerCase());
+  const op = opNow(box)!;
+  assert.equal(op.stage, "filled", "the same page's end, the rest leg's own");
+  assert.deepEqual(op.txs, (got as { txs: unknown }).txs);
+  assert.equal(op.pool_amount, R.poolUnits(AMOUNT_IN, 18), "what W spent at the venue");
+});
