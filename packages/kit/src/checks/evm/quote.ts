@@ -83,8 +83,12 @@ import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 export type EvmRpcCall = { readonly method: string; readonly params: readonly unknown[] };
 /** One RPC provider: answers a batch with one JSON-RPC answer object ({ result } or { error }) per call, in order;
  *  throws when it cannot be reached. evmJsonRpc makes one from a URL. `signal`, when given, ends the request early
- *  (the scan's bound). */
-export type EvmRpc = (calls: readonly EvmRpcCall[], signal?: AbortSignal) => Promise<readonly unknown[]>;
+ *  (the scan's bound); `sent`, called as each post leaves the device (after its gate and its pace), with its calls. */
+export type EvmRpc = (calls: readonly EvmRpcCall[], signal?: AbortSignal, sent?: (calls: readonly EvmRpcCall[]) => void) => Promise<readonly unknown[]>;
+/** A post's kind for its hedge time (evmHedgeAfter): a head or a block by number, or a batch of calls by its size (1,
+ *  2-3, 4-7, 8 and more), each answered in its own time. */
+export const evmPostKind = (calls: readonly EvmRpcCall[]): string =>
+  calls.some((c) => c.method === "eth_getLogs") ? "logs" : calls.every((c) => c.method === "eth_getBlockByNumber" || c.method === "eth_blockNumber") ? "head" : `calls ${calls.length <= 1 ? 1 : calls.length <= 3 ? 3 : calls.length <= 7 ? 7 : 8}`;
 
 /** The user's own request: the token they picked, the amount of the native asset in (wei), their slippage, and the route
  *  to quote (the helper's, or one the device made). */
@@ -817,6 +821,7 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
         true,
         late,
         down,
+        roomOf(batch),
       );
       for (const [i, v] of a) all[i] = v;
     }),
@@ -963,6 +968,10 @@ function pairOrders(rpcs: readonly EvmRpc[], batches: readonly (readonly EvmRpcC
       if (pick >= 0) [order[i], order[pick]] = [order[pick]!, k];
     }
     for (const k of order.slice(0, 2)) before[k]!.push([...b]);
+    // and the quorum's third where it is not held and its pace has its turn (agreeing's `room`), so no later batch moves
+    // up a provider whose units this round's thirds take
+    const t = order[2];
+    if (t !== undefined && HELD_OF.get(rpcs[t]!)?.() !== true && wait(t) <= 0) before[t]!.push([...b]);
     return order.every((k, i) => k === i) ? rpcs : Object.freeze(order.map((k) => rpcs[k]!));
   });
 }
@@ -1001,6 +1010,14 @@ function agreeing<T>(
   // request still queued in such a provider's gate moves to the next provider unsent while one is left, and with none
   // left it is sent, the last one to ask. A 429 keeps its own rule (ask)
   down?: Set<EvmRpc>,
+  // The quorum (card evm-warm-tap-ends-inside-two-seconds): whether a provider has a place for this round's post now
+  // (roomOf: its quote's gate and its pace, pace.ts evmPaceReady). A round of three providers or more whose third is
+  // not held and has one asks it at once with the first two, its own seat and its own vote, and the first two answers
+  // that are `same` win: 2 of 3, the standard read pattern. A hedge only shortens the wait for the slower seat; Base's
+  // warm Round 1 batch took 1,348-1,390 ms on base-rpc.publicnode.com on 2 of 5 warm taps while blastapi answered it
+  // in about 300 ms, and the round waited for the stand-in, the tap ending at about 2.0 s (side A be22ec935,
+  // 2026-11-22 02:3xZ). With no place (or none given) the round asks two as before
+  room?: (rpc: EvmRpc) => boolean,
 ): Promise<{ a: T; b: T; i: number; j: number }> {
   const list = [...rpcs];
   const need = Math.floor(list.length / 2) + 1;
@@ -1013,9 +1030,33 @@ function agreeing<T>(
     let contested = false;
     let failed: { e: unknown } | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // the stand-ins (hedged requests): a request out past its provider's own hedge time (evmHedgeAfter) has the next
+    // provider asked once in its place, outside `late`'s budget; the two share one seat (`seat`), whose first answer is
+    // its one vote, so a stand-in is never a third vote nor a second answer of one provider. `gone`: requests whose
+    // seat had its answer when they settled: they vote no more. A contested round
+    // asks every provider, and there each provider's answer is its own vote
+    let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
+    const seat: number[] = [];
+    const voted: boolean[] = [];
+    const hedgedK: boolean[] = [];
+    let gone = 0;
+    // each request's abort, for its wait at its provider's pace (evmJsonRpc): a request not yet on the wire when the
+    // round is done is dropped there unsent, its units never taken; one still in its gate is dropped as it would leave
+    // (`moved`). A dropped request is no failure and holds nothing (timed). Only a provider with a URL, whose post
+    // says when it leaves (`wire`), is dropped by its abort, so no post already sent is cut
+    const stops: AbortController[] = [];
+    const drop = () => {
+      for (let n = 0; n < started; n++) {
+        if (settledK[n] || wireAt[n] !== undefined || (GATED_URL.get(list[n]!) ?? URL_OF.get(list[n]!)) === undefined) continue;
+        movedK[n] = true;
+        stops[n]!.abort(DROPPED);
+      }
+    };
     const lose = () => {
       done = true;
       clearTimeout(timer);
+      clearTimeout(hedgeTimer);
+      drop();
       const x = got[0];
       const y = x === undefined ? undefined : (got.find((g) => !same(x.v, g.v)) ?? got[1]);
       if (x !== undefined && y !== undefined) {
@@ -1029,13 +1070,15 @@ function agreeing<T>(
     const end = () => {
       if (done) return;
       // contested: a value no count of the providers left can bring to `need` is never used
-      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails < need) return lose();
+      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails - gone < need) return lose();
       if (settled < started || started < list.length) return;
       lose();
     };
     const win = (g: { k: number; v: T }, h: { k: number; v: T }) => {
       done = true;
       clearTimeout(timer);
+      clearTimeout(hedgeTimer);
+      drop();
       // the quote's next rounds ask these two first: one that was slow, failed or differed is a spare from now on
       // (`rpcs` is the quote's own list, gated(); reordered only while no other round has)
       if (!Object.isFrozen(rpcs) && list.every((r, n) => rpcs[n] === r)) {
@@ -1063,12 +1106,17 @@ function agreeing<T>(
       const stuck = ks.find((n) => STALLED.get(list[n]!)?.() === true);
       if (stuck !== undefined) {
         movedK[stuck] = true;
-        return start(true);
+        // a stand-in moved keeps its seat
+        return start(true, seat[stuck] === stuck ? undefined : seat[stuck]);
       }
       if (ks.length > 0) return arm();
-      // every request out was sent: late once the newest of them has been out lateAfter()
+      // every request out was sent: late once the newest of them has been out lateAfter() on the wire (round F: a post
+      // waiting at its provider's pace past its gate is not late; a provider with no URL, a test's model, says no
+      // send, and is timed from its gate)
       const out = Array.from({ length: started }, (_, n) => n).filter((n) => sentK[n] && !settledK[n]);
-      const since = performance.now() - Math.max(...out.map((n) => sentAt[n]!));
+      const onWire = out.map((n) => wireAt[n] ?? (GATED_URL.get(list[n]!) ?? URL_OF.get(list[n]!) === undefined ? sentAt[n]! : undefined));
+      if (onWire.some((x) => x === undefined)) return arm();
+      const since = performance.now() - Math.max(...(onWire as number[]));
       if (out.length > 0 && since < lateAfter()) return arm(lateAfter() - since);
       if (late?.() !== false) start(true);
     };
@@ -1085,8 +1133,39 @@ function agreeing<T>(
     // unheld one later in the list goes first, else the round waits on the two; a contested round asks every provider
     const heldK = (n: number) => HELD_OF.get(list[n]!)?.() === true;
     const failedK: boolean[] = [];
-    const live = () => Array.from({ length: started }, (_, n) => n).filter((n) => !heldK(n) && !movedK[n] && !failedK[n]).length;
-    const start = (backup = false) => {
+    const live = () => Array.from({ length: started }, (_, n) => n).filter((n) => !heldK(n) && !movedK[n] && !failedK[n] && !hedgedK[n]).length;
+    // when request `n` is late: when its post left the device (`wire`, past its gate and its pace: one queued there
+    // is not late) plus its provider's hedge time for the post's kind; none before it is sent
+    const wireAt: number[] = [];
+    const kindK: string[] = [];
+    const hedgeAt = (n: number): number | null => {
+      if (wireAt[n] === undefined) return null;
+      const after = evmHedgeAfter(GATED_URL.get(list[n]!) ?? URL_OF.get(list[n]!), kindK[n]!);
+      return after === null ? null : wireAt[n]! + after;
+    };
+    // the requests a stand-in may still be asked for: each its own seat, out, never moved and none asked for it yet
+    const hedgeable = () => Array.from({ length: started }, (_, n) => n).filter((n) => seat[n] === n && !settledK[n] && !movedK[n] && !hedgedK[n] && !voted[n]);
+    const armHedge = () => {
+      clearTimeout(hedgeTimer);
+      if (done || started >= list.length) return;
+      const at = hedgeable()
+        .map(hedgeAt)
+        .filter((x): x is number => x !== null);
+      if (at.length === 0) return;
+      hedgeTimer = setTimeout(standIn, Math.max(1, Math.min(...at) - performance.now()));
+      (hedgeTimer as { unref?: () => void }).unref?.();
+    };
+    const standIn = () => {
+      if (done) return;
+      const now = performance.now();
+      const n = hedgeable().find((x) => (hedgeAt(x) ?? Infinity) <= now);
+      if (n !== undefined && started < list.length) {
+        hedgedK[n] = true;
+        start(true, n);
+      }
+      armHedge();
+    };
+    const start = (backup = false, of?: number) => {
       if (done || started >= list.length) return;
       if (backup && !contested && started >= 2 && heldK(started)) {
         const j = list.findIndex((_, n) => n > started && !heldK(n));
@@ -1095,28 +1174,40 @@ function agreeing<T>(
       }
       const k = started++;
       t0[k] = performance.now();
-      // read as the request would leave its gate: one whose provider answered 5xx in this round moves to the next now,
-      // or is dropped unsent where its batch is already agreed
+      seat[k] = of ?? k;
+      stops[k] = new AbortController();
+      // read as the request would leave its gate: any request is dropped unsent where its round is already done; one
+      // whose provider answered 5xx in this round moves to the next now
       const moved = () => {
         if (movedK[k] === true) return true;
-        if (down?.has(list[k]!) !== true) return false;
         if (done) return (movedK[k] = true);
+        if (down?.has(list[k]!) !== true) return false;
         if (started >= list.length) return false;
         movedK[k] = true;
-        start(true);
+        start(true, seat[k] === k ? undefined : seat[k]);
         return true;
       };
       const gate: Gated = {
         sent: () => void ((sentK[k] = true), (sentAt[k] = performance.now())),
+        wire: (calls) => void ((wireAt[k] = performance.now()), (kindK[k] = evmPostKind(calls)), armHedge()),
         moved,
         spare: () => !done && started < list.length,
         down: () => void down?.add(list[k]!),
+        until: stops[k]!.signal,
+        done: () => done,
       };
       one(list[k]!, k, gate).then(
         (v) => {
           settled++;
           settledK[k] = true;
           if (done) return;
+          // the seat's second answer: its first was its vote (a contested round asks every provider, each its own vote)
+          if (voted[seat[k]!] && !contested) {
+            gone++;
+            return end();
+          }
+          voted[seat[k]!] = true;
+          armHedge();
           const now = { k, v };
           got.push(now);
           const peers = got.filter((x) => same(x.v, v));
@@ -1138,6 +1229,12 @@ function agreeing<T>(
           settledK[k] = true;
           // a request moved to the next provider is no failure: the next was asked in its place
           if (movedK[k]) return done ? undefined : end();
+          // nor one whose seat has its answer: the first answer was the seat's. A failure of a seat whose stand-in is
+          // still out asks the next as any failure does, so a stand-in that hangs too never holds the round
+          if (voted[seat[k]!]) {
+            gone++;
+            return done ? undefined : end();
+          }
           fails++;
           failedK[k] = true;
           failed ??= { e };
@@ -1147,17 +1244,63 @@ function agreeing<T>(
         },
       );
       if (started >= 2) arm();
+      armHedge();
     };
     start();
     start();
+    // the quorum's third (`room`): its own seat (start's own k) and its own vote
+    if (started === 2 && list.length > 2 && !contested && !heldK(2) && room?.(list[2]!) === true) start();
   });
 }
 
+/** agreeing, for the tests of its hedges (test/evm-hedge-clock.test.ts). Not in the index. */
+export const evmAgreeing = agreeing;
+/** askAt, for the quorum's tests (test/evm-quorum.test.ts). Not in the index. */
+export const evmAskAt = (rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Promise<readonly unknown[]> => askAt(rpc, calls, gate);
+export type EvmGated = Gated;
+
 /** A request's hooks in its provider's gate (agreeing's `moving`): `sent` as it leaves the gate, and `moved`, read as it
  *  would leave: true, it is not sent (MOVED). `spare`: agreeing has a provider left to ask in this one's place (ask).
- *  `down`: the provider answered HTTP 5xx (gated), held for the rest of the round (agreeing's `down`). */
-type Gated = { readonly sent: () => void; readonly moved: () => boolean; readonly spare?: () => boolean; readonly down?: () => void };
+ *  `down`: the provider answered HTTP 5xx (gated), held for the rest of the round (agreeing's `down`). `wire`: the post
+ *  left the device (evmJsonRpc, past its gate and its pace), with its calls: its hedge clock starts there. */
+type Gated = { readonly sent: () => void; readonly moved: () => boolean; readonly spare?: () => boolean; readonly down?: () => void; readonly wire?: (calls: readonly EvmRpcCall[]) => void; readonly until?: AbortSignal; readonly done?: () => boolean };
+// `until`: aborted (DROPPED) where the request's round is done before its post left the device, so its wait at its
+// provider's pace ends there (agreeing's drop); a post already sent is never cut by it
+// `done`: the request's round is agreed (or lost): ask and askAt never ask its provider again for it (the recorded PONS
+// warm tap, test/evm-warm-tap-calls.test.ts: robinhood.rpc.blxrbdn.com, the cold quote's third, answered for a block it
+// did not hold yet after the round was agreed and was asked again 0.25, 0.5 and 0.75 s on, after the quote had ended)
 const MOVED = new Error("moved to the next provider before it was sent");
+const DROPPED = new Error("dropped unsent: its round was already agreed");
+/** One provider asked once for `calls`, with the time its post left the device: `wire` resolves with the post's kind
+ *  as it is sent (past the provider's gate and its pace), and never where it is not. */
+function wired(rpc: EvmRpc, calls: readonly EvmRpcCall[]): { p: Promise<readonly unknown[]>; wire: Promise<string> } {
+  let on!: (kind: string) => void;
+  const wire = new Promise<string>((r) => (on = r));
+  return { p: askAt(rpc, calls, { sent: () => {}, moved: () => false, wire: (c) => on(evmPostKind(c)) }), wire };
+}
+/** A request and its stand-in (hedged requests): `a`, and where it is still out past its provider's hedge time for its
+ *  post's kind, timed from its send (evmHedgeAfter of `url`; none before the kind's first answer), `b()` asked once
+ *  too. Which answers first: 0 for `a`, 1 for `b`; a failure waits for the other, and with both failed `a` is the one
+ *  read. Nothing is thrown here. */
+async function hedged<T>(a: { p: Promise<T>; wire: Promise<string> }, url: string | undefined, b: () => Promise<T>): Promise<0 | 1> {
+  const kind = await Promise.race([a.wire, a.p.then(() => null, () => null)]);
+  const after = kind === null ? null : evmHedgeAfter(url, kind);
+  if (after === null) return 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = await new Promise<boolean>((go) => {
+    timer = setTimeout(() => go(true), after);
+    a.p.then(() => go(false), () => go(false));
+  });
+  clearTimeout(timer);
+  if (!late) return 0;
+  const second = b();
+  return new Promise<0 | 1>((go) => {
+    let left = 2;
+    const failed = () => void (--left === 0 && go(0));
+    a.p.then(() => go(0), failed);
+    second.then(() => go(1), failed);
+  });
+}
 // a gated provider's call with a request's hooks, and whether the provider is stalled (gated, ask)
 const GATED = new WeakMap<EvmRpc, (calls: readonly EvmRpcCall[], gate?: Gated) => Promise<readonly unknown[]>>();
 const STALLED = new WeakMap<EvmRpc, () => boolean>();
@@ -1181,13 +1324,13 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Pro
       // a gated provider says when the request leaves its gate; any other sends it now
       const g = GATED.get(rpc);
       if (g === undefined) gate?.sent();
-      out = await (g === undefined ? rpc(calls) : g(calls, gate));
+      out = await (g === undefined ? rpc(calls, gate?.until, gate?.wire) : g(calls, gate));
       if (i < 3 && Array.isArray(out) && out.some(limited)) throw new RateLimited("a call's error names the provider's rate limit");
       break;
     } catch (e) {
-      // moved, or the quote's deadline passed in the gate (gated): nothing was sent
-      if (e === MOVED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;
-      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || gate?.spare?.() === true) {
+      // moved, dropped, or the quote's deadline passed in the gate (gated): nothing was sent
+      if (e === MOVED || e === DROPPED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;
+      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || gate?.spare?.() === true || gate?.done?.() === true) {
         throw new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
       }
       await new Promise((r) => setTimeout(r, 500 * (i + 1)));
@@ -1208,7 +1351,7 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Pro
 async function askAt(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Promise<readonly unknown[]> {
   for (let i = 0; ; i++) {
     const out = await ask(rpc, calls, gate);
-    if (!out.some(notYet) || i === 3) return out;
+    if (!out.some(notYet) || i === 3 || gate?.done?.() === true) return out;
     if (gate?.spare?.() === true) throw new EvmQuoteError("rpc_error", "a provider does not hold the block yet");
     await new Promise((r) => setTimeout(r, FRESH_RETRY_MS * (i + 1)));
   }
@@ -1277,6 +1420,10 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
       // held: only a head more than maxLag below the lower of the two, never one above them (re-review of fd9dd16, LOW-1:
       // a liar's old head and a lagging honest one held the provider that was up to date)
       (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),
+      false,
+      undefined,
+      undefined,
+      roomOf([call]),
     );
     got = minBlock === 0n ? await round : await within(round, left(), late);
     if (got.a.number >= minBlock && got.b.number >= minBlock) break;
@@ -1306,19 +1453,35 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
     let unsure = false;
     const strict = () => unsure || against.length > 0;
     const enough = () => holds >= (strict() ? need : 2);
-    for (let n = 0; n < others.length && !enough(); n++) {
+    // each provider asked once (a stand-in's answer is its own provider's, never asked again)
+    const asked = new Map<number, { p: Promise<Block>; wire: Promise<string> }>();
+    const ask1 = (k: number) => {
+      const w = wired(list[k]!, [by]);
+      return { p: w.p.then((x) => header(x[0], `provider ${k + 1}`)), wire: w.wire };
+    };
+    const asking = (k: number) => asked.get(k) ?? asked.set(k, ask1(k)).get(k)!;
+    const of = (k: number) => asking(k).p;
+    const order = [...others];
+    for (let n = 0; n < order.length && !enough(); n++) {
       // too few left to bring it to `need`
-      if (strict() && holds + others.length - n < need) break;
+      if (strict() && holds + order.length - n < need) break;
+      // a stand-in (agreeing's): where this one is out past its provider's hedge time the next is asked too, and the
+      // first to answer takes this place; the late one keeps the next place, its answer read only if the confirm gets
+      // there. One answered by a stand-in for the other head's provider is a spare's: the block then needs `need`
+      if (n + 1 < order.length && (await hedged(asking(order[n]!), GATED_URL.get(list[order[n]!]!) ?? URL_OF.get(list[order[n]!]!), () => of(order[n + 1]!))) === 1) {
+        [order[n], order[n + 1]] = [order[n + 1]!, order[n]!];
+        if (n === 0) unsure = true;
+      }
       let back: Block;
       try {
-        back = header((await askAt(list[others[n]!]!, [by]))[0], `provider ${others[n]! + 1}`);
+        back = await of(order[n]!);
       } catch (e) {
         failed ??= { e };
         if (n === 0) unsure = true;
         continue;
       }
       if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {
-        against.push(others[n]!);
+        against.push(order[n]!);
       } else holds++;
     }
     if (enough()) return against.forEach((k) => HOLD.get(list[k]!)?.());
@@ -1342,7 +1505,15 @@ function pinConfirm(rpcs: readonly EvmRpc[], pin: Block, grant: () => void): () 
   grant();
   return async () => {
     const by = { method: "eth_getBlockByNumber", params: ["0x" + pin.number.toString(16), false] };
-    const one = async (k: number) => header((await askAt(rpcs[k]!, [by]))[0], `provider ${k + 1}`);
+    // each provider asked once (a stand-in's answer is its own provider's)
+    const asked = new Map<number, { p: Promise<Block>; wire: Promise<string> }>();
+    const asking = (k: number) => {
+      const got = asked.get(k);
+      if (got !== undefined) return got;
+      const w = wired(rpcs[k]!, [by]);
+      return asked.set(k, { p: w.p.then((x) => header(x[0], `provider ${k + 1}`)), wire: w.wire }).get(k)!;
+    };
+    const one = (k: number) => asking(k).p;
     let holds = 0;
     let failed = null as { e: unknown } | null;
     const judge = (r: PromiseSettledResult<Block>, k: number) => {
@@ -1354,8 +1525,17 @@ function pinConfirm(rpcs: readonly EvmRpc[], pin: Block, grant: () => void): () 
       }
       holds++;
     };
-    (await Promise.allSettled([0, 1].filter((k) => k < rpcs.length).map(one))).forEach(judge);
-    for (let k = 2; k < rpcs.length && holds < 2; k++) judge((await Promise.allSettled([one(k)]))[0]!, k);
+    // the first two at once; one out past its provider's hedge time has the next in the order asked in its place (a
+    // stand-in, agreeing's), and the first of the two to answer is read
+    let next = 2;
+    const seat = async (k: number) => {
+      let j = k;
+      const by2 = next < rpcs.length ? await hedged(asking(k), GATED_URL.get(rpcs[k]!) ?? URL_OF.get(rpcs[k]!), () => one((j = next++))) : 0;
+      const at = by2 === 1 ? j : k;
+      judge((await Promise.allSettled([one(at)]))[0]!, at);
+    };
+    await Promise.all([0, 1].filter((k) => k < rpcs.length).map(seat));
+    for (let k = next; k < rpcs.length && holds < 2; k++) judge((await Promise.allSettled([one(k)]))[0]!, k);
     if (holds < 2) {
       // fewer than two hold it (one failed, or lags): the pin is not used; the quote is asked again at a block agreed now
       const e = new EvmQuoteError("rpc_error", `fewer than two providers hold block ${pin.number}: ${String((failed?.e as Error | undefined)?.message ?? "no answer")}`);
@@ -2067,7 +2247,11 @@ const SCAN_BACKOFF_MAX_MS = 8_000;
  *  - Nothing is sent once the quote's bound has passed, and no request runs past it (re-review of 59a69e2, MEDIUM-1: a
  *    provider that timed out every request was asked one at a time, about 10.8 hours at the 10 s deadline).
  *  One gate per quote, so a request that never returns holds up that quote alone. */
-type ScanGate = { ask: (rpc: EvmRpc, calls: readonly EvmRpcCall[], tries: number, fast?: boolean) => Promise<readonly unknown[]> };
+type ScanGate = { ask: (rpc: EvmRpc, calls: readonly EvmRpcCall[], tries: number, fast?: boolean, hedge?: ScanHedge) => Promise<readonly unknown[]> };
+/** A warm scan request that a stand-in races (scanPools' `run`, round F): `sent` when it leaves the device, past the
+ *  gate and the provider's pace, and `lost`, which ends it once the stand-in's answer won. Such a request is not cut at
+ *  EVM_SCAN_HOLD_MS: the stand-in, asked at the provider's own time for its getLogs, is what ends its wait. */
+type ScanHedge = { sent: () => void; lost: Promise<never>; signal: AbortSignal };
 /** A scan request whose connection was refused SCAN_TRIES times in a row: the scan refuses, never asks its halves,
  *  which go to the same provider. Where another provider follows (`spareNext`), a provider's gate refuses this way, at
  *  once, a request whose connection was refused, and a `fast` request (a warm scan's) that its throttle would hold, or
@@ -2168,10 +2352,14 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
   };
   // the request, ended at the quote's bound where that comes before its own deadline, and a fast one at
   // EVM_SCAN_HOLD_MS
-  const send = async (rpc: EvmRpc, calls: readonly EvmRpcCall[], fast: boolean) => {
+  const send = async (rpc: EvmRpc, calls: readonly EvmRpcCall[], fast: boolean, hedge?: ScanHedge) => {
     const toBound = untilMs - performance.now();
-    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;
+    const left = fast && hedge === undefined ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;
+    if (hedge !== undefined) return Promise.race([left >= EVM_RPC_TIMEOUT_MS ? rpc(calls, hedge.signal, hedge.sent) : sendBound(rpc, calls, left, toBound, fast, hedge), hedge.lost]);
     if (left >= EVM_RPC_TIMEOUT_MS) return rpc(calls);
+    return sendBound(rpc, calls, left, toBound, fast);
+  };
+  const sendBound = async (rpc: EvmRpc, calls: readonly EvmRpcCall[], left: number, toBound: number, fast: boolean, hedge?: ScanHedge) => {
     const stop = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const bound = new Promise<never>((_, no) => {
@@ -2182,13 +2370,13 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
       }, Math.max(0, left));
     });
     try {
-      return await Promise.race([rpc(calls, stop.signal), bound]);
+      return await Promise.race([rpc(calls, hedge === undefined ? stop.signal : AbortSignal.any([stop.signal, hedge.signal]), hedge?.sent), bound]);
     } finally {
       clearTimeout(timer);
     }
   };
   return {
-    async ask(rpc, calls, tries, fast = false) {
+    async ask(rpc, calls, tries, fast = false, hedge) {
       scanAsks++;
       fast &&= spareNext;
       // a request the next reads in one round of its own requests (`spareBlocks`, its span x its parallel): a warm one,
@@ -2234,7 +2422,7 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
         const sent = cuts;
         let out: unknown;
         try {
-          out = await send(rpc, calls, fast);
+          out = await send(rpc, calls, fast, hedge);
         } catch (e) {
           done();
           if (e instanceof RateLimited) {
@@ -2459,7 +2647,10 @@ async function scanPools(
   // count only where that answer is the agreed block's hash (review of c71a4d0..a9f1d32, MEDIUM: a head read on one
   // backend and logs answered by another that lags behind it, empty past its own head with no error)
   let pin: Block | null = null;
-  type Job = { part: Each[]; a: number; b: number; on: ScanOn };
+  // `into`: where its answers are kept, the scan's own (`got`) unless a race holds them until it has a winner (`run`);
+  // `hedge`: the race's hooks of a warm request a stand-in races
+  type Got = { part: Each[]; a: number; b: number; logs: unknown[]; spare: boolean };
+  type Job = { part: Each[]; a: number; b: number; on: ScanOn; into?: Got[] | undefined; hedge?: ScanHedge | undefined };
   const jobs: Job[] = [];
   // the halving requests asked for answers short of the logs, and the most an honest chain needs (SCAN_SHORT_LEVEL)
   let shorts = 0;
@@ -2510,10 +2701,10 @@ async function scanPools(
   // has EVM_SCAN_HOLD_MS a request before the next takes it (scanGateOf)
   const fast = second !== undefined && jobs.reduce((n, j) => n + Math.ceil((j.b - j.a + 1) / second.span), 0) <= second.parallel;
   // each request's logs as it comes back
-  const got: { part: Each[]; a: number; b: number; logs: unknown[]; spare: boolean }[] = [];
+  const got: Got[] = [];
   // the tail answered a flood (TailFlood): no request of this scan is sent after it, its halves included
   let flooded = false;
-  const one = async ({ part, a, b, on }: Job, splits = SCAN_SPLITS): Promise<void> => {
+  const one = async ({ part, a, b, on, into, hedge }: Job, splits = SCAN_SPLITS): Promise<void> => {
     if (flooded) throw new TailFlood("rpc_error", "the chain's tail answered a flood of pools");
     const f = (topics: (string | string[] | null)[]) => ({ method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics }] });
     const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));
@@ -2539,9 +2730,9 @@ async function scanPools(
     let unheld = false;
     const rpc: EvmRpc = !top
       ? on.rpc
-      : async (cs, signal) => {
+      : async (cs, signal, sent) => {
           unheld = false;
-          const out = await on.rpc(cs, signal);
+          const out = await on.rpc(cs, signal, sent);
           const h = (out[filters.length] as { result?: unknown } | null)?.result;
           if (Array.isArray(out) && h === null && !out.some(limited)) {
             unheld = true;
@@ -2559,10 +2750,10 @@ async function scanPools(
       } else if (top && typeof h?.hash !== "string") return null;
       return out.slice(0, filters.length).map((x) => (x as { result?: unknown } | null)?.result);
     };
-    const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ part, a, b, logs: r as unknown[], spare: on !== first })));
+    const keep = (rs: unknown[]) => (into ?? got).push(...rs.map((r) => ({ part, a, b, logs: r as unknown[], spare: on !== first })));
     const halves = (left: number) => {
       const mid = a + Math.floor((b - a) / 2);
-      return settle([one({ part, a, b: mid, on }, left), one({ part, a: mid + 1, b, on }, left)]);
+      return settle([one({ part, a, b: mid, on, into }, left), one({ part, a: mid + 1, b, on, into }, left)]);
     };
     // The provider's own answer short of every log (an error in any words, or in its data alone; an HTTP status other
     // than 429 or 5xx; a body that is not a batch or past its size; SCAN_MAX_LOGS logs) is asked as its halves on that
@@ -2630,7 +2821,7 @@ async function scanPools(
     // 59783246 yet" in 2,218 to 6,303 ms. One further behind refuses as before; the provider answering holds the request's
     // own last block in its batch as any request's
     let ownTo: number | null = null;
-    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast).then((out) => (behindIn(out) ? ((behind = true), null) : logsOf(out)), async (e) => {
+    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast, hedge).then((out) => (behindIn(out) ? ((behind = true), null) : logsOf(out)), async (e) => {
       if (unheld && own !== undefined && (e instanceof NotHeldYet || e instanceof ScanRefused)) {
         const h = await own().then(Number, () => null);
         if (h !== null && h < b && head - h <= lag) return ((ownTo = h), null);
@@ -2643,7 +2834,7 @@ async function scanPools(
       notYet = e instanceof NotHeldYet;
       return null;
     });
-    if (ownTo !== null) return a > ownTo ? undefined : one({ part, a, b: ownTo, on }, splits);
+    if (ownTo !== null) return a > ownTo ? undefined : one({ part, a, b: ownTo, on, into }, splits);
     // the tail's answer past 4 times the pools the venue's measured rate makes of its blocks (and past one): a flood of
     // pools (independent review of 266cca1b4, M3: 50,000 made-up pools of other currencies in the tail's blocks cost a
     // quote 15 getLogs and 50,001 logs where main asked 2), so this quote drops the tail and scans by currency, as main
@@ -2704,15 +2895,84 @@ async function scanPools(
   // 5 Nov Base's first and second were both down about 10 minutes). All read the same blocks of the same PoolManager:
   // a scan only adds pools, each read on both quote providers like any candidate.
   const run = (j: Job): Promise<void> =>
+    fast && j.on.next !== undefined ? raced(j) :
     one(j).catch(async (e) => {
       const next = j.on.next;
       if (next === undefined || e instanceof ScanStop) throw e;
       let done: Spans = [];
-      for (const g of got) if (g.part === j.part && g.a >= j.a && g.b <= j.b) done = withSpan(done, g.a, g.b);
+      for (const g of j.into ?? got) if (g.part === j.part && g.a >= j.a && g.b <= j.b) done = withSpan(done, g.a, g.b);
       const rest: Job[] = [];
       for (const [a, b] of gapsOf(done, j.a, j.b)) jobsOf(j.part, a, b, next, rest);
       shortMax += 2 * rest.length;
-      await settle(rest.map(run));
+      await settle(rest.map((r) => run({ ...r, into: j.into })));
+    });
+  // A warm scan's request (`fast`, one round of the next's requests) with a provider after it: the next is asked for
+  // its blocks once the request has been out on the wire past its provider's own time for a getLogs (the 95th
+  // percentile of its newest answers, evmHedgeAfter; EVM_SCAN_HOLD_MS before it has any), or at once where the request
+  // fails, and the first of the two to answer whole is kept, each through every check of `one`; the other's answer is
+  // dropped and the request ended (card evm-warm-tap-ends-inside-two-seconds, round F: the fixed cut at
+  // EVM_SCAN_HOLD_MS held a warm Robinhood ANT tap 1,994 ms on daybreak before Pocket answered in 1,673, 4,811 ms in
+  // all: --record read, 2026-11-21 15:5xZ). A request waiting at the gate or the provider's pace is not late: its time
+  // runs from its send. Both failing, the next's failure is the scan's, as before; a ScanStop of the first stops it.
+  const raced = (j: Job): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      const next = j.on.next!;
+      const mine: Got[] = [];
+      const theirs: Got[] = [];
+      let over = false;
+      let stood = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let firstOut: { e: unknown } | undefined;
+      let nextOut: { e: unknown } | undefined;
+      const stop = new AbortController();
+      const lost = new Promise<never>((_, no) => {
+        if (stop.signal.aborted) return no(stop.signal.reason);
+        stop.signal.addEventListener("abort", () => no(stop.signal.reason), { once: true });
+      });
+      lost.catch(() => undefined);
+      const lose = (e: unknown) => stop.abort(e);
+      const end = (go: () => void) => {
+        if (over) return;
+        over = true;
+        clearTimeout(timer);
+        go();
+      };
+      const win = (xs: Got[]) => end(() => ((j.into ?? got).push(...xs), resolve()));
+      const fail = (e: unknown) => end(() => reject(e));
+      const standIn = () => {
+        if (stood || over) return;
+        stood = true;
+        clearTimeout(timer);
+        const rest: Job[] = [];
+        jobsOf(j.part, j.a, j.b, next, rest);
+        shortMax += 2 * rest.length;
+        settle(rest.map((r) => run({ ...r, into: theirs }))).then(
+          () => {
+            win(theirs);
+            lose(new ScanRefused("rpc_error", "the next scan provider answered first"));
+          },
+          (e) => {
+            nextOut = { e };
+            if (firstOut !== undefined) fail(e);
+          },
+        );
+      };
+      const url = URL_OF.get(j.on.rpc);
+      const sent = () => {
+        if (timer !== undefined || stood) return;
+        timer = setTimeout(standIn, evmHedgeAfter(url, "logs") ?? EVM_SCAN_HOLD_MS);
+      };
+      // a provider with no URL (a test's model) says no send: timed from the request's start
+      if (url === undefined) sent();
+      one({ ...j, into: mine, hedge: { sent, lost, signal: stop.signal } }).then(
+        () => win(mine),
+        (e) => {
+          firstOut = { e };
+          if (e instanceof ScanStop) return fail(e);
+          if (!stood) return standIn();
+          if (nextOut !== undefined) fail(nextOut.e);
+        },
+      );
     });
   const kept = new Set<object>();
   const take = () => {
@@ -2907,12 +3167,12 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
 }
 
 // Each pinned provider's measured speed (card evm-quote-warm-round): its time to answer a batch, an average that weighs
-// the newest a quarter, and, after a failure (no answer, a 429, a call's error naming a rate limit), the time until
-// which it is asked only after every other. A quote asks the providers in this order, so its two are the fastest that
+// the newest a quarter, and, after a failure (a 429, a call's error naming a rate limit, a stall, a second lost post
+// within EVM_HOLD_MS: `timed`), the time until which it is asked only after every other. A quote asks the providers in this order, so its two are the fastest that
 // answer, and the rest are its spares (agreeing).
 // A provider with a request out for longer than EVM_HEDGE_MS is ranked with the held until it answers: the next quote
 // does not wait on it either.
-const SPEED = new Map<string, { ms: number | null; held: number; out: number[]; last: number }>();
+const SPEED = new Map<string, { ms: number | null; held: number; out: number[]; last: number; failed: number; times: Map<string, number[]> }>();
 /** Every venue's `quoteLast`: the providers a quote asks only after every other (evmRanked). */
 let QUOTE_LAST: ReadonlySet<string> | undefined;
 const quoteLastOf = (): ReadonlySet<string> =>
@@ -2925,29 +3185,66 @@ const throttleHoldMs = (url: string | undefined, afterMs: number | null): number
 /** Forgets every provider's measured time and hold: for the tests, which share this module's state (not in the index). */
 export const evmSpeedReset = (): void => SPEED.clear();
 const speedOf = (url: string) => {
-  const s = SPEED.get(url) ?? { ms: null, held: 0, out: [], last: 0 };
+  const s = SPEED.get(url) ?? { ms: null, held: 0, out: [], last: 0, failed: -Infinity, times: new Map<string, number[]>() };
   SPEED.set(url, s);
   return s;
 };
+/** The answered posts of a kind (evmPostKind) a provider's hedge time is read from: its newest EVM_HEDGE_KEPT. */
+const EVM_HEDGE_KEPT = 32;
+/** How long a post to `url` is out before it is late and a spare stands in for it (hedged requests, Dean and Barroso,
+ *  "The Tail at Scale", CACM 2013: a second request once the first is out past the 95th percentile of its kind): the 95th
+ *  percentile of the provider's newest answered posts of the post's kind, each timed from its send (past the device's
+ *  gate and pace), never under EVM_HEDGE_MS; null before the kind's first answer. A hung
+ *  post held a warm tap until its 10 s timeout where the round's spares were spent (card
+ *  evm-warm-tap-ends-inside-two-seconds, round E). */
+export function evmHedgeAfter(url: string | undefined, kind: string): number | null {
+  const t = url === undefined ? undefined : SPEED.get(url)?.times.get(kind);
+  if (t === undefined || t.length === 0) return null;
+  const sorted = [...t].sort((a, b) => a - b);
+  return Math.max(EVM_HEDGE_MS, sorted[Math.ceil(0.95 * sorted.length) - 1]!);
+}
 const timed = (url: string, rpc: EvmRpc): EvmRpc => {
-  const f: EvmRpc = async (calls, signal) => {
+  const f: EvmRpc = async (calls, signal, sent) => {
     const t = performance.now();
     const s = speedOf(url);
     s.out.push(t);
+    // the post's own time on the wire: from its send, past the device's gate and pace (card
+    // evm-warm-tap-ends-inside-two-seconds, round F)
+    let wire: number | undefined;
     try {
       // the caller's cut ends the post itself (card evm-pace-holds-units-while-out): a scan request cut at its hold or
       // the quote's bound gives its provider's units back then (pace.ts), never held to its own 10 s timeout
-      const out = await rpc(calls, signal);
+      const out = await rpc(calls, signal, (c) => {
+        wire = performance.now();
+        sent?.(c);
+      });
       s.last = performance.now();
       // an answer that names a rate limit or a state the provider does not hold is held, never measured: such an error
       // comes back fast, and a provider past its state cut kept first by it failed every quote's reads (card
       // evm-quote-lag-held)
       if (out.some(limited) || out.some(stateless)) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));
       // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)
-      else if (!out.some(notYet)) s.ms = s.ms === null ? performance.now() - t : s.ms * 0.75 + (performance.now() - t) * 0.25;
+      else if (!out.some(notYet)) {
+        const ms = performance.now() - (wire ?? t);
+        s.ms = s.ms === null ? ms : s.ms * 0.75 + ms * 0.25;
+        const kind = evmPostKind(calls);
+        const times = s.times.get(kind) ?? [];
+        s.times.set(kind, times);
+        times.push(ms);
+        if (times.length > EVM_HEDGE_KEPT) times.shift();
+      }
       return out;
     } catch (e) {
-      s.held = performance.now() + (e instanceof RateLimited ? throttleHoldMs(url, e.afterMs) : EVM_HOLD_MS);
+      // a post lost (no answer, a timeout, an HTTP error) holds the provider where it is a stall, nothing answered since
+      // the post was sent, or its second loss within EVM_HOLD_MS (consecutive-failure ejection, as Envoy's outlier
+      // detection): one lost post of a provider that answers the rest was its load while it was out (evmRanked), never
+      // its seat. A lone hung post held Base's blastapi 30 s while it answered every other post in about 300 ms, warm
+      // taps of 2.0 to 4.7 s on mainnet.base.org meanwhile (card evm-warm-tap-ends-inside-two-seconds, 2026-11-21 13:0xZ)
+      // a post dropped unsent at its pace, its round already agreed (agreeing's drop), is no loss
+      if (e === DROPPED) throw e;
+      const now = performance.now();
+      if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held = now + (e instanceof RateLimited ? throttleHoldMs(url, e.afterMs) : EVM_HOLD_MS);
+      s.failed = now;
       throw e;
     } finally {
       s.out.splice(s.out.indexOf(t), 1);
@@ -3054,9 +3351,20 @@ export function evmProviders(urls: readonly string[], fetchFn: typeof fetch, lat
     const f = timed(u, evmJsonRpc(u, fetchFn, undefined, undefined, later));
     URL_OF.set(f, u);
     HELD_OF.set(f, () => speedOf(u).held > performance.now() || evmProviderHeld(u));
+    ROOM.set(f, (calls) => evmPaceReady(u, calls, performance.now(), later));
     return f;
   });
 }
+/** Whether a provider's post of `calls` would leave now (agreeing's `room`, its quorum's third): set by evmProviders,
+ *  its pace's turn (pace.ts evmPaceReady, in its own lane), and by gated, a free place in the quote's gate too. A
+ *  provider with none (a test's model, an app's own) is never asked as a third. */
+const ROOM = new WeakMap<EvmRpc, (calls: readonly EvmRpcCall[]) => boolean>();
+const roomOf =
+  (calls: readonly EvmRpcCall[]) =>
+  (rpc: EvmRpc): boolean =>
+    ROOM.get(rpc)?.(calls) === true;
+/** roomOf, for the tests of the quorum (test/evm-quorum.test.ts). Not in the index. */
+export const evmRoomOf = roomOf;
 
 /** What every quote checks before any read, buy or sell: the device's clock, two different providers, the amount in
  *  and the slippage. */
@@ -3081,20 +3389,21 @@ function gated(rpcsIn: readonly EvmRpc[], parallel: number, deadline?: Deadline,
   const list = rpcsIn.map((rpc) => {
     const url = URL_OF.get(rpc);
     const pin = url !== undefined && inflight !== undefined && Object.hasOwn(inflight, url) ? inflight[url] : undefined;
-    const g = gateOf(typeof pin === "number" && Number.isSafeInteger(pin) && pin >= 1 ? pin : parallel);
+    const places = typeof pin === "number" && Number.isSafeInteger(pin) && pin >= 1 ? pin : parallel;
+    const g = gateOf(places);
     // stalled: requests out and none answered for 4 x EVM_HEDGE_MS (agreeing moves a request queued behind them)
     let flying = 0;
     let lastAt = 0;
-    const out = async (calls: readonly EvmRpcCall[]) => {
+    const out = async (calls: readonly EvmRpcCall[], sent?: (calls: readonly EvmRpcCall[]) => void, until?: AbortSignal) => {
       if (flying++ === 0) lastAt = performance.now();
       try {
-        return await rpc(calls);
+        return await rpc(calls, until, sent);
       } finally {
         flying--;
         lastAt = performance.now();
       }
     };
-    const f = (calls: readonly EvmRpcCall[]) => g(() => (past(), out(calls)));
+    const f = (calls: readonly EvmRpcCall[], _signal?: AbortSignal, sent?: (calls: readonly EvmRpcCall[]) => void) => g(() => (past(), out(calls, sent)));
     if (url !== undefined) GATED_URL.set(f as unknown as EvmRpc, url);
     GATED.set(f as unknown as EvmRpc, (calls, gate) =>
       g(() => {
@@ -3103,13 +3412,16 @@ function gated(rpcsIn: readonly EvmRpc[], parallel: number, deadline?: Deadline,
         gate?.sent();
         // an HTTP 5xx holds the provider for the round before its slot frees, so the request next in its gate, judged as
         // it leaves, already moves (agreeing's `down`)
-        return out(calls).catch((e: unknown) => {
+        return out(calls, gate?.wire, gate?.until).catch((e: unknown) => {
           if (serverFault(e)) gate?.down?.();
           throw e;
         });
       }),
     );
     STALLED.set(f as unknown as EvmRpc, () => flying > 0 && performance.now() - lastAt > 4 * EVM_HEDGE_MS);
+    // a place now: a free place in this gate (none queued: every place is a request out) and the provider's own
+    const roomNow = ROOM.get(rpc);
+    if (roomNow !== undefined) ROOM.set(f as unknown as EvmRpc, (calls) => flying < places && roomNow(calls));
     const heldNow = HELD_OF.get(rpc);
     if (heldNow !== undefined) HELD_OF.set(f as unknown as EvmRpc, heldNow);
     const hold = HOLD.get(rpc);
@@ -5049,12 +5361,18 @@ async function releasesConfirmed(at: readonly ReleaseLog[], list: readonly EvmRp
  *  and one above it counts where both gave it or a second provider confirms it (releasesConfirmed). `funding`: the buy
  *  that paid W the token this sale sells (the quote's token and boughtBlock). `clock`: the device's clock, in ms. */
 async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rpcs: readonly EvmRpc[], block: Block, maxLag: bigint, sent: readonly EvmSellSent[], funding: { token: string; block: bigint }, clock: () => number): Promise<EvmSellReleases> {
+  const finalized: EvmRpcCall[] = [{ method: "eth_getBlockByNumber", params: ["finalized", false] }];
   const fins = await agreeing(
     rpcs,
-    async (rpc, k, gate) => header((await ask(rpc, [{ method: "eth_getBlockByNumber", params: ["finalized", false] }], gate))[0], `provider ${k + 1}`),
+    async (rpc, k, gate) => header((await ask(rpc, finalized, gate))[0], `provider ${k + 1}`),
     () => true,
     () => refuse("rpc_error", "the providers gave no finalized block"),
     false,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    roomOf(finalized),
   );
   const n = block.number;
   const low = (x: bigint, y: bigint) => (x < y ? x : y);
@@ -5070,17 +5388,17 @@ async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rp
     pages.push([a, a + EVM_SELL_TAIL_PAGE - 1n]);
   }
   const wTopic = "0x" + word(BigInt(w));
+  // two pages a batch from page `i`, each with the agreed block's header, which must be the quote's (CALLS_PER_BATCH)
+  const callsAt = (i: number): EvmRpcCall[] => [
+    ...pages.slice(i, i + CALLS_PER_BATCH - 1).map(([a, b]) => ({ method: "eth_getLogs", params: [{ address: pool, fromBlock: hx(a), toBlock: b === null ? "latest" : hx(b), topics: [[TOPIC_WITHDRAWN, TOPIC_BOUGHT], wTopic] }] })),
+    { method: "eth_getBlockByNumber", params: [hx(n), false] },
+  ];
   const logsOf = async (rpc: EvmRpc, k: number, gate?: Gated) => {
     const who = `provider ${k + 1}`;
     const out: ReleaseLog[] = [];
-    // two pages a batch, each with the agreed block's header, which must be the quote's (CALLS_PER_BATCH)
     for (let i = 0; i < pages.length; i += CALLS_PER_BATCH - 1) {
       const part = pages.slice(i, i + CALLS_PER_BATCH - 1);
-      const calls: EvmRpcCall[] = [
-        ...part.map(([a, b]) => ({ method: "eth_getLogs", params: [{ address: pool, fromBlock: hx(a), toBlock: b === null ? "latest" : hx(b), topics: [[TOPIC_WITHDRAWN, TOPIC_BOUGHT], wTopic] }] })),
-        { method: "eth_getBlockByNumber", params: [hx(n), false] },
-      ];
-      const got = await askAt(rpc, calls, gate);
+      const got = await askAt(rpc, callsAt(i), gate);
       if (header(got[part.length], who).hash !== block.hash) return refuse("rpc_disagree", `${who} does not hold the quote's block ${n}`);
       for (let p = 0; p < part.length; p++) {
         const r = (got[p] as { result?: unknown } | null)?.result;
@@ -5096,11 +5414,18 @@ async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rp
   const upTo = (x: readonly { block: bigint; key: string }[]) => x.filter((e) => e.block <= n).map((e) => e.key).join(";");
   // the order agreeing indexes, taken as it starts
   const list = [...rpcs];
+  // the quorum's third has a place for the first post; its later posts take their turns at its pace
   const { a, b, i, j } = await agreeing(
     rpcs,
     logsOf,
     (x, y) => upTo(x) === upTo(y),
     () => refuse("rpc_disagree", `the providers give W's releases up to block ${n} differently`),
+    true,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    roomOf(callsAt(0)),
   );
   // above the agreed block: a log both gave counts; one only one gave counts once a second provider confirms it, asked
   // block by block, and a claimant's first denial drops the rest it alone gave (review of 9c2a87d5, R3-3)
@@ -5360,11 +5685,12 @@ function logsOf(rc: Record<string, unknown>, who: string): string[] {
   });
 }
 async function tradeOf(rpcs: EvmRpc[], h: string): Promise<Trade> {
+  const calls: EvmRpcCall[] = [{ method: "eth_getTransactionByHash", params: [h] }, { method: "eth_getTransactionReceipt", params: [h] }];
   const { a: sale } = await agreeing(
     rpcs,
     async (rpc, k, gate) => {
       const who = `provider ${k + 1}`;
-      const [t, r] = await askAt(rpc, [{ method: "eth_getTransactionByHash", params: [h] }, { method: "eth_getTransactionReceipt", params: [h] }], gate);
+      const [t, r] = await askAt(rpc, calls, gate);
       const tx = resultOf(t, who, "transaction"), rc = resultOf(r, who, "receipt");
       const auths = tx.authorizationList;
       const fees: Record<string, string> = typeof tx.maxFeePerGas === "string" ? { maxFeePerGas: num(tx, "maxFeePerGas", who), maxPriorityFeePerGas: num(tx, "maxPriorityFeePerGas", who) } : { gasPrice: num(tx, "gasPrice", who) };
@@ -5378,6 +5704,12 @@ async function tradeOf(rpcs: EvmRpc[], h: string): Promise<Trade> {
     },
     (x, y) => JSON.stringify(x) === JSON.stringify(y),
     () => refuse("rpc_disagree", `the providers answer the sale ${h} differently`),
+    true,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    roomOf(calls),
   );
   return sale;
 }
@@ -5552,16 +5884,23 @@ async function tracedPre(trace: readonly (readonly [EvmRpc, EvmRpc])[], sale: Tr
   const b = preBounds(BigInt(sale.gasUsed));
   // one tracer on the two providers (`at`: 0 the prestate's, 1 the callTracer's), read by `of`, equal as JSON on both
   const read = async <T>(at: 0 | 1, tracer: object, of: (r: unknown) => T | null): Promise<T | null> => {
+    const calls: EvmRpcCall[] = [{ method: "debug_traceTransaction", params: [sale.hash, tracer] }];
     const { a } = await agreeing(
       trace.map((t) => t[at]),
       async (rpc, k, gate) => {
-        const [x] = await ask(rpc, [{ method: "debug_traceTransaction", params: [sale.hash, tracer] }], gate);
+        const [x] = await ask(rpc, calls, gate);
         const r = (x as { result?: unknown } | null)?.result;
         if (r === undefined || r === null) return refuse("rpc_error", `trace provider ${k + 1} answered no trace of the trade`);
         return of(r);
       },
       (x, y) => JSON.stringify(x) === JSON.stringify(y),
       () => refuse("rpc_disagree", `the trace providers answer the trade ${sale.hash}'s trace differently`),
+      true,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      roomOf(calls),
     );
     return a;
   };
@@ -5610,16 +5949,23 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   // the trade's own transaction and receipt name one place in one block
   if (sale.index !== sale.rcIndex) return [];
   // 2. the sale's block: its parent, number and time, the same on two providers
+  const blkCalls: EvmRpcCall[] = [{ method: "eth_getBlockByHash", params: [sale.blockHash, false] }];
   const { a: blk } = await agreeing(
     rpcs,
     async (rpc, k, gate) => {
       const who = `provider ${k + 1}`;
-      const [b] = await askAt(rpc, [{ method: "eth_getBlockByHash", params: [sale.blockHash, false] }], gate);
+      const [b] = await askAt(rpc, blkCalls, gate);
       const r = resultOf(b, who, "block of the sale");
       return { hash: str(r, "hash", who), number: num(r, "number", who), timestamp: num(r, "timestamp", who), parentHash: str(r, "parentHash", who), baseFeePerGas: num(r, "baseFeePerGas", who), mixHash: str(r, "mixHash", who) };
     },
     (x, y) => JSON.stringify(x) === JSON.stringify(y),
     () => refuse("rpc_disagree", `the providers answer the sale's block ${sale.blockHash} differently`),
+    true,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    roomOf(blkCalls),
   );
   if (blk.hash !== sale.blockHash || BigInt(blk.number) !== BigInt(sale.blockNumber) || !/^0x[0-9a-f]{64}$/.test(blk.parentHash)) return [];
   // the trade's own gas, less its authorizations' intrinsic cost, which an eth_call with no authorization list does not
@@ -5639,11 +5985,12 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   const sysSlots = evmSystemSlotsOf(chain, BigInt(blk.number), BigInt(blk.timestamp)).flatMap(([a, ss]) => ss.map((s) => [a, "0x" + word(s)] as const));
   const sys: Record<string, { stateDiff: Record<string, string> }> = {};
   if (sysSlots.length > 0) {
+    const slotCalls: EvmRpcCall[] = sysSlots.map(([a, s]) => ({ method: "eth_getStorageAt", params: [a, s, { blockHash: blk.hash, requireCanonical: true }] }));
     const { a: words } = await agreeing(
       rpcs,
       async (rpc, k, gate) => {
         const who = `provider ${k + 1}`;
-        const got = await askAt(rpc, sysSlots.map(([a, s]) => ({ method: "eth_getStorageAt", params: [a, s, { blockHash: blk.hash, requireCanonical: true }] })), gate);
+        const got = await askAt(rpc, slotCalls, gate);
         return got.map((g) => {
           const r = (g as { result?: unknown } | null)?.result;
           if (typeof r !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(r)) return refuse("rpc_error", `${who} answered a system slot of the sale's block with no word`);
@@ -5652,6 +5999,12 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
       },
       (x, y) => JSON.stringify(x) === JSON.stringify(y),
       () => refuse("rpc_disagree", `the providers answer the system state of the sale's block ${blk.hash} differently`),
+      true,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      roomOf(slotCalls),
     );
     sysSlots.forEach(([a, s], i) => ((sys[a] ??= { stateDiff: {} }).stateDiff[s] = words[i]!));
   }
@@ -5685,11 +6038,18 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   const replay = async (extra: Record<string, { code: string }>): Promise<Replay> => {
     const state: Record<string, Override> = { ...base };
     for (const [a, o] of Object.entries({ ...asW, ...extra })) state[lower(a)] = { ...state[lower(a)], ...o };
+    const calls: EvmRpcCall[] = [{ method: "eth_call", params: [call, parent, state, env] }];
     const { a } = await agreeing(
       rpcs,
-      async (rpc, k, gate) => replayOf((await askAt(rpc, [{ method: "eth_call", params: [call, parent, state, env] }], gate))[0], `provider ${k + 1}`, halt, gas),
+      async (rpc, k, gate) => replayOf((await askAt(rpc, calls, gate))[0], `provider ${k + 1}`, halt, gas),
       (x, y) => (x.ok && y.ok && x.result === y.result) || (!x.ok && !y.ok && x.data === y.data && x.halt === y.halt),
       () => refuse("rpc_disagree", "the providers answer the sale's replay differently"),
+      true,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      roomOf(calls),
     );
     return a;
   };
@@ -6070,7 +6430,7 @@ export const EVM_RPC_TIMEOUT_MS = 10_000;
  *  (pace.ts). */
 export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes = 1 << 20, timeoutMs = EVM_RPC_TIMEOUT_MS, later = false): EvmRpc {
   if (typeof url !== "string" || !/^https:\/\//.test(url)) return refuse("bad_request", "a provider URL is https");
-  const rpc: EvmRpc = async (calls, until) => {
+  const rpc: EvmRpc = async (calls, until, sent) => {
     // a batch past the most calls the provider takes (one it refused for its size, any reader's, kept for the page's
     // life: pace.ts evmBatchMost) leaves as its parts, all at once, each its own post at the provider's pace; the
     // answers come back in the calls' order, so every caller reads the same calls of the same provider
@@ -6078,7 +6438,7 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     if (calls.length > most) {
       const parts: (readonly EvmRpcCall[])[] = [];
       for (let i = 0; i < calls.length; i += most) parts.push(calls.slice(i, i + most));
-      return (await Promise.all(parts.map((p) => rpc(p, until)))).flat();
+      return (await Promise.all(parts.map((p) => rpc(p, until, sent)))).flat();
     }
     // the provider's turn at its pace, shared by every reader on the device (pace.ts); its time is not the request's
     const turn = evmPaceTake(url, calls, until, later);
@@ -6087,7 +6447,7 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     // whether the provider answered the post (any status): one that did not gives its units back as sent (pace.ts)
     let answered = false;
     try {
-      return await post(calls, until, () => void (answered = true));
+      return await post(calls, until, sent, () => void (answered = true));
     } catch (e) {
       if (!(e instanceof BatchRefused)) throw e;
       refused = e;
@@ -6096,7 +6456,7 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     }
     // refused for its size: asked again as parts of at most half (or the maximum the refusal named), never a call more
     evmBatchRefused(url, calls.length, refused.said);
-    return rpc(calls, until);
+    return rpc(calls, until, sent);
   };
   RPC_URL.set(rpc, url);
   if (later) RPC_LATER.add(rpc);
@@ -6105,12 +6465,13 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     RPC_TWIN.set(rpc, () => (twin ??= evmJsonRpc(url, fetchFn, maxBytes, timeoutMs, true)));
   }
   return rpc;
-  async function post(calls: readonly EvmRpcCall[], until?: AbortSignal, heard?: () => void): Promise<unknown[]> {
+  async function post(calls: readonly EvmRpcCall[], until?: AbortSignal, sent?: (calls: readonly EvmRpcCall[]) => void, heard?: () => void): Promise<unknown[]> {
     const body = JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params })));
     // a request that never returns is a refusal once its time runs out, never a quote (and a buy button) that hangs
     let res: Response;
     try {
       const signal = until === undefined ? AbortSignal.timeout(timeoutMs) : AbortSignal.any([AbortSignal.timeout(timeoutMs), until]);
+      sent?.(calls);
       res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal });
       heard?.();
     } catch (e) {

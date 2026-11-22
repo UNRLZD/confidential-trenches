@@ -5063,8 +5063,16 @@ test("V9 the pinned quote asks the kit's providers in their measured order: the 
     });
     return new Response(JSON.stringify(dated.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
   });
+  // the device's pool index, served and whole to the head, holds the case's pools, as the sign page's does: with none the
+  // quote's cold scan asked base-rpc.publicnode.com 192 getLogs posts, 125 at its burst and the rest at its 1.8 a second
+  // (pace.ts), and ended stale_quote at 37.8 s on the test's clock, so v1 was never accepted and the provider was ranked
+  // last by a scan post still waiting at its pace, not by its failed reads
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  evmPoolIndexReset();
   try {
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 5_000_000, pools: pools.map((q) => ({ key: q.key })) }), true);
     const v1 = await verdict(evmPoolBuyQuote(warmReq(token)));
+    assert.equal((v1 as { accepted: boolean }).accepted, true, big(v1));
     assert.equal(hostOf(quoteMod.evmRanked(p).at(-1)!), hostOf(p[0]!), `the provider that failed is ranked last (${big(v1)})`);
     reads = 0;
     const v = await verdict(evmPoolBuyQuote(warmReq(token)));
@@ -5072,6 +5080,7 @@ test("V9 the pinned quote asks the kit's providers in their measured order: the 
     assert.equal(reads, 0, "the held provider is not asked while the others agree");
   } finally {
     net.mock.restore();
+    evmPoolIndexReset();
     evmPaceReset();
   }
 }));
@@ -5197,6 +5206,35 @@ test("V12 the pair's honest provider gives no confirm (it fails, or holds no suc
   // all honest, the other head's provider failing its confirm: three of five hold the block
   const v = await buyN(v3direct, [honestNode(), honestNode("throws"), honestNode(), honestNode(), honestNode()]);
   assert.equal(big(v), big({ accepted: false, code: "below_reference" }), "read at the block, priced, refused on its own merits");
+}));
+
+// card evm-warm-tap-ends-inside-two-seconds, round (E): the other head's provider late on its confirm has the next
+// provider asked in its place (a stand-in, evmHedgeAfter); that one is a spare, so the block then needs more than half
+// the providers, as where the other head's provider fails (V12)
+test("V12H the pair's honest provider is late on its confirm: the stand-in asked in its place is a spare, and a colluding spare alone never confirms the liar's block", () => onTestClock(async () => {
+  quoteMod.evmSpeedReset();
+  const late = (): EvmRpc => {
+    const h = honestNode();
+    return async (calls) => {
+      if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] !== "latest")) {
+        await pause(10_000);
+        throw new TypeError("fetch failed");
+      }
+      return h(calls);
+    };
+  };
+  const { f, urls, idle } = hosted({
+    "l1.v12h.test": { rpc: oldNode(), ms: 1 },
+    "h1.v12h.test": { rpc: late(), ms: 5 },
+    "l2.v12h.test": { rpc: oldNode(), ms: 5 },
+    "h2.v12h.test": { rpc: honestNode(), ms: 5 },
+    "h3.v12h.test": { rpc: honestNode(), ms: 5 },
+  });
+  // each answers once, so each has its hedge time
+  const ps = quoteMod.evmProviders(urls, f);
+  await Promise.all(ps.map((p) => p([{ method: "eth_getBlockByNumber", params: ["latest", false] }])));
+  assert.equal(big(await buyN(v3direct, quoteMod.evmProviders(urls, f))), big({ accepted: false, code: "rpc_disagree" }));
+  await idle();
 }));
 
 test("V13 a head is held only when more than maxLag below the lower of the two used: a liar's old head and a lagging honest one never hold the up-to-date provider", async () => {
@@ -6511,9 +6549,10 @@ test("SP2 a first scan provider that does not answer a warm scan: the second has
       : head(calls);
   const { v, asked } = await warmPair(token, hangs);
   assert.deepEqual(v, below);
-  // the first's one getLogs was ended at the 2 s hold, never at its own 10 s timeout or the quote's 60 s bound, and
-  // never asked again
-  assert.deepEqual(why, ["rpc_error: the scan provider did not answer within 2000 ms"]);
+  // the first's one getLogs, a provider with no measured time (a model here), raced by the second from 2 s on
+  // (EVM_SCAN_HOLD_MS) and ended by the second's answer, never at its own 10 s timeout or the quote's 60 s bound, and
+  // never asked again (round F: a hedge, not a cut, SP2H)
+  assert.deepEqual(why, ["rpc_error: the next scan provider answered first"]);
   assert.deepEqual(asked, [[5_000_001, 5_000_010], [5_000_001, 5_000_010]]);
   // a cold scan the second cannot carry in one round stays on the first while it answers: its newest request, answered
   // after 2.5 s, is waited for, never passed over at 2 s
@@ -6527,6 +6566,46 @@ test("SP2 a first scan provider that does not answer a warm scan: the second has
   const cold = await pairQuote(token2, late, scanner(5_000_000, [], second));
   assert.deepEqual(cold.v, below);
   assert.equal(second.length, 0, "the second read a cold scan's blocks");
+}));
+
+test("SP2H card evm-warm-tap-ends-inside-two-seconds: a warm scan's request out past its first provider's own getLogs time from its send has the second asked for its blocks then, and the first answer whole is kept", { timeout: 30_000 }, () => onTestClock(async () => {
+  // The --record read, 2026-11-21 15:5xZ: a warm Robinhood ANT tap held 1,994 ms on daybreak's getLogs, the fixed cut,
+  // then Pocket answered in 1,673: 4,811 ms. The first here answers its getLogs in 100 ms as measured, then 1,500 ms
+  const token = "0x00000000000000000000000000000000005c45f2";
+  let logsMs = 100;
+  let firstLogsAt = -1;
+  // both providers hold the token's real pool, made at 5,000,005: either answer finds it
+  const model = scanner(5_000_010, realAt(token, 5_000_005));
+  const viaUrl = (async (_u: string | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] }[] | { id: number; method: string; params: unknown[] };
+    const list = Array.isArray(body) ? body : [body];
+    if (list.some((c) => c.method === "eth_getLogs")) {
+      if (firstLogsAt < 0 && logsMs > 100) firstLogsAt = performance.now();
+      await pause(logsMs);
+    }
+    const out = (await model(list.map((c) => ({ method: c.method, params: c.params })))) as { result?: unknown; error?: unknown }[];
+    const ans = out.map((r, i) => ({ ...r, jsonrpc: "2.0", id: list[i]!.id }));
+    return new Response(JSON.stringify(Array.isArray(body) ? ans : ans[0]), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const first = quoteMod.evmProviders(["https://first.sp2h.test", "https://other.sp2h.test"], viaUrl)[0]!;
+  const logs = { method: "eth_getLogs", params: [{ address: NATIVE, fromBlock: "0x1", toBlock: "0x1", topics: [] }] };
+  for (let i = 0; i < 3; i++) await first([logs, logs]);
+  logsMs = 1_500;
+  const inner = scanner(5_000_010, realAt(token, 5_000_005));
+  let secondLogsAt = -1;
+  const second: EvmRpc = async (calls) => {
+    if (secondLogsAt < 0 && calls.some((c) => c.method === "eth_getLogs")) secondLogsAt = performance.now();
+    return inner(calls);
+  };
+  const warm = scanner(5_000_000, []);
+  quoteMod.evmScanTailAlias(first, warm);
+  await pairQuote(token, warm, scanner(5_000_000, []));
+  const { v } = await pairQuote(token, first, second, "base", 5_000_010);
+  assert.deepEqual(v, below);
+  assert.ok(firstLogsAt >= 0 && secondLogsAt >= 0, `the first's getLogs at ${firstLogsAt}, the second's at ${secondLogsAt}`);
+  // asked at the first's own time (EVM_HEDGE_MS's 400 ms, its 100 ms measured below it), never the fixed 2 s cut
+  const after = secondLogsAt - firstLogsAt;
+  assert.ok(after >= 300 && after < 1_000, `the second was asked ${Math.round(after)} ms after the first's send`);
 }));
 
 test("SP3 a first scan provider that answers no logs from behind the head: the second's answer counts; one that answers an error for blocks it holds: never the second's", { timeout: 30_000 }, async () => {
@@ -7074,8 +7153,17 @@ test("SP6 a first scan provider whose head read takes 2.5 s: the head is the sec
     return inner(calls);
   };
   const second: [number, number][] = [];
-  const { v } = await pairQuote(token, slowHead, scanner(5_000_000, realAt(token, 4_999_000), second));
+  const secondModel = scanner(5_000_000, realAt(token, 4_999_000), second);
+  // the head read is the one fast ask the scan still cuts at EVM_SCAN_HOLD_MS (its logs are raced, SP2H): the head is
+  // the second's, read once the first's is cut at 2 s, never waited for to 2.5 s
+  let secondHeads = 0;
+  const secondRpc: EvmRpc = async (calls) => {
+    if (calls.some((c) => c.method === "eth_blockNumber")) secondHeads++;
+    return secondModel(calls);
+  };
+  const { v } = await pairQuote(token, slowHead, secondRpc);
   assert.deepEqual(v, below);
+  assert.ok(secondHeads > 0, "the head was the first's, waited for past the 2 s cut");
   assert.ok(firstLogs.length > 0, "the first was asked no getLogs");
   assert.equal(second.length, 0, `the second read ${second.length} of a cold scan's requests`);
 }));

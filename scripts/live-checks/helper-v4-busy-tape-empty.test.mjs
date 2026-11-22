@@ -5,6 +5,7 @@
 // row, a tape still filling, a 503: FAIL; two RPCs not alike, a chain with no tape judged: INCONCLUSIVE.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { test } from "node:test";
 import { BASE_VENUES, ROBINHOOD_VENUES, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
 import { CHAINS, judge, LAG_S, SWAP } from "./helper-v4-busy-tape-empty.mjs";
@@ -82,4 +83,28 @@ test("a tape of another pool (the coin's busiest of a quote of ours) is shown, n
   const r = judge(run);
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
   assert.ok(r.lines.some((l) => /another pool's/.test(l)));
+});
+
+test("planted: a swap the pool's hook sent itself (fees it sold) inside the tape's blocks is no trade: PASS; a key that does not hash to the id proves no hook: FAIL", () => {
+  // live run 44989861313: Robinhood 0x94641b97's pool 0x338fce55, its hook 0xe5e70264's own sale of its fee coins in tx
+  // 0xc25ae71f was counted as a swap missing from the tape
+  const { keccak_256 } = createRequire(new URL("../../apps/helper/package.json", import.meta.url))("@noble/hashes/sha3.js");
+  const HOOK = "0xe5e702641e000000000000000000000000000000";
+  const key = { currency0: "0x0000000000000000000000000000000000000000", currency1: MOW, fee: 0, tickSpacing: 200, hooks: HOOK };
+  const w = (a) => a.slice(2).padStart(64, "0");
+  const n = (x) => x.toString(16).padStart(64, "0");
+  const id = `0x${Buffer.from(keccak_256(Buffer.from(w(key.currency0) + w(key.currency1) + n(key.fee) + n(key.tickSpacing) + w(key.hooks), "hex"))).toString("hex")}`;
+  const run = copy(A.good);
+  const c = mow(run);
+  c.pool = id;
+  c.key = key;
+  const at = c.reads[0].logs[3];
+  for (const r of c.reads) r.logs.push({ tx: `0x${"cd".repeat(32)}`, b: at.b, ts: at.ts, s: HOOK });
+  const r = judge(run);
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => /1 swaps its hook sent itself left out/.test(l)), r.lines.join("\n"));
+  c.key = { ...key, tickSpacing: 60 };
+  const off = judge(run);
+  assert.equal(off.verdict, "FAIL");
+  assert.match(bad(off).join("\n"), /1 missing/);
 });

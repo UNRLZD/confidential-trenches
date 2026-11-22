@@ -25,6 +25,10 @@ const BUY = "src/trade/evm/buy.ts";
 const BUYU = "src/trade/evm/buy-unpinned.ts";
 const Q = "test/evm-quote.test.ts";
 const R = "test/evm-quote-attacks.test.ts";
+const PR = "test/evm-pair-rank.test.ts";
+const HP = "test/evm-hung-post.test.ts";
+const FH = "test/evm-quote-follow-hung.test.ts";
+const HC = "test/evm-hedge-clock.test.ts";
 const H = "test/evm-quote-head.test.ts";
 // a real cold and warm Robinhood quote's answers, replayed (card evm-quote-gas-used, review of e9b54f71, P2)
 const RP = "test/evm-quote-gas-used-replay.test.ts";
@@ -220,7 +224,7 @@ export const MUTANTS = [
   // a fast request held at a slot when another request's Retry-After lands (the chain's tail read beside a `later` one,
   // after the answer): SP4's warm request is refused by its hold before it reaches the gate's slot
   [QUOTE, "      if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw", "      if (false) throw", R, "SP4b "],
-  [QUOTE, "    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP2 "],
+  [QUOTE, "    const left = fast && hedge === undefined ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP6 "],
   [QUOTE, "  const fast = second !== undefined && jobs.reduce(", "  const fast = second !== undefined && 0 * jobs.reduce(", R, "SP2 "],
   [QUOTE, "    const top = p === null;", "    const top = false;", R, "SP3 "],
   // review of 22e29c9, B2: the block check on the request up to the head alone; since card evm-rpc-spare-list a not-yet
@@ -240,7 +244,7 @@ export const MUTANTS = [
   [QUOTE, "    if (fast && on.next !== undefined) throw new ScanRefused(", "    if (false) throw new ScanRefused(", R, "SP5 "],
   // card evm-rpc-spare-list: a request the second fails goes to the third, the head too; a 5xx passes on at once; a
   // not-yet block is asked again whole; a one-call batch's bare answer is read
-  [QUOTE, "      await settle(rest.map(run));", "      await settle(rest.map((r) => one(r)));", R, "SL1 "],
+  [QUOTE, "      await settle(rest.map((r) => run({ ...r, into: j.into })));", "      await settle(rest.map((r) => one({ ...r, into: j.into })));", R, "SL1 "],
   [QUOTE, "(o.next === undefined ? Promise.reject(e) : headFrom(o.next))", "(o.next === undefined || o !== firstOn ? Promise.reject(e) : headFrom(o.next))", R, "SL1 "],
   // re-anchored (card evm-unreachable-moves-on): the 5xx test is serverFault's since card evm-5xx-holds-the-provider-
   // for-the-round; SL1 passes on it (the request still reaches the next after its tries), SP5xx does not
@@ -267,7 +271,9 @@ export const MUTANTS = [
   // review of 2afa8b6 (fold 8): every held pool and X priced at the user's amount within fixed-order bounds that never
   // refuse; a hooked route counts at the lower of its hook replaced and as it is; unlisted v4 middles of a device quote
   // build; scans as ORs within a provider's span; 429s asked again; each provider at most its limit at once
-  [QUOTE, "    if (!out.some(notYet) || i === 3) return out;", "    return out;", R, "R10 "],
+  [QUOTE, "    if (!out.some(notYet) || i === 3 || gate?.done?.() === true) return out;", "    return out;", R, "R10 "],
+  // card evm-warm-tap-ends-inside-two-seconds: a seat whose round is agreed is asked again for a not-yet answer (Q6)
+  [QUOTE, "    if (!out.some(notYet) || i === 3 || gate?.done?.() === true) return out;", "    if (!out.some(notYet) || i === 3) return out;", "test/evm-quorum.test.ts", "Q6 "],
   [QUOTE, "for (const { k, id } of ordered) {", "for (const { k, id } of [] as typeof ordered) {", R, "N1a "],
   [QUOTE, "    if (startsBuy(f.other) && f.quotes.length === 0 && can(f, amountIn)) f.quotes.push(", "    if (false) f.quotes.push(", R, "A1 "],
   // (no mutant reads `found` for `held` here: a buy's pool the PoolManager does not hold reads a price of 0, which the
@@ -301,7 +307,7 @@ export const MUTANTS = [
   [QUOTE, "[rankClass(u, now), cost(u), k] as const;", "[0, cost(u), k] as const;", R, "V4 "],
   [QUOTE, "late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);", "0);", R, "V4 "],
   [QUOTE, "|| evmProviderHeld(u, now) ? 2 : late", "|| evmProviderHeld(u, now) ? 1 : late", R, "V4 "],
-  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) s.ms", "      s.ms", R, "V4 "],
+  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) {", "      {", R, "V4 "],
   // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
   // is agreed again without it; a 200 carrying a state error holds its provider in the ranking
   [QUOTE, "    if (!(await behind(got.block))) return got;\n    if (got.low === undefined) {", "    return got;\n    if (got.low === undefined) {", R, "LH1 "],
@@ -325,12 +331,34 @@ export const MUTANTS = [
   [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ3 "],
   [QUOTE, "!reverted(a) && /request limit", "/request limit", R, "RQ4 "],
   [QUOTE, "      await res.body?.cancel().catch(() => {});\n", "", R, "LQ3 "],
-  [QUOTE, "      else if (!out.some(notYet)) s.ms", "      else s.ms", R, "LQ4 "],
+  [QUOTE, "      else if (!out.some(notYet)) {", "      else {", R, "LQ4 "],
   [QUOTE, "|too many requests|exceeded its compute units per second/i", "|too many requests/i", R, "LQ5 "],
   [QUOTE, "const need = Math.floor(Math.max(of, list.length) / 2) + 1;", "const need = Math.floor(list.length / 2) + 1;", R, "LM2 "],
   [QUOTE, "    if (rest.length < 2) return got;", "", R, "LL4 "],
   [QUOTE, "(waitFrom ??= (a.mono ?? monotonic)())", "(a.mono ?? monotonic)()", R, "LW "],
-  [QUOTE, "      s.held = performance.now() + (e instanceof RateLimited ? throttleHoldMs(url, e.afterMs) : EVM_HOLD_MS);\n      throw e;", "      throw e;", R, "V4 "],
+  [QUOTE, "      if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held = now + (e instanceof RateLimited ? throttleHoldMs(url, e.afterMs) : EVM_HOLD_MS);\n      s.failed = now;\n      throw e;", "      s.failed = now;\n      throw e;", R, "V4 "],
+  // card evm-warm-tap-ends-inside-two-seconds, round (D): a lost post holds its provider at a stall (R4) or at its second
+  // loss within EVM_HOLD_MS (R5), never at one loss among answers (R3)
+  [QUOTE, "if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held", "if (now - s.failed < EVM_HOLD_MS) s.held", PR, "R4 "],
+  [QUOTE, "if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held", "if (s.last <= t) s.held", PR, "R5 "],
+  [QUOTE, "if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held", "if (true) s.held", PR, "R3 "],
+  // round (E): a post out past its provider's hedge time has a stand-in asked, in agreeing (H4), in the block's confirm
+  // (H1) and in the follow's pin confirm (H2); the hedge time is read from the provider's answers (H1)
+  [QUOTE, "        hedgedK[n] = true;\n        start(true, n);", "        hedgedK[n] = true;", HP, "H4 "],
+  [QUOTE, "  if (t === undefined || t.length === 0) return null;", "  return null;", HP, "H1 "],
+  [QUOTE, "        times.push(ms);\n", "", HP, "H1 "],
+  [QUOTE, "if (n + 1 < order.length && (await hedged(", "if (false && (await hedged(", HP, "H1 "],
+  [QUOTE, "const by2 = next < rpcs.length ? await hedged(", "const by2 = false ? await hedged(", FH, "H2 "],
+  // round (F): the hedge clock runs from the post's send, past its gate and pace (W1), against its own kind's time (W2);
+  // a seat's failure while its stand-in is out asks the next (W3)
+  [QUOTE, "wire: (calls) => void ((wireAt[k] = performance.now()),", "wire: (calls) => void ((wireAt[k] = sentAt[k] ?? performance.now()),", HC, "W1 "],
+  [QUOTE, "\"logs\" : calls.every((c) => c.method === \"eth_getBlockByNumber\"", "\"logs\" : \"all\" || calls.every((c) => c.method === \"eth_getBlockByNumber\"", HC, "W2 "],
+  [QUOTE, "          if (voted[seat[k]!]) {\n            gone++;", "          if (voted[seat[k]!] || Array.from({ length: started }, (_, n) => n).some((n) => n !== k && seat[n] === seat[k] && !settledK[n])) {\n            gone++;", HC, "W3 "],
+  // round (F): a warm scan request out past its provider's own getLogs time from its send has the next raced (SP2H)
+  [QUOTE, "    fast && j.on.next !== undefined ? raced(j) :", "    false ? raced(j) :", R, "SP2H "],
+  [QUOTE, "timer = setTimeout(standIn, evmHedgeAfter(url, \"logs\") ?? EVM_SCAN_HOLD_MS);", "timer = setTimeout(standIn, EVM_SCAN_HOLD_MS);", R, "SP2H "],
+  // a stand-in answering for the other head's provider is a spare's: the block then needs more than half (V12H)
+  [QUOTE, "        [order[n], order[n + 1]] = [order[n + 1]!, order[n]!];\n        if (n === 0) unsure = true;", "        [order[n], order[n + 1]] = [order[n + 1]!, order[n]!];", R, "V12H "],
   // the review of bc189de: a contested value needs more than half the listed providers, on the reads (M-1) and the
   // block's confirmation (M-2); a provider that differs from what the quote used is held; the spare's timer counts
   // from its own request (L-2); the pinned quote ranks (M14), a spare is asked while none answered (M15)
@@ -343,7 +371,7 @@ export const MUTANTS = [
   [QUOTE, "  HOLD.set(f, () => void (speedOf(url).held = performance.now() + EVM_HOLD_MS));", "", R, "V11 "],
   [QUOTE, "    const enough = () => holds >= (strict() ? need : 2);", "    const enough = () => holds >= 2;", R, "V10 "],
   [QUOTE, "    if (enough()) return against.forEach((k) => HOLD.get(list[k]!)?.());", "    if (enough()) return;", R, "V7 "],
-  [QUOTE, "        against.push(others[n]!);\n      } else holds++;", "        return refuse(\"rpc_disagree\", \"another block\");\n      } else holds++;", R, "V7 "],
+  [QUOTE, "        against.push(order[n]!);\n      } else holds++;", "        return refuse(\"rpc_disagree\", \"another block\");\n      } else holds++;", R, "V7 "],
   [QUOTE, "            first = performance.now() - (sentAt[k] ?? t0[k]!);", "            first = performance.now() - (sentAt[0] ?? t0[0]!);", R, "V8 "],
   [QUOTE, "      if (started >= 2) arm();\n", "", R, "V8 "],
   [QUOTE, "const q = await evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p, undefined, sizeOf(v, chain, \"buy\", asked.token)), fetch, later),", "const q = await evmPoolBuyQuoteWith(asked, evmProviders(p, fetch, later),", R, "V9 "],
@@ -351,18 +379,18 @@ export const MUTANTS = [
   // more than maxLag below the pair, and heads are no vote (LOW-1, U6); a contested round out of reach ends at once
   // (U1), and so does a confirm (U5)
   [QUOTE, "    const enough = () => holds >= (strict() ? need : 2);", "    const enough = () => holds >= (against.length > 0 ? need : 2);", R, "V12 "],
-  [QUOTE, "        if (n === 0) unsure = true;", "", R, "V12 "],
+  [QUOTE, "        failed ??= { e };\n        if (n === 0) unsure = true;\n", "        failed ??= { e };\n", R, "V12 "],
   [QUOTE, "    let holds = 1;\n", "    let holds = 2;\n", R, "V12 "],
   [QUOTE, "    let holds = 1;\n", "    let holds = 0;\n", R, "V3 "],
   [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => !near(x, a) && !near(x, b),", R, "V13 "],
   [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    () => false,", R, "V13 "],
   [QUOTE, "      // a head past maxLag is a missing answer, not a vote\n      false,\n", "", R, "V13 "],
-  [QUOTE, "      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails < need) return lose();\n", "", R, "V14 "],
-  [QUOTE, "      if (strict() && holds + others.length - n < need) break;\n", "", R, "V15 "],
+  [QUOTE, "      if (contested && Math.max(...got.map((x) => got.filter((y) => same(x.v, y.v)).length)) + list.length - got.length - fails - gone < need) return lose();\n", "", R, "V14 "],
+  [QUOTE, "      if (strict() && holds + order.length - n < need) break;\n", "", R, "V15 "],
   // the re-review of 47109a7: the held head's edges (E3, E4) and the confirm's early stop without a vote against (E6)
   [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => x.number + maxLag <= (a.number <= b.number ? a.number : b.number),", R, "V13 "],
   [QUOTE, "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),", "    (x, a, b) => x.number + maxLag < (a.number <= b.number ? b.number : a.number),", R, "V13 "],
-  [QUOTE, "      if (strict() && holds + others.length - n < need) break;", "      if (against.length > 0 && holds + others.length - n < need) break;", R, "V15 "],
+  [QUOTE, "      if (strict() && holds + order.length - n < need) break;", "      if (against.length > 0 && holds + order.length - n < need) break;", R, "V15 "],
   // the scan's spans: each that came back is kept, also when another failed, never past a head named beyond maxLag;
   // a throttled span is asked again whole
   [QUOTE, "  await settle(jobs.map(run)).catch((e) => failing(e));", "  await settle(jobs.map(run));", R, "J1 "],
@@ -484,9 +512,11 @@ export const MUTANTS = [
   [QUOTE, "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]))", "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [p.key]))", R, "S3c "],
   [QUOTE, "hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)]", "hops: [hopTo(x, via.key), hopTo(lower(token), p.key)]", R, "T5 "],
   [QUOTE, "    if (res.status === 429) {", "    if (false) {", R, "T7 "],
-  [QUOTE, "      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || gate?.spare?.() === true) {", "      if (true) {", R, "T7 "],
+  [QUOTE, "      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || gate?.spare?.() === true || gate?.done?.() === true) {", "      if (true) {", R, "T7 "],
   // card evm-unreachable-moves-on: a request that made no connection goes to the next at once while one is left
-  [QUOTE, " || i === 3 || gate?.spare?.() === true) {", " || i === 3 || (e instanceof RateLimited && gate?.spare?.() === true)) {", R, "FU1 "],
+  [QUOTE, " || i === 3 || gate?.spare?.() === true || gate?.done?.() === true) {", " || i === 3 || (e instanceof RateLimited && gate?.spare?.() === true) || gate?.done?.() === true) {", R, "FU1 "],
+  // card evm-warm-tap-ends-inside-two-seconds: a seat whose round is agreed is asked again after a lost connection (Q6b)
+  [QUOTE, " || i === 3 || gate?.spare?.() === true || gate?.done?.() === true) {", " || i === 3 || gate?.spare?.() === true) {", "test/evm-quorum.test.ts", "Q6b "],
   [QUOTE, "      if (i < 3 && Array.isArray(out) && out.some(limited)) throw", "      if (false) throw", R, "T7 "],
   // card evm-lag-answer-read-again: a not-yet answer goes to the next provider at once while one is left (LG5); the last
   // provider left is asked again (LG3)
@@ -1163,13 +1193,13 @@ export const MUTANTS = [
   // no deadline at the block's agreement (as at 2d9a7bd9, where it was set once the token's scan returned): the scan's
   // catch-up to the agreed block is asked again past it
   [QUOTE, "        if (deadline !== undefined) deadline.until = Number(x.block.timestamp) * 1000 + EVM_QUOTE_MAX_AGE_MS;", "", R, "QE11 "],
-  [QUOTE, 'if (e === MOVED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;', "if (e === MOVED) throw e;", R, "QE2 (buy) "],
+  [QUOTE, 'if (e === MOVED || e === DROPPED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;', "if (e === MOVED || e === DROPPED) throw e;", R, "QE2 (buy) "],
   [QUOTE, "      if (left() < 0 || resumeAt - now > left()) throw stale();\n", "", R, "QE7 "],
   [QUOTE, "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, DEADLINE.get(rpcs), scanRpcs[i]!,", "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, undefined, scanRpcs[i]!,", R, "QE7 "],
   [QUOTE, "gated(poolRpcs, v.scan?.parallel ?? 2, DEADLINE.get(rpcs))", "gated(poolRpcs, v.scan?.parallel ?? 2)", R, "QE8 "],
   // card evm-5xx-holds-the-provider-for-the-round: a provider that answers HTTP 5xx is held for the rest of its round, so
   // the round's batches queued in its gate go to the next unsent, and the scan's requests the next would be handed too
-  [QUOTE, "        late,\n        down,\n      );", "        late,\n      );", R, "FH1 "],
+  [QUOTE, "        late,\n        down,\n        roomOf(batch),\n      );", "        late,\n        undefined,\n        roomOf(batch),\n      );", R, "FH1 "],
   [QUOTE, "          if (serverFault(e)) gate?.down?.();\n          throw e;", "          throw e;", R, "FH1 "],
   [QUOTE, "            down = true;\n", "", R, "SP5xx "],
   [QUOTE, "readBoth(rpcs, block.hash, third.slice(own), v.reads, undefined, down)", "readBoth(rpcs, block.hash, third.slice(own), v.reads)", R, "FH4 "],
