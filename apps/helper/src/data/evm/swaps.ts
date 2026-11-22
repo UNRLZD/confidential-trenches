@@ -659,7 +659,9 @@ export const BACK_AT_ONCE = 4;
  *  follow (paceFor), above the CALLER_ROOM every background read leaves callers. [design: 0.6, from the same test at
  *  BACK_AT_ONCE 4: at 0.6 the worst answer stood 80 blocks and 8 s behind the head and the slowest tape filled at 43.1
  *  s; at 0.4, 110 blocks and 41.9 s; with no share kept (0.25, CALLER_ROOM's), 110 blocks and 38.7 s. The head is the
- *  bound the live checks found broken, so its margin is the one kept.] */
+ *  bound the live checks found broken, so its margin is the one kept. Kept only while a tick or an index follow runs
+ *  (freshRuns): kept between ticks too, a coin opened alone filled a tick late (8.8 s against 5.8). So kept, the 12
+ *  coins' worst answer stood 120 blocks and 11 s behind and the slowest tape filled at 42.0 s.] */
 export const FRESH_ROOM = 0.6;
 /** How long a tape's locate may wait out its provider's holds before the steps read the day (readBack). [design: 30 s:
  *  a dozen tapes' locates refused for our own rate are each sent within a few holds, and a provider refusing longer
@@ -1439,6 +1441,20 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Work that callers may share, started now: a lane of its own, foreground when its starter is, fresh when its
    *  starter is. */
   const sharedLane = (): Lane => (lanes.getStore()?.fresh === true ? freshLane() : newLane(fgNow()));
+  /** Ticks and index follows running now: FRESH_ROOM is kept for them only meanwhile, so a read back with no tick to
+   *  make room for draws as before (swaps-back-resume.test.ts: a coin opened alone, kept below FRESH_ROOM between
+   *  ticks, waited a tick to fill, 8.8 s against 5.8). */
+  let freshRuns = 0;
+  /** `work` in a fresh lane, counted in freshRuns while it runs. */
+  const freshRun = <T>(work: () => Promise<T>): Promise<T> =>
+    lanes.run(freshLane(), async () => {
+      freshRuns++;
+      try {
+        return await work();
+      } finally {
+        freshRuns--;
+      }
+    });
   /** A caller joins shared work: a foreground one lifts it to foreground, and counts its waits as its own. */
   const join = (l: Lane): void => {
     const me = lanes.getStore();
@@ -1580,12 +1596,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  PACE_PATIENT_MS when no other provider answered it (agreed's last round). False when it is not to be sent here. A
    *  foreground read (a caller's, card helper-deploy-reads-fast) also draws the CALLER_ROOM background leaves. */
   /** A draw of the provider's pace (holds.take): 0, or the ms to wait. A background read neither fresh nor a caller's (a
-   *  read back, the lists' read ahead) waits while the bucket holds no more than FRESH_ROOM besides its units, the
-   *  ticks' and the index follow's (card robinhood-tapes-inside-their-bounds-on-live). */
+   *  read back, the lists' read ahead) waits, while a tick or an index follow runs (freshRuns), as long as the bucket
+   *  holds no more than FRESH_ROOM besides its units, theirs (card robinhood-tapes-inside-their-bounds-on-live). */
   function draw(url: string, calls: number): number {
     const l = lanes.getStore();
     const p = holds.paceOf(url);
-    if (p !== undefined && l?.fg !== true && l?.fresh !== true) {
+    if (freshRuns > 0 && p !== undefined && l?.fg !== true && l?.fresh !== true) {
       const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst * (1 - FRESH_ROOM));
       const short = p.burst * FRESH_ROOM + units - holds.room(url) * p.burst;
       if (short > 0) return Math.max(1, Math.ceil((short * 1000) / p.perS));
@@ -2897,8 +2913,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   let follower: ReturnType<typeof setInterval> | null = null;
   if (index !== null && deps.tickMs !== 0) {
     // fresh: ahead of the read backs and the read ahead (freshLane)
-    void lanes.run(freshLane(), follow);
-    follower = setInterval(() => void lanes.run(freshLane(), follow), INDEX_FOLLOW_MS);
+    void freshRun(follow);
+    follower = setInterval(() => void freshRun(follow), INDEX_FOLLOW_MS);
     follower.unref();
   }
 
@@ -3617,7 +3633,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   function start(): Promise<void> {
     // a tick is the helper's own read, background whoever starts it (an open whose first read failed, a stale book)
     if (!running)
-      running = lanes.run(freshLane(), tick)
+      running = freshRun(tick)
         .catch(() => undefined)
         .finally(() => {
           running = null;
