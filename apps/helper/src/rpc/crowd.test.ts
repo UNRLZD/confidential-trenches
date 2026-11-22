@@ -108,3 +108,12 @@ test("card helper-crowd-429: two RPC clients on one keyed URL (SOLANA_HOLDERS_RP
   assert.equal(pv.p.throttled, 0, `peak ${peak(pv.p.all)} in a second`);
   assert.deepEqual(all.map((a) => a.status), Array(16).fill(200));
 });
+
+test("card sol-follow-round-draws-the-callers-share: with the background reads' half of the keyed provider's second taken, a read a caller waits on (rpc.caller: a Solana pool round a page waits for) still goes, in the callers' room, and a background read is still refused (red at 90776a37e: no caller draw, the round drew the background half)", () => {
+  const r = createRpc({ SOLANA_RPC_URL: URL_KEYED, RPC_BUDGET_SOLANA: "100,42" }, { fetch: (async () => new Response("{}", { status: 500 })) as never, now: mono });
+  let background = 0;
+  while (background < 100 && r.background("solana", URL_KEYED, "getTransaction") === 0) background++;
+  assert.ok(background > 0 && background < 100, `background reads in the second: ${background}`);
+  assert.equal(r.caller("solana", URL_KEYED, "getTransaction", "198.51.100.7"), 0, "the caller's read goes");
+  assert.ok(r.background("solana", URL_KEYED, "getTransaction") > 0, "a background read is still refused");
+});
