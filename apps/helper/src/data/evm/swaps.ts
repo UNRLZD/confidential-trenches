@@ -2288,29 +2288,42 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // the busiest pool the tape can price: one quoted in a third token only once that token's own route to USD or WETH
     // is known (quotePool), else the next (card index-evm-swaps-v4-route-tape: Base 0x86fb3335's cbBTC pool, 332 swap
     // transactions in the window, over the USDC pool an arbitrage passed through, 18)
-    let best = ranked[0]!;
+    let best: (typeof ranked)[number] | undefined;
     for (const x of ranked) {
-      if (x.c.quote.kind !== "token" || (await quotePool(x.c.quote.token)) !== null) {
+      if (await priceable(x.c)) {
         best = x;
         break;
       }
       // a busier pool whose quote's route was not read: no pool of ours for now, as a token our reads find none of is
       // answered (an empty chart and tape from our reads, the vendor's before them), asked again STALE_MS on
       // (noneShort); never the next pool kept in its place, never a 503 the coin's build without third quotes did not give
-      if (quoteUnread.has(x.c.quote.token)) {
+      if (x.c.quote.kind === "token" && quoteUnread.has(x.c.quote.token)) {
         if (noneShort.size >= POOLS_MAX) noneShort.clear();
         noneShort.add(token);
         return null;
       }
     }
+    // every pool found quoted in a token whose route our reads found none of (none at or above LIQ_MIN_USD within two
+    // pools on this chain): no pool the tape can price, so no pool of ours, answered as a token our reads find none of
+    // (an empty chart and tape from our reads, the vendor's before them), never a book of a pool no read can price, whose
+    // first read never folds and whose every open is a 503 (card index-evm-swaps-v4-route-tape: live run 44979250087,
+    // Base RALLY 0x19640000's only pool 0xd6951c4c is quoted in ELEVATE, whose one USD market is on Ethereum: 503)
+    if (best === undefined) return null;
     // no swap in the window on the pools found: a pool its factory or key confirmed is still the token's, its book's
     // price the pool's own state (markQuiet; card evm-chart-opens-without-a-vendor-call: 10 of the 20 GeckoTerminal
     // trending Base pools had no swap in the 1,500-block window, 2026-11-11 07:3xZ, and each was "none"). The list's
     // pool when it is among them, else the first in the order found (the top transfer counterparties first). A candidate
-    // read not agreed may be the main pool: no answer, never a book or "no pool" from the rest
+    // read not agreed may be the main pool: no answer, never a book or "no pool" from the rest. Of those the tape can price
+    // (priceable), as the busiest is: best is one, so one is found
     if (best.n <= 0) {
       if (missed.any) throw new Error("pools not read");
-      const i = Math.max(0, cands.findIndex((c) => c.id === hint));
+      const order = [...cands.keys()].sort((a, b) => Number(cands[b]!.id === hint) - Number(cands[a]!.id === hint) || a - b);
+      let i = best.i;
+      for (const k of order)
+        if (await priceable(cands[k]!)) {
+          i = k;
+          break;
+        }
       best = { c: cands[i]!, i, n: 0 };
     }
     // a hooked v4 pool reads the token's other v4 pools' swaps with its own (Pool.siblings), so hookTakes counts a
@@ -2343,7 +2356,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  (findPool) then decides the main pool in the background (verify, on the lists' search ahead). */
   async function mainPool(token: string, client?: string): Promise<Found | null | "unlisted"> {
     const kept = pools.get(token);
-    if (kept !== undefined && kept.found !== null && now() - kept.at < POOL_KEEP_MS) return { ...kept.found };
+    // a kept pool quoted in a third token whose route has since read as none is no pool the tape can price: searched
+    // again (findPool's rule), never a book whose first read never folds
+    if (kept !== undefined && kept.found !== null && now() - kept.at < POOL_KEEP_MS && (await priceable(kept.found.pool))) return { ...kept.found };
     // `client`: the caller whose open asks (a token no list carries is named on that caller's share, server.ts evmKnown)
     if (!(await deps.listed(token, client))) return "unlisted";
     if (kept !== undefined && kept.found === null && now() - kept.at < NONE_MS) return null;
@@ -3914,6 +3929,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Third quote token `q`'s route, held GT_POOL_FRESH_MS (null: none reaches USD or WETH above LIQ_MIN_USD within
    *  two pools); a pick not read (the vendor refused, a read not agreed) keeps the last one and is asked again a
    *  STALE_MS later. */
+  /** Whether the tape can price pool `c`'s swaps: a USD, WETH or ETH quote, or a third token once its route is known. */
+  async function priceable(c: Pool): Promise<boolean> {
+    return c.quote.kind !== "token" || (await quotePool(c.quote.token)) !== null;
+  }
   function quotePool(q: string): Promise<Route | null> {
     const held = quotePools.get(q);
     if (held !== undefined && now() - held.at < GT_POOL_FRESH_MS) return Promise.resolve(held.route);
