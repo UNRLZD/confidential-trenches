@@ -2631,8 +2631,14 @@ async function scanPools(
     // quote: TAIL7) count as read for this rule alone, and only while within maxLag of the head, the miss the kit accepts
     // for any gap; older ones are read again before the answer (independent review of c6cf1927d, HIGH 1, HIGH 2, MEDIUM
     // 3: counted read up to the margin, a pool a lagging first, or a spare whose pools no coin keeps, did not answer 110
-    // blocks before the head was missed, and the coin quoted against a seeded pool at a tenth: TAIL11, TAIL11b, TAIL11c)
-    const unread = e.tail ? gapsOf((tail0?.band ?? []).filter(([, y]) => y > head - lag).map(([x, y]): [number, number] => [Math.max(x, head - lag + 1), y]).reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
+    // blocks before the head was missed, and the coin quoted against a seeded pool at a tenth: TAIL11, TAIL11b, TAIL11c).
+    // Those within maxLag are counted read against the scan head, so they go with the read after the answer, and P2-1
+    // below counts from the first of them against the agreed block (independent review of 7ed7d86f9, H1: a band block 80
+    // blocks before an agreed block 40 past the scan head was never read again, and the coin quoted against a seeded
+    // pool, RVW3; RVW4 on a tail with kept spans, as on main)
+    const lagged: Spans = e.tail ? (tail0?.band ?? []).filter(([, y]) => y > head - lag).map(([x, y]): [number, number] => [Math.max(x, head - lag + 1), y]) : [];
+    const unread = e.tail ? gapsOf(lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
+    const laggedFrom = lagged.length > 0 ? Math.min(...lagged.map(([x]) => x)) : undefined;
     const held = (e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === "markets";
     // read to be kept on the tail: the blocks no provider answered, and those of the band now past the index's margin
     // below the head; the band's others give an answer kept for no quote, so they are read before an answer that needs
@@ -2641,10 +2647,12 @@ async function scanPools(
     const top = head - tailLag;
     const kept = e.tail ? gapsOf((tail0?.band ?? []).filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y]).reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
     if (held && e.gaps.length > 0 && unread.every(([a]) => a > head - lag)) {
-      e.later = kept;
+      e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), kept);
       e.gaps = [];
-      // the first block of it no provider answered (P2-1 below counts those alone)
-      if (e.tail && unread.length > 0) e.laterFrom = unread[0]![0];
+      // the first block of it no provider answered, or the band's counted read within maxLag (P2-1 below counts those
+      // alone)
+      const from = Math.min(unread[0]?.[0] ?? Infinity, laggedFrom ?? Infinity);
+      if (e.tail && from !== Infinity) e.laterFrom = from;
     } else if (e.tail && held && unread.length > 0) {
       // unread past maxLag: each unread span that starts more than maxLag before the head is read before the answer (the
       // band within maxLag counts as read here as above), and one that starts within it right after, as any gap within
@@ -2652,9 +2660,9 @@ async function scanPools(
       // the band's past the margin go with the read after it (a Robinhood quote 31 s after the last read the margin's
       // 7,119 blocks with the 547 new ones before its answer, where main read the 547)
       const now = unread.filter(([a]) => a <= head - lag);
-      e.later = gapsOf(now.reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(kept, floor, head)), floor, head);
+      e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(now.reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(kept, floor, head)), floor, head));
       e.gaps = now;
-      e.laterFrom = unread.find(([a]) => a > head - lag)?.[0] ?? head + 1;
+      e.laterFrom = Math.min(unread.find(([a]) => a > head - lag)?.[0] ?? head + 1, laggedFrom ?? head + 1);
     }
   }
   // the currencies with the same blocks left share each request
@@ -3078,7 +3086,16 @@ async function scanPools(
     TAIL_READING.set(tail0, reading);
     const key = `${j.a}:${j.b}`;
     const led = reading.get(key);
-    if (led !== undefined) return led.then((gs) => (gs !== null && gapsOf(gs.reduce<Spans>((sp, g) => withSpan(sp, g.a, g.b), []), j.a, j.b).length === 0 ? void got.push(...gs.map((g) => ({ ...g, part: j.part }))) : run(j)));
+    // the taker waits EVM_SCAN_HOLD_MS for it at most, as a warm request waits for its provider before the next is asked
+    // (independent review of 7ed7d86f9, M1: a taker had no bound of its own); past it, it reads the blocks itself
+    if (led !== undefined) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const held = new Promise<null>((ok) => (timer = setTimeout(() => ok(null), EVM_SCAN_HOLD_MS)));
+      return Promise.race([led, held]).then((gs) => {
+        clearTimeout(timer);
+        return gs !== null && gapsOf(gs.reduce<Spans>((sp, g) => withSpan(sp, g.a, g.b), []), j.a, j.b).length === 0 ? void got.push(...gs.map((g) => ({ ...g, part: j.part }))) : run(j);
+      });
+    }
     const sent = run(j);
     const answer = sent.then(
       () => got.filter((g) => g.a >= j.a && g.b <= j.b && j.part.every((e) => g.part.includes(e))).map(({ a, b, logs, spare }) => ({ a, b, logs, spare })),
