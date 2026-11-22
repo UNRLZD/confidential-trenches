@@ -96,6 +96,9 @@ test("refuses a share, a budget or the holds on the default clock, lets a still 
     "upstreamBudget with no clock": "const b = upstreamBudget(() => ({ total: 2, perClient: 1 }));",
     "providerHolds with no clock": "const holds = providerHolds();",
     "after an onVirtualTime that has ended": "await onVirtualTime(0, async () => x());\nconst r = createRpc(ENV, { fetch });",
+    // card helper-pacer-on-the-clients-clock: the pace's waits on the machine's monotonic clock
+    "createPacer with no clock": "const pacer = createPacer();",
+    "createPacer with no clock, handed to a clocked createRpc": "const r = createRpc(ENV, { now: STILL, sleep, pacer: createPacer() });",
   };
   for (const [name, src] of Object.entries(REFUSED_SHARES)) assert.equal(shareFindings(src).length, 1, name);
   const ALLOWED_SHARES = {
@@ -103,6 +106,7 @@ test("refuses a share, a budget or the holds on the default clock, lets a still 
     "a test clock by shorthand": "let clock = 0;\nconst now = () => clock;\nconst r = createRpc(ENV, { fetch, now, sleep });",
     "a deps object that names its clock": "const deps = {\n  fetch: fetch as never,\n  now: () => clock,\n  sleep: async (ms: number) => { clock += ms; },\n};\nconst r = createRpc(BASE_ENV, w.deps);",
     "clientWindow and upstreamBudget given a clock": "const w = clientWindow(10, () => t);\nconst b = upstreamBudget(limits, STILL);",
+    "createPacer given a clock, alone and as a module's": "const pacer = createPacer(() => t);\nconst r = createRpc(ENV, { now: p.now, pacer: M.createPacer(() => p.c.t) });",
     "providerHolds given a clock": "const holds = providerHolds(() => clock, PACE);",
     "inside onVirtualTime": "await onVirtualTime(1_000_000_000, async () => {\n  const r = createRpc(ENV, { fetch });\n  const h = providerHolds();\n});",
     "the function itself, a comment, a string": "export function createRpc(env, deps = {}) {}\n// createRpc(ENV) was the old form\nconst s = 'providerHolds()';",

@@ -364,8 +364,8 @@ export function createPacer(clock: () => number = () => performance.now()) {
      * When `n` sends to `url` may go so that no PACE_SECOND_MS holds more than `perSecond` of them, `fromMs` from now
      * on (a hold's end) and after every send booked before (first come, first sent), `share` the most of a second's
      * room these may fill (a background read: half, so a caller always finds the rest). Booked when within `maxWaitMs`
-     * (and `book`), else only named: the ms to wait. Every time here is the process's monotonic clock
-     * (performance.now), never the wall clock: on the box Date.now() stepped back 0.5 s and 8 s inside a test (traced
+     * (and `book`), else only named: the ms to wait. Every time here is `clock`: createRpc's `now`, by default the
+     * process's monotonic clock (performance.now), never the wall clock: on the box Date.now() stepped back 0.5 s and 8 s inside a test (traced
      * 4 Nov 22:14Z), and bookings on it let 11 sends into one real second, then refused callers for the step's length.
      */
     at(url: string, n: number, perSecond: number, opts: { fromMs?: number; maxWaitMs: number; share?: number; book?: boolean }): number {
@@ -1238,7 +1238,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     budget.hold(c, now() + seconds * 1000, whose === "background");
     log(`rpc hold ${c} ${whose} ${budget.heldFor(c, whose === "background")} s${shapeTail()}`);
   };
-  const pacer = deps.pacer ?? createPacer();
+  // the pacer on the client's own clock, as its holds and budgets (card helper-pacer-on-the-clients-clock): on the machine's
+  // monotonic clock beside a test's `now`, a paced burst slept on the test's clock and asked its wait again until the
+  // machine's second passed (test pacer-clock.test.ts: the sixth send 5.4 s of the test's clock on, where 1 s)
+  const pacer = deps.pacer ?? createPacer(now);
   /** Each keyed URL's secret forms, whatever chain it serves: an answer holding any of them is never kept. */
   // card helper-solana-off-a-spent-key: route A's candidates (aCandidates: the Solana slots, then the keyed spares)
   const aKeyed = aCandidates(env);
