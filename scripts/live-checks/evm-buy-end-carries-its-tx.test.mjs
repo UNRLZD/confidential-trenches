@@ -92,7 +92,7 @@ const SIGN_TEXT = [
 const APP_TEXT = [
   "function GS(e,t,n,r,i){if(n===`sent`&&e.id===t&&US(e))return WS(e);let a=i?.[0]?.hash,o=KS(e,t,n,a,r);return a?HS(o,{t:`tx`,id:t,tx:a}):o}",
   "e.stage===`part_filled`?{k:`partial`,reason:null}:e.stage===`owed_back`?{k:`owedBack`,reason:null}:{k:`failed`,reason:Lh(e.code)}",
-  "e.k===`ended`&&e.stage===`refused`&&e.id===t&&n===`owed_back`?{k:`ended`,id:t,at:e.at,stage:n}:!Dh(e)||e.id!==t",
+  "e.k===`ended`&&e.stage===`refused`&&e.id===t?n===`filled`?{k:`filled`,id:t,at:e.at,ms:Math.max(0,r-e.at)}:n===`part_filled`||n===`owed_back`?{k:`ended`,id:t,at:e.at,stage:n}:e:!Fh(e)||e.id!==t",
   "ended`&&e.stage!==`part_filled`&&e.stage!==`owed_back`&&!Rh(e);",
 ].join("\n");
 
@@ -131,11 +131,20 @@ test("near misses: the shapes before this card, or one piece cut, are refused", 
   without("sign", SIGN_TEXT.replace(",`not_landed`,`owed_back`])", ",`not_landed`])"), NAMES.sign[7]);
   without("sign", SIGN_TEXT.replace("progress:(e,t)=>(c(`swap`,{stage:e}),r.progress(e,t))", "progress:e=>(c(`swap`,{stage:e}),r.progress(e))"), NAMES.sign[8]);
   without("sign", SIGN_TEXT.replace("r.progress(e,t))", "r.progress(t,e))"), NAMES.sign[8]);
-  // the app: the end's tx never reaches the route, owed_back not its own end, a late owed_back left as Failed, Retry
-  // shown on owed back
+  // the app: the end's tx never reaches the route, owed_back not its own end, Retry shown on owed back
   without("app", APP_TEXT.replace("let a=i?.[0]?.hash,o=KS(e,t,n,a,r);return a?HS(o,{t:`tx`,id:t,tx:a}):o", "return KS(e,t,n,void 0,r)"), NAMES.app[0]);
   without("app", APP_TEXT.replace("e.stage===`owed_back`?{k:`owedBack`,reason:null}:", ""), NAMES.app[1]);
-  without("app", APP_TEXT.replace("e.k===`ended`&&e.stage===`refused`&&e.id===t&&n===`owed_back`?{k:`ended`,id:t,at:e.at,stage:n}:", ""), NAMES.app[2]);
-  without("app", APP_TEXT.replace("&&e.id===t&&n===`owed_back`", "&&n===`owed_back`"), NAMES.app[2]);
+  // a refused buy's late end (card evm-buy-late-fill-reaches-app): the rule cut, its owed_back move dropped, its late
+  // filled dropped or left as Failed, part filled dropped, another id's end taken, or the refusal not kept for any other
+  // stage
+  without("app", APP_TEXT.replace("e.k===`ended`&&e.stage===`refused`&&e.id===t?n===`filled`?{k:`filled`,id:t,at:e.at,ms:Math.max(0,r-e.at)}:n===`part_filled`||n===`owed_back`?{k:`ended`,id:t,at:e.at,stage:n}:e:", ""), NAMES.app[2]);
+  without("app", APP_TEXT.replace("n===`part_filled`||n===`owed_back`?", "n===`part_filled`?"), NAMES.app[2]);
+  without("app", APP_TEXT.replace("n===`filled`?{k:`filled`,id:t,at:e.at,ms:Math.max(0,r-e.at)}:", ""), NAMES.app[2]);
+  without("app", APP_TEXT.replace("n===`filled`?{k:`filled`,", "n===`filled`?{k:`ended`,"), NAMES.app[2]);
+  without("app", APP_TEXT.replace("n===`part_filled`||n===`owed_back`?", "n===`owed_back`?"), NAMES.app[2]);
+  without("app", APP_TEXT.replace("&&e.id===t?n===`filled`", "?n===`filled`"), NAMES.app[2]);
+  without("app", APP_TEXT.replace("stage:n}:e:!Fh(e)", "stage:n}:{k:`ended`,id:t,at:e.at,stage:n}:!Fh(e)"), NAMES.app[2]);
+  // the same rule written as ifs passes
+  assert.ok(marksIn("app", "if(e.k===`ended`&&e.stage===`refused`&&e.id===t){if(n===`filled`)return{k:`filled`,id:t,at:e.at,ms:Math.max(0,r-e.at)};if(n===`part_filled`||n===`owed_back`)return{k:`ended`,id:t,at:e.at,stage:n};return e}").includes(NAMES.app[2]));
   without("app", APP_TEXT.replace("&&e.stage!==`owed_back`", ""), NAMES.app[3]);
 });

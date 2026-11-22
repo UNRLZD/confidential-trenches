@@ -225,6 +225,26 @@ test("card sol-meteora-tape-inside-rpc-budget: every sampled coin cut fails, nam
   assert.equal(check.cutOf({ headers: { "server-timing": "sol-whole-cut;desc=\"a Meteora trade unread 0 s ago\", total;dur=3" } }), 'sol-whole-cut;desc="a Meteora trade unread 0 s ago"');
 });
 
+// card solana-flooded-coin-first-answer-holds-rows: past the budget the helper serves a coin its own rows, filling, the cut
+// named and no reach (whole_ms) while the cut lasts. A cut answer that names a reach claims every trade from then on while
+// one is unread: BAD. rolled_try4's DLMM cut coins name none (its DLMM venue judged ok, above); the same run with one cut
+// answer naming a reach fails on DLMM.
+test("card solana-flooded-coin-first-answer-holds-rows: a cut answer naming a reach (whole_ms) fails; one naming none is skipped", () => {
+  const m = structuredClone(A.rolled_try4.meteora);
+  const v = "meteora-dlmm";
+  assert.ok(m.cut[v].length > 0, "the recorded run holds cut DLMM coins");
+  assert.ok(m.cut[v].every((c) => c.whole_ms === undefined), "the recorded cuts name no reach");
+  assert.deepEqual(bad(check.judgeMeteora(m)).filter((l) => l.includes(v)), []);
+  m.cut[v][0].whole_ms = 1795011901000;
+  const r = check.judgeMeteora(m);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l.startsWith(`BAD ${v}: `) && l.includes("named the cut") && l.includes("whole_ms 1795011901000")), bad(r).join("\n"));
+  // the reach read off an answer's body, null when it names none or is not JSON
+  assert.equal(check.wholeOf({ body: JSON.stringify({ trades: [], filling: true, src: "chain" }) }), null);
+  assert.equal(check.wholeOf({ body: JSON.stringify({ trades: [], whole_ms: 5, src: "chain" }) }), 5);
+  assert.equal(check.wholeOf({ body: "busy" }), null);
+});
+
 // card sol-meteora-tape-inside-rpc-budget: GET /v1/market/trades takes a limit only (at most 50), so a found trade its
 // coin's tape no longer answers for is skipped and named in `rolled`, never judged missing: one older than the 50 rows, or
 // older than the reach the answer names (whole_ms). rolled_try4: the check's readMeteora at 8ddec0fe2 against a local

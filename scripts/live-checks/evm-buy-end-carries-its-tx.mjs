@@ -14,7 +14,8 @@
 //     trace: the review of 167d9deea found both passing the stage alone, so the end still reached the app with no tx);
 //   - APP_HOST: the trade box takes an end stage's transaction into the fill toast's link (route.ts fromProgress), and
 //     ends a buy at owed_back with its own line and no Retry (model.ts endView, showsRetry), a refused buy of the same id
-//     too when its late end is owed_back (model.ts progress).
+//     too when its late end is owed_back (model.ts progress), and Filled or part filled when its late end is that
+//     (card evm-buy-late-fill-reaches-app); any other late stage leaves it refused.
 // The behaviour is the packages' own tests: packages/kit/test/signpage-client.test.mjs, packages/signpage/test/
 // pool-buy-evm-kind.test.ts, pool-buy-evm.test.ts, pool-sell-evm.test.ts, api.test.ts, kit-version.test.ts, and
 // apps/terminal/test/buy-route.test.ts and trade-states.test.ts. Mainnet only: no testnet run of any kind.
@@ -56,7 +57,10 @@ export const MARKS = {
     ["an end stage's tx fills the toast's link", new RegExp(`\\?\\.\\[0\\]\\?\\.hash,${ID}=${ID}\\(${ID},${ID},${ID},${ID},${ID}\\);return ${ID}\\?${ID}\\(${ID},\\{t:${Q}tx${Q},id:${ID},tx:${ID}\\}\\):${ID}`, "g"), 1],
     // endView's chained answer, as an if or a ternary
     ["owed_back ends a buy as owed back", new RegExp(`\\.stage===${Q}owed_back${Q}(?:\\)return|\\?)\\{k:${Q}owedBack${Q},reason:null\\}`, "g"), 1],
-    ["a late owed_back moves a refused buy to owed back", new RegExp(`(${ID})\\.k===${Q}ended${Q}&&\\1\\.stage===${Q}refused${Q}&&\\1\\.id===(${ID})&&(${ID})===${Q}owed_back${Q}(?:\\)return|\\?)\\{k:${Q}ended${Q},id:\\2,at:\\1\\.at,stage:\\3\\}`, "g"), 1],
+    // a refused buy's late end of the same id (card evm-buy-late-fill-reaches-app: filled and part_filled beside owed_back,
+    // the review of 167d9deea's): filled is Filled from the tap, part filled and owed back their own end, anything else
+    // leaves the buy as it is
+    ["a refused buy's late owed_back, part filled or filled moves it; nothing else does", new RegExp(`(${ID})\\.k===${Q}ended${Q}&&\\1\\.stage===${Q}refused${Q}&&\\1\\.id===(${ID})(?:\\)\\{if\\(|\\?)(${ID})===${Q}filled${Q}(?:\\)return|\\?)\\{k:${Q}filled${Q},id:\\2,at:\\1\\.at,ms:Math\\.max\\(0,${ID}-\\1\\.at\\)\\}(?:;if\\(|:)\\3===${Q}part_filled${Q}\\|\\|\\3===${Q}owed_back${Q}(?:\\)return|\\?)\\{k:${Q}ended${Q},id:\\2,at:\\1\\.at,stage:\\3\\}(?:;return |:)\\1(?![\\w$.])`, "g"), 1],
     ["owed back shows no Retry", new RegExp(`\\.stage!==${Q}part_filled${Q}&&${ID}\\.stage!==${Q}owed_back${Q}&&`, "g"), 1],
   ],
 };

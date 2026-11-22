@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { fromLogs } from "./decode.ts";
 import { joinBars } from "../candles.ts";
-import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, FAILED_OPEN_MS, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, SYSVAR_CLOCK, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
+import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, FAILED_OPEN_MS, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, SHORT_PAGE, SYSVAR_CLOCK, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { b58decode, b58encode } from "./lists.ts";
 import { turnSlicer } from "../../limits/turn.ts";
@@ -985,9 +985,100 @@ test("card solana-tape-rows-at-first-answer: a busy token whose newest signature
   await new Promise((r) => setTimeout(r, 50));
   const all = (JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[] }).trades.map((r) => r.tx);
   assert.deepEqual(all.sort(), ok.slice(0, 30).sort(), "the newest successful transactions, at most COLD_SIGS");
-  assert.deepEqual(f.asked, [30, 1_000], "one more signature page, of Solana's largest size, only past a first page of failed ones");
+  // card solana-flooded-coin-first-answer-holds-rows: with none successful in the first page, a SHORT_PAGE beside it
+  assert.deepEqual(f.asked, [30, SHORT_PAGE, 1_000], "one more signature page, of Solana's largest size, only past a first page of failed ones");
   assert.equal(tx(), ok.slice(0, 30).length, "a transaction read for each successful one only");
   t.stop();
+});
+
+// card solana-flooded-coin-first-answer-holds-rows: helper update 22's live run 45011614034 opened 5o7AFuoN...pump cold, 1
+// of its newest 30 signatures successful, and answered 0 rows at its bound: the walk read that one only after the
+// COLD_PAGE before it was listed (1000 signatures, 235 KB: 1,599 ms from the Mac on api.mainnet-beta, 22 Nov 12:2xZ).
+test("card solana-flooded-coin-first-answer-holds-rows: a flooded coin with 1 successful in its newest 30 answers its first read with that trade, src chain, while the COLD_PAGE is still listed; the walk then holds the newest 30 successful, each read once, in the list's order (red at ef813c927: 0 rows at the bound)", async () => {
+  // as read live: the 8th newest succeeded, then one in 34 past the first page
+  const f = botFlood(1_030, (i) => i === 7 || (i >= 30 && i % 34 === 0));
+  let tx = 0;
+  let pageGo = () => {};
+  const page = new Promise<void>((go) => (pageGo = go));
+  let bound = () => {};
+  const base = rpcFetch({ sigs: f.sigs, txs: f.txs, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  const fetchFn = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string, Record<string, unknown>] };
+    if (req.method === "getTransaction") tx++;
+    // the COLD_PAGE answers only once the test lets it go, after the first answer
+    if (req.method === "getSignaturesForAddress" && req.params[1].limit === 1_000) await page;
+    return base(url, init);
+  };
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => new Promise<void>((go) => (bound = go)) });
+  const answer = t.trades(MINT, 50);
+  // the first page listed and its one successful read, the COLD_PAGE still out; then the bound
+  for (let i = 0; i < 30; i++) await settle();
+  bound();
+  const first = JSON.parse((await answer).body) as { trades: { tx: string }[]; src: string; filling?: boolean };
+  const ok = f.list.filter((s) => s.err === null).map((s) => s.signature);
+  assert.deepEqual([first.src, first.trades.map((r) => r.tx)], ["chain", [ok[0]]], "the first page's one trade at the first answer, ours");
+  assert.equal(first.filling, true, "more to come: filling");
+  pageGo();
+  for (let i = 0; i < 60; i++) await settle();
+  const all = (JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[] }).trades.map((r) => r.tx);
+  assert.deepEqual(all, ok.slice(0, 30), "the newest 30 successful, newest first: the early one above every older page's");
+  assert.deepEqual(f.asked, [30, 1_000]);
+  assert.equal(tx, 30, "each read once");
+  t.stop();
+});
+
+test("card solana-flooded-coin-first-answer-holds-rows: a flooded coin with none successful in its newest 30 lists a SHORT_PAGE beside the COLD_PAGE and answers its first read with the short page's trades, src chain, the COLD_PAGE still held; the walk then holds the newest 30 successful, each read once (red at ef813c927: 0 rows at the bound)", async () => {
+  // as CjRGc8wH...pump read in live run 43689567273: the newest 30 failed, then one in 34 succeeded
+  const f = botFlood(1_030, (i) => i >= 30 && i % 34 === 0);
+  let tx = 0;
+  let pageGo = () => {};
+  const page = new Promise<void>((go) => (pageGo = go));
+  let bound = () => {};
+  const base = rpcFetch({ sigs: f.sigs, txs: f.txs, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  const fetchFn = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string, Record<string, unknown>] };
+    if (req.method === "getTransaction") tx++;
+    if (req.method === "getSignaturesForAddress" && req.params[1].limit === 1_000) await page;
+    return base(url, init);
+  };
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => new Promise<void>((go) => (bound = go)) });
+  const answer = t.trades(MINT, 50);
+  for (let i = 0; i < 30; i++) await settle();
+  bound();
+  const first = JSON.parse((await answer).body) as { trades: { tx: string }[]; src: string };
+  const ok = f.list.filter((s) => s.err === null).map((s) => s.signature);
+  assert.deepEqual([first.src, first.trades.map((r) => r.tx)], ["chain", ok.slice(0, 3)], "the short page's three successful trades (the 35th, 69th and 103rd newest), ours, at the first answer");
+  pageGo();
+  for (let i = 0; i < 60; i++) await settle();
+  const all = (JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[] }).trades.map((r) => r.tx);
+  assert.deepEqual(all, ok.slice(0, 30), "the newest 30 successful, newest first");
+  assert.deepEqual(f.asked, [30, SHORT_PAGE, 1_000], "the short page beside the COLD_PAGE, asked first");
+  assert.equal(tx, 30, "each read once");
+  t.stop();
+});
+
+test("card solana-flooded-coin-first-answer-holds-rows: a read of a cold tape another read opened (vendor rows already held for its pool) waits for our first row inside its bound and answers src chain, not the vendor's rows at once (red at ef813c927: src coingecko at once)", async () => {
+  const c = joinedCold();
+  const opening = c.t.trades(MINT, 50);
+  for (let i = 0; i < 20 && c.asks.length === 0; i++) await settle();
+  c.asks[0]!.ok();
+  for (let i = 0; i < 10; i++) await settle();
+  c.vendorWait();
+  for (let i = 0; i < 5; i++) await settle();
+  c.bound();
+  const first = JSON.parse((await opening).body) as { src: string; filling?: boolean };
+  assert.deepEqual([first.src, first.filling], ["coingecko", true], "the opening read at its bound: the vendor's rows, filling (as before)");
+  assert.ok(c.vendorReads() > 0, "the vendor's rows held for the coin");
+  // a second read while the walk's reads are still out: it waits for our first row
+  let got: { src: string; trades: unknown[] } | null = null;
+  const next = c.t.trades(MINT, 50).then((a) => (got = JSON.parse(a.body)));
+  for (let i = 0; i < 5; i++) await settle();
+  assert.equal(got, null, "no vendor answer at once while our walk reads inside the bound");
+  c.letGo();
+  await next;
+  assert.equal(got!.src, "chain");
+  assert.ok(got!.trades.length > 0);
+  c.t.stop();
 });
 
 test("card solana-tape-rows-at-first-answer, guard: a token whose newest COLD_SIGS signatures succeeded asks its one page, as before", async () => {
