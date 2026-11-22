@@ -153,15 +153,59 @@ test("R6 two providers held: neither takes a first seat while one not held is le
   evmPaceReset();
 }));
 
-test("R7 a provider whose hold has ended is half open: after every provider not held until it answers a post, then back in its seat", () => onTestClock(async () => {
+test("R7 a provider whose hold has ended is half open: seated once as the probe before quoteLast, after every one not held while the probe is out, and back in its seat once it answers", () => onTestClock(async () => {
   evmSpeedReset();
   evmPaceReset();
   const of = await rhMeasured({ [RH_PUBLICNODE]: 150, [RH_DRPC]: 120, [RH_OWN]: 350, [RH_BLX]: 300 });
   evmProviderHold(RH_DRPC, 60_000);
   evmProviderHold(RH_BLX, 1_000);
+  await new Promise((r) => setTimeout(r, 900));
+  assert.deepEqual(evmRanked(rh.providers!), [RH_PUBLICNODE, RH_OWN, RH_DRPC, RH_BLX], "a held provider took a seat");
+  await new Promise((r) => setTimeout(r, 200));
+  // the hold over, the rest healthy: the next quote seats it once, as the probe, before Robinhood's own RPC (quoteLast)
+  assert.deepEqual(evmRanked(rh.providers!), [RH_PUBLICNODE, RH_BLX, RH_OWN, RH_DRPC], "a provider out of its hold was never probed");
+  // its probe out: after every provider not held, so no other quote seats it before the answer
+  const probe = of.get(RH_BLX)!(one);
+  assert.deepEqual(evmRanked(rh.providers!), [RH_PUBLICNODE, RH_OWN, RH_BLX, RH_DRPC], "a provider whose probe is out was seated again");
+  await probe;
+  assert.deepEqual(evmRanked(rh.providers!).slice(0, 2), [RH_PUBLICNODE, RH_BLX], "a provider whose probe answered stayed out of its seat");
+  evmPaceReset();
+}));
+
+test("R9 a half-open provider whose probe answers past its hedge time is held again, and one in time is closed", () => onTestClock(async () => {
+  evmSpeedReset();
+  evmPaceReset();
+  const ms = { [RH_PUBLICNODE]: 150, [RH_DRPC]: 120, [RH_OWN]: 350, [RH_BLX]: 300 };
+  const of = await rhMeasured(ms);
+  evmProviderHold(RH_BLX, 1_000);
   await new Promise((r) => setTimeout(r, 1_100));
-  assert.deepEqual(evmRanked(rh.providers!), [RH_PUBLICNODE, RH_OWN, RH_BLX, RH_DRPC], "a provider out of its hold took a first seat before it answered");
+  ms[RH_BLX] = 2_000;
   await of.get(RH_BLX)!(one);
-  assert.deepEqual(evmRanked(rh.providers!).slice(0, 2), [RH_PUBLICNODE, RH_BLX], "a provider that answered once out of its hold stayed out of its seat");
+  assert.equal(evmRanked(rh.providers!).at(-1), RH_BLX, "a provider whose probe answered late was closed");
+  await new Promise((r) => setTimeout(r, 31_000));
+  ms[RH_BLX] = 300;
+  await of.get(RH_BLX)!(one);
+  // closed: back among the providers not held, before Robinhood's own RPC (quoteLast), at its measured time
+  assert.deepEqual(evmRanked(rh.providers!), [RH_DRPC, RH_PUBLICNODE, RH_BLX, RH_OWN], "a provider whose probe answered in time stayed out of its seat");
+  evmPaceReset();
+}));
+
+test("R8 a half-open provider whose probe is lost is held again", () => onTestClock(async () => {
+  evmSpeedReset();
+  evmPaceReset();
+  let lose = false;
+  const fetchFn = (async (url: string | URL, init?: RequestInit) => {
+    await new Promise((go) => setTimeout(go, 100));
+    if (lose && String(url) === RH_BLX) throw new Error("the post timed out");
+    const body = JSON.parse(String(init?.body)) as { id: number }[];
+    return new Response(JSON.stringify(body.map((c) => ({ jsonrpc: "2.0", id: c.id, result: "0x1" }))), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const rpcs = evmProviders(rh.providers!, fetchFn);
+  await Promise.all(rpcs.map((r: EvmRpc) => r(one)));
+  evmProviderHold(RH_BLX, 1_000);
+  await new Promise((r) => setTimeout(r, 1_100));
+  lose = true;
+  await assert.rejects(rpcs[rh.providers!.indexOf(RH_BLX)]!(one));
+  assert.equal(evmRanked(rh.providers!).at(-1), RH_BLX, "a provider whose probe was lost was not held again");
   evmPaceReset();
 }));

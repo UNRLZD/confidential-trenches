@@ -305,7 +305,7 @@ export const MUTANTS = [
   [QUOTE, "        order.forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));", "", R, "V1 "],
   [QUOTE, "        failed ??= { e };\n        if (n === 0) unsure = true;\n        continue;", "        throw e;", R, "V3 "],
   [QUOTE, "[rankClass(u, now), cost(u), k] as const;", "[0, cost(u), k] as const;", R, "V4 "],
-  [QUOTE, "late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);", "0);", R, "V4 "],
+  [QUOTE, "late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);", "0);", "test/evm-pair-rank.test.ts", "R2 "],
   [QUOTE, "  if (till > now) return 20 + last;", "  if (till > now) return 1 + last;", R, "V4 "],
   [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) {", "      {", R, "V4 "],
   // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
@@ -1283,8 +1283,13 @@ export const MUTANTS = [
   // card evm-quote-fewer-rounds: a held provider after every one not held, quoteLast too; half open after its hold
   // until it answers; held by the pace's own hold as by the ranking's
   [QUOTE, '  if (till > now) return 20 + last;', '  if (till > now) return 2 + last;', "test/evm-pair-rank.test.ts", "R6 "],
-  [QUOTE, '  if (till > 0 && (s?.last ?? 0) < till) return 10 + last;', '  if (false && till > 0 && (s?.last ?? 0) < till) return 10 + last;', "test/evm-pair-rank.test.ts", "R7 "],
-  [QUOTE, '  const till = Math.max(s?.held ?? 0, evmProviderHeldMs(u, 0));', '  const till = s?.held ?? 0;', "test/evm-pair-rank.test.ts", "R6 "],
+  [QUOTE, '  if (till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;', '  if (false && till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;', "test/evm-pair-rank.test.ts", "R7 "],
+  // the half-open provider is probed: seated once before quoteLast, never left last with the rest healthy (review of A+B, 3)
+  [QUOTE, '  if (till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;', '  if (till > 0 && (s?.last ?? 0) < till) return 10 + last;', "test/evm-pair-rank.test.ts", "R7 "],
+  [QUOTE, '  if (till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;', '  if (till > 0 && (s?.last ?? 0) < till) return 2 + last;', "test/evm-pair-rank.test.ts", "R7 "],
+  [QUOTE, "        if (probe && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS)) s.held = performance.now() + EVM_HOLD_MS;", "", "test/evm-pair-rank.test.ts", "R9 "],
+  [QUOTE, "    const probe = till > 0 && till <= t && s.last < till;", "    const probe = false;", "test/evm-pair-rank.test.ts", "R9 "],
+  [QUOTE, 'undefined): number => Math.max(s?.held ?? 0, evmProviderHeldMs(u, 0));', 'undefined): number => s?.held ?? 0;', "test/evm-pair-rank.test.ts", "R6 "],
   // card evm-quote-fewer-rounds, S1 as the rule it holds: a speculative read's answer is used only for a pool held at the
   // quote's block (W6), only by the very same read (W6e), only from the quote's own block (W6c), and a hook that is an
   // address the reads call is still dropped (W6d)

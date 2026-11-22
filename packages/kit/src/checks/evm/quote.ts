@@ -3260,10 +3260,16 @@ export function evmHedgeAfter(url: string | undefined, kind: string): number | n
   const sorted = [...t].sort((a, b) => a - b);
   return Math.max(EVM_HEDGE_MS, sorted[Math.ceil(0.95 * sorted.length) - 1]!);
 }
+/** When `u`'s hold ends: by this ranking's own measure, or by any reader's throttle of the provider (pace.ts, its hold's
+ *  end kept). */
+const heldTill = (u: string, s: { held: number } | undefined): number => Math.max(s?.held ?? 0, evmProviderHeldMs(u, 0));
 const timed = (url: string, rpc: EvmRpc): EvmRpc => {
   const f: EvmRpc = async (calls, signal, sent) => {
     const t = performance.now();
     const s = speedOf(url);
+    // the half-open provider's probe (rankClass): its first post since its hold ended
+    const till = heldTill(url, s);
+    const probe = till > 0 && till <= t && s.last < till;
     s.out.push(t);
     // the post's own time on the wire: from its send, past the device's gate and pace (card
     // evm-warm-tap-ends-inside-two-seconds, round F)
@@ -3285,6 +3291,9 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
         const ms = performance.now() - (wire ?? t);
         s.ms = s.ms === null ? ms : s.ms * 0.75 + ms * 0.25;
         const kind = evmPostKind(calls);
+        // a probe answered past its kind's hedge time is held again: in time closes the breaker, late keeps it open
+        // (review of A+B, 3)
+        if (probe && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS)) s.held = performance.now() + EVM_HOLD_MS;
         const times = s.times.get(kind) ?? [];
         s.times.set(kind, times);
         times.push(ms);
@@ -3312,31 +3321,35 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
 };
 /** `urls` in the order a quote asks them: those neither held nor with a request out past EVM_HEDGE_MS by their
  *  measured time (the unmeasured after them, in the venue list's order), then those with a request out, each in the same
- *  order, a venue's `quoteLast` after them (card robinhood-quotes-inside-provider-limits); then those half open, then the
- *  held, each in the same order (card evm-quote-fewer-rounds). */
+ *  order, a half-open one to be probed before a venue's `quoteLast`, which comes after them (card
+ *  robinhood-quotes-inside-provider-limits); then those half open with their probe out, then the held, each in the same
+ *  order (card evm-quote-fewer-rounds). */
 /** A request of `s` out longer than its own measured time (EVM_HEDGE_MS before its first answer): one it is late on. */
 const lateOf = (s: { ms: number | null; out: number[] } | undefined, now: number): number[] => (s === undefined ? [] : s.out.filter((t) => now - t > (s.ms ?? EVM_HEDGE_MS)));
 /** `url`'s class in evmRanked's order, lowest first: 0 free, 1 stalled (a request out past its own measured time and no
- *  answer since it was sent), 3 more for a venue's `quoteLast`; 10 more where its hold has ended and it has answered no
- *  post since (half open), 20 more where it is held. One late request of a provider that answers
- *  the requests sent after it is its load, never its seat (evmRanked): Base's blastapi, one post out 8 s while it answered
+ *  answer since it was sent), 3 more for a venue's `quoteLast`; where its hold has ended and it has answered no post
+ *  since (half open), 2 more until a post is sent to it (the probe), 10 more while that post is out; 20 more where held.
+ *  One late request of a provider that answers the requests sent after it is its load, never its seat (evmRanked): Base's
+ *  blastapi, one post out 8 s while it answered
  *  the rest in about 300 ms, sat behind mainnet.base.org for that post's 8 s at a request out past 400 ms, Base's warm
  *  taps 2.0 to 4.7 s on mainnet.base.org meanwhile (card evm-warm-tap-ends-inside-two-seconds, 2026-11-21 13:0xZ). */
 const rankClass = (u: string, now: number): number => {
   const s = SPEED.get(u);
   const late = lateOf(s, now);
   const last = quoteLastOf().has(u) ? 3 : 0;
-  // held: by this ranking's own measure, or by any reader's throttle of the provider (pace.ts, its hold's end kept)
-  const till = Math.max(s?.held ?? 0, evmProviderHeldMs(u, 0));
+  const till = heldTill(u, s);
   // A circuit breaker (card evm-quote-fewer-rounds): a held provider is out of the first seats, after every provider not
-  // held, a venue's quoteLast too, and once its hold ends it is half open, after every one not held, until it answers a
-  // post (its first one since, a third's or a spare's seat, is the probe). Never out of the agreement: agreeing still asks
-  // it where no other is left. Ranked by class alone, two held providers tied and the faster took a first seat while
+  // held, a venue's quoteLast too. Once its hold ends it is half open: the next quote seats it once as the probe, after
+  // the providers that are free and before a venue's quoteLast; while that post is out it waits after every one not held;
+  // an answer closes it (its own rank again), and a post lost holds it again (timed: a loss with no answer since its
+  // send). Never out of the agreement: agreeing still asks it where no other is left. Seated only where the quote ran
+  // short (a third's or a spare's seat), a half-open provider with the rest healthy was never asked, and stayed last
+  // (review of A+B, 3). Ranked by class alone, two held providers tied and the faster took a first seat while
   // held: robinhood.drpc.org, held, sat beside publicnode while bloXroute, held 30 s by one 429, sat behind it and
   // Robinhood's own RPC, quoteLast, after both; dRPC answered 10 more posts 429 in that tap's next quotes (read only from
   // macOS, 2026-11-22 17:3xZ)
   if (till > now) return 20 + last;
-  if (till > 0 && (s?.last ?? 0) < till) return 10 + last;
+  if (till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;
   return last + (late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);
 };
 /** The size a quote's reads are ranked for (evmRanked): its largest round's posts to each provider, and each provider's
