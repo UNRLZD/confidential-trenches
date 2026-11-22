@@ -1272,6 +1272,11 @@ export const MUTANTS = [
   // read beside it; and each batch of a round asks first the two providers that answer it soonest
   [QUOTE, "(a.pin !== undefined ? Promise.resolve(a.pin.number) : spec !== null ? Promise.resolve(spec.number) : headFrom(f))", "(a.pin !== undefined ? Promise.resolve(a.pin.number) : headFrom(f))", R, "WS1 "],
   [QUOTE, "  if (rpcs.length < 3 || urls.every((u) => u === undefined)) return batches.map(() => rpcs);", "  return batches.map(() => rpcs);", R, "WS2 "],
+  // card evm-cold-quote-inside-the-kpi: a first scan provider still out past its hedge time for its head has the next
+  // asked beside it; the first head answered is kept, and the first's failure still asks the next
+  [QUOTE, "evmHedgeAfter(URL_OF.get(o.rpc), \"head\") ?? EVM_HEDGE_MS);", "EVM_SCAN_HOLD_MS * 10);", R, "KPI1 "],
+  [QUOTE, "      const timer = setTimeout(() => void spare().then(win, () => {}), evmHedgeAfter(", "      const timer = setTimeout(() => void spare().then(win, (e: unknown) => ((over = true), no(e))), evmHedgeAfter(", R, "KPI2 "],
+  [QUOTE, "      scanHeadOf(o.rpc, o.gate).then(win, () => {\n        clearTimeout(timer);", "      scanHeadOf(o.rpc, o.gate).then(win, (e: unknown) => {\n        if (theirs === undefined) return no(e);\n        clearTimeout(timer);", R, "KPI2 "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);

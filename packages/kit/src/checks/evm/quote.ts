@@ -4254,7 +4254,37 @@ async function routeSetOf(a: {
   // the head, read once per quote on the first; where it answers none, on the next in the list that does. The
   // requests stay on the first, the rest behind each (review of 22e29c9, B1: a head answered after 2 s sent a whole
   // cold scan to the second, 800 getLogs where the first carried it)
-  const headFrom = (o: ScanOn): Promise<bigint> => scanHeadOf(o.rpc, o.gate).catch((e) => (o.next === undefined ? Promise.reject(e) : headFrom(o.next)));
+  // and a first still out past its hedge time for a head read (evmHedgeAfter, EVM_HEDGE_MS before its first answer) has
+  // the next asked beside it, the first head answered kept (card evm-cold-quote-inside-the-kpi: a cold Robinhood tap's
+  // first link, every read of the quote after it, is this read: rpc.mainnet.chain.robinhood.com's eth_blockNumber took
+  // 360 to 1,373 ms, 1.1 s and more in 3 of 4 cold taps of main 569b59dab, read only from macOS 2026-11-22 16:1xZ). A
+  // head of the next is a scan provider's head as the first's is: each request still asks its own last block, so a
+  // first behind it counts none of the blocks it does not hold
+  const headFrom = (o: ScanOn): Promise<bigint> => {
+    const next = o.next;
+    if (next === undefined) return scanHeadOf(o.rpc, o.gate);
+    return new Promise<bigint>((ok, no) => {
+      let over = false;
+      let theirs: Promise<bigint> | undefined;
+      const spare = () => (theirs ??= headFrom(next));
+      const win = (h: bigint) => {
+        if (over) return;
+        over = true;
+        clearTimeout(timer);
+        ok(h);
+      };
+      const timer = setTimeout(() => void spare().then(win, () => {}), evmHedgeAfter(URL_OF.get(o.rpc), "head") ?? EVM_HEDGE_MS);
+      (timer as { unref?: () => void }).unref?.();
+      scanHeadOf(o.rpc, o.gate).then(win, () => {
+        clearTimeout(timer);
+        spare().then(win, (e: unknown) => {
+          if (over) return;
+          over = true;
+          no(e);
+        });
+      });
+    });
+  };
   // A follow pinned to a refusal's block (a request's `at`) scans up to that block, its head with no read: a pool made
   // after it holds no state there, so no block past it can change the quote, and the blocks the refused quote's scan
   // kept up to it are read again by none; only those it did not keep, up to the pin, are asked (card

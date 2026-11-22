@@ -12524,3 +12524,54 @@ test("TAIL11j a taker of a shared tail read waits EVM_SCAN_HOLD_MS for it at mos
     release();
   }
 });
+
+// card evm-cold-quote-inside-the-kpi: the scan provider's head is a cold quote's first link (every read after it); a
+// first still out past its hedge time has the next asked beside it, and the first head answered is kept
+test("KPI1 a cold quote whose first scan provider holds its head read has the next asked beside it: the quote's agreement leaves before the first's head answers", async () => {
+  quoteMod.evmSpeedReset();
+  const token = freshToken();
+  const pools = [best(token)];
+  const order: string[] = [];
+  // the first's head answers at 1 s, inside the 2 s it was held to before the next was asked (EVM_SCAN_HOLD_MS): every
+  // read of the quote waited for it (rpc.mainnet.chain.robinhood.com, 1.1 to 1.4 s in 3 of 4 cold taps of main 569b59dab)
+  const inner = scanner(5_000_000, []);
+  const slowHead: EvmRpc = async (calls, until) => {
+    if (calls.some((c) => c.method === "eth_blockNumber")) {
+      await pause(1_000);
+      order.push("first's head");
+    }
+    return inner(calls, until);
+  };
+  // the agreement's first block read: every state read of the quote waits for it, and it for the scan's head
+  const reads = (rpc: EvmRpc): EvmRpc => async (calls, until) => {
+    if (calls.some((c) => c.method === "eth_getBlockByNumber") && !order.includes("agreement")) order.push("agreement");
+    return rpc(calls, until);
+  };
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [reads(chain(pools, 0)), reads(chain(pools, 1))], NOW, [slowHead, scanner(5_000_000, [])], undefined, () => 0));
+  assert.equal((v as { accepted: boolean }).accepted, true, big(v));
+  assert.equal(order[0], "agreement", order.join(", "));
+});
+
+test("KPI2 a next asked beside a held first that fails leaves the first's head to answer: the quote waits for it and quotes; a first that fails has the next asked; both failing refuses", async () => {
+  quoteMod.evmSpeedReset();
+  const token = freshToken();
+  const pools = [best(token)];
+  const inner = scanner(5_000_000, []);
+  const late = (fail: boolean): EvmRpc => async (calls, until) => {
+    if (calls.some((c) => c.method === "eth_blockNumber")) {
+      await pause(1_000);
+      if (fail) throw new Error("connection reset");
+    }
+    return inner(calls, until);
+  };
+  const brokenHead: EvmRpc = async (calls, until) => (calls.some((c) => c.method === "eth_blockNumber") ? [{ jsonrpc: "2.0", id: 0, result: "0xzz" }] : inner(calls, until));
+  const ok = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, [late(false), brokenHead], undefined, () => 0));
+  assert.equal((ok as { accepted: boolean }).accepted, true, big(ok));
+  // a first whose head read fails at once (an answer that is no block number, asked no more) has the next asked then
+  const t1 = freshToken();
+  const spared = await verdict(evmPoolBuyQuoteWith(warmReq(t1), [chain([best(t1)], 0), chain([best(t1)], 1)], NOW, [brokenHead, scanner(5_000_000, [])], undefined, () => 0));
+  assert.equal((spared as { accepted: boolean }).accepted, true, big(spared));
+  const t2 = freshToken();
+  const no = await verdict(evmPoolBuyQuoteWith(warmReq(t2), [chain([best(t2)], 0), chain([best(t2)], 1)], NOW, [late(true), brokenHead], undefined, () => 0));
+  assert.equal((no as { code?: string }).code, "rpc_error", big(no));
+});
