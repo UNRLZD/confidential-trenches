@@ -10,8 +10,8 @@
   "liveBefore": "SIGN_HOST as served at 2026-11-13T21:37Z, before card pool-amounts-are-standard-sizes"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-8L2e50ZAdXtdYvlXwOkM1tOj6Hye2Alk423/yOFCmQPLgGDRB3neAuJzz8nYHpDL\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-8L2e50ZAdXtdYvlXwOkM1tOj6Hye2Alk423/yOFCmQPLgGDRB3neAuJzz8nYHpDL",
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-A1CksNnB3B2SDKyfvsjtiNgZZFy8+6V2lWEMxlD9KZmPvCCxk0avV3smYLtQKaKG\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-A1CksNnB3B2SDKyfvsjtiNgZZFy8+6V2lWEMxlD9KZmPvCCxk0avV3smYLtQKaKG",
   "carries": {
    "a full sell carries no deposit back and no reserve, each refused by name, a partial sell's reserve at most the cap of its own constants": true,
    "a partial sell's deposit back is its min out less the reserve as the rules' note of it, a rung, refused by name otherwise": true,
