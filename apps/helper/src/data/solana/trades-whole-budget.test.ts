@@ -1,8 +1,9 @@
 // Card sol-meteora-tape-inside-rpc-budget: a Meteora stream transaction is read whole (its events are in its inner
 // instructions only, card index-sol-trades-2) only inside the whole reads' budget, on their own providers, never the
 // trades list the callers' providers lead (at c775de255 every one was read, on the main key first: a burst of busy
-// Meteora coins took the Solana budget the sell routes draw). Past the budget the coin's tape names its reach and is
-// served its top pool's trades, as a venue not decoded is.
+// Meteora coins took the Solana budget the sell routes draw). Past the budget the coin's tape names the cut: its own rows
+// filling and never whole while the cut lasts, its top pool's trades only while it holds no row of its own (card
+// solana-flooded-coin-first-answer-holds-rows).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -107,29 +108,40 @@ test("card sol-meteora-tape-inside-rpc-budget: a burst of Meteora stream trades 
   c.t.stop();
 });
 
-test("card sol-meteora-tape-inside-rpc-budget: past the budget a coin's tape names its reach and is served its top pool's trades while the vendor answers", async () => {
+// card solana-flooded-coin-first-answer-holds-rows: a coin past the budget that holds rows of its own is served them,
+// never the vendor's (red at ef813c927: the vendor's rows over ours, as helper-23 run 45018729954 answered 9WB75GUz
+// src coingecko, 50 rows, 145 ms). Our chain read is fresher than a vendor tape; filling and the named cut say a trade
+// is unread, and no whole_ms is claimed while the cut lasts.
+test("card sol-meteora-tape-inside-rpc-budget: past the budget a coin's tape is its own rows, filling, never whole, the cut named, while the vendor answers (red at ef813c927: the vendor's rows)", async () => {
   const vendor = { status: 200, body: JSON.stringify([{ t_ms: TS * 1000, side: "b", usd: "1", amt: "1", trader: null, tx: "V1" }]), src: "geckoterminal", asOfMs: TS * 1000 };
-  let answers = true;
-  const c = chain([TTW], { tape: async () => (answers ? vendor : { status: 503, body: "{}" }) });
+  const c = chain([TTW], { tape: async () => vendor });
   assert.equal((await c.t.trades(TTW, 50)).status, 200);
   for (let i = 0; i < 40; i++) c.stream(TTW);
   await settle();
   const va = await c.t.trades(TTW, 50);
-  const a = JSON.parse(va.body) as { src: string; trades: { tx: string }[] };
-  assert.equal(a.src, "geckoterminal", "a coin past the budget is served its top pool's trades");
-  assert.deepEqual(a.trades.map((r) => r.tx), ["V1"]);
+  const a = JSON.parse(va.body) as { src: string; filling?: boolean; whole_ms?: number; trades: { tx: string }[] };
+  assert.equal(a.src, "chain", "a coin past the budget holding rows of its own is served them");
+  assert.ok(a.trades.length > 0);
+  assert.ok(!a.trades.some((r) => r.tx === "V1"), "no vendor row among ours");
+  assert.equal(a.filling, true, "a trade unread: filling");
+  assert.equal(a.whole_ms, undefined, "never whole while the cut lasts");
   assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago: past the 7 a second busy coins share"/, "the answer names why");
-  // the vendor down: its own rows, whole only from the second after the newest transaction not read
-  answers = false;
+  // still inside the cut 31 s on: the same
   c.step(31_000);
-  const b = JSON.parse((await c.t.trades(TTW, 50)).body) as { src: string; whole_ms?: number; trades: unknown[] };
+  const vb = await c.t.trades(TTW, 50);
+  const b = JSON.parse(vb.body) as { src: string; whole_ms?: number; filling?: boolean };
   assert.equal(b.src, "chain");
-  assert.ok(b.trades.length > 0);
-  assert.equal(b.whole_ms, (TS + 1) * 1000, "the tape's reach starts after the cut");
-  // a minute past the cut with every read inside the budget: its own tape again
-  answers = true;
+  assert.equal(b.whole_ms, undefined);
+  assert.equal(b.filling, true);
+  assert.match(vb.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 31 s ago/);
+  // a minute past the cut with every read inside the budget: whole again, its reach after the cut
   c.step(T.CUT_KEEP_MS);
-  assert.equal((JSON.parse((await c.t.trades(TTW, 50)).body) as { src: string }).src, "chain");
+  const vc = await c.t.trades(TTW, 50);
+  const d = JSON.parse(vc.body) as { src: string; whole_ms?: number; filling?: boolean };
+  assert.equal(d.src, "chain");
+  assert.equal(d.whole_ms, (TS + 1) * 1000, "the tape's reach starts after the cut");
+  assert.equal(d.filling, undefined);
+  assert.doesNotMatch(vc.timing ?? "", /sol-whole-cut/);
   c.t.stop();
 });
 
@@ -173,13 +185,18 @@ test("card helper-sol-tape-checks-hold: past the budget, a chain tape that names
   assert.equal(a.filling, true, "its first walk still reads");
   assert.equal(a.whole_ms, undefined, "no reach named");
   assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 31 s ago: past the 7 a second busy coins share"/, "the cut named");
-  // its walk done: live, its reach after the cut names it, as before
+  // its walk done, live: still no reach while the cut lasts (card solana-flooded-coin-first-answer-holds-rows), then
+  // its reach after the cut, as before
   gate = null;
   release();
   await settle();
   c.t.tick();
   const vb = await c.t.trades(TTW, 50);
-  assert.equal((JSON.parse(vb.body) as { whole_ms?: number }).whole_ms, (TS + 1) * 1000);
+  assert.equal((JSON.parse(vb.body) as { whole_ms?: number }).whole_ms, undefined, "never whole while the cut lasts");
+  assert.match(vb.timing ?? "", /sol-whole-cut/);
+  c.step(T.CUT_KEEP_MS);
+  const vc = await c.t.trades(TTW, 50);
+  assert.equal((JSON.parse(vc.body) as { whole_ms?: number }).whole_ms, (TS + 1) * 1000);
   c.t.stop();
 });
 
@@ -196,9 +213,16 @@ test("card helper-sol-tape-checks-hold: a stream transaction whose trade cannot 
   assert.equal((JSON.parse((await c.t.trades(TTW, 50)).body) as { whole_ms?: number }).whole_ms, 0, "whole from the mint's first signature before it");
   c.stream(TTW);
   await settle();
-  const a = JSON.parse((await c.t.trades(TTW, 50)).body) as { whole_ms?: number; trades: unknown[] };
+  const va = await c.t.trades(TTW, 50);
+  const a = JSON.parse(va.body) as { whole_ms?: number; filling?: boolean; trades: unknown[] };
   assert.deepEqual(a.trades, [], "the trade not read");
-  assert.equal(a.whole_ms, (TS + 1) * 1000, "the reach starts the second after the unread transaction");
+  // card solana-flooded-coin-first-answer-holds-rows: while the cut lasts the tape names no reach, filling, the cut named
+  assert.equal(a.whole_ms, undefined, "never whole while its trade is unread");
+  assert.equal(a.filling, true);
+  assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago: its read unanswered"/);
+  c.step(T.CUT_KEEP_MS + 1);
+  const b = JSON.parse((await c.t.trades(TTW, 50)).body) as { whole_ms?: number };
+  assert.equal(b.whole_ms, (TS + 1) * 1000, "past the cut, the reach starts the second after the unread transaction");
   c.t.stop();
 });
 

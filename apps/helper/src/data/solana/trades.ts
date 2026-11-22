@@ -83,11 +83,12 @@ export const WHOLE_RPCS = ["https://solana-rpc.publicnode.com"] as const;
  *  above, so the trade walks' own last fallback (TRADES_RPCS) keeps the other half] */
 export const WHOLE_PER_S = 10;
 /** The whole reads one coin may send a WHOLE_WINDOW_MS, so one busy coin never takes every coin's second. [design: 20,
- *  two a second: ten coins at it fill WHOLE_PER_S; a coin past it is served its pool's tape (CUT_KEEP_MS)] */
+ *  two a second: ten coins at it fill WHOLE_PER_S; a coin past it names the cut (CUT_KEEP_MS)] */
 export const WHOLE_COIN_MAX = 20;
 export const WHOLE_WINDOW_MS = 10_000;
-/** How long a coin whose Meteora trade went unread (past the budget) is served its top pool's tape (trades): a minute,
- *  so a coin at the budget's edge never flips between the two tapes read to read. */
+/** How long a coin whose Meteora trade went unread (past the budget) names the cut (trades: its own rows filling, never
+ *  whole; its top pool's tape only while it holds no row of its own): a minute, so a coin at the budget's edge never
+ *  flips between whole and not read to read. */
 export const CUT_KEEP_MS = 60_000;
 /** Card helper-sol-tape-checks-hold, round 3: the places of each second (of WHOLE_PER_S) a busy coin (WHOLE_QUIET_MAX or
  *  more whole reads in its WHOLE_WINDOW_MS) may not take, kept for the quiet coins. Live run 44901581973 (helper
@@ -154,6 +155,11 @@ export const COLD_RETRY_MAX_MS = 30_000;
 export const COLD_PAGE = 1_000;
 const TX_PARALLEL = 5;
 export const SIG_PAGE = 100;
+/** The page listed beside a flooded first read's COLD_PAGE when its first page held no successful signature, so some
+ *  are read before the COLD_PAGE lands (card solana-flooded-coin-first-answer-holds-rows). [design: one in 34 succeeded
+ *  past CjRGc8wH...pump's newest 30 (live run 43689567273), so 100 holds about 3; a page's time grows with its size
+ *  (1000: 1,599 ms from the Mac)] */
+export const SHORT_PAGE = 100;
 export const REFILL_MAX = 1_000;
 export const SETTLE_SLOTS = 150;
 /** A first read answers after its walk, its first trade held, or this long after the read began, with what it holds by
@@ -655,6 +661,8 @@ type Entry = {
   /** While a first read waits (first()): told after each fold, so a trade the stream sends answers it as a walk's round
    *  that holds one does. */
   onFold?: () => void;
+  /** Reads waiting on this cold tape's first row of ours (trades: rowOrBound), told after each fold that holds one. */
+  rowWaits?: Set<() => void>;
   /** The vendor's tape read VENDOR_EARLY_MS into a first read that held no row (first()), and when: the vendor reads
    *  within COLD_WAIT_MS of it take it (vendorTape), so the answers at the bound with no row of ours, every read joined
    *  on the first, never wait on the vendor or ask it again. */
@@ -1128,6 +1136,7 @@ export function createSolanaTrades(deps: {
     for (const slot of e.refs.keys()) if (slot <= e.book.settledTo) e.refs.delete(slot);
     e.readAt = now();
     e.onFold?.();
+    if (e.rowWaits !== undefined && e.book.tape(1).length > 0) for (const go of e.rowWaits) go();
   }
 
   /** Walks `mint`'s signatures newer than `until` (the newest COLD_SIGS successful ones when null) and holds each
@@ -1145,6 +1154,40 @@ export function createSolanaTrades(deps: {
     let listedAll = false;
     const gap: { t: number | null } = { t: null };
     const below = (t: number | null): void => void (gap.t = Math.max(gap.t ?? 0, t ?? Math.floor(now() / 1000)));
+    /** One transaction read and its trades held in its place (`order`). */
+    const readOne = async (s: { signature: string; slot: number; t: number | null; order: number }): Promise<void> => {
+      const r = (await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
+      if (r === null) return below(s.t);
+      e.seen++;
+      const meta = (r.meta ?? {}) as Record<string, unknown>;
+      const f = fromLogs(meta.logMessages);
+      // dated by its block: the transaction's block time, its signature's, else its slot's (never the walk's clock)
+      const got = await dated(await forMint(e.mint, f.truncated || eventsInInner(meta.logMessages) ? cutTrades(f, r) : f.trades), s.slot, blockTime(r) ?? s.t);
+      if (got === null) return below(s.t);
+      hold(e, s.signature, s.slot, s.order, got);
+    };
+    /** Reads `list` (oldest first) newest first, TX_PARALLEL at a time, the tape folded after each round. */
+    const readAll = async (list: readonly { signature: string; slot: number; t: number | null; order: number }[]): Promise<void> => {
+      for (let k = list.length; k > 0; k -= TX_PARALLEL) {
+        await Promise.all(list.slice(Math.max(0, k - TX_PARALLEL), k).map(readOne));
+        if (round !== undefined) {
+          fold(e);
+          round();
+        }
+      }
+    };
+    // card solana-flooded-coin-first-answer-holds-rows: a first page of a flooded coin with some successful signatures
+    // has them read at once, while the COLD_PAGE before them is listed, not after it (helper update 22's live run
+    // 45011614034: 5o7AFuoN...pump, 1 of its newest 30 successful, answered 0 rows at its bound: the COLD_PAGE of 1000
+    // signatures, 235 KB, read 1,599 ms from the Mac on api.mainnet-beta, stood before its one successful read); a first
+    // page with none has a SHORT_PAGE listed beside the COLD_PAGE, from the same signature, and its successful ones read as
+    // soon as it lands (live run 43689567273: CjRGc8wH...pump, 0 of its newest 30 successful, 29 of its newest 1000).
+    // Each place is the list's: a signature's order is its position from the newest (`at`), counted down from `reserve`.
+    let early: { sigs: Set<string>; listed: Promise<void>; read: Promise<void> } | null = null;
+    let reserve = -1;
+    const TOP = COLD_SIGS + COLD_PAGE + 1;
+    const placeOf = new Map<string, number>();
+    const at = (p: number): number => reserve + TOP - p;
     while (cold ? sigs.filter(ok).length < COLD_SIGS : sigs.length < REFILL_MAX) {
       // a first read's newest COLD_SIGS, then once, when they were not all successful, one COLD_PAGE before them: a
       // bot-flooded token's newest signatures are failed transactions, and a first read of them alone held no trade
@@ -1158,37 +1201,55 @@ export function createSolanaTrades(deps: {
       if (page.length < limit) listedAll = true;
       if (page.length < limit || sigs.length === 0 || (cold && before !== undefined)) break;
       before = sigs[sigs.length - 1]!.signature;
-    }
-    sigs.reverse();
-    // each transaction's place is the list's (oldest first), taken before the reads, which go TX_PARALLEL at a time; a
-    // first read keeps the newest COLD_SIGS successful
-    const todo = sigs
-      .filter((s) => ok(s) && !e.held.has(s.signature))
-      .slice(cold ? -COLD_SIGS : 0)
-      .map((s) => ({ ...s, order: ++seq }));
-    // a first walk that listed the mint's every signature and reads each successful one not held: the tape from its birth
-    const everyOne = cold && listedAll && todo.length === sigs.filter((x) => ok(x) && !e.held.has(x.signature)).length;
-    // the read back starts before the oldest the first walk reads (its older page's signatures not read included)
-    if (cold) e.oldest = todo[0]?.signature ?? sigs[0]?.signature ?? null;
-    for (let k = todo.length; k > 0; k -= TX_PARALLEL) {
-      await Promise.all(
-        todo.slice(Math.max(0, k - TX_PARALLEL), k).map(async (s) => {
-          const r = (await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
-          if (r === null) return below(s.t);
-          e.seen++;
-          const meta = (r.meta ?? {}) as Record<string, unknown>;
-          const f = fromLogs(meta.logMessages);
-          // dated by its block: the transaction's block time, its signature's, else its slot's (never the walk's clock)
-          const got = await dated(await forMint(e.mint, f.truncated || eventsInInner(meta.logMessages) ? cutTrades(f, r) : f.trades), s.slot, blockTime(r) ?? s.t);
-          if (got === null) return below(s.t);
-          hold(e, s.signature, s.slot, s.order, got);
-        }),
-      );
-      if (round !== undefined) {
-        fold(e);
-        round();
+      // only a first page with another to come (not all of its newest COLD_SIGS successful) reads ahead of it
+      if (cold && early === null && sigs.filter(ok).length < COLD_SIGS) {
+        reserve = seq;
+        seq += TOP + 1;
+        sigs.forEach((x, i) => placeOf.set(x.signature, i));
+        const first = sigs.filter((x) => ok(x) && !e.held.has(x.signature));
+        const set = new Set(first.map((x) => x.signature));
+        let read: Promise<void>;
+        let listed: Promise<void> = Promise.resolve();
+        if (first.length > 0) read = readAll(first.map((x) => ({ ...x, order: at(placeOf.get(x.signature)!) })).reverse());
+        else {
+          // the short page beside the COLD_PAGE (asked next, from the same `before`): its positions are the COLD_PAGE's
+          const top = sigs.length;
+          const mine = (rpc("getSignaturesForAddress", [e.mint, { limit: SHORT_PAGE, commitment: "confirmed", before }]) as Promise<unknown>).then((short) =>
+            !Array.isArray(short)
+              ? []
+              : (short as Record<string, unknown>[])
+                  .map((x, j) => ({ x, j }))
+                  .filter(({ x }) => typeof x?.signature === "string" && Number.isSafeInteger(x.slot) && (x.err === null || x.err === undefined) && !e.held.has(x.signature as string))
+                  .slice(0, COLD_SIGS)
+                  .map(({ x, j }) => ({ signature: x.signature as string, slot: x.slot as number, t: Number.isSafeInteger(x.blockTime) && (x.blockTime as number) > 0 ? (x.blockTime as number) : null, order: at(top + j) })),
+          );
+          // the short page is a head start only: its listing failing leaves the COLD_PAGE's walk as it was
+          listed = mine.then((m) => void m.forEach((x) => set.add(x.signature)), () => undefined);
+          read = mine.then((m) => readAll(m.slice().reverse()), () => undefined);
+        }
+        early = { sigs: set, listed, read };
+        early.read.catch(() => undefined);
       }
     }
+    // the short page's signatures known before the list's places are taken (its reads go on)
+    if (early !== null) await early.listed;
+    if (reserve >= 0) sigs.forEach((x, i) => placeOf.set(x.signature, i));
+    sigs.reverse();
+    // each transaction's place is the list's (oldest first), taken before the reads, which go TX_PARALLEL at a time; a
+    // first read keeps the newest COLD_SIGS successful (those read early among them)
+    const fresh = (x: { signature: string; err: unknown }): boolean => ok(x) && (early?.sigs.has(x.signature) === true || !e.held.has(x.signature));
+    const todo = sigs
+      .filter(fresh)
+      .slice(cold ? -COLD_SIGS : 0)
+      .map((s) => ({ ...s, order: reserve >= 0 ? at(placeOf.get(s.signature)!) : ++seq }));
+    // a first walk that listed the mint's every signature and reads each successful one not held: the tape from its birth
+    const everyOne = cold && listedAll && todo.length === sigs.filter(fresh).length;
+    // the read back starts before the oldest the first walk reads (its older page's signatures not read included)
+    if (cold) e.oldest = todo[0]?.signature ?? sigs[0]?.signature ?? null;
+    // those read early first (the newest): never more than TX_PARALLEL reads at once, as before; a failed read fails the
+    // walk, as any read does
+    if (early !== null) await early.read;
+    await readAll(early === null ? todo : todo.filter((x) => !early!.sigs.has(x.signature)));
     for (const s of sigs) e.covered = Math.max(e.covered, s.slot);
     // the reach (Entry.whole): a first walk's oldest read, 0 when it read every successful signature the mint has; a gap's
     // walk that stopped at REFILL_MAX leaves the signatures below its oldest unread
@@ -1667,6 +1728,8 @@ export function createSolanaTrades(deps: {
         }
       }
       fold(e);
+      // the walk is done: a read waiting on its first row answers now with what it holds
+      for (const go of e.rowWaits ?? []) go();
       return "walk";
     });
     // the first answer waits for the walk's first round that holds a trade (its newest trades), a streamed trade, the
@@ -1812,6 +1875,21 @@ export function createSolanaTrades(deps: {
     if (backQueue.length < OPEN_MAX) backQueue.push(e);
     else e.back.done = true;
     startBacks();
+  }
+  /** Resolves once `e` holds a row of ours, its first walk ends, or `ms` pass. */
+  function rowOrBound(e: Entry, ms: number): Promise<void> {
+    if (ms <= 0) return Promise.resolve();
+    return new Promise<void>((done) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const go = (): void => {
+        clearTimeout(timer);
+        e.rowWaits?.delete(go);
+        done();
+      };
+      (e.rowWaits ??= new Set()).add(go);
+      timer = setTimeout(go, ms);
+      timer.unref?.();
+    });
   }
   /** Whether `e`'s read back is still reading. */
   const backing = (e: Entry): boolean => e.back !== undefined && !e.back.done;
@@ -2095,7 +2173,15 @@ export function createSolanaTrades(deps: {
       // tape a token page reads is never a 404 while its page and chart answer (card solana-trades-show-on-every-token:
       // the live helper at 837d9d810 answered NEARKAT's and BONK's trades 404, neither on the lists, their pages 200)
       if (!entries.has(mint) && deps.tape !== undefined && (await deps.listed(mint)) !== true) return poolTape(mint, limit, null, client);
+      const began = performance.now();
+      // a read that joins or starts a first read waits on that read's own bound (first); one on a tape already held does not
+      const held = entries.has(mint) && !opening.has(mint);
       const e = await open(mint);
+      // card solana-flooded-coin-first-answer-holds-rows: a tape still on its first walk (cold) with no row of ours waits
+      // for its first row up to COLD_WAIT_MS from this read's start, as its first read does, before the vendor's rows
+      // answer: a read joining a tape another read opened (its chart, an earlier caller) got the vendor's rows at once
+      // while the walk read on (a coin opened before its tape was asked answered src coingecko at 145 ms)
+      if (held && "mint" in e && e.state === "cold" && (folded(e).book === null || e.book!.tape(1).length === 0)) await rowOrBound(e, COLD_WAIT_MS - (performance.now() - began));
       // card helper-stays-fast-under-the-live-run: a listed coin whose first read failed (its subscription, its account)
       // answers the vendor's rows, filling, else an empty tape, filling: never a 503 (app-console-429 on helper-20, 25 of
       // 25 reads of one cold coin 503 at 3.6 s while its page, holders and bars answered); the next read opens it again
@@ -2131,10 +2217,12 @@ export function createSolanaTrades(deps: {
       // token not on the pump.fun curve, PumpSwap, Orca, Raydium CLMM, CPMM, LaunchLab, Meteora DLMM, DBC or DAMM v2) is served its top pool's trades (token.ts tape),
       // never an empty tape for a token that trades (card solana-trades-show-on-every-token: NEARKAT and BONK answered 0
       // rows, src chain, while their pools traded)
-      // card sol-meteora-tape-inside-rpc-budget: a coin whose Meteora trade went unread inside CUT_KEEP_MS is served its top
-      // pool's trades as a venue not decoded is, while the vendor answers them; else its own rows, whole only past the cut.
-      // The vendor's rows are named in Server-Timing, so a reader can tell this coin's chain tape is past the budget, a coin
-      // with no row of its own yet included (every trade of a fresh coin past the budget)
+      // card sol-meteora-tape-inside-rpc-budget: a coin whose Meteora trade went unread inside CUT_KEEP_MS names the cut in
+      // Server-Timing, so a reader can tell its tape is past the budget. Card solana-flooded-coin-first-answer-holds-rows:
+      // our own rows come first, filling and never whole while the cut lasts (our chain read is fresher than a vendor
+      // tape, and filling says a trade is unread); the vendor's rows only while we hold none (every trade of a fresh coin
+      // past the budget), named the same. Before it, a live tape past the cut was served the vendor's rows over its own
+      // (helper-23 run 45018729954: 9WB75GUz answered 50 rows src coingecko at 145 ms).
       const cut = e.cut !== undefined && now() - e.cut.at <= CUT_KEEP_MS;
       const named = (v: DataAnswer): DataAnswer => (cut && v.status === 200 && v.src !== "chain" ? { ...v, timing: `${v.timing === undefined ? "" : `${v.timing}, `}sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` } : v);
       // card helper-stays-fast-under-the-live-run: a tape with no row of ours while its walk still reads its newest
@@ -2147,10 +2235,6 @@ export function createSolanaTrades(deps: {
         return { ...v, body: JSON.stringify({ ...b, filling: true }), timing: [v.timing, readTo(e)].filter((x) => x !== undefined && x !== "").join(", ") };
       };
       if (rows.length === 0 && deps.tape !== undefined) return named(reading(await poolTape(mint, limit, e, client)));
-      if (cut && deps.tape !== undefined) {
-        const v = await poolTape(mint, limit, null, client);
-        if (v.status === 200 && v.src !== "chain") return named(v);
-      }
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(`${mint} ${r.tx}`)?.[r.index % 8] ?? null, tx: r.tx }));
       // `filling` while the cold walk still reads the token's older trades (first() answered at COLD_WAIT_MS or its first
@@ -2158,13 +2242,14 @@ export function createSolanaTrades(deps: {
       // and while the token is behind the chain (behind: a gap walked, the stream silent past SOL_BEHIND_MS): the rows it
       // holds, never a complete list (card every-tape-and-chart-says-filling-behind-the-head)
       const late = behind(e);
-      const fill = (e.state === "cold" && rows.length < limit) || late ? { filling: true } : {};
+      const fill = (e.state === "cold" && rows.length < limit) || late || cut ? { filling: true } : {};
       // how far back the tape holds every trade (Entry.whole), only while no gap is being walked and the stream is heard
-      const whole = e.state === "live" && !late && e.whole !== undefined ? { whole_ms: Math.max(e.whole, e.cut?.to ?? 0) } : {};
-      // card helper-sol-tape-checks-hold: a tape past the budget that names no reach (its walk still reading, or behind)
-      // names the cut, as the vendor's rows do: it lacks the unread trade and nothing else in it says so (a local helper
+      // (none while a cut lasts: a Meteora trade is unread, so no span of this tape is known whole; past it, from after it)
+      const whole = e.state === "live" && !late && !cut && e.whole !== undefined ? { whole_ms: Math.max(e.whole, e.cut?.to ?? 0) } : {};
+      // card helper-sol-tape-checks-hold: a tape past the budget (named no reach while the cut lasts, above) names the
+      // cut, as the vendor's rows do: it lacks the unread trade and nothing else in it says so (a local helper
       // at 321baac8c, 20 Nov 05:36Z: CARDSccU's tape cold, no whole_ms, its DLMM trade 4vEPr51yjSyE unread)
-      const timing = cut && !("whole_ms" in whole) ? `${readTo(e)}, sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` : readTo(e);
+      const timing = cut ? `${readTo(e)}, sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` : readTo(e);
       return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing };
     },
   };
