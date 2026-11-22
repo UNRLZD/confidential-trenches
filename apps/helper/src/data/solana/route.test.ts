@@ -88,3 +88,11 @@ test("the vendor never answered: 503 upstream, with the commit and CORS", async 
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["access-control-allow-origin"], APP);
 });
+
+test("card helper-stays-fast-under-the-live-run: a lists answer names the helper's own time in Server-Timing (total;dur), plain and gzip, as every other market read does (red at b09ba8178: helper-21's burst read lists at 2.4 s p50 with nothing naming whether the helper or the way to it held them)", async () => {
+  for (const h of [{ origin: APP }, { origin: APP, "accept-encoding": "gzip" }] as Record<string, string>[]) {
+    const r = await call("GET", "/v1/market/lists?chain=solana", h);
+    assert.equal(r.status, 200);
+    assert.match(String(r.headers["server-timing"]), /^total;dur=\d+$/);
+  }
+});
