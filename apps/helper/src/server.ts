@@ -1310,6 +1310,24 @@ function unsettledOf(body: string): { open: number; listed: number } | null {
 export const READY_SETTLE_MAX_MS = 240_000;
 /** The client the warm-up's token reads draw as (a caller's share, the callers' room). */
 const READY_CLIENT = "helper-ready";
+/** The Solana pool's provider reads (card helper-pool-fee-never-a-client-429): a provider's 429 to one holds the market's
+ *  and the background's reads of it for its wait (rpc.ts backgroundThrottled), as their own 429 does, so the pool's next
+ *  read finds the provider's window theirs. helper-25 on ee5c7dac4 (live run 45032297159) ran 104 "rpc hold
+ *  solana-public background" and 103 "rpc hold solana publicnode.com market" lines while the pool's fee read was refused
+ *  on the same two providers: the market's holds came only from its own refusals, so it kept drawing each window the
+ *  pool needed. */
+export function poolFetchAhead(rpc: Pick<Rpc, "backgroundThrottled">, f: typeof fetch = fetch): typeof fetch {
+  return async (input, init) => {
+    const r = await f(input, init);
+    if (r.status === 429) {
+      // the market's spelling of the provider (data/solana/trades.ts TRADES_RPCS): no trailing slash on a bare host
+      const u = new URL(input instanceof Request ? input.url : String(input));
+      rpc.backgroundThrottled("solana", `${u.origin}${u.pathname === "/" ? "" : u.pathname}${u.search}`, r.headers);
+    }
+    return r;
+  };
+}
+
 /** Asks isReady every READY_EVERY_MS until it is true, then resolves. */
 export async function warmUntilReady(p: Ready, everyMs = READY_EVERY_MS): Promise<void> {
   const started = Date.now();
@@ -1523,7 +1541,7 @@ if (import.meta.main) {
     const bind = bindSenderFromEnv(process.env, watches);
     // a Solana pool whose configured fee is not the kit's for the rent both providers read stops the helper (at the
     // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
-    const pools = solanaPoolSendersFromEnv(process.env);
+    const pools = solanaPoolSendersFromEnv(process.env, poolFetchAhead(rpc));
     // card helper-ready-without-gt: every part read from the environment is read here, at the start, so a value the
     // helper refuses stops it at once (exit 2, naming the variable). Left to handler()'s defaults they were read only at
     // listen(), which a peer runs once warm, inside a promise: an unhandled rejection, exit 1 with no line of ours, and

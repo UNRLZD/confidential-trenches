@@ -611,6 +611,76 @@ test("N3: the rent is read once an epoch, so a rent change between two epochs gi
   assert.equal((await t.fee(NOW)).fee, "2000000");
 });
 
+// ---- card helper-pool-fee-never-a-client-429: helper-25 on ee5c7dac4 (live run 45032297159) answered GET /v1/pool/fee
+// 429 "provider limit", fee none: each epoch is 60 s (fee.ts POOL_EPOCH_MS) and its first ask read the Rent sysvar on the
+// pool's two public providers, which the market's and the read ahead's reads held (the container's log: 104 "rpc hold
+// solana-public background" and 103 "rpc hold solana publicnode.com market" lines). Planted here: both providers
+// refuse every read as an address the market loads is refused (HTTP 429), from the second epoch on.
+
+/** A pool sender whose rent read is refused 429 while `held` says so, and the epochs it read. */
+function heldWorld(held: (n: number) => boolean) {
+  let now = NOW;
+  const reads: number[] = [];
+  const s = sender(null, [], [], {
+    now: () => now,
+    readRent: async (epoch) => {
+      reads.push(epoch);
+      if (held(reads.length)) throw new Error("HTTP 429 Too Many Requests");
+      return TEST_RENT;
+    },
+  });
+  return { s, reads, at: () => now, step: (ms: number) => void (now += ms) };
+}
+
+test("card helper-pool-fee-never-a-client-429: the market and background reads hold both pool providers, and 50 fee asks in a row, one an epoch, each answer 200 with the fee read before (red at ee5c7dac4: the second epoch's ask answered 429 provider limit)", async () => {
+  const { createServer } = await import("node:http");
+  const { handler } = await import("../server.ts");
+  const w = heldWorld((n) => n > 1);
+  await w.s.ready;
+  const srv = createServer(handler("a".repeat(40), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 1, new Map([[w.s.pool, w.s]]), new Map(), w.at));
+  const port = await listening(srv.listen(0, "127.0.0.1"), "the helper");
+  try {
+    const got: string[] = [];
+    for (let k = 0; k < 50; k++) {
+      const f = await call(port, { path: `/v1/pool/fee?pool=${POOL}` }, "the helper");
+      got.push(f.status === 200 ? (JSON.parse(f.body) as { fee: string }).fee : `${f.status} ${f.body}`);
+      w.step(POOL_EPOCH_MS);
+    }
+    assert.deepEqual(got, got.map(() => String(FEE)));
+    // one read an epoch, never one an ask: the refused read is not asked again inside its epoch
+    assert.equal(w.reads.length, 50);
+  } finally {
+    srv.close();
+  }
+});
+
+test("card helper-pool-fee-never-a-client-429: a fresh start whose first rent read is throttled reads again until it is good, and once the fee is known no ask answers 429, the epoch the next reads are refused in included; a carried fee is the fee the send route holds the epoch's releases to (red at ee5c7dac4)", async () => {
+  const w = heldWorld((n) => n === 1 || n > 2);
+  let settled = "pending";
+  w.s.ready.then(() => (settled = "ok"), () => (settled = "rejected"));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(settled, "pending", "the first read was throttled and the start check waits");
+  // the start check's next ask (server.ts poolsChecked, every READY_EVERY_MS) reads again, in the same epoch
+  w.step(2_000);
+  await w.s.ready;
+  assert.equal(settled, "ok");
+  w.step(POOL_EPOCH_MS);
+  assert.equal((await w.s.fee(w.at())).fee, String(FEE), "the first epoch after the fee was known");
+  // a release in the carried epoch: the fee published for it is carried, any other refused, where at ee5c7dac4 the
+  // throttled read answered it 429 rate_limited too
+  assert.equal(code(await w.s.carry(body(build({ fee: FEE, nullifier: 21 })))), "ok");
+  assert.equal(code(await w.s.carry(body(build({ fee: 1_300_000n, nullifier: 22 })))), "fee_off");
+  for (let k = 2; k <= 4; k++) {
+    w.step(POOL_EPOCH_MS);
+    assert.equal((await w.s.fee(w.at())).fee, String(FEE), `epoch ${k} after the fee was known`);
+  }
+});
+
+test("card helper-pool-fee-never-a-client-429: a failed read before any good one carries nothing: the ask is still refused", async () => {
+  const t = heldWorld(() => true);
+  await assert.rejects(t.s.fee(t.at()), /HTTP 429/);
+});
+
 // ---- The relayer's cost guards (card relayer-cost-guards, audit I-6: the program holds no relay fee floor) ----
 
 test("I-6: a release whose relay fee is 0 is refused (fee_off) before any read, signature or send", async () => {

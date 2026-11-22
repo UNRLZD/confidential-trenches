@@ -524,6 +524,8 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   const readyP = new Promise<void>((ok, no) => (settle = { ok, no }));
   readyP.catch(() => {}); // a sender nobody awaits (a test) must not end the process; server.ts awaits it
   let configured: "unchecked" | "ok" | "mismatch" = "unchecked";
+  // the newest epoch's fee read on both providers, and its epoch: an epoch whose own read fails carries it (feeOf)
+  let last: { epoch: number; f: EpochFee } | null = null;
   const feeOf = (epoch: number): Promise<EpochFee> => {
     const had = epochFees.get(epoch);
     if (had) return had;
@@ -537,7 +539,18 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       }
       if (configured === "mismatch") throw new Error("the configured fee is not the kit's");
       known.set(epoch, f);
+      if (last === null || epoch >= last.epoch) last = { epoch, f };
       return f;
+    }, (e: unknown) => {
+      // card helper-pool-fee-never-a-client-429: an epoch whose rent read failed (a provider's throttle, a timeout, the
+      // two disagreeing) carries the newest fee read once the start check passed, kept for the whole epoch, so every
+      // caller and the send route see one fee for it and the next epoch reads again. helper-25 on ee5c7dac4 (live run
+      // 45032297159) answered GET /v1/pool/fee 429 "provider limit": each epoch is 60 s (fee.ts POOL_EPOCH_MS), so the
+      // first ask of each minute read the Rent sysvar on both public providers the market's reads also load, and a
+      // throttle of either went to the client, though a fee was held and a Rent change moves it only at the next read.
+      if (configured !== "ok" || last === null) throw e;
+      known.set(epoch, last.f);
+      return last.f;
     });
     epochFees.set(epoch, p);
     p.catch(() => {
