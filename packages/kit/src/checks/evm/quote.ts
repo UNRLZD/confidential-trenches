@@ -4260,13 +4260,17 @@ async function routeSetOf(a: {
   // 360 to 1,373 ms, 1.1 s and more in 3 of 4 cold taps of main 569b59dab, read only from macOS 2026-11-22 16:1xZ). A
   // head of the next is a scan provider's head as the first's is: each request still asks its own last block, so a
   // first behind it counts none of the blocks it does not hold
+  // The next is hedged no further: once asked beside the first it is asked as the first was before, its failure handing
+  // the read to its own next (Pocket, the next's next on Robinhood at 2 calls a second, was asked a head in 5 of 6 cold
+  // taps where each next answered in 389 to 561 ms, read only from macOS 2026-11-22 16:3xZ)
+  const inTurn = (o: ScanOn): Promise<bigint> => scanHeadOf(o.rpc, o.gate).catch((e) => (o.next === undefined ? Promise.reject(e) : inTurn(o.next)));
   const headFrom = (o: ScanOn): Promise<bigint> => {
     const next = o.next;
     if (next === undefined) return scanHeadOf(o.rpc, o.gate);
     return new Promise<bigint>((ok, no) => {
       let over = false;
       let theirs: Promise<bigint> | undefined;
-      const spare = () => (theirs ??= headFrom(next));
+      const spare = () => (theirs ??= inTurn(next));
       const win = (h: bigint) => {
         if (over) return;
         over = true;

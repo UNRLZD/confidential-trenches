@@ -1277,6 +1277,7 @@ export const MUTANTS = [
   [QUOTE, "evmHedgeAfter(URL_OF.get(o.rpc), \"head\") ?? EVM_HEDGE_MS);", "EVM_SCAN_HOLD_MS * 10);", R, "KPI1 "],
   [QUOTE, "      const timer = setTimeout(() => void spare().then(win, () => {}), evmHedgeAfter(", "      const timer = setTimeout(() => void spare().then(win, (e: unknown) => ((over = true), no(e))), evmHedgeAfter(", R, "KPI2 "],
   [QUOTE, "      scanHeadOf(o.rpc, o.gate).then(win, () => {\n        clearTimeout(timer);", "      scanHeadOf(o.rpc, o.gate).then(win, (e: unknown) => {\n        if (theirs === undefined) return no(e);\n        clearTimeout(timer);", R, "KPI2 "],
+  [QUOTE, "      const spare = () => (theirs ??= inTurn(next));", "      const spare = () => (theirs ??= headFrom(next));", R, "KPI3 "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);

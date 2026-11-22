@@ -12575,3 +12575,27 @@ test("KPI2 a next asked beside a held first that fails leaves the first's head t
   const no = await verdict(evmPoolBuyQuoteWith(warmReq(t2), [chain([best(t2)], 0), chain([best(t2)], 1)], NOW, [late(true), brokenHead], undefined, () => 0));
   assert.equal((no as { code?: string }).code, "rpc_error", big(no));
 });
+
+test("KPI3 the next asked beside a held first is hedged no further: a third scan provider is asked no head while the next is out, and is asked one once the next fails", async () => {
+  quoteMod.evmSpeedReset();
+  const heads = { second: 0, third: 0 };
+  const inner = scanner(5_000_000, []);
+  const held = (ms: number, fail = false, on?: "second" | "third"): EvmRpc => async (calls, until) => {
+    if (calls.some((c) => c.method === "eth_blockNumber")) {
+      if (on !== undefined) heads[on]++;
+      await pause(ms);
+      if (fail) return [{ jsonrpc: "2.0", id: 0, result: "0xzz" }];
+    }
+    return inner(calls, until);
+  };
+  // the next answers its head in 900 ms, past its own hedge time: the third is never asked one
+  const t1 = freshToken();
+  const v1 = await verdict(evmPoolBuyQuoteWith(warmReq(t1), [chain([best(t1)], 0), chain([best(t1)], 1)], NOW, [held(1_500), held(900, false, "second"), held(0, false, "third")], undefined, () => 0));
+  assert.equal((v1 as { accepted: boolean }).accepted, true, big(v1));
+  assert.deepEqual(heads, { second: 1, third: 0 });
+  // the next fails its head: its own next is asked then, as before
+  const t2 = freshToken();
+  const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(t2), [chain([best(t2)], 0), chain([best(t2)], 1)], NOW, [held(1_500), held(600, true, "second"), held(0, false, "third")], undefined, () => 0));
+  assert.equal((v2 as { accepted: boolean }).accepted, true, big(v2));
+  assert.deepEqual(heads, { second: 2, third: 1 });
+});
