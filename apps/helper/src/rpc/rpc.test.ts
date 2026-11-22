@@ -15,6 +15,20 @@ import { listening } from "../../test/servers.ts";
  *  clientWindow, upstreamBudget; card helper-share-tests-on-a-still-clock), so on the machine's clock a window's turn
  *  inside a test clears the share its counts and 429s assert (PR 979's merge queue run 44243609488). */
 const STILL = (): number => 1_800_000_000_000;
+/** A test clock for one helper (card helper-pacer-on-the-clients-clock): its waits move it, each to its own wake time as
+ *  timers end, and createRpc's pacer reads it as its holds and shares do, so a paced burst never waits on the machine's
+ *  clock; it starts at STILL, a share window's first ms. */
+function testClock() {
+  let t = STILL();
+  return {
+    now: (): number => t,
+    sleep: async (ms: number): Promise<void> => {
+      const wake = t + ms;
+      await null;
+      t = Math.max(t, wake);
+    },
+  };
+}
 // read off the module, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
 const { RPC_CHAIN_MAX, RPC_CLIENT_MAX } = rpcModule as unknown as { RPC_CHAIN_MAX: number; RPC_CLIENT_MAX: number };
 // each route's share: what one signing page draws in its busiest 10 s (card helper-gives-a-trade-its-reads)
@@ -149,7 +163,8 @@ test("card helper-rpc-takes-batches: eth_chainId and eth_getBlockByHash are forw
 test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded to SOLANA_DEVNET_RPC_URL, its key never in the answer; anything else refused before any call", async () => {
   next = { status: 200, type: JSON_T, body: echo };
   const DEV = "fake-devnet-key-0123456789abcdef";
-  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet?api-key=${DEV}` }, { now: STILL });
+  // eleven reads in a row at the devnet key's pace: the last waits its second on the test clock
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet?api-key=${DEV}` }, { ...testClock() });
   // the reads a pool buy makes (packages/signpage/src/pool-buy.ts), each to the devnet URL, never the mainnet one
   for (const method of ["getAccountInfo", "getMultipleAccounts", "getLatestBlockhash", "isBlockhashValid", "getBlockHeight", "getTransaction", "getSlot", "getSignaturesForAddress", "getFeeForMessage", "getBlockTime", "getEpochInfo"]) {
     seen.length = 0;
@@ -725,7 +740,8 @@ test("re-check F-D: the helper's own reads (no caller) draw from the chain's tot
 
 test("each chain is one budget callers draw from fairly: a heavy caller is throttled at RPC_CLIENT_MAX while an honest one still goes; the helper's own reads draw from no share", async () => {
   let t = 1_800_000_000_000;
-  const r = createRpc({ SOLANA_RPC_URL: base, NEAR_RPC_URL: base }, { now: () => (t += 1) });
+  // the pace's waits move the same clock (card helper-pacer-on-the-clients-clock), never the machine's
+  const r = createRpc({ SOLANA_RPC_URL: base, NEAR_RPC_URL: base }, { now: () => (t += 1), sleep: async (ms: number) => void (t += ms) });
   const ok = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: ["x"] });
   next = { status: 200, type: JSON_T, body: echo };
   seen.length = 0;
@@ -767,10 +783,11 @@ test("provider URLs: from the environment, http(s) only; an error names the vari
 // a keyed provider in memory that keeps a per-second limit, as Helius free does (10 requests/s, research
 // scripts/deploy/helius-key.sh:7): past `perSecond` requests sent in any 1 s it answers 429 (Retry-After 1)
 // (its window on the monotonic clock, card helper-crowd-429: the box's wall clock steps back under a test)
-const keepsPerSecond = (perSecond: number) => {
+// (`clock`: a test clock's, when the helper paces on one, card helper-pacer-on-the-clients-clock)
+const keepsPerSecond = (perSecond: number, clock: () => number = () => performance.now()) => {
   const p = { calls: 0, throttled: 0, sent: [] as number[] };
   const fetch = async (_u: string, init: RequestInit): Promise<Response> => {
-    const t = performance.now();
+    const t = clock();
     const body = JSON.parse(String(init.body)) as { id: unknown } | { id: unknown }[];
     const n = Array.isArray(body) ? body.length : 1;
     p.sent = p.sent.filter((x) => x > t - 1000);
@@ -784,13 +801,15 @@ const keepsPerSecond = (perSecond: number) => {
 };
 
 test("card app-console-429: one caller's burst of 35 on a keyed provider (Helius free, 100 per 10 s = 10 a second) is paced to the provider's second, so it never throttles, nothing is held, and another caller's read answers 200", async () => {
-  const provider = keepsPerSecond(10);
+  // the helper and the provider on one test clock: the burst's second second is a PACE_SECOND_MS of it, never the machine's
+  const c = testClock();
+  const provider = keepsPerSecond(10, c.now);
   const lines: string[] = [];
   // the public endpoint is its own provider (card helper-solana-slots-off-a-spent-key, round 2: the burst past the
   // key's PACE_MAX_MS goes there, never the caller's 429 while it has room)
-  const pub = keepsPerSecond(100);
+  const pub = keepsPerSecond(100, c.now);
   const both = (u: string, i: RequestInit) => (u === RPC_UPSTREAMS.solana.fallback ? pub.fetch(u, i) : provider.fetch(u, i));
-  const r = createRpc({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}`, RPC_BUDGET_SOLANA: `100,${SOL_SHARE}` }, { now: STILL, fetch: both as never, log: (l) => lines.push(l) });
+  const r = createRpc({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}`, RPC_BUDGET_SOLANA: `100,${SOL_SHARE}` }, { now: c.now, sleep: c.sleep, fetch: both as never, log: (l) => lines.push(l) });
   const burst = await Promise.all(Array.from({ length: 35 }, (_, i) => r.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), "203.0.113.7")));
   const other = await r.handle("solana", JSON_T, JSON.stringify(getBalance()), "203.0.113.8");
   assert.equal(provider.p.throttled, 0, `the provider never throttled (${provider.p.calls} sent)`);
@@ -815,10 +834,12 @@ test("card app-console-429: past PACE_MAX_MS of queued sends, only the caller ov
   assert.deepEqual(waits, [], "within the plan's second nothing waits");
   // card helper-solana-slots-off-a-spent-key, round 2: the reads past the key's PACE_MAX_MS go on to the public endpoint
   // (its own provider here), so no caller is the helper's own 429 while it has room
-  const key10 = keepsPerSecond(10);
-  const pub10 = keepsPerSecond(100);
+  // the helper and the provider on one test clock: the key's second second is a PACE_SECOND_MS of it
+  const c = testClock();
+  const key10 = keepsPerSecond(10, c.now);
+  const pub10 = keepsPerSecond(100, c.now);
   const both = (u: string, i: RequestInit) => (u === RPC_UPSTREAMS.solana.fallback ? pub10.fetch(u, i) : key10.fetch(u, i));
-  const tight = createRpc({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, RPC_BUDGET_SOLANA: "100,90" }, { now: STILL, fetch: both as never, log: (l) => lines.push(l) });
+  const tight = createRpc({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, RPC_BUDGET_SOLANA: "100,90" }, { now: c.now, sleep: c.sleep, fetch: both as never, log: (l) => lines.push(l) });
   const many = await Promise.all(Array.from({ length: 40 }, (_, i) => tight.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `198.51.100.${i}`)));
   assert.equal(key10.p.calls, 20, "10 now, 10 a PACE_SECOND_MS later: the key's room within PACE_MAX_MS");
   assert.equal(key10.p.throttled, 0, "the key never throttled");

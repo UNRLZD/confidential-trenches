@@ -32,6 +32,9 @@
 // (or spread a test's `...testClock()`, its now, pacer and sleep on one clock),
 // clientWindow and upstreamBudget take it second, providerHolds first; or it runs inside onVirtualTime(...) or
 // onTestClock(...), where the clock is the test's. SHARE_LISTED counts the calls still to convert, each with its reason.
+// The pace's waits too (card helper-pacer-on-the-clients-clock): createRpc builds its pacer on its `now`, so a createRpc
+// with a clock paces on it; a test's own createPacer takes its clock first, as providerHolds does (with none it read
+// the machine's monotonic clock, and a paced burst on a test clock asked its wait again until the machine's second passed).
 //   node scripts/ci/no-wall-clock-asserts.mjs    lists what it refuses in the tracked unit tests, exit 1 on any
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -132,7 +135,7 @@ export function quoteFindings(text) {
 // Calls that build a share, a budget or the holds on the helper's default clock, per file (the count still to convert, and
 // why). A file may make no more than its count; a new call passes a clock.
 export const SHARE_LISTED = {};
-const SHARE_CALL = /(?<![\w$.])(createRpc|clientWindow|upstreamBudget|providerHolds)\(/g;
+const SHARE_CALL = /(?<![\w$.])(createRpc|clientWindow|upstreamBudget|providerHolds|createPacer)\(/g;
 
 /** True when createRpc's deps are a name (`deps`, `w.deps`) and the file's one object assigned to `deps` names `now`. */
 function depsClocked(src, args) {
@@ -141,9 +144,9 @@ function depsClocked(src, args) {
   return objs.length > 0 && objs.every((o) => /(?<![\w$.])now\s*[:(,]/.test(o));
 }
 
-/** Every helper share, budget or holds built on its default clock outside onVirtualTime(...) or onTestClock(...): a
- *  createRpc whose deps name no `now`, a clientWindow or upstreamBudget with no second argument, a providerHolds with
- *  none: [{ line, text }]. */
+/** Every helper share, budget, holds or pacer built on its default clock outside onVirtualTime(...) or onTestClock(...):
+ *  a createRpc whose deps name no `now`, a clientWindow or upstreamBudget with no second argument, a providerHolds or
+ *  createPacer with none: [{ line, text }]. */
 export function shareFindings(text) {
   const src = code(text);
   const clocks = [...src.matchAll(/\b(?:onVirtualTime|onTestClock)\(/g)].map((m) => [m.index, closeOf(src, m.index + m[0].length - 1).end]);
@@ -154,7 +157,7 @@ export function shareFindings(text) {
     const { end, commas } = closeOf(src, open);
     const args = src.slice(open + 1, end - 1);
     const n = args.trim() === "" ? 0 : commas + 1;
-    const clocked = m[1] === "createRpc" ? n >= 2 && (/(?<![\w$.])now(?![\w$])/.test(args) || /\.\.\.\s*testClock\(\)/.test(args) || depsClocked(src, args)) : m[1] === "providerHolds" ? n >= 1 : n >= 2;
+    const clocked = m[1] === "createRpc" ? n >= 2 && (/(?<![\w$.])now(?![\w$])/.test(args) || /\.\.\.\s*testClock\(\)/.test(args) || depsClocked(src, args)) : m[1] === "providerHolds" || m[1] === "createPacer" ? n >= 1 : n >= 2;
     if (clocked || clocks.some(([a, b]) => m.index > a && m.index < b)) continue;
     const line = src.slice(0, m.index).split("\n").length;
     out.push({ line, text: text.split("\n")[line - 1].trim().slice(0, 160) });

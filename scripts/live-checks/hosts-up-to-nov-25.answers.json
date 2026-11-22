@@ -1,0 +1,119 @@
+{
+ "_note": "Each host's reads as the check read them (status, content type, the health body's ok, bytes, error, ms; no body). good: the deployed hosts read 2026-11-22T09:31:28.515Z from macOS: APP_HOST and SIGN_HOST 200 HTML, HELPER_HOST 200 JSON ok true: PASS. bad: the same check at 2026-11-22T09:31:51.917Z with --sign pointed at a name with no DNS record (ct-sign-none.unrealized.trade) and --helper at a path the helper does not serve (/v1/none): each read twice 20 s apart, ENOTFOUND and HTTP 404: FAIL, two hosts down.",
+ "good": {
+  "readAt": "2026-11-22T09:31:28.515Z",
+  "hosts": [
+   {
+    "name": "APP_HOST",
+    "url": "https://ct-app.unrealized.trade/",
+    "kind": "page",
+    "reads": [
+     {
+      "status": 200,
+      "type": "text/html; charset=utf-8",
+      "ok": null,
+      "bytes": 3919,
+      "error": null,
+      "ms": 278
+     }
+    ]
+   },
+   {
+    "name": "SIGN_HOST",
+    "url": "https://confidential.unrealized.trade/",
+    "kind": "page",
+    "reads": [
+     {
+      "status": 200,
+      "type": "text/html; charset=utf-8",
+      "ok": null,
+      "bytes": 438,
+      "error": null,
+      "ms": 278
+     }
+    ]
+   },
+   {
+    "name": "HELPER_HOST",
+    "url": "https://ct-api.unrealized.trade/v1/health",
+    "kind": "health",
+    "reads": [
+     {
+      "status": 200,
+      "type": "application/json; charset=utf-8",
+      "ok": true,
+      "bytes": 760,
+      "error": null,
+      "ms": 1076
+     }
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "readAt": "2026-11-22T09:31:51.917Z",
+  "hosts": [
+   {
+    "name": "APP_HOST",
+    "url": "https://ct-app.unrealized.trade/",
+    "kind": "page",
+    "reads": [
+     {
+      "status": 200,
+      "type": "text/html; charset=utf-8",
+      "ok": null,
+      "bytes": 3919,
+      "error": null,
+      "ms": 216
+     }
+    ]
+   },
+   {
+    "name": "SIGN_HOST",
+    "url": "https://ct-sign-none.unrealized.trade/",
+    "kind": "page",
+    "reads": [
+     {
+      "status": null,
+      "type": "",
+      "ok": null,
+      "bytes": 0,
+      "error": "ENOTFOUND",
+      "ms": 51
+     },
+     {
+      "status": null,
+      "type": "",
+      "ok": null,
+      "bytes": 0,
+      "error": "ENOTFOUND",
+      "ms": 5
+     }
+    ]
+   },
+   {
+    "name": "HELPER_HOST",
+    "url": "https://ct-api.unrealized.trade/v1/none",
+    "kind": "health",
+    "reads": [
+     {
+      "status": 404,
+      "type": "application/json; charset=utf-8",
+      "ok": false,
+      "bytes": 21,
+      "error": null,
+      "ms": 1588
+     },
+     {
+      "status": 404,
+      "type": "application/json; charset=utf-8",
+      "ok": false,
+      "bytes": 21,
+      "error": null,
+      "ms": 1736
+     }
+    ]
+   }
+  ]
+ }
+}

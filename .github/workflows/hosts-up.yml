@@ -1,0 +1,46 @@
+# The live demo's three hosts are read every 15 minutes from GitHub's runners through 2026-11-25, and a host down turns
+# this workflow's run red (card hosts-up-to-nov-25): APP_HOST and SIGN_HOST answer GET / with a page, HELPER_HOST GET
+# /v1/health with ok true. scripts/live-checks/hosts-up-to-nov-25.mjs reads them and reads a failed host again 20 s
+# later, so one dropped connection is no red run. It reads no key; the workflow's token holds contents: read alone.
+#
+# Every action is pinned by commit sha, as ci.yml pins them: actions/checkout v7.0.1, actions/setup-node v7.1.0.
+# The check imports node's own modules only, so no install runs.
+name: hosts-up
+
+on:
+  # every 15 minutes until 25 Nov 2026 (the window step skips every later scheduled run)
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosts-up
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - id: window
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(date -u +%F)" \> 2026-11-25 ]; then
+            echo "the probe ended on 2026-11-25"
+            echo "open=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "open=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.window.outputs.open == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: steps.window.outputs.open == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - if: steps.window.outputs.open == 'true'
+        name: read the three hosts, red when one is down
+        run: node scripts/live-checks/hosts-up-to-nov-25.mjs
