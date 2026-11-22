@@ -425,17 +425,24 @@ export async function collect({ launchers, shots, source, expect, routes }) {
 // refuses with that code, and a kind named in `holds` is never answered, as a run still going (card app-near-trading:
 // the NEAR buy's Sending and its refusals); the last deposit.quote's id is the deposit's op id, and
 // window.__ctShellPush(facts) posts a state event with that one deposit op ({ stage, ...facts }), as the real page posts
-// a deposit's stages. The update run's shell names message API 2 in its ready. The late and silent shells post their ready 7 s after the load
+// a deposit's stages. A kind named in `late` (kind -> [{ stage, txs }]) is answered as above, then LATE_END_MS after its
+// answer each of its ends goes to the frame in order as a progress event under the request's id, as the signing page
+// posts a buy's end it read after answering (packages/signpage/src/pool-buy-evm.ts `late`; card
+// app-shell-posts-a-late-end), and window.__ctShellLate counts the answers whose ends went out. The update run's shell names message API 2 in its ready. The late and silent shells post their ready 7 s after the load
 // and tell the check through window.__ctShellReady. Its headers
 // are SIGN_HOST's _headers with section 4's frame rules: frame-ancestors 'none' and frame-src APP_HOST.
 const SIGNED_IN = { release: "harness-shell", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "1250.00", wallets: [], positions: [], orders: [], held: [], ops: [] };
 const SIGNED_OUT = { release: "harness-shell", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
-const shellJs = (kind, state = null, opens = [], answers = {}, holds = [], closes = false) => `const APP = ${JSON.stringify(APP_HOST)};
+/** How long after its answer the shell posts a kind's late ends: past the app's drawing of the answer, as a real late end
+ *  comes after a read of the chain. */
+export const LATE_END_MS = 1_500;
+const shellJs = (kind, state = null, opens = [], answers = {}, holds = [], closes = false, late = {}) => `const APP = ${JSON.stringify(APP_HOST)};
 const OPENS = ${JSON.stringify(opens)};
 const OPENED = ${JSON.stringify(closes ? { pending: true, closes: true } : { pending: true })};
 window.__ctShellCloses = ${closes};
 const HOLDS = ${JSON.stringify(holds)};
 const ANSWERS = ${JSON.stringify(answers)};
+const LATE = ${JSON.stringify(late)};
 let DEPOSIT = null;
 window.__ctShellPush = (facts) => {
   STATE.ops = [{ id: DEPOSIT, kind: "deposit", txs: [], ...facts }];
@@ -475,6 +482,14 @@ addEventListener("message", (e) => {
   const answer = e.data.type === "state" ? ok(STATE) : nav || e.data.type === "reload" ? ok({}) : refused ? refused : read ? ok(read) : OPENS.includes(e.data.type) ? ok({ ...OPENED }) : no;
   if (nav) history.replaceState(null, "", location.origin + new URL(APP + p).pathname + new URL(APP + p).search);
   f.contentWindow.postMessage(answer, APP);
+  const ends = Object.hasOwn(LATE, e.data.type) ? LATE[e.data.type] : null;
+  if (ends) {
+    const id = e.data.id;
+    setTimeout(() => {
+      for (const x of ends) f.contentWindow.postMessage({ v: 1, type: "progress", id, stage: x.stage, ...(x.txs ? { txs: x.txs } : {}) }, APP);
+      window.__ctShellLate = (window.__ctShellLate ?? 0) + 1;
+    }, ${LATE_END_MS});
+  }
   if (e.data.type === "reload") location.reload();
 });
 document.body.appendChild(f);
@@ -696,7 +711,7 @@ export const refusalOf = (u) => `harness: no answer for ${u.origin}${u.pathname}
 
 /** Playwright's route for the in-shell harness; `log` takes each refusal's line (stderr by default), and the returned
  *  route's `refused` lists every request it refused, in order. */
-export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [], answers = {}, holds = [], closes = false, near = nearChain(), log = (l) => console.error(l) } = {}) {
+export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [], answers = {}, holds = [], closes = false, late = {}, near = nearChain(), log = (l) => console.error(l) } = {}) {
   // the state the shell sends, as the kit's client reads it: a fixture the real app would drop fails here, by name
   const why = await kitRefuses(state ?? (kind === "tap" ? SIGNED_OUT : SIGNED_IN));
   if (why) throw new Error(`${KEY}: the planted state: ${why}`);
@@ -709,7 +724,7 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
   };
   const appRules = rulesOf(readFileSync(path.join(appBuild, "_headers"), "utf8"));
   const signRules = rulesOf(shellHeaders(readFileSync(path.join(REPO, "packages/signpage/public/_headers"), "utf8")));
-  const js = shellJs(kind, state, opens, answers, holds, closes);
+  const js = shellJs(kind, state, opens, answers, holds, closes, late);
   const pools = await poolAnswers();
   const shellFiles = { "/shell.js": js, "/shell.css": SHELL_CSS };
   const headers = (rules, p, type) => ({ ...Object.fromEntries(headersFor(rules, p)), "content-type": type });
