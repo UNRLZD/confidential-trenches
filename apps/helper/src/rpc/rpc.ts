@@ -405,6 +405,8 @@ export type Pacer = ReturnType<typeof createPacer>;
  * token watches and the pool senders read their own providers), so 0. The token page's reads are not in it: they are
  * one per token a caller opens, so they draw that caller's share and stop at the total less this, as callers do.
  */
+/** The most budgetless providers a market hold is kept for (backgroundThrottled): the trade walks' few. */
+const MARKET_HELD_MAX = 16;
 export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base: 0, robinhood: 0, near: 0, "solana-devnet": 0, "solana-marks": 0 };
 /**
  * The part of each chain's total, and of each method's, the helper's own background reads never draw (card
@@ -2501,6 +2503,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         const per = slotShareOf(ownPlans.solana);
         return holdsAll.heldMs(url) > 0 || pacer.go(url, 1, Math.max(1, per - userRoomOf(per))) > 0 ? 1 : 0;
       }
+      // card helper-pool-fee-first-in-the-solana-budget: a public Solana provider with no budget of its own (the trade
+      // walks' TRADES_RPCS) is held for the market's reads while it refuses them (backgroundThrottled)
+      if (chain === "solana" && !isSpare(chain, url)) {
+        const ms = (marketHeldTo.get(url) ?? 0) - now();
+        return ms > 0 ? Math.max(1, Math.ceil(ms / 1000)) : 0;
+      }
       if (!isSpare(chain, url)) return 0;
       const ms = holdsAll.heldMs(url) || holdsAll.take(url, 1, true);
       return ms > 0 ? Math.max(1, Math.ceil(ms / 1000)) : 0;
@@ -2526,6 +2534,13 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   function caller(chain: RpcChain, url: string, method: string, client: string): number {
     const key = keyOf(chain, url);
     if (key === null) return background(chain, url, method);
+    // card helper-pool-fee-first-in-the-solana-budget: the provider's own wait, named in its 429 to a market read
+    // (backgroundThrottled), holds the market's reads a page waits on too: they are still the market's, and sending
+    // through it kept the public endpoint refusing the helper's address, the pool's fee read on it among them (helper-24
+    // on 47d3aa851, live run 45022630048: 314 "rpc hold solana-public background" lines, GET /v1/pool/fee 429 "provider
+    // limit"). The pool's own reads are no market read: they draw nothing here and wait on none of it.
+    const held = budget.heldFor(key, true);
+    if (held > 0) return held;
     const p = pacedOf(key);
     if (p !== null && pacer.at(p.url, 1, p.perSecond, { maxWaitMs: 0, book: false }) > 0) return 1;
     const wait = budget.takeEach(drawsOf(key, [method]), client, false, false);
@@ -2540,8 +2555,19 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       const s = upstreamRetryAfterS(headers, now());
       holdsAll.hold(url, s);
       log(`rpc hold ${chain} ${companyOf(new URL(url).host)} background ${s} s`);
+    } else if (chain === "solana") {
+      // card helper-pool-fee-first-in-the-solana-budget: a public provider with no budget of its own (TRADES_RPCS'
+      // publicnode) refused a market read: the market's reads of it wait out its reset, a later shorter one never cutting
+      // it, so its window clears for the pool's reads, which go to it directly
+      const s = upstreamRetryAfterS(headers, now());
+      const to = Math.max(marketHeldTo.get(url) ?? 0, now() + s * 1000);
+      if (!marketHeldTo.has(url) && marketHeldTo.size >= MARKET_HELD_MAX) marketHeldTo.delete(marketHeldTo.keys().next().value!);
+      marketHeldTo.set(url, to);
+      log(`rpc hold solana ${companyOf(new URL(url).host)} market ${s} s`);
     }
   }
+  /** Each budgetless public Solana provider's market hold, until when (ms): backgroundThrottled, background. */
+  const marketHeldTo = new Map<string, number>();
   const isSpare = (chain: RpcChain, url: string): boolean => (url !== upstreams[chain].url || companyUrls.has(url)) && upstreams[chain].keyed.some((k) => k.url === url);
 
   /** Each keyed URL's last probe (card rpc-keyed-lists), for /v1/health: "unread" until its first; and when it was. */
