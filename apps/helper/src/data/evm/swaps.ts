@@ -2009,6 +2009,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Each pool search's lane, which a foreground open that joins it lifts (join). */
   const resolvingLane = new Map<string, Lane>();
   const pad32 = (a: string) => a.slice(2).padStart(64, "0");
+  /** A pool index entry's PoolKey as its five words (it must still hash to the id). */
+  const indexKey = (x: IndexedPool): string => `0x${[x.key.currency0, x.key.currency1].map(pad32).join("")}${pad32(`0x${x.key.fee.toString(16)}`)}${pad32(`0x${x.key.tickSpacing.toString(16)}`)}${pad32(x.key.hooks)}`;
 
   const wordAddr = (r: string | undefined, i = 0): string | null => (r !== undefined && /^0x([0-9a-f]{64})+$/.test(r) && r.length >= 2 + 64 * (i + 1) ? `0x${r.slice(2 + 64 * i + 24, 2 + 64 * (i + 1))}` : null);
 
@@ -2256,13 +2258,20 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const answers = await callsSome(head.n, [...paired.map(confirmCall), ...list.map((id) => ({ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` }))], missed);
     for (const c of confirmed(paired, answers.slice(0, paired.length))) if (c !== null) cands.push(c);
     const keys = answers.slice(paired.length);
+    const indexed = list.length === 0 ? [] : (deps.quoteIndex?.(token) ?? []);
     for (const [i, id] of list.entries()) {
       const e = seen.get(id)!;
       // the PositionManager's key when it hashes to the id: that is the pool, whatever it pairs (a route's other hop, or
       // the token against a quote of no venue of ours), and no search finds another (card robinhood-cold-open-fast: those
-      // misses searched seconds each); else one worked out from the swap (it must hash to the id), the event loop let run
+      // misses searched seconds each); else the chain's pool index's (deps.quoteIndex: every Initialize of the PoolManager,
+      // any currency and hook: card robinhood-few-trade-tapes-fill-inside-45s, Robinhood 0x28da843c's busiest pool
+      // 0x73b1e6d1, the PositionManager's record of it empty, pairs it with 0xa30fa36d under hook 0x4e346895, which no
+      // search below tries: the coin read as having no pool and its tape was the vendor's, live run 44979250087); else one
+      // worked out from the swap (it must hash to the id), the event loop let run
       const k = keys[i];
-      const c = k !== undefined && /^0x[0-9a-f]{320}$/.test(k) && keccakHex(k) === id ? v4Pool(token, id, k) : v4Pool(token, id, (await v4KeySliced(id, token, e.fee, [...e.around], chain, slice)) ?? undefined);
+      const ix = indexed.find((x) => x.id === id);
+      const kx = ix === undefined ? undefined : indexKey(ix);
+      const c = k !== undefined && /^0x[0-9a-f]{320}$/.test(k) && keccakHex(k) === id ? v4Pool(token, id, k) : kx !== undefined && keccakHex(kx) === id ? v4Pool(token, id, kx) : v4Pool(token, id, (await v4KeySliced(id, token, e.fee, [...e.around], chain, slice)) ?? undefined);
       if (c !== null) cands.push(c);
     }
     // a Pons token: the factory's own record of it names its curve and its quote (zero: native ETH), or once it has
@@ -2982,7 +2991,20 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // swaps-base-spread.test.ts's rig, left to the locates 8 tapes still filling at 45 s; reading named blocks beside
       // them, the last locates waited to 38 and 44 s behind those reads, 2 still filling)
       const free = backRpcs.filter((u) => usable([u]).length > 0);
-      const two = free.filter((u) => !(BACK_LOCATE.includes(u) && ((holds.paceOf(u)?.perS ?? 1) <= 1 || locating(u))));
+      const fast = (u: string): boolean => !(BACK_LOCATE.includes(u) && ((holds.paceOf(u)?.perS ?? 1) <= 1 || locating(u)));
+      const two = free.filter(fast);
+      // one of the two held a moment only (pocket's Retry-After 1 past its own per-second share, a refusal of part of the
+      // round before) is waited for, never stood in for by the chain's own RPC: its logs carry no block time, a header a
+      // named block at its post a second, and a round there took 3.6 to 12.4 s where a round of the two took 0.5 to 1.4 s
+      // (card robinhood-few-trade-tapes-fill-inside-45s: Robinhood 0x7fe995a8's 50 trades over its ETH pool's 117 named
+      // blocks filled in 59.2, 65.3 and 79.2 s with 7 or 8 rounds there, from the Mac 22 Nov 05:0xZ; waiting, 24.5 to 40.6 s)
+      if (two.length < 2 && (back.fails ?? 0) === 0) {
+        const soon = backRpcs.filter((u) => fast(u) && !two.includes(u)).map((u) => holds.heldMs(u)).filter((ms) => ms > 0 && ms < BACK_RETRY_MS);
+        if (two.length + soon.length >= 2) {
+          e.back = { ...back, until: now() + Math.min(...soon) };
+          return;
+        }
+      }
       const urls = two.length >= 2 && (back.fails ?? 0) === 0 ? two : free;
       const wide = Math.min(...urls.map((u) => BACK_SPAN[u] ?? V.span));
       // a round reads the named blocks of the newest BACK_ROUND_SPANS spans of `wide` blocks, the next round the next
@@ -4230,8 +4252,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const indexed = (deps.quoteIndex?.(q) ?? []).flatMap((x) => {
       const other = x.key.currency0 === q ? x.key.currency1 : x.key.currency1 === q ? x.key.currency0 : null;
       if (other !== V.usd && other !== V.weth && other !== ZERO) return [];
-      const k = `0x${[x.key.currency0, x.key.currency1].map(pad32).join("")}${pad32(`0x${x.key.fee.toString(16)}`)}${pad32(`0x${x.key.tickSpacing.toString(16)}`)}${pad32(x.key.hooks)}`;
-      const p = v4Pool(q, x.id, k);
+      const p = v4Pool(q, x.id, indexKey(x));
       return p === null ? [] : [p];
     }).slice(0, CANDIDATES_MAX);
     const cands = [...found, ...indexed].filter((p): p is Pool => p != null && p.venue !== "curve" && p.quote.kind !== "token");

@@ -1519,7 +1519,10 @@ if (import.meta.main) {
     // card evm-token-page-opens-any-coin: a token no list carries is named by DexScreener, on the budget held reads draw
     const dex = upstreamBudget(() => DEX_LIMITS, Date.now);
     const evmNamed = evmNamedFrom(SERVED_EVM, dex);
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed, { storeDir, writable: senders.held }, { base: quoteIndexFromSign("base") }), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    // Robinhood's pool index (poolIndexes, opened below) names any v4 pool's key to the tapes' pool search, read through
+    // this holder: empty until it opens (card robinhood-few-trade-tapes-fill-inside-45s)
+    const indexOf: { robinhood?: Pick<PoolIndex, "pools"> } = {};
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed, { storeDir, writable: senders.held }, { base: quoteIndexFromSign("base"), robinhood: (t) => indexOf.robinhood?.pools(t).pools ?? [] }), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info CoinGecko's keyed
     // on-chain read, never GeckoTerminal's keyless window (card evm-token-page-off-the-5-call-window), its pool and
     // decimals the swap reads' when they hold them
@@ -1576,6 +1579,7 @@ if (import.meta.main) {
       }
     })();
     if (poolIndexes !== null) {
+      indexOf.robinhood = poolIndexes.robinhood;
       const running = { stopped: false };
       const [first, ...rest] = (["robinhood", "base"] as const).flatMap((c) => poolIndexes[c] ?? []);
       void senders.held
