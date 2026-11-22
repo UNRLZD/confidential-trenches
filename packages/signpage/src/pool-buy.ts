@@ -1342,14 +1342,17 @@ export async function sendAndSettle(
     // read back on both RPCs as these very transactions: only now is the buy told as sent, by its signature; a buy
     // tells it as a route fact too (card pool-buy-send-fast), which reaches the app however late it comes: an answer
     // past the kit client's 10 s is dropped (a mainnet bundle the helper holds until it lands)
-    if (!ours && seen[0] && seen[1]) {
-      ours = true;
-      tellTx(signature);
+    // with it, the blockhash these bytes carry and the last height they are held to, kept beside the op on the device so
+    // a reload reads its end from both RPCs (card signpage-sent-end-recorded); told just before sent, so the op has them
+    if (!ours && seen[0] && seen[1])
       try {
         h.sendAt?.(signature, solanaDecodeTransaction(signed).message.blockhash, lastHeight);
       } catch {
         /* the op's end then waits for the run's own, as before */
       }
+    if (!ours && seen[0] && seen[1]) {
+      ours = true;
+      tellTx(signature);
       await h.sent?.(signature);
     }
     if (landed && fill) {

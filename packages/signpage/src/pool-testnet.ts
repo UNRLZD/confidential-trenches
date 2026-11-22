@@ -3553,6 +3553,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const p = (async () => {
       try {
         const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
+        // a pool buy a closed or reloaded page left "sent": its end read from its own txs on both RPCs, in the
+        // background, never holding the read back (card signpage-sent-end-recorded)
+        settleSent();
         // the next buy's proofs (card signpage-pool-pins) before any settle step: a page that loads with the pool's
         // notes landed opens the queue, and each read while it is open makes the epoch's proofs again, one pass at a
         // time; a settle that throws or waits (a deposit run, a sell's verdict, a buy's owed pieces) never holds them back
@@ -3563,9 +3566,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // waits or fails holds it back, as main.ts settles a dead trade (trade.ts tradeSettleDue). Its unrun legs are
         // refused "failed" (nothing was sent for them), and its id is never id_reused for good
         if (locks) await within(page.store(), TRADE_STORE_MS, "the wallet store").then((ops) => settleDeadSellOps(timedStore(ops, TRADE_STORE_MS), locks)).catch(() => {});
-        // a pool buy a closed or reloaded page left "sent": its end read from its own txs on both RPCs, in the
-        // background, never holding the read back (card signpage-sent-end-recorded)
-        settleSent();
         if (settling) return await settling;
         if (mine.some((n) => n.state === "INCOMING")) {
           const coming = new Set(mine.filter((n) => n.state === "INCOMING" && n.ref.kind === "deposit").map((n) => n.id));
