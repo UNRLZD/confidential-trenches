@@ -344,7 +344,20 @@ const isKey = (s: unknown): s is string => {
 /** How a coin's SOL pools of one program are found (solanaScannedPools): the scan of the pools whose two mints are `x`
  *  and `y` in that order, each pool's SOL reserve (an SPL Token account, its amount at 64) as `rpc` names it (at most
  *  RANK_BATCH pools at a time; a pool it cannot name has depth 0), and the name a refusal says. */
-export type SolanaPoolScanKind = { readonly name: string; readonly scan: (x: string, y: string) => readonly unknown[]; readonly solReserves: (rpc: SolanaRpc, pools: readonly string[]) => Promise<readonly string[]> };
+export type SolanaPoolScanKind = {
+  readonly name: string;
+  readonly scan: (x: string, y: string) => readonly unknown[];
+  readonly solReserves: (rpc: SolanaRpc, pools: readonly string[]) => Promise<readonly string[]>;
+  /** The program makes a pool only with its first mint below its second, byte for byte (Raydium CLMM create_pool:
+   *  `token_mint_0.key() < token_mint_1.key()`), so one scan, in that order, finds every pool of the pair. */
+  readonly ordered?: boolean;
+};
+/** `x` below `y` byte for byte, as Solana orders two addresses (Pubkey's Ord). */
+const below = (x: string, y: string): boolean => {
+  const [a, b] = [base58.decode(x), base58.decode(y)];
+  for (let i = 0; i < 32; i++) if (a[i] !== b[i]) return a[i]! < b[i]!;
+  return false;
+};
 /** One scan's addresses; throws on an answer that is not a list of at most SOLANA_DLMM_SCAN_MAX addresses. */
 async function scanOn(rpc: SolanaRpc, kind: SolanaPoolScanKind, x: string, y: string): Promise<string[]> {
   const a = (await solanaTimedRpc(rpc, SCAN_TIMEOUT_MS)("getProgramAccounts", [...kind.scan(x, y)])) as { value?: unknown } | unknown[] | null;
@@ -385,11 +398,14 @@ async function depthsOn(rpc: SolanaRpc, kind: SolanaPoolScanKind, pairs: readonl
  * like any other by the reference. Past SOLANA_DLMM_MAX_PAIRS, `read`'s two providers each keep the half they read
  * deepest in SOL (each pool's SOL reserve), and the union of the two halves is the list: one provider cannot push the
  * pool the other reads deepest out. Sorted; [] for wSOL itself. Throws when a provider fails or answers out of shape.
+ * `quote`: the other mint, wSOL unless named (clmm.ts lists a coin's USDC markets too; `solReserves` then names each
+ * pool's reserve of that quote).
  */
-export async function solanaScannedPools(kind: SolanaPoolScanKind, scan: readonly [SolanaRpc, SolanaRpc], read: readonly [SolanaRpc, SolanaRpc], mint: string): Promise<string[]> {
+export async function solanaScannedPools(kind: SolanaPoolScanKind, scan: readonly [SolanaRpc, SolanaRpc], read: readonly [SolanaRpc, SolanaRpc], mint: string, quote: string = SOLANA_SOL_MINT): Promise<string[]> {
   if (!isKey(mint)) throw new Error("the coin is not a 32-byte address");
-  if (mint === SOLANA_SOL_MINT) return [];
-  const lists = await Promise.all(scan.map((rpc) => Promise.all([scanOn(rpc, kind, mint, SOLANA_SOL_MINT), scanOn(rpc, kind, SOLANA_SOL_MINT, mint)])));
+  if (mint === quote) return [];
+  const orders: (readonly [string, string])[] = kind.ordered ? [below(mint, quote) ? [mint, quote] : [quote, mint]] : [[mint, quote], [quote, mint]];
+  const lists = await Promise.all(scan.map((rpc) => Promise.all(orders.map(([x, y]) => scanOn(rpc, kind, x, y)))));
   const all = [...new Set(lists.flat(2))].sort();
   if (all.length <= SOLANA_DLMM_MAX_PAIRS) return all;
   const half = SOLANA_DLMM_MAX_PAIRS / 2;

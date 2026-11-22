@@ -156,8 +156,13 @@ const TX_PARALLEL = 5;
 export const SIG_PAGE = 100;
 export const REFILL_MAX = 1_000;
 export const SETTLE_SLOTS = 150;
-/** A first read answers after its walk, or after this with what it holds by then. */
+/** A first read answers after its walk, its first trade held, or this long after the read began, with what it holds by
+ *  then (filling). [design: 3 s, for now: at 1.5 s a local helper on the public lanes answered 6 of 6 busy coins'
+ *  first tapes at the bound with no row (solana-tape-rows-at-first-answer FAIL, 21 Nov 22:20Z); the bound comes down
+ *  with the walk's first round, sized on the keyed lanes' sol-open times (card helper-stays-fast-under-the-live-run)] */
 export const COLD_WAIT_MS = 3_000;
+/** How long after a first read its answers name its phases (sol-open): the reads that joined it. */
+export const OPEN_NAMED_MS = 1_000;
 export const SILENT_MS = 30_000;
 /** SOL_BEHIND_MS and SOL_VENDOR_REACH_MS live in token.ts, whose tapes wait past the reach (card
  *  sol-vendor-tape-waits-past-reach); token.ts cannot import this file, which imports it. */
@@ -605,6 +610,13 @@ function within(p: Promise<unknown>, ms: number): Promise<void> {
 type Held = { slot: number; seq: number; t: RawTrade[] };
 type Entry = {
   mint: string;
+  /** The first read's phases (first()), named in a cold tape's Server-Timing (sol-open) so a slow first answer names
+   *  its wait: the mint's account, the stream's subscription, and what answered it (the walk, a trade held from the
+   *  walk or the stream, or the bound), each in ms from the read's start. */
+  open?: { at: number; desc: string };
+  /** While a first read waits (first()): told after each fold, so a trade the stream sends answers it as a walk's round
+   *  that holds one does. */
+  onFold?: () => void;
   decimals: number;
   quoteMint: string | null;
   book: Book | null;
@@ -1067,6 +1079,7 @@ export function createSolanaTrades(deps: {
     for (const [sig, h] of e.held) if (h.slot <= e.book.settledTo) e.held.delete(sig);
     for (const slot of e.refs.keys()) if (slot <= e.book.settledTo) e.refs.delete(slot);
     e.readAt = now();
+    e.onFold?.();
   }
 
   /** Walks `mint`'s signatures newer than `until` (the newest COLD_SIGS successful ones when null) and holds each
@@ -1254,7 +1267,9 @@ export function createSolanaTrades(deps: {
   const readTo = (e: Entry): string => {
     const h = source.heard?.() ?? null;
     const ago = h === null ? "never" : `${Math.max(0, Math.round((now() - h.at) / 1_000))} s ago`;
-    return `sol-read-to;desc="slot ${e.covered} of head ${h?.slot ?? "none"}, heard ${ago}${e.state === "live" ? "" : `, ${e.state}`}"`;
+    // the first read's phases, on the answers of its first OPEN_NAMED_MS (the reads that waited on it)
+    const opened = e.open !== undefined && now() - e.open.at <= OPEN_NAMED_MS ? `, sol-open;desc="${e.open.desc}"` : "";
+    return `sol-read-to;desc="slot ${e.covered} of head ${h?.slot ?? "none"}, heard ${ago}${e.state === "live" ? "" : `, ${e.state}`}"${opened}`;
   };
 
   /** Each mint's tape the vendor has not answered (poolTape): since when, and its last such read; a read more than
@@ -1299,13 +1314,18 @@ export function createSolanaTrades(deps: {
   }
   /** A pool's newest trades (newest first), read at `at`, as the trades answer: the newest `limit`, every one after the
    *  oldest (card token-stats-count-every-trade) claimed complete only while that read is within SOL_VENDOR_REACH_MS,
-   *  its age always named (card vendor-tapes-name-their-reach-every-chain), the vendor's rows and ours alike. */
+   *  its age always named (card vendor-tapes-name-their-reach-every-chain), the vendor's rows and ours alike. Past the
+   *  reach the tape says filling, as this chain's own tape says it behind its stream (token.ts SOL_BEHIND_MS): card
+   *  sol-vendor-tape-gap-served-inside-reach, live run 44938731300 served BONK's rows 33,606 and 54,172 ms old with no
+   *  word of it, the refresh past the reach refused or not landed within TAPE_OPEN_BOUND_MS, and the page drew them as
+   *  live (apps/terminal screens/token/trades.ts marks a tape only by `filling`). */
   function rowsAnswer(all: unknown[], src: string, at: number, limit: number, holed = false): DataAnswer {
     const age = Math.max(0, now() - at);
     const oldest = (all.at(-1) as { t_ms?: unknown } | undefined)?.t_ms;
     const whole = typeof oldest === "number" && Number.isSafeInteger(oldest) && age <= SOL_VENDOR_REACH_MS && !holed ? { whole_ms: oldest + 1_000 } : {};
+    const behind = age > SOL_VENDOR_REACH_MS ? { filling: true } : {};
     const timing = `sol-vendor-read;desc="rows read ${age} ms ago"`;
-    return { status: 200, body: JSON.stringify({ trades: all.slice(0, limit), ...whole, src, as_of_ms: at }), src, asOfMs: at, timing };
+    return { status: 200, body: JSON.stringify({ trades: all.slice(0, limit), ...behind, ...whole, src, as_of_ms: at }), src, asOfMs: at, timing };
   }
 
   // Card sol-vendor-tape-refresh-from-our-reads: the vendor names a coin's pool once (its first answer); while a page
@@ -1499,7 +1519,11 @@ export function createSolanaTrades(deps: {
 
   /** A first read: the token's decimals, its subscription in force, then its newest COLD_SIGS signatures walked. */
   async function first(mint: string): Promise<Entry | DataAnswer> {
+    const began = now();
+    const marks: string[] = [];
+    const mark = (name: string): void => void marks.push(`${name} ${Math.round(now() - began)}`);
     const listed = await deps.listed(mint);
+    mark("listed");
     if (listed === null) return UPSTREAM;
     if (!listed) return NOT_FOUND;
     if (entries.size >= OPEN_MAX) return { ...err(429, "rate_limited"), retryAfterS: 5, why: "solana trades open" };
@@ -1508,7 +1532,8 @@ export function createSolanaTrades(deps: {
       const a = await account(mint);
       if (a === null || !TOKEN_PROGRAMS.includes(a.owner as string) || a.data.length < 82 || a.data[45] !== 1) return NOT_FOUND;
       decimals = a.data[44]!;
-      if (solUsd === null) await readRef();
+      mark("account");
+      if (solUsd === null) (await readRef(), mark("price"));
     } catch {
       return UPSTREAM;
     }
@@ -1523,6 +1548,12 @@ export function createSolanaTrades(deps: {
       source.unwatch(mint);
       return UPSTREAM;
     }
+    mark("watch");
+    // the first answer's bound runs from the subscription, so the walk has its whole COLD_WAIT_MS: a flooded coin's walk
+    // reads a page of COLD_PAGE signatures past its newest COLD_SIGS before any transaction, and with the bound run from
+    // the read's start (88bb881e5) helper-19's live run 44962533217 answered three flooded coins' first tapes at 4.0 to 4.2
+    // s with the vendor's rows, none of ours (solana-tape-rows-at-first-answer BAD; green on helper-18)
+    const bound = deps.coldWait?.() ?? new Promise<void>((r) => setTimeout(r, COLD_WAIT_MS).unref?.());
     // the tape is served from the moment the stream holds the token; the walk's older trades join as they are read
     e.readAt = now();
     let firstRound: () => void = () => undefined;
@@ -1530,16 +1561,22 @@ export function createSolanaTrades(deps: {
     // the first answer is the first round that holds a trade: a busy token's newest transactions may hold none of a venue
     // read (failed bot buys, other venues), and its first round answered an empty tape (card
     // helper-live-run-green-after-122: ni hao cat's first reads, 0 rows at +0 and +2.4 s, 18 rows a second later)
+    let rounds = 0;
     const traded = (): void => {
       if (e.book !== null && e.book.tape(1).length > 0) firstRound();
     };
+    // card helper-stays-fast-under-the-live-run: a trade the stream sends answers the first read too, once folded: a
+    // busy coin's stream holds trades within a second while its walk's first round waits on its reads (the live helper at
+    // f28b6bd56, 21 Nov 21:04Z: three cold trending coins' tapes answered at 2.5, 3.1 and 3.6 s, past the burst check's
+    // 3 s p99 with the way to it), and the tape answered then is our own rows, filling while the walk reads older ones
+    e.onFold = traded;
     // a walk that fails is walked again while the token is open, after a wait that doubles to COLD_RETRY_MAX_MS: the
     // tape stays cold (filling) until its newest COLD_SIGS are read, never settled short on a read that failed (card
     // robinhood-trades-finish-filling: three fails ended the walk and the tape said done with what the stream had sent)
     const cold = (async () => {
       for (let attempt = 0; !stopped && entries.get(mint) === e; attempt++) {
         try {
-          await walk(e, null, traded);
+          await walk(e, null, () => (rounds++, traded()));
           if (e.state === "cold") e.state = "live";
           break;
         } catch {
@@ -1548,9 +1585,12 @@ export function createSolanaTrades(deps: {
       }
       fold(e);
     })();
-    // the first answer waits for the walk's first round that holds a trade (its newest trades), the whole walk, or
-    // COLD_WAIT_MS
-    await Promise.race([cold, rounded, deps.coldWait?.() ?? new Promise((r) => setTimeout(r, COLD_WAIT_MS).unref?.())]);
+    // the first answer waits for the walk's first round that holds a trade (its newest trades), a streamed trade, the
+    // whole walk, or the bound: COLD_WAIT_MS from the subscription (bound above)
+    const by = await Promise.race([cold.then(() => "walk"), rounded.then(() => "trade"), bound.then(() => "bound")]);
+    e.onFold = undefined;
+    mark(`answer by ${by} after ${rounds} round${rounds === 1 ? "" : "s"}`);
+    e.open = { at: now(), desc: marks.join(", ") };
     return e;
   }
 
@@ -1828,7 +1868,15 @@ export function createSolanaTrades(deps: {
       // with no row of its own yet included (every trade of a fresh coin past the budget)
       const cut = e.cut !== undefined && now() - e.cut.at <= CUT_KEEP_MS;
       const named = (v: DataAnswer): DataAnswer => (cut && v.status === 200 && v.src !== "chain" ? { ...v, timing: `${v.timing === undefined ? "" : `${v.timing}, `}sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` } : v);
-      if (rows.length === 0 && deps.tape !== undefined) return named(await poolTape(mint, limit, e));
+      // card helper-stays-fast-under-the-live-run: a tape with no row of ours while its walk still reads its newest
+      // signatures (a first read past its bound) says so: filling, never whole, whoever's rows it carries; the next read
+      // after the walk's first round is our own rows
+      const reading = (v: DataAnswer): DataAnswer => {
+        if (e.state !== "cold" || v.status !== 200) return v;
+        const { whole_ms: _, ...b } = JSON.parse(v.body) as Record<string, unknown>;
+        return { ...v, body: JSON.stringify({ ...b, filling: true }) };
+      };
+      if (rows.length === 0 && deps.tape !== undefined) return named(reading(await poolTape(mint, limit, e)));
       if (cut && deps.tape !== undefined) {
         const v = await poolTape(mint, limit, null);
         if (v.status === 200 && v.src !== "chain") return named(v);

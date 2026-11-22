@@ -710,6 +710,104 @@ test("card helper-live-run-green-after-122: a token none of whose newest transac
   t.stop();
 });
 
+test("card helper-stays-fast-under-the-live-run: a busy token's first tape read answers at the first trade the stream sends, while its walk's first round still reads, not at the bound", async () => {
+  // the live helper at f28b6bd56, 21 Nov 21:04Z: three cold trending coins' first tapes answered at 2.5, 3.1 and 3.6 s,
+  // their streams sending trades all the while, the answer waiting on the walk's first round or the bound
+  const sigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
+  const base = rpcFetch({ sigs: () => sigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse(), txs: Object.fromEntries(sigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  // every transaction read of the walk hangs until the test lets it go
+  let open = 0;
+  let letGo = () => {};
+  const held = new Promise<void>((go) => (letGo = go));
+  const hang = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string };
+    if (req.method === "getTransaction") {
+      open++;
+      await held;
+      open--;
+    }
+    return base(url, init);
+  };
+  let on: SourceEvents | null = null;
+  let bound = () => {};
+  const t = createSolanaTrades({ fetch: hang, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => new Promise<void>((go) => (bound = go)) });
+  let answer: { trades: { tx: string }[]; filling?: boolean } | null = null;
+  const reading = t.trades(MINT, 50).then((a) => (answer = JSON.parse(a.body)));
+  for (let i = 0; i < 100 && open < 5; i++) await settle();
+  assert.equal(open, 5, "the walk's first round is reading");
+  const streamed = `${BUY.signature.slice(0, -2)}99`;
+  withClock(on!).note(MINT, { sig: streamed, slot: 465_000_100, err: false, logs: BUY.result.meta.logMessages });
+  for (let i = 0; i < 50 && answer === null; i++) await settle();
+  assert.notEqual(answer, null, "answered at the streamed trade, the bound not reached");
+  assert.deepEqual([answer!.trades.map((r) => r.tx), answer!.filling, open], [[streamed], true, 5], "the streamed row, filling, the walk's reads still open");
+  bound();
+  await reading;
+  letGo();
+  for (let i = 0; i < 100 && open > 0; i++) await settle();
+  t.stop();
+});
+
+test("card helper-stays-fast-under-the-live-run: a flooded coin's walk keeps its whole bound after a slow subscription: the bound runs from the subscription, and the first answer is the walk's rows, ours, never the vendor's", async () => {
+  // helper-19's live run 44962533217 (the bound run from the read's start, 88bb881e5): three flooded coins' first tapes
+  // answered at 4.0 to 4.2 s with CoinGecko's 50 rows, none of ours (solana-tape-rows-at-first-answer BAD); a flooded
+  // walk reads a page of COLD_PAGE signatures past its newest COLD_SIGS before any transaction. Here the newest 30
+  // failed and the 10 before them succeeded; the subscription takes the bound's whole time
+  const okSigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
+  const failed = Array.from({ length: COLD_SIGS }, (_, i) => ({ signature: `${BUY.signature.slice(0, -3)}f${String(i).padStart(2, "0")}`, slot: 465_000_100 + i, err: { InstructionError: [0, "Custom"] } }));
+  const list = [...failed.slice().reverse(), ...okSigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse()];
+  const fetchFn = rpcFetch({ sigs: (o) => list.slice(0, Number(o.limit ?? list.length)), txs: Object.fromEntries(okSigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  let subscribed = () => {};
+  const subscribing = new Promise<void>((go) => (subscribed = go));
+  let bound: (() => void) | null = null;
+  const vendor = async () => ({ status: 200, body: JSON.stringify(POOL_ROWS), src: "coingecko", asOfMs: TS * 1000 });
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: () => subscribing, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: vendor, coldWait: () => new Promise<void>((go) => (bound = go)) });
+  let answer = null as { trades: { tx: string }[]; src: string; filling?: boolean } | null;
+  const reading = t.trades(MINT, 50).then((a) => (answer = JSON.parse(a.body)));
+  for (let i = 0; i < 20; i++) await settle();
+  // the subscription takes the bound's whole time: a bound already running has run out by the time it is in force
+  const early = bound !== null;
+  (bound as (() => void) | null)?.();
+  subscribed();
+  for (let i = 0; i < 100 && answer === null; i++) await settle();
+  assert.notEqual(answer, null);
+  assert.equal(answer!.src, "chain", `the walk's rows, not the vendor's (${answer!.src})`);
+  assert.ok(answer!.trades.length > 0, "rows of ours at the first answer");
+  assert.equal(early, false, "no bound runs before the subscription is in force");
+  await reading;
+  t.stop();
+});
+
+test("card helper-stays-fast-under-the-live-run: a first answer at its bound with no row of ours says filling and claims no whole tape, whoever's rows it carries; the next read after the walk is our own rows, every one walked", async () => {
+  const sigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
+  const base = rpcFetch({ sigs: () => sigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse(), txs: Object.fromEntries(sigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  let open = 0;
+  let letGo = () => {};
+  const held = new Promise<void>((go) => (letGo = go));
+  const hang = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string };
+    if (req.method === "getTransaction") {
+      open++;
+      await held;
+      open--;
+    }
+    return base(url, init);
+  };
+  // the vendor's tape answers fresh rows: on their own they would claim a whole tape (whole_ms)
+  const vendor = async () => ({ status: 200, body: JSON.stringify(POOL_ROWS), src: "geckoterminal", asOfMs: TS * 1000 });
+  const t = createSolanaTrades({ fetch: hang, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: vendor, coldWait: () => settle() });
+  const first = JSON.parse((await t.trades(MINT, 50)).body) as { trades: unknown[]; src: string; filling?: boolean; whole_ms?: number };
+  assert.equal(open, 5, "the walk's first round still reads");
+  assert.deepEqual([first.src, first.trades.length > 0, first.filling, first.whole_ms], ["geckoterminal", true, true, undefined], "the vendor's rows, filling, no whole tape claimed");
+  letGo();
+  for (let i = 0; i < 100 && open > 0; i++) await settle();
+  await settle();
+  const next = JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[]; src: string; filling?: boolean };
+  assert.equal(next.src, "chain", "our own rows once the walk holds them");
+  assert.deepEqual(next.trades.map((r) => r.tx).sort(), [...sigs].sort(), "every trade walked, none missing");
+  assert.equal(next.filling, undefined, "the walk ended: no mark");
+  t.stop();
+});
+
 // card solana-trades-show-on-every-token: a token whose newest signatures are failed bot transactions
 /** A token's signature list, newest first, as getSignaturesForAddress pages it (`limit`, `before`); `ok(i)` whether the
  *  i-th newest succeeded. Each call's `limit` is kept in `asked`. */
@@ -790,9 +888,20 @@ test("a cold walk whose signature reads fail three times is walked again: the ta
 const POOL_ROWS = [
   { t_ms: Date.parse("2026-11-14T17:22:05Z"), side: "s", usd: "427.037807197591623106", amt: "648306.777831", trader: "EiSEokSBEa9iHSN3gEUKbyCriKMkzqUfr5nLazkkHZki", tx: NK.signature },
 ];
+/** A first read's bound that a walk of one recorded transaction ends well inside: the bound runs from the read's start
+ *  (card helper-stays-fast-under-the-live-run), so one settle() could end it before the walk. */
+const walked = () => new Promise<void>((r) => setTimeout(r, 200));
 function nearkat(tape?: () => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>) {
-  const fetchFn = rpcFetch({ sigs: () => [{ signature: NK.signature, slot: NK.tx.slot, err: null }], txs: { [NK.signature]: NK.tx }, price: 9_342_267_796n, pub: TS, slot: NK.tx.slot }, { [NK.mint]: 6 });
-  return createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === NK.mint, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => settle(), ...(tape === undefined ? {} : { tape }) });
+  const chain = rpcFetch({ sigs: () => [{ signature: NK.signature, slot: NK.tx.slot, err: null }], txs: { [NK.signature]: NK.tx }, price: 9_342_267_796n, pub: TS, slot: NK.tx.slot }, { [NK.mint]: 6 });
+  // the trade's pool account (4w2cysot..., read since the tape decodes Raydium CPMM) answers no account: the walk ends
+  // with no trade placed, as on a venue the tape does not decode; thrown, the walk retried for good and the first read
+  // answered at its bound, still reading (card helper-stays-fast-under-the-live-run)
+  const fetchFn = async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    if (req.method === "getAccountInfo" && req.params[0] !== NK.mint && req.params[0] !== PYTH_SOL_USD) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: NK.tx.slot }, value: null } }), { status: 200 });
+    return chain(url, init);
+  };
+  return createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === NK.mint, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: walked, ...(tape === undefined ? {} : { tape }) });
 }
 
 test("card solana-trades-show-on-every-token: a listed token on a venue the chain tape does not decode (Raydium CPMM, recorded) is served its top pool's trades, never an empty tape", async () => {

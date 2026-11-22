@@ -35,7 +35,9 @@
 //   node scripts/live-checks/signpage-pool-price.mjs [--host sign|app] [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/signpage-pool-price.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
-//     a local build (apps/terminal/dist, or --build <dir>) at APP_HOST's name, the helper's reads recorded
+//     a local build (apps/terminal/dist, or --build <dir>) at APP_HOST's name, the helper's reads recorded; nothing read
+//     live (card signpage-pool-price-harness-reads-no-live-rpc): the page's Pyth read is answered from the kit's recorded
+//     answers (harnessPyth), moved to the run's clock, and SIGN_HOST's CSP is this checkout's public/_headers
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge().
 import "../net-window.mjs";
@@ -47,10 +49,11 @@ import { fileURLToPath } from "node:url";
 import { POOL_USD_FEEDS, poolUsdPrice, SOLANA_RPC_RETRY, solanaHelperRpc, solanaJsonRpc, solanaSameProvider } from "../../packages/kit/src/index.ts";
 import { launchBrowser } from "../browsers.mjs";
 import { launchHarnessBrowser } from "../harness-sockets.mjs";
-import { harnessRoute } from "./app-in-shell.mjs";
+import { harnessRoute, recordedPyth } from "./app-in-shell.mjs";
 import { MINT, PATH } from "./app-sell-mount.mjs";
 import { POOL } from "./trade-box-pool.mjs";
 import { follow } from "./pool-usd-price-never-stale.mjs";
+import { treeCsp } from "./signpage-pool-pins.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-pool-price";
@@ -159,8 +162,8 @@ export function judge(rec) {
  *  price it holds, as src/pool-price.ts would put it in state.pools[solana].price. A run sends the price held at its own
  *  start, never one read before the runs began: a single read went stale between the desktop and the phone run (10 Nov,
  *  phone fresh read `Bal —`). */
-export function pageFeed({ read = poolUsdPrice, firstMs = 30_000, now = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
-  const rpcs = [solanaJsonRpc(PAGE_PAIR[0], { retry: SOLANA_RPC_RETRY }), solanaHelperRpc(HELPER_HOST, { retry: SOLANA_RPC_RETRY })];
+export function pageFeed({ read = poolUsdPrice, firstMs = 30_000, now = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), fetch } = {}) {
+  const rpcs = [solanaJsonRpc(PAGE_PAIR[0], { retry: SOLANA_RPC_RETRY, fetch }), solanaHelperRpc(HELPER_HOST, { retry: SOLANA_RPC_RETRY, fetch })];
   const base = { rpcs: PAGE_PAIR };
   if (solanaSameProvider(rpcs[0], rpcs[1])) return { first: async () => ({ ...base, error: "one provider twice" }), now: () => null, stop: async () => {} };
   let held = null;
@@ -185,6 +188,10 @@ export function pageFeed({ read = poolUsdPrice, firstMs = 30_000, now = Date.now
     },
   };
 }
+
+/** The harness's answers for the page's Pyth read (card signpage-pool-price-harness-reads-no-live-rpc): the kit's
+ *  recorded Pyth SOL/USD reads, moved to the run's clock (app-in-shell.mjs recordedPyth); nothing asked of a provider. */
+export const harnessPyth = (now = Date.now) => recordedPyth({ account: POOL_USD_FEEDS.solana.account, first: PAGE_PAIR[0], now });
 
 const READ = (sheet) => {
   const main = document.querySelector("main[data-route]");
@@ -259,12 +266,14 @@ async function entryOf(build) {
 
 export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), build = null, source, host = "sign" }) {
   mkdirSync(shots, { recursive: true });
-  const feed = pageFeed();
+  // the harness reads nothing live: the page's price from the recorded provider answers, its policy from this checkout
+  const feed = pageFeed(build ? { fetch: harnessPyth() } : {});
   const read = await feed.first();
   const at = new Date().toISOString();
   const entry = await entryOf(build);
-  // SIGN_HOST's own policy as served: the page's pair must be in its connect-src
-  const signCsp = (await fetch(`${SIGN_HOST}/`, { signal: AbortSignal.timeout(15_000) })).headers.get("content-security-policy");
+  // SIGN_HOST's own policy as served (the harness: this checkout's public/_headers): the page's pair must be in its
+  // connect-src
+  const signCsp = build ? treeCsp() : (await fetch(`${SIGN_HOST}/`, { signal: AbortSignal.timeout(15_000) })).headers.get("content-security-policy");
   // SIGN_HOST's bundle as served (the harness: this checkout's, served as SIGN_HOST's), against this checkout's
   const treeBundle = sha384(readFileSync(treeBundlePath()));
   let signBundle;
@@ -305,7 +314,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (a.includes("--harness")) {
       build = path.resolve(opt("--build", path.join(REPO, "apps/terminal/dist")));
       const rel = path.relative(REPO, build);
-      source = `harness, terminal build ${rel && !rel.startsWith("..") ? rel : "<build>"}, the stand-in shell signed in with the devnet pool and the page's own price read`;
+      source = `harness, terminal build ${rel && !rel.startsWith("..") ? rel : "<build>"}, the stand-in shell signed in with the devnet pool, the page's price read answered from the kit's recorded Pyth answers and this checkout's _headers as SIGN_HOST's`;
     }
     const host = opt("--host", "sign");
     if (host !== "sign" && host !== "app") throw new Error("--host: sign or app");

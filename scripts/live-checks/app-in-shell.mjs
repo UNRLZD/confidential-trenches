@@ -655,6 +655,40 @@ export async function kitRefuses(state) {
   }
 }
 
+/** The kit's recorded real answers of Pyth's SOL/USD account on two Solana providers (packages/kit/test/fixtures/
+ *  pool-usd.json, recorded by its pool-usd-capture.mjs; the kit's pool-usd.test.ts replays the same). */
+const PYTH_RECORDED = path.join(REPO, "packages/kit/test/fixtures/pool-usd.json");
+/**
+ * A harness's provider answers for the signing page's Pyth read (card signpage-pool-price-harness-reads-no-live-rpc): a
+ * fetch for the page's pair (the kit's solanaJsonRpc `fetch`) that answers a getMultipleAccounts of `account` from the
+ * recording, its publish_time and prev_publish_time (PriceUpdateV2 bytes 93 and 101, the kit's pool-usd.ts) moved by the
+ * time since the recording, as harnessRoute moves a recorded tape, so the price is as old at each read as it was when
+ * recorded. `first` (the pair's first provider) answers what the recording's provider of that URL answered, any other
+ * the recording's other provider. Any other call answers an RPC error, never the network: a public provider's stall
+ * never reaches a harness run (PR 1133's merge-queue run 44938644132, test-browser (3), failed every priced case of
+ * signpage-pool-price --harness on publicnode's getMultipleAccounts giving no answer).
+ */
+export function recordedPyth({ account, first, now = Date.now }) {
+  const fx = JSON.parse(readFileSync(PYTH_RECORDED, "utf8"));
+  const calls = fx.solana.calls.filter((c) => c.method === "getMultipleAccounts" && c.params?.[0]?.[0] === account);
+  const mine = calls.find((c) => c.url === first);
+  const other = calls.find((c) => c.url !== first);
+  if (!mine || !other) throw new Error(`${PYTH_RECORDED}: no recorded read of ${account} on ${first} and another provider`);
+  const moved = (result) => {
+    const shift = BigInt(Math.floor(now() / 1000) - Math.floor(fx.nowMs / 1000));
+    const d = Buffer.from(result.value[0].data[0], "base64");
+    for (const at of [93, 101]) d.writeBigInt64LE(d.readBigInt64LE(at) + shift, at);
+    return { ...result, value: [{ ...result.value[0], data: [d.toString("base64"), "base64"] }] };
+  };
+  return async (url, init) => {
+    const q = JSON.parse(init.body);
+    const rec = url === first ? mine : other;
+    const ok = q.method === "getMultipleAccounts" && JSON.stringify(q.params?.[0]) === JSON.stringify([account]);
+    const body = ok ? { jsonrpc: "2.0", id: q.id, result: moved(rec.result) } : { jsonrpc: "2.0", id: q.id, error: { code: -32601, message: `not recorded for the harness: ${q.method}` } };
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  };
+}
+
 /** The harness's own refusal of a request it holds no answer for, named so a browser test's failed-load line (Chrome's
  *  "net::ERR_NAME_NOT_RESOLVED": the abort the judges count as a network refusal) is read as the harness's, never DNS:
  *  "harness: no answer for <origin><path>", logged once per origin and path, and kept on the route's `refused`. */

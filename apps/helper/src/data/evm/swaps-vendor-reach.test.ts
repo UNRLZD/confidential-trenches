@@ -72,18 +72,20 @@ test("a vendor tape read within BEHIND_MAX's ms claims every trade after its old
     const jl = JSON.parse(late.body) as Tape;
     assert.deepEqual([late.status, jl.src, jl.as_of_ms, jl.trades.length], [200, "geckoterminal", read0, 6], "the held rows are still served");
     assert.equal(jl.whole_ms, undefined, "rows read past BEHIND_MAX's ms are no complete list: the trades since are not in them");
+    // card sol-vendor-tape-gap-served-inside-reach: and they say so, as a chain tape behind its head does (red at 61fa14a08)
+    assert.deepEqual([je.filling, jl.filling], [undefined, true], "rows past BEHIND_MAX's ms say filling; at it, none");
 
     // ten minutes on, the same
     clock.t = read0 + 600_000;
     const old = JSON.parse((await s.trades(v.coin, 50)).body) as Tape;
-    assert.deepEqual([old.trades.length, old.whole_ms], [6, undefined]);
+    assert.deepEqual([old.trades.length, old.whole_ms, old.filling], [6, undefined, true]);
 
     // the vendor answers again: a fresh read claims its reach again
     v.gt.up = true;
     clock.t += 1;
     const back = await s.trades(v.coin, 50);
     const jb = JSON.parse(back.body) as Tape;
-    assert.deepEqual([jb.as_of_ms, jb.whole_ms], [clock.t, v.oldest + 1_000]);
+    assert.deepEqual([jb.as_of_ms, jb.whole_ms, jb.filling], [clock.t, v.oldest + 1_000, undefined]);
     // each answer names how long ago its rows were read, the reach the live check judges a vendor tape by
     const named = [a, edge, late, back].map((x) => VENDOR_READ.exec(x.timing ?? "")?.[1] ?? `none in ${JSON.stringify(x.timing)}`);
     assert.deepEqual(named, ["0", String(ms), String(ms + 1), "0"]);

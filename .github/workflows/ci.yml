@@ -477,10 +477,12 @@ jobs:
         run: node scripts/ci/test-shards.mjs packages typecheck "$INDEX" "$TOTAL"
       - name: the deploy gate's own tests
         if: steps.plan.outputs.deploy_gate == 'true'
-        run: node --test apps/terminal/scripts/check-deploy.test.ts
+        run: node --test --test-reporter=./scripts/test-report.mjs apps/terminal/scripts/check-deploy.test.ts
+      # card test-count-never-short: through scripts/test-report.mjs, which fails the step when a file's results did not
+      # all arrive (every package's test script reports through it too, scripts/ci/tests-run.test.mjs)
       - name: every live check replays its recorded answers
         if: steps.plan.outputs.replays == 'true'
-        run: node --test scripts/live-checks/*.test.mjs
+        run: node --test --test-reporter=./scripts/test-report.mjs scripts/live-checks/*.test.mjs
       # Every SIGN_HOST and APP_HOST live check that reads only what the host serves from the build runs its own read
       # and judge on this pull request's build: SIGN_HOST's index.html and public/, built from this checkout's sources by
       # build-app.mjs as its deploy builds them (scripts/signpage-built.mjs), and the terminal's vite build. A change

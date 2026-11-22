@@ -328,9 +328,12 @@ test("planted: the packages split runs every package's test script but the walle
 
 // card test-runs-never-hold-a-slot: every workspace package's `test` script runs each `node --test` under the bound
 // (scripts/test-bound.mjs: --test-timeout cancels a test and names it, the preload stops a file or the run that is still
-// going at its bound), so no suite can hold a CI job or a heavy slot for ever (18 Nov: 49 min in one wallet file)
+// going at its bound), so no suite can hold a CI job or a heavy slot for ever (18 Nov: 49 min in one wallet file); card
+// test-count-never-short: and reports through scripts/test-report.mjs, which fails the run when a file's results did not
+// all arrive
+export const REPORT = "--test-reporter=../../scripts/test-report.mjs";
 export function unbounded(root) {
-  const want = ["--require=../../scripts/test-bound-watch.cjs", `--test-timeout=${TEST_MS}`, "--test-force-exit"];
+  const want = ["--require=../../scripts/test-bound-watch.cjs", `--test-timeout=${TEST_MS}`, "--test-force-exit", REPORT];
   const out = [];
   const globs = [...readFileSync(path.join(root, "pnpm-workspace.yaml"), "utf8").matchAll(/^\s+-\s+["']?([^"'\s]+)["']?\s*$/gm)].map((m) => m[1]);
   for (const pkg of globs.flatMap((g) => globSync(`${g}/package.json`, { cwd: root })).sort()) {
@@ -353,7 +356,7 @@ test("every package's test script runs node --test under the bound", () => {
   assert.deepEqual(unbounded(ROOT), []);
 });
 
-test("planted: a test script with no bound, a looser one or no force exit is refused", () => {
+test("planted: a test script with no bound, a looser one, no force exit or no count check is refused", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "tests-run-bound-"));
   try {
     const put = (f, text) => {
@@ -361,16 +364,19 @@ test("planted: a test script with no bound, a looser one or no force exit is ref
       writeFileSync(path.join(dir, f), text);
     };
     put("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n');
-    const bound = `--require=../../scripts/test-bound-watch.cjs --test-timeout=${TEST_MS} --test-force-exit`;
+    const bound = `--require=../../scripts/test-bound-watch.cjs --test-timeout=${TEST_MS} --test-force-exit ${REPORT}`;
     const pkg = (test) => put("packages/w/package.json", JSON.stringify({ scripts: { test } }));
     pkg(`tsc -p . && node --test ${bound} "test/*.test.ts"`);
     assert.deepEqual(unbounded(dir), []);
     pkg('node --test "test/*.test.ts"');
     assert.deepEqual(unbounded(dir), [`packages/w: node --test lacks ${bound}`]);
-    pkg(`node --test --require=../../scripts/test-bound-watch.cjs --test-timeout=${TEST_MS * 10} --test-force-exit "test/*.test.ts"`);
+    pkg(`node --test --require=../../scripts/test-bound-watch.cjs --test-timeout=${TEST_MS * 10} --test-force-exit ${REPORT} "test/*.test.ts"`);
     assert.deepEqual(unbounded(dir), [`packages/w: node --test lacks --test-timeout=${TEST_MS}`]);
-    pkg(`node --test --require=../../scripts/test-bound-watch.cjs --test-timeout=${TEST_MS} "test/*.test.ts"`);
+    pkg(`node --test --require=../../scripts/test-bound-watch.cjs --test-timeout=${TEST_MS} ${REPORT} "test/*.test.ts"`);
     assert.deepEqual(unbounded(dir), ["packages/w: node --test lacks --test-force-exit"]);
+    // card test-count-never-short: a run on node's own reporter alone counts only what arrives
+    pkg(`node --test --require=../../scripts/test-bound-watch.cjs --test-timeout=${TEST_MS} --test-force-exit "test/*.test.ts"`);
+    assert.deepEqual(unbounded(dir), [`packages/w: node --test lacks ${REPORT}`]);
     pkg(`node --test ${bound} "test/a.test.ts" && node --test "test/b.test.ts"`);
     assert.deepEqual(unbounded(dir), [`packages/w: node --test lacks ${bound}`], "each node --test of a chain");
     pkg("tsc -p .");
