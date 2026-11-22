@@ -1,0 +1,118 @@
+{
+ "good": {
+  "_note": "ct-api.unrealized.trade read 2026-11-22 from the Mac, the pool from contracts/pool-solana/deployments/mainnet.json",
+  "run": {
+   "base": "https://ct-api.unrealized.trade",
+   "pools": [
+    {
+     "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+     "asks": [
+      {
+       "epoch": null,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360560000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360500000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360500000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360440000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360440000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360380000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360380000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360320000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360320000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360260000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360260000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360200000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360200000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360140000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360140000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360080000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360080000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "bad": {
+  "_note": "MADE from good: the fourth ask answered as helper-25 on ee5c7dac4 answered relayer-cost-guards (live run 45032297159), 429 rate_limited",
+  "run": {
+   "base": "https://ct-api.unrealized.trade",
+   "pools": [
+    {
+     "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+     "asks": [
+      {
+       "epoch": null,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360560000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360500000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360500000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360440000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360440000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360380000,
+       "status": 429,
+       "body": "{\"error\":{\"code\":\"rate_limited\"}}"
+      },
+      {
+       "epoch": 1795360320000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360320000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360260000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360260000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360200000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360200000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360140000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360140000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      },
+      {
+       "epoch": 1795360080000,
+       "status": 200,
+       "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1795360080000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

@@ -184,7 +184,11 @@ export type Pace = { perS: number; burst: number; unit: "post" | "call"; infligh
  *   - robinhood.api.pocket.network: x-ratelimit-limit 1200, its reset 60 s ahead, remaining one less per call (read
  *     2026-11-04 20:49Z). Paced at 15 calls a second, 200 at once: 1,100 in any minute.
  *   - robinhood.drpc.org: 33 calls a second for 8 s, none refused (SWAP_RPCS' note, 2026-11-04 19:4xZ). Paced at 15, 15 at once: at most 30 in
- *     any second.
+ *     any second. 44 runs of 12 cold Robinhood tapes from the Mac at this pace (22 Nov, card
+ *     robinhood-tapes-inside-their-bounds-on-live) had 3,266 of 17,429 calls refused ("You reached Public endpoint rate
+ *     limit"), in stretches whatever was sent: in 10 s windows sending 13 calls a second or more, 13 of 5,682 refused;
+ *     sending 2 to 6, 2,228 of 3,343. The refusals did not follow the rate sent, and a slower pace slows every read back (at 6 a second the
+ *     slowest of swaps-back-resume.test.ts's 12 coins filled at 55.1 s, past 45 s); the holds keep the stretches.
  *   - rpc.mainnet.chain.robinhood.com, the chain's own and /v1/rpc/robinhood's first: 3.8 posts a second, then 429 (the
  *     same note), and a fourth quick read refused 429 (19:2xZ). Paced at 1, 2 at once: at most 3 in any second.
  * api.blockvectra.com (100 blocks, last) is not paced: its holds keep it, as before.
