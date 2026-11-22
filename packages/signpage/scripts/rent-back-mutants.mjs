@@ -164,7 +164,10 @@ export const M = [
   ["a14 a no-buy mark taken whatever the public seat reads", SELL, T, "if (claimed === null) return a === \"none\" ? null : \"differs\";", "if (claimed === null) return null;"],
   ["a15 an unproven W never steady", SELL, T, "(ev.rec === undefined && !ev.none ? o.passes + 1 : differs) >= POOL_RENT_BACK_UNPROVEN_PASSES ?", "false ?"],
   ["a16 an unproven W steady at once", SELL, T, "(ev.rec === undefined && !ev.none ? o.passes + 1 : differs) >= POOL_RENT_BACK_UNPROVEN_PASSES ?", "true ?"],
-  ["a17 an unproven W's pass not tried again", SELL, T, " || r.end === \"owed\" || unproven === \"again\";", " || r.end === \"owed\";"],
+  ["a17 an unproven W's pass not tried again", SELL, T, " || r.end === \"owed\" || unproven === \"again\" || (r.end === \"holds\" && !r.steady);", " || r.end === \"owed\";"],
+  // review of dec80ea5b (the mainnet copy run, C1): a hold that is not W's steady state, a found W not yet past its rule
+  // among them, tried again on the runs' doubling wait
+  ["a17b a found W held young not tried again", SELL, T, " || unproven === \"again\" || (r.end === \"holds\" && !r.steady);", " || unproven === \"again\";"],
   ["a18 the proven buy not kept on the record", SELL, T, ", ...(kept.buy === undefined ? {} : { buy: kept.buy })", ""],
   ["a19 the record's proven buy proven again", SELL, T, "  let proven = o.buy;\n", "  let proven: SolanaBuy | null | undefined = undefined;\n"],
   ["a20 a sale's rent back keeps no seen", SELL, T, "owedRec, hold, await seenOf(h, w.address, owedRec.mints))));", "owedRec, hold, undefined)));"],

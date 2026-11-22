@@ -38,8 +38,8 @@ import { onTestClock } from "../../kit/test/test-clock.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
-import { FOUND_ROUND_GAP, POOL_BUY_POLL_MS } from "../src/pool-buy.ts";
-import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_UNPROVEN_PASSES, restAdds, POOL_RENT_BACK_MS, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type RentBackSpacing, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, FOUND_CLOSE_MAX, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, forgetPageLoad, solanaSellBudget, solanaSellBudgetFits, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type OwedRentBacks, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { FOUND_ROUND_GAP, POOL_BUY_POLL_MS, resumePieces, type OwedPieces, type PiecesOwed } from "../src/pool-buy.ts";
+import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_UNPROVEN_PASSES, restAdds, POOL_RENT_BACK_MS, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type RentBackSpacing, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, FOUND_CLOSE_MAX, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, strandOwed, forgetPageLoad, solanaSellBudget, solanaSellBudgetFits, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type OwedRentBacks, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaKeepSweep, checkSolanaSweep, PoolRuleRefused, solanaNoteOf, solanaSellNoteFloor, solanaSweepOf, solanaSweepStay, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
@@ -2657,6 +2657,40 @@ test("a found W whose buy round was signed after its first round landed: held, n
     const { w } = await load(H + 151 + FOUND_ROUND_GAP + 1, strangers);
     assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(w.told));
     if (strangers) assert.equal(new DataView(w.c.accounts.get(unit)!.data.buffer).getBigUint64(64, true), 1n);
+  }
+});
+
+// Review of dec80ea5b, H1: a buy of pieces refused at FOUND_ROUND_GAP after its first round landed, or whose first round
+// did not land whole, left W holding the released SOL with an owed record (resumePieces' strand) that had no `found`: the
+// rent back held it as "no buy of W's is recorded", then steady, and findHeldWs skipped it, so this device never swept
+// it. And the mainnet copy run of dec80ea5b (C1): a found W's first pass held it young and booked no other in the page,
+// W's SOL never swept. Now: the strand writes a found record, a young hold tries again, and once past the rule W is
+// swept back into the user's note on the same device.
+test("a buy of pieces refused at the round gap, or its first round not landed whole: the state read strands W as found, held young and tried again, then swept on the same device", async () => {
+  const H = 10;
+  const cases: [string, Record<string, string>][] = [
+    ["refused at the gap (round one landed whole, the own note freed)", { own: "UNSPENT", p1: "SPENT" }],
+    ["round one not landed whole", { own: "UNSPENT", p1: "SPENT", p2: "UNSPENT" }],
+  ];
+  for (const [name, states] of cases) {
+    const plant = { buy: null, wLastHeight: H, finalHeight: H + 155 };
+    const w = await world(plant, []);
+    w.c.accounts.delete(VF.pump.ata);
+    await foundW(w);
+    await w.host.owed!.drop(W.address);
+    const rec: OwedPieces = { address: W.address, l: L.toString(), j: J, primary: "own", pieces: Object.keys(states).filter((k) => k !== "own"), lastHeight: String(H + 151), mint: VF.pump.mint, program: SOLANA_TOKEN_PROGRAM, spend: { program: PROGRAM, feePayer: W.address, context: "0", nullifier: "1" } };
+    const kept = [rec];
+    const owed = { list: async () => [...kept], put: async () => {}, drop: async (a: string) => void kept.splice(kept.findIndex((r) => r.address === a), 1) } as unknown as PiecesOwed;
+    const n = await resumePieces({ owed, state: async (id) => states[id], owner: async () => assert.fail("a freed note's owner is never read"), strand: (r) => strandOwed(w.host.owed!, r) });
+    assert.equal(n, 1, name);
+    const before = w.c.accounts.get(W.address)?.lamports;
+    assert.equal(await resumeRentBacks(w.host, fakeLocks()), true, `${name}: held young, tried again`);
+    assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction" || c.method === "simulateTransaction").length, 0, name);
+    assert.equal(w.c.accounts.get(W.address)?.lamports, before, `${name}: W's SOL where it was`);
+    plant.finalHeight = H + 151 + FOUND_ROUND_GAP + 1;
+    await resumeRentBacks(w.host, fakeLocks());
+    assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, `${name}: ${JSON.stringify(w.told.map((t) => [t.state, t.detail]))}`);
+    assert.equal((await w.host.owed!.list()).find((r) => r.address === W.address)?.found, true, `${name}: the strand's record is found`);
   }
 });
 

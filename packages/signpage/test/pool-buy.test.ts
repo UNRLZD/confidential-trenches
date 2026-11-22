@@ -1558,8 +1558,10 @@ test("card pool-buy-filled-2s: the checks' reads go out in three rounds by their
   assert.equal((answer as { stage?: string }).stage, "filled");
   const before = rounds.slice(0, rounds.findIndex((r) => r.includes("0:getTransaction")));
   assert.deepEqual(before.map((r) => [...r].sort()), [
-    // the rent, the pinned table, the pool account and the reference: each needs only the pin and the ask
-    ["0:getAccountInfo", "0:getAccountInfo", "0:getAccountInfo", "0:getMultipleAccounts", "0:getMultipleAccounts", "1:getAccountInfo", "1:getAccountInfo", "1:getAccountInfo", "1:getMultipleAccounts", "1:getMultipleAccounts"],
+    // the rent, the pinned table, the pool account and the reference: each needs only the pin and the ask; and both
+    // RPCs' confirmed heights, the first round's floor (card a-found-wallet-sweeps-past-a-strangers-coin, review of
+    // dec80ea5b M1: the buy round's bound neither RPC alone lifts), in this round so the rounds stay three
+    ["0:getAccountInfo", "0:getAccountInfo", "0:getAccountInfo", "0:getBlockHeight", "0:getMultipleAccounts", "0:getMultipleAccounts", "1:getAccountInfo", "1:getAccountInfo", "1:getAccountInfo", "1:getBlockHeight", "1:getMultipleAccounts", "1:getMultipleAccounts"],
     // the two root pages (the sizes name them), the venue (the reference names it), then the device's blockhash and slot
     ["0:getAccountInfo", "0:getAccountInfo", "0:getLatestBlockhash", "0:getMultipleAccounts", "1:getAccountInfo", "1:getAccountInfo", "1:getMultipleAccounts"],
     // the blockhash on RPC 1, which needs RPC 0's, and beside it RPC 1's height with its slot (card
@@ -2793,7 +2795,7 @@ test("pieces: resumePieces on a reload mid-buy and after: RESERVED keeps, the bu
  *  and W's history answer each landed transaction under the helper's name for it; the settle reads a note spent once its
  *  transaction landed. `round1`: whether round 1 lands. `gap`: the buy round's blockhash read with its last height this far
  *  past round 1's (card a-found-wallet-sweeps-past-a-strangers-coin). */
-async function twoRounds(round1: "lands" | "never", gap?: number) {
+async function twoRounds(round1: "lands" | "never", gap?: number, liar?: 0 | 1) {
   const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
   const parent = pieceProof("note-2", 777n, 5_000_000n);
   const change = pieceProof("note-3", 888n, 7_000_000n);
@@ -2865,11 +2867,23 @@ async function twoRounds(round1: "lands" | "never", gap?: number) {
       }
       if (method === "getLatestBlockhash" && stage === 2 && gap !== undefined) {
         const a = (await rpc(method, params)) as { context: unknown; value: { blockhash: string; lastValidBlockHeight: number } };
-        return { ...a, value: { ...a.value, lastValidBlockHeight: Number((await owed.list())[0]!.lastHeight) + gap } };
+        return { ...a, value: { ...a.value, lastValidBlockHeight: (liar === undefined ? Number((await owed.list())[0]!.lastHeight) : 151) + gap } };
       }
       return rpc(method, params);
     }) as SolanaRpc;
-  w.host.rpcs = [wrap(r0), wrap(r1)];
+  // a lying RPC in round 1 (review of dec80ea5b, M1): RPC 0 says its blockhash lives to height 1,000,000; RPC 1 says its
+  // confirmed height is 1,000,000 (beside the blockhash check, and asked alone)
+  const lie = (rpc: SolanaRpc, p: 0 | 1): SolanaRpc =>
+    (async (method: string, params: readonly unknown[]) => {
+      const a = await rpc(method, params);
+      if (liar !== p || stage !== 1) return a;
+      if (p === 0 && method === "getLatestBlockhash") return { ...(a as object), value: { ...(a as { value: object }).value, lastValidBlockHeight: 1_000_000 } };
+      const confirmed = (params[0] as { commitment?: string } | undefined)?.commitment === "confirmed";
+      if (p === 1 && confirmed && method === "getBlockHeight") return 1_000_000;
+      if (p === 1 && confirmed && method === "getEpochInfo") return { ...(a as object), blockHeight: 1_000_000 };
+      return a;
+    }) as SolanaRpc;
+  w.host.rpcs = [lie(wrap(r0), 0), lie(wrap(r1), 1)];
   w.host.reads = 10;
   return { w, spend, log, sent, owed };
 }
@@ -2910,6 +2924,23 @@ test("card a-found-wallet-sweeps-past-a-strangers-coin: the buy round signs only
   assert.deepEqual(past.log.filter((l) => !l.startsWith("settle")), ["takeSet:note-2", "sendPieces:1:owed", "prove:note-2->W"], "round 1 alone: the buy round takes and signs nothing");
   assert.equal(past.sent.length, 1);
   assert.equal((await past.owed.list()).length, 1, "W stays found");
+});
+
+// Review of dec80ea5b, M1: the buy round's bound was round 1's own last height, a max over RPC 0's word and RPC 1's
+// height, so one lying RPC lifted it and a buy round 100,000 blocks later signed (the review's probe, liar.mts). The bound
+// is now the least of both RPCs' heights read before round 1 is signed (heightFloor), so neither RPC alone lifts it.
+test("card a-found-wallet-sweeps-past-a-strangers-coin: a lying RPC in round 1, either one, never lifts the buy round's bound: 100,000 blocks on, failed with no tag 3 taken or signed", async () => {
+  for (const liar of [0, 1] as const) {
+    const x = await twoRounds("lands", 100_000, liar);
+    const a = await runPoolBuy(x.w.host, { ...ASK, amount: x.spend });
+    assert.deepEqual(a, { error: "failed" }, `liar ${liar}`);
+    assert.deepEqual(x.log.filter((l) => !l.startsWith("settle")), ["takeSet:note-2", "sendPieces:1:owed", "prove:note-2->W"], `liar ${liar}: round 1 alone`);
+    assert.equal(x.sent.length, 1, `liar ${liar}`);
+    // an honest pair at the bound still buys
+    const ok = await twoRounds("lands", FOUND_ROUND_GAP, liar);
+    const b = await runPoolBuy(ok.w.host, { ...ASK, amount: ok.spend });
+    assert.equal("stage" in b && b.stage, "filled", `liar ${liar}, round 2 at the bound: ${JSON.stringify(b)}`);
+  }
 });
 
 test("card buy-spends-its-change-in-the-same-tap: round 1 that the helper answers 503 (not landed whole) sends no buy: failed, no change proved, nothing more sent, and W's owed record stays for the state reads", async () => {

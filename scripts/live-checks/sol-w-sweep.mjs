@@ -76,18 +76,20 @@ const tied = (re, more) => ({
 // (review P3-5 of c7b85ba3a), the rule's time part holds on both RPCs: W's latest transaction (getSignaturesForAddress,
 // W alone) is the same signature and slot on both; that block's height at finalized is the same on both (getBlock with
 // the one config the helper forwards, the kit's HELPER_SOLANA_BLOCK_HEADER, whole); and each RPC's finalized block height
-// is past it + 151, so no transaction signed before W's latest (another device's buy, signed before its pieces paid W)
-// can still land. W's latest read again between the teardown's signing and its send drops the closes when it changed.
+// is past it + 151 + 750 (FOUND_ROUND_GAP: a tap's buy round after its first round is signed only on a blockhash at most
+// 151 + 750 past the least of both RPCs' heights before that first round, pool-buy.ts), so no transaction signed before
+// W's latest, nor any buy round of a tap whose first round paid W (another device's buy), can still land. W's latest read again between the teardown's signing and its send drops the closes when it changed.
 // The teardown then reads each token account both RPCs list W owning (getTokenAccountsByOwner, both programs, W alone, the
 // same sorted list on both, at most 16 a pass) with W's own, so the kit's plan closes to W each one holding none, any
 // mint, a stranger's included (review P2 of c7b85ba3a: one such account held the sweep for good); one holding tokens is
 // kept and W holds. Past the time part, W's own accounts come from W's own notes (card
-// a-found-wallet-sweeps-past-a-strangers-coin): each note on W's label and j read for its spend mark on both RPCs, the
-// two alike or W held young; every one of W's accounts its own once a note is spent, none while every note is unspent.
+// a-found-wallet-sweeps-past-a-strangers-coin): each note on W's label and j settled on the pool's whole mark list (the
+// sell host's settleSet, solanaSettleSpentSet, at the time part's finalized slots), no read naming a note's mark; no
+// answer holds W young; every one of W's accounts its own once a note is spent, none while every note is unspent.
 // The sweep, in its own pass: the list read again into the plan, W owns no token account of its own of either
 // token program and W's history since that latest transaction (until it, on both RPCs) holds only the teardown's own
 // frames, read again between the sweep's signing and its send. What W read as, for a load's skip, holds that list too.
-const FOUND = "a found W is swept only once its notes' spend is read on the pool's whole mark list (no read naming a note's mark) and both RPCs read it owning no token account of its own (every one once a note is spent, none while unspent) and past its latest transaction's blockhash life and a tap's buy round's gap (that round signed at most 750 blocks past its first round's blockhash), the same latest transaction on both, nothing signed for it before that, a close included, every token account both list it owning closed to it when it holds none, and its history since holding only its teardown's frames when the sweep is built and again before its send";
+const FOUND = "a found W is swept only once its notes' spend is read on the pool's whole mark list (no read naming a note's mark) and both RPCs read it owning no token account of its own (every one once a note is spent, none while unspent) and past its latest transaction's blockhash life and a tap's buy round's gap (that round's tag 3 signed on a blockhash at most 151 + 750 blocks past the least of both RPCs' heights read before its first round, and the sell host's settle reading the pool's whole list), the same latest transaction on both, nothing signed for it before that, a close included, every token account both list it owning closed to it when it holds none, and its history since holding only its teardown's frames when the sweep is built and again before its send";
 const found = {
   test(js) {
     const td = new RegExp(`=await ${I}\\(\`teardown\`,async\\(\\)=>\\{let (?<why>${I})=\`\`,(?<pa>${I})=(?<t>${I})\\.bare===!0\\?await (?<fp>${I})\\((?<r>${I}),(?<w>${I})\\.address\\)\\.catch\\((?<c1>${I})=>\\(\\k<why>=\`[^\`]*\\$\\{(?<fo>${I})\\(\\k<c1>\\)\\}\\)\`,null\\)\\):void 0;if\\(\\k<pa>===null\\)return\\{young:\\k<why>\\|\\|\`[^\`]*\`,keep:\\[\\],signed:\\[\\],last:0,unclaimed:void 0,since:void 0\\};let (?<e>${I})=\\k<pa>\\?\\.signature;if\\(\\k<pa>!==void 0\\)\\{(?<os>${I})=void 0;let (?<on>${I})=await (?<nr>${I})\\((?<hh>${I}),\\k<t>\\.store,\\k<t>\\.scope,\\k<w>,\\k<pa>\\.slots\\)\\.catch\\((?<c0>${I})=>\\(\\k<why>=\`[^\`]*\\$\\{\\k<fo>\\(\\k<c0>\\)\\}\\)\`,null\\)\\);if\\(\\k<on>===null\\)return\\{young:\\k<why>\\|\\|\`[^\`]*\`,keep:\\[\\],signed:\\[\\],last:0,unclaimed:void 0,since:void 0\\};\\k<os>=\\k<on>\\}let (?<x>${I})=\\k<e>===void 0\\?\\[\\]:await (?<ft>${I})\\((?<tk>${I}),\\k<w>\\.address\\)\\.catch\\((?<c2>${I})=>\\(\\k<why>=\`[^\`]*\\$\\{\\k<fo>\\(\\k<c2>\\)\\}\\)\`,null\\)\\);if\\(\\k<x>===null\\)return\\{young:\\k<why>,keep:\\[\\],signed:\\[\\],last:0,unclaimed:void 0,since:void 0\\};let ${I}=await (?<rw>${I})\\(void 0,\\k<x>\\);[^]{0,2000}?let (?<sg>${I})=await ${I}\\((?<f>${I})\\.wires\\);return \\k<e>!==void 0&&await (?<lo>${I})\\(\\k<r>,\\k<w>\\.address\\)\\.catch\\(\\(\\)=>null\\)!==\\k<e>\\?\\{young:\`[^\`]*\`,keep:\\[\\],signed:\\[\\],last:0,unclaimed:void 0,since:void 0\\}:\\{keep:\\k<f>\\.plan\\.keep,signed:\\k<sg>,last:${I}\\.lastHeight,unclaimed:\\k<f>\\.reads\\.unclaimed,since:\\k<e>\\}\\}\\);if\\((?<h>${I})===null\\)return (?<g>${I})\\(\`gave_up\`,\`the teardown\`\\);if\\(\\k<h>\\.ok\\.young!==void 0\\)return \\k<g>\\(\`holds\`,\`a found W: \\$\\{\\k<h>\\.ok\\.young\\}\`,!1\\);`).exec(js)?.groups;
@@ -123,15 +125,28 @@ const found = {
     // of the pool's whole mark list (settleSet) at the finalized slots the time part read, so no read names a note's
     // mark; no host settle, no note, a short answer or one note's refusal null (W held young), any spent true
     const notes = new RegExp(`async function ${esc(td.nr)}\\((?<h>${I}),(?<st>${I}),(?<sc>${I}),(?<w>${I}),(?<ms>${I})\\)\\{if\\(\\k<h>\\.settleSet===void 0\\)return null;let (?<m>${I})=\\(await \\k<st>\\.list\\(\\)\\)\\.filter\\((?<n>${I})=>\\k<n>\\.scope===\\k<sc>&&\\k<n>\\.leaf!==void 0&&\\k<n>\\.leaf\\.label===\\k<w>\\.l&&${I}\\(\\k<n>\\.ref\\)===\\k<w>\\.j\\);if\\(\\k<m>\\.length===0\\)return null;let (?<g>${I})=await \\k<h>\\.settleSet\\(\\k<m>\\.map\\((?<i>${I})=>\\k<i>\\.id\\),\\k<ms>\\);return \\k<g>\\.length!==\\k<m>\\.length\\|\\|\\k<g>\\.some\\((?<e>${I})=>\`error\`in \\k<e>\\)\\?null:\\k<g>\\.some\\((?<f>${I})=>\\k<f>\\.kind===\`spent\`\\)\\}`).test(js);
-    // the tap's buy round after a first round (pool-buy.ts): signed only on a blockhash whose last height is at most 750
-    // past the first round's, so none of its tag 3s lands past W's latest + 151 + 750; the first round's own last height
-    // kept with it
-    const round = new RegExp(`if\\((?<ld>${I})!==null&&(?<bh>${I})\\.lastHeight>\\k<ld>\\.lastHeight\\+750\\)return\\{error:\`failed\`\\}`).test(js) && new RegExp(`[,; ](?<ld>${I})=\\{releases:${I},wallet:${I}\\.wallet\\.address,lastHeight:${I}\\.lastHeight\\}`).test(js);
+    // the sell host's settleSet (pool-testnet.ts): the seed's copy handed to the pool's whole-list reader
+    // (solanaSettleSpentSet: each asked note looked up, then the marks and the pool's pages read whole, `leaves`) at the
+    // time part's slots, and wiped after; never a reader of a note's own mark (review of dec80ea5b, L3)
+    const host = new RegExp(`settleSet:async\\((?<n>${I}),(?<m>${I})\\)=>\\{let (?<s>${I})=await ${I}\\.seed64\\(\\);try\\{return await (?<f>${I})\\(\\{seed64:\\k<s>,notes:await ${I}\\(\\),noteIds:\\k<n>,program:${I}\\.program,minSlots:\\k<m>,rpcs:${I}\\(\\),lister:${I}\\(\\),signal:${I},cache:${I},markBatches:${I}\\}\\)\\}finally\\{\\k<s>\\.fill\\(0\\)\\}\\},ops:`).exec(js)?.groups;
+    const whole = host !== undefined && new RegExp(`async function ${esc(host.f)}\\((?<a>${I})\\)\\{if\\(!\\(\\k<a>\\.seed64 instanceof Uint8Array\\)[^]{0,200}?=await Promise\\.all\\(\\k<a>\\.noteIds\\.map\\(async [^]{0,700}?try\\{(?<mk>${I})=await ${I}\\(\\k<a>\\.minSlots\\),${I}=await ${I}\\.leaves\\(\\k<mk>\\.slot,\\k<a>\\.signal,\\k<a>\\.rpcs\\)`).test(js);
+    // the tap's buy round after a first round (pool-buy.ts): its tag 3 built only on a blockhash whose last height (from
+    // blockhashValid, never under the true one) is at most the first round's floor + 151 + 750, the floor the least of
+    // both RPCs' whole confirmed heights read before the first round is signed (heightFloor, beside its round's tree
+    // sizes and reference), so none of its tag 3s lands past W's latest + 151 + 750 and neither RPC alone lifts the bound (review of
+    // dec80ea5b, M1)
+    const rd = new RegExp(`let\\[${I},${I},,(?<fl>${I})\\]=await Promise\\.all\\(\\[${I}\\(${I},${I},${I}\\),${I}\\(${I}\\.rpcs,\\{side:\`buy\`,[^]{0,300}?,(?<ld>${I})===null\\?(?<hf>${I})\\((?<h>${I})\\.rpcs\\):null\\]\\)[^]{0,2500}?\\[,${I},(?<z>${I})\\]=await Promise\\.all\\(\\[Promise\\.all\\(${I}\\),${I},(?<bo>${I})\\(${I}\\)\\]\\),(?<bh>${I})=${I}\\(\\)-${I}>${I}\\?await \\k<bo>\\(\\k<h>\\.rpcs\\):\\k<z>;if\\(\\k<ld>!==null&&\\k<bh>\\.lastHeight>\\k<ld>\\.floor\\+(?<life>${I})\\+750\\)return\\{error:\`failed\`\\}[^]{0,4000}?\\{blockhash:\\k<bh>\\.blockhash,lastValidBlockHeight:\\k<bh>\\.lastValidBlockHeight,`).exec(js)?.groups;
+    const floor = rd !== undefined && (rd.life === "151" || is(rd.life, "151")) && new RegExp(`[,; ]${esc(rd.ld)}=\\{releases:${I},wallet:${I}\\.wallet\\.address,floor:${esc(rd.fl)}\\};continue\\}`).test(js);
+    const hf = rd === undefined ? undefined : new RegExp(`async function ${esc(rd.hf)}\\((?<r>${I})\\)\\{let (?<t>${I})=await Promise\\.all\\(\\k<r>\\.map\\((?<p>${I})=>\\k<p>\\(\`getBlockHeight\`,\\[\\{commitment:\`confirmed\`\\}\\]\\)\\)\\);return Math\\.min\\(\\.\\.\\.\\k<t>\\.map\\((?<n>${I})\\)\\)\\}`).exec(js)?.groups;
+    const whole2 = hf !== undefined && new RegExp(`[,; ]${esc(hf.n)}=(?<x>${I})=>Number\\.isSafeInteger\\(\\k<x>\\)&&\\k<x>>=0\\?\\k<x>:${I}\\(\\)[,;]`).test(js);
+    const bo = rd === undefined ? undefined : new RegExp(`async function ${esc(rd.bo)}\\((?<r>${I})\\)\\{return (?<bv>${I})\\(\\k<r>,await ${I}\\(\\k<r>\\)\\)\\}`).exec(js)?.groups;
+    const valid = bo !== undefined && new RegExp(`async function ${esc(bo.bv)}\\((?<r>${I}),(?<t>${I})\\)\\{[^]{0,900}?(?<u>${I})=${I}\\((?<c>${I})\\)\\+${esc(rd.life)};return\\{blockhash:\\k<t>\\.blockhash,lastValidBlockHeight:(?<l>${I}),slot:\\k<t>\\.slot,lastHeight:\\k<l>>\\k<u>\\?\\k<l>:\\k<u>\\}\\}`).test(js);
+    const round = floor && whole2 && valid;
     const both = new RegExp(`[,; ]${esc(q.bo)}=\\((?<r>${I}),(?<f>${I})\\)=>Promise\\.all\\(\\[\\k<f>\\(\\k<r>\\[0\\]\\),\\k<f>\\(\\k<r>\\[1\\]\\)\\]\\)[,;]`).test(js);
     // the getBlock config, whole: the one object the helper forwards (the kit's HELPER_SOLANA_BLOCK_HEADER), so a drift of
     // either side is red here, never a found W that holds for good on mainnet
     const header = is(q.hd, "Object\\.freeze\\(\\{commitment:`finalized`,encoding:`json`,transactionDetails:`none`,rewards:!1,maxSupportedTransactionVersion:0\\}\\)");
-    return notes && round && tokens && addressesOf && simulated && address && keeps && header && latest && again && since && both && Boolean(t) && is(q.life, "151") && is(t.a, "`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`") && is(t.b, "`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`");
+    return notes && whole && round && tokens && addressesOf && simulated && address && keeps && header && latest && again && since && both && Boolean(t) && is(q.life, "151") && is(t.a, "`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`") && is(t.b, "`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`");
   },
 };
 const isOf = (js, name, v) => new RegExp(`[,; ]${esc(name)}=${v}[,;]`).test(js);

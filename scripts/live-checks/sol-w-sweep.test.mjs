@@ -130,8 +130,16 @@ const JS = [
   ";if(S.end!==`sent`)return`steady`in S?g(S.end,S.detail,S.end===`floor`&&S.steady):g(S.end,S.detail);",
   ";I||(be.mints=iz((await Promise.resolve(e.owed?.list()).then(e=>e?.find(e=>e.address===f.address),()=>void 0))?.mints,be.mints),await e.owed?.put(be)",
   // card a-found-wallet-sweeps-past-a-strangers-coin: the tap's buy round signed at most 750 blocks past its first round's
-  ";if(T!==null&&B.lastHeight>T.lastHeight+750)return{error:`failed`};let V=k.expectedOut;",
-  ";T={releases:g1,wallet:r.wallet.address,lastHeight:B.lastHeight};continue}",
+  // review of dec80ea5b, M1 and L3: the bound from the least of both RPCs' heights before the first round (HW, whole
+  // heights CW), checked on the blockhash (zW, VW: never under the true last height) the tag 3 is built on; the sell
+  // host's settleSet handing the seed to the pool's whole-list reader (tz), as the release build spells them
+  "T=null;for(let n=0;;n++){let[E,D,,O]=await Promise.all([AW(e,d,s),lH(e.rpcs,{side:`buy`,token:u,amount:t.amount}),n===0?g.then(e=>void(_=e,v=nh(e))):null,T===null?HW(e.rpcs):null]),k=fH(D,new Set(y.keys()),t.slippageBps);if(`error`in k)return SW(k.error);let I=mh(e.rpcs,j,u,A.address,`buy`,...e.pick?[e.pick]:[]),L=0,R=[((t,n,r)=>e.rpcs[0](t,n,r).then(e=>(L=c(),e))),e.rpcs[1]],[,z,B]=await Promise.all([Promise.all(F),I,zW(R)]),V=c()-L>1e3?await zW(e.rpcs):B;if(T!==null&&V.lastHeight>T.floor+RW+750)return{error:`failed`};let ee=A.expectedOut;he=Hre(me,ue,R,pe,{blockhash:V.blockhash,lastValidBlockHeight:V.lastValidBlockHeight,stateSize:E.stateSize+ce-1,",
+  ";T={releases:u,wallet:W.wallet.address,floor:O};continue}",
+  ";var RW=151;async function HW(e){let t=await Promise.all(e.map(e=>e(`getBlockHeight`,[{commitment:`confirmed`}])));return Math.min(...t.map(CW))}",
+  ",CW=e=>Number.isSafeInteger(e)&&e>=0?e:SW(),",
+  "async function zW(e){return VW(e,await BW(e))}async function VW(e,t){let[n,r]=await Promise.all([e[1](`isBlockhashValid`,[t.blockhash,{commitment:`confirmed`}]),e[1](`getEpochInfo`,[{commitment:`confirmed`}])]);if(n?.value!==!0)return SW();let i=CW(n.context?.slot);if(i===0)return SW();let a=r?.absoluteSlot,o=r?.blockHeight,s=Number.isSafeInteger(a)&&Number.isSafeInteger(o)&&a>=0&&o>=0?Math.max(0,i-a):1/0,c=s<=RW?o+s:await e[1](`getBlockHeight`,[{commitment:`confirmed`,minContextSlot:i}]),l=t.lastValidBlockHeight,u=CW(c)+RW;return{blockhash:t.blockhash,lastValidBlockHeight:l,slot:t.slot,lastHeight:l>u?l:u}}",
+  "settleSet:async(t,r)=>{let i=await e.seed64();try{return await tz({seed64:i,notes:await _(),noteIds:t,program:n.program,minSlots:r,rpcs:a(),lister:s(),signal:h,cache:l,markBatches:w8})}finally{i.fill(0)}},ops:e.store,",
+  "async function tz(e){if(!(e.seed64 instanceof Uint8Array)||e.seed64.length!==64)throw Error(`seed64: not 64 bytes`);let t=fA(e.program).scope,n=await Promise.all(e.noteIds.map(async n=>{let r=await e.notes.get(n);return r===void 0||r.leaf===void 0||r.scope!==t?{error:Error(`note ${n}: not a landed note of this pool`)}:{note:r}}));if(n.every(e=>`error`in e))return n.map(e=>({error:e.error}));let r=e.cache??{},i=r.pages??=OA(e.rpcs,e.program,e.lagWait),a=XR(r,e),o,s;try{o=await a(e.minSlots),s=await i.leaves(o.slot,e.signal,e.rpcs);}catch(e){throw e}}",
   // review P1-2 of 1d3b96d9c: W's own coins' accounts, the keep count's caller; card
   // a-found-wallet-sweeps-past-a-strangers-coin: a found W's every account until its note's spend reads alike, then none
   // while unspent
@@ -332,9 +340,26 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("&&e.height>r[0]+Tq+750)", "&&e.height>r[0]+Tq+749)"), 26],
     [JS.replace("slots:[i[0].slot,i[1].slot]", "slots:[0,0]"), 26],
     [JS.replace("e.slot>=0&&", ""), 26],
-    [JS.replace("if(T!==null&&B.lastHeight>T.lastHeight+750)return{error:`failed`};", ""), 26],
-    [JS.replace("B.lastHeight>T.lastHeight+750)", "B.lastHeight>T.lastHeight+751)"), 26],
-    [JS.replace(",lastHeight:B.lastHeight};", "};"), 26],
+    [JS.replace("if(T!==null&&V.lastHeight>T.floor+RW+750)return{error:`failed`};", ""), 26],
+    [JS.replace("V.lastHeight>T.floor+RW+750)", "V.lastHeight>T.floor+RW+751)"), 26],
+    [JS.replace("V.lastHeight>T.floor+RW+750)", "V.lastHeight>T.floor+750)"), 26],
+    [JS.replace("var RW=151;", "var RW=1151;"), 26],
+    // review of dec80ea5b, M1: the bound from round 1's own last height (one RPC's word lifts it), a floor that is the
+    // greater of the two heights, a floor of heights not checked whole, a floor read after the first round (each round),
+    // the tag 3 built on another blockhash than the one checked, a last height under the true one (RPC 0's word alone)
+    [JS.replace("V.lastHeight>T.floor+RW+750)", "V.lastHeight>T.lastHeight+750)").replace("floor:O};continue}", "lastHeight:V.lastHeight};continue}"), 26],
+    [JS.replace("floor:O};continue}", "floor:V.lastHeight-RW};continue}"), 26],
+    [JS.replace("return Math.min(...t.map(CW))", "return Math.max(...t.map(CW))"), 26],
+    [JS.replace("return Math.min(...t.map(CW))", "return Math.min(...t.map(Number))"), 26],
+    [JS.replace("n===0?g.then(e=>void(_=e,v=nh(e))):null,T===null?HW(e.rpcs):null]", "n===0?g.then(e=>void(_=e,v=nh(e))):null,null]"), 26],
+    [JS.replace("T===null?HW(e.rpcs):null]),k=fH(", "null]),k=fH(").replace("zW(R)]),V=", "zW(R),T===null?HW(e.rpcs):null]),V=").replace("[,z,B]=", "[,z,B,O]="), 26],
+    [JS.replace("{blockhash:V.blockhash,lastValidBlockHeight:V.lastValidBlockHeight,stateSize", "{blockhash:z.blockhash,lastValidBlockHeight:z.lastValidBlockHeight,stateSize"), 26],
+    [JS.replace("lastHeight:l>u?l:u}}", "lastHeight:l}}"), 26],
+    // review of dec80ea5b, L3: the sell host's settleSet reading the note's own mark, or no settleSet at all
+    [JS.replace("try{return await tz({seed64:i,", "try{return await Az({seed64:i,"), 26],
+    [JS.replace(/settleSet:async\(t,r\)=>\{[^]*?\}finally\{i\.fill\(0\)\}\},ops:/, "ops:"), 26],
+    [JS.replace("s=await i.leaves(o.slot,e.signal,e.rpcs)", "s=await i.marksOf(o.slot,e.signal,e.rpcs)"), 26],
+    [JS.replace("}finally{i.fill(0)}},ops:", "}finally{}},ops:"), 26],
     [JS.replace("await jq(tk,c.address).catch(t=>(ww=`its token accounts not read alike on both RPCs (${fq(t)})`,null))", "await jq(tk,c.address).catch(()=>null)"), 26],
     [JS.replace("if(h.ok.young!==void 0)return g(`holds`,`a found W: ${h.ok.young}`,!1);", "if(h.ok.young!==void 0)return g(`holds`,`a found W`,!1);"), 26],
     // every token account both RPCs list W owning, both programs, the same sorted list, each an address, 16 a pass, read

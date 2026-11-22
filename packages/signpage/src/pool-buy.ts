@@ -521,6 +521,14 @@ export async function blockhashValid(rpcs: readonly [SolanaRpc, SolanaRpc], r: {
   return { blockhash: r.blockhash, lastValidBlockHeight: said, slot: r.slot, lastHeight: said > cap ? said : cap };
 }
 
+/** The least of both RPCs' confirmed block heights (review of dec80ea5b, M1): a height either RPC answers too high is
+ *  undone by the other's, so neither alone lifts it; read before a transaction is signed, it is under the height that
+ *  transaction lands at. An answer with no whole height fails the read. */
+export async function heightFloor(rpcs: readonly [SolanaRpc, SolanaRpc]): Promise<number> {
+  const hs = await Promise.all(rpcs.map((rpc) => rpc("getBlockHeight", [{ commitment: "confirmed" }])));
+  return Math.min(...hs.map(int));
+}
+
 /** True once both RPCs' finalized block height is past `last`: no transaction on that blockhash can land after, and
  *  any that did is final, so a spent mark read now at finalized is the whole answer. A failed read is "not yet". */
 export async function pastOnBoth(rpcs: readonly [SolanaRpc, SolanaRpc], last: number): Promise<boolean> {
@@ -886,11 +894,13 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     };
     // the tap's first round, once it landed (card buy-spends-its-change-in-the-same-tap): its releases to W, counted in
     // W's funds and named first in the buy's `before`; W and its own note's proof's place, held for the buy's round
-    let landed: { releases: SolanaPoolRelease[]; wallet: string; lastHeight: number } | null = null;
+    let landed: { releases: SolanaPoolRelease[]; wallet: string; floor: number } | null = null;
     for (let round = 0; ; round++) {
       // round 1: the pool account's two tree sizes and the reference (the quote's age counts from it, so it is read
-      // again each round), with the rent on the first
-      const [sizes, ref] = await Promise.all([treeSizes(h, pool, wait), pageReference(h.rpcs, { side: "buy", token, amount: ask.amount }), round === 0 ? rentRead.then((x) => void ((rent = x), (feeCap = solanaPoolFee(x)))) : null]);
+      // again each round), with the rent on the first; before a first round is signed, the least of both RPCs'
+      // confirmed block heights too (heightFloor): no transaction signed after it lands at or under it, so W's latest
+      // transaction once that round landed is above it (read here, never between the device's slot read and the take)
+      const [sizes, ref, , floor]: [Awaited<ReturnType<typeof treeSizes>>, Awaited<ReturnType<typeof pageReference>>, unknown, number | null] = await Promise.all([treeSizes(h, pool, wait), pageReference(h.rpcs, { side: "buy", token, amount: ask.amount }), round === 0 ? rentRead.then((x) => void ((rent = x), (feeCap = solanaPoolFee(x)))) : null, landed === null ? heightFloor(h.rpcs) : null]);
       // the venue (card sol-buy-takes-the-best-venue-it-can-trade): the best pool on a venue the page pins a table for,
       // held to the best of every venue read (solanaBuyVenue, the decision pool.buy.dry takes too); a reference with no
       // pinned pool, or one below the market, is refused as soon as the reference is read, before the venue's own
@@ -934,11 +944,15 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const [, venue, first] = await Promise.all([Promise.all(lookups), venueRead, blockhashOf(timed)]);
       const bh = nowMs() - slotAt > POOL_BUY_SLOT_STALE_MS ? await blockhashOf(h.rpcs) : first;
       // the buy's round after a first round (card a-found-wallet-sweeps-past-a-strangers-coin): its tag 3 relies on the
-      // SOL the first round put on W, so it is signed only on a blockhash whose last height is at most FOUND_ROUND_GAP past
-      // the first round's: another device on the same 12 words sweeps W as found once past W's latest transaction + 151
-      // + FOUND_ROUND_GAP (pool-sell.ts foundPast), and no tag 3 of this tap can land by then. Later: the tap failed, and
-      // the first round's SOL waits in W, which its owed record names, as when the first round does not land whole
-      if (landed !== null && bh.lastHeight > landed.lastHeight + FOUND_ROUND_GAP) return { error: "failed" };
+      // SOL the first round put on W, so it is signed only on a blockhash whose last height (never under the true one,
+      // blockhashValid) is at most the first round's floor + 151 + FOUND_ROUND_GAP: another device on the same 12 words
+      // sweeps W as found once past W's latest transaction + 151 + FOUND_ROUND_GAP (pool-sell.ts foundPast), that
+      // transaction lands above the floor, and no tag 3 of this tap can land by then. The floor is the least of both
+      // RPCs' heights, so neither alone raises it (review of dec80ea5b, M1: the first round's own last height, a max over
+      // RPC 0's word and RPC 1's height, let one lying RPC lift the bound), and it is a height read, not counted from
+      // slots, so skipped slots never lift it (L1). Later: the tap failed, and the first round's SOL waits in W, whose
+      // owed record the state reads strand as found (pool-sell.ts strandOwed), as when the first round does not land whole
+      if (landed !== null && bh.lastHeight > landed.floor + BLOCKHASH_LIFE + FOUND_ROUND_GAP) return { error: "failed" };
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
       // the pick, from the ready proofs as they are now (a remake or another tab may have changed them during the
       // reads): the pieces of one W, its own note's among them, each note once, that pay the spend and W's accounts in
@@ -1022,7 +1036,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
         // a buy); any piece that landed waits in W, which its owed record names, for the state reads to put back
         if (!("stage" in a1) || a1.stage !== "filled") return { error: "failed" };
         for (const p of split.first) await h.carry!.prove(p.noteId, { l: r.wallet.l, j: r.wallet.j, address: r.wallet.address });
-        landed = { releases: got1, wallet: r.wallet.address, lastHeight: bh.lastHeight };
+        landed = { releases: got1, wallet: r.wallet.address, floor: floor! };
         continue;
       }
       const k = set.length;

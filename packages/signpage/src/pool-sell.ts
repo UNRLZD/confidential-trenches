@@ -702,8 +702,9 @@ const stamped = (laters: readonly Later[], ms: number): Promise<unknown> => Prom
  *  holding, an account kept), so a load whose read of W is the same skips W with no other read. Card
  *  round-trip-costs-less: `buy`, W's coin as the restore's rebuild read it and the public seat read it the same
  *  (provenBuy; null: W's note paid a plain release, no buy), so it is read once. `found`: a W the device found holding
- *  SOL with no buy of its recorded (card buy-spends-several-pieces: the own W of an UNSPENT note, after a restore): swept
- *  only once both RPCs read it owning no token account at all, so a coin is never swept with it. */
+ *  SOL with no buy of its recorded (card buy-spends-several-pieces: the own W of an UNSPENT note, after a restore; a buy
+ *  of pieces whose own tag 3 never landed, strandOwed): swept on the found W's rule (foundPast, foundSince), so a coin
+ *  of the user's is never swept with it. */
 /** `lamports`: what W's last pass read on W, alike on both RPCs, its buy proven (src/positions.ts returningWallets lists
  *  W on its way at it); `sweep`: its last sweep's signature, so W stays listed until the note that sweep wrote is counted
  *  (never twice: the list reads the same notes the balance does); `spaced`: when W's own last rent-back send was, so W is
@@ -716,6 +717,15 @@ type SoldBy = { tx: string; last: number };
 /** `empty`/`markEmpty` (card round-trip-costs-less): the account's Ws a pass read empty for good (nothing on W, no
  *  account, or no buy at all), each with the rules it was read under (POOL_RENT_BACK_RULES), so a load lists them and
  *  reads none of them again. */
+/** A buy of pieces that can no longer land, a piece's release paid W (pool-buy.ts resumePieces `strand`: its buy round
+ *  refused past FOUND_ROUND_GAP, its first round not landed whole, or its own note spent by another): W's owed record,
+ *  `found`, so the SOL its first round put on W comes back on the found W's rule on this device too (review of
+ *  dec80ea5b, H1: a record with no `found` and no buy recorded held as "no buy of W's is recorded", then steady, and
+ *  findHeldWs skips a W with a record). A buy recorded or proven for W still takes the record's sweep (rentBackOwed). */
+export async function strandOwed(owed: Pick<OwedRentBacks, "list" | "put">, r: { address: string; l: string; j: number; mint: string; program: string }): Promise<void> {
+  const had = (await owed.list()).find((x) => x.address === r.address);
+  await owed.put({ ...(had ?? { passes: 0 }), address: r.address, l: r.l, j: r.j, mints: [...(had?.mints ?? []).filter((m) => m.mint !== r.mint), { mint: r.mint, program: r.program }], found: true });
+}
 export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void>; empty?(): Promise<ReadonlySet<string>>; markEmpty?(address: string): Promise<void>; spacing?(): Promise<RentBackSpacing | undefined>; space?(v: RentBackSpacing): Promise<void>; claim?(v: RentBackSpacing, own?: number): Promise<boolean>; rideAt?(): Promise<number | undefined>; bookRide?(at: number): Promise<void>; rode?(at: number): Promise<void>; tail?(t: WTail): Promise<void>; untail?(address: string): Promise<void> };
 /** A W's leftover under the pool's least standard size (card pool-amounts-are-standard-sizes; pick (c), 13 Nov
  *  20:4xZ): meta w-tail/sol/<address>, the record wallet's pool-to-Cash carries to Cash and the balance counts. Written
@@ -2535,7 +2545,10 @@ async function rentBackOwed(h: PoolSellHost, given: RentBack, o: OwedRentBack, h
     await h.owed!.put({ ...now, sweep: s, ...(lamports === undefined ? {} : { lamports: lamports.toString() }) });
   } }, hold);
   await owedAfter(h, o, r.end, r.steady && x.bare !== true ? seen : undefined, { ...(differs === (o.differs ?? 0) ? {} : { differs }), ...(proven === undefined ? {} : { buy: proven }), ...(lamports === undefined ? {} : { lamports }), ...(unlisted ? { unlisted: true as const } : {}), ...(spaced === undefined ? {} : { spaced }), ...(sweep === undefined ? {} : { sweep }) });
-  return r.end === "gave_up" || r.end === "sent" || r.end === "owed" || unproven === "again";
+  // a hold that is not W's steady state (a found W not yet past its rule, a sell not final yet) tries again too, on the
+  // runs' doubling wait (pool-testnet.ts backsSchedule): the mainnet copy run of dec80ea5b held a found W young on its
+  // first pass and booked no other in 14 min, W's SOL never swept
+  return r.end === "gave_up" || r.end === "sent" || r.end === "owed" || unproven === "again" || (r.end === "holds" && !r.steady);
 }
 
 /** What the helper reads one W as (findOn) before its pass: a sale's own rent back keeps it on a steady end. */
