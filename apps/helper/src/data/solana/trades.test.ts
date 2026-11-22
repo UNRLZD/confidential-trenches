@@ -590,7 +590,7 @@ test("card helper-stays-fast-under-the-live-run: a listed coin whose first read 
   const held = await at(500, 5);
   assert.equal(accounts, 1, "inside the first wait: no read of its own");
   assert.match(held[0]!.timing ?? "", /sol-open;desc="listed 0, account unread 0, read again in 500 ms"/);
-  assert.deepEqual(JSON.parse(held[0]!.body), { trades: [], filling: true, src: "chain", as_of_ms: TS * 1000 + 500 });
+  assert.deepEqual(JSON.parse(held[0]!.body), { trades: [], filling: true, src: "chain", as_of_ms: TS * 1000 }, "the failed read's own answer, kept");
   await at(FAILED_OPEN_MS, 3);
   assert.equal(accounts, 2, "past the wait: read again once for every read joined");
   await at(FAILED_OPEN_MS + 1_500, 3);
@@ -598,6 +598,33 @@ test("card helper-stays-fast-under-the-live-run: a listed coin whose first read 
   await at(FAILED_OPEN_MS * 3, 1);
   assert.equal(accounts, 3);
   t.stop();
+});
+
+test("card helper-stays-fast-under-the-live-run, load: the live run's crowd (app-console-429's 25 reads a route at once: the tape and the bars) polling a listed coin whose first read always fails, every 3 s for 30 s, runs at most 5 first reads and 5 vendor reads, every answer 200 (red at fda1267c6: 10 first reads, one per poll, and a vendor read for every tape read, 250)", async () => {
+  let accounts = 0;
+  let vendor = 0;
+  let clock = TS * 1000;
+  const t = createSolanaTrades({
+    fetch: (async (_u: string, init: RequestInit) => ((JSON.parse(String(init.body)) as { method: string }).method === "getAccountInfo" && accounts++, new Response("down", { status: 503 }))) as never,
+    now: () => clock,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+    tape: async () => (vendor++, { status: 200, body: JSON.stringify(POOL_ROWS), src: "coingecko", asOfMs: clock }),
+    history: async () => ({ status: 200, body: JSON.stringify({ tf: "1m", candles: [] }), src: "geckoterminal", asOfMs: clock }),
+  });
+  const statuses = new Set<number>();
+  for (let poll = 0; poll < 10; poll++) {
+    clock = TS * 1000 + poll * 3_000;
+    const got = await Promise.all([...Array.from({ length: 25 }, () => t.trades(MINT, 50)), ...Array.from({ length: 25 }, () => t.candles(MINT, "1m", null, 50))]);
+    for (const a of got.slice(0, 25)) statuses.add(a.status);
+  }
+  t.stop();
+  assert.deepEqual([...statuses], [200], "every tape read answered 200");
+  // the first read again at +0, +3, +6, +12 and +21 s: its wait 1, 2, 4, 8 then 16 s
+  assert.ok(accounts <= 5, `${accounts} first reads in 30 s`);
+  assert.ok(vendor <= 5, `${vendor} vendor reads in 30 s`);
 });
 
 // card token-page-data-complete-and-fast: a coin launched against another coin (BUBBLE against FRONTIER, 11 Nov) had

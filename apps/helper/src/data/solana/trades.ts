@@ -1791,7 +1791,7 @@ export function createSolanaTrades(deps: {
   const opening = new Map<string, Promise<Entry | DataAnswer>>();
   /** Each listed coin whose first read failed: when it may be opened again, and how many have failed in a row (at most
    *  OPEN_MAX kept, the oldest dropped). */
-  const failedOpens = new Map<string, { until: number; n: number; desc: string }>();
+  const failedOpens = new Map<string, { until: number; n: number; desc: string; answer?: { a: Promise<DataAnswer>; limit: number } }>();
   async function open(mint: string): Promise<Entry | DataAnswer> {
     // card helper-stays-fast-under-the-live-run: a coin whose first read failed waits FAILED_OPEN_MS, doubling, before
     // it is read again; the reads in between are answered as the failed one was, with no read of their own
@@ -1939,14 +1939,28 @@ export function createSolanaTrades(deps: {
       // 25 reads of one cold coin 503 at 3.6 s while its page, holders and bars answered); the next read opens it again
       if (!("mint" in e)) {
         if (e.why !== FIRST_FAILED) return e;
-        const v = deps.tape === undefined ? null : await poolTape(mint, limit, null);
-        const timing = [v?.timing, e.timing].filter((x) => x !== undefined && x !== "").join(", ");
-        if (v !== null && v.status === 200) {
-          const { whole_ms: _, ...b } = JSON.parse(v.body) as Record<string, unknown>;
-          return { ...v, body: JSON.stringify({ ...b, filling: true }), timing };
-        }
-        const at = now();
-        return { status: 200, body: JSON.stringify({ trades: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing };
+        // the answer of the failed read, kept while its coin waits (FAILED_OPEN_MS): the reads in between are answered
+        // with it, so a crowd polling a failing coin asks neither the chain nor the vendor again until the wait is out
+        // one answer for every read joined on the failure (one vendor read), set before it is read
+        const f = failedOpens.get(mint);
+        const kept = f !== undefined && f.answer !== undefined && f.answer.limit >= limit && now() < f.until ? f.answer.a : undefined;
+        const answer =
+          kept ??
+          (async (): Promise<DataAnswer> => {
+            const v = deps.tape === undefined ? null : await poolTape(mint, limit, null);
+            if (v !== null && v.status === 200) {
+              const { whole_ms: _, trades, ...b } = JSON.parse(v.body) as Record<string, unknown>;
+              return { ...v, body: JSON.stringify({ trades: Array.isArray(trades) ? trades.slice(0, limit) : trades, ...b, filling: true }), timing: v.timing };
+            }
+            const at = now();
+            return { status: 200, body: JSON.stringify({ trades: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+          })();
+        if (kept === undefined && f !== undefined) f.answer = { a: answer, limit };
+        const a = await answer;
+        // a kept answer is the read's own: the bars a limit asks for, the timing of this read's wait
+        const { trades: rows, ...rest } = JSON.parse(a.body) as Record<string, unknown>;
+        const body = JSON.stringify({ trades: Array.isArray(rows) ? rows.slice(0, limit) : rows, ...rest });
+        return { ...a, body, timing: [a.timing, e.timing].filter((x) => x !== undefined && x !== "").join(", ") };
       }
       const rows = folded(e).book === null ? [] : e.book!.tape(limit);
       // a token with no trade of a venue this tape decodes (Raydium's other pools, Meteora's older pools, the other launchpads: a
