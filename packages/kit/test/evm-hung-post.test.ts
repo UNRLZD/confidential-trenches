@@ -60,6 +60,8 @@ const run = async (hang?: Hang) => {
     );
     const answers = new Map<string, [string, unknown][]>(F.calls);
     const given = new Map<string, Set<number>>();
+    // each call's answer given last (the provider asked last for it), by its key
+    const last = new Map<string, number>();
     let quote = -1;
     let hung = 0;
     const fetchFn = (async (url: string | URL, init?: RequestInit) => {
@@ -78,9 +80,13 @@ const run = async (hang?: Hang) => {
         const g = given.get(k) ?? new Set<number>();
         given.set(k, g);
         let i = all.findIndex(([h], j) => h === host && !g.has(j));
+        // a provider the recording never asked for this call (a quorum's third, a stand-in) answers as the last one
+        // given it did, at the same time; it never takes an answer recorded for a later ask (a newer head)
+        if (i < 0 && last.has(k)) i = last.get(k)!;
         if (i < 0) i = all.findIndex((_, j) => !g.has(j));
         if (i < 0) i = all.length - 1;
         g.add(i);
+        last.set(k, i);
         return { jsonrpc: "2.0", id: c.id, ...(all[i]![1] as object) };
       };
       return new Response(JSON.stringify(Array.isArray(body) ? calls.map(one) : one(body)), { status: 200, headers: { "content-type": "application/json" } });

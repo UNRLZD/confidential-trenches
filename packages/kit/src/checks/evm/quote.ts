@@ -821,6 +821,7 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
         true,
         late,
         down,
+        roomOf(batch),
       );
       for (const [i, v] of a) all[i] = v;
     }),
@@ -967,6 +968,10 @@ function pairOrders(rpcs: readonly EvmRpc[], batches: readonly (readonly EvmRpcC
       if (pick >= 0) [order[i], order[pick]] = [order[pick]!, k];
     }
     for (const k of order.slice(0, 2)) before[k]!.push([...b]);
+    // and the quorum's third where it is not held and its pace has its turn (agreeing's `room`), so no later batch moves
+    // up a provider whose units this round's thirds take
+    const t = order[2];
+    if (t !== undefined && HELD_OF.get(rpcs[t]!)?.() !== true && wait(t) <= 0) before[t]!.push([...b]);
     return order.every((k, i) => k === i) ? rpcs : Object.freeze(order.map((k) => rpcs[k]!));
   });
 }
@@ -1005,6 +1010,14 @@ function agreeing<T>(
   // request still queued in such a provider's gate moves to the next provider unsent while one is left, and with none
   // left it is sent, the last one to ask. A 429 keeps its own rule (ask)
   down?: Set<EvmRpc>,
+  // The quorum (card evm-warm-tap-ends-inside-two-seconds): whether a provider has a place for this round's post now
+  // (roomOf: its quote's gate and its pace, pace.ts evmPaceReady). A round of three providers or more whose third is
+  // not held and has one asks it at once with the first two, its own seat and its own vote, and the first two answers
+  // that are `same` win: 2 of 3, the standard read pattern. A hedge only shortens the wait for the slower seat; Base's
+  // warm Round 1 batch took 1,348-1,390 ms on base-rpc.publicnode.com on 2 of 5 warm taps while blastapi answered it
+  // in about 300 ms, and the round waited for the stand-in, the tap ending at about 2.0 s (side A be22ec935,
+  // 2026-11-22 02:3xZ). With no place (or none given) the round asks two as before
+  room?: (rpc: EvmRpc) => boolean,
 ): Promise<{ a: T; b: T; i: number; j: number }> {
   const list = [...rpcs];
   const need = Math.floor(list.length / 2) + 1;
@@ -1027,10 +1040,23 @@ function agreeing<T>(
     const voted: boolean[] = [];
     const hedgedK: boolean[] = [];
     let gone = 0;
+    // each request's abort, for its wait at its provider's pace (evmJsonRpc): a request not yet on the wire when the
+    // round is done is dropped there unsent, its units never taken; one still in its gate is dropped as it would leave
+    // (`moved`). A dropped request is no failure and holds nothing (timed). Only a provider with a URL, whose post
+    // says when it leaves (`wire`), is dropped by its abort, so no post already sent is cut
+    const stops: AbortController[] = [];
+    const drop = () => {
+      for (let n = 0; n < started; n++) {
+        if (settledK[n] || wireAt[n] !== undefined || (GATED_URL.get(list[n]!) ?? URL_OF.get(list[n]!)) === undefined) continue;
+        movedK[n] = true;
+        stops[n]!.abort(DROPPED);
+      }
+    };
     const lose = () => {
       done = true;
       clearTimeout(timer);
       clearTimeout(hedgeTimer);
+      drop();
       const x = got[0];
       const y = x === undefined ? undefined : (got.find((g) => !same(x.v, g.v)) ?? got[1]);
       if (x !== undefined && y !== undefined) {
@@ -1052,6 +1078,7 @@ function agreeing<T>(
       done = true;
       clearTimeout(timer);
       clearTimeout(hedgeTimer);
+      drop();
       // the quote's next rounds ask these two first: one that was slow, failed or differed is a spare from now on
       // (`rpcs` is the quote's own list, gated(); reordered only while no other round has)
       if (!Object.isFrozen(rpcs) && list.every((r, n) => rpcs[n] === r)) {
@@ -1148,12 +1175,13 @@ function agreeing<T>(
       const k = started++;
       t0[k] = performance.now();
       seat[k] = of ?? k;
-      // read as the request would leave its gate: one whose provider answered 5xx in this round moves to the next now,
-      // or is dropped unsent where its batch is already agreed
+      stops[k] = new AbortController();
+      // read as the request would leave its gate: any request is dropped unsent where its round is already done; one
+      // whose provider answered 5xx in this round moves to the next now
       const moved = () => {
         if (movedK[k] === true) return true;
-        if (down?.has(list[k]!) !== true) return false;
         if (done) return (movedK[k] = true);
+        if (down?.has(list[k]!) !== true) return false;
         if (started >= list.length) return false;
         movedK[k] = true;
         start(true, seat[k] === k ? undefined : seat[k]);
@@ -1165,6 +1193,7 @@ function agreeing<T>(
         moved,
         spare: () => !done && started < list.length,
         down: () => void down?.add(list[k]!),
+        until: stops[k]!.signal,
       };
       one(list[k]!, k, gate).then(
         (v) => {
@@ -1218,6 +1247,8 @@ function agreeing<T>(
     };
     start();
     start();
+    // the quorum's third (`room`): its own seat (start's own k) and its own vote
+    if (started === 2 && list.length > 2 && !contested && !heldK(2) && room?.(list[2]!) === true) start();
   });
 }
 
@@ -1229,8 +1260,11 @@ export type EvmGated = Gated;
  *  would leave: true, it is not sent (MOVED). `spare`: agreeing has a provider left to ask in this one's place (ask).
  *  `down`: the provider answered HTTP 5xx (gated), held for the rest of the round (agreeing's `down`). `wire`: the post
  *  left the device (evmJsonRpc, past its gate and its pace), with its calls: its hedge clock starts there. */
-type Gated = { readonly sent: () => void; readonly moved: () => boolean; readonly spare?: () => boolean; readonly down?: () => void; readonly wire?: (calls: readonly EvmRpcCall[]) => void };
+type Gated = { readonly sent: () => void; readonly moved: () => boolean; readonly spare?: () => boolean; readonly down?: () => void; readonly wire?: (calls: readonly EvmRpcCall[]) => void; readonly until?: AbortSignal };
+// `until`: aborted (DROPPED) where the request's round is done before its post left the device, so its wait at its
+// provider's pace ends there (agreeing's drop); a post already sent is never cut by it
 const MOVED = new Error("moved to the next provider before it was sent");
+const DROPPED = new Error("dropped unsent: its round was already agreed");
 /** One provider asked once for `calls`, with the time its post left the device: `wire` resolves with the post's kind
  *  as it is sent (past the provider's gate and its pace), and never where it is not. */
 function wired(rpc: EvmRpc, calls: readonly EvmRpcCall[]): { p: Promise<readonly unknown[]>; wire: Promise<string> } {
@@ -1284,12 +1318,12 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Pro
       // a gated provider says when the request leaves its gate; any other sends it now
       const g = GATED.get(rpc);
       if (g === undefined) gate?.sent();
-      out = await (g === undefined ? rpc(calls, undefined, gate?.wire) : g(calls, gate));
+      out = await (g === undefined ? rpc(calls, gate?.until, gate?.wire) : g(calls, gate));
       if (i < 3 && Array.isArray(out) && out.some(limited)) throw new RateLimited("a call's error names the provider's rate limit");
       break;
     } catch (e) {
-      // moved, or the quote's deadline passed in the gate (gated): nothing was sent
-      if (e === MOVED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;
+      // moved, dropped, or the quote's deadline passed in the gate (gated): nothing was sent
+      if (e === MOVED || e === DROPPED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;
       if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || gate?.spare?.() === true) {
         throw new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
       }
@@ -1380,6 +1414,10 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
       // held: only a head more than maxLag below the lower of the two, never one above them (re-review of fd9dd16, LOW-1:
       // a liar's old head and a lagging honest one held the provider that was up to date)
       (x, a, b) => x.number + maxLag < (a.number <= b.number ? a.number : b.number),
+      false,
+      undefined,
+      undefined,
+      roomOf([call]),
     );
     got = minBlock === 0n ? await round : await within(round, left(), late);
     if (got.a.number >= minBlock && got.b.number >= minBlock) break;
@@ -3196,6 +3234,8 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
       // detection): one lost post of a provider that answers the rest was its load while it was out (evmRanked), never
       // its seat. A lone hung post held Base's blastapi 30 s while it answered every other post in about 300 ms, warm
       // taps of 2.0 to 4.7 s on mainnet.base.org meanwhile (card evm-warm-tap-ends-inside-two-seconds, 2026-11-21 13:0xZ)
+      // a post dropped unsent at its pace, its round already agreed (agreeing's drop), is no loss
+      if (e === DROPPED) throw e;
       const now = performance.now();
       if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held = now + (e instanceof RateLimited ? throttleHoldMs(url, e.afterMs) : EVM_HOLD_MS);
       s.failed = now;
@@ -3305,9 +3345,20 @@ export function evmProviders(urls: readonly string[], fetchFn: typeof fetch, lat
     const f = timed(u, evmJsonRpc(u, fetchFn, undefined, undefined, later));
     URL_OF.set(f, u);
     HELD_OF.set(f, () => speedOf(u).held > performance.now() || evmProviderHeld(u));
+    ROOM.set(f, (calls) => evmPaceReady(u, calls, performance.now(), later));
     return f;
   });
 }
+/** Whether a provider's post of `calls` would leave now (agreeing's `room`, its quorum's third): set by evmProviders,
+ *  its pace's turn (pace.ts evmPaceReady, in its own lane), and by gated, a free place in the quote's gate too. A
+ *  provider with none (a test's model, an app's own) is never asked as a third. */
+const ROOM = new WeakMap<EvmRpc, (calls: readonly EvmRpcCall[]) => boolean>();
+const roomOf =
+  (calls: readonly EvmRpcCall[]) =>
+  (rpc: EvmRpc): boolean =>
+    ROOM.get(rpc)?.(calls) === true;
+/** roomOf, for the tests of the quorum (test/evm-quorum.test.ts). Not in the index. */
+export const evmRoomOf = roomOf;
 
 /** What every quote checks before any read, buy or sell: the device's clock, two different providers, the amount in
  *  and the slippage. */
@@ -3332,14 +3383,15 @@ function gated(rpcsIn: readonly EvmRpc[], parallel: number, deadline?: Deadline,
   const list = rpcsIn.map((rpc) => {
     const url = URL_OF.get(rpc);
     const pin = url !== undefined && inflight !== undefined && Object.hasOwn(inflight, url) ? inflight[url] : undefined;
-    const g = gateOf(typeof pin === "number" && Number.isSafeInteger(pin) && pin >= 1 ? pin : parallel);
+    const places = typeof pin === "number" && Number.isSafeInteger(pin) && pin >= 1 ? pin : parallel;
+    const g = gateOf(places);
     // stalled: requests out and none answered for 4 x EVM_HEDGE_MS (agreeing moves a request queued behind them)
     let flying = 0;
     let lastAt = 0;
-    const out = async (calls: readonly EvmRpcCall[], sent?: (calls: readonly EvmRpcCall[]) => void) => {
+    const out = async (calls: readonly EvmRpcCall[], sent?: (calls: readonly EvmRpcCall[]) => void, until?: AbortSignal) => {
       if (flying++ === 0) lastAt = performance.now();
       try {
-        return await rpc(calls, undefined, sent);
+        return await rpc(calls, until, sent);
       } finally {
         flying--;
         lastAt = performance.now();
@@ -3354,13 +3406,16 @@ function gated(rpcsIn: readonly EvmRpc[], parallel: number, deadline?: Deadline,
         gate?.sent();
         // an HTTP 5xx holds the provider for the round before its slot frees, so the request next in its gate, judged as
         // it leaves, already moves (agreeing's `down`)
-        return out(calls, gate?.wire).catch((e: unknown) => {
+        return out(calls, gate?.wire, gate?.until).catch((e: unknown) => {
           if (serverFault(e)) gate?.down?.();
           throw e;
         });
       }),
     );
     STALLED.set(f as unknown as EvmRpc, () => flying > 0 && performance.now() - lastAt > 4 * EVM_HEDGE_MS);
+    // a place now: a free place in this gate (none queued: every place is a request out) and the provider's own
+    const roomNow = ROOM.get(rpc);
+    if (roomNow !== undefined) ROOM.set(f as unknown as EvmRpc, (calls) => flying < places && roomNow(calls));
     const heldNow = HELD_OF.get(rpc);
     if (heldNow !== undefined) HELD_OF.set(f as unknown as EvmRpc, heldNow);
     const hold = HOLD.get(rpc);
@@ -5300,12 +5355,18 @@ async function releasesConfirmed(at: readonly ReleaseLog[], list: readonly EvmRp
  *  and one above it counts where both gave it or a second provider confirms it (releasesConfirmed). `funding`: the buy
  *  that paid W the token this sale sells (the quote's token and boughtBlock). `clock`: the device's clock, in ms. */
 async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rpcs: readonly EvmRpc[], block: Block, maxLag: bigint, sent: readonly EvmSellSent[], funding: { token: string; block: bigint }, clock: () => number): Promise<EvmSellReleases> {
+  const finalized: EvmRpcCall[] = [{ method: "eth_getBlockByNumber", params: ["finalized", false] }];
   const fins = await agreeing(
     rpcs,
-    async (rpc, k, gate) => header((await ask(rpc, [{ method: "eth_getBlockByNumber", params: ["finalized", false] }], gate))[0], `provider ${k + 1}`),
+    async (rpc, k, gate) => header((await ask(rpc, finalized, gate))[0], `provider ${k + 1}`),
     () => true,
     () => refuse("rpc_error", "the providers gave no finalized block"),
     false,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    roomOf(finalized),
   );
   const n = block.number;
   const low = (x: bigint, y: bigint) => (x < y ? x : y);
@@ -5321,17 +5382,17 @@ async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rp
     pages.push([a, a + EVM_SELL_TAIL_PAGE - 1n]);
   }
   const wTopic = "0x" + word(BigInt(w));
+  // two pages a batch from page `i`, each with the agreed block's header, which must be the quote's (CALLS_PER_BATCH)
+  const callsAt = (i: number): EvmRpcCall[] => [
+    ...pages.slice(i, i + CALLS_PER_BATCH - 1).map(([a, b]) => ({ method: "eth_getLogs", params: [{ address: pool, fromBlock: hx(a), toBlock: b === null ? "latest" : hx(b), topics: [[TOPIC_WITHDRAWN, TOPIC_BOUGHT], wTopic] }] })),
+    { method: "eth_getBlockByNumber", params: [hx(n), false] },
+  ];
   const logsOf = async (rpc: EvmRpc, k: number, gate?: Gated) => {
     const who = `provider ${k + 1}`;
     const out: ReleaseLog[] = [];
-    // two pages a batch, each with the agreed block's header, which must be the quote's (CALLS_PER_BATCH)
     for (let i = 0; i < pages.length; i += CALLS_PER_BATCH - 1) {
       const part = pages.slice(i, i + CALLS_PER_BATCH - 1);
-      const calls: EvmRpcCall[] = [
-        ...part.map(([a, b]) => ({ method: "eth_getLogs", params: [{ address: pool, fromBlock: hx(a), toBlock: b === null ? "latest" : hx(b), topics: [[TOPIC_WITHDRAWN, TOPIC_BOUGHT], wTopic] }] })),
-        { method: "eth_getBlockByNumber", params: [hx(n), false] },
-      ];
-      const got = await askAt(rpc, calls, gate);
+      const got = await askAt(rpc, callsAt(i), gate);
       if (header(got[part.length], who).hash !== block.hash) return refuse("rpc_disagree", `${who} does not hold the quote's block ${n}`);
       for (let p = 0; p < part.length; p++) {
         const r = (got[p] as { result?: unknown } | null)?.result;
@@ -5347,11 +5408,18 @@ async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rp
   const upTo = (x: readonly { block: bigint; key: string }[]) => x.filter((e) => e.block <= n).map((e) => e.key).join(";");
   // the order agreeing indexes, taken as it starts
   const list = [...rpcs];
+  // the quorum's third has a place for the first post; its later posts take their turns at its pace
   const { a, b, i, j } = await agreeing(
     rpcs,
     logsOf,
     (x, y) => upTo(x) === upTo(y),
     () => refuse("rpc_disagree", `the providers give W's releases up to block ${n} differently`),
+    true,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    roomOf(callsAt(0)),
   );
   // above the agreed block: a log both gave counts; one only one gave counts once a second provider confirms it, asked
   // block by block, and a claimant's first denial drops the rest it alone gave (review of 9c2a87d5, R3-3)
@@ -5611,11 +5679,12 @@ function logsOf(rc: Record<string, unknown>, who: string): string[] {
   });
 }
 async function tradeOf(rpcs: EvmRpc[], h: string): Promise<Trade> {
+  const calls: EvmRpcCall[] = [{ method: "eth_getTransactionByHash", params: [h] }, { method: "eth_getTransactionReceipt", params: [h] }];
   const { a: sale } = await agreeing(
     rpcs,
     async (rpc, k, gate) => {
       const who = `provider ${k + 1}`;
-      const [t, r] = await askAt(rpc, [{ method: "eth_getTransactionByHash", params: [h] }, { method: "eth_getTransactionReceipt", params: [h] }], gate);
+      const [t, r] = await askAt(rpc, calls, gate);
       const tx = resultOf(t, who, "transaction"), rc = resultOf(r, who, "receipt");
       const auths = tx.authorizationList;
       const fees: Record<string, string> = typeof tx.maxFeePerGas === "string" ? { maxFeePerGas: num(tx, "maxFeePerGas", who), maxPriorityFeePerGas: num(tx, "maxPriorityFeePerGas", who) } : { gasPrice: num(tx, "gasPrice", who) };
@@ -5629,6 +5698,12 @@ async function tradeOf(rpcs: EvmRpc[], h: string): Promise<Trade> {
     },
     (x, y) => JSON.stringify(x) === JSON.stringify(y),
     () => refuse("rpc_disagree", `the providers answer the sale ${h} differently`),
+    true,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    roomOf(calls),
   );
   return sale;
 }
@@ -5803,16 +5878,23 @@ async function tracedPre(trace: readonly (readonly [EvmRpc, EvmRpc])[], sale: Tr
   const b = preBounds(BigInt(sale.gasUsed));
   // one tracer on the two providers (`at`: 0 the prestate's, 1 the callTracer's), read by `of`, equal as JSON on both
   const read = async <T>(at: 0 | 1, tracer: object, of: (r: unknown) => T | null): Promise<T | null> => {
+    const calls: EvmRpcCall[] = [{ method: "debug_traceTransaction", params: [sale.hash, tracer] }];
     const { a } = await agreeing(
       trace.map((t) => t[at]),
       async (rpc, k, gate) => {
-        const [x] = await ask(rpc, [{ method: "debug_traceTransaction", params: [sale.hash, tracer] }], gate);
+        const [x] = await ask(rpc, calls, gate);
         const r = (x as { result?: unknown } | null)?.result;
         if (r === undefined || r === null) return refuse("rpc_error", `trace provider ${k + 1} answered no trace of the trade`);
         return of(r);
       },
       (x, y) => JSON.stringify(x) === JSON.stringify(y),
       () => refuse("rpc_disagree", `the trace providers answer the trade ${sale.hash}'s trace differently`),
+      true,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      roomOf(calls),
     );
     return a;
   };
@@ -5861,16 +5943,23 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   // the trade's own transaction and receipt name one place in one block
   if (sale.index !== sale.rcIndex) return [];
   // 2. the sale's block: its parent, number and time, the same on two providers
+  const blkCalls: EvmRpcCall[] = [{ method: "eth_getBlockByHash", params: [sale.blockHash, false] }];
   const { a: blk } = await agreeing(
     rpcs,
     async (rpc, k, gate) => {
       const who = `provider ${k + 1}`;
-      const [b] = await askAt(rpc, [{ method: "eth_getBlockByHash", params: [sale.blockHash, false] }], gate);
+      const [b] = await askAt(rpc, blkCalls, gate);
       const r = resultOf(b, who, "block of the sale");
       return { hash: str(r, "hash", who), number: num(r, "number", who), timestamp: num(r, "timestamp", who), parentHash: str(r, "parentHash", who), baseFeePerGas: num(r, "baseFeePerGas", who), mixHash: str(r, "mixHash", who) };
     },
     (x, y) => JSON.stringify(x) === JSON.stringify(y),
     () => refuse("rpc_disagree", `the providers answer the sale's block ${sale.blockHash} differently`),
+    true,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    roomOf(blkCalls),
   );
   if (blk.hash !== sale.blockHash || BigInt(blk.number) !== BigInt(sale.blockNumber) || !/^0x[0-9a-f]{64}$/.test(blk.parentHash)) return [];
   // the trade's own gas, less its authorizations' intrinsic cost, which an eth_call with no authorization list does not
@@ -5890,11 +5979,12 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   const sysSlots = evmSystemSlotsOf(chain, BigInt(blk.number), BigInt(blk.timestamp)).flatMap(([a, ss]) => ss.map((s) => [a, "0x" + word(s)] as const));
   const sys: Record<string, { stateDiff: Record<string, string> }> = {};
   if (sysSlots.length > 0) {
+    const slotCalls: EvmRpcCall[] = sysSlots.map(([a, s]) => ({ method: "eth_getStorageAt", params: [a, s, { blockHash: blk.hash, requireCanonical: true }] }));
     const { a: words } = await agreeing(
       rpcs,
       async (rpc, k, gate) => {
         const who = `provider ${k + 1}`;
-        const got = await askAt(rpc, sysSlots.map(([a, s]) => ({ method: "eth_getStorageAt", params: [a, s, { blockHash: blk.hash, requireCanonical: true }] })), gate);
+        const got = await askAt(rpc, slotCalls, gate);
         return got.map((g) => {
           const r = (g as { result?: unknown } | null)?.result;
           if (typeof r !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(r)) return refuse("rpc_error", `${who} answered a system slot of the sale's block with no word`);
@@ -5903,6 +5993,12 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
       },
       (x, y) => JSON.stringify(x) === JSON.stringify(y),
       () => refuse("rpc_disagree", `the providers answer the system state of the sale's block ${blk.hash} differently`),
+      true,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      roomOf(slotCalls),
     );
     sysSlots.forEach(([a, s], i) => ((sys[a] ??= { stateDiff: {} }).stateDiff[s] = words[i]!));
   }
@@ -5936,11 +6032,18 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   const replay = async (extra: Record<string, { code: string }>): Promise<Replay> => {
     const state: Record<string, Override> = { ...base };
     for (const [a, o] of Object.entries({ ...asW, ...extra })) state[lower(a)] = { ...state[lower(a)], ...o };
+    const calls: EvmRpcCall[] = [{ method: "eth_call", params: [call, parent, state, env] }];
     const { a } = await agreeing(
       rpcs,
-      async (rpc, k, gate) => replayOf((await askAt(rpc, [{ method: "eth_call", params: [call, parent, state, env] }], gate))[0], `provider ${k + 1}`, halt, gas),
+      async (rpc, k, gate) => replayOf((await askAt(rpc, calls, gate))[0], `provider ${k + 1}`, halt, gas),
       (x, y) => (x.ok && y.ok && x.result === y.result) || (!x.ok && !y.ok && x.data === y.data && x.halt === y.halt),
       () => refuse("rpc_disagree", "the providers answer the sale's replay differently"),
+      true,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      roomOf(calls),
     );
     return a;
   };

@@ -1189,13 +1189,13 @@ export const MUTANTS = [
   // no deadline at the block's agreement (as at 2d9a7bd9, where it was set once the token's scan returned): the scan's
   // catch-up to the agreed block is asked again past it
   [QUOTE, "        if (deadline !== undefined) deadline.until = Number(x.block.timestamp) * 1000 + EVM_QUOTE_MAX_AGE_MS;", "", R, "QE11 "],
-  [QUOTE, 'if (e === MOVED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;', "if (e === MOVED) throw e;", R, "QE2 (buy) "],
+  [QUOTE, 'if (e === MOVED || e === DROPPED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;', "if (e === MOVED || e === DROPPED) throw e;", R, "QE2 (buy) "],
   [QUOTE, "      if (left() < 0 || resumeAt - now > left()) throw stale();\n", "", R, "QE7 "],
   [QUOTE, "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, DEADLINE.get(rpcs), scanRpcs[i]!,", "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, undefined, scanRpcs[i]!,", R, "QE7 "],
   [QUOTE, "gated(poolRpcs, v.scan?.parallel ?? 2, DEADLINE.get(rpcs))", "gated(poolRpcs, v.scan?.parallel ?? 2)", R, "QE8 "],
   // card evm-5xx-holds-the-provider-for-the-round: a provider that answers HTTP 5xx is held for the rest of its round, so
   // the round's batches queued in its gate go to the next unsent, and the scan's requests the next would be handed too
-  [QUOTE, "        late,\n        down,\n      );", "        late,\n      );", R, "FH1 "],
+  [QUOTE, "        late,\n        down,\n        roomOf(batch),\n      );", "        late,\n        undefined,\n        roomOf(batch),\n      );", R, "FH1 "],
   [QUOTE, "          if (serverFault(e)) gate?.down?.();\n          throw e;", "          throw e;", R, "FH1 "],
   [QUOTE, "            down = true;\n", "", R, "SP5xx "],
   [QUOTE, "readBoth(rpcs, block.hash, third.slice(own), v.reads, undefined, down)", "readBoth(rpcs, block.hash, third.slice(own), v.reads)", R, "FH4 "],
