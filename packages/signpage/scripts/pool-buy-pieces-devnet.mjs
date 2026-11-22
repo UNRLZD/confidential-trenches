@@ -26,18 +26,21 @@
 //                         stop            the process ends at the helper's answer to the pieces; W is left holding the
 //                                         pieces' SOL, for `found`. Its out.json names W.
 //   found               FLOW_RESUME=<seed of a tag3-fail stop run> FLOW_W=<its W>: a fresh store signed in with those
-//                       words, the page's restore, then a load every LOAD_MS: each load's rent back lines, W's lamports,
+//                       words, the page's restore, one page tapped once (a refused sell: rent backs pass a W only after a
+//                       tap), then a state read of it every LOAD_MS: each load's rent back lines, W's lamports,
 //                       W's latest transaction, its block's height and each RPC's finalized height. FLOW_PLANT, sent by F
 //                       right after the restore (F funded first):
 //                         none (default)  nothing: held while + 151 is not past, then swept;
 //                         pay             1,000,000 lamports to W: the clock runs from that signature, then swept;
 //                         empty           an empty wSOL token account owned by W: held while + 151 from its create is
 //                                         not past, then swept with that account closed (read gone on both RPCs);
-//                         token           1 unit of <mint> in W's token account: held for good (the run passes when
-//                                         W keeps its SOL for 2 loads past + 151).
+//                         token           1 unit of <mint> in W's token account (a stranger's, W's own note unspent):
+//                                         held while + 151 is not past, then swept, that account kept with its unit
+//                                         (card a-found-wallet-sweeps-past-a-strangers-coin; before it, held for good).
 //                       FLOW_EXPECT=held (any plant) passes when W keeps its SOL for 2 loads past + 151, as a helper
 //                       that refuses the header read leaves it; else (swept) PASS needs every load before + 151 held
-//                       and W swept within SWEEP_WAIT_MS.
+//                       and W swept within SWEEP_WAIT_MS. Every "+ 151" here is + 151 + FOUND_ROUND_GAP since card
+//                       a-found-wallet-sweeps-past-a-strangers-coin (a tap's buy round may sign that far past its first).
 // - A seed made in this run only (16 random bytes), never printed, kept at ~/.ct-devnet-runs/run-<time>.seed (0600;
 //   FLOW_DIR=<folder> keeps it there instead, the folder made 0700), and
 //   a funder F's key beside it (run-<time>.funder, 0600; FLOW_FUNDER=<file> uses a kept one). F's address and what it
@@ -74,6 +77,7 @@ const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { HELPER_SOLANA_BLOCK_HEADER } = await import("../../kit/src/index.ts");
 const { solanaCompileV0 } = await import("../../kit/src/trade/solana/build.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
+const { FOUND_ROUND_GAP } = await import("../src/pool-buy.ts");
 const { PAGE_POOLS, poolBuyDryKind } = await import("../src/pools.ts");
 const { poolRestore } = await import("../src/pool-restore.ts");
 const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import("../src/pool-testnet.ts");
@@ -110,7 +114,9 @@ const FOUND_W = process.env.FLOW_W;
 if (SCENARIO === "found" && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(FOUND_W ?? "")) throw new Error("found takes FLOW_W=<W's address from the stop run's out.json>");
 const PLANT = process.env.FLOW_PLANT ?? "none";
 if (!["none", "pay", "empty", "token"].includes(PLANT) || (PLANT !== "none" && SCENARIO !== "found")) throw new Error("FLOW_PLANT is none, pay, empty or token, on found only");
-const EXPECT = process.env.FLOW_EXPECT ?? (PLANT === "token" ? "held" : "swept");
+// card a-found-wallet-sweeps-past-a-strangers-coin: a stranger's unit (token) no longer holds a found W, so every plant
+// expects W swept by default; FLOW_EXPECT=held stays for a helper that refuses the header read
+const EXPECT = process.env.FLOW_EXPECT ?? "swept";
 if (!["held", "swept"].includes(EXPECT)) throw new Error("FLOW_EXPECT is held or swept");
 const HELPER = COPY ? "the copy's sender, in process" : process.env.FLOW_HELPER;
 if (!COPY && !/^https?:\/\/[^/]+$/.test(HELPER ?? "")) throw new Error("FLOW_HELPER=<the helper's origin: https://ct-api.unrealized.trade, or a local helper's http://127.0.0.1:<port>>");
@@ -128,7 +134,7 @@ const RUNG = 10_000_000n;
 const FEE = 5_000n;
 const FRONT = 50_000_000n; // F's front-run buy on the curve: moves the price well past 1 bp
 const LOAD_MS = 20_000;
-const SWEEP_WAIT_MS = 8 * 60_000;
+const SWEEP_WAIT_MS = 14 * 60_000; // a found W waits its latest + 151 + FOUND_ROUND_GAP (750) blocks, about 6 min, then a pass
 const SYSTEM = "11111111111111111111111111111111";
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -371,14 +377,14 @@ const wHolds = async (W) => {
   });
   return { lamports, units };
 };
-/** W's latest transaction, its block's height and each RPC's finalized height, both RPCs (the found W's rule's reads). */
+/** W's latest transaction, its block's height and each RPC's finalized height, both RPCs (the found W's rule's reads): `past`, every finalized height past it + 151 + FOUND_ROUND_GAP. */
 const wClock = async (W) => {
   const last = await both(async (r) => (await r("getSignaturesForAddress", [W, { limit: 1, commitment: "confirmed" }]))[0] ?? null);
   // each RPC's own answer, a refusal kept as its message (a helper that refuses the header read)
   const height = last[0] ? await Promise.all(rpcs.map((r) => r("getBlock", [last[0].slot, HELPER_SOLANA_BLOCK_HEADER]).then((b) => b?.blockHeight ?? null, (e) => `refused: ${String(e?.message ?? e).slice(0, 120)}`))) : [null, null];
   const finalized = await both(async (r) => r("getBlockHeight", [{ commitment: "finalized" }]));
   const h = height.find((x) => typeof x === "number") ?? null;
-  return { latest: last.map((x) => x?.signature ?? null), height, finalized, past: h !== null && finalized.every((f) => f > h + 151) };
+  return { latest: last.map((x) => x?.signature ?? null), height, finalized, past: h !== null && finalized.every((f) => f > h + 151 + FOUND_ROUND_GAP) };
 };
 
 const helperCommit = await fetch(`${TRADE_HELPER}/v1/health`).then((r) => r.headers.get("x-helper-commit"), () => null);
@@ -415,7 +421,10 @@ const ataCreate = (owner, mint, tp) => ({ program: SOLANA_ATA_PROGRAM, accounts:
 
 // ---------- found: a fresh device from the words alone ----------
 if (SCENARIO === "found") {
-  const restore = poolRestore({ store: async () => store, seed64: async () => seed64.slice(), signedIn: async () => true, ended: () => {} });
+  // the run's own Solana pool on the run's pair (the copy's, or devnet's): with no pools given the restore walked the
+  // build's own pins and providers (pagePools), which a copy refuses, and wrote no note; no deposit id read (step 5's
+  // NEAR pair is out of the copy); each reason a walk is not done logged
+  const restore = poolRestore({ store: async () => store, seed64: async () => seed64.slice(), signedIn: async () => true, ended: (stage, why) => log(`the restore: ${stage}${why.length ? ` (${why.join("; ")})` : ""}`), pools: () => [{ chain: "solana", program: PIN.program, scope, rpcs: () => [rpcs[0], rpcs[1]] }], ids: null });
   out.restore = await restore.auto();
   log(`the restore ended ${out.restore}`);
   // F's plant on W, right after the restore
@@ -442,30 +451,46 @@ if (SCENARIO === "found") {
     }
   }
   out.loads = [];
+  // the rent backs pass a W only after the page's first tap (card rent-backs-resume-private: before it a run reads the
+  // Ws on the helper's seat and passes none), so the restored device's page stays open and is tapped once, as its user
+  // does (card a-found-wallet-sweeps-past-a-strangers-coin): a sell of the run's coin, which no W the device bought with
+  // holds (W's buy never landed), refused inside the page's flow; each load is then a state read of that page. A sell
+  // refused before the flow (not_allowed: its token's decimals not read) is no tap, and the run fails on it
+  const p = page("found", await openWalletStore({ indexedDB: idb }));
+  const tapped = await once(p, "pool.sell", { chain: "solana", token: MINT, share_bps: 10_000, slippage_bps: 300 }, true);
+  out.tap = tapped.answer;
+  if (tapped.answer?.error === "not_allowed") finish(false, `the tap never reached the page's flow: ${JSON.stringify(tapped.answer)}`);
   const t0 = Date.now();
-  let prev = null;
   for (let i = 0; Date.now() - t0 < SWEEP_WAIT_MS; i++) {
-    prev?.cut();
-    const p = page(`load${i}`, await openWalletStore({ indexedDB: idb }));
     const from = told.length;
     await p.t.stateRead();
     await sleep(LOAD_MS);
-    const load = { at: new Date().toISOString(), told: told.slice(from).map((x) => x.line), holds: await wHolds(FOUND_W), clock: await wClock(FOUND_W) };
+    // the page's own state behind its verdict: its rent back records (found ones among them) and the scope's notes
+    const owedNow = Object.values((await p.w.get("meta", "owed/rentback-sol")) ?? {}).map((r) => ({ address: r?.address, found: r?.found ?? false, passes: r?.passes, seen: r?.seen !== undefined }));
+    const notesNow = (await p.notesOf()).filter((n) => n.scope === scope).map((n) => `${n.ref.kind}:${n.state}${n.leaf ? "" : ":noleaf"}`);
+    const load = { at: new Date().toISOString(), told: told.slice(from).map((x) => x.line), holds: await wHolds(FOUND_W), clock: await wClock(FOUND_W), owed: owedNow, notes: notesNow };
     out.loads.push(load);
-    log(`load ${i}: W ${JSON.stringify(load.holds)}; latest ${load.clock.latest[0]} at height ${JSON.stringify(load.clock.height)}, finalized ${load.clock.finalized.join("/")} (past + 151: ${load.clock.past})`);
-    prev = p;
-    const swept = load.holds.lamports.every((l) => l === "0");
-    const heldPast = out.loads.filter((x) => x.clock.past && x.holds.lamports.every((l) => l !== "0")).length;
+    log(`load ${i}: W ${JSON.stringify(load.holds)}; latest ${load.clock.latest[0]} at height ${JSON.stringify(load.clock.height)}, finalized ${load.clock.finalized.join("/")} (past + 151: ${load.clock.past}); rent back records ${JSON.stringify(owedNow)}; notes ${JSON.stringify(notesNow)}; lines ${JSON.stringify(load.told)}`);
+    // swept: W at 0 on both RPCs; with a stranger's unit planted (token), W keeps that account's close cost (the page's
+    // keepOf, card a-found-wallet-sweeps-past-a-strangers-coin), so swept is W down by at least 2,000,000 lamports (a
+    // sweep's least note; W otherwise only pays fees) on both RPCs from the first load's read
+    const sweptAt = (x) => (PLANT === "token" ? x.holds.lamports.every((l, k) => BigInt(out.loads[0].holds.lamports[k]) - BigInt(l) >= 2_000_000n) : x.holds.lamports.every((l) => l === "0"));
+    const swept = sweptAt(load);
+    const heldPast = out.loads.filter((x) => x.clock.past && !sweptAt(x)).length;
     if (EXPECT === "held" && (swept || heldPast >= 2)) finish(!swept, swept ? `W swept, expected held (${PLANT})` : `W held ${heldPast} loads past + 151 (${PLANT}): ${JSON.stringify(load.holds)}; the rent back's lines ${JSON.stringify(load.told)}`);
     if (EXPECT === "swept" && swept) {
-      const early = out.loads.filter((x) => !x.clock.past && x.holds.lamports.every((l) => l !== "0"));
-      const sweptEarly = out.loads.some((x) => !x.clock.past && x.holds.lamports.every((l) => l === "0"));
+      const early = out.loads.filter((x) => !x.clock.past && !sweptAt(x));
+      // swept early: a load reads W swept before any load read past + 151 (the swept load's own clock reads the sweep as
+      // W's latest, so its own `past` says nothing of when the sweep was sent)
+      const sweptEarly = out.loads.some((x, k) => sweptAt(x) && !out.loads.slice(0, k).some((y) => y.clock.past));
       const notes = (await p.notesOf()).filter((n) => n.scope === scope).map((n) => ({ ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null }));
       out.notes = notes;
       // pay: a held load read the plant as W's latest; empty: the planted account is gone on both RPCs
       const fromPlant = PLANT !== "pay" || out.loads.some((x) => x.clock.latest[0] === out.plant.sig && !x.clock.past);
       const closed = PLANT !== "empty" || (await exists(out.plant.account)).every((e) => !e);
-      finish(!sweptEarly && early.length > 0 && fromPlant && closed, `W swept after ${i + 1} load(s); ${early.length} load(s) held while + 151 was not past${PLANT === "pay" ? `; the clock ran from the plant ${out.plant.sig}: ${fromPlant}` : ""}${PLANT === "empty" ? `; the planted ${out.plant.account} closed on both RPCs: ${closed}` : ""}; the notes ${JSON.stringify(notes)}`);
+      // token: the stranger's unit where it was, on both RPCs (kept with its account, never burned or moved)
+      const unit = PLANT !== "token" || load.holds.units.every((u) => u === "1");
+      finish(!sweptEarly && early.length > 0 && fromPlant && closed && unit, `W swept after ${i + 1} load(s); ${early.length} load(s) held while + 151 was not past${PLANT === "pay" ? `; the clock ran from the plant ${out.plant.sig}: ${fromPlant}` : ""}${PLANT === "empty" ? `; the planted ${out.plant.account} closed on both RPCs: ${closed}` : ""}${PLANT === "token" ? `; W from ${out.loads[0].holds.lamports.join("/")} to ${load.holds.lamports.join("/")}, the stranger's unit kept in ${out.plant.account}: ${unit}` : ""}; the notes ${JSON.stringify(notes)}`);
     }
   }
   finish(false, `W ${EXPECT === "held" ? "not read past + 151 twice" : "not swept"} within ${SWEEP_WAIT_MS / 60_000} min`);
