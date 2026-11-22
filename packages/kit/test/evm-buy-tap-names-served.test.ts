@@ -13,12 +13,14 @@ import { EvmBuyTapRefused } from "../src/trade/evm/buy-tap.ts";
 import { replayTap } from "./evm-tap-record.ts";
 import { onTestClock } from "./test-clock.ts";
 
-for (const [name, coin, code] of [
-  ["evm-tap-novaai-served", "NOVAAI on Robinhood, the helper's pools served as the page serves them", "not_allowed"],
+// with the count of reads its quotes speculate with a plan's hook replaced, which the recording predates
+for (const [name, coin, code, specs] of [
+  ["evm-tap-novaai-served", "NOVAAI on Robinhood, the helper's pools served as the page serves them", "not_allowed", 4],
 ] as const) {
   test(`${coin}: the recorded tap ends in ${code}, never the generic quote_check_failed`, () => onTestClock(async () => {
-    const { end, missed, F } = await replayTap(name);
+    const { end, missed, spec, F } = await replayTap(name);
     assert.deepEqual(missed, [], "every call the replay asks is in the recording");
+    assert.equal(spec.length, specs, `reads set apart: ${spec.join("; ")}`);
     // the recording's own end, which the tap named quote_check_failed (release 150's run 43708088495)
     assert.equal(F.outcome.code, "quote_check_failed");
     assert.ok(end instanceof EvmBuyTapRefused, String(end));

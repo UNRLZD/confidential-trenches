@@ -15,7 +15,7 @@ import { evmGasPacking, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexPools, evmP
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import { evmBuyTapReset, evmPoolBuyQuoteTap, evmPoolIndexRefresh } from "../src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, type EvmPoolChain } from "../src/trade/evm/buy-unpinned.ts";
-import { callKey, withEventOnly } from "./evm-quote-calls-record.ts";
+import { callKey, hookSpeculation, withEventOnly } from "./evm-quote-calls-record.ts";
 
 /** The tap's amount: the mainnet check's (scripts/live-checks/evm-buy-and-sell-on-mainnet.mjs QUOTE_AMOUNT). */
 export const TAP_AMOUNT = 980_000_000_000_000n;
@@ -28,6 +28,10 @@ const fixture = (name: string) => JSON.parse(gunzipSync(readFileSync(new URL(`./
 type Live = (url: string, at: number, call: { method: string; params: unknown }) => Promise<{ result: unknown } | undefined>;
 const replayed = (F: { quotes: { calls: [string, unknown][]; own: [string, unknown][] }[] }, live?: Live) => {
   const quotes = F.quotes.map((q) => ({ answers: new Map<string, unknown>(withEventOnly(q.calls)), own: new Map<string, unknown>(q.own) }));
+  // a read a quote speculates with a hook of the plan replaced, which a recording made before it never holds: a
+  // provider's error, set apart (hookSpeculation); the plan's hooks are those any quote of the tap replaced
+  const speculated = hookSpeculation(quotes.flatMap((q) => [...q.answers.keys()]));
+  const spec: string[] = [];
   const missed: string[] = [];
   // each missed call whole, with its kit quote and host (`topup` below)
   const missedCalls: { at: number; host: string; url: string; call: { method: string; params: unknown } }[] = [];
@@ -41,6 +45,10 @@ const replayed = (F: { quotes: { calls: [string, unknown][]; own: [string, unkno
     const one = async (c: { id: unknown; method: string; params: unknown }) => {
       const k = callKey(c);
       if (own.has(`${host} ${k}`)) return { jsonrpc: "2.0", id: c.id, ...(own.get(`${host} ${k}`) as object) };
+      if (!answers.has(k) && speculated(c)) {
+        spec.push(k.slice(0, 120));
+        return { jsonrpc: "2.0", id: c.id, error: { code: -32000, message: "not in the recording" } };
+      }
       // `topup`: a call the recording never held, read now as it is asked
       if (!answers.has(k) && live !== undefined) {
         const got = await live(String(url), q, { method: c.method, params: c.params });
@@ -55,7 +63,7 @@ const replayed = (F: { quotes: { calls: [string, unknown][]; own: [string, unkno
     };
     return new Response(JSON.stringify(Array.isArray(body) ? await Promise.all(body.map(one)) : await one(body)), { status: 200, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
-  return { fetchFn, missed, missedCalls, next: () => void at++ };
+  return { fetchFn, missed, missedCalls, spec, next: () => void at++ };
 };
 
 /** Replays the recorded tap `name` (test/fixtures/<name>.json.gz) call by call through the tap and the kit's quote,
@@ -63,7 +71,7 @@ const replayed = (F: { quotes: { calls: [string, unknown][]; own: [string, unkno
  *  it on the test clock (test/test-clock.ts), one recording of a chain and token a process: the kit's scan of a token is
  *  kept for the module's life, so a second replay of the same token tops up from the first's head. `quotes`: the kit
  *  quotes the tap asked. */
-export const replayTap = async (name: string, F0?: ReturnType<typeof fixture>, live?: Live): Promise<{ end: unknown; missed: string[]; missedCalls: { at: number; host: string; url: string; call: { method: string; params: unknown } }[]; F: ReturnType<typeof fixture>; quotes: number }> => {
+export const replayTap = async (name: string, F0?: ReturnType<typeof fixture>, live?: Live): Promise<{ end: unknown; missed: string[]; spec: string[]; missedCalls: { at: number; host: string; url: string; call: { method: string; params: unknown } }[]; F: ReturnType<typeof fixture>; quotes: number }> => {
   evmSpeedReset();
   evmPaceReset();
   evmPoolIndexReset();
@@ -82,7 +90,7 @@ export const replayTap = async (name: string, F0?: ReturnType<typeof fixture>, l
     { chain, token: F.buys, amountIn: BigInt(F.amountIn), slippageBps: 300 },
     { indexPools: () => F.indexPools ?? null, quote: (req) => (quotes++, r.next(), evmPoolBuyQuoteWith(req, evmProviders(evmRanked(v.providers!), r.fetchFn), F.now, scans)) },
   ).catch((e: unknown) => e);
-  return { end, missed: r.missed, missedCalls: r.missedCalls, F, quotes };
+  return { end, missed: r.missed, missedCalls: r.missedCalls, spec: r.spec, F, quotes };
 };
 
 /** `topup <fixture name>` (card evm-scan-chain-tail): each call a replay of the recording asks that it never held, read
