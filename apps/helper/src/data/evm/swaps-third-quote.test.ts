@@ -675,8 +675,8 @@ test("card robinhood-old-state-from-keepers: a keeper of old state that answers 
 
 /** The keepers' rig of card robinhood-old-state-from-keepers: 5 providers, c and e keep old state, the quote's pool quiet
  *  (one swap at the read back's start, so a walk back of its logs is long). `refuse(url, block, post)` names the error a
- *  provider answers an eth_call at a numeric block with, if any; `t` the virtual time the run started. */
-async function keepersRun(refuse: (url: string, n: number, post: number, t: number) => object | null, between?: (s: ReturnType<typeof createSwaps>) => Promise<void>, noOldRouteLogs = false) {
+ *  provider answers an eth_call at a numeric block with, if any; `late` whether `between` has let the run on. */
+async function keepersRun(refuse: (url: string, n: number, post: number, late: boolean) => object | null, between?: (s: ReturnType<typeof createSwaps>, late: { v: boolean }) => Promise<void>, noOldRouteLogs = false) {
   const c = CASES[0]!;
   const p = planted(c);
   const QPOOL = `0x${"f7".repeat(20)}`;
@@ -693,8 +693,9 @@ async function keepersRun(refuse: (url: string, n: number, post: number, t: numb
   const f = rig(p, FIVE);
   let qBlocks = 0;
   const posts = new Map<string, number>();
-  const oldAsks: { url: string; t: number }[] = [];
-  const t0 = { v: 0 };
+  const oldAsks: { url: string; late: boolean }[] = [];
+  // set by `between` once the run is past the wait it asks
+  const late = { v: false };
   const one = Object.assign(async (url: string, init: RequestInit) => {
     const body = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] } | { id: number; method: string; params: unknown[] }[];
     const list = [body].flat();
@@ -703,23 +704,22 @@ async function keepersRun(refuse: (url: string, n: number, post: number, t: numb
       if (r.method === "eth_getLogs" && [q?.address].flat().includes(QPOOL)) qBlocks += parseInt(q.toBlock!, 16) - parseInt(q.fromBlock!, 16) + 1;
     }
     const at = (r: { method: string; params: unknown[] }) => (r.method === "eth_call" && typeof r.params[1] === "string" && r.params[1] !== "latest" ? parseInt(r.params[1], 16) : null);
-    if (list.some((r) => (at(r) ?? HEAD) < HEAD - 2_000)) oldAsks.push({ url, t: Date.now() - t0.v });
+    if (list.some((r) => (at(r) ?? HEAD) < HEAD - 2_000)) oldAsks.push({ url, late: late.v });
     const k = (posts.get(url) ?? 0) + 1;
     posts.set(url, k);
     // with noOldRouteLogs no provider answers the quote pool's logs under the read back's newest blocks: only a state read
     // prices a read back block
     const oldLogs = (r: { method: string; params: unknown[] }) => noOldRouteLogs && r.method === "eth_getLogs" && [(r.params[0] as { address?: string }).address].flat().includes(QPOOL) && parseInt((r.params[0] as { fromBlock: string }).fromBlock, 16) < HEAD - 2_000;
-    const errs = list.map((r) => (oldLogs(r) ? { code: -32000, message: "query timeout exceeded" } : at(r) === null ? null : refuse(url, at(r)!, k, Date.now() - t0.v)));
+    const errs = list.map((r) => (oldLogs(r) ? { code: -32000, message: "query timeout exceeded" } : at(r) === null ? null : refuse(url, at(r)!, k, late.v)));
     if (errs.every((e) => e === null)) return f(url, init);
     const res = (await (await f(url, init)).json()) as { id: number }[] | { id: number };
     const out = [res].flat().map((x, i) => (errs[i] !== null ? { jsonrpc: "2.0", id: x.id, error: errs[i] } : x));
     return new Response(JSON.stringify(Array.isArray(body) ? out : out[0]), { status: 200, headers: { "content-type": "application/json" } });
   }, { counts: f.counts });
   const { value } = await onVirtualTime(9_000_000, async () => {
-    t0.v = Date.now();
     const s = createSwaps("base", { fetch: one as never, now: () => Date.now(), listed: async () => true, rpcs: FIVE, pools: new Map(), tickMs: 0, sleep: (ms: number) => new Promise((go) => setTimeout(go, ms)) });
     let a = await s.trades(COIN, 50);
-    if (between !== undefined) await between(s);
+    if (between !== undefined) await between(s, late);
     for (let i = 0; i < 60 && a.status === 200 && JSON.parse(a.body).filling === true; i++) {
       await new Promise((go) => setTimeout(go, 1_000));
       await s.tick();
@@ -766,18 +766,19 @@ test("card robinhood-old-state-from-keepers (mark ages): a provider's mark of ol
 });
 
 test("card robinhood-old-state-from-keepers (mark heals): a keeper that refused old state once, a blip, is asked it again and the tape fills, where the route's old logs are not served so only state reads price the read back", async () => {
-  // e refuses old state in the first minute only; a, b and d always
+  // e refuses old state until the wait below; a, b and d always
   const { oldAsks } = await keepersRun(
-    (url, n, _post, t) => (url === "https://e.test" ? (n < HEAD - 2_000 && t < 60_000 ? { code: -32000, message: GONE_MSG } : null) : goneBelow(url, n)),
-    async (s) => {
+    (url, n, _post, late) => (url === "https://e.test" ? (n < HEAD - 2_000 && !late ? { code: -32000, message: GONE_MSG } : null) : goneBelow(url, n)),
+    async (s, late) => {
       // the read back's first round marks e; the next rounds run once the mark is past its age
       await new Promise((go) => setTimeout(go, 1_000));
       await s.tick();
       await new Promise((go) => setTimeout(go, 600_000));
+      late.v = true;
     },
     true,
   );
-  const late = oldAsks.filter((x) => x.url === "https://e.test" && x.t >= 600_000);
-  console.log(`old-state posts to e: ${oldAsks.filter((x) => x.url === "https://e.test").length}, ${late.length} after the mark's age`);
-  assert.ok(late.length > 0, "e never asked old state again after its mark aged");
+  const after = oldAsks.filter((x) => x.url === "https://e.test" && x.late);
+  console.log(`old-state posts to e: ${oldAsks.filter((x) => x.url === "https://e.test").length}, ${after.length} after the wait`);
+  assert.ok(after.length > 0, "e never asked old state again after its refusals ended");
 });
