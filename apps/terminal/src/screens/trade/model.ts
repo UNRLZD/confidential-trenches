@@ -143,9 +143,15 @@ export function progress(p: Phase, id: string, stage: Stage, now: number): Phase
     if (stage === "part_filled" || stage === "not_landed" || stage === "refused" || stage === "owed_back") return { k: "ended", id, at: p.at, stage };
     return p;
   }
-  // a buy answered refused whose bytes landed anyway, its swap failed and its ETH on W: the page's late end owed_back
-  // moves it from Failed to owed back (review of 167d9deea)
-  if (p.k === "ended" && p.stage === "refused" && p.id === id && stage === "owed_back") return { k: "ended", id, at: p.at, stage };
+  // a buy answered refused whose bytes landed anyway: the page reads on and posts the end it reads under the same id
+  // (pool-buy-evm.ts `late`, every end but not_landed). Its swap failed with the ETH on W: owed back (review of
+  // 167d9deea). It filled: Filled, its time from the tap; part filled: that end (card evm-buy-late-fill-reaches-app,
+  // the EVM buy's second review at 289126a2, P3-4)
+  if (p.k === "ended" && p.stage === "refused" && p.id === id) {
+    if (stage === "filled") return { k: "filled", id, at: p.at, ms: Math.max(0, now - p.at) };
+    if (stage === "part_filled" || stage === "owed_back") return { k: "ended", id, at: p.at, stage };
+    return p;
+  }
   if (!busy(p) || p.id !== id) return p;
   if (stage === "signed") return p;
   if (stage === "sent") return p.k === "sending" ? { k: "landing", id, at: p.at } : p;

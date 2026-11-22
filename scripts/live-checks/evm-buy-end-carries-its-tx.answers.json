@@ -1,5 +1,5 @@
 {
- "_note": "good: this card's builds (packages/signpage/scripts/build-app.mjs bundle(), mainnet; apps/terminal vite build) read through scripts/ci/bundle-checks.mjs buildFetch on 2026-11-18: PASS. bad: SIGN_HOST and APP_HOST as deployed before this card, read over https on 2026-11-18 by --record: FAIL, every mark missing on both hosts.",
+ "_note": "good: this card's builds (packages/signpage/scripts/build-app.mjs bundle(), mainnet; apps/terminal vite build) read through scripts/ci/bundle-checks.mjs buildFetch on 2026-11-18: PASS. bad: SIGN_HOST and APP_HOST as deployed before this card, read over https on 2026-11-18 by --record: FAIL, every mark missing on both hosts. good.app re-read on 2026-11-22 from card evm-buy-late-fill-reaches-app's vite build through the same buildFetch (its refused-buy late end mark rewritten): PASS.",
  "good": {
   "at": "2026-11-18T10:38:24.698Z",
   "sign": {
@@ -30,14 +30,14 @@
    "pageStatus": 200,
    "js": [
     {
-     "url": "/assets/index-Cmsx_DMe.js",
+     "url": "/assets/index-CJwJOQSg.js",
      "status": 200,
-     "integrity": "sha384-QqEVUi3A2nFnI6xWq7uLftq7RV2XG7Pasqqrv06tPYc9LAI5NKQ7XoucnpUE9CuS",
-     "sha384": "sha384-QqEVUi3A2nFnI6xWq7uLftq7RV2XG7Pasqqrv06tPYc9LAI5NKQ7XoucnpUE9CuS",
+     "integrity": "sha384-c44hobnYPK5pTqrtmxKmrqdPtl1aCbQEpCOe3V5HA9kk14chQvfKoL1ygKutuOgs",
+     "sha384": "sha384-c44hobnYPK5pTqrtmxKmrqdPtl1aCbQEpCOe3V5HA9kk14chQvfKoL1ygKutuOgs",
      "found": [
       "an end stage's tx fills the toast's link",
       "owed_back ends a buy as owed back",
-      "a late owed_back moves a refused buy to owed back",
+      "a refused buy's late owed_back, part filled or filled moves it; nothing else does",
       "owed back shows no Retry"
      ]
     }
