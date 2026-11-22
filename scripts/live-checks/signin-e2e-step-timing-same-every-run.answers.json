@@ -1,0 +1,88 @@
+{
+ "good": {
+  "key": "signin-e2e-step-timing-same-every-run",
+  "at": "2026-11-22T05:01:44.669Z",
+  "url": "https://confidential.unrealized.trade/",
+  "runs": [
+   {
+    "width": "390",
+    "ground": {
+     "z": 1,
+     "transition": "opacity 0.16s ease-out",
+     "index": 1
+    },
+    "veil": {
+     "z": 1,
+     "transition": "opacity 0.16s ease-out",
+     "index": 2
+    },
+    "frame": {
+     "z": "auto",
+     "transition": "all",
+     "index": 3
+    }
+   },
+   {
+    "width": "1440",
+    "ground": {
+     "z": 1,
+     "transition": "opacity 0.16s ease-out",
+     "index": 1
+    },
+    "veil": {
+     "z": 1,
+     "transition": "opacity 0.16s ease-out",
+     "index": 2
+    },
+    "frame": {
+     "z": "auto",
+     "transition": "all",
+     "index": 3
+    }
+   }
+  ]
+ },
+ "bad": {
+  "key": "signin-e2e-step-timing-same-every-run",
+  "at": "2026-11-22T05:01:39.346Z",
+  "url": "https://confidential.unrealized.trade/",
+  "runs": [
+   {
+    "width": "390",
+    "ground": {
+     "z": "auto",
+     "transition": "all",
+     "index": 1
+    },
+    "veil": {
+     "z": 1,
+     "transition": "opacity 0.16s ease-out",
+     "index": 2
+    },
+    "frame": {
+     "z": "auto",
+     "transition": "all",
+     "index": 3
+    }
+   },
+   {
+    "width": "1440",
+    "ground": {
+     "z": "auto",
+     "transition": "all",
+     "index": 1
+    },
+    "veil": {
+     "z": 1,
+     "transition": "opacity 0.16s ease-out",
+     "index": 2
+    },
+    "frame": {
+     "z": "auto",
+     "transition": "all",
+     "index": 3
+    }
+   }
+  ]
+ }
+}
