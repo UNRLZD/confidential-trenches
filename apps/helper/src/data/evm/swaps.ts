@@ -650,15 +650,16 @@ export const BACK_ROUND_SPANS = 2;
 /** Tapes read back at once on a chain (backFrom); the rest wait their turn in the order their books opened (card
  *  robinhood-tapes-inside-their-bounds-on-live: 12 tapes opened at once read back side by side, and on the live helper
  *  the burst held the ticks' head and forward reads behind them, "19 of 35 ready; no room 15, held 64, busy 37").
- *  [design: 3, from the Mac rig's posts (12 cold Robinhood tapes, ten runs on ee5c7dac4, 22 Nov): the providers
- *  accepted 11.0 posts a second (median), 6.8 of them the ticks' head, forward and other reads, so read backs had 4.3; a
- *  spread tape's read back is about 57 posts, 1.27 a second to fill inside 45 s, and 4.3 / 1.27 = 3.3 fill side by side
- *  inside it. Twelve at once each had 0.35 a second, and none filled inside 45 s.] */
-export const BACK_AT_ONCE = 3;
+ *  [design: 4, from swaps-back-resume.test.ts's 12 coins at the providers' paces with FRESH_ROOM 0.6: the slowest tape
+ *  filled at 44.2 s at 3, 43.1 s at 4, 42.9 s at 6 and 43.3 s at 12, all inside the live checks' 45 s; and with the head
+ *  moving, the worst answer stood 90, 80, 140 and 110 blocks behind it. 4 fills inside the bound and keeps the ticks
+ *  the closest to the head.] */
+export const BACK_AT_ONCE = 4;
 /** The share of each paced provider's bucket a read back or the lists' read ahead leaves for the ticks and the index's
- *  follow (paceFor), above the CALLER_ROOM every background read leaves callers. [design: 0.6, so the ticks' reads draw
- *  their 6.8 of the 11.0 posts a second the rig's providers accepted (BACK_AT_ONCE), 0.62 of them, from a bucket no read
- *  back took below it.] */
+ *  follow (paceFor), above the CALLER_ROOM every background read leaves callers. [design: 0.6, from the same test at
+ *  BACK_AT_ONCE 4: at 0.6 the worst answer stood 80 blocks and 8 s behind the head and the slowest tape filled at 43.1
+ *  s; at 0.4, 110 blocks and 41.9 s; with no share kept (0.25, CALLER_ROOM's), 110 blocks and 38.7 s. The head is the
+ *  bound the live checks found broken, so its margin is the one kept.] */
 export const FRESH_ROOM = 0.6;
 /** How long a tape's locate may wait out its provider's holds before the steps read the day (readBack). [design: 30 s:
  *  a dozen tapes' locates refused for our own rate are each sent within a few holds, and a provider refusing longer
