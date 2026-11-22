@@ -126,6 +126,7 @@ const solanaMethodsIn = (src: string): string[] => [...src.matchAll(/["'`]((?:ge
 const NOT_RPC: ReadonlySet<string> = new Set([
   "sendMarginMs", // wallet pool/pool.ts: a field of the pool's timing
   "sendPieces", // signpage pool-buy.ts: the buy host's helper call for a buy of several pieces
+  "sendAt", // signpage pool-buy.ts: the buy host's call that keeps a sent tx's blockhash and last height on the device
 ]);
 
 /** The methods the files name, each with a file naming it, and those of them off the helper's list. */

@@ -1,7 +1,7 @@
 import type { Chain } from "@blindfill/kit";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { fillOf, fillStore } from "../portfolio/fills.ts";
-import { busy, outcome, progress, READY, sellShareOk, tap, tradeSellAsk } from "../trade/model.ts";
+import { busy, endFromOps, opEnd, outcome, progress, READY, sellShareOk, tap, tradeSellAsk } from "../trade/model.ts";
 import type { Cents, Phase } from "../trade/model.ts";
 import { fromOutcome, fromProgress, fromStage, routeEvent, routeSell, SELL_IDLE } from "../trade/route.ts";
 import type { Route } from "../trade/route.ts";
@@ -98,6 +98,20 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
       setRoute((r) => fromProgress(r, id, stage));
     });
   }, [kit.onProgress, src.now]);
+
+  // a sale shown as sent whose page posted no end ends from the op the page records under its id (card
+  // signpage-sent-end-known), as the box's buy does
+  const ops = src.snapshot.state?.ops;
+  useEffect(() => {
+    if (phase.k === "ready") return;
+    const id = phase.id;
+    const e = opEnd(ops, id);
+    if (e === null) return;
+    const at = src.now();
+    if (endFromOps(phase, ops, at) === phase) return;
+    setPhase((p) => endFromOps(p, ops, at));
+    setRoute((r) => fromProgress(r, id, e.stage));
+  }, [ops, phase, src.now]);
 
   // what the page tells of the sell besides its stage, by the sell's id (the buy's route events): its wallet, the venue
   // and pool; a page that tells none leaves those values empty, never made up

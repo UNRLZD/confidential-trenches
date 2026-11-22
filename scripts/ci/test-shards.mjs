@@ -92,6 +92,7 @@ export const E2E_SECONDS = {
   "apps/terminal: node ../../scripts/live-checks/app-lock-holds-until-the-layer-closes.mjs --harness": 6, // B2 5.8
   // card app-shell-posts-a-late-end: its --harness on a local run (22 Nov), whole seconds from start to exit, until CI times it
   "apps/terminal: node ../../scripts/live-checks/evm-buy-late-fill-reaches-app.mjs --harness": 10, // 10 s
+  "apps/terminal: node ../../scripts/live-checks/signpage-sent-end-known.mjs --harness": 10, // 7 s measured 22 Nov
   "apps/terminal: node ../../scripts/live-checks/signed-out-portfolio-and-account-say-what-appears.mjs --harness": 34, // C3 33.8
   "apps/terminal: node ../../scripts/live-checks/app-pages-open-right.mjs --harness": 30, // A1 29.3
   // card app-live-checks-run-on-the-build-before-merge: each app check's own --harness, measured on a local run

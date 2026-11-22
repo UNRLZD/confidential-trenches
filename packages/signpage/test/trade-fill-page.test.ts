@@ -111,10 +111,10 @@ test("T3: a buy's end fills it once its records are written (the ops record the 
   const r = tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pb1", sha: "00", progress: () => {}, route: () => {} } as never);
   assert.ok("running" in r, `the buy runs: ${JSON.stringify(r)}`);
   await tick();
-  assert.equal(await w.get("ops", "pb1"), undefined, "no ops record before the end");
+  await until(async () => ((await w.get("ops", "pb1")) as { stage?: string } | undefined)?.stage === "sent", "its ops record at sent before the end (card signpage-sent-end-recorded)");
   assert.equal(read.join(), "", "nothing read before the end");
   run.end("filled");
-  await until(async () => (await w.get("ops", "pb1")) !== undefined, "the end's ops record");
+  await until(async () => ((await w.get("ops", "pb1")) as { stage?: string } | undefined)?.stage === "filled", "the end's ops record");
   assert.equal((await w.get("ops", "pb1") as { pool_amount?: string }).pool_amount, undefined, "its figures not told: left to the fill");
   await until(() => read.includes("SigB"), "the buy's own transaction read after its records");
 });
