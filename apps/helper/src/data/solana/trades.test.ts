@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { fromLogs } from "./decode.ts";
 import { joinBars } from "../candles.ts";
-import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, SYSVAR_CLOCK, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
+import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, FAILED_OPEN_MS, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, SYSVAR_CLOCK, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { b58decode, b58encode } from "./lists.ts";
 import { turnSlicer } from "../../limits/turn.ts";
@@ -546,11 +546,12 @@ test("card helper-live-bars-no-503: a held token's tape and live candles (limit 
   assert.equal(fresh.asOfMs, ms, "read again once the stream and its walk are back");
 });
 
-test("card helper-stays-fast-under-the-live-run (was helper-live-bars-no-503's control): a listed Solana token whose first read fails, with no vendor rows, answers an empty tape, filling, never a 503, its phases named; the next read opens it again (the page polls a filling tape every 3 s and backs a failed one off to 30 s)", async () => {
+test("card helper-stays-fast-under-the-live-run (was helper-live-bars-no-503's control): a listed Solana token whose first read fails, with no vendor rows, answers an empty tape, filling, never a 503, its phases named; a read past FAILED_OPEN_MS opens it again (the page polls a filling tape every 3 s and backs a failed one off to 30 s)", async () => {
   let accounts = 0;
+  let clock = TS * 1000;
   const t = createSolanaTrades({
     fetch: (async (_u: string, init: RequestInit) => ((JSON.parse(String(init.body)) as { method: string }).method === "getAccountInfo" && accounts++, new Response("down", { status: 503 }))) as never,
-    now: () => TS * 1000,
+    now: () => clock,
     listed: async (m) => m === MINT,
     rpcs: ["https://rpc.test"],
     source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
@@ -560,9 +561,70 @@ test("card helper-stays-fast-under-the-live-run (was helper-live-bars-no-503's c
   assert.equal(a.status, 200);
   assert.deepEqual(JSON.parse(a.body), { trades: [], filling: true, src: "chain", as_of_ms: TS * 1000 });
   assert.match(a.timing ?? "", /sol-open;desc="listed 0, account unread 0"/);
+  clock += FAILED_OPEN_MS;
   await t.trades(MINT, 50);
-  assert.equal(accounts, 2, "the next read opens the token again");
+  assert.equal(accounts, 2, "a read past the wait opens the token again");
   t.stop();
+});
+
+test("card helper-stays-fast-under-the-live-run: a listed coin whose first read failed is read again only after FAILED_OPEN_MS, doubled after each failure; the reads in between answer at once, filling, with no read of their own and the wait named (red at fda1267c6: every read ran the whole first read again, the page's 3 s poll of every failing coin under a spent key)", async () => {
+  let accounts = 0;
+  let clock = TS * 1000;
+  const t = createSolanaTrades({
+    fetch: (async (_u: string, init: RequestInit) => ((JSON.parse(String(init.body)) as { method: string }).method === "getAccountInfo" && accounts++, new Response("down", { status: 503 }))) as never,
+    now: () => clock,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+  });
+  // the reads a crowd of pages makes, at each time, ms after the first failure
+  const at = async (ms: number, reads: number) => {
+    clock = TS * 1000 + ms;
+    const got = await Promise.all(Array.from({ length: reads }, () => t.trades(MINT, 50)));
+    assert.deepEqual([...new Set(got.map((a) => a.status))], [200], `200 at +${ms} ms`);
+    return got;
+  };
+  await at(0, 1);
+  assert.equal(accounts, 1);
+  const held = await at(500, 5);
+  assert.equal(accounts, 1, "inside the first wait: no read of its own");
+  assert.match(held[0]!.timing ?? "", /sol-open;desc="listed 0, account unread 0, read again in 500 ms"/);
+  assert.deepEqual(JSON.parse(held[0]!.body), { trades: [], filling: true, src: "chain", as_of_ms: TS * 1000 }, "the failed read's own answer, kept");
+  await at(FAILED_OPEN_MS, 3);
+  assert.equal(accounts, 2, "past the wait: read again once for every read joined");
+  await at(FAILED_OPEN_MS + 1_500, 3);
+  assert.equal(accounts, 2, "the wait doubled after the second failure");
+  await at(FAILED_OPEN_MS * 3, 1);
+  assert.equal(accounts, 3);
+  t.stop();
+});
+
+test("card helper-stays-fast-under-the-live-run, load: the live run's crowd (app-console-429's 25 reads a route at once: the tape and the bars) polling a listed coin whose first read always fails, every 3 s for 30 s, runs at most 5 first reads and 5 vendor reads, every answer 200 (red at fda1267c6: 10 first reads, one per poll, and a vendor read for every tape read, 250)", async () => {
+  let accounts = 0;
+  let vendor = 0;
+  let clock = TS * 1000;
+  const t = createSolanaTrades({
+    fetch: (async (_u: string, init: RequestInit) => ((JSON.parse(String(init.body)) as { method: string }).method === "getAccountInfo" && accounts++, new Response("down", { status: 503 }))) as never,
+    now: () => clock,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+    tape: async () => (vendor++, { status: 200, body: JSON.stringify(POOL_ROWS), src: "coingecko", asOfMs: clock }),
+    history: async () => ({ status: 200, body: JSON.stringify({ tf: "1m", candles: [] }), src: "geckoterminal", asOfMs: clock }),
+  });
+  const statuses = new Set<number>();
+  for (let poll = 0; poll < 10; poll++) {
+    clock = TS * 1000 + poll * 3_000;
+    const got = await Promise.all([...Array.from({ length: 25 }, () => t.trades(MINT, 50)), ...Array.from({ length: 25 }, () => t.candles(MINT, "1m", null, 50))]);
+    for (const a of got.slice(0, 25)) statuses.add(a.status);
+  }
+  t.stop();
+  assert.deepEqual([...statuses], [200], "every tape read answered 200");
+  // the first read again at +0, +3, +6, +12 and +21 s: its wait 1, 2, 4, 8 then 16 s
+  assert.ok(accounts <= 5, `${accounts} first reads in 30 s`);
+  assert.ok(vendor <= 5, `${vendor} vendor reads in 30 s`);
 });
 
 // card token-page-data-complete-and-fast: a coin launched against another coin (BUBBLE against FRONTIER, 11 Nov) had

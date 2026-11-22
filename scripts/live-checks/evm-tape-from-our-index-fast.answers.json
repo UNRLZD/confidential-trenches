@@ -1,5 +1,5 @@
 {
- "_note": "Each tape answers as the check read them (time from its first read, status, X-Helper-Commit, rows, filling, first fault; not the rows). good: a keyless helper of this card on a Mac (branch card/evm-tape-from-our-index-fast, the read back of a step that holds no swap asking its pool swaps alone and ending at the pool birth), started cold at 08:20Z and read as --base 2026-11-15T08:21:51.538Z: three short tapes said filling and ended done within the bound (34.9, 45.5 and 42.5 s), one full at once: PASS. bad_live: the deployed helper 0d308d3bc read 2026-11-15T08:17:20.598Z: two new tokens tapes still filling at 45.9 and 47.7 s: FAIL. Card evm-keyed-checks-hold-steady (each answer's `open` is the helper's Server-Timing evm-open in ms, null where none was read): good_live: the deployed helper beb3ef4f8 read 2026-11-15T15:01:17Z with this card's picks (new's and trending_1h's next two past helper-base-tape-reads-back's), three tapes opened cold (3317, 3141, 1201 ms) said filling and ended within the bound: PASS. warm_live: the same check again at 15:01:31Z, every tape open from the run before (evm-open 0 ms), the short two done at their first answer: INCONCLUSIVE (the check at b78515461 FAILs it: no read back, as helper live run 43722667540 attempt 1 did at 14:16Z).",
+ "_note": "Each tape answers as the check read them (time from its first read, status, X-Helper-Commit, rows, filling, first fault; not the rows). good: a keyless helper of this card on a Mac (branch card/evm-tape-from-our-index-fast, the read back of a step that holds no swap asking its pool swaps alone and ending at the pool birth), started cold at 08:20Z and read as --base 2026-11-15T08:21:51.538Z: three short tapes said filling and ended done within the bound (34.9, 45.5 and 42.5 s), one full at once: PASS. bad_live: the deployed helper 0d308d3bc read 2026-11-15T08:17:20.598Z: two new tokens tapes still filling at 45.9 and 47.7 s: FAIL. Card evm-keyed-checks-hold-steady (each answer's `open` is the helper's Server-Timing evm-open in ms, null where none was read): good_live: the deployed helper beb3ef4f8 read 2026-11-15T15:01:17Z with this card's picks (new's and trending_1h's next two past helper-base-tape-reads-back's), three tapes opened cold (3317, 3141, 1201 ms) said filling and ended within the bound: PASS. warm_live: the same check again at 15:01:31Z, every tape open from the run before (evm-open 0 ms), the short two done at their first answer: INCONCLUSIVE (the check at b78515461 FAILs it: no read back, as helper live run 43722667540 attempt 1 did at 14:16Z). Card evm-tape-check-counts-read-ahead-warm (each answer's `whole`: it named whole_ms): ahead_44962533217 and ahead_44979250087, helper live runs 44962533217 (21 Nov 23:43Z, helper 77c0dd813) and 44979250087 attempt 1 (22 Nov 03:16Z, helper 77bfa8030) as their logs printed them: every tape done or full at its first answer, two short (10 trades at 2,754 ms and 46 at 1,938 ms; 5 at 452 ms and 34 at 710 ms), and FAILed by the check judging them cold by evm-open; the check did not record whole_ms then, so `whole` is the helper's trades answer at both commits (swaps.ts: an answer not filling names whole_ms) and the 09:05Z records' 7 of 7 answers not filling on 77bfa8030 naming it; `open` is null, the logs print none. ahead_live: this check read the deployed 77bfa8030 at 2026-11-22T09:05:54Z: a short tape whole at once (1 trade, evm-open 318 ms) beside one that said filling and ended: PASS.",
  "good": {
   "base": "http://127.0.0.1:18787",
   "readAt": "2026-11-15T08:21:51.538Z",
@@ -851,6 +851,248 @@
       "n": 50,
       "filling": false,
       "open": 0,
+      "fault": null
+     }
+    ]
+   }
+  ]
+ },
+ "ahead_44962533217": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-21T23:42:58Z",
+  "run": "44962533217",
+  "lists": {
+   "status": 200,
+   "new": 19
+  },
+  "tapes": [
+   {
+    "address": "0x00690bb904d35b673981c9e66c03407f6ab8dcb5",
+    "answers": [
+     {
+      "t": 2754,
+      "status": 200,
+      "commit": "77c0dd8137d72b24dbc4d6aa07876a8caedebcec",
+      "n": 10,
+      "filling": false,
+      "whole": true,
+      "open": null,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0xb2000000000000000000005e1f13232f18e32e2c",
+    "answers": [
+     {
+      "t": 1938,
+      "status": 200,
+      "commit": "77c0dd8137d72b24dbc4d6aa07876a8caedebcec",
+      "n": 46,
+      "filling": false,
+      "whole": true,
+      "open": null,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf",
+    "answers": [
+     {
+      "t": 996,
+      "status": 200,
+      "commit": "77c0dd8137d72b24dbc4d6aa07876a8caedebcec",
+      "n": 50,
+      "filling": false,
+      "whole": true,
+      "open": null,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+    "answers": [
+     {
+      "t": 1338,
+      "status": 200,
+      "commit": "77c0dd8137d72b24dbc4d6aa07876a8caedebcec",
+      "n": 50,
+      "filling": false,
+      "whole": true,
+      "open": null,
+      "fault": null
+     }
+    ]
+   }
+  ]
+ },
+ "ahead_44979250087": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-22T03:16:13Z",
+  "run": "44979250087",
+  "lists": {
+   "status": 200,
+   "new": 20
+  },
+  "tapes": [
+   {
+    "address": "0x4ea6ba68d5bc67733bd1e511a1ba85523cb18c59",
+    "answers": [
+     {
+      "t": 452,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 5,
+      "filling": false,
+      "whole": true,
+      "open": null,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0xb200000000000000000000e4f83bcaf1ef8a0443",
+    "answers": [
+     {
+      "t": 710,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 34,
+      "filling": false,
+      "whole": true,
+      "open": null,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+    "answers": [
+     {
+      "t": 1302,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 50,
+      "filling": false,
+      "whole": true,
+      "open": null,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+    "answers": [
+     {
+      "t": 1112,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 50,
+      "filling": false,
+      "whole": true,
+      "open": null,
+      "fault": null
+     }
+    ]
+   }
+  ]
+ },
+ "ahead_live": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-22T09:05:54.265Z",
+  "lists": {
+   "status": 200,
+   "new": 20
+  },
+  "tapes": [
+   {
+    "address": "0xb2000000000000000000002e88fa9112b00c7d9d",
+    "answers": [
+     {
+      "t": 551,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 1,
+      "filling": false,
+      "whole": true,
+      "open": 318,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x12b106e3affd796a2f2b96e27e888997d8ef4049",
+    "answers": [
+     {
+      "t": 4384,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 5,
+      "filling": true,
+      "whole": false,
+      "open": 2809,
+      "fault": null
+     },
+     {
+      "t": 7914,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 5,
+      "filling": true,
+      "whole": false,
+      "open": 0,
+      "fault": null
+     },
+     {
+      "t": 11092,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 5,
+      "filling": true,
+      "whole": false,
+      "open": 0,
+      "fault": null
+     },
+     {
+      "t": 14313,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 6,
+      "filling": false,
+      "whole": true,
+      "open": 0,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+    "answers": [
+     {
+      "t": 3692,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 50,
+      "filling": false,
+      "whole": true,
+      "open": 83,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+    "answers": [
+     {
+      "t": 1115,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 50,
+      "filling": false,
+      "whole": true,
+      "open": 243,
       "fault": null
      }
     ]

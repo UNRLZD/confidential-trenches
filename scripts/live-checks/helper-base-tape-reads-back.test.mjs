@@ -3,7 +3,10 @@
 // Mac: two short tapes said filling and then ended, two were full: PASS. bad_live: the deployed helper before part C, the
 // short tapes never filling: FAIL. Planted from the good one: a tape still filling at its end, an answer off the tape's
 // fields, fewer trades at the end, no X-Helper-Commit: FAIL; every tape full at its first answer: INCONCLUSIVE. The body
-// rule, the read's pacing and its token picks are held on their own.
+// rule, the read's pacing and its token picks are held on their own. Card evm-tape-check-counts-read-ahead-warm: a short
+// tape done at its first answer is read back only when it names whole_ms. ahead_44989861313 (helper live run 44989861313,
+// which the check FAILed on new's two tapes the lists had read ahead) and ahead_live (the deployed 77bfa8030, 22 Nov
+// 09:06Z): PASS. Every short tape planted with neither filling nor whole_ms: FAIL, a read back seen beside it or not.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -33,7 +36,37 @@ test("good: part C's helper, short tapes filling then done, full ones full: PASS
 test("bad_live: the deployed helper before part C, short tapes with no read back: FAIL", () => {
   const r = judge(A.bad_live);
   assert.equal(r.verdict, "FAIL");
-  assert.deepEqual(bad(r), ["BAD no tape said filling while a tape answered short: no read back (the helper before part C)"]);
+  const shortOnes = A.bad_live.tapes.filter((t) => t.answers[0].n < TRADES_MAX).map((t) => t.address);
+  assert.deepEqual(bad(r), [
+    ...shortOnes.map((t) => `BAD ${t}: short and done at its first answer, naming neither filling nor whole_ms: never read back (the helper before part C)`),
+    "BAD no tape said filling while a tape answered short: no read back (the helper before part C)",
+  ]);
+});
+
+test("ahead: a run the check FAILed on short tapes the lists read ahead, whole at their first answer, and the deployed helper's: PASS (red at 893bbaa43: FAIL)", () => {
+  for (const k of ["ahead_44989861313", "ahead_live"]) {
+    const r = judge(A[k]);
+    assert.equal(r.verdict, "PASS", `${k}\n${r.lines.join("\n")}`);
+    // short and never filling: the tapes whole at once (ahead_live's fourth said filling, still so at its fiftieth trade)
+    const shortOnes = A[k].tapes.filter((t) => t.answers[0].n < TRADES_MAX && !t.answers.some((a) => a.filling)).map((t) => t.address);
+    assert.equal(shortOnes.length, 2, k);
+    assert.ok(r.lines.includes(`ok  short tape(s) whole at the first answer (whole_ms: ${shortOnes.join(", ")}): read back before this check's read`), `${k}\n${r.lines.join("\n")}`);
+  }
+});
+
+test("planted: a short tape done at its first answer naming neither filling nor whole_ms: FAIL, a read back beside it or not (red at 893bbaa43 beside a read back)", () => {
+  const unread = (run, i) => tapeOf(run, i, (t) => ({ ...t, answers: [{ ...t.answers[0], whole: false }] }));
+  const at = A.ahead_44989861313.tapes.findIndex((t) => t.answers[0].n < TRADES_MAX);
+  // A.good with a short tape done at once beside its read back
+  const beside = { ...A.good, tapes: [...A.good.tapes, { address: "0x" + "c".repeat(40), answers: [{ ...A.good.tapes[short].answers.at(-1), t: 400, n: 5, filling: false, whole: false }] }] };
+  for (const [what, run] of [
+    ["ahead_44989861313, one short tape naming no whole_ms", unread(A.ahead_44989861313, at)],
+    ["the good run with a short tape naming no whole_ms beside its read back", beside],
+  ]) {
+    const r = judge(run);
+    assert.equal(r.verdict, "FAIL", `${what}\n${r.lines.join("\n")}`);
+    assert.ok(bad(r).some((l) => / short and done at its first answer, naming neither filling nor whole_ms: never read back \(the helper before part C\)$/.test(l)), `${what}\n${r.lines.join("\n")}`);
+  }
 });
 
 test("planted from the good answer: FAIL, or INCONCLUSIVE when nothing was short", () => {
@@ -74,7 +107,7 @@ test("bodyFault: the tape's fields exactly, filling only as true, rows newest fi
   ]) assert.match(bodyFault(b) ?? "null", want, what);
 });
 
-test("readRun: opens new's and trending_1h's first OPEN / 2 as the page reads them, each again every POLL_MS until it ends or BOUND_MS pass", async () => {
+test("readRun: opens new's and trending_1h's first OPEN / 2 as the page reads them, each again every POLL_MS until it ends or BOUND_MS pass, with whole_ms", async () => {
   const tok = (c) => "0x" + c.repeat(40);
   const lists = { chain: "base", lists: { new: [{ token: tok("1") }, { token: tok("2") }, { token: tok("3") }], trending_1h: [{ token: tok("2") }, { token: tok("4") }, { token: tok("5") }] } };
   let clock = 0;
@@ -91,7 +124,7 @@ test("readRun: opens new's and trending_1h's first OPEN / 2 as the page reads th
     const n = (reads.get(t) ?? 0) + 1;
     reads.set(t, n);
     const body =
-      t === tok("1") ? { trades: Array.from({ length: n < 3 ? 1 : 4 }, (_, i) => ROW(10 - i, i)), ...(n < 3 ? { filling: true } : {}), src: "chain", as_of_ms: 1 }
+      t === tok("1") ? { trades: Array.from({ length: n < 3 ? 1 : 4 }, (_, i) => ROW(10 - i, i)), ...(n < 3 ? { filling: true } : { whole_ms: 0 }), src: "chain", as_of_ms: 1 }
       : t === tok("2") ? { trades: Array.from({ length: TRADES_MAX }, (_, i) => ROW(100 - i, i)), src: "chain", as_of_ms: 1 }
       : { trades: [], filling: true, src: "chain", as_of_ms: 1 };
     return new Response(JSON.stringify(body), { status: 200, headers: h });
@@ -100,7 +133,7 @@ test("readRun: opens new's and trending_1h's first OPEN / 2 as the page reads th
   assert.deepEqual(run.tapes.map((t) => t.address), [tok("1"), tok("2"), tok("4")], "new's first two and trending_1h's, each once");
   assert.ok(asked.every(([, limit]) => limit === String(TRADES_MAX)));
   const by = Object.fromEntries(run.tapes.map((t) => [t.address, t.answers]));
-  assert.deepEqual(by[tok("1")].map((a) => [a.n, a.filling]), [[1, true], [1, true], [4, false]]);
+  assert.deepEqual(by[tok("1")].map((a) => [a.n, a.filling, a.whole]), [[1, true, false], [1, true, false], [4, false, true]]);
   assert.equal(by[tok("2")].length, 1, "full at once: read once");
   assert.ok(by[tok("4")].length <= BOUND_MS / POLL_MS + 2 && by[tok("4")].at(-1).t >= BOUND_MS, "never ends: read until BOUND_MS, then stopped");
   const r = judge(run);

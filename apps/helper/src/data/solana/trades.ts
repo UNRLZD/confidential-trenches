@@ -175,6 +175,13 @@ export const VENDOR_EARLY_MS = 1_000;
 export const WATCH_TRIES = 3;
 /** A listed coin's first read that failed (its account, its subscription): named in the refusals' count. */
 export const FIRST_FAILED = "solana first read failed";
+/** A listed coin whose first read failed is opened again only after this wait, doubled after each failure to
+ *  COLD_RETRY_MAX_MS, its reads in between answered at once from what is held (filling), as the cold walk's own retry
+ *  waits [design: the 503 a failed first read answered before made the page back off to 30 s (apps/terminal
+ *  screens/token/trades.ts TRADES_BACKOFF_MAX_MS); its filling answer is polled every 3 s, so without a wait here every
+ *  page's poll of a coin whose reads fail (a spent key, the public lanes) ran the whole first read and a vendor read
+ *  again: live run 44989861313 on helper-21 ran with helius-rpc.com spent and its burst landed every route at ~2.4 s] */
+export const FAILED_OPEN_MS = 1_000;
 /** How long after a first read its answers name its phases (sol-open): the reads that joined it. */
 export const OPEN_NAMED_MS = 1_000;
 export const SILENT_MS = 30_000;
@@ -1782,7 +1789,14 @@ export function createSolanaTrades(deps: {
   const backing = (e: Entry): boolean => e.back !== undefined && !e.back.done;
 
   const opening = new Map<string, Promise<Entry | DataAnswer>>();
+  /** Each listed coin whose first read failed: when it may be opened again, and how many have failed in a row (at most
+   *  OPEN_MAX kept, the oldest dropped). */
+  const failedOpens = new Map<string, { until: number; n: number; desc: string; answer?: { a: Promise<DataAnswer>; limit: number } }>();
   async function open(mint: string): Promise<Entry | DataAnswer> {
+    // card helper-stays-fast-under-the-live-run: a coin whose first read failed waits FAILED_OPEN_MS, doubling, before
+    // it is read again; the reads in between are answered as the failed one was, with no read of their own
+    const held = opening.has(mint) || entries.has(mint) ? undefined : failedOpens.get(mint);
+    if (held !== undefined && now() < held.until) return { ...UPSTREAM, why: FIRST_FAILED, timing: `sol-open;desc="${held.desc}, read again in ${Math.ceil(held.until - now())} ms"` };
     // a first read in flight is joined before the entry is looked at: first() holds the entry from its mint read on, but
     // it serves only once the stream holds the token (readAt), so a caller that came in between would read it as down
     // (card app-console-429: 4 of 25 reads at once answered 503 on the deployed helper, 11:19Z)
@@ -1790,7 +1804,18 @@ export function createSolanaTrades(deps: {
     if (e === undefined) {
       let p = opening.get(mint);
       if (p === undefined) {
-        p = first(mint).finally(() => opening.delete(mint));
+        p = first(mint)
+          .then((got) => {
+            if ("mint" in got) failedOpens.delete(mint);
+            else if (got.why === FIRST_FAILED) {
+              const n = (failedOpens.get(mint)?.n ?? 0) + 1;
+              failedOpens.delete(mint);
+              if (failedOpens.size >= OPEN_MAX) failedOpens.delete(failedOpens.keys().next().value!);
+              failedOpens.set(mint, { until: now() + Math.min(FAILED_OPEN_MS * 2 ** (n - 1), COLD_RETRY_MAX_MS), n, desc: /desc="([^"]*)"/.exec(got.timing ?? "")?.[1] ?? "failed" });
+            }
+            return got;
+          })
+          .finally(() => opening.delete(mint));
         opening.set(mint, p);
       }
       const got = await p;
@@ -1914,14 +1939,28 @@ export function createSolanaTrades(deps: {
       // 25 reads of one cold coin 503 at 3.6 s while its page, holders and bars answered); the next read opens it again
       if (!("mint" in e)) {
         if (e.why !== FIRST_FAILED) return e;
-        const v = deps.tape === undefined ? null : await poolTape(mint, limit, null);
-        const timing = [v?.timing, e.timing].filter((x) => x !== undefined && x !== "").join(", ");
-        if (v !== null && v.status === 200) {
-          const { whole_ms: _, ...b } = JSON.parse(v.body) as Record<string, unknown>;
-          return { ...v, body: JSON.stringify({ ...b, filling: true }), timing };
-        }
-        const at = now();
-        return { status: 200, body: JSON.stringify({ trades: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing };
+        // the answer of the failed read, kept while its coin waits (FAILED_OPEN_MS): the reads in between are answered
+        // with it, so a crowd polling a failing coin asks neither the chain nor the vendor again until the wait is out
+        // one answer for every read joined on the failure (one vendor read), set before it is read
+        const f = failedOpens.get(mint);
+        const kept = f !== undefined && f.answer !== undefined && f.answer.limit >= limit && now() < f.until ? f.answer.a : undefined;
+        const answer =
+          kept ??
+          (async (): Promise<DataAnswer> => {
+            const v = deps.tape === undefined ? null : await poolTape(mint, limit, null);
+            if (v !== null && v.status === 200) {
+              const { whole_ms: _, trades, ...b } = JSON.parse(v.body) as Record<string, unknown>;
+              return { ...v, body: JSON.stringify({ trades: Array.isArray(trades) ? trades.slice(0, limit) : trades, ...b, filling: true }), timing: v.timing };
+            }
+            const at = now();
+            return { status: 200, body: JSON.stringify({ trades: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+          })();
+        if (kept === undefined && f !== undefined) f.answer = { a: answer, limit };
+        const a = await answer;
+        // a kept answer is the read's own: the bars a limit asks for, the timing of this read's wait
+        const { trades: rows, ...rest } = JSON.parse(a.body) as Record<string, unknown>;
+        const body = JSON.stringify({ trades: Array.isArray(rows) ? rows.slice(0, limit) : rows, ...rest });
+        return { ...a, body, timing: [a.timing, e.timing].filter((x) => x !== undefined && x !== "").join(", ") };
       }
       const rows = folded(e).book === null ? [] : e.book!.tape(limit);
       // a token with no trade of a venue this tape decodes (Raydium's other pools, Meteora's older pools, the other launchpads: a

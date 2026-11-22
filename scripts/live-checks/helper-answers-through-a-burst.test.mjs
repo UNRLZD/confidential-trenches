@@ -92,7 +92,7 @@ test("each route's p50, p99 and max are printed, and the SLOWEST reads with the 
   assert.ok(v.lines.includes(`    /v1/market/trades: ${PAGES} answered, p50 3200 ms, p99 3200 ms, max 3200 ms`), v.lines.join("\n"));
   const slow = v.lines.filter((l) => l.startsWith("    slow: "));
   assert.equal(slow.length, 5);
-  assert.ok(slow.every((l) => l === '    slow: /v1/market/trades 200 3200 ms (sol-read-to;desc="cold", total;dur=2500)'), slow.join("\n"));
+  assert.ok(slow.every((l) => l === '    slow: /v1/market/trades 200 3200 ms, sent +0 ms, headers at 0 ms (sol-read-to;desc="cold", total;dur=2500)'), slow.join("\n"));
   // the printed lines carry no verdict of their own: the run fails on its p99 alone
   assert.deepEqual(v.lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" ")[1]), ["p99"]);
   assert.equal(judge(got).ok, true, judge(got).lines.join("\n"));
@@ -120,8 +120,26 @@ test("a lists read that names no coin (Caddy's 502 with no CORS header) is kept 
   const fetchFn = async () => new Response("", { status: 502 });
   const got = await read("https://ct-api.unrealized.trade", fetchFn, () => 0, async () => assert.fail("no socket without a coin"));
   assert.equal(got.coin, null);
-  assert.deepEqual(got.answers, [{ route: "/v1/market/lists", status: 502, ms: 0, cors: null, body: "" }]);
+  assert.deepEqual(got.answers, [{ route: "/v1/market/lists", chain: "solana", status: 502, ms: 0, at: 0, head: 0, cors: null, body: "" }]);
   const v = judge(got);
   assert.equal(v.ok, false);
   assert.ok(v.lines.some((l) => l.startsWith("BAD 500, 502 or 504: 1")), v.lines.join("\n"));
+});
+
+test("card helper-stays-fast-under-the-live-run: a slow read names when it was sent after the burst's first, when its headers came, and a lists read its chain, so a wait for the answer is told from its transfer (red at b09ba8178: helper-21's run 44989861313 printed `slow: /v1/market/lists 200 3620 ms` and nothing more)", async () => {
+  const fetchFn = async (url) => {
+    const u = new URL(url);
+    if (u.pathname === "/v1/market/lists" && u.searchParams.get("chain") === "solana" && !fetchFn.listed) {
+      fetchFn.listed = true;
+      return new Response(JSON.stringify({ lists: { trending: [{ token: A.good.coin }] } }), { status: 200, headers: { "access-control-allow-origin": APP } });
+    }
+    return new Response("{}", { status: 200, headers: { "access-control-allow-origin": APP } });
+  };
+  const got = await read("https://ct-api.unrealized.trade", fetchFn, () => 0, async () => ({ route: PUSH, status: 101, ms: 0 }));
+  assert.equal(got.answers.filter((a) => a.route === "/v1/market/lists" && a.chain === "base").length, PAGES, "each lists read names its chain");
+  assert.ok(got.answers.filter((a) => a.route !== PUSH).every((a) => a.at === 0 && a.head === 0), "each read keeps its send and its headers' time");
+  // a run whose Base lists reads were sent 40 ms after the first and answered headers at 3,000 ms, the rest at 50 ms
+  const run = { ...got, answers: got.answers.map((a) => (a.route === PUSH ? a : a.chain === "base" ? { ...a, at: 1_040, head: 3_000, ms: 3_010, timing: "total;dur=1" } : { ...a, at: 1_000, head: 50, ms: 60 })) };
+  const slow = judge(run).lines.filter((l) => l.startsWith("    slow: "));
+  assert.equal(slow[0], "    slow: /v1/market/lists?chain=base 200 3010 ms, sent +40 ms, headers at 3000 ms (total;dur=1)", slow.join("\n"));
 });
