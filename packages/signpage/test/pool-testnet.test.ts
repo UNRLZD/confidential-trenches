@@ -1638,6 +1638,41 @@ test("the page's buy host writes W's buy record in the wallet store's meta/owed/
   }
 });
 
+// Card signpage-sent-end-recorded, part 1: a pool buy whose page closed after its "sent" answer left its op at sent; the
+// next page's state read ends it from its own txs on both RPCs and its notes' marks in this store (positions.ts
+// settleSentBuys): a tx past its blockhash on both, not_landed; a tx landed on both whose note this store has no mark
+// of yet, still sent (the run's own rule: filled only once the note is SPENT as this attempt's)
+test("card signpage-sent-end-recorded part 1: a reload (a fresh page on the same store) ends a buy op left at sent whose tx both RPCs read past its blockhash, and leaves one whose note's mark is not known yet", async () => {
+  const seed64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
+  (await openNoteStore(w)).close();
+  try {
+    const past = base58.encode(new Uint8Array(64).fill(4));
+    const landed = base58.encode(new Uint8Array(64).fill(6));
+    const blockhash = base58.encode(new Uint8Array(32).fill(7));
+    const note = (id: string) => ({ id, attempt: "a1", pieces: [], program: "Prog1", feePayer: "Fee1", wallet: "W1", nullifier: "77", context: "9" });
+    const op = (sig: string, id: string) => ({ kind: "buy", stage: "sent", txs: [{ chain: "solana", hash: sig, leg: true, blockhash, lvbh: 1_000, note: note(id) }], created_ms: 1, chain: "solana", token: base58.encode(new Uint8Array(32).fill(5)), amount_usd: "1.5" });
+    await w.put("ops", "pb1", op(past, "n-past"));
+    await w.put("ops", "pb2", op(landed, "n-landed"));
+    const rpc = () => async (m: string, p?: readonly unknown[]) => {
+      if (m === "getLatestBlockhash") return { context: { slot: 50 }, value: { blockhash, lastValidBlockHeight: 1_350 } };
+      if (m === "isBlockhashValid") return { context: { slot: 52 }, value: false };
+      if (m === "getSignatureStatuses") return { context: { slot: 53 }, value: [(p![0] as string[])[0] === landed ? { confirmationStatus: "finalized", err: null, slot: 40 } : null] };
+      throw new Error("offline");
+    };
+    const t = testnetPool({ store: async () => w, seed64: async () => seed64.slice() }, { rpcs: [rpc(), rpc()] as never, prover: { vault: signalsProver(), stop: () => {} } });
+    await t.stateRead();
+    for (let i = 0; i < 200 && ((await w.get("ops", "pb1")) as { stage: string }).stage === "sent"; i++) await new Promise((r) => setTimeout(r, 10));
+    const one = (await w.get("ops", "pb1")) as { stage: string; txs: { hash: string }[] };
+    assert.equal(one.stage, "not_landed");
+    assert.deepEqual(one.txs.map((x) => x.hash), [past]);
+    assert.equal(((await w.get("ops", "pb2")) as { stage: string }).stage, "sent", "landed, its note's mark not known yet: sent");
+  } finally {
+    w.close();
+  }
+});
+
 // Review of fcd67b72, P1: a sell with no deposit back makes no note, so a state read that settles sells only on an
 // INCOMING return or R note never read its record: a page closed after its send (or a sell that ended "sent" past its
 // read budget) left the op "sent" for good. The state read settles sells when a kept record is there too.

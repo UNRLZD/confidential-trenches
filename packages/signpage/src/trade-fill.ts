@@ -327,7 +327,11 @@ export async function fillTradeOps(d: FillDeps): Promise<boolean> {
   found.sort((a, b) => at(b.rec) - at(a.rec));
   for (const { k, rec } of found.slice(0, FILL_OPS_MAX)) {
     if (d.signal?.aborted) break;
-    const sigs = rec.kind === "buy" ? [rec.txs[0]!.hash] : rec.txs.map((t) => t.hash);
+    // a buy's legs (card signpage-sent-end-recorded, review 2 of 59a86ef49): the txs its op marks `leg` (a split tap's
+    // one buy tx a leg, each its own W, summed as a sale's), never a piece's tag 2 release; an op with none marked, its
+    // first (the buy's own)
+    const legTxs = rec.txs.filter((t) => (t as { leg?: unknown }).leg === true);
+    const sigs = rec.kind === "buy" ? (legTxs.length > 0 ? legTxs : rec.txs.slice(0, 1)).map((t) => t.hash) : rec.txs.map((t) => t.hash);
     const walletsOk = rec.kind === "sell" ? legWallets(rec) : null;
     let units = 0n;
     let lamports = 0n;
@@ -364,10 +368,18 @@ export async function fillTradeOps(d: FillDeps): Promise<boolean> {
     const fill: Record<string, string> = { units: poolUnits(units, decimals), pool_amount: poolUnits(lamports, 9) };
     // a buy with no USD (a device restored from the words rebuilt it from W's history, src/sol-buy-records.ts; or its
     // request had no price): its SOL in at its own block's price, as an old sale's; none, no USD
+    // (a split tap: each leg at its own block's price, summed; any leg with none: no USD)
     if (rec.kind === "buy" && rec.amount_usd === undefined) {
-      const l = legs[0]!;
-      const bp = l.blockS === null ? null : await blockPrice(d, l.sig, l.blockS);
-      if (bp !== null && l.lamports > 0n) [fill.amount_usd, fill.usd_from] = [poolUnits(l.lamports * bp.price * 10n ** BigInt(18 + bp.expo), 9 + 18), "block"];
+      let sum = 0n;
+      for (const l of legs) {
+        const bp = l.blockS === null ? null : await blockPrice(d, l.sig, l.blockS);
+        if (bp === null || l.lamports <= 0n) {
+          sum = -1n;
+          break;
+        }
+        sum += l.lamports * bp.price * 10n ** BigInt(18 + bp.expo);
+      }
+      if (sum > 0n) [fill.amount_usd, fill.usd_from] = [poolUnits(sum, 9 + 18), "block"];
     }
     if (rec.kind === "sell") {
       const p = d.price();
