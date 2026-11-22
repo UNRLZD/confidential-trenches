@@ -556,6 +556,9 @@ export const QUOTE_SEEDS: Record<EvmChain, readonly string[]> = {
  *  some 5 MB a token, 16 tokens: under 80 MB at worst; Base's quotes in practice are a handful.] */
 const QUOTE_POINTS_MAX = 50_000;
 const QUOTE_TOKENS_MAX = 16;
+/** The blocks before a route span's start whose logs seed its state when no provider serves the state read there
+ *  (routeStateFromLogs). [design: a route pool is its quote's deepest, so it trades within this; as refBack's 1,000] */
+const QUOTE_SEED_BACK = 1_000;
 /** A pool trade's ids on an EVM chain (../solana/token.ts toTape): a 32-byte hash and an address, lower case. */
 const EVM_IDS: TapeIds = { tx: (v) => (typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v) ? v.toLowerCase() : null), address: evmAddress };
 /** The bytes of GeckoTerminal answers one chain's swap reads hand the next process (data/warm.ts) [design: 2 MB, a
@@ -4046,9 +4049,22 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const s: QState = { hop: route.hop === null ? null : poolStateLegs(route.hop, a.slice(0, hop.length)), end: poolStateLegs(route.end, a.slice(hop.length, hop.length + end.length)), eth: eth ? refStateUsd(a.at(-1)) : null };
     return quoteUsd(route, s) === null ? null : s;
   }
-  /** Blocks [lo, hi] of the route's points: from state `from` (null: read at lo - 1), its pools' logs in the span. */
+  /** The route's state at the end of block `n` from its pools' own logs in the QUOTE_SEED_BACK blocks to `n` (each part's
+   *  newest: a Swap's sqrtPriceX96, a Sync's reserves, the ETH price pool's), for a provider that keeps no state that
+   *  old and refuses the read at `n` (routeStateAt); null when a part logged nothing there or a read was not agreed. */
+  async function routeStateFromLogs(route: Route, n: number): Promise<QState | null> {
+    const parts = routeParts(route);
+    const logs = await Promise.all(parts.map((p) => agreedRange(rpcs, p.filter, Math.max(0, n - QUOTE_SEED_BACK + 1), n)));
+    if (logs.some((x) => x == null)) return null;
+    const s: QState = { hop: null, end: null, eth: null };
+    const all = logs.flatMap((x, i) => x!.map((l) => ({ l, i }))).sort((a, b) => a.l.block - b.l.block || a.l.index - b.l.index);
+    for (const { l, i } of all) parts[i]!.set(l, s);
+    return quoteUsd(route, s) === null ? null : s;
+  }
+  /** Blocks [lo, hi] of the route's points: from state `from` (null: read at lo - 1, else from the logs before lo), its
+   *  pools' logs in the span. */
   async function routeSpan(route: Route, lo: number, hi: number, from: QState | null): Promise<{ pts: QPoint[]; at: QState } | null> {
-    const s0 = from ?? (await routeStateAt(route, lo - 1));
+    const s0 = from ?? (await routeStateAt(route, lo - 1)) ?? (await routeStateFromLogs(route, lo - 1));
     if (s0 === null) return null;
     const parts = routeParts(route);
     const logs = await Promise.all(parts.map((p) => agreedRange(rpcs, p.filter, lo, hi)));
@@ -4133,7 +4149,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const per = [...hop, ...end, ...(eth ? [refStateCall(chain)] : [])];
     const missed = { any: false };
     const got = await callsAgreed(want[0]! - 1, want.flatMap((n) => per.map((c) => ({ ...c, n: n - 1 }))), missed);
-    if (missed.any) return false;
+    // the state that deep not served (a provider that keeps no old state refuses it): the span's exact path, the route's
+    // own logs over the blocks (quoteSpan), slower but never a read back that fails on every try
+    if (missed.any) return quoteSpan(q, Math.min(...want), Math.max(...want));
     want.forEach((n, i) => {
       const a = got.slice(i * per.length, (i + 1) * per.length);
       const st: QState = { hop: route.hop === null ? null : poolStateLegs(route.hop, a.slice(0, hop.length)), end: poolStateLegs(route.end, a.slice(hop.length, hop.length + end.length)), eth: eth ? refStateUsd(a.at(-1)) : null };
