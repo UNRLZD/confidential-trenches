@@ -120,7 +120,7 @@ import {
   type SolanaRent,
 } from "../../kit/src/trade/solana/pool-buy.ts";
 import { pageReference, solanaBuyVenue } from "./page-rpc.ts";
-import { solanaDecodeLookupTable, type SolanaLookupTable } from "../../kit/src/checks/solana/message.ts";
+import { solanaDecodeLookupTable, solanaDecodeTransaction, type SolanaLookupTable } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX } from "../../kit/src/checks/solana/checks.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -226,6 +226,12 @@ export type PoolBuyHost = {
   /** Both RPCs read this very transaction's bytes under that signature: its signature, told once. Never before, so
    *  nothing the app is told names a transaction the chain did not read as this one. */
   sent?(signature: string): void | Promise<void>;
+  /** With sent, before it: the blockhash this very transaction's bytes carry and the last height the run holds it to
+   *  (blockhashOf's lastHeight), so a page that ends the request's op after a reload reads its end on both RPCs by them
+   *  (card signpage-sent-end-recorded: trade.ts txEnd); kept on the device only. `note`: the buy's own note and attempt,
+   *  its pieces' notes, and what spendOwner reads its spend by, so that reload reads the marks this run reads (spent(),
+   *  owner()) and ends it as this run would (positions.ts SentNote). */
+  sendAt?(signature: string, blockhash: string, lastHeight: number, note: { id: string; attempt: string; pieces: string[]; program: string; feePayer: string; wallet: string; nullifier: string; context: string }): void;
   /** This very transaction landed: both RPCs read it back as succeeded, the amount out told when it reads the same. Once,
    *  after sent; never for one that did not land. The reads from here to Final are the host's to pace (card
    *  sell-right-after-a-buy: a background pass's), every read before it a trade's, the ones that tell Filled among them.
@@ -1147,7 +1153,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
  *  fill: the buy's route, told as the run goes (W and the venue with its pool once the take holds the note, the amount
  *  out once the transaction reads back); none for a pool withdraw, whose release tells no buy route. */
 export async function sendAndSettle(
-  h: Pick<PoolBuyHost, "rpcs" | "take" | "takeSet" | "send" | "sendPieces" | "settle" | "settleSet" | "now" | "reads" | "named" | "sent" | "landed">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
+  h: Pick<PoolBuyHost, "rpcs" | "take" | "takeSet" | "send" | "sendPieces" | "settle" | "settleSet" | "now" | "reads" | "named" | "sent" | "sendAt" | "landed">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
   fill?: { token: string; minOut: bigint; tell: (x: BuyRoute) => void; bound: readonly BuyRoute[]; decimals?: (d: number) => void; early?: Promise<ChainNow> },
   before: readonly { r: Ready; release: SolanaPoolRelease; signed: Uint8Array }[] = [],
   round = false,
@@ -1374,7 +1380,17 @@ export async function sendAndSettle(
     // read back on both RPCs as these very transactions: only now is the buy told as sent, by its signature; a buy
     // tells it as a route fact too (card pool-buy-send-fast), which reaches the app however late it comes: an answer
     // past the kit client's 10 s is dropped (a mainnet bundle the helper holds until it lands)
-    if (!ours && seen[0] && seen[1]) {
+    // with it, the blockhash these bytes carry and the last height they are held to, kept beside the op on the device so
+    // a reload reads its end from both RPCs (card signpage-sent-end-recorded); told just before sent, so the op has them.
+    // A first round's release (`round`) is never told: it is no buy, and only the buy's own transaction is the op's
+    // (the money review of 59a86ef49, finding 1: round 1 told sent made the op name it, and a reload read it filled)
+    if (!round && !ours && seen[0] && seen[1])
+      try {
+        h.sendAt?.(signature, solanaDecodeTransaction(signed).message.blockhash, lastHeight, { id: r.noteId, attempt: r.attempt, pieces: before.map((p) => p.r.noteId), program: pin.program, feePayer: pin.feePayer, wallet: r.wallet.address, nullifier: BigInt(r.publicSignals[1]).toString(), context: r.binding.context.toString() });
+      } catch {
+        /* the op's end then waits for the run's own, as before */
+      }
+    if (!round && !ours && seen[0] && seen[1]) {
       ours = true;
       tellTx(signature);
       await h.sent?.(signature);
