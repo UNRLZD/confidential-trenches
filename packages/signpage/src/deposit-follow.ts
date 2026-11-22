@@ -8,14 +8,17 @@
 // - deposit.confirm { deposit_address }: answered with the stage and facts of the op that names that address (no op:
 //   not_allowed), and each later stage goes out as the request's progress; the op is followed if no follow runs for it.
 // - settle(): each signed-in landing resumes every deposit op no follow has ended (wallet follow.ts followEnded: held
-//   with no refund move out, or done past its quote's deadline on both RPCs), so a reload or a closed tab carries on
+//   with no refund move out and no moved money still coming, heldFollowed; or done past its quote's deadline on both
+//   RPCs), so a reload or a closed tab carries on
 //   from its stage, an op past its deadline (expired, refunded, waiting) reads U's balances on the chain again, and a
 //   done op's U is followed to its deadline (an older quote's late send to U is bound). The follows run on the wallet store's handle they opened on:
 //   when that connection closes (another tab's upgrade or delete), storeClosed() ends them, which frees U's lock, and
 //   main.ts settles them again once the store is opened next; a settle() that finds another handle ends them first.
-// - One follower per U across tabs: the lock below, held while any op of U is followed; another tab's follow of U waits
-//   for it. One follower per U (the money is U's: two quotes before a payment name one U): one lock per U across tabs,
-//   FOLLOW_LOCK/<network>/<U>, and in the tab every op of U attaches to U's one follower. The wallet's seed lock is taken
+// - One follower per U across tabs: FOLLOWER_LOCK/<network>/<U>, held while any op of U is followed; another tab's
+//   follow of U waits for it. One follower per U (the money is U's: two quotes before a payment name one U), and in the
+//   tab every op of U attaches to U's one follower. U's own lock, FOLLOW_LOCK/<network>/<U>, is held only around each
+//   round (its reads, binds and moves), never across the waits between rounds: the way out's tap takes it only if free
+//   (main.ts heldULock), so a tap between two rounds moves, and a round waits for a tap. The wallet's seed lock is taken
 //   shared only around a bind phase, or the refund move's signature, while the seed is open (followDeposit's seedLock
 //   and seed64); a sign out aborts every follow first (signedOut()).
 // - The refund move (card wallet-refund-move; wallet.md §2.4 point 8): a deposit 1Click refunded to U inside
@@ -39,7 +42,11 @@ import type { ApiHost, Deferred, KindContext } from "./api.ts";
 
 type Kinds = NonNullable<ApiHost["kinds"]>;
 
+/** U's own lock: held by U's follower around each of its rounds only (followDeposit's roundLock), never across the waits
+ *  between them, and taken by the way out's tap only if free (main.ts heldULock). */
 export const FOLLOW_LOCK = "ct-wallet/deposit-follow/";
+/** One follower per U across tabs: FOLLOWER_LOCK/<network>/<U>, held while any op of U is followed in this tab. */
+export const FOLLOWER_LOCK = "ct-wallet/deposit-follower/";
 /**
  * The stages that end an op's follow: the note read on both RPCs (followed on to its quote's deadline, followEnded), or
  * held (the bind stopped, the money under U for withdraw.open). Every other op, expired and refunded among them, is read
@@ -115,7 +122,7 @@ export function depositFollows(h: FollowHost) {
   const rpcs = h.rpcs ?? (() => [followRpc(NEAR_NETWORKS[h.network()].fastnear[0]), followRpc(NEAR_NETWORKS[h.network()].drpc)] as const);
   const locks = h.locks ?? (() => (typeof navigator !== "undefined" ? (navigator.locks ?? null) : null));
 
-  // One body per U in this tab, under FOLLOW_LOCK/<network>/<U> across tabs: it opens U's note store once and keeps it
+  // One body per U in this tab, under FOLLOWER_LOCK/<network>/<U> across tabs: it opens U's note store once and keeps it
   // while any op of U is followed; each op's followDeposit attaches to U's one follower (wallet follow.ts). No seed
   // lock while it polls: the wallet's seed lock is taken shared only around a bind phase, while the seed is open.
   // dead: its note store never opened (the wallet store would not open); the next follow of U opens a new one
@@ -164,12 +171,14 @@ export function depositFollows(h: FollowHost) {
         }
       };
       const lm = locks();
-      void (lm ? lm.request(`${FOLLOW_LOCK}${key}`, { mode: "exclusive", signal }, hold) : hold()).catch(failed);
+      void (lm ? lm.request(`${FOLLOWER_LOCK}${key}`, { mode: "exclusive", signal }, hold) : hold()).catch(failed);
       bodies.set(key, (ub = body));
     }
     const u = ub;
     const lm = locks();
     const seedLock = <T,>(fn: () => Promise<T>): Promise<T> => (lm ? (lm.request(WALLET_SEED_LOCK, { mode: "shared", signal }, fn) as Promise<T>) : fn());
+    // U's own lock around each round only (review M1 of 4723424c4): the tap between two rounds takes it and moves
+    const roundLock = <T,>(fn: () => Promise<T>): Promise<T> => (lm ? (lm.request(`${FOLLOW_LOCK}${key}`, { mode: "exclusive", signal }, fn) as Promise<T>) : fn());
     // a throw that is no refusal (the store, a read) pauses and runs again; only the sign out's signal ends it
     let again = false;
     const one = async () => {
@@ -196,6 +205,7 @@ export function depositFollows(h: FollowHost) {
             rpcs: rpcs(),
             seed64: () => h.seed64(),
             seedLock,
+            roundLock,
             signal,
             untilFinal: true,
             refundMove: refundMover(f.network, { ...(h.fetch ? { fetch: h.fetch } : {}), ...(h.now ? { now: h.now } : {}) }),
@@ -279,6 +289,24 @@ export function depositFollows(h: FollowHost) {
         const v = await ops.get("ops", k).catch(() => undefined);
         if (isDepositOp(v) && v.follow.network === h.network() && !followEnded(v)) void follow(k, v.follow);
       }
+    },
+    /**
+     * A held op's way out answered empty (U holds nothing to move on the token): every op of its U whose follow has not
+     * ended (wallet follow.ts heldFollowed: a refund move went through and its USDC has not read under U yet) is followed
+     * again now, and this answers true, so the tap never answers Nothing to move while U's money is still coming (card
+     * held-move-follow-resume); false when every op of U has ended, or the op is no deposit op of this network.
+     */
+    async resume(opId: string): Promise<boolean> {
+      const ops = await h.store();
+      if (on !== null && on !== ops) restart();
+      const me = await ops.get("ops", opId).catch(() => undefined);
+      if (!isDepositOp(me) || me.follow.network !== h.network()) return false;
+      let any = false;
+      for (const k of await ops.keys("ops")) {
+        const v = await ops.get("ops", k).catch(() => undefined);
+        if (isDepositOp(v) && v.follow.network === me.follow.network && v.follow.u === me.follow.u && !followEnded(v)) (any = true), void follow(k, v.follow);
+      }
+      return any;
     },
     /** The wallet store's connection closed (main.ts onEvent "closed"): every follow ends, U's lock with it; main.ts
      * calls settle() once the store is opened again. */
