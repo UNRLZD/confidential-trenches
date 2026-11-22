@@ -425,10 +425,12 @@ export async function collect({ launchers, shots, source, expect, routes }) {
 // refuses with that code, and a kind named in `holds` is never answered, as a run still going (card app-near-trading:
 // the NEAR buy's Sending and its refusals); the last deposit.quote's id is the deposit's op id, and
 // window.__ctShellPush(facts) posts a state event with that one deposit op ({ stage, ...facts }), as the real page posts
-// a deposit's stages. A kind named in `late` (kind -> [{ stage, txs }]) is answered as above, then LATE_END_MS after its
+// a deposit's stages. A kind named in `late` (kind -> [{ stage, txs, op }]) is answered as above, then LATE_END_MS after its
 // answer each of its ends goes to the frame in order as a progress event under the request's id, as the signing page
 // posts a buy's end it read after answering (packages/signpage/src/pool-buy-evm.ts `late`; card
-// app-shell-posts-a-late-end), and window.__ctShellLate counts the answers whose ends went out. The update run's shell names message API 2 in its ready. The late and silent shells post their ready 7 s after the load
+// app-shell-posts-a-late-end), or with `op` as the request's op in the state's ops (kind buy for pool.buy, sell for
+// pool.sell) and the state sent, as the page records an end its settle reached (card signpage-sent-end-known); and
+// window.__ctShellLate counts the answers whose ends went out. The update run's shell names message API 2 in its ready. The late and silent shells post their ready 7 s after the load
 // and tell the check through window.__ctShellReady. Its headers
 // are SIGN_HOST's _headers with section 4's frame rules: frame-ancestors 'none' and frame-src APP_HOST.
 const SIGNED_IN = { release: "harness-shell", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "1250.00", wallets: [], positions: [], orders: [], held: [], ops: [] };
@@ -485,8 +487,16 @@ addEventListener("message", (e) => {
   const ends = Object.hasOwn(LATE, e.data.type) ? LATE[e.data.type] : null;
   if (ends) {
     const id = e.data.id;
+    const kind = e.data.type === "pool.sell" ? "sell" : "buy";
     setTimeout(() => {
-      for (const x of ends) f.contentWindow.postMessage({ v: 1, type: "progress", id, stage: x.stage, ...(x.txs ? { txs: x.txs } : {}) }, APP);
+      for (const x of ends) {
+        // an end marked op: the request's op recorded in the state's ops under its id, as the page's settle records it
+        // (card signpage-sent-end-known), and the state sent; otherwise a progress event
+        if (x.op) {
+          STATE.ops = [...STATE.ops.filter((o) => o.id !== id), { id, kind, stage: x.stage, txs: x.txs ?? [] }];
+          f.contentWindow.postMessage({ v: 1, type: "state", state: STATE }, APP);
+        } else f.contentWindow.postMessage({ v: 1, type: "progress", id, stage: x.stage, ...(x.txs ? { txs: x.txs } : {}) }, APP);
+      }
       window.__ctShellLate = (window.__ctShellLate ?? 0) + 1;
     }, ${LATE_END_MS});
   }

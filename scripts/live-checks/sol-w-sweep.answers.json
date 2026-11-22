@@ -1,6 +1,6 @@
 {
  "_note": {
-  "good": "this card's build (pool-amounts-are-standard-sizes, packages/signpage/public/app.js as built locally from 6d5783f00)",
+  "good": "this card's build (a-found-wallet-sweeps-past-a-strangers-coin, packages/signpage/public/app.js and index.html as built locally on its final sources)",
   "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them; the found W's rule (card buy-spends-several-pieces) is in none of them",
   "beforeFold": "08290868's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 7's fold (no buy record: an airdrop's full sell swept W with its own coin held): FAIL on the seen and the own-coin rules alone; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them; the found W's rule (card buy-spends-several-pieces) is in none of them",
   "beforeFold8": "5697d7a1's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 8's fold (no buy record: the page's holdings, the helper's word on mainnet, decided the pass and were part of what W read as): FAIL on the seen and own-coin rules; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them; the found W's rule (card buy-spends-several-pieces) is in none of them",
@@ -10,8 +10,8 @@
   "liveBefore": "SIGN_HOST as served at 2026-11-13T21:37Z, before card pool-amounts-are-standard-sizes"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-T1c41lXECTG99RXnv5BWqpuvyuhm7iLADcjElGhKC/BfIBMcfCbhL0179ff9APWQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-T1c41lXECTG99RXnv5BWqpuvyuhm7iLADcjElGhKC/BfIBMcfCbhL0179ff9APWQ",
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-8L2e50ZAdXtdYvlXwOkM1tOj6Hye2Alk423/yOFCmQPLgGDRB3neAuJzz8nYHpDL\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-8L2e50ZAdXtdYvlXwOkM1tOj6Hye2Alk423/yOFCmQPLgGDRB3neAuJzz8nYHpDL",
   "carries": {
    "a full sell carries no deposit back and no reserve, each refused by name, a partial sell's reserve at most the cap of its own constants": true,
    "a partial sell's deposit back is its min out less the reserve as the rules' note of it, a rung, refused by name otherwise": true,
@@ -22,7 +22,7 @@
    "the sweep's rule takes its deposit alone, its value the sweep's note of what W holds past its costs and what W must keep, a rung and at least 0.005 SOL, each refused by name": true,
    "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": true,
    "the sweep's rule leaves W exactly what each owed claim costs, for at most two": true,
-   "the sweep goes on around kept accounts, each counted as an owed claim is, but never around tokens on W's own coins' accounts, a found W's all": true,
+   "the sweep goes on around kept accounts, each counted as an owed claim is, but never around tokens on W's own accounts: a bought W's coins', a found W's every one until its notes' spend is read on the pool's whole mark list, then none while unspent": true,
    "W owed, not dropped, when the rest is under the floor": true,
    "a load that reads W as it read at its last end runs no pass: what W read as is the bytes of W and its accounts, the rent and the rules' version, each W's own in one batched read": true,
    "an owed W's record is dropped only when both RPCs read W empty, kept on every other end from the record as it is then, with what W read as only on W's own state": true,
@@ -39,7 +39,7 @@
    "the sweep's plan refusal ends the pass refused, not given up": true,
    "every sleep of the pass, its tries' and its read-backs', lets the sell lock go": true,
    "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record it holds; the page's buy and sell hosts write and read that record in its store": true,
-   "a found W is swept only once both RPCs read it owning no token account and past its latest transaction's blockhash life, the same latest transaction on both, nothing signed for it before that, a close included, every token account both list it owning closed to it when it holds none, and its history since holding only its teardown's frames when the sweep is built and again before its send": true,
+   "a found W is swept only once its notes' spend is read on the pool's whole mark list (no read naming a note's mark) and both RPCs read it owning no token account of its own (every one once a note is spent, none while unspent) and past its latest transaction's blockhash life and a tap's buy round's gap (that round's tag 3 signed on a blockhash at most 151 + 750 blocks past the least of both RPCs' heights read before its first round, those heights at most 150 apart or the tap refused before it, and the sell host's settle reading the pool's whole list), a stranded buy's W found with no mint of its tap named, a found pass naming no mint and a young hold booking the next run, the same latest transaction on both, nothing signed for it before that, a close included, every token account both list it owning closed to it when it holds none, and its history since holding only its teardown's frames when the sweep is built and again before its send": true,
    "a floor end records W's tail, the user's own, as meta w-tail/sol/<W> {chain, address, l, j, amount}, deleted once W reads empty or its sweep is sent": true
   }
  },
@@ -66,7 +66,7 @@
    "the sweep's plan refusal ends the pass refused, not given up": true,
    "every sleep of the pass, its tries' and its read-backs', lets the sell lock go": true,
    "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record it holds; the page's buy and sell hosts write and read that record in its store": true,
-   "a found W is swept only once both RPCs read it owning no token account and past its latest transaction's blockhash life, the same latest transaction on both, nothing signed for it before that, a close included, every token account both list it owning closed to it when it holds none, and its history since holding only its teardown's frames when the sweep is built and again before its send": true,
+   "a found W is swept only once its notes' spend is read on the pool's whole mark list (no read naming a note's mark) and both RPCs read it owning no token account of its own (every one once a note is spent, none while unspent) and past its latest transaction's blockhash life and a tap's buy round's gap (that round's tag 3 signed on a blockhash at most 151 + 750 blocks past the least of both RPCs' heights read before its first round, those heights at most 150 apart or the tap refused before it, and the sell host's settle reading the pool's whole list), a stranded buy's W found with no mint of its tap named, a found pass naming no mint and a young hold booking the next run, the same latest transaction on both, nothing signed for it before that, a close included, every token account both list it owning closed to it when it holds none, and its history since holding only its teardown's frames when the sweep is built and again before its send": true,
    "a full sell deposits W's surplus": true,
    "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,
    "the full sell's keep counts W's volume accounts owed a claim, on either RPC's read": true,
@@ -217,7 +217,7 @@
    "the sweep's rule takes one deposit, or it then one System transfer from W to the pin's fee payer of 1 to 999,999 lamports, no compute budget, its note on the grid and at least 0.005 SOL, each refused by name": false,
    "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": true,
    "the sweep's rule leaves exactly that, for at most two": true,
-   "the sweep goes on around kept accounts, each counted as an owed claim is, but never around tokens on W's own coins' accounts, a found W's all": false,
+   "the sweep goes on around kept accounts, each counted as an owed claim is, but never around tokens on W's own accounts: a bought W's coins', a found W's every one until its notes' spend is read on the pool's whole mark list, then none while unspent": false,
    "W owed, not dropped, when the rest is under the floor": true,
    "a load that reads W as it read at its last end runs no pass: what W read as is the bytes of W and its accounts, the rent and the rules' version, each W's own in one batched read": true,
    "an owed W's record is dropped only when both RPCs read W empty, kept on every other end from the record as it is then, with what W read as only on W's own state": true,
@@ -234,7 +234,7 @@
    "the sweep's plan refusal ends the pass refused, not given up": true,
    "every sleep of the pass, its tries' and its read-backs', lets the sell lock go": true,
    "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record it holds; the page's buy and sell hosts write and read that record in its store": true,
-   "a found W is swept only once both RPCs read it owning no token account and past its latest transaction's blockhash life, the same latest transaction on both, nothing signed for it before that, a close included, every token account both list it owning closed to it when it holds none, and its history since holding only its teardown's frames when the sweep is built and again before its send": true
+   "a found W is swept only once its notes' spend is read on the pool's whole mark list (no read naming a note's mark) and both RPCs read it owning no token account of its own (every one once a note is spent, none while unspent) and past its latest transaction's blockhash life and a tap's buy round's gap (that round's tag 3 signed on a blockhash at most 151 + 750 blocks past the least of both RPCs' heights read before its first round, those heights at most 150 apart or the tap refused before it, and the sell host's settle reading the pool's whole list), a stranded buy's W found with no mint of its tap named, a found pass naming no mint and a young hold booking the next run, the same latest transaction on both, nothing signed for it before that, a close included, every token account both list it owning closed to it when it holds none, and its history since holding only its teardown's frames when the sweep is built and again before its send": true
   }
  },
  "liveBefore": {
@@ -250,7 +250,7 @@
    "the sweep's rule takes its deposit alone, its value the sweep's note of what W holds past its costs and what W must keep, a rung and at least 0.005 SOL, each refused by name": false,
    "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": true,
    "the sweep's rule leaves W exactly what each owed claim costs, for at most two": false,
-   "the sweep goes on around kept accounts, each counted as an owed claim is, but never around tokens on W's own coins' accounts, a found W's all": true,
+   "the sweep goes on around kept accounts, each counted as an owed claim is, but never around tokens on W's own accounts: a bought W's coins', a found W's every one until its notes' spend is read on the pool's whole mark list, then none while unspent": true,
    "W owed, not dropped, when the rest is under the floor": true,
    "a load that reads W as it read at its last end runs no pass: what W read as is the bytes of W and its accounts, the rent and the rules' version, each W's own in one batched read": true,
    "an owed W's record is dropped only when both RPCs read W empty, kept on every other end from the record as it is then, with what W read as only on W's own state": true,
@@ -267,7 +267,7 @@
    "the sweep's plan refusal ends the pass refused, not given up": true,
    "every sleep of the pass, its tries' and its read-backs', lets the sell lock go": true,
    "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record it holds; the page's buy and sell hosts write and read that record in its store": true,
-   "a found W is swept only once both RPCs read it owning no token account and past its latest transaction's blockhash life, the same latest transaction on both, nothing signed for it before that, a close included, every token account both list it owning closed to it when it holds none, and its history since holding only its teardown's frames when the sweep is built and again before its send": false,
+   "a found W is swept only once its notes' spend is read on the pool's whole mark list (no read naming a note's mark) and both RPCs read it owning no token account of its own (every one once a note is spent, none while unspent) and past its latest transaction's blockhash life and a tap's buy round's gap (that round's tag 3 signed on a blockhash at most 151 + 750 blocks past the least of both RPCs' heights read before its first round, those heights at most 150 apart or the tap refused before it, and the sell host's settle reading the pool's whole list), a stranded buy's W found with no mint of its tap named, a found pass naming no mint and a young hold booking the next run, the same latest transaction on both, nothing signed for it before that, a close included, every token account both list it owning closed to it when it holds none, and its history since holding only its teardown's frames when the sweep is built and again before its send": false,
    "a floor end records W's tail, the user's own, as meta w-tail/sol/<W> {chain, address, l, j, amount}, deleted once W reads empty or its sweep is sent": false
   }
  }

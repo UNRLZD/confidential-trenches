@@ -75,7 +75,9 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["(a.rec===void 0&&!a.none?n.passes+1:c)>=3?`steady`", "(a.rec===void 0&&!a.none?n.passes+1:c)>=1?`steady`", 4],
     ["||l===`again`", "", 4],
     ["t.unproven!==`again`);", "!0);", 4],
-    ["n.found===!0?{bare:!0}:l?{unproven:l}:{}", "l?{unproven:l}:{}", 4],
+    ["n.found===!0?{bare:!0,mints:[]}:l?{unproven:l}:{}", "l?{unproven:l}:{}", 4],
+    // review of 359f71639, M1: a found pass naming its record's mints
+    ["n.found===!0?{bare:!0,mints:[]}:l?", "n.found===!0?{bare:!0}:l?", 4],
     ["h.steady&&u.bare!==!0?i:void 0", "h.steady?i:void 0", 4],
     // the positions' hold
     ["D=e.preempt?.();try{let l=0;for(", "D=void 0;try{let l=0;for(", 5],
