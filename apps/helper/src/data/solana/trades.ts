@@ -90,6 +90,9 @@ export const WHOLE_WINDOW_MS = 10_000;
  *  whole; its top pool's tape only while it holds no row of its own): a minute, so a coin at the budget's edge never
  *  flips between whole and not read to read. */
 export const CUT_KEEP_MS = 60_000;
+/** Card helper-tape-handover-judges-handed-books: the Server-Timing part of a trades answer whose tape the previous
+ *  process handed over (restore). */
+export const HANDED_TIMING = 'sol-handed;desc="tape from the handover"';
 /** Card helper-sol-tape-checks-hold, round 3: the places of each second (of WHOLE_PER_S) a busy coin (WHOLE_QUIET_MAX or
  *  more whole reads in its WHOLE_WINDOW_MS) may not take, kept for the quiet coins. Live run 44901581973 (helper
  *  4e03fcbac, 21 Nov 12:0xZ): a DBC coin trading 3 times in 136 s was cut "past every coin's 10 a second" each time,
@@ -654,6 +657,9 @@ function within(p: Promise<unknown>, ms: number): Promise<void> {
 type Held = { slot: number; seq: number; t: RawTrade[] };
 type Entry = {
   mint: string;
+  /** Card helper-tape-handover-judges-handed-books: the tape came from the previous process's handover (restore),
+   *  named in its trades answer (HANDED_TIMING). */
+  handed?: true;
   /** The first read's phases (first()), named in a cold tape's Server-Timing (sol-open) so a slow first answer names
    *  its wait: the mint's account, the stream's subscription, and what answered it (the walk, a trade held from the
    *  walk or the stream, or the bound), each in ms from the read's start. */
@@ -1995,7 +2001,7 @@ export function createSolanaTrades(deps: {
       back = { before: null, events: [], book: bb, done: true, born: b.born, txs: 0, n: 0, want: { tf: "1d", limit: 1 } };
     }
     // a restored tape is one whose stream dropped at the handover: behind (filling) until its gap from `from` is walked
-    const e: Entry = { mint, decimals: v.decimals as number, quoteMint: qm, book, held, refs, lastSig: v.from, covered: v.covered as number, state: "refilling", gapFrom: v.from, refilling: null, inflight: new Map(), touched: v.touched as number, readAt: v.readAt as number, seen: 0, traded: 0, ...(v.whole === undefined ? {} : { whole: v.whole as number }), ...(v.holed === true ? { holed: true as const } : {}), ...(v.oldest === undefined ? {} : { oldest: v.oldest as string | null }), ...(back === undefined ? {} : { back }) };
+    const e: Entry = { mint, handed: true, decimals: v.decimals as number, quoteMint: qm, book, held, refs, lastSig: v.from, covered: v.covered as number, state: "refilling", gapFrom: v.from, refilling: null, inflight: new Map(), touched: v.touched as number, readAt: v.readAt as number, seen: 0, traded: 0, ...(v.whole === undefined ? {} : { whole: v.whole as number }), ...(v.holed === true ? { holed: true as const } : {}), ...(v.oldest === undefined ? {} : { oldest: v.oldest as string | null }), ...(back === undefined ? {} : { back }) };
     return [mint, e, seqMax];
   }
 
@@ -2249,7 +2255,9 @@ export function createSolanaTrades(deps: {
       // card helper-sol-tape-checks-hold: a tape past the budget (named no reach while the cut lasts, above) names the
       // cut, as the vendor's rows do: it lacks the unread trade and nothing else in it says so (a local helper
       // at 321baac8c, 20 Nov 05:36Z: CARDSccU's tape cold, no whole_ms, its DLMM trade 4vEPr51yjSyE unread)
-      const timing = cut ? `${readTo(e)}, sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` : readTo(e);
+      const own = cut ? `${readTo(e)}, sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` : readTo(e);
+      // card helper-tape-handover-judges-handed-books: a tape the handover gave names it
+      const timing = e.handed === true ? `${own}, ${HANDED_TIMING}` : own;
       return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing };
     },
   };

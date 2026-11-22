@@ -9,12 +9,15 @@
 //   - GET <helper>/v1/health: its X-Helper-Started header and commit;
 //   - for each chain, GET /v1/market/lists?chain=<chain>, then for its first COINS coins (or --token <chain>:<address>)
 //     GET /v1/market/trades?chain=<chain>&token=<t>&limit=50 with Origin APP, every POLL_MS until it is not filling or
-//     FILLED_MS (tape-read.mjs) from its first read has passed.
+//     FILLED_MS (tape-read.mjs) from its first read has passed, each answer's Server-Timing kept (2,000 chars at most).
 // Judged: the helper names its start; a coin's first answer is short when its last answer holds a row its first did not
 // at or before the first answer's newest row (and, a first answer under 50 rows, anywhere below it): rows the first
 // answer should have held, filled in after it. Rows newer than its newest are the blocks since (a book at rest reads them
-// after its first answer, as on the old helper) and are not judged. A short first answer FAILs while the helper is
-// younger than RESTART_MS (the deploy this card is about) and is INCONCLUSIVE past it (a coin no helper held).
+// after its first answer, as on the old helper) and are not judged. Card helper-tape-handover-judges-handed-books: only a
+// book the old helper handed over is judged. Its answer names it in its Server-Timing (HANDED, swaps.ts HANDED_TIMING),
+// and its first answer short FAILs. A book the old helper did not hand over (one it never held, or an old helper whose
+// warm file holds no books, as helper-24's rollback to 90776a37e on 22 Nov 13:17Z) opens cold: its short first answer is
+// named, not failed (before the card every short first answer on a young helper FAILed, a cold one too).
 // Its runs are helper-tape-handover.answers.json, replayed by its .test.mjs.
 // After: helper
 // Serial: evm-keyed 3 (first of the group: it reads each tape's first answer nearest the deploy; its Base and Robinhood tape reads draw the keyed providers)
@@ -28,12 +31,17 @@ import { FILLED_MS } from "./tape-read.mjs";
 export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
 export const CHAINS = ["base", "robinhood"];
-/** A helper younger than this is judged as just started. [design: one with helper-evm-tapes-survive-a-restart] */
+/** A helper younger than this is named as just started. [design: one with helper-evm-tapes-survive-a-restart] */
 export const RESTART_MS = 20 * 60_000;
 export const LIMIT = 50;
 const COINS = 3;
 const POLL_MS = 1_000;
 const TIMEOUT_MS = 15_000;
+/** The Server-Timing part a trades answer carries when its book came from the handover (apps/helper/src/data/evm/swaps.ts
+ *  HANDED_TIMING); a string from the network, read by this bounded pattern only. */
+export const HANDED = /(?:^|,)\s*evm-handed;/;
+/** Whether an answer's recorded Server-Timing names its book as handed over. */
+export const handedOf = (a) => typeof a?.timing === "string" && a.timing.length <= 2_000 && HANDED.test(a.timing);
 
 /** The rows of an answer's body as [tx, t_ms], or null when it holds none in that shape. */
 const rowsOf = (b) => (Array.isArray(b?.trades) ? b.trades.filter((r) => typeof r?.tx === "string" && Number.isFinite(r?.t_ms)).map((r) => [r.tx, r.t_ms]) : null);
@@ -45,7 +53,7 @@ export async function read(base = BASE, fetchFn = fetch, tokens = {}) {
     const at = Date.now();
     try {
       const r = await fetchFn(`${root}${path}`, { headers: { origin: APP, "cache-control": "no-cache" }, signal: AbortSignal.timeout(TIMEOUT_MS) });
-      return { at, status: r.status, started: r.headers.get("x-helper-started"), body: (await r.text()).slice(0, 200_000) };
+      return { at, status: r.status, started: r.headers.get("x-helper-started"), timing: (r.headers.get("server-timing") ?? "").slice(0, 2_000), body: (await r.text()).slice(0, 200_000) };
     } catch (e) {
       return { at, error: String(e?.message ?? e).slice(0, 200) };
     }
@@ -78,7 +86,7 @@ export async function read(base = BASE, fetchFn = fetch, tokens = {}) {
         try {
           b = JSON.parse(a.body ?? "null");
         } catch {}
-        answers.push({ at: a.at, status: a.status ?? null, error: a.error ?? null, filling: b?.filling === true, src: b?.src ?? null, rows: rowsOf(b) });
+        answers.push({ at: a.at, status: a.status ?? null, error: a.error ?? null, filling: b?.filling === true, src: b?.src ?? null, timing: a.timing ?? null, rows: rowsOf(b) });
         if (a.status !== 200 || b?.filling !== true || Date.now() - t0 >= FILLED_MS) break;
         await new Promise((ok) => setTimeout(ok, POLL_MS));
       }
@@ -105,7 +113,6 @@ export function missed(first, last) {
 export function judge(run, chains = CHAINS) {
   const lines = [];
   let bad = false;
-  let quiet = false;
   const say = (ok, what) => {
     lines.push(`${ok ? "GOOD" : "BAD"} ${what}`);
     if (!ok) bad = true;
@@ -116,7 +123,7 @@ export function judge(run, chains = CHAINS) {
   else say(started !== null && started <= h.at, `/v1/health names the helper's start: X-Helper-Started ${JSON.stringify(h.started)} (commit ${h.commit ?? "none"})`);
   const ageMs = started === null ? null : h.at - started;
   const young = ageMs !== null && ageMs < RESTART_MS;
-  if (ageMs !== null) lines.push(`--  the helper started ${Math.round(ageMs / 1_000)} s before the health read (${young ? "within" : "past"} ${RESTART_MS / 60_000} min: ${young ? "a deploy, judged" : "warm, a short first answer not judged"})`);
+  if (ageMs !== null) lines.push(`--  the helper started ${Math.round(ageMs / 1_000)} s before the health read (${young ? "within" : "past"} ${RESTART_MS / 60_000} min${young ? ": a deploy" : ""})`);
   for (const chain of chains) {
     const tapes = run?.chains?.[chain]?.tapes ?? [];
     if (tapes.length === 0) {
@@ -132,16 +139,14 @@ export function judge(run, chains = CHAINS) {
         continue;
       }
       const miss = missed(f, l);
-      const what = `first answer ${f.rows.length} rows${f.filling ? " (filling)" : ""}, last ${l.rows?.length ?? 0} rows ${(((l.at ?? f.at) - f.at) / 1_000).toFixed(1)} s on after ${t.reads} read(s)`;
+      const handed = handedOf(f);
+      const what = `${handed ? "handed over" : "cold"}, first answer ${f.rows.length} rows${f.filling ? " (filling)" : ""}, last ${l.rows?.length ?? 0} rows ${(((l.at ?? f.at) - f.at) / 1_000).toFixed(1)} s on after ${t.reads} read(s)`;
       if (miss.length === 0) say(true, `${tag} ${what}: every row of its span there at its first answer`);
-      else if (young) say(false, `${tag} ${what}: ${miss.length} row(s) at or below its first answer's span filled in after it on a helper ${Math.round(ageMs / 1_000)} s old (oldest ${new Date(Math.min(...miss.map(([, x]) => x))).toISOString()})`);
-      else {
-        lines.push(`--  ${tag} ${what}: ${miss.length} row(s) filled in after its first answer on a warm helper (a coin no helper held)`);
-        quiet = true;
-      }
+      else if (handed) say(false, `${tag} ${what}: ${miss.length} row(s) at or below its first answer's span filled in after it on a helper ${ageMs === null ? "of unnamed age" : `${Math.round(ageMs / 1_000)} s old`} (oldest ${new Date(Math.min(...miss.map(([, x]) => x))).toISOString()})`);
+      else lines.push(`--  ${tag} ${what}: ${miss.length} row(s) filled in after its first answer; its book was not handed over (it opened cold), so it is named, not judged`);
     }
   }
-  const verdict = verdictOf(bad, quiet);
+  const verdict = verdictOf(bad, false);
   return { ok: verdict === "PASS", verdict, lines };
 }
 

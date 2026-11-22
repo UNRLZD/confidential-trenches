@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeChain, ICNT, open, REC, VVV } from "../../../test/evm-swaps/base.ts";
-import { IDLE_MS } from "./swaps.ts";
+import { HANDED_TIMING, IDLE_MS } from "./swaps.ts";
 
 const bodyOf = async (p: Promise<{ body: string }>) => JSON.parse((await p).body);
 const handed = (s: { state(): unknown }) => JSON.parse(JSON.stringify(s.state())) as Record<string, unknown>;
@@ -119,4 +119,26 @@ test("card helper-tape-handover (hostile): a book whose bars, swaps or blocks ar
     assert.ok(Array.isArray(a.trades) && a.trades.length > 0, `${what}: the tape answered from its own read`);
     next.stop();
   }
+});
+
+test("card helper-tape-handover-judges-handed-books: a restored book's trades answer names the handover in its Server-Timing, and a cold one names nothing, so the live check judges only a book the old helper handed over (red at main 5d7c3a99d: no answer said where its book came from)", async () => {
+  const { clock, head, st } = await warmOld();
+  clock.t += 30_000;
+  const c = fakeChain();
+  c.st.head = head;
+  const next = open(c, clock, { pools: new Map() });
+  assert.equal(next.restore(st), true);
+  const handedOver = await next.trades(ICNT, 50);
+  assert.ok((JSON.parse(handedOver.body).trades as unknown[]).length > 0, "the restored book answers its rows");
+  assert.ok((handedOver.timing ?? "").includes(HANDED_TIMING), `a handed book is named: ${handedOver.timing}`);
+  // a coin the old helper never held opens cold on the same helper, and an old helper's own book is never named
+  const c2 = fakeChain();
+  c2.st.head = head;
+  const cold = open(c2, { t: clock.t });
+  await cold.candles(ICNT, "1m", null, 500);
+  const coldAnswer = await cold.trades(ICNT, 50);
+  assert.ok((JSON.parse(coldAnswer.body).trades as unknown[]).length > 0, "the cold book answers its rows");
+  assert.ok(!(coldAnswer.timing ?? "").includes("handed"), `a cold book is not named: ${coldAnswer.timing}`);
+  next.stop();
+  cold.stop();
 });
