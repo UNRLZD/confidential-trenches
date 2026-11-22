@@ -2122,10 +2122,12 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     // found W each token account both RPCs list it owning (foundTokenAccounts, `extra`), so a zero-balance one, which
     // anyone can open for W, is closed to W, never a hold for good (review P2 of c7b85ba3a)
     // the accounts whose tokens hold the sweep (keepOf, review P1-2 of 1d3b96d9c): W's account of each of its own coins,
-    // the mints its buy record names; on a found W, whose record names none, any (a coin W holds may be its own; the
-    // found W's rule, foundPast, holds such a W before this anyway)
+    // the mints its buy record names; on a found W, whose record names none, its coin as both RPCs read W's history once
+    // the found W's rule's time part holds (foundCoin, card a-found-wallet-sweeps-past-a-strangers-coin): W's account of
+    // its buy's coin, or none when both read no buy, so a stranger's unit sent to W never holds its SOL; any before then
     const mine = new Set(x.mints.map((m) => solanaAta(w.address, m.mint, m.program)));
-    const ownAccounts = (address: string): boolean => x.bare === true || mine.has(address);
+    let foundOwn: ReadonlySet<string> | undefined;
+    const ownAccounts = (address: string): boolean => (x.bare === true ? foundOwn === undefined || foundOwn.has(address) : mine.has(address));
     const addressesOf = (extra: readonly string[]): string[] => [...new Set([...solanaTeardownAddresses(w.address, x.mints), ...extra])];
     // W's accounts and W, in one getMultipleAccounts call on each RPC (one slot each): the plan over them, and whether
     // W still holds a mint it traded (review M-B: an owed record from a sell that never filled, or not yet); planned with
@@ -2199,6 +2201,14 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       let why = "";
       const since = x.bare === true ? await foundPast(rpcs, w.address).catch((e: unknown) => ((why = `its latest transaction not read on both RPCs (${faultOf(e)})`), null)) : undefined;
       if (since === null) return { young: why || "not yet past its last transaction's blockhash on both RPCs, or the two not reading that transaction alike", keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
+      // past it, a found W's buy read on both RPCs names the accounts whose tokens hold it (foundCoin); no answer, or the
+      // two apart, holds W as before
+      if (since !== undefined) {
+        foundOwn = undefined;
+        const coin = await foundCoin(rpcs, x.program, w.address).catch((e: unknown) => ((why = `its buy not read on both RPCs (${faultOf(e)})`), null));
+        if (coin === null) return { young: why || "its buy not read alike on both RPCs", keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
+        foundOwn = coin;
+      }
       const extra = since === undefined ? [] : await foundTokenAccounts(tokens, w.address).catch((e: unknown) => ((why = `its token accounts not read alike on both RPCs (${faultOf(e)})`), null));
       if (extra === null) return { young: why, keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
       const read = await readW(undefined, extra);
@@ -2282,8 +2292,8 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       // a found W (no buy recorded, card buy-spends-several-pieces): swept only on the found W's rule, its time part read
       // before the teardown and the rest here, in the pass that reads the lamports the sweep signs for (foundSince);
       // short of it W holds, not as its own state, so every later pass reads it again
-      const rule = since === undefined ? true : await foundSince(tokens, rpcs, w.address, since, own).catch((e: unknown) => faultOf(e));
-      if (rule !== true) return { end: "holds" as const, steady: false, detail: `a found W: ${rule === false ? "owning a token account, or a transaction on W since the rule's read, on either RPC" : `its token accounts or history since the rule's read not read on both RPCs (${rule})`}` };
+      const rule = since === undefined ? true : await foundSince(tokens, rpcs, w.address, since, own, foundOwn ?? null).catch((e: unknown) => faultOf(e));
+      if (rule !== true) return { end: "holds" as const, steady: false, detail: `a found W: ${rule === false ? "owning an account of its coin, or a transaction on W since the rule's read, on either RPC" : `its token accounts or history since the rule's read not read on both RPCs (${rule})`}` };
       // the gate; the sizes the sweep is priced on are read again with its pages (depositHeld, review P2-1 of 77055f4e)
       let sizes = await treeSizes(rpcs, x.program, x.pool, wait);
       const s = await seed();
@@ -2385,7 +2395,7 @@ export function leftAfter(meta: Record<string, unknown> | undefined, owner: stri
  * stable cashback, tokens on any account but W's own coins'): the sweep leaves what claiming or closing them later
  * costs (solanaSweepKeep) and carries the rest (card every-lamport-can-move, review P2-1 of T1+T2). null, W keeping
  * everything, when one of W's own coins' accounts (`own`: W's account of each mint its buy record names, x.mints; on a
- * found W any token account) holds tokens W could still sell (`tokens`: selling them needs W's SOL), or more claims are owed than the rule bounds. Tokens
+ * found W its buy's coin's account as both RPCs read W's history, foundCoin, or none) holds tokens W could still sell (`tokens`: selling them needs W's SOL), or more claims are owed than the rule bounds. Tokens
  * on any other account hold nothing (review P1-2 of 1d3b96d9c: W's address is public, so a stranger's unit of USDC in
  * W's USDC account, which every rent back reads, would otherwise keep a whole sale on W for good).
  */
@@ -2792,9 +2802,12 @@ function randomBelow(n: number): number {
  * The found W's rule (card buy-spends-several-pieces): a W the device found holding SOL with no buy of its recorded (the
  * own W of an UNSPENT note: a buy of several pieces whose pieces paid W and whose buy, maybe still in flight on another
  * device on the same 12 words, has not landed) is swept only when, on both RPCs:
- *  - W owns no token account of either token program (getTokenAccountsByOwner, W alone): the teardown before it closes
- *    to W each one both RPCs list holding none, any mint, so a stranger's (anyone can open one for W) never holds the
- *    sweep for good (review P2 of c7b85ba3a); one holding tokens is kept, and W with it;
+ *  - W owns no account of its own coin (getTokenAccountsByOwner, W alone, either token program; its coin as both RPCs
+ *    read W's history once the second part holds, foundCoin: its buy's, or none): the teardown before it closes to W
+ *    each one both RPCs list holding none, any mint, so a stranger's (anyone can open one for W) never holds the sweep
+ *    for good (review P2 of c7b85ba3a); one holding tokens is kept, at its close cost, and W with it only when it is
+ *    W's coin's (card a-found-wallet-sweeps-past-a-strangers-coin: a stranger's unit, about 0.002 SOL, kept a whole
+ *    buy's pieces on W); W's buy not read alike on both, W holds;
  *  - W's latest transaction (getSignaturesForAddress, W alone, the same signature on both) is in a finalized block, and
  *    each RPC's finalized block height is past that block's height + 151: past the life of any blockhash a transaction
  *    signed before it carries, so no buy that relies on the SOL already on W can still land (its tag 3 was signed
@@ -2826,10 +2839,21 @@ async function latestAt(rpcs: Rpcs, owner: string): Promise<{ signature: string;
   return one[0] && one[1] && one[0].signature === one[1].signature && one[0].slot === one[1].slot ? one[0] : null;
 }
 const latestOf = async (rpcs: Rpcs, owner: string): Promise<string | null> => (await latestAt(rpcs, owner))?.signature ?? null;
-/** The found W's rule's other part, in the sweep's pass: W owns no token account and shows nothing since `since` but
- *  `own`, on both RPCs. */
-async function foundSince(tokens: Rpcs, rpcs: Rpcs, owner: string, since: string, own: ReadonlySet<string>): Promise<boolean> {
-  return (await ownsNoTokens(tokens, owner)) && (await onlyOwnSince(rpcs, owner, since, own));
+/** The found W's rule's other part, in the sweep's pass: W owns no account of its coin (`coin`, foundCoin's set, the
+ *  one keepOf holds on; null, any token account) and shows nothing since `since` but `own`, on both RPCs. */
+async function foundSince(tokens: Rpcs, rpcs: Rpcs, owner: string, since: string, own: ReadonlySet<string>, coin: ReadonlySet<string> | null): Promise<boolean> {
+  return (await ownsNoTokens(tokens, owner, coin)) && (await onlyOwnSince(rpcs, owner, since, own));
+}
+/** A found W's own coin, past the found W's rule's time part (card a-found-wallet-sweeps-past-a-strangers-coin): W's
+ *  buy as each RPC reads W's own history at finalized (the restore's reader, buy-wallets.ts solanaBuyReader: W signs it,
+ *  the pinned pool's tag 3 names W, one mint rises in W's account). Both "no buy": the empty set, so no token account
+ *  holds W's SOL (a stranger can open one for W and send it a unit for about 0.002 SOL); the same buy on both: W's
+ *  account of that coin; null when either gives no answer or the two read apart. Each request names W alone. */
+async function foundCoin(rpcs: Rpcs, program: string, owner: string): Promise<ReadonlySet<string> | null> {
+  const [a, b] = await both(rpcs, (r) => solanaBuyReader(r, program).read(owner));
+  if (a === "none" && b === "none") return new Set();
+  if (a === null || b === null || a === "none" || b === "none" || a.mint !== b.mint || a.program !== b.program) return null;
+  return new Set([solanaAta(owner, a.mint, a.program)]);
 }
 /** Every transaction on `owner` after `since` is one of `own`, on both RPCs (getSignaturesForAddress until `since`, W
  *  alone, at most one more than `own` asked for): an RPC that does not know `since` lists what came before it, which is
@@ -2872,12 +2896,17 @@ async function foundTokenAccounts(rpcs: Rpcs, owner: string): Promise<string[]> 
   if (lists[0].join(",") !== lists[1].join(",")) throw new Error("the two RPCs list W's token accounts apart");
   return lists[0].slice(0, FOUND_CLOSE_MAX);
 }
-/** Both RPCs read `owner` owning no token account of either token program (four calls, each naming W alone). */
-async function ownsNoTokens(rpcs: Rpcs, owner: string): Promise<boolean> {
+/** Both RPCs read `owner` owning no token account in `coin` (foundCoin's set, the one keepOf holds on; null: any), of
+ *  either token program (four calls, each naming W alone): an account outside it is a stranger's, kept at its close
+ *  cost (keepOf), never a hold. */
+async function ownsNoTokens(rpcs: Rpcs, owner: string, coin: ReadonlySet<string> | null): Promise<boolean> {
   const reads = await Promise.all(
     rpcs.flatMap((r) => [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM].map((programId) => r("getTokenAccountsByOwner", [owner, { programId }, { encoding: "base64", commitment: "confirmed" }]))),
   );
-  return reads.every((x) => Array.isArray((x as { value?: unknown } | null)?.value) && ((x as { value: unknown[] }).value.length === 0));
+  return reads.every((x) => {
+    const list = (x as { value?: unknown } | null)?.value;
+    return Array.isArray(list) && list.every((e: { pubkey?: unknown } | null) => typeof e?.pubkey === "string" && coin !== null && !coin.has(e.pubkey));
+  });
 }
 
 /** The listed buy wallets, then each owed record's W that none of them names (ownW). */

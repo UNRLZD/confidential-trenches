@@ -50,7 +50,7 @@ import { isRung } from "../../wallet/src/pool/ladder.ts";
 import { ridePiece } from "../src/pool-withdraw.ts";
 import { poolSellPays } from "../src/pool-sell-dry.ts";
 
-import { SEED64, L, J, W, PIN, SCOPE, VF, MINT, AMOUNT, SLIPPAGE, ASK, UNITS, FEE, feeOf, N, ENOUGH, enc, be32, beInt, FRONT_RUN, markOf, RETURN, SECOND, preOf, MINT_READ, TOKEN_PROGRAM, ATA, REF, MIN_OUT, nativeAccount, tokenAccount, pageBytes, chain, rentMin, type Acc, type Plant, type Venue } from "./pool-sell-world.ts";
+import { SEED64, L, J, W, wReleaseJson, PIN, SCOPE, VF, MINT, AMOUNT, SLIPPAGE, ASK, UNITS, FEE, feeOf, N, ENOUGH, enc, be32, beInt, FRONT_RUN, markOf, RETURN, SECOND, preOf, MINT_READ, TOKEN_PROGRAM, ATA, REF, MIN_OUT, nativeAccount, tokenAccount, pageBytes, chain, rentMin, type Acc, type Plant, type Venue } from "./pool-sell-world.ts";
 
 const closers: (() => void)[] = [];
 after(() => closers.forEach((f) => f()));
@@ -2539,11 +2539,12 @@ test("a W no spent note lists, owed by the record of a buy whose pieces landed: 
   assert.ok(w.seeds.length >= 1 && w.seeds.every((s) => s.every((b) => b === 0)), "every seed copy zeroed");
 });
 
-test("a W found holding SOL with no buy recorded (a restore): kept while it owns a token account holding tokens, swept once both read none", async () => {
-  const w = await world({ buy: null }, []);
+test("a W found holding SOL with no buy recorded (a restore): kept while its coin's account holds tokens, swept once both read none", async () => {
+  // W's history reads its buy of the venue's coin on both RPCs (card a-found-wallet-sweeps-past-a-strangers-coin)
+  const w = await world({ buy: null, wFirst: { mint: VF.pump.mint, program: VF.pump.mintRead.owner } }, []);
   const rec: OwedRentBack = { address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true };
   await w.host.owed!.put(rec);
-  // W owns a token account holding tokens (its coin, or anyone's): nothing swept, nothing closed, W kept as it reads
+  // W's coin's account holds tokens: nothing swept, nothing closed, W kept as it reads
   await resumeRentBacks(w.host, fakeLocks());
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
   assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction").length, 0);
@@ -2722,6 +2723,8 @@ test("a found W while another device's tag 3 can still land: the sweep is never 
   for (const p of [0, 1] as const)
     around(w, p, (m, params, r) => {
       if (m === "getSignaturesForAddress") return [{ signature: tag3, slot: VF.pump.slot + 5, err: null }];
+      // the buy reader's read of it: the venue's coin bought (card a-found-wallet-sweeps-past-a-strangers-coin)
+      if (m === "getTransaction" && params[0] === tag3) return wReleaseJson(tag3, { mint: VF.pump.mint, program: VF.pump.mintRead.owner });
       if (m === "getBlock" && params[0] === VF.pump.slot + 5) return { blockHeight: 950 };
       if (m === "getBlockHeight" && (params[0] as { commitment: string }).commitment === "finalized") return 5_000;
       return r(m, params);
@@ -2744,8 +2747,10 @@ test("a found W while another device's tag 3 can still land: the sweep is never 
 // for W, of any mint, under either token program, at an associated address or any other (about 0.002 SOL), and W owning
 // any token account held the found W's sweep for good, its teardown knowing no mint of it. Each one both RPCs list holding
 // none is read by the teardown and closed to W (its rent W's, swept with the rest), under the rule's time part, which runs
-// from the stranger's create as W's latest; one holding tokens is kept and W holds, its SOL and that account as they are.
-test("a found W owning strangers' zero-balance token accounts, of any mint, under either program, at any address: closed to W in the pass, then swept; one holding tokens keeps W as it is", async () => {
+// from the stranger's create as W's latest. One holding tokens (card a-found-wallet-sweeps-past-a-strangers-coin, review
+// adf75824d: a stranger's 1 unit, about 0.002 SOL, kept a whole buy's pieces on W for good) is kept with its tokens, at
+// its close cost, and W's SOL swept, unless W's history reads its buy of that coin on both RPCs: then W holds.
+test("a found W owning strangers' zero-balance token accounts, of any mint, under either program, at any address: closed to W in the pass, then swept; a stranger's unit is kept at its close cost and W swept; W's own coin keeps W", async () => {
   const other = VF.pumpswap.mint;
   const spam = [
     // W's associated account of another mint, under Token
@@ -2773,25 +2778,65 @@ test("a found W owning strangers' zero-balance token accounts, of any mint, unde
   assert.ok(asked.every((c) => c.params[0] === W.address));
   assert.deepEqual([...new Set(asked.map((c) => (c.params[1] as { programId: string }).programId))].sort(), [SOLANA_TOKEN_PROGRAM, TOKEN_2022].sort());
   assert.deepEqual([...new Set(asked.map((c) => c.p))].sort(), [0, 1]);
-  // one holding tokens beside them: the empty ones closed to W, that one kept with its tokens, nothing swept
-  const v = await world({ buy: null }, []);
-  v.c.accounts.delete(VF.pump.ata);
-  for (const t of spam) v.c.accounts.set(t.at, { owner: t.owner, lamports: Number(TOKEN_RENT), data: tokenAccount(0n, 1, other) });
-  const held = base58.encode(new Uint8Array(32).fill(43));
-  v.c.accounts.set(held, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(5n, 1, other) });
-  await v.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
-  await resumeRentBacks(v.host, fakeLocks());
-  for (const t of spam) assert.ok(!v.c.accounts.has(t.at), `${t.at} closed`);
-  assert.equal(new DataView(v.c.accounts.get(held)!.data.buffer).getBigUint64(64, true), 5n, "its tokens where they are");
-  assert.equal(v.c.deposits.filter((d) => d.sweep).length, 0);
-  assert.deepEqual(v.told.filter((t) => t.step === "rent_back").map((t) => t.state), ["kept"]);
-  // emptied later (its holder moves the tokens out): the next load reads W again, closes it and sweeps
-  v.c.accounts.set(held, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(0n, 1, other) });
-  for (const p of [0, 1] as const)
-    around(v, p, (m, params, r) => (m === "getBlockHeight" && (params[0] as { commitment: string }).commitment === "finalized" ? 5_000 : r(m, params)));
-  await resumeRentBacks(v.host, fakeLocks());
-  assert.ok(!v.c.accounts.has(held), "closed once empty");
-  assert.equal(v.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(v.told.slice(-4)));
+  // a stranger's 1 unit beside them, W's history reading no buy on both RPCs: the empty ones closed to W, that one kept
+  // with its unit, W's SOL swept in the same pass, W keeping that account's close cost
+  for (const at of [base58.encode(new Uint8Array(32).fill(43)), solanaAta(W.address, other, SOLANA_TOKEN_PROGRAM)]) {
+    const v = await world({ buy: null }, []);
+    v.c.accounts.delete(VF.pump.ata);
+    for (const t of spam) if (t.at !== at) v.c.accounts.set(t.at, { owner: t.owner, lamports: Number(TOKEN_RENT), data: tokenAccount(0n, 1, other) });
+    v.c.accounts.set(at, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(1n, 1, other) });
+    await v.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
+    await resumeRentBacks(v.host, fakeLocks());
+    for (const t of spam) if (t.at !== at) assert.ok(!v.c.accounts.has(t.at), `${t.at} closed`);
+    assert.equal(new DataView(v.c.accounts.get(at)!.data.buffer).getBigUint64(64, true), 1n, "the stranger's unit where it is");
+    assert.equal(v.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(v.told));
+    restAfterSweep(v, solanaSweepKeep(rent, 0, 1), "W keeps the kept account's cost and the rest past the rung");
+    // the record kept, so a later pass closes that account once it empties
+    assert.ok(v.owed.has(W.address));
+  }
+  // W's history reading its buy of that coin on both RPCs: its account holds W, its SOL and coin where they are
+  const u = await world({ buy: null, wFirst: { mint: other, program: SOLANA_TOKEN_PROGRAM } }, []);
+  u.c.accounts.delete(VF.pump.ata);
+  const coin = solanaAta(W.address, other, SOLANA_TOKEN_PROGRAM);
+  u.c.accounts.set(coin, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(5n, 1, other) });
+  await u.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
+  await resumeRentBacks(u.host, fakeLocks());
+  assert.equal(new DataView(u.c.accounts.get(coin)!.data.buffer).getBigUint64(64, true), 5n, "its coin where it is");
+  assert.equal(u.c.deposits.filter((d) => d.sweep).length, 0);
+  assert.deepEqual(u.told.filter((t) => t.step === "rent_back").map((t) => t.state), ["kept"]);
+});
+
+// Card a-found-wallet-sweeps-past-a-strangers-coin: W's buy, as both RPCs read W's history, decides which account holds a
+// found W. No answer, or the two apart, holds W as before, nothing signed; its buy of one coin holds W on that coin's
+// account alone, never on a stranger's unit of another.
+test("a found W's buy read on both RPCs: no answer or the two apart hold W, nothing signed; its buy's coin holds W, a stranger's unit of another coin never does", async () => {
+  const other = VF.pumpswap.mint;
+  const stranger = base58.encode(new Uint8Array(32).fill(43));
+  const coin = { mint: VF.pump.mint, program: VF.pump.mintRead.owner };
+  const run = async (wFirst: Plant["wFirst"]) => {
+    const v = await world({ buy: null, wFirst }, []);
+    v.c.accounts.delete(VF.pump.ata);
+    v.c.accounts.set(stranger, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(1n, 1, other) });
+    await v.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
+    await resumeRentBacks(v.host, fakeLocks());
+    return v;
+  };
+  for (const [name, first] of [["its first transaction unread", "unread"], ["a buy on RPC 0 alone", { ...coin, on: 0 }], ["a buy on RPC 1 alone", { ...coin, on: 1 }]] as const) {
+    const v = await run(first);
+    assert.equal(v.c.deposits.filter((d) => d.sweep).length, 0, name);
+    assert.equal(v.c.calls.filter((c) => c.method === "sendTransaction" || c.method === "simulateTransaction").length, 0, `${name}: nothing built`);
+    const told = v.told.filter((t) => t.step === "rent_back");
+    assert.deepEqual(told.map((t) => [t.state, t.detail]), [["holds", "a found W: its buy not read alike on both RPCs"]], name);
+    assert.ok(v.owed.has(W.address), `${name}: still owed, read again at the next load`);
+  }
+  // its buy of the venue's coin on both, that coin's account gone: the stranger's unit of another holds nothing, W swept
+  const b = await run(coin);
+  assert.equal(b.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(b.told));
+  assert.equal(new DataView(b.c.accounts.get(stranger)!.data.buffer).getBigUint64(64, true), 1n, "the stranger's unit where it is");
+  // the buy reads named W alone, on both RPCs
+  const asked = b.c.calls.filter((c) => c.method === "getSignaturesForAddress" && (c.params[1] as { commitment: string }).commitment === "finalized");
+  assert.ok(asked.length >= 2 && asked.every((c) => c.params[0] === W.address), JSON.stringify(asked.map((c) => c.params[0])));
+  assert.deepEqual([...new Set(asked.map((c) => c.p))].sort(), [0, 1]);
 });
 
 // More strangers' accounts than one pass reads (FOUND_CLOSE_MAX): each pass closes the first ones and holds, and a later
@@ -7183,11 +7228,13 @@ test("round-trip-costs-less P2-2: a W with an older own send is still held by an
 // review P3-8 of 024e8a89d (probe P-H): a found W kept only by a stranger's account holding tokens (no close in its
 // pass, W unchanged) is passed again at a later load once that account is empty (`r.steady && x.bare !== true` at the
 // found W's seen; `r.steady` alone survived, since the card's own test closes spam first, which changes W)
-test("round-trip-costs-less P3-8: a found W kept by a stranger's holding account alone is passed again once that account empties", async () => {
+test("round-trip-costs-less P3-8: a found W kept by its coin's holding account alone is passed again once that account empties", async () => {
   const other = VF.pumpswap.mint;
-  const v = await world({ buy: null }, []);
+  // W's history reads its buy of `other` on both RPCs, so that coin's account holds W (card
+  // a-found-wallet-sweeps-past-a-strangers-coin: a stranger's account no longer does)
+  const v = await world({ buy: null, wFirst: { mint: other, program: SOLANA_TOKEN_PROGRAM } }, []);
   v.c.accounts.delete(VF.pump.ata);
-  const held = base58.encode(new Uint8Array(32).fill(43));
+  const held = solanaAta(W.address, other, SOLANA_TOKEN_PROGRAM);
   v.c.accounts.set(held, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(5n, 1, other) });
   await v.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
   await resumeRentBacks(v.host, fakeLocks());
