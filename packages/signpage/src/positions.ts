@@ -82,6 +82,7 @@ import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { ANSWER_ROOM, pickOps } from "./state.ts";
 import { poolUnits } from "./rules/pool.ts";
 import { noted, txEnd, type LegEnd, type TradeStore } from "./trade.ts";
+import { legsStage } from "./pool-buy.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 
 export type Position = SignpageState["positions"][number];
@@ -604,13 +605,18 @@ export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBu
 /**
  * A Solana pool buy's op a closed or reloaded page left at "sent" (card signpage-sent-end-recorded): its end read from
  * its own txs, each on both RPCs by trade.ts txEnd (the kit's readSolanaTxEnd: filled or failed only on both reads,
- * not_landed only once both read its blockhash past its last height), and written by trade.ts's noted() rule (every tx
- * filled: filled; some: part_filled; else not_landed). Any tx unknown leaves the op as it is, read again at the next
+ * not_landed only once both read its blockhash past its last height), each tx's end noted on it (trade.ts noted()), and
+ * the op's stage the one the page would have shown: failed is refused, as the run answers it, and the legs' stages make
+ * the op's by pool-buy.ts legsStage (every tx filled: filled; some: part_filled; every one refused: refused; else
+ * not_landed). Any tx unknown leaves the op as it is, read again at the next
  * state read. Only ops of kind buy, chain solana, at "sent", every tx with its blockhash and last height (recordPoolBuy);
  * an op from before them, another chain's (an EVM buy's sent op has no tx), or one `running` names (this page's own
  * run, whose end is its own) is never read. Written in one update that writes only while the op is still "sent", so a
  * run's own end that came first stays. A filled end here has no units: src/trade-fill.ts reads them from its tx.
  */
+/** A tx's end as a Solana pool buy's run answers it (pool-buy.ts: a part failed on chain on both RPCs is refused). */
+const LEG_STAGE: Readonly<Record<LegEnd, "filled" | "refused" | "not_landed">> = { filled: "filled", failed: "refused", not_landed: "not_landed" };
+
 export async function settleSentBuys(store: Pick<TradeStore, "get" | "keys" | "update">, providers: readonly [SolanaRpc, SolanaRpc], running: (id: string) => boolean = () => false): Promise<string[]> {
   const ended: string[] = [];
   for (const k of await store.keys("ops")) {
@@ -622,12 +628,17 @@ export async function settleSentBuys(store: Pick<TradeStore, "get" | "keys" | "u
     if (at.some((x) => x === null)) continue;
     const ends = await Promise.all(txs.map((t, i) => txEnd(providers, { sig: t.hash!, lvbh: at[i]!.lvbh, blockhash: at[i]!.blockhash })));
     if (ends.some((e) => e === "unknown")) continue;
+    // the end the page would have shown (the CO's ruling on the money review's question 2): each tx's end as the run
+    // reads it (failed on both RPCs: refused, pool-buy.ts; past its blockhash on both: not_landed; landed: filled), the
+    // op's stage from them by the pool buy's own rule (legsStage), never noted()'s, which reads a failed tx not_landed
+    const stage = legsStage(ends.map((e) => LEG_STAGE[e as LegEnd]));
     let wrote = false;
     await store.update("ops", k, (v) => {
       const r = v as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
       if (r?.kind !== "buy" || r.stage !== "sent") return v;
       wrote = true;
-      return txs.reduce<object>((o, t, i) => noted(o as { stage?: unknown; txs?: unknown }, t.hash!, ends[i] as LegEnd), r);
+      // each tx's own end noted on it (trade.ts noted()), the op's stage legsStage's
+      return { ...txs.reduce<object>((o, t, i) => noted(o as { stage?: unknown; txs?: unknown }, t.hash!, ends[i] as LegEnd), r), stage };
     });
     if (wrote) ended.push(k);
   }

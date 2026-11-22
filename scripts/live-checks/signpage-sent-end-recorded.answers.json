@@ -1,8 +1,8 @@
 {
  "good": {
-  "note": "branch card/signpage-sent-end-recorded (main 2d870021c with this card's part 1 sources), built with build-app.mjs --out, read 2026-11-22T16:34:16.278Z",
-  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-x64UtJQX9xaGUh0S9tQ6euNgk5tAgIyq9yFa3AB/HOh9fid9A7oTPYH/G7wGHmid\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-x64UtJQX9xaGUh0S9tQ6euNgk5tAgIyq9yFa3AB/HOh9fid9A7oTPYH/G7wGHmid",
+  "note": "branch card/signpage-sent-end-recorded (main 2d870021c with this card's part 1 sources and the legsStage end), built with build-app.mjs --out, read 2026-11-22T17:11:03.045Z",
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Z4drowx6JhFeogQNVOC1HueeADFMM8BTHIMD1jOkpfhCPqCZOP0pKn87qfBMroBM\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-Z4drowx6JhFeogQNVOC1HueeADFMM8BTHIMD1jOkpfhCPqCZOP0pKn87qfBMroBM",
   "sent": true,
   "asked": true,
   "end": true,
@@ -10,7 +10,7 @@
   "two": true
  },
  "bad": {
-  "note": "main 2d870021c's sign sources, built with build-app.mjs --out, read 2026-11-22T16:34:16.278Z",
+  "note": "main 2d870021c's sign sources, built with build-app.mjs --out, read 2026-11-22T17:11:03.045Z",
   "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-EV9i6k1bgHDLRcUni9kO9W96ugPCMUO/0WsD/KYBU+PuA4oDGfpF1i28lM6BWtNb\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "sha384": "sha384-EV9i6k1bgHDLRcUni9kO9W96ugPCMUO/0WsD/KYBU+PuA4oDGfpF1i28lM6BWtNb",
   "sent": false,

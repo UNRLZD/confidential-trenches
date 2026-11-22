@@ -54,9 +54,11 @@ const ASKED = "e!==null&&e.result.stage===`sent`&&u(e.result.txs.map(e=>({chain:
 const AT = "let a={result:{stage:`sent`,txs:t.map(e=>({...e,...Ut.get(e.hash)}))}};for(let e of t)Ut.delete(e.hash)";
 const TOLD = "try{e.sendAt?.(R,ts(i).message.blockhash,a)}catch{}";
 const END = "a=i!==void 0&&i.kind===`buy`&&i.stage===`sent`;if(i!==void 0&&(!a||`error`in r))return;let o=n.price===null?null:QQ(n.spend,n.spendDecimals,n.price),s=`error`in r?`refused`:r.result.stage;if(s===`sent`?a:!Xge.has(s))return;let c=`error`in r?[]:r.result.txs.map(e=>({chain:e.chain,hash:e.hash})),l=c.length===0&&a&&Array.isArray(i.txs)?i.txs:c;";
-const SETTLE = "if(a?.kind!==`buy`||a.chain!==`solana`||a.stage!==`sent`||!Array.isArray(a.txs)||a.txs.length===0)continue;let o=a.txs,s=o.map(e=>typeof e==`object`&&e&&typeof e.hash==`string`?$Q(e):null);if(s.some(e=>e===null))continue;let c=await Promise.all(o.map((e,n)=>nW(t,{sig:e.hash,lvbh:s[n].lvbh,blockhash:s[n].blockhash})));if(c.some(e=>e===`unknown`))continue;let l=!1;await e.update(`ops`,i,e=>{let t=e;return t?.kind!==`buy`||t.stage!==`sent`?e:(l=!0,o.reduce((e,t,n)=>iW(e,t.hash,c[n]),t))})";
+const SETTLE = "if(a?.kind!==`buy`||a.chain!==`solana`||a.stage!==`sent`||!Array.isArray(a.txs)||a.txs.length===0)continue;let o=a.txs,s=o.map(e=>typeof e==`object`&&e&&typeof e.hash==`string`?$Q(e):null);if(s.some(e=>e===null))continue;let c=await Promise.all(o.map((e,n)=>nW(t,{sig:e.hash,lvbh:s[n].lvbh,blockhash:s[n].blockhash})));if(c.some(e=>e===`unknown`))continue;let l=sG(c.map(e=>e_e[e])),u=!1;await e.update(`ops`,i,e=>{let t=e;return t?.kind!==`buy`||t.stage!==`sent`?e:(u=!0,{...o.reduce((e,t,n)=>iW(e,t.hash,c[n]),t),stage:l})})";
+const LEG_MAP = "var e_e={filled:`filled`,failed:`refused`,not_landed:`not_landed`}";
+const LEGS = "function sG(e){let t=e.filter(e=>e!==null);return t.length===0?null:t.length===e.length&&t.every(e=>e===`filled`)?`filled`:t.includes(`sent`)||t.includes(`signed`)?`sent`:t.some(e=>e===`filled`||e===`part_filled`)?`part_filled`:t.every(e=>e===`refused`)?`refused`:`not_landed`}";
 const TWO = "l=c===null?void 0:BigInt(Math.min(c[0].height,c[1].height))";
-const ALL = { SENT, ASKED, AT, TOLD, END, SETTLE, TWO };
+const ALL = { SENT, ASKED, AT, TOLD, END, SETTLE, LEG_MAP, LEGS, TWO };
 
 test("facts() reads each mark from the minified code as the build writes it", () => {
   const all = facts(INDEX, Object.values(ALL).join(";"));
@@ -83,6 +85,13 @@ test("planted near misses: each mark's shape one step off is no mark", () => {
     ["settle", "SETTLE", SETTLE.replace("if(c.some(e=>e===`unknown`))continue;", "")],
     ["settle", "SETTLE", SETTLE.replace("t?.kind!==`buy`||t.stage!==`sent`?e:", "t?.kind!==`buy`?e:")],
     ["settle", "SETTLE", SETTLE.replace("||a.chain!==`solana`", "")],
+    // the end the page would have shown (the CO's ruling on review question 2): a failed tx read not_landed, noted()'s
+    // stage kept over the legs', the stage from another list than the map, or a legs rule that is not legsStage's
+    ["settle", "LEG_MAP", LEG_MAP.replace("failed:`refused`", "failed:`not_landed`")],
+    ["settle", "SETTLE", SETTLE.replace(",t),stage:l})", ",t)})")],
+    ["settle", "SETTLE", SETTLE.replace("stage:l}", "stage:u}")],
+    ["settle", "SETTLE", SETTLE.replace("sG(c.map(e=>e_e[e]))", "sG(c)")],
+    ["settle", "LEGS", LEGS.replace("t.every(e=>e===`refused`)?`refused`:`not_landed`", "`not_landed`")],
     // the higher height: one RPC's word frees the note
     ["two", "TWO", TWO.replace("Math.min", "Math.max")],
   ];

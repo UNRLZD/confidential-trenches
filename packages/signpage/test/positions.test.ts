@@ -1348,6 +1348,30 @@ test("card signpage-sent-end-recorded part 1: a reload's settle ends a sent buy 
   }
 });
 
+// The CO's ruling on the money review's question 2: a buy's end after a reload is the end the same page would have
+// shown. A tx failed on chain on both RPCs is refused, as the run answers it (pool-buy.ts: a part failed on both,
+// refused); past its blockhash on both, not_landed; landed, filled; the op's stage from the legs' by pool-buy's own
+// rule (legsStage), never trade.ts noted()'s. A split tap with one leg failed and one filled is part_filled by both
+// rules, so it is held here but cannot fail first; both legs failed is the split case the rules part on.
+test("card signpage-sent-end-recorded part 1: a reload ends a buy as the page would have: failed on both, refused; a split tap's legs by legsStage", async () => {
+  const { legsStage } = await import("../src/pool-buy.ts");
+  const cases: [string, readonly string[], readonly [ReturnType<typeof txReads>, ReturnType<typeof txReads>], string][] = [
+    ["one tx landed with an error on both RPCs", ["F1"], [txReads({ F1: "err" }, 900), txReads({ F1: "err" }, 900)], "refused"],
+    ["a split tap, both legs failed on both", ["F2", "F3"], [txReads({ F2: "err", F3: "err" }, 900), txReads({ F2: "err", F3: "err" }, 900)], "refused"],
+    ["a split tap, one leg failed and one filled", ["F4", "F5"], [txReads({ F4: "err", F5: "ok" }, 900), txReads({ F4: "err", F5: "ok" }, 900)], "part_filled"],
+    ["a split tap, one leg failed and one past its blockhash", ["F6", "F7"], [txReads({ F6: "err" }, 1_200), txReads({ F6: "err" }, 1_200)], "not_landed"],
+  ];
+  for (const [what, sigs, rpcs, stage] of cases) {
+    const s = opsStore({ b: sentOp(sigs) });
+    assert.deepEqual(await settleSentBuys(s, rpcs as never), ["b"], `${what}: told`);
+    const op = s.m.get("b") as { stage: string; txs: { hash: string; state?: string }[] };
+    assert.equal(op.stage, stage, what);
+    assert.equal(op.stage, legsStage(op.txs.map((t) => (t.state === "failed" ? "refused" : (t.state as never)))), `${what}: legsStage's`);
+    assert.deepEqual(op.txs.map((t) => t.hash), sigs, `${what}: its txs kept`);
+    assert.ok(op.txs.every((t) => typeof t.state === "string"), `${what}: each tx's end noted`);
+  }
+});
+
 test("card signpage-sent-end-recorded part 1: the settle reads only a Solana buy op at sent with its blockhash fields: an op from before them, an EVM buy's sent op with no tx, a sell, an end, or this page's own run is left as it is", async () => {
   const both = [txReads({ S1: "ok" }, 900), txReads({ S1: "ok" }, 900)] as never;
   const old = sentOp(["S1"], false);

@@ -10,7 +10,8 @@
 //   - end: the end is written onto that same op only while it reads "sent", never over an end, never a refusal over
 //     sent, and an end with no transactions keeps sent's (recordPoolBuy);
 //   - settle: a reload ends a Solana buy op left at sent from its own txs, each read on both RPCs (src/positions.ts
-//     settleSentBuys over trade.ts txEnd and noted()), any unknown left as it is;
+//     settleSentBuys over trade.ts txEnd), any unknown left as it is, with the end the page would have shown: each tx's
+//     end as the run reads it (failed on both: refused) and the op's stage from them by pool-buy.ts legsStage;
 //   - two: a RESERVED note is freed (the follow's not_landed) only once the lower of both RPCs' finalized heights is past
 //     its last height (../../wallet/src/pool/solana-restore.ts solanaSettleReserved), never on one RPC's word.
 // What each does is held by packages/signpage/test/positions.test.ts (the card's tests and their mutants); a real
@@ -41,7 +42,16 @@ const AT = new RegExp(`txs:${ID}\\.map\\(${ID}=>\\(\\{\\.\\.\\.${ID},\\.\\.\\.${
 const TOLD = new RegExp(`${ID}\\.sendAt\\?\\.\\(${ID},${ID}\\(${ID}\\)\\.message\\.blockhash,${ID}\\)`);
 // settleSentBuys: a Solana buy op at sent, every tx with its fields, ended from both RPCs' reads (txEnd), any unknown
 // left, the end written by noted() only while the op still reads sent
-const SETTLE = new RegExp(`if\\(${ID}\\?\\.kind!==\`buy\`\\|\\|${ID}\\.chain!==\`solana\`\\|\\|${ID}\\.stage!==\`sent\`\\|\\|!Array\\.isArray\\(${ID}\\.txs\\)\\|\\|${ID}\\.txs\\.length===0\\)continue;.{0,240}\\{sig:${ID}\\.hash,lvbh:${ID}\\[${ID}\\]\\.lvbh,blockhash:${ID}\\[${ID}\\]\\.blockhash\\}\\)\\)\\);if\\(${ID}\\.some\\(${ID}=>${ID}===\`unknown\`\\)\\)continue;.{0,80}\\?\\.kind!==\`buy\`\\|\\|${ID}\\.stage!==\`sent\`\\?${ID}:\\(${ID}=!0,${ID}\\.reduce\\(`);
+const SETTLE = new RegExp(`if\\(${ID}\\?\\.kind!==\`buy\`\\|\\|${ID}\\.chain!==\`solana\`\\|\\|${ID}\\.stage!==\`sent\`\\|\\|!Array\\.isArray\\(${ID}\\.txs\\)\\|\\|${ID}\\.txs\\.length===0\\)continue;.{0,240}\\{sig:${ID}\\.hash,lvbh:${ID}\\[${ID}\\]\\.lvbh,blockhash:${ID}\\[${ID}\\]\\.blockhash\\}\\)\\)\\);if\\(${ID}\\.some\\(${ID}=>${ID}===\`unknown\`\\)\\)continue;let (${ID})=(${ID})\\(${ID}\\.map\\(${ID}=>(${ID})\\[${ID}\\]\\)\\),${ID}=!1;.{0,80}\\?\\.kind!==\`buy\`\\|\\|${ID}\\.stage!==\`sent\`\\?${ID}:\\(${ID}=!0,\\{\\.\\.\\.${ID}\\.reduce\\(.{0,60}\\),stage:(${ID})\\}\\)`);
+// the tx ends' stages the settle maps through (failed on both RPCs: refused, as the run answers it) and the legs rule
+// it takes the op's stage from (pool-buy.ts legsStage: every refused, refused; else not_landed), each where it is defined
+const esc = (n) => n.replace(/\$/g, "\\$");
+const LEG_MAP = (m) => new RegExp(`(?:^|[^\\w$])${esc(m)}=\\{filled:\`filled\`,failed:\`refused\`,not_landed:\`not_landed\`\\}`);
+const LEGS = (f) => new RegExp(`function ${esc(f)}\\(${ID}\\)\\{let ${ID}=${ID}\\.filter\\(${ID}=>${ID}!==null\\);.{0,240}\\.every\\(${ID}=>${ID}===\`refused\`\\)\\?\`refused\`:\`not_landed\`\\}`);
+const settleOf = (js) => {
+  const m = SETTLE.exec(js);
+  return m !== null && m[1] === m[4] && LEG_MAP(m[3]).test(js) && LEGS(m[2]).test(js);
+};
 // recordPoolBuy: an op already there is written over only while it is this buy's "sent", and never by a refusal; an
 // end with no transactions keeps sent's
 const END = new RegExp(`${ID}\\.kind===\`buy\`&&${ID}\\.stage===\`sent\`;if\\(${ID}!==void 0&&\\(!${ID}\\|\\|\`error\`in ${ID}\\)\\)return;[^;]*;if\\(${ID}===\`sent\`\\?${ID}:!${ID}\\.has\\(${ID}\\)\\)return;let ${ID}=[^;]*,${ID}=${ID}\\.length===0&&${ID}&&Array\\.isArray\\(${ID}\\.txs\\)\\?${ID}\\.txs:${ID};`);
@@ -50,7 +60,7 @@ const TWO = new RegExp(`BigInt\\(Math\\.min\\(${ID}\\[0\\]\\.height,${ID}\\[1\\]
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
-  return { index, sha384: sha384(js), sent: SENT.test(js), asked: ASKED.test(js) && AT.test(js) && TOLD.test(js), end: END.test(js), settle: SETTLE.test(js), two: TWO.test(js) };
+  return { index, sha384: sha384(js), sent: SENT.test(js), asked: ASKED.test(js) && AT.test(js) && TOLD.test(js), end: END.test(js), settle: settleOf(js), two: TWO.test(js) };
 }
 
 /** The verdict on an answer { index, sha384, sent, asked, end, settle, two }. */
