@@ -478,3 +478,66 @@ test("harness: a request it holds no answer for is refused by name, once per ori
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// card app-shell-posts-a-late-end: a kind named in `late` is answered as any other, then, LATE_END_MS after its answer,
+// each of its late ends goes to the frame as a progress event under the request's own id ({ v, type, id, stage } and
+// its txs when named), in order, as the signing page posts a buy's end read after its answer (packages/signpage/src/
+// pool-buy-evm.ts `late`); any other kind, and a shell with no `late`, posts nothing after its answer.
+test("harness: a kind named in late is answered, then its late ends go out as progress under its id, in order, LATE_END_MS after", async () => {
+  const { mkdtempSync, copyFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const vm = await import("node:vm");
+  const { harnessRoute, LATE_END_MS } = await import("./app-in-shell.mjs");
+  assert.equal(typeof LATE_END_MS, "number", "the shell names how long after its answer a late end goes out");
+  const dir = mkdtempSync(path.join(tmpdir(), "app-in-shell-late-"));
+  copyFileSync(path.join(HERE, "../../apps/terminal/public/_headers"), path.join(dir, "_headers"));
+  const TX = { chain: "base", hash: `0x${"ab".repeat(32)}` };
+  /** The shell's script on a stand-in page: every post to the frame, each with the time it went out (the shell's timers
+   *  run at once, their delay kept). */
+  const shellOf = async (opts) => {
+    const route = await harnessRoute(dir, "signed", opts);
+    let js = null;
+    await route({ request: () => ({ url: () => `${SIGN_HOST}/shell.js` }), fulfill: async (a) => void (js = a.body), abort: async () => {} });
+    const posts = [];
+    let clock = 0;
+    const frameWin = { postMessage: (m, to) => posts.push({ m: JSON.parse(JSON.stringify(m)), to, at: clock }) };
+    const iframe = { contentWindow: frameWin, setAttribute: () => {}, addEventListener: () => {} };
+    let onMessage = null;
+    const win = {
+      location: { pathname: "/", search: "", origin: SIGN_HOST, reload: () => {} },
+      history: { replaceState: () => {} },
+      document: { createElement: () => iframe, body: { appendChild: () => {} } },
+      addEventListener: (t, f) => t === "message" && (onMessage = f),
+      setTimeout: (f, ms) => {
+        clock += ms;
+        f();
+        clock -= ms;
+      },
+    };
+    win.window = win;
+    vm.runInNewContext(js, win);
+    const ask = (type, id, params = {}) => onMessage({ origin: APP_HOST, source: frameWin, data: { v: 1, id, type, ...params } });
+    return { posts, ask, win };
+  };
+  try {
+    const late = { "pool.buy": [{ stage: "refused" }, { stage: "filled", txs: [TX] }] };
+    const s = await shellOf({ answers: { "pool.buy": { stage: "refused", txs: [] } }, late });
+    s.ask("pool.buy", "buy-1", { kind: "pool.buy" });
+    assert.deepEqual(s.posts, [
+      { m: { v: 1, id: "buy-1", ok: true, result: { stage: "refused", txs: [] } }, to: APP_HOST, at: 0 },
+      { m: { v: 1, type: "progress", id: "buy-1", stage: "refused" }, to: APP_HOST, at: LATE_END_MS },
+      { m: { v: 1, type: "progress", id: "buy-1", stage: "filled", txs: [TX] }, to: APP_HOST, at: LATE_END_MS },
+    ]);
+    assert.equal(s.win.__ctShellLate, 1, "the check can read that the late ends went out");
+    // another kind of the same shell, and a shell with no late: the answer only
+    s.posts.length = 0;
+    s.ask("pool.sell", "sell-1");
+    assert.deepEqual(s.posts.map((p) => p.m), [{ v: 1, id: "sell-1", ok: false, error: { code: "not_allowed" } }]);
+    const plain = await shellOf({ answers: { "pool.buy": { stage: "refused", txs: [] } } });
+    plain.ask("pool.buy", "buy-2");
+    assert.deepEqual(plain.posts.map((p) => p.m), [{ v: 1, id: "buy-2", ok: true, result: { stage: "refused", txs: [] } }]);
+    assert.equal(plain.win.__ctShellLate, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
