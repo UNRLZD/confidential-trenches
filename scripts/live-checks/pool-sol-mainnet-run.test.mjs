@@ -6,18 +6,25 @@
 // The record tool: from the window alone it finds the dry run's 8 signatures in order (U funded, deposit, a buy on
 // pump's curve, the sell deposited back, two teardown frames, the exit's release and its payment to the fresh
 // address), and the money gate's own parser reads its record with no problem; a window that ends before the exit fails.
+// On the money gate's three mainnet RPCs (pool-sol-mainnet-run.answers.json good_mainnet_three_operators and
+// pool-sol-mainnet-run.record-mainnet-answers.json, both recorded 2026-11-22 00:05-00:07Z): the check passes with
+// PublicNode left out of the marks it serves only with a key, and fails on a third host whose pool differs; the record
+// tool finds the owner's run with PublicNode, whose history does not reach it, listing none, and fails on a signature
+// only one operator lists.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { parseLive, RPCS } from "../ci/money-gate.mjs";
+import { operatorOf as gateOperatorOf, parseLive, RPCS } from "../ci/money-gate.mjs";
 import { RETRY } from "./provider-answer.mjs";
 import { check } from "./pool-sol-mainnet-run.mjs";
-import { CLUSTERS, facts, findRun, GATE_RPCS, PUMP, PUMPSWAP, recordText } from "./pool-sol-mainnet-run.record.mjs";
+import { CLUSTERS, facts, findRun, GATE_RPCS, NoAnswer, operatorOf, PUMP, PUMPSWAP, recordText } from "./pool-sol-mainnet-run.record.mjs";
 
 RETRY.ms = 0;
 
 const A = JSON.parse(readFileSync(new URL("./pool-sol-mainnet-run.answers.json", import.meta.url), "utf8"));
 const R = JSON.parse(readFileSync(new URL("./pool-sol-mainnet-run.record-answers.json", import.meta.url), "utf8"));
+const R3 = JSON.parse(readFileSync(new URL("./pool-sol-mainnet-run.record-mainnet-answers.json", import.meta.url), "utf8"));
+const [MB, SVS, PN] = RPCS.solana;
 
 /** Each recorded answer once, in the order read (a provider's 429 then its retry's answer, as recorded). */
 function replay(answers) {
@@ -60,7 +67,7 @@ test("planted on the devnet answer: a spent mark only one RPC lists: FAIL", asyn
   scan.json.result.pop();
   const r = await live(rec, answers);
   assert.equal(r.ok, false);
-  assert.match(r.lines.find((l) => l.startsWith("FAIL")), /^FAIL spent marks: .*the two RPCs list different marks/);
+  assert.match(r.lines.find((l) => l.startsWith("FAIL")), /^FAIL spent marks: .*the RPCs list different marks/);
 });
 
 const run = (until = R.until) => findRun({ cluster: R.cluster, since: R.since, until, fetchFn: replay(R.answers), sleep: async () => {} });
@@ -85,9 +92,75 @@ test("a window that ends before the exit: FAIL, no exit found", async () => {
   assert.match(r.lines.find((l) => l.startsWith("FAIL")), /^FAIL an exit to an address: none/);
 });
 
-test("the two RPCs are the money gate's, for both clusters", () => {
-  assert.deepEqual(GATE_RPCS.solana, RPCS.solana);
-  assert.deepEqual(GATE_RPCS["solana-devnet"], RPCS["solana-devnet"]);
+test("the RPCs are the money gate's own list, for both clusters: one list, imported", () => {
+  assert.equal(GATE_RPCS.solana, RPCS.solana);
+  assert.equal(GATE_RPCS["solana-devnet"], RPCS["solana-devnet"]);
+  assert.equal(CLUSTERS.mainnet.rpcs, RPCS.solana);
+  assert.equal(CLUSTERS.devnet.rpcs, RPCS["solana-devnet"]);
+  // each host is its own operator by the gate's own map, so counting by host counts the gate's operators
+  for (const chain of ["solana", "solana-devnet"]) {
+    const ops = RPCS[chain].map((u) => gateOperatorOf(chain, u));
+    assert.equal(new Set(ops).size, RPCS[chain].length, chain);
+    assert.ok(ops.every((o, i) => o !== RPCS[chain][i]), `${chain}: every host is in rpc-operators.mjs`);
+    assert.equal(new Set(RPCS[chain].map((u) => operatorOf(chain, u))).size, RPCS[chain].length);
+  }
+  // the three-operator recordings were read on the gate's list as it is
+  assert.deepEqual(A.good_mainnet_three_operators.rpcs, RPCS.solana);
+  assert.deepEqual(R3.rpcs, RPCS.solana);
+});
+
+test("three operators: the mainnet pool after the owner's run passes, PublicNode left out of the marks it serves only with a key", async () => {
+  const r = await live(A.good_mainnet_three_operators);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.deepEqual(r.books, { deposits: 26n, releases: 14n, deposited: 690928900n, spent: 448381793n });
+  assert.match(r.lines[0], /^PASS the pool \S+: the same bytes and lamports on api\.mainnet-beta\.solana\.com and public\.rpc\.solanavibestation\.com and solana-rpc\.publicnode\.com$/);
+  const notes = r.lines.filter((l) => l.startsWith("note"));
+  assert.equal(notes.length, 2);
+  for (const n of notes) assert.match(n, /^note getProgramAccounts: solana-rpc\.publicnode\.com HTTP 403: served only with a key .*, left out$/);
+});
+
+test("three operators, planted: a third host whose pool differs fails; marks only one operator answers are inconclusive", async () => {
+  const rec = A.good_mainnet_three_operators;
+  const answers = structuredClone(rec.answers);
+  // PublicNode's pool one lamport more, on both reads (the check reads the pool again once when the hosts differ: each
+  // host's recorded pool answer is given a second time)
+  const pools = answers.filter((x) => x.method === "getAccountInfo" && x.params[0] === CLUSTERS.mainnet.pool);
+  for (const a of pools.filter((x) => x.url === PN)) {
+    const j = JSON.parse(a.text);
+    j.result.value.lamports += 1;
+    a.text = JSON.stringify(j);
+  }
+  answers.push(...structuredClone(pools));
+  const r = await live(rec, answers);
+  assert.equal(r.ok, false);
+  assert.match(r.lines.find((l) => l.startsWith("FAIL")), /^FAIL the pool \S+: the same bytes and lamports on /);
+  // the vibe station's marks a 429 too: one operator answers them, never a pass
+  const quiet = replay(rec.answers);
+  const fetchFn = async (url, init) => (url === SVS && JSON.parse(init.body).method === "getProgramAccounts" ? { ok: false, status: 429, text: async () => "", headers: new Headers() } : quiet(url, init));
+  await assert.rejects(check({ cluster: rec.cluster, rpcs: rec.rpcs, fetchFn, sleep: async () => {} }), (e) => e instanceof NoAnswer && /getProgramAccounts: fewer than two operators answered/.test(e.message));
+});
+
+const run3 = (answers = R3.answers) => findRun({ cluster: R3.cluster, since: R3.since, until: R3.until, rpcs: R3.rpcs, fetchFn: replay(answers), sleep: async () => {} });
+
+test("three operators: the record tool finds the owner's mainnet run, PublicNode (no history that far) listing none", async () => {
+  const r = await run3();
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(r.steps.length, 16);
+  assert.match(r.lines[0], /^ok {3}the pool \S+: 10 \/ 10 \/ 0 signatures in the window on api\.mainnet-beta\.solana\.com \/ public\.rpc\.solanavibestation\.com \/ solana-rpc\.publicnode\.com$/);
+  assert.equal(r.steps.filter((s) => s.step === "deposit").length, 1);
+  assert.ok(r.steps.some((s) => s.step === "exit to 9udoXBjKXn9z4ENaW1pz9JqyiBmKTTwqxJLeoaH1wZJh"));
+});
+
+test("three operators, planted: a pool signature only one operator lists fails, PublicNode's empty list never standing in", async () => {
+  const answers = structuredClone(R3.answers);
+  const page = answers.find((x) => x.url === SVS && x.method === "getSignaturesForAddress" && x.params[0] === CLUSTERS.mainnet.pool);
+  const j = JSON.parse(page.text);
+  const dropped = j.result.find((x) => x.blockTime >= R3.since / 1000 && x.blockTime <= R3.until / 1000).signature;
+  j.result = j.result.filter((x) => x.signature !== dropped);
+  page.text = JSON.stringify(j);
+  const r = await run3(answers);
+  assert.equal(r.ok, false);
+  assert.match(r.lines[0], new RegExp(`^FAIL the pool \\S+: 10 / 9 / 0 signatures in the window on .*, on one only: ${dropped}$`));
 });
 
 test("a buy whose pool call invokes PumpSwap is named a buy on PumpSwap, so the record shows which venue ran", () => {

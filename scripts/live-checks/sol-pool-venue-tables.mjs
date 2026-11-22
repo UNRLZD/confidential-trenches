@@ -12,7 +12,10 @@
 //     authority none (frozen), holding exactly the record's addresses; the newest also exactly the kit's own list for
 //     its pages (solanaPoolVenueTableList over the venue's global account, read at finalized on the same two RPCs), so
 //     a venue account that changed since (a new fee recipient) FAILs, naming the next generation as the fix; and every
-//     tx the record lists for it reads back succeeded at finalized on the money gate's two transaction readers (TX_RPCS).
+//     tx the record lists for it reads back succeeded at finalized on two operators of the money gate's transaction
+//     readers (TX_RPCS, the gate's own list) and failed on none, by the gate's rule: a reader's null counts against the tx
+//     only where its history reaches the tx's slot (its first available block at or below it; with no slot read, at or
+//     before the gate's FLOOR), so a reader that keeps a day or so (PublicNode) is left out, as a no-answer is.
 //   - the trees: the pool account's two tree sizes on both RPCs (the larger is judged). For a venue whose buy outgrows
 //     a generation (PumpSwap; the curve fits at any tree size: packages/kit/test/solana-pool-venue-tables.test.ts), the
 //     row FAILs once either tree passes 80 percent of the newest pinned generation's range, naming the entries left.
@@ -42,6 +45,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as kit from "../../packages/kit/src/index.ts";
 import { ALT_PROGRAM, b58encode, DEVNET_GENESIS, MAINNET_GENESIS, MAINNET_RPCS, operatorProblems, RPCS as DEVNET_RPCS } from "./pool-sol-deploy.mjs";
+import { FLOOR, RPCS as MONEY_RPCS } from "../ci/money-gate-reads.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "sol-pool-venue-tables";
@@ -52,13 +56,10 @@ export const CLUSTERS = Object.freeze({
   devnet: { rpcs: DEVNET_RPCS, genesis: DEVNET_GENESIS },
 });
 export const VENUES = kit.SOLANA_POOL_BUY_VENUES;
-/** Where a generation's txs are read back: the money gate's own transaction readers per chain (scripts/ci/money-gate.mjs
- *  RPCS.solana and RPCS["solana-devnet"]; the test holds them equal). publicnode keeps no history that far back: it
- *  answered null for the mainnet curve table's create of 8 Nov on 10 Nov 00:50Z, which api.mainnet-beta read. */
-export const TX_RPCS = Object.freeze({
-  mainnet: ["https://api.mainnet-beta.solana.com", "https://public.rpc.solanavibestation.com"],
-  devnet: ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"],
-});
+/** Where a generation's txs are read back: the money gate's own transaction readers per chain (scripts/ci/money-gate-reads.mjs
+ *  RPCS.solana and RPCS["solana-devnet"], imported, so the two never drift). Each is its own operator
+ *  (scripts/ci/rpc-operators.mjs; the test holds it by the gate's operatorOf), counted by host. */
+export const TX_RPCS = Object.freeze({ mainnet: MONEY_RPCS.solana, devnet: MONEY_RPCS["solana-devnet"] });
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 /** An address lookup table holds at most 256 addresses. */
 const TABLE_MAX = 256;
@@ -77,6 +78,28 @@ async function read(fetchFn, url, method, params) {
   if (a.noAnswer !== undefined) throw new NoAnswer(a.noAnswer);
   if (a.error !== undefined) throw new Error(`${new URL(url).host}: ${method} answered ${JSON.stringify(a.error).slice(0, 120)}`);
   return a.result;
+}
+/** Whether a tx reads back by the money gate's rule: succeeded at finalized on two operators and failed on none. A
+ *  reader with no answer, or whose null its history does not reach (its first available block above the tx's slot from
+ *  another reader; with no slot read, that block's time after FLOOR), is left out; when that leaves fewer than two
+ *  operators holding it, NoAnswer (the row is quiet, never passed). */
+async function readBack(fetchFn, cluster, sig) {
+  const urls = TX_RPCS[cluster];
+  const got = await Promise.allSettled(urls.map((url) => read(fetchFn, url, "getTransaction", [sig, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }])));
+  for (const g of got) if (g.status === "rejected" && !(g.reason instanceof NoAnswer)) throw g.reason;
+  const held = got.map((g) => (g.status === "fulfilled" ? g.value : undefined)); // undefined: no answer
+  if (held.some((x) => x && x.meta?.err !== null)) return false;
+  if (new Set(urls.filter((_, i) => held[i]?.meta).map((u) => new URL(u).host)).size >= 2) return true;
+  const slot = held.find((x) => x?.meta)?.slot;
+  const unread = urls.filter((_, i) => held[i] === undefined).map((u) => `${new URL(u).host}: no answer`);
+  for (const [i, url] of urls.entries()) {
+    if (held[i] !== null) continue;
+    const first = await read(fetchFn, url, "getFirstAvailableBlock", []).catch((e) => (e instanceof NoAnswer ? null : Promise.reject(e)));
+    const reaches = first === null ? false : slot !== undefined ? first <= slot : ((await read(fetchFn, url, "getBlockTime", [first]).catch((e) => (e instanceof NoAnswer ? null : Promise.reject(e)))) ?? Infinity) * 1000 <= FLOOR;
+    if (!reaches) unread.push(`${new URL(url).host}: no history at ${slot ?? "the tx"} (first block ${first ?? "not read"})`);
+  }
+  if (unread.length) throw new NoAnswer(`${sig.slice(0, 12)}... held by fewer than two operators that answered (${unread.join("; ")})`);
+  return false;
 }
 async function account(fetchFn, url, addr) {
   const v = (await read(fetchFn, url, "getAccountInfo", [addr, { encoding: "base64", commitment: "finalized" }]))?.value;
@@ -206,9 +229,8 @@ async function checkRow({ cluster, venue, k, newest, rec, fetchFn, call }) {
       }
     }
     for (const t of g.txs) {
-      const got = await Promise.all(TX_RPCS[cluster].map((url) => read(fetchFn, url, "getTransaction", [t.signature, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }])));
-      const landed = got.every((x) => x && x.meta && x.meta.err === null);
-      say(landed, `${String(t.step ?? "tx").slice(0, 60)} ${t.signature.slice(0, 12)}... reads back succeeded at finalized on ${TX_RPCS[cluster].join(" and ")}: ${landed}`);
+      const landed = await readBack(fetchFn, cluster, t.signature);
+      say(landed, `${String(t.step ?? "tx").slice(0, 60)} ${t.signature.slice(0, 12)}... reads back succeeded at finalized on two operators of ${TX_RPCS[cluster].join(" and ")}: ${landed}`);
     }
   } catch (e) {
     // the kit's reader wraps a provider's throw in its own words: a no-answer is found by its class on the chain

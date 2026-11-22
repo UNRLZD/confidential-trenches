@@ -17,7 +17,8 @@ const SOL_TX = "2z6qyzLaN9dV3SUaNyCGXm4zPQTQ61vuJJnTvbn3vzPkZNwQ8KJhCEETJeN7vtM9
 function stub(answer) {
   return async (url, init) => {
     const { method } = JSON.parse(init.body);
-    const result = answer(url, method);
+    // a stub host keeps every block (card money-gate-solana-reads-past-one-stall) unless its answer says otherwise
+    const result = answer(url, method) ?? (method === "getFirstAvailableBlock" ? { result: 0 } : undefined);
     return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, ...result }) };
   };
 }
@@ -30,6 +31,7 @@ const chainAnswers = (t) => (url, method) => {
   if (method === "eth_getTransactionReceipt") return { result: { status: "0x1", blockNumber: "0x10" } };
   if (method === "eth_getBlockByNumber") return { result: { timestamp: "0x" + t.toString(16) } };
   if (method === "getTransaction") return { result: { meta: { err: null }, blockTime: t } };
+  if (method === "getFirstAvailableBlock") return { result: 0 };
   if (method === "EXPERIMENTAL_tx_status")
     return { result: { final_execution_status: "FINAL", status: { SuccessValue: "" }, receipts: [], receipts_outcome: [], transaction_outcome: { block_hash: "h" } } };
   if (method === "block") return { result: { header: { timestamp_nanosec: String(BigInt(t) * 1000000000n) } } };
@@ -780,7 +782,8 @@ test("a solana-devnet tx failed, missing or old on one devnet RPC is refused", a
 });
 
 test('a devnet signature written as "Tx: solana" is refused on the mainnet RPCs, and a malformed one is refused', async () => {
-  const split = stub((url, method) => (url.startsWith("d") ? chainAnswers(NOV2)(url, method) : { result: null }));
+  // the mainnet hosts: no such tx (each keeps every block: stub's getFirstAvailableBlock 0)
+  const split = stub((url, method) => (url.startsWith("d") ? chainAnswers(NOV2)(url, method) : method === "getTransaction" ? { result: null } : undefined));
   assert.match((await moneyGate(rec(`Money path: yes\nTx: solana ${SOL_TX}\n`), split, RPCS)).refusals.join("\n"), /missing on s1, missing on s2/);
   assert.deepEqual((await moneyGate(rec(`Money path: yes\nTx: solana-devnet ${SOL_TX}\n`), split, RPCS)).refusals, []);
   assert.match(parseLive(`CARD demo / live: PASS\nMoney path: yes\nTx: solana-devnet ${NEAR_TX}\n`, "demo").problems.join(), /bad solana-devnet hash/);
@@ -1932,4 +1935,70 @@ test("planted: a NEAR proof whose dRPC reads throttle is proven again next round
   assert.equal(g.unread.length, 1);
   assert.match(g.unread[0], /not proven: near-testnet\.drpc\.org status: no answer \(rate limited 6 times in a row\)$/);
   assert.equal(outcome(g), 3);
+});
+
+// Card money-gate-solana-reads-past-one-stall: a third Solana operator, PublicNode, which keeps recent history only (its
+// first available block 471,786,675, 20 Nov 15:25Z, read 21 Nov 21:12Z). One operator's stall past the rounds no
+// longer leaves a landed tx could not read, and PublicNode's null for a tx before its first block is never absent.
+const [MB, SVS, PN] = REAL_RPCS.solana;
+const PN_FIRST = 471786675;
+const PN_FIRST_TIME = Date.parse("2026-11-20T15:25:20Z") / 1000;
+const TX_SLOT = 466032982; // the oldest recorded mainnet Solana tx, 5wGExGur (pool-sol-deploy-mainnet.md)
+const okAt = (slot) => ({ result: { slot, meta: { err: null }, blockTime: NOV2 } });
+// PublicNode as read: its history from PN_FIRST, a null for any tx before it
+const prunedPN = (method) =>
+  method === "getTransaction" ? { result: null } : method === "getFirstAvailableBlock" ? { result: PN_FIRST } : method === "getBlockTime" ? { result: PN_FIRST_TIME } : null;
+
+test("the Solana hosts are three operators, PublicNode the third", async () => {
+  const { operatorOf } = await import("./money-gate.mjs");
+  assert.equal(PN, "https://solana-rpc.publicnode.com");
+  assert.equal(new Set(REAL_RPCS.solana.map((u) => operatorOf("solana", u))).size, 3);
+});
+
+test("planted: one Solana operator stalled past every round, a landed tx passes on the other two in the first round (red with two operators: COULD NOT READ, exit 3)", async () => {
+  for (const stalled of REAL_RPCS.solana) {
+    const s = flaky((url, method) => (url === stalled ? "a transport error" : method === "getTransaction" ? okAt(470000000 + 1) : null));
+    const r = await moneyGate(oneTx("solana"), s.fetchFn, { solana: REAL_RPCS.solana }, { sleep: s.sleep });
+    assert.deepEqual(r.unread, [], stalled);
+    assert.deepEqual(r.refusals, [], stalled);
+    assert.equal(r.read.length, 2, stalled);
+    assert.equal(outcome(r), 0, stalled);
+    // before the 30/60/120 s rounds: no gate pause at all
+    assert.deepEqual(s.log.filter((l) => GATE_PAUSE.test(l)), [], stalled);
+  }
+});
+
+test("planted: PublicNode's null for a tx before its first block is never absent: beside one absent operator and one stalled it is COULD NOT READ, never a refusal", async () => {
+  // no host read the tx: its slot unknown, PublicNode's first block after the floor
+  const none = flaky((url, method) => (url === SVS ? "a transport error" : url === PN ? prunedPN(method) : missingOn("solana", method)));
+  const a = await moneyGate(oneTx("solana"), none.fetchFn, { solana: REAL_RPCS.solana }, { sleep: none.sleep });
+  assert.equal(a.unread.length, 1, a.refusals.join("\n"));
+  assert.match(a.unread[0], /missing on https:\/\/api\.mainnet-beta\.solana\.com, .*no history \(its first block 471786675, 2026-11-20T15:25:20\.000Z, is after 2026-11-01T00:00:00\.000Z\) on https:\/\/solana-rpc\.publicnode\.com$/);
+  assert.equal(outcome(a), 3);
+  // one host read it at TX_SLOT, before PublicNode's first block: its null is no history, and the stall leaves it unread
+  const one = flaky((url, method) => (url === SVS ? "a transport error" : url === PN ? prunedPN(method) : method === "getTransaction" ? okAt(TX_SLOT) : null));
+  const b = await moneyGate(oneTx("solana"), one.fetchFn, { solana: REAL_RPCS.solana }, { sleep: one.sleep });
+  assert.equal(b.unread.length, 1, b.refusals.join("\n"));
+  assert.match(b.unread[0], /no history \(its first block 471786675 is after the tx's slot 466032982\) on https:\/\/solana-rpc\.publicnode\.com$/);
+  // the same, both full-history operators reading it ok: a pass, PublicNode's null beside it no refusal
+  const both = flaky((url, method) => (url === PN ? prunedPN(method) : method === "getTransaction" ? okAt(TX_SLOT) : null));
+  const c = await moneyGate(oneTx("solana"), both.fetchFn, { solana: REAL_RPCS.solana }, { sleep: both.sleep });
+  assert.deepEqual([c.refusals, c.unread, outcome(c)], [[], [], 0]);
+});
+
+test("planted: absent on two Solana operators is still refused with PublicNode stalled, and PublicNode's null inside its history is absent", async () => {
+  const s = flaky((url, method) => (url === PN ? "a transport error" : missingOn("solana", method)));
+  const r = await moneyGate(oneTx("solana"), s.fetchFn, { solana: REAL_RPCS.solana }, { sleep: s.sleep });
+  assert.deepEqual(r.unread, []);
+  assert.match(r.refusals.join("\n"), /missing on https:\/\/api\.mainnet-beta\.solana\.com, missing on https:\/\/public\.rpc\.solanavibestation\.com, /);
+  assert.equal(outcome(r), 1);
+  // a tx inside PublicNode's history that one full-history host reads ok and PublicNode and the other read null: absent
+  // on two operators, refused
+  const inside = flaky((url, method) =>
+    url === MB ? (method === "getTransaction" ? okAt(PN_FIRST + 10) : null) : url === PN ? (method === "getTransaction" ? { result: null } : prunedPN(method)) : missingOn("solana", method),
+  );
+  const q = await moneyGate(oneTx("solana"), inside.fetchFn, { solana: REAL_RPCS.solana }, { sleep: inside.sleep });
+  assert.deepEqual(q.unread, []);
+  assert.match(q.refusals.join("\n"), /ok on https:\/\/api\.mainnet-beta\.solana\.com, missing on https:\/\/public\.rpc\.solanavibestation\.com, missing on https:\/\/solana-rpc\.publicnode\.com$/);
+  assert.equal(outcome(q), 1);
 });

@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { base58, hex } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { onePass, POOL_RPCS, readPoolTx, recordOf, originChainOf, STATUS_URL } from "./pool-deposit-address-mainnet.mjs";
-import { RPCS } from "../../../scripts/ci/money-gate.mjs";
+import { operatorOf, RPCS } from "../../../scripts/ci/money-gate.mjs";
 
 const FIX = JSON.parse(readFileSync(new URL("../../../apps/helper/src/bind/fixtures/oneclick-status.json", import.meta.url), "utf8")).answers.success_sol;
 const BASE_USDC = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
@@ -285,5 +285,27 @@ test("review R6: one pass writes the record only once the delivery and the pool 
 });
 
 test("the pool tx's RPCs are the money gate's, so the record's reads and the gate's are one list", () => {
-  for (const c of ["solana", "base", "robinhood"]) assert.deepEqual(POOL_RPCS[c], RPCS[c], c);
+  for (const c of ["solana", "base", "robinhood"]) {
+    assert.equal(POOL_RPCS[c], RPCS[c], c); // the gate's own array, imported, never a copy
+    // each host its own operator by the gate's map, so two hosts read alike are two operators
+    assert.equal(new Set(RPCS[c].map((u) => operatorOf(c, u))).size, RPCS[c].length, c);
+  }
+});
+
+test("on three RPCs: one with no answer is left out and the other two read it; one that reads it apart, or a second with no answer, refuses", async () => {
+  const THREE = ["https://a.test", "https://b.test", "https://c.test"];
+  const read = (answer, f = solFetch(answer)) => readPoolTx("solana", DEP, U, { fetch: f, rpcs: THREE, pin: PIN });
+  // c.test: null for the pool tx (a host whose history does not hold it): left out, named
+  const r = await read(solAnswer({ pool: (url) => (url.includes("c.test") ? null : solPool()) }));
+  assert.deepEqual(r.read, ["a.test", "b.test"]);
+  assert.match(r.left.join(), /^c\.test: getTransaction of the pool tx has no answer$/);
+  // c.test: a 429 on every read: left out
+  const limited = solFetch(solAnswer());
+  assert.deepEqual((await read(null, async (url, init) => (String(url).includes("c.test") ? new Response("", { status: 429 }) : limited(url, init)))).read, ["a.test", "b.test"]);
+  // c.test reads the pool tx in another slot: refused, never outvoted
+  await assert.rejects(read(solAnswer({ pool: (url) => solPool({ slot: url.includes("c.test") ? 10 : 9 }) })), /the RPCs read the pool tx apart/);
+  // c.test reads a tx signed by another: refused
+  await assert.rejects(read(solAnswer({ pool: (url) => solPool(url.includes("c.test") ? { signer: OTHER } : {}) })), /not signed by U_X/);
+  // b.test and c.test give no answer: one RPC is never enough
+  await assert.rejects(read(solAnswer({ pool: (url) => (url.includes("a.test") ? solPool() : null) })), /fewer than two RPCs read the pool tx \(b\.test: .*; c\.test: .*\)/);
 });
