@@ -1044,5 +1044,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const code = outcome(result);
   if (code === 3) console.error(`money-gate: COULD NOT READ (${unread.length}): no answer from enough providers within ${ROUND_PAUSES.length + 1} rounds; nothing refused, nothing passed: run it again`);
   if (code) process.exit(code);
-  console.log(`money-gate: PASS (${records.length} record(s) read, ${read.length} tx read(s), ${history.length} test-network line(s) named, not read)`);
+  // the PASS line as before when no test-network line is named (base-gate.test.mjs reads it)
+  console.log(`money-gate: PASS (${records.length} record(s) read, ${read.length} tx read(s)${history.length ? `, ${history.length} test-network line(s) named, not read` : ""})`);
 }
