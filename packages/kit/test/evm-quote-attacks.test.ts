@@ -11726,11 +11726,15 @@ test("TAIL5 a Robinhood quote whose index ends past the tail's budget scans by c
 // are the index's and the tail's. The scans by currency stay for the cold tail and the stale index, where they are the
 // measured faster path (TAILF1, TAIL5); this guards that a warm quote never takes them. The planted case, the tail
 // forced cold (a scan provider whose tail no quote read), does name currencies, and the guard refuses it.
+// Card evm-tail-warms-with-the-index-at-the-head: the tail warms with the index at the head too (a reload with a kept
+// index synced before the first quote): its first read, all inside the index's margin, keeps no span (TAIL7), and the
+// tail counted as never read, so every later quote read its gap by currency (read-only mainnet taps, 22 Nov 11:49Z: 5
+// such getLogs after every warm Base answer; red at ef813c927: "base: a warm quote sent 2 getLogs naming a currency of 2")
 /** The index a day behind the head (the release's snapshot): 43,200 Base blocks of 2 s, 864,000 Robinhood ones of 0.1 s. */
 const DAY_BEHIND = { base: 5_000_000 - 43_200, robinhood: RC_HEAD - 864_000 };
 const namedCurrencies = (fs: { topics: unknown[] }[]): number => fs.filter((f) => f.topics.slice(1).some((t) => t !== null && t !== undefined)).length;
 const warmGuard = (chainName: string, fs: { topics: unknown[] }[]): void => assert.equal(namedCurrencies(fs), 0, `${chainName}: a warm quote sent ${namedCurrencies(fs)} getLogs naming a currency of ${fs.length}`);
-test("GUARD a warm quote on Base and on Robinhood, its chain's tail read and its index within EVM_INDEX_KEEP_MS of the head, sends no getLogs naming a currency, before or after its answer; planted: the tail forced cold names them and the guard refuses it", async () => {
+test("GUARD a warm quote on Base and on Robinhood, its chain's tail read with the index a day behind or already at the head, and its index within EVM_INDEX_KEEP_MS of the head, sends no getLogs naming a currency, before or after its answer; planted: the tail forced cold names them and the guard refuses it", async () => {
   const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
   const cases = [
     { name: "base" as const, head: 5_000_000, behind: 4, index: { chainId: 8453, poolManager: PM, from: 4_000_001 } },
@@ -11747,18 +11751,19 @@ test("GUARD a warm quote on Base and on Robinhood, its chain's tail read and its
     await evmTailFills(scan.rpc);
   };
   try {
-    for (const c of cases) {
+    for (const c of cases) for (const at of ["a day behind", "at the head"] as const) {
       evmPoolIndexReset();
       const [tw, tc] = [freshToken(), freshToken()];
       const serve = (n: number) => assert.equal(evmPoolIndexUse(c.name, { index: c.index, coversThrough: n, pools: [{ key: real(tw).key }, { key: real(tc).key }] }), true);
-      // warm: another coin's quote with the index a day behind (the release's snapshot), then the chain's tail read after
-      // its answer (onTail); then the index synced to within EVM_INDEX_KEEP_MS of the head
-      serve(DAY_BEHIND[c.name]);
+      // warm: another coin's quote with the index a day behind (the release's snapshot) or already at the head (a reload
+      // with a kept index), then the chain's tail read after its answer (onTail); then the index synced to within
+      // EVM_INDEX_KEEP_MS of the head
+      serve(at === "a day behind" ? DAY_BEHIND[c.name] : c.head - c.behind);
       const warm = await onTail([], c.head, c.name);
       serve(c.head - c.behind);
       const fs: { topics: unknown[] }[] = [];
       await quoteOf(c, tw, warm, fs);
-      warmGuard(c.name, fs);
+      warmGuard(at === "a day behind" ? c.name : `${c.name} (the tail read with the index ${at})`, fs);
       // planted: the same quote on a scan provider whose tail no quote read: it scans by currency, and the guard fails
       const cold = moving();
       evmScanFillable(cold.rpc);

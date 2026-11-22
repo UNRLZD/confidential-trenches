@@ -2587,7 +2587,13 @@ async function scanPools(
   // Read before the answer, the first Base quote's 14 requests of every pool came back 1,620,418 bytes against 1,064
   // by currency, the last of them 410-919 ms against 316-440 (read-only from the Mac, 2026-11-18 21:2xZ), and the
   // quote 2,878 ms against main's 2,436 (median of 7 a side)
-  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0;
+  // A tail read only inside the index's margin (`band`: its fill started from an index at the head, a reload with a kept
+  // index) has been read: it keeps no span there (TAIL7, the margin's reorg and lagging-backend reason, unchanged), but
+  // it is no cold tail, so the quote reads its gap as the event alone (card evm-tail-warms-with-the-index-at-the-head:
+  // counted cold, every later quote read its gap by currency and asked for the fill again, 5 such getLogs after every
+  // warm Base answer on mainnet, 22 Nov 11:49Z). `cold` only picks how the blocks are asked; which count as read is the
+  // margin's rule below, as before
+  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;
   const near = !byCurrency && !cold && head - start <= tailBudgetOf(s);
   // asked for once this scan's reads are kept (commit): a scan that failed, or a quote that refused, starts none
   const wantFill = cold && !byCurrency && typeof fill === "function" && head - start <= tailBudgetOf(s);

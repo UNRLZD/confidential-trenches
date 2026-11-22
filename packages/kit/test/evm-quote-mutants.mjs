@@ -475,8 +475,10 @@ export const MUTANTS = [
   [QUOTE, "Math.max(1, Math.min(on.span, Math.floor(tailBudgetOf(s) / TAIL_FLOOD)))", "on.span", R, "TAIL8 "],
   [QUOTE, "    again[14] = true;", "    again[14] = false;", R, "X4f "],
   // card evm-scan-chain-tail, round 5: a chain's tail with no block read is read after the answer (TAILF1 to TAILF6)
-  [QUOTE, "  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0;", "  const cold = false;", R, "TAILF1 "],
-  [QUOTE, "  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0;", "  const cold = (tail0?.spans.length ?? 0) === 0;", R, "TAILF1 "],
+  [QUOTE, "  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", "  const cold = false;", R, "TAILF1 "],
+  [QUOTE, "  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", "  const cold = (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", R, "TAILF1 "],
+  // card evm-tail-warms-with-the-index-at-the-head: a tail read only inside the index's margin is no cold tail
+  [QUOTE, " && (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", " && (tail0?.spans.length ?? 0) === 0;", R, "GUARD "],
   [QUOTE, "reach(fill === true ? e.ix : e.spans)", "reach(e.spans)", R, "TAILF1 "],
   [QUOTE, "      if (wantFill && !got.some((g) => g.spare)) (fill", "      if (wantFill) (fill", R, "TAILF6 "],
   [QUOTE, "  if (running.has(chain) || FLOODED.get(src)?.has(chain) === true) return;", "  if (FLOODED.get(src)?.has(chain) === true) return;", R, "TAILF2 "],
