@@ -59,42 +59,17 @@ import { readFileSync, readdirSync, existsSync, realpathSync, lstatSync } from "
 import { fileURLToPath } from "node:url";
 import { operatorOf as nearOperatorOf } from "./near-rpc-operators.mjs";
 import { RPC_OPERATORS } from "./rpc-operators.mjs";
+import { FLOOR, RPCS } from "./money-gate-reads.mjs";
 import { NOT_WAITED, exactJson, hostOf, rpc, wait } from "./rpc-wait.mjs";
 
 export { exactJson };
 
-// Public RPCs, none ours; each answered a tx read on 2026-10-26 between 11:48 and 11:54Z. NEAR lists two operators on
-// three hosts: FastNEAR's archival RPC, dRPC (which keeps only recent txs, enough for a fresh live record), and
-// near.org's archival RPC, which FastNEAR runs (near-rpc-operators.mjs): a second door to FastNEAR when its own host
-// rate-limits, never a second operator.
-export const RPCS = {
-  near: ["https://archival-rpc.mainnet.fastnear.com", "https://near.drpc.org", "https://archival-rpc.mainnet.near.org"],
-  // card money-gate-solana-reads-past-one-stall: PublicNode, a third operator, so a tx passes on two operators' reads
-  // while one stalls past the rounds. It keeps recent history only (its first available block 471,786,675, 20 Nov
-  // 15:25Z, read 21 Nov 21:12Z; the oldest recorded tx, 5wGExGur at slot 466,032,982, reads null there and ok on the two
-  // others): its null counts only where its history reaches the tx (solanaAbsent)
-  solana: ["https://api.mainnet-beta.solana.com", "https://public.rpc.solanavibestation.com", "https://solana-rpc.publicnode.com"],
-  base: ["https://mainnet.base.org", "https://base.drpc.org"],
-  robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com"],
-  // NEAR testnet, read 2026-10-31 at 16:16Z: the same two operators on three hosts, as for mainnet.
-  // test.rpc.fastnear.com and near-testnet.drpc.org keep only recent txs (each answered UNKNOWN_TRANSACTION for a
-  // 2026-10-26 tx that both archival RPCs read), so FastNEAR's archival RPC stands in for its test.rpc.
-  "near-testnet": ["https://archival-rpc.testnet.fastnear.com", "https://near-testnet.drpc.org", "https://archival-rpc.testnet.near.org"],
-  // Solana devnet, read 2026-11-02 between 23:12 and 23:14Z: the cluster's public RPC and OnFinality's public devnet
-  // endpoint each answered getTransaction for one devnet signature (rpc-operators.mjs names both).
-  "solana-devnet": ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"],
-  // Base Sepolia and Robinhood's testnet, read 2026-11-03 between 03:07:14 and 03:07:19Z: each host answered its
-  // chain's eth_chainId (0x14a34, 0xb626) and eth_getTransactionReceipt with status 0x1 for one testnet tx, which the
-  // mainnet RPCs above answered as unknown (rpc-operators.mjs names each host's operator).
-  "base-sepolia": ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"],
-  "robinhood-testnet": ["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"],
-};
+// Public RPCs and FLOOR: money-gate-reads.mjs, the one list the gate and the live checks read.
+export { FLOOR, RPCS };
 // test networks: read back like any chain, never real-money proof
 export const TESTNET = new Set(["near-testnet", "solana-devnet", "base-sepolia", "robinhood-testnet"]);
 const SOLANA = new Set(["solana", "solana-devnet"]);
 const NEAR = new Set(["near", "near-testnet"]);
-// The build starts here: a tx before it is not this repo's (a pasted research tx, say).
-export const FLOOR = Date.parse("2026-11-01T00:00:00Z");
 // The folders that hold money code, from the kit layout (README.md "Layout": contracts/vault/ the vault, packages/kit/
 // the kit, packages/wallet/ the wallets) and the terminal's trade code (docs/plan1/app.md:128 and :141 cite the UNRLZD
 // terminal's apps/terminal/src/trading/, which the terminal is rebuilt from), and the pool programs on Solana and EVM

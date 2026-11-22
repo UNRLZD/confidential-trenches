@@ -14,10 +14,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { parseLive, RPCS } from "../ci/money-gate.mjs";
+import { operatorOf as gateOperatorOf, parseLive, RPCS } from "../ci/money-gate.mjs";
 import { RETRY } from "./provider-answer.mjs";
 import { check } from "./pool-sol-mainnet-run.mjs";
-import { CLUSTERS, facts, findRun, GATE_RPCS, NoAnswer, PUMP, PUMPSWAP, recordText } from "./pool-sol-mainnet-run.record.mjs";
+import { CLUSTERS, facts, findRun, GATE_RPCS, NoAnswer, operatorOf, PUMP, PUMPSWAP, recordText } from "./pool-sol-mainnet-run.record.mjs";
 
 RETRY.ms = 0;
 
@@ -97,6 +97,13 @@ test("the RPCs are the money gate's own list, for both clusters: one list, impor
   assert.equal(GATE_RPCS["solana-devnet"], RPCS["solana-devnet"]);
   assert.equal(CLUSTERS.mainnet.rpcs, RPCS.solana);
   assert.equal(CLUSTERS.devnet.rpcs, RPCS["solana-devnet"]);
+  // each host is its own operator by the gate's own map, so counting by host counts the gate's operators
+  for (const chain of ["solana", "solana-devnet"]) {
+    const ops = RPCS[chain].map((u) => gateOperatorOf(chain, u));
+    assert.equal(new Set(ops).size, RPCS[chain].length, chain);
+    assert.ok(ops.every((o, i) => o !== RPCS[chain][i]), `${chain}: every host is in rpc-operators.mjs`);
+    assert.equal(new Set(RPCS[chain].map((u) => operatorOf(chain, u))).size, RPCS[chain].length);
+  }
   // the three-operator recordings were read on the gate's list as it is
   assert.deepEqual(A.good_mainnet_three_operators.rpcs, RPCS.solana);
   assert.deepEqual(R3.rpcs, RPCS.solana);

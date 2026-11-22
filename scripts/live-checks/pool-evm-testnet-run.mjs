@@ -41,7 +41,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RPCS as MONEY_RPCS } from "../ci/money-gate.mjs";
+import { RPCS as MONEY_RPCS } from "../ci/money-gate-reads.mjs";
 import { recorder } from "./notes-per-pool-evm.mjs";
 import { BUILD, CHAINS as DEPLOYED, pinnedBuild } from "./pool-evm-deploy.mjs";
 import { POOL_REDEPLOYS } from "./pool-redeploys.mjs";
