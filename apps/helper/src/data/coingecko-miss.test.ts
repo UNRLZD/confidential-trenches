@@ -16,7 +16,7 @@ function keyed() {
   const sent: string[] = [];
   const fetch = async (url: string) => {
     sent.push(url.slice(CG_ONCHAIN.length));
-    const path = url.slice(CG_ONCHAIN.length).split("?")[0];
+    const path = url.slice(CG_ONCHAIN.length).split("?")[0]!;
     return path === LISTED || path.startsWith(`${LISTED}/`) ? new Response("{}", { status: 200 }) : new Response("{}", { status: 404 });
   };
   const holds = providerHolds(() => t.t, coingeckoPace(ENV));
