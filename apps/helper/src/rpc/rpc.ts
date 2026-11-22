@@ -2516,6 +2516,22 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (wait === 0 && p !== null) pacer.at(p.url, 1, p.perSecond, room);
     return wait;
   }
+  /**
+   * Card sol-follow-round-draws-the-callers-share: a read by another path (data/solana/trades.ts, a pool round) that a
+   * caller waits on, drawn as that caller's own read of this chain's configured provider: its share of the budget
+   * (`client`, perClient) and a place in the provider's whole second, now or never (a wait skips it to the next
+   * provider), never only the half background reads may take. Another provider (a spare, another slot's key) is drawn as
+   * background reads of it are. Returns the seconds to wait, 0 to go.
+   */
+  function caller(chain: RpcChain, url: string, method: string, client: string): number {
+    const key = keyOf(chain, url);
+    if (key === null) return background(chain, url, method);
+    const p = pacedOf(key);
+    if (p !== null && pacer.at(p.url, 1, p.perSecond, { maxWaitMs: 0, book: false }) > 0) return 1;
+    const wait = budget.takeEach(drawsOf(key, [method]), client, false, false);
+    if (wait === 0 && p !== null) pacer.at(p.url, 1, p.perSecond, { maxWaitMs: 0 });
+    return wait;
+  }
   /** That provider answered 429 to a background read: the background reads wait out its reset; callers go on. */
   function backgroundThrottled(chain: RpcChain, url: string, headers: Headers): void {
     const key = keyOf(chain, url);
@@ -2598,7 +2614,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    *  before the public endpoint (solanaRest), so it is "keyed" while one of them serves (not spent, its last identity
    *  read answered), and "fallback" only once none does. Its other members are the slot's own. */
   const shownSlot: Slot = { ...slot, state: () => (slot.state() === "fallback" && upstreams.solana.keyed.slice(1).some((k) => !spent(k.url) && probed.get(k.url) === "answers") ? "keyed" : slot.state()) };
-  return { handle, background, backgroundThrottled, slot: shownSlot, pacer, keyed: keyedHealth, probe, policyOf, spent };
+  return { handle, background, caller, backgroundThrottled, slot: shownSlot, pacer, keyed: keyedHealth, probe, policyOf, spent };
 }
 
 /** The chains whose keyed lists /v1/health names (card rpc-keyed-lists): mainnet's four. */

@@ -719,8 +719,11 @@ export function createSolanaTrades(deps: {
   /** When a first read with no row yet reads the vendor's tape (default VENDOR_EARLY_MS on a timer; a test gives its own). */
   vendorWait?: () => Promise<unknown>;
   /** The shared RPC budget (../../rpc/rpc.ts background, card helper-ready-gate): before each request to `url`, the
-   *  seconds to wait (0: go); a provider with a wait is skipped for the next, so callers' reads keep their room. */
-  budget?: (url: string, method: string) => number;
+   *  seconds to wait (0: go); a provider with a wait is skipped for the next, so callers' reads keep their room.
+   *  `client`: the page a pool round is read for, which waits on it (poolTape past SOL_VENDOR_REACH_MS), so the request
+   *  draws that caller's share (rpc.ts caller), never the helper's background one (card
+   *  sol-follow-round-draws-the-callers-share). */
+  budget?: (url: string, method: string, client?: string) => number;
   /** That provider's 429, which holds its budget for every caller. */
   throttled?: (url: string, headers: Headers) => void;
   /** The slot of `rpcs[0]` when it is a keyed provider (SOLANA_TRADES_RPC_URL, rpc/slot.ts): while it is fallen back the
@@ -752,10 +755,10 @@ export function createSolanaTrades(deps: {
   /** One request, to each provider in turn until one answers a result. `lane`: the whole reads' own providers
    *  (WHOLE_RPCS), outside the shared budget and the keyed slot, whose 429 holds only them. */
   const slot = deps.slot !== undefined && deps.slot.state() !== "public" ? deps.slot : undefined;
-  async function rpc(method: string, params: unknown[], lane?: { urls: readonly string[]; throttled(s: number): void }): Promise<unknown> {
+  async function rpc(method: string, params: unknown[], lane?: { urls: readonly string[]; throttled(s: number): void }, client?: string): Promise<unknown> {
     for (const url of lane?.urls ?? (slot !== undefined && !slot.useKeyed() ? rpcs.slice(1) : rpcs)) {
       const key = lane === undefined && slot !== undefined && url === rpcs[0] ? slot : undefined;
-      if (lane === undefined && (deps.budget?.(url, method) ?? 0) > 0) continue;
+      if (lane === undefined && (deps.budget?.(url, method, client) ?? 0) > 0) continue;
       const sent = now();
       try {
         const r = await doFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
@@ -840,17 +843,18 @@ export function createSolanaTrades(deps: {
     return trades.map((x) => (x.ts === t ? x : { ...x, ts: t }));
   }
 
-  async function account(key: string): Promise<{ owner: unknown; data: Buffer; slot: number } | null> {
-    const r = (await rpc("getAccountInfo", [key, { encoding: "base64", commitment: "confirmed" }])) as Record<string, unknown>;
+  /** `client`: the caller a pool round reads it for (round), whose share it draws. */
+  async function account(key: string, client?: string): Promise<{ owner: unknown; data: Buffer; slot: number } | null> {
+    const r = (await rpc("getAccountInfo", [key, { encoding: "base64", commitment: "confirmed" }], undefined, client)) as Record<string, unknown>;
     const v = r?.value as Record<string, unknown> | null;
     const slot = (r?.context as Record<string, unknown> | undefined)?.slot;
     if (v === null || v === undefined || !Array.isArray(v.data) || typeof v.data[0] !== "string" || !Number.isSafeInteger(slot)) return null;
     return { owner: v.owner, data: Buffer.from(v.data[0], "base64"), slot: slot as number };
   }
 
-  async function readRef(): Promise<void> {
+  async function readRef(client?: string): Promise<void> {
     refAt = now(); // one try every REF_MS, answered or not
-    const a = await account(PYTH_SOL_USD);
+    const a = await account(PYTH_SOL_USD, client);
     const v = a === null ? null : pythSolUsd(a.owner, a.data, Math.floor(now() / 1000));
     if (a === null || v === null) return;
     solUsd = { slot: a.slot, v };
@@ -880,7 +884,7 @@ export function createSolanaTrades(deps: {
   }
 
   /** Reads a quote coin's decimals (once, from its mint account) and its USD price; never throws. */
-  function readQuote(q: string): Promise<void> {
+  function readQuote(q: string, client?: string): Promise<void> {
     let k = quotes.get(q);
     if (k === undefined) {
       if (quotes.size >= QUOTES_MAX) quotes.delete(quotes.keys().next().value!);
@@ -892,7 +896,7 @@ export function createSolanaTrades(deps: {
     kk.at = now();
     kk.reading = (async () => {
       if (kk.decimals === null) {
-        const a = await account(q);
+        const a = await account(q, client);
         if (a !== null && TOKEN_PROGRAMS.includes(a.owner as string) && a.data.length >= 82 && a.data[45] === 1) kk.decimals = a.data[44]!;
       }
       const usd = usdScaled(await deps.quoteUsd!(q));
@@ -1382,14 +1386,14 @@ export function createSolanaTrades(deps: {
   }
   /** A quote coin's USD price per whole coin times 10^18, or null: USDC one dollar, SOL Pyth's (readRef), another coin
    *  its own row (readQuote), each read again past REF_MS. */
-  async function usdOf(q: string): Promise<bigint | null> {
+  async function usdOf(q: string, client?: string): Promise<bigint | null> {
     if (q === USDC) return 10n ** 18n;
     if (q === WSOL) {
-      if (solUsd === null || now() - refAt >= REF_MS) await readRef().catch(() => undefined);
+      if (solUsd === null || now() - refAt >= REF_MS) await readRef(client).catch(() => undefined);
       return solUsd?.v ?? null;
     }
     if (deps.quoteUsd === undefined) return null;
-    if (!priced(q) || now() - (quotes.get(q)?.at ?? 0) >= REF_MS) await readQuote(q);
+    if (!priced(q) || now() - (quotes.get(q)?.at ?? 0) >= REF_MS) await readQuote(q, client);
     return quotes.get(q)?.usd ?? null;
   }
   type Sig = { signature: string; err?: unknown; blockTime?: unknown };
@@ -1411,14 +1415,15 @@ export function createSolanaTrades(deps: {
     return { sigs, cut, bottom, read };
   }
   /** The tape rows of transactions read (newest first), and how many showed a trade; throws for a trade with no price. */
-  async function rowsOf(mint: string, f: Follow, read: { s: Sig; r: unknown }[]): Promise<{ rows: TapeRow[]; legs: number }> {
+  async function rowsOf(mint: string, f: Follow, read: { s: Sig; r: unknown }[], client?: string): Promise<{ rows: TapeRow[]; legs: number }> {
     const rows: TapeRow[] = [];
     let legs = 0;
     for (const { s: x, r } of read) {
       const leg = poolLeg(r, mint, f.data!);
       if (leg === null) continue;
       legs++;
-      const p = await usdOf(leg.quoteMint);
+      // the round's caller draws its price reads too (card sol-follow-round-draws-the-callers-share)
+      const p = await usdOf(leg.quoteMint, client);
       if (p === null) throw new Error("quote unpriced");
       const usd = (leg.quote * p) / 10n ** BigInt(leg.quoteDecimals);
       if (usd > 0n) rows.push({ t_ms: leg.ts * 1_000, side: leg.side, usd: fixed(usd, VALUE_SCALE), amt: fixed(leg.amt, leg.decimals), trader: leg.trader, tx: x.signature });
@@ -1434,11 +1439,12 @@ export function createSolanaTrades(deps: {
   /** One round of `f`'s pool: the pool the vendor names now (deps.pool, its own freshness: a new top pool is followed
    *  from its newest trades), its account once, then a page of a hole a round before left (signatures before its
    *  `before` and after its `until`, the rows put in their place), then its signatures since the newest read, each new
-   *  successful transaction, and the rows they hold put on top. Throws when a read fails or a trade has no price. */
-  async function round(mint: string, f: Follow): Promise<void> {
+   *  successful transaction, and the rows they hold put on top. Throws when a read fails or a trade has no price.
+   *  `client`: the page that waits on this round (its rows past SOL_VENDOR_REACH_MS), whose share its requests draw. */
+  async function round(mint: string, f: Follow, client?: string): Promise<void> {
     const started = now();
     followCount.rounds++;
-    const call = (method: string, params: unknown[]) => (followCount.calls++, rpc(method, params));
+    const call = (method: string, params: unknown[]) => (followCount.calls++, rpc(method, params, undefined, client));
     const named = deps.pool === undefined ? null : await deps.pool(mint).catch(() => null);
     if (named != null && address(named) !== null && named !== f.pool) Object.assign(f, { pool: named, data: null, rows: [], lastSig: null, hole: null, above: 0, placed: false, misses: 0 });
     if (f.data === null) {
@@ -1454,7 +1460,7 @@ export function createSolanaTrades(deps: {
       const g = await page(f, { before: h.before, until: h.until }, call);
       // a transaction not served yet: the hole stays as it is for the next round
       if (g.read.every((x) => x.r != null) && f.hole === h) {
-        const { rows } = await rowsOf(mint, f, g.read);
+        const { rows } = await rowsOf(mint, f, g.read, client);
         f.rows = [...f.rows.slice(0, f.above), ...rows, ...f.rows.slice(f.above)];
         f.above += rows.length;
         f.hole = g.cut && g.bottom !== null ? { before: g.bottom, until: h.until } : null;
@@ -1476,7 +1482,7 @@ export function createSolanaTrades(deps: {
       newest = below.signature;
       at = Number.isSafeInteger(x.blockTime) ? Math.max(f.at, Math.min(started, (x.blockTime as number) * 1_000)) : f.at;
     }
-    const { rows, legs } = await rowsOf(mint, f, kept);
+    const { rows, legs } = await rowsOf(mint, f, kept, client);
     // a pool none of whose first few transactions shows a trade we can read is not ours to follow
     if (legs > 0) f.placed = true;
     else if (!f.placed && (f.misses += kept.length) >= 3) return void (f.unplaced = true);
@@ -1514,7 +1520,7 @@ export function createSolanaTrades(deps: {
   /** The tape of a pool the vendor names: its follow's rows, renewed by a round once FOLLOW_MS old, a caller past
    *  SOL_VENDOR_REACH_MS waiting for that round within TAPE_OPEN_BOUND_MS (card sol-vendor-tape-waits-past-reach);
    *  with no follow (none started, idle past IDLE_MS) or an unplaced one, the vendor's (vendorTape). */
-  async function poolTape(mint: string, limit: number, e: Entry | null): Promise<DataAnswer> {
+  async function poolTape(mint: string, limit: number, e: Entry | null, client?: string): Promise<DataAnswer> {
     // one bound for the whole answer: the vendor's wait and the round's together (card helper-tapes-refresh-holds-live:
     // the round's own TAPE_OPEN_BOUND_MS after the vendor's page wait answered a page past its 15 s)
     const until = now() + TAPE_OPEN_BOUND_MS;
@@ -1532,14 +1538,19 @@ export function createSolanaTrades(deps: {
       f = g;
     }
     f.touched = now();
+    // card sol-follow-round-draws-the-callers-share: a round this caller waits on (rows past the reach) is its read, in
+    // the callers' share; one behind rows inside the reach is the helper's background read. Live run 45011614034 served
+    // WIF's rows 23,973 ms old at once: the waited round drew the background share, full under the run's reads, and
+    // failed with nothing sent
+    const waits = now() - f.at > SOL_VENDOR_REACH_MS;
     if (now() - f.at >= FOLLOW_MS && f.reading === null && now() >= f.retryAt) {
       const g = f;
-      g.reading = round(mint, g)
+      g.reading = round(mint, g, waits ? client : undefined)
         .catch(() => fromVendor(mint, g))
         .catch(() => undefined)
         .finally(() => (g.reading = null));
     }
-    if (now() - f.at > SOL_VENDOR_REACH_MS && f.reading !== null) await within(f.reading, Math.max(0, until - now()));
+    if (waits && f.reading !== null) await within(f.reading, Math.max(0, until - now()));
     // a pool the round found no trade of is the vendor's: the answer this call read already, else the vendor's now
     if (f.unplaced) return read ?? vendorTape(mint, limit, e);
     return rowsAnswer(f.rows, f.src, f.at, limit, f.hole !== null);
@@ -1925,14 +1936,14 @@ export function createSolanaTrades(deps: {
       return { status: 200, body: JSON.stringify(body), src, asOfMs: at, timing: readTo(e) };
     },
     /** 06b Trades: the newest `limit` trades, newest first, the trader the event's user. */
-    async trades(token: string, limit: number): Promise<DataAnswer> {
+    async trades(token: string, limit: number, client?: string): Promise<DataAnswer> {
       const mint = address(token);
       if (mint === null || !Number.isSafeInteger(limit) || limit < 1 || limit > TRADES_MAX) return NOT_FOUND;
       // a token Discover's lists do not hold (one the user searched, or the lists dropped) is served its top pool's
       // trades, as its chart's bars come from the history source (candles), with no walk of ours opened for it: the
       // tape a token page reads is never a 404 while its page and chart answer (card solana-trades-show-on-every-token:
       // the live helper at 837d9d810 answered NEARKAT's and BONK's trades 404, neither on the lists, their pages 200)
-      if (!entries.has(mint) && deps.tape !== undefined && (await deps.listed(mint)) !== true) return poolTape(mint, limit, null);
+      if (!entries.has(mint) && deps.tape !== undefined && (await deps.listed(mint)) !== true) return poolTape(mint, limit, null, client);
       const e = await open(mint);
       // card helper-stays-fast-under-the-live-run: a listed coin whose first read failed (its subscription, its account)
       // answers the vendor's rows, filling, else an empty tape, filling: never a 503 (app-console-429 on helper-20, 25 of
@@ -1947,7 +1958,7 @@ export function createSolanaTrades(deps: {
         const answer =
           kept ??
           (async (): Promise<DataAnswer> => {
-            const v = deps.tape === undefined ? null : await poolTape(mint, limit, null);
+            const v = deps.tape === undefined ? null : await poolTape(mint, limit, null, client);
             if (v !== null && v.status === 200) {
               const { whole_ms: _, trades, ...b } = JSON.parse(v.body) as Record<string, unknown>;
               return { ...v, body: JSON.stringify({ trades: Array.isArray(trades) ? trades.slice(0, limit) : trades, ...b, filling: true }), timing: v.timing };
@@ -1984,9 +1995,9 @@ export function createSolanaTrades(deps: {
         // the first read's phases with the vendor's rows, as with ours (readTo), so a slow cold answer names its wait
         return { ...v, body: JSON.stringify({ ...b, filling: true }), timing: [v.timing, readTo(e)].filter((x) => x !== undefined && x !== "").join(", ") };
       };
-      if (rows.length === 0 && deps.tape !== undefined) return named(reading(await poolTape(mint, limit, e)));
+      if (rows.length === 0 && deps.tape !== undefined) return named(reading(await poolTape(mint, limit, e, client)));
       if (cut && deps.tape !== undefined) {
-        const v = await poolTape(mint, limit, null);
+        const v = await poolTape(mint, limit, null, client);
         if (v.status === 200 && v.src !== "chain") return named(v);
       }
       const at = e.readAt ?? now();

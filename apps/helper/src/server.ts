@@ -1156,8 +1156,9 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
       return typeof p === "string" ? p : null;
     },
     log: (line) => console.log(`helper: ${line}`),
-    // the walks draw the Solana budget callers draw, behind them (rpc.ts userRoomOf)
-    ...(rpc === undefined ? {} : { budget: (u: string, m: string) => rpc.background("solana", u, m), throttled: (u: string, h: globalThis.Headers) => rpc.backgroundThrottled("solana", u, h) }),
+    // the walks draw the Solana budget callers draw, behind them (rpc.ts userRoomOf); a pool round a page waits on draws
+    // that page's share (card sol-follow-round-draws-the-callers-share)
+    ...(rpc === undefined ? {} : { budget: (u: string, m: string, client?: string) => (client === undefined ? rpc.background("solana", u, m) : rpc.caller("solana", u, m, client)), throttled: (u: string, h: globalThis.Headers) => rpc.backgroundThrottled("solana", u, h) }),
     // every mint an answer of the last SERVED_MS held (card robinhood-listed-tape-opens); no answer yet: unknown, never
     // "not listed" (trades.ts listed)
     listed: lists.listed,
