@@ -1115,19 +1115,6 @@ function agreeing<T>(
       // send, and is timed from its gate)
       const out = Array.from({ length: started }, (_, n) => n).filter((n) => sentK[n] && !settledK[n]);
       const onWire = out.map((n) => wireAt[n] ?? (GATED_URL.get(list[n]!) ?? URL_OF.get(list[n]!) === undefined ? sentAt[n]! : undefined));
-      // A request still waiting at its provider's pace lateAfter() past its gate moves, unsent, to the next provider
-      // where that one is not held and has a place for it now (`room`): moved, not added, so no post more leaves and
-      // each read still has its two agreeing answers. Left at the pace, a round waited for every turn of a paced
-      // provider: with robinhood.drpc.org held, a warm ANT tap's first round of 7 posts on publicnode had its second
-      // answers wait at robinhood.rpc.blxrbdn.com's pace, sent at 56, 221, 697, 1,173, 1,514 and 1,835 ms, while
-      // rpc.mainnet.chain.robinhood.com had a place; the round took 1.9 s where dRPC's took 0.4 s, the tap 4.4 s (read
-      // only from macOS, 2026-11-22 17:1xZ; card evm-quote-fewer-rounds)
-      const paced = out.find((n, x) => onWire[x] === undefined && !movedK[n] && !voted[seat[n]!] && performance.now() - sentAt[n]! >= lateAfter());
-      if (paced !== undefined && !heldK(started) && room?.(list[started]!) === true) {
-        movedK[paced] = true;
-        stops[paced]!.abort(DROPPED);
-        return start(true, seat[paced] === paced ? undefined : seat[paced]);
-      }
       if (onWire.some((x) => x === undefined)) return arm();
       const since = performance.now() - Math.max(...(onWire as number[]));
       if (out.length > 0 && since < lateAfter()) return arm(lateAfter() - since);
