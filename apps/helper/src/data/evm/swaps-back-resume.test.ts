@@ -29,7 +29,7 @@ import { test } from "node:test";
 import { fakeChain, open, REC, timeAt } from "../../../test/evm-swaps/robinhood.ts";
 import { callsIn, pocketRefusal } from "../../../test/pocket.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
-import { HEADER_TIMED, IDLE_MS, ROBINHOOD_VENUES, SWAP_RPCS, TOPIC, TRADES_MAX } from "./swaps.ts";
+import { BEHIND_MAX, HEADER_TIMED, IDLE_MS, ROBINHOOD_VENUES, SWAP_RPCS, TOPIC, TRADES_MAX } from "./swaps.ts";
 
 const OWN = "https://rpc.mainnet.chain.robinhood.com";
 const POCKET = "https://robinhood.api.pocket.network";
@@ -215,6 +215,42 @@ test("card robinhood-spread-tapes-fill-inside-45s: 12 Robinhood coins the discov
   });
   // every swap shown was read from two providers, never the locate's untimed word alone
   assert.ok((r.reads.get(DAYBREAK) ?? 0) > 0 && (r.reads.get(POCKET) ?? 0) > 0, `the read back asked daybreak and pocket: ${[...r.reads].join(" ")}`);
+});
+
+test("card robinhood-tapes-inside-their-bounds-on-live: the 12 coins opened at once while the chain's head moves 10 blocks a second and the helper ticks every second, as live: every answer after the first reads names a block inside BEHIND_MAX of the chain's head, read inside its ms, while the read backs still fill (red at ee5c7dac4: the 12 read backs' posts held the ticks' head and forward reads in each provider's pace and queue, and answers fell 300 blocks and more behind)", async () => {
+  const r = rig({});
+  const SETTLE_MS = 15_000;
+  const LIVE_MS = 45_000;
+  const sleep = (ms: number) => new Promise((go) => setTimeout(go, ms));
+  const { value: seen } = await onVirtualTime(9_000_000, async () => {
+    r.start();
+    const t0 = clock.t;
+    const s = open(r.chain, clock, { pools: new Map(), rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never });
+    const seen: { at: number; lag: number; ageS: number; filling: boolean }[] = [];
+    const ask = (token: string) =>
+      void s.trades(token, 50).then((a) => {
+        const m = /block (\d+) of head \d+, read (\d+) s ago/.exec(a.timing ?? "");
+        if (m !== null) seen.push({ at: clock.t - t0, lag: r.chain.st.head - Number(m[1]), ageS: Number(m[2]), filling: a.status !== 200 || (JSON.parse(a.body) as { filling?: boolean }).filling === true });
+      });
+    for (const { token } of TOKENS) ask(token);
+    // the chain's 10 blocks a second, and the helper's tick every TICK_MS (1 s), each run to its end before the next
+    for (let k = 1; k * 1_000 <= LIVE_MS; k++) {
+      await sleep(1_000);
+      r.chain.st.head += 10;
+      void s.tick();
+      if (k % 3 === 0) for (const { token } of TOKENS) ask(token);
+    }
+    s.stop();
+    return seen;
+  });
+  const after = seen.filter((x) => x.at >= SETTLE_MS);
+  const late = after.filter((x) => x.lag > BEHIND_MAX.robinhood.blocks || x.ageS * 1_000 > BEHIND_MAX.robinhood.ms);
+  const line = `${after.length} answers after ${SETTLE_MS / 1000} s, ${late.length} behind, worst ${Math.max(...after.map((x) => x.lag))} blocks and ${Math.max(...after.map((x) => x.ageS))} s, ${after.filter((x) => x.filling).length} filling`;
+  console.log(line);
+  assert.ok(after.length >= TOKENS.length * 8, line);
+  assert.equal(late.length, 0, line);
+  // the read backs still went on: the burst's load was there
+  assert.ok(after.some((x) => x.filling), line);
 });
 
 test("card robinhood-trades-finish-filling: a coin whose locate the chain's own RPC refuses 429 for 20 s is still located, not read in 10,000-block steps: a refusal is one held locate, never a fail and a hold (red at d59370557: each refusal counted two of BACK_FAILS_MAX, and the day was read in steps)", async () => {

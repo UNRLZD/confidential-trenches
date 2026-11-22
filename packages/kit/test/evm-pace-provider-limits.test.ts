@@ -30,6 +30,17 @@ const bucket = (burst: number, perS: number) => () => {
   };
 };
 
+/** At most `most` calls in any `ms`: the provider's limit as one refusal read it, with no bucket fitted. */
+const window = (ms: number, most: number) => () => {
+  const at: number[] = [];
+  return (now: number, calls: number) => {
+    while (at.length > 0 && at[0]! <= now - ms) at.shift();
+    if (at.length + calls > most) return true;
+    for (let i = 0; i < calls; i++) at.push(now);
+    return false;
+  };
+};
+
 const LIMITS: readonly Limit[] = [
   // bloXroute's Robinhood endpoint, the quote list's fourth: posts of 3 eth_call (a real cbBTC tap's own, 2,568 bytes)
   // from the Mac, 2026-11-20 01:53-01:58Z: 4, 8, 12 and 16 calls a second for 10 s none refused; 24 a second refused
@@ -38,6 +49,10 @@ const LIMITS: readonly Limit[] = [
   // reduced rate limit on this endpoint." Three refusals fit one bucket: 9 at once, 17 a second back (9 + 1.25 x 17 =
   // 30, 9 + 2.85 x 17 = 57, 9 + 8.5 x 17 = 153).
   { name: "robinhood.rpc.blxrbdn.com", url: "https://robinhood.rpc.blxrbdn.com", refuses: bucket(9, 17) },
+  // the same endpoint from a GitHub runner: release 192's sign live run 45043534742 (attempt 2, 22 Nov) met its 429 at 17
+  // calls in the second before, 3 out at once (TORCH warm 3), under the bucket read from the Mac; so 16 in any second
+  // (card evm-cold-quote-inside-the-kpi)
+  { name: "robinhood.rpc.blxrbdn.com from a runner", url: "https://robinhood.rpc.blxrbdn.com", refuses: window(1_000, 16) },
 ];
 
 /** `posts` posts of `size` eth_call to `url`, all asked at once through the lane, each reaching the provider `path(n)`
@@ -124,8 +139,9 @@ test("card evm-pace-holds-units-while-out: slow answers never leave more of a ta
 );
 
 // A post's calls come back as it ends in any way, so a hung post holds the lane no longer than its own cut: one that
-// never answers, cut at its caller's bound (500 ms here), gives its calls back as sent, and the next post of the whole
-// burst leaves at the cut, not a refill later (6 calls at 15 a second: 400 ms more, had it been spent at its cut).
+// never answers, cut at its caller's bound (700 ms here, past the 600 ms its 6 calls take to refill at 10 a second),
+// gives its calls back as sent, and the next post of the whole burst leaves at the cut, not a refill later (600 ms
+// more, had it been spent at its cut).
 test("card evm-pace-holds-units-while-out: a bloXroute post that never answers, cut at its bound, lets the next post leave inside the cut and 50 ms", { timeout: 60_000 }, () =>
   onTestClock(async () => {
     evmPaceReset();
@@ -140,12 +156,12 @@ test("card evm-pace-holds-units-while-out: a bloXroute post that never answers, 
     const rpc = evmProviders(["https://robinhood.rpc.blxrbdn.com", "https://robinhood.drpc.org"], fetchFn)[0]!;
     const six = Array.from({ length: 6 }, (_, i) => ({ method: "eth_call", params: [{ to: "0x" + "1".repeat(40), data: "0x0" + i }, "latest"] }));
     const t0 = performance.now();
-    const hung = rpc(six, AbortSignal.timeout(500)).then(() => "answered", () => "cut");
+    const hung = rpc(six, AbortSignal.timeout(700)).then(() => "answered", () => "cut");
     const next = rpc(six);
     assert.equal(await hung, "cut");
     await next;
     evmPaceReset();
     const after = sentAt[1]! - t0;
-    assert.ok(after <= 550, `the next post left ${Math.round(after)} ms in, past the hung post's 500 ms cut and 50 ms`);
+    assert.ok(after <= 750, `the next post left ${Math.round(after)} ms in, past the hung post's 700 ms cut and 50 ms`);
   }),
 );

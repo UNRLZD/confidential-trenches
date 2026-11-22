@@ -647,6 +647,31 @@ export const BACK_FAILS_MAX = 3;
  *  their other filters and ETH price spans. [design: 2, as Base's window rounds (card base-tape-fills-inside-45s): a
  *  tape holds no more of daybreak's 3 in-flight places than a step did, and a dozen fill side by side, newest first] */
 export const BACK_ROUND_SPANS = 2;
+/** Tapes read back at once on a chain (backFrom); the rest wait their turn in the order their books opened (card
+ *  robinhood-tapes-inside-their-bounds-on-live: 12 tapes opened at once read back side by side, and on the live helper
+ *  the burst held the ticks' head and forward reads behind them, "19 of 35 ready; no room 15, held 64, busy 37").
+ *  [design: 4, from swaps-back-resume.test.ts's 12 coins at the providers' paces with FRESH_ROOM 0.6: the slowest tape
+ *  filled at 44.2 s at 3, 43.1 s at 4, 42.9 s at 6 and 43.3 s at 12, all inside the live checks' 45 s; and with the head
+ *  moving, the worst answer stood 90, 80, 140 and 110 blocks behind it. 4 fills inside the bound and keeps the ticks
+ *  the closest to the head.] */
+export const BACK_AT_ONCE = 4;
+/** The share of each paced provider's bucket a read back or the lists' read ahead leaves for the ticks and the index's
+ *  follow (paceFor), above the CALLER_ROOM every background read leaves callers. [design: 0.6, from the same test at
+ *  BACK_AT_ONCE 4: at 0.6 the worst answer stood 80 blocks and 8 s behind the head and the slowest tape filled at 43.1
+ *  s; at 0.4, 110 blocks and 41.9 s; with no share kept (0.25, CALLER_ROOM's), 110 blocks and 38.7 s. The head is the
+ *  bound the live checks found broken, so its margin is the one kept. Kept only while a tick or an index follow runs
+ *  (freshRuns): kept between ticks too, a coin opened alone filled a tick late (8.8 s against 5.8). So kept, the 12
+ *  coins' worst answer stood 120 blocks and 11 s behind and the slowest tape filled at 42.0 s.] */
+export const FRESH_ROOM = 0.6;
+/** Each chain's read back share: `atOnce` read backs at once (backTurn), `room` of each paced bucket kept for the ticks
+ *  while one runs (draw). Robinhood's is BACK_AT_ONCE and FRESH_ROOM, sized above from its 12 coins. Base keeps none:
+ *  its read backs each ask base-rpc.publicnode.com for the whole day at once (locate) beside four providers, and at
+ *  Robinhood's share swaps-base-spread.test.ts's 12 coins went past its 45 s bound (3 still filling at 45 s at
+ *  780b502a9, with the cap alone or the room alone too), while with none they fill inside it, as they did before. */
+export const READ_BACK_SHARE: Readonly<Record<EvmChain, { atOnce: number; room: number }>> = {
+  base: { atOnce: Number.POSITIVE_INFINITY, room: 0 },
+  robinhood: { atOnce: BACK_AT_ONCE, room: FRESH_ROOM },
+};
 /** How long a tape's locate may wait out its provider's holds before the steps read the day (readBack). [design: 30 s:
  *  a dozen tapes' locates refused for our own rate are each sent within a few holds, and a provider refusing longer
  *  leaves the tape to the steps inside the live checks' 45 s] */
@@ -1407,15 +1432,38 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // tape 503 at OPEN_BOUND_MS, and index-evm-swaps BAD). Work a caller joins that another started (a pool search, the
   // shared head, the ETH price read) is lifted to foreground by the join (join), the standard priority inheritance.
   // A lane also counts the ms its reads waited for a pace or a queue, for the answer's Server-Timing (laneTiming).
-  type Lane = { fg: boolean; paceMs: number; slotMs: number; posts: number; joined?: Set<Lane> };
+  // The ticks and the index's follow run in a fresh lane (card robinhood-tapes-inside-their-bounds-on-live): background
+  // still, but ahead of the other background reads (read backs, the lists' read ahead) in each provider's in-flight
+  // queue, and with FRESH_ROOM of each paced bucket theirs, so a burst of opens never holds a tick's head and forward
+  // reads past BEHIND_MAX.
+  type Lane = { fg: boolean; fresh?: boolean; paceMs: number; slotMs: number; posts: number; joined?: Set<Lane> };
   /** An agreed head (agreedHead): its block, that block's time (s), when it was read (now(), ms), the providers that have it. */
   type Head = { n: number; t: number; at: number; with: string[] };
   const lanes = new AsyncLocalStorage<Lane>();
   const newLane = (fg: boolean): Lane => ({ fg, paceMs: 0, slotMs: 0, posts: 0 });
   /** The lane a read runs in now: none set is background. */
   const fgNow = (): boolean => lanes.getStore()?.fg === true;
-  /** Work that callers may share, started now: a lane of its own, foreground when its starter is. */
-  const sharedLane = (): Lane => newLane(fgNow());
+  /** A tick's or the index follow's lane: background, fresh. */
+  const freshLane = (): Lane => ({ ...newLane(false), fresh: true });
+  /** A post's rank in a provider's in-flight queue: foreground, then fresh, then the rest of background. */
+  const rankOf = (l: Lane | undefined): number => (l?.fg === true ? 0 : l?.fresh === true ? 1 : 2);
+  /** Work that callers may share, started now: a lane of its own, foreground when its starter is, fresh when its
+   *  starter is. */
+  const sharedLane = (): Lane => (lanes.getStore()?.fresh === true ? freshLane() : newLane(fgNow()));
+  /** Ticks and index follows running now: FRESH_ROOM is kept for them only meanwhile, so a read back with no tick to
+   *  make room for draws as before (swaps-back-resume.test.ts: a coin opened alone, kept below FRESH_ROOM between
+   *  ticks, waited a tick to fill, 8.8 s against 5.8). */
+  let freshRuns = 0;
+  /** `work` in a fresh lane, counted in freshRuns while it runs. */
+  const freshRun = <T>(work: () => Promise<T>): Promise<T> =>
+    lanes.run(freshLane(), async () => {
+      freshRuns++;
+      try {
+        return await work();
+      } finally {
+        freshRuns--;
+      }
+    });
   /** A caller joins shared work: a foreground one lifts it to foreground, and counts its waits as its own. */
   const join = (l: Lane): void => {
     const me = lanes.getStore();
@@ -1466,8 +1514,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (!ok && unsent !== undefined && holds.heldFor(url) === 0) unsent.paced = true;
       return ok;
     };
-    const send = (part: Call[]) => async () => ((await paceOk(part.length)) ? one(url, part) : null);
-    const got = await Promise.all(parts.map(async (part) => (fgNow() ? slot(url, part.length, wait, send(part)) : (await paceOk(part.length)) ? slot(url, part.length, wait, () => one(url, part)) : null)));
+    // a part of log reads from as far back as the provider refused for its history window (pastWindow) is its refusal
+    // again, never sent: looked at before its pace and again at its turn, as a refusal of a post queued with it may
+    // have come meanwhile (card robinhood-tapes-inside-their-bounds-on-live: 12 tapes' cold reads queued 30 spans each
+    // at blockvectra before its first refusal came back)
+    const known = (part: Call[]): Reply[] | null => (part.every((c) => pastWindow(url, c)) ? part.map((): Reply => ({ ok: false, wait: 0, gone: true })) : null);
+    // each answer read for the window as it comes, so the posts still queued behind it know it (noteLogs)
+    const sent = async (part: Call[]): Promise<Reply[] | null> => {
+      const r = await one(url, part);
+      if (r !== null) noteLogs(url, part, r);
+      return r;
+    };
+    const send = (part: Call[]) => async () => known(part) ?? ((await paceOk(part.length)) ? sent(part) : null);
+    const got = await Promise.all(parts.map(async (part) => (fgNow() ? slot(url, part.length, wait, send(part)) : (known(part) ?? ((await paceOk(part.length)) ? slot(url, part.length, wait, async () => known(part) ?? sent(part)) : null)))));
     if (unsent !== undefined && got.some((g) => g === GAVE_UP)) unsent.paced = true;
     // a part given back from the queue (slot) is no answer for its requests alone: the parts answered are kept, and only
     // its requests are asked of the next provider
@@ -1494,9 +1553,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const queuedAt = performance.now();
       const sent = await new Promise<boolean>((go) => {
         const entry = { go: () => go(true), calls, fg, lane: lanes.getStore() };
-        // a foreground post goes ahead of every background one queued (card helper-deploy-reads-fast), behind the
-        // foreground ones before it
-        const at = fg ? q.queue.findIndex((x) => !x.fg) : -1;
+        // a foreground post goes ahead of every background one queued (card helper-deploy-reads-fast), a fresh one (a
+        // tick's, the index follow's) ahead of the rest of background (card robinhood-tapes-inside-their-bounds-on-live),
+        // each behind the ones of its rank before it
+        const rank = fg ? 0 : rankOf(entry.lane);
+        const at = rank < 2 ? q.queue.findIndex((x) => (x.fg ? 0 : rankOf(x.lane)) > rank) : -1;
         if (at < 0) q.queue.push(entry);
         else q.queue.splice(at, 0, entry);
         timer = setTimeout(() => {
@@ -1543,11 +1604,25 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  its units, the hold read again after each wait; past PACE_WAIT_MAX_MS of waits it is another provider's, past
    *  PACE_PATIENT_MS when no other provider answered it (agreed's last round). False when it is not to be sent here. A
    *  foreground read (a caller's, card helper-deploy-reads-fast) also draws the CALLER_ROOM background leaves. */
+  /** A draw of the provider's pace (holds.take): 0, or the ms to wait. A background read neither fresh nor a caller's (a
+   *  read back, the lists' read ahead) waits, while a tick or an index follow runs (freshRuns), as long as the bucket
+   *  holds no more than FRESH_ROOM besides its units, theirs (card robinhood-tapes-inside-their-bounds-on-live). */
+  function draw(url: string, calls: number): number {
+    const l = lanes.getStore();
+    const p = holds.paceOf(url);
+    const room = READ_BACK_SHARE[chain].room;
+    if (room > 0 && freshRuns > 0 && p !== undefined && l?.fg !== true && l?.fresh !== true) {
+      const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst * (1 - room));
+      const short = p.burst * room + units - holds.room(url) * p.burst;
+      if (short > 0) return Math.max(1, Math.ceil((short * 1000) / p.perS));
+    }
+    return holds.take(url, calls, !fgNow());
+  }
   async function paceFor(url: string, calls: number, patient: boolean): Promise<boolean> {
     if (holds.heldFor(url) > 0) return false;
     // the lane's priority read at each wait: a background read a caller joins meanwhile (join) draws as the caller's
     let slept = 0;
-    for (let w = holds.take(url, calls, !fgNow()); w > 0; w = holds.take(url, calls, !fgNow())) {
+    for (let w = draw(url, calls); w > 0; w = draw(url, calls)) {
       if (slept + w > (patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS)) return (waited(slept), paced.set(url, (paced.get(url) ?? 0) + 1), false);
       await new Promise((go) => setTimeout(go, w));
       slept += w;
@@ -1882,8 +1957,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const at = (f: Record<string, unknown>): [number, number] => [hexInt(f.fromBlock) ?? -1, hexInt(f.toBlock) ?? -1];
     const rest = (f: Record<string, unknown>) => JSON.stringify({ ...f, fromBlock: null, toBlock: null });
     const groups: { f: Record<string, unknown>; from: number; to: number; of: number[] }[] = [];
+    // a range as old as one this provider refused for its history window (pastWindow) is not asked of it: no answer
     fs.forEach((f, i) => {
       const [from, to] = at(f);
+      if (pastWindow(u, { method: "eth_getLogs", params: [f] })) return;
       const g = groups.at(-1);
       // a run of the same filter is joined over the spans between too (those another pair already agreed), its answer
       // split back by each one's own blocks: the spans a busy filter still lacks after a first pair lie apart (card
@@ -1892,8 +1969,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (g !== undefined && from >= 0 && to >= from && rest(g.f) === rest(f) && from > g.to && to - g.from + 1 <= (f.address === undefined ? Math.min(max, INDEX_JOIN_MAX) : max)) (g.to = to), g.of.push(i);
       else groups.push({ f, from, to, of: [i] });
     });
-    const r = await batchTo(u, groups.map((g) => ({ method: "eth_getLogs", params: [g.of.length === 1 ? g.f : { ...g.f, fromBlock: `0x${g.from.toString(16)}`, toBlock: `0x${g.to.toString(16)}` }] })), patient);
     const out: (Log[] | null)[] = fs.map(() => null);
+    if (groups.length === 0) return out;
+    const r = await batchTo(u, groups.map((g) => ({ method: "eth_getLogs", params: [g.of.length === 1 ? g.f : { ...g.f, fromBlock: `0x${g.from.toString(16)}`, toBlock: `0x${g.to.toString(16)}` }] })), patient);
     for (const [k, g] of groups.entries()) {
       const logs = r?.[k]?.ok ? await parseLogs((r[k] as { result: unknown }).result, slice) : null;
       if (logs === null) continue;
@@ -1903,6 +1981,50 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
     }
     return out;
+  }
+
+  /** Card robinhood-tapes-inside-their-bounds-on-live: each provider that refused a log read for its history window
+   *  (isStateGone: api.blockvectra.com's -32011 "block reference is outside the public history window", about 850
+   *  blocks), with how far behind the newest head that read began, the least such, and how far back the deepest log
+   *  read it served began (logsDeepest): while the mark holds (stateMarkHolds) it is asked no read from deeper than it
+   *  served, so a cold read's 30 spans, refused one by one deepest first, are not each sent to learn the next. A window
+   *  follows the head, so the marks are depths, never blocks. 12 Robinhood tapes opened at once from the Mac on the
+   *  keyless providers (22 Nov 14:0xZ) sent blockvectra 62 log reads, 41 refused so and 19 more 429: each a post spent
+   *  and a pair waited on, on the reads every tape fills from. */
+  const logsGone = new Map<string, { depth: number; at: number }>();
+  const logsDeepest = new Map<string, number>();
+  /** A post's answers to its log reads, read for `u`'s window: the depth of each read it served, and of each it refused
+   *  for its window from shallower than the mark (a refusal past the mark is the mark's own, batchTo `known`). */
+  function noteLogs(u: string, part: Call[], r: Reply[]): void {
+    if (newest === null) return;
+    part.forEach((c, i) => {
+      const from = c.method === "eth_getLogs" ? hexInt(obj(c.params[0]).fromBlock) : null;
+      const a = r[i];
+      if (from === null || from < 0 || a === undefined) return;
+      const depth = newest!.n - from;
+      if (a.ok) {
+        if (depth > (logsDeepest.get(u) ?? -1)) logsDeepest.set(u, depth);
+      } else if (a.gone === true && depth < (logsGoneDepth(u) ?? Infinity)) markLogsGone(u, depth);
+    });
+  }
+  function markLogsGone(u: string, depth: number): void {
+    const had = logsGone.get(u);
+    const keep = had !== undefined && stateMarkHolds(had.at, now()) ? Math.min(had.depth, depth) : depth;
+    logsGone.set(u, { depth: Math.max(1, keep), at: now() });
+  }
+  function logsGoneDepth(u: string): number | null {
+    const g = logsGone.get(u);
+    if (g === undefined) return null;
+    if (!stateMarkHolds(g.at, now())) return (logsGone.delete(u), null);
+    return g.depth;
+  }
+  /** Whether `c` is a log read from as far back as `u` refused for its history window (logsGone). */
+  function pastWindow(u: string, c: Call): boolean {
+    if (c.method !== "eth_getLogs") return false;
+    const gone = logsGoneDepth(u);
+    const from = hexInt(obj(c.params[0]).fromBlock);
+    if (gone === null || newest === null || from === null || from < 0) return false;
+    return newest.n - from > Math.min(gone - 1, logsDeepest.get(u) ?? 0);
   }
 
   /** For each filter, its logs when two providers return the same ones; null where they do not agree. */
@@ -2801,8 +2923,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
   let follower: ReturnType<typeof setInterval> | null = null;
   if (index !== null && deps.tickMs !== 0) {
-    void follow();
-    follower = setInterval(() => void follow(), INDEX_FOLLOW_MS);
+    // fresh: ahead of the read backs and the read ahead (freshLane)
+    void freshRun(follow);
+    follower = setInterval(() => void freshRun(follow), INDEX_FOLLOW_MS);
     follower.unref();
   }
 
@@ -3337,9 +3460,24 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (head !== null) backFrom(e, head.with);
     }).catch(() => undefined);
   }
-  /** A read book's read back started, once (backAll): its own background read, never a caller's or the tick's wait. */
+  /** BACK_AT_ONCE read backs at once, the rest waiting their turn in order. */
+  let backsOut = 0;
+  const backsWaiting: (() => void)[] = [];
+  async function backTurn(run: () => Promise<void>): Promise<void> {
+    if (backsOut >= READ_BACK_SHARE[chain].atOnce) await new Promise<void>((go) => backsWaiting.push(go));
+    else backsOut++;
+    try {
+      await run();
+    } finally {
+      const next = backsWaiting.shift();
+      if (next !== undefined) next();
+      else backsOut--;
+    }
+  }
+  /** A read book's read back started, once (backAll): its own background read, never a caller's or the tick's wait;
+   *  at most BACK_AT_ONCE at once (backTurn). */
   function backFrom(e: Entry, urls: readonly string[]): void {
-    if (e.readAt !== null && e.from !== undefined && e.back?.done !== true && e.backing === undefined) e.backing = lanes.run(newLane(false), () => backAll(e, urls)).finally(() => (e.backing = undefined));
+    if (e.readAt !== null && e.from !== undefined && e.back?.done !== true && e.backing === undefined) e.backing = lanes.run(newLane(false), () => backTurn(() => backAll(e, urls))).finally(() => (e.backing = undefined));
   }
   /** Whether a book's tape is still reading back (readBack): the answer says `filling`, so the page shows it loading,
    *  not empty, and reads it again every TRADES_POLL_MS (apps/terminal/src/screens/token/trades.ts) until it is done. */
@@ -3506,7 +3644,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   function start(): Promise<void> {
     // a tick is the helper's own read, background whoever starts it (an open whose first read failed, a stale book)
     if (!running)
-      running = lanes.run(newLane(false), tick)
+      running = freshRun(tick)
         .catch(() => undefined)
         .finally(() => {
           running = null;
