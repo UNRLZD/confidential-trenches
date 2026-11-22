@@ -697,6 +697,7 @@ export function handler(
         const evm = chains.length === 1 && Object.hasOwn(evmLists, chains[0]!) ? evmLists[chains[0] as EvmChain] : undefined;
         const nearLists = chains.length === 1 && chains[0] === "near" ? near?.lists : undefined;
         if (chains.length !== 1 || (chains[0] !== "solana" && evm === undefined && nearLists === undefined)) return send(404, { error: { code: "not_found" } }, cors(req));
+        const began = performance.now();
         void (evm ?? nearLists ?? lists)
           .get()
           .then((a) => {
@@ -705,6 +706,10 @@ export function handler(
             if (a.status !== 200 || a.asOfMs === undefined) return send(a.status, JSON.parse(a.body), cors(req));
             h[HELPER_SOURCE_HEADER] = nearLists !== undefined ? "chain" : evm === undefined ? "jupiter" : "geckoterminal";
             h[HELPER_FETCHED_AT_HEADER] = new Date(a.asOfMs).toISOString();
+            // card helper-stays-fast-under-the-live-run: the helper's own time for the lists, as every market read names it
+            // (settle), so a slow lists answer tells the helper's wait from the way to it (helper-21's burst: lists at 2.4 s
+            // p50 naming nothing)
+            h["Server-Timing"] = `total;dur=${Math.round(performance.now() - began)}`;
             const gzip = a.gzip !== undefined && /\bgzip\b/i.test(String(req.headers["accept-encoding"] ?? ""));
             const out = gzip ? a.gzip! : Buffer.from(a.body, "utf8");
             if (gzip) h["Content-Encoding"] = "gzip";

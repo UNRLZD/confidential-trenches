@@ -54,16 +54,21 @@ export function pagePaths(token) {
   return [...CHAINS.map((c) => `/v1/market/lists?chain=${c}`), `/v1/market/token?chain=solana&token=${t}`, `/v1/market/trades?chain=solana&token=${t}&limit=50`, `/v1/market/candles?chain=solana&token=${t}&tf=15m&limit=500`];
 }
 
-/** One read: its route, status, time and CORS header (with `keep`, the whole body as `text`, for the caller to drop). */
+/** One read: its route, status, time and CORS header (with `keep`, the whole body as `text`, for the caller to drop);
+ *  when it was sent (`at`, on `now`'s clock) and when its headers came (`head`, ms after it was sent), so a slow read
+ *  tells a wait for the answer (late headers: the helper or the proxy before it) from its transfer (late body); a lists
+ *  read names its chain. */
 async function one(base, fetchFn, path, now, keep = false) {
   const began = now();
+  const chain = routeOf(path) === "/v1/market/lists" ? { chain: new URLSearchParams(path.split("?")[1] ?? "").get("chain") } : {};
   try {
     const r = await fetchFn(`${base.replace(/\/$/, "")}${path}`, { redirect: "manual", headers: { origin: APP }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const head = Math.round(now() - began);
     const body = await r.text();
     // the helper's own account of the read (Server-Timing: each upstream it waited on, and its total), so a slow answer
     // names its wait
     const timing = r.headers.get("server-timing");
-    return { route: routeOf(path), status: r.status, ms: Math.round(now() - began), cors: r.headers.get("access-control-allow-origin"), body: r.status === 200 ? undefined : body.slice(0, 200), ...(timing ? { timing } : {}), ...(keep && r.status === 200 ? { text: body } : {}) };
+    return { route: routeOf(path), ...chain, status: r.status, ms: Math.round(now() - began), at: Math.round(began), head, cors: r.headers.get("access-control-allow-origin"), body: r.status === 200 ? undefined : body.slice(0, 200), ...(timing ? { timing } : {}), ...(keep && r.status === 200 ? { text: body } : {}) };
   } catch (e) {
     return { route: routeOf(path), status: null, ms: Math.round(now() - began), error: String(e?.cause?.code ?? e?.name ?? "error") };
   }
@@ -131,7 +136,12 @@ export function judge(run) {
     const ms = answers.filter((a) => a.route === route && a.status !== null).map((a) => a.ms);
     lines.push(`    ${route}: ${ms.length} answered, p50 ${pct(ms, 50) ?? "none"} ms, p99 ${pct(ms, 99) ?? "none"} ms, max ${ms.length ? Math.max(...ms) : "none"} ms`);
   }
-  for (const a of [...answers].filter((a) => a.status !== null).sort((x, y) => y.ms - x.ms).slice(0, SLOWEST)) lines.push(`    slow: ${a.route} ${a.status} ${a.ms} ms${a.timing ? ` (${a.timing})` : ""}`);
+  // card helper-stays-fast-under-the-live-run: each slow read's start after the burst's first and its headers' time, and
+  // a lists read's chain: helper-21's run 44989861313 landed every route at ~2.4 s, the slowest lists reads naming
+  // nothing (no Server-Timing, no chain), so whether the wait was the answer's or its transfer was not read
+  const first = Math.min(...answers.filter((a) => Number.isFinite(a.at)).map((a) => a.at));
+  const when = (a) => (Number.isFinite(a.at) && Number.isFinite(a.head) ? `, sent +${a.at - first} ms, headers at ${a.head} ms` : "");
+  for (const a of [...answers].filter((a) => a.status !== null).sort((x, y) => y.ms - x.ms).slice(0, SLOWEST)) lines.push(`    slow: ${a.route}${a.chain ? `?chain=${a.chain}` : ""} ${a.status} ${a.ms} ms${when(a)}${a.timing ? ` (${a.timing})` : ""}`);
   say(p99 !== null && p99 <= P99_MAX_MS, `p99 ${p99 ?? "none"} ms, within ${P99_MAX_MS} ms (p50 ${pct(answers.map((a) => a.ms), 50) ?? "none"} ms; by status ${JSON.stringify(by)})`);
   return { ok: lines.every((l) => !l.startsWith("BAD")), lines };
 }
