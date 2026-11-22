@@ -1078,7 +1078,8 @@ test("a pool buy's records: filled, its ops record (time, chain, token, USD) and
   await recordPoolBuy(s, "b4", FACTS, { result: { stage: "sent", txs: [{ chain: "solana", hash: "Sig4" }] } });
   await recordPoolBuy(s, "b5", FACTS, { error: "id_reused" });
   await recordPoolBuy(s, "b6", FACTS, null);
-  assert.deepEqual([...s.ops.keys()], ["b1", "b2", "b3"], "no record for an answer with no end, another tab's run or none");
+  assert.deepEqual([...s.ops.keys()], ["b1", "b2", "b3", "b4"], "sent: its op at sent (card signpage-sent-end-recorded); no record for another tab's run or none");
+  assert.deepEqual(opOf("b4", s.ops.get("b4")), { id: "b4", kind: "buy", stage: "sent", txs: [{ chain: "solana", hash: "Sig4" }], created_ms: 1_800_000_000_000, chain: "solana", token: MINT, amount_usd: "1.5" });
   await recordPoolBuy(s, "b1", FACTS, { error: "failed" });
   assert.equal((s.ops.get("b1") as { stage: string }).stage, "filled", "a record already there is never written over");
   const n = memStore();
@@ -1177,15 +1178,106 @@ test("the page: a pool buy answered early as sent (its fill read later) is recor
   await until(async () => (await tp.positions()) !== null);
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pb2", sha: "00", progress: (s: string) => posted.push(s) } as never);
   answered();
-  await new Promise((r) => setTimeout(r, 20));
-  assert.equal(await w.get("ops", "pb2"), undefined, "sent is no end: nothing written yet");
-  progress("filled");
-  progress("filled");
   await until(async () => (await w.get("ops", "pb2")) !== undefined);
+  assert.deepEqual(((await w.get("ops", "pb2")) as { stage: string }).stage, "sent", "sent is no end: its op reads sent (card signpage-sent-end-recorded)");
+  progress("filled");
+  progress("filled");
+  await until(async () => ((await w.get("ops", "pb2")) as { stage: string }).stage !== "sent");
   const op = (await w.get("ops", "pb2")) as { stage: string; txs: unknown[] };
   assert.deepEqual([op.stage, op.txs], ["filled", [{ chain: "solana", hash: "SigS" }]]);
   assert.deepEqual(posted, ["filled", "filled"], "the app still gets every progress the run posts");
   assert.deepEqual(await w.get("meta", POSITION_COSTS_KEY), { [solanaWallet()]: { mint: MINT, received: "5", cost_usd: "1.5" } });
+});
+
+// card signpage-sent-end-recorded: a Solana pool buy's op under its request id, from its send to its one end
+test("card signpage-sent-end-recorded: a Solana buy's op reads sent with its transaction, then one end: the end's txs over sent's (none: sent's kept); an end never written over; a refusal never over sent; a sent with no tx writes nothing", async () => {
+  const { opOf } = await import("../src/state.ts");
+  const SENT = { result: { stage: "sent", txs: [{ chain: "solana" as const, hash: "SigA" }] } };
+  const s = memStore();
+  await recordPoolBuy(s, "e1", FACTS, SENT);
+  assert.deepEqual(opOf("e1", s.ops.get("e1")), { id: "e1", kind: "buy", stage: "sent", txs: [{ chain: "solana", hash: "SigA" }], created_ms: 1_800_000_000_000, chain: "solana", token: MINT, amount_usd: "1.5" }, "sent, with its transaction");
+  assert.equal(s.meta.get(POSITION_COSTS_KEY), undefined, "sent writes no W record");
+  await recordPoolBuy(s, "e1", FACTS, { result: { stage: "sent", txs: [{ chain: "solana", hash: "SigOther" }] } });
+  assert.deepEqual((s.ops.get("e1") as { txs: unknown }).txs, [{ chain: "solana", hash: "SigA" }], "sent once");
+  await recordPoolBuy(s, "e1", FACTS, { error: "failed" });
+  assert.equal((s.ops.get("e1") as { stage: string }).stage, "sent", "a refusal never over sent: its bytes may have left");
+  await recordPoolBuy(s, "e1", FACTS, { result: { stage: "not_landed", txs: [] } });
+  assert.deepEqual([(s.ops.get("e1") as { stage: string }).stage, (s.ops.get("e1") as { txs: unknown }).txs], ["not_landed", [{ chain: "solana", hash: "SigA" }]], "an end with no txs keeps sent's");
+  await recordPoolBuy(s, "e1", FACTS, { result: { stage: "filled", txs: [{ chain: "solana", hash: "SigB" }] } });
+  assert.equal((s.ops.get("e1") as { stage: string }).stage, "not_landed", "an end is never written over");
+  const f = memStore();
+  await recordPoolBuy(f, "e2", FACTS, SENT);
+  await recordPoolBuy(f, "e2", FACTS, { result: { stage: "filled", txs: [{ chain: "solana", hash: "SigB" }] } });
+  assert.deepEqual(opOf("e2", f.ops.get("e2")), { id: "e2", kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: "SigB" }], created_ms: 1_800_000_000_000, chain: "solana", token: MINT, amount_usd: "1.5", units: "1081590.213565", pool_amount: "0.01" }, "the end's own txs replace sent's, with its figures");
+  assert.ok(Object.hasOwn(f.meta.get(POSITION_COSTS_KEY) as object, W1), "a filled end over sent writes W's record");
+  const n = memStore();
+  await recordPoolBuy(n, "e3", FACTS, { result: { stage: "sent", txs: [] } });
+  assert.equal(n.ops.get("e3"), undefined, "a sent with no transaction writes nothing");
+  const o = memStore();
+  o.ops.set("e4", { kind: "sell", pool: "sol", sha: "00", stage: "sent", txs: [], created_ms: 1 });
+  await recordPoolBuy(o, "e4", FACTS, { result: { stage: "filled", txs: [] } });
+  assert.equal((o.ops.get("e4") as { kind: string }).kind, "sell", "another kind's op under the id is never written over");
+});
+
+/** A stand-in pool.buy kind on the page that answers "sent" with `sig`, then posts what the test asks (pool-buy.ts
+ *  poolBuyKind's order: the early answer, the run's own end, a follow's late end). */
+const sentBuy = (sig: string) => {
+  const k = { answered: (() => {}) as () => void, progress: ((_s: string) => {}) as (s: string) => void };
+  const buy = () => (_ask: unknown, ctx: { route?: (r: unknown) => void; progress: (s: string) => void }) => {
+    k.progress = ctx.progress;
+    ctx.route?.({ wallet: solanaWallet() });
+    return { running: true as const, after: new Promise<void>((r) => (k.answered = r)), answer: () => ({ result: { stage: "sent", txs: [{ chain: "solana", hash: sig }] } }) };
+  };
+  return { k, buy };
+};
+
+test("card signpage-sent-end-recorded (b): a Solana buy whose run ends sent, its landing unknown: its op reads sent with its transaction right after the answer, and the follow's end (both RPCs past) ends it, sent's txs kept", async () => {
+  const w = await spentWallet();
+  const c = chain();
+  const { k, buy } = sentBuy("SigL");
+  const tp = testnetPool(
+    { store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE },
+    // @ts-expect-error a stand-in buy kind
+    { pin: PIN, evmPin: NO_EVM, rpcs: c.rpcs, table: "Table111111111111111111111111111111111111111", holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: () => {}, clearTimer: () => {} } },
+  );
+  await until(async () => (await tp.positions()) !== null);
+  tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pbL", sha: "00", progress: () => {} } as never);
+  k.answered();
+  await until(async () => (await w.get("ops", "pbL")) !== undefined);
+  assert.deepEqual(((await w.get("ops", "pbL")) as { stage: string; txs: unknown }).txs, [{ chain: "solana", hash: "SigL" }]);
+  assert.equal(((await w.get("ops", "pbL")) as { stage: string }).stage, "sent", "sent right after the answer");
+  k.progress("sent");
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(((await w.get("ops", "pbL")) as { stage: string }).stage, "sent", "the run's own end is sent: still sent");
+  k.progress("not_landed");
+  await until(async () => ((await w.get("ops", "pbL")) as { stage: string }).stage !== "sent");
+  const op = (await w.get("ops", "pbL")) as { stage: string; txs: unknown };
+  assert.deepEqual([op.stage, op.txs], ["not_landed", [{ chain: "solana", hash: "SigL" }]]);
+});
+
+test("card signpage-sent-end-recorded (a): a Solana buy that throws after answering sent (poolBuyKind posts sent, then hands the page its follow) reaches its follow's end in the op; a refused end on chain is an end too", async () => {
+  for (const [end, sig] of [["filled", "SigT"], ["refused", "SigR"]] as const) {
+    const w = await spentWallet();
+    const c = chain();
+    const { k, buy } = sentBuy(sig);
+    const tp = testnetPool(
+      { store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE },
+      // @ts-expect-error a stand-in buy kind
+      { pin: PIN, evmPin: NO_EVM, rpcs: c.rpcs, table: "Table111111111111111111111111111111111111111", holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: () => {}, clearTimer: () => {} } },
+    );
+    await until(async () => (await tp.positions()) !== null);
+    tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pbT", sha: "00", progress: () => {} } as never);
+    // the throw past the early answer: pool-buy.ts poolBuyKind's catch posts "sent" (test/pool-buy.test.ts "a run that
+    // throws past its own catch after the early answer posts sent"), then its follow posts the end
+    k.progress("sent");
+    k.answered();
+    await until(async () => (await w.get("ops", "pbT")) !== undefined);
+    assert.equal(((await w.get("ops", "pbT")) as { stage: string }).stage, "sent", `${end}: sent first`);
+    k.progress(end);
+    await until(async () => ((await w.get("ops", "pbT")) as { stage: string }).stage !== "sent");
+    const op = (await w.get("ops", "pbT")) as { stage: string; txs: unknown };
+    assert.deepEqual([op.stage, op.txs], [end, [{ chain: "solana", hash: sig }]], `${end}: the follow's end`);
+  }
 });
 
 test("the page: a sell answered at its send (sent) and ended later: its position is gone at the end, with no reload", async () => {

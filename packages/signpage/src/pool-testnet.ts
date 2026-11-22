@@ -2993,6 +2993,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       });
   };
   const TRADE_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed"]);
+  // a buy's ends: those, and refused on chain (both RPCs read its transaction failed: pool-buy.ts), each its op's end
+  const BUY_ENDS: ReadonlySet<string> = new Set([...TRADE_ENDS, "refused"]);
   // a pool buy, its records written once its run ends (src/positions.ts recordPoolBuy: its ops record, and W's buy record
   // for the cost), the positions read again after them; its W and the amount W received come from the run's own route
   // facts, the price is the page's own read at the request. The kind's `after` settles at its first answer, which may be
@@ -3012,17 +3014,28 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const f = { ...facts };
       early = inTurn(f.wallet, async () => recordBoughtOut((await page.store()) as unknown as BuyRecordStore, f)).finally(() => positions.refresh());
     };
+    // the request's op at "sent" with its transaction (card signpage-sent-end-recorded), written once the run answers
+    // it; the end's write waits for it, so an end is never written under it
+    let opened: Promise<void> = Promise.resolve();
+    let sentOp = false;
+    const sent = (txs: TxRef[]): void => {
+      if (done || sentOp || txs.length === 0) return;
+      sentOp = true;
+      const a = { result: { stage: "sent", txs } };
+      opened = inTurn(facts.wallet, async () => recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, a));
+    };
     const finish = (end: Parameters<typeof recordPoolBuy>[3]): void => {
       if (done) return;
       done = true;
       if (facts.wallet !== undefined) {
         facts.decimals = boughtDecimals.get(facts.wallet) ?? facts.decimals;
         boughtDecimals.delete(facts.wallet);
-        if (end !== null && "result" in end && end.result.stage !== "not_landed") awaited.set(facts.wallet, ctx.id);
+        if (end !== null && "result" in end && end.result.stage !== "not_landed" && end.result.stage !== "refused") awaited.set(facts.wallet, ctx.id);
       }
       const ran = facts.wallet;
-      // after this run's early write (in W's turn before it), and every earlier write on W
+      // after this run's early write and its "sent" op (in W's turn before it), and every earlier write on W
       void inTurn(ran, async () => {
+        await opened;
         await early;
         await recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end);
       }).finally(() => (ran !== undefined && runningBuys.delete(ran), positions.refresh(), fillTrades()));
@@ -3033,9 +3046,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     };
     const progress = (stage: Parameters<KindContext["progress"]>[0], txs?: Parameters<KindContext["progress"]>[1]): void => {
       ctx.progress(stage, txs);
-      if (TRADE_ENDS.has(stage)) finish({ result: { stage, txs: txsOf() } });
-      // the run ended "sent" (its spend not read as final): no records, its W looked for, its decimals let go
-      else if (stage === "sent" && !done && facts.wallet !== undefined) {
+      if (BUY_ENDS.has(stage)) finish({ result: { stage, txs: txsOf() } });
+      // the run ended "sent" (its spend not read as final): its op at "sent", its W looked for, its decimals let go
+      else if (stage === "sent" && !done) {
+        sent(txsOf());
+        if (facts.wallet === undefined) return;
         boughtDecimals.delete(facts.wallet);
         awaited.set(facts.wallet, ctx.id);
         positions.refresh();
@@ -3051,8 +3066,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if ("after" in run)
       void run.after.then(() => {
         const a = run.answer() as Parameters<typeof recordPoolBuy>[3];
-        if (a !== null && ("error" in a || TRADE_ENDS.has(a.result.stage))) finish(a);
-        else positions.refresh();
+        if (a !== null && ("error" in a || BUY_ENDS.has(a.result.stage))) finish(a);
+        else {
+          if (a !== null && a.result.stage === "sent") sent(a.result.txs.map((t) => ({ chain: t.chain, hash: t.hash })));
+          positions.refresh();
+        }
       });
     return run;
   };

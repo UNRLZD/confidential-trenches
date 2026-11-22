@@ -52,11 +52,12 @@
 //   over what it received, so a sell takes cost off pro rata by the units it sold. A position any of whose Ws has no
 //   cost in its record (no record, or a buy with no price read) has cost "0", which the app reads as unknown: never a
 //   cost made of part of its Ws.
-// - The pool buy's ops record (recordPoolBuy, review P3-1 of card kit-portfolio-reads): written once its run ends, as
-//   state.ts's op contract reads it: kind "buy", its end stage, its txs, the error code of a refusal, its time, chain and
+// - The pool buy's ops record (recordPoolBuy, review P3-1 of card kit-portfolio-reads), under the request's id, as
+//   state.ts's op contract reads it: kind "buy", its stage, its txs, the error code of a refusal, its time, chain and
 //   token, and amount_usd its asked spend at that price; filled, the token W received (units) and the SOL it spent
-//   (pool_amount, kit 1.10). Nothing secret. A run a closed tab ended writes none, nor one
-//   that answered "sent" (no end yet).
+//   (pool_amount, kit 1.10). Nothing secret. Written at "sent" with its transaction once the run answers it (card
+//   signpage-sent-end-recorded), then once at its end, the end's txs over sent's (none: sent's kept); an end is never
+//   written over.
 // - When: a pass at the sign-in's first state read, and again each time a pool buy or sell run ends; never inside a
 //   state read, which only takes the last pass. One pass at a time: a refresh asked while one runs runs once more after
 //   it, a sign out's included. A sell's own read of the Ws holds every pass off (the running one stopped, a booked
@@ -549,21 +550,30 @@ export async function recordBoughtOut(store: Pick<BuyRecordStore, "update">, f: 
   await store.update("meta", POSITION_COSTS_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [f.wallet!]: rec }));
 }
 
-/** A pool buy's records once its run ended (see the header): its ops record under the request's id (never over one
- *  already there, nor for an id another tab runs), and when it filled with W and its amount told, W's buy record (with
+/** A pool buy's records: at its "sent" answer, its ops record under the request's id at "sent" with its transaction;
+ *  once its run ended (see the header), that record's end (never over an end, nor for an id another tab runs), and when it filled with W and its amount told, W's buy record (with
  *  the token's decimals when told, and the USD it spent when a price was read), every other W's record kept. A run that
  *  ended not_landed or refused on chain (both RPCs' verdict: pool-buy.ts) takes back W's record of this very buy, the
  *  one recordBoughtOut wrote at its read-back; an end not known ("sent") writes nothing, so it stays. */
 export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBuyFacts, answer: BuyAnswer | null): Promise<void> {
   if (answer === null || ("error" in answer && answer.error === "id_reused")) return;
-  if ((await store.get("ops", id)) !== undefined) return;
+  const had = (await store.get("ops", id)) as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
+  // an op already there is written over only by this buy's end, and only while it reads "sent" (card
+  // signpage-sent-end-recorded); an end is never written over, nor a refusal over "sent" (its bytes may have left)
+  const open = had !== undefined && had.kind === "buy" && had.stage === "sent";
+  if (had !== undefined && (!open || "error" in answer)) return;
   const usd = f.price === null ? null : usdOf(f.spend, f.spendDecimals, f.price);
   const stage = "error" in answer ? "refused" : answer.result.stage;
-  // an end only: a run that answered "sent" (read back, its spend not yet read as this attempt's) is the note settle's to
-  // finish, which writes no op, so a "sent" record would stay open; and trade.ts settleTradeOps refuses an open buy
-  // record with no tx as a trade-box one
-  if (!FINAL.has(stage)) return;
-  const txs = "error" in answer ? [] : answer.result.txs.map((t) => ({ chain: t.chain, hash: t.hash }));
+  // "sent" once, with its transaction (read back on both RPCs: pool-buy.ts sent), so the request's op is there from its
+  // send on and trade.ts settleTradeOps, which refuses an open buy op with no tx, leaves it; then exactly one end
+  if (stage === "sent" ? open : !FINAL.has(stage)) return;
+  const own = "error" in answer ? [] : answer.result.txs.map((t) => ({ chain: t.chain, hash: t.hash }));
+  // the end's own txs; an end with none keeps sent's
+  const txs = own.length === 0 && open && Array.isArray(had.txs) ? (had.txs as TxRef[]) : own;
+  if (stage === "sent") {
+    if (txs.length === 0) return;
+    return void (await store.put("ops", id, { kind: "buy", stage, txs, created_ms: f.createdMs, chain: "solana", token: f.token, ...(usd === null ? {} : { amount_usd: usd }) }));
+  }
   // a filled buy's own figures (kit 1.10 OpDetail, card portfolio-shows-pool-trades): the token W received, read back on
   // both RPCs, and the SOL its request spent at the venue; with no `out` told, src/trade-fill.ts reads both from the
   // buy's transaction
