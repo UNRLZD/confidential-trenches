@@ -4,7 +4,8 @@
 # deploy/unplug.sh off, scripts/drill/servers-down.mjs reading every port of it as answering nothing, unplug.sh on, and
 # the same read failing on the helper it brought back. It needs Docker; nothing of the live host is touched:
 #   bash apps/helper/deploy/unplug-proof.sh [<out dir>]
-# The recorded reads land in <out dir> (default a new temp dir): off.json (the good answer) and on.json (the bad one).
+# The recorded reads land in <out dir> (default a new temp dir), off.json (the good answer) and on.json (the bad one),
+# and are printed, so a run on another machine (heavy.sh's box) hands them back in its output.
 set -uo pipefail
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 OUT=${1:-$(mktemp -d)}
@@ -31,9 +32,11 @@ echo "== unplug.sh off"
 bash ./unplug.sh off 2>&1 | tail -3; echo "rc=${PIPESTATUS[0]} (want 0)"
 echo "== servers-down on the stopped stack: the good answer"
 node "$DOWN" --helper 127.0.0.1 --http-port 18090 --https-port 18453 --record "$OUT/off.json"; echo "rc=$? (want 0)"
+echo "== off.json"; cat "$OUT/off.json"
 echo "== unplug.sh on"
 UNPLUG_READY_S=${UNPLUG_READY_S:-300} bash ./unplug.sh on 2>&1 | tail -3; echo "rc=${PIPESTATUS[0]} (want 0)"
 curl -s -o /dev/null -w 'health after: %{http_code}\n' http://127.0.0.1:18090/v1/health
 echo "== servers-down on the stack brought back: the bad answer"
 node "$DOWN" --helper 127.0.0.1 --http-port 18090 --https-port 18453 --record "$OUT/on.json"; echo "rc=$? (want 1)"
+echo "== on.json"; cat "$OUT/on.json"
 echo "== done"
