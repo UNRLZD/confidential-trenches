@@ -1,7 +1,7 @@
 // Card helper-unplug-off: the unplug drill's check that every server of ours is off (scripts/drill/servers-down.mjs).
 // It replays scripts/drill/servers-down.answers.json: the stack read after deploy/unplug.sh off passes; the live helper
-// read while it served (and, once unplug-proof.sh has run, the local stack after unplug.sh on) fails; a read with one port still open, a
-// health that answered, or no helper read at all fails; the static hosts never decide the verdict.
+// read while it served and the same stack read after unplug.sh on fail; a read with one port still open, a health that
+// answered, or no helper read at all fails; the static hosts never decide the verdict.
 //   node --test scripts/ci/servers-down.test.mjs
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -15,19 +15,22 @@ import { judge, tcp } from "../drill/servers-down.mjs";
 const ROOT = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const ANSWERS = `${ROOT}/scripts/drill/servers-down.answers.json`;
 const answers = JSON.parse(readFileSync(ANSWERS, "utf8"));
-// the stack after unplug.sh off as servers-down reads it (a refused port answers "refused", a health with no server an
-// error and no status); the recorded one from unplug-proof.sh replaces it when the answers file holds one
-const DOWN = { at: "2026-11-22T19:00:00.000Z", helper: { host: "ct-api.unrealized.trade", tcp: { 443: "refused", 80: "refused" }, health: { status: null, error: "ECONNREFUSED" } }, statics: [] };
-answers.good ??= DOWN;
 
-test("the good answer (the stack after unplug.sh off) passes: every port and the health answered nothing", () => {
+test("the answers are the recorded reads: the stack after off and after on (unplug-proof.yml's run), and the live helper", () => {
+  for (const name of ["good", "back_on", "live_up"]) {
+    assert.equal(typeof answers[name]?.at, "string", `${name} is a recorded read`);
+    assert.ok(Object.keys(answers[name].helper?.tcp ?? {}).length >= 2, `${name} read two ports`);
+  }
+});
+
+test("the recorded good answer (the stack after unplug.sh off) passes: every port and the health answered nothing", () => {
   const v = judge(answers.good);
   assert.equal(v.pass, true, v.lines.join("\n"));
   assert.ok(v.lines.filter((l) => l.startsWith("ok ")).length >= 3, v.lines.join("\n"));
 });
 
 test("the recorded bad answers fail: the live helper while it served, and the local stack after unplug.sh on", () => {
-  for (const name of ["live_up", "back_on"].filter((n) => answers[n] !== undefined)) {
+  for (const name of ["live_up", "back_on"]) {
     const v = judge(answers[name]);
     assert.equal(v.pass, false, `${name}: ${v.lines.join("\n")}`);
   }
@@ -65,7 +68,7 @@ test("tcp reads a listening port as open and a closed one as refused", async () 
 test("the command judges a recorded answer: PASS exit 0 on the good one, FAIL exit 1 on a bad one", () => {
   const dir = mkdtempSync(`${tmpdir()}/servers-down-`);
   try {
-    for (const [name, want] of [["good", 0], ["live_up", 1], ["back_on", 1]].filter(([n]) => answers[n] !== undefined)) {
+    for (const [name, want] of [["good", 0], ["live_up", 1], ["back_on", 1]]) {
       writeFileSync(`${dir}/${name}.json`, JSON.stringify(answers[name]));
       const r = spawnSync(process.execPath, [`${ROOT}/scripts/drill/servers-down.mjs`, "--dry", `${dir}/${name}.json`], { encoding: "utf8" });
       assert.equal(r.status, want, `${name}: ${r.stdout}${r.stderr}`);
