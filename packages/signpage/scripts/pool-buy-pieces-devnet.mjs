@@ -448,11 +448,13 @@ if (SCENARIO === "found") {
   out.loads = [];
   // the rent backs pass a W only after the page's first tap (card rent-backs-resume-private: before it a run reads the
   // Ws on the helper's seat and passes none), so the restored device's page stays open and is tapped once, as its user
-  // does (card a-found-wallet-sweeps-past-a-strangers-coin): a sell of a coin no W of the user holds, refused; each load
-  // is then a state read of that page
+  // does (card a-found-wallet-sweeps-past-a-strangers-coin): a sell of the run's coin, which no W the device bought with
+  // holds (W's buy never landed), refused inside the page's flow; each load is then a state read of that page. A sell
+  // refused before the flow (not_allowed: its token's decimals not read) is no tap, and the run fails on it
   const p = page("found", await openWalletStore({ indexedDB: idb }));
-  const tapped = await once(p, "pool.sell", { chain: "solana", token: base58.encode(new Uint8Array(32).fill(9)), share_bps: 10_000, slippage_bps: 300 }, true);
+  const tapped = await once(p, "pool.sell", { chain: "solana", token: MINT, share_bps: 10_000, slippage_bps: 300 }, true);
   out.tap = tapped.answer;
+  if (tapped.answer?.error === "not_allowed") finish(false, `the tap never reached the page's flow: ${JSON.stringify(tapped.answer)}`);
   const t0 = Date.now();
   for (let i = 0; Date.now() - t0 < SWEEP_WAIT_MS; i++) {
     const from = told.length;
