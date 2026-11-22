@@ -11,25 +11,30 @@
 // in is a quote, not the coin). The busiest such coin is judged. It passes only when:
 //   - GET /v1/market/trades?chain=base&token=<coin>&limit=50 answers 200 JSON, X-Helper-Source "chain", with trades;
 //   - every swap transaction of the coin's busiest pool in the scan, from the tape's oldest trade's time to MARGIN blocks
-//     under the scan's head, is on the tape (the tape is that pool's, not a side pool an arbitrage also swapped in);
-//   - index-evm-swaps's own read and judge of the coin pass (its pool rule: the sampled trades are judged on the busiest
-//     pool over the window, each amount that pool's leg).
-// A scan with no third-quoted coin is INCONCLUSIVE (exit 3), never a pass.
+//     under the scan's head, is on the tape (index-evm-swaps's pool rule: the tape is the busiest pool's, not a side pool
+//     an arbitrage also swapped in).
+// index-evm-swaps's own read (each sampled amount its pool's leg) is not run here: it builds its JSON-RPC itself
+// (live-checks-provider-answer's NOT_MOVED), and every read of this check goes through provider-answer.mjs, which
+// leaves a provider's no-answer out. A scan with no third-quoted coin, or one no two providers answered alike, is
+// INCONCLUSIVE (exit 3), never a pass or a FAIL.
 // After: helper
-// Serial: evm-keyed 101 (its tape reads and index-evm-swaps's draw the keyed Base providers)
+// Serial: evm-keyed 101 (the helper's tape read of the coin draws the keyed Base providers)
 //   node scripts/live-checks/index-evm-swaps-v4-route-tape.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes the run (every answer read).
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { BLOCK_CLOCK } from "../../apps/helper/src/data/evm/lists.ts";
 import { SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
-import { APP, BASE, judge as judgeSwaps, read as readSwaps, TRADES_PATH } from "./index-evm-swaps.mjs";
+import { APP, BASE, TRADES_PATH } from "./index-evm-swaps.mjs";
+import { rpcAnswer, rpcBatchAnswer } from "./provider-answer.mjs";
 
 const KEY = "index-evm-swaps-v4-route-tape";
 /** The scan: 1,500 blocks (5 min of Base's 200 ms blocks), the helper's own cold window (swaps.ts VENUES.base.cold). */
 export const SCAN_BLOCKS = 1_500;
 export const SCAN_STEP = 500;
 export const SCAN_POOLS = 40;
+/** A provider read's timeout: a 500-block getLogs of the PoolManager runs a few seconds. */
+export const READ_MS = 30_000;
 /** Key reads KEY_BATCH a post, KEY_EVERY_MS apart: sentio refuses a batch over 5, tenderly paces each call in one at 2/s
  *  (base-tapes' PROVIDER_PACE; live, 21 Nov 23:4xZ, a batch of 10 was 429 on both). */
 export const KEY_BATCH = 5;
@@ -92,7 +97,8 @@ export function judge(run) {
   const lines = [];
   const bad = (l) => (lines.push(`BAD ${l}`), false);
   const ok = (l) => (lines.push(`ok  ${l}`), true);
-  if (run.scan == null) return { ok: false, verdict: "FAIL", lines: [`BAD the scan was not read on two agreeing providers: ${run.scanError ?? "no answer"}`] };
+  // the providers' no-answers are theirs, never the helper's: a scan they left unread judges nothing
+  if (run.scan == null) return { ok: false, verdict: "INCONCLUSIVE", lines: [`-- the scan was not read on two agreeing providers: ${run.scanUnread ?? "no answer"}`] };
   const chosen = pick(run.scan);
   if (chosen === null) return { ok: false, verdict: "INCONCLUSIVE", lines: [`-- no third-quoted coin in ${run.scan.pools.length} pools over ${SCAN_BLOCKS} blocks to ${run.scan.head}`] };
   let good = chosen.coin === run.coin && chosen.pool === run.pool ? ok(`the coin ${run.coin}: its busiest pool ${run.pool} is quoted in a third token (${run.scan.pools.find((p) => p.id === run.pool).n} swaps in the scan, ${run.scan.others[run.coin]} other transactions of the coin; no v2 or v3 pool of it busier)`) : bad(`the run judged ${run.coin} ${run.pool}, the scan picks ${chosen.coin} ${chosen.pool}`);
@@ -111,57 +117,60 @@ export function judge(run) {
     const missing = want.filter((tx) => !onTape.has(tx));
     good = (missing.length === 0 ? ok(`all ${want.length} swap transactions of ${run.pool.slice(0, 10)} from the tape's oldest trade (block ${oldest}) to ${MARGIN} blocks under the head are on the tape`) : bad(`${missing.length} of ${want.length} swap transactions of the coin's busiest pool ${run.pool.slice(0, 10)} from the tape's oldest trade (block ${oldest}) are not on the tape: ${missing.slice(0, 5).join(", ")}; the tape is another pool's`)) && good;
   }
-  if (run.swaps !== undefined) {
-    const v = judgeSwaps(run.swaps);
-    for (const l of v.lines) lines.push(`[index-evm-swaps] ${l}`);
-    good = (v.ok ? ok("index-evm-swaps passes on the coin") : bad(`index-evm-swaps on the coin: ${v.verdict}`)) && good;
-  }
   return { ok: good, verdict: good ? "PASS" : "FAIL", lines };
 }
 
-/** One JSON-RPC answer from `url`. */
-async function rpc(url, body, fetchFn) {
-  const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
-  return r.json();
+/** One provider's answer to `calls` (one [method, params], or a list of them sent as one batch), read through
+ *  provider-answer.mjs: `{ result }` (a batch's: every call's result in order), `{ error }` or `{ noAnswer }`. */
+async function ask(url, calls, fetchFn) {
+  if (!Array.isArray(calls[0])) return rpcAnswer(url, calls[0], calls[1], { fetchFn, timeoutMs: READ_MS });
+  const b = await rpcBatchAnswer(url, calls, { fetchFn, timeoutMs: READ_MS });
+  if (b.noAnswer !== undefined) return { noAnswer: b.noAnswer };
+  if (b.error !== undefined) return { error: b.error };
+  // a call that reverts (factory() on a router or an account) is an answer, null; any other error leaves the provider out
+  const reverted = (e) => e?.code === 3 || (typeof e?.message === "string" && /^execution reverted/i.test(e.message));
+  const gap = b.answers.find((x) => x.noAnswer !== undefined) ?? b.answers.find((x) => x.error !== undefined && !reverted(x.error));
+  return gap ?? { result: b.answers.map((x) => (x.error !== undefined ? null : x.result)) };
 }
-/** The same request on providers in turn until two answer it alike (`norm`: the part of an answer that must agree);
- *  null when no two do. */
-async function agreed(body, fetchFn, rpcs, norm = (x) => x) {
+/** The same read on providers in turn until two answer it alike (`norm`: the part of an answer that must agree):
+ *  `{ result }`, or `{ unread }` naming why not. A provider's no-answer (a 429, a rate limit, an empty body, a block it
+ *  does not hold) or error is left out, never judged: the subject is the helper's tape, not the providers. */
+async function agreed(calls, fetchFn, rpcs, norm = (x) => x) {
   const got = [];
+  const left = [];
   for (const u of rpcs) {
-    let a;
-    try {
-      a = await rpc(u, body, fetchFn);
-    } catch {
+    const a = await ask(u, calls, fetchFn);
+    if (a.result === undefined) {
+      left.push(a.noAnswer ?? `${new URL(u).host}: ${JSON.stringify(a.error).slice(0, 80)}`);
       continue;
     }
-    const s = JSON.stringify(norm(Array.isArray(a) ? a.map((x) => x.result ?? null) : a.result ?? null));
-    if ((Array.isArray(a) ? a.every((x) => x.result !== undefined) : a.result !== undefined) && got.includes(s)) return JSON.parse(s);
+    const s = JSON.stringify(norm(a.result));
+    if (got.includes(s)) return { result: JSON.parse(s) };
     got.push(s);
   }
-  return null;
+  return { unread: `${got.length} providers answered ${Array.isArray(calls[0]) ? `a batch of ${calls.length} ${calls[0][0]}` : calls[0]}, no two alike${left.length === 0 ? "" : `; left out: ${left.join("; ")}`}` };
 }
 
-/** Our own scan of the PoolManager's swaps and the busiest pools' keys (two agreeing providers each). */
+/** Our own scan of the PoolManager's swaps and the busiest pools' keys (two agreeing providers each): the scan, or
+ *  `{ unread }` naming the read no two providers answered alike. */
 export async function scan(fetchFn = fetch, rpcs = SWAP_RPCS.base.filter((u) => !u.includes("mainnet.base.org"))) {
   // two providers' heads differ by a block or two: the scan ends 10 blocks under the lower of the first two answered
   const heads = [];
   for (const u of rpcs) {
     if (heads.length === 2) break;
-    try {
-      const a = await rpc(u, { jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }, fetchFn);
-      if (typeof a.result === "string") heads.push(parseInt(a.result, 16));
-    } catch {}
+    const a = await rpcAnswer(u, "eth_blockNumber", [], { fetchFn, timeoutMs: READ_MS });
+    if (typeof a.result === "string" && /^0x[0-9a-f]+$/i.test(a.result)) heads.push(parseInt(a.result, 16));
   }
-  if (heads.length < 2) return null;
+  if (heads.length < 2) return { unread: `${heads.length} providers answered eth_blockNumber` };
   const head = Math.min(...heads) - 10;
   // SCAN_STEP blocks a read, the span the keyless providers all take (tenderly refused the 1,500 in one, 21 Nov 23:3xZ)
   const logs = [];
   for (let lo = head - SCAN_BLOCKS + 1; lo <= head; lo += SCAN_STEP) {
     // each log as the chain holds it (providers add fields of their own)
-    const part = await agreed({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: PM, topics: [TOPIC.swap4], fromBlock: hex(lo), toBlock: hex(Math.min(head, lo + SCAN_STEP - 1)) }] }, fetchFn, rpcs, (ls) => (Array.isArray(ls) ? ls.map((l) => ({ transactionHash: l.transactionHash, blockNumber: parseInt(l.blockNumber, 16), logIndex: parseInt(l.logIndex, 16), topics: l.topics, data: l.data })) : ls));
-    if (!Array.isArray(part)) return null;
-    logs.push(...part);
+    const part = await agreed(["eth_getLogs", [{ address: PM, topics: [TOPIC.swap4], fromBlock: hex(lo), toBlock: hex(Math.min(head, lo + SCAN_STEP - 1)) }]], fetchFn, rpcs, (ls) => (Array.isArray(ls) ? ls.map((l) => ({ transactionHash: l.transactionHash, blockNumber: parseInt(l.blockNumber, 16), logIndex: parseInt(l.logIndex, 16), topics: l.topics, data: l.data })) : ls));
+    if (part.unread !== undefined) return part;
+    if (!Array.isArray(part.result)) return { unread: "eth_getLogs answered no list" };
+    logs.push(...part.result);
   }
   const by = new Map();
   for (const l of logs) {
@@ -177,9 +186,9 @@ export async function scan(fetchFn = fetch, rpcs = SWAP_RPCS.base.filter((u) => 
   const keys = [];
   for (let i = 0; i < top.length; i += KEY_BATCH) {
     if (i > 0) await sleep(KEY_EVERY_MS);
-    const part = await agreed(top.slice(i, i + KEY_BATCH).map((p, k) => ({ jsonrpc: "2.0", id: k, method: "eth_call", params: [{ to: POSM, data: `0x86b6be7d${p.id.slice(2, 52).padEnd(64, "0")}` }, hex(head)] })), fetchFn, rpcs);
-    if (part === null) return null;
-    keys.push(...part);
+    const part = await agreed(top.slice(i, i + KEY_BATCH).map((p) => ["eth_call", [{ to: POSM, data: `0x86b6be7d${p.id.slice(2, 52).padEnd(64, "0")}` }, hex(head)]]), fetchFn, rpcs);
+    if (part.unread !== undefined) return part;
+    keys.push(...part.result);
   }
   top.forEach((p, i) => {
     const k = keys[i];
@@ -193,14 +202,18 @@ export async function scan(fetchFn = fetch, rpcs = SWAP_RPCS.base.filter((u) => 
     const n = new Map();
     const txs = new Set();
     for (let lo = head - SCAN_BLOCKS + 1; lo <= head; lo += SCAN_STEP) {
-      const part = await agreed({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: c.coin, topics: [TOPIC.transfer], fromBlock: hex(lo), toBlock: hex(Math.min(head, lo + SCAN_STEP - 1)) }] }, fetchFn, rpcs, (ls) => (Array.isArray(ls) ? ls.map((l) => [l.transactionHash, l.topics]) : ls));
-      if (!Array.isArray(part)) return null;
+      const got = await agreed(["eth_getLogs", [{ address: c.coin, topics: [TOPIC.transfer], fromBlock: hex(lo), toBlock: hex(Math.min(head, lo + SCAN_STEP - 1)) }]], fetchFn, rpcs, (ls) => (Array.isArray(ls) ? ls.map((l) => [l.transactionHash, l.topics]) : ls));
+      if (got.unread !== undefined) return got;
+      const part = got.result;
+      if (!Array.isArray(part)) return { unread: "eth_getLogs answered no list" };
       for (const [tx] of part) txs.add(tx);
       for (const [, t] of part) for (const a of [t[1], t[2]]) if (typeof a === "string") n.set(`0x${a.slice(26)}`, (n.get(`0x${a.slice(26)}`) ?? 0) + 1);
     }
     const busier = [...n].filter(([a, k]) => a !== PM && a !== `0x${"0".repeat(40)}` && k > c.n).sort((x, y) => y[1] - x[1]).slice(0, 3);
-    const f = busier.length === 0 ? [] : await agreed(busier.map(([a], i) => ({ jsonrpc: "2.0", id: i, method: "eth_call", params: [{ to: a, data: "0xc45a0155" }, hex(head)] })), fetchFn, rpcs);
-    if (f === null) return null;
+    // a counterparty with no factory() (an EOA, a router) reverts or answers 0x: judged as no venue's pool
+    const fa = busier.length === 0 ? { result: [] } : await agreed(busier.map(([a]) => ["eth_call", [{ to: a, data: "0xc45a0155" }, hex(head)]]), fetchFn, rpcs);
+    if (fa.unread !== undefined) return fa;
+    const f = fa.result;
     const pool = busier.find((_, i) => typeof f[i] === "string" && f[i].length === 66 && FACTORIES.has(`0x${f[i].slice(26)}`));
     elsewhere[c.coin] = pool === undefined ? null : { pool: pool[0], transfers: pool[1] };
     const own = new Set(top.find((p) => p.id === c.pool).txs.map(([tx]) => tx));
@@ -209,9 +222,9 @@ export async function scan(fetchFn = fetch, rpcs = SWAP_RPCS.base.filter((u) => 
   return { head, pools: top, elsewhere, others };
 }
 
-export async function read(base = BASE, fetchFn = fetch) {
-  const s = await scan(fetchFn).catch((e) => (console.error(e.message), null));
-  if (s === null) return { base, scan: null, scanError: "no two providers agreed" };
+export async function read(base = BASE, fetchFn = fetch, rpcs = undefined) {
+  const s = await scan(fetchFn, rpcs);
+  if (s.unread !== undefined) return { base, scan: null, scanUnread: s.unread };
   const chosen = pick(s);
   if (chosen === null) return { base, scan: s };
   // a cold coin's tape answers `filling` until its read is done: read again FILL_EVERY_MS apart, FILL_MS at most (the
@@ -222,8 +235,7 @@ export async function read(base = BASE, fetchFn = fetch) {
     trades = { status: r.status, headers: Object.fromEntries(r.headers), body: await r.text() };
     if (!/"filling":true/.test(trades.body) || Date.now() - t0 >= FILL_MS) break;
   }
-  const swaps = await readSwaps(base, chosen.coin, fetchFn, undefined, "base");
-  return { base, scan: s, coin: chosen.coin, pool: chosen.pool, trades, swaps };
+  return { base, scan: s, coin: chosen.coin, pool: chosen.pool, trades };
 }
 
 if (import.meta.main) {
