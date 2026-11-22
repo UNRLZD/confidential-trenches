@@ -632,7 +632,7 @@ function heldWorld(held: (n: number) => boolean) {
   return { s, reads, at: () => now, step: (ms: number) => void (now += ms) };
 }
 
-test("card helper-pool-fee-never-a-client-429: the market and background reads hold both pool providers, and 50 fee asks in a row, one an epoch, each answer 200 with the fee read before (red at ee5c7dac4: the second epoch's ask answered 429 provider limit)", async () => {
+test("card helper-pool-fee-never-a-client-429: every rent read after the first refused 429 (as both pool providers refuse a loaded address): 50 GET /v1/pool/fee, one an epoch, each answer 200 with the fee read first, one read an epoch (red at ee5c7dac4: the second epoch's ask answered 429 provider limit)", async () => {
   const { createServer } = await import("node:http");
   const { handler } = await import("../server.ts");
   const w = heldWorld((n) => n > 1);
@@ -679,6 +679,71 @@ test("card helper-pool-fee-never-a-client-429: a fresh start whose first rent re
 test("card helper-pool-fee-never-a-client-429: a failed read before any good one carries nothing: the ask is still refused", async () => {
   const t = heldWorld(() => true);
   await assert.rejects(t.s.fee(t.at()), /HTTP 429/);
+});
+
+/** A rent a little above TEST_RENT's: the kit's fee for it is not FEE. */
+const RENT2: SolanaRent = { lamportsPerByte: 12_000n, factor: 1n };
+/** A pool sender whose rent reads answer `script` in order (its last for every read after), "fail" a 429. */
+function seqWorld(script: Array<SolanaRent | "fail">) {
+  let now = NOW;
+  const reads: number[] = [];
+  const s = sender(null, [], [], {
+    now: () => now,
+    readRent: async (epoch) => {
+      reads.push(epoch);
+      const r = script[Math.min(reads.length - 1, script.length - 1)]!;
+      if (r === "fail") throw new Error("HTTP 429 Too Many Requests");
+      return r;
+    },
+  });
+  return { s, reads, at: () => now, step: (ms: number) => void (now += ms) };
+}
+
+test("card helper-pool-fee-never-a-client-429 (review M1): an epoch whose read fails carries the newest fee read, after a rent change the new one, never the first", async () => {
+  const y = solanaPoolFee(RENT2);
+  assert.notEqual(y, FEE);
+  const w = seqWorld([TEST_RENT, RENT2, "fail"]);
+  await w.s.ready;
+  assert.equal((await w.s.fee(w.at())).fee, String(FEE));
+  w.step(POOL_EPOCH_MS);
+  assert.equal((await w.s.fee(w.at())).fee, String(y), "the next epoch read the new rent");
+  w.step(POOL_EPOCH_MS);
+  assert.equal((await w.s.fee(w.at())).fee, String(y), "the epoch after failed: it carries the newest fee");
+});
+
+test("card helper-pool-fee-never-a-client-429 (review M2): a carried epoch's fee is kept as that epoch's: a release bound in it is carried in the next epoch after the rent moved, though the last good read at its fee is past a proof's life", async () => {
+  const y = solanaPoolFee(RENT2);
+  // a good read at FEE, then 11 failed epochs (each carries FEE), then a good read at the new rent
+  const w = seqWorld([TEST_RENT, ...Array<"fail">(11).fill("fail"), RENT2]);
+  await w.s.ready;
+  for (let k = 1; k <= 11; k++) {
+    w.step(POOL_EPOCH_MS);
+    assert.equal((await w.s.fee(w.at())).fee, String(FEE), `carried epoch ${k}`);
+  }
+  // the device binds FEE in the 11th carried epoch (its deadline 270 s on) and sends in the next, read good at the new rent
+  const wire = build({ fee: FEE, nullifier: 77, deadlineMs: BigInt(w.at()) + 270_000n });
+  w.step(POOL_EPOCH_MS);
+  assert.equal((await w.s.fee(w.at())).fee, String(y));
+  assert.equal(code(await w.s.carry(body(wire))), "ok");
+});
+
+test("card helper-pool-fee-never-a-client-429 (review M4): the pool senders the helper builds from its environment (server.ts poolSendersOf) read through poolFetchAhead: a 429 to the pool's rent read holds the market's reads of that provider", async () => {
+  const { poolSendersOf } = await import("../server.ts");
+  const { createRpc } = await import("../rpc/rpc.ts");
+  let t = 1_795_000_000_000;
+  const BETA = "https://api.mainnet-beta.solana.com";
+  const NODE = "https://solana-rpc.publicnode.com";
+  const rpc = createRpc({ SOLANA_RPC_URL: "https://mainnet.helius-rpc.invalid/?api-key=fake-helius-key-0123456789abcdef" }, { fetch: (async () => new Response("{}")) as never, now: () => t, log: () => {} });
+  const refusing = (async () => new Response("Too many requests", { status: 429, headers: { "retry-after": "10" } })) as unknown as typeof fetch;
+  const env = { POOL_SOLANA_PROGRAM_MAINNET: PROGRAM, POOL_SOLANA_FEE_PAYER_KEY_MAINNET: FP.secret, POOL_SOLANA_FEE_MAINNET: String(FEE), POOL_SOLANA_RPCS_MAINNET: `${BETA}/,${NODE}` };
+  // the helper's start builds its pools so (server.ts main), on the rpc its market reads draw
+  assert.match(readFileSync(new URL("../server.ts", import.meta.url), "utf8"), /\n {4}const pools = poolSendersOf\(process\.env, rpc\);\n/, "the helper's start builds its pools through poolSendersOf");
+  const pools = poolSendersOf(env, rpc, refusing);
+  assert.equal(pools.size, 1);
+  for (const url of [BETA, NODE]) assert.equal(rpc.caller("solana", url, "getTransaction", "198.51.100.7"), 0, `${url} free before the pool's read`);
+  await assert.rejects([...pools.values()][0]!.fee(t), /429/);
+  t += 1_000;
+  for (const url of [BETA, NODE]) assert.ok(rpc.caller("solana", url, "getTransaction", "198.51.100.7") > 0, `${url}: the market's reads held after the pool's 429`);
 });
 
 // ---- The relayer's cost guards (card relayer-cost-guards, audit I-6: the program holds no relay fee floor) ----
