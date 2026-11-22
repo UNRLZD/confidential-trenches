@@ -75,7 +75,7 @@ import {
 import { EVM_POOL_MIN_DEPOSIT, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads } from "../../trade/evm/pool-fee.ts";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmPoolSellFeeMax, evmPoolSellTip, evmSellCallData, evmSellRouteCheck, evmSellRouteOf as evmSignedSellRouteOf, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { evmSellReleasesAt, evmSellSentOf, type EvmReleaseLog, type EvmSellReleases, type EvmSellSent } from "../../trade/evm/sell-releases.ts";
-import { EVM_PROVIDER_HOLD_MS, evmBatchMost, evmBatchRefused, evmPaceAdvised, evmPaceReady, evmPaceTake, evmPaceWaitMs, evmProviderHeld, evmProviderHeldMs, evmProviderHold } from "./pace.ts";
+import { evmBatchMost, evmBatchRefused, evmHelperRoute, evmPaceAdvised, evmPaceReady, evmPaceTake, evmPaceWaitMs, evmProviderHeld, evmProviderHeldMs, evmProviderHold, evmThrottleHoldMs } from "./pace.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -2219,7 +2219,7 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
       if (before !== null) throw before;
       // a throttle holds the provider; such a request goes to the next at once, a longer cold one waits the gate's backoff
       const held = (sent: number, afterMs: number | null) => {
-        if (provider !== undefined) SCAN_HELD.set(provider, performance.now() + EVM_HOLD_MS);
+        if (provider !== undefined) SCAN_HELD.set(provider, performance.now() + throttleHoldMs(RPC_URL.get(provider), afterMs));
         if (spare) throw new ScanRefused("rpc_error", "the scan provider limited its rate");
         throttle(sent, afterMs);
       };
@@ -2918,6 +2918,10 @@ let QUOTE_LAST: ReadonlySet<string> | undefined;
 const quoteLastOf = (): ReadonlySet<string> =>
   (QUOTE_LAST ??= new Set(Object.values(evmPoolVenues()).flatMap((v) => (Object.hasOwn(v, "quoteLast") && Array.isArray(v.quoteLast) ? v.quoteLast : []))));
 export const EVM_HOLD_MS = 30_000;
+/** A throttle's hold of `url` on the quote's own lists (timed, the scan gate): our helper's route for its Retry-After
+ *  (pace.ts evmThrottleHoldMs, card evm-helper-429-waits-its-retry-after), every other provider EVM_HOLD_MS. */
+const throttleHoldMs = (url: string | undefined, afterMs: number | null): number =>
+  url !== undefined && evmHelperRoute(url) ? evmThrottleHoldMs(url, afterMs) : EVM_HOLD_MS;
 /** Forgets every provider's measured time and hold: for the tests, which share this module's state (not in the index). */
 export const evmSpeedReset = (): void => SPEED.clear();
 const speedOf = (url: string) => {
@@ -2938,12 +2942,12 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
       // an answer that names a rate limit or a state the provider does not hold is held, never measured: such an error
       // comes back fast, and a provider past its state cut kept first by it failed every quote's reads (card
       // evm-quote-lag-held)
-      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + EVM_HOLD_MS;
+      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));
       // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)
       else if (!out.some(notYet)) s.ms = s.ms === null ? performance.now() - t : s.ms * 0.75 + (performance.now() - t) * 0.25;
       return out;
     } catch (e) {
-      s.held = performance.now() + EVM_HOLD_MS;
+      s.held = performance.now() + (e instanceof RateLimited ? throttleHoldMs(url, e.afterMs) : EVM_HOLD_MS);
       throw e;
     } finally {
       s.out.splice(s.out.indexOf(t), 1);
@@ -6140,7 +6144,7 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     }
     if (res.status === 429) {
       const after = retryAfterMs(res.headers.get("retry-after"));
-      evmProviderHold(url, Math.max(EVM_PROVIDER_HOLD_MS, after ?? 0));
+      evmProviderHold(url, evmThrottleHoldMs(url, after));
       throw new RateLimited("the provider answered 429 Too Many Requests", after);
     }
     // any other status outside 2xx is a failure, never an answer to read (review MED-1: robinhood-rpc.publicnode.com
@@ -6184,7 +6188,7 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     }
     const out = calls.map((_, id) => byId.get(id) ?? null);
     // a call's error naming the rate limit holds the provider as a 429 does
-    if (out.some(limited)) evmProviderHold(url);
+    if (out.some(limited)) evmProviderHold(url, evmThrottleHoldMs(url, null));
     return out;
   }
 }

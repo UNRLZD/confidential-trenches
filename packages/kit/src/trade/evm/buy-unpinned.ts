@@ -24,6 +24,7 @@
 // with the digest made here.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import { EVM_HELPER_ORIGIN } from "../../checks/evm/pace.ts";
 
 export type EvmPoolChain = "base" | "robinhood" | "base-sepolia" | "robinhood-testnet";
 
@@ -633,7 +634,7 @@ export const evmMainnetVenues = () =>
       // 1,000 spans and 2,001 calls on Robinhood's own. batchMax: the helper's HELPER_RPC_BATCH_MAX (helper/v1.ts; a
       // batch past it is its 413), written here so the quote loads no helper file (scripts/ci/quote-speed.mjs PATHS);
       // test/evm-pool-index.test.ts fails when the two differ.
-      index: bare({ readers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://ct-api.unrealized.trade/v1/rpc/robinhood?keyed=only"] as const), span: 500_000, perBatch: 1, parallel: 1, margin: 7_119, cap: 131_072, batchMax: 10 }),
+      index: bare({ readers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", `${EVM_HELPER_ORIGIN}/v1/rpc/robinhood?keyed=only`] as const), span: 500_000, perBatch: 1, parallel: 1, margin: 7_119, cap: 131_072, batchMax: 10 }),
     }),
     // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed
     // 2026-11-03), whose code scripts/live-checks/evm-venues-pin.mjs reads on the chain's two RPCs against the build
