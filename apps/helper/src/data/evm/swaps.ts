@@ -564,6 +564,14 @@ const QUOTE_SEED_NEAR = 100;
  *  from the route's logs (quoteBlocks). [design: pocket's holds read 1 to 4 s, 22 Nov 10:2xZ; a walk back of the route's
  *  logs cost 0xaa07a0e9's rounds 4 s on a busy route pool and 48 s on a quiet one] */
 const QUOTE_HOLD_WAIT_S = 5;
+/** How long a provider's refusal of old state keeps it off old-state reads (goneBlock): after it, it is asked again, so a
+ *  wrong mark or a provider that came to keep the state heals though no post was sent it meanwhile. [design: as a held
+ *  pick, GT_POOL_FRESH_MS's 10 min; one re-ask a provider a period costs one refused post] */
+const QUOTE_STATE_GONE_MS = 600_000;
+/** Whether a provider's mark of old state gone, made at `at`, still holds at `now` (createSwaps' goneBlock). */
+export function stateMarkHolds(at: number, now: number): boolean {
+  return now - at < QUOTE_STATE_GONE_MS;
+}
 /** The posts a read back's state may take in a round: the first, then again while its refusals taught a provider gone or
  *  a keeper's throttle is waited out (quoteBlocks). [design: 22 Nov 10:1xZ a round's one retry after pocket's 1 s hold
  *  was throttled again and its blocks walked the route's logs; a quiet route pool's walk held 0xaa07a0e9 at 34 rows 48 s] */
@@ -1314,11 +1322,12 @@ type Reply = { ok: true; result: unknown } | { ok: false; wait: number; reverted
 /** A provider's refusal of a read at a block whose state it no longer keeps, as each Robinhood provider words it (read
  *  22 Nov 10:0xZ at 400,000 blocks back): daybreak's and the chain's own "historical state <root> is not available",
  *  blockmachine's "missing trie node", blockvectra's -32011 "block reference is outside the public history window"
- *  (data.reason "state_window"); geth's "header not found" and an archive refusal ("-32602 archive") alike. */
+ *  (data.reason "state_window"). Only these words, as read: a provider behind the head answers "header not found" for a
+ *  recent block, which is no word on the state it keeps. */
 const isStateGone = (e: unknown): boolean => {
   const o = obj(e);
   const m = typeof o.message === "string" ? o.message : "";
-  return /historical state|missing trie node|history window|header not found|archive|pruned/i.test(m) || obj(o.data).reason === "state_window";
+  return /historical state \S+ is not available|missing trie node|outside the public history window/i.test(m) || obj(o.data).reason === "state_window";
 };
 /** An `eth_call` the provider ran and the contract reverted: geth's code 3 (a revert with data) or a message naming the
  *  revert (-32000 "execution reverted", as daybreak, blockmachine, drpc and the chain's own RPC answer one). It is the
@@ -1974,11 +1983,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Each provider that refused a state read for want of the state, with the newest block it refused: it keeps no state
    *  that old (Robinhood 22 Nov 08:5xZ: daybreak refuses state 1,000 blocks back, the chain's own RPC and blockmachine
    *  20,000, blockvectra any; pocket and drpc keep 400,000), learned from the answers alone (callsAgreed). */
-  const stateGone = new Map<string, number>();
+  const stateGone = new Map<string, { b: number; at: number }>();
+  /** The newest block `u` refused for want of the state, -1 when none or the mark is QUOTE_STATE_GONE_MS old (dropped:
+   *  a wrong mark, or a provider that came to keep the state, is asked again). */
+  function goneBlock(u: string): number {
+    const g = stateGone.get(u);
+    if (g === undefined) return -1;
+    if (!stateMarkHolds(g.at, now())) return (stateGone.delete(u), -1);
+    return g.b;
+  }
   /** The providers a state read at blocks from `oldest` up skips: those that refused a block at or above it, while two
    *  others are left to agree; none otherwise. */
   function stateSkip(oldest: number): ReadonlySet<string> | undefined {
-    const gone = new Set([...stateGone].filter(([, b]) => b >= oldest).map(([u]) => u));
+    const gone = new Set(rpcs.filter((u) => goneBlock(u) >= oldest));
     return gone.size === 0 || rpcs.filter((u) => !gone.has(u)).length < 2 ? undefined : gone;
   }
   /** The same `eth_call`s at block `n`: each result two providers gave alike, else undefined. A call at a mined block
@@ -2026,11 +2043,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // off (card robinhood-old-state-from-keepers)
     for (const [u, is] of refused) {
       const b = Math.max(-1, ...[...is].map(blockOf));
-      if (b >= 0 && b > (stateGone.get(u) ?? -1)) stateGone.set(u, b);
+      if (b >= 0 && b > goneBlock(u)) stateGone.set(u, { b, at: now() });
     }
     for (const [u, is] of ran) {
-      const gone = stateGone.get(u);
-      if (gone !== undefined && [...is].some((i) => blockOf(i) <= gone)) stateGone.delete(u);
+      const gone = goneBlock(u);
+      if (gone >= 0 && [...is].some((i) => blockOf(i) <= gone)) stateGone.delete(u);
     }
     ask.forEach((c, i) => {
       const x = got[i];
@@ -4260,7 +4277,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // gone is sent once more, to the keepers alone (card robinhood-old-state-from-keepers: on Robinhood pocket and drpc
     // keep it, and a first post that asked daybreak and blockvectra first was not agreed)
     const oldest = Math.min(...want) - 1;
-    const keepers = () => rpcs.filter((u) => (stateGone.get(u) ?? -1) < oldest).length;
+    const keepers = () => rpcs.filter((u) => goneBlock(u) < oldest).length;
     const post = () => want.flatMap((n) => per.map((c) => ({ ...c, n: n - 1 })));
     const missed = { any: keepers() < 2 };
     let got: (string | undefined)[] = [];
@@ -4273,7 +4290,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // fewer each time; QUOTE_HOLD_WAIT_S in all
       let waitedS = 0;
       for (let tries = 1, was = before; missed.any && keepers() >= 2 && tries < QUOTE_POST_TRIES; tries++) {
-        const held = Math.min(...rpcs.filter((u) => (stateGone.get(u) ?? -1) < oldest).map((u) => holds.heldFor(u)).filter((x) => x > 0));
+        const held = Math.min(...rpcs.filter((u) => goneBlock(u) < oldest).map((u) => holds.heldFor(u)).filter((x) => x > 0));
         const taught = keepers() < was;
         if (!taught && !(Number.isFinite(held) && waitedS + held <= QUOTE_HOLD_WAIT_S)) break;
         if (Number.isFinite(held) && waitedS + held <= QUOTE_HOLD_WAIT_S) {
