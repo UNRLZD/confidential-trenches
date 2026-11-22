@@ -1520,8 +1520,6 @@ export function createSolanaTrades(deps: {
   /** A first read: the token's decimals, its subscription in force, then its newest COLD_SIGS signatures walked. */
   async function first(mint: string): Promise<Entry | DataAnswer> {
     const began = now();
-    // the first answer's bound runs from here (below)
-    const bound = deps.coldWait?.() ?? new Promise<void>((r) => setTimeout(r, COLD_WAIT_MS).unref?.());
     const marks: string[] = [];
     const mark = (name: string): void => void marks.push(`${name} ${Math.round(now() - began)}`);
     const listed = await deps.listed(mint);
@@ -1551,6 +1549,11 @@ export function createSolanaTrades(deps: {
       return UPSTREAM;
     }
     mark("watch");
+    // the first answer's bound runs from the subscription, so the walk has its whole COLD_WAIT_MS: a flooded coin's walk
+    // reads a page of COLD_PAGE signatures past its newest COLD_SIGS before any transaction, and with the bound run from
+    // the read's start (88bb881e5) helper-19's live run 44962533217 answered three flooded coins' first tapes at 4.0 to 4.2
+    // s with the vendor's rows, none of ours (solana-tape-rows-at-first-answer BAD; green on helper-18)
+    const bound = deps.coldWait?.() ?? new Promise<void>((r) => setTimeout(r, COLD_WAIT_MS).unref?.());
     // the tape is served from the moment the stream holds the token; the walk's older trades join as they are read
     e.readAt = now();
     let firstRound: () => void = () => undefined;
@@ -1583,9 +1586,7 @@ export function createSolanaTrades(deps: {
       fold(e);
     })();
     // the first answer waits for the walk's first round that holds a trade (its newest trades), a streamed trade, the
-    // whole walk, or the bound: COLD_WAIT_MS from the read's start (bound above), never from the stream's subscription,
-    // so a slow mint, price or subscribe read is inside it, not on top (a local helper at main, 21 Nov 21:07Z: 2j5SaS7x
-    // subscribed at 1.3 s, answered at 4.3 s)
+    // whole walk, or the bound: COLD_WAIT_MS from the subscription (bound above)
     const by = await Promise.race([cold.then(() => "walk"), rounded.then(() => "trade"), bound.then(() => "bound")]);
     e.onFold = undefined;
     mark(`answer by ${by} after ${rounds} round${rounds === 1 ? "" : "s"}`);
