@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, LATE, TX, TX_URL } from "./signpage-sent-end-known.mjs";
+import { judge, judgeSign, LATE, opEnds, tradeStages, TX, TX_URL } from "./signpage-sent-end-known.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-sent-end-known.answers.json"), "utf8"));
@@ -69,4 +69,56 @@ test("planted: each broken fact fails by its own line", () => {
   fails(planted((r) => (r.runs[1].ready = false)), /the coin's page not ready/);
   fails(planted((r) => r.runs.pop()), /run\(s\) of 2/);
   fails({ runs: [] }, /run\(s\) of 2/);
+});
+
+// The SIGN_HOST run (--host sign): every stage the app ends a sent trade on (model.ts OP_ENDS) is in the trade stage list
+// the served bundle's buy and sell op schemas name, in the /app.js index.html pins.
+//   good: the deployed SIGN_HOST, read 22 Nov: PASS;
+//   bad:  a sign build with owed_back cut from that list, pinned by its index: FAIL on owed_back alone.
+const SIGN_ANSWERS = ANSWERS.sign;
+const signFails = (rec, re) => {
+  const r = judgeSign(rec);
+  assert.equal(r.ok, false, r.lines.join("\n"));
+  assert.ok(bad(r).some((l) => re.test(l)), r.lines.join("\n"));
+};
+
+test("sign, recorded good answer: the deployed SIGN_HOST carries every end the app reads: PASS", () => {
+  const r = judgeSign(SIGN_ANSWERS.good);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.deepEqual(SIGN_ANSWERS.good.ends, opEnds());
+});
+
+test("sign, recorded bad answer: a bundle whose trade stages lack owed_back: FAIL on owed_back alone", () => {
+  const r = judgeSign(SIGN_ANSWERS.bad);
+  assert.equal(r.ok, false, r.lines.join("\n"));
+  assert.deepEqual(bad(r), ["BAD owed_back: the app ends a sent trade on it, but the page's op schema leaves an op of that stage out, so the box never sees that end"]);
+});
+
+test("sign: the app's ends are model.ts OP_ENDS, and a model.ts with no OP_ENDS reads none", () => {
+  assert.deepEqual(opEnds(), ["filled", "part_filled", "not_landed", "refused", "owed_back"]);
+  assert.equal(opEnds("const X = new Set([])"), null);
+});
+
+test("sign: the stage list is the one both op rows name, wherever it is defined; a row missing or naming another list reads none", () => {
+  const list = "Fh=[`signed`,`sent`,`filled`,`part_filled`,`refused`,`not_landed`,`owed_back`]";
+  const rows = (b, s) => `,buy:Uh(Eh(\`buy\`),${b},{code:Wh}),sell:Uh(Eh(\`sell\`),${s},{code:Wh}),`;
+  assert.deepEqual(tradeStages(`var Ih=[\`in_flight\`],${list};x={${rows("Fh", "Fh")}}`), ["signed", "sent", "filled", "part_filled", "refused", "not_landed", "owed_back"]);
+  // a $ in the minified name
+  assert.deepEqual(tradeStages(`var $h=[\`filled\`];x={${rows("$h", "$h")}}`), ["filled"]);
+  assert.equal(tradeStages(`var ${list};x={${rows("Fh", "Ih")}}`), null, "rows naming two lists");
+  assert.equal(tradeStages(`var ${list};x={,buy:Uh(Eh(\`buy\`),Fh,{code:Wh}),}`), null, "no sell row");
+  assert.equal(tradeStages(`var Ih=[\`x\`];x={${rows("Fh", "Fh")}}`), null, "the list not defined");
+  // another list whose name ends the same is not it
+  assert.equal(tradeStages(`var aFh=[\`filled\`];x={${rows("Fh", "Fh")}}`), null);
+});
+
+test("sign, planted: each broken fact fails by its own line", () => {
+  const g = () => structuredClone(SIGN_ANSWERS.good);
+  signFails({ ...g(), stages: g().stages.filter((s) => s !== "part_filled") }, /^BAD part_filled: /);
+  signFails({ ...g(), stages: g().stages.map((s) => (s === "not_landed" ? "notlanded" : s)) }, /^BAD not_landed: /);
+  signFails({ ...g(), stages: null }, /no trade stage list/);
+  signFails({ ...g(), ends: null }, /OP_ENDS\) not read/);
+  signFails({ ...g(), ends: [] }, /OP_ENDS\) not read/);
+  signFails({ ...g(), sha384: "sha384-x" }, /not the one index\.html pins/);
+  signFails({ ...g(), index: "<html></html>" }, /pins no \/app\.js/);
 });

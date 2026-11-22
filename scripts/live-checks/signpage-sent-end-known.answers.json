@@ -127,5 +127,47 @@
     ]
    }
   ]
+ },
+ "sign": {
+  "_note": "Read 22 Nov: good = the deployed SIGN_HOST (signpage-sent-end-known.mjs --host sign --record), PASS; bad = this branch's sign build (packages/signpage/scripts/build-app.mjs --out) with owed_back cut from the kit's trade stage list and index.html pinning that bundle, as a deploy that dropped it would serve: FAIL on owed_back alone.",
+  "good": {
+   "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-cp1oOoVJS49Pc9Rpa98cgvjtQcrMiY5M1iHxGwDRJCZqcVDZ9gzImLo6bUcAQoVE\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-cp1oOoVJS49Pc9Rpa98cgvjtQcrMiY5M1iHxGwDRJCZqcVDZ9gzImLo6bUcAQoVE",
+   "stages": [
+    "signed",
+    "sent",
+    "filled",
+    "part_filled",
+    "refused",
+    "not_landed",
+    "owed_back"
+   ],
+   "ends": [
+    "filled",
+    "part_filled",
+    "not_landed",
+    "refused",
+    "owed_back"
+   ]
+  },
+  "bad": {
+   "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-RSqBvjSIJRPdhKVHQ5uaiXBfKPsNirQJqWvkl9OvTUmxm5SEhnP+g1whT1m3xcI9\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-RSqBvjSIJRPdhKVHQ5uaiXBfKPsNirQJqWvkl9OvTUmxm5SEhnP+g1whT1m3xcI9",
+   "stages": [
+    "signed",
+    "sent",
+    "filled",
+    "part_filled",
+    "refused",
+    "not_landed"
+   ],
+   "ends": [
+    "filled",
+    "part_filled",
+    "not_landed",
+    "refused",
+    "owed_back"
+   ]
+  }
  }
 }

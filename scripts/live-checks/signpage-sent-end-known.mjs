@@ -10,16 +10,25 @@
 // (desktop; the right column): $2 typed, Buy. Want one pool.buy on Base, the box Landing (no end) before the op, then
 // Filled with the fill toast linking the tx on basescan. A screenshot of each state is kept. Signs nothing and moves
 // nothing: the shell stands in for SIGN_HOST.
+// On SIGN_HOST (--host sign, after a sign deploy): the seam this card stands on. The page sends a buy or sell op in
+// state.ops only when its stage is in the kit's trade stages (packages/kit/src/signpage/schema.ts TRADE, the op schemas'
+// buy and sell rows; an op of another stage is left out, never sent), so every stage the app ends a sent trade on
+// (model.ts OP_ENDS, read from this commit's source) must be in that list in the served /app.js, the one index.html
+// pins. A sign deploy that renames or drops one leaves the app's box at Landing for that end: this run FAILs.
 // After: app
-// Bundle: out a browser and the helper (its --harness run is in test:e2e)
+// After: sign --host sign
+// Bundle: read sign
 //   node scripts/live-checks/signpage-sent-end-known.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live but the coin's recorded reads), framed by
 //     the stand-in shell
 //   node scripts/live-checks/signpage-sent-end-known.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
 //     a local build (apps/terminal/dist, or --build <dir>) at APP_HOST's name, the helper's reads recorded
+//   node scripts/live-checks/signpage-sent-end-known.mjs --host sign [--record <file>]
+//     the deployed SIGN_HOST's index.html and /app.js, read signed out
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge().
 import "../net-window.mjs";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -189,11 +198,75 @@ export async function routeFor(build) {
   };
 }
 
+// ------------------------------------------------------------------------------------------------ SIGN_HOST
+export const SIGN = "https://confidential.unrealized.trade";
+const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
+const ID = "[\\w$]+";
+
+/** The stages the app ends a sent trade on: model.ts OP_ENDS, read from this commit's source. */
+export function opEnds(src = readFileSync(path.join(REPO, "apps/terminal/src/screens/trade/model.ts"), "utf8")) {
+  const m = /const OP_ENDS: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/.exec(src);
+  return m ? [...m[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]) : null;
+}
+
+/** The kit's trade stages in a built /app.js: the list the buy and sell op schemas both name (schema.ts `buy: op(lit("buy"),
+ *  TRADE, ...)`, minified `buy:F(L(`buy`),T,{code:`), read where it is defined; null when either row or the list is not
+ *  there. */
+export function tradeStages(js) {
+  const row = (k) => new RegExp(`${k}:${ID}\\(${ID}\\(\`${k}\`\\),(${ID}),\\{code:`).exec(js)?.[1] ?? null;
+  const t = row("buy");
+  if (t === null || row("sell") !== t) return null;
+  const list = new RegExp(`(?:^|[^\\w$])${t.replace(/\$/g, "\\$")}=\\[((?:\`[a-z_]+\`,?)+)\\]`).exec(js)?.[1];
+  return list ? [...list.matchAll(/`([a-z_]+)`/g)].map((x) => x[1]) : null;
+}
+
+/** What the sign run keeps: the index, the served bundle's sha384, its trade stages, and the app's ends. */
+export function signFacts(index, js, ends = opEnds()) {
+  return { index, sha384: sha384(js), stages: tradeStages(js), ends };
+}
+
+/** The verdict on a sign run's facts { index, sha384, stages, ends }. */
+export function judgeSign(a) {
+  const lines = [];
+  const bad = (m) => lines.push(`BAD ${m}`);
+  const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
+  if (!pin) bad("SIGN_HOST's index.html pins no /app.js");
+  else if (pin !== a.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
+  if (!Array.isArray(a?.ends) || a.ends.length === 0) bad("the app's ends (model.ts OP_ENDS) not read");
+  if (!Array.isArray(a?.stages)) bad("the served /app.js holds no trade stage list the buy and sell op schemas both name");
+  else for (const e of Array.isArray(a?.ends) ? a.ends : []) if (!a.stages.includes(e)) bad(`${e}: the app ends a sent trade on it, but the page's op schema leaves an op of that stage out, so the box never sees that end`);
+  if (lines.length === 0) lines.push(`ok  every end the app reads from an op (${a.ends.join(", ")}) is a stage the page's buy and sell ops may carry`);
+  return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
+}
+
+/** SIGN_HOST's index.html and /app.js, through `f` (the network, or a build: scripts/ci/bundle-checks.mjs). */
+export async function readSign(f = fetch) {
+  const get = async (p) => {
+    const r = await f(`${SIGN}${p}`, { redirect: "error" });
+    if (r.status !== 200) throw new Error(`${p}: HTTP ${r.status}`);
+    return r.text();
+  };
+  const index = await get("/");
+  return signFacts(index, await get("/app.js"));
+}
+
+/** The sign run on a build (scripts/ci/bundle-checks.mjs "Bundle: read sign"). */
+export const bundle = async (f) => judgeSign(await readSign(f));
+
 // ------------------------------------------------------------------------------------------------ main
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
+    if (opt("--host", "app") === "sign") {
+      const facts = await readSign();
+      const file = opt("--record", null);
+      if (file) writeFileSync(file, `${JSON.stringify(facts, null, 1)}\n`);
+      const { ok, lines } = judgeSign(facts);
+      for (const l of lines) console.log(l);
+      console.log(`CARD ${KEY} / live: ${ok ? "PASS" : "FAIL"} (${SIGN}, signed out)`);
+      process.exit(ok ? 0 : 1);
+    }
     let build = null;
     let source = `live ${APP_HOST}, the stand-in shell signed in, its Base buy answered sent, its op recorded filled`;
     if (a.includes("--harness")) {
