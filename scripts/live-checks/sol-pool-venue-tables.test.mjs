@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { RPCS as MONEY_RPCS } from "../ci/money-gate.mjs";
+import { operatorOf as gateOperatorOf, RPCS as MONEY_RPCS } from "../ci/money-gate.mjs";
 import { b58decode } from "./pool-sol-deploy.mjs";
 import { RETRY } from "./provider-answer.mjs";
 import { checkTables, CLUSTERS, GROWS, parsePins, PINS_SOURCE, readRecord, TX_RPCS, VENUES } from "./sol-pool-venue-tables.mjs";
@@ -155,9 +155,10 @@ test("a generation's tx that failed, or that one reader does not hold, fails the
     answers.push(reaches);
     assert.match(failLines(await run(answers)), new RegExp(`^FAIL devnet pumpswap g1: lookup table: extend with 4 addresses ${sig.slice(0, 12)}\\.\\.\\. reads back succeeded at finalized on two operators of .*: false$`, "m"));
   }
-  // the readers are the money gate's own list, imported
+  // the readers are the money gate's own list, imported, each host its own operator by the gate's map
   assert.equal(TX_RPCS.mainnet, MONEY_RPCS.solana);
   assert.equal(TX_RPCS.devnet, MONEY_RPCS["solana-devnet"]);
+  for (const [chain, urls] of [["solana", TX_RPCS.mainnet], ["solana-devnet", TX_RPCS.devnet]]) assert.equal(new Set(urls.map((u) => gateOperatorOf(chain, u))).size, urls.length, chain);
 });
 
 test("the gate's rule: a reader whose history does not reach the tx is left out; two other operators holding it pass, one alone is quiet", async () => {

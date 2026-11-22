@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The run record of card pool-sol-mainnet-run, from chain reads alone: no signature is typed by hand. Given the run's
 // start time (and its end, else now), it lists every finalized signature of the Solana pool account in that window on
-// the RPCs the money gate reads (money-gate.mjs RPCS, imported: on mainnet api.mainnet-beta.solana.com,
+// the RPCs the money gate reads (money-gate-reads.mjs RPCS, the gate's own, imported: on mainnet api.mainnet-beta.solana.com,
 // public.rpc.solanavibestation.com and solana-rpc.publicnode.com), reads each on them, and sorts the run's steps by what
 // the pool instruction is and who signed it:
 //   - tag 1 signed by U (a deposit wallet): "deposit"; U's own incoming payments in the window: "U funded" (the NEAR
@@ -29,7 +29,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { operatorOf, RPCS } from "../ci/money-gate.mjs";
+import { RPCS } from "../ci/money-gate-reads.mjs";
 import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 // @noble/curves from the helper's own dependencies, as pool-sol-deploy.mjs takes it (a static name, read by check:imports)
@@ -40,7 +40,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MAINNET = JSON.parse(readFileSync(path.join(HERE, "../../contracts/pool-solana/deployments/mainnet.json"), "utf8"));
 const DEVNET = JSON.parse(readFileSync(path.join(HERE, "pool-sol-deploy.devnet.json"), "utf8"));
 export const KEY = "pool-sol-mainnet-run";
-/** The money gate's Solana RPCs per cluster: its own list, imported, so the two never drift (the test holds them one). */
+/** The money gate's Solana RPCs per cluster: its own list (scripts/ci/money-gate-reads.mjs), imported, so the two never
+ *  drift (the test holds them one). */
 export const GATE_RPCS = Object.freeze({ solana: RPCS.solana, "solana-devnet": RPCS["solana-devnet"] });
 /** Per cluster: the pinned program and pool, the helper's fee payer (packages/wallet/src/pool/solana.ts SOL_POOLS, the
  *  one GET /v1/pool/fee names), the record's chain name and the money gate's RPCs. */
@@ -108,6 +109,9 @@ export async function answer(fetchFn, url, method, params, sleep) {
     await sleep(1000 * (i + 1));
   }
 }
+/** A host's operator: each Solana host of the money gate's list is its own (scripts/ci/rpc-operators.mjs; the test holds
+ *  it by the gate's operatorOf), read by host so the check takes the gate's list and not its code. */
+export const operatorOf = (chain, url) => new URL(url).host;
 /** One read on every host of `urls`: { answers: [{ url, result }] of the hosts that answered, none: a line per host
  *  that gave no answer, left out }. Fewer than two operators answering: NoAnswer (INCONCLUSIVE); a JSON-RPC error
  *  throws, as answer's does. */

@@ -45,7 +45,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as kit from "../../packages/kit/src/index.ts";
 import { ALT_PROGRAM, b58encode, DEVNET_GENESIS, MAINNET_GENESIS, MAINNET_RPCS, operatorProblems, RPCS as DEVNET_RPCS } from "./pool-sol-deploy.mjs";
-import { FLOOR, operatorOf, RPCS as MONEY_RPCS } from "../ci/money-gate.mjs";
+import { FLOOR, RPCS as MONEY_RPCS } from "../ci/money-gate-reads.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "sol-pool-venue-tables";
@@ -56,10 +56,10 @@ export const CLUSTERS = Object.freeze({
   devnet: { rpcs: DEVNET_RPCS, genesis: DEVNET_GENESIS },
 });
 export const VENUES = kit.SOLANA_POOL_BUY_VENUES;
-/** Where a generation's txs are read back: the money gate's own transaction readers per chain (scripts/ci/money-gate.mjs
- *  RPCS.solana and RPCS["solana-devnet"], imported, so the two never drift). */
+/** Where a generation's txs are read back: the money gate's own transaction readers per chain (scripts/ci/money-gate-reads.mjs
+ *  RPCS.solana and RPCS["solana-devnet"], imported, so the two never drift). Each is its own operator
+ *  (scripts/ci/rpc-operators.mjs; the test holds it by the gate's operatorOf), counted by host. */
 export const TX_RPCS = Object.freeze({ mainnet: MONEY_RPCS.solana, devnet: MONEY_RPCS["solana-devnet"] });
-const TX_CHAIN = Object.freeze({ mainnet: "solana", devnet: "solana-devnet" });
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 /** An address lookup table holds at most 256 addresses. */
 const TABLE_MAX = 256;
@@ -85,12 +85,11 @@ async function read(fetchFn, url, method, params) {
  *  operators holding it, NoAnswer (the row is quiet, never passed). */
 async function readBack(fetchFn, cluster, sig) {
   const urls = TX_RPCS[cluster];
-  const chain = TX_CHAIN[cluster];
   const got = await Promise.allSettled(urls.map((url) => read(fetchFn, url, "getTransaction", [sig, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }])));
   for (const g of got) if (g.status === "rejected" && !(g.reason instanceof NoAnswer)) throw g.reason;
   const held = got.map((g) => (g.status === "fulfilled" ? g.value : undefined)); // undefined: no answer
   if (held.some((x) => x && x.meta?.err !== null)) return false;
-  if (new Set(urls.filter((_, i) => held[i]?.meta).map((u) => operatorOf(chain, u))).size >= 2) return true;
+  if (new Set(urls.filter((_, i) => held[i]?.meta).map((u) => new URL(u).host)).size >= 2) return true;
   const slot = held.find((x) => x?.meta)?.slot;
   const unread = urls.filter((_, i) => held[i] === undefined).map((u) => `${new URL(u).host}: no answer`);
   for (const [i, url] of urls.entries()) {
