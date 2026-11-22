@@ -20,7 +20,7 @@ import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vaul
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
-import { lateBuyEnd, pickPieces, POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_RESEND_MAX, POOL_BUY_RESEND_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, PoolSendRefused, poolBuyKind, readBack, resumePieces, runPoolBuy, solanaProofBytes, type OwedPieces, type PiecesOwed, type PoolBuyHost } from "../src/pool-buy.ts";
+import { FOUND_ROUND_GAP, HEIGHT_APART_MAX, lateBuyEnd, pickPieces, POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_RESEND_MAX, POOL_BUY_RESEND_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, PoolSendRefused, poolBuyKind, readBack, resumePieces, runPoolBuy, solanaProofBytes, type OwedPieces, type PiecesOwed, type PoolBuyHost } from "../src/pool-buy.ts";
 import * as poolBuy from "../src/pool-buy.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
@@ -1558,8 +1558,10 @@ test("card pool-buy-filled-2s: the checks' reads go out in three rounds by their
   assert.equal((answer as { stage?: string }).stage, "filled");
   const before = rounds.slice(0, rounds.findIndex((r) => r.includes("0:getTransaction")));
   assert.deepEqual(before.map((r) => [...r].sort()), [
-    // the rent, the pinned table, the pool account and the reference: each needs only the pin and the ask
-    ["0:getAccountInfo", "0:getAccountInfo", "0:getAccountInfo", "0:getMultipleAccounts", "0:getMultipleAccounts", "1:getAccountInfo", "1:getAccountInfo", "1:getAccountInfo", "1:getMultipleAccounts", "1:getMultipleAccounts"],
+    // the rent, the pinned table, the pool account and the reference: each needs only the pin and the ask; and both
+    // RPCs' confirmed heights, the first round's floor (card a-found-wallet-sweeps-past-a-strangers-coin, review of
+    // dec80ea5b M1: the buy round's bound neither RPC alone lifts), in this round so the rounds stay three
+    ["0:getAccountInfo", "0:getAccountInfo", "0:getAccountInfo", "0:getBlockHeight", "0:getMultipleAccounts", "0:getMultipleAccounts", "1:getAccountInfo", "1:getAccountInfo", "1:getAccountInfo", "1:getBlockHeight", "1:getMultipleAccounts", "1:getMultipleAccounts"],
     // the two root pages (the sizes name them), the venue (the reference names it), then the device's blockhash and slot
     ["0:getAccountInfo", "0:getAccountInfo", "0:getLatestBlockhash", "0:getMultipleAccounts", "1:getAccountInfo", "1:getAccountInfo", "1:getMultipleAccounts"],
     // the blockhash on RPC 1, which needs RPC 0's, and beside it RPC 1's height with its slot (card
@@ -2801,8 +2803,9 @@ test("pieces: resumePieces on a reload mid-buy and after: RESERVED keeps, the bu
 /** A two-round tap: W's own note (note-1), a 0.012 note (note-2) whose piece is 0.005, and its 0.007 change (note-3,
  *  proved to W once round 1 settled). Every RPC read but the transactions is world()'s; getTransaction (any commitment)
  *  and W's history answer each landed transaction under the helper's name for it; the settle reads a note spent once its
- *  transaction landed. `round1`: whether round 1 lands. */
-async function twoRounds(round1: "lands" | "never") {
+ *  transaction landed. `round1`: whether round 1 lands. `gap`: the buy round's blockhash read with its last height this far
+ *  past round 1's (card a-found-wallet-sweeps-past-a-strangers-coin). */
+async function twoRounds(round1: "lands" | "never", gap?: number, liar?: 0 | 1, apart?: number) {
   const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
   const parent = pieceProof("note-2", 777n, 5_000_000n);
   const change = pieceProof("note-3", 888n, 7_000_000n);
@@ -2872,9 +2875,27 @@ async function twoRounds(round1: "lands" | "never") {
         if ((params[1] as { before?: string }).before !== undefined) return [];
         return [...landed.keys()].reverse().map((signature) => ({ signature, slot: TX_SLOT, err: null }));
       }
+      if (method === "getLatestBlockhash" && stage === 2 && gap !== undefined) {
+        const a = (await rpc(method, params)) as { context: unknown; value: { blockhash: string; lastValidBlockHeight: number } };
+        return { ...a, value: { ...a.value, lastValidBlockHeight: (liar === undefined && apart === undefined ? Number((await owed.list())[0]!.lastHeight) : 151) + gap } };
+      }
       return rpc(method, params);
     }) as SolanaRpc;
-  w.host.rpcs = [wrap(r0), wrap(r1)];
+  // a lying RPC in round 1 (review of dec80ea5b, M1): RPC 0 says its blockhash lives to height 1,000,000; RPC 1 says its
+  // confirmed height is 1,000,000 (beside the blockhash check, and asked alone)
+  const lie = (rpc: SolanaRpc, p: 0 | 1): SolanaRpc =>
+    (async (method: string, params: readonly unknown[]) => {
+      const a = await rpc(method, params);
+      // RPC 1's confirmed height `apart` above RPC 0's in round 1 (review of 359f71639, L4): RPC 0 a seat far too low
+      if (apart !== undefined && p === 1 && stage === 1 && method === "getBlockHeight") return (a as number) + apart;
+      if (liar !== p || stage !== 1) return a;
+      if (p === 0 && method === "getLatestBlockhash") return { ...(a as object), value: { ...(a as { value: object }).value, lastValidBlockHeight: 1_000_000 } };
+      const confirmed = (params[0] as { commitment?: string } | undefined)?.commitment === "confirmed";
+      if (p === 1 && confirmed && method === "getBlockHeight") return 1_000_000;
+      if (p === 1 && confirmed && method === "getEpochInfo") return { ...(a as object), blockHeight: 1_000_000 };
+      return a;
+    }) as SolanaRpc;
+  w.host.rpcs = [lie(wrap(r0), 0), lie(wrap(r1), 1)];
   w.host.reads = 10;
   return { w, spend, log, sent, owed };
 }
@@ -2899,6 +2920,67 @@ test("card buy-spends-its-change-in-the-same-tap: a buy past the ready pieces re
   assert.equal(solanaDecodePoolRelease(msgOf(one!).instructions.at(-1)!.data).withdrawnValue, 5_000_000n);
   assert.equal(solanaDecodePoolRelease(msgOf(two!).instructions.at(-1)!.data).withdrawnValue, 7_000_000n);
   assert.equal(msgOf(three!).instructions.at(-1)!.data[0], 3);
+});
+
+// Card a-found-wallet-sweeps-past-a-strangers-coin (review of 258abca1d): the buy round's tag 3 relies on the SOL round 1
+// put on W, and another device on the same 12 words sweeps W as found once past W's latest + 151 + FOUND_ROUND_GAP
+// (pool-sell.ts foundPast): the buy round signs only on a blockhash whose last height is at most FOUND_ROUND_GAP past
+// round 1's, so no tag 3 of it lands after that sweep can start.
+test("card a-found-wallet-sweeps-past-a-strangers-coin: the buy round signs only on a blockhash at most FOUND_ROUND_GAP past round 1's: at it, filled; one past, failed with no tag 3 taken or signed and W's owed record kept", async () => {
+  const at = await twoRounds("lands", FOUND_ROUND_GAP);
+  const a = await runPoolBuy(at.w.host, { ...ASK, amount: at.spend });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const past = await twoRounds("lands", FOUND_ROUND_GAP + 1);
+  const b = await runPoolBuy(past.w.host, { ...ASK, amount: past.spend });
+  assert.deepEqual(b, { error: "failed" });
+  assert.deepEqual(past.log.filter((l) => !l.startsWith("settle")), ["takeSet:note-2", "sendPieces:1:owed", "prove:note-2->W"], "round 1 alone: the buy round takes and signs nothing");
+  assert.equal(past.sent.length, 1);
+  assert.equal((await past.owed.list()).length, 1, "W stays found");
+});
+
+// Review of dec80ea5b, M1: the buy round's bound was round 1's own last height, a max over RPC 0's word and RPC 1's
+// height, so one lying RPC lifted it and a buy round 100,000 blocks later signed (the review's probe, liar.mts). The bound
+// is now the least of both RPCs' heights read before round 1 is signed (heightFloor), so neither RPC alone lifts it. RPC 1's
+// lie is a confirmed height 1,000,000 against RPC 0's 0, so the tap is refused before round 1 (review of 359f71639, L4).
+test("card a-found-wallet-sweeps-past-a-strangers-coin: a lying RPC in round 1, either one, never lifts the buy round's bound: 100,000 blocks on, failed with no tag 3 taken or signed", async () => {
+  for (const liar of [0, 1] as const) {
+    const x = await twoRounds("lands", 100_000, liar);
+    const a = await runPoolBuy(x.w.host, { ...ASK, amount: x.spend });
+    assert.deepEqual(a, { error: "failed" }, `liar ${liar}`);
+    assert.deepEqual(x.log.filter((l) => !l.startsWith("settle")), liar === 0 ? ["takeSet:note-2", "sendPieces:1:owed", "prove:note-2->W"] : [], `liar ${liar}: round 1 alone, or nothing`);
+    assert.equal(x.sent.length, liar === 0 ? 1 : 0, `liar ${liar}`);
+    // an honest pair at the bound still buys; RPC 1's height lie refuses the tap before round 1, whatever the gap
+    const ok = await twoRounds("lands", FOUND_ROUND_GAP, liar);
+    const b = await runPoolBuy(ok.w.host, { ...ASK, amount: ok.spend });
+    if (liar === 0) assert.equal("stage" in b && b.stage, "filled", `liar ${liar}, round 2 at the bound: ${JSON.stringify(b)}`);
+    else assert.deepEqual([b, ok.sent.length], [{ error: "failed" }, 0], `liar ${liar}, refused before round 1`);
+  }
+});
+
+// Review of 359f71639, L4: a seat that answers its confirmed height far too low pulled heightFloor down, so round 1 paid
+// and the buy round was then sure to be refused at FOUND_ROUND_GAP. Both RPCs' heights more than HEIGHT_APART_MAX (150)
+// apart refuse the tap before round 1 takes or signs anything; 150 apart, it buys.
+test("card a-found-wallet-sweeps-past-a-strangers-coin: both RPCs' confirmed heights more than 150 apart before round 1: refused, nothing taken or signed; 150 apart, filled", async () => {
+  assert.equal(HEIGHT_APART_MAX, 150);
+  const far = await twoRounds("lands", undefined, undefined, HEIGHT_APART_MAX + 1);
+  assert.deepEqual(await runPoolBuy(far.w.host, { ...ASK, amount: far.spend }), { error: "failed" });
+  assert.deepEqual([far.log, far.sent.length, (await far.owed.list()).length], [[], 0, 0], "nothing taken, signed or owed");
+  const near = await twoRounds("lands", undefined, undefined, HEIGHT_APART_MAX);
+  const b = await runPoolBuy(near.w.host, { ...ASK, amount: near.spend });
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
+});
+
+// Re-review of 696e71176, LOW 1: inside the window, RPC 1 answering its height 150 above RPC 0's still never lifts the
+// floor: the buy round's bound is the honest floor (RPC 0's 0) + 151 + FOUND_ROUND_GAP, so a round-two blockhash one past
+// it is refused with no tag 3 taken or signed, and one at it fills (a floor of the greater height would sign it).
+test("card a-found-wallet-sweeps-past-a-strangers-coin: RPC 1 150 above RPC 0 in round 1 never lifts the floor: a buy round one past the honest floor + 151 + FOUND_ROUND_GAP is refused; at it, filled", async () => {
+  const past = await twoRounds("lands", FOUND_ROUND_GAP + 1, undefined, HEIGHT_APART_MAX);
+  assert.deepEqual(await runPoolBuy(past.w.host, { ...ASK, amount: past.spend }), { error: "failed" });
+  assert.deepEqual(past.log.filter((l) => !l.startsWith("settle")), ["takeSet:note-2", "sendPieces:1:owed", "prove:note-2->W"], "round 1 alone: the buy round takes and signs nothing");
+  assert.equal(past.sent.length, 1);
+  const at = await twoRounds("lands", FOUND_ROUND_GAP, undefined, HEIGHT_APART_MAX);
+  const b = await runPoolBuy(at.w.host, { ...ASK, amount: at.spend });
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
 });
 
 test("card buy-spends-its-change-in-the-same-tap: round 1 that the helper answers 503 (not landed whole) sends no buy: failed, no change proved, nothing more sent, and W's owed record stays for the state reads", async () => {
