@@ -1103,7 +1103,7 @@ const SHARED_MAX = 64;
  * shared between every caller per scan for MARKET_SCAN_HOLD_MS: the signing page asks it for each buy of a coin it has
  * not read within its own keep, and a CLMM pool for a mint is made rarely, so one read serves every device opening that
  * coin. The list only names pools: each device reads each pool's state fresh on two providers, and its other provider
- * (the page's seat) scans fresh, so a pool made since is still found by the union. [design: 10 min, the CO's floor]
+ * (the page's seat) scans fresh, so a pool made since is still found by the union. [design: 10 min floor]
  */
 export const MARKET_SCAN_HOLD_MS = 10 * 60_000;
 /** Market scans held at once [design: two a coin, for 4,096 coins; each a few addresses, under 2 MB in all]. */

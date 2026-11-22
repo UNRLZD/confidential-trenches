@@ -230,7 +230,7 @@ export const MUTANT_SECONDS = {
   // 18:47Z, its slot shared at load 10), at about 1.5 times that on a runner
   "packages/kit: node --test test/mutants/near-swap-mutants.test.mjs": 167,
   // card solana-buy-never-below-a-hidden-market: the CLMM market read's 23 mutants and their named tests, 4.1 s on the Mac
-  // queue as a whole job (heavy.sh slot-1, load 7.8, 21 Nov 18:10Z), listed at about twice that for a runner
+  // queue as a whole job (a shared local runner, load 7.8, 21 Nov 18:10Z), listed at about twice that for a runner
   "packages/kit: node --test test/mutants/solana-clmm-mutants.test.mjs": 9,
   // the quote sweep: 733 mutants and 340 named tests, 488.3 s in all on the queue's runner (job 129687360144): 150.3 s
   // for the named tests on the code as it is and 337.5 s for the mutants. A part runs the named tests of its mutants (233

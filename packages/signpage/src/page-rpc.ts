@@ -312,7 +312,7 @@ export const POOLS_KEPT = 256;
 export const POOLS_KEEP_MS = 60_000;
 /** How long a market finder (MARKET_FINDER_KINDS) keeps a coin's markets: a CLMM pool for a mint is made rarely, and
  *  each tap reads each listed pool's state fresh (kit clmm.ts readSolanaClmmMarket), so the list alone is kept, as the
- *  helper keeps its half for every device (apps/helper rpc.ts MARKET_SCAN_HOLD_MS). [design: 10 min, the CO's floor] */
+ *  helper keeps its half for every device (apps/helper rpc.ts MARKET_SCAN_HOLD_MS). [design: 10 min floor] */
 export const MARKETS_KEEP_MS = 10 * 60_000;
 type ScanRead = (scan: readonly [SolanaRpc, SolanaRpc], read: readonly [SolanaRpc, SolanaRpc], mint: string) => Promise<string[]>;
 const FIND: Readonly<Record<PoolFinderKind | MarketFinderKind, ScanRead>> = Object.freeze({ dlmmPairs: readSolanaDlmmPairs, cpmmPools: readSolanaCpmmPools, ammV4Pools: readSolanaAmmV4Pools, clmmPools: readSolanaClmmPools });
