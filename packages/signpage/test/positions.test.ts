@@ -1369,7 +1369,7 @@ test("card signpage-sent-end-recorded part 1: a reload's settle ends a sent buy 
   }
 });
 
-// The CO's ruling on the money review's question 2: a buy's end after a reload is the end the same page would have
+// The ruling on the money review's question 2: a buy's end after a reload is the end the same page would have
 // shown. A tx failed on chain on both RPCs is refused, as the run answers it (pool-buy.ts: a part failed on both,
 // refused); past its blockhash on both, not_landed; landed, filled; the op's stage from the legs' by pool-buy's own
 // rule (legsStage), never trade.ts noted()'s. A split tap with one leg failed and one filled is part_filled by both

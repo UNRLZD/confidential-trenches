@@ -697,7 +697,7 @@ export async function settleSentBuys(
     o.reads?.set(k, { first: seen?.first ?? t, last: t });
     const ends = await Promise.all(txs.map((t, i) => txEnd(providers, { sig: t.hash!, lvbh: at[i]!.lvbh, blockhash: at[i]!.blockhash })));
     if (ends.some((e) => e === "unknown")) continue;
-    // the end the page would have shown (the CO's ruling on the money review's question 2): each leg's end as the run
+    // the end the page would have shown (the ruling on the money review's question 2): each leg's end as the run
     // reads it (legEnd), the op's stage from them by the pool buy's own rule (legsStage), never noted()'s, which reads
     // a failed tx not_landed
     const legEnds = await Promise.all(ends.map((e, i) => legEnd(e as LegEnd, at[i]!.note, marks).catch(() => null)));
