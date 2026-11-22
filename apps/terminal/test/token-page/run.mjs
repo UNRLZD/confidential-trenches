@@ -100,10 +100,23 @@ const EDGE_MS = Number(process.env.TOKEN_PAGE_CLOCK_EDGE_MS ?? 0);
 // The planted slow frame (TOKEN_PAGE_MARK_DELAY_MS=<ms>, card chart-push-mark-test-waits): from the push on, each
 // animation-frame callback in the terminal's frame runs that many ms late, as on a loaded runner. The marks are placed in
 // a frame after the tape takes the trade (TradeMarks.tsx schedule), the last bar by the wake's read, so the mark can land
-// after the bar: browser job 130467972429 (PR #627, 10:42Z) read 0 marks at the instant the bar moved. 200 fails a count
-// read at that instant and passes one that waits under LIVE_MS / 2; 5000 is a mark never drawn in the bound, which fails:
+// after the bar: browser job 130467972429 (PR #627, 10:42Z), PR #582's queue run 42881939226 (@1280) and PR #592's run
+// 42891009866 (@390) each read 0 marks at the instant the bar moved (21 to 23 ms after the push). 200 and 1500 both pass:
+// the step waits for the mark itself (card app-chart-live-mark-flake), on no clock:
 //   TOKEN_PAGE_MARK_DELAY_MS=200 node apps/terminal/test/token-page/run.mjs --only chart-live
 const MARK_DELAY_MS = Number(process.env.TOKEN_PAGE_MARK_DELAY_MS ?? 0);
+// The planted page that drops the pushed trade (TOKEN_PAGE_DROP_PUSH_TRADE=1, card app-chart-live-mark-flake): the push
+// socket's message reaches the page's handler with its trades taken out, so no mark can be drawn; the step must fail
+// (the mark never drawn by MARK_WAIT_MS past the push's delivery), never pass on a count read early or late:
+//   TOKEN_PAGE_DROP_PUSH_TRADE=1 node apps/terminal/test/token-page/run.mjs --only chart-live
+const DROP_PUSH_TRADE = process.env.TOKEN_PAGE_DROP_PUSH_TRADE === "1";
+// A loaded runner (TOKEN_PAGE_CPU_THROTTLE=<rate>): Chromium's own CPU throttle (DevTools' Emulation.setCPUThrottlingRate)
+// on each page, the terminal's frame with it (one site, one process), for the step's repeated runs:
+//   TOKEN_PAGE_CPU_THROTTLE=4 node apps/terminal/test/token-page/run.mjs --only chart-live
+const CPU_THROTTLE = Number(process.env.TOKEN_PAGE_CPU_THROTTLE ?? 0);
+/** How long the step waits for an event it checks (the push handed to the page, the mark drawn) before it fails: a bound
+ *  only so a page that never draws it fails rather than hangs; the step goes on the moment the event comes. */
+const MARK_WAIT_MS = 10_000;
 const BOUNDARY_MS = 900_000;
 let skewMs = 0;
 const chartNow = () => Date.now() + skewMs;
@@ -275,6 +288,29 @@ async function openAt(browser, route, w, s, calls) {
       const seen = () => document.querySelector('[data-testid="token-rail"][data-state="error"], [data-testid="phone-trenches"][data-state="error"]') && (window.__ctListsErrorSeen = true);
       new MutationObserver(seen).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-state"] });
     });
+  // each message the push socket hands the page's handler, counted (window.__ctPushIn), the event the step waits on; with
+  // the drop plant (DROP_PUSH_TRADE, once window.__ctDropPush is set) handed on with its trades taken out
+  await ctx.addInitScript((drop) => {
+    const W = window.WebSocket;
+    if (typeof W !== "function") return;
+    window.__ctPushIn = 0;
+    window.WebSocket = class extends W {
+      set onmessage(fn) {
+        super.onmessage =
+          typeof fn !== "function"
+            ? fn
+            : (e) => {
+                window.__ctPushIn++;
+                if (!drop || window.__ctDropPush !== true) return fn.call(this, e);
+                const d = JSON.parse(e.data);
+                return fn.call(this, { data: JSON.stringify({ ...d, trades: [] }) });
+              };
+      }
+      get onmessage() {
+        return super.onmessage;
+      }
+    };
+  }, DROP_PUSH_TRADE);
   if (MARK_DELAY_MS > 0)
     await ctx.addInitScript((ms) => {
       const raf = window.requestAnimationFrame.bind(window);
@@ -291,6 +327,7 @@ async function openAt(browser, route, w, s, calls) {
     return route(r);
   });
   const page = await ctx.newPage();
+  if (CPU_THROTTLE > 1) await (await ctx.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   const consoles = [];
@@ -519,6 +556,11 @@ try {
               const [ts] = after.last.split(":");
               calls.plant = (Number(calls.plant) * 1.05).toFixed(12).replace(/0+$/, "").replace(/\.$/, "");
               if (MARK_DELAY_MS > 0) await f.evaluate(() => (window.__ctMarkDelay = true));
+              if (DROP_PUSH_TRADE) await f.evaluate(() => (window.__ctDropPush = true));
+              // the throttle as the terminal's frame feels it: one fixed loop's time there (TOKEN_PAGE_CPU_THROTTLE set)
+              if (process.env.TOKEN_PAGE_CPU_THROTTLE !== undefined)
+                console.log(`${tag}: CPU throttle ${CPU_THROTTLE}: a 2e7-step loop in the terminal's frame took ${await f.evaluate(() => { const t = performance.now(); let x = 0; for (let i = 0; i < 2e7; i++) x += i; return Math.round(performance.now() - t + (x < 0 ? 1 : 0)); })} ms`);
+              const in0 = await f.evaluate(() => window.__ctPushIn);
               const t1 = Date.now();
               ws.send(JSON.stringify({ trades: [{ t_ms: Number(ts) + 1_000, side: "b", usd: "50.00", amt: (50 / Number(calls.plant)).toFixed(6), trader: "TraderPushxxxxxxxxxxxxxxxxxxxxxxxxxxxx", tx: "txPush" }], src: "chain", as_of_ms: Date.now() }));
               let pushed = after;
@@ -528,15 +570,18 @@ try {
               }
               const ms2 = Date.now() - t1;
               check(pushed.last.endsWith(`:${Number(calls.plant)}`) && ms2 < LIVE_MS / 2, `${tag}: the pushed trade (close ${calls.plant}) reached the last bar in ${ms2} ms (${pushed.last}), want under ${LIVE_MS / 2} ms (the wake, not the next tick)`);
-              // its mark is placed in a frame of its own (TradeMarks.tsx), which may come after the bar: read until it is
-              // drawn, under the bar's own bound from the send, and fail only past it
-              let marks1 = await marks();
-              while (Date.now() - t1 < LIVE_MS / 2 && marks1 <= marks0) {
-                await f.waitForTimeout(20);
-                marks1 = await marks();
-              }
+              // its mark (card app-chart-live-mark-flake): the step waits on the events it checks, never a clock. The push
+              // handed to the page's handler first (the socket's delivery), then the mark drawn, which TradeMarks.tsx places
+              // in an animation frame of its own after the tape takes the trade, so after the bar or long after it on a
+              // loaded runner (PR #582's queue run and run 42891009866 read the count at the bar's instant: 0 -> 0). Each
+              // wait goes on within 20 ms of the event; MARK_WAIT_MS only fails a page that never draws it
+              const until = (fn, arg) => f.waitForFunction(fn, arg, { polling: 20, timeout: MARK_WAIT_MS }).then(() => true, () => false);
+              const delivered = await until((n) => window.__ctPushIn > n, in0);
+              check(delivered, `${tag}: the pushed trade never reached the page's push handler`);
+              const drawn = await until(([b, n]) => document.querySelectorAll(`${b} [data-testid="trade-mark"]`).length > n, [box, marks0]);
+              const marks1 = await marks();
               const ms3 = Date.now() - t1;
-              check(marks1 === marks0 + 1 && ms3 < LIVE_MS / 2, `${tag}: the pushed trade's mark: ${marks0} -> ${marks1} marks in ${ms3} ms, want one more under ${LIVE_MS / 2} ms`);
+              check(drawn && marks1 === marks0 + 1, `${tag}: the pushed trade's mark: ${marks0} -> ${marks1} marks ${drawn ? `in ${ms3} ms` : `by ${MARK_WAIT_MS} ms past its delivery`}, want one more`);
               console.log(`${tag}: pushed trade drawn on the last bar in ${ms2} ms; marks ${marks0} -> ${marks1} in ${ms3} ms`);
               // card app-sell-e2e-in-the-app: an open mark's card holds still while a live read moves its mark. Live app run
               // 43025383719 (11 Nov, phone): a walk's tap opened the newest bar's mark card, a live tick rescaled the price
