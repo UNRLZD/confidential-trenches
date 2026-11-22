@@ -1,5 +1,5 @@
 {
- "_note": "good: this branch's Solana tape (apps/helper/src/data/solana/trades.ts createSolanaTrades on the public providers and stream, no vendor fallback) behind a local harness serving /v1/market/trades, the lists the deployed helper's own answer, read 2026-11-15T08:56:03Z: two flooded coins (0 and 1 of their newest 30 signatures successful) answered our own chain rows at the first answer (1 and 13): PASS. bad: the deployed helper 0d308d3bc read 2026-11-15T08:54:53Z: flooded 9nxbR8JV...pump (0 of 30 successful) answered CoinGecko's 50 rows, its own first read holding none: FAIL. bad_zero: helper live run 43689567273 (token-page-data-complete-and-fast, 07:27:09Z), CjRGc8wH...pump answered 0 rows at its first answer; its newest 30 signatures at 07:27:09Z read on api.mainnet-beta.solana.com 2026-11-15 08:4xZ (0 successful); the other two tapes of that run as its log prints them: FAIL.",
+ "_note": "good: this branch's Solana tape (apps/helper/src/data/solana/trades.ts createSolanaTrades on the public providers and stream, no vendor fallback) behind a local harness serving /v1/market/trades, the lists the deployed helper's own answer, read 2026-11-15T08:56:03Z: two flooded coins (0 and 1 of their newest 30 signatures successful) answered our own chain rows at the first answer (1 and 13): PASS. bad: the deployed helper 0d308d3bc read 2026-11-15T08:54:53Z: flooded 9nxbR8JV...pump (0 of 30 successful) answered CoinGecko's 50 rows, its own first read holding none: FAIL. bad_zero: helper live run 43689567273 (token-page-data-complete-and-fast, 07:27:09Z), CjRGc8wH...pump answered 0 rows at its first answer; its newest 30 signatures at 07:27:09Z read on api.mainnet-beta.solana.com 2026-11-15 08:4xZ (0 successful); the other two tapes of that run as its log prints them: FAIL. path_run (card solana-flooded-coin-first-answer-holds-rows): the deployed helper (helper-24, 47d3aa851 by the CO's word) read 2026-11-22T12:41:45Z with this card's check, each tape's Server-Timing path recorded and named in its line: three busy coins answered our own chain rows, none flooded (10, 27 and 30 of their newest 30 successful): INCONCLUSIVE.",
  "good": {
   "base": "http://127.0.0.1:18083",
   "readAt": "2026-11-15T08:56:03.390Z",
@@ -333,6 +333,147 @@
     "src": null,
     "filling": false,
     "ms": 389
+   }
+  ]
+ },
+ "path_run": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-22T12:41:45.777Z",
+  "lists": {
+   "status": 200,
+   "busy": 12
+  },
+  "picks": [
+   {
+    "mint": "95saMAmFDrj7j6rKKKdjtaBHHNh8ULobvwkhPYe3YPhj",
+    "buys_5m": 642,
+    "newest": {
+     "sigs": 30,
+     "ok": 27
+    }
+   },
+   {
+    "mint": "3D7YQcnXi6RMjWxheiE8VLuGXJTtgQkmyugGYvzjpump",
+    "buys_5m": 285,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   },
+   {
+    "mint": "B34nXKzCgsJb9ChLuSHPRpXLE3WFSWyeT8Cqkzzmpump",
+    "buys_5m": 197,
+    "newest": {
+     "sigs": 30,
+     "ok": 10
+    }
+   },
+   {
+    "mint": "6C9r2gzu8Pr54hTevHo3x5gSj9JqtpApj7obJnrtpump",
+    "buys_5m": 153,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   },
+   {
+    "mint": "C5xph2yL6gMdxmuLGxJBkGpmuDFfyi5fqkBNhvL6pump",
+    "buys_5m": 113,
+    "newest": {
+     "sigs": 30,
+     "ok": 29
+    }
+   },
+   {
+    "mint": "2HbL7DfGRDDoJ1eZXpUGAvd4RRhpCrVM4AR427JLpump",
+    "buys_5m": 111,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   },
+   {
+    "mint": "2UoZpbbQeSGMtNaDH74m4234wQZT12m4dtj9XyUopump",
+    "buys_5m": 63,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   },
+   {
+    "mint": "Hx6wyyah44V9yrzdNRfoFuJ766gwAR8z6ZKhcPB5pump",
+    "buys_5m": 52,
+    "newest": {
+     "sigs": 30,
+     "ok": 10
+    }
+   },
+   {
+    "mint": "74SBV4zDXxTRgv1pEMoECskKBkZHc2yGPnc7GYVepump",
+    "buys_5m": 46,
+    "newest": {
+     "sigs": 30,
+     "ok": 23
+    }
+   },
+   {
+    "mint": "Ebr4QyBWy3ogBnb3B8L4K2GhPBez15k55P3ZzD4ppump",
+    "buys_5m": 44,
+    "newest": {
+     "sigs": 30,
+     "ok": 29
+    }
+   },
+   {
+    "mint": "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump",
+    "buys_5m": 43,
+    "newest": {
+     "sigs": 30,
+     "ok": 25
+    }
+   },
+   {
+    "mint": "2EyqxKLPfovbNpejQwzCZLC39fEWHRRfeKtk8meKpump",
+    "buys_5m": 39,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   }
+  ],
+  "tapes": [
+   {
+    "mint": "95saMAmFDrj7j6rKKKdjtaBHHNh8ULobvwkhPYe3YPhj",
+    "flooded": false,
+    "status": 200,
+    "json": true,
+    "rows": 2,
+    "src": "chain",
+    "filling": true,
+    "ms": 1095,
+    "path": "sol-open;desc=\"listed 1, account 23, watch 39, answer by trade after 0 rounds 564\""
+   },
+   {
+    "mint": "3D7YQcnXi6RMjWxheiE8VLuGXJTtgQkmyugGYvzjpump",
+    "flooded": false,
+    "status": 200,
+    "json": true,
+    "rows": 1,
+    "src": "chain",
+    "filling": true,
+    "ms": 1068,
+    "path": "sol-open;desc=\"listed 0, account 16, watch 31, answer by trade after 0 rounds 531\""
+   },
+   {
+    "mint": "B34nXKzCgsJb9ChLuSHPRpXLE3WFSWyeT8Cqkzzmpump",
+    "flooded": false,
+    "status": 200,
+    "json": true,
+    "rows": 4,
+    "src": "chain",
+    "filling": true,
+    "ms": 2076,
+    "path": "sol-open;desc=\"listed 1, account 444, watch 458, answer by trade after 0 rounds 1536\""
    }
   ]
  }

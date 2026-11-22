@@ -83,11 +83,12 @@ export const WHOLE_RPCS = ["https://solana-rpc.publicnode.com"] as const;
  *  above, so the trade walks' own last fallback (TRADES_RPCS) keeps the other half] */
 export const WHOLE_PER_S = 10;
 /** The whole reads one coin may send a WHOLE_WINDOW_MS, so one busy coin never takes every coin's second. [design: 20,
- *  two a second: ten coins at it fill WHOLE_PER_S; a coin past it is served its pool's tape (CUT_KEEP_MS)] */
+ *  two a second: ten coins at it fill WHOLE_PER_S; a coin past it names the cut (CUT_KEEP_MS)] */
 export const WHOLE_COIN_MAX = 20;
 export const WHOLE_WINDOW_MS = 10_000;
-/** How long a coin whose Meteora trade went unread (past the budget) is served its top pool's tape (trades): a minute,
- *  so a coin at the budget's edge never flips between the two tapes read to read. */
+/** How long a coin whose Meteora trade went unread (past the budget) names the cut (trades: its own rows filling, never
+ *  whole; its top pool's tape only while it holds no row of its own): a minute, so a coin at the budget's edge never
+ *  flips between whole and not read to read. */
 export const CUT_KEEP_MS = 60_000;
 /** Card helper-sol-tape-checks-hold, round 3: the places of each second (of WHOLE_PER_S) a busy coin (WHOLE_QUIET_MAX or
  *  more whole reads in its WHOLE_WINDOW_MS) may not take, kept for the quiet coins. Live run 44901581973 (helper
@@ -2065,10 +2066,12 @@ export function createSolanaTrades(deps: {
       // token not on the pump.fun curve, PumpSwap, Orca, Raydium CLMM, CPMM, LaunchLab, Meteora DLMM, DBC or DAMM v2) is served its top pool's trades (token.ts tape),
       // never an empty tape for a token that trades (card solana-trades-show-on-every-token: NEARKAT and BONK answered 0
       // rows, src chain, while their pools traded)
-      // card sol-meteora-tape-inside-rpc-budget: a coin whose Meteora trade went unread inside CUT_KEEP_MS is served its top
-      // pool's trades as a venue not decoded is, while the vendor answers them; else its own rows, whole only past the cut.
-      // The vendor's rows are named in Server-Timing, so a reader can tell this coin's chain tape is past the budget, a coin
-      // with no row of its own yet included (every trade of a fresh coin past the budget)
+      // card sol-meteora-tape-inside-rpc-budget: a coin whose Meteora trade went unread inside CUT_KEEP_MS names the cut in
+      // Server-Timing, so a reader can tell its tape is past the budget. Card solana-flooded-coin-first-answer-holds-rows:
+      // our own rows come first, filling and never whole while the cut lasts (our chain read is fresher than a vendor
+      // tape, and filling says a trade is unread); the vendor's rows only while we hold none (every trade of a fresh coin
+      // past the budget), named the same. Before it, a live tape past the cut was served the vendor's rows over its own
+      // (helper-23 run 45018729954: 9WB75GUz answered 50 rows src coingecko at 145 ms).
       const cut = e.cut !== undefined && now() - e.cut.at <= CUT_KEEP_MS;
       const named = (v: DataAnswer): DataAnswer => (cut && v.status === 200 && v.src !== "chain" ? { ...v, timing: `${v.timing === undefined ? "" : `${v.timing}, `}sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` } : v);
       // card helper-stays-fast-under-the-live-run: a tape with no row of ours while its walk still reads its newest
@@ -2081,10 +2084,6 @@ export function createSolanaTrades(deps: {
         return { ...v, body: JSON.stringify({ ...b, filling: true }), timing: [v.timing, readTo(e)].filter((x) => x !== undefined && x !== "").join(", ") };
       };
       if (rows.length === 0 && deps.tape !== undefined) return named(reading(await poolTape(mint, limit, e, client)));
-      if (cut && deps.tape !== undefined) {
-        const v = await poolTape(mint, limit, null, client);
-        if (v.status === 200 && v.src !== "chain") return named(v);
-      }
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(`${mint} ${r.tx}`)?.[r.index % 8] ?? null, tx: r.tx }));
       // `filling` while the cold walk still reads the token's older trades (first() answered at COLD_WAIT_MS or its first
@@ -2092,13 +2091,14 @@ export function createSolanaTrades(deps: {
       // and while the token is behind the chain (behind: a gap walked, the stream silent past SOL_BEHIND_MS): the rows it
       // holds, never a complete list (card every-tape-and-chart-says-filling-behind-the-head)
       const late = behind(e);
-      const fill = (e.state === "cold" && rows.length < limit) || late ? { filling: true } : {};
+      const fill = (e.state === "cold" && rows.length < limit) || late || cut ? { filling: true } : {};
       // how far back the tape holds every trade (Entry.whole), only while no gap is being walked and the stream is heard
-      const whole = e.state === "live" && !late && e.whole !== undefined ? { whole_ms: Math.max(e.whole, e.cut?.to ?? 0) } : {};
-      // card helper-sol-tape-checks-hold: a tape past the budget that names no reach (its walk still reading, or behind)
-      // names the cut, as the vendor's rows do: it lacks the unread trade and nothing else in it says so (a local helper
+      // (none while a cut lasts: a Meteora trade is unread, so no span of this tape is known whole; past it, from after it)
+      const whole = e.state === "live" && !late && !cut && e.whole !== undefined ? { whole_ms: Math.max(e.whole, e.cut?.to ?? 0) } : {};
+      // card helper-sol-tape-checks-hold: a tape past the budget (named no reach while the cut lasts, above) names the
+      // cut, as the vendor's rows do: it lacks the unread trade and nothing else in it says so (a local helper
       // at 321baac8c, 20 Nov 05:36Z: CARDSccU's tape cold, no whole_ms, its DLMM trade 4vEPr51yjSyE unread)
-      const timing = cut && !("whole_ms" in whole) ? `${readTo(e)}, sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` : readTo(e);
+      const timing = cut ? `${readTo(e)}, sol-whole-cut;desc="a Meteora trade unread ${Math.round((now() - e.cut!.at) / 1_000)} s ago: ${CUT_WHY[e.cut!.why]}"` : readTo(e);
       return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing };
     },
   };
