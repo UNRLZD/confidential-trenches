@@ -410,12 +410,19 @@ const WIDE_SPAN: Readonly<Record<string, number>> = {
  *  (code 35 "ranges over 10000 blocks are not supported on free plan"; BACK_NARROW). [design: what each answered every
  *  time; pocket and daybreak agree a step with their own times, the chain's own the third] */
 /** The providers that answer a pool's swaps over a whole tapeBack in one read (readBack's locate), in order: the chain's
- *  own, 747 logs over the day in 571 ms (read above). */
-const BACK_LOCATE: readonly string[] = ["https://rpc.mainnet.chain.robinhood.com"];
+ *  own, 747 logs over the day in 571 ms (read above); and Base's base-rpc.publicnode.com, one pool's swaps over 50,000
+ *  blocks in one read (card base-tapes-fill-inside-their-bound, read 2026-11-21 21:1xZ from the Mac: a v3 pool's address,
+ *  1,584 logs in 478 ms; the v4 PoolManager with one pool id, 308 logs in 516 ms), where base.gateway.tenderly.co and
+ *  rpc.sentio.xyz/base refused 5,000 blocks (-32602) and answered 1,000, base-pokt.nodies.app took 50 and
+ *  mainnet.base.org refuses every eth_getLogs (LOGS_REFUSED). */
+const BACK_LOCATE: readonly string[] = ["https://rpc.mainnet.chain.robinhood.com", "https://base-rpc.publicnode.com"];
 /** The most single-value filters one locate sends (one per value of each topic position, their product). [design: 16, a
  *  hooked v4 pool's four first topics (its Swap and POOL_CALLS) times its pool and three siblings; one batch.] */
 const LOCATE_FILTERS_MAX = 16;
 const BACK_SPAN: Readonly<Record<string, number>> = {
+  "https://base-rpc.publicnode.com": 50_000,
+  "https://base.gateway.tenderly.co": 1_000,
+  "https://rpc.sentio.xyz/base": 1_000,
   "https://robinhood.api.pocket.network": 10_000,
   "https://robinhood.daybreak-rpc.network": 2_000,
   "https://rpc.mainnet.chain.robinhood.com": 10_000,
@@ -503,6 +510,9 @@ export const IDLE_MS = 60_000;
 export const REST_MAX = 100;
 /** The tick period. */
 export const TICK_MS = 1_000;
+/** A book still reading back (backing: its tape short, filling) is read forward at most this often: a third of Base's
+ *  BEHIND_MAX, so it is never stale for it. */
+export const FILLING_TICK_MS = 5_000;
 /** An agreed head read within this is every reader's (agreedHead). [design: a tick's period, so a tick reads at most one
  *  head of its own and a dozen first reads at once read one.] */
 export const HEAD_SHARE_MS = TICK_MS;
@@ -1317,6 +1327,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const backRpcs = rpcs.filter((u) => BACK_SPAN[u] !== undefined);
   const backNarrow = rpcs.filter((u) => BACK_NARROW.includes(u));
   const canBack = VENUES[chain].tapeBack > 0 && (!VENUES[chain].backOnly || backRpcs.length >= 2);
+  /** The provider a tape's read back first locates its swaps on, one read over the whole tapeBack (BACK_LOCATE): on any
+   *  chain whose list holds one and two providers that serve old blocks to agree the blocks it names (card
+   *  base-tapes-fill-inside-their-bound: Base read back in agreed steps alone, 1,000-block spans on two providers, and a
+   *  dozen cold tapes at once still filled past 45 s on the public paces). */
+  const locator = backRpcs.length >= 2 ? BACK_LOCATE.find((u) => rpcs.includes(u)) : undefined;
   const headerTimed = deps.headerTimed ?? HEADER_TIMED;
   const V = VENUES[chain];
   // a swap is timed by its log's own block time, which two providers must give alike (sameLogs with times)
@@ -2882,7 +2897,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // settled at 17 trades, not filling, with more over the day). A locate whose provider is held is asked again when
     // the hold ends; one held or unanswered BACK_FAILS_MAX times in a row, or that cannot be made ("steps"), reads the day
     // in the agreed steps from the top, in the read back's own background lane at the providers' paces.
-    if (V.backOnly && back.located !== true) {
+    if ((V.backOnly || locator !== undefined) && back.located !== true) {
       const at = await locate(e, end, back.lo - 1);
       const { heldSince: _, ...unheld } = back;
       const steps: Back = { ...unheld, located: true, fails: 0 };
@@ -2891,7 +2906,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // as one, three in a row sent a burst's short tapes to walk the day in 87 steps, still filling at 46 s, live run
       // 43977576335; swaps-search.test.ts, 12 tapes at once: 6 still filling at 50 s at ad9337504)
       if (at === "paced") {
-        e.back = { ...back, until: now() + Math.ceil(1_000 / Math.max(holds.paceOf(BACK_LOCATE[0]!)?.perS ?? 1, 0.001)) };
+        e.back = { ...back, until: now() + Math.ceil(1_000 / Math.max(holds.paceOf(locator ?? BACK_LOCATE[0]!)?.perS ?? 1, 0.001)) };
         return;
       }
       // held (the provider refused our rate): asked again when the hold ends, no fail, as a paced one; held past
@@ -2947,8 +2962,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // RPC asked 19 of their reads beside the 24 of the locates); a held provider leaves it to agree with the one left.
       // A read the two left wholly unagreed asks it again as the third, the tie-break (agreedLogs' `third`), so two
       // that disagree never stall the tape (swaps-own-third.test.ts: pocket's times a second late)
+      // A locate provider paced at more than a post a second (Base's publicnode, 3 calls a second) reads the named blocks
+      // too while no locate waits on it (card base-tapes-fill-inside-their-bound: 12 cold Base coins on
+      // swaps-base-spread.test.ts's rig, left to the locates 8 tapes still filling at 45 s; reading named blocks beside
+      // them, the last locates waited to 38 and 44 s behind those reads, 2 still filling)
       const free = backRpcs.filter((u) => usable([u]).length > 0);
-      const two = free.filter((u) => !BACK_LOCATE.includes(u));
+      const two = free.filter((u) => !(BACK_LOCATE.includes(u) && ((holds.paceOf(u)?.perS ?? 1) <= 1 || locating(u))));
       const urls = two.length >= 2 && (back.fails ?? 0) === 0 ? two : free;
       const wide = Math.min(...urls.map((u) => BACK_SPAN[u] ?? V.span));
       // a round reads the named blocks of the newest BACK_ROUND_SPANS spans of `wide` blocks, the next round the next
@@ -3127,6 +3146,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  URL, so a locate is only ever sent to the provider it was asked of. */
   type LocateLine = { queue: LocateAsk[]; out: boolean; alone: Set<string> };
   const locateLines = new Map<string, LocateLine>();
+  /** Whether a locate waits on `u` or is out there. */
+  const locating = (u: string): boolean => {
+    const l = locateLines.get(u);
+    return l !== undefined && (l.out || l.queue.length > 0);
+  };
   function locatePost(u: string, key: string, calls: Call[]): Promise<{ r: Reply[] | null; paced: boolean }> {
     let line = locateLines.get(u);
     if (line === undefined) locateLines.set(u, (line = { queue: [], out: false, alone: new Set() }));
@@ -3336,11 +3360,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const refReady = needRef ? readRef(head.with, head.n, undefined, true).catch(() => false) : Promise.resolve(true);
     // the open books, READ_PARALLEL at a time: one after another a tick over a dozen tokens outlasts several blocks; a
     // book whose first read is in flight (firstRead) is that read's
-    const due = [...books.values()].filter((e) => e.first === undefined);
+    const open = [...books.values()].filter((e) => e.first === undefined);
+    // a book still filling its tape (backing) is read forward every FILLING_TICK_MS, not every tick: it says filling
+    // meanwhile, and the public paces its forward reads took each second are its read back's (card
+    // base-tapes-fill-inside-their-bound: 12 cold Base tapes read forward each tick, the last filled at 44.95 s on
+    // swaps-base-spread.test.ts's rig, at 40.9 s read forward every 5 s)
+    const due = open.filter((e) => !(backing(e) && e.headAt !== undefined && now() - e.headAt < FILLING_TICK_MS));
     for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false)));
     // then each read book whose tape is short reads back (readBack): its own background read, never the tick's wait, so
     // a tick's period and forward reads are as they were; one read back a book at a time
-    for (const e of due) backFrom(e, head.with);
+    for (const e of open) backFrom(e, head.with);
     await refReady;
   }
   function start(): Promise<void> {
@@ -3559,7 +3588,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // and rows priced through their quote token's own pool at their block say how many (card evm-quote-token-priced-from-our-reads)
     const through = rows.filter((r) => thirdPriced.has(`${token} ${r.tx}`)).length;
     const timing = `evm-vendor-read;desc="rows read ${age} ms ago"${priced.length > 0 ? `, evm-vendor-price;desc="usd read ${Math.max(0, now() - Math.min(...priced))} ms ago"` : ""}${through > 0 ? `, evm-quote-usd;desc="${through} rows priced from chain at their block"` : ""}`;
-    return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at, timing };
+    // rows read past BEHIND_MAX say filling, as a chain tape behind its head does (card sol-vendor-tape-gap-served-inside-reach:
+    // the Solana vendor tape served rows 54 s old with no word of it, live run 44938731300; the same answer here)
+    return { status: 200, body: JSON.stringify({ trades, ...(waiting || age > BEHIND_MAX[chain].ms ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at, timing };
   }
   /** The refresh behind a held vendor tape's rows, one per coin however many callers. A page's read of the tape starts
    *  it (heldTape, noneTrades: `caller`, that read's lane), so it is that caller's read: work callers share (sharedLane),

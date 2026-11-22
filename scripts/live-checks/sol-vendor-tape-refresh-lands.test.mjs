@@ -24,6 +24,43 @@ test("the recorded bad answer, main before card sol-vendor-tape-waits-past-reach
   assert.match(r.lines.find((l) => l.startsWith("BAD")), /after 17 s unread.*past it$/);
 });
 
+// Card sol-vendor-tape-gap-served-inside-reach: rows past the reach are BAD, and an answer past it that does not say
+// filling is a second, separate BAD (the page draws it as live); saying filling never makes rows past the reach pass.
+test("the recorded answer of the deployed helper before card sol-vendor-tape-gap-served-inside-reach: FAIL on both rules, POPCAT's third gap read served rows 19,651 ms old with no word of it", () => {
+  const r = judge(A.gapUnsaid);
+  assert.equal(r.ok, false, r.lines.join("\n"));
+  const badLines = r.lines.filter((l) => l.startsWith("BAD"));
+  assert.deepEqual(badLines, [
+    "BAD 7GCihgDB8f: 3 vendor answers after 17 s unread, rows read 1, 0, 19651 ms before (at most 15000): 1 past it",
+    "BAD 7GCihgDB8f: 1 gap answers past 15000 ms, each saying filling: 1 with no word of it",
+  ]);
+});
+
+test("planted: a gap or hold read past the reach saying filling still FAILs, on the reach alone; without filling it FAILs on both; a filling read inside the reach passes", () => {
+  const judged = (r) => r.coins.find((c) => Array.isArray(c.gaps));
+  const said = structuredClone(A.gapUnsaid);
+  judged(said).gaps[2].filling = true;
+  const v = judge(said);
+  assert.equal(v.ok, false, v.lines.join("\n"));
+  assert.deepEqual(v.lines.filter((l) => l.startsWith("BAD")), ["BAD 7GCihgDB8f: 3 vendor answers after 17 s unread, rows read 1, 0, 19651 ms before (at most 15000): 1 past it"]);
+  assert.ok(v.lines.includes("ok 7GCihgDB8f: 1 gap answers past 15000 ms, each saying filling: yes"), v.lines.join("\n"));
+  const early = structuredClone(A.good);
+  judged(early).gaps[0].filling = true;
+  assert.equal(judge(early).ok, true);
+  for (const filling of [true, false]) {
+    const hold = structuredClone(A.good);
+    const h = judged(hold).reads.find((x) => /rows read \d+ ms ago/.test(x.timing));
+    h.timing = h.timing.replace(/rows read \d+ ms ago/, `rows read ${SOL_VENDOR_REACH_MS + 1} ms ago`);
+    if (filling) h.filling = true;
+    const j = judge(hold);
+    assert.equal(j.ok, false, j.lines.join("\n"));
+    const bad = j.lines.filter((l) => l.startsWith("BAD"));
+    assert.equal(bad.length, filling ? 1 : 2, bad.join("\n"));
+    assert.match(bad[0], /past it$/);
+    if (!filling) assert.match(bad[1], /1 hold answers past 15000 ms, each saying filling: 1 with no word of it$/);
+  }
+});
+
 test("planted gap reads: one at the bound passes, one past it fails, a 503 fails; none from the vendor, or none at all, is no verdict", () => {
   const judged = (r) => r.coins.find((c) => Array.isArray(c.gaps));
   const at = structuredClone(A.good);

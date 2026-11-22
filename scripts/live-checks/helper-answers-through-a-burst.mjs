@@ -15,7 +15,9 @@
 //   - the answers' p99 is within P99_MAX_MS.
 // After: helper
 // Budget-exempt: its token reads are for a coin it takes from the Solana lists, and a listed coin takes its row from Discover's lists with no Jupiter call (apps/helper/src/data/solana/token.ts listedRow)
-//   node scripts/live-checks/helper-answers-through-a-burst.mjs [--base <url>] [--record <file>]
+//   node scripts/live-checks/helper-answers-through-a-burst.mjs [--base <url>] [--coin <Solana mint>] [--record <file>]
+// It prints each route's p50, p99 and max and the slowest reads with the helper's Server-Timing, so a p99 past the bound
+// names the reads that made it; --coin opens that coin in place of the lists' first (a cold coin's first answers).
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { randomBytes } from "node:crypto";
@@ -39,6 +41,8 @@ export const P99_MAX_MS = 3_000;
 /** How long one request may take before it counts as unanswered [design: the page's own 10 s read bound]. */
 export const TIMEOUT_MS = 10_000;
 const CHAINS = ["solana", "base", "robinhood", "near"];
+/** The slowest reads a run names with their Server-Timing. */
+export const SLOWEST = 5;
 
 /** A path without its query. */
 const routeOf = (path) => path.split("?")[0];
@@ -56,7 +60,10 @@ async function one(base, fetchFn, path, now, keep = false) {
   try {
     const r = await fetchFn(`${base.replace(/\/$/, "")}${path}`, { redirect: "manual", headers: { origin: APP }, signal: AbortSignal.timeout(TIMEOUT_MS) });
     const body = await r.text();
-    return { route: routeOf(path), status: r.status, ms: Math.round(now() - began), cors: r.headers.get("access-control-allow-origin"), body: r.status === 200 ? undefined : body.slice(0, 200), ...(keep && r.status === 200 ? { text: body } : {}) };
+    // the helper's own account of the read (Server-Timing: each upstream it waited on, and its total), so a slow answer
+    // names its wait
+    const timing = r.headers.get("server-timing");
+    return { route: routeOf(path), status: r.status, ms: Math.round(now() - began), cors: r.headers.get("access-control-allow-origin"), body: r.status === 200 ? undefined : body.slice(0, 200), ...(timing ? { timing } : {}), ...(keep && r.status === 200 ? { text: body } : {}) };
   } catch (e) {
     return { route: routeOf(path), status: null, ms: Math.round(now() - began), error: String(e?.cause?.code ?? e?.name ?? "error") };
   }
@@ -81,7 +88,7 @@ export function upgrade(base, coin, now = () => performance.now()) {
 
 /** The run: { base, coin, answers }; answers in the order sent, each by its route (the path, no query: a record holds
  *  no coin address beside a "token" key, which a secret scan reads as one). */
-export async function read(base = BASE, fetchFn = fetch, now = () => performance.now(), upgradeFn = upgrade) {
+export async function read(base = BASE, fetchFn = fetch, now = () => performance.now(), upgradeFn = upgrade, asked = null) {
   // the lists read for the coin, kept in the record when it names none (a 502, a 503 shed, a timeout), so a replay says why
   const first = await one(base, fetchFn, "/v1/market/lists?chain=solana", now, true);
   let coin = null;
@@ -91,6 +98,8 @@ export async function read(base = BASE, fetchFn = fetch, now = () => performance
     coin = null;
   }
   delete first.text;
+  // --coin: a coin the operator names (a cold one, to read its first answers), in place of the lists' first
+  if (asked !== null) coin = asked;
   if (coin === null) return { base, coin, answers: [first] };
   const paths = Array.from({ length: PAGES }, () => pagePaths(coin)).flat();
   const answers = await Promise.all([...paths.map((p) => one(base, fetchFn, p, now)), ...Array.from({ length: SOCKETS }, () => upgradeFn(base, coin, now))]);
@@ -117,6 +126,12 @@ export function judge(run) {
   const by = {};
   for (const a of answers) by[a.status ?? "none"] = (by[a.status ?? "none"] ?? 0) + 1;
   const p99 = pct(answers.filter((a) => a.status !== null).map((a) => a.ms), 99);
+  // each route's own times, and the slowest reads with the helper's Server-Timing, so a p99 past the bound names its reads
+  for (const route of [...new Set(answers.map((a) => a.route))]) {
+    const ms = answers.filter((a) => a.route === route && a.status !== null).map((a) => a.ms);
+    lines.push(`    ${route}: ${ms.length} answered, p50 ${pct(ms, 50) ?? "none"} ms, p99 ${pct(ms, 99) ?? "none"} ms, max ${ms.length ? Math.max(...ms) : "none"} ms`);
+  }
+  for (const a of [...answers].filter((a) => a.status !== null).sort((x, y) => y.ms - x.ms).slice(0, SLOWEST)) lines.push(`    slow: ${a.route} ${a.status} ${a.ms} ms${a.timing ? ` (${a.timing})` : ""}`);
   say(p99 !== null && p99 <= P99_MAX_MS, `p99 ${p99 ?? "none"} ms, within ${P99_MAX_MS} ms (p50 ${pct(answers.map((a) => a.ms), 50) ?? "none"} ms; by status ${JSON.stringify(by)})`);
   return { ok: lines.every((l) => !l.startsWith("BAD")), lines };
 }
@@ -125,7 +140,7 @@ if (import.meta.main) {
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
-    const run = await read(opt("--base", BASE));
+    const run = await read(opt("--base", BASE), fetch, () => performance.now(), upgrade, opt("--coin", null));
     const record = opt("--record", null);
     if (record !== null) writeFileSync(record, `${JSON.stringify(run, null, 2)}\n`);
     const v = judge(run);
