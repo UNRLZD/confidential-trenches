@@ -151,13 +151,37 @@ test("owed_back ends the buy as owed back: its own line, no Retry, never Failed"
 
 // Review of 167d9deea (P3): a buy answered refused (every leg's first post refused by the helper) whose bytes landed
 // anyway, its swap failed and its ETH on W: the page's late end is owed_back under the same id. The box moves from
-// Failed to owed back (no Retry); any other late stage, or another id, leaves an ended buy as it is.
+// Failed to owed back (no Retry); a late filled or part_filled is its end too (card evm-buy-late-fill-reaches-app, below);
+// any other late stage, or another id, leaves an ended buy as it is.
 test("evm-buy-end-carries-its-tx: a late owed_back moves a refused buy of the same id to owed back; nothing else moves an ended buy", () => {
   const refused: Phase = { k: "ended", id: "b1", at: T0, stage: "refused" };
   assert.deepEqual(progress(refused, "b1", "owed_back", T0 + 30_000), { k: "ended", id: "b1", at: T0, stage: "owed_back" });
   assert.equal(showsRetry(progress(refused, "b1", "owed_back", T0 + 30_000)), false);
   assert.equal(progress(refused, "b2", "owed_back", T0 + 30_000), refused);
-  for (const s of ["filled", "part_filled", "not_landed", "sent", "refused"] as const) assert.equal(progress(refused, "b1", s, T0 + 30_000), refused, s);
+  for (const s of ["not_landed", "sent", "signed", "refused"] as const) assert.equal(progress(refused, "b1", s, T0 + 30_000), refused, s);
   const notLanded: Phase = { k: "ended", id: "b1", at: T0, stage: "not_landed" };
   assert.equal(progress(notLanded, "b1", "owed_back", T0 + 30_000), notLanded);
+});
+
+// Card evm-buy-late-fill-reaches-app (the EVM buy's second review at 289126a2, P3-4): a buy the helper's word refused
+// whose transaction landed anyway. The signing page reads on past its answer and posts the end it reads as progress
+// under the same id (packages/signpage/src/pool-buy-evm.ts: `h.late?.(end)` after a refused answer, every end but
+// not_landed). A late filled is Filled, its time from the tap, with no Retry; a late part_filled is that end. Another
+// id, or a buy ended any other way, moves nothing.
+test("evm-buy-late-fill-reaches-app: a refused buy whose late end is filled shows Filled; part filled shows its own end", () => {
+  const refused: Phase = { k: "ended", id: "b1", at: T0, stage: "refused", code: "down" };
+  // as the box reaches it: the request's refusal, then the page's late progress
+  const asked = outcome(tap(READY, "b1", T0), "b1", { ok: false, error: { code: "down" } }, T0 + 2_000);
+  assert.deepEqual(asked, refused);
+  const late = progress(asked, "b1", "filled", T0 + 41_000);
+  assert.deepEqual(late, { k: "filled", id: "b1", at: T0, ms: 41_000 });
+  assert.equal(showsRetry(late), false);
+  assert.deepEqual(progress(refused, "b1", "part_filled", T0 + 41_000), { k: "ended", id: "b1", at: T0, stage: "part_filled" });
+  assert.equal(progress(refused, "b2", "filled", T0 + 41_000), refused);
+  for (const stage of ["not_landed", "part_filled", "owed_back"] as const) {
+    const ended: Phase = { k: "ended", id: "b1", at: T0, stage };
+    assert.equal(progress(ended, "b1", "filled", T0 + 41_000), ended, stage);
+  }
+  // once Filled, a second copy of the stage moves nothing
+  assert.equal(progress(late, "b1", "filled", T0 + 50_000), late);
 });
