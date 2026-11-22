@@ -59,8 +59,9 @@ test("this tree's build gives the recorded good run's bundle facts, its index pi
   const b = localBuild();
   sameFacts(b.index, b.js);
   // planted: the tree's build with one marker gone (the carry's floor, the one after its costs read: the piece rule's
-  // chunk has its own, card every-lamport-can-move), its index pinning it, fails on that fact
-  const js = b.js.replace(/(\.costs\([\w$]+\);)if\(([\w$]+)<([\w$]+)\.floor\)return ([\w$]+)\(\2\);/, "$1");
+  // chunk has its own, card every-lamport-can-move; with the cost the carry hands its left, card
+  // a-restored-deposit-wallets-leftover-shows), its index pinning it, fails on that fact
+  const js = b.js.replace(/(\.costs\([\w$]+\);)if\(([\w$]+)=([\w$]+)\.keep\+\3\.perRung,([\w$]+)<\3\.floor\)return ([\w$]+)\(\4\);/, "$1");
   assert.notEqual(js, b.js);
   const index = b.index.replace(bundleFacts(b.index, b.js).pin, bundleFacts("", js).sha384);
   assert.throws(() => sameFacts(index, js), (e) => e instanceof assert.AssertionError && /ux_carry/.test(e.message));
@@ -114,7 +115,13 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/,([\w$]+)!==([\w$]+)\)throw Error\(`its U_X reads/, ",!1)throw Error(`its U_X reads").ux_read, false, "two balances taken");
   assert.equal(mut(/,([\w$]+)!==([\w$]+)\)throw Error\(`its U_X reads/, ",$1!==$1)throw Error(`its U_X reads").ux_read, false, "the two balances compared to themselves");
   assert.equal(mut(/return ([\w$]+)===0n\?([\w$]+):\(([\w$]+)\.set/, "return $1<=1n?$2:($3.set").ux_read, false, "a held balance read as none");
-  assert.equal(mut(/(\.costs\([\w$]+\);)if\(([\w$]+)<([\w$]+)\.floor\)return ([\w$]+)\(\2\);/, "$1if($2<$3.keep)return $4($2);").ux_carry, false, "another floor");
+  const floor = /(\.costs\([\w$]+\);)if\(([\w$]+)=([\w$]+)\.keep\+\3\.perRung,([\w$]+)<\3\.floor\)return ([\w$]+)\(\4\);/;
+  assert.equal(mut(floor, "$1if($2=$3.keep+$3.perRung,$4<$3.keep)return $5($4);").ux_carry, false, "another floor");
+  // card a-restored-deposit-wallets-leftover-shows: the carry hands its left the cost it read, and the wiring hands the
+  // follows U_X whole, so a U_X with no op is given one
+  assert.equal(mut(floor, "$1if($2=$3.keep,$4<$3.floor)return $5($4);").ux_carry, false, "another cost");
+  assert.equal(mut(/\.leftAt\?\.\(([\w$]+),([\w$]+),([\w$]+)\)/, ".leftAt?.($1,$2)").ux_carry, false, "the carry's cost not handed");
+  assert.equal(mut(/\?\.left\(([\w$]+),([\w$]+),([\w$]+)\)\}\},ended:/, "?.left($1.chain,$1.u,$2)}},ended:").ux_wired, false, "the follows handed U_X's chain and address, never U_X");
   assert.equal(mut(/if\(([\w$]+)!==null&&([\w$]+)>=\1\)return\{why:`holds/, "if(!1)return{why:`holds").ux_carry, false, "a filled deposit that moved nothing carried on");
   assert.equal(mut(/if\(([\w$]+)!==`filled`&&\1!==`part_filled`\)return\{why:`holds/, "if($1===`failed`)return{why:`holds").ux_carry, false, "a carry that did not fill passed");
   // card pool-deposit-op-txs: the follow's deposit answers its run ({ end, txs }); the run read as its end never fills
@@ -201,7 +208,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   };
   const dead = (text, copy) => f(`${text};var __dead=0${copy};`);
   assert.equal(dead(broken(/,([\w$]+)!==([\w$]+)\)throw Error\(`its U_X reads/, ",!1)throw Error(`its U_X reads"), read).ux_read, false, "dead copy: read (real guard dropped)");
-  assert.equal(dead(broken(/(\.costs\([\w$]+\);)if\(([\w$]+)<([\w$]+)\.floor\)return ([\w$]+)\(\2\);/, "$1"), `;${carry.replace(/^async function ([\w$]+)/, "async function __dead_c")}`).ux_carry, false, "dead copy: carry (real floor dropped)");
+  assert.equal(dead(broken(floor, "$1"), `;${carry.replace(/^async function ([\w$]+)/, "async function __dead_c")}`).ux_carry, false, "dead copy: carry (real floor dropped)");
   assert.equal(dead(broken(/:([\w$]+)>1n&&/, ":!1&&"), `;${held.replace(/^async function ([\w$]+)/, "async function __dead_h")}`).id_held, false, "dead copy: held rule (real one names nothing)");
   assert.equal(dead(broken(/(ux:[\w$]+=>\{let [\w$]+=[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1(()=>null)({chain:"), `;var __dead_w={signedIn:0,${wired}0}`).ux_wired, false, "dead copy: wired (real deps swapped)");
   assert.equal(dead(js, read).ux_read, false, "a second copy of the reader beside the real one");
