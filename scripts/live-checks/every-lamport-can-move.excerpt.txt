@@ -25,7 +25,8 @@ At=()=>{let t=G2(Date.now());kt.ride(t),Promise.resolve(tY(e.store).bookRide?.(t
 let t=await Promise.resolve(tY(e.store).rideAt?.()).catch(()=>void 0);t!==void 0&&kt.ride(Math.min(t,Date.now()+aJ))
 bookRide:async t=>void await(await e()).update(`meta`,rY,e=>Number.isSafeInteger(e)&&e>=t?void 0:t)
 function zY(e,t){let n=e.filter(e=>e.cashback===!0).length;return n>2||e.some(e=>e.tokens===!0&&t(e.address))?null:{owed:n,kept:e.length-n}}
-n=new Set(t.mints.map(e=>oc(c.address,e.mint,e.program))),i,r=e=>t.bare===!0?i===void 0||i===`any`||i.has(e):n.has(e)
-if(o!==void 0){i=void 0;let n=await bq(s,t.program,t.store,t.scope,c,a).catch(t=>(u=`its note's spend not read on both RPCs (${KK(t)})`,null));if(n===null)return{young:u||`its note's spend not read alike on both RPCs`,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0};i=n}
+n=new Set(t.mints.map(e=>oc(c.address,e.mint,e.program))),i,r=e=>t.bare===!0?i!==!1:n.has(e)
+if(o!==void 0){i=void 0;let n=await bq(e,t.store,t.scope,c,o.slots).catch(t=>(u=`its note's spend not read (${KK(t)})`,null));if(n===null)return{young:u||`its note's spend not read`,keep:[],signed:[],last:0,unclaimed:void 0,since:void 0};i=n}
+async function bq(e,t,n,r,i){if(e.settleSet===void 0)return null;let a=(await t.list()).filter(e=>e.scope===n&&e.leaf!==void 0&&e.leaf.label===r.l&&TR(e.ref)===r.j);if(a.length===0)return null;let o=await e.settleSet(a.map(e=>e.id),i);return o.length!==a.length||o.some(e=>`error`in e)?null:o.some(e=>e.kind===`spent`)}
 if(zY(y.ok.keep,r)===null)
 let f=zY(d.plan.keep,r);

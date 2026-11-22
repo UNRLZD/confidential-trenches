@@ -123,18 +123,24 @@ export const MARKS = Object.freeze({
     ],
   ),
   // review P1-2 of 1d3b96d9c: tokens keep W whole only on W's own coins' accounts; card
-  // a-found-wallet-sweeps-past-a-strangers-coin: a found W's own accounts come from its own note's spend read on both
-  // RPCs (none while unspent, every one once spent), every one while unread, and a read with no answer alike holds W
-  // young before any sweep
-  "the sweep goes on around kept accounts but never around tokens on W's own accounts: a bought W's coins', a found W's every one until its note's spend reads alike on both RPCs, then none while unspent, and a found W whose note gives no answer alike held young before any sweep": tied(
-    re(R`function (?<k>${I})\((${I}),(${I})\)\{let (${I})=\2\.filter\((${I})=>\5\.cashback===!0\)\.length;return \4>2\|\|\2\.some\((${I})=>\6\.tokens===!0&&\3\(\6\.address\)\)\?null:\{owed:\4,kept:\2\.length-\4\}\}`),
-    (g) => [
-      // a bought W keeps on its coins' accounts (`mine`); a found W on every one while its set is unread or "any", and on
-      // its own set once read; the set read from its note in the teardown, a read with no answer alike held young, and
-      // only then the sweep's keep (keepOf on the teardown's and on the plan's)
-      R`(${I})=new Set\((${I})\.mints\.map\((${I})=>${I}\((${I})\.address,\3\.mint,\3\.program\)\)\),(${I}),(${I})=(${I})=>\2\.bare===!0\?\5===void 0\|\|\5===` + "`any`" + R`\|\|\5\.has\(\7\):\1\.has\(\7\)[^]*?if\(${I}!==void 0\)\{\5=void 0;let (${I})=await ${I}\(${I},\2\.program,\2\.store,\2\.scope,\4,${I}\)\.catch\([^]{0,200}?,null\)\);if\(\8===null\)return\{young:[^]{0,200}?\};\5=\8\}[^]*?${esc(g.k)}\(${I}\.ok\.keep,\6\)[^]*?${esc(g.k)}\(${I}\.plan\.keep,\6\)`,
-    ],
-  ),
+  // a-found-wallet-sweeps-past-a-strangers-coin: a found W's own accounts come from whether its own notes are spent, read
+  // on the pool's whole mark list by the host's settle (settleSet, as solanaSettleSpentSet reads it: no read names a
+  // note's mark) at or past the finalized slots the time part read; every one while unread or once one is spent, none
+  // while all are unspent; no answer holds W young before any sweep
+  "the sweep goes on around kept accounts but never around tokens on W's own accounts: a bought W's coins', a found W's every one until its notes' spend is read on the pool's whole mark list (no read naming a note's mark), then none while unspent, and a found W whose notes give no answer held young before any sweep": {
+    test(js) {
+      const keep = re(R`function (?<k>${I})\((${I}),(${I})\)\{let (${I})=\2\.filter\((${I})=>\5\.cashback===!0\)\.length;return \4>2\|\|\2\.some\((${I})=>\6\.tokens===!0&&\3\(\6\.address\)\)\?null:\{owed:\4,kept:\2\.length-\4\}\}`).exec(js)?.groups;
+      if (!keep) return false;
+      // a bought W keeps on its coins' accounts (mine); a found W on every one while its spend is unread or true, none once
+      // false; the spend read in the teardown, cleared first, no answer young, and only then the keeps (keepOf on the
+      // teardown's and on the plan's)
+      const own = re(R`(${I})=new Set\((${I})\.mints\.map\((${I})=>${I}\((${I})\.address,\3\.mint,\3\.program\)\)\),(?<sp>${I}),(?<oa>${I})=(${I})=>\2\.bare===!0\?\k<sp>!==!1:\1\.has\(\7\)[^]*?if\((?<pa>${I})!==void 0\)\{\k<sp>=void 0;let (?<on>${I})=await (?<rd>${I})\(${I},\2\.store,\2\.scope,\4,\k<pa>\.slots\)\.catch\([^]{0,200}?,null\)\);if\(\k<on>===null\)return\{young:[^]{0,200}?\};\k<sp>=\k<on>\}[^]*?${esc(keep.k)}\(${I}\.ok\.keep,\k<oa>\)[^]*?${esc(keep.k)}\(${I}\.plan\.keep,\k<oa>\)`).exec(js)?.groups;
+      if (!own) return false;
+      // the reader: W's notes on its label and j in this pool's scope, settled on the host's one read of the pool's marks
+      // at those slots; no host settle, no note, a short answer or one note's refusal: null; any spent: true
+      return re(R`async function ${esc(own.rd)}\((?<h>${I}),(?<st>${I}),(?<sc>${I}),(?<w>${I}),(?<ms>${I})\)\{if\(\k<h>\.settleSet===void 0\)return null;let (?<m>${I})=\(await \k<st>\.list\(\)\)\.filter\((?<n>${I})=>\k<n>\.scope===\k<sc>&&\k<n>\.leaf!==void 0&&\k<n>\.leaf\.label===\k<w>\.l&&${I}\(\k<n>\.ref\)===\k<w>\.j\);if\(\k<m>\.length===0\)return null;let (?<g>${I})=await \k<h>\.settleSet\(\k<m>\.map\((?<i>${I})=>\k<i>\.id\),\k<ms>\);return \k<g>\.length!==\k<m>\.length\|\|\k<g>\.some\((?<e>${I})=>${"`error`"}in \k<e>\)\?null:\k<g>\.some\((?<f>${I})=>\k<f>\.kind===${"`spent`"}\)\}`).test(js);
+    },
+  },
 });
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle carries. */

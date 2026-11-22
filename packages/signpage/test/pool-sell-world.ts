@@ -209,7 +209,8 @@ export type Plant = {
   statusLagOn1?: boolean;
   /** RPC p's finalized block height (1,000 when not given: past the blockhash's last height, 151) */
   finalHeight?: number;
-  /** the block height of W's latest transaction, before the test's own sends (500 when not given: 1,000 is past it + 151) */
+  /** the block height of W's latest transaction, before the test's own sends (0 when not given: 1,000 is past it + 151 +
+   *  FOUND_ROUND_GAP, 750) */
   wLastHeight?: number;
   /** another deposit takes the return note's precommitment just before the sell lands */
   frontRun?: boolean;
@@ -295,9 +296,10 @@ export type Plant = {
   /** W's buy record (pool-buy.ts BuyMints): the venue's mint when not given; null, none (a buy from before it was
    *  written, or a restored device) */
   buy?: { mint: string; program: string; rebuilt?: true } | null;
-  /** W's own note's spent mark (W_NOTE_MARK): no account when not given (unspent); "spent", an account the pool owns on
-   *  both RPCs (its tag 3 landed); `spentOn`, on that RPC alone; "paid", lamports a stranger sent to the address, owned
-   *  by the system program, on both */
+  /** W's own note's spent mark (W_NOTE_MARK), as the host's settle (settleSet, the pool's whole mark list) reads it and
+   *  as the chain holds it: no account when not given (unspent); "spent", an account the pool owns on both RPCs (its tag
+   *  3 landed); `spentOn`, on that RPC alone (the settle refuses); "paid", lamports a stranger sent to the address, owned
+   *  by the system program, on both (no mark: unspent) */
   wNote?: "spent" | "paid" | { spentOn: 0 | 1 };
   /** Strangers' transactions on W after its release (W_PAST), each long final: anyone can send W lamports or a token */
   wStrangers?: number;
@@ -382,11 +384,11 @@ export function chain(plant: Plant = {}) {
   // transaction at wLastHeight; one the test lands on W is its latest, in a block at the finalized height
   const W_PAST = base58.encode(new Uint8Array(64).fill(7));
   const wHistory = [{ signature: W_PAST, slot: VF[v].slot - 300 }];
-  const heightAt = new Map<number, number>([[wHistory[0]!.slot, plant.wLastHeight ?? 500]]);
+  const heightAt = new Map<number, number>([[wHistory[0]!.slot, plant.wLastHeight ?? 0]]);
   // strangers' transactions on W after W_PAST (wStrangers), newest first, each in a block at wLastHeight
   for (let k = 1; k <= (plant.wStrangers ?? 0); k++) {
     wHistory.unshift({ signature: base58.encode(new Uint8Array(64).fill(100 + k)), slot: VF[v].slot - 300 + k });
-    heightAt.set(VF[v].slot - 300 + k, plant.wLastHeight ?? 500);
+    heightAt.set(VF[v].slot - 300 + k, plant.wLastHeight ?? 0);
   }
 
   /** The program's deposit of `value` on `pre`: the next nonce's label, both leaves, the mark. */

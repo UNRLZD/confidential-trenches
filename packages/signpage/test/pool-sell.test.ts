@@ -38,7 +38,7 @@ import { onTestClock } from "../../kit/test/test-clock.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
-import { POOL_BUY_POLL_MS } from "../src/pool-buy.ts";
+import { FOUND_ROUND_GAP, POOL_BUY_POLL_MS } from "../src/pool-buy.ts";
 import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_UNPROVEN_PASSES, restAdds, POOL_RENT_BACK_MS, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type RentBackSpacing, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, FOUND_CLOSE_MAX, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, forgetPageLoad, solanaSellBudget, solanaSellBudgetFits, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type OwedRentBacks, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
@@ -66,13 +66,14 @@ const wallet = (amount: bigint, frozen = false, mint = MINT): BuyWallet => ({
   pool: PROGRAM, chain: "sol", note: "n1", l: L, j: J, path: W.path, address: W.address,
   holdings: { native: 0n, tokens: new Map([[mint, { amount, frozen }]]), unreadable: [] },
 });
-type World = { c: ReturnType<typeof chain>; ns: NoteStore; store: WalletStore; host: PoolSellHost; seeds: Uint8Array[]; sent: string[]; owed: Map<string, OwedRentBack>; kept: Map<string, KeptSell>; told: RentBackTold[] };
+type World = { c: ReturnType<typeof chain>; ns: NoteStore; store: WalletStore; host: PoolSellHost; seeds: Uint8Array[]; settles: { noteIds: string[]; minSlots: number[] }[]; sent: string[]; owed: Map<string, OwedRentBack>; kept: Map<string, KeptSell>; told: RentBackTold[] };
 async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, false, VF[plant.venue ?? "pump"].mint)]): Promise<World> {
   // a fresh page: no leftover pass of an earlier test's load
   forgetPageLoad();
   const c = chain(plant);
   const { store, ns } = await notes();
   const seeds: Uint8Array[] = [];
+  const settles: { noteIds: string[]; minSlots: number[] }[] = [];
   const sent: string[] = [];
   const owed = new Map<string, OwedRentBack>();
   const empties = new Set<string>();
@@ -87,6 +88,14 @@ async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, f
     bought: { get: async (a) => bought.get(a), put: async (a, m) => void bought.set(a, m) },
     rpcs: c.rpcs,
     notes: async () => ns,
+    // the pool's settle on its whole mark list (pool-testnet.ts settleSet, the wallet's solanaSettleSpentSet), as the plant's
+    // W_NOTE_MARK stands: one RPC alone, the settle refuses
+    settleSet: async (noteIds, minSlots) => {
+      settles.push({ noteIds: [...noteIds], minSlots: [...minSlots] });
+      const n = plant.wNote;
+      if (typeof n === "object") throw new Error("the two RPCs list the pool's marks apart");
+      return noteIds.map(() => (n === "spent" ? ({ kind: "spent", withdrawn: 0n } as never) : { kind: "unspent" as const }));
+    },
     seed64: async () => {
       c.log.push("seed");
       const s = SEED64.slice();
@@ -103,7 +112,7 @@ async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, f
     wait: async () => {},
     pick: () => 2,
   };
-  return { c, ns, store, host, seeds, sent, owed, kept, told };
+  return { c, ns, store, host, seeds, settles, sent, owed, kept, told };
 }
 /** A W found holding SOL with no buy recorded (a restore, pool-testnet.ts findHeldWs): its owed record, and the note
  *  whose own W it is in the store (W_NOTE, UNSPENT; pool-found.ts ownWs), once. */
@@ -2568,6 +2577,10 @@ test("a W found holding SOL with no buy recorded (a restore): its note spent, ke
 // The found W's rule (card buy-spends-several-pieces): no buy record, `found` in the owed record, and both RPCs'
 // getTokenAccountsByOwner, both token programs, W alone, listing W's token accounts alike. Each way short of it holds.
 /** RPC `p` of `w` answering through `f`, which may hand a call on to the RPC it wraps. */
+/** A finalized height read answered at `h` on RPC p: getBlockHeight, or getEpochInfo with its slot (the found W's time
+ *  part, foundPast, card a-found-wallet-sweeps-past-a-strangers-coin); any other read, undefined. */
+const finalHeightAt = (m: string, params: readonly unknown[], h: number, p: 0 | 1): unknown =>
+  (params[0] as { commitment?: string } | undefined)?.commitment !== "finalized" ? undefined : m === "getBlockHeight" ? h : m === "getEpochInfo" ? { blockHeight: h, absoluteSlot: VF.pump.slot + 10 + p, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 } : undefined;
 const around = (w: World, p: 0 | 1, f: (m: string, params: readonly unknown[], r: SolanaRpc) => unknown): void => {
   const r = w.host.rpcs[p];
   const wrapped = (async (m: string, params: readonly unknown[]) => f(m, params, r)) as SolanaRpc;
@@ -2590,9 +2603,11 @@ test("a found W: held with no `found`, with one RPC failing, answering out of sh
       w.host.rpcs = [w.host.rpcs[0], (async (m: string, p: readonly unknown[]) => (m === "getTokenAccountsByOwner" && (p[1] as { programId: string }).programId === TOKEN_PROGRAM ? { context: { slot: 1 }, value: [{ pubkey: VF.pump.ata, account: { owner: TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: [base64.encode(tokenAccount(0n)), "base64"] } }] } : r(m, p))) as SolanaRpc];
     }],
     ["RPC 1 lists an entry with no address", (w) => around(w, 1, (m, p, r) => (m === "getTokenAccountsByOwner" ? { context: { slot: 1 }, value: [{ pubkey: "not-an-address" }] } : r(m, p)))],
-    // the found W's expiry: W's latest transaction's block height + 151 not yet passed at finalized on both RPCs
-    ["not yet past its last transaction's height + 151", () => {}, { wLastHeight: 849 }],
-    ["past on RPC 0 only", (w) => around(w, 1, (m, p, r) => (m === "getBlockHeight" && (p[0] as { commitment: string }).commitment === "finalized" ? 600 : r(m, p)))],
+    // the found W's expiry: W's latest transaction's block height + 151 + FOUND_ROUND_GAP not yet passed at finalized
+    // on both RPCs
+    ["not yet past its last transaction's height + 151 + FOUND_ROUND_GAP", () => {}, { wLastHeight: 1_000 - 151 - FOUND_ROUND_GAP }],
+    ["past on RPC 0 only", (w) => around(w, 1, (m, p, r) => (m === "getEpochInfo" && (p[0] as { commitment: string }).commitment === "finalized" ? { blockHeight: 600, absoluteSlot: VF.pump.slot + 11, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 } : r(m, p)))],
+    ["RPC 1's finalized slot not a number", (w) => around(w, 1, (m, p, r) => (m === "getEpochInfo" && (p[0] as { commitment: string }).commitment === "finalized" ? { blockHeight: 1_000, absoluteSlot: "x" } : r(m, p)))],
     ["the two RPCs naming different latest signatures", (w) => around(w, 1, (m, p, r) => (m === "getSignaturesForAddress" ? [{ signature: base58.encode(new Uint8Array(64).fill(9)), slot: VF.pump.slot - 300, err: null }] : r(m, p)))],
     ["RPC 1's latest signature read failing", (w) => around(w, 1, (m, p, r) => (m === "getSignaturesForAddress" ? Promise.reject(new Error("HTTP 503")) : r(m, p)))],
     ["RPC 1 not having the latest's block at finalized", (w) => around(w, 1, (m, p, r) => (m === "getBlock" ? null : r(m, p)))],
@@ -2608,6 +2623,58 @@ test("a found W: held with no `found`, with one RPC failing, answering out of sh
     assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, name);
     assert.equal(w.c.accounts.get(W.address)?.lamports, before, `${name}: W's SOL where it was`);
     assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => t.state), ["holds"], name);
+  }
+});
+
+// Card a-found-wallet-sweeps-past-a-strangers-coin (review of 258abca1d): a tap of two rounds lands its first round's SOL
+// on W at height H, then signs its buy round's tag 3 on a fresh blockhash, at H+60 say, which can land until H+60+151.
+// Another device on the same 12 words that loads at H+155 reads W found (no buy recorded there) past W's latest + 151:
+// it swept W, a stranger's unit beside it or none, under the buy that relies on that SOL. Past W's latest + 151 +
+// FOUND_ROUND_GAP (the buy round's blockhash at most that far past the first round's, pool-buy.ts) no such tag 3 lands.
+test("a found W whose buy round was signed after its first round landed: held, nothing signed, until W's latest + 151 + FOUND_ROUND_GAP (B signs at H+60, A loads at H+155)", async () => {
+  const H = 10;
+  const other = VF.pumpswap.mint;
+  const unit = base58.encode(new Uint8Array(32).fill(43));
+  const load = async (finalHeight: number, strangers: boolean) => {
+    const w = await world({ buy: null, wLastHeight: H, finalHeight }, []);
+    w.c.accounts.delete(VF.pump.ata);
+    if (strangers) w.c.accounts.set(unit, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(1n, 1, other) });
+    await foundW(w);
+    const before = w.c.accounts.get(W.address)?.lamports;
+    await resumeRentBacks(w.host, fakeLocks());
+    return { w, before };
+  };
+  for (const strangers of [true, false])
+    for (const at of [H + 155, H + 60 + 151, H + 151 + FOUND_ROUND_GAP]) {
+      const { w, before } = await load(at, strangers);
+      const name = `${strangers ? "a stranger's unit" : "no token account"}, finalized at H+${at - H}`;
+      assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction" || c.method === "simulateTransaction").length, 0, name);
+      assert.equal(w.c.accounts.get(W.address)?.lamports, before, `${name}: W's SOL where it was`);
+      assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => t.state), ["holds"], name);
+    }
+  // one block past it: swept, a stranger's unit kept where it is
+  for (const strangers of [true, false]) {
+    const { w } = await load(H + 151 + FOUND_ROUND_GAP + 1, strangers);
+    assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(w.told));
+    if (strangers) assert.equal(new DataView(w.c.accounts.get(unit)!.data.buffer).getBigUint64(64, true), 1n);
+  }
+});
+
+// Card a-found-wallet-sweeps-past-a-strangers-coin (review of 258abca1d): a found W's note's spend is read on the pool's
+// whole mark list, never by the note's own mark's address: a provider that logged a read naming it beside W's reads, and
+// later the note's spend paying another W, would tie the two Ws to one user.
+test("a found W's teardown and sweep: no read names its note's spent mark, its spend or not", async () => {
+  const other = VF.pumpswap.mint;
+  const unit = base58.encode(new Uint8Array(32).fill(43));
+  for (const wNote of [undefined, "spent", "paid"] as const) {
+    const w = await world({ buy: null, ...(wNote === undefined ? {} : { wNote }) }, []);
+    w.c.accounts.delete(VF.pump.ata);
+    w.c.accounts.set(unit, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(wNote === "spent" ? 5n : 1n, 1, other) });
+    await foundW(w);
+    await resumeRentBacks(w.host, fakeLocks());
+    assert.ok(w.c.calls.some((c) => c.method === "getTokenAccountsByOwner" && c.params[0] === W.address), "W's own reads ran");
+    assert.deepEqual(w.c.calls.filter((c) => JSON.stringify(c.params).includes(W_NOTE_MARK)).map((c) => [c.p, c.method]), [], String(wNote));
+    assert.equal(w.settles.length, 1, String(wNote));
   }
 });
 
@@ -2731,7 +2798,7 @@ test("a found W while another device's tag 3 can still land: the sweep is never 
     around(w, p, (m, params, r) => {
       if (m === "getSignaturesForAddress") return [{ signature: tag3, slot: VF.pump.slot + 5, err: null }];
       if (m === "getBlock" && params[0] === VF.pump.slot + 5) return { blockHeight: 950 };
-      if (m === "getBlockHeight" && (params[0] as { commitment: string }).commitment === "finalized") return 5_000;
+      if (finalHeightAt(m, params, 5_000, p) !== undefined) return finalHeightAt(m, params, 5_000, p);
       return r(m, params);
     });
   await resumeRentBacks(w.host, fakeLocks());
@@ -2796,9 +2863,10 @@ test("a found W owning strangers' zero-balance token accounts, of any mint, unde
     assert.equal(s.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(s.told));
     restAfterSweep(s, solanaSweepKeep(rent, 0, 1), "W keeps the kept account's cost and the rest past the rung");
     assert.ok(s.owed.has(W.address));
-    // the read that decided it named the note's spent mark alone, never W, on both RPCs
-    const marks = s.c.calls.filter((c) => c.method === "getMultipleAccounts" && (c.params[0] as string[]).includes(W_NOTE_MARK));
-    assert.deepEqual(marks.map((c) => [c.p, c.params[0]]).sort(), [[0, [W_NOTE_MARK]], [1, [W_NOTE_MARK]]]);
+    // the note's spend decided on the pool's whole mark list (the host's settle), at or past the finalized slots the
+    // time part read on each RPC; no read names the note's mark
+    assert.deepEqual(s.settles, [{ noteIds: [(await s.ns.list()).find((n) => n.ref.kind === "deposit" && n.ref.i === 70)!.id], minSlots: [VF.pump.slot + 10, VF.pump.slot + 11] }]);
+    assert.equal(s.c.calls.filter((c) => JSON.stringify(c.params).includes(W_NOTE_MARK)).length, 0);
   }
   // W's own note spent on both RPCs (its tag 3 landed): one holding tokens beside them, the empty ones closed to W,
   // that one kept with its tokens, nothing swept
@@ -2816,7 +2884,7 @@ test("a found W owning strangers' zero-balance token accounts, of any mint, unde
   // emptied later (its holder moves the tokens out): the next load reads W again, closes it and sweeps
   v.c.accounts.set(held, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(0n, 1, other) });
   for (const p of [0, 1] as const)
-    around(v, p, (m, params, r) => (m === "getBlockHeight" && (params[0] as { commitment: string }).commitment === "finalized" ? 5_000 : r(m, params)));
+    around(v, p, (m, params, r) => (finalHeightAt(m, params, 5_000, p) ?? r(m, params)));
   await resumeRentBacks(v.host, fakeLocks());
   assert.ok(!v.c.accounts.has(held), "closed once empty");
   assert.equal(v.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(v.told.slice(-4)));
@@ -2864,8 +2932,17 @@ test("a found W's note: unspent on both sweeps past a stranger's unit; spent on 
     const w = await run(plant, note);
     assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction" || c.method === "simulateTransaction").length, 0, JSON.stringify(plant));
     assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
-    assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => [t.state, t.detail]), [["holds", "a found W: its note's spend not read alike on both RPCs"]], JSON.stringify(plant));
+    assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => [t.state, t.detail]), [["holds", note ? "a found W: its note's spend not read (Error: the two RPCs list the pool's marks apart)" : "a found W: its note's spend not read"]], JSON.stringify(plant));
   }
+  // a host with no settle on the pool's mark list: W holds the same way
+  const bare = await world({ buy: null }, []);
+  bare.c.accounts.delete(VF.pump.ata);
+  bare.c.accounts.set(unit, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(1n, 1, other) });
+  delete bare.host.settleSet;
+  await foundW(bare);
+  await resumeRentBacks(bare.host, fakeLocks());
+  assert.equal(bare.c.deposits.filter((d) => d.sweep).length, 0);
+  assert.deepEqual(bare.told.filter((t) => t.step === "rent_back").map((t) => [t.state, t.detail]), [["holds", "a found W: its note's spend not read"]]);
 });
 
 // More strangers' accounts than one pass reads (FOUND_CLOSE_MAX): each pass closes the first ones and holds, and a later
@@ -2880,7 +2957,7 @@ test("a found W owning more strangers' empty accounts than one pass reads: FOUND
   assert.equal(spam.filter((at) => w.c.accounts.has(at)).length, 3, "FOUND_CLOSE_MAX closed");
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
   for (const p of [0, 1] as const)
-    around(w, p, (m, params, r) => (m === "getBlockHeight" && (params[0] as { commitment: string }).commitment === "finalized" ? 5_000 : r(m, params)));
+    around(w, p, (m, params, r) => (finalHeightAt(m, params, 5_000, p) ?? r(m, params)));
   await resumeRentBacks(w.host, fakeLocks());
   assert.equal(spam.filter((at) => w.c.accounts.has(at)).length, 0, "the rest closed");
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(w.told.slice(-4)));
@@ -7270,7 +7347,7 @@ test("round-trip-costs-less P3-8: a found W kept by a stranger's holding account
   assert.deepEqual(v.told.filter((t) => t.step === "rent_back").map((t) => t.state), ["kept"]);
   v.c.accounts.set(held, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(0n, 1, other) });
   for (const p of [0, 1] as const)
-    around(v, p, (m, params, r) => (m === "getBlockHeight" && (params[0] as { commitment: string }).commitment === "finalized" ? 5_000 : r(m, params)));
+    around(v, p, (m, params, r) => (finalHeightAt(m, params, 5_000, p) ?? r(m, params)));
   await resumeRentBacks(v.host, fakeLocks());
   assert.ok(!v.c.accounts.has(held), "closed once empty");
   assert.equal(v.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(v.told.slice(-4)));
@@ -7431,7 +7508,7 @@ test("round-trip-costs-less P3-11: a found W that is young and not held carries 
   await foundW(w);
   const block = 2_000_000;
   let height = 0;
-  for (const p of [0, 1] as const) around(w, p, (m, params, r) => (m === "getBlockHeight" && (params[0] as { commitment: string }).commitment === "finalized" ? height : r(m, params)));
+  for (const p of [0, 1] as const) around(w, p, (m, params, r) => (finalHeightAt(m, params, height, p) ?? r(m, params)));
   forgetPageLoad();
   await resumeRentBacks(w.host, fakeLocks());
   assert.match(w.told.at(-1)!.detail, /a found W: not yet past/, JSON.stringify(w.told.slice(-2)));
@@ -7454,7 +7531,7 @@ test("round-trip-costs-less P3-11: a found W held at its teardown lists the lamp
   const spam = base58.encode(new Uint8Array(32).fill(44));
   w.c.accounts.set(spam, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(0n, 1, VF.pumpswap.mint) });
   await foundW(w);
-  for (const p of [0, 1] as const) around(w, p, (m, params, r) => (m === "getBlockHeight" && (params[0] as { commitment: string }).commitment === "finalized" ? 2_000_000 : r(m, params)));
+  for (const p of [0, 1] as const) around(w, p, (m, params, r) => (finalHeightAt(m, params, 2_000_000, p) ?? r(m, params)));
   forgetPageLoad();
   await resumeRentBacks({ ...w.host, owed: { ...w.host.owed!, claim: async () => false } }, fakeLocks());
   assert.ok(w.c.accounts.has(spam), "held before the teardown's send");

@@ -3103,6 +3103,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       rpcs: r,
       tokenRpcs: tokenRpcs(),
       notes: store,
+      // a found W's own notes' spend (pool-sell.ts foundSpentOf, card a-found-wallet-sweeps-past-a-strangers-coin): on
+      // one read of every mark the pool holds, as the buy's settleSet, so no read names a note's mark
+      settleSet: async (noteIds, minSlots) => {
+        const seed64 = await page.seed64();
+        try {
+          return await solanaSettleSpentSet({ seed64, notes: await store(), noteIds, program: pin!.program, minSlots, rpcs: settleRpcs(), lister: lister(), signal: solanaStop.signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
+        } finally {
+          seed64.fill(0);
+        }
+      },
       ops: page.store,
       seed64: page.seed64,
       // the sell's own read holds the positions' passes off while it runs (the running one stopped, a booked retry

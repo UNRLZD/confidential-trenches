@@ -20,7 +20,7 @@ import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vaul
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
-import { lateBuyEnd, pickPieces, POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_RESEND_MAX, POOL_BUY_RESEND_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, PoolSendRefused, poolBuyKind, readBack, resumePieces, runPoolBuy, solanaProofBytes, type OwedPieces, type PiecesOwed, type PoolBuyHost } from "../src/pool-buy.ts";
+import { FOUND_ROUND_GAP, lateBuyEnd, pickPieces, POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_RESEND_MAX, POOL_BUY_RESEND_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, PoolSendRefused, poolBuyKind, readBack, resumePieces, runPoolBuy, solanaProofBytes, type OwedPieces, type PiecesOwed, type PoolBuyHost } from "../src/pool-buy.ts";
 import * as poolBuy from "../src/pool-buy.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
@@ -2791,8 +2791,9 @@ test("pieces: resumePieces on a reload mid-buy and after: RESERVED keeps, the bu
 /** A two-round tap: W's own note (note-1), a 0.012 note (note-2) whose piece is 0.005, and its 0.007 change (note-3,
  *  proved to W once round 1 settled). Every RPC read but the transactions is world()'s; getTransaction (any commitment)
  *  and W's history answer each landed transaction under the helper's name for it; the settle reads a note spent once its
- *  transaction landed. `round1`: whether round 1 lands. */
-async function twoRounds(round1: "lands" | "never") {
+ *  transaction landed. `round1`: whether round 1 lands. `gap`: the buy round's blockhash read with its last height this far
+ *  past round 1's (card a-found-wallet-sweeps-past-a-strangers-coin). */
+async function twoRounds(round1: "lands" | "never", gap?: number) {
   const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
   const parent = pieceProof("note-2", 777n, 5_000_000n);
   const change = pieceProof("note-3", 888n, 7_000_000n);
@@ -2862,6 +2863,10 @@ async function twoRounds(round1: "lands" | "never") {
         if ((params[1] as { before?: string }).before !== undefined) return [];
         return [...landed.keys()].reverse().map((signature) => ({ signature, slot: TX_SLOT, err: null }));
       }
+      if (method === "getLatestBlockhash" && stage === 2 && gap !== undefined) {
+        const a = (await rpc(method, params)) as { context: unknown; value: { blockhash: string; lastValidBlockHeight: number } };
+        return { ...a, value: { ...a.value, lastValidBlockHeight: Number((await owed.list())[0]!.lastHeight) + gap } };
+      }
       return rpc(method, params);
     }) as SolanaRpc;
   w.host.rpcs = [wrap(r0), wrap(r1)];
@@ -2889,6 +2894,22 @@ test("card buy-spends-its-change-in-the-same-tap: a buy past the ready pieces re
   assert.equal(solanaDecodePoolRelease(msgOf(one!).instructions.at(-1)!.data).withdrawnValue, 5_000_000n);
   assert.equal(solanaDecodePoolRelease(msgOf(two!).instructions.at(-1)!.data).withdrawnValue, 7_000_000n);
   assert.equal(msgOf(three!).instructions.at(-1)!.data[0], 3);
+});
+
+// Card a-found-wallet-sweeps-past-a-strangers-coin (review of 258abca1d): the buy round's tag 3 relies on the SOL round 1
+// put on W, and another device on the same 12 words sweeps W as found once past W's latest + 151 + FOUND_ROUND_GAP
+// (pool-sell.ts foundPast): the buy round signs only on a blockhash whose last height is at most FOUND_ROUND_GAP past
+// round 1's, so no tag 3 of it lands after that sweep can start.
+test("card a-found-wallet-sweeps-past-a-strangers-coin: the buy round signs only on a blockhash at most FOUND_ROUND_GAP past round 1's: at it, filled; one past, failed with no tag 3 taken or signed and W's owed record kept", async () => {
+  const at = await twoRounds("lands", FOUND_ROUND_GAP);
+  const a = await runPoolBuy(at.w.host, { ...ASK, amount: at.spend });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const past = await twoRounds("lands", FOUND_ROUND_GAP + 1);
+  const b = await runPoolBuy(past.w.host, { ...ASK, amount: past.spend });
+  assert.deepEqual(b, { error: "failed" });
+  assert.deepEqual(past.log.filter((l) => !l.startsWith("settle")), ["takeSet:note-2", "sendPieces:1:owed", "prove:note-2->W"], "round 1 alone: the buy round takes and signs nothing");
+  assert.equal(past.sent.length, 1);
+  assert.equal((await past.owed.list()).length, 1, "W stays found");
 });
 
 test("card buy-spends-its-change-in-the-same-tap: round 1 that the helper answers 503 (not landed whole) sends no buy: failed, no change proved, nothing more sent, and W's owed record stays for the state reads", async () => {

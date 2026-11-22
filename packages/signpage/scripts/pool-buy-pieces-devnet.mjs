@@ -39,7 +39,8 @@
 //                                         (card a-found-wallet-sweeps-past-a-strangers-coin; before it, held for good).
 //                       FLOW_EXPECT=held (any plant) passes when W keeps its SOL for 2 loads past + 151, as a helper
 //                       that refuses the header read leaves it; else (swept) PASS needs every load before + 151 held
-//                       and W swept within SWEEP_WAIT_MS.
+//                       and W swept within SWEEP_WAIT_MS. Every "+ 151" here is + 151 + FOUND_ROUND_GAP since card
+//                       a-found-wallet-sweeps-past-a-strangers-coin (a tap's buy round may sign that far past its first).
 // - A seed made in this run only (16 random bytes), never printed, kept at ~/.ct-devnet-runs/run-<time>.seed (0600;
 //   FLOW_DIR=<folder> keeps it there instead, the folder made 0700), and
 //   a funder F's key beside it (run-<time>.funder, 0600; FLOW_FUNDER=<file> uses a kept one). F's address and what it
@@ -76,6 +77,7 @@ const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { HELPER_SOLANA_BLOCK_HEADER } = await import("../../kit/src/index.ts");
 const { solanaCompileV0 } = await import("../../kit/src/trade/solana/build.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
+const { FOUND_ROUND_GAP } = await import("../src/pool-buy.ts");
 const { PAGE_POOLS, poolBuyDryKind } = await import("../src/pools.ts");
 const { poolRestore } = await import("../src/pool-restore.ts");
 const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import("../src/pool-testnet.ts");
@@ -132,7 +134,7 @@ const RUNG = 10_000_000n;
 const FEE = 5_000n;
 const FRONT = 50_000_000n; // F's front-run buy on the curve: moves the price well past 1 bp
 const LOAD_MS = 20_000;
-const SWEEP_WAIT_MS = 8 * 60_000;
+const SWEEP_WAIT_MS = 14 * 60_000; // a found W waits its latest + 151 + FOUND_ROUND_GAP (750) blocks, about 6 min, then a pass
 const SYSTEM = "11111111111111111111111111111111";
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -375,14 +377,14 @@ const wHolds = async (W) => {
   });
   return { lamports, units };
 };
-/** W's latest transaction, its block's height and each RPC's finalized height, both RPCs (the found W's rule's reads). */
+/** W's latest transaction, its block's height and each RPC's finalized height, both RPCs (the found W's rule's reads): `past`, every finalized height past it + 151 + FOUND_ROUND_GAP. */
 const wClock = async (W) => {
   const last = await both(async (r) => (await r("getSignaturesForAddress", [W, { limit: 1, commitment: "confirmed" }]))[0] ?? null);
   // each RPC's own answer, a refusal kept as its message (a helper that refuses the header read)
   const height = last[0] ? await Promise.all(rpcs.map((r) => r("getBlock", [last[0].slot, HELPER_SOLANA_BLOCK_HEADER]).then((b) => b?.blockHeight ?? null, (e) => `refused: ${String(e?.message ?? e).slice(0, 120)}`))) : [null, null];
   const finalized = await both(async (r) => r("getBlockHeight", [{ commitment: "finalized" }]));
   const h = height.find((x) => typeof x === "number") ?? null;
-  return { latest: last.map((x) => x?.signature ?? null), height, finalized, past: h !== null && finalized.every((f) => f > h + 151) };
+  return { latest: last.map((x) => x?.signature ?? null), height, finalized, past: h !== null && finalized.every((f) => f > h + 151 + FOUND_ROUND_GAP) };
 };
 
 const helperCommit = await fetch(`${TRADE_HELPER}/v1/health`).then((r) => r.headers.get("x-helper-commit"), () => null);

@@ -472,6 +472,13 @@ async function tableOf(h: PoolBuyHost, address: string): Promise<{ table: Solana
 /** A blockhash is valid for 150 blocks after the one it names (Solana's MAX_PROCESSING_AGE), so at most height + 151. */
 const BLOCKHASH_LIFE = 151;
 
+/** How far, in block heights, a tap's buy round may sign past its first round's blockhash (card
+ *  a-found-wallet-sweeps-past-a-strangers-coin): its blockhash's last height at most the first round's + this. A found W
+ *  (pool-sell.ts foundPast) is swept only past its latest transaction's height + 151 + this, so a tag 3 signed after the
+ *  first round's SOL landed on W can no longer land then. 750 blocks, about five minutes: a first round's send, read
+ *  back, settle and its changes' proofs fit with room; a later buy round is refused (the tap fails, nothing lost). */
+export const FOUND_ROUND_GAP = 750;
+
 /** The blockhash on RPC 0 and its slot (the device's own slot for the quote's age), valid on RPC 1; and `lastHeight`,
  *  a block height past which no transaction on it can land, whichever RPC lies: the higher of RPC 0's
  *  lastValidBlockHeight and RPC 1's height (read after it) + 151. A liar can only raise it, which only waits longer.
@@ -879,7 +886,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     };
     // the tap's first round, once it landed (card buy-spends-its-change-in-the-same-tap): its releases to W, counted in
     // W's funds and named first in the buy's `before`; W and its own note's proof's place, held for the buy's round
-    let landed: { releases: SolanaPoolRelease[]; wallet: string } | null = null;
+    let landed: { releases: SolanaPoolRelease[]; wallet: string; lastHeight: number } | null = null;
     for (let round = 0; ; round++) {
       // round 1: the pool account's two tree sizes and the reference (the quote's age counts from it, so it is read
       // again each round), with the rent on the first
@@ -926,6 +933,12 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const timed: readonly [SolanaRpc, SolanaRpc] = [((m: string, q: readonly unknown[], s?: AbortSignal) => h.rpcs[0](m, q, s).then((x) => ((slotAt = nowMs()), x))) as SolanaRpc, h.rpcs[1]];
       const [, venue, first] = await Promise.all([Promise.all(lookups), venueRead, blockhashOf(timed)]);
       const bh = nowMs() - slotAt > POOL_BUY_SLOT_STALE_MS ? await blockhashOf(h.rpcs) : first;
+      // the buy's round after a first round (card a-found-wallet-sweeps-past-a-strangers-coin): its tag 3 relies on the
+      // SOL the first round put on W, so it is signed only on a blockhash whose last height is at most FOUND_ROUND_GAP past
+      // the first round's: another device on the same 12 words sweeps W as found once past W's latest transaction + 151
+      // + FOUND_ROUND_GAP (pool-sell.ts foundPast), and no tag 3 of this tap can land by then. Later: the tap failed, and
+      // the first round's SOL waits in W, which its owed record names, as when the first round does not land whole
+      if (landed !== null && bh.lastHeight > landed.lastHeight + FOUND_ROUND_GAP) return { error: "failed" };
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
       // the pick, from the ready proofs as they are now (a remake or another tab may have changed them during the
       // reads): the pieces of one W, its own note's among them, each note once, that pay the spend and W's accounts in
@@ -1009,7 +1022,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
         // a buy); any piece that landed waits in W, which its owed record names, for the state reads to put back
         if (!("stage" in a1) || a1.stage !== "filled") return { error: "failed" };
         for (const p of split.first) await h.carry!.prove(p.noteId, { l: r.wallet.l, j: r.wallet.j, address: r.wallet.address });
-        landed = { releases: got1, wallet: r.wallet.address };
+        landed = { releases: got1, wallet: r.wallet.address, lastHeight: bh.lastHeight };
         continue;
       }
       const k = set.length;
