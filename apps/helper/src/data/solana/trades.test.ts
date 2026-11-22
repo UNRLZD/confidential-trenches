@@ -747,38 +747,33 @@ test("card helper-stays-fast-under-the-live-run: a busy token's first tape read 
   t.stop();
 });
 
-test("card helper-stays-fast-under-the-live-run: a first read's bound runs from the read's start, so a slow subscription is inside it, not on top", async () => {
-  // the live run's 2j5SaS7x on a local helper at main, 21 Nov 21:07Z: subscribed at 1.3 s, answered at 4.3 s (the bound
-  // counted from the subscription)
-  const sigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
-  const base = rpcFetch({ sigs: () => sigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse(), txs: Object.fromEntries(sigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
-  let open = 0;
-  let letGo = () => {};
-  const held = new Promise<void>((go) => (letGo = go));
-  const hang = async (url: string, init: RequestInit) => {
-    const req = JSON.parse(String(init.body)) as { method: string };
-    if (req.method === "getTransaction") {
-      open++;
-      await held;
-      open--;
-    }
-    return base(url, init);
-  };
+test("card helper-stays-fast-under-the-live-run: a flooded coin's walk keeps its whole bound after a slow subscription: the bound runs from the subscription, and the first answer is the walk's rows, ours, never the vendor's", async () => {
+  // helper-19's live run 44962533217 (the bound run from the read's start, 88bb881e5): three flooded coins' first tapes
+  // answered at 4.0 to 4.2 s with CoinGecko's 50 rows, none of ours (solana-tape-rows-at-first-answer BAD); a flooded
+  // walk reads a page of COLD_PAGE signatures past its newest COLD_SIGS before any transaction. Here the newest 30
+  // failed and the 10 before them succeeded; the subscription takes the bound's whole time
+  const okSigs = Array.from({ length: 10 }, (_, i) => `${BUY.signature.slice(0, -2)}${String(i).padStart(2, "0")}`);
+  const failed = Array.from({ length: COLD_SIGS }, (_, i) => ({ signature: `${BUY.signature.slice(0, -3)}f${String(i).padStart(2, "0")}`, slot: 465_000_100 + i, err: { InstructionError: [0, "Custom"] } }));
+  const list = [...failed.slice().reverse(), ...okSigs.map((s, i) => ({ signature: s, slot: 465_000_000 + i, err: null })).reverse()];
+  const fetchFn = rpcFetch({ sigs: (o) => list.slice(0, Number(o.limit ?? list.length)), txs: Object.fromEntries(okSigs.map((s) => [s, BUY.result])), price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
   let subscribed = () => {};
   const subscribing = new Promise<void>((go) => (subscribed = go));
   let bound: (() => void) | null = null;
-  const t = createSolanaTrades({ fetch: hang, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: () => subscribing, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => new Promise<void>((go) => (bound = go)) });
-  let answer = null as { trades: unknown[]; filling?: boolean } | null;
+  const vendor = async () => ({ status: 200, body: JSON.stringify(POOL_ROWS), src: "coingecko", asOfMs: TS * 1000 });
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: () => subscribing, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: vendor, coldWait: () => new Promise<void>((go) => (bound = go)) });
+  let answer = null as { trades: { tx: string }[]; src: string; filling?: boolean } | null;
   const reading = t.trades(MINT, 50).then((a) => (answer = JSON.parse(a.body)));
-  for (let i = 0; i < 20 && bound === null; i++) await settle();
-  assert.notEqual(bound, null, "the bound is running while the subscription still waits");
-  bound!();
+  for (let i = 0; i < 20; i++) await settle();
+  // the subscription takes the bound's whole time: a bound already running has run out by the time it is in force
+  const early = bound !== null;
+  (bound as (() => void) | null)?.();
   subscribed();
-  for (let i = 0; i < 100 && (answer === null || open < 5); i++) await settle();
-  assert.deepEqual([answer?.trades.length, answer?.filling], [0, true], "answered once subscribed, the bound already past");
+  for (let i = 0; i < 100 && answer === null; i++) await settle();
+  assert.notEqual(answer, null);
+  assert.equal(answer!.src, "chain", `the walk's rows, not the vendor's (${answer!.src})`);
+  assert.ok(answer!.trades.length > 0, "rows of ours at the first answer");
+  assert.equal(early, false, "no bound runs before the subscription is in force");
   await reading;
-  letGo();
-  for (let i = 0; i < 100 && open > 0; i++) await settle();
   t.stop();
 });
 
