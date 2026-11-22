@@ -81,8 +81,11 @@ import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/sr
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { ANSWER_ROOM, pickOps } from "./state.ts";
 import { poolUnits } from "./rules/pool.ts";
-import { noted, txEnd, type LegEnd, type TradeStore } from "./trade.ts";
-import { legsStage } from "./pool-buy.ts";
+import { noted, tradeLock, txEnd, type LegEnd, type TradeStore } from "./trade.ts";
+import { lateBuyEnd, legsStage, POOL_BLOCKHASH_LIFE_MS } from "./pool-buy.ts";
+import type { SpendOwner } from "./pool-spend.ts";
+
+type Locks = Pick<LockManager, "request">;
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 
 export type Position = SignpageState["positions"][number];
@@ -524,11 +527,28 @@ export type BuyRecordStore = {
 };
 /** What a pool buy run told and asked, for its records. */
 export type PoolBuyFacts = { token: string; spend: bigint; spendDecimals: number; price: PoolStatePrice | null; createdMs: number; wallet?: string; out?: string; decimals?: number };
-/** A sent tx's blockhash and the last height the run held it to (pool-buy.ts sendAt), device-only beside its TxRef. */
-export type SentAt = { blockhash: string; lvbh: number };
+/** The notes a sent buy tx spends and whose spend it is to be (pool-buy.ts sendAt): the buy's own note and its taken
+ *  attempt, its pieces' notes, and what pool-spend.ts spendOwner reads its spend by (the proof's pin, W, the nullifier
+ *  hash in decimal, the binding's context), so a reload reads the same marks the run reads (spent(), owner()). */
+export type SentNote = { id: string; attempt: string; pieces: string[]; program: string; feePayer: string; wallet: string; nullifier: string; context: string };
+/** A sent tx's blockhash, the last height the run held it to and its notes (pool-buy.ts sendAt), device-only beside its
+ *  TxRef (state.ts opOf sends chain and hash). */
+export type SentAt = { blockhash: string; lvbh: number; note: SentNote };
 type BuyAnswer = { result: { stage: string; txs: readonly (TxRef & Partial<SentAt>)[] } } | { error: string };
 const BLOCKHASH = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const sentAtOf = (t: Partial<SentAt>): SentAt | null => (typeof t.blockhash === "string" && BLOCKHASH.test(t.blockhash) && Number.isSafeInteger(t.lvbh) && t.lvbh! > 0 ? { blockhash: t.blockhash, lvbh: t.lvbh! } : null);
+const NAME = /^[\x21-\x7e]{1,128}$/;
+const DIGITS = /^(0|[1-9][0-9]{0,77})$/;
+const noteOf = (n: unknown): SentNote | null => {
+  const x = n as Partial<SentNote> | null;
+  if (typeof x !== "object" || x === null || !Array.isArray(x.pieces) || x.pieces.length > 8) return null;
+  const names = [x.id, x.attempt, x.program, x.feePayer, x.wallet, x.context, ...x.pieces];
+  if (!names.every((s) => typeof s === "string" && NAME.test(s)) || typeof x.nullifier !== "string" || !DIGITS.test(x.nullifier)) return null;
+  return { id: x.id!, attempt: x.attempt!, pieces: [...(x.pieces as string[])], program: x.program!, feePayer: x.feePayer!, wallet: x.wallet!, nullifier: x.nullifier, context: x.context! };
+};
+const sentAtOf = (t: Partial<SentAt>): SentAt | null => {
+  const note = noteOf(t.note);
+  return typeof t.blockhash === "string" && BLOCKHASH.test(t.blockhash) && Number.isSafeInteger(t.lvbh) && t.lvbh! > 0 && note !== null ? { blockhash: t.blockhash, lvbh: t.lvbh!, note } : null;
+};
 
 const FINAL = new Set(["filled", "part_filled", "refused", "not_landed"]);
 
@@ -573,13 +593,17 @@ export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBu
   // "sent" once, with its transaction (read back on both RPCs: pool-buy.ts sent), so the request's op is there from its
   // send on and trade.ts settleTradeOps, which refuses an open buy op with no tx, leaves it; then exactly one end
   if (stage === "sent" ? open : !FINAL.has(stage)) return;
-  const own = "error" in answer ? [] : answer.result.txs.map((t) => ({ chain: t.chain, hash: t.hash }));
+  // the legs (review 2 of 59a86ef49): a sent answer names only the legs' own buy txs (one a leg, pool-buy.ts
+  // poolBuyKind), each marked `leg`, device-only; an end's txs (a buy's own, then its pieces' tag 2 releases) keep the
+  // mark on the hashes sent marked, so src/trade-fill.ts sums the legs and never a release
+  const legs = new Set(open && Array.isArray(had.txs) ? (had.txs as { hash?: unknown; leg?: unknown }[]).flatMap((t) => (t?.leg === true && typeof t.hash === "string" ? [t.hash] : [])) : []);
+  const own = "error" in answer ? [] : answer.result.txs.map((t) => ({ chain: t.chain, hash: t.hash, ...(stage === "sent" || legs.has(t.hash) ? { leg: true } : {}) }));
   // the end's own txs; an end with none keeps sent's
   const txs = own.length === 0 && open && Array.isArray(had.txs) ? (had.txs as TxRef[]) : own;
   if (stage === "sent") {
     if (txs.length === 0 || "error" in answer) return;
-    // each tx's blockhash and last height beside it, device-only (state.ts opOf sends chain and hash): a reload ends the
-    // op from them (settleSentBuys); one with none keeps only the run's own end
+    // each tx's blockhash, last height and notes beside it, device-only (state.ts opOf sends chain and hash): a reload
+    // ends the op from them (settleSentBuys); one with none keeps only the run's own end
     const at = answer.result.txs.map((t) => sentAtOf(t));
     const kept = at.every((x) => x !== null) ? txs.map((t, i) => ({ ...t, ...at[i] })) : txs;
     return void (await store.put("ops", id, { kind: "buy", stage, txs: kept, created_ms: f.createdMs, chain: "solana", token: f.token, ...(usd === null ? {} : { amount_usd: usd }) }));
@@ -614,24 +638,65 @@ export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBu
  * run, whose end is its own) is never read. Written in one update that writes only while the op is still "sent", so a
  * run's own end that came first stays. A filled end here has no units: src/trade-fill.ts reads them from its tx.
  */
-/** A tx's end as a Solana pool buy's run answers it (pool-buy.ts: a part failed on chain on both RPCs is refused). */
-const LEG_STAGE: Readonly<Record<LegEnd, "filled" | "refused" | "not_landed">> = { filled: "filled", failed: "refused", not_landed: "not_landed" };
+/** The marks a sent buy's notes carry on this device, read as the run reads them (review 5 of 59a86ef49): `note`, a
+ *  note's record as the page's settle pass left it (the note store); `owner`, whose spend a note's is (pool-spend.ts
+ *  spendOwner on both RPCs at finalized, as the page's follow reads a buy's), null when it cannot tell. */
+export type SentMarks = {
+  note(id: string): Promise<{ state: string; attempt?: string } | undefined>;
+  owner(n: SentNote): Promise<SpendOwner>;
+};
+/** An op the settle read with no end (a tx one RPC reads landed and the other never) is read at every state read until
+ *  this long after its first read: the blockhash's life (POOL_BLOCKHASH_LIFE_MS, a tx sent at its edge lands by then or
+ *  never) and Solana's finalized depth (32 slots, ~13 s at 400 ms), so both RPCs' reads are final by then. */
+export const SENT_SETTLE_PAST_MS = POOL_BLOCKHASH_LIFE_MS + 13_000;
+/** Past SENT_SETTLE_PAST_MS such an op is read once this often: its end then waits on an RPC that lags or is wrong, not on
+ *  the chain, so a read a minute keeps the shared read budget (the helper's seat) while the op stays honest at "sent"
+ *  until both RPCs agree; never a guess, never a timer that ends it. */
+export const SENT_SETTLE_SLOW_MS = 60_000;
+/** Each op's first read and last read by the settle (the page keeps one for its session). */
+export type SentReads = Map<string, { first: number; last: number }>;
 
-export async function settleSentBuys(store: Pick<TradeStore, "get" | "keys" | "update">, providers: readonly [SolanaRpc, SolanaRpc], running: (id: string) => boolean = () => false): Promise<string[]> {
+/** A leg's end as the run would answer it, from its tx's end on both RPCs and its notes' marks (null: not known yet,
+ *  the op left "sent"): failed on chain is refused, unless the note or a piece's note reads spent (pool-buy.ts: a spend
+ *  found then is not this buy's, not_landed); landed is filled only once the note is SPENT and its spend read as this
+ *  attempt's (pool-buy.ts lateBuyEnd, the page's follow's rule), another's not_landed; past its blockhash, not_landed. */
+async function legEnd(end: LegEnd, n: SentNote, marks: SentMarks): Promise<"filled" | "refused" | "not_landed" | null> {
+  if (end === "not_landed") return "not_landed";
+  if (end === "filled") return lateBuyEnd(await marks.note(n.id), n.attempt, () => marks.owner(n));
+  const states = await Promise.all([n.id, ...n.pieces].map(async (id) => (await marks.note(id))?.state));
+  if (states.some((s) => s === "SPENT")) return "not_landed";
+  // a note still RESERVED (or not read): its spent mark not known yet, as the run's spent() that throws
+  return states.some((s) => s === undefined || s === "RESERVED") ? null : "refused";
+}
+
+export async function settleSentBuys(
+  store: Pick<TradeStore, "get" | "keys" | "update">, providers: readonly [SolanaRpc, SolanaRpc], marks: SentMarks,
+  o: { running?: (id: string) => boolean; locks?: Locks | null; now?: () => number; reads?: SentReads } = {},
+): Promise<string[]> {
   const ended: string[] = [];
+  const now = o.now ?? Date.now;
   for (const k of await store.keys("ops")) {
-    if (running(k)) continue;
+    if (o.running?.(k)) continue;
     const rec = (await store.get("ops", k)) as { kind?: unknown; chain?: unknown; stage?: unknown; txs?: unknown } | undefined;
     if (rec?.kind !== "buy" || rec.chain !== "solana" || rec.stage !== "sent" || !Array.isArray(rec.txs) || rec.txs.length === 0) continue;
     const txs = rec.txs as (Partial<TxRef> & Partial<SentAt>)[];
     const at = txs.map((t) => (t !== null && typeof t === "object" && typeof t.hash === "string" ? sentAtOf(t) : null));
     if (at.some((x) => x === null)) continue;
+    // past its first read's blockhash life and finalized depth, read at the slow pace (review 4)
+    const t = now();
+    const seen = o.reads?.get(k);
+    if (seen !== undefined && t - seen.first >= SENT_SETTLE_PAST_MS && t - seen.last < SENT_SETTLE_SLOW_MS) continue;
+    // another tab's live run holds its trade lock (review 3): its end is its own, as settleTradeOps leaves it
+    if (o.locks && (await o.locks.request(tradeLock(k), { mode: "exclusive", ifAvailable: true }, async (l) => l === null))) continue;
+    o.reads?.set(k, { first: seen?.first ?? t, last: t });
     const ends = await Promise.all(txs.map((t, i) => txEnd(providers, { sig: t.hash!, lvbh: at[i]!.lvbh, blockhash: at[i]!.blockhash })));
     if (ends.some((e) => e === "unknown")) continue;
-    // the end the page would have shown (the CO's ruling on the money review's question 2): each tx's end as the run
-    // reads it (failed on both RPCs: refused, pool-buy.ts; past its blockhash on both: not_landed; landed: filled), the
-    // op's stage from them by the pool buy's own rule (legsStage), never noted()'s, which reads a failed tx not_landed
-    const stage = legsStage(ends.map((e) => LEG_STAGE[e as LegEnd]));
+    // the end the page would have shown (the CO's ruling on the money review's question 2): each leg's end as the run
+    // reads it (legEnd), the op's stage from them by the pool buy's own rule (legsStage), never noted()'s, which reads
+    // a failed tx not_landed
+    const legEnds = await Promise.all(ends.map((e, i) => legEnd(e as LegEnd, at[i]!.note, marks).catch(() => null)));
+    if (legEnds.some((e) => e === null)) continue;
+    const stage = legsStage(legEnds);
     let wrote = false;
     await store.update("ops", k, (v) => {
       const r = v as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
@@ -640,7 +705,7 @@ export async function settleSentBuys(store: Pick<TradeStore, "get" | "keys" | "u
       // each tx's own end noted on it (trade.ts noted()), the op's stage legsStage's
       return { ...txs.reduce<object>((o, t, i) => noted(o as { stage?: unknown; txs?: unknown }, t.hash!, ends[i] as LegEnd), r), stage };
     });
-    if (wrote) ended.push(k);
+    if (wrote) (ended.push(k), o.reads?.delete(k));
   }
   return ended;
 }

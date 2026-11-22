@@ -62,7 +62,7 @@ import { proverGate } from "../../wallet/src/pool/prover-gate.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { proofFront, type ProofFront } from "./proof-front.ts";
-import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, TRADE_STORE_MS, timedStore, within, type TradeStore } from "./trade.ts";
+import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, TRADE_STORE_MS, timedStore, tradeLock, within, type TradeStore } from "./trade.ts";
 import { SOL_EPOCH_MS, SOL_LIFE_MS, SOL_PIECES, SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest, type SolanaPoolVenueName } from "../../wallet/src/pool/solana.ts";
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, solanaSettleSpentSet, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
@@ -73,7 +73,7 @@ import { heldWs, ownWs } from "./pool-found.ts";
 import { boughtSincePass, keptHeldOf, type StoreWs } from "./pool-sell-dry.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, legCause, owedRentBacks, poolSellKind, POOL_RENT_BACK_SPACE_MAX_MS, READS_NONE, rentBackGapDrawn, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type OwedRentBack, type PoolSellKindHost } from "./pool-sell.ts";
 import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, evmHelperShownRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
-import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, solanaAssetHeld, recordPoolBuy, routeInto, settleSentBuys, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
+import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, solanaAssetHeld, recordPoolBuy, routeInto, settleSentBuys, type SentAt, type SentMarks, type SentReads, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_POOLS, evmFeeHold, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmFeeHold, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleOpen, evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
@@ -2445,7 +2445,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         void lateFollow();
       },
       // the sent tx's blockhash and last height, for the request's "sent" op (recordedBuy)
-      sendAt: (signature, blockhash, lastHeight) => void sendsAt.set(signature, { blockhash, lvbh: lastHeight }),
+      sendAt: (signature, blockhash, lastHeight, note) => void sendsAt.set(signature, { blockhash, lvbh: lastHeight, note }),
       seed64: page.seed64,
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
@@ -2546,7 +2546,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const buyIds = new Set<string>();
   // each sent buy tx's blockhash and last height, by signature, as its run told them (pool-buy.ts sendAt), until the
   // request's "sent" op takes them
-  const sendsAt = new Map<string, { blockhash: string; lvbh: number }>();
+  const sendsAt = new Map<string, SentAt>();
   // each buy whose run ended "sent" (its end not known), by note id: its taken proof, where to post its end, and W's
   // history places read so far (card pool-buy-record-never-stays-sent)
   const lateBuys = new Map<string, { r: ReadyProof<SolanaReleaseRequest>; post: (stage: "filled" | "not_landed") => void; places: HistoryPlaces }>();
@@ -3051,7 +3051,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         await opened;
         await early;
         await recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end);
-      }).finally(() => (ran !== undefined && runningBuys.delete(ran), buyIds.delete(ctx.id), positions.refresh(), fillTrades()));
+      }).finally(() => (ran !== undefined && runningBuys.delete(ran), buyIds.delete(ctx.id), free(), positions.refresh(), fillTrades()));
     };
     const txsOf = (): TxRef[] => {
       const a = r && "answer" in r ? (r.answer() as { result?: { txs?: TxRef[] } }) : null;
@@ -3076,8 +3076,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     });
     // its op is this run's to end until its records are written: the reload settle (settleSentBuys) leaves it
     buyIds.add(ctx.id);
+    // and its trade lock (trade.ts tradeLock) held as long, so another tab's settle leaves it too (review 3 of
+    // 59a86ef49: buyIds is this tab's alone); a closed tab's lock goes with it
+    let free!: () => void;
+    const freed = new Promise<void>((res) => (free = res));
+    if (locks) void locks.request(tradeLock(ctx.id), { mode: "exclusive" }, () => freed).catch(() => {});
     r = buy(ask, { ...ctx, progress, route: (x) => (into(x), "out" in x && out()) });
     const run = r;
+    if (!("after" in run)) free();
     if ("after" in run)
       void run.after.then(() => {
         const a = run.answer() as Parameters<typeof recordPoolBuy>[3];
@@ -3250,10 +3256,29 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // (buyIds); one pass at a time, a state read during it asks none. An end written reads the positions again, fills
   // its figures from its tx (fillTrades) and tells the app's state watchers
   let sentSettling: Promise<void> | null = null;
+  // each sent op's reads this session (positions.ts SentReads: past the blockhash's life, read at the slow pace)
+  const sentReads: SentReads = new Map();
   const settleSent = (): void => {
     if (sentSettling) return;
     sentSettling = (async () => {
-      const ended = await settleSentBuys(timedStore(await within(page.store(), TRADE_STORE_MS, "the wallet store"), TRADE_STORE_MS), rpcs("pass"), (id) => buyIds.has(id));
+      const notes = await openNoteStore(await page.store());
+      let ended: string[];
+      try {
+        // the marks the run reads, as the page keeps them: each note's record (the settle pass's), and whose spend it
+        // is on both seats at finalized (spendOwner, as followBuys reads a buy's)
+        const marks: SentMarks = {
+          note: async (id) => notes.get(id),
+          owner: async (n) => {
+            const rs = settleRpcs("pass");
+            const slots = await Promise.all(rs.map((rpc) => rpc("getSlot", [{ commitment: "finalized" }])));
+            if (!slots.every((x) => Number.isSafeInteger(x))) return null;
+            return spendOwner(rs, { program: n.program, feePayer: n.feePayer }, n.wallet, BigInt(n.nullifier), n.context, Math.max(...(slots as number[])), undefined, new Map());
+          },
+        };
+        ended = await settleSentBuys(timedStore(await within(page.store(), TRADE_STORE_MS, "the wallet store"), TRADE_STORE_MS), rpcs("pass"), marks, { running: (id) => buyIds.has(id), locks, reads: sentReads });
+      } finally {
+        notes.close();
+      }
       if (ended.length === 0) return;
       positions.refresh();
       fillTrades();

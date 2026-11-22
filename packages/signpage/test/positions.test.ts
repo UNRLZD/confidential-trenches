@@ -22,7 +22,7 @@ import type { Holdings, HoldingsReader } from "../../wallet/src/pool/buy-wallets
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
-import { keptPositions, passMemo, returningWallets, withReturning, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_RETRY_MS, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, settleSentBuys, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
+import { keptPositions, passMemo, returningWallets, withReturning, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_RETRY_MS, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, SENT_SETTLE_PAST_MS, SENT_SETTLE_SLOW_MS, settleSentBuys, type SentMarks, type SentNote, type SentReads, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
 import { stateFor } from "../src/kit-version.ts";
 import { BACKS_LOAD_MAX_MS, testnetPool as makePool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { poolKinds, type PoolRpc } from "../src/pool-kinds.ts";
@@ -1184,7 +1184,7 @@ test("the page: a pool buy answered early as sent (its fill read later) is recor
   progress("filled");
   await until(async () => ((await w.get("ops", "pb2")) as { stage: string }).stage !== "sent");
   const op = (await w.get("ops", "pb2")) as { stage: string; txs: unknown[] };
-  assert.deepEqual([op.stage, op.txs], ["filled", [{ chain: "solana", hash: "SigS" }]]);
+  assert.deepEqual([op.stage, op.txs], ["filled", [{ chain: "solana", hash: "SigS", leg: true }]]);
   assert.deepEqual(posted, ["filled", "filled"], "the app still gets every progress the run posts");
   assert.deepEqual(await w.get("meta", POSITION_COSTS_KEY), { [solanaWallet()]: { mint: MINT, received: "5", cost_usd: "1.5" } });
 });
@@ -1198,11 +1198,11 @@ test("card signpage-sent-end-recorded: a Solana buy's op reads sent with its tra
   assert.deepEqual(opOf("e1", s.ops.get("e1")), { id: "e1", kind: "buy", stage: "sent", txs: [{ chain: "solana", hash: "SigA" }], created_ms: 1_800_000_000_000, chain: "solana", token: MINT, amount_usd: "1.5" }, "sent, with its transaction");
   assert.equal(s.meta.get(POSITION_COSTS_KEY), undefined, "sent writes no W record");
   await recordPoolBuy(s, "e1", FACTS, { result: { stage: "sent", txs: [{ chain: "solana", hash: "SigOther" }] } });
-  assert.deepEqual((s.ops.get("e1") as { txs: unknown }).txs, [{ chain: "solana", hash: "SigA" }], "sent once");
+  assert.deepEqual((s.ops.get("e1") as { txs: unknown }).txs, [{ chain: "solana", hash: "SigA", leg: true }], "sent once");
   await recordPoolBuy(s, "e1", FACTS, { error: "failed" });
   assert.equal((s.ops.get("e1") as { stage: string }).stage, "sent", "a refusal never over sent: its bytes may have left");
   await recordPoolBuy(s, "e1", FACTS, { result: { stage: "not_landed", txs: [] } });
-  assert.deepEqual([(s.ops.get("e1") as { stage: string }).stage, (s.ops.get("e1") as { txs: unknown }).txs], ["not_landed", [{ chain: "solana", hash: "SigA" }]], "an end with no txs keeps sent's");
+  assert.deepEqual([(s.ops.get("e1") as { stage: string }).stage, (s.ops.get("e1") as { txs: unknown }).txs], ["not_landed", [{ chain: "solana", hash: "SigA", leg: true }]], "an end with no txs keeps sent's");
   await recordPoolBuy(s, "e1", FACTS, { result: { stage: "filled", txs: [{ chain: "solana", hash: "SigB" }] } });
   assert.equal((s.ops.get("e1") as { stage: string }).stage, "not_landed", "an end is never written over");
   const f = memStore();
@@ -1221,13 +1221,13 @@ test("card signpage-sent-end-recorded: a Solana buy's op reads sent with its tra
 
 /** A stand-in pool.buy kind on the page that answers "sent" with `sig`, then posts what the test asks (pool-buy.ts
  *  poolBuyKind's order: the early answer, the run's own end, a follow's late end). */
-const sentBuy = (sig: string, at?: { blockhash: string; lastHeight: number }) => {
+const sentBuy = (sig: string, at?: { blockhash: string; lastHeight: number; note: SentNote }) => {
   const k = { answered: (() => {}) as () => void, progress: ((_s: string) => {}) as (s: string) => void };
-  const buy = (host: () => { sendAt?(s: string, b: string, l: number): void }) => (_ask: unknown, ctx: { route?: (r: unknown) => void; progress: (s: string) => void }) => {
+  const buy = (host: () => { sendAt?(s: string, b: string, l: number, n: SentNote): void }) => (_ask: unknown, ctx: { route?: (r: unknown) => void; progress: (s: string) => void }) => {
     k.progress = ctx.progress;
     ctx.route?.({ wallet: solanaWallet() });
-    // the run's read-back of its tx: its blockhash and last height told with its signature (pool-buy.ts sendAt)
-    if (at) host().sendAt?.(sig, at.blockhash, at.lastHeight);
+    // the run's read-back of its tx: its blockhash, last height and notes told with its signature (pool-buy.ts sendAt)
+    if (at) host().sendAt?.(sig, at.blockhash, at.lastHeight, at.note);
     return { running: true as const, after: new Promise<void>((r) => (k.answered = r)), answer: () => ({ result: { stage: "sent", txs: [{ chain: "solana", hash: sig }] } }) };
   };
   return { k, buy };
@@ -1246,7 +1246,7 @@ test("card signpage-sent-end-recorded (b): a Solana buy whose run ends sent, its
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pbL", sha: "00", progress: () => {} } as never);
   k.answered();
   await until(async () => (await w.get("ops", "pbL")) !== undefined);
-  assert.deepEqual(((await w.get("ops", "pbL")) as { stage: string; txs: unknown }).txs, [{ chain: "solana", hash: "SigL" }]);
+  assert.deepEqual(((await w.get("ops", "pbL")) as { stage: string; txs: unknown }).txs, [{ chain: "solana", hash: "SigL", leg: true }]);
   assert.equal(((await w.get("ops", "pbL")) as { stage: string }).stage, "sent", "sent right after the answer");
   k.progress("sent");
   await new Promise((r) => setTimeout(r, 20));
@@ -1254,7 +1254,7 @@ test("card signpage-sent-end-recorded (b): a Solana buy whose run ends sent, its
   k.progress("not_landed");
   await until(async () => ((await w.get("ops", "pbL")) as { stage: string }).stage !== "sent");
   const op = (await w.get("ops", "pbL")) as { stage: string; txs: unknown };
-  assert.deepEqual([op.stage, op.txs], ["not_landed", [{ chain: "solana", hash: "SigL" }]]);
+  assert.deepEqual([op.stage, op.txs], ["not_landed", [{ chain: "solana", hash: "SigL", leg: true }]]);
 });
 
 test("card signpage-sent-end-recorded (a): a Solana buy that throws after answering sent (poolBuyKind posts sent, then hands the page its follow) reaches its follow's end in the op; a refused end on chain is an end too", async () => {
@@ -1278,7 +1278,7 @@ test("card signpage-sent-end-recorded (a): a Solana buy that throws after answer
     k.progress(end);
     await until(async () => ((await w.get("ops", "pbT")) as { stage: string }).stage !== "sent");
     const op = (await w.get("ops", "pbT")) as { stage: string; txs: unknown };
-    assert.deepEqual([op.stage, op.txs], [end, [{ chain: "solana", hash: sig }]], `${end}: the follow's end`);
+    assert.deepEqual([op.stage, op.txs], [end, [{ chain: "solana", hash: sig, leg: true }]], `${end}: the follow's end`);
   }
 });
 
@@ -1302,22 +1302,43 @@ const opsStore = (ops: Record<string, unknown>) => {
   const m = new Map(Object.entries(ops));
   return { m, get: async (_s: "ops", k: string) => m.get(k), keys: async () => [...m.keys()], update: async (_s: "ops", k: string, f: (v: unknown) => unknown) => void m.set(k, f(m.get(k))) };
 };
-const sentOp = (sigs: readonly string[], at = true) => ({ kind: "buy", stage: "sent", txs: sigs.map((hash) => ({ chain: "solana", hash, ...(at ? { blockhash: SENT_BH, lvbh: SENT_LVBH } : {}) })), created_ms: 1, chain: "solana", token: MINT, amount_usd: "1.5" });
+/** A sent tx's notes (pool-buy.ts sendAt): its own note n-<sig> at attempt a1, `pieces` its pieces' notes. */
+const sentNote = (hash: string, pieces: string[] = []) => ({ id: `n-${hash}`, attempt: "a1", pieces, program: "Prog1", feePayer: "Fee1", wallet: "W1", nullifier: "77", context: "9" });
+const sentOp = (sigs: readonly string[], at = true) => ({ kind: "buy", stage: "sent", txs: sigs.map((hash) => ({ chain: "solana", hash, leg: true, ...(at ? { blockhash: SENT_BH, lvbh: SENT_LVBH, note: sentNote(hash) } : {}) })), created_ms: 1, chain: "solana", token: MINT, amount_usd: "1.5" });
+/** The notes' marks (positions.ts SentMarks): each note's state as the settle pass left it (none: not read), its
+ *  attempt a1; whose spend it is, this attempt's unless `other`. */
+const marksOf = (states: Record<string, string> = {}, other = false): SentMarks => ({
+  note: async (id) => (states[id] === undefined ? undefined : { state: states[id]!, attempt: "a1" }),
+  owner: async () => (other ? "other" : { mine: "x", accounts: [] }),
+});
+/** Each of these sigs' notes in `state`. */
+const notesAt = (state: string, ...sigs: string[]): Record<string, string> => Object.fromEntries(sigs.map((s) => [`n-${s}`, state]));
+type Rpcs = readonly [ReturnType<typeof txReads>, ReturnType<typeof txReads>];
 
-test("card signpage-sent-end-recorded part 1: the sent op keeps each tx's blockhash and last height beside it, device-only (opOf sends chain and hash); a sent answer with none, or a bad one, keeps none", async () => {
+test("card signpage-sent-end-recorded part 1: the sent op keeps each tx's blockhash, last height and notes beside it and marks it a leg, device-only (opOf sends chain and hash); a sent answer with none, or a bad one, keeps none", async () => {
   const { opOf } = await import("../src/state.ts");
   const s = memStore();
-  await recordPoolBuy(s, "k1", FACTS, { result: { stage: "sent", txs: [{ chain: "solana", hash: "SigK", blockhash: SENT_BH, lvbh: SENT_LVBH }] } });
-  assert.deepEqual((s.ops.get("k1") as { txs: unknown }).txs, [{ chain: "solana", hash: "SigK", blockhash: SENT_BH, lvbh: SENT_LVBH }]);
+  await recordPoolBuy(s, "k1", FACTS, { result: { stage: "sent", txs: [{ chain: "solana", hash: "SigK", blockhash: SENT_BH, lvbh: SENT_LVBH, note: sentNote("SigK") }] } });
+  assert.deepEqual((s.ops.get("k1") as { txs: unknown }).txs, [{ chain: "solana", hash: "SigK", leg: true, blockhash: SENT_BH, lvbh: SENT_LVBH, note: sentNote("SigK") }]);
   assert.deepEqual(opOf("k1", s.ops.get("k1"))!.txs, [{ chain: "solana", hash: "SigK" }], "the app is sent chain and hash only");
-  await recordPoolBuy(s, "k2", FACTS, { result: { stage: "sent", txs: [{ chain: "solana", hash: "SigK2", blockhash: "not a hash", lvbh: SENT_LVBH }] } });
-  assert.deepEqual((s.ops.get("k2") as { txs: unknown }).txs, [{ chain: "solana", hash: "SigK2" }], "a blockhash that is none: no fields kept");
+  await recordPoolBuy(s, "k2", FACTS, { result: { stage: "sent", txs: [{ chain: "solana", hash: "SigK2", blockhash: "not a hash", lvbh: SENT_LVBH, note: sentNote("SigK2") }] } });
+  assert.deepEqual((s.ops.get("k2") as { txs: unknown }).txs, [{ chain: "solana", hash: "SigK2", leg: true }], "a blockhash that is none: no fields kept");
+  await recordPoolBuy(s, "k3", FACTS, { result: { stage: "sent", txs: [{ chain: "solana", hash: "SigK3", blockhash: SENT_BH, lvbh: SENT_LVBH, note: { ...sentNote("SigK3"), nullifier: "0x1" } }] } });
+  assert.deepEqual((s.ops.get("k3") as { txs: unknown }).txs, [{ chain: "solana", hash: "SigK3", leg: true }], "a note that is none: no fields kept");
 });
 
-test("card signpage-sent-end-recorded part 1: the page's sent op carries the blockhash and last height its run told with the signature", async () => {
+test("card signpage-sent-end-recorded (review 2): a split tap's sent op marks each leg; its end keeps the marks on the legs alone, never on a piece's release", async () => {
+  const s = memStore();
+  await recordPoolBuy(s, "k", FACTS, { result: { stage: "sent", txs: [{ chain: "solana", hash: "L0" }, { chain: "solana", hash: "L1" }] } });
+  assert.deepEqual((s.ops.get("k") as { txs: unknown }).txs, [{ chain: "solana", hash: "L0", leg: true }, { chain: "solana", hash: "L1", leg: true }]);
+  await recordPoolBuy(s, "k", FACTS, { result: { stage: "filled", txs: [{ chain: "solana", hash: "L0" }, { chain: "solana", hash: "P0" }, { chain: "solana", hash: "L1" }] } });
+  assert.deepEqual((s.ops.get("k") as { txs: unknown }).txs, [{ chain: "solana", hash: "L0", leg: true }, { chain: "solana", hash: "P0" }, { chain: "solana", hash: "L1", leg: true }]);
+});
+
+test("card signpage-sent-end-recorded part 1: the page's sent op carries the blockhash, last height and notes its run told with the signature", async () => {
   const w = await spentWallet();
   const c = chain();
-  const { k, buy } = sentBuy("SigH", { blockhash: SENT_BH, lastHeight: 1_234 });
+  const { k, buy } = sentBuy("SigH", { blockhash: SENT_BH, lastHeight: 1_234, note: sentNote("SigH") });
   const tp = testnetPool(
     { store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE },
     // @ts-expect-error a stand-in buy kind
@@ -1327,20 +1348,20 @@ test("card signpage-sent-end-recorded part 1: the page's sent op carries the blo
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pbH", sha: "00", progress: () => {} } as never);
   k.answered();
   await until(async () => (await w.get("ops", "pbH")) !== undefined);
-  assert.deepEqual(((await w.get("ops", "pbH")) as { txs: unknown }).txs, [{ chain: "solana", hash: "SigH", blockhash: SENT_BH, lvbh: 1_234 }]);
+  assert.deepEqual(((await w.get("ops", "pbH")) as { txs: unknown }).txs, [{ chain: "solana", hash: "SigH", leg: true, blockhash: SENT_BH, lvbh: 1_234, note: sentNote("SigH") }]);
 });
 
 test("card signpage-sent-end-recorded part 1: a reload's settle ends a sent buy op from its txs on both RPCs: filled; past on both, not_landed; past on one only, still sent; a split tap filled and past, part_filled", async () => {
-  const cases: [string, readonly string[], readonly [ReturnType<typeof txReads>, ReturnType<typeof txReads>], string][] = [
-    ["filled on both", ["S1"], [txReads({ S1: "ok" }, 900), txReads({ S1: "ok" }, 900)], "filled"],
-    ["past its blockhash on both", ["S2"], [txReads({}, 1_200), txReads({}, 1_200)], "not_landed"],
-    ["past on one RPC only", ["S3"], [txReads({}, 1_200), txReads({}, 900)], "sent"],
-    ["filled on one RPC only", ["S4"], [txReads({ S4: "ok" }, 900), txReads({}, 900)], "sent"],
-    ["a split tap: one tx filled, one past", ["S5", "S6"], [txReads({ S5: "ok" }, 1_200), txReads({ S5: "ok" }, 1_200)], "part_filled"],
+  const cases: [string, readonly string[], Rpcs, Record<string, string>, string][] = [
+    ["filled on both", ["S1"], [txReads({ S1: "ok" }, 900), txReads({ S1: "ok" }, 900)], notesAt("SPENT", "S1"), "filled"],
+    ["past its blockhash on both", ["S2"], [txReads({}, 1_200), txReads({}, 1_200)], {}, "not_landed"],
+    ["past on one RPC only", ["S3"], [txReads({}, 1_200), txReads({}, 900)], {}, "sent"],
+    ["filled on one RPC only", ["S4"], [txReads({ S4: "ok" }, 900), txReads({}, 900)], notesAt("SPENT", "S4"), "sent"],
+    ["a split tap: one tx filled, one past", ["S5", "S6"], [txReads({ S5: "ok" }, 1_200), txReads({ S5: "ok" }, 1_200)], notesAt("SPENT", "S5"), "part_filled"],
   ];
-  for (const [what, sigs, rpcs, stage] of cases) {
+  for (const [what, sigs, rpcs, states, stage] of cases) {
     const s = opsStore({ b: sentOp(sigs) });
-    const ended = await settleSentBuys(s, rpcs as never);
+    const ended = await settleSentBuys(s, rpcs as never, marksOf(states));
     const op = s.m.get("b") as { stage: string; txs: { hash: string }[] };
     assert.equal(op.stage, stage, what);
     assert.deepEqual(ended, stage === "sent" ? [] : ["b"], `${what}: told`);
@@ -1355,20 +1376,39 @@ test("card signpage-sent-end-recorded part 1: a reload's settle ends a sent buy 
 // rules, so it is held here but cannot fail first; both legs failed is the split case the rules part on.
 test("card signpage-sent-end-recorded part 1: a reload ends a buy as the page would have: failed on both, refused; a split tap's legs by legsStage", async () => {
   const { legsStage } = await import("../src/pool-buy.ts");
-  const cases: [string, readonly string[], readonly [ReturnType<typeof txReads>, ReturnType<typeof txReads>], string][] = [
-    ["one tx landed with an error on both RPCs", ["F1"], [txReads({ F1: "err" }, 900), txReads({ F1: "err" }, 900)], "refused"],
-    ["a split tap, both legs failed on both", ["F2", "F3"], [txReads({ F2: "err", F3: "err" }, 900), txReads({ F2: "err", F3: "err" }, 900)], "refused"],
-    ["a split tap, one leg failed and one filled", ["F4", "F5"], [txReads({ F4: "err", F5: "ok" }, 900), txReads({ F4: "err", F5: "ok" }, 900)], "part_filled"],
-    ["a split tap, one leg failed and one past its blockhash", ["F6", "F7"], [txReads({ F6: "err" }, 1_200), txReads({ F6: "err" }, 1_200)], "not_landed"],
+  const cases: [string, readonly string[], Rpcs, Record<string, string>, string][] = [
+    ["one tx landed with an error on both RPCs", ["F1"], [txReads({ F1: "err" }, 900), txReads({ F1: "err" }, 900)], notesAt("UNSPENT", "F1"), "refused"],
+    ["a split tap, both legs failed on both", ["F2", "F3"], [txReads({ F2: "err", F3: "err" }, 900), txReads({ F2: "err", F3: "err" }, 900)], notesAt("UNSPENT", "F2", "F3"), "refused"],
+    ["a split tap, one leg failed and one filled", ["F4", "F5"], [txReads({ F4: "err", F5: "ok" }, 900), txReads({ F4: "err", F5: "ok" }, 900)], { ...notesAt("UNSPENT", "F4"), ...notesAt("SPENT", "F5") }, "part_filled"],
+    ["a split tap, one leg failed and one past its blockhash", ["F6", "F7"], [txReads({ F6: "err" }, 1_200), txReads({ F6: "err" }, 1_200)], notesAt("UNSPENT", "F6"), "not_landed"],
   ];
-  for (const [what, sigs, rpcs, stage] of cases) {
+  for (const [what, sigs, rpcs, states, stage] of cases) {
     const s = opsStore({ b: sentOp(sigs) });
-    assert.deepEqual(await settleSentBuys(s, rpcs as never), ["b"], `${what}: told`);
+    assert.deepEqual(await settleSentBuys(s, rpcs as never, marksOf(states)), ["b"], `${what}: told`);
     const op = s.m.get("b") as { stage: string; txs: { hash: string; state?: string }[] };
     assert.equal(op.stage, stage, what);
     assert.equal(op.stage, legsStage(op.txs.map((t) => (t.state === "failed" ? "refused" : (t.state as never)))), `${what}: legsStage's`);
     assert.deepEqual(op.txs.map((t) => t.hash), sigs, `${what}: its txs kept`);
     assert.ok(op.txs.every((t) => typeof t.state === "string"), `${what}: each tx's end noted`);
+  }
+});
+
+test("card signpage-sent-end-recorded (review 5): a reload reads the notes' marks as the run does: failed on both with the note or a piece's note spent, not_landed; a note still reserved, not known (sent); landed with the spend another's, not_landed; landed with the note not yet spent, sent", async () => {
+  const failed = [txReads({ G1: "err" }, 900), txReads({ G1: "err" }, 900)] as never;
+  const landed = [txReads({ G1: "ok" }, 900), txReads({ G1: "ok" }, 900)] as never;
+  const withPiece = { ...sentOp(["G1"]), txs: [{ ...sentOp(["G1"]).txs[0]!, note: sentNote("G1", ["p-1"]) }] };
+  const cases: [string, unknown, never, SentMarks, string][] = [
+    ["failed on both, its note spent", sentOp(["G1"]), failed, marksOf(notesAt("SPENT", "G1")), "not_landed"],
+    ["failed on both, a piece's note spent", withPiece, failed, marksOf({ ...notesAt("UNSPENT", "G1"), "p-1": "SPENT" }), "not_landed"],
+    ["failed on both, its note still reserved", sentOp(["G1"]), failed, marksOf(notesAt("RESERVED", "G1")), "sent"],
+    ["failed on both, its note not read", sentOp(["G1"]), failed, marksOf({}), "sent"],
+    ["landed on both, the spend another's", sentOp(["G1"]), landed, marksOf(notesAt("SPENT", "G1"), true), "not_landed"],
+    ["landed on both, its note still reserved by its attempt", sentOp(["G1"]), landed, marksOf(notesAt("RESERVED", "G1")), "sent"],
+  ];
+  for (const [what, op, rpcs, marks, stage] of cases) {
+    const s = opsStore({ b: op });
+    await settleSentBuys(s, rpcs, marks);
+    assert.equal((s.m.get("b") as { stage: string }).stage, stage, what);
   }
 });
 
@@ -1379,8 +1419,95 @@ test("card signpage-sent-end-recorded part 1: the settle reads only a Solana buy
   const sell = { ...sentOp(["S1"]), kind: "sell", pool: "sol", sha: "00" };
   const ended = { ...sentOp(["S1"]), stage: "not_landed" };
   const s = opsStore({ old, base, sell, ended, mine: sentOp(["S1"]) });
-  assert.deepEqual(await settleSentBuys(s, both, (id) => id === "mine"), []);
+  assert.deepEqual(await settleSentBuys(s, both, marksOf(notesAt("SPENT", "S1")), { running: (id) => id === "mine" }), []);
   assert.deepEqual(Object.fromEntries(s.m), { old, base, sell, ended, mine: sentOp(["S1"]) }, "each left as it is");
+});
+
+test("card signpage-sent-end-recorded (review 3): another tab's live run (its trade lock held) is left as it is; once its lock is free, the op is settled", async () => {
+  const both = [txReads({ S1: "ok" }, 900), txReads({ S1: "ok" }, 900)] as never;
+  const held = new Set(["ct-wallet/trade/b"]);
+  const locks = { request: async (name: string, opts: { ifAvailable?: boolean }, f: (l: unknown) => Promise<unknown>) => f(opts.ifAvailable && held.has(name) ? null : {}) } as unknown as Pick<LockManager, "request">;
+  const s = opsStore({ b: sentOp(["S1"]) });
+  assert.deepEqual(await settleSentBuys(s, both, marksOf(notesAt("SPENT", "S1")), { locks }), []);
+  assert.equal((s.m.get("b") as { stage: string }).stage, "sent", "another tab's run");
+  held.clear();
+  assert.deepEqual(await settleSentBuys(s, both, marksOf(notesAt("SPENT", "S1")), { locks }), ["b"]);
+  assert.equal((s.m.get("b") as { stage: string }).stage, "filled");
+});
+
+test("card signpage-sent-end-recorded (review 3): the page holds its buy's trade lock while the run lives, so another tab's state read leaves its sent op; a tab with the lock free ends it", async () => {
+  const w = await spentWallet();
+  const c = chain();
+  // one device's locks, shared by its tabs: an exclusive one held while its callback runs; ifAvailable reads it
+  const held = new Set<string>();
+  const locks = {
+    request: async (name: string, a: unknown, b?: (l: unknown) => unknown) => {
+      const o = (typeof a === "function" ? {} : a) as { mode?: string; ifAvailable?: boolean };
+      const f = (typeof a === "function" ? a : b) as (l: unknown) => unknown;
+      if (o.ifAvailable && held.has(name)) return f(null);
+      if (o.mode !== "exclusive" || o.ifAvailable) return f({ name });
+      held.add(name);
+      try {
+        return await f({ name });
+      } finally {
+        held.delete(name);
+      }
+    },
+  } as unknown as Pick<LockManager, "request">;
+  // both seats read the buy's tx past its blockhash: an end any tab could write, were the run not live
+  const reads = (k: 0 | 1) => async (m: string, p: readonly unknown[]) => (["getLatestBlockhash", "isBlockhashValid", "getSignatureStatuses"].includes(m) ? txReads({}, 1_200)(m, p) : c.rpcs[k](m, p));
+  const { k, buy } = sentBuy("SigX", { blockhash: SENT_BH, lastHeight: SENT_LVBH, note: sentNote("SigX") });
+  const over = { pin: PIN, evmPin: NO_EVM, rpcs: [reads(0), reads(1)], table: "Table111111111111111111111111111111111111111", holdings: () => c.finder, positions: { setTimer: () => {}, clearTimer: () => {} } };
+  // @ts-expect-error a stand-in buy kind
+  const a = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE }, { ...over, tradeKinds: { buy }, locks });
+  await until(async () => (await a.positions()) !== null);
+  a.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pbX", sha: "00", progress: () => {} } as never);
+  k.answered();
+  await until(async () => (await w.get("ops", "pbX")) !== undefined);
+  assert.ok(held.has("ct-wallet/trade/pbX"), "tab A holds its buy's trade lock");
+  // tab B: its state read's settle leaves tab A's live run
+  // @ts-expect-error the stand-in page options
+  const b = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE }, { ...over, locks });
+  await b.stateRead();
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(((await w.get("ops", "pbX")) as { stage: string }).stage, "sent", "another tab's live run is left");
+  // the same read with the lock free (tab A closed): the op ends
+  // @ts-expect-error the stand-in page options
+  const z = testnetPool({ store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE }, { ...over, locks: { request: async (_n: string, a: unknown, b?: (l: unknown) => unknown) => ((typeof a === "function" ? a : b) as (l: unknown) => unknown)({}) } });
+  await z.stateRead();
+  await until(async () => ((await w.get("ops", "pbX")) as { stage: string }).stage !== "sent");
+  assert.equal(((await w.get("ops", "pbX")) as { stage: string }).stage, "not_landed");
+});
+
+test("card signpage-sent-end-recorded (review 4): an op one RPC reads landed and the other never is read at every pass until SENT_SETTLE_PAST_MS after its first read, then once each SENT_SETTLE_SLOW_MS, still sent, and ends once both agree", async () => {
+  let t = 1_000_000;
+  let agree = false;
+  let asked = 0;
+  const one = txReads({ S1: "ok" }, 900);
+  const counted = async (m: string, p?: readonly unknown[]) => (m === "getSignatureStatuses" && asked++, one(m, p));
+  const other = async (m: string, p?: readonly unknown[]) => (agree ? one : txReads({}, 900))(m, p);
+  const s = opsStore({ b: sentOp(["S1"]) });
+  const reads: SentReads = new Map();
+  const pass = async (): Promise<number> => {
+    const before = asked;
+    await settleSentBuys(s, [counted, other] as never, marksOf(notesAt("SPENT", "S1")), { now: () => t, reads });
+    return asked - before;
+  };
+  assert.equal(await pass(), 1, "the first read");
+  t += 5_000;
+  assert.equal(await pass(), 1, "the normal pace before");
+  t += SENT_SETTLE_PAST_MS;
+  assert.equal(await pass(), 1, "past the blockhash's life: one read, then the slow pace");
+  t += 1_000;
+  assert.equal(await pass(), 0, "within SENT_SETTLE_SLOW_MS of it: none");
+  t += SENT_SETTLE_SLOW_MS - 1_000;
+  assert.equal(await pass(), 1, "a slow read");
+  assert.equal((s.m.get("b") as { stage: string }).stage, "sent", "never a guess");
+  agree = true;
+  t += SENT_SETTLE_SLOW_MS;
+  assert.equal(await pass(), 1);
+  assert.equal((s.m.get("b") as { stage: string }).stage, "filled", "both agree: its end");
+  assert.equal(reads.has("b"), false, "an ended op's reads let go");
 });
 
 test("card signpage-sent-end-recorded part 1: a run's own end that came while the settle read stays: the settle writes only over sent", async () => {
@@ -1390,8 +1517,18 @@ test("card signpage-sent-end-recorded part 1: a run's own end that came while th
     s.m.set("b", { ...sentOp(["S1"]), stage: "filled", txs: [{ chain: "solana", hash: "S1" }], units: "5", pool_amount: "0.01" });
     return txReads({ S1: "err" }, 1_200)(method, params);
   };
-  await settleSentBuys(s, [slow, txReads({ S1: "err" }, 1_200)] as never);
+  await settleSentBuys(s, [slow, txReads({ S1: "err" }, 1_200)] as never, marksOf());
   assert.deepEqual([(s.m.get("b") as { stage: string }).stage, (s.m.get("b") as { units?: string }).units], ["filled", "5"]);
+});
+
+test("card signpage-sent-end-recorded (review 6): a run's own refused end that came while the settle read a filled one stays: the guard holds over an end the settle would change", async () => {
+  const s = opsStore({ b: sentOp(["S1"]) });
+  const racing = async (method: string, params?: readonly unknown[]) => {
+    s.m.set("b", { ...sentOp(["S1"]), stage: "refused", txs: [{ chain: "solana", hash: "S1" }] });
+    return txReads({ S1: "ok" }, 900)(method, params);
+  };
+  assert.deepEqual(await settleSentBuys(s, [racing, txReads({ S1: "ok" }, 900)] as never, marksOf(notesAt("SPENT", "S1"))), []);
+  assert.equal((s.m.get("b") as { stage: string }).stage, "refused");
 });
 
 test("the page: a sell answered at its send (sent) and ended later: its position is gone at the end, with no reload", async () => {

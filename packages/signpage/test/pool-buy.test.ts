@@ -2910,6 +2910,25 @@ test("card buy-spends-its-change-in-the-same-tap: round 1 that the helper answer
   assert.equal((await x.owed.list()).length, 1, "W stays found");
 });
 
+test("card signpage-sent-end-recorded (review 1): a two-round tap's round 1 is never told as the buy: neither sent nor sendAt names its release, and the kind's early answer names only the buy's own transaction", async () => {
+  const x = await twoRounds("lands");
+  const round1 = base58.encode(new Uint8Array(64).fill(20)); // the first signature the helper names: round 1's release
+  const told: string[] = [];
+  const at: string[] = [];
+  x.w.host.sent = async (s) => void told.push(s);
+  x.w.host.sendAt = (s) => void at.push(s);
+  const a = await runPoolBuy(x.w.host, { ...ASK, amount: x.spend });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.ok(!told.includes(round1) && !at.includes(round1), `round 1 told: sent ${JSON.stringify(told)}, sendAt ${JSON.stringify(at)}`);
+  assert.deepEqual([told, at], [[(a as { txs: { hash: string }[] }).txs[0]!.hash], [(a as { txs: { hash: string }[] }).txs[0]!.hash]], "the buy's own, once each");
+  // the kind (poolBuyKind): its early "sent" answer is the page's op; it never names round 1's release
+  const y = await twoRounds("lands");
+  const stages: string[] = [];
+  const k = poolBuyKind(() => y.w.host, lockOnce)({ ...ASK, amount: y.spend }, { id: "r2", sha: "00", progress: (s: string) => void stages.push(s) } as never) as { after: Promise<void>; answer: () => { result?: { txs: { hash: string }[] } } };
+  await k.after;
+  assert.ok(!(k.answer().result?.txs ?? []).some((t) => t.hash === round1), `the answer names round 1: ${JSON.stringify(k.answer())}`);
+});
+
 test("card buy-spends-its-change-in-the-same-tap: between a first round that landed and the buy's round (own note HELD, a piece SPENT) a state read keeps W's record while a tap holds a note of it; once no tap does, W is swept back", async () => {
   const rec: OwedPieces = { address: "W", l: "3", j: 0, primary: "W-own", pieces: ["W-p1"], lastHeight: "151", mint: "M", program: "T", spend: { program: "P", feePayer: "F", context: "7", nullifier: "9" } };
   const st: Record<string, string> = { "W-own": "HELD", "W-p1": "SPENT" };
