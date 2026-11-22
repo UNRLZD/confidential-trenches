@@ -348,3 +348,49 @@ test("card index-evm-swaps-v4-route-tape (device index): a quote token whose onl
     assert.ok(Math.abs(Number(t.usd) - usd) <= usd * 1e-9, `row ${i}: usd ${t.usd}, want ${usd}`);
   });
 });
+
+test("card index-evm-swaps-v4-route-tape-2 (read back): a third-quoted pool whose 50 newest trades lie hours apart fills its tape by pricing each read back block at its own start, one agreed post of the route's state, never the route's logs over every block between them (red at fda1267c6: the quote pool's logs read over the whole read back; Robinhood 0xaa07a0e9's pool 0xe7cbe028 still filling at 160 s)", async () => {
+  const c = CASES[0]!;
+  const p = planted(c);
+  const QPOOL = `0x${"f7".repeat(20)}`;
+  // the coin's 60 swaps 250 blocks apart, over 15,000 blocks: the newest five in the cold window, the rest read back
+  const blockOf = new Map(p.mains.map((m, k) => [m.tx, HEAD - 15_000 + (k + 1) * 250]));
+  for (const l of p.logs) {
+    const b = blockOf.get(l.transactionHash);
+    if (b === undefined) continue;
+    l.blockNumber = `0x${b.toString(16)}`;
+    l.blockTimestamp = `0x${timeOf(b).toString(16)}`;
+  }
+  for (const m of p.mains) m.b = blockOf.get(m.tx)!;
+  const f = rig(p);
+  let qBlocks = 0;
+  const counted = Object.assign(async (url: string, init: RequestInit) => {
+    for (const r of [JSON.parse(String(init.body))].flat() as { method: string; params: { address?: string; fromBlock?: string; toBlock?: string }[] }[])
+      if (r.method === "eth_getLogs" && [r.params[0]?.address].flat().includes(QPOOL)) qBlocks += parseInt(r.params[0]!.toBlock!, 16) - parseInt(r.params[0]!.fromBlock!, 16) + 1;
+    return f(url, init);
+  }, { counts: f.counts });
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const s = createSwaps("base", { fetch: counted as never, now: () => Date.now(), listed: async () => true, rpcs: URLS, pools: new Map(), tickMs: 0, sleep: async () => undefined });
+    let a = await s.trades(COIN, 50);
+    for (let i = 0; i < 60 && a.status === 200 && JSON.parse(a.body).filling === true; i++) {
+      await new Promise((go) => setTimeout(go, 1_000));
+      await s.tick();
+      a = await s.trades(COIN, 50);
+    }
+    s.stop();
+    return a;
+  });
+  assert.equal(value.status, 200, value.body);
+  const j = JSON.parse(value.body) as { trades: { tx: string; usd: string }[]; filling?: boolean };
+  const want = p.mains.slice(-TRADES_MAX).reverse();
+  assert.equal(j.trades.length, TRADES_MAX, value.body.slice(0, 200));
+  assert.notEqual(j.filling, true);
+  j.trades.forEach((t, i) => {
+    assert.equal(t.tx, want[i]!.tx, `row ${i}`);
+    const usd = Number(want[i]!.q) * c.usdPerQuoteUnit;
+    assert.ok(Math.abs(Number(t.usd) - usd) <= usd * 1e-9, `row ${i}: usd ${t.usd}, want ${usd}`);
+  });
+  // the quote pool's logs only over the blocks read forward (the cold window's 1,500 and the first read's, on two agreeing
+  // providers: 5,502 here), never over the read back's 15,000 (29,502 at fda1267c6)
+  assert.ok(qBlocks <= 6_000, `the quote pool's logs read over ${qBlocks} blocks on the providers; the read back spans 15,000`);
+});
