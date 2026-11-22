@@ -10,7 +10,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { SOLANA_ATA_PROGRAM, solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_CLAIM_CASHBACK, SOLANA_CLOSE_VOLUME_ACCUMULATOR, SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_TOKEN_2022_PROGRAM as TOKEN_2022, SOLANA_TOKEN_PROGRAM, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
-import { solanaPoolPage, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
+import { solanaPoolPage, solanaPoolSpentMark, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
@@ -38,17 +38,6 @@ export type RaydiumVenue = "raydium-cpmm" | "raydium-amm-v4";
 export type WorldVenue = Venue | "dlmm" | RaydiumVenue;
 /** Each recorded venue's mint, its read (a Token-2022 mint on both), W's token account under it, the reference both
  *  providers give for exactly this sell and the floor the run's min out comes from. */
-/** One of W's transactions as getTransaction answers it in json (the buy reader's encoding), its block time long past
- *  SOL_RELEASE_FINAL_MS. */
-const historyTxJson = (signature: string, keys: readonly string[], signers: number, ixs: readonly { programIdIndex: number; accounts: number[]; data: string }[], err: unknown, post: unknown[]) => ({ slot: 1, blockTime: 1_700_000_000, meta: { err, preTokenBalances: [], postTokenBalances: post }, transaction: { signatures: [signature], message: { header: { numRequiredSignatures: signers }, accountKeys: keys, instructions: ixs } } });
-/** The pinned pool's release naming W, signed by the fee payer and W, in json: a plain release (tag 2), or with
- *  `bought` a release-and-buy (tag 3) whose coin rises in W's account (card a-found-wallet-sweeps-past-a-strangers-coin). */
-export function wReleaseJson(signature: string, bought?: { mint: string; program: string }): unknown {
-  // [fee payer, W, the pool, W's coin account]
-  const ix = { programIdIndex: 2, accounts: [2, 1, 0], data: base58.encode(Uint8Array.of(bought ? 3 : 2, 1, 2, 3)) };
-  const post = bought ? [{ accountIndex: 3, mint: bought.mint, owner: W.address, programId: bought.program, uiTokenAmount: { amount: "5000000", decimals: 6 } }] : [];
-  return historyTxJson(signature, [FEE_PAYER, W.address, PROGRAM, base58.encode(new Uint8Array(32).fill(61))], 2, [ix], null, post);
-}
 export const VF = {} as Record<WorldVenue, { mint: string; mintRead: { owner: string; data: [string, string] }; ata: string; slot: number; minOut: bigint }>;
 export const MINT = fx.pump.mint as string;
 /** 4,000,000 tokens (6 decimals): the recorded curve gives about 0.11 SOL for them. */
@@ -80,6 +69,10 @@ export const beInt = (b: Uint8Array): bigint => b.reduce((a, x) => (a << 8n) | B
 export const FRONT_RUN = 1_000_000n;
 export const markOf = (pre: bigint, program = PROGRAM): string => solanaProgramAddress([enc.encode("pre"), be32(pre)], program);
 export const RETURN: NoteRef = { kind: "return", c: "sol", l: L, j: J };
+/** The deposit note whose own W is W (label L, jOf = J): a found W's note (pool-found.ts ownWs), and the pool's spent
+ *  mark of its nullifier hash, the account its tag 3 writes (card a-found-wallet-sweeps-past-a-strangers-coin). */
+export const W_NOTE: NoteRef = { kind: "deposit", s: SCOPE, i: 70 };
+export const W_NOTE_MARK = solanaPoolSpentMark(PROGRAM, be32(noteSecrets(SEED64, W_NOTE).nullifierHash));
 export const SECOND = (n: number): NoteRef => ({ kind: "second", id: { id: "R", c: "sol", l: L, j: J }, n });
 export const preOf = (ref: NoteRef): bigint => noteSecrets(SEED64, ref).precommitment;
 
@@ -302,11 +295,12 @@ export type Plant = {
   /** W's buy record (pool-buy.ts BuyMints): the venue's mint when not given; null, none (a buy from before it was
    *  written, or a restored device) */
   buy?: { mint: string; program: string; rebuilt?: true } | null;
-  /** W's first transaction as the buy reader reads W's history (solanaBuyReader: getSignaturesForAddress at finalized,
-   *  getTransaction in json; card a-found-wallet-sweeps-past-a-strangers-coin): the pool's plain release naming W (tag
-   *  2) when not given, long final, so W reads "no buy"; a buy of `mint` (tag 3, the mint rising in W's account); on
-   *  RPC `on` only when given (the other reads the plain release); "unread": its transaction not returned (no answer) */
-  wFirst?: { mint: string; program: string; on?: 0 | 1 } | "unread";
+  /** W's own note's spent mark (W_NOTE_MARK): no account when not given (unspent); "spent", an account the pool owns on
+   *  both RPCs (its tag 3 landed); `spentOn`, on that RPC alone; "paid", lamports a stranger sent to the address, owned
+   *  by the system program, on both */
+  wNote?: "spent" | "paid" | { spentOn: 0 | 1 };
+  /** Strangers' transactions on W after its release (W_PAST), each long final: anyone can send W lamports or a token */
+  wStrangers?: number;
   /** More of the user's buy wallets holding the venue's token (card pool-sell-share-across-wallets: each buy lands in a
    *  fresh W): each at (l, j), its token account holding `held`, its lamports (ENOUGH when not given) */
   others?: { l: bigint; j: number; held: bigint; lamports?: number }[];
@@ -389,19 +383,11 @@ export function chain(plant: Plant = {}) {
   const W_PAST = base58.encode(new Uint8Array(64).fill(7));
   const wHistory = [{ signature: W_PAST, slot: VF[v].slot - 300 }];
   const heightAt = new Map<number, number>([[wHistory[0]!.slot, plant.wLastHeight ?? 500]]);
-  /** W's history in the json encoding the buy reader asks for: W_PAST as planted (wFirst), each transaction landed on W
-   *  with its signers and instructions as signed, no token balances; block times long past SOL_RELEASE_FINAL_MS. */
-  const historyJson = (sig: string, p: 0 | 1): unknown => {
-    if (sig === W_PAST) {
-      const first = plant.wFirst;
-      if (first === "unread") return null;
-      return wReleaseJson(W_PAST, first !== undefined && (first.on === undefined || first.on === p) ? first : undefined);
-    }
-    const t = txs.get(sig);
-    if (!t) return null;
-    const m = solanaDecodeMessage(t.tx.subarray(65));
-    return historyTxJson(sig, m.staticKeys, m.requiredSignatures, m.instructions.map((x) => ({ programIdIndex: x.programIndex, accounts: x.accounts, data: base58.encode(x.data) })), t.err, []);
-  };
+  // strangers' transactions on W after W_PAST (wStrangers), newest first, each in a block at wLastHeight
+  for (let k = 1; k <= (plant.wStrangers ?? 0); k++) {
+    wHistory.unshift({ signature: base58.encode(new Uint8Array(64).fill(100 + k)), slot: VF[v].slot - 300 + k });
+    heightAt.set(VF[v].slot - 300 + k, plant.wLastHeight ?? 500);
+  }
 
   /** The program's deposit of `value` on `pre`: the next nonce's label, both leaves, the mark. */
   const deposit = (pre: bigint, value: bigint): void => {
@@ -666,6 +652,11 @@ export function chain(plant: Plant = {}) {
 
   const rpc = (p: 0 | 1): SolanaRpc => {
     const answer = (address: string): unknown => {
+      if (address === W_NOTE_MARK) {
+        const n = plant.wNote;
+        if (n === "paid") return { owner: "11111111111111111111111111111111", lamports: 1_000_000, data: ["", "base64"], executable: false, rentEpoch: 0, space: 0 };
+        return n === "spent" || (typeof n === "object" && n.spentOn === p) ? { owner: PROGRAM, lamports: 890_880, data: ["", "base64"], executable: false, rentEpoch: 0, space: 0 } : null;
+      }
       if (p === 1 && plant.hideOn1 === address) return null;
       if (p === 1 && plant.ammHiddenOn1 && (address === ammVol || address === ammAta)) return null;
       if (p === 1 && plant.owedOn1BeforeSell && !sellLanded && (address === ammVol || address === solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM))) {
@@ -895,8 +886,6 @@ export function chain(plant: Plant = {}) {
           if (p === 1 && plant.txNoneOn1) return null;
           if (plant.txNone) return null;
           if (plant.metaJunk && sent) return { slot: VF[v].slot, transaction: [base64.encode(sent), "base64"], meta: "x" };
-          // the buy reader's read of one of W's transactions (encoding json)
-          if ((params[1] as { encoding?: string } | undefined)?.encoding === "json" && wHistory.some((e) => e.signature === params[0])) return historyJson(params[0] as string, p);
           const t = txs.get(params[0] as string);
           if (t && plant.unfinalSell && (params[1] as { commitment?: string } | undefined)?.commitment === "finalized" && solanaDecodeMessage(t.tx.subarray(65)).instructions.some((x) => sellData(x.data))) return null;
           if (t && plant.unreadTeardown) {
@@ -909,13 +898,7 @@ export function chain(plant: Plant = {}) {
         case "getSignaturesForAddress": {
           // W's own history only, newest first, at most the limit asked: its latest one, or each one after `until`
           assert.equal(params[0], W.address);
-          const o = params[1] as { until?: string; before?: string; limit: number; commitment: string };
-          if (o.commitment === "finalized") {
-            // the buy reader's pages (solanaBuyReader): newest first, after `before`, at most the limit
-            assert.deepEqual(Object.keys(o).filter((k) => k !== "before").sort(), ["commitment", "limit"]);
-            const from = o.before === undefined ? 0 : wHistory.findIndex((e) => e.signature === o.before) + 1;
-            return wHistory.slice(from, from + o.limit).map((e) => ({ signature: e.signature, slot: e.slot, err: null, memo: null, blockTime: 1_700_000_000, confirmationStatus: "finalized" }));
-          }
+          const o = params[1] as { until?: string; limit: number; commitment: string };
           if (o.until === undefined) assert.deepEqual(o, { limit: 1, commitment: "confirmed" });
           else assert.deepEqual(Object.keys(o).sort(), ["commitment", "limit", "until"]);
           assert.equal(o.commitment, "confirmed");

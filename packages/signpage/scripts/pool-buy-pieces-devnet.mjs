@@ -33,8 +33,9 @@
 //                         pay             1,000,000 lamports to W: the clock runs from that signature, then swept;
 //                         empty           an empty wSOL token account owned by W: held while + 151 from its create is
 //                                         not past, then swept with that account closed (read gone on both RPCs);
-//                         token           1 unit of <mint> in W's token account: held for good (the run passes when
-//                                         W keeps its SOL for 2 loads past + 151).
+//                         token           1 unit of <mint> in W's token account (a stranger's, W's own note unspent):
+//                                         held while + 151 is not past, then swept, that account kept with its unit
+//                                         (card a-found-wallet-sweeps-past-a-strangers-coin; before it, held for good).
 //                       FLOW_EXPECT=held (any plant) passes when W keeps its SOL for 2 loads past + 151, as a helper
 //                       that refuses the header read leaves it; else (swept) PASS needs every load before + 151 held
 //                       and W swept within SWEEP_WAIT_MS.
@@ -110,7 +111,9 @@ const FOUND_W = process.env.FLOW_W;
 if (SCENARIO === "found" && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(FOUND_W ?? "")) throw new Error("found takes FLOW_W=<W's address from the stop run's out.json>");
 const PLANT = process.env.FLOW_PLANT ?? "none";
 if (!["none", "pay", "empty", "token"].includes(PLANT) || (PLANT !== "none" && SCENARIO !== "found")) throw new Error("FLOW_PLANT is none, pay, empty or token, on found only");
-const EXPECT = process.env.FLOW_EXPECT ?? (PLANT === "token" ? "held" : "swept");
+// card a-found-wallet-sweeps-past-a-strangers-coin: a stranger's unit (token) no longer holds a found W, so every plant
+// expects W swept by default; FLOW_EXPECT=held stays for a helper that refuses the header read
+const EXPECT = process.env.FLOW_EXPECT ?? "swept";
 if (!["held", "swept"].includes(EXPECT)) throw new Error("FLOW_EXPECT is held or swept");
 const HELPER = COPY ? "the copy's sender, in process" : process.env.FLOW_HELPER;
 if (!COPY && !/^https?:\/\/[^/]+$/.test(HELPER ?? "")) throw new Error("FLOW_HELPER=<the helper's origin: https://ct-api.unrealized.trade, or a local helper's http://127.0.0.1:<port>>");
@@ -454,18 +457,24 @@ if (SCENARIO === "found") {
     out.loads.push(load);
     log(`load ${i}: W ${JSON.stringify(load.holds)}; latest ${load.clock.latest[0]} at height ${JSON.stringify(load.clock.height)}, finalized ${load.clock.finalized.join("/")} (past + 151: ${load.clock.past})`);
     prev = p;
-    const swept = load.holds.lamports.every((l) => l === "0");
-    const heldPast = out.loads.filter((x) => x.clock.past && x.holds.lamports.every((l) => l !== "0")).length;
+    // swept: W at 0 on both RPCs; with a stranger's unit planted (token), W keeps that account's close cost (the page's
+    // keepOf, card a-found-wallet-sweeps-past-a-strangers-coin), so swept is W down by at least 2,000,000 lamports (a
+    // sweep's least note; W otherwise only pays fees) on both RPCs from the first load's read
+    const sweptAt = (x) => (PLANT === "token" ? x.holds.lamports.every((l, k) => BigInt(out.loads[0].holds.lamports[k]) - BigInt(l) >= 2_000_000n) : x.holds.lamports.every((l) => l === "0"));
+    const swept = sweptAt(load);
+    const heldPast = out.loads.filter((x) => x.clock.past && !sweptAt(x)).length;
     if (EXPECT === "held" && (swept || heldPast >= 2)) finish(!swept, swept ? `W swept, expected held (${PLANT})` : `W held ${heldPast} loads past + 151 (${PLANT}): ${JSON.stringify(load.holds)}; the rent back's lines ${JSON.stringify(load.told)}`);
     if (EXPECT === "swept" && swept) {
-      const early = out.loads.filter((x) => !x.clock.past && x.holds.lamports.every((l) => l !== "0"));
-      const sweptEarly = out.loads.some((x) => !x.clock.past && x.holds.lamports.every((l) => l === "0"));
+      const early = out.loads.filter((x) => !x.clock.past && !sweptAt(x));
+      const sweptEarly = out.loads.some((x) => !x.clock.past && sweptAt(x));
       const notes = (await p.notesOf()).filter((n) => n.scope === scope).map((n) => ({ ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null }));
       out.notes = notes;
       // pay: a held load read the plant as W's latest; empty: the planted account is gone on both RPCs
       const fromPlant = PLANT !== "pay" || out.loads.some((x) => x.clock.latest[0] === out.plant.sig && !x.clock.past);
       const closed = PLANT !== "empty" || (await exists(out.plant.account)).every((e) => !e);
-      finish(!sweptEarly && early.length > 0 && fromPlant && closed, `W swept after ${i + 1} load(s); ${early.length} load(s) held while + 151 was not past${PLANT === "pay" ? `; the clock ran from the plant ${out.plant.sig}: ${fromPlant}` : ""}${PLANT === "empty" ? `; the planted ${out.plant.account} closed on both RPCs: ${closed}` : ""}; the notes ${JSON.stringify(notes)}`);
+      // token: the stranger's unit where it was, on both RPCs (kept with its account, never burned or moved)
+      const unit = PLANT !== "token" || load.holds.units.every((u) => u === "1");
+      finish(!sweptEarly && early.length > 0 && fromPlant && closed && unit, `W swept after ${i + 1} load(s); ${early.length} load(s) held while + 151 was not past${PLANT === "pay" ? `; the clock ran from the plant ${out.plant.sig}: ${fromPlant}` : ""}${PLANT === "empty" ? `; the planted ${out.plant.account} closed on both RPCs: ${closed}` : ""}${PLANT === "token" ? `; W from ${out.loads[0].holds.lamports.join("/")} to ${load.holds.lamports.join("/")}, the stranger's unit kept in ${out.plant.account}: ${unit}` : ""}; the notes ${JSON.stringify(notes)}`);
     }
   }
   finish(false, `W ${EXPECT === "held" ? "not read past + 151 twice" : "not swept"} within ${SWEEP_WAIT_MS / 60_000} min`);

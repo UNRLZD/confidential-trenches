@@ -44,7 +44,7 @@
 //   larger rung leaves W enough after its full sell for the sweep, so the record times the sale, teardown and sweep.
 // - Keys are made fresh for the copy and live only in the run's temp folder, removed at the end.
 import { spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -65,9 +65,10 @@ const PIECES = FLOW === "pieces";
 const PLAIN = FLOW === "plain";
 if (PLAIN && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "all")) throw new Error("SOL_COPY_FLOW=plain runs the curve coin alone, with no plant and every step");
 // the pieces driver's scenario: copy-part1 (the default), copy-takeable (the Max past an epoch boundary, the load), or
-// tag3-fail (the tag 3 refused by pump once its tag 2s landed: W swept back into the pool)
+// tag3-fail (the tag 3 refused by pump once its tag 2s landed: W swept back into the pool), or found (tag3-fail stopped, then
+// its W found by a restore of its words with a stranger's unit planted on it, card a-found-wallet-sweeps-past-a-strangers-coin)
 const SCENARIO = process.env.SOL_COPY_SCENARIO ?? "copy-part1";
-if (!["copy-part1", "copy-legs", "copy-takeable", "tag3-fail"].includes(SCENARIO)) throw new Error(`SOL_COPY_SCENARIO: copy-part1, copy-legs, copy-takeable or tag3-fail, not ${SCENARIO}`);
+if (!["copy-part1", "copy-legs", "copy-takeable", "tag3-fail", "found"].includes(SCENARIO)) throw new Error(`SOL_COPY_SCENARIO: copy-part1, copy-legs, copy-takeable, tag3-fail or found, not ${SCENARIO}`);
 if (PIECES && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "all")) throw new Error("SOL_COPY_FLOW=pieces runs the curve coin alone, with no plant and every step");
 // since card owners-solana-buy-lands a buy of several pieces needs no engine to land (its tag 2s go plain, its tag 3 with
 // a plain copy), so the pieces flow runs on the default stand-in too, the one that never lands a bundle
@@ -405,13 +406,30 @@ for (const kind of KINDS) {
   writeFileSync(cfg, JSON.stringify({ rpcs: URLS, feePayerKeyFile: fpFile, dir, mint: c.mint, engine: ENGINE, plant: kind === "mayhem" ? PLANT : "" }));
   const flowOut = join(dir, "flow.json");
   if (PIECES) {
+    // found (card a-found-wallet-sweeps-past-a-strangers-coin): the driver's tag3-fail stopped at the helper's answer to
+    // the pieces (W holding them with no buy, the owed record left behind), then its found on the same copy with that
+    // run's words and W: a fresh store's restore, F's plant (SOL_COPY_FOUND_PLANT, token by default: 1 unit of the coin
+    // in W's token account), and a load every LOAD_MS until W is swept
+    let stop = null;
+    if (SCENARIO === "found") {
+      const stopOut = join(dir, "stop.json");
+      log(`${kind} ${c.mint}: tag3-fail (stop) of pool-buy-pieces-devnet.mjs`);
+      const s = await runNode(["packages/signpage/scripts/pool-buy-pieces-devnet.mjs", "tag3-fail", "pinned", c.mint, stopOut], { FLOW_COPY: cfg, FLOW_AFTER: "stop" });
+      stop = existsSync(stopOut) ? JSON.parse(readFileSync(stopOut, "utf8")) : null;
+      runs.stop = { exit: s.code, pieces: stop, tail: s.out.split("\n").slice(-30) };
+    }
+    const seedOf = () => readdirSync(dir).filter((n) => n.endsWith(".seed")).map((n) => join(dir, n))[0];
+    if (SCENARIO === "found" && !(stop?.ok === true && stop.W && seedOf())) {
+      records.push({ coin: kind, step: "stop", ok: false, why: stop?.why ?? "the stop run left no W or no seed" });
+      continue;
+    }
     log(`${kind} ${c.mint}: ${SCENARIO} of pool-buy-pieces-devnet.mjs`);
-    const r = await runNode(["packages/signpage/scripts/pool-buy-pieces-devnet.mjs", SCENARIO, "pinned", c.mint, flowOut], { FLOW_COPY: cfg });
+    const r = await runNode(["packages/signpage/scripts/pool-buy-pieces-devnet.mjs", SCENARIO, "pinned", c.mint, flowOut], { FLOW_COPY: cfg, ...(SCENARIO === "found" ? { FLOW_RESUME: seedOf(), FLOW_W: stop.W, FLOW_PLANT: process.env.SOL_COPY_FOUND_PLANT ?? "token" } : {}) });
     const f = existsSync(flowOut) ? JSON.parse(readFileSync(flowOut, "utf8")) : null;
     runs[kind] = { exit: r.code, pieces: f, tail: r.out.split("\n").slice(-30) };
-    const Ws = { "buy-2": f?.two?.W ?? null, max: f?.max?.W ?? null };
+    const Ws = { "buy-2": f?.two?.W ?? stop?.two?.W ?? null, max: f?.max?.W ?? null };
     const seen = new Set();
-    for (const s of f?.steps ?? []) {
+    for (const s of [...(stop?.steps ?? []), ...(f?.steps ?? [])]) {
       if (seen.has(s.signature)) continue;
       seen.add(s.signature);
       // a send of the run's last moments (a rent back the sale started) may land after the driver ends: read it again
@@ -522,7 +540,7 @@ const record = {
   what: PLAIN
     ? "the Solana pool's own coin sent straight to U_X on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): the page's pool.address plain-send answer, an outside wallet's two transfers, the follow's carry with no 1Click read, and a withdraw of the note"
     : PIECES
-      ? `a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): ${SCENARIO === "tag3-fail" ? "2 notes of 0.01 SOL, a buy of 2 pieces at 1 bp whose tag 3 pump refuses after a front-run, its tag 2s landed, W swept back into the pool" : SCENARIO === "copy-takeable" ? "5 notes of 0.01 SOL, Max ready after a load and past an epoch boundary" : SCENARIO === "copy-legs" ? "6 notes of 0.01 SOL, a buy only 5 pay, filled as legs on their own Ws in one tap" : "6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max"}`
+      ? `a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): ${SCENARIO === "tag3-fail" ? "2 notes of 0.01 SOL, a buy of 2 pieces at 1 bp whose tag 3 pump refuses after a front-run, its tag 2s landed, W swept back into the pool" : SCENARIO === "found" ? `the same buy stopped at its pieces, then W found by a restore of its words on a fresh store, ${process.env.SOL_COPY_FOUND_PLANT ?? "token"} planted on W by the run's funder, and W swept back into the pool` : SCENARIO === "copy-takeable" ? "5 notes of 0.01 SOL, Max ready after a load and past an epoch boundary" : SCENARIO === "copy-legs" ? "6 notes of 0.01 SOL, a buy only 5 pay, filled as legs on their own Ws in one tap" : "6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max"}`
       : "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
   validator: version,
   mainnetSlot: read.slot,
@@ -557,6 +575,6 @@ const pumpRefused = (coin, step) => (r) => r.coin === coin && r.step === step &&
 const plantOk = PLANT ? records.some(pumpRefused("mayhem", "buy")) : true;
 if (PLANT) log(`plant ${PLANT}: ${plantOk ? "the buy failed with pump's own error" : "NOT refused by pump"}`);
 const tag3Refused = pumpRefused("curve", "tag3-fail");
-const tag3Ok = PIECES && SCENARIO === "tag3-fail" ? records.some(tag3Refused) && records.every((r) => r.ok || tag3Refused(r)) : null;
+const tag3Ok = PIECES && (SCENARIO === "tag3-fail" || SCENARIO === "found") ? records.some(tag3Refused) && records.every((r) => r.ok || tag3Refused(r)) : null;
 if (tag3Ok !== null) log(`tag3-fail: ${tag3Ok ? "the tag 3 refused by pump's own error, every other record ok" : "NOT as planted"}`);
 process.exit(records.length > 0 && (PLANT ? plantOk : tag3Ok ?? records.every((r) => r.ok)) ? 0 : 1);
