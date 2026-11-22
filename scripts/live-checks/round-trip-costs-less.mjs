@@ -83,9 +83,9 @@ export const MARKS = Object.freeze({
     // card every-lamport-can-move, review P1: with buy evidence, only reads that plainly disagree count (differs)
     re(R`(?<c>${I})=(?<o>${I})===void 0&&(?<s>${I})===void 0&&(?<n>${I})\.found!==!0\?\((?<ev>${I})\.rec===void 0&&!\k<ev>\.none\?\k<n>\.passes\+1:(?<df>${I})\)>=3\?` + "`steady`:`again`" + R`:void 0`),
     (g) => [R`\|\|(${I})\.end===` + "`owed`" + R`\|\|${esc(g.c)}===` + "`again`", R`;try\{if\(!(${I})\.buy&&\1\.bare!==!0\)return (${I})\(` + "`holds`,`no buy of W's is recorded`" + R`,\1\.unproven!==` + "`again`" + R`\);`,
-      // a found W's pass on the found W's rule (bare), and no `seen` of it kept: its reads name token accounts the
-      // finding read does not, so every load passes it
-      R`\.\.\.${esc(g.n)}\.found===!0\?\{bare:!0\}:${esc(g.c)}\?\{unproven:${esc(g.c)}\}:\{\}`,
+      // a found W's pass on the found W's rule (bare), naming no mint (review of 359f71639, M1), and no `seen` of it kept:
+      // its reads name token accounts the finding read does not, so every load passes it
+      R`\.\.\.${esc(g.n)}\.found===!0\?\{bare:!0,mints:\[\]\}:${esc(g.c)}\?\{unproven:${esc(g.c)}\}:\{\}`,
       R`(${I})\.steady&&(${I})\.bare!==!0\?(${I}):void 0`],
   ),
   "the positions' passes held only while a W is read": tied(
