@@ -5,7 +5,7 @@
 # the same read failing on the helper it brought back. It needs Docker; nothing of the live host is touched:
 #   bash apps/helper/deploy/unplug-proof.sh [<out dir>]
 # The recorded reads land in <out dir> (default a new temp dir), off.json (the good answer) and on.json (the bad one),
-# and are printed, so a run on another machine (heavy.sh's box) hands them back in its output.
+# and are printed, so a run on another machine (a CI runner) hands them back in its output.
 set -uo pipefail
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 OUT=${1:-$(mktemp -d)}
