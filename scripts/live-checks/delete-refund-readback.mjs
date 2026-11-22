@@ -22,7 +22,9 @@ export const SWEEP = { chain: "near-testnet", hash: "EamCGz2G4488WsjqwmCTXzRG9Ju
 
 export async function check({ sweep = SWEEP, fetchFn = fetch, rpcs = RPCS, floor = FLOOR, sleep }) {
   const text = `CARD ${KEY} / live: PASS\nMoney path: yes\nTx: ${sweep.chain} ${sweep.hash} ${sweep.account}\nDeleted: ${sweep.chain} ${sweep.account}\n`;
-  const r = await moneyGate([{ path: `${LIVE}${KEY}.md`, key: KEY, text }], fetchFn, rpcs, { floor, ...(sleep ? { sleep } : {}) });
+  // the gate's own testnet reads, asked for by name (replayTestNetworks, which the gate's CLI never sets): a change's
+  // run record on a test network is refused, never read as proof
+  const r = await moneyGate([{ path: `${LIVE}${KEY}.md`, key: KEY, text }], fetchFn, rpcs, { floor, replayTestNetworks: true, ...(sleep ? { sleep } : {}) });
   const ok = r.refusals.length === 0 && r.gone.length === 1 && r.read.length + r.proven.length > 0;
   const said = r.refusals.length ? r.refusals.map((x) => x.replace(/^[^:]+: /, "")).join("; ") : [...r.read, ...r.proven, ...r.gone].join(", ");
   return { ok, lines: [`${ok ? "ok " : "BAD"} the sweep Transfer reads ok on ${r.read.length} RPC(s), proven ${r.proven.length}, the account gone ${r.gone.length}: ${said}`] };

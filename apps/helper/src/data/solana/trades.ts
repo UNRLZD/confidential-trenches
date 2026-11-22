@@ -157,10 +157,24 @@ export const SIG_PAGE = 100;
 export const REFILL_MAX = 1_000;
 export const SETTLE_SLOTS = 150;
 /** A first read answers after its walk, its first trade held, or this long after the read began, with what it holds by
- *  then (filling). [design: 3 s, for now: at 1.5 s a local helper on the public lanes answered 6 of 6 busy coins'
- *  first tapes at the bound with no row (solana-tape-rows-at-first-answer FAIL, 21 Nov 22:20Z); the bound comes down
- *  with the walk's first round, sized on the keyed lanes' sol-open times (card helper-stays-fast-under-the-live-run)] */
-export const COLD_WAIT_MS = 3_000;
+ *  then (filling), whatever is still waited on, the subscription included. [design: 2 s: the deployed helper at
+ *  77bfa8030 on its keyed lanes, 22 Nov 03:53Z, answered six cold coins' first tapes by a trade after one round at 124
+ *  to 462 ms (sol-open), 25 reads joined on one busy coin at 308 ms; helper-answers-through-a-burst holds 3 s with the
+ *  runner's round trip (lists p50 641 ms), and at 3 s from the subscription live run 44979250087 answered 12 joined
+ *  tapes at 3.9 s. At 1.5 s a local helper on the public lanes answered 6 of 6 busy coins at the bound with no row
+ *  (21 Nov 22:20Z): those lanes are not the deployed one's] */
+export const COLD_WAIT_MS = 2_000;
+/** How long into a first read that holds no row yet the vendor's tape is read, so an answer at the bound with no row of
+ *  ours never waits on it [design: half the bound; the burst of live run 44979250087 read the vendor only once its
+ *  joined first read reached the bound, server total 3.29 to 3.37 s for 12 tapes]. */
+export const VENDOR_EARLY_MS = 1_000;
+/** A first read's subscription asked again after the stream dropped before it was in force, at most this many asks in
+ *  all, inside TIMEOUT_MS [design: the stream reconnects within RECONNECT_MS's first steps and subscribes every mint it
+ *  watches again; a drop failed every read joined on the mint (app-console-429 on helper-20: 25 of 25 reads 503 at 3.6
+ *  s on one cold coin)]. */
+export const WATCH_TRIES = 3;
+/** A listed coin's first read that failed (its account, its subscription): named in the refusals' count. */
+export const FIRST_FAILED = "solana first read failed";
 /** How long after a first read its answers name its phases (sol-open): the reads that joined it. */
 export const OPEN_NAMED_MS = 1_000;
 export const SILENT_MS = 30_000;
@@ -617,6 +631,10 @@ type Entry = {
   /** While a first read waits (first()): told after each fold, so a trade the stream sends answers it as a walk's round
    *  that holds one does. */
   onFold?: () => void;
+  /** The vendor's tape read VENDOR_EARLY_MS into a first read that held no row (first()), and when: the vendor reads
+   *  within COLD_WAIT_MS of it take it (vendorTape), so the answers at the bound with no row of ours, every read joined
+   *  on the first, never wait on the vendor or ask it again. */
+  early?: { p: Promise<DataAnswer | null>; at: number };
   decimals: number;
   quoteMint: string | null;
   book: Book | null;
@@ -691,6 +709,8 @@ export function createSolanaTrades(deps: {
   /** The first answer's bound: resolves when a first read stops waiting for a round that holds a trade (default
    *  COLD_WAIT_MS on a timer; a test gives its own). */
   coldWait?: () => Promise<unknown>;
+  /** When a first read with no row yet reads the vendor's tape (default VENDOR_EARLY_MS on a timer; a test gives its own). */
+  vendorWait?: () => Promise<unknown>;
   /** The shared RPC budget (../../rpc/rpc.ts background, card helper-ready-gate): before each request to `url`, the
    *  seconds to wait (0: go); a provider with a wait is skipped for the next, so callers' reads keep their room. */
   budget?: (url: string, method: string) => number;
@@ -1281,7 +1301,8 @@ export function createSolanaTrades(deps: {
    *  walk (`e` null) the vendor's refusal, and a mint no pool names is the 404 it was. A good answer that names its pool
    *  starts that pool's follow (seed), which renews the rows from our own reads (poolTape). */
   async function vendorTape(mint: string, limit: number, e: Entry | null): Promise<DataAnswer> {
-    const v = await deps.tape!(mint).catch(() => null);
+    const early = e !== null && e.early !== undefined && now() - e.early.at <= COLD_WAIT_MS ? e.early.p : undefined;
+    const v = await (early ?? deps.tape!(mint).catch(() => null));
     if (v === null || v.status !== 200) {
       // card solana-dropped-tape-settles: a tape waits for the vendor VENDOR_WAIT_MS at most, filling, then answers what
       // it holds: helper 178, live run 43989230034, Cat (CoqwPnZ3...u61w) answered filling for 45.8 s, its one pool made
@@ -1522,9 +1543,17 @@ export function createSolanaTrades(deps: {
     const began = now();
     const marks: string[] = [];
     const mark = (name: string): void => void marks.push(`${name} ${Math.round(now() - began)}`);
+    // card helper-stays-fast-under-the-live-run: the first answer's bound runs from the read's start and nothing it
+    // waits on holds the answer past it, the subscription included: live run 44979250087 (helper-20, the bound run from
+    // the subscription, 106c0a2f4) answered a flooded coin's first tape at 5.5 s and 12 joined tapes at 3.9 s
+    const bound = deps.coldWait?.() ?? new Promise<void>((r) => setTimeout(r, COLD_WAIT_MS).unref?.());
+    const early = deps.vendorWait?.() ?? new Promise<void>((r) => setTimeout(r, VENDOR_EARLY_MS).unref?.());
+    // a read that fails names its phases too, so a 503's wait is read as a slow answer's is; one past the lists (the coin
+    // listed) is named FIRST_FAILED, which the tape answers filling, never as a 503
+    const failed = (why: string, listed = true): DataAnswer => (mark(why), { ...UPSTREAM, ...(listed ? { why: FIRST_FAILED } : {}), timing: `sol-open;desc="${marks.join(", ")}"` });
     const listed = await deps.listed(mint);
     mark("listed");
-    if (listed === null) return UPSTREAM;
+    if (listed === null) return failed("lists unread", false);
     if (!listed) return NOT_FOUND;
     if (entries.size >= OPEN_MAX) return { ...err(429, "rate_limited"), retryAfterS: 5, why: "solana trades open" };
     let decimals: number;
@@ -1535,27 +1564,16 @@ export function createSolanaTrades(deps: {
       mark("account");
       if (solUsd === null) (await readRef(), mark("price"));
     } catch {
-      return UPSTREAM;
+      return failed("account unread");
     }
     const e: Entry = { mint, decimals, quoteMint: null, book: null, held: new Map(), refs: new Map(), lastSig: null, covered: 0, state: "cold", gapFrom: null, refilling: null, inflight: new Map(), touched: now(), readAt: null, seen: 0, traded: 0 };
     if (solUsd !== null) e.refs.set(0, solUsd.v); // the price in force for the cold read's trades
     entries.set(mint, e);
-    try {
-      // the walk starts only once the stream sends this mint's trades, so nothing falls between them
-      await Promise.race([source.watch(mint), new Promise((_, no) => setTimeout(() => no(new Error("subscribe timeout")), TIMEOUT_MS).unref?.())]);
-    } catch {
-      entries.delete(mint);
-      source.unwatch(mint);
-      return UPSTREAM;
-    }
-    mark("watch");
-    // the first answer's bound runs from the subscription, so the walk has its whole COLD_WAIT_MS: a flooded coin's walk
-    // reads a page of COLD_PAGE signatures past its newest COLD_SIGS before any transaction, and with the bound run from
-    // the read's start (88bb881e5) helper-19's live run 44962533217 answered three flooded coins' first tapes at 4.0 to 4.2
-    // s with the vendor's rows, none of ours (solana-tape-rows-at-first-answer BAD; green on helper-18)
-    const bound = deps.coldWait?.() ?? new Promise<void>((r) => setTimeout(r, COLD_WAIT_MS).unref?.());
-    // the tape is served from the moment the stream holds the token; the walk's older trades join as they are read
-    e.readAt = now();
+    // the vendor's tape read once the read is VENDOR_EARLY_MS in with no row of ours, so the answer at the bound has it
+    void early.then(() => {
+      if (deps.tape === undefined || e.open !== undefined || entries.get(mint) !== e || (e.book !== null && e.book.tape(1).length > 0)) return;
+      e.early = { p: deps.tape(mint).catch(() => null), at: now() };
+    });
     let firstRound: () => void = () => undefined;
     const rounded = new Promise<void>((ok) => (firstRound = ok));
     // the first answer is the first round that holds a trade: a busy token's newest transactions may hold none of a venue
@@ -1570,10 +1588,40 @@ export function createSolanaTrades(deps: {
     // f28b6bd56, 21 Nov 21:04Z: three cold trending coins' tapes answered at 2.5, 3.1 and 3.6 s, past the burst check's
     // 3 s p99 with the way to it), and the tape answered then is our own rows, filling while the walk reads older ones
     e.onFold = traded;
+    // the walk starts only once the stream sends this mint's trades, so nothing falls between them; a stream that drops
+    // before the subscription is in force is waited again (it reconnects and subscribes every mint it watches), WATCH_TRIES
+    // asks inside TIMEOUT_MS, never a failed read for every caller joined on it (app-console-429 on helper-20)
+    let timedOut = false;
+    const timeout = new Promise<never>((_, no) => setTimeout(() => ((timedOut = true), no(new Error("subscribe timeout"))), TIMEOUT_MS).unref?.());
+    timeout.catch(() => undefined);
+    const watched = (async (): Promise<string | null> => {
+      for (let k = 1; ; k++) {
+        try {
+          await Promise.race([source.watch(mint), timeout]);
+          return null;
+        } catch (x) {
+          const why = timedOut ? "subscribe timeout" : String((x as Error)?.message ?? x);
+          if (timedOut || k >= WATCH_TRIES || stopped || entries.get(mint) !== e) return why;
+          // a turn before the next ask: a source that refuses at once is asked again after the loop's other work
+          await new Promise<void>((r) => setImmediate(r));
+        }
+      }
+    })();
     // a walk that fails is walked again while the token is open, after a wait that doubles to COLD_RETRY_MAX_MS: the
     // tape stays cold (filling) until its newest COLD_SIGS are read, never settled short on a read that failed (card
     // robinhood-trades-finish-filling: three fails ended the walk and the tape said done with what the stream had sent)
-    const cold = (async () => {
+    const cold = watched.then(async (why): Promise<"walk" | "failed"> => {
+      if (why !== null) {
+        if (entries.get(mint) === e) {
+          entries.delete(mint);
+          source.unwatch(mint);
+        }
+        mark(`watch failed: ${why}`);
+        return "failed";
+      }
+      mark("watch");
+      // the tape is served from the moment the stream holds the token; the walk's older trades join as they are read
+      e.readAt ??= now();
       for (let attempt = 0; !stopped && entries.get(mint) === e; attempt++) {
         try {
           await walk(e, null, () => (rounds++, traded()));
@@ -1584,11 +1632,16 @@ export function createSolanaTrades(deps: {
         }
       }
       fold(e);
-    })();
+      return "walk";
+    });
     // the first answer waits for the walk's first round that holds a trade (its newest trades), a streamed trade, the
-    // whole walk, or the bound: COLD_WAIT_MS from the subscription (bound above)
-    const by = await Promise.race([cold.then(() => "walk"), rounded.then(() => "trade"), bound.then(() => "bound")]);
+    // whole walk, or the bound, COLD_WAIT_MS from the read's start: at the bound the tape is served cold (filling) with
+    // what it holds, the subscription still asked if it is not yet in force
+    const by = await Promise.race([cold, rounded.then(() => "trade" as const), bound.then(() => "bound" as const)]);
     e.onFold = undefined;
+    if (by === "failed") return { ...UPSTREAM, why: FIRST_FAILED, timing: `sol-open;desc="${marks.join(", ")}"` };
+    if (by !== "bound") e.early = undefined;
+    e.readAt ??= now();
     mark(`answer by ${by} after ${rounds} round${rounds === 1 ? "" : "s"}`);
     e.open = { at: now(), desc: marks.join(", ") };
     return e;
@@ -1856,7 +1909,20 @@ export function createSolanaTrades(deps: {
       // the live helper at 837d9d810 answered NEARKAT's and BONK's trades 404, neither on the lists, their pages 200)
       if (!entries.has(mint) && deps.tape !== undefined && (await deps.listed(mint)) !== true) return poolTape(mint, limit, null);
       const e = await open(mint);
-      if (!("mint" in e)) return e;
+      // card helper-stays-fast-under-the-live-run: a listed coin whose first read failed (its subscription, its account)
+      // answers the vendor's rows, filling, else an empty tape, filling: never a 503 (app-console-429 on helper-20, 25 of
+      // 25 reads of one cold coin 503 at 3.6 s while its page, holders and bars answered); the next read opens it again
+      if (!("mint" in e)) {
+        if (e.why !== FIRST_FAILED) return e;
+        const v = deps.tape === undefined ? null : await poolTape(mint, limit, null);
+        const timing = [v?.timing, e.timing].filter((x) => x !== undefined && x !== "").join(", ");
+        if (v !== null && v.status === 200) {
+          const { whole_ms: _, ...b } = JSON.parse(v.body) as Record<string, unknown>;
+          return { ...v, body: JSON.stringify({ ...b, filling: true }), timing };
+        }
+        const at = now();
+        return { status: 200, body: JSON.stringify({ trades: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, timing };
+      }
       const rows = folded(e).book === null ? [] : e.book!.tape(limit);
       // a token with no trade of a venue this tape decodes (Raydium's other pools, Meteora's older pools, the other launchpads: a
       // token not on the pump.fun curve, PumpSwap, Orca, Raydium CLMM, CPMM, LaunchLab, Meteora DLMM, DBC or DAMM v2) is served its top pool's trades (token.ts tape),
@@ -1874,7 +1940,8 @@ export function createSolanaTrades(deps: {
       const reading = (v: DataAnswer): DataAnswer => {
         if (e.state !== "cold" || v.status !== 200) return v;
         const { whole_ms: _, ...b } = JSON.parse(v.body) as Record<string, unknown>;
-        return { ...v, body: JSON.stringify({ ...b, filling: true }) };
+        // the first read's phases with the vendor's rows, as with ours (readTo), so a slow cold answer names its wait
+        return { ...v, body: JSON.stringify({ ...b, filling: true }), timing: [v.timing, readTo(e)].filter((x) => x !== undefined && x !== "").join(", ") };
       };
       if (rows.length === 0 && deps.tape !== undefined) return named(reading(await poolTape(mint, limit, e)));
       if (cut && deps.tape !== undefined) {

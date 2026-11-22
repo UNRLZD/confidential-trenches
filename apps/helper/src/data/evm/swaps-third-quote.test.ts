@@ -225,6 +225,49 @@ test("card index-evm-swaps-v4-route-tape (no route): a coin whose only pool is q
   assert.deepEqual((JSON.parse(value.body) as { trades: unknown[] }).trades, [], value.body);
 });
 
+test("card index-evm-swaps-v4-route-tape (no route on this chain): a coin whose only pool is quoted in a token with no pool on this chain, the vendor's list read and naming none (Base RALLY 0x19640000's pool 0xd6951c4c, quoted in ELEVATE, whose one USD market is on Ethereum), answers as a coin with no pool of ours, 200 on its tape and chart and on every read after, never a 503 (red at 77bfa8030: 503, live run 44979250087)", async () => {
+  const p = planted(CASES[0]!);
+  // the third-token pool is the coin's only one, and the quote token has no pool here: no swap, no transfer of it
+  for (let i = p.logs.length - 1; i >= 0; i--) if (p.logs[i]!.topics[1] === p.SIDE || p.logs[i]!.address === `0x${"f7".repeat(20)}` || p.logs[i]!.address === CASES[0]!.quote) p.logs.splice(i, 1);
+  for (const ls of p.receipts.values()) for (let i = ls.length - 1; i >= 0; i--) if (ls[i]!.topics[1] === p.SIDE) ls.splice(i, 1);
+  // the vendor's key answers: the quote's list of pools, read, names none
+  const asked: string[] = [];
+  const keyed = { read: async (path: string, ok: (j: unknown) => boolean) => (asked.push(path), ok({ data: [] }) ? { data: [] } : undefined) };
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const s = createSwaps("base", { fetch: rig(p) as never, now: () => Date.now(), listed: async () => true, rpcs: URLS, pools: new Map(), tickMs: 0, sleep: async () => undefined, keyed: keyed as never });
+    const out: { status: number; body: string }[] = [await s.trades(COIN, 50), await s.candles(COIN, "1m", null, 60)];
+    for (let i = 0; i < 3; i++) {
+      await new Promise((go) => setTimeout(go, 1_000));
+      await s.tick();
+      out.push(await s.trades(COIN, 50));
+    }
+    s.stop();
+    return out;
+  });
+  assert.ok(asked.some((x) => x.includes(CASES[0]!.quote)), `the quote's pools asked of the vendor: ${asked.join(", ")}`);
+  for (const [i, a] of value.entries()) {
+    assert.equal(a.status, 200, `answer ${i}: ${a.status} ${a.body}`);
+    assert.notEqual((JSON.parse(a.body) as { filling?: boolean }).filling, true, `answer ${i}: a coin with no pool of ours is no cold tape: ${a.body}`);
+  }
+  assert.deepEqual((JSON.parse(value[0]!.body) as { trades: unknown[] }).trades, [], value[0]!.body);
+});
+
+test("card index-evm-swaps-v4-route-tape (kept pool, no route): a pool kept from before (the helper's pool list at start, or a pick made while the quote's route was known) quoted in a token whose route now reads as none is searched again, 200 as a coin with no pool of ours, never a 503 (red at 77bfa8030: 503)", async () => {
+  const p = planted(CASES[0]!);
+  for (let i = p.logs.length - 1; i >= 0; i--) if (p.logs[i]!.topics[1] === p.SIDE || p.logs[i]!.address === `0x${"f7".repeat(20)}` || p.logs[i]!.address === CASES[0]!.quote) p.logs.splice(i, 1);
+  for (const ls of p.receipts.values()) for (let i = ls.length - 1; i >= 0; i--) if (ls[i]!.topics[1] === p.SIDE) ls.splice(i, 1);
+  const keyed = { read: async (_: string, ok: (j: unknown) => boolean) => (ok({ data: [] }) ? { data: [] } : undefined) };
+  const pool: S.Pool = { venue: "v4", id: p.MAIN, token: COIN, tokenIs0: true, quote: { kind: "token", decimals: 18, token: CASES[0]!.quote } };
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const s = createSwaps("base", { fetch: rig(p) as never, now: () => Date.now(), listed: async () => true, rpcs: URLS, pools: new Map([[COIN, { pool, decimals: 18 }]]), tickMs: 0, sleep: async () => undefined, keyed: keyed as never });
+    const a = await s.trades(COIN, 50);
+    s.stop();
+    return a;
+  });
+  assert.equal(value.status, 200, value.body);
+  assert.deepEqual((JSON.parse(value.body) as { trades: unknown[] }).trades, [], value.body);
+});
+
 test("card index-evm-swaps-v4-route-tape (moving quote): each row is priced at the quote's price in force at its own log, from the quote pool's own Swap logs: a coin swap in the block where cbBTC's price moves, but before that move's log, keeps the old price (red at c3b72179a: priced at the block's end state)", async () => {
   const c = CASES[0]!;
   const p = planted(c);

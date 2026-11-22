@@ -17,10 +17,16 @@
 // (live-checks-provider-answer's NOT_MOVED), and every read of this check goes through provider-answer.mjs, which
 // leaves a provider's no-answer out. A scan with no third-quoted coin, or one no two providers answered alike, is
 // INCONCLUSIVE (exit 3), never a pass or a FAIL.
+// A coin is judged on its tape only when its quote has a market our reads can price it by: the quote traded in the scan
+// against USDC, WETH or ETH on Base (a scanned v4 pool of the two, or a v2 or v3 venue's pool its Transfers name;
+// `markets`). The busiest candidate whose quote traded against none of them has no pool the helper's tape can price (live
+// run 44979250087: Base RALLY 0x19640000's only pool 0xd6951c4c is quoted in ELEVATE, whose one USD market is on
+// Ethereum); its trades answer must still be 200 (or 404, a coin no list carries), never a 5xx: the helper answered 503.
 // After: helper
 // Serial: evm-keyed 101 (the helper's tape read of the coin draws the keyed Base providers)
 //   node scripts/live-checks/index-evm-swaps-v4-route-tape.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes the run (every answer read).
+// Record: what the run read; a live run that fails keeps it beside its log
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { BLOCK_CLOCK } from "../../apps/helper/src/data/evm/lists.ts";
@@ -48,6 +54,8 @@ export const FILL_MS = 45_000;
 export const FILL_EVERY_MS = 3_000;
 const sleep = (ms) => new Promise((go) => setTimeout(go, ms));
 export const QUOTE_POOLS_MAX = 3;
+/** A quote's Transfer counterparties read for a v2 or v3 pool against USDC, WETH or ETH, most transfers first. */
+export const MARKET_PARTIES = 5;
 /** Blocks under the head a tape may not hold yet (index-evm-swaps MARGIN.base). */
 export const MARGIN = 120;
 const PM = VENUES.base.poolManager;
@@ -72,7 +80,7 @@ export function candidates(scan) {
     // the coin is the side that is not many coins' quote
     const other = p.c0 === c ? p.c1 : p.c0;
     if ((quotes.get(c) ?? 0) > QUOTE_POOLS_MAX || (quotes.get(c) ?? 0) > (quotes.get(other) ?? 0)) continue;
-    out.push({ coin: c, pool: p.id, n: p.n });
+    out.push({ coin: c, pool: p.id, n: p.n, quote: other });
   }
   return out.sort((a, b) => b.n - a.n || (a.coin < b.coin ? -1 : 1));
 }
@@ -82,8 +90,15 @@ export function candidates(scan) {
  *  each the busier by the window read (live, 21 Nov 23:4xZ: Base 0x95669a65's two third-quoted pools, 5 against 14 swaps
  *  over 1,500 blocks and 65 against 53 over 12,000), so neither is judged. */
 export function pick(scan) {
-  const c = candidates(scan).find((x) => scan.elsewhere?.[x.coin] === null && typeof scan.others?.[x.coin] === "number" && scan.others[x.coin] * DOMINANCE <= x.n);
+  // a scan recorded before the quotes' markets were read (bad_run_44942886709) names none: its pick stands as it was read
+  const c = candidates(scan).find((x) => scan.elsewhere?.[x.coin] === null && typeof scan.others?.[x.coin] === "number" && scan.others[x.coin] * DOMINANCE <= x.n && (scan.markets === undefined || scan.markets[x.quote] != null));
   return c === undefined ? null : { coin: c.coin, pool: c.pool };
+}
+/** The busiest candidate whose quote traded against no USDC, WETH or ETH pool on Base in the scan (`markets[quote]`
+ *  null): no pool the helper's tape can price, so the coin is judged on its answer's status alone. */
+export function unpriced(scan) {
+  const c = scan.markets === undefined ? undefined : candidates(scan).find((x) => scan.markets[x.quote] === null);
+  return c === undefined ? null : { coin: c.coin, pool: c.pool, quote: c.quote };
 }
 
 /** Base's block at a time in ms (BLOCK_CLOCK's last era). */
@@ -100,8 +115,18 @@ export function judge(run) {
   // the providers' no-answers are theirs, never the helper's: a scan they left unread judges nothing
   if (run.scan == null) return { ok: false, verdict: "INCONCLUSIVE", lines: [`-- the scan was not read on two agreeing providers: ${run.scanUnread ?? "no answer"}`] };
   const chosen = pick(run.scan);
-  if (chosen === null) return { ok: false, verdict: "INCONCLUSIVE", lines: [`-- no third-quoted coin in ${run.scan.pools.length} pools over ${SCAN_BLOCKS} blocks to ${run.scan.head}`] };
-  let good = chosen.coin === run.coin && chosen.pool === run.pool ? ok(`the coin ${run.coin}: its busiest pool ${run.pool} is quoted in a third token (${run.scan.pools.find((p) => p.id === run.pool).n} swaps in the scan, ${run.scan.others[run.coin]} other transactions of the coin; no v2 or v3 pool of it busier)`) : bad(`the run judged ${run.coin} ${run.pool}, the scan picks ${chosen.coin} ${chosen.pool}`);
+  const un = unpriced(run.scan);
+  if (chosen === null && un === null) return { ok: false, verdict: "INCONCLUSIVE", lines: [`-- no third-quoted coin in ${run.scan.pools.length} pools over ${SCAN_BLOCKS} blocks to ${run.scan.head}`] };
+  let good = true;
+  if (un !== null) {
+    const u = run.unpriced;
+    const status = u?.trades?.status;
+    if (u?.coin !== un.coin) good = bad(`the run read ${u?.coin} as the coin with no market its quote can price, the scan names ${un.coin}`);
+    else if (status === 200 || status === 404) ok(`the coin ${un.coin}: its busiest pool ${un.pool} is quoted in ${un.quote}, which traded against no USDC, WETH or ETH pool on Base in the scan: trades ${status}, never a 5xx`);
+    else good = bad(`the coin ${un.coin}, whose quote ${un.quote} has no market on Base the tape can price it by: trades ${status} ${u.trades?.body?.slice(0, 80)}, not 200: a listed coin's tape is never a 5xx`);
+  }
+  if (chosen === null) return { ok: good, verdict: good ? "PASS" : "FAIL", lines: [...lines, `-- no third-quoted coin whose quote has a market on Base in ${run.scan.pools.length} pools: no tape judged`] };
+  good = (chosen.coin === run.coin && chosen.pool === run.pool ? ok(`the coin ${run.coin}: its busiest pool ${run.pool} is quoted in a third token (${run.scan.pools.find((p) => p.id === run.pool).n} swaps in the scan, ${run.scan.others[run.coin]} other transactions of the coin; no v2 or v3 pool of it busier)`) : bad(`the run judged ${run.coin} ${run.pool}, the scan picks ${chosen.coin} ${chosen.pool}`)) && good;
   const t = run.trades;
   let rows = [];
   try {
@@ -219,23 +244,62 @@ export async function scan(fetchFn = fetch, rpcs = SWAP_RPCS.base.filter((u) => 
     const own = new Set(top.find((p) => p.id === c.pool).txs.map(([tx]) => tx));
     others[c.coin] = [...txs].filter((tx) => !own.has(tx)).length;
   }
-  return { head, pools: top, elsewhere, others };
+  // each candidate's quote: a market against USDC, WETH or ETH on Base in the scan, null when it traded against none
+  const markets = {};
+  for (const c of candidates({ head, pools: top }).slice(0, ELSEWHERE_COINS)) {
+    if (c.quote in markets) continue;
+    const v4 = top.find((p) => (p.c0 === c.quote && BASES.has(p.c1)) || (p.c1 === c.quote && BASES.has(p.c0)));
+    if (v4 !== undefined) {
+      markets[c.quote] = { pool: v4.id, venue: "v4" };
+      continue;
+    }
+    const n = new Map();
+    for (let lo = head - SCAN_BLOCKS + 1; lo <= head; lo += SCAN_STEP) {
+      const got = await agreed(["eth_getLogs", [{ address: c.quote, topics: [TOPIC.transfer], fromBlock: hex(lo), toBlock: hex(Math.min(head, lo + SCAN_STEP - 1)) }]], fetchFn, rpcs, (ls) => (Array.isArray(ls) ? ls.map((l) => l.topics) : ls));
+      if (got.unread !== undefined) return got;
+      if (!Array.isArray(got.result)) return { unread: "eth_getLogs answered no list" };
+      for (const t of got.result) for (const a of [t[1], t[2]]) if (typeof a === "string") n.set(`0x${a.slice(26)}`, (n.get(`0x${a.slice(26)}`) ?? 0) + 1);
+    }
+    const parties = [...n].filter(([a]) => a !== PM && a !== `0x${"0".repeat(40)}`).sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, MARKET_PARTIES).map(([a]) => a);
+    markets[c.quote] = null;
+    if (parties.length === 0) continue;
+    await sleep(KEY_EVERY_MS);
+    const fa = await agreed(parties.map((a) => ["eth_call", [{ to: a, data: "0xc45a0155" }, hex(head)]]), fetchFn, rpcs);
+    if (fa.unread !== undefined) return fa;
+    for (const [i, a] of parties.entries()) {
+      const f = fa.result[i];
+      if (typeof f !== "string" || f.length !== 66 || !FACTORIES.has(`0x${f.slice(26)}`)) continue;
+      await sleep(KEY_EVERY_MS);
+      const tk = await agreed([["eth_call", [{ to: a, data: "0x0dfe1681" }, hex(head)]], ["eth_call", [{ to: a, data: "0xd21220a7" }, hex(head)]]], fetchFn, rpcs);
+      if (tk.unread !== undefined) return tk;
+      const [t0, t1] = tk.result.map((x) => (typeof x === "string" && x.length === 66 ? `0x${x.slice(26)}` : null));
+      if ((t0 === c.quote && BASES.has(t1)) || (t1 === c.quote && BASES.has(t0))) {
+        markets[c.quote] = { pool: a, venue: `0x${f.slice(26)}` };
+        break;
+      }
+    }
+  }
+  return { head, pools: top, elsewhere, others, markets };
 }
 
 export async function read(base = BASE, fetchFn = fetch, rpcs = undefined) {
   const s = await scan(fetchFn, rpcs);
   if (s.unread !== undefined) return { base, scan: null, scanUnread: s.unread };
   const chosen = pick(s);
-  if (chosen === null) return { base, scan: s };
+  const un = unpriced(s);
   // a cold coin's tape answers `filling` until its read is done: read again FILL_EVERY_MS apart, FILL_MS at most (the
   // bound a cold Base tape fills inside, card base-tapes-fill-inside-their-bound)
-  let trades;
-  for (const t0 = Date.now(); ; await sleep(FILL_EVERY_MS)) {
-    const r = await fetchFn(`${base}${TRADES_PATH(chosen.coin)}`, { headers: { Origin: APP }, signal: AbortSignal.timeout(60_000) });
-    trades = { status: r.status, headers: Object.fromEntries(r.headers), body: await r.text() };
-    if (!/"filling":true/.test(trades.body) || Date.now() - t0 >= FILL_MS) break;
-  }
-  return { base, scan: s, coin: chosen.coin, pool: chosen.pool, trades };
+  const tape = async (coin) => {
+    for (const t0 = Date.now(); ; await sleep(FILL_EVERY_MS)) {
+      const r = await fetchFn(`${base}${TRADES_PATH(coin)}`, { headers: { Origin: APP }, signal: AbortSignal.timeout(60_000) });
+      const trades = { status: r.status, headers: Object.fromEntries(r.headers), body: await r.text() };
+      if (!/"filling":true/.test(trades.body) || Date.now() - t0 >= FILL_MS) return trades;
+    }
+  };
+  const run = { base, scan: s };
+  if (un !== null) run.unpriced = { coin: un.coin, pool: un.pool, trades: await tape(un.coin) };
+  if (chosen !== null) Object.assign(run, { coin: chosen.coin, pool: chosen.pool, trades: await tape(chosen.coin) });
+  return run;
 }
 
 if (import.meta.main) {
