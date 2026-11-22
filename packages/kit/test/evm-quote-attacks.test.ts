@@ -4382,7 +4382,7 @@ const specCase = (token: string, x: string) => {
 /** The verdict of a quote of `token` with no plan kept, on `rpcs`. */
 const coldVerdict = async (token: string, rpcs: () => EvmRpc[], logs: Parameters<typeof scanner>[1]) => {
   quoteMod.evmQuoteWarmReset();
-  return verdict(evmPoolBuyQuoteWith(warmReq(token), rpcs(), NOW, scanner(5_000_000, logs)));
+  return verdict(evmPoolBuyQuoteWith(warmReq(token), rpcs(), NOW, scanner(5_000_000, logs), undefined, () => 0));
 };
 
 test("W6 a warm quote's read of a hooked pool that vanished since the last quote is never used, though its answer would move the quote: it decides as a quote with no plan", async () => {
@@ -4412,9 +4412,9 @@ test("W6b a warm quote whose hooked pool changed hook since the last quote reads
   const logsNow = [...logs, { key: moved.key, at: 4_100_003 }];
   const expected = await coldVerdict(token, () => [chain(now, 0), chain(now, 1)], logsNow);
   assert.deepEqual(expected, { accepted: false, code: "below_reference" });
-  await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)));
+  await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0));
   const seen: Overridden[] = [];
-  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(now, 0, 5_000_000, seen), chain(now, 1, 5_000_000, seen)], NOW, scanner(5_000_000, logsNow)));
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(now, 0, 5_000_000, seen), chain(now, 1, 5_000_000, seen)], NOW, scanner(5_000_000, logsNow), undefined, () => 0));
   assert.deepEqual(v, expected);
   assert.ok(seen.some((o) => o.replaces.includes(NEW_HOOK)), "the new pool was not read with its hook replaced");
 });
@@ -4431,9 +4431,9 @@ test("W6c a warm quote uses only answers of its own block: a provider that answe
   };
   const expected = await coldVerdict(token, () => [pinned(0), pinned(1)], logs);
   assert.deepEqual(expected, { accepted: false, code: "below_reference" });
-  await verdict(evmPoolBuyQuoteWith(warmReq(token), [pinned(0), pinned(1)], NOW, scanner(5_000_000, logs)));
+  await verdict(evmPoolBuyQuoteWith(warmReq(token), [pinned(0), pinned(1)], NOW, scanner(5_000_000, logs), undefined, () => 0));
   const second = counted(pinned(0));
-  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [second.rpc, pinned(1)], NOW, scanner(5_000_000, logs)));
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [second.rpc, pinned(1)], NOW, scanner(5_000_000, logs), undefined, () => 0));
   assert.deepEqual(v, expected);
   assert.equal(second.n.calls, 1, "the hooked pool's read with its hook replaced was not read beside the first round");
 });
@@ -4445,9 +4445,9 @@ test("W6e a warm quote's read with a hook replaced is answered only by that very
   const two = [...pools.filter((p) => p !== hooked), { ...hooked, give: (a: bigint) => 5n * a, lie: (a: bigint) => 20n * a }];
   const expected = await coldVerdict(token, () => [chain(two, 0), chain(two, 1)], logs);
   assert.equal(expected.accepted, true, String((expected as { code?: string }).code));
-  await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(two, 0), chain(two, 1)], NOW, scanner(5_000_000, logs)));
+  await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(two, 0), chain(two, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0));
   const second = counted(chain(two, 0));
-  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [second.rpc, chain(two, 1)], NOW, scanner(5_000_000, logs)));
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [second.rpc, chain(two, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0));
   assert.deepEqual(v, expected);
   assert.equal(second.n.calls, 1, "the read with the hook replaced was not read beside the first round");
 });
@@ -4459,7 +4459,7 @@ test("W6d a warm quote never replaces a hook that is an address the reads call: 
   const all = [...pools, quoterHooked];
   const logsAll = [...logs, { key: quoterHooked.key, at: 4_100_004 }];
   const seen: Overridden[] = [];
-  for (let k = 0; k < 2; k++) await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(all, 0, 5_000_000, seen), chain(all, 1, 5_000_000, seen)], NOW, scanner(5_000_000, logsAll)));
+  for (let k = 0; k < 2; k++) await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(all, 0, 5_000_000, seen), chain(all, 1, 5_000_000, seen)], NOW, scanner(5_000_000, logsAll), undefined, () => 0));
   assert.ok(seen.some((o) => o.replaces.includes(UNPINNED)), "the case plants no hook the quote replaces");
   assert.deepEqual(seen.filter((o) => o.replaces.includes(QUOTER_V4)), [], "a read replaced the V4Quoter's code");
 });
