@@ -560,9 +560,14 @@ const QUOTE_TOKENS_MAX = 16;
  *  state read there (routeStatesFromLogs); each further window ten times the last, to the chain's read back depth.
  *  [design: a deep route pool logs every few blocks; a quiet one is found in a few windows, shared by every block] */
 const QUOTE_SEED_NEAR = 100;
-/** The longest a read back's state post waits for a throttled keeper of old state before its blocks are priced from the
- *  route's logs (quoteBlocks). [design: blockmachine's Retry-After 3; a walk back cost 0xaa07a0e9's rounds some 4 s] */
-const QUOTE_HOLD_WAIT_S = 3;
+/** The longest, in all, a read back's state posts wait for a throttled keeper of old state before their blocks are priced
+ *  from the route's logs (quoteBlocks). [design: pocket's holds read 1 to 4 s, 22 Nov 10:2xZ; a walk back of the route's
+ *  logs cost 0xaa07a0e9's rounds 4 s on a busy route pool and 48 s on a quiet one] */
+const QUOTE_HOLD_WAIT_S = 5;
+/** The posts a read back's state may take in a round: the first, then again while its refusals taught a provider gone or
+ *  a keeper's throttle is waited out (quoteBlocks). [design: 22 Nov 10:1xZ a round's one retry after pocket's 1 s hold
+ *  was throttled again and its blocks walked the route's logs; a quiet route pool's walk held 0xaa07a0e9 at 34 rows 48 s] */
+const QUOTE_POST_TRIES = 4;
 /** A pool trade's ids on an EVM chain (../solana/token.ts toTape): a 32-byte hash and an address, lower case. */
 const EVM_IDS: TapeIds = { tx: (v) => (typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v) ? v.toLowerCase() : null), address: evmAddress };
 /** The bytes of GeckoTerminal answers one chain's swap reads hand the next process (data/warm.ts) [design: 2 MB, a
@@ -4264,11 +4269,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       got = await callsAgreed(oldest, post(), missed);
       // a keeper that answered a throttle (pocket's 429 on a 5-call post, 22 Nov 10:0xZ) is waited for, at most
       // QUOTE_HOLD_WAIT_S: its answer is the second of the pair, where the route's logs walked back cost the round some 4 s
-      const held = Math.min(...rpcs.filter((u) => (stateGone.get(u) ?? -1) < oldest).map((u) => holds.heldFor(u)).filter((x) => x > 0));
-      if (missed.any && keepers() >= 2 && (keepers() < before || held <= QUOTE_HOLD_WAIT_S)) {
-        if (Number.isFinite(held) && held <= QUOTE_HOLD_WAIT_S) await (deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms))))(held * 1_000);
+      // each try asks only the calls not agreed yet (callsAgreed keeps each agreed one), so a throttled keeper is asked
+      // fewer each time; QUOTE_HOLD_WAIT_S in all
+      let waitedS = 0;
+      for (let tries = 1, was = before; missed.any && keepers() >= 2 && tries < QUOTE_POST_TRIES; tries++) {
+        const held = Math.min(...rpcs.filter((u) => (stateGone.get(u) ?? -1) < oldest).map((u) => holds.heldFor(u)).filter((x) => x > 0));
+        const taught = keepers() < was;
+        if (!taught && !(Number.isFinite(held) && waitedS + held <= QUOTE_HOLD_WAIT_S)) break;
+        if (Number.isFinite(held) && waitedS + held <= QUOTE_HOLD_WAIT_S) {
+          await (deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms))))(held * 1_000);
+          waitedS += held;
+        }
+        was = keepers();
         missed.any = false;
-        // only the calls not agreed are asked again (callsAgreed keeps each agreed one)
         got = await callsAgreed(oldest, post(), missed);
       }
     }

@@ -608,7 +608,7 @@ test("card robinhood-old-state-from-keepers: where 2 of 5 providers keep old sta
   assert.ok(qBlocks <= 6_000, `the quote pool's logs read over ${qBlocks} blocks`);
 });
 
-test("card robinhood-old-state-from-keepers: a keeper of old state that answers a read back's state post with a throttle is waited for and asked again, never the route's logs walked back over the read back (pocket's 429 on Robinhood, 22 Nov 10:0xZ; red before the wait: the quote pool's logs walked back)", async () => {
+test("card robinhood-old-state-from-keepers: a keeper of old state that answers a read back's state post with a throttle is waited for and asked again, twice in a row if it throttles again, never the route's logs walked back over the read back (pocket's 429 on Robinhood, 22 Nov 10:0xZ; red on main 77a1056ac, and with one retry: the quote pool's logs walked back)", async () => {
   const c = CASES[0]!;
   const p = planted(c);
   const QPOOL = `0x${"f7".repeat(20)}`;
@@ -636,8 +636,9 @@ test("card robinhood-old-state-from-keepers: a keeper of old state that answers 
       if (r.method === "eth_getLogs" && [q?.address].flat().includes(QPOOL)) qBlocks += parseInt(q.toBlock!, 16) - parseInt(q.fromBlock!, 16) + 1;
     }
     if (!list.some(old)) return f(url, init);
-    // e keeps old state but throttles every other post of it, as pocket did; a, b and d keep none
-    const throttle = url === "https://e.test" && throttled++ % 2 === 0;
+    // e keeps old state but throttles two posts of it in a row of every three, as pocket did (22 Nov 10:2xZ: a retry
+    // after its 1 s hold throttled again); a, b and d keep none
+    const throttle = url === "https://e.test" && throttled++ % 3 !== 2;
     if (KEEP.has(url) && !throttle) return f(url, init);
     const res = (await (await f(url, init)).json()) as { id: number }[] | { id: number };
     const err = throttle ? { code: -32005, message: "rate limit exceeded", data: { backoff_seconds: 1 } } : { code: -32000, message: "historical state not available" };
@@ -665,7 +666,7 @@ test("card robinhood-old-state-from-keepers: a keeper of old state that answers 
     const usd = Number(want[i]!.q) * c.usdPerQuoteUnit;
     assert.ok(Math.abs(Number(t.usd) - usd) <= usd * 1e-9, `row ${i}: usd ${t.usd}, want ${usd}`);
   });
-  console.log(`throttled posts ${Math.ceil(throttled / 2)}; the quote pool's logs over ${qBlocks} blocks`);
+  console.log(`posts of old state to e ${throttled}; the quote pool's logs over ${qBlocks} blocks`);
   assert.ok(throttled > 0, "e was never asked old state");
   assert.ok(qBlocks <= 6_000, `the quote pool's logs read over ${qBlocks} blocks: walked back`);
 });
