@@ -14,18 +14,22 @@
 // It passes only when every answer is 200 JSON in the tape's fields {trades, src, as_of_ms[, filling: true]} with rows
 // {t_ms, side, usd, amt, trader, tx}, X-Helper-Commit a full sha; each tape ends within BOUND_MS, never holding fewer
 // trades than at its first answer; and at least one tape said filling and then ended (a read back seen end to end).
-// A tape still filling at BOUND_MS: FAIL. A short tape opened cold (its first answer's Server-Timing evm-open WARM_MS or
-// more, or none) that never said filling: FAIL. Every tape full at its first answer, or open before this check's first
-// read (evm-open under WARM_MS: its read back, if any, was another reader's), leaves nothing to read back: INCONCLUSIVE. Card
-// evm-keyed-checks-hold-steady: helper live run 43722667540 attempt 1 (15 Nov 14:16Z) opened the four tapes
-// helper-base-tape-reads-back had opened a minute before, two of them short and done at their first answer (5 trades
-// at 135 ms, 1 at 389 ms), and FAILed with no read back to see.
+// A tape still filling at BOUND_MS: FAIL. A short tape done at its first answer counts as read back only when the helper
+// says so, naming whole_ms (apps/helper/src/data/evm/swaps.ts trades: every swap since then held, the tape not filling);
+// one naming neither filling nor whole_ms is a tape the helper never read back: FAIL. Short tapes that all named
+// whole_ms at once were read back before this check's read (the lists read their tapes ahead): PASS. Every tape full at
+// its first answer leaves nothing to read back: INCONCLUSIVE. Card evm-tape-check-counts-read-ahead-warm: the check
+// judged a tape cold by its open time (evm-open 10 ms or more), and so FAILed tapes the lists had read ahead, short and
+// whole at their first answer (helper live runs 44962533217, 44979250087 attempt 1, 44992969378: 10 trades at 2,754 ms,
+// 5 at 452 ms, 23 at 2,351 ms). A held tape's open reads the blocks since its rest first (swaps.ts open, reopen): four
+// short tapes on the deployed helper 22 Nov 09:0xZ opened in 181 to 1,666 ms, each naming whole_ms.
 // After: helper
 // Serial: evm-keyed 85 (before evm-chart-opens-without-a-vendor-call, index-evm-swaps and helper-base-tape-reads-back, which
 //   open Base tapes of the same lists, so its picks are cold)
 //   node scripts/live-checks/evm-tape-from-our-index-fast.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read (each answer's
-//   status, commit, row count, filling and fault, not its rows; each tape's token as `address`), for the test's replay.
+//   status, commit, row count, filling, whether it named whole_ms, evm-open and fault, not its rows; each tape's token as
+//   `address`), for the test's replay.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { EXIT } from "./provider-answer.mjs";
@@ -38,9 +42,6 @@ export const APP = "https://ct-app.unrealized.trade";
 export const TRADES_MAX = 50;
 /** The page's read again of a filling tape (trades.ts TRADES_POLL_MS): a test holds it. */
 export const POLL_MS = 3_000;
-/** An open this short (evm-open, ms) found the tape's book held: an open of a book not held reads a provider first. [design:
- *  10 ms; a held book's open read 0 and 1 ms (15 Nov 15:01Z to 15:09Z, deployed and local), a cold one 383 to 8,001 ms.] */
-export const WARM_MS = 10;
 /** Tapes opened at once: the first OPEN / 2 of new and of trending_1h. */
 export const OPEN = 4;
 /** How long a cold tape may fill: the listed tape's bound (tape-read.mjs FILLED_MS, robinhood-listed-tape-opens; a test holds them equal). */
@@ -95,12 +96,12 @@ export function openMs(timing) {
   const m = /(?:^|,)\s*evm-open;dur=(\d+)(?:[;,]|$)/.exec(timing ?? "");
   return m === null ? null : Number(m[1]);
 }
-/** One answer as recorded: its time from the tape's first read, status, commit, rows, filling, the helper's open (ms)
- *  and first fault. */
+/** One answer as recorded: its time from the tape's first read, status, commit, rows, filling, whether it named
+ *  whole_ms (the helper's word that it holds every swap since then), the helper's open (ms) and first fault. */
 function answer(a, t) {
   const b = parse(a.body);
   const fault = a.status !== 200 ? `HTTP ${a.status}` : !/^application\/json/i.test(a.type) ? `Content-Type ${a.type}` : bodyFault(b);
-  return { t, status: a.status, commit: a.commit, n: Array.isArray(b?.trades) ? b.trades.length : null, filling: b?.filling === true, open: openMs(a.timing), fault };
+  return { t, status: a.status, commit: a.commit, n: Array.isArray(b?.trades) ? b.trades.length : null, filling: b?.filling === true, whole: Number.isSafeInteger(b?.whole_ms), open: openMs(a.timing), fault };
 }
 /** Whether a tape's answer ends it: TRADES_MAX trades, or no longer filling. */
 const ends = (a) => a.fault !== null || a.n >= TRADES_MAX || !a.filling;
@@ -151,19 +152,18 @@ export function judge(run) {
     const ended = last.fault === null && (last.n >= TRADES_MAX || !last.filling);
     say(ended, `${token}: first ${first.n} trade(s)${first.filling ? " filling" : ""}, ${ended ? `${last.n} and ${last.n >= TRADES_MAX ? "full" : "done"} at ${last.t} ms` : `still filling at ${last.t} ms`}${said ? " (read back)" : ""}`);
     say(last.n !== null && first.n !== null && last.n >= first.n, `${token}: never fewer trades than at its first answer (${first.n} then ${last.n})`);
+    // a short tape done at once was read back only when the helper says so (whole_ms), never judged by its open time
+    if (ended && !said && last.n < TRADES_MAX) say(last.whole === true, `${token}: short and done at its first answer, ${last.whole === true ? "naming whole_ms: read back before this read" : "naming neither filling nor whole_ms: never read back"}`);
   }
   const back = tapes.some(({ answers }) => answers.some((a) => a.filling) && answers.at(-1)?.filling === false && answers.at(-1)?.fault === null);
-  // a tape open before this check's first read (evm-open under WARM_MS) has read back, if it had to, for another reader
-  const warm = (answers) => Number.isSafeInteger(answers[0]?.open) && answers[0].open < WARM_MS;
-  const coldShort = tapes.filter(({ answers }) => (answers[0]?.n ?? 0) < TRADES_MAX && !warm(answers));
+  const whole = tapes.filter(({ answers }) => (answers[0]?.n ?? 0) < TRADES_MAX && !answers.some((a) => a.filling) && answers.at(-1)?.whole === true).map((t) => t.address);
   const allFull = tapes.length > 0 && tapes.every(({ answers }) => (answers[0]?.n ?? 0) >= TRADES_MAX);
-  const warmShort = tapes.filter(({ answers }) => (answers[0]?.n ?? 0) < TRADES_MAX && warm(answers)).map((t) => t.address);
   say(
-    back || (tapes.length > 0 && coldShort.length === 0 ? null : false),
+    back || whole.length > 0 || (allFull ? null : false),
     back ? "a short tape said filling, then ended: read back seen end to end"
+    : whole.length > 0 ? `short tape(s) whole at the first answer (whole_ms: ${whole.join(", ")}): read back before this check's read`
     : allFull ? "every tape full at its first answer: nothing to read back"
-    : tapes.length > 0 && coldShort.length === 0 ? `every short tape open before this check's first read (evm-open under ${WARM_MS} ms: ${warmShort.join(", ")}), the rest full at its first answer: nothing of its own to read back`
-    : "no tape said filling while a tape opened cold answered short: no read back",
+    : "no short tape said filling or named whole_ms: no read back",
   );
   const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : lines.some((l) => l.startsWith("N/A")) ? "INCONCLUSIVE" : "PASS";
   return { ok: verdict === "PASS", verdict, lines };

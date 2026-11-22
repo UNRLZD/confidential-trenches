@@ -1,5 +1,5 @@
 {
- "_note": "Each tape's answers as the check read them (time from its first read, status, X-Helper-Commit, rows, filling, first fault; not the rows). good: a keyless helper started from data-tape-r2 (b4187333e, part C) on a Mac as --base, read 2026-11-14T06:05:57.458Z: the two new tokens' tapes said filling with no row, then ended done (their pools younger than the hour read back), the two trending_1h tapes full at 50: PASS. bad_live: the deployed helper (a6b7a3ad7, before part C) read 2026-11-14T06:04:23.682Z: the same lists' tapes, the new ones short (2 and 0 trades) and none saying filling: FAIL.",
+ "_note": "Each tape's answers as the check read them (time from its first read, status, X-Helper-Commit, rows, filling, first fault; not the rows). good: a keyless helper started from data-tape-r2 (b4187333e, part C) on a Mac as --base, read 2026-11-14T06:05:57.458Z: the two new tokens' tapes said filling with no row, then ended done (their pools younger than the hour read back), the two trending_1h tapes full at 50: PASS. bad_live: the deployed helper (a6b7a3ad7, before part C) read 2026-11-14T06:04:23.682Z: the same lists' tapes, the new ones short (2 and 0 trades) and none saying filling: FAIL. Card evm-tape-check-counts-read-ahead-warm (each answer's `whole`: it named whole_ms): ahead_44989861313, helper live run 44989861313 (22 Nov 05:40Z, helper b09ba8178) as its log printed it: new's two tapes short and done at their first answer (5 trades at 1,835 ms and 5 at 825 ms), trending_1h's two full, FAILed with no read back to see; the check did not record whole_ms then, so `whole` is the helper's trades answer at b09ba8178 (swaps.ts: an answer not filling names whole_ms) and the 09:05Z records' 7 of 7 answers not filling on 77bfa8030 naming it. ahead_live: this check read the deployed 77bfa8030 at 2026-11-22T09:06:21Z: two short tapes whole at once (5 trades at 496 ms, 23 at 956 ms), one full, one filling still at its fiftieth trade: PASS (the check before this card FAILs it).",
  "good": {
   "base": "http://127.0.0.1:18781",
   "readAt": "2026-11-14T06:05:57.458Z",
@@ -574,6 +574,157 @@
       "commit": "a6b7a3ad7496b410117da34029be667f2e17a932",
       "n": 50,
       "filling": false,
+      "fault": null
+     }
+    ]
+   }
+  ]
+ },
+ "ahead_44989861313": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-22T05:40:19Z",
+  "run": "44989861313",
+  "lists": {
+   "status": 200,
+   "new": 20
+  },
+  "tapes": [
+   {
+    "address": "0x40da76d8276b8f9d97f91833c98c89b7e2419875",
+    "answers": [
+     {
+      "t": 1835,
+      "status": 200,
+      "commit": "b09ba8178c9e8ca42e320dd6f602c932dd9d8d1d",
+      "n": 5,
+      "filling": false,
+      "whole": true,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x67f6dd9c2cb35d126eb0dcfa82ae36d94f1c0aa4",
+    "answers": [
+     {
+      "t": 825,
+      "status": 200,
+      "commit": "b09ba8178c9e8ca42e320dd6f602c932dd9d8d1d",
+      "n": 5,
+      "filling": false,
+      "whole": true,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+    "answers": [
+     {
+      "t": 839,
+      "status": 200,
+      "commit": "b09ba8178c9e8ca42e320dd6f602c932dd9d8d1d",
+      "n": 50,
+      "filling": false,
+      "whole": true,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+    "answers": [
+     {
+      "t": 1132,
+      "status": 200,
+      "commit": "b09ba8178c9e8ca42e320dd6f602c932dd9d8d1d",
+      "n": 50,
+      "filling": false,
+      "whole": true,
+      "fault": null
+     }
+    ]
+   }
+  ]
+ },
+ "ahead_live": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-22T09:06:21.512Z",
+  "lists": {
+   "status": 200,
+   "new": 20
+  },
+  "tapes": [
+   {
+    "address": "0x2dd08b1233faec328438a320e24079e4bc35a7a2",
+    "answers": [
+     {
+      "t": 496,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 5,
+      "filling": false,
+      "whole": true,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x03d6ae60cbd63fe595d23041cf963669819f4a56",
+    "answers": [
+     {
+      "t": 956,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 23,
+      "filling": false,
+      "whole": true,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x29cc30f9d113b356ce408667aa6433589cecbdca",
+    "answers": [
+     {
+      "t": 2621,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 50,
+      "filling": false,
+      "whole": true,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+    "answers": [
+     {
+      "t": 8528,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 10,
+      "filling": true,
+      "whole": false,
+      "fault": null
+     },
+     {
+      "t": 14690,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 10,
+      "filling": true,
+      "whole": false,
+      "fault": null
+     },
+     {
+      "t": 18439,
+      "status": 200,
+      "commit": "77bfa80307bad762f23766694a0d18b8c88d45b4",
+      "n": 50,
+      "filling": true,
+      "whole": false,
       "fault": null
      }
     ]

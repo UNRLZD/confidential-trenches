@@ -4,14 +4,17 @@
 // deployed helper 0d308d3bc: a short tape still filling at BOUND_MS: FAIL. Planted from the good one: a tape still filling
 // at its end, an answer off the tape's fields, a 503, fewer trades at the end, no X-Helper-Commit: FAIL; every tape full
 // at its first answer: INCONCLUSIVE. The bound is the listed tape's, the read's pacing and picks are held on their own.
-// Card evm-keyed-checks-hold-steady: good_live, the deployed helper beb3ef4f8 with tapes opened cold: PASS; warm_live,
-// the same check a run later, every tape open before it (evm-open 0 ms): INCONCLUSIVE, never the FAIL the check at
-// b78515461 gave it; planted from it: the short tapes opened cold (or naming no open) and done with no filling: FAIL.
+// Card evm-keyed-checks-hold-steady: good_live, the deployed helper beb3ef4f8 with tapes opened cold: PASS. Card
+// evm-tape-check-counts-read-ahead-warm: a short tape done at its first answer is read back only when it names whole_ms,
+// never judged by its open time. ahead_44962533217 and ahead_44979250087 (helper live runs the check FAILed on tapes the
+// lists had read ahead) and ahead_live (the deployed 77bfa8030, 22 Nov 09:05Z): PASS. warm_live as recorded (no
+// whole_ms recorded then) and every short tape planted with neither filling nor whole_ms, whatever its open: FAIL, a
+// read back seen on another tape beside it or not.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { TRADES_MAX as HELPER_TRADES_MAX } from "../../apps/helper/src/data/evm/swaps.ts";
-import { APP, BOUND_MS, bodyFault, judge, OPEN, POLL_MS, readRun, TRADES_MAX, WARM_MS } from "./evm-tape-from-our-index-fast.mjs";
+import { APP, BOUND_MS, bodyFault, judge, OPEN, POLL_MS, readRun, TRADES_MAX } from "./evm-tape-from-our-index-fast.mjs";
 import { FILLED_MS } from "./tape-read.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-tape-from-our-index-fast.answers.json", import.meta.url), "utf8"));
@@ -50,24 +53,39 @@ test("good_live: the deployed helper beb3ef4f8, short tapes opened cold said fil
   assert.ok(A.good_live.tapes.filter((t) => t.answers[0].n < TRADES_MAX).every((t) => t.answers[0].open > 0), "every short tape opened cold");
 });
 
-test("warm_live: every tape open before the check's first read (evm-open 0 ms), the short ones done at once: INCONCLUSIVE, naming them (red at b78515461: FAIL)", () => {
-  const r = judge(A.warm_live);
-  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
-  const warmShort = A.warm_live.tapes.filter((t) => t.answers[0].n < TRADES_MAX);
-  assert.ok(warmShort.length > 0 && A.warm_live.tapes.every((t) => t.answers[0].open === 0));
-  assert.ok(r.lines.some((l) => l.startsWith("N/A every short tape open before this check's first read") && warmShort.every((t) => l.includes(t.address))), r.lines.join("\n"));
-  // a held book's open read 1 ms on this branch's helper (15 Nov 15:08:51Z, 0x734be42b, opened twice before): still warm
-  const one = { ...A.warm_live, tapes: A.warm_live.tapes.map((t) => ({ ...t, answers: t.answers.map((a, i) => (i === 0 ? { ...a, open: WARM_MS - 9 } : a)) })) };
-  assert.equal(judge(one).verdict, "INCONCLUSIVE", judge(one).lines.join("\n"));
+test("ahead: runs the check FAILed on short tapes the lists read ahead, whole at their first answer: PASS (red at 893bbaa43: FAIL)", () => {
+  for (const k of ["ahead_44962533217", "ahead_44979250087"]) {
+    const r = judge(A[k]);
+    assert.equal(r.verdict, "PASS", `${k}\n${r.lines.join("\n")}`);
+    const shortOnes = A[k].tapes.filter((t) => t.answers[0].n < TRADES_MAX).map((t) => t.address);
+    assert.equal(shortOnes.length, 2, k);
+    assert.ok(r.lines.includes(`ok  short tape(s) whole at the first answer (whole_ms: ${shortOnes.join(", ")}): read back before this check's read`), `${k}\n${r.lines.join("\n")}`);
+  }
+  const r = judge(A.ahead_live);
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  const one = A.ahead_live.tapes.find((t) => t.answers.length === 1 && t.answers[0].n < TRADES_MAX);
+  assert.ok(one.answers[0].whole === true && one.answers[0].open > 10, "a short tape whole at once, its open past the old 10 ms guess");
+  assert.ok(r.lines.includes(`ok  ${one.address}: short and done at its first answer, naming whole_ms: read back before this read`), r.lines.join("\n"));
+  // the read-back tape left out: the whole short tape alone still PASSes, whatever its open
+  for (const open of [0, 318, 5000, null]) {
+    const alone = { ...A.ahead_live, tapes: A.ahead_live.tapes.filter((t) => !t.answers.some((a) => a.filling)).map((t) => (t === one ? { ...t, answers: [{ ...t.answers[0], open }] } : t)) };
+    assert.equal(judge(alone).verdict, "PASS", `open ${open}\n${judge(alone).lines.join("\n")}`);
+  }
 });
 
-test("planted from warm_live: a short tape opened cold, or naming no open, done at its first answer with no filling: FAIL", () => {
-  for (const open of [WARM_MS, 215, null, undefined]) {
-    const run = { ...A.warm_live, tapes: A.warm_live.tapes.map((t) => (t.answers[0].n < TRADES_MAX ? { ...t, answers: t.answers.map((a, i) => (i === 0 ? { ...a, open } : a)) } : t)) };
+test("planted: a short tape done at its first answer naming neither filling nor whole_ms: FAIL, whatever its open, a read back beside it or not (red at 893bbaa43)", () => {
+  const unread = (run) => ({ ...run, tapes: run.tapes.map((t) => (t.answers.length === 1 && t.answers[0].n < TRADES_MAX ? { ...t, answers: [{ ...t.answers[0], whole: false }] } : t)) });
+  for (const [what, run] of [
+    ["warm_live as recorded", A.warm_live],
+    ...[0, 1, 10, 215, null, undefined].map((open) => [`warm_live, open ${open}`, { ...A.warm_live, tapes: A.warm_live.tapes.map((t) => (t.answers[0].n < TRADES_MAX ? { ...t, answers: [{ ...t.answers[0], open }] } : t)) }]),
+    ["ahead_44979250087 naming no whole_ms", unread(A.ahead_44979250087)],
+    ["ahead_live naming no whole_ms, a read back seen beside it", unread(A.ahead_live)],
+  ]) {
     const r = judge(run);
-    assert.equal(r.verdict, "FAIL", `open ${open}\n${r.lines.join("\n")}`);
-    assert.ok(bad(r).includes("BAD no tape said filling while a tape opened cold answered short: no read back"), r.lines.join("\n"));
+    assert.equal(r.verdict, "FAIL", `${what}\n${r.lines.join("\n")}`);
+    assert.ok(bad(r).some((l) => / short and done at its first answer, naming neither filling nor whole_ms: never read back$/.test(l)), `${what}\n${r.lines.join("\n")}`);
   }
+  assert.ok(bad(judge(A.warm_live)).includes("BAD no short tape said filling or named whole_ms: no read back"));
 });
 
 test("planted from the good answer: FAIL, or INCONCLUSIVE when nothing was short", () => {
@@ -108,7 +126,7 @@ test("bodyFault: the tape's fields exactly, filling only as true, rows newest fi
   ]) assert.match(bodyFault(b) ?? "null", want, what);
 });
 
-test("readRun: opens new's and trending_1h's next OPEN / 2 past helper-base-tape-reads-back's picks (the first OPEN / 2 of each) as the page reads them, each again every POLL_MS until it ends or BOUND_MS pass, with the helper's evm-open", async () => {
+test("readRun: opens new's and trending_1h's next OPEN / 2 past helper-base-tape-reads-back's picks (the first OPEN / 2 of each) as the page reads them, each again every POLL_MS until it ends or BOUND_MS pass, with the helper's evm-open and whole_ms", async () => {
   const tok = (c) => "0x" + c.repeat(40);
   // helper-base-tape-reads-back opens 1, 2 (new) and 2, 4 (trending_1h); this check the next two of each not among them
   const lists = { chain: "base", lists: { new: [1, 2, 3, 6, 7].map((c) => ({ token: tok(String(c)) })), trending_1h: [2, 4, 5, 3, 8].map((c) => ({ token: tok(String(c)) })) } };
@@ -126,7 +144,7 @@ test("readRun: opens new's and trending_1h's next OPEN / 2 past helper-base-tape
     const n = (reads.get(t) ?? 0) + 1;
     reads.set(t, n);
     const body =
-      t === tok("3") ? { trades: Array.from({ length: n < 3 ? 1 : 4 }, (_, i) => ROW(10 - i, i)), ...(n < 3 ? { filling: true } : {}), src: "chain", as_of_ms: 1 }
+      t === tok("3") ? { trades: Array.from({ length: n < 3 ? 1 : 4 }, (_, i) => ROW(10 - i, i)), ...(n < 3 ? { filling: true } : { whole_ms: 0 }), src: "chain", as_of_ms: 1 }
       : t === tok("6") ? { trades: Array.from({ length: TRADES_MAX }, (_, i) => ROW(100 - i, i)), src: "chain", as_of_ms: 1 }
       : { trades: [], filling: true, src: "chain", as_of_ms: 1 };
     return new Response(JSON.stringify(body), { status: 200, headers: h });
@@ -135,9 +153,10 @@ test("readRun: opens new's and trending_1h's next OPEN / 2 past helper-base-tape
   assert.deepEqual(run.tapes.map((t) => t.address), [tok("3"), tok("6"), tok("5")], "new's and trending_1h's next two past the other check's picks, each once");
   assert.ok(asked.every(([, limit]) => limit === String(TRADES_MAX)));
   const by = Object.fromEntries(run.tapes.map((t) => [t.address, t.answers]));
-  assert.deepEqual(by[tok("3")].map((a) => [a.n, a.filling, a.open]), [[1, true, 812], [1, true, 0], [4, false, 0]]);
+  assert.deepEqual(by[tok("3")].map((a) => [a.n, a.filling, a.whole, a.open]), [[1, true, false, 812], [1, true, false, 0], [4, false, true, 0]]);
   assert.equal(by[tok("6")].length, 1, "full at once: read once");
   assert.equal(by[tok("6")][0].open, null, "no Server-Timing: no open read");
+  assert.equal(by[tok("6")][0].whole, false, "no whole_ms: none recorded");
   assert.ok(by[tok("5")].length <= BOUND_MS / POLL_MS + 2 && by[tok("5")].at(-1).t >= BOUND_MS, "never ends: read until BOUND_MS, then stopped");
   const r = judge(run);
   assert.equal(r.verdict, "FAIL");
