@@ -472,11 +472,13 @@ async function tableOf(h: PoolBuyHost, address: string): Promise<{ table: Solana
 /** A blockhash is valid for 150 blocks after the one it names (Solana's MAX_PROCESSING_AGE), so at most height + 151. */
 const BLOCKHASH_LIFE = 151;
 
-/** How far, in block heights, a tap's buy round may sign past its first round's blockhash (card
- *  a-found-wallet-sweeps-past-a-strangers-coin): its blockhash's last height at most the first round's + this. A found W
- *  (pool-sell.ts foundPast) is swept only past its latest transaction's height + 151 + this, so a tag 3 signed after the
- *  first round's SOL landed on W can no longer land then. 750 blocks, about five minutes: a first round's send, read
- *  back, settle and its changes' proofs fit with room; a later buy round is refused (the tap fails, nothing lost). */
+/** How far, in block heights, a tap's buy round may sign past its first round (card
+ *  a-found-wallet-sweeps-past-a-strangers-coin): its blockhash's last height at most the first round's heightFloor +
+ *  151 + this. A found W (pool-sell.ts foundPast) is swept only past its latest transaction's height + 151 + this, so a
+ *  tag 3 signed after the first round's SOL landed on W can no longer land then. 750 blocks, about five minutes: a first
+ *  round's send, read back, settle and its changes' proofs fit with room. A later buy round is refused and the tap
+ *  fails: round one's fees are spent, and the SOL it released to W waits on W until the found W's sweep returns it to
+ *  the pool (resumePieces' strand, pool-sell.ts strandOwed; review of 359f71639, L5). */
 export const FOUND_ROUND_GAP = 750;
 
 /** The blockhash on RPC 0 and its slot (the device's own slot for the quote's age), valid on RPC 1; and `lastHeight`,
@@ -523,11 +525,16 @@ export async function blockhashValid(rpcs: readonly [SolanaRpc, SolanaRpc], r: {
 
 /** The least of both RPCs' confirmed block heights (review of dec80ea5b, M1): a height either RPC answers too high is
  *  undone by the other's, so neither alone lifts it; read before a transaction is signed, it is under the height that
- *  transaction lands at. An answer with no whole height fails the read. */
-export async function heightFloor(rpcs: readonly [SolanaRpc, SolanaRpc]): Promise<number> {
-  const hs = await Promise.all(rpcs.map((rpc) => rpc("getBlockHeight", [{ commitment: "confirmed" }])));
-  return Math.min(...hs.map(int));
+ *  transaction lands at. An answer with no whole height fails the read. Two heights more than HEIGHT_APART_MAX apart
+ *  give none (null, review of 359f71639, L4): a seat that answers far too low would pull the floor down so far that the
+ *  buy round is sure to be refused at FOUND_ROUND_GAP after round one has paid; the tap is refused before round one. */
+export async function heightFloor(rpcs: readonly [SolanaRpc, SolanaRpc]): Promise<number | null> {
+  const [a, b] = (await Promise.all(rpcs.map((rpc) => rpc("getBlockHeight", [{ commitment: "confirmed" }])))).map(int) as [number, number];
+  return Math.abs(a - b) > HEIGHT_APART_MAX ? null : Math.min(a, b);
 }
+/** How far apart both RPCs' confirmed heights may read (heightFloor): a blockhash's life, so two seats in step with the
+ *  chain always fit, and a floor this far down still leaves the buy round FOUND_ROUND_GAP's room less this. */
+export const HEIGHT_APART_MAX = BLOCKHASH_LIFE - 1;
 
 /** True once both RPCs' finalized block height is past `last`: no transaction on that blockhash can land after, and
  *  any that did is final, so a spent mark read now at finalized is the whole answer. A failed read is "not yet". */
@@ -905,6 +912,8 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // held to the best of every venue read (solanaBuyVenue, the decision pool.buy.dry takes too); a reference with no
       // pinned pool, or one below the market, is refused as soon as the reference is read, before the venue's own
       // accounts are read and before the pick, so no note is claimed
+      // both RPCs' heights too far apart (heightFloor null): refused before round one signs anything
+      if (landed === null && floor === null) return { error: "failed" };
       const pick = solanaBuyVenue(ref, new Set(tableReads.keys()), ask.slippageBps);
       if ("error" in pick) return no(pick.error);
       const best = pick.pool;

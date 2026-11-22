@@ -168,10 +168,17 @@ export const M = [
   // review of dec80ea5b (the mainnet copy run, C1): a hold that is not W's steady state, a found W not yet past its rule
   // among them, tried again on the runs' doubling wait
   ["a17b a found W held young not tried again", SELL, T, " || unproven === \"again\" || (r.end === \"holds\" && !r.steady);", " || unproven === \"again\";"],
+  // review of 359f71639, M1: the strand's record naming the tap's mint, or a found pass naming the record's mints, holds a
+  // stranded W on a stranger's unit of that mint
+  ["a17c a strand names the tap's mint", SELL, T, "mints: had?.mints ?? [], found: true });", "mints: [...(had?.mints ?? []).filter((m) => m.mint !== r.mint), { mint: r.mint, program: r.program }], found: true });"],
+  ["a17d a found pass names its record's mints", SELL, T, "(o.found === true ? { bare: true as const, mints: [] } :", "(o.found === true ? { bare: true as const } :"],
+  // review of 359f71639, L4: both RPCs' heights far apart before round 1, not refused (round 1 pays into a sure refusal)
+  ["a17e heights far apart give a floor", BUY, TB, "return Math.abs(a - b) > HEIGHT_APART_MAX ? null : Math.min(a, b);", "return Math.min(a, b);", "a-found-wallet-sweeps"],
+  ["a17f no floor refuses nothing before round 1", BUY, TB, "      if (landed === null && floor === null) return { error: \"failed\" };\n", "", "a-found-wallet-sweeps"],
   ["a18 the proven buy not kept on the record", SELL, T, ", ...(kept.buy === undefined ? {} : { buy: kept.buy })", ""],
   ["a19 the record's proven buy proven again", SELL, T, "  let proven = o.buy;\n", "  let proven: SolanaBuy | null | undefined = undefined;\n"],
   ["a20 a sale's rent back keeps no seen", SELL, T, "owedRec, hold, await seenOf(h, w.address, owedRec.mints))));", "owedRec, hold, undefined)));"],
-  ["a21 a plain release's W read again on every load", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const } : unproven ? { unproven } : {}) };", "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const } : { unproven: \"again\" as const }) };"],
+  ["a21 a plain release's W read again on every load", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const, mints: [] } : unproven ? { unproven } : {}) };", "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const, mints: [] } : { unproven: \"again\" as const }) };"],
   // inverted 13 Nov 09:31Z (card every-lamport-can-move T3): a leftover is counted in the balance
   ["c16 a W that ended at the floor carries no amount", SELL, T, 'e === "floor" ? kept.lamports?.toString() :', 'e === "floor" ? undefined :'],
   ["c17 a found W kept by a stranger's holding account alone keeps its seen", SELL, T, "r.steady && x.bare !== true ? seen", "r.steady ? seen"],

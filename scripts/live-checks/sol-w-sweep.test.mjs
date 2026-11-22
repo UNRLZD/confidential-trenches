@@ -133,13 +133,18 @@ const JS = [
   // review of dec80ea5b, M1 and L3: the bound from the least of both RPCs' heights before the first round (HW, whole
   // heights CW), checked on the blockhash (zW, VW: never under the true last height) the tag 3 is built on; the sell
   // host's settleSet handing the seed to the pool's whole-list reader (tz), as the release build spells them
-  "T=null;for(let n=0;;n++){let[E,D,,O]=await Promise.all([AW(e,d,s),lH(e.rpcs,{side:`buy`,token:u,amount:t.amount}),n===0?g.then(e=>void(_=e,v=nh(e))):null,T===null?HW(e.rpcs):null]),k=fH(D,new Set(y.keys()),t.slippageBps);if(`error`in k)return SW(k.error);let I=mh(e.rpcs,j,u,A.address,`buy`,...e.pick?[e.pick]:[]),L=0,R=[((t,n,r)=>e.rpcs[0](t,n,r).then(e=>(L=c(),e))),e.rpcs[1]],[,z,B]=await Promise.all([Promise.all(F),I,zW(R)]),V=c()-L>1e3?await zW(e.rpcs):B;if(T!==null&&V.lastHeight>T.floor+RW+750)return{error:`failed`};let ee=A.expectedOut;he=Hre(me,ue,R,pe,{blockhash:V.blockhash,lastValidBlockHeight:V.lastValidBlockHeight,stateSize:E.stateSize+ce-1,",
+  "T=null;for(let n=0;;n++){let[E,D,,O]=await Promise.all([AW(e,d,s),lH(e.rpcs,{side:`buy`,token:u,amount:t.amount}),n===0?g.then(e=>void(_=e,v=nh(e))):null,T===null?HW(e.rpcs):null]);if(T===null&&O===null)return{error:`failed`};let k=fH(D,new Set(y.keys()),t.slippageBps);if(`error`in k)return SW(k.error);let I=mh(e.rpcs,j,u,A.address,`buy`,...e.pick?[e.pick]:[]),L=0,R=[((t,n,r)=>e.rpcs[0](t,n,r).then(e=>(L=c(),e))),e.rpcs[1]],[,z,B]=await Promise.all([Promise.all(F),I,zW(R)]),V=c()-L>1e3?await zW(e.rpcs):B;if(T!==null&&V.lastHeight>T.floor+RW+750)return{error:`failed`};let ee=A.expectedOut;he=Hre(me,ue,R,pe,{blockhash:V.blockhash,lastValidBlockHeight:V.lastValidBlockHeight,stateSize:E.stateSize+ce-1,",
   ";T={releases:u,wallet:W.wallet.address,floor:O};continue}",
-  ";var RW=151;async function HW(e){let t=await Promise.all(e.map(e=>e(`getBlockHeight`,[{commitment:`confirmed`}])));return Math.min(...t.map(CW))}",
+  ";var RW=151;async function HW(e){let[t,n]=(await Promise.all(e.map(e=>e(`getBlockHeight`,[{commitment:`confirmed`}])))).map(CW);return Math.abs(t-n)>150?null:Math.min(t,n)}",
   ",CW=e=>Number.isSafeInteger(e)&&e>=0?e:SW(),",
   "async function zW(e){return VW(e,await BW(e))}async function VW(e,t){let[n,r]=await Promise.all([e[1](`isBlockhashValid`,[t.blockhash,{commitment:`confirmed`}]),e[1](`getEpochInfo`,[{commitment:`confirmed`}])]);if(n?.value!==!0)return SW();let i=CW(n.context?.slot);if(i===0)return SW();let a=r?.absoluteSlot,o=r?.blockHeight,s=Number.isSafeInteger(a)&&Number.isSafeInteger(o)&&a>=0&&o>=0?Math.max(0,i-a):1/0,c=s<=RW?o+s:await e[1](`getBlockHeight`,[{commitment:`confirmed`,minContextSlot:i}]),l=t.lastValidBlockHeight,u=CW(c)+RW;return{blockhash:t.blockhash,lastValidBlockHeight:l,slot:t.slot,lastHeight:l>u?l:u}}",
   "settleSet:async(t,r)=>{let i=await e.seed64();try{return await tz({seed64:i,notes:await _(),noteIds:t,program:n.program,minSlots:r,rpcs:a(),lister:s(),signal:h,cache:l,markBatches:w8})}finally{i.fill(0)}},ops:e.store,",
   "async function tz(e){if(!(e.seed64 instanceof Uint8Array)||e.seed64.length!==64)throw Error(`seed64: not 64 bytes`);let t=fA(e.program).scope,n=await Promise.all(e.noteIds.map(async n=>{let r=await e.notes.get(n);return r===void 0||r.leaf===void 0||r.scope!==t?{error:Error(`note ${n}: not a landed note of this pool`)}:{note:r}}));if(n.every(e=>`error`in e))return n.map(e=>({error:e.error}));let r=e.cache??{},i=r.pages??=OA(e.rpcs,e.program,e.lagWait),a=XR(r,e),o,s;try{o=await a(e.minSlots),s=await i.leaves(o.slot,e.signal,e.rpcs);}catch(e){throw e}}",
+  // review of 359f71639, M1 and L3: the strand's record found with no mint of the tap's, wired as the page's strand; a
+  // found pass naming no mint, and a young hold booking the next run
+  "async function pK(e,t){let n=(await e.list()).find(e=>e.address===t.address);await e.put({...n??{passes:0},address:t.address,l:t.l,j:t.j,mints:n?.mints??[],found:!0})}",
+  ",strand:t=>pK(mn(e.store),t)}).catch(()=>0)>0&&An.again()},",
+  "async function oq(e,t,n,r,i){let a=await eq(e,t.w.address),o=a.rec&&a.rec.rebuilt!==!0?{mint:a.rec.mint,program:a.rec.program}:void 0,s=n.buy,c=n.differs??0;if(o===void 0&&s===void 0&&(a.rec!==void 0||a.none)){let e=await aq(t.rpcs[0],t.program,t.w.address,a.rec?{mint:a.rec.mint,program:a.rec.program}:null);e===`differs`?c++:s=e}o===void 0&&s&&(o=s);let l=o===void 0&&s===void 0&&n.found!==!0?(a.rec===void 0&&!a.none?n.passes+1:c)>=3?`steady`:`again`:void 0,u=o?{...t,mints:Nq(t.mints,[o]),buy:o}:{...t,buy:null,...n.found===!0?{bare:!0,mints:[]}:l?{unproven:l}:{}},d,f=!1,p,m,h=await ZK(e,{...u,...n.spaced===void 0?{}:{own:n.spaced},read:e=>(d=e,f=!1),unlisted:()=>(d=void 0,f=!0),stamped:e=>p=e,swept:async(t,r)=>{m=t,(u.buy||u.bare===!0)&&(d=r);let i=(await e.owed.list()).find(e=>e.address===n.address)??n;await e.owed.put({...i,sweep:t,...d===void 0?{}:{lamports:d.toString()}})}},r);return await cq(e,n,h.end,h.steady&&u.bare!==!0?i:void 0,{...c===(n.differs??0)?{}:{differs:c},...s===void 0?{}:{buy:s},...d===void 0?{}:{lamports:d},...f?{unlisted:!0}:{},...p===void 0?{}:{spaced:p},...m===void 0?{}:{sweep:m}}),h.end===`gave_up`||h.end===`sent`||h.end===`owed`||l===`again`||h.end===`holds`&&!h.steady}",
   // review P1-2 of 1d3b96d9c: W's own coins' accounts, the keep count's caller; card
   // a-found-wallet-sweeps-past-a-strangers-coin: a found W's every account until its note's spend reads alike, then none
   // while unspent
@@ -349,10 +354,22 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     // the tag 3 built on another blockhash than the one checked, a last height under the true one (RPC 0's word alone)
     [JS.replace("V.lastHeight>T.floor+RW+750)", "V.lastHeight>T.lastHeight+750)").replace("floor:O};continue}", "lastHeight:V.lastHeight};continue}"), 26],
     [JS.replace("floor:O};continue}", "floor:V.lastHeight-RW};continue}"), 26],
-    [JS.replace("return Math.min(...t.map(CW))", "return Math.max(...t.map(CW))"), 26],
-    [JS.replace("return Math.min(...t.map(CW))", "return Math.min(...t.map(Number))"), 26],
+    [JS.replace("?null:Math.min(t,n)}", "?null:Math.max(t,n)}"), 26],
+    [JS.replace(".map(CW);return Math.abs(", ".map(Number);return Math.abs("), 26],
+    // review of 359f71639, L4: both heights more than 150 apart not refused, or refused only further apart, or the floor's
+    // none not refusing the tap before round 1
+    [JS.replace("return Math.abs(t-n)>150?null:Math.min(t,n)", "return Math.min(t,n)"), 26],
+    [JS.replace("Math.abs(t-n)>150?null:", "Math.abs(t-n)>151?null:"), 26],
+    [JS.replace("if(T===null&&O===null)return{error:`failed`};let k=fH(", "let k=fH("), 26],
+    // review of 359f71639, M1 and L3: the strand naming the tap's mint, or not found, or not wired; a found pass naming
+    // its record's mints, or no run booked after a young hold
+    [JS.replace("j:t.j,mints:n?.mints??[],found:!0}", "j:t.j,mints:[...n?.mints??[],{mint:t.mint,program:t.program}],found:!0}"), 26],
+    [JS.replace("j:t.j,mints:n?.mints??[],found:!0}", "j:t.j,mints:n?.mints??[]}"), 26],
+    [JS.replace("strand:t=>pK(mn(e.store),t)}", "strand:async()=>{}}"), 26],
+    [JS.replace("...n.found===!0?{bare:!0,mints:[]}:l?", "...n.found===!0?{bare:!0}:l?"), 26],
+    [JS.replace("||l===`again`||h.end===`holds`&&!h.steady}", "||l===`again`}"), 26],
     [JS.replace("n===0?g.then(e=>void(_=e,v=nh(e))):null,T===null?HW(e.rpcs):null]", "n===0?g.then(e=>void(_=e,v=nh(e))):null,null]"), 26],
-    [JS.replace("T===null?HW(e.rpcs):null]),k=fH(", "null]),k=fH(").replace("zW(R)]),V=", "zW(R),T===null?HW(e.rpcs):null]),V=").replace("[,z,B]=", "[,z,B,O]="), 26],
+    [JS.replace("T===null?HW(e.rpcs):null]);if(T===null&&O===null)return{error:`failed`};let k=fH(", "null]),k=fH(").replace("zW(R)]),V=", "zW(R),T===null?HW(e.rpcs):null]),V=").replace("[,z,B]=", "[,z,B,O]="), 26],
     [JS.replace("{blockhash:V.blockhash,lastValidBlockHeight:V.lastValidBlockHeight,stateSize", "{blockhash:z.blockhash,lastValidBlockHeight:z.lastValidBlockHeight,stateSize"), 26],
     [JS.replace("lastHeight:l>u?l:u}}", "lastHeight:l}}"), 26],
     // review of dec80ea5b, L3: the sell host's settleSet reading the note's own mark, or no settleSet at all

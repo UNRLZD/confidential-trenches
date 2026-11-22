@@ -722,9 +722,10 @@ type SoldBy = { tx: string; last: number };
  *  `found`, so the SOL its first round put on W comes back on the found W's rule on this device too (review of
  *  dec80ea5b, H1: a record with no `found` and no buy recorded held as "no buy of W's is recorded", then steady, and
  *  findHeldWs skips a W with a record). A buy recorded or proven for W still takes the record's sweep (rentBackOwed). */
-export async function strandOwed(owed: Pick<OwedRentBacks, "list" | "put">, r: { address: string; l: string; j: number; mint: string; program: string }): Promise<void> {
+export async function strandOwed(owed: Pick<OwedRentBacks, "list" | "put">, r: { address: string; l: string; j: number }): Promise<void> {
   const had = (await owed.list()).find((x) => x.address === r.address);
-  await owed.put({ ...(had ?? { passes: 0 }), address: r.address, l: r.l, j: r.j, mints: [...(had?.mints ?? []).filter((m) => m.mint !== r.mint), { mint: r.mint, program: r.program }], found: true });
+  // no mint of the tap's: W never traded it (its buy round never landed; review of 359f71639, M1)
+  await owed.put({ ...(had ?? { passes: 0 }), address: r.address, l: r.l, j: r.j, mints: had?.mints ?? [], found: true });
 }
 export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void>; empty?(): Promise<ReadonlySet<string>>; markEmpty?(address: string): Promise<void>; spacing?(): Promise<RentBackSpacing | undefined>; space?(v: RentBackSpacing): Promise<void>; claim?(v: RentBackSpacing, own?: number): Promise<boolean>; rideAt?(): Promise<number | undefined>; bookRide?(at: number): Promise<void>; rode?(at: number): Promise<void>; tail?(t: WTail): Promise<void>; untail?(address: string): Promise<void> };
 /** A W's leftover under the pool's least standard size (card pool-amounts-are-standard-sizes; pick (c), 13 Nov
@@ -2532,7 +2533,9 @@ async function rentBackOwed(h: PoolSellHost, given: RentBack, o: OwedRentBack, h
   // built only on the found W's rule (foundPast before its teardown, foundSince in its sweep); its reads name token
   // accounts the finding read does not, so no `seen` of it is kept and every load passes it
   const unproven = buy === undefined && proven === undefined && o.found !== true ? ((ev.rec === undefined && !ev.none ? o.passes + 1 : differs) >= POOL_RENT_BACK_UNPROVEN_PASSES ? ("steady" as const) : ("again" as const)) : undefined;
-  const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const } : unproven ? { unproven } : {}) };
+  // a found W's pass names no mint of its record (review of 359f71639, M1): no coin of W's is the user's by a record
+  // alone, so a stranger's unit of a mint a record names never holds W; a buy recorded or proven adds its mint back
+  const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const, mints: [] } : unproven ? { unproven } : {}) };
   let lamports: bigint | undefined;
   let unlisted = false;
   let spaced: number | undefined;
