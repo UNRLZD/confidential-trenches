@@ -245,7 +245,7 @@ export const MUTANTS = [
   // card evm-rpc-spare-list: a request the second fails goes to the third, the head too; a 5xx passes on at once; a
   // not-yet block is asked again whole; a one-call batch's bare answer is read
   [QUOTE, "      await settle(rest.map((r) => run({ ...r, into: j.into })));", "      await settle(rest.map((r) => one({ ...r, into: j.into })));", R, "SL1 "],
-  [QUOTE, "(o.next === undefined ? Promise.reject(e) : headFrom(o.next))", "(o.next === undefined || o !== firstOn ? Promise.reject(e) : headFrom(o.next))", R, "SL1 "],
+  [QUOTE, "(o.next === undefined ? Promise.reject(e) : inTurn(o.next))", "Promise.reject(e)", R, "SL1 "],
   // re-anchored (card evm-unreachable-moves-on): the 5xx test is serverFault's since card evm-5xx-holds-the-provider-
   // for-the-round; SL1 passes on it (the request still reaches the next after its tries), SP5xx does not
   [QUOTE, "          if (spareNext && out5xx && !deepCall) {", "          if (false && out5xx && !deepCall) {", R, "SP5xx "],
