@@ -348,3 +348,31 @@ test("card index-evm-swaps-v4-route-tape (device index): a quote token whose onl
     assert.ok(Math.abs(Number(t.usd) - usd) <= usd * 1e-9, `row ${i}: usd ${t.usd}, want ${usd}`);
   });
 });
+
+test("card robinhood-few-trade-tapes-fill-inside-45s (pool index key): a coin whose busiest v4 pool the PositionManager holds no record of, paired with a token no key search tries (Robinhood 0x28da843c's 0x73b1e6d1, against 0xa30fa36d under hook 0x4e346895), is found by the chain's pool index's key and has that pool's whole tape (red at b3593c25d: no key, the USDC side pool's rows)", async () => {
+  const c = CASES[0]!;
+  const run = async (indexed: boolean) => {
+    const p = planted(c);
+    // the PositionManager's record of the pool: empty, as a launchpad's pool made without it
+    p.calls.delete(`${BASE_VENUES.positionManager} 0x86b6be7d${p.MAIN.slice(2, 52).padEnd(64, "0")}`);
+    const entry = { id: p.MAIN, key: { currency0: COIN, currency1: c.quote, fee: 0, tickSpacing: 200, hooks: ZERO } };
+    const quoteIndex = (t: string) => (indexed && (t === COIN || t === c.quote) ? [entry] : []);
+    const f = rig(p);
+    const { value } = await onVirtualTime(9_000_000, async () => {
+      const s = createSwaps("base", { fetch: f as never, now: () => Date.now(), listed: async () => true, rpcs: URLS, pools: new Map(), tickMs: 0, sleep: async () => undefined, quoteIndex });
+      let a = await s.trades(COIN, 50);
+      for (let i = 0; i < 40 && a.status === 200 && JSON.parse(a.body).filling === true; i++) {
+        await new Promise((go) => setTimeout(go, 1_000));
+        await s.tick();
+        a = await s.trades(COIN, 50);
+      }
+      s.stop();
+      return a;
+    });
+    return { value, mains: p.mains };
+  };
+  const { value, mains } = await run(true);
+  assert.equal(value.status, 200, value.body);
+  const j = JSON.parse(value.body) as { trades: { tx: string }[] };
+  assert.deepEqual(j.trades.map((t) => t.tx), mains.slice(-TRADES_MAX).reverse().map((m) => m.tx), "the index's pool's whole tape");
+});
