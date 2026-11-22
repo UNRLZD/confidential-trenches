@@ -556,6 +556,9 @@ export const QUOTE_SEEDS: Record<EvmChain, readonly string[]> = {
  *  some 5 MB a token, 16 tokens: under 80 MB at worst; Base's quotes in practice are a handful.] */
 const QUOTE_POINTS_MAX = 50_000;
 const QUOTE_TOKENS_MAX = 16;
+/** The blocks before a route span's start whose logs seed its state when no provider serves the state read there
+ *  (routeStateFromLogs). [design: a route pool is its quote's deepest, so it trades within this; as refBack's 1,000] */
+const QUOTE_SEED_BACK = 1_000;
 /** A pool trade's ids on an EVM chain (../solana/token.ts toTape): a 32-byte hash and an address, lower case. */
 const EVM_IDS: TapeIds = { tx: (v) => (typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v) ? v.toLowerCase() : null), address: evmAddress };
 /** The bytes of GeckoTerminal answers one chain's swap reads hand the next process (data/warm.ts) [design: 2 MB, a
@@ -3090,7 +3093,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const logs = read.flatMap((b) => unitsOf(b).flatMap((k) => got.get(k)!));
       // a third token's quote priced at these blocks and the ones held first (a price dropped since is read again):
       // unread, the agreed reads are kept for the next try
-      if (!(await quoteReady(e.pool, [...logs, ...back.logs]))) return failed({ ...back, got });
+      if (!(await quoteReady(e.pool, [...logs, ...back.logs], true))) return failed({ ...back, got });
       for (const b of read) for (const k of unitsOf(b)) if (!k.startsWith("r ")) got.delete(k);
       const all = [...logs, ...back.logs].sort((a, b) => a.block - b.block || a.index - b.index).filter((l, i, xs) => i === 0 || l.block !== xs[i - 1]!.block || l.index !== xs[i - 1]!.index);
       const born = logs.some((l) => isBirth(e.pool, l, chain));
@@ -3123,7 +3126,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const logs = swaps == null || extra.some((x) => x == null) ? null : swaps.concat(...(extra as Log[][])).sort((a, b) => a.block - b.block || a.index - b.index);
     if (logs == null) return failed();
     const all = logs.concat(back.logs);
-    if (!(await quoteReady(e.pool, all))) return failed();
+    if (!(await quoteReady(e.pool, all, true))) return failed();
     tradersAhead(e.pool, logs);
     e.back = { lo, logs: all, tape: backBook(e, all), done: lo <= end || born, ...(back.located === true ? { located: true as const } : {}), ...(born ? { born: true as const } : {}) };
   }
@@ -4046,9 +4049,22 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const s: QState = { hop: route.hop === null ? null : poolStateLegs(route.hop, a.slice(0, hop.length)), end: poolStateLegs(route.end, a.slice(hop.length, hop.length + end.length)), eth: eth ? refStateUsd(a.at(-1)) : null };
     return quoteUsd(route, s) === null ? null : s;
   }
-  /** Blocks [lo, hi] of the route's points: from state `from` (null: read at lo - 1), its pools' logs in the span. */
+  /** The route's state at the end of block `n` from its pools' own logs in the QUOTE_SEED_BACK blocks to `n` (each part's
+   *  newest: a Swap's sqrtPriceX96, a Sync's reserves, the ETH price pool's), for a provider that keeps no state that
+   *  old and refuses the read at `n` (routeStateAt); null when a part logged nothing there or a read was not agreed. */
+  async function routeStateFromLogs(route: Route, n: number): Promise<QState | null> {
+    const parts = routeParts(route);
+    const logs = await Promise.all(parts.map((p) => agreedRange(rpcs, p.filter, Math.max(0, n - QUOTE_SEED_BACK + 1), n)));
+    if (logs.some((x) => x == null)) return null;
+    const s: QState = { hop: null, end: null, eth: null };
+    const all = logs.flatMap((x, i) => x!.map((l) => ({ l, i }))).sort((a, b) => a.l.block - b.l.block || a.l.index - b.l.index);
+    for (const { l, i } of all) parts[i]!.set(l, s);
+    return quoteUsd(route, s) === null ? null : s;
+  }
+  /** Blocks [lo, hi] of the route's points: from state `from` (null: read at lo - 1, else from the logs before lo), its
+   *  pools' logs in the span. */
   async function routeSpan(route: Route, lo: number, hi: number, from: QState | null): Promise<{ pts: QPoint[]; at: QState } | null> {
-    const s0 = from ?? (await routeStateAt(route, lo - 1));
+    const s0 = from ?? (await routeStateAt(route, lo - 1)) ?? (await routeStateFromLogs(route, lo - 1));
     if (s0 === null) return null;
     const parts = routeParts(route);
     const logs = await Promise.all(parts.map((p) => agreedRange(rpcs, p.filter, lo, hi)));
@@ -4105,11 +4121,48 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Whether the blocks of `logs` that hold a swap of `pool` are inside its quote's points (a `token` quote; any other:
    *  true), read when not; false when the quote's route is not known (none at or above LIQ_MIN_USD within two pools, or
    *  its pick not read) or a read did not agree: the fold waits, as an ETH-quoted one waits for the ETH price. */
-  async function quoteReady(pool: Pool, logs: readonly Log[]): Promise<boolean> {
+  async function quoteReady(pool: Pool, logs: readonly Log[], back = false): Promise<boolean> {
     if (pool.quote.kind !== "token") return true;
     const blocks = logs.filter((l) => decodeSwap(pool, l, chain) !== null).map((l) => l.block);
     if (blocks.length === 0) return true;
-    return quoteSpan(pool.quote.token, Math.min(...blocks), Math.max(...blocks));
+    return back ? quoteBlocks(pool.quote.token, blocks) : quoteSpan(pool.quote.token, Math.min(...blocks), Math.max(...blocks));
+  }
+  /** A read back's third-quote prices: the quote's USD at the start of each block of its swaps (the route's state at the
+   *  end of the block before), every block not in the quote's span read in one agreed post (card
+   *  index-evm-swaps-v4-route-tape-2). A read back's swaps lie hours apart: the span from its oldest to its newest read
+   *  the route's own logs over all of it, every block (Robinhood 0xaa07a0e9's pool 0xe7cbe028, quoted in 0xe33322da
+   *  whose route ends in an ETH pool: 116 reads of the ETH price's logs in its first 21 s, and the tape still filling at
+   *  180 s in live run 44989861313 and at 160 s on 77bfa8030, b09ba8178 and 5c2e7d385 alike), where its 50 trades need 50
+   *  states at most. False when the route is not known or the post was not agreed. */
+  const quoteAt = new Map<string, Map<number, bigint>>();
+  async function quoteBlocks(q: string, blocks: readonly number[]): Promise<boolean> {
+    const s = quoteSeries.get(q);
+    const held = quoteAt.get(q) ?? new Map<number, bigint>();
+    const want = [...new Set(blocks)].filter((n) => !(s !== undefined && n >= s.lo && n <= s.hi) && !held.has(n));
+    if (want.length === 0) return true;
+    const route = await quotePool(q);
+    if (route === null) return false;
+    const end = poolStateCalls(route.end, chain);
+    const hop = route.hop === null ? [] : poolStateCalls(route.hop, chain);
+    if (end === null || hop === null) return false;
+    const eth = route.end.quote.kind === "eth";
+    const per = [...hop, ...end, ...(eth ? [refStateCall(chain)] : [])];
+    const missed = { any: false };
+    const got = await callsAgreed(want[0]! - 1, want.flatMap((n) => per.map((c) => ({ ...c, n: n - 1 }))), missed);
+    // the state that deep not served (a provider that keeps no old state refuses it): the span's exact path, the route's
+    // own logs over the blocks (quoteSpan), slower but never a read back that fails on every try
+    if (missed.any) return quoteSpan(q, Math.min(...want), Math.max(...want));
+    want.forEach((n, i) => {
+      const a = got.slice(i * per.length, (i + 1) * per.length);
+      const st: QState = { hop: route.hop === null ? null : poolStateLegs(route.hop, a.slice(0, hop.length)), end: poolStateLegs(route.end, a.slice(hop.length, hop.length + end.length)), eth: eth ? refStateUsd(a.at(-1)) : null };
+      const usd = quoteUsd(route, st);
+      if (usd === null) return;
+      if (held.size >= QUOTE_POINTS_MAX) held.delete(held.keys().next().value!);
+      held.set(n, usd);
+    });
+    if (!quoteAt.has(q) && quoteAt.size >= QUOTE_TOKENS_MAX) quoteAt.delete(quoteAt.keys().next().value!);
+    quoteAt.set(q, held);
+    return want.every((n) => held.has(n));
   }
   /** The quote's price in force after block `n`'s logs, null when not held. */
   function quoteAfter(q: string, n: number): bigint | null {
@@ -4126,15 +4179,19 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const swaps = events.filter((x) => x.kind === "swap");
     if (swaps.length === 0) return [...events];
     const inside = (b: number) => s !== undefined && b >= s.lo && b <= s.hi;
+    // a read back's swaps outside the span: the quote's price at their block's start (quoteBlocks), never another's
+    const at = lenient ? quoteAt.get(pool.quote.token) : undefined;
+    const sparse = (b: number) => !inside(b) && at?.has(b) === true;
     if (!lenient && !swaps.every((x) => inside(x.block))) return null;
-    const kept = events.filter((x) => x.kind !== "swap" || inside(x.block));
-    const ks = kept.filter((x) => x.kind === "swap");
-    if (ks.length === 0 || s === undefined) return kept;
+    const kept = events.filter((x) => x.kind !== "swap" || inside(x.block) || sparse(x.block));
+    const blockRefs = [...new Set(kept.filter((x) => x.kind === "swap" && sparse(x.block)).map((x) => x.block))].map((b): Event => ({ kind: "ref", block: b, index: -1, ethUsd: at!.get(b)! }));
+    const ks = kept.filter((x) => x.kind === "swap" && inside(x.block));
+    if (ks.length === 0 || s === undefined) return [...blockRefs, ...kept].sort((a, b) => a.block - b.block || a.index - b.index);
     const [first, last] = [ks[0]!, ks.at(-1)!];
     const pos = (p: { block: number; index: number }, q: { block: number; index: number }) => p.block - q.block || p.index - q.index;
     const seed = [...s.pts].reverse().find((p) => pos(p, first) < 0)!;
     const refs: Event[] = [{ kind: "ref", block: first.block, index: -1, ethUsd: seed.usd }, ...s.pts.filter((p) => pos(p, first) > 0 && pos(p, last) < 0).map((p): Event => ({ kind: "ref", block: p.block, index: p.index, ethUsd: p.usd }))];
-    return [...refs, ...kept].sort((a, b) => a.block - b.block || a.index - b.index);
+    return [...blockRefs, ...refs, ...kept].sort((a, b) => a.block - b.block || a.index - b.index);
   }
   /** The vendor's list of `q`'s pools (GeckoTerminal's answer shape), undefined when not had: one call, the key's
    *  background share first, else the keyless refresh lane (renamePool's). */
