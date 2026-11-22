@@ -1,0 +1,131 @@
+{
+ "_note": "Recorded 22 Nov by signpage-sent-end-known.mjs --harness in headless Chrome: good = the build with card signpage-sent-end-known (PASS); bad = main's build before it (2d870021c, FAIL: Landing kept, no toast).",
+ "good": {
+  "check": "signpage-sent-end-known",
+  "at": "2026-11-22T15:48:42.943Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in, its Base buy answered sent, its op recorded filled",
+  "browser": "158.0.8127.36",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "ready": true,
+    "symbol": "PROS",
+    "buyOn": true,
+    "buys": 1,
+    "chain": "base",
+    "before": {
+     "stage": null,
+     "cta": "Landing 0.0s",
+     "toast": false,
+     "href": null,
+     "lateOut": false
+    },
+    "late": true,
+    "after": {
+     "stage": null,
+     "cta": "Filled 1.5sFinal",
+     "toast": true,
+     "href": "https://basescan.org/tx/0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+    },
+    "shots": [
+     "phone-typed.png",
+     "phone-landing.png",
+     "phone-filled.png"
+    ]
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "ready": true,
+    "symbol": "PROS",
+    "buyOn": true,
+    "buys": 1,
+    "chain": "base",
+    "before": {
+     "stage": null,
+     "cta": "Landing 0.0s",
+     "toast": false,
+     "href": null,
+     "lateOut": false
+    },
+    "late": true,
+    "after": {
+     "stage": null,
+     "cta": "Filled 1.5sFinal",
+     "toast": true,
+     "href": "https://basescan.org/tx/0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+    },
+    "shots": [
+     "desktop-typed.png",
+     "desktop-landing.png",
+     "desktop-filled.png"
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "check": "signpage-sent-end-known",
+  "at": "2026-11-22T15:48:52.133Z",
+  "source": "harness, terminal build dist, the stand-in shell signed in, its Base buy answered sent, its op recorded filled",
+  "browser": "158.0.8127.36",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "ready": true,
+    "symbol": "PROS",
+    "buyOn": true,
+    "buys": 1,
+    "chain": "base",
+    "before": {
+     "stage": null,
+     "cta": "Landing 0.0s",
+     "toast": false,
+     "href": null,
+     "lateOut": false
+    },
+    "late": true,
+    "after": {
+     "stage": null,
+     "cta": "Landing 3.5s",
+     "toast": false,
+     "href": null
+    },
+    "shots": [
+     "phone-typed.png",
+     "phone-landing.png",
+     "phone-filled.png"
+    ]
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "ready": true,
+    "symbol": "PROS",
+    "buyOn": true,
+    "buys": 1,
+    "chain": "base",
+    "before": {
+     "stage": null,
+     "cta": "Landing 0.0s",
+     "toast": false,
+     "href": null,
+     "lateOut": false
+    },
+    "late": true,
+    "after": {
+     "stage": null,
+     "cta": "Landing 3.5s",
+     "toast": false,
+     "href": null
+    },
+    "shots": [
+     "desktop-typed.png",
+     "desktop-landing.png",
+     "desktop-filled.png"
+    ]
+   }
+  ]
+ }
+}

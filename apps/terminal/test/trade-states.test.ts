@@ -185,3 +185,41 @@ test("evm-buy-late-fill-reaches-app: a refused buy whose late end is filled show
   // once Filled, a second copy of the stage moves nothing
   assert.equal(progress(late, "b1", "filled", T0 + 50_000), late);
 });
+
+// Card signpage-sent-end-known: a trade the box shows as sent (Landing, then Slow) whose page never posts its end (a run
+// that threw after answering sent, or ended sent with its landing unknown) ends from the op the signing page records
+// under the request's id (state.ops, card signpage-sent-end-recorded): its end stage goes through progress(), as a
+// progress event's would. An op of another id, of another kind, or still at sent moves nothing; never a timer.
+test("signpage-sent-end-known: a sent buy ends from its op in state.ops; another id, kind or a sent op moves nothing", () => {
+  const { endFromOps, opEnd } = model as unknown as {
+    endFromOps?: (p: Phase, ops: readonly unknown[] | undefined, now: number) => Phase;
+    opEnd?: (ops: readonly unknown[] | undefined, id: string) => { stage: string; txs: readonly unknown[] } | null;
+  };
+  assert.equal(typeof endFromOps, "function", "model.ts endFromOps");
+  assert.equal(typeof opEnd, "function", "model.ts opEnd");
+  const TX = [{ chain: "solana", hash: "5".repeat(88) }];
+  const landing: Phase = { k: "landing", id: "b1", at: T0 };
+  const op = (stage: string, more: Record<string, unknown> = {}) => ({ id: "b1", kind: "buy", stage, txs: TX, ...more });
+  // an end recorded: Filled (its time from the tap to the read), part filled, not landed, refused, owed back
+  assert.deepEqual(endFromOps!(landing, [op("filled")], T0 + 70_000), { k: "filled", id: "b1", at: T0, ms: 70_000 });
+  for (const s of ["part_filled", "not_landed", "refused", "owed_back"] as const) assert.deepEqual(endFromOps!(landing, [op(s)], T0 + 70_000), { k: "ended", id: "b1", at: T0, stage: s }, s);
+  // Slow is Landing past SLOW_MS: the same phase, the same end
+  assert.equal(isSlow(landing, T0 + SLOW_MS + 1), true);
+  assert.deepEqual(endFromOps!(landing, [op("not_landed")], T0 + SLOW_MS + 1), { k: "ended", id: "b1", at: T0, stage: "not_landed" });
+  // a sale's op ends the sale the same way
+  assert.deepEqual(endFromOps!(landing, [op("filled", { kind: "sell" })], T0 + 5_000), { k: "filled", id: "b1", at: T0, ms: 5_000 });
+  // a provisional Filled is Final at its op's filled
+  const prov: Phase = { k: "filled", id: "b1", at: T0, ms: 1_100, provisional: true };
+  assert.deepEqual(endFromOps!(prov, [op("filled")], T0 + 9_000), { k: "filled", id: "b1", at: T0, ms: 1_100 });
+  // nothing moves: still sent, another id, another kind, no op, no ops, no buy running
+  for (const ops of [[op("sent")], [op("signed")], [{ ...op("filled"), id: "b2" }], [op("filled", { kind: "withdraw" })], [], undefined]) assert.equal(endFromOps!(landing, ops, T0 + 70_000), landing, JSON.stringify(ops));
+  assert.equal(endFromOps!(READY, [op("filled")], T0 + 70_000), READY);
+  // an end the box shows stays (the op cannot take it back), but for refused, which a later filled moves as a late
+  // progress does (card evm-buy-late-fill-reaches-app)
+  const notLanded: Phase = { k: "ended", id: "b1", at: T0, stage: "not_landed" };
+  assert.equal(endFromOps!(notLanded, [op("filled")], T0 + 70_000), notLanded);
+  assert.deepEqual(endFromOps!({ k: "ended", id: "b1", at: T0, stage: "refused" }, [op("filled")], T0 + 70_000), { k: "filled", id: "b1", at: T0, ms: 70_000 });
+  // the op's end and its transactions, for the strip and the toast's link
+  assert.deepEqual(opEnd!([op("sent"), { ...op("filled"), id: "b2" }], "b2"), { stage: "filled", txs: TX });
+  assert.equal(opEnd!([op("sent")], "b1"), null);
+});

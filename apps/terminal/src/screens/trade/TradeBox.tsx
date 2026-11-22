@@ -50,6 +50,8 @@ import {
   buyOff,
   dryOffAfter,
   dryUnavailable,
+  endFromOps,
+  opEnd,
   unavailable,
   waitingCents,
   withCoinTap,
@@ -425,6 +427,21 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
       setRoute((r) => fromProgress(r, id, stage, at, txs));
     });
   }, [kit.onProgress, src.now]);
+
+  // a buy shown as sent whose page posted no end (a run that threw after sent, or ended sent with its landing unknown)
+  // ends from the op the page records under its id (card signpage-sent-end-known): read on each state the page sends
+  const ops = snapshot.state?.ops;
+  useEffect(() => {
+    if (phase.k === "ready") return;
+    const id = phase.id;
+    const e = opEnd(ops, id);
+    if (e === null) return;
+    const at = src.now();
+    const next = endFromOps(phase, ops, at);
+    if (next === phase) return;
+    setPhase((p) => endFromOps(p, ops, at));
+    setRoute((r) => fromProgress(r, id, e.stage, at, e.txs));
+  }, [ops, phase, src.now]);
 
   // what the page tells of the running buy besides its stage: the wallet, the venue and pool, the filled amount
   useEffect(() => {
