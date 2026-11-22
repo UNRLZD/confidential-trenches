@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { timeOf } from "../../../test/evm-swaps/base.ts";
-import { createSwaps, SWAP_RPCS, TOPIC, TRADES_MAX, type Pool } from "./swaps.ts";
+import { blockSecondMs, createSwaps, SWAP_RPCS, TOPIC, TRADES_MAX, VENUES, type Pool } from "./swaps.ts";
 
 const PUBLICNODE = "https://base-rpc.publicnode.com";
 const LATE_MS = 300;
@@ -131,4 +131,46 @@ test("card base-tapes-fill-inside-their-bound: 12 cold Base coins whose newest 5
     assert.equal(g.n, TRADES_MAX, `the token's newest ${TRADES_MAX} trades: ${line}`);
     assert.equal(g.tx, SWAPS.get(pool)!.at(-1)!.tx, `newest first: ${line}`);
   });
+});
+
+// card helper-fresh-tapes-whole-from-the-first-minute: helper-25's live run 45032297159 (ee5c7dac4, 22 Nov 14:36Z) read
+// Base 0x20ef8496 (AiSTR, whose pools last traded days before) "short and done at its first answer, naming neither
+// filling nor whole_ms", and the warm helper 90776a37e answered it the same at 16:1xZ: a quiet coin whose day read (the
+// one wide read on base-rpc.publicnode.com, locate) names no swap is done with no trade, and its reach (wholeOf) took
+// a located read back's from its oldest trade alone, so an empty tape claimed none. The day read covered every block
+// from tapeBack before the first read: the tape holds every swap since that block's second.
+const QUIET = { token: `0x${"ba5e99".padStart(40, "0")}`, pool: `0x${"9ba5e99".padStart(40, "0")}` };
+const QUIET_POOLS = new Map([...POOLS, [QUIET.token, { pool: { venue: "v3", id: QUIET.pool, token: QUIET.token, tokenIs0: true, quote: { kind: "usd", decimals: 6 } } as Pool, decimals: 18 }]]);
+
+test("a quiet Base coin with no swap in the hour, opened cold and handed over to a new helper: done only naming whole_ms, the second of the first block its day read covered (red at ee5c7dac4: done, no whole_ms)", async () => {
+  const r = rig();
+  const sleep = (ms: number) => new Promise((go) => setTimeout(go, ms));
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const make = () => createSwaps("base", { fetch: r.fetch as never, now: () => Date.now(), listed: async () => true, rpcs: SWAP_RPCS.base, pools: QUIET_POOLS, tickMs: 0 });
+    const read = async (s: ReturnType<typeof make>) => JSON.parse((await s.trades(QUIET.token, TRADES_MAX)).body) as { trades: unknown[]; filling?: boolean; whole_ms?: number };
+    const s = make();
+    const answers: { trades: unknown[]; filling?: boolean; whole_ms?: number }[] = [await read(s)];
+    for (let i = 0; i < 20 && answers.at(-1)!.filling === true; i++) {
+      await sleep(1_000);
+      await s.tick();
+      answers.push(await read(s));
+    }
+    // the new helper: the old one's state handed over (books-handover), its first answer before any read of its own
+    const next = make();
+    next.restore(JSON.parse(JSON.stringify(s.state())));
+    const handed = await read(next);
+    s.stop();
+    next.stop();
+    return { answers, handed };
+  });
+  const last = value.answers.at(-1)!;
+  const line = `cold ${JSON.stringify(value.answers.map((a) => ({ n: a.trades.length, filling: a.filling === true, whole_ms: a.whole_ms })))}, handed ${JSON.stringify({ n: value.handed.trades.length, filling: value.handed.filling === true, whole_ms: value.handed.whole_ms })}`;
+  console.log(line);
+  assert.equal(last.filling, undefined, `the cold tape ends: ${line}`);
+  assert.equal(last.trades.length, 0, line);
+  const floor = blockSecondMs("base", Math.max(0, HEAD - VENUES.base.cold + 1 - VENUES.base.tapeBack))! + 1_000;
+  for (const [name, a] of [["cold", last], ["handed", value.handed]] as const) {
+    assert.ok(a.filling === true || a.whole_ms !== undefined, `${name}: done naming neither filling nor whole_ms: ${line}`);
+    if (a.filling !== true) assert.ok(a.whole_ms! <= floor && a.whole_ms! >= blockSecondMs("base", HEAD - VENUES.base.tapeBack - VENUES.base.cold - 2_000)!, `${name}: whole_ms ${a.whole_ms} at the day read's first block's second ${floor}: ${line}`);
+  }
 });

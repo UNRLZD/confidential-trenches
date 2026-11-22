@@ -233,7 +233,7 @@ function preview(tp: Page) {
   return poolSellDry({ pinned: () => true, rpcs: () => rec, positions: () => tp.positionsNow(), rent: () => RENT, decimals: tokenDecimalsKept(), trading: () => false }, { chain: "solana", token: MINT, share_bps: 10_000, slippage_bps: 1000 });
 }
 
-test("from the buy's read-back, before its end: W's record is written, the positions show W's token at the amount it received, and the preview answers a number; no ops record says the buy ended", async () => {
+test("from the buy's read-back, before its end: W's record is written, the positions show W's token at the amount it received, and the preview answers a number; its ops record says sent, no end", async () => {
   const w = await sentWallet();
   const f = finder();
   const b = buyKind();
@@ -245,7 +245,7 @@ test("from the buy's read-back, before its end: W's record is written, the posit
   await until(async () => (await rowOf(tp)) !== undefined, "the row from the read-back, the finder still listing no token");
   assert.deepEqual(await rowOf(tp), { chain: "solana", token: MINT, amount: OUT, cost: "1.5", wallets: [W], decimals: 6 });
   assert.deepEqual(((await w.get("meta", POSITION_COSTS_KEY)) as Record<string, unknown>)[W], { mint: MINT, received: OUT, decimals: 6, cost_usd: "1.5" }, "the record a filled end writes, the same fields");
-  assert.equal(await w.get("ops", "pb1"), undefined, "no ops record: nothing says the buy is Final");
+  await until(async () => ((await w.get("ops", "pb1")) as { stage?: string } | undefined)?.stage === "sent", "its ops record at sent (card signpage-sent-end-recorded): nothing says the buy is Final");
   const a = (await preview(tp)) as { result?: { out: string } };
   assert.ok(a.result && /^\d+\.\d+$/.test(a.result.out) && Number(a.result.out) > 0, `the preview answers a number: ${JSON.stringify(a)}`);
 });
@@ -294,7 +294,7 @@ test("a buy that did not stay: a not_landed end (both RPCs' verdict) drops W's r
     await until(async () => (await rowOf(tp)) !== undefined);
     b.run.end(end);
     await tick(60);
-    await until(async () => ((await w.get("ops", "pb1")) !== undefined) === (end === "not_landed"), `${end}: its ops record`);
+    await until(async () => ((await w.get("ops", "pb1")) as { stage?: string } | undefined)?.stage === end, `${end}: its ops record (sent: at sent, card signpage-sent-end-recorded)`);
     const recOf = async () => ((await w.get("meta", POSITION_COSTS_KEY)) as Record<string, unknown> | undefined)?.[W];
     const recW = await recOf();
     if (end === "not_landed") {
@@ -358,7 +358,7 @@ test("a sale tapped right after a buy's read-back plans W from its records alone
   assert.ok("running" in tapBuy(tp));
   await until(() => b.run.told, "the run told its amount");
   await until(async () => (await rowOf(tp)) !== undefined, "W's row from the read-back: its record is written");
-  assert.equal(await w.get("ops", "pb1"), undefined, "the buy is not final yet");
+  await until(async () => ((await w.get("ops", "pb1")) as { stage?: string } | undefined)?.stage === "sent", "the buy is not final yet: its op at sent (card signpage-sent-end-recorded)");
   const before = f.st.reads;
   f.st.fail = true; // a finder read now fails the test's count below, and would leave W unread
   const ask = { kind: "pool.sell", chain: "solana", token: MINT, amount: 0n, shareBps: 10_000, slippageBps: 1000, decimals: 6 } as const;
