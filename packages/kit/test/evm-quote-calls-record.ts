@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { deserialize } from "node:v8";
 import { gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
-import { evmJsonRpc, evmPoolBuyQuoteWith, evmProviders, evmRanked, EvmQuoteError, type EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
+import { EVM_NOOP_HOOK_CODE, evmJsonRpc, evmPoolBuyQuoteWith, evmProviders, evmRanked, EvmQuoteError, type EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
 import { evmPoolIndexRefresh } from "../src/trade/evm/buy-tap.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
 
@@ -24,6 +24,36 @@ export const CALLS_REQUEST: EvmPoolBuyQuoteRequest = {
 };
 /** A call's key: its method and params, never its id. */
 export const callKey = (c: { method: unknown; params?: unknown }): string => JSON.stringify([c.method, c.params ?? []]);
+
+const MC3 = "0xca11bde05977b3631167028862be2a173976ca11";
+const SEL_BUY_SWAP = "0x25faf2a3";
+type Overrides = Record<string, Record<string, unknown>>;
+/** The addresses an eth_call's override gives the no-op hook's code (EVM_NOOP_HOOK_CODE), lower case, where every
+ *  override but Multicall3's is that alone; otherwise null. */
+const noopAt = (o: unknown): string[] | null => {
+  if (o === undefined || o === null) return null;
+  const at = Object.keys(o as Overrides).filter((a) => a.toLowerCase() !== MC3);
+  const noop = at.every((a) => Object.keys((o as Overrides)[a]!).length === 1 && (o as Overrides)[a]!.code === EVM_NOOP_HOOK_CODE);
+  return at.length > 0 && noop ? at.map((a) => a.toLowerCase()) : null;
+};
+/** For a replay of a recording whose calls are `keys` (callKey): whether a call it lacks is the read a warm quote
+ *  speculates beside its first round with a hook of its plan replaced (card evm-quote-fewer-rounds, S1), which a
+ *  recording made before it never holds and whose failure ends nothing, so a replay answers it as a provider's error and
+ *  sets it apart: only where every override but Multicall3's is the no-op hook's code at a hook the recording's own reads
+ *  replaced (a pool of its plan), named in the read's own data, and the read is no swap fit. A swap fit (its override a
+ *  balance) or any other override the recording lacks is missed (review of A+B, 1). */
+export const hookSpeculation = (keys: Iterable<string>): ((c: { method: string; params?: unknown }) => boolean) => {
+  const planHooks = new Set([...keys].flatMap((k) => {
+    const [m, ps] = JSON.parse(k) as [string, unknown[]];
+    return m === "eth_call" ? (noopAt(ps[2]) ?? []) : [];
+  }));
+  return (c) => {
+    const ps = (c.params ?? []) as unknown[];
+    const hooks = c.method === "eth_call" ? noopAt(ps[2]) : null;
+    const data = String((ps[0] as { data?: string } | undefined)?.data).toLowerCase();
+    return hooks !== null && !data.startsWith(SEL_BUY_SWAP) && hooks.every((h) => planHooks.has(h) && data.includes(h.slice(2)));
+  };
+};
 
 /** A recording's calls with, for each block range its getLogs named a currency in (recorded before card
  *  evm-scan-chain-tail), the same range's getLogs of the event alone, answered with the union of those logs: a scan

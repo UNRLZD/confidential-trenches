@@ -12,7 +12,7 @@ import { gunzipSync } from "node:zlib";
 import { EVM_NOOP_HOOK_CODE, evmAgreedReset, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolIndexUse, evmProviders, evmQuoteWarmReset, evmRanked, evmSpeedReset, type EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
-import { callKey } from "./evm-quote-calls-record.ts";
+import { callKey, hookSpeculation } from "./evm-quote-calls-record.ts";
 import { onTestClock } from "./test-clock.ts";
 
 const F = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/evm-warm-tap-calls.json.gz", import.meta.url))).toString("utf8"));
@@ -32,11 +32,8 @@ const MC3 = "0xca11bde05977b3631167028862be2a173976ca11";
  *  its quote's own recorded head (the recording reads two a quote, in the quotes' order), so a quote that reads its head
  *  more or fewer times than the recording did still holds the recording's block; a getLogs span the recording does not
  *  hold is answered from a recorded span of the same filter that covers it whole, its logs inside the span; and a read
- *  with a hook's code replaced that the recording predates is answered as a provider's error (`spec`), as the read a warm
- *  quote speculates beside its first round, whose failure ends nothing: only where every override but Multicall3's is
- *  the no-op hook's code (EVM_NOOP_HOOK_CODE) at a hook the recording's own reads replaced (a pool of its plan), named
- *  in the read's own data, and the read is no swap fit (review of A+B, 1: a fit read overrides a balance, and one the
- *  recording lacks is missed). Any other call the recording does not hold is missed, as before. */
+ *  a warm quote speculates with a hook of its plan replaced that the recording predates is answered as a provider's
+ *  error and set apart (`spec`, hookSpeculation). Any other call the recording does not hold is missed, as before. */
 const replay = (rec: Rec = F) => {
   let phase: Phase = "cold";
   let quote = 0;
@@ -44,17 +41,7 @@ const replay = (rec: Rec = F) => {
   const latest = answers.get(JSON.stringify(["eth_getBlockByNumber", ["latest", false]])) ?? [];
   if (latest.length !== 2 * rec.quotes.length) throw new Error(`the recording holds ${latest.length} heads at "latest" for ${rec.quotes.length} quotes, not two a quote`);
   const spec: string[] = [];
-  type Overrides = Record<string, Record<string, unknown>>;
-  const noopAt = (o: Overrides): string[] | null => {
-    const at = Object.keys(o).filter((a) => a.toLowerCase() !== MC3);
-    const noop = at.every((a) => Object.keys(o[a]!).length === 1 && o[a]!.code === EVM_NOOP_HOOK_CODE);
-    return at.length > 0 && noop ? at.map((a) => a.toLowerCase()) : null;
-  };
-  // the hooks the recording's own reads replaced: the plan's pools' hooks
-  const planHooks = new Set([...answers.keys()].flatMap((k) => {
-    const [m, ps] = JSON.parse(k) as [string, unknown[]];
-    return m === "eth_call" && ps[2] !== undefined ? (noopAt(ps[2] as Overrides) ?? []) : [];
-  }));
+  const speculated = hookSpeculation(answers.keys());
   // each recorded getLogs: its filter without the span, and the span
   const spans = [...answers.entries()].flatMap(([k, all]) => {
     const [m, ps] = JSON.parse(k) as [string, { fromBlock?: string; toBlock?: string }[]];
@@ -105,11 +92,7 @@ const replay = (rec: Rec = F) => {
           }
         }
       }
-      const tx = (c.params?.[0] ?? {}) as { data?: string };
-      const hooks = c.method === "eth_call" && c.params?.[2] !== undefined ? noopAt(c.params[2] as Overrides) : null;
-      const data = String(tx.data).toLowerCase();
-      const hooked = hooks !== null && !data.startsWith(SEL_BUY_SWAP) && hooks.every((h) => planHooks.has(h) && data.includes(h.slice(2)));
-      if (all === undefined && hooked) {
+      if (all === undefined && speculated(c)) {
         spec.push(`${sentIn} ${k.slice(0, 140)}`);
         return { jsonrpc: "2.0", id: c.id, error: { code: -32000, message: "not in the recording" } };
       }
