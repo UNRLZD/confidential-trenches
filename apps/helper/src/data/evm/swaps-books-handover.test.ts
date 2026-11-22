@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeChain, ICNT, open, REC, VVV } from "../../../test/evm-swaps/base.ts";
+import { IDLE_MS } from "./swaps.ts";
 
 const bodyOf = async (p: Promise<{ body: string }>) => JSON.parse((await p).body);
 const handed = (s: { state(): unknown }) => JSON.parse(JSON.stringify(s.state())) as Record<string, unknown>;
@@ -51,6 +52,41 @@ test("card helper-tape-handover: a second helper restored from the first one's s
   await next.tick();
   assert.ok(logsAsked(c) > 0, "the tick reads on");
   assert.deepEqual((await bodyOf(next.trades(ICNT, 50))).trades, was.trades[0]);
+  next.stop();
+});
+
+test("card helper-tape-handover: a book at rest on the old helper (idle past IDLE_MS) is handed over at rest; its first open on the new one answers its rows and reads only the blocks after its settled one", async () => {
+  const clock = { t: 1_000_000 };
+  const c = fakeChain();
+  c.st.head = REC.lastHead - 40;
+  const old = open(c, clock);
+  await old.candles(ICNT, "1m", null, 500);
+  for (let h = REC.lastHead - 40; h < REC.lastHead - 20; h += 5) {
+    c.st.head = h;
+    await old.tick();
+  }
+  const was = (await bodyOf(old.trades(ICNT, 50))).trades;
+  clock.t += IDLE_MS + 1;
+  await old.tick();
+  const st = handed(old);
+  old.stop();
+  const books = st.books as [string, { rest?: true; book: { settledTo: number } }][];
+  assert.deepEqual(books.map(([t, b]) => [t, b.rest]), [[ICNT, true]], "the idle book handed over at rest");
+  const settled = books[0]![1].book.settledTo;
+  clock.t += 30_000;
+  const n = fakeChain();
+  n.st.head = REC.lastHead - 20;
+  const from: number[] = [];
+  const fetch = (url: string, init: RequestInit) => {
+    for (const r of JSON.parse(String(init.body)) as { method: string; params: { fromBlock?: string }[] }[]) if (r.method === "eth_getLogs") from.push(parseInt(r.params[0]!.fromBlock!, 16));
+    return n.fetch(url, init);
+  };
+  const next = open({ ...n, fetch }, clock, { pools: new Map() });
+  assert.equal(next.restore(st), true);
+  assert.equal(logsAsked(n), 0, "nothing read at the restore: the book rests");
+  const now = (await bodyOf(next.trades(ICNT, 50))).trades;
+  assert.deepEqual(now.slice(-was.length), was, "its rows as the old helper held them");
+  assert.ok(from.length > 0 && from.every((b) => b > settled), `only the blocks after its settled ${settled} read (${from.join(",")})`);
   next.stop();
 });
 
