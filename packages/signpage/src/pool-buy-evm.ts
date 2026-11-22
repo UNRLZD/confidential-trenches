@@ -1002,14 +1002,14 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
     // withdrawn: W holds the chunk less the fee in ETH; the buy did not fill. The carry puts it back into the pool, from
     // the chain's own release (no record of this run is its source: a write that fails here loses nothing). The op is
     // noted first, as on filled
-    const end = await ended({ stage: "owed_back", txs });
+    if (ref !== null) await noteLeg(h, ref.id, ref.leg, { stage: "owed_back", txs });
     await h.record(x.w, { ...x.holding, state: "withdrawn", route: at }).catch(() => {});
     try {
       h.carry?.();
     } catch {
       /* the next state read runs it */
     }
-    return end;
+    return { stage: "owed_back", txs };
   }
   return null;
 }
