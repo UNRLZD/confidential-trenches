@@ -24,7 +24,7 @@ import { bindSenderFromEnv } from "../src/bind/env.ts";
 import { pairNames, tokenWatchesFromEnv } from "../src/token-status/status.ts";
 import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
 import { withdrawSenderFromEnv } from "../src/withdraw/send.ts";
-import { evmSwapsFromEnv, poolIndexesFromEnv, sendersFromEnv, solanaTokenFromEnv, solanaTradesFromEnv } from "../src/server.ts";
+import { evmSwapsFromEnv, poolIndexesFromEnv, poolSendersOf, sendersFromEnv, solanaTokenFromEnv, solanaTradesFromEnv } from "../src/server.ts";
 import { solanaPoolSendersFromEnv } from "../src/pool/solana.ts";
 import { evmPoolSendersFromEnv } from "../src/pool/evm.ts";
 import { releaseOf } from "../src/health.ts";
@@ -86,6 +86,8 @@ export const ENV_READERS = {
   solanaTokenFromEnv: (env) => solanaTokenFromEnv(env, noProxy, noLists),
   releaseOf,
   solanaPoolSendersFromEnv,
+  // card helper-pool-fee-never-a-client-429: the start's pool senders, their reads through poolFetchAhead (no read at build)
+  poolSendersOf: (env) => poolSendersOf(env, { backgroundThrottled: () => {} }),
   evmPoolSendersFromEnv,
   evmSwapsFromEnv: (env) => evmSwapsFromEnv(env, noEvmLists),
   solanaTradesFromEnv: (env) => solanaTradesFromEnv(env, noLists, noToken).stop(),
