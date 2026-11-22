@@ -26,11 +26,14 @@
 // AS-01: one shot per frame and width, fr-<frame>-<state id>-<width>.png, read back from disk: a missing file fails.
 //
 //   node apps/terminal/test/e2e/signin/run.mjs [--runs prf,no-prf,wallet] [--shots <dir>] [--record <file>]
-//     [--plant jump | missing-frame | prf-off] [--cpu <rate>]   --cpu 4 slows the page's CPU 4x (CDP
+//     [--plant jump | missing-frame | prf-off | slow-paint] [--cpu <rate>]   --cpu 4 slows the page's CPU 4x (CDP
 //     Emulation.setCPUThrottlingRate), a slower device than the machine running it      PASS exit 0, FAIL exit 1, error exit 2
 // Needs the terminal's build (pnpm --filter terminal build) and Playwright's Chromium. --plant breaks one thing on
 // purpose so the run shows it red: jump moves the page 48 px inside the sign-in step, missing-frame drops FR-P1's shot,
-// prf-off gives the prf launch an authenticator with no PRF.
+// prf-off gives the prf launch an authenticator with no PRF. slow-paint is a slow device, not a fault: APP_HOST's script
+// comes 300 ms late and the boot frame's logo 400 ms late, so the hop back's new frame paints its sparse boot frame long
+// before its script says painted (CI's 117 ms #040404 blank, card signin-e2e-step-timing-same-every-run); it fails BAR-03
+// where that frame shows under the full dim, and passes where the shell's ground covers it until the painted.
 // Records hold states, counts, times and boxes only: never the 12 words, a key or a PRF output.
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,7 +43,7 @@ import { addAuthenticator, cdpFor, HOSTS, REAL, startHarness } from "../../harne
 import { framePixels } from "./png.mjs";
 
 export const RUNS = ["prf", "no-prf", "wallet"];
-export const PLANTS = ["jump", "missing-frame", "prf-off"];
+export const PLANTS = ["jump", "missing-frame", "prf-off", "slow-paint"];
 export const WIDTHS = [
   { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
@@ -271,6 +274,11 @@ async function oneWidth(h, runName, w, { plant, shotDir, cpu }) {
   const events = [];
   await context.exposeBinding("__ct", (_src, e) => events.push(e));
   await context.addInitScript(PROBE, { sign: REAL.sign, app: REAL.app, plant });
+  // slow-paint: APP_HOST's script 300 ms late and the boot frame's logo files 400 ms late, a slow device's app start
+  if (plant === "slow-paint") {
+    await context.route(/\/assets\/index-[^/]*\.js$/, async (r) => setTimeout(() => r.continue().catch(() => {}), 300));
+    await context.route(/\/assets\/ct-stack-[^/]*\.svg$/, async (r) => setTimeout(() => r.continue().catch(() => {}), 400));
+  }
   const page = await context.newPage();
   const cdp = await cdpFor(page);
   // --cpu N: the page's CPU slowed N times (a slower device than the runner), for every document of the tab

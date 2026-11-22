@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createHash } from "node:crypto";
-import { bundle, bundleModuleProblems, check, copyServed, EVM_INDEX_CHAINS, EVM_INDEX_PINS, outputFiles, outsideTsconfigs, page, SERVED, sha384, walkSourceProblems } from "./build-app.mjs";
+import { bundle, bundleModuleProblems, check, copyServed, EVM_INDEX_CHAINS, EVM_INDEX_PINS, outputFiles, outsideTsconfigs, page, SERVED, sha384, walkSourceProblems, writeOutputs } from "./build-app.mjs";
 import { SIGN_BUILD_OUTPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
@@ -289,5 +289,31 @@ test("build-app writes exactly SIGN_BUILD_OUTPUTS: in the package, and by the sa
     assert.deepEqual(readdirSync(out, { recursive: true }).sort(), served);
   } finally {
     rmSync(out, { recursive: true, force: true });
+  }
+});
+
+// card signin-e2e-step-timing-same-every-run: three harnesses at once each copy public/ whole while another's build writes
+// it; a temporary file listed in public/ and renamed away before its copy failed the copy ENOENT
+test("a build's temporary files are never in a folder a reader copies, and each output lands whole", () => {
+  const d = mkdtempSync(join(tmpdir(), "ct-build-app-write-"));
+  try {
+    const files = outputFiles({ js: "J", html: "H", worker: "W", thread: "T", walk: "K" }, false);
+    mkdirSync(join(d, "public"));
+    const seen = [];
+    const used = writeOutputs(d, files, {
+      pid: 4242,
+      write: (p, bytes) => {
+        writeFileSync(p, bytes);
+        // what a reader copying public/ lists between this write and its rename
+        seen.push(...readdirSync(join(d, "public")).filter((n) => !Object.keys(files).includes(`public/${n}`)));
+      },
+    });
+    assert.equal(used.length, Object.keys(files).length);
+    for (const t of used) assert.ok(!t.slice(d.length + 1).includes("/"), `${t} at the folder's top`);
+    assert.deepEqual(seen, [], "no temporary file in public/ while a build writes");
+    for (const [rel, bytes] of Object.entries(files)) assert.equal(readFileSync(join(d, rel), "utf8"), bytes);
+    assert.deepEqual(readdirSync(d).filter((n) => n.endsWith(".tmp")), [], "no temporary file left");
+  } finally {
+    rmSync(d, { recursive: true, force: true });
   }
 });
