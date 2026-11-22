@@ -41,6 +41,11 @@
 // read on the mainnet RPCs, where it does not exist, and is refused. solana-devnet, base-sepolia and robinhood-testnet
 // are read the same way, each on its own RPCs (TESTNET below). A testnet tx is never real-money proof: parseLive's
 // `real` lists the mainnet txs only, and a release counts those alone.
+// Card money-gate-test-networks-never-proof (owner, 12 Nov: no test networks, mainnet is the proof): a change whose record
+// adds a Tx line on a test network is refused, and a test-network Tx line a record held before the change (all of them
+// under --all) is never read: it is named as test-network history, not proof, so the gate judges mainnet records only.
+// Before it, --all failed on 215 solana-devnet txs whose only second operator, OnFinality's devnet host, keeps history
+// from block 523,247,104 (read 21 Nov).
 // A change (a pull request, or a push to main) that touches money code (MONEY below) may merge with no record: when a
 // card whose commit touches money code changes its record in the same change, that record must be true, so "Money
 // path: no" in it, a last live verdict of FAIL or no live section is refused. Money code in a commit that names no card,
@@ -758,7 +763,11 @@ export const outcome = ({ refusals = [], unread = [] }) => (refusals.some((x) =>
 
 // records: the records to read back; every: all records in the repo (for the twice-listed check); money: what
 // moneyCode() found in the change; sleep: how a wait is waited (a test records it)
-export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every = records, floor = FLOOR, money, sleep = wait } = {}) {
+// `replayTestNetworks`: test-network Tx lines are read as before, for a test or a live check (money-gate-testnet,
+// delete-refund-readback) that replays recorded test-network txs
+// through the reading paths mainnet uses (NEAR's light-client proof, tx rebuild, a host's chain id); the command line
+// never sets it, so the gate CI runs never reads a test network (card money-gate-test-networks-never-proof)
+export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every = records, floor = FLOOR, money, sleep = wait, replayTestNetworks = false } = {}) {
   const lines = () => ({ refusals: [], unread: [], read: [], notes: [], proven: [], gone: [] });
   // each Solana host's first available block, read once in this run (solanaAbsent)
   const history = new Map();
@@ -851,6 +860,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
   const notes = []; // a host's 429 not waited because two operators read it ok
   const proven = []; // a NEAR tx read ok on one operator and proven by its light-client proof on the other
   const gone = []; // a Deleted account read gone on two operators
+  const testnetHistory = []; // a test-network Tx line held before the change: named, never read, never proof
   const unread = []; // "could not read: ...": a tx or account no answer decided within ROUND_PAUSES, never a pass
   const jobs = [];
   for (const f of money?.merged ?? []) refusals.push(`${f} changes money code in a merge commit, outside any card's commit`);
@@ -877,7 +887,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
       seen.set(id, [...(seen.get(id) ?? []), path]);
     }
   }
-  for (const { path, key, text, notFile, bytes: bytesOf, bytesProblem } of records) {
+  for (const { path, key, text, before, notFile, bytes: bytesOf, bytesProblem } of records) {
     if (bytesProblem) refusals.push(`${path.replace(/\.md$/, BYTES)}: ${bytesProblem}`);
     if (notFile) {
       refusals.push(`${path}: ${notFile}, not a regular file`);
@@ -887,14 +897,31 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
     if (!live) continue;
     for (const p of live.problems) refusals.push(`${path}: ${p}`);
     if (!live.moneyPath) continue;
+    // the record's test-network Tx lines before the change (`before`: its text at the change's base; none given, every
+    // line is the change's own, so a caller that names no base is refused, never passed)
+    const held = new Set((parseLive(before ?? "", key)?.txs ?? []).map((t) => `${t.chain} ${t.hash}`));
     for (const tx of live.txs) {
       const where = seen.get(`${tx.chain} ${tx.hash}`) ?? [];
       if (where.length > 1) refusals.push(`${path}: ${tx.chain} ${tx.hash} is listed ${where.length} times (${where.join(", ")})`);
+      if (TESTNET.has(tx.chain) && !replayTestNetworks) {
+        if (held.has(`${tx.chain} ${tx.hash}`)) testnetHistory.push(`${path}: ${tx.chain} ${tx.hash}`);
+        else refusals.push(`${path}: ${tx.chain} ${tx.hash}: a test network is never money proof; record the run on mainnet`);
+        continue;
+      }
       jobs.push(txJob(path, tx, bytesOf));
     }
     // a bad Deleted line is a problem above and reads nothing
     if (live.problems.length) continue;
-    for (const { chain, account } of live.deleted) jobs.push(goneJob(path, chain, account));
+    const heldGone = new Set((parseLive(before ?? "", key)?.deleted ?? []).map((d) => `${d.chain} ${d.account}`));
+    for (const { chain, account } of live.deleted) {
+      // a test network's Deleted line as its Tx lines: held before the change, history; the change's own, refused
+      if (TESTNET.has(chain) && !replayTestNetworks) {
+        if (heldGone.has(`${chain} ${account}`)) testnetHistory.push(`${path}: Deleted ${chain} ${account}`);
+        else refusals.push(`${path}: Deleted ${chain} ${account}: a test network is never money proof; record the run on mainnet`);
+        continue;
+      }
+      jobs.push(goneJob(path, chain, account));
+    }
   }
   // Rounds: every job reads its hosts; one that no answer decides is read again, on the hosts that gave none, after a
   // pause, at most ROUND_PAUSES.length more times. Each job's lines land in its own slot, in the record's order.
@@ -918,7 +945,7 @@ export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every =
   }
   // a could-not-read is a refusal too, so a caller that reads refusals alone never passes it; outcome() tells them apart
   refusals.push(...unread);
-  return { refusals, read, notes, proven, gone, unread };
+  return { refusals, read, notes, proven, gone, unread, history: testnetHistory };
 }
 
 // a record is read only when it is a regular file: a symlink (to a file anywhere) or anything else is refused, never
@@ -984,7 +1011,18 @@ export function recordsFrom(cwd, args) {
       .filter(isRecord);
     money = moneyCode(cwd, base, head);
   }
-  return { records: paths.map((p) => load(cwd, p)), every: all.map((p) => load(cwd, p)), money };
+  // each record's text before the change: under --all its own (every line held), else at the base the diff above
+  // reads from (base...head: their merge base), none for a record the change adds (or one git cannot show)
+  const from = args[0] === "--all" ? null : execFileSync("git", ["merge-base", args[0], args[1]], { cwd, encoding: "utf8" }).trim();
+  const before = (p) => {
+    try {
+      return execFileSync("git", ["show", `${from}:${p}`], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    } catch {
+      return "";
+    }
+  };
+  const records = paths.map((p) => load(cwd, p)).map((r) => ({ ...r, before: args[0] === "--all" ? r.text : before(r.path) }));
+  return { records, every: all.map((p) => load(cwd, p)), money };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -995,7 +1033,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   }
   const { records, every, money } = recordsFrom(process.cwd(), args);
   const result = await moneyGate(records, fetch, RPCS, { every, money });
-  const { refusals, read, notes, proven, gone, unread } = result;
+  const { refusals, read, notes, proven, gone, unread, history } = result;
+  for (const h of history) console.log(`money-gate: test-network history, not proof: ${h}`);
   for (const r of read) console.log(`money-gate: ${r}`);
   for (const n of notes) console.log(`money-gate: ${n}`);
   for (const p of proven) console.log(`money-gate: ${p}`);
@@ -1005,5 +1044,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const code = outcome(result);
   if (code === 3) console.error(`money-gate: COULD NOT READ (${unread.length}): no answer from enough providers within ${ROUND_PAUSES.length + 1} rounds; nothing refused, nothing passed: run it again`);
   if (code) process.exit(code);
-  console.log(`money-gate: PASS (${records.length} record(s) read, ${read.length} tx read(s))`);
+  // the PASS line as before when no test-network line is named (base-gate.test.mjs reads it)
+  console.log(`money-gate: PASS (${records.length} record(s) read, ${read.length} tx read(s)${history.length ? `, ${history.length} test-network line(s) named, not read` : ""})`);
 }
