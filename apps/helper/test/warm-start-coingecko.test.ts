@@ -31,7 +31,10 @@ const CG = "https://pro-api.coingecko.com/";
  *  quote tokens, swaps.ts QUOTE_SEEDS) and 16 for the four coins' top pools (4), bars (8, two timeframes) and tapes (4); to be set from helper-28's live run.] */
 const COLD_MAX = 19;
 /** The most a start on the warm file makes for the same reads. [design: measured here, 7 sends: the start's own 3 and one
- *  trades read a coin (the four tapes restored are read again, not served); no top pool and no bars read; to be set from helper-28's live run.] */
+ *  trades read a coin; no top pool and no bars read. The trades reads are the vendor tape's freshness rule, not a part the
+ *  warm file lacks: a Solana vendor tape is served only inside SOL_VENDOR_REACH_MS of its read (solana/token.ts:81 and its
+ *  cached reachMs), shorter than any helper swap, so rows handed over would be read again at the first page all the
+ *  same. To be set from helper-28's live run.] */
 const WARM_MAX = 7;
 
 /** The coins read: BONK, JUP and WIF's mints and the recorded tape's (sol-pool-trades-nearkat.json), a Raydium coin. */

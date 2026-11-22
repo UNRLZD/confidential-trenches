@@ -52,14 +52,17 @@ globalThis.fetch = async (input) => {
   return answer(bare);
 };
 
-const refuse = (what) => (opts, ...rest) => {
+/** Throws unless the target is 127.0.0.1 (a test's own server). */
+const local = (what, opts) => {
   const host = typeof opts === "string" ? new URL(opts).hostname : opts instanceof URL ? opts.hostname : (opts?.hostname ?? opts?.host ?? "");
   if (host !== "127.0.0.1") throw new Error(`net-replay: ${what} to ${String(host)} refused`);
-  return realRequest[what](opts, ...rest);
 };
-const realRequest = { http: http.request, https: https.request };
-http.request = refuse("http");
-https.request = refuse("https");
+const real = { http: http.request, https: https.request, httpGet: http.get, httpsGet: https.get };
+http.request = (opts, ...rest) => (local("http", opts), real.http(opts, ...rest));
+https.request = (opts, ...rest) => (local("https", opts), real.https(opts, ...rest));
+// get() calls the module's own request, not the export replaced above, so it is refused on its own
+http.get = (opts, ...rest) => (local("http", opts), real.httpGet(opts, ...rest));
+https.get = (opts, ...rest) => (local("https", opts), real.httpsGet(opts, ...rest));
 syncBuiltinESMExports();
 
 // the Solana tape's stream: a socket that never opens (the helper falls to its reads)
