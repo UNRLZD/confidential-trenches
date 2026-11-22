@@ -21,6 +21,7 @@ import { readSolanaReference, type SolanaReference, type SolanaReferenceRequest 
 import { base58 } from "@scure/base";
 import { readSolanaDlmmPairs, SOLANA_DLMM_MAX_PAIRS, SOLANA_DLMM_SCAN_MAX } from "../../kit/src/trade/solana/dlmm.ts";
 import { readSolanaCpmmPools } from "../../kit/src/trade/solana/cpmm.ts";
+import { readSolanaClmmPools } from "../../kit/src/trade/solana/clmm.ts";
 import { readSolanaAmmV4Pools } from "../../kit/src/trade/solana/amm-v4.ts";
 import { SOLANA_POOL_BUY_VENUES } from "../../kit/src/trade/solana/pool-buy.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
@@ -210,25 +211,39 @@ export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: 
   // the same reads' rules. A request that names a kind's pools is read with those, that kind's finder never asked.
   // `early` (a preview, card solana-quote-reads-found-pools-once): each kind's pools as soon as one provider's scan names
   // them (PoolsOf.early), never waiting for the slower provider's half; a tap's own read waits for both (the finder)
-  const kinds = FINDER_KINDS.filter((k) => req[k] === undefined && finders?.[k]);
+  // a buy's markets (MARKET_FINDER_KINDS) are found the same way; a sell reads none, so no market can hold a sell back.
+  // A market scan that faulted leaves a tap's buy refused with that fault, never priced as if the coin had no market
+  const kinds = [...FINDER_KINDS, ...(req.side === "buy" ? MARKET_FINDER_KINDS : [])].filter((k) => req[k] === undefined && finders?.[k]);
   if (kinds.length > 0) {
     // a scan a provider failed past the page's own retry is that fault, never "no pools" (card
     // pool-buy-waits-out-a-throttle): a reference that then names no pool throws it, as a read's own fault, so a buy of
     // a coin whose pools are all on a scanned venue waits it out instead of answering quote_check_failed
     let scanFault: SolanaRpcTransportError | null = null;
-    const found = Promise.all(kinds.map((k) => ((o.early ? finders![k]!.early : undefined) ?? finders![k]!)(req.token).catch((e: unknown) => (e instanceof SolanaRpcTransportError && (scanFault ??= e), [] as readonly string[]))));
+    let marketFault: unknown = null;
+    // a market finder's fault is kept apart (beside a transport fault's own keeping below, unchanged)
+    const ask = (k: PoolFinderKind | MarketFinderKind): Promise<readonly string[]> => {
+      const pools = ((o.early ? finders![k]!.early : undefined) ?? finders![k]!)(req.token);
+      return (MARKET_FINDER_KINDS as readonly string[]).includes(k) ? pools.catch((e: unknown) => Promise.reject((marketFault ??= e))) : pools;
+    };
+    const found = Promise.all(kinds.map((k) => ask(k).catch((e: unknown) => (e instanceof SolanaRpcTransportError && (scanFault ??= e), [] as readonly string[]))));
     const pump = readReference(rpcs, req);
     const unfound = async (read: Promise<SolanaReference | null>): Promise<SolanaReference | null> => {
       const ref = await read;
       if (ref === null && scanFault !== null) throw scanFault;
       return ref;
     };
+    // a tap's buy whose market scan faulted is refused with that fault; a preview reads on without the markets
+    const marketsRead = async (read: Promise<SolanaReference | null>): Promise<SolanaReference | null> => {
+      const ref = await unfound(read);
+      if (ref !== null && marketFault !== null && !o.early) throw marketFault;
+      return ref;
+    };
     const lists = await found;
-    if (lists.every((l) => l.length === 0)) return unfound(pump);
+    if (lists.every((l) => l.length === 0)) return marketsRead(pump);
     pump.catch(() => {});
-    const more: { -readonly [K in PoolFinderKind]?: string[] } = {};
+    const more: { -readonly [K in PoolFinderKind | MarketFinderKind]?: string[] } = {};
     kinds.forEach((k, i) => void (lists[i]!.length > 0 && (more[k] = [...lists[i]!])));
-    return unfound(readReference(rpcs, { ...req, ...more }));
+    return marketsRead(readReference(rpcs, { ...req, ...more }));
   }
   return readReference(rpcs, req);
 }
@@ -281,28 +296,42 @@ export type PoolsOf = ((token: string) => Promise<readonly string[]>) & { readon
 export const POOL_FINDER_VENUES = Object.freeze({ dlmmPairs: "dlmm", cpmmPools: "raydium-cpmm", ammV4Pools: "raydium-amm-v4" } as const);
 export type PoolFinderKind = keyof typeof POOL_FINDER_VENUES;
 const FINDER_KINDS = Object.keys(POOL_FINDER_VENUES) as PoolFinderKind[];
-/** The page's finders, one per scanned venue; a kind with none is read without its pools. */
-export type PoolFinders = { readonly [K in PoolFinderKind]?: PoolsOf | null };
+/** The markets a buy's reference reads but no buy ever takes (card solana-buy-never-below-a-hidden-market): a coin's
+ *  Raydium CLMM pools in wSOL and USDC (kit clmm.ts readSolanaClmmPools), the request's `clmmPools`. Never a venue of
+ *  POOL_FINDER_VENUES, so readCoinVenue and the tap's tables never see one; read for a buy only, where they can only
+ *  raise the price the buy must meet (kit pool.ts solanaReferenceSet). */
+export const MARKET_FINDER_KINDS = Object.freeze(["clmmPools"] as const);
+export type MarketFinderKind = (typeof MARKET_FINDER_KINDS)[number];
+/** The page's finders, one per scanned venue and market kind; a kind with none is read without its pools. */
+export type PoolFinders = { readonly [K in PoolFinderKind | MarketFinderKind]?: PoolsOf | null };
 /** The page's finders, set once at start on mainnet (main.ts); none: a reference reads the pump venues alone. */
 let pageFinders: PoolFinders | null = null;
 export const setPagePoolFinders = (f: PoolFinders | null): void => void (pageFinders = f);
 /** How many coins' pools a finder keeps, and how long: a pool made since is found on the next read a minute on. */
 export const POOLS_KEPT = 256;
 export const POOLS_KEEP_MS = 60_000;
+/** How long a market finder (MARKET_FINDER_KINDS) keeps a coin's markets: a CLMM pool for a mint is made rarely, and
+ *  each tap reads each listed pool's state fresh (kit clmm.ts readSolanaClmmMarket), so the list alone is kept, as the
+ *  helper keeps its half for every device (apps/helper rpc.ts MARKET_SCAN_HOLD_MS). [design: 10 min floor] */
+export const MARKETS_KEEP_MS = 10 * 60_000;
 type ScanRead = (scan: readonly [SolanaRpc, SolanaRpc], read: readonly [SolanaRpc, SolanaRpc], mint: string) => Promise<string[]>;
-const FIND: Readonly<Record<PoolFinderKind, ScanRead>> = Object.freeze({ dlmmPairs: readSolanaDlmmPairs, cpmmPools: readSolanaCpmmPools, ammV4Pools: readSolanaAmmV4Pools });
+const FIND: Readonly<Record<PoolFinderKind | MarketFinderKind, ScanRead>> = Object.freeze({ dlmmPairs: readSolanaDlmmPairs, cpmmPools: readSolanaCpmmPools, ammV4Pools: readSolanaAmmV4Pools, clmmPools: readSolanaClmmPools });
+/** How many scans each provider answers for one coin: the coin first and second beside wSOL; for the CLMM markets one
+ *  beside wSOL and one beside USDC, each in the program's own mint order (kit clmm.ts readSolanaClmmPools). */
+const SCANS: Readonly<Record<PoolFinderKind | MarketFinderKind, number>> = Object.freeze({ dlmmPairs: 2, cpmmPools: 2, ammV4Pools: 2, clmmPools: 2 });
 /**
  * A finder of one venue that keeps each coin's pools POOLS_KEEP_MS: the kit's reader, scanning on `scan` (two providers
  * that answer getProgramAccounts) and ranking past its cap on `read`. A read that fails is kept for nothing, so the next
  * reference asks again; one read at a time per coin.
  */
-export function keptPools(kind: PoolFinderKind, scan: () => readonly [SolanaRpc, SolanaRpc], read: () => readonly [SolanaRpc, SolanaRpc], now: () => number = () => performance.now()): PoolsOf {
+export function keptPools(kind: PoolFinderKind | MarketFinderKind, scan: () => readonly [SolanaRpc, SolanaRpc], read: () => readonly [SolanaRpc, SolanaRpc], now: () => number = () => performance.now()): PoolsOf {
   type Kept = { at: number; pools: Promise<readonly string[]>; early: Promise<readonly string[]> };
   const kept = new Map<string, Kept>();
   const find = FIND[kind];
+  const keep = (MARKET_FINDER_KINDS as readonly string[]).includes(kind) ? MARKETS_KEEP_MS : POOLS_KEEP_MS;
   const of = (token: string): Kept => {
     const k = kept.get(token);
-    if (k !== undefined && now() - k.at < POOLS_KEEP_MS) return k;
+    if (k !== undefined && now() - k.at < keep) return k;
     if (kept.size >= POOLS_KEPT) kept.clear();
     // the same scan, each provider's answers seen as they come: the first provider whose two scans (the coin first and
     // second) both answered a list names the early list, as the kit makes the list from both (its union, and past
@@ -334,7 +363,7 @@ export function keptPools(kind: PoolFinderKind, scan: () => readonly [SolanaRpc,
         const answer = await rpc(method, params, signal);
         if (method === "getProgramAccounts" && scannedList(answer) !== null) {
           answers[i]!.set(JSON.stringify(params), answer);
-          if (answers[i]!.size === 2) halfOf(i);
+          if (answers[i]!.size === SCANS[kind]) halfOf(i);
         }
         return answer;
       }),
@@ -372,14 +401,18 @@ function scannedList(a: unknown): string[] | null {
   }
   return out;
 }
-/** Every venue's kept finder on the same providers. */
+/** Every venue's and market kind's kept finder on the same providers. */
 export const keptPoolFinders = (scan: () => readonly [SolanaRpc, SolanaRpc], read: () => readonly [SolanaRpc, SolanaRpc], now?: () => number): PoolFinders =>
-  Object.freeze(Object.fromEntries(FINDER_KINDS.map((k) => [k, keptPools(k, scan, read, now)])) as PoolFinders);
+  Object.freeze(Object.fromEntries([...FINDER_KINDS, ...MARKET_FINDER_KINDS].map((k) => [k, keptPools(k, scan, read, now)])) as PoolFinders);
 /** The finders of the venues `tables` pins a non-empty table for (a coin of a venue with none stays unbought at the tap:
- *  quote_check_failed, no Cash moved); null when none is left. */
+ *  quote_check_failed, no Cash moved), and every market finder, which needs no table since no buy takes a market; null
+ *  when none is left. */
 export function pinnedPoolFinders(finders: PoolFinders | null, tables: Readonly<Record<string, readonly string[] | undefined>>): PoolFinders | null {
   if (finders === null) return null;
-  const kept = FINDER_KINDS.filter((k) => finders[k] && Object.hasOwn(tables, POOL_FINDER_VENUES[k]) && (tables[POOL_FINDER_VENUES[k]]?.length ?? 0) > 0);
+  const kept = [
+    ...FINDER_KINDS.filter((k) => finders[k] && Object.hasOwn(tables, POOL_FINDER_VENUES[k]) && (tables[POOL_FINDER_VENUES[k]]?.length ?? 0) > 0),
+    ...MARKET_FINDER_KINDS.filter((k) => finders[k]),
+  ];
   return kept.length === 0 ? null : Object.freeze(Object.fromEntries(kept.map((k) => [k, finders[k]])) as PoolFinders);
 }
 
