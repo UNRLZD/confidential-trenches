@@ -172,8 +172,10 @@ export interface PoolUxReads {
   /** The page's pool.deposit on X from U_X, for `amount`, to its end, with the txs its answer named. */
   deposit(f: PoolUx, amount: bigint, signal: AbortSignal): Promise<PoolDepositRun>;
   /** A restore's: what it read U_X holds, written as U_X's newest ended op's `left` (poolFollows' left; review r3 P2-1):
-   *  0 before a carry from it is sent, its last read once the carry is done. */
-  leftAt?(f: PoolUx, low: bigint): Promise<void>;
+   *  0 before a carry from it is sent, its last read once the carry is done; with one deposit's cost (keep + perRung)
+   *  as the carry last read it, when it read one. A U_X with no op is given one (card
+   *  a-restored-deposit-wallets-leftover-shows). */
+  leftAt?(f: PoolUx, low: bigint, cost?: bigint): Promise<void>;
 }
 
 export interface PoolFollowDeps extends PoolUxReads {
@@ -598,8 +600,10 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
  *  nothing secret. `final` once in_pool is read on past the quote's deadline. `since_ms` is the device's clock when a
  *  stage first said the money was sent (any stage but quote_checked and expired), `refunded` true from the refunded
  *  stage on (card pool-deposit-stages): the facts src/state.ts opOf sends the app on the stages they belong to (kit
- *  messages.ts PoolDepositFacts). */
-export type PoolDepositOp = { kind: "pool_deposit"; stage: PoolFollowStage; txs: TxRef[]; created_ms: number; follow: PoolFollowRecord; final?: true; since_ms?: number; refunded?: true; untimed?: true };
+ *  messages.ts PoolDepositFacts).
+ *  `restored` on the op a restore writes for a U_X it carried that has no op on this device (a lost store's quote; card
+ *  a-restored-deposit-wallets-leftover-shows): ended as written, never followed or read again, never sent to the app. */
+export type PoolDepositOp = { kind: "pool_deposit"; stage: PoolFollowStage; txs: TxRef[]; created_ms: number; follow: PoolFollowRecord; final?: true; since_ms?: number; refunded?: true; untimed?: true; restored?: true };
 
 /** The op with `t` added to its txs, each hash once; the op itself when nothing is new (no write). */
 export function withTxs(op: PoolDepositOp, t: readonly TxRef[]): PoolDepositOp {
@@ -655,6 +659,8 @@ export function resumeOf(op: PoolDepositOp): PoolDepositOp {
 
 /** One follower per op across tabs: POOL_FOLLOW_LOCK/<op id>, held while it is followed. */
 export const POOL_FOLLOW_LOCK = "ct-wallet/pool-follow/";
+/** The restored op's id (poolFollows' writeLeft): POOL_RESTORED_OP + "<chain>/<scope>/<index>", one per U_X. */
+export const POOL_RESTORED_OP = "pool-restored/";
 
 const FOLLOW_KEYS = ["chain", "s", "i", "u", "refund_id", "refund_to", "address", "deadline_ms", "origin", "min_out", "refund_min"] as const;
 const isPoolOp = (v: unknown): v is PoolDepositOp =>
@@ -801,16 +807,30 @@ export function poolFollows(h: PoolFollowHost) {
   // an ended op's U_X read once: covering one deposit's floor, the op is followed again from in_pool (its money read as
   // landed before, so what arrives is carried and the op ends again past its deadline once U_X is under the floor)
   // what U_X holds now, written as its newest op's `left` when that op has ended and the value differs (an op still
-  // followed writes its own at its end)
-  const writeLeft = async (chain: PoolChain, u: string, low: bigint): Promise<void> => {
+  // followed writes its own at its end), with one deposit's `cost` when the reader read it
+  const writeLeft = async (f: PoolUx, low: bigint, cost?: bigint): Promise<void> => {
     const ops = await h.store();
     let newest: { k: string; v: PoolDepositOp } | undefined;
     for (const k of await ops.keys("ops")) {
       const v = await ops.get("ops", k).catch(() => undefined);
-      if (isPoolOp(v) && v.follow.chain === chain && v.follow.u === u && (newest === undefined || v.created_ms > newest.v.created_ms)) newest = { k, v };
+      if (isPoolOp(v) && v.follow.chain === f.chain && v.follow.u === f.u && (newest === undefined || v.created_ms > newest.v.created_ms)) newest = { k, v };
     }
-    if (newest === undefined || !poolFollowEnded(newest.v) || newest.v.follow.left === low.toString()) return;
-    await ops.update("ops", newest.k, (x) => (isPoolOp(x) && poolFollowEnded(x) && x.follow.left !== low.toString() ? { ...x, follow: { ...x.follow, left: low.toString() } } : undefined));
+    const end = { left: low.toString(), ...(cost === undefined ? {} : { cost: cost.toString() }) };
+    const ended = (x: unknown): PoolDepositOp | undefined => {
+      if (!isPoolOp(x) || !poolFollowEnded(x) || (x.follow.left === end.left && (end.cost === undefined || x.follow.cost === end.cost))) return undefined;
+      return { ...x, follow: { ...x.follow, ...end } };
+    };
+    if (newest !== undefined) return void (await ops.update("ops", newest.k, ended));
+    // no op of U_X on this device (a lost store's quote, which only a restore carried; card
+    // a-restored-deposit-wallets-leftover-shows): money left there is written as a follow's end is, so the balance lists
+    // it (depositWalletsOf), the namer reads it (uxHeldOf) and pool to Cash carries it (leftoverSources). One per U_X
+    // (its scope and index), `restored`: settle never follows or reads it, so it costs no read a restore does not make,
+    // and it is never sent to the app as a deposit asked on this device (src/state.ts opOf). Its quote fields name no
+    // quote: the address is U_X's own (a plain send's shape), its deadline the time it was written
+    if (low === 0n) return;
+    const t = (h.now ?? Date.now)();
+    const made: PoolDepositOp = { kind: "pool_deposit", stage: "in_pool", final: true, restored: true, txs: [], created_ms: t, follow: { chain: f.chain, s: f.s, i: f.i, u: f.u, refund_id: f.refund_id, address: f.u, deadline_ms: t, origin: "", min_out: "0", ...end } };
+    await ops.update("ops", `${POOL_RESTORED_OP}${f.chain}/${f.s}/${f.i}`, (x) => (x === undefined ? made : ended(x)));
   };
   const followAgain = async (id: string, v: PoolDepositOp): Promise<void> => {
     if (running.get(id)?.signal.aborted === false) return;
@@ -821,7 +841,7 @@ export function poolFollows(h: PoolFollowHost) {
       const low = a < b ? a : b;
       // under one deposit's floor: nothing to carry, and what U_X holds now is its `left` (review r3 P2-1: a restore's
       // carry of a top-up leaves no stale row)
-      if (low < d.ladder.min || low < (await d.costs(v.follow)).floor) return void (await writeLeft(v.follow.chain, v.follow.u, low));
+      if (low < d.ladder.min || low < (await d.costs(v.follow)).floor) return void (await writeLeft(v.follow, low));
     } catch {
       return;
     }
@@ -878,7 +898,8 @@ export function poolFollows(h: PoolFollowHost) {
       const ended = new Map<string, { k: string; v: PoolDepositOp }>();
       for (const k of await ops.keys("ops")) {
         const v = await ops.get("ops", k).catch(() => undefined);
-        if (!isPoolOp(v)) continue;
+        // a restore's op of a U_X with no op of its own (writeLeft): never followed or read again
+        if (!isPoolOp(v) || v.restored === true) continue;
         const ux = `${v.follow.chain}/${v.follow.u}`;
         if (!poolFollowEnded(v) || openHeard(v)) {
           live.add(ux);
@@ -913,8 +934,9 @@ export function poolFollows(h: PoolFollowHost) {
         }
       })().finally(() => (againRun = null));
     },
-    /** A U_X's lower balance read by a restore's carry (src/pool-restore.ts carryUx): its newest ended op's `left`. */
-    left: (chain: PoolChain, u: string, low: bigint): Promise<void> => writeLeft(chain, u, low),
+    /** A U_X's lower balance read by a restore's carry (src/pool-restore.ts carryUx), with one deposit's cost when it
+     *  read one: its newest ended op's `left`, or the restored op of a U_X with none. */
+    left: (f: PoolUx, low: bigint, cost?: bigint): Promise<void> => writeLeft(f, low, cost),
     /** This tab's sign out, or the store closing: every follow stops; settle() starts them again. */
     stop(): void {
       abort.abort(new Error("stopped"));
