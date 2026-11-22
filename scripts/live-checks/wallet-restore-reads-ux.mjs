@@ -94,18 +94,19 @@ const UX_READ = new RegExp(
     `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},(?:\\1|${N}\\(${N},\\5\\.scope,\\1\\)),await ${N}\\(\\5\\.scope,\\5\\.notes\\)\\);`,
 );
 // (card deposit-takes-each-pools-own-coin, delta review r3 P2-1: what each read leaves at U_X is written as its op's
-// left, `L`: 0 before a deposit is sent, the last read when what is left is under one deposit's floor)
+// left, `L`: 0 before a deposit is sent, the last read when what is left is under one deposit's floor; card
+// a-restored-deposit-wallets-leftover-shows: with one deposit's cost as the carry last read it, `cost`)
 const UX_CARRY = new RegExp(
-  `async function (${N})\\((${N}),(${N}),(${N}),(${N})\\)\\{let (${N})=null,(${N})=async (${N})=>\\(await \\2\\.leftAt\\?\\.\\(\\3,\\8\\)\\.catch\\(\\(\\)=>\\{\\}\\),null\\);` +
-    `for\\(;;\\)\\{let\\[(${N}),(${N})\\]=await \\2\\.balances\\(\\3\\);if\\(\\9!==\\10\\)return\\{why:${Q}reads [^${Q}]*${Q},retry:\\6===null\\};` +
-    `if\\(\\6!==null&&\\9>=\\6\\)return\\{why:${Q}holds [^${Q}]*after a deposit from it filled: read again${Q},retry:!1\\};if\\(\\9<\\2\\.ladder\\.min\\)return \\7\\(\\9\\);let (${N})=await \\2\\.costs\\(\\3\\);if\\(\\9<\\11\\.floor\\)return \\7\\(\\9\\);` +
-    `let (${N})=${N}\\(\\2\\.ladder,\\9,\\11\\.perRung,\\11\\.keep\\);if\\(\\12===0n\\)return \\7\\(\\9\\);if\\(!\\4\\)return\\{why:${Q}holds \\$\\{String\\(\\9\\)\\}, with no deposit note on this device for its index to carry it into the pool${Q},retry:!1\\};` +
+  `async function (${N})\\((${N}),(${N}),(${N}),(${N})\\)\\{let (${N})=null,(${N}),(${N})=async (${N})=>\\(await \\2\\.leftAt\\?\\.\\(\\3,\\9,\\7\\)\\.catch\\(\\(\\)=>\\{\\}\\),null\\);` +
+    `for\\(;;\\)\\{let\\[(${N}),(${N})\\]=await \\2\\.balances\\(\\3\\);if\\(\\10!==\\11\\)return\\{why:${Q}reads [^${Q}]*${Q},retry:\\6===null\\};` +
+    `if\\(\\6!==null&&\\10>=\\6\\)return\\{why:${Q}holds [^${Q}]*after a deposit from it filled: read again${Q},retry:!1\\};if\\(\\10<\\2\\.ladder\\.min\\)return \\8\\(\\10\\);let (${N})=await \\2\\.costs\\(\\3\\);if\\(\\7=\\12\\.keep\\+\\12\\.perRung,\\10<\\12\\.floor\\)return \\8\\(\\10\\);` +
+    `let (${N})=${N}\\(\\2\\.ladder,\\10,\\12\\.perRung,\\12\\.keep\\);if\\(\\13===0n\\)return \\8\\(\\10\\);if\\(!\\4\\)return\\{why:${Q}holds \\$\\{String\\(\\10\\)\\}, with no deposit note on this device for its index to carry it into the pool${Q},retry:!1\\};` +
     // card notes-plan-at-restored-index: a U_X with no note here (`noted` a function) has its note written from the two
     // equal balances before its first deposit; a write refused is named, never carried, and a sign out goes on as a throw
-    `if\\(\\5\\.throwIfAborted\\(\\),typeof \\4==${Q}function${Q}\\)\\{try\\{await \\4\\(\\[\\9,\\10\\]\\)\\}catch\\((${N})\\)\\{if\\(\\5\\.throwIfAborted\\(\\),\\13 instanceof ${N}\\)throw \\13;` +
-    `return\\{why:${Q}holds \\$\\{String\\(\\9\\)\\}; its deposit note was not written \\(\\$\\{\\13 instanceof Error\\?\\13\\.message:${Q}it threw${Q}\\}\\): restore again to carry it${Q},retry:!1\\}\\}\\4=!0\\}` +
-    `await \\7\\(0n\\);let\\{end:(${N})\\}=await \\2\\.deposit\\(\\3,\\12,\\5\\);` +
-    `if\\(\\14!==${Q}filled${Q}&&\\14!==${Q}part_filled${Q}\\)return\\{why:${Q}holds [^${Q}]*its carry into the pool ended [^${Q}]*${Q},retry:!1\\};\\6=\\9\\}\\}`,
+    `if\\(\\5\\.throwIfAborted\\(\\),typeof \\4==${Q}function${Q}\\)\\{try\\{await \\4\\(\\[\\10,\\11\\]\\)\\}catch\\((${N})\\)\\{if\\(\\5\\.throwIfAborted\\(\\),\\14 instanceof ${N}\\)throw \\14;` +
+    `return\\{why:${Q}holds \\$\\{String\\(\\10\\)\\}; its deposit note was not written \\(\\$\\{\\14 instanceof Error\\?\\14\\.message:${Q}it threw${Q}\\}\\): restore again to carry it${Q},retry:!1\\}\\}\\4=!0\\}` +
+    `await \\8\\(0n\\);let\\{end:(${N})\\}=await \\2\\.deposit\\(\\3,\\13,\\5\\);` +
+    `if\\(\\15!==${Q}filled${Q}&&\\15!==${Q}part_filled${Q}\\)return\\{why:${Q}holds [^${Q}]*its carry into the pool ended [^${Q}]*${Q},retry:!1\\};\\6=\\10\\}\\}`,
 );
 // the carry's call site, bound to the reader's held map (`held`), the scope's U_X reads (`ux`) and the carry's own name:
 // `noted(scope)` read once per scope with a U_X held, and the carry handed whether U_{s,i}'s own index is among them,
@@ -197,11 +198,12 @@ const FOLLOW_READER = (f) => new RegExp(`function ${esc(f)}\\((${N})\\)\\{let ($
 // the restore host's ux, bound to the host itself (its signedIn and written before it, its ended after), so a copy of
 // the ux line alone elsewhere is not the restore's
 // (and on Base and Robinhood the page's own pool pair, evmPoolOf: card evm-deposit-on-mainnet)
-// (delta review r3 P2-1: with the follows' leftAt, so what the restore reads U_X holds is its op's left)
+// (delta review r3 P2-1: with the follows' leftAt, so what the restore reads U_X holds is its op's left; card
+// a-restored-deposit-wallets-leftover-shows: U_X whole and the carry's cost, so a U_X with no op is given one)
 const UX_WIRED = (c) =>
   new RegExp(
     `written:\\(\\)=>void ${N}\\?\\.proofs\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),(?:firstPass:${N}=>${N}\\?\\.firstPass\\(${N}\\)\\?\\?Promise\\.resolve\\(\\),)?ux:(${N})=>\\{let (${N})=${esc(c)}\\(\\1,(${N})\\(\\{chain:\\1,[^}]*\\},${N}\\),${N}\\?\\.program,void 0,(${N})=>${N}\\?\\.evmPoolOf\\(\\4\\)\\?\\?null\\);` +
-      `return \\2===null\\?null:\\{\\.\\.\\.\\2,leftAt:async\\((${N}),(${N})\\)=>void await ${N}\\?\\.left\\(\\5\\.chain,\\5\\.u,\\6\\)\\}\\},ended:`,
+      `return \\2===null\\?null:\\{\\.\\.\\.\\2,leftAt:async\\((${N}),(${N}),(${N})\\)=>void await ${N}\\?\\.left\\(\\5,\\6,\\7\\)\\}\\},ended:`,
   );
 const UX_ANY = (c) => new RegExp(`ux:(${N})=>\\{let ${N}=${esc(c)}\\(`);
 // each marker's own words, once in the whole bundle, so no second copy of it rides beside the real one

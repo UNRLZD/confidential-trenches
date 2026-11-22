@@ -364,8 +364,8 @@ export function createPacer(clock: () => number = () => performance.now()) {
      * When `n` sends to `url` may go so that no PACE_SECOND_MS holds more than `perSecond` of them, `fromMs` from now
      * on (a hold's end) and after every send booked before (first come, first sent), `share` the most of a second's
      * room these may fill (a background read: half, so a caller always finds the rest). Booked when within `maxWaitMs`
-     * (and `book`), else only named: the ms to wait. Every time here is the process's monotonic clock
-     * (performance.now), never the wall clock: on the box Date.now() stepped back 0.5 s and 8 s inside a test (traced
+     * (and `book`), else only named: the ms to wait. Every time here is `clock`: createRpc's `now`, by default the
+     * process's monotonic clock (performance.now), never the wall clock: on the box Date.now() stepped back 0.5 s and 8 s inside a test (traced
      * 4 Nov 22:14Z), and bookings on it let 11 sends into one real second, then refused callers for the step's length.
      */
     at(url: string, n: number, perSecond: number, opts: { fromMs?: number; maxWaitMs: number; share?: number; book?: boolean }): number {
@@ -1238,7 +1238,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     budget.hold(c, now() + seconds * 1000, whose === "background");
     log(`rpc hold ${c} ${whose} ${budget.heldFor(c, whose === "background")} s${shapeTail()}`);
   };
-  const pacer = deps.pacer ?? createPacer();
+  // the pacer on the client's own clock, as its holds and budgets (card helper-pacer-on-the-clients-clock): on the machine's
+  // monotonic clock beside a test's `now`, a paced burst slept on the test's clock and asked its wait again until the
+  // machine's second passed (test pacer-clock.test.ts: the sixth send 5.4 s of the test's clock on, where 1 s)
+  const pacer = deps.pacer ?? createPacer(now);
   /** Each keyed URL's secret forms, whatever chain it serves: an answer holding any of them is never kept. */
   // card helper-solana-off-a-spent-key: route A's candidates (aCandidates: the Solana slots, then the keyed spares)
   const aKeyed = aCandidates(env);
@@ -2513,6 +2516,22 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (wait === 0 && p !== null) pacer.at(p.url, 1, p.perSecond, room);
     return wait;
   }
+  /**
+   * Card sol-follow-round-draws-the-callers-share: a read by another path (data/solana/trades.ts, a pool round) that a
+   * caller waits on, drawn as that caller's own read of this chain's configured provider: its share of the budget
+   * (`client`, perClient) and a place in the provider's whole second, now or never (a wait skips it to the next
+   * provider), never only the half background reads may take. Another provider (a spare, another slot's key) is drawn as
+   * background reads of it are. Returns the seconds to wait, 0 to go.
+   */
+  function caller(chain: RpcChain, url: string, method: string, client: string): number {
+    const key = keyOf(chain, url);
+    if (key === null) return background(chain, url, method);
+    const p = pacedOf(key);
+    if (p !== null && pacer.at(p.url, 1, p.perSecond, { maxWaitMs: 0, book: false }) > 0) return 1;
+    const wait = budget.takeEach(drawsOf(key, [method]), client, false, false);
+    if (wait === 0 && p !== null) pacer.at(p.url, 1, p.perSecond, { maxWaitMs: 0 });
+    return wait;
+  }
   /** That provider answered 429 to a background read: the background reads wait out its reset; callers go on. */
   function backgroundThrottled(chain: RpcChain, url: string, headers: Headers): void {
     const key = keyOf(chain, url);
@@ -2595,7 +2614,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    *  before the public endpoint (solanaRest), so it is "keyed" while one of them serves (not spent, its last identity
    *  read answered), and "fallback" only once none does. Its other members are the slot's own. */
   const shownSlot: Slot = { ...slot, state: () => (slot.state() === "fallback" && upstreams.solana.keyed.slice(1).some((k) => !spent(k.url) && probed.get(k.url) === "answers") ? "keyed" : slot.state()) };
-  return { handle, background, backgroundThrottled, slot: shownSlot, pacer, keyed: keyedHealth, probe, policyOf, spent };
+  return { handle, background, caller, backgroundThrottled, slot: shownSlot, pacer, keyed: keyedHealth, probe, policyOf, spent };
 }
 
 /** The chains whose keyed lists /v1/health names (card rpc-keyed-lists): mainnet's four. */

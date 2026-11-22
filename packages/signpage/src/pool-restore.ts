@@ -820,14 +820,18 @@ async function uxOf(seed: SeedUse, chain: PoolChain, scope: bigint, i: number, i
 export async function carryUx(ux: PoolUxReads, f: PoolUx, noted: boolean | ((amounts: readonly [bigint, bigint]) => Promise<void>), signal: AbortSignal): Promise<{ why: string; retry: boolean } | null> {
   let before: bigint | null = null;
   // what is left, read on both alike, is U_X's op's `left` (review r3 P2-1: state.deposit_wallets lists what U_X holds,
-  // never what a carry here took into the pool); a write that fails leaves it to the next landing's read
-  const left = async (a: bigint): Promise<null> => (await ux.leftAt?.(f, a).catch(() => {}), null);
+  // never what a carry here took into the pool); a write that fails leaves it to the next landing's read. With it, one
+  // deposit's cost (keep + perRung) as this carry last read it, none when it read none (card
+  // a-restored-deposit-wallets-leftover-shows: a U_X with no op is given one, its end as a follow's; no read added)
+  let cost: bigint | undefined;
+  const left = async (a: bigint): Promise<null> => (await ux.leftAt?.(f, a, cost).catch(() => {}), null);
   for (;;) {
     const [a, b] = await ux.balances(f);
     if (a !== b) return { why: `reads ${String(a)} and ${String(b)} on the pool chain's two RPCs: read again`, retry: before === null };
     if (before !== null && a >= before) return { why: `holds ${String(a)} after a deposit from it filled: read again`, retry: false };
     if (a < ux.ladder.min) return left(a);
     const c = await ux.costs(f);
+    cost = c.keep + c.perRung;
     if (a < c.floor) return left(a);
     const amount = askOf(ux.ladder, a, c.perRung, c.keep);
     if (amount === 0n) return left(a);

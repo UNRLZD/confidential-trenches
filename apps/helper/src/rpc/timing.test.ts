@@ -47,7 +47,7 @@ async function serve(rpc: ReturnType<typeof createRpc>) {
 test("a paced burst on the first key: every 200 names rpc-wait, rpc and SOLANA_RPC_URL; a later one waited for its second", async () => {
   // 50 a 10 s: 5 sends a second on the first key (rpc.ts pacedOf); the share at least one page's (RPC_PAGE_NEED 42)
   // a clock the pace's wait moves: the wait it names is the time it slept on the helper's clock, never the machine's;
-  // the pacer on it too (createRpc builds its own pacer on the machine's monotonic clock, whatever `now` it is given)
+  // the pacer on it too (createRpc builds its own on `now` since card helper-pacer-on-the-clients-clock; named here as well)
   let clock = STILL();
   const rpc = createRpc({ SOLANA_RPC_URL: MAIN, RPC_BUDGET_SOLANA: "50,45" }, { now: () => clock, pacer: createPacer(() => clock), sleep: async (ms: number) => {
     const wake = clock + ms; // waits side by side end at their own wake time, as timers do, never one after another

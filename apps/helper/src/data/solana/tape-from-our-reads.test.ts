@@ -96,15 +96,15 @@ const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise((ok) => setImmediate(ok));
 };
 
-function harness(pool?: Buffer, burst = 0, moved?: string) {
+function harness(pool?: Buffer, burst = 0, moved?: string, budget?: (url: string, method: string, client?: string) => number) {
   const v = vendor();
   const c = chain(pool, burst, moved);
   const named = { pool: V.pool };
   const clock = { t: Date.parse("2026-11-14T17:22:20Z") };
   const token = createSolanaToken(down as never, down as never, { now: () => clock.t, fetch: v.fetch as never, sleep: async () => undefined });
-  const trades = createSolanaTrades({ now: () => clock.t, listed: async () => false, rpcs: ["https://rpc.test"], fetch: c.fetch as never, source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: (m) => token.tape(m), pool: async (m) => (moved === undefined ? token.tapePool(m) : named.pool), quoteUsd: async () => QUOTE_USD });
-  const read = async () => {
-    const a = await trades.trades(V.mint, 50);
+  const trades = createSolanaTrades({ now: () => clock.t, listed: async () => false, rpcs: ["https://rpc.test"], fetch: c.fetch as never, source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: (m) => token.tape(m), pool: async (m) => (moved === undefined ? token.tapePool(m) : named.pool), quoteUsd: async () => QUOTE_USD, ...(budget === undefined ? {} : { budget }) });
+  const read = async (client?: string) => {
+    const a = await trades.trades(V.mint, 50, client);
     return { a, j: JSON.parse(a.body) as Tape, age: ageOf(a.timing) };
   };
   return { v, c, clock, trades, read, named };
@@ -356,6 +356,40 @@ test("the top pool is asked of the vendor at POOL_FRESH_MS while a page holds th
     const hour = poolCalls() - first;
     assert.equal(hour, 3_600_000 / POOL_FRESH_MS, `${hour} pool calls in an hour`);
     console.log(`vendor pool calls a held coin a day: ${(hour * 24)}; trades calls after the first: ${h.v.gt.log.filter((u) => u.includes("/trades")).length - 1}`);
+  } finally {
+    h.trades.stop();
+  }
+});
+
+// Card sol-follow-round-draws-the-callers-share: live run 45011614034 (helper update 22, job 137175132383) read WIF 17 s
+// after its last reader and was served rows 23,973 ms old at once, filling: the round the page waited on drew the
+// helper's background RPC share (rpc.background, behind callers), full under the live run's reads, so every provider was
+// skipped and the round failed with nothing sent. A round a page waits on is the page's read, in the callers' share, as
+// token.ts's page read of the vendor is (card sol-vendor-tape-gap-served-inside-reach). Red at 90776a37e: every round
+// drew the background share, refused, and the gap read was served rows 22 s old.
+test("the helper's background RPC share full, a page opening a held tape 17 s after its last reader draws the callers' share for the round it waits on and is served rows inside SOL_VENDOR_REACH_MS; a round behind rows inside the reach stays the helper's background read (red at 90776a37e)", async () => {
+  const drew: (string | undefined)[] = [];
+  const h = harness(undefined, 0, undefined, (_u, _m, client) => (drew.push(client), client === undefined ? 1 : 0));
+  try {
+    const first = await h.read("page");
+    assert.equal(first.j.src, "geckoterminal");
+    h.v.gt.up = false;
+    h.v.gt.throttle = true;
+    // inside the reach: served the held rows at once; the round behind them is the helper's, refused while its share is full
+    h.clock.t += FOLLOW_MS;
+    const inside = await h.read("page");
+    await settle();
+    assert.ok(inside.age <= SOL_VENDOR_REACH_MS, `rows read ${inside.age} ms before`);
+    assert.ok(drew.length > 0 && drew.every((c) => c === undefined), `the round behind held rows drew ${JSON.stringify(drew)}`);
+    drew.length = 0;
+    // the gap: the page waits for the round, which draws the page's share
+    h.clock.t += 17_000;
+    const gap = await h.read("page");
+    assert.equal(gap.a.status, 200);
+    assert.ok(gap.age <= SOL_VENDOR_REACH_MS, `gap read: rows read ${gap.age} ms before (at most ${SOL_VENDOR_REACH_MS})`);
+    assert.equal(gap.j.filling, undefined, "rows inside the reach are live");
+    assert.equal(gap.j.src, "chain,geckoterminal");
+    assert.ok(drew.length > 0 && drew.every((c) => c === "page"), `the round the page waited on drew ${JSON.stringify(drew)}`);
   } finally {
     h.trades.stop();
   }

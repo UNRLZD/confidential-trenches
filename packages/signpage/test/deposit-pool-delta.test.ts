@@ -356,6 +356,68 @@ test("r3 P2-1: a restore's carryUx writes U_X's left: 0 before its deposit is se
   assert.deepEqual(wrote, ["left 0", `deposit ${SOL_LADDER.min}`, `left ${1_300_479n + FLOOR - SOL_LADDER.min - PER}`]);
 });
 
+// card a-restored-deposit-wallets-leftover-shows: a U_X only a restore carried (a lost store's: no op of it on this device)
+test("a restore's carry of a U_X with no op writes one: its remainder is listed, with its cost, and never read or shown as a deposit", async () => {
+  const { carryUx } = (await import("../src/pool-restore.ts")) as Record<string, any>;
+  const { leftoverSources } = await import("../src/leftover-carry.ts");
+  const { opOf } = await import("../src/state.ts");
+  const depositWalletsOf = m.depositWalletsOf as (ops: readonly unknown[], d: (c: string) => number, a: (c: string) => string) => { chain: string; address: string; amount: string }[];
+  const { rows, store } = opsStore();
+  const asked: string[] = [];
+  const host: ReturnType<typeof poolFollows> = poolFollows({
+    store: async () => store,
+    deps: () => (asked.push("deps"), null),
+    again: () => (asked.push("again"), null),
+    decimals: () => 9,
+    locks: () => null,
+    now: () => 7,
+  } as unknown as Parameters<typeof poolFollows>[0]);
+  const f = { chain: "solana" as const, s: "91", i: 3, u: "U_X", refund_id: "ab".repeat(32) };
+  const leftAt = (g: typeof f, low: bigint, cost?: bigint) => (host.left as (...a: unknown[]) => Promise<void>)(g, low, cost);
+  let bal = 1_300_479n + FLOOR;
+  const end = await carryUx(
+    {
+      balances: async () => [bal, bal] as const,
+      costs: async () => ({ floor: FLOOR, perRung: PER, keep: KEEP }),
+      ladder: SOL_LADDER,
+      deposit: async (_f: unknown, a: bigint) => ((bal -= a + PER), { end: "filled", txs: [] }),
+      leftAt,
+    },
+    f,
+    true,
+    new AbortController().signal,
+  );
+  assert.equal(end, null);
+  const left = 1_300_479n + FLOOR - SOL_LADDER.min - PER;
+  // listed as a follow's remainder is, at what the restore's last read left there
+  assert.deepEqual(depositWalletsOf([...rows.values()], () => 9, () => "SOL"), [{ chain: "solana", address: "U_X", asset: "SOL", amount: (Number(left) / 1e9).toString() }]);
+  assert.equal(rows.size, 1);
+  const [[id, op]] = [...rows];
+  // its end as a follow's: in_pool, ended, what it left and one deposit's cost as the carry last read them
+  assert.equal(op.stage, "in_pool");
+  assert.ok(poolFollowEnded(op));
+  assert.equal(op.follow.left, left.toString());
+  assert.equal(op.follow.cost, (KEEP + PER).toString());
+  assert.equal(uxHeldOf([...rows.values()], "solana", "U_X"), left > KEEP + PER);
+  // carried to Cash as any leftover is (its scope and index kept)
+  assert.deepEqual(leftoverSources([...rows.values()], []), [{ chain: "solana", kind: "ux", address: "U_X", s: "91", i: 3 }]);
+  // no new chain read: a landing neither follows nor reads it; and no deposit row the user never asked on this device
+  await host.settle({ load: true });
+  await host.settle();
+  await host.idle();
+  assert.deepEqual(asked, []);
+  assert.equal(opOf(id, op), null);
+  // a second restore's carry writes the same op again, never a second one; what it reads at 0 lists none
+  bal = 0n;
+  const ux0 = { balances: async () => [bal, bal] as const, costs: async () => ({ floor: FLOOR, perRung: PER, keep: KEEP }), ladder: SOL_LADDER, deposit: async () => assert.fail("nothing to carry"), leftAt };
+  assert.equal(await carryUx(ux0, f, true, new AbortController().signal), null);
+  assert.equal(rows.size, 1);
+  assert.deepEqual(depositWalletsOf([...rows.values()], () => 9, () => "SOL"), []);
+  // a U_X a restore reads empty, with no op, writes nothing
+  await leftAt({ ...f, i: 4, u: "U_Y" }, 0n);
+  assert.equal(rows.size, 1);
+});
+
 test("r3 P2-2: a landing's run reads its N ended U_X each after its own drawn wait, in a drawn order", async () => {
   const N = 12;
   const orders: string[][] = [];

@@ -90,6 +90,10 @@ export function opOf(id: string, rec: unknown): Operation | null {
   // record, and each fact its record keeps only on the stages it belongs to (the record keeps `refunded` from the
   // refunded stage on and `since_ms` from the first send seen; kit messages.ts PoolDepositFacts)
   if (rec.kind === "pool_deposit") {
+    // a restore's op of a U_X it carried with no op on this device (pool-deposit-follow.ts writeLeft, card
+    // a-restored-deposit-wallets-leftover-shows): the store's record of what U_X holds, counted in state.deposit_wallets,
+    // never a deposit asked on this device
+    if (rec.restored === true) return null;
     op.chain = isRecord(rec.follow) ? rec.follow.chain : undefined;
     // a refunded on the helper's word alone (release-94 to 107, no refunded fact) goes out as the follow reads it again:
     // quote_checked (pool-deposit-follow.ts resumeOf, the same rule)

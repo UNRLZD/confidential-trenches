@@ -627,6 +627,27 @@ test("card helper-stays-fast-under-the-live-run, load: the live run's crowd (app
   assert.ok(vendor <= 5, `${vendor} vendor reads in 30 s`);
 });
 
+test("card sol-vendor-tape-refresh-lands: a failed read's kept answer names its vendor rows' age as of each read, not as of the read it was kept by (red at fd4d3d39a: a read 700 ms later still said 0 ms)", async () => {
+  let clock = TS * 1000;
+  const t = createSolanaTrades({
+    fetch: (async () => new Response("down", { status: 503 })) as never,
+    now: () => clock,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+    tape: async () => ({ status: 200, body: JSON.stringify(POOL_ROWS), src: "coingecko", asOfMs: TS * 1000 }),
+  });
+  const first = await t.trades(MINT, 50);
+  assert.match(first.timing ?? "", /sol-vendor-read;desc="rows read 0 ms ago"/);
+  clock += 700;
+  const kept = await t.trades(MINT, 50);
+  assert.match(kept.timing ?? "", /read again in 300 ms/, "inside the wait: the kept answer");
+  assert.match(kept.timing ?? "", /sol-vendor-read;desc="rows read 700 ms ago"/);
+  assert.equal(JSON.parse(kept.body).as_of_ms, TS * 1000, "dated by the rows' read");
+  t.stop();
+});
+
 // card token-page-data-complete-and-fast: a coin launched against another coin (BUBBLE against FRONTIER, 11 Nov) had
 // an empty tape: its trades were dropped for a quote that is not SOL or USDC. They are priced at the quote coin's row.
 const QC = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-quote-coin.json"), "utf8")) as { mint: string; quoteMint: string; signature: string; slot: number; logMessages: string[] };
