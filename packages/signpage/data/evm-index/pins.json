@@ -1,10 +1,10 @@
 {
  "base": {
-  "bytes": 1058285,
-  "sha256": "8584f766c8504e71eb144f8a4ee2407ba9b5ed6b483b68bf7edcbb8e9daa4218"
+  "bytes": 1014218,
+  "sha256": "6c9de6437f017376bb1a46c69d87f06d72f93ea315c9dbd603f0d6596bbb9ce5"
  },
  "robinhood": {
-  "bytes": 4683698,
-  "sha256": "324ecbb75ac168988e9209904eb1e460f040214d7c65d7babbd55826c1150a60"
+  "bytes": 4630256,
+  "sha256": "ebb571710ca25fb36d8b36197451eb298a0bf396ea9553bf38486dc07cece177"
  }
 }
