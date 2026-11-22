@@ -14,10 +14,11 @@ import { asRecorded, gasRoundAnswers, withMarker } from "../../kit/test/evm-quot
 import { entropyToWords, freshWallet, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
 import { EVM_POOL_EVENTS, evmPoolContextOf, evmPoolScopeOf, evmRelayDataBytes, type EvmPoolRequest, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { EVM_BUY_LAG_BLOCKS, EVM_BUY_SETTLE_MS, EVM_POSITION_COSTS_KEY, evmLastRouteReset, runEvmPoolBuy, type EvmHolding, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
+import { EVM_BUY_LAG_BLOCKS, EVM_BUY_SETTLE_MS, EVM_POSITION_COSTS_KEY, evmLastRouteReset, evmTradeKey, runEvmPoolBuy, type EvmHolding, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { evmBuyCalldata, EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, EVM_WITHDRAW_SIGNATURE } from "../src/evm-send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import * as R from "../src/rules/pool.ts";
+import { opOf } from "../src/state.ts";
 
 // the pool's testnet run's own encoder (contracts/pool-evm/script/testnet-run-lib.mjs), a plain module with no types
 const LIB = new URL("../../../contracts/pool-evm/script/testnet-run-lib.mjs", import.meta.url).href;
@@ -1003,6 +1004,39 @@ test("(pending end, dead tab) a pending record whose tab died before its end is 
     else assert.equal(kept.has(W), false, "never landed: removed, so the note can buy again");
     assert.ok(logReads(load.seen).every((r) => BigInt(r.fromBlock) === START - EVM_BUY_LAG_BLOCKS), "from the record's own block");
     assert.equal(load.seen.settles, 1, "the settle pass ends the note");
+  }
+});
+
+// card evm-buy-late-end-names-tx: a buy that ends filled on a later load names its transaction, as the tap's own run
+// does: the load's follow writes the trade op (h.traded -> writeEvmTradeOp under trade/<chain>/<tx>, the op state.ops
+// carries to the app's Activity row and its link), with the chain's tx; a buy that never landed writes none.
+test("(pending end, later load) a buy filled on the next load writes its trade op with its transaction, as the tap's run does", async () => {
+  assert.equal(typeof followPending, "function", "followPendingEvmBuys");
+  for (const landed of [false, true]) {
+    const kept = new Map<string, EvmHolding>();
+    const tab = host({ holdings: kept });
+    assert.deepEqual(await runEvmPoolBuy(tab.h, ASK), { stage: "sent", txs: [] });
+    stops.at(-1)!.abort();
+    await turns(20);
+    assert.equal(kept.get(W)?.state, "pending");
+    const load = host({ holdings: kept, ...(landed ? both([release()]) : {}) });
+    load.seen.clock.t = NOW + 200_000n;
+    const ops: Record<string, unknown>[] = [];
+    await followPending!({ ...load.h, traded: async (op: Record<string, unknown>) => void ops.push(op) } as EvmPoolBuyHost);
+    if (!landed) {
+      assert.deepEqual(ops, [], "never landed: no trade op");
+      continue;
+    }
+    assert.equal(ops.length, 1, "one trade op for the buy the load read filled");
+    const { created_ms, ...rest } = ops[0]!;
+    assert.ok(Number.isSafeInteger(created_ms), "its time");
+    assert.deepEqual(rest.txs, [{ chain: "base", hash: TX }], "the buy's transaction, as the tap's run names it");
+    assert.deepEqual([rest.kind, rest.stage, rest.chain, rest.token, rest.units], ["buy", "filled", "base", TOKEN.toLowerCase(), "40"]);
+    assert.equal(evmTradeKey("base", TX), `trade/base/${TX}`, "the op's key names the transaction");
+    // and the state the app reads carries it: the op as state.ops sends it (src/state.ts opOf, the kit's own schema)
+    const sent = opOf(evmTradeKey("base", TX), ops[0]);
+    assert.ok(sent !== null, "state.ops sends the op");
+    assert.deepEqual([sent!.id, sent!.kind, sent!.stage, sent!.txs], [`trade/base/${TX}`, "buy", "filled", [{ chain: "base", hash: TX }]]);
   }
 });
 
