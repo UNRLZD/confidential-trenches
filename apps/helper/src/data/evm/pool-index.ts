@@ -22,6 +22,7 @@
 // `complete: false`, which the device treats as no answer.
 import { DatabaseSync } from "node:sqlite";
 import { checkpointAside } from "../../store/checkpoint.ts";
+import { writerAside, type Writer } from "../../store/writer.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import type { ProviderHolds } from "../../limits/limits.ts";
 import { pass } from "../../limits/turn.ts";
@@ -50,6 +51,15 @@ const BACKFILL_HOLD_S = 10;
 /** The largest answer the backfill reads (a span's logs at the cap are about 10,000 x 1 KB). */
 export const POOL_INDEX_ANSWER_BYTES = 32 * 1024 * 1024;
 
+/** The write connection's pragmas: WAL with synchronous NORMAL, the log checkpointed on its own thread
+ *  (store/checkpoint.ts; card helper-loop-never-held-by-a-read). */
+export const WRITE_PRAGMAS = "PRAGMA synchronous = NORMAL; PRAGMA wal_autocheckpoint = 0;";
+const PUT_POOL = "INSERT OR IGNORE INTO pools (id, c0, c1, fee, ts, hooks, block) VALUES (?, ?, ?, ?, ?, ?, ?)";
+const SET_META = "INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v";
+/** The writer's statements, by index. */
+const POOL = 0;
+const META = 1;
+
 export type PoolKey = { currency0: string; currency1: string; fee: number; tickSpacing: number; hooks: string };
 export type ServedPool = { id: string; key: PoolKey };
 export type PoolsAnswer = { chainId: number; poolManager: string; complete: boolean; through: number; pools: ServedPool[] };
@@ -77,6 +87,8 @@ export type PoolIndexDeps = {
   now(): number;
   /** The loop's turns (limits/turn.ts pass, the default): null while this turn has room, else when to go on. */
   pass?: () => Promise<void> | null;
+  /** The file's write connection on its own thread (store/writer.ts writerAside, the default). */
+  writer?: typeof writerAside;
 };
 
 const hexOf = (b: Uint8Array) => "0x" + Buffer.from(b).toString("hex");
@@ -119,15 +131,13 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
   // sample taken). Never corrupt on a crash; a power loss rolls back only the newest commits, in order, and `next`
   // moves in a span's last one, so a span lost is read again and INSERT OR IGNORE keeps each pool once. The log's
   // checkpoint, the one sync left, runs on a thread of its own (store/checkpoint.ts).
-  db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA wal_autocheckpoint = 0;
+  db.exec(`PRAGMA journal_mode = WAL; ${WRITE_PRAGMAS}
     CREATE TABLE IF NOT EXISTS pools (id BLOB PRIMARY KEY, c0 BLOB NOT NULL, c1 BLOB NOT NULL, fee INTEGER NOT NULL, ts INTEGER NOT NULL, hooks BLOB NOT NULL, block INTEGER NOT NULL) WITHOUT ROWID;
     CREATE INDEX IF NOT EXISTS pools_c0 ON pools (c0);
     CREATE INDEX IF NOT EXISTS pools_c1 ON pools (c1);
     CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID;`);
-  const aside = checkpointAside(file, () => db.isOpen && db.exec("PRAGMA wal_autocheckpoint = 1000"));
   const get = db.prepare("SELECT v FROM meta WHERE k = ?");
-  const set = db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v");
-  const put = db.prepare("INSERT OR IGNORE INTO pools (id, c0, c1, fee, ts, hooks, block) VALUES (?, ?, ?, ?, ?, ?, ?)");
+  const set = db.prepare(SET_META);
   const of = db.prepare(`SELECT id, c0, c1, fee, ts, hooks FROM pools WHERE c0 = ? UNION SELECT id, c0, c1, fee, ts, hooks FROM pools WHERE c1 = ? LIMIT ${POOL_INDEX_ANSWER_MAX}`);
   // a file of another chain or PoolManager is refused, never mixed
   const same = (k: string, v: string) => {
@@ -137,6 +147,11 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
   };
   same("chainId", String(c.chainId));
   same("poolManager", pm);
+  // card pool-index-writer-off-the-main-thread: from here on this connection only reads; every write is the writer's,
+  // each span one transaction on its own thread (store/writer.ts), so no commit holds the loop
+  const writer: Writer = (d.writer ?? writerAside)(file, WRITE_PRAGMAS, [PUT_POOL, SET_META]);
+  // a checkpoint thread that fails: the writer's connection checkpoints again, so the log never grows unbounded
+  const aside = checkpointAside(file, () => void writer.exec("PRAGMA wal_autocheckpoint = 1000").catch(() => undefined));
   const metaNum = (k: string, fallback: number) => Number((get.get(k) as { v: string } | undefined)?.v ?? fallback);
   /** The next block the backfill reads; every block before it is in the file. */
   let next = metaNum("next", c.first);
@@ -146,6 +161,8 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
   /** Per provider: the largest span it may still answer (one less than the least it refused with an error). */
   const limits = new Map<string, number>();
   const CALLS = 3;
+  /** Each budget group's spend this day as the file holds it (`<day>:<calls>`), read once, then kept here. */
+  const days = new Map<string, string>();
   /** Per provider with no pace of ours: when the backfill last posted to it. */
   const lastPost = new Map<string, number>();
   /** A background draw of `calls` on `url`: the ms to wait first, 0 to go (and drawn). Below the users' reads on every
@@ -166,43 +183,31 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
     }
     const day = Math.floor(t / DAY_MS);
     const k = `day:${p.group ?? url}`;
-    const was = /^(\d+):(\d+)$/.exec((get.get(k) as { v: string } | undefined)?.v ?? "");
+    // the spend read from the file once, then held here; each change is the writer's, in order with the spans
+    if (!days.has(k)) days.set(k, (get.get(k) as { v: string } | undefined)?.v ?? "");
+    const was = /^(\d+):(\d+)$/.exec(days.get(k)!);
     const used = was !== null && Number(was[1]) === day ? Number(was[2]) : 0;
     const need = calls * (p.cost ?? 1);
     if (p.day !== undefined && used + need > p.day * BACKFILL_DAY_SHARE) return (day + 1) * DAY_MS - t;
     const w = d.holds.take(url, calls, true);
-    if (w === 0 && p.day !== undefined) set.run(k, `${day}:${used + need}`);
+    if (w === 0 && p.day !== undefined) {
+      const v = `${day}:${used + need}`;
+      days.set(k, v);
+      void writer.tx([[META, [k, v]]]).catch(() => undefined);
+    }
     return w;
   };
 
-  /** Writes a span's pools, then the block after it, a turn's slice at a time (limits/turn.ts pass; card
-   *  helper-loop-never-held-by-a-write: a span at the log cap written in one transaction held the loop 300 to 376 ms in a
-   *  copy's profile). Each slice is its own transaction and the last also moves `next`, so a span lands whole before any
-   *  answer counts it: a stop part way leaves `next` at the span's start, and the restart's INSERT OR IGNORE keeps each
-   *  pool once. A pool written before `next` moves is a real pool of the chain, and the device proves each it is served. */
+  /** Writes a span's pools, then the block after it, in one transaction on the writer's thread (card
+   *  pool-index-writer-off-the-main-thread: on the loop, sliced a turn at a time, single commits still held it 100 to 601
+   *  ms in a bench of 300k pools). The span lands whole before any answer counts it: `next` moves in the same
+   *  transaction and here only once it has committed, and a failed one rolls back whole, so the span is read again and
+   *  INSERT OR IGNORE keeps each pool once. A pool in the file is a real pool of the chain, and the device proves each it
+   *  is served. */
   const keep = async (pools: (ServedPool & { block: number })[], to: number): Promise<void> => {
-    let i = 0;
-    for (;;) {
-      let w: Promise<void> | null = null;
-      db.exec("BEGIN IMMEDIATE");
-      try {
-        while (i < pools.length && w === null) {
-          const p = pools[i++]!;
-          put.run(bytesOf(p.id), bytesOf(p.key.currency0), bytesOf(p.key.currency1), p.key.fee, p.key.tickSpacing, bytesOf(p.key.hooks), p.block);
-          w = turn();
-        }
-        if (i >= pools.length) {
-          set.run("next", String(to + 1));
-          set.run("head", String(head));
-        }
-        db.exec("COMMIT");
-      } catch (e) {
-        db.exec("ROLLBACK");
-        throw e;
-      }
-      if (w !== null) await w;
-      if (i >= pools.length) break;
-    }
+    const ops: [number, unknown[]][] = pools.map((p) => [POOL, [bytesOf(p.id), bytesOf(p.key.currency0), bytesOf(p.key.currency1), p.key.fee, p.key.tickSpacing, bytesOf(p.key.hooks), p.block]]);
+    ops.push([META, ["next", String(to + 1)]], [META, ["head", String(head)]]);
+    await writer.tx(ops);
     next = to + 1;
   };
 
@@ -295,6 +300,7 @@ export function createPoolIndex(file: string, c: PoolIndexConfig, d: PoolIndexDe
     state: () => ({ next, head }),
     close: () => {
       aside.stop();
+      writer.close();
       db.close();
     },
   };
