@@ -4419,6 +4419,32 @@ test("W6b a warm quote whose hooked pool changed hook since the last quote reads
   assert.ok(seen.some((o) => o.replaces.includes(NEW_HOOK)), "the new pool was not read with its hook replaced");
 });
 
+test("W6f a warm quote's read with a hook replaced is read apart from its first round's plain reads, so its failure costs none of them, and the quote decides as one with no plan", async () => {
+  const token = "0x00000000000000000000000000000000000fe5e6";
+  const { pools, logs } = specCase(token, xAt(0x3f60));
+  // every read with the hooked pool's hook replaced is a provider's error, on both providers
+  const hooked = (c: EvmRpcCall) => c.method === "eth_call" && Object.keys((c.params[2] ?? {}) as object).some((k) => k.toLowerCase() === UNPINNED.toLowerCase());
+  const failing = (who: 0 | 1): EvmRpc => async (calls, ...rest) => {
+    const got = await chain(pools, who)(calls, ...rest);
+    return calls.map((c, i) => (hooked(c) ? ({ jsonrpc: "2.0", error: { code: -32000, message: "execution aborted (timeout = 5s)" } } as (typeof got)[number]) : got[i]!));
+  };
+  // each post of the warm quote's first round that carries a hooked read beside a plain eth_call (7450e4999: one post
+  // failing dropped both)
+  const mixed: number[] = [];
+  let second: ReturnType<typeof counted> | undefined;
+  const watched: EvmRpc = (calls, ...rest) => {
+    const n = second?.n.calls ?? 0;
+    if (n === 1 && calls.some(hooked) && calls.some((c) => c.method === "eth_call" && !hooked(c))) mixed.push(calls.length);
+    return failing(0)(calls, ...rest);
+  };
+  const expected = await coldVerdict(token, () => [failing(0), failing(1)], logs);
+  await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0));
+  second = counted(watched);
+  const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [second.rpc, failing(1)], NOW, scanner(5_000_000, logs), undefined, () => 0));
+  assert.deepEqual(v, expected);
+  assert.deepEqual(mixed, [], "a first-round post carried the hooked read beside plain reads");
+});
+
 test("W6c a warm quote uses only answers of its own block: a provider that answers the reads at any other block otherwise is never heard", async () => {
   const token = "0x00000000000000000000000000000000000fe5e3";
   const { pools, logs } = specCase(token, xAt(0x3f30));
