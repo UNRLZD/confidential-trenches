@@ -816,7 +816,7 @@ test("N1a a seeded standard pool is held to the token's real pool the device's o
   assert.deepEqual(await quoteOn(pools, "0x00000000000000000000000000000000000a22a2", seededRoute("0x00000000000000000000000000000000000a22a2"), broken), { accepted: false, code: "rpc_error" });
 });
 
-test("TAIL10 a quote whose new blocks start past maxLag reads them alone before its answer: the index's margin, read by the last quote's tail, counts as read for it and its blocks now past the margin are read right after", async () => {
+test("TAIL10 a quote whose new blocks start past maxLag reads them before its answer, with the index's margin the last quote's tail read, now past maxLag too, in one request", async () => {
   const [token, b] = ["0x00000000000000000000000000000000000a1a10", "0x00000000000000000000000000000000000a1a11"];
   const logs = [{ key: real(token).key, at: 4_500_000 }, { key: real(b).key, at: 4_600_000 }];
   const asked: [number, number][] = [];
@@ -830,11 +830,10 @@ test("TAIL10 a quote whose new blocks start past maxLag reads them alone before 
   // answer (a coin whose own scan read the margin, as main's does, reads none of it again)
   assert.deepEqual(await quoteOn([seeded(b), real(b)], b, seededRoute(b), m.to(scanner(5_000_200, logs, asked)), undefined, "base", 5_000_200), below);
   for (let i = 0; i < 400 && asked.length < 2; i++) await new Promise((go) => setTimeout(go, 5));
-  // the new blocks first, alone, then (beside the quote's next round, as any later read) the margin's blocks now past
-  // it, kept (TAIL7); never the margin's others, which the tail's read answered (at c514de6ab one request of all of
-  // them with the new ones before the answer, [4,999,527, 5,000,200]: a Robinhood quote 31 s after the last read 7,471
-  // blocks before its answer where main read 547)
-  assert.deepEqual(asked, [[5_000_001, 5_000_200], [5_000_000 - TAIL_MARGIN + 1, 5_000_200 - TAIL_MARGIN]]);
+  // the margin's blocks the tail read, every one now past maxLag, count as read no longer (independent review of
+  // c6cf1927d, HIGH 1, MEDIUM 3: a pool a lagging first missed there was missed by every quote until it left the
+  // margin): read again with the new blocks in one request before the answer, nothing after it
+  assert.deepEqual(asked, [[5_000_000 - TAIL_MARGIN + 1, 5_000_200]]);
 });
 
 
@@ -2019,7 +2018,7 @@ test("TAIL1 one scan of the token's blocks finds X's market too: the quote sends
   // the token's blocks and X's markets are a lookup of the tail: no getLogs names a currency
   assert.ok(topics.every((t) => t.length === 1), "a getLogs named a currency");
 });
-test("TAIL2 a second coin quoted on the same chain and provider reads no block the first quote's scan read: its pools are a lookup of the chain's tail", async () => {
+test("TAIL2 a second coin quoted on the same chain and provider reads no block the first quote's scan kept: its pools are a lookup of the chain's tail, and only the margin's blocks past maxLag are read again", async () => {
   const [a, b] = ["0x00000000000000000000000000000000000f5f7a", "0x00000000000000000000000000000000000f5f7b"];
   const pools = [seeded(a), real(a), seeded(b), real(b)];
   const logs = [{ key: real(a).key, at: 4_200_000 }, { key: real(b).key, at: 4_300_000 }];
@@ -2033,9 +2032,10 @@ test("TAIL2 a second coin quoted on the same chain and provider reads no block t
   asked.length = 0;
   // the same provider at the same head: b's real pool, read by the tail, holds b's seeded route with no getLogs
   assert.deepEqual(await quoteOnStill(pools, b, seededRoute(b), m.to(scanner(5_000_000, logs, asked))), below);
-  // (the index's margin below the head is never kept, TAIL7: b holds a pool, so its blocks count as read for the answer,
-  // and none of them is yet past the margin to be read again after it)
-  assert.deepEqual(asked, []);
+  // (the index's margin below the head is never kept, TAIL7, and its blocks count as read for the answer only within
+  // maxLag of the head, independent review of c6cf1927d: b reads the others again, the first's answer for them kept for
+  // no quote, before it answers)
+  assert.deepEqual(asked, [[5_000_000 - TAIL_MARGIN + 1, 5_000_000 - 50]]);
 });
 test("TAIL3 a coin with no pool in the index or the chain's tail reads the newest blocks before it answers: a pool made within maxLag still holds its seeded route", async () => {
   const [a, b] = ["0x00000000000000000000000000000000000f5f8a", "0x00000000000000000000000000000000000f5f8b"];
@@ -12222,4 +12222,183 @@ test("TAILF12 a warm quote's later reads of both kinds on the chain's tail go on
   assert.equal(warm.accepted, true, String((warm as { code?: string }).code));
   await pause(50);
   assert.ok(asked.length > 0 && asked.length === new Set(asked.map((r) => r.join("-"))).size, `a block range read twice: ${JSON.stringify(asked)}`);
+});
+
+// Card evm-tail-warms-with-the-index-at-the-head (independent review of c6cf1927d, HIGH 1, HIGH 2, MEDIUM 3): blocks of
+// the chain's tail inside the index's margin (`band`) that a first with a lagging logs backend, or a spare whose pools
+// are kept for no coin, answered count as read only while they are within maxLag of the head, the miss the kit accepts
+// for any gap; older, they are read again before the answer. Counted read up to the margin, a coin holding a seeded pool
+// was quoted against it at a tenth of its real pool's price, made 110 blocks before the head: on a tail read only inside
+// the margin (TAIL11, TAIL11b, red at c6cf1927d) and on one with kept spans (TAIL11c, red at ef813c927 too)
+const bandQuote = async (pools: ModelPool[], token: string, route: EvmRoute, scans: EvmRpc | EvmRpc[], headNo: number, agreed = headNo, chainName: "base" | "robinhood" = "base") => {
+  evmScanBound?.(Number.MAX_SAFE_INTEGER / 4);
+  try {
+    return await verdict(evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route } as EvmPoolBuyQuoteRequest, [chain(pools, 0, agreed), chain(pools, 1, agreed)], NOW, scans as EvmRpc, undefined, () => 0));
+  } finally {
+    evmScanBound?.();
+  }
+};
+test("TAIL11 a band-only tail (index at the head, the first's logs backend lagging at the fill) hides no pool made inside the margin past maxLag: B's quote 100 blocks on, B holding a seeded pool, finds its real pool there", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const b = freshToken();
+  try {
+    evmPoolIndexReset();
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 4_999_980, pools: [{ key: seeded(b).key }] }), true);
+    const m = moving();
+    evmScanFillable(m.rpc);
+    const w = freshToken();
+    // another coin's quote, then the tail's fill after its answer: the first's logs backend has not indexed block 4,999,990
+    assert.equal((await bandQuote([best(w)], w, bestRoute(w), m.to(scanner(5_000_000, [])), 5_000_000)).accepted, true);
+    await evmTailFills(m.rpc);
+    // B's quote 100 blocks on (past Base's maxLag 50, inside its margin 474), the first honest now
+    const asked: [number, number][] = [];
+    const v = await bandQuote([seeded(b), real(b)], b, seededRoute(b), m.to(scanner(5_000_100, [{ key: real(b).key, at: 4_999_990 }], asked)), 5_000_100);
+    assert.deepEqual(v, below, `asked ${JSON.stringify(asked)}`);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+test("TAIL11b a band-only tail written only by a spare (the fill's first down) hides no pool the spare found inside the margin past maxLag: B's quote 100 blocks on, B holding a seeded pool, finds its real pool there", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const b = freshToken();
+  const logs = [{ key: real(b).key, at: 4_999_990 }];
+  try {
+    evmPoolIndexReset();
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 4_999_980, pools: [{ key: seeded(b).key }] }), true);
+    const m = moving();
+    evmScanFillable(m.rpc);
+    const honest0 = scanner(5_000_000, logs);
+    // the first answers a currency's reads, and refuses the connection for every read of the event alone (the fill's)
+    const firstDownForTail: EvmRpc = async (calls, until) => {
+      if (getLogsOf(calls).some((f) => f.topics.length === 1)) throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+      return honest0(calls, until);
+    };
+    const spareAlone: { topics: unknown[] }[] = [];
+    const spareInner = scanner(5_000_000, logs);
+    const spare: EvmRpc = async (calls, until) => (spareAlone.push(...getLogsOf(calls).filter((f) => f.topics.length === 1)), spareInner(calls, until));
+    const w = freshToken();
+    assert.equal((await bandQuote([best(w)], w, bestRoute(w), [m.to(firstDownForTail), spare], 5_000_000)).accepted, true);
+    await evmTailFills(m.rpc);
+    assert.ok(spareAlone.length > 0, "the spare carried no read of the tail");
+    const asked: [number, number][] = [];
+    const v = await bandQuote([seeded(b), real(b)], b, seededRoute(b), [m.to(scanner(5_000_100, logs, asked)), scanner(5_000_100, logs)], 5_000_100);
+    assert.deepEqual(v, below, `spare tail reads ${spareAlone.length}; asked ${JSON.stringify(asked)}`);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+test("TAIL11c a warm tail (index a day behind, spans kept) whose margin a spare carried at the fill hides no pool the spare found there past maxLag: B's quote 100 blocks on, B holding a seeded pool, finds its real pool there", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const b = freshToken();
+  const logs = [{ key: real(b).key, at: 4_999_990 }];
+  try {
+    evmPoolIndexReset();
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 5_000_000 - 43_200, pools: [{ key: seeded(b).key }] }), true);
+    const m = moving();
+    evmScanFillable(m.rpc);
+    const honest0 = scanner(5_000_000, logs);
+    const firstDownForMargin: EvmRpc = async (calls, until) => {
+      if (getLogsOf(calls).some((f) => f.topics.length === 1 && Number(f.toBlock) >= 4_999_990)) throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+      return honest0(calls, until);
+    };
+    const spareAlone: { topics: unknown[] }[] = [];
+    const spareInner = scanner(5_000_000, logs);
+    const spare: EvmRpc = async (calls, until) => (spareAlone.push(...getLogsOf(calls).filter((f) => f.topics.length === 1)), spareInner(calls, until));
+    const w = freshToken();
+    assert.equal((await bandQuote([best(w)], w, bestRoute(w), [m.to(firstDownForMargin), spare], 5_000_000)).accepted, true);
+    await evmTailFills(m.rpc);
+    assert.ok(spareAlone.length > 0, "the spare carried no read of the tail");
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 5_000_000 - 43_200, pools: [{ key: seeded(b).key }] }), true);
+    const asked: [number, number][] = [];
+    const v = await bandQuote([seeded(b), real(b)], b, seededRoute(b), [m.to(scanner(5_000_100, logs, asked)), scanner(5_000_100, logs)], 5_000_100);
+    assert.deepEqual(v, below, `spare tail reads ${spareAlone.length}; asked ${JSON.stringify(asked)}`);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+test("TAIL11d the band read at the fill straddles maxLag below a quote 40 blocks on: its blocks older than maxLag (B's real pool made 55 blocks before the head) are read again, those within it are not", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const b = freshToken();
+  try {
+    evmPoolIndexReset();
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 4_999_980, pools: [{ key: seeded(b).key }] }), true);
+    const m = moving();
+    evmScanFillable(m.rpc);
+    const w = freshToken();
+    // another coin's quote, then the tail's fill after its answer: the first's logs backend has not indexed block 4,999,990
+    assert.equal((await bandQuote([best(w)], w, bestRoute(w), m.to(scanner(5_000_000, [])), 5_000_000)).accepted, true);
+    await evmTailFills(m.rpc);
+    // B's quote 40 blocks on: the band's blocks up to 4,999,990 are past Base's maxLag 50, the rest within it
+    const asked: [number, number][] = [];
+    const v = await bandQuote([seeded(b), real(b)], b, seededRoute(b), m.to(scanner(5_000_040, [{ key: real(b).key, at: 4_999_985 }], asked)), 5_000_040);
+    assert.deepEqual(v, below, `asked ${JSON.stringify(asked)}`);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+test("TAIL11e the new blocks a quote leaves for after its answer, beside a read of the band past maxLag before it, still count from their first block against the agreed block: B's real pool made 55 blocks before the agreed block (scan head 20 behind it) is read before the answer", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const b = freshToken();
+  try {
+    evmPoolIndexReset();
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 4_999_980, pools: [{ key: seeded(b).key }] }), true);
+    const m = moving();
+    evmScanFillable(m.rpc);
+    const w = freshToken();
+    // another coin's quote, then the tail's fill after its answer: the first's logs backend has not indexed block 4,999,990
+    assert.equal((await bandQuote([best(w)], w, bestRoute(w), m.to(scanner(5_000_000, [])), 5_000_000)).accepted, true);
+    await evmTailFills(m.rpc);
+    // B's quote: the scan head 5,000,040, the agreed block 5,000,060, B's real pool at 5,000,005 in the new blocks
+    const asked: [number, number][] = [];
+    const v = await bandQuote([seeded(b), real(b)], b, seededRoute(b), m.to(scanner(5_000_040, [{ key: real(b).key, at: 5_000_005 }], asked)), 5_000_040, 5_000_060);
+    assert.deepEqual(v, below, `asked ${JSON.stringify(asked)}`);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+// the band read again past maxLag is a scan read as any other: asked in its provider's span, its halves where the
+// provider refuses the range, and a refused range never counts as read (a Robinhood margin is 7,119 blocks; dRPC's free
+// plan refuses 1,000-block spans, buy-unpinned.ts)
+const rangeCapped = (inner: EvmRpc, cap: number, answered: [number, number][]): EvmRpc => async (calls, signal) => {
+  const out = await inner(calls, signal);
+  return calls.map((c, i) => {
+    if (c.method !== "eth_getLogs") return out[i];
+    const f = c.params[0] as { fromBlock: string; toBlock: string };
+    const [a, b] = [Number(f.fromBlock), Number(f.toBlock)];
+    if (b - a + 1 > cap) return { jsonrpc: "2.0", id: (out[i] as { id?: unknown }).id, error: { code: -32602, message: `query exceeds max block range ${cap}` } };
+    answered.push([a, b]);
+    return out[i];
+  });
+};
+test("TAIL11f the band read again past maxLag on Robinhood (its margin 7,119 blocks) pages under a provider's block-range cap: a first that refuses getLogs over 1,000 blocks answers its halves and B's real pool there is found; one that refuses over 10 refuses the quote, never accepts it", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  for (const cap of [1_000, 10]) {
+    const b = freshToken();
+    const logs = [{ key: real(b).key, at: RC_HEAD - 3_000 }];
+    try {
+      evmPoolIndexReset();
+      const serve = () => assert.equal(evmPoolIndexUse("robinhood", { index: { chainId: 4663, poolManager: RH_PM, from: RC_HEAD - 10_000_000 }, coversThrough: RC_HEAD - 864_000, pools: [{ key: seeded(b).key }] }), true);
+      serve();
+      const m = moving();
+      evmScanFillable(m.rpc);
+      const w = freshToken();
+      // another coin's quote, then the tail's fill after its answer: the first's logs backend has not indexed B's pool's
+      // block yet, so the margin's blocks are kept for no quote (TAIL7) and read as empty
+      assert.equal((await bandQuote([best(w)], w, bestRoute(w), m.to(scanner(RC_HEAD, [])), RC_HEAD, RC_HEAD, "robinhood")).accepted, true);
+      await evmTailFills(m.rpc);
+      serve();
+      // B's quote 200 blocks on, past Robinhood's maxLag 100: the margin's blocks are read again before the answer
+      const answered: [number, number][] = [];
+      const v = await bandQuote([seeded(b), real(b)], b, seededRoute(b), m.to(rangeCapped(scanner(RC_HEAD + 200, logs), cap, answered)), RC_HEAD + 200, RC_HEAD + 200, "robinhood");
+      if (cap === 1_000) {
+        assert.deepEqual(v, below, `cap ${cap}: answered ${JSON.stringify(answered)}`);
+        assert.ok(answered.some(([x, y]) => x <= RC_HEAD - 3_000 && RC_HEAD - 3_000 <= y), `cap ${cap}: B's pool's block never answered: ${JSON.stringify(answered)}`);
+      } else {
+        assert.equal(v.accepted, false, `cap ${cap}: accepted past a refused range: ${JSON.stringify(answered)}`);
+        assert.notDeepEqual(v, below, `cap ${cap}: ${big(v)}`);
+      }
+    } finally {
+      evmPoolIndexReset();
+    }
+  }
 });

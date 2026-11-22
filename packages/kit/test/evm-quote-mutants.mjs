@@ -393,7 +393,7 @@ export const MUTANTS = [
   [QUOTE, "      if (strict() && holds + order.length - n < need) break;", "      if (against.length > 0 && holds + order.length - n < need) break;", R, "V15 "],
   // the scan's spans: each that came back is kept, also when another failed, never past a head named beyond maxLag;
   // a throttled span is asked again whole
-  [QUOTE, "  await settle(jobs.map(run)).catch((e) => failing(e));", "  await settle(jobs.map(run));", R, "J1 "],
+  [QUOTE, "  await settle(jobs.map(shared)).catch((e) => failing(e));", "  await settle(jobs.map(shared));", R, "J1 "],
   [QUOTE, "    if (a > at) out.push([at, a - 1]);", "", R, "J1 "],
   [QUOTE, "      if (!(e instanceof TailFlood) && scanHead - b.number <= maxLag) commit();", "      if (!(e instanceof TailFlood)) commit();", R, "J3 "],
   // the review of bc189de: a kept scan started early waits for the quote's pick when it ends (L-3) and when it fails
@@ -466,7 +466,7 @@ export const MUTANTS = [
   // quote scans by currency; the budget of no measured pools is the depth (L2)
   [QUOTE, "        const top = head - tailLag;", "        const top = head;", R, "TAIL7 "],
   [QUOTE, "(tail0?.band ?? []).filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y])", "([] as Spans)", R, "TAIL2 "],
-  [QUOTE, "    } else if (e.tail && held && unread.length > 0) {", "    } else if (false) {", R, "TAIL10 "],
+  [QUOTE, "    } else if (e.tail && held && unread.length > 0) {", "    } else if (false) {", R, "W2b "],
   [QUOTE, "          if (g.b > top) t.band = withSpan(", "          if (false) t.band = withSpan(", R, "W2b "],
   [QUOTE, "          if (g.spare) continue;\n", "", R, "TAIL4b "],
   [QUOTE, "      if (e.tail && unread.length > 0) e.laterFrom = unread[0]![0];", "", R, "W2b "],
@@ -479,6 +479,15 @@ export const MUTANTS = [
   [QUOTE, "  const cold = fill !== true && (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", "  const cold = (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", R, "TAILF1 "],
   // card evm-tail-warms-with-the-index-at-the-head: a tail read only inside the index's margin is no cold tail
   [QUOTE, " && (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;", " && (tail0?.spans.length ?? 0) === 0;", R, "GUARD "],
+  // a band block counts as read only within maxLag of the head (independent review of c6cf1927d, HIGH 1, HIGH 2, MEDIUM 3)
+  [QUOTE, "(tail0?.band ?? []).filter(([, y]) => y > head - lag).map(([x, y]): [number, number] => [Math.max(x, head - lag + 1), y]).reduce(", "(tail0?.band ?? []).reduce(", R, "TAIL11 "],
+  [QUOTE, "(tail0?.band ?? []).filter(([, y]) => y > head - lag).map(([x, y]): [number, number] => [Math.max(x, head - lag + 1), y]).reduce(", "(tail0?.band ?? []).filter(([, y]) => y > head - lag).reduce(", R, "TAIL11d "],
+  // past maxLag, only the unread spans that start past it go before the answer; those within it go after, counted from
+  // their first block (P2-1)
+  [QUOTE, "      const now = unread.filter(([a]) => a <= head - lag);", "      const now = unread;", R, "W2b "],
+  [QUOTE, "      e.laterFrom = unread.find(([a]) => a > head - lag)?.[0] ?? head + 1;", "      e.laterFrom = head + 1;", R, "TAIL11e "],
+  // a quote's tail scans that read the same blocks before the answer at once share one request (TAIL_READING)
+  [QUOTE, "  await settle(jobs.map(shared)).catch((e) => failing(e));", "  await settle(jobs.map(run)).catch((e) => failing(e));", R, "TAILF12 "],
   [QUOTE, "reach(fill === true ? e.ix : e.spans)", "reach(e.spans)", R, "TAILF1 "],
   [QUOTE, "      if (wantFill && !got.some((g) => g.spare)) (fill", "      if (wantFill) (fill", R, "TAILF6 "],
   [QUOTE, "  if (running.has(chain) || FLOODED.get(src)?.has(chain) === true) return;", "  if (FLOODED.get(src)?.has(chain) === true) return;", R, "TAILF2 "],

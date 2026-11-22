@@ -1861,6 +1861,13 @@ const quoting = (chain: string, d: 1 | -1): void => {
   QUIET.delete(chain);
 };
 const FLOODED = new WeakMap<object, Set<EvmPoolChain>>();
+/** A chain's tail's requests before an answer in flight, by their blocks: a quote's scans of every kind (its token's,
+ *  X's markets), or two quotes at once, that read the same blocks of the tail before their answers take the one
+ *  request's answer (card evm-tail-warms-with-the-index-at-the-head: the band's blocks past maxLag, read again before
+ *  each answer, were read once a scan, 4 times in one warm quote of a token and X's markets, TAILF12). The answer is
+ *  the blocks' logs and whether a spare carried them, so a spare's pools stay kept for no coin (TAIL6) in every scan
+ *  that takes it */
+const TAIL_READING = new WeakMap<Tail, Map<string, Promise<{ a: number; b: number; logs: unknown[]; spare: boolean }[] | null>>>();
 /** For the tests: settles once every read of a chain's tail started so far on `by`'s first scan provider has ended.
  *  Not in the kit's index. */
 export const evmTailFills = async (by: EvmRpc): Promise<void> => {
@@ -2592,7 +2599,7 @@ async function scanPools(
   // it is no cold tail, so the quote reads its gap as the event alone (card evm-tail-warms-with-the-index-at-the-head:
   // counted cold, every later quote read its gap by currency and asked for the fill again, 5 such getLogs after every
   // warm Base answer on mainnet, 22 Nov 11:49Z). `cold` only picks how the blocks are asked; which count as read is the
-  // margin's rule below, as before
+  // band's rule below (`unread`)
   const cold = fill !== true && (tail0?.spans.length ?? 0) === 0 && (tail0?.band?.length ?? 0) === 0;
   const near = !byCurrency && !cold && head - start <= tailBudgetOf(s);
   // asked for once this scan's reads are kept (commit): a scan that failed, or a quote that refused, starts none
@@ -2620,10 +2627,12 @@ async function scanPools(
   // quote cost one post of Robinhood's scan provider's 1 a second.
   const lag = Number(maxLag);
   for (const e of scans) {
-    // on the chain's tail, the blocks a first provider answered within the index's margin of its head (`band`, kept for
-    // no quote: TAIL7) count as read for this rule alone: they are read again, before the answer where any block of the
-    // gap reads unread past maxLag or a currency holds no pool, as any gap; otherwise right after it
-    const unread = e.tail ? gapsOf((tail0?.band ?? []).reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
+    // on the chain's tail, the blocks a provider answered within the index's margin of its head (`band`, kept for no
+    // quote: TAIL7) count as read for this rule alone, and only while within maxLag of the head, the miss the kit accepts
+    // for any gap; older ones are read again before the answer (independent review of c6cf1927d, HIGH 1, HIGH 2, MEDIUM
+    // 3: counted read up to the margin, a pool a lagging first, or a spare whose pools no coin keeps, did not answer 110
+    // blocks before the head was missed, and the coin quoted against a seeded pool at a tenth: TAIL11, TAIL11b, TAIL11c)
+    const unread = e.tail ? gapsOf((tail0?.band ?? []).filter(([, y]) => y > head - lag).map(([x, y]): [number, number] => [Math.max(x, head - lag + 1), y]).reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
     const held = (e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === "markets";
     // read to be kept on the tail: the blocks no provider answered, and those of the band now past the index's margin
     // below the head; the band's others give an answer kept for no quote, so they are read before an answer that needs
@@ -2637,12 +2646,15 @@ async function scanPools(
       // the first block of it no provider answered (P2-1 below counts those alone)
       if (e.tail && unread.length > 0) e.laterFrom = unread[0]![0];
     } else if (e.tail && held && unread.length > 0) {
-      // unread past maxLag: those blocks alone before the answer (the band counts as read here as above), the band's past
-      // the margin right after it, and no block up to the head is left unanswered for P2-1 (a Robinhood quote 31 s after
-      // the last read the margin's 7,119 blocks with the 547 new ones before its answer, where main read the 547)
-      e.later = gapsOf(unread.reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(kept, floor, head)), floor, head);
-      e.gaps = unread;
-      e.laterFrom = head + 1;
+      // unread past maxLag: each unread span that starts more than maxLag before the head is read before the answer (the
+      // band within maxLag counts as read here as above), and one that starts within it right after, as any gap within
+      // maxLag, so a band block older than maxLag adds its own request and never pulls the new blocks before the answer;
+      // the band's past the margin go with the read after it (a Robinhood quote 31 s after the last read the margin's
+      // 7,119 blocks with the 547 new ones before its answer, where main read the 547)
+      const now = unread.filter(([a]) => a <= head - lag);
+      e.later = gapsOf(now.reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(kept, floor, head)), floor, head);
+      e.gaps = now;
+      e.laterFrom = unread.find(([a]) => a > head - lag)?.[0] ?? head + 1;
     }
   }
   // the currencies with the same blocks left share each request
@@ -3056,7 +3068,28 @@ async function scanPools(
     }
     throw e;
   };
-  await settle(jobs.map(run)).catch((e) => failing(e));
+  // a tail request of blocks past maxLag below the head (the band's, read again, and older), not pinned: one in flight
+  // with the same blocks on this tail is not sent again, its answer is taken (TAIL_READING); one whose sender failed is
+  // sent as any
+  const shared = (j: Job): Promise<void> => {
+    if (!near || fill === true || tail0 === undefined || j.into !== undefined || pin !== null || !j.part[0]!.tail || j.b > head - lag) return run(j);
+    const reading = TAIL_READING.get(tail0) ?? new Map<string, Promise<{ a: number; b: number; logs: unknown[]; spare: boolean }[] | null>>();
+    TAIL_READING.set(tail0, reading);
+    const key = `${j.a}:${j.b}`;
+    const led = reading.get(key);
+    if (led !== undefined) return led.then((gs) => (gs === null ? run(j) : void got.push(...gs.map((g) => ({ ...g, part: j.part })))));
+    const sent = run(j);
+    const answer = sent.then(
+      () => got.filter((g) => g.part === j.part && g.a >= j.a && g.b <= j.b).map(({ a, b, logs, spare }) => ({ a, b, logs, spare })),
+      () => null,
+    );
+    reading.set(key, answer);
+    void answer.then(() => {
+      if (reading.get(key) === answer) reading.delete(key);
+    });
+    return sent;
+  };
+  await settle(jobs.map(shared)).catch((e) => failing(e));
   const agreedAt = await agreed();
   const b = agreedAt.number;
   if (scanHead - b > maxLag) return refuse("rpc_disagree", `the scan provider's head ${scanHead} is more than ${maxLag} blocks past the agreed block ${b}`);
