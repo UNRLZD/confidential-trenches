@@ -1,5 +1,5 @@
 {
- "about": "Card helper-tape-handover. Not read from the live helper (helper update 23 was deploying and measuring on 22 Nov when the card was built; the live helper was off limits): both runs come from the helper's own code on the recorded Base hour (apps/helper/test/evm-swaps/base.ts, fixtures/swaps-base-hour.json.gz), made by the card's scratch script and shaped as read() records them. Base only: no Robinhood recording of a deploy exists. The first deploy's live run with --record replaces them. Card helper-tape-handover-judges-handed-books: each answer now keeps its Server-Timing (`timing`), in the shape the helper's trades answer writes it (apps/helper/src/data/evm/swaps-books-handover.test.ts: a restored book's answer ends in evm-handed, a cold one's does not). The good run's answers are marked handed over, as that test reads them. The bad run is planted: the no-handover run's short ICNT answer marked handed over, a restored book that answered short. The cold run is that no-handover run as it was, unmarked.",
+ "about": "Card helper-tape-handover. Not read from the live helper (helper update 23 was deploying and measuring on 22 Nov when the card was built; the live helper was off limits): both runs come from the helper's own code on the recorded Base hour (apps/helper/test/evm-swaps/base.ts, fixtures/swaps-base-hour.json.gz), made by the card's scratch script and shaped as read() records them. Base only: no Robinhood recording of a deploy exists. The first deploy's live run with --record replaces them. Card helper-tape-handover-judges-handed-books: each answer now keeps its Server-Timing (`timing`), in the shape the helper's trades answer writes it (apps/helper/src/data/evm/swaps-books-handover.test.ts: a restored book's answer ends in evm-handed, a cold one's does not). The good run's answers are marked handed over, as that test reads them. The bad run is planted: the no-handover run's short ICNT answer marked handed over, a restored book that answered short. The cold run is that no-handover run as it was, unmarked. Each run's health now keeps X-Helper-Handover (`handover`), in the shape server.ts writes it (server.test.ts: \"<chain> books held <n> restored <m>, ..., solana tapes held <n> restored <m>\"): the good and bad runs' two Base books were handed over and restored (the restore test's two books, swaps-books-handover.test.ts), the cold run's file held none. The test plants two more on the cold run's answers: the file held two Base books and restored none, and two restored with no coin read answering as handed.",
  "good": {
   "what": "a helper 120 s old restored from the old one's warm-file books (swaps.ts restore): ICNT and VVV each answer their 50 rows at the first read, the same rows a read later; every answer marked handed over (evm-handed)",
   "run": {
@@ -8,6 +8,7 @@
     "status": 200,
     "error": null,
     "started": "1794999944000",
+    "handover": "base books held 2 restored 2, robinhood books held 0 restored 0, solana tapes held 0 restored 0",
     "commit": "rig"
    },
    "chains": {
@@ -875,6 +876,7 @@
     "status": 200,
     "error": null,
     "started": "1794999944000",
+    "handover": "base books held 2 restored 2, robinhood books held 0 restored 0, solana tapes held 0 restored 0",
     "commit": "rig"
    },
    "chains": {
@@ -1534,13 +1536,14 @@
   }
  },
  "cold": {
-  "what": "the same helper with no handover (main a2458a619's start), its first log reads slower than the open's bound (OPEN_BOUND_MS 8 s) as the live providers were after helper update 22's deploy: ICNT answers 0 rows filling at its first read and 50 a read later; no answer marked: every book opened cold, named and not judged",
+  "what": "the same helper with no handover (main a2458a619's start), its first log reads slower than the open's bound (OPEN_BOUND_MS 8 s) as the live providers were after helper update 22's deploy: ICNT answers 0 rows filling at its first read and 50 a read later; no answer marked: every book opened cold, named and not judged; the warm file held no books (held 0)",
   "run": {
    "health": {
     "at": 1795000064000,
     "status": 200,
     "error": null,
     "started": "1794999944000",
+    "handover": "base books held 0 restored 0, robinhood books held 0 restored 0, solana tapes held 0 restored 0",
     "commit": "rig"
    },
    "chains": {

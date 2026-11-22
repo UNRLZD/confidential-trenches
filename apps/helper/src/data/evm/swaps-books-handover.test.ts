@@ -142,3 +142,37 @@ test("card helper-tape-handover-judges-handed-books: a restored book's trades an
   next.stop();
   cold.stop();
 });
+
+test("card helper-tape-handover-judges-handed-books: the swaps name what the warm file held and what they restored (handover(), on /v1/health): after a restore 2 of 2, at a cold start 0 of 0, after a file with a hostile book 0 of 2 (a restore is whole or nothing), so the live check fails a deploy that dropped books (red at main 5d7c3a99d: no counts)", async () => {
+  const { clock, head, st } = await warmOld();
+  const at = () => {
+    const c = fakeChain();
+    c.st.head = head;
+    return open(c, clock, { pools: new Map() });
+  };
+  const cold = at();
+  assert.deepEqual(cold.handover(), { held: 0, restored: 0 }, "a cold start");
+  assert.equal(cold.restore(undefined), false);
+  assert.deepEqual(cold.handover(), { held: 0, restored: 0 }, "no swaps part handed over: nothing held");
+  cold.stop();
+  const next = at();
+  assert.equal(next.restore(st), true);
+  assert.deepEqual(next.handover(), { held: 2, restored: 2 }, "after a restore");
+  // the same file read again at the handover (server.ts restores at the start and once the senders are held) counts its
+  // books once: they are held already
+  assert.equal(next.restore(st), true);
+  assert.deepEqual(next.handover(), { held: 2, restored: 2 }, "the same file again");
+  next.stop();
+  const hostile = JSON.parse(JSON.stringify(st)) as { books: [string, Record<string, unknown>][] };
+  (hostile.books[1]![1].book as { tape: unknown[] }).tape.reverse();
+  const after = at();
+  assert.equal(after.restore(hostile), false);
+  assert.deepEqual(after.handover(), { held: 2, restored: 0 }, "a hostile book: the file held 2, none restored");
+  after.stop();
+  for (const [what, part] of [["no state", 7], ["books that are no list", { books: {} }]] as const) {
+    const odd = at();
+    assert.equal(odd.restore(part), false, what);
+    assert.deepEqual(odd.handover(), { held: 1, restored: 0 }, `${what}: something held, nothing restored`);
+    odd.stop();
+  }
+});

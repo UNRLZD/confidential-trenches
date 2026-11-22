@@ -151,3 +151,32 @@ test("card helper-tape-handover-judges-handed-books: a restored Solana tape's tr
   assert.ok((handedOver.timing ?? "").includes(HANDED_TIMING), `a handed tape is named: ${handedOver.timing}`);
   next.t.stop();
 });
+
+test("card helper-tape-handover-judges-handed-books: the Solana tapes name what the warm file held and what they restored (handover(), on /v1/health): after a restore all of them, at a cold start 0 of 0, after a file with a hostile tape 0 of all (a restore is whole or nothing) (red at main 5d7c3a99d: no counts)", async () => {
+  const { clock, st } = await warmOld();
+  const n = st.tapes.length;
+  assert.ok(n > 0, "the old helper handed tapes over");
+  clock.ms += 30_000;
+  const cold = helper(chain(), clock);
+  assert.deepEqual(cold.t.handover(), { held: 0, restored: 0 }, "a cold start");
+  assert.equal(cold.t.restore(undefined), false);
+  assert.deepEqual(cold.t.handover(), { held: 0, restored: 0 }, "no tapes part handed over: nothing held");
+  cold.t.stop();
+  const next = helper(chain(), clock);
+  assert.equal(next.t.restore(st), true);
+  assert.deepEqual(next.t.handover(), { held: n, restored: n }, "after a restore");
+  assert.equal(next.t.restore(st), true);
+  assert.deepEqual(next.t.handover(), { held: n, restored: n }, "the same file again counts its tapes once");
+  await settle();
+  next.t.stop();
+  const hostile = JSON.parse(JSON.stringify(st)) as typeof st;
+  hostile.tapes.push(["not-a-mint", {}]);
+  const after = helper(chain(), clock);
+  assert.equal(after.t.restore(hostile), false);
+  assert.deepEqual(after.t.handover(), { held: n + 1, restored: 0 }, "a hostile tape: the file held them all, none restored");
+  after.t.stop();
+  const odd = helper(chain(), clock);
+  assert.equal(odd.t.restore({ tapes: {}, traders: [] }), false);
+  assert.deepEqual(odd.t.handover(), { held: 1, restored: 0 }, "tapes that are no list: something held, nothing restored");
+  odd.t.stop();
+});

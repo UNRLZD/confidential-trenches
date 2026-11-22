@@ -777,6 +777,9 @@ export function createSolanaTrades(deps: {
    *  never by the transaction's first trade (card sol-tape-trader-is-the-events-user, as evm/swaps.ts traderAt). */
   const traders = new Map<string, (string | null)[]>();
   let seq = 0;
+  // card helper-tape-handover-judges-handed-books: the tapes the last warm file held and how many of them this process
+  // holds after its restore (handover(), named on /v1/health)
+  let handedCount = { held: 0, restored: 0 };
   let solUsd: { slot: number; v: bigint } | null = null;
   let refAt = 0;
   let reportAt = now();
@@ -2041,7 +2044,12 @@ export function createSolanaTrades(deps: {
      *  is restored (false). A token this one already holds keeps its own. Each restored tape is watched on the stream and
      *  its gap walked from the signature it was held to, as after a dropped stream (refill); behind (filling) till then. */
     restore(st: unknown): boolean {
-      if (typeof st !== "object" || st === null || Array.isArray(st)) return false;
+      // no part handed over counts nothing; a part that is no state, or `tapes` that is no list, held something and
+      // restores nothing
+      if (st === undefined) return false;
+      const isState = typeof st === "object" && st !== null && !Array.isArray(st);
+      handedCount = { held: !isState ? 1 : Array.isArray((st as Record<string, unknown>).tapes) ? ((st as Record<string, unknown>).tapes as unknown[]).length : (st as Record<string, unknown>).tapes === undefined ? 0 : 1, restored: 0 };
+      if (!isState) return false;
       const o = st as Record<string, unknown>;
       if (!Array.isArray(o.tapes) || o.tapes.length > OPEN_MAX || !Array.isArray(o.traders) || o.traders.length > OPEN_MAX * TRADES_MAX * 2) return false;
       const t = now();
@@ -2062,8 +2070,11 @@ export function createSolanaTrades(deps: {
         if (traders.size >= HELD_MAX) traders.delete(traders.keys().next().value!);
         traders.set(k, u);
       }
+      // a tape this process already holds (its own open, or the same file's tape restored before) counts restored
       for (const [mint, e, s] of got) {
+        if (entries.has(mint) || opening.has(mint)) handedCount.restored++;
         if (entries.has(mint) || opening.has(mint) || entries.size >= OPEN_MAX) continue;
+        handedCount.restored++;
         seq = Math.max(seq, s);
         entries.set(mint, e);
         // watched first, so no trade falls between the stream and the gap's walk (as a first read's walk waits on it)
@@ -2081,6 +2092,11 @@ export function createSolanaTrades(deps: {
         timer.unref?.();
       }
       return true;
+    },
+    /** Card helper-tape-handover-judges-handed-books: the tapes the last warm file held and how many this process holds
+     *  after restoring it (0 and 0 with none read), counts only, for /v1/health. */
+    handover(): { held: number; restored: number } {
+      return { ...handedCount };
     },
     stop(): void {
       stopped = true;
