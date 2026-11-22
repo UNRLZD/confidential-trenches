@@ -4,8 +4,12 @@
 // Server-Timing) is read again within SOL_VENDOR_REACH_MS (15 s) while a page holds it. The deployed helper served
 // BONK's at 26 s (18 Nov 13:03Z), and its GeckoTerminal minute lines from 12:56Z to 13:48Z show no keyless
 // "sol trades" call, the refresh lane's room taken by the lists and the read ahead (token.ts tapes).
-// The coin: the first of CANDIDATES (coins on no Discover list, so served from the vendor while no walk of ours holds
-// them), then of the Trending (1h) list, whose tape answers from the vendor's rows. It is read as a page holds it, every
+// The coin: the first of CANDIDATES that no list of the lists answer holds now (a coin the lists held in the helper's
+// last SERVED_MS is served from our own chain reads, apps/helper/src/data/solana/lists.ts listed, so a candidate a list
+// names is skipped unread and the next one tried), then of the Trending (1h) list, whose tape answers from the vendor's
+// rows where our reads do not decode its venue. On 22 Nov BONK, WIF, JUP and POPCAT had all been listed (the read of
+// 11:02Z: each first answer from our chain reads; live run 45006783900 the same, nothing to judge), so the candidates
+// are eleven long-traded coins. It is read as a page holds it, every
 // POLL_MS for HOLD_MS; then:
 //   - every answer is 200;
 //   - at least MIN_VENDOR answers are the vendor's rows (named in Server-Timing), spanning more than TAPE_FRESH_MS, so
@@ -21,6 +25,8 @@
 // page never draws it as live (card sol-vendor-tape-gap-served-inside-reach). It is its own BAD line; an answer past the
 // reach that says filling is still BAD by the rule above.
 // No coin served from the vendor long enough to judge, or no gap answer from the vendor: error (exit 2), never a pass.
+// Each gap answer's time (Server-Timing total) is printed beside it, so a red run shows whether the helper waited for a
+// refresh or answered at once.
 // After: helper
 //   node scripts/live-checks/sol-vendor-tape-refresh-lands.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
@@ -32,9 +38,22 @@ import { TAPE_FRESH_MS } from "../../apps/helper/src/data/solana/token.ts";
 const KEY = "sol-vendor-tape-refresh-lands";
 export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
-/** Coins long listed on Solana's DEXes and on no Discover list (lists of new, trending and graduating coins) when this
- *  check was written: BONK, WIF, JUP, POPCAT. */
-export const CANDIDATES = ["DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr"];
+/** Coins long traded on Solana's DEXes: BONK, WIF, JUP, POPCAT (when this check was written), then ORCA, KMNO, RENDER,
+ *  PYTH, MEW, HNT, JTO (card sol-vendor-tape-refresh-lands-live, each traded in the 24 h before 22 Nov 11:05Z by
+ *  DexScreener's token read). */
+export const CANDIDATES = [
+  "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+  "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+  "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+  "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr",
+  "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE",
+  "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS",
+  "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof",
+  "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3",
+  "MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5",
+  "hntyVP6YFm1Hg25TN9WGLqM12b8TQmcknKrdu1oxWux",
+  "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
+];
 /** Trending coins tried after the candidates. */
 export const TRENDING = 6;
 export const POLL_MS = 2_000;
@@ -56,6 +75,12 @@ export function vendorReadOf(entry, timing) {
   return m === null ? null : Number(m[1]);
 }
 
+/** The answer's time a Server-Timing names (`total;dur=N`), or null. */
+export function totalOf(timing) {
+  const m = /(?:^|,)\s*total;dur=(\d+(?:\.\d+)?)/.exec(String(timing ?? ""));
+  return m === null ? null : Math.round(Number(m[1]));
+}
+
 const obj = (v) => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : {});
 const arr = (v) => (Array.isArray(v) ? v : []);
 
@@ -74,9 +99,13 @@ export async function read(base = BASE, fetchFn = fetch, wait = (ms) => new Prom
     return { at, status: r.status, timing: r.headers.get("server-timing") ?? "", body };
   };
   const l = await get(`/v1/market/lists?chain=solana`);
-  const trending = arr(obj(obj(l.body).lists).trending_1h).map((r) => obj(r).token).filter((t) => typeof t === "string").slice(0, TRENDING);
+  const lists = obj(obj(l.body).lists);
+  const tokens = (rows) => arr(rows).map((r) => obj(r).token).filter((t) => typeof t === "string");
+  const trending = tokens(lists.trending_1h).slice(0, TRENDING);
+  // a coin a list holds now is served from our own chain reads: not read
+  const held = new Set(Object.values(lists).flatMap(tokens));
   const coins = [];
-  for (const coin of [...CANDIDATES, ...trending.filter((t) => !CANDIDATES.includes(t))]) {
+  for (const coin of [...CANDIDATES.filter((c) => !held.has(c)), ...trending.filter((t) => !CANDIDATES.includes(t))]) {
     const reads = [];
     for (const end = now() + HOLD_MS; ; ) {
       const t = await get(`/v1/market/trades?chain=solana&token=${encodeURIComponent(coin)}&limit=50`);
@@ -146,6 +175,7 @@ export function judge(r) {
   const gAges = gv.map((x) => vendorReadOf(ENTRY, x.timing));
   const gOver = gAges.filter((a) => a > SOL_VENDOR_REACH_MS);
   say(gOver.length === 0, `${String(c.coin).slice(0, 10)}: ${gv.length} vendor answers after ${GAP_MS / 1000} s unread, rows read ${gAges.join(", ")} ms before (at most ${SOL_VENDOR_REACH_MS}): ${gOver.length ? `${gOver.length} past it` : "every one"}`);
+  lines.push(`--  ${String(c.coin).slice(0, 10)}: gap answers took ${gaps.map((x) => totalOf(x.timing) ?? "?").join(", ")} ms (Server-Timing total)`);
   unsaid(c.coin, "gap", gv, gAges);
   return { ok: lines.every((l) => !l.startsWith("BAD")), lines };
 }

@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { CANDIDATES, GAP_MS, GAPS, HOLD_MS, judge, MIN_VENDOR, POLL_MS, read } from "./sol-vendor-tape-refresh-lands.mjs";
+import { CANDIDATES, GAP_MS, GAPS, HOLD_MS, judge, MIN_VENDOR, POLL_MS, read, totalOf } from "./sol-vendor-tape-refresh-lands.mjs";
 import { SOL_VENDOR_REACH_MS } from "../../apps/helper/src/data/solana/trades.ts";
 
 const A = JSON.parse(readFileSync(new URL("./sol-vendor-tape-refresh-lands.answers.json", import.meta.url), "utf8"));
@@ -120,4 +120,38 @@ test("read: a coin answered from our own chain reads is left at its first answer
   assert.equal(r.coins[0].gaps, undefined, "a coin not judged is not gap-read");
   assert.equal(asked.filter((x) => x === CANDIDATES[0]).length, 1);
   assert.equal(judge(r).ok, true, judge(r).lines.join("\n"));
+});
+
+// Card sol-vendor-tape-refresh-lands-live: on 22 Nov BONK, WIF, JUP and POPCAT were all held by the lists, so served from
+// our own chain reads, and the run had nothing to judge (live run 45006783900; the read of 11:02Z, recorded below as
+// allListed). Red at fd4d3d39a: every candidate read, none from the vendor, no verdict.
+test("read: a candidate the lists hold now is not read; the first candidate no list holds is judged (red at fd4d3d39a: the four listed candidates read, nothing to judge)", async () => {
+  let t = Date.parse("2026-11-22T11:02:00Z");
+  const asked = [];
+  const listed = CANDIDATES.slice(0, 4);
+  const fetchFn = async (url) => {
+    const u = new URL(url);
+    if (u.pathname === "/v1/market/lists") return new Response(JSON.stringify({ lists: { new: [{ token: listed[0] }], trending_5m: [{ token: listed[1] }, { token: listed[2] }], trending_1h: [{ token: listed[3] }] } }), { status: 200 });
+    const token = u.searchParams.get("token");
+    asked.push(token);
+    const vendor = !listed.includes(token);
+    return new Response(JSON.stringify({ trades: [], src: vendor ? "coingecko" : "chain", as_of_ms: t - 1_000 }), { status: 200, headers: vendor ? { "server-timing": `sol-vendor-read;desc="rows read 1000 ms ago", total;dur=12` } : {} });
+  };
+  const r = await read("http://h", fetchFn, async (ms) => void (t += ms), () => t);
+  assert.deepEqual(r.coins.map((c) => c.coin), [CANDIDATES[4]], "the listed four unread, the fifth judged");
+  assert.equal(asked.filter((x) => listed.includes(x)).length, 0);
+  const v = judge(r);
+  assert.equal(v.ok, true, v.lines.join("\n"));
+  assert.ok(v.lines.includes(`--  ${CANDIDATES[4].slice(0, 10)}: gap answers took 12, 12, 12 ms (Server-Timing total)`), v.lines.join("\n"));
+});
+
+test("the recorded read of 22 Nov 11:02Z, every coin tried held by the lists and answered from our chain reads: no verdict, never a pass", () => {
+  const r = judge(A.allListed);
+  assert.equal(r.ok, null, r.lines.join("\n"));
+  assert.equal(r.lines.at(-1), "--  no coin served from the vendor's rows long enough to judge");
+});
+
+test("totalOf reads Server-Timing's total, null without it", () => {
+  assert.equal(totalOf(`sol-vendor-read;desc="rows read 5 ms ago", total;dur=633.4`), 633);
+  assert.equal(totalOf(`sol-vendor-read;desc="rows read 5 ms ago"`), null);
 });
