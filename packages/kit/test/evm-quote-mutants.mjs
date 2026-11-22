@@ -1278,6 +1278,8 @@ export const MUTANTS = [
   [QUOTE, "      const timer = setTimeout(() => void spare().then(win, () => {}), evmHedgeAfter(", "      const timer = setTimeout(() => void spare().then(win, (e: unknown) => ((over = true), no(e))), evmHedgeAfter(", R, "KPI2 "],
   [QUOTE, "      scanHeadOf(o.rpc, o.gate).then(win, () => {\n        clearTimeout(timer);", "      scanHeadOf(o.rpc, o.gate).then(win, (e: unknown) => {\n        if (theirs === undefined) return no(e);\n        clearTimeout(timer);", R, "KPI2 "],
   [QUOTE, "      const spare = () => (theirs ??= inTurn(next));", "      const spare = () => (theirs ??= headFrom(next));", R, "KPI3 "],
+  // bloXroute's Robinhood endpoint paced to 16 calls in any second, its 429 from a runner at 17 (live run 45043534742)
+  ["src/checks/evm/pace.ts", '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 10, burst: 6, unit: "call" }),', '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 15, burst: 6, unit: "call" }),', "test/evm-pace-provider-limits.test.ts", "card robinhood-taps-meet-no-429: a burst of a tap's posts to robinhood.rpc.blxrbdn.com from a runner"],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
