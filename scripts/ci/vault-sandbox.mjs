@@ -46,6 +46,8 @@ export const PATHS = [
   "packages/exit/test/out-cli.ts",
   // exit_words.rs: the exit command's sandbox run (packages/exit/test/exit-cli.ts, runCli and the NEAR chain)
   "packages/exit/test/exit-cli.ts",
+  // exit_every_kind.rs: its seed helper (every kind of note the words make, on the mainnet vault's copy)
+  "packages/exit/test/every-kind-cli.ts",
   "packages/exit/src/",
   "packages/exit/package.json",
   "packages/wallet/src/",
@@ -101,11 +103,13 @@ export function matches(file, paths = PATHS) {
 // 473 and 650 s (42 + about 30 of compile + 577).
 // mainnet_copy_payouts (card near-cash-pays-any-amount: the mainnet vault's copy, three deposits, three relayed
 // withdrawals and their settles through the helper's CLI) joins shard 1, then the lightest at about 410.
+// exit_every_kind (card exit-every-note-kind-on-a-mainnet-copy: the mainnet vault's copy, five kinds seeded, the exit
+// command's whole run with six proofs) joins shard 4, then the lightest at about 473.
 export const SHARDS = [
   ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13", "mainnet_copy_payouts"],
   ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay", "s16", "exit_out"],
   ["payouts", "s20", "s02", "withdraw_vectors", "s15", "s12", "exit_words"],
-  ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw", "s19"],
+  ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw", "s19", "exit_every_kind"],
   ["p02"],
 ];
 
