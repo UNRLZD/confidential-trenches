@@ -3281,6 +3281,9 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
         wire = performance.now();
         sent?.(c);
       });
+      // still open when this answer came: no answer since the hold ended (a slower post of the probe's round, answered
+      // after an earlier one in time closed it, holds nothing again: review of 7c0291eb2, MEDIUM)
+      const open = s.last < till;
       s.last = performance.now();
       // an answer that names a rate limit or a state the provider does not hold is held, never measured: such an error
       // comes back fast, and a provider past its state cut kept first by it failed every quote's reads (card
@@ -3293,7 +3296,7 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
         const kind = evmPostKind(calls);
         // a probe answered past its kind's hedge time is held again: in time closes the breaker, late keeps it open
         // (review of A+B, 3)
-        if (probe && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS)) s.held = performance.now() + EVM_HOLD_MS;
+        if (probe && open && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS)) s.held = performance.now() + EVM_HOLD_MS;
         const times = s.times.get(kind) ?? [];
         s.times.set(kind, times);
         times.push(ms);

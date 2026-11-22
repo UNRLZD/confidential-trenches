@@ -150,6 +150,8 @@ test("card robinhood-taps-meet-no-429: a recorded heavy warm tap (PONS) reads th
   evmPaceReset();
   console.log(`fits cold ${r.fits.cold} warm ${r.fits.warm} (routes ${r.fitKeys.warm.size}); calls cold ${r.calls.cold} warm ${r.calls.warm}; speculative reads the recording predates ${r.spec.length}; outcomes ${JSON.stringify(outcomes)}`);
   assert.deepEqual(r.missed, []);
+  // the four reads the warm quote speculates with the plan's hook replaced, and no other (review of 7c0291eb2, LOW)
+  assert.equal(r.spec.length, 4, `reads set apart: ${r.spec.join("; ")}`);
   assert.deepEqual(outcomes, F.quotes.map((x: { outcome: string }) => x.outcome), "every quote of the replay ends as the recording's did");
   assert.ok(r.fitKeys.warm.size <= WARM_FITS_MAX, `the warm tap read the swap fit of ${r.fitKeys.warm.size} routes, more than ${WARM_FITS_MAX}`);
   // each read on at most the round's three seats (the quorum, card evm-warm-tap-ends-inside-two-seconds: two agreeing of three)
@@ -210,5 +212,7 @@ test("RP3 the replay sets apart only a read with a hook of its plan replaced by 
   // the no-op at a hook outside the plan, or other code at the plan's hook: missed
   await post(r, call(quoteOf(STRANGER, 2), { [STRANGER]: { code: EVM_NOOP_HOOK_CODE } }));
   await post(r, call(quoteOf(HOOK, 3), { [HOOK]: { code: "0x00" } }));
-  assert.deepEqual([r.spec.length, r.missed.length], [1, 4], "a read replacing a hook outside the plan, or other code, was set apart");
+  // the plan's hook given the no-op code in a read that names another pool's hook
+  await post(r, call(quoteOf(STRANGER, 3), { [HOOK]: { code: EVM_NOOP_HOOK_CODE } }));
+  assert.deepEqual([r.spec.length, r.missed.length], [1, 5], "a read replacing a hook outside the plan, other code, or a hook the read does not name, was set apart");
 }));

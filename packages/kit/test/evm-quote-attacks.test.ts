@@ -4450,9 +4450,12 @@ test("W6c a warm quote uses only answers of its own block: a provider that answe
   const { pools, logs } = specCase(token, xAt(0x3f30));
   // at any block but the quote's own (NEW), the hooked pool's reads with its hook replaced revert
   const other = pools.map((p) => (p.key.hooks === UNPINNED ? { ...p, give: () => null as unknown as bigint } : p));
+  // the block of every read with the hooked pool's hook replaced
+  const hookAt: unknown[] = [];
   const pinned = (who: 0 | 1): EvmRpc => async (calls, ...rest) => {
-    const [a, b] = await Promise.all([chain(pools, who)(calls, ...rest), chain(other, who)(calls, ...rest)]);
     const at = (c: EvmRpcCall) => (c.params[1] as { blockHash?: unknown } | undefined)?.blockHash ?? c.params[1];
+    for (const c of calls) if (c.method === "eth_call" && Object.keys((c.params[2] ?? {}) as object).some((k) => k.toLowerCase() === UNPINNED.toLowerCase())) hookAt.push(at(c));
+    const [a, b] = await Promise.all([chain(pools, who)(calls, ...rest), chain(other, who)(calls, ...rest)]);
     return calls.map((c, i) => (c.method === "eth_call" && at(c) !== NEW ? b[i] : a[i]));
   };
   const expected = await coldVerdict(token, () => [pinned(0), pinned(1)], logs);
@@ -4462,6 +4465,9 @@ test("W6c a warm quote uses only answers of its own block: a provider that answe
   const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [second.rpc, pinned(1)], NOW, scanner(5_000_000, logs), undefined, () => 0));
   assert.deepEqual(v, expected);
   assert.equal(second.n.calls, 1, "the hooked pool's read with its hook replaced was not read beside the first round");
+  // each read with the hook replaced, the cold quote's and the warm quote's, asked at the quote's own block only
+  assert.ok(hookAt.length > 0);
+  assert.deepEqual([...new Set(hookAt)], [NEW], "a read with the hook replaced was asked at another block");
 });
 
 test("W6e a warm quote's read with a hook replaced is answered only by that very read, never by the same read with the hook as it is", async () => {

@@ -71,7 +71,7 @@ const replayed = (F: { quotes: { calls: [string, unknown][]; own: [string, unkno
  *  it on the test clock (test/test-clock.ts), one recording of a chain and token a process: the kit's scan of a token is
  *  kept for the module's life, so a second replay of the same token tops up from the first's head. `quotes`: the kit
  *  quotes the tap asked. */
-export const replayTap = async (name: string, F0?: ReturnType<typeof fixture>, live?: Live): Promise<{ end: unknown; missed: string[]; missedCalls: { at: number; host: string; url: string; call: { method: string; params: unknown } }[]; F: ReturnType<typeof fixture>; quotes: number }> => {
+export const replayTap = async (name: string, F0?: ReturnType<typeof fixture>, live?: Live): Promise<{ end: unknown; missed: string[]; spec: string[]; missedCalls: { at: number; host: string; url: string; call: { method: string; params: unknown } }[]; F: ReturnType<typeof fixture>; quotes: number }> => {
   evmSpeedReset();
   evmPaceReset();
   evmPoolIndexReset();
@@ -90,7 +90,7 @@ export const replayTap = async (name: string, F0?: ReturnType<typeof fixture>, l
     { chain, token: F.buys, amountIn: BigInt(F.amountIn), slippageBps: 300 },
     { indexPools: () => F.indexPools ?? null, quote: (req) => (quotes++, r.next(), evmPoolBuyQuoteWith(req, evmProviders(evmRanked(v.providers!), r.fetchFn), F.now, scans)) },
   ).catch((e: unknown) => e);
-  return { end, missed: r.missed, missedCalls: r.missedCalls, F, quotes };
+  return { end, missed: r.missed, missedCalls: r.missedCalls, spec: r.spec, F, quotes };
 };
 
 /** `topup <fixture name>` (card evm-scan-chain-tail): each call a replay of the recording asks that it never held, read

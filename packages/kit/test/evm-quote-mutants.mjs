@@ -1287,7 +1287,10 @@ export const MUTANTS = [
   // the half-open provider is probed: seated once before quoteLast, never left last with the rest healthy (review of A+B, 3)
   [QUOTE, '  if (till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;', '  if (till > 0 && (s?.last ?? 0) < till) return 10 + last;', "test/evm-pair-rank.test.ts", "R7 "],
   [QUOTE, '  if (till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;', '  if (till > 0 && (s?.last ?? 0) < till) return 2 + last;', "test/evm-pair-rank.test.ts", "R7 "],
-  [QUOTE, "        if (probe && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS)) s.held = performance.now() + EVM_HOLD_MS;", "", "test/evm-pair-rank.test.ts", "R9 "],
+  [QUOTE, "        if (probe && open && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS)) s.held = performance.now() + EVM_HOLD_MS;", "", "test/evm-pair-rank.test.ts", "R9 "],
+  [QUOTE, "        if (probe && open && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS))", "        if (probe && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS))", "test/evm-pair-rank.test.ts", "R9b "],
+  // every hook-replaced read a warm quote sends is pinned to its own block (review of 7c0291eb2, LOW)
+  [QUOTE, "  const heldReading = heldFirst.length === 0 ? Promise.resolve(null) : readBoth(rpcs, block.hash, heldFirst, v.reads, undefined, firstDown).catch(() => null);", "  const heldReading = heldFirst.length === 0 ? Promise.resolve(null) : (readBoth(rpcs, block.parentHash, heldFirst, v.reads, undefined, firstDown).catch(() => null), readBoth(rpcs, block.hash, heldFirst, v.reads, undefined, firstDown).catch(() => null));", R, "W6c "],
   [QUOTE, "    const probe = till > 0 && till <= t && s.last < till;", "    const probe = false;", "test/evm-pair-rank.test.ts", "R9 "],
   [QUOTE, 'undefined): number => Math.max(s?.held ?? 0, evmProviderHeldMs(u, 0));', 'undefined): number => s?.held ?? 0;', "test/evm-pair-rank.test.ts", "R6 "],
   // card evm-quote-fewer-rounds, S1 as the rule it holds: a speculative read's answer is used only for a pool held at the

@@ -190,6 +190,24 @@ test("R9 a half-open provider whose probe answers past its hedge time is held ag
   evmPaceReset();
 }));
 
+test("R9b a probe's round answered in time closes the breaker, and a slower post of that round answered after it holds nothing again", () => onTestClock(async () => {
+  evmSpeedReset();
+  evmPaceReset();
+  const ms = { [RH_PUBLICNODE]: 150, [RH_DRPC]: 120, [RH_OWN]: 350, [RH_BLX]: 300 };
+  const of = await rhMeasured(ms);
+  evmProviderHold(RH_BLX, 1_000);
+  await new Promise((r) => setTimeout(r, 1_100));
+  // four posts sent before any answer, each a probe: three answered at 300 ms, one at 650 ms
+  const posts = [of.get(RH_BLX)!(one), of.get(RH_BLX)!(one), of.get(RH_BLX)!(one)];
+  // the fourth sent once the three are on the wire (the provider's gate sends after a turn), still before any answer
+  await new Promise((r) => setTimeout(r, 50));
+  ms[RH_BLX] = 650;
+  posts.push(of.get(RH_BLX)!(one));
+  await Promise.all(posts);
+  assert.deepEqual(evmRanked(rh.providers!), [RH_DRPC, RH_PUBLICNODE, RH_BLX, RH_OWN], "a slow post answered after the breaker closed held the provider again");
+  evmPaceReset();
+}));
+
 test("R8 a half-open provider whose probe is lost is held again", () => onTestClock(async () => {
   evmSpeedReset();
   evmPaceReset();
