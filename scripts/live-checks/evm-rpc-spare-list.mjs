@@ -28,7 +28,10 @@
 //   - each chain's scan list has a third provider on a host of its own, and its answer to the browser's CORS preflight
 //     from the app's origin allows that origin and content-type, as does its POST's answer;
 //   - a warm-up quote ends ok, every held quote ends ok under the bound (60 s), and every held quote asked the third
-//     for logs; each mode's first quote waits out the kit's hold of the first two (KIT_HOLD_MS) and asks them before the
+//     (any read: since card evm-warm-tap-ends-inside-two-seconds, 893bbaa43, the kit asks a third provider at once for
+//     its 2-of-3 and quotes on a pool index already served, so the third may answer the state reads and no getLogs; a
+//     quote that never asks it fails as before; card helper-tape-handover, helper update 22's live run 45011614034 read
+//     "the third 0 getLogs" on base-hook); each mode's first quote waits out the kit's hold of the first two (KIT_HOLD_MS) and asks them before the
 //     third, and a quote that asked them 0 times started inside that hold;
 //   - every held helper read answers 200 with a JSON-RPC result list, from a provider past the first two;
 //   - every address-less Transfer read answers 200 with a JSON-RPC result list, never an error;
@@ -186,7 +189,9 @@ export function check(run) {
       say(unheld.some((q) => q.heldAsked > 0), `${name}, first two ${m}: ${unheld.length} of ${qs.length} held quotes met them unheld, ${unheld.filter((q) => q.heldAsked > 0).length} asked them (one at least wanted; none: the kit skips them unasked, or holds them past ${KIT_HOLD_MS} ms)`);
       for (const q of qs) {
         say(q.code === want && q.ms < BOUND_MS, `${name}, first two ${m}: ends ${q.code}${q.message ? `: ${q.message}` : ""} in ${q.ms} ms (${want} under ${BOUND_MS} ms wanted)`);
-        say((q.heldAsked > 0 || inHold(q)) && q.thirdLogs > 0, `${name}, first two ${m}: the first two asked ${q.heldAsked} times${inHold(q) ? ` (${q.heldLeftMs} ms left of the kit's hold on them)` : ""}, the third ${q.thirdLogs} getLogs`);
+        // a record from before the third's every read was counted (no thirdAsked) asked it at least as often as it read logs
+        const thirdAsked = Math.max(Number.isSafeInteger(q.thirdAsked) ? q.thirdAsked : 0, Number.isSafeInteger(q.thirdLogs) ? q.thirdLogs : 0);
+        say((q.heldAsked > 0 || inHold(q)) && thirdAsked > 0, `${name}, first two ${m}: the first two asked ${q.heldAsked} times${inHold(q) ? ` (${q.heldLeftMs} ms left of the kit's hold on them)` : ""}, the third asked ${thirdAsked} times (${q.thirdLogs} getLogs)`);
       }
     }
   }
@@ -361,9 +366,10 @@ const holding = (real, held, mode, n) => async (u, init) => {
  *  not recorded). */
 async function quote(req, list, mode, holdUntil = 0) {
   const real = globalThis.fetch;
-  const n = { heldAsked: 0, thirdLogs: 0, heldLeftMs: Math.max(0, Math.round(holdUntil - performance.now())) };
+  const n = { heldAsked: 0, thirdAsked: 0, thirdLogs: 0, heldLeftMs: Math.max(0, Math.round(holdUntil - performance.now())) };
   const inner = holding(real, list.slice(0, 2), mode, n);
   globalThis.fetch = async (u, init) => {
+    if (String(u) === list[2]) n.thirdAsked++;
     if (String(u) === list[2] && bodyOf(init).some((c) => c?.method === "eth_getLogs")) n.thirdLogs++;
     return inner(u, init);
   };
@@ -459,7 +465,7 @@ export async function measure(venues = mainnetVenues(), base = HELPER) {
         const { failedAt, ...q } = await quote(req, list, m, holdUntil);
         if (failedAt !== undefined) holdUntil = failedAt + KIT_HOLD_MS;
         c.held.push(q);
-        console.log(`${name} first two ${m} ${i}: ${q.code} ${q.ms} ms, first two asked ${q.heldAsked}${q.heldLeftMs > 0 ? ` (${q.heldLeftMs} ms left of the kit's hold)` : ""}, third getLogs ${q.thirdLogs}${q.message ? `: ${q.message}` : ""}`);
+        console.log(`${name} first two ${m} ${i}: ${q.code} ${q.ms} ms, first two asked ${q.heldAsked}${q.heldLeftMs > 0 ? ` (${q.heldLeftMs} ms left of the kit's hold)` : ""}, third asked ${q.thirdAsked} (${q.thirdLogs} getLogs)${q.message ? `: ${q.message}` : ""}`);
       }
     }
   }
