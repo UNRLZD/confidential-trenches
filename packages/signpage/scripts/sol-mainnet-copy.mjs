@@ -441,7 +441,7 @@ for (const kind of KINDS) {
       }
       records.push(txRecord(kind, s.step, s.signature, tx, Ws[s.step] ? { W: Ws[s.step] } : {}, (x) => base58.decode(x)));
     }
-    for (const s of f?.simFails ?? []) records.push({ coin: kind, step: s.phase, ok: false, simulation: s });
+    for (const s of [...(stop?.simFails ?? []), ...(f?.simFails ?? [])]) records.push({ coin: kind, step: s.phase, ok: false, simulation: s });
     records.push({ coin: kind, step: "pieces", ok: r.code === 0 && f?.ok === true, exit: r.code, why: f?.why ?? null });
     continue;
   }
