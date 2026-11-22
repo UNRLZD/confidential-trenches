@@ -1,0 +1,19 @@
+{
+ "_note": "bad: SIGN_HOST read 2026-11-22 10:27Z (the deployed page, before this card: its /app.js writes no op for a restored U_X). good: this tree's build (packages/signpage: index.html and public/app.js, --site) at 54e30ca51, which the deploy serves; re-recorded from SIGN_HOST once this card is deployed.",
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-c/V614Jt2tpFdYvAbJXCkeq7Qqi8F2lt39CEc7qsO34JqNZeXb2lZYjlGjYE0Jkq\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-c/V614Jt2tpFdYvAbJXCkeq7Qqi8F2lt39CEc7qsO34JqNZeXb2lZYjlGjYE0Jkq",
+   "markers": []
+  }
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-EV9i6k1bgHDLRcUni9kO9W96ugPCMUO/0WsD/KYBU+PuA4oDGfpF1i28lM6BWtNb\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-EV9i6k1bgHDLRcUni9kO9W96ugPCMUO/0WsD/KYBU+PuA4oDGfpF1i28lM6BWtNb",
+   "markers": [
+    "pool-restored/"
+   ]
+  }
+ }
+}
