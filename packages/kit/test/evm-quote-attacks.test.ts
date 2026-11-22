@@ -12402,3 +12402,40 @@ test("TAIL11f the band read again past maxLag on Robinhood (its margin 7,119 blo
     }
   }
 });
+test("TAIL11g a band read two quotes at once share, carried by a spare, is each quote's whole and stays a spare's for both: C's and D's real pools the spare read there hold both seeded routes, and its blocks past the margin are kept as read by neither, so B's later quote reads them again on the first and finds B's real pool the spare left out", async () => {
+  const [c, d, b] = [freshToken(), freshToken(), freshToken()];
+  // C and D hold their seeded pools in the chain's tail, so their quotes 10 blocks on read only the band past maxLag
+  // before the answer; their real pools were made in it, after the tail's read (the first's logs backend lagging then)
+  const logs = [seeded(c), seeded(d), seeded(b)].map((p, i) => ({ key: p.key, at: 4_100_000 + i }));
+  const band = [{ key: real(c).key, at: 4_999_700 }, { key: real(d).key, at: 4_999_710 }];
+  // B's real pool, 4,999,530, past the margin of a head 5,000,010 (top 4,999,536): on the first alone
+  const bLogs = [...logs, ...band, { key: real(b).key, at: 4_999_530 }];
+  const m = await onTail(logs);
+  // the first refuses the connection for the tail's reads of the band past maxLag; the spare answers them 200 ms late,
+  // so the other quote's read finds the first's in flight, and without B's real pool
+  const first0 = scanner(5_000_010, bLogs);
+  const firstDown: EvmRpc = async (calls, until) => {
+    if (getLogsOf(calls).some((f) => f.topics.length === 1 && Number(f.toBlock) <= 5_000_010 - 50)) throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+    return first0(calls, until);
+  };
+  const spareBand: [number, number][] = [];
+  const spare0 = scanner(5_000_010, [...logs, ...band]);
+  const spare: EvmRpc = async (calls, until) => {
+    const reads = getLogsOf(calls).filter((f) => f.topics.length === 1 && Number(f.toBlock) <= 5_000_010 - 50);
+    for (const f of reads) spareBand.push([Number(f.fromBlock), Number(f.toBlock)]);
+    if (reads.length > 0) await pause(200);
+    return spare0(calls, until);
+  };
+  const scans = [m.to(firstDown), spare] as unknown as EvmRpc;
+  const [vc, vd] = await Promise.all([c, d].map((t) => quoteOnStill([seeded(t), real(t)], t, seededRoute(t), scans, undefined, "base", 5_000_010)));
+  assert.deepEqual([vc, vd], [below, below], `${big(vc)} ${big(vd)}`);
+  await pause(50);
+  // each quote scans the tail twice: the second quote's first scan takes the first's read in flight, and so does its
+  // second the first's second, read again once the first read had landed (a follow-up card's): the spare carried two of
+  // the four
+  assert.equal(spareBand.length, 2, `the spare's band reads: ${JSON.stringify(spareBand)}`);
+  // B's quote 100 blocks on, the first honest: the spare's blocks past the margin were kept as read by neither quote
+  const asked: [number, number][] = [];
+  const v = await quoteOnStill([seeded(b), real(b)], b, seededRoute(b), m.to(scanner(5_000_110, bLogs, asked)), undefined, "base", 5_000_110);
+  assert.deepEqual(v, below, `asked ${JSON.stringify(asked)}`);
+});

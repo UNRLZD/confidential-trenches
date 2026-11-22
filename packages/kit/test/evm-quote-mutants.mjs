@@ -488,6 +488,9 @@ export const MUTANTS = [
   [QUOTE, "      e.laterFrom = unread.find(([a]) => a > head - lag)?.[0] ?? head + 1;", "      e.laterFrom = head + 1;", R, "TAIL11e "],
   // a quote's tail scans that read the same blocks before the answer at once share one request (TAIL_READING)
   [QUOTE, "  await settle(jobs.map(shared)).catch((e) => failing(e));", "  await settle(jobs.map(run)).catch((e) => failing(e));", R, "TAILF12 "],
+  // the shared answer is the taker's whole, a stand-in's included, and a spare's stays a spare's
+  [QUOTE, "g.a >= j.a && g.b <= j.b && j.part.every((e) => g.part.includes(e))", "g.part === j.part && g.a >= j.a && g.b <= j.b", R, "TAIL11g "],
+  [QUOTE, "void got.push(...gs.map((g) => ({ ...g, part: j.part })))", "void got.push(...gs.map((g) => ({ ...g, spare: false, part: j.part })))", R, "TAIL11g "],
   [QUOTE, "reach(fill === true ? e.ix : e.spans)", "reach(e.spans)", R, "TAILF1 "],
   [QUOTE, "      if (wantFill && !got.some((g) => g.spare)) (fill", "      if (wantFill) (fill", R, "TAILF6 "],
   [QUOTE, "  if (running.has(chain) || FLOODED.get(src)?.has(chain) === true) return;", "  if (FLOODED.get(src)?.has(chain) === true) return;", R, "TAILF2 "],

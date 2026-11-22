@@ -3069,18 +3069,19 @@ async function scanPools(
     throw e;
   };
   // a tail request of blocks past maxLag below the head (the band's, read again, and older), not pinned: one in flight
-  // with the same blocks on this tail is not sent again, its answer is taken (TAIL_READING); one whose sender failed is
-  // sent as any
+  // with the same blocks on this tail is not sent again, its answer is taken (TAIL_READING); one whose sender failed, or
+  // whose answer does not hold every one of its blocks, is sent as any. A request's answers are its part's whatever
+  // array holds it (a stand-in's requests are made of a copy of it, jobsOf)
   const shared = (j: Job): Promise<void> => {
     if (!near || fill === true || tail0 === undefined || j.into !== undefined || pin !== null || !j.part[0]!.tail || j.b > head - lag) return run(j);
     const reading = TAIL_READING.get(tail0) ?? new Map<string, Promise<{ a: number; b: number; logs: unknown[]; spare: boolean }[] | null>>();
     TAIL_READING.set(tail0, reading);
     const key = `${j.a}:${j.b}`;
     const led = reading.get(key);
-    if (led !== undefined) return led.then((gs) => (gs === null ? run(j) : void got.push(...gs.map((g) => ({ ...g, part: j.part })))));
+    if (led !== undefined) return led.then((gs) => (gs !== null && gapsOf(gs.reduce<Spans>((sp, g) => withSpan(sp, g.a, g.b), []), j.a, j.b).length === 0 ? void got.push(...gs.map((g) => ({ ...g, part: j.part }))) : run(j)));
     const sent = run(j);
     const answer = sent.then(
-      () => got.filter((g) => g.part === j.part && g.a >= j.a && g.b <= j.b).map(({ a, b, logs, spare }) => ({ a, b, logs, spare })),
+      () => got.filter((g) => g.a >= j.a && g.b <= j.b && j.part.every((e) => g.part.includes(e))).map(({ a, b, logs, spare }) => ({ a, b, logs, spare })),
       () => null,
     );
     reading.set(key, answer);
