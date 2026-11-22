@@ -788,7 +788,8 @@ export const outcome = ({ refusals = [], unread = [] }) => (refusals.some((x) =>
 
 // records: the records to read back; every: all records in the repo (for the twice-listed check); money: what
 // moneyCode() found in the change; sleep: how a wait is waited (a test records it)
-// `replayTestNetworks`: test-network Tx lines are read as before, for a test that replays recorded test-network txs
+// `replayTestNetworks`: test-network Tx lines are read as before, for a test or a live check (money-gate-testnet,
+// delete-refund-readback) that replays recorded test-network txs
 // through the reading paths mainnet uses (NEAR's light-client proof, tx rebuild, a host's chain id); the command line
 // never sets it, so the gate CI runs never reads a test network (card money-gate-test-networks-never-proof)
 export async function moneyGate(records, fetchFn = fetch, rpcs = RPCS, { every = records, floor = FLOOR, money, sleep = wait, replayTestNetworks = false } = {}) {

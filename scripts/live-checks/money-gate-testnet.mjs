@@ -23,7 +23,9 @@ export const OLD = { hash: "EioYwuXPgpEkar6uPohK6bNnQPg54n2Ud5r2kBPkRkou", signe
 const record = (chain, { hash, signer }) => `CARD ${KEY} / live: PASS\nMoney path: yes\nTx: ${chain} ${hash} ${signer}\n`;
 
 export async function check({ fresh, old = OLD, fetchFn = fetch, rpcs = RPCS, floor = FLOOR }) {
-  const run = (chain, tx) => moneyGate([{ path: `${LIVE}${KEY}.md`, key: KEY, text: record(chain, tx) }], fetchFn, rpcs, { floor });
+  // the gate's own testnet reads, asked for by name (replayTestNetworks, which the gate's CLI never sets): a change's
+  // run record on a test network is refused, never read as proof
+  const run = (chain, tx) => moneyGate([{ path: `${LIVE}${KEY}.md`, key: KEY, text: record(chain, tx) }], fetchFn, rpcs, { floor, replayTestNetworks: true });
   const said = (r) => (r.refusals.length ? r.refusals.map((x) => x.replace(/^[^:]+: /, "")).join("; ") : r.read.join(", "));
   const lines = [];
   const a = await run("near-testnet", fresh);
