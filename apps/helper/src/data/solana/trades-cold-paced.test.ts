@@ -80,20 +80,26 @@ test(`a cold walk of ${COLD_SIGS} transactions on a background budget of ${PER_S
       source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
       tickMs: 0,
     });
-    const reads: { at: number; filling: boolean; n: number }[] = [];
-    // the page's reads, 3 s apart (as the live check reads), until the tape is no longer filling or well past the bound
-    for (;;) {
-      const a = JSON.parse((await t.trades(MINT, 50)).body) as { trades: unknown[]; filling?: boolean };
-      reads.push({ at: Date.now() - start, filling: a.filling === true, n: a.trades.length });
-      if (a.filling !== true || Date.now() - start > FILLED_MS + 30_000) break;
-      await new Promise((go) => setTimeout(go, 3_000));
-    }
+    // the page's reads, 3 s apart (as the live check reads), until the tape is no longer filling; at FILLED_MS of the
+    // virtual clock the latest answer is the verdict (no clock read: no-wall-clock-asserts)
+    const reads: { filling: boolean; n: number }[] = [];
+    let over = false;
+    const sleep = (ms: number) => new Promise((go) => setTimeout(go, ms));
+    const by = sleep(FILLED_MS).then(() => ((over = true), reads.at(-1)));
+    const poll = (async () => {
+      while (!over) {
+        const a = JSON.parse((await t.trades(MINT, 50)).body) as { trades: unknown[]; filling?: boolean };
+        reads.push({ filling: a.filling === true, n: a.trades.length });
+        if (a.filling !== true) return;
+        await sleep(3_000);
+      }
+    })();
+    const latest = await by;
+    await poll;
     t.stop();
-    return { reads, sent };
+    return { latest, reads, sent };
   });
-  const last = value.reads.at(-1)!;
-  const line = `${value.reads.map((r) => `${r.at} ms ${r.filling ? "filling" : "done"} n${r.n}`).join(", ")}; ${value.sent} sent`;
+  const line = `${value.reads.map((r) => `${r.filling ? "filling" : "done"} n${r.n}`).join(", ")}; ${value.sent} sent`;
   console.log(line);
-  assert.equal(last.filling, false, `still filling: ${line}`);
-  assert.ok(last.at <= FILLED_MS, `done ${last.at} ms after the first read, past ${FILLED_MS}: ${line}`);
+  assert.equal(value.latest?.filling, false, `still filling at ${FILLED_MS} ms: ${line}`);
 });
