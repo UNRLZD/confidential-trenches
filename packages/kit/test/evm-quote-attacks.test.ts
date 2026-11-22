@@ -4802,7 +4802,7 @@ test("V3 a provider whose head lags past maxLag is passed over for the next: the
   assert.equal(w.accepted, true, String((w as { code?: string }).code));
 }));
 
-test("V4 the providers are asked fastest first by measured time; one with a request out past EVM_HEDGE_MS goes after them, and one held (it failed) last until EVM_HOLD_MS pass", async () => {
+test("V4 the providers are asked fastest first by measured time; one with a request out past EVM_HEDGE_MS goes after them, and one held (it failed) last until EVM_HOLD_MS pass, then half open", async () => {
   assert.equal(typeof evmRanked, "function", "the kit ranks its providers");
   // down: an HTTP 503, which holds no provider for every reader (pace.ts holds a 429 and a refused connection): held here
   // by the ranking's own measure (card mutants-killed-on-main, the quote sweep's mutant 190)
@@ -4827,8 +4827,9 @@ test("V4 the providers are asked fastest first by measured time; one with a requ
   // the one with a request out past EVM_HEDGE_MS goes after the rest, before the held
   const t = performance.now();
   assert.deepEqual(evmRanked!(urls, t + EVM_HEDGE_MS! + 1), [fast, slow, fresh, stuck, limited, capped, down]);
-  // past the hold the limits and the failure are forgiven; the request still out is not
-  assert.deepEqual(evmRanked!(urls, t + EVM_HOLD_MS! + 1), [fast, slow, limited, fresh, capped, down, stuck]);
+  // past the hold the limits and the failure are half open (card evm-quote-fewer-rounds): after every provider not held,
+  // the one with a request out too, until each answers a post (test/evm-pair-rank.test.ts R7), in their own order
+  assert.deepEqual(evmRanked!(urls, t + EVM_HOLD_MS! + 1), [fast, slow, fresh, stuck, limited, capped, down]);
 });
 
 // ------------------------------------------------------------------ the scan's spans (card evm-quote-warm-round)

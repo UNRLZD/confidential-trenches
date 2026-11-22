@@ -306,7 +306,7 @@ export const MUTANTS = [
   [QUOTE, "        failed ??= { e };\n        if (n === 0) unsure = true;\n        continue;", "        throw e;", R, "V3 "],
   [QUOTE, "[rankClass(u, now), cost(u), k] as const;", "[0, cost(u), k] as const;", R, "V4 "],
   [QUOTE, "late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);", "0);", R, "V4 "],
-  [QUOTE, "|| evmProviderHeld(u, now) ? 2 : late", "|| evmProviderHeld(u, now) ? 1 : late", R, "V4 "],
+  [QUOTE, "  if (till > now) return 20 + last;", "  if (till > now) return 1 + last;", R, "V4 "],
   [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) {", "      {", R, "V4 "],
   // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
   // is agreed again without it; a 200 carrying a state error holds its provider in the ranking
@@ -1280,6 +1280,11 @@ export const MUTANTS = [
   [QUOTE, "      const spare = () => (theirs ??= inTurn(next));", "      const spare = () => (theirs ??= headFrom(next));", R, "KPI3 "],
   // bloXroute's Robinhood endpoint paced to 16 calls in any second, its 429 from a runner at 17 (live run 45043534742)
   ["src/checks/evm/pace.ts", '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 10, burst: 6, unit: "call" }),', '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 15, burst: 6, unit: "call" }),', "test/evm-pace-provider-limits.test.ts", "card robinhood-taps-meet-no-429: a burst of a tap's posts to robinhood.rpc.blxrbdn.com from a runner"],
+  // card evm-quote-fewer-rounds: a held provider after every one not held, quoteLast too; half open after its hold
+  // until it answers; held by the pace's own hold as by the ranking's
+  [QUOTE, '  if (till > now) return 20 + last;', '  if (till > now) return 2 + last;', "test/evm-pair-rank.test.ts", "R6 "],
+  [QUOTE, '  if (till > 0 && (s?.last ?? 0) < till) return 10 + last;', '  if (false && till > 0 && (s?.last ?? 0) < till) return 10 + last;', "test/evm-pair-rank.test.ts", "R7 "],
+  [QUOTE, '  const till = Math.max(s?.held ?? 0, evmProviderHeldMs(u, 0));', '  const till = s?.held ?? 0;', "test/evm-pair-rank.test.ts", "R6 "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
