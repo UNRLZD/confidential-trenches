@@ -7,9 +7,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { entropyToWords, freshWallet, wordsToSeed64 } from "../src/derive/keys.ts";
+import { depositIdEvm, entropyToWords, freshWallet, wordsToSeed64 } from "../src/derive/keys.ts";
 import { EVM_POOLS } from "../src/pool/evm.ts";
-import { EVM_EXIT_GAS_PATH, EvmExitRefused, evmExitGasAddress, evmExitSignSend, evmExitWithdrawCalldata, evmExitWithdrawDigest, evmExitWithdrawSignature } from "../src/pool/evm-exit.ts";
+import { EVM_EXIT_GAS_PATH, EvmExitRefused, evmExitGasAddress, evmExitSignSend, evmExitU, evmExitWithdrawCalldata, evmExitWithdrawDigest, evmExitWithdrawSignature } from "../src/pool/evm-exit.ts";
 
 const SEED = wordsToSeed64(entropyToWords(new Uint8Array(16))); // the A.8 words, public, holding nothing
 const POOL = EVM_POOLS.base!.pool;
@@ -88,6 +88,24 @@ test("withdraw calldata: the pool's selector, 1,028 bytes, pB's pairs swapped", 
   assert.equal(hex(data.subarray(0, 4)), hex(keccak_256(new TextEncoder().encode("withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)")).subarray(0, 4)));
   const at = (k: number) => BigInt(hex(data.subarray(4 + 32 * k, 36 + 32 * k)));
   assert.deepEqual([at(1), at(2), at(3), at(4), at(5), at(6), at(7), at(8)], [1n, 2n, 4n, 3n, 6n, 5n, 7n, 8n]);
+});
+
+// card wallet-u-restore-exit: a pool deposit's one-time wallet on Base and Robinhood is U^evm_{s,i}, an HKDF key no
+// outside wallet imports; the exit sends what it holds on as W's, a plain send signed by U itself
+test("U^evm_{s,i}'s send is a plain send, signed by U^evm_{s,i}; data, the zero address or a precompile is refused", () => {
+  const TO = "0x5555555555555555555555555555555555555555";
+  const t = { chainId: 8453n, nonce: 0n, tip: 10_000_000n, maxFee: 20_000_000n, gas: 21_000n, to: TO, value: 777n, data: new Uint8Array(0) };
+  const want = depositIdEvm(SEED, 9n, 3);
+  want.secretKey.fill(0);
+  assert.equal(evmExitU(SEED, 9n, 3), want.address.toLowerCase());
+  const u = evmExitSignSend(SEED, { kind: "u", s: 9n, i: 3 }, t);
+  const du = decode(u.raw);
+  assert.equal(du.from, want.address.toLowerCase());
+  assert.equal(u.from, du.from);
+  assert.equal(hex(du.fields[5]!), TO);
+  assert.equal(BigInt(hex(du.fields[6]!)), 777n);
+  assert.throws(() => evmExitSignSend(SEED, { kind: "u", s: 9n, i: 3 }, { ...t, data: new Uint8Array(4) }), EvmExitRefused);
+  assert.throws(() => evmExitSignSend(SEED, { kind: "u", s: 9n, i: 3 }, { ...t, to: "0x0000000000000000000000000000000000000001" }), EvmExitRefused);
 });
 
 test("G's send is the pool's withdraw at value 0, signed by G; W's is a plain send, signed by W; any other shape is refused", () => {
