@@ -1032,6 +1032,15 @@ test("RV7: two honest RPCs at different finalized slots still restore, and the p
     return rpc(chain, MAINNET)(m, [p[0], cfg]);
   }, { url: "https://b.example" });
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [rpc(ahead, { ...MAINNET, url: "https://a.example" }), deaf], gap: 4 }), new RegExp(`^Error: rpc 1: getMultipleAccounts: not one account per listed mark at or past slot ${chain.slot + 3}$`));
+  // one whose marks come from a caught-up node but whose page reads alone land on a lower node that ignores
+  // minContextSlot (two nodes behind one balancer): the pages' own slot check refuses it, never the lower pages taken
+  const pageKeys = new Set(([0, 1] as const).flatMap((t) => Array.from({ length: 64 }, (_, n) => solanaPageOf(PROGRAM, t, n))));
+  const deafPages: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m !== "getMultipleAccounts" || !(p[0] as string[]).some((k) => pageKeys.has(k))) return rpc(ahead, MAINNET)(m, p);
+    const { minContextSlot: _, ...cfg } = p[1] as { minContextSlot?: number };
+    return rpc(chain, MAINNET)(m, [p[0], cfg]);
+  }, { url: "https://b.example" });
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: [rpc(ahead, { ...MAINNET, url: "https://a.example" }), deafPages], gap: 4 }), new RegExp(`getMultipleAccounts: answered at slot ${chain.slot}, below ${chain.slot + 3}`));
 });
 
 test("RV2, RV3, RV4: one RPC short below the cut (either side); the reached check reads its own slot's time; a forged label root", async () => {
@@ -1538,6 +1547,10 @@ test("N1 union: two reads of one mark with other records are refused (the union 
   const sm = (withdrawn: bigint, number = 0): SolanaSpentMark => ({ withdrawn, number });
   assert.throws(() => solanaMarksUnion({ spent: new Map([["k", sm(1n)]]), pre: new Map(), slot: 1 }, { spent: new Map([["k", sm(2n)]]), pre: new Map(), slot: 2 }), /two reads differ/);
   assert.throws(() => solanaMarksUnion({ spent: new Map([["k", sm(1n, 0)]]), pre: new Map(), slot: 1 }, { spent: new Map([["k", sm(1n, 9)]]), pre: new Map(), slot: 2 }), /two reads differ/, "the release number alone");
+  // a precommitment mark the same: its value or its nonce alone
+  const pm = (value: bigint, nonce: bigint) => ({ spent: new Map<string, SolanaSpentMark>(), pre: new Map([["k", { value, nonce }]]), slot: 1 });
+  assert.throws(() => solanaMarksUnion(pm(10n, 1n), pm(11n, 1n)), /two reads differ/, "the deposit's value alone");
+  assert.throws(() => solanaMarksUnion(pm(10n, 1n), pm(10n, 2n)), /two reads differ/, "the deposit's nonce alone");
   assert.equal(solanaMarksUnion({ spent: new Map([["k", sm(1n)]]), pre: new Map(), slot: 1 }, { spent: new Map([["j", sm(2n)]]), pre: new Map(), slot: 2 }).slot, 2);
 });
 
@@ -2219,6 +2232,8 @@ test("fold 10 (number): a spent mark whose release number differs between the pa
   }
   // the same mark with its true number on both restores
   assert.equal(await outcome(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: two(bAt, bAt), gap: 4 })), "restored");
+  // the number is read from the mark's own bytes: the pool's one release numbered 9 on both RPCs is a hole in 0 to 0
+  assert.match(await outcome(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: two(aAt, aAt), gap: 4 })), /the listed releases' numbers are not 0 to 0/);
 });
 
 // ---------------------------------------------------------------------------------------------- card sol-marks-scale
