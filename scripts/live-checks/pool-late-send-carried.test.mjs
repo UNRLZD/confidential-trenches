@@ -52,6 +52,6 @@ test("this tree's build holds every fact; each rule broken in place in it turns 
   assert.equal(mut(/,refund_id:([\w$]+)\.id\},([\w$]+)!==void 0\|\|\(([\w$]+)=>/, ",refund_id:$1.id},!0||($3=>").carry, false, "carried with no note written");
   assert.equal(mut(/\.retry\.push\(`\$\{([\w$]+)\} was not read \(/, ".held.slice(`${$1} was not read (").carry, false, "a failed read dropped");
   // NEAR: what an id holds not named as step 5 names it, a failed read taken as nothing
-  assert.equal(mut(/:await ([\w$]+)\(async\(\)=>([\w$]+)\.held,\2\.id\);/, ":[];").near, false, "holdings not named");
+  assert.equal(mut(/:await ([\w$]+)\(async\(\)=>([\w$]+)\.held,\2\.id,/, ":[]||await $1(async()=>$2.held,$2.id,").near, false, "holdings not named");
   assert.equal(mut(/\?\[\{why:`was not read on NEAR \(\$\{([\w$]+)\.error\}\): read again`,retry:!0\}\]:/, "?[]:").near, false, "a failed read taken as nothing");
 });

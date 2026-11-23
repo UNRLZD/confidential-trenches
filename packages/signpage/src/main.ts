@@ -265,7 +265,9 @@ const restore = !framed
       // and what it reads U_X holds is U_X's op's `left` (state.deposit_wallets; review r3 P2-1)
       ux: (chain) => {
         const r = restoreUxOf(chain, poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY), PAGE_SOL_PIN?.program, undefined, (c) => testnet?.evmPoolOf(c) ?? null);
-        return r === null ? null : { ...r, leftAt: async (f, low, cost) => void (await poolFollow?.left(f, low, cost)) };
+        // and a refund left under U_{s,i} inside intents.near moved back to U_X by the follow's own refund carry, its move
+        // kept in U_X's restored op and read while it may be on its way (card restore-carries-pool-refund)
+        return r === null ? null : { ...r, leftAt: async (f, low, cost) => void (await poolFollow?.left(f, low, cost)), restoredRefund: async (f, asset, signal) => (await poolFollow?.restoredRefund(f, asset, signal)) ?? "held", restoredMoving: async (c, s) => (await poolFollow?.restoredMoving(c, s)) ?? [] };
       },
       // each reason a run ends stalled, on this device's console only: lanes, indices, providers, scopes and the user's own
       // note amounts (an EVM release's "withdrew X of Y", ../../wallet/src/pool/evm-restore.ts), a one-time wallet U_X

@@ -171,6 +171,13 @@ export interface PoolUxReads {
   ladder: Ladder;
   /** The page's pool.deposit on X from U_X, for `amount`, to its end, with the txs its answer named. */
   deposit(f: PoolUx, amount: bigint, signal: AbortSignal): Promise<PoolDepositRun>;
+  /** A restore's carry of a refund left under U_{s,i} inside intents.near (poolFollows' restoredRefund, card
+   *  restore-carries-pool-refund): `asset` held there moved back to X's coin at U_X by the follow's own refund carry.
+   *  None: a restore names that money and carries none of it. */
+  restoredRefund?(f: PoolUx, asset: string, signal: AbortSignal): Promise<RestoredRefund>;
+  /** The deposit indices of scope `s` on `chain` whose U_X has such a move recorded and still in its window (its deadline
+   *  and POOL_TX_READ_MARGIN_MS on the device's clock): money that may be on its way to U_X (poolFollows' restoredMoving). */
+  restoredMoving?(chain: PoolChain, s: string): Promise<number[]>;
   /** A restore's: what it read U_X holds, written as U_X's newest ended op's `left` (poolFollows' left; review r3 P2-1):
    *  0 before a carry from it is sent, its last read once the carry is done; with one deposit's cost (keep + perRung)
    *  as the carry last read it, when it read one. A U_X with no op is given one (card
@@ -667,6 +674,22 @@ const isPoolOp = (v: unknown): v is PoolDepositOp =>
   typeof v === "object" && v !== null && (v as PoolDepositOp).kind === "pool_deposit" && typeof (v as PoolDepositOp).follow === "object" && (v as PoolDepositOp).follow !== null;
 /** A pool op's follow ended: in_pool read on past its quote's deadline. Every other op is followed again at each landing. */
 export const poolFollowEnded = (op: Pick<PoolDepositOp, "stage" | "final">): boolean => op.stage === "in_pool" && op.final === true;
+
+/** U_X's restored op's key in the ops store: one per U_X, by its chain, scope and index. */
+const restoredKey = (f: Pick<PoolUx, "chain" | "s" | "i">): string => `${POOL_RESTORED_OP}${f.chain}/${f.s}/${f.i}`;
+/** U_X's restored op (a lost store's quote, which only a restore carried; card a-restored-deposit-wallets-leftover-shows):
+ *  in_pool and ended, `restored`, its quote fields naming no quote: the address is U_X's own (a plain send's shape), its
+ *  deadline the time it was written. */
+const restoredOp = (f: PoolUx, t: number): PoolDepositOp => ({ kind: "pool_deposit", stage: "in_pool", final: true, restored: true, txs: [], created_ms: t, follow: { chain: f.chain, s: f.s, i: f.i, u: f.u, refund_id: f.refund_id, address: f.u, deadline_ms: t, origin: "", min_out: "0" } });
+
+/** A restored op's refund move that may still be on its way to U_X: the device's clock at or before its deadline and the
+ *  read margin past it. */
+const inWindowAt = (m: PoolMove, t: number): boolean => Number.isFinite(m.deadline_ms) && t <= m.deadline_ms + POOL_TX_READ_MARGIN_MS;
+
+/** A restore's refund carry's answer (poolFollows' restoredRefund): "moved", a move sent now; "moving", one recorded that
+ *  may still be on its way to U_X (within its deadline and the read margin); "held", nothing moved this try; "none",
+ *  nothing there to move and no move on its way. */
+export type RestoredRefund = "moved" | "moving" | "held" | "none";
 /** A refund move's heard tx neither read final nor let go (re-check P3-2): an ended op with one is read again at each
  *  landing (its refund carry's settle only), so a move that landed late still shows its tx. */
 const openHeard = (op: PoolDepositOp): boolean => (op.follow.move?.txs ?? []).some(openTx);
@@ -829,8 +852,9 @@ export function poolFollows(h: PoolFollowHost) {
     // quote: the address is U_X's own (a plain send's shape), its deadline the time it was written
     if (low === 0n) return;
     const t = (h.now ?? Date.now)();
-    const made: PoolDepositOp = { kind: "pool_deposit", stage: "in_pool", final: true, restored: true, txs: [], created_ms: t, follow: { chain: f.chain, s: f.s, i: f.i, u: f.u, refund_id: f.refund_id, address: f.u, deadline_ms: t, origin: "", min_out: "0", ...end } };
-    await ops.update("ops", `${POOL_RESTORED_OP}${f.chain}/${f.s}/${f.i}`, (x) => (x === undefined ? made : ended(x)));
+    const r = restoredOp(f, t);
+    const made: PoolDepositOp = { ...r, follow: { ...r.follow, ...end } };
+    await ops.update("ops", restoredKey(f), (x) => (x === undefined ? made : ended(x)));
   };
   const followAgain = async (id: string, v: PoolDepositOp): Promise<void> => {
     if (running.get(id)?.signal.aborted === false) return;
@@ -937,6 +961,60 @@ export function poolFollows(h: PoolFollowHost) {
     /** A U_X's lower balance read by a restore's carry (src/pool-restore.ts carryUx), with one deposit's cost when it
      *  read one: its newest ended op's `left`, or the restored op of a U_X with none. */
     left: (f: PoolUx, low: bigint, cost?: bigint): Promise<void> => writeLeft(f, low, cost),
+    /**
+     * A restore's carry of a refund left under U_{s,i} inside intents.near, its pool deposit op lost with the old store
+     * (card restore-carries-pool-refund; src/pool-restore.ts steps 5 and 7): `asset` held there moved back to X's coin
+     * at U_X by the follow's own refund carry (h.deps' `refund`, poolRefundMover, its checks whole: both of NEAR's RPCs
+     * read alike, the pool's floor and the device's price read now, the quote and the intent checked, the move written
+     * before it is sent and never a second intent while one is in its window). The record is built from what the restore
+     * read on chain and the seed alone, never a helper's word: U_X and U_{s,i}'s id from the seed, the asset from the id's
+     * own holdings, no lowest refund (any amount the pool's floor lets through). Its move is kept in U_X's restored op
+     * (made here when U_X has none), whose follow never runs. The restore carries what reaches U_X into the pool as it
+     * carries any U_X (carryUx); while a move may still be on its way there, "moving" keeps the scope from done. A U_{s,i}
+     * this device holds a deposit op of (not restored) is that op's follow's to carry: "held", nothing sent here.
+     */
+    async restoredRefund(ux: PoolUx, asset: string, signal: AbortSignal): Promise<RestoredRefund> {
+      const key = restoredKey(ux);
+      const f: PoolFollowRecord = { ...restoredOp(ux, 0).follow, origin: asset };
+      const ops = await h.store();
+      // a deposit op this device holds for the same U_{s,i} (its store was not lost): its own follow carries the refund on
+      // its own move record, and a second record here could send a second intent for the same money
+      for (const k of await ops.keys("ops")) {
+        if (k === key) continue;
+        const v = await ops.get("ops", k).catch(() => undefined);
+        if (isPoolOp(v) && v.restored !== true && v.follow.chain === ux.chain && v.follow.s === ux.s && v.follow.i === ux.i) return "held";
+      }
+      const move = async (): Promise<PoolMove | undefined> => {
+        const v = await ops.get("ops", key);
+        return isPoolOp(v) ? v.follow.move : undefined;
+      };
+      // the move written before it is sent (poolRefundMover's record): a write that fails sends nothing
+      const record = async (m: PoolMove): Promise<void> => void (await ops.update("ops", key, (v) => withMove(isPoolOp(v) ? v : restoredOp(ux, (h.now ?? Date.now)()), m)));
+      const d = h.deps(f, { move, record });
+      if (d === null || d.refund === undefined) return "held";
+      const r = await d.refund(f, signal).catch((): RefundRead => "held");
+      if (r === "moved") return "moved";
+      const m = await move().catch(() => undefined);
+      if (m !== undefined && inWindowAt(m, (h.now ?? Date.now)())) return "moving";
+      return r === "none" ? "none" : "held";
+    },
+    /**
+     * The indices of scope `s` on `chain` whose U_X's restored op holds a refund move still in its window (its deadline
+     * and POOL_TX_READ_MARGIN_MS on the device's clock; card restore-carries-pool-refund): the money left U_{s,i} inside
+     * intents.near and may not have reached U_X yet, so the restore keeps the scope from done until U_X is read holding
+     * it (and carries it) or the window ends. An op that does not read is left out.
+     */
+    async restoredMoving(chain: PoolChain, s: string): Promise<number[]> {
+      const ops = await h.store();
+      const at = `${POOL_RESTORED_OP}${chain}/${s}/`;
+      const out: number[] = [];
+      for (const k of await ops.keys("ops")) {
+        if (!k.startsWith(at)) continue;
+        const v = await ops.get("ops", k).catch(() => undefined);
+        if (isPoolOp(v) && v.restored === true && v.follow.move !== undefined && inWindowAt(v.follow.move, (h.now ?? Date.now)())) out.push(v.follow.i);
+      }
+      return out.sort((x, y) => x - y);
+    },
     /** This tab's sign out, or the store closing: every follow stops; settle() starts them again. */
     stop(): void {
       abort.abort(new Error("stopped"));
