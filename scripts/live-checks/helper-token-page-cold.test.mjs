@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { COLD_MIN, helperMs, judge, LIMIT_MS, pct, read, slow } from "./helper-token-page-cold.mjs";
+import { COLD_MIN, helperMs, judge, LIMIT_MS, PAIRS, pct, read, slow } from "./helper-token-page-cold.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-token-page-cold.answers.json"), "utf8"));
@@ -106,4 +106,37 @@ test("card helper-page-jup-429: planted on the good answer: a 503 with no cause 
   assert.ok(!shed.lines.some((l) => /a bare 503/.test(l)), shed.lines.join("\n"));
   assert.equal(shed.ok, false, "a shed page read is still a failed read");
   assert.ok(bad(shed).some((l) => / did not: 503 Retry-After 2 Server-Timing loop;desc="past capacity"/.test(l)), shed.lines.join("\n"));
+});
+
+// Card helper-token-page-cold-draws: a token the helper already held is no cold read, and was the run's red at every
+// helper deploy (helper-28's live run 45167566673: 17 of 32 read cold, the cold reads' time within the limit). The
+// check draws more pairs, at most PAIRS more, until COLD_MIN cold reads are in; each held read names its row's age.
+test("read() draws more pairs, at most PAIRS more, until COLD_MIN cold reads are in; held reads name their row's age", async () => {
+  const ids = Array.from({ length: 200 }, (_, i) => `${"1".repeat(30)}${String(i).padStart(3, "0").replace(/0/g, "z")}`);
+  const held = new Set();
+  const make = (warmFirst) => async (url) => {
+    if (url.includes("/v1/market/lists")) return new Response(JSON.stringify({ lists: {} }), { status: 200 });
+    if (url.includes("lite-api.jup.ag")) return new Response(JSON.stringify(ids.map((id) => ({ id }))), { status: 200 });
+    if (url.endsWith("/v1/health")) return new Response("{}", { status: 200 });
+    const mint = new URL(url).searchParams.get("token");
+    // the first `warmFirst` tokens asked were held: their row read a minute before
+    const old = held.size < warmFirst && !held.has(mint) ? (held.add(mint), true) : held.has(mint);
+    return new Response(JSON.stringify({ risk: { holders: { v: 1, src: "jupiter", as_of_ms: Date.now() - (old ? 60_000 : 0) } } }), { status: 200 });
+  };
+  held.clear();
+  const run = await read("https://helper.test", make(17), PAIRS, async () => {});
+  const r = judge(run);
+  assert.ok(run.reads.length > PAIRS * 2 && run.reads.length <= PAIRS * 4, `${run.reads.length} reads`);
+  const got = Number(new RegExp(`^ok  (\\d+) of ${run.reads.length} read cold`, "m").exec(r.lines.join("\n"))?.[1]);
+  assert.ok(got >= COLD_MIN && got <= COLD_MIN + 1, r.lines.join("\n"));
+  assert.match(r.lines.join("\n"), /not cold: \S+ \(its row read 60\d\d\d ms before the read was sent\)/);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  // every token held: the draws stop at PAIRS more, and the run fails on its cold count
+  held.clear();
+  const all = await read("https://helper.test", make(1e9), PAIRS, async () => {});
+  assert.equal(all.reads.length, PAIRS * 4);
+  assert.equal(judge(all).ok, false);
+  // a small run (--pairs 3) all cold draws nothing more
+  held.clear();
+  assert.equal((await read("https://helper.test", make(0), 3, async () => {})).reads.length, 6);
 });
