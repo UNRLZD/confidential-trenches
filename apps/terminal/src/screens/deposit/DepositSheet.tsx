@@ -58,7 +58,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   }, [onClose]);
   const { pathname } = useLocation();
   const state = src.snapshot.state;
-  const balance = useBalance(src.snapshot) ?? 0n;
+  const balance = useBalance(src.snapshot);
   const [dest, setDest] = useState<Dest>("near");
   // the address just copied: Copy reads Copied for COPIED_MS (UNRLZD's deposit address), a new address starts at Copy
   const [copied, setCopied] = useState<string | null>(null);

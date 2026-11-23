@@ -14,7 +14,8 @@ import { fileURLToPath } from "node:url";
 import type { SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
 import { balanceOf, NO_DATA, portfolio } from "../src/screens/portfolio/model.ts";
 import type { PortfolioData } from "../src/screens/portfolio/model.ts";
-import { headerModel, restoreModel } from "../src/screens/signin/model.ts";
+import { holdsNothing } from "../src/screens/portfolio/model.ts";
+import { headerModel, restoreModel, usd } from "../src/screens/signin/model.ts";
 import { poolView, tradeBal } from "../src/screens/trade/model.ts";
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src");
@@ -123,4 +124,35 @@ test("the trade box's Bal and Cash with a priced pool: Cash is the vault path's 
   assert.deepEqual(tradeBal(true, pv, t.offPool), { from: "pool", cents: 7500n });
   // Solana's part of Cash: its pool and the READY Solana wallet's 20.12
   assert.equal(t.parts.find((p) => p.chain === "solana")!.cents, pv!.balance + 2012n);
+});
+
+// card vault-balance-unread: from kit 1.21 the signing page sends no vault_balance while it could not read the vault's
+// notes; before, it sent "0" and every balance drew $0 (on mainnet the pools are [] either way, so nothing told the two
+// apart). Each figure made from it is unread (a dash), never $0 or the rest alone.
+test("vault-balance-unread: a state with no vault_balance has no Cash, total, off-pool Cash or NEAR part, the header and restore draw a dash, the pools are unread, and it never reads as empty", () => {
+  const restore = { id: "r1", kind: "restore", stage: "done", txs: [] } as unknown as SignpageState["ops"][number];
+  for (const pools of [[], undefined, state().pools]) {
+    const { vault_balance: _v, ...rest } = state({ pools, ops: [restore] });
+    const s = rest as SignpageState;
+    const name = JSON.stringify(pools);
+    const t = portfolio(snap(s), NO_DATA, NOW).totals!;
+    assert.equal(t.cash, null, name);
+    assert.equal(t.total, null, name);
+    assert.equal(t.offPool, null, name);
+    assert.equal(t.parts.find((p) => p.chain === "near")?.cents, null, name);
+    assert.equal(balanceOf(snap(s), NO_DATA, NOW), null, name);
+    const h = headerModel(snap(s), balanceOf(snap(s), NO_DATA, NOW));
+    assert.deepEqual([h.kind, h.cents, usd(h.cents)], ["balance", null, "\u2014"], name);
+    assert.deepEqual(restoreModel(s, balanceOf(snap(s), NO_DATA, NOW)), { id: "r1", kind: "done", cents: null }, name);
+    assert.equal(portfolio(snap(s), NO_DATA, NOW).pools.view, "unread", name);
+    assert.equal(holdsNothing(s), false, name);
+    // the trade box's Bal on a chain with no pool is Cash less the pools: unread too
+    assert.equal(tradeBal(false, null, t.offPool).cents, null, name);
+  }
+  // a vault that holds nothing is still $0, the account empty
+  const zero = state({ vault_balance: "0", wallets: [], positions: [], pools: [] });
+  const z = portfolio(snap(zero), NO_DATA, NOW).totals!;
+  assert.deepEqual([z.cash, z.total, z.offPool, z.parts.find((p) => p.chain === "near")?.cents], [0n, 0n, 0n, 0n]);
+  assert.equal(headerModel(snap(zero), balanceOf(snap(zero), NO_DATA, NOW)).kind, "empty");
+  assert.equal(holdsNothing(zero), true);
 });

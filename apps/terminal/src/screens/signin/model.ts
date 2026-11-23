@@ -8,8 +8,9 @@ export type HeaderKind = "out" | "loading" | "empty" | "balance";
 export interface HeaderModel {
   /** S1.1 signed out, S1.2 the balance skeleton, S1.3 $0.00, S1.4 a balance. */
   kind: HeaderKind;
-  /** The balance in USD cents, as a decimal-free bigint; 0 for out and loading. */
-  cents: bigint;
+  /** The balance in USD cents, as a decimal-free bigint; 0 for out and loading; null while it is unread (the signing
+   *  page could not read the vault's notes, card vault-balance-unread): a dash, never $0.00. */
+  cents: bigint | null;
   /** The Backup dot: signed in and the 12 words not saved yet (`code_saved` false). */
   backupDot: boolean;
   /** The way in, for S1.16's wallet label (CN-79). */
@@ -23,8 +24,9 @@ export function toCents(amount: string): bigint {
   return BigInt(m[1]!) * 100n + BigInt(((m[2] ?? "") + "00").slice(0, 2));
 }
 
-/** "$1,234.56" from cents. */
-export function usd(cents: bigint): string {
+/** "$1,234.56" from cents; a dash for a balance that is unread (null). */
+export function usd(cents: bigint | null): string {
+  if (cents === null) return "\u2014";
   const whole = (cents / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return `$${whole}.${(cents % 100n).toString().padStart(2, "0")}`;
 }
@@ -37,9 +39,9 @@ export function headerModel(snap: SignpageClientSnapshot, balance: bigint | null
   const s = snap.state;
   if (!s) return { kind: snap.status === "connecting" ? "loading" : "out", cents: 0n, backupDot: false, way: null };
   if (!s.signed_in) return { kind: "out", cents: 0n, backupDot: false, way: null };
-  // the balance is the one number (portfolio balanceOf, CH-001): this model never sums one of its own
-  const cents = balance ?? 0n;
-  return { kind: cents === 0n ? "empty" : "balance", cents, backupDot: !s.code_saved, way: s.way ?? null };
+  // the balance is the one number (portfolio balanceOf, CH-001): this model never sums one of its own; signed in with a
+  // state, none is a balance unread
+  return { kind: balance === 0n ? "empty" : "balance", cents: balance, backupDot: !s.code_saved, way: s.way ?? null };
 }
 
 /**
@@ -71,7 +73,8 @@ export interface RestoreModel {
   id: string;
   /** S19.1/S19.2 scanning (the balance grows), S19.3 done, S19.4 nothing found, S19.5 offline. */
   kind: RestoreKind;
-  cents: bigint;
+  /** Null while the balance is unread: a dash. */
+  cents: bigint | null;
 }
 
 /** The latest restore operation in `state`, as S19, or null when there is none. */
@@ -79,10 +82,11 @@ export function restoreModel(s: SignpageState | null, balance: bigint | null = n
   if (!s?.signed_in) return null;
   const op = s.ops.findLast((o) => o.kind === "restore");
   if (!op || op.kind !== "restore") return null;
-  const cents = balance ?? 0n;
+  const cents = balance;
   if (op.stage === "stalled") return { id: op.id, kind: "offline", cents };
   if (op.stage !== "done") return { id: op.id, kind: "scanning", cents };
-  const found = cents > 0n || s.positions.length > 0 || s.held.length > 0 || s.orders.length > 0;
+  // an unread balance is not "nothing found": it is drawn as a dash beside the done tick
+  const found = cents === null || cents > 0n || s.positions.length > 0 || s.held.length > 0 || s.orders.length > 0;
   return { id: op.id, kind: found ? "done" : "nothing", cents };
 }
 

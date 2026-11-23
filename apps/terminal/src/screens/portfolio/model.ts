@@ -224,13 +224,15 @@ export interface CashPart {
 }
 
 export interface Totals {
-  /** The vault, every pool priced and the READY wallets, each once. */
-  cash: bigint;
+  /** The vault, every pool priced and the READY wallets, each once. Null while the signing page could not read the
+   *  vault's notes (no vault_balance, kit 1.21, card vault-balance-unread): Cash is unread then, never $0 or a part. */
+  cash: bigint | null;
   /** Each chain's part of `cash`, NEAR first, then the pool chains in the kit's order: a chain with nothing and no
    *  deposit moving is left out, NEAR never. */
   parts: CashPart[];
-  /** Cash less the SOL and ETH pools: what a chain the trade box buys on with no pool spends (the vault path). */
-  offPool: bigint;
+  /** Cash less the SOL and ETH pools: what a chain the trade box buys on with no pool spends (the vault path). Null
+   *  while the vault is unread, as `cash`. */
+  offPool: bigint | null;
   onWay: bigint;
   /** What the open buys' one-time wallets hold beside their tokens and get back at the sell (the signing page's
    *  positions[].asset_held: the wallet's own coin and its accounts' rent), at the pool's price; part of `inPos`. */
@@ -241,7 +243,8 @@ export interface Totals {
    *  16:17:50Z option B). */
   coins: bigint;
   inPos: bigint;
-  total: bigint;
+  /** Null while `cash` is. */
+  total: bigint | null;
   unreal: bigint;
   realized30: bigint;
   /** The exact sums' signs, for the tones of `unreal` and `realized30`. */
@@ -506,7 +509,7 @@ export function movingChain(o: Operation): Chain | null {
 
 /** The parts of Cash per chain: the vault on NEAR, each pool in dollars at the signing page's own price while it is
  *  fresh on this device's clock (trade model statePoolPrice, the trade box's one rule), each READY wallet on its chain. */
-function cashParts(s: SignpageState, now: number): { cash: bigint; parts: CashPart[]; offPool: bigint } {
+function cashParts(s: SignpageState, now: number): { cash: bigint | null; parts: CashPart[]; offPool: bigint | null } {
   const at = new Map<Chain, CashPart>();
   const part = (chain: Chain): CashPart => at.get(chain) ?? (at.set(chain, { chain, cents: 0n, moving: false }).get(chain)!);
   let cash = 0n;
@@ -516,9 +519,12 @@ function cashParts(s: SignpageState, now: number): { cash: bigint; parts: CashPa
     cash += c ?? 0n;
   };
   // The vault's USDC is vault_balance alone: the signing page's pool table never holds the vault's scope (packages/
-  // signpage test/pools.test.ts), so a USDC pool is other money and the vault's USDC never counts twice.
-  let offPool = cents(s.vault_balance) ?? 0n;
-  add("near", offPool);
+  // signpage test/pools.test.ts), so a USDC pool is other money and the vault's USDC never counts twice. No
+  // vault_balance (kit 1.21, card vault-balance-unread): the page could not read the vault's notes, so NEAR's part, Cash
+  // and Cash less the pools have no figure, never $0
+  const vault = s.vault_balance === undefined ? null : (cents(s.vault_balance) ?? 0n);
+  let offPool = vault ?? 0n;
+  add("near", vault);
   for (const p of s.pools ?? []) {
     if (p.asset === "USDC") {
       const c = cents(p.balance) ?? 0n;
@@ -544,7 +550,7 @@ function cashParts(s: SignpageState, now: number): { cash: bigint; parts: CashPa
   }
   const order = (c: Chain) => (c === "near" ? -1 : (POOL_CHAINS as readonly Chain[]).indexOf(c) >>> 0);
   const parts = [...at.values()].filter((p) => p.chain === "near" || p.cents !== 0n || p.moving).sort((a, b) => order(a.chain) - order(b.chain));
-  return { cash, parts, offPool };
+  return vault === null ? { cash: null, parts, offPool: null } : { cash, parts, offPool };
 }
 
 export function totals(s: SignpageState, rows: readonly Row[], closed: readonly ClosedTrade[], now: number): Totals {
@@ -571,7 +577,7 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
   }
   const coins = downCents(posX);
   const inPos = held.cents + coins;
-  return { cash, parts, offPool, onWay, held: held.cents, heldChains: held.chains, coins, inPos, total: cash + onWay + inPos, unreal: downCents(unrealX), realized30: realized30(rows, closed, now), unrealSign: signOf(unrealX), realized30Sign: signOf(realized30X(rows, closed, now)), partial };
+  return { cash, parts, offPool, onWay, held: held.cents, heldChains: held.chains, coins, inPos, total: cash === null ? null : cash + onWay + inPos, unreal: downCents(unrealX), realized30: realized30(rows, closed, now), unrealSign: signOf(unrealX), realized30Sign: signOf(realized30X(rows, closed, now)), partial };
 }
 
 /**
@@ -637,11 +643,12 @@ export function heldOf(rows: readonly Row[], chain: Chain, token: string): Row |
  *  first state. */
 /**
  * The account holds no money anywhere (card app-money-sheets-read-right: the trade box's Deposit offer), read from the signing page's own amounts (never from prices, which may not be
- * read yet): nothing in the vault, in any chain's pool or at any deposit wallet. Null (no state yet) is not empty.
+ * read yet): nothing in the vault, in any chain's pool or at any deposit wallet. Null (no state yet) is not empty, nor
+ * is a state with no vault_balance (the vault's notes unread, card vault-balance-unread).
  */
 export function holdsNothing(state: { vault_balance?: string; pools?: readonly { balance: string }[]; deposit_wallets?: readonly { amount: string }[] } | null | undefined): boolean {
   const none = (v: string | undefined) => !/[1-9]/.test(v ?? "0");
-  return !!state && none(state.vault_balance) && (state.pools ?? []).every((p) => none(p.balance)) && (state.deposit_wallets ?? []).every((w) => none(w.amount));
+  return !!state && state.vault_balance !== undefined && none(state.vault_balance) && (state.pools ?? []).every((p) => none(p.balance)) && (state.deposit_wallets ?? []).every((w) => none(w.amount));
 }
 
 export const balanceOf = (snap: SignpageClientSnapshot, d: PortfolioData, now: number): bigint | null => portfolio(snap, d, now).totals?.cash ?? null;
@@ -740,8 +747,8 @@ export interface PoolRow {
   pooled: bigint;
 }
 
-/** loading: no state yet. offline: the signing page is down. unread: the page sent no pools (it cannot read the
- *  notes, or it is a page that does not send them): dashes. empty: no pool holds anything. rows: one per chain. */
+/** loading: no state yet. offline: the signing page is down. unread: the page sent no pools or no vault_balance (it
+ *  cannot read the notes, or it is a page that does not send them): dashes. empty: no pool holds anything. rows: one per chain. */
 export type PoolsView = "loading" | "offline" | "unread" | "empty" | "rows";
 
 export interface Pools {
@@ -752,7 +759,7 @@ export interface Pools {
 /** The pool rows from the signing page's state: NEAR's first, the vault's USDC (vault_balance; the page's pool table
  *  never holds the vault, as cashParts reads it), then the pools in the page's order. */
 export function pools(s: SignpageState, offline = false): Pools {
-  if (s.pools === undefined) return { view: offline ? "offline" : "unread", rows: [] };
+  if (s.pools === undefined || s.vault_balance === undefined) return { view: offline ? "offline" : "unread", rows: [] };
   const v = baseUnits(s.vault_balance, POOL_ASSET_DECIMALS.USDC) ?? 0n;
   const vault: PoolRow = { chain: "near", asset: "USDC", decimals: POOL_ASSET_DECIMALS.USDC, balance: v, pooled: v };
   const rows = [vault, ...s.pools.map((p): PoolRow => {
