@@ -34,6 +34,13 @@
 //   whatever the price did since, and past it the price now decides (fee_too_low). A device refused fee_too_low stops
 //   and gets its note back only after deadline_ms (up to 600 s, wallet request.ts WITHDRAW_DEADLINE_MAX_MS), so the open quotes are kept in the relayers' durable
 //   store (store/durable.ts) when the host gives one (HELPER_STORE_DIR): a restart inside the window holds to them too.
+// - One fee per epoch (card relayer-fresh-near; the pool's duty 1, packages/wallet/src/pool/pool.ts:31-33): the chain's
+//   time is cut into FEE_EPOCH_MS epochs (the wallet's NEAR_EPOCH_MS) by the agreed block's own time, and the quote
+//   answers one relay_fee for the whole epoch, the fee_min at the first block it priced in that epoch, whoever asks and
+//   whoever the withdrawal pays. Every fee prices A_fund (S_w above), the creation of a fresh recipient included, so a
+//   fresh recipient's request binds the same fee as any other in its epoch and no fee tells one apart. The epoch's fee is
+//   kept in the durable store with the open quotes, so a restart inside the epoch answers it again. POST's fee_min is
+//   unchanged: the epoch's fee is one of the quotes it holds to.
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
 import { type HelperWithdrawFeeAnswer } from "@blindfill/kit";
@@ -81,6 +88,10 @@ export const FEE_BLOCK_MS_MIN = 500;
  * before the request it prices can. What the relayer takes on: up to ten minutes of NEAR's price against its fee.
  */
 export const FEE_QUOTE_WINDOW_BLOCKS = FEE_REQUEST_LIFE_MS / FEE_BLOCK_MS_MIN;
+/** The fee's epoch, ms of chain time: the wallet's NEAR_EPOCH_MS (packages/wallet/src/pool/near.ts), one fee each. */
+export const FEE_EPOCH_MS = 60_000n;
+/** The start of the epoch holding chain time `ms`. */
+export const feeEpochOf = (ms: bigint): bigint => ms - (ms % FEE_EPOCH_MS);
 /** One pair of reads per network per this long, however many callers ask (about one NEAR block; token-status's CACHE_MS). */
 export const FEE_CACHE_MS = 1_000;
 /**
@@ -321,6 +332,36 @@ export function createFeeQuoter(cfg: FeeQuoterConfig): FeeQuoter {
     return m;
   };
   const given: Record<FeeNetwork, Open> = { mainnet: load("mainnet"), testnet: load("testnet") };
+  // The epoch's one fee per network (the header's "one fee per epoch"): the newest epoch priced, its fee and the
+  // register_deposit it was priced at. An unreadable file holds none: the next quote prices its epoch afresh.
+  type Epoch = { start: bigint; fee: bigint; registerMin: bigint };
+  const epochFile = (n: FeeNetwork) => `fee-epoch-${n}.json`;
+  const loadEpoch = (n: FeeNetwork): Epoch | null => {
+    const text = cfg.store?.text(epochFile(n));
+    if (!text) return null;
+    try {
+      const r = JSON.parse(text) as Record<string, unknown> | null;
+      const start = decimal(r?.start, U128);
+      const fee = decimal(r?.fee, U128);
+      const registerMin = decimal(r?.register_min, U128);
+      return start !== null && fee !== null && registerMin !== null ? { start, fee, registerMin } : null;
+    } catch {
+      return null;
+    }
+  };
+  const epochs: Record<FeeNetwork, Epoch | null> = { mainnet: loadEpoch("mainnet"), testnet: loadEpoch("testnet") };
+  /** The epoch's fee at `block`: the one priced first in its epoch, else `price()` now, kept when its epoch is the newest. */
+  const epochFee = (n: FeeNetwork, block: Block, registerMin: bigint, price: () => bigint): bigint => {
+    const start = feeEpochOf(block.ms);
+    const e = epochs[n];
+    if (e !== null && e.start === start && e.registerMin === registerMin) return e.fee;
+    const fee = price();
+    if (e === null || start > e.start) {
+      epochs[n] = { start, fee, registerMin };
+      cfg.store?.replace(epochFile(n), JSON.stringify({ start: start.toString(), fee: fee.toString(), register_min: registerMin.toString() }));
+    }
+    return fee;
+  };
   const prune = (n: FeeNetwork, height: bigint) => {
     for (const until of given[n].keys()) if (until < height || until > height + FEE_QUOTE_AHEAD_MAX) given[n].delete(until);
   };
@@ -381,7 +422,7 @@ export function createFeeQuoter(cfg: FeeQuoterConfig): FeeQuoter {
       // stops on this 503 before it proves anything (wallet withdraw/relay.ts askWithdrawFee)
       const f = await feeAccountAt(network, block);
       if (!feeAccountReady(f)) throw new FeeReadRefused(`${FEE_ACCOUNT_NOT_READY}: ${net.relayer.fee_recipient} registered ${f.registered}, blocklisted ${f.blocklisted}`);
-      const fee = withdrawFeeMin({ gasPrice: block.gasPrice, poolToken: pool.token, poolNear: pool.near, registerDeposit: registerMin });
+      const fee = epochFee(network, block, registerMin, () => withdrawFeeMin({ gasPrice: block.gasPrice, poolToken: pool.token, poolNear: pool.near, registerDeposit: registerMin }));
       const until = block.height + BigInt(FEE_QUOTE_WINDOW_BLOCKS);
       const had = given[network].get(until);
       if (had === undefined || fee < had.fee) {

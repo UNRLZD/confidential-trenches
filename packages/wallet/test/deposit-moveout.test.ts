@@ -10,8 +10,9 @@ import { base58, base64 } from "@scure/base";
 import { VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { IDBFactory } from "fake-indexeddb";
 import { untilAborted } from "../../kit/src/abort.ts";
-import { NEAR_NETWORKS } from "../src/deposit/account.ts";
+import { HEIGHT_SPREAD_MAX, NEAR_NETWORKS } from "../src/deposit/account.ts";
 import type { DepositOp, FollowRecord } from "../src/deposit/follow.ts";
+import { REFUND_HEIGHTS } from "../src/deposit/follow.ts";
 import { buildMoveOut, ID_KEEP, buildRegisterOut, buildWithdrawOut, checkMoveCalls, checkRegisterCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, signedBlockHash, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
 import * as d from "../src/derive/index.ts";
 import { depositId } from "../src/derive/keys.ts";
@@ -916,6 +917,9 @@ test("BIND-OUT a tap while U's bind call is out (nonce above U's, within max_blo
     slept++;
     assert.equal(chain.sent.length, 0, "nothing sent while the bind call is out");
     assert.equal(seedOpens, 0, "the seed is not opened while the bind call is out");
+    // a height per wait: the tap decides REFUND_HEIGHTS past the first height that read the call used
+    chain.a.height++;
+    chain.b.height++;
     if (slept === 2) {
       // the bind landed: U's nonce passed the call, U's USDC went into the vault
       chain.nonce = 8n;
@@ -953,6 +957,9 @@ test("BIND-UNSENT a tap while U's bind call is written but not yet sent: the tap
       if (++heldWaits > 3) chain.a.height = chain.b.height = 1100 + 200;
       return;
     }
+    // a height per wait with U's lock free: the tap decides REFUND_HEIGHTS past the first height that read the call used
+    chain.a.height++;
+    chain.b.height++;
     if (!sent) {
       // U's lock is free: the follow round sends the written call, it lands, the bind takes U's USDC
       sent = true;
@@ -965,6 +972,97 @@ test("BIND-UNSENT a tap while U's bind call is written but not yet sent: the tap
   assert.deepEqual(out, { kind: "empty" }, "decided on the read after the call landed");
   assert.equal(chain.sent.length, 0);
   assert.equal(seedOpens, 0);
+});
+
+// U's nonce moves at the bind call's own receipt; the token debits U at a later one, up to REFUND_HEIGHTS after. A tap
+// that read the nonce passed as the debit done would sign a move for USDC the bind is about to take: the bind's receipt
+// runs first, the move's transfer fails and U pays its gas.
+test("BIND-RECEIPT a tap while U's bind call reads used but its debit shows only REFUND_HEIGHTS - 1 heights later signs nothing; it decides once the lower final height is REFUND_HEIGHTS past the first that read the call used: empty", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  seedOpens = 0;
+  let passedAt = 0;
+  const sleep = async () => {
+    assert.equal(chain.sent.length, 0, "nothing sent while the bind's debit can still land");
+    assert.equal(seedOpens, 0, "the seed is not opened while the bind's debit can still land");
+    chain.a.height++;
+    chain.b.height++;
+    // the bind's call runs: U's nonce passes it, U's USDC still reads whole
+    if (passedAt === 0) {
+      passedAt = chain.a.height;
+      chain.nonce = 8n;
+    }
+    // its token receipt debits U REFUND_HEIGHTS - 1 heights after the nonce moved
+    if (chain.a.height >= passedAt + Number(REFUND_HEIGHTS) - 1) chain.usdc = 0n;
+  };
+  const out = await moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), sleep, notes: { list: async () => [bindNote(8n, 1100n)] } });
+  assert.deepEqual(out, { kind: "empty" }, "the bind took U's USDC: nothing to move");
+  assert.equal(chain.sent.length, 0);
+  assert.equal(seedOpens, 0);
+});
+
+test("BIND-RECEIPT-BOUND a tap waits REFUND_HEIGHTS past the first height that read U's bind call used, no longer: then it decides on that read (U's USDC still there: it moves)", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.nonce = 8n; // the call already reads used at the tap's first read
+  const heights: number[] = [];
+  const sleep = async () => {
+    if (chain.sent.length > 0) return;
+    heights.push(chain.a.height);
+    chain.a.height++;
+    chain.b.height++;
+  };
+  const out = await moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), sleep, notes: { list: async () => [bindNote(8n, 1100n)] } });
+  assert.equal(out.kind, "moved");
+  assert.deepEqual(heights, [1000, 1001, 1002], "one wait per height until REFUND_HEIGHTS past the first read");
+  assert.equal(decode(chain.sent[0]!).nonce, 9n);
+});
+
+// a bind call used long ago (its window and REFUND_HEIGHTS past at the first read) holds no tap
+// U's bind call read used on a chain whose final height does not move: no debit can be ruled out, so nothing is signed.
+// One RPC stalled while the other goes on is no read once their heights spread past HEIGHT_SPREAD_MAX: the tap answers
+// unread. Both stalled at one height: the tap keeps waiting, signing nothing, until the heights move or the page goes.
+test("BIND-RECEIPT-STILL a tap while U's bind call reads used and the final height does not move signs nothing: one RPC stalled answers unread once the spread passes HEIGHT_SPREAD_MAX; both stalled, it keeps waiting", async () => {
+  {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.nonce = 8n;
+    seedOpens = 0;
+    let waits = 0;
+    const sleep = async () => {
+      waits++;
+      assert.equal(chain.sent.length, 0, "nothing sent while the debit cannot be ruled out");
+      chain.b.height++; // the first RPC's final height stays at 1000
+    };
+    const out = await moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), sleep, notes: { list: async () => [bindNote(8n, 1100n)] } });
+    assert.deepEqual(out, { kind: "unread" });
+    assert.equal(waits, HEIGHT_SPREAD_MAX + 1, "unread once the two RPCs' heights spread past HEIGHT_SPREAD_MAX");
+    assert.equal(chain.sent.length, 0);
+    assert.equal(seedOpens, 0);
+  }
+  {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.nonce = 8n;
+    seedOpens = 0;
+    let waits = 0;
+    const sleep = async () => {
+      if (++waits === 200) throw new Error("the page goes");
+    };
+    await assert.rejects(moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), sleep, notes: { list: async () => [bindNote(8n, 1100n)] } }), /the page goes/);
+    assert.equal(chain.sent.length, 0, "nothing sent on a chain that does not move");
+    assert.equal(seedOpens, 0);
+  }
+});
+
+test("BIND-RECEIPT-OLD a tap after U's bind call read used past its max_block_height + LAPSE_MARGIN + REFUND_HEIGHTS decides at once: it moves", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.nonce = 8n;
+  const sleep = async () => assert.ok(chain.sent.length > 0, "no wait before the send for a call whose receipts are long done");
+  const out = await moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), sleep, notes: { list: async () => [bindNote(8n, 900n)] } });
+  assert.equal(out.kind, "moved");
+  assert.equal(decode(chain.sent[0]!).nonce, 9n);
 });
 
 test("BIND-OVER a tap while U's bind call is over (final height past max_block_height + LAPSE_MARGIN, nonce unused) decides at once: it moves", async () => {

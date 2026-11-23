@@ -27,12 +27,17 @@
 // It passes when
 //   - each chain's scan list has a third provider on a host of its own, and its answer to the browser's CORS preflight
 //     from the app's origin allows that origin and content-type, as does its POST's answer;
-//   - a warm-up quote ends ok, every held quote ends ok under the bound (60 s), and every held quote asked the third
-//     (any read: since card evm-warm-tap-ends-inside-two-seconds, 893bbaa43, the kit asks a third provider at once for
-//     its 2-of-3 and quotes on a pool index already served, so the third may answer the state reads and no getLogs; a
-//     quote that never asks it fails as before; card helper-tape-handover, helper update 22's live run 45011614034 read
-//     "the third 0 getLogs" on base-hook); each mode's first quote waits out the kit's hold of the first two (KIT_HOLD_MS) and asks them before the
-//     third, and a quote that asked them 0 times started inside that hold;
+//   - a warm-up quote ends ok, every held quote ends ok under the bound (60 s), and every held quote asked a provider
+//     past the first two, the third or any after it (any read: since card evm-warm-tap-ends-inside-two-seconds,
+//     893bbaa43, the kit asks a third provider at once for its 2-of-3 and quotes on a pool index already served, so the
+//     third may answer the state reads and no getLogs; card helper-tape-handover, helper update 22's live run
+//     45011614034 read "the third 0 getLogs" on base-hook. Any spare, not the third alone: the kit's own pace of a spare
+//     (packages/kit/src/checks/evm/pace.ts, Base's Pocket at 2 a second, burst 3) passes it unasked when it has no turn
+//     free and the walk goes on to the fourth, an ok quote; card evm-rpc-spare-list-past-two, release 195's app run
+//     45125809604 and an A/B on 8e5ff14ee and 51a89d97e each read "the third asked 0" with Sentio carrying every quote.
+//     A quote that asked nothing past the first two fails as before); each mode's first quote waits out the kit's hold
+//     of the first two (KIT_HOLD_MS) and asks them before the spares, and a quote that asked them 0 times started inside
+//     that hold;
 //   - every held helper read answers 200 with a JSON-RPC result list, from a provider past the first two;
 //   - every address-less Transfer read answers 200 with a JSON-RPC result list, never an error;
 //   - the deployed helper's read HISTORY_BACK blocks back answers 200 with a result list on each chain;
@@ -191,7 +196,9 @@ export function check(run) {
         say(q.code === want && q.ms < BOUND_MS, `${name}, first two ${m}: ends ${q.code}${q.message ? `: ${q.message}` : ""} in ${q.ms} ms (${want} under ${BOUND_MS} ms wanted)`);
         // a record from before the third's every read was counted (no thirdAsked) asked it at least as often as it read logs
         const thirdAsked = Math.max(Number.isSafeInteger(q.thirdAsked) ? q.thirdAsked : 0, Number.isSafeInteger(q.thirdLogs) ? q.thirdLogs : 0);
-        say((q.heldAsked > 0 || inHold(q)) && thirdAsked > 0, `${name}, first two ${m}: the first two asked ${q.heldAsked} times${inHold(q) ? ` (${q.heldLeftMs} ms left of the kit's hold on them)` : ""}, the third asked ${thirdAsked} times (${q.thirdLogs} getLogs)`);
+        // one from before every spare's reads were counted (no spareAsked) asked the spares at least as often as the third
+        const spareAsked = Math.max(Number.isSafeInteger(q.spareAsked) ? q.spareAsked : 0, thirdAsked);
+        say((q.heldAsked > 0 || inHold(q)) && spareAsked > 0, `${name}, first two ${m}: the first two asked ${q.heldAsked} times${inHold(q) ? ` (${q.heldLeftMs} ms left of the kit's hold on them)` : ""}, past the first two asked ${spareAsked} times (the third ${thirdAsked}, ${q.thirdLogs} getLogs)`);
       }
     }
   }
@@ -366,10 +373,12 @@ const holding = (real, held, mode, n) => async (u, init) => {
  *  not recorded). */
 async function quote(req, list, mode, holdUntil = 0) {
   const real = globalThis.fetch;
-  const n = { heldAsked: 0, thirdAsked: 0, thirdLogs: 0, heldLeftMs: Math.max(0, Math.round(holdUntil - performance.now())) };
+  const n = { heldAsked: 0, thirdAsked: 0, thirdLogs: 0, spareAsked: 0, heldLeftMs: Math.max(0, Math.round(holdUntil - performance.now())) };
   const inner = holding(real, list.slice(0, 2), mode, n);
+  const spares = new Set(list.slice(2));
   globalThis.fetch = async (u, init) => {
     if (String(u) === list[2]) n.thirdAsked++;
+    if (spares.has(String(u))) n.spareAsked++;
     if (String(u) === list[2] && bodyOf(init).some((c) => c?.method === "eth_getLogs")) n.thirdLogs++;
     return inner(u, init);
   };
@@ -465,7 +474,7 @@ export async function measure(venues = mainnetVenues(), base = HELPER) {
         const { failedAt, ...q } = await quote(req, list, m, holdUntil);
         if (failedAt !== undefined) holdUntil = failedAt + KIT_HOLD_MS;
         c.held.push(q);
-        console.log(`${name} first two ${m} ${i}: ${q.code} ${q.ms} ms, first two asked ${q.heldAsked}${q.heldLeftMs > 0 ? ` (${q.heldLeftMs} ms left of the kit's hold)` : ""}, third asked ${q.thirdAsked} (${q.thirdLogs} getLogs)${q.message ? `: ${q.message}` : ""}`);
+        console.log(`${name} first two ${m} ${i}: ${q.code} ${q.ms} ms, first two asked ${q.heldAsked}${q.heldLeftMs > 0 ? ` (${q.heldLeftMs} ms left of the kit's hold)` : ""}, past the first two asked ${q.spareAsked} (the third ${q.thirdAsked}, ${q.thirdLogs} getLogs)${q.message ? `: ${q.message}` : ""}`);
       }
     }
   }

@@ -1,0 +1,3583 @@
+{
+ "_run": "drill-rehearse.yml run 45142237963 (pull request 1200 at d3ae6f4ab, its merge commit 5eeb35f2f), 23 Nov 2026 08:53-09:0xZ",
+ "good": {
+  "at": "2026-11-23T08:58:04.778Z",
+  "commit": "5eeb35f2f6427db02b5a1a7c11decf11f98768ef",
+  "leave_on": false,
+  "stack": {
+   "ports": {
+    "http": 18190,
+    "https": 18553
+   },
+   "health": 200,
+   "status": [
+    "unplug: helper running",
+    "unplug: caddy running"
+   ]
+  },
+  "cut": {
+   "at": "2026-11-23T08:55:55Z",
+   "unplug": {
+    "rc": 0,
+    "lines": [
+     "unplug: docker compose stop helper caddy",
+     " Container ct-drill-rehearse-caddy-1  Stopping",
+     " Container ct-drill-rehearse-caddy-1  Stopped",
+     " Container ct-drill-rehearse-helper-1  Stopping",
+     " Container ct-drill-rehearse-helper-1  Stopped",
+     "unplug: helper stopped",
+     "unplug: caddy stopped",
+     "unplug: off, no server of the stack runs"
+    ]
+   },
+   "servers_down": {
+    "rc": 0,
+    "read": {
+     "at": "2026-11-23T08:55:56.629Z",
+     "helper": {
+      "host": "127.0.0.1",
+      "tcp": {
+       "18190": "refused",
+       "18553": "refused"
+      },
+      "health": {
+       "status": null,
+       "error": "ECONNREFUSED"
+      }
+     },
+     "statics": [
+      {
+       "host": "ct-app.unrealized.trade",
+       "status": 200
+      },
+      {
+       "host": "confidential.unrealized.trade",
+       "status": 200
+      }
+     ]
+    },
+    "lines": [
+     "ok 127.0.0.1:18190 answered nothing (refused)",
+     "ok 127.0.0.1:18553 answered nothing (refused)",
+     "ok 127.0.0.1/v1/health answered nothing (ECONNREFUSED)",
+     "-- ct-app.unrealized.trade answered 200 (static files on Cloudflare Pages, reported only)",
+     "-- confidential.unrealized.trade answered 200 (static files on Cloudflare Pages, reported only)",
+     "servers-down: PASS (127.0.0.1)"
+    ]
+   }
+  },
+  "exit": {
+   "rc": 0,
+   "lines": [
+    "copy: vault.confidential.unrlzd.near at mainnet block 224593535, code hash C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u, 43 records read back at final, access keys []",
+    "the mainnet vault's copy answers as mainnet; USDC 17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1 holds 5476346 for it",
+    "seeded on label 549753465896303606874578589164322010706894580788847462228788483832567349954: refund_pending 5000000, move 1100000, return 1200000 (sol), U second 1300000, A second 1400000; X = x.test.near",
+    "unplug: docker compose stop helper caddy",
+    "unplug: helper stopped",
+    "unplug: caddy stopped",
+    "unplug: off, no server of the stack runs",
+    "ok 127.0.0.1:18190 answered nothing (refused)",
+    "ok 127.0.0.1:18553 answered nothing (refused)",
+    "ok 127.0.0.1/v1/health answered nothing (ECONNREFUSED)",
+    "servers-down: PASS (127.0.0.1)",
+    "drill: cut passed before the exit command: bash /home/runner/work/confidential-trenches/confidential-trenches/scripts/drill/rehearse.sh --cut /home/runner/work/_temp/rehearse-off ",
+    "exit: Pay near out to (a NEAR account): ",
+    "exit: The 12 words (hidden): ",
+    "exit: near: reading the vault vault.confidential.unrlzd.near on mainnet",
+    "exit: near: 4 note(s) to withdraw, 5 USDC; 1 spend(s) of ours read",
+    "exit: near: Send 0.18748 NEAR to 4a29904b0c22d23718c654781c45256f3bd43597e2a91929b3e032fcaeca3c65 to pay the fees (it holds 0, needs 0.18748). Waiting...",
+    "test the_words_alone_bring_every_kind_home has been running for over 60 seconds",
+    "exit: near: settle tx 3K9bCSj5JAcEuiA8wBWfH3dx99UMuZ42fBwPd8TiSoA8 from 4a29904b0c22d23718c654781c45256f3bd43597e2a91929b3e032fcaeca3c65",
+    "exit: near: close tx 9WQhCcE2NzetQHRDsMeBNVFsJvGBTZatWEYHA6LSi22D from 4a29904b0c22d23718c654781c45256f3bd43597e2a91929b3e032fcaeca3c65",
+    "exit: near: scanned again after the settles: 5 note(s) to withdraw, 10 USDC",
+    "exit: near: Send 0.577200000000000000000001 NEAR to 9b430a3d2a5e89da6e02af103ba3c6b1ef1996f4d62edd4ef29848d71475f969 to pay the fees (it holds 0, needs 0.577200000000000000000001). Waiting...",
+    "exit: near: proving the withdrawal of 1.3 USDC",
+    "exit: near: withdraw tx 25kpKfoHKbdJetoWfMvoBAMNN9tSjGpejfP9KgKT6Rsv from 9b430a3d2a5e89da6e02af103ba3c6b1ef1996f4d62edd4ef29848d71475f969",
+    "exit: near: settle tx E4JUwZbhWZBKjBxRtabiPpEw9P8d4EF93Vz4WZB2YdJ1 from 9b430a3d2a5e89da6e02af103ba3c6b1ef1996f4d62edd4ef29848d71475f969",
+    "exit: near: close tx 7WqYw7HSVkLmLhuH4KUcuFxTZUHdYcRCDQQsPDRqkJzt from 9b430a3d2a5e89da6e02af103ba3c6b1ef1996f4d62edd4ef29848d71475f969",
+    "exit: near: Send 0.575950000000000000000001 NEAR to 8f74680a250f7627d29b09d49bb534fd1b2e4a8d307a17469c059baf83ea7812 to pay the fees (it holds 0, needs 0.575950000000000000000001). Waiting...",
+    "exit: near: proving the withdrawal of 5 USDC",
+    "exit: near: withdraw tx 4UbKtmqunAVbcBGcmtqk48am2Vp1UMyyLzxm4ea4yK6t from 8f74680a250f7627d29b09d49bb534fd1b2e4a8d307a17469c059baf83ea7812",
+    "exit: near: settle tx CmgRd9rijsSokX78pp2zfMKUMhQP3xkZkvucNpNNZjhx from 8f74680a250f7627d29b09d49bb534fd1b2e4a8d307a17469c059baf83ea7812",
+    "exit: near: close tx 82KLcLxY4gg8cHd1A6VELaUsDvsGv6G7C6qhTZRQro7s from 8f74680a250f7627d29b09d49bb534fd1b2e4a8d307a17469c059baf83ea7812",
+    "exit: near: Send 0.575950000000000000000001 NEAR to cacff27bd8a3e0314f49cdbc36e902e7f8c57f13615601e12e23f1bb9e572f6c to pay the fees (it holds 0, needs 0.575950000000000000000001). Waiting...",
+    "exit: near: proving the withdrawal of 1.1 USDC",
+    "exit: near: withdraw tx 2vQdgGdvz45pL97AAH4gCmP9izhfsAeHxo7Nv7t993sA from cacff27bd8a3e0314f49cdbc36e902e7f8c57f13615601e12e23f1bb9e572f6c",
+    "exit: near: settle tx 2vRq9ryriW6ZpBkzAr2tcesFU4ro72xhPT57fujoSqN3 from cacff27bd8a3e0314f49cdbc36e902e7f8c57f13615601e12e23f1bb9e572f6c",
+    "exit: near: close tx 5Qcd9BG9nAnw3EfmcZ2UfMMAJ89FHTAnrXwC2ngijwNr from cacff27bd8a3e0314f49cdbc36e902e7f8c57f13615601e12e23f1bb9e572f6c",
+    "exit: near: Send 0.575950000000000000000001 NEAR to df51f57bb65838b25a82d0b8e2d62d971ca4ffc68b86a977f3dbd798eeeb39e1 to pay the fees (it holds 0, needs 0.575950000000000000000001). Waiting...",
+    "exit: near: proving the withdrawal of 1.4 USDC",
+    "exit: near: withdraw tx HsAFm79wA2vWEE2onS23HiSqAX9RHmnpWmFYhDFYhDTY from df51f57bb65838b25a82d0b8e2d62d971ca4ffc68b86a977f3dbd798eeeb39e1",
+    "exit: near: settle tx 62p3qyBFthDaYSm6aGKKrsrPfZdiXUHzpQWFQhF37QDe from df51f57bb65838b25a82d0b8e2d62d971ca4ffc68b86a977f3dbd798eeeb39e1",
+    "exit: near: close tx 5o9wbh5n6LrTTTs4UQcrnDxfwqtpNuS5rNUqWfvLqJcQ from df51f57bb65838b25a82d0b8e2d62d971ca4ffc68b86a977f3dbd798eeeb39e1",
+    "exit: near: Send 0.575950000000000000000001 NEAR to 197496847d414435f3934c46d288f9325f19d80286ca194709e201c43e842fa8 to pay the fees (it holds 0, needs 0.575950000000000000000001). Waiting...",
+    "exit: near: proving the withdrawal of 1.2 USDC",
+    "exit: near: withdraw tx Atxau9JmBWZ8TF4oLfkoy9i1R4mZfu58UsfDz1i8N6ju from 197496847d414435f3934c46d288f9325f19d80286ca194709e201c43e842fa8",
+    "exit: near: settle tx 9Pv9tq4owMNL574JvhGeXATKNmDmhSZuTkyKnR87Q6cv from 197496847d414435f3934c46d288f9325f19d80286ca194709e201c43e842fa8",
+    "exit: near: close tx GNV2kGqon2ujXcHXGAXRCn9dyR5N7zwsjuSv4FYwUeRn from 197496847d414435f3934c46d288f9325f19d80286ca194709e201c43e842fa8",
+    "exit: near: done: sent 10000000, left 0, txs 3K9bCSj5JAcEuiA8wBWfH3dx99UMuZ42fBwPd8TiSoA8 9WQhCcE2NzetQHRDsMeBNVFsJvGBTZatWEYHA6LSi22D 25kpKfoHKbdJetoWfMvoBAMNN9tSjGpejfP9KgKT6Rsv E4JUwZbhWZBKjBxRtabiPpEw9P8d4EF93Vz4WZB2YdJ1 7WqYw7HSVkLmLhuH4KUcuFxTZUHdYcRCDQQsPDRqkJzt 4UbKtmqunAVbcBGcmtqk48am2Vp1UMyyLzxm4ea4yK6t CmgRd9rijsSokX78pp2zfMKUMhQP3xkZkvucNpNNZjhx 82KLcLxY4gg8cHd1A6VELaUsDvsGv6G7C6qhTZRQro7s 2vQdgGdvz45pL97AAH4gCmP9izhfsAeHxo7Nv7t993sA 2vRq9ryriW6ZpBkzAr2tcesFU4ro72xhPT57fujoSqN3 5Qcd9BG9nAnw3EfmcZ2UfMMAJ89FHTAnrXwC2ngijwNr HsAFm79wA2vWEE2onS23HiSqAX9RHmnpWmFYhDFYhDTY 62p3qyBFthDaYSm6aGKKrsrPfZdiXUHzpQWFQhF37QDe 5o9wbh5n6LrTTTs4UQcrnDxfwqtpNuS5rNUqWfvLqJcQ Atxau9JmBWZ8TF4oLfkoy9i1R4mZfu58UsfDz1i8N6ju 9Pv9tq4owMNL574JvhGeXATKNmDmhSZuTkyKnR87Q6cv GNV2kGqon2ujXcHXGAXRCn9dyR5N7zwsjuSv4FYwUeRn",
+    "chain: settle 3K9bCSj5JAcEuiA8wBWfH3dx99UMuZ42fBwPd8TiSoA8: no result {\"name\":\"HANDLER_ERROR\",\"cause\":{\"info\":{\"requested_transaction_hash\":\"3K9bCSj5JAcEuiA8wBWfH3dx99UMuZ42fBwPd8TiSoA8\"},\"name\":\"UNKNOWN_TRANSACTION\"},\"code\":-32000,\"message\":\"Server error\",\"data\":\"Transaction 3K9bCSj5JAcEuiA8wBWfH3dx99UMuZ42fBwPd8TiSoA8 doesn't exist\"}",
+    "chain: close 9WQhCcE2NzetQHRDsMeBNVFsJvGBTZatWEYHA6LSi22D: FINAL [\"{\\\"Failure\\\":{\\\"ActionError\\\":{\\\"index\\\":0,\\\"kind\\\":{\\\"AccountDoesNotExist\\\":{\\\"account_id\\\":\\\"4a29904b0c22d23718c654781c45256f3bd43597e2a91929b3e032fcaeca3c65\\\"}}}}}\"]",
+    "chain: withdraw 25kpKfoHKbdJetoWfMvoBAMNN9tSjGpejfP9KgKT6Rsv: FINAL []",
+    "chain: settle E4JUwZbhWZBKjBxRtabiPpEw9P8d4EF93Vz4WZB2YdJ1: FINAL []",
+    "chain: close 7WqYw7HSVkLmLhuH4KUcuFxTZUHdYcRCDQQsPDRqkJzt: FINAL [\"{\\\"Failure\\\":{\\\"ActionError\\\":{\\\"index\\\":0,\\\"kind\\\":{\\\"AccountDoesNotExist\\\":{\\\"account_id\\\":\\\"9b430a3d2a5e89da6e02af103ba3c6b1ef1996f4d62edd4ef29848d71475f969\\\"}}}}}\"]",
+    "chain: withdraw 4UbKtmqunAVbcBGcmtqk48am2Vp1UMyyLzxm4ea4yK6t: FINAL []",
+    "chain: settle CmgRd9rijsSokX78pp2zfMKUMhQP3xkZkvucNpNNZjhx: FINAL []",
+    "chain: close 82KLcLxY4gg8cHd1A6VELaUsDvsGv6G7C6qhTZRQro7s: FINAL [\"{\\\"Failure\\\":{\\\"ActionError\\\":{\\\"index\\\":0,\\\"kind\\\":{\\\"AccountDoesNotExist\\\":{\\\"account_id\\\":\\\"8f74680a250f7627d29b09d49bb534fd1b2e4a8d307a17469c059baf83ea7812\\\"}}}}}\"]",
+    "chain: withdraw 2vQdgGdvz45pL97AAH4gCmP9izhfsAeHxo7Nv7t993sA: FINAL []",
+    "chain: settle 2vRq9ryriW6ZpBkzAr2tcesFU4ro72xhPT57fujoSqN3: FINAL []",
+    "chain: close 5Qcd9BG9nAnw3EfmcZ2UfMMAJ89FHTAnrXwC2ngijwNr: FINAL [\"{\\\"Failure\\\":{\\\"ActionError\\\":{\\\"index\\\":0,\\\"kind\\\":{\\\"AccountDoesNotExist\\\":{\\\"account_id\\\":\\\"cacff27bd8a3e0314f49cdbc36e902e7f8c57f13615601e12e23f1bb9e572f6c\\\"}}}}}\"]",
+    "chain: withdraw HsAFm79wA2vWEE2onS23HiSqAX9RHmnpWmFYhDFYhDTY: FINAL []",
+    "chain: settle 62p3qyBFthDaYSm6aGKKrsrPfZdiXUHzpQWFQhF37QDe: FINAL []",
+    "chain: close 5o9wbh5n6LrTTTs4UQcrnDxfwqtpNuS5rNUqWfvLqJcQ: FINAL [\"{\\\"Failure\\\":{\\\"ActionError\\\":{\\\"index\\\":0,\\\"kind\\\":{\\\"AccountDoesNotExist\\\":{\\\"account_id\\\":\\\"df51f57bb65838b25a82d0b8e2d62d971ca4ffc68b86a977f3dbd798eeeb39e1\\\"}}}}}\"]",
+    "chain: withdraw Atxau9JmBWZ8TF4oLfkoy9i1R4mZfu58UsfDz1i8N6ju: FINAL []",
+    "chain: settle 9Pv9tq4owMNL574JvhGeXATKNmDmhSZuTkyKnR87Q6cv: FINAL []",
+    "chain: close GNV2kGqon2ujXcHXGAXRCn9dyR5N7zwsjuSv4FYwUeRn: FINAL [\"{\\\"Failure\\\":{\\\"ActionError\\\":{\\\"index\\\":0,\\\"kind\\\":{\\\"AccountDoesNotExist\\\":{\\\"account_id\\\":\\\"197496847d414435f3934c46d288f9325f19d80286ca194709e201c43e842fa8\\\"}}}}}\"]",
+    "pending refund: 5000000 withdrawn to X, spends row 4 settled",
+    "move note: 1100000 withdrawn to X, spends row 5 settled",
+    "return note: 1200000 withdrawn to X, spends row 7 settled",
+    "U second arrival: 1300000 withdrawn to X, spends row 3 settled",
+    "A second arrival: 1400000 withdrawn to X, spends row 6 settled",
+    "x.usdc: 10000000 (want 10000000); the vault: 5476346 (mainnet's 5476346)",
+    "the words alone: all five kinds at X (10000000), the vault back at mainnet's 5476346, 6 A accounts deleted",
+    "test the_words_alone_bring_every_kind_home ... ok",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 176.10s"
+   ]
+  },
+  "requests": [
+   {
+    "url": "https://rpc.mainnet.fastnear.com/",
+    "ours": false
+   },
+   {
+    "url": "https://rpc.mainnet.fastnear.com/",
+    "ours": false
+   },
+   {
+    "url": "https://near.drpc.org/",
+    "ours": false
+   },
+   {
+    "url": "https://near.drpc.org/",
+    "ours": false
+   },
+   {
+    "url": "https://rpc.mainnet.fastnear.com/",
+    "ours": false
+   },
+   {
+    "url": "https://rpc.mainnet.fastnear.com/",
+    "ours": false
+   },
+   {
+    "url": "https://near.drpc.org/",
+    "ours": false
+   },
+   {
+    "url": "https://near.drpc.org/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/build/withdraw/withdraw_js/withdraw.wasm",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/trusted-setup/final-keys/withdraw.zkey",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/build/withdraw/withdraw_js/withdraw.wasm",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/trusted-setup/final-keys/withdraw.zkey",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/build/withdraw/withdraw_js/withdraw.wasm",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/trusted-setup/final-keys/withdraw.zkey",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/build/withdraw/withdraw_js/withdraw.wasm",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/trusted-setup/final-keys/withdraw.zkey",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/build/withdraw/withdraw_js/withdraw.wasm",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/trusted-setup/final-keys/withdraw.zkey",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/build/withdraw/withdraw_js/withdraw.wasm",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/trusted-setup/final-keys/withdraw.zkey",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:36265/",
+    "ours": false
+   }
+  ]
+ },
+ "left_on": {
+  "at": "2026-11-23T08:55:59.694Z",
+  "commit": "5eeb35f2f6427db02b5a1a7c11decf11f98768ef",
+  "leave_on": true,
+  "stack": {
+   "ports": {
+    "http": 18190,
+    "https": 18553
+   },
+   "health": 200,
+   "status": [
+    "unplug: helper running",
+    "unplug: caddy running"
+   ]
+  },
+  "cut": {
+   "at": "2026-11-23T08:55:59Z",
+   "unplug": {
+    "rc": null,
+    "lines": [
+     "rehearse: unplug.sh off left out (--leave-on)"
+    ]
+   },
+   "servers_down": {
+    "rc": 1,
+    "read": {
+     "at": "2026-11-23T08:55:59.631Z",
+     "helper": {
+      "host": "127.0.0.1",
+      "tcp": {
+       "18190": "open",
+       "18553": "open"
+      },
+      "health": {
+       "status": 200
+      }
+     },
+     "statics": [
+      {
+       "host": "ct-app.unrealized.trade",
+       "status": 200
+      },
+      {
+       "host": "confidential.unrealized.trade",
+       "status": 200
+      }
+     ]
+    },
+    "lines": [
+     "BAD 127.0.0.1:18190 took a connection",
+     "BAD 127.0.0.1:18553 took a connection",
+     "BAD 127.0.0.1/v1/health answered 200",
+     "-- ct-app.unrealized.trade answered 200 (static files on Cloudflare Pages, reported only)",
+     "-- confidential.unrealized.trade answered 200 (static files on Cloudflare Pages, reported only)",
+     "servers-down: FAIL (127.0.0.1)"
+    ]
+   }
+  },
+  "exit": {
+   "rc": 101,
+   "lines": [
+    "copy: vault.confidential.unrlzd.near at mainnet block 224593535, code hash C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u, 43 records read back at final, access keys []",
+    "the mainnet vault's copy answers as mainnet; USDC 17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1 holds 5476346 for it",
+    "seeded on label 549753465896303606874578589164322010706894580788847462228788483832567349954: refund_pending 5000000, move 1100000, return 1200000 (sol), U second 1300000, A second 1400000; X = x.test.near",
+    "rehearse: unplug.sh off left out (--leave-on)",
+    "BAD 127.0.0.1:18190 took a connection",
+    "BAD 127.0.0.1:18553 took a connection",
+    "BAD 127.0.0.1/v1/health answered 200",
+    "servers-down: FAIL (127.0.0.1)",
+    "drill: the cut failed, so the exit never ran: bash /home/runner/work/confidential-trenches/confidential-trenches/scripts/drill/rehearse.sh --cut /home/runner/work/_temp/rehearse-left-on --leave-on",
+    "test the_words_alone_bring_every_kind_home ... FAILED",
+    "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 47.17s"
+   ]
+  },
+  "requests": [
+   {
+    "url": "https://rpc.mainnet.fastnear.com/",
+    "ours": false
+   },
+   {
+    "url": "https://rpc.mainnet.fastnear.com/",
+    "ours": false
+   },
+   {
+    "url": "https://near.drpc.org/",
+    "ours": false
+   },
+   {
+    "url": "https://near.drpc.org/",
+    "ours": false
+   },
+   {
+    "url": "https://rpc.mainnet.fastnear.com/",
+    "ours": false
+   },
+   {
+    "url": "https://rpc.mainnet.fastnear.com/",
+    "ours": false
+   },
+   {
+    "url": "https://near.drpc.org/",
+    "ours": false
+   },
+   {
+    "url": "https://near.drpc.org/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "http://127.0.0.1:35425/",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/build/withdraw/withdraw_js/withdraw.wasm",
+    "ours": false
+   },
+   {
+    "url": "https://raw.githubusercontent.com/0xbow-io/privacy-pools-core/c312dcd58f6ad085204be61923c49f8065e4e9ae/packages/circuits/trusted-setup/final-keys/withdraw.zkey",
+    "ours": false
+   }
+  ]
+ }
+}

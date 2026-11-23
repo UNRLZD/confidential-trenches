@@ -35,10 +35,11 @@
 //        (a JSON number past 2^53) and never the helper's clock; else deadline_too_close.
 //   10.  the token watch (token-status/status.ts tokenHeld): anything but a caught-up open token is 503 token_halted,
 //        checked again inside the relayer's queue right before the transaction is signed.
-//   A request with fund_recipient true (the kit sends it on every withdrawal): until H3.7's funding is built, it is
-//   carried only when its recipient is an implicit A (64 lowercase hex) that exists with key list exactly [A's own id
-//   key] and holds at least A_store, read at the same block on both providers (H3.7 item 1's resend rule, M:1567-1572);
-//   anything else is recipient_refused, nothing sent (decided on card relayer-withdraw-send).
+//   A request with fund_recipient true (the kit sends it on every withdrawal): its recipient is an implicit A (64
+//   lowercase hex), read at the same block on both providers. One that exists with key list exactly [A's own id key]
+//   and holds at least A_store is carried with no Transfer (H3.7 item 1's resend rule, M:1567-1572). One absent on
+//   both (UNKNOWN_ACCOUNT and an empty key list) is created first, once (card relayer-fresh-near; H3.7 item 1, the
+//   funding lock M:1164-1190): see createRecipient below. Anything else is recipient_refused, nothing sent.
 //   relayer_low (H3.5, M:1511): in the queue, before signing, the gas account must hold one more withdraw's gas bought
 //   up front, its attachment and one settle's gas and attachment (WITHDRAW_FLOOR), else 503 relayer_low.
 //   The send: one FunctionCall withdraw(withdrawal, proof, public_signals) on the vault, 300 Tgas, the storage the
@@ -58,14 +59,29 @@
 // the release that signed it and is not signed again by that release (a failure that repeats would burn gas every
 // round); a settle never applied is signed again.
 //
-// Not here: H3.7's funding of A and its relayed call (fund_recipient_wrong, and the Transfer of A_store).
+// The creation of an absent A (createRecipient), after checks 1-10 and 7b passed, before the withdrawal's send:
+//   - one note funds at most one A, ever: the note's nullifier is bound to A by one create-if-absent write (a second
+//     A for the same note is recipient_refused), and A's creation record holds the notes it was created for;
+//   - one Transfer of A_store, the only action of its transaction, never a CreateAccount (a named account's creator can
+//     add its own key; a Transfer to a 64-hex id creates it holding only its id's key). Its record, with its signed
+//     bytes, is written before the broadcast; it is signed only after, in the relayer's queue, check 10, the gas
+//     account's floor (the Transfer's A_fund and one more withdrawal's worst), A read absent again at a fresh agreed
+//     block on both providers, and check 9 at the funding margin (120 s);
+//   - a Transfer of ours whose outcome is not known is read again by its hash, its stored bytes sent again, never a
+//     second one signed: in_flight until it reads final. Landed for this note: the withdrawal is sent, with no Transfer,
+//     whatever A reads. Landed for another note, or failed on chain: recipient_refused. Dropped (never applied, and
+//     never can be): the next request may sign afresh.
+//   The NEAR this spends is the relayer's, paid back by the fee: every quote prices A_fund (fee.ts S_w), fresh
+//   recipient or not, so a fresh recipient's fee is the epoch's one fee.
+//
+// Not here: A's relayed call after the payout (fund_recipient_wrong), and funding an A that exists below A_store.
 import { join } from "node:path";
 import { vaultWithdrawYocto, type HelperWithdrawCode } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
-import { createFileStore, nearRpc, relayerKey, RPC_TIMEOUT_MS, RpcError, startRelayer, type Relayer, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
+import { createFileStore, nearRpc, relayerKey, RPC_TIMEOUT_MS, RpcError, startRelayer, type CreationEntry, type CreationRecord, type DepositStore, type Relayer, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
 import { readUrls, statusesOf, tokenHeld, tokenWatchesFromEnv, USDC, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { checkWithdraw, decimal, isAccountId, type CheckedWithdraw, type WithdrawConfig, type WithdrawReads } from "./checks.ts";
-import { agreedBlock, FEE_ACCOUNT_NOT_READY, feeAccountReady, FeeReadRefused, HEIGHT_SPREAD_MAX, readFeeAccount, readRegisterMin, RELAYER_ENV, STORE_ENV, TESTNET_RPCS, TESTNET_TOKEN, viewAt, type Block, type FeeAccount, type FeeNetwork, type FeeQuoter } from "./fee.ts";
+import { agreedBlock, FEE_A_FUND, FEE_ACCOUNT_NOT_READY, feeAccountReady, FeeReadRefused, HEIGHT_SPREAD_MAX, readFeeAccount, readRegisterMin, RELAYER_ENV, STORE_ENV, TESTNET_RPCS, TESTNET_TOKEN, viewAt, type Block, type FeeAccount, type FeeNetwork, type FeeQuoter } from "./fee.ts";
 import { checkNullifier, createLeavesIndex, createSpendsIndex, createWithdrawSendStore, nullifierKey, TREE_CAPACITY, type LeavesIndex, type SpendsIndex, type WithdrawSendStore } from "./index.ts";
 import { pagesAt } from "../near/pages.ts";
 
@@ -129,6 +145,11 @@ export type WithdrawSendDeps = {
    * throw is ignored.
    */
   onLanded?: (recipient: string) => void;
+  /**
+   * The fresh recipients' creation records and the notes bound to them (the relayers' nonce store, bind/send.ts: one
+   * create-if-absent file per note, one record per id). Without it an absent A is recipient_refused.
+   */
+  creations?: Pick<DepositStore, "creation" | "putCreation" | "bind">;
 };
 
 const no = (code: HelperWithdrawCode | "upstream", status = 400): WithdrawAnswer => ({ status, body: { error: { code } } });
@@ -287,12 +308,17 @@ export function check5(w: CheckedWithdraw, r: ChainReads): HelperWithdrawCode | 
 /** A's own id key: the ed25519 key whose 32 bytes are A's implicit id. */
 export const idKeyOf = (a: string): string => `ed25519:${base58(Buffer.from(a, "hex"))}`;
 
+/** fund_recipient true and A an implicit id read absent on both providers: A is created before the withdrawal. */
+export const createsRecipient = (w: CheckedWithdraw, r: ChainReads): boolean => w.fund_recipient === true && /^[0-9a-f]{64}$/.test(w.recipient) && r.recipient?.kind === "absent";
+
 /**
- * fund_recipient true, until H3.7 funds A: null when A is an implicit account that exists with key list exactly
- * [A's own id key, full access] and holds at least A_store (carried with no Transfer); else recipient_refused.
+ * fund_recipient true: null when A is an implicit id read absent (created first, createRecipient), or one that exists
+ * with key list exactly [A's own id key, full access] and holds at least A_store (carried with no Transfer); else
+ * recipient_refused.
  */
 export function checkFunded(w: CheckedWithdraw, r: ChainReads): HelperWithdrawCode | null {
   if (w.fund_recipient !== true) return null;
+  if (createsRecipient(w, r)) return null;
   const a = r.recipient;
   if (!/^[0-9a-f]{64}$/.test(w.recipient) || a === undefined || a.kind !== "account") return "recipient_refused";
   const [k, ...more] = a.keys;
@@ -361,7 +387,8 @@ export async function carryWithdraw(request: unknown, deps: WithdrawSendDeps): P
   const [leaf, reads] = await Promise.all([leafCheck(), readChecks(deps.rpcs, deps.cfg.vault, deps.cfg.token, w, deps.now).catch(() => null)]);
   if (leaf === "index_behind") return no("index_behind", 503);
   if (reads === null) return no("upstream", 503);
-  const c = check5(w, reads) ?? leaf ?? checks7to9(w, deps.cfg.vault, reads) ?? checkFunded(w, reads);
+  const creates = createsRecipient(w, reads);
+  const c = check5(w, reads) ?? leaf ?? checks7to9(w, deps.cfg.vault, reads, { funds: creates }) ?? checkFunded(w, reads);
   if (c !== null) return no(c);
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const feeHold = (f: FeeRead) => {
@@ -372,8 +399,17 @@ export async function carryWithdraw(request: unknown, deps: WithdrawSendDeps): P
   if (await held(deps)) return no("token_halted", 503); // check 10 first: a halted token holds whatever 7b reads
   if ("unread" in reads.feeAccount || !feeAccountReady(reads.feeAccount)) return feeHold(reads.feeAccount);
 
-  const relayer = deps.relayers[turn++ % deps.relayers.length]!;
   const deposit = vaultWithdrawYocto(w.register_deposit, w.relay_fee, true);
+  if (creates) {
+    let made: WithdrawAnswer | null;
+    try {
+      made = await createRecipient(w, nf, deps, deposit);
+    } catch {
+      return no("upstream", 503); // a read, the key or the store failed: no Transfer was broadcast unrecorded
+    }
+    if (made !== null) return made;
+  }
+  const relayer = deps.relayers[turn++ % deps.relayers.length]!;
   let feeHeld: FeeRead | null = null;
   const action = { kind: "call" as const, receiver: deps.cfg.vault, method: "withdraw", args: withdrawArgs(w), gas: WITHDRAW_GAS, deposit };
   try {
@@ -402,6 +438,71 @@ export async function carryWithdraw(request: unknown, deps: WithdrawSendDeps): P
   } catch (e) {
     if (e instanceof ClaimLost) return no(e.code);
     return no("upstream", 503); // the key read or the store failed: nothing was sent
+  }
+}
+
+// ---- The creation of a fresh recipient ----
+
+/** The ids this process is creating, per gas account: a second request for one while its run holds answers in_flight. */
+const creating = new Set<string>();
+
+/** A Transfer's outcome into A's record: a landed one adds the note it was for (`delivery`) to the notes A serves. */
+function creationOutcome(rec: CreationRecord, last: CreationEntry, out: Extract<TxOutcome, { kind: "final" | "dropped" }>): CreationRecord {
+  if (out.kind === "dropped") return { ...rec, last: { ...last, state: "dropped" } };
+  const ok = out.receipts.length > 0 && out.receipts.every((r) => r.ok);
+  const top = out.receipts.reduce((h, r) => (r.height > h ? r.height : h), 0n);
+  const used = ok && last.delivery !== null && !rec.used.includes(last.delivery) ? [...rec.used, last.delivery] : rec.used;
+  return { ...rec, used, last: { ...last, state: ok ? "landed" : "failed", landed_at: top.toString() } };
+}
+
+/**
+ * Creates the absent A of a request that passed checks 1-10 (the header's "creation"): null once A's Transfer for this
+ * note has landed (the withdrawal goes next), else the answer. The first relayer key signs every creation, so its
+ * read-back is by the key that signed it.
+ */
+export async function createRecipient(w: CheckedWithdraw, nf: bigint, deps: WithdrawSendDeps, withdrawDeposit: bigint): Promise<WithdrawAnswer | null> {
+  const store = deps.creations;
+  if (store === undefined) return no("recipient_refused");
+  const a = w.recipient;
+  const relayer = deps.relayers[0]!;
+  const slot = `${relayer.account}/${a}`;
+  if (creating.has(slot)) return no("in_flight");
+  creating.add(slot);
+  try {
+    const note = nullifierKey(nf);
+    if (store.bind(nf, a) !== a) return no("recipient_refused"); // one note funds one A, ever
+    let rec: CreationRecord = store.creation(a) ?? { id: a, last: null, used: [] };
+    if (rec.last !== null && rec.last.state === "pending") {
+      const out = await relayer.resolve(rec.last, { resend: true }); // A read absent: the same bytes again, never new ones
+      if (out.kind === "unknown") return no("in_flight");
+      rec = creationOutcome(rec, rec.last, out);
+      store.putCreation(rec);
+    }
+    if (rec.last !== null && rec.last.state === "landed") return rec.used.includes(note) ? null : no("recipient_refused");
+    if (rec.last !== null && rec.last.state === "failed") return no("recipient_refused");
+    // none sent, or the last one dropped (it never applied and never can): one Transfer
+    const out = await relayer.send<HelperWithdrawCode>(
+      { kind: "transfer", receiver: a, amount: A_STORE_YOCTO },
+      async () => {
+        if (await held(deps)) return "token_halted";
+        if ((await relayer.balance()) < withdrawFloor(withdrawDeposit) + FEE_A_FUND) return "relayer_low";
+        const b = await agreedBlock(deps.rpcs, deps.now ?? Date.now);
+        if ((await accountAt(deps.rpcs, b, a)).kind !== "absent") return "in_flight"; // it exists now: the next request reads it
+        return BigInt(w.deadline_ms) < (await newestFinalMs(deps.rpcs)) + FUND_MARGIN_MS ? "deadline_too_close" : null;
+      },
+      (tx) => {
+        rec = { ...rec, last: { ...tx, state: "pending", landed_at: null, delivery: note } };
+        store.putCreation(rec);
+      },
+    );
+    if (out.kind === "guarded") return no(out.code, out.code === "token_halted" || out.code === "relayer_low" ? 503 : 400);
+    if (out.kind === "unknown") return no("in_flight");
+    rec = creationOutcome(rec, rec.last!, out);
+    store.putCreation(rec);
+    if (out.kind === "dropped") return no("in_flight");
+    return rec.last!.state === "landed" ? null : no("recipient_refused");
+  } finally {
+    creating.delete(slot);
   }
 }
 
@@ -662,6 +763,7 @@ export function withdrawSenderFromEnv(
         leaves: createLeavesIndex(rpcs, net.vault),
         store,
         relayers,
+        creations: nonces,
         // no watch for this network's token: held (token_halted), as the watch holds while it is not caught up
         tokenStatus: watch ?? (async () => ({ token: TOKENS[net.network], caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: "", block_height: 0, last_event: null })),
         // mainnet only: intents.near, where an arming account's intents go, is a mainnet contract
