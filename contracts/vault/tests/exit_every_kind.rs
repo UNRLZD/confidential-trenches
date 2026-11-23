@@ -194,6 +194,14 @@ async fn the_words_alone_bring_every_kind_home() -> R<()> {
     let funder = h.account("funder", 50).await?;
     h.wait_final(x.id()).await?;
     println!("seeded on label {label}: refund_pending {REFUND}, move {MOVE}, return {RETURN} (sol), U second {SECOND_U}, A second {SECOND_A}; X = {}", x.id());
+    // the unplug drill's rehearsal (scripts/drill/rehearse.sh): DRILL_CUT, when set, is its cut (the helper stack's
+    // unplug.sh off, then servers-down.mjs read against it), run here, after the deposits and before the exit command;
+    // a cut that fails (a server of ours still answering) stops the test before any exit
+    if let Ok(cut) = std::env::var("DRILL_CUT") {
+        let ok = Command::new("bash").arg("-c").arg(&cut).status()?.success();
+        assert!(ok, "drill: the cut failed, so the exit never ran: {cut}");
+        println!("drill: cut passed before the exit command: {cut}");
+    }
 
     // the command, on the sandbox's RPCs only: the typed account and the words on stdin, as a user types them
     let g = h.rpc("EXPERIMENTAL_genesis_config", json!({})).await?;
