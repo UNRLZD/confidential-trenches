@@ -13,6 +13,7 @@
 import { join } from "node:path";
 import { HELPER_CODE_STATUS, HELPER_INTENTS_CODES, NEAR_RHEA } from "@blindfill/kit";
 import { decodeSignedDelegate } from "./checks.ts";
+import { checkOnward, isOnward } from "./onward.ts";
 import { type CreateDeps, deliveryReads, onStatusAnswer } from "./create.ts";
 import { carryTrade, createTradeReads, createTradeStore, isTradeBody, type TradeAnswer, type TradeDeps } from "./trade.ts";
 import { parseRecordBody, readRecords, type RecordAnswer, type RecordDeps } from "./record.ts";
@@ -97,15 +98,19 @@ export function createLine(a: { code: string; tx_hash?: string } | null): string
 }
 export const CREATE_START_FAILED = "helper: create start_failed";
 /** The route's own answers, before the carry: check 1's and check 5's codes, and upstream (a start that failed). */
-export type BindRouteAnswer = { status: number; body: Answer["body"] | TradeAnswer["body"] | { error: { code: "bad_shape" | "token_not_accepted" | "upstream" } } };
+export type BindRouteAnswer = { status: number; body: Answer["body"] | TradeAnswer["body"] | IntentsAnswer["body"] | { error: { code: "bad_shape" | "token_not_accepted" | "upstream" } } };
 const no = (code: "bad_shape" | "token_not_accepted" | "upstream"): BindRouteAnswer => ({ status: STATUS[code] ?? 400, body: { error: { code } } });
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 
 /** The delegate's receiver_id, or null when the body is not {signed_delegate: base64 of one SignedDelegateAction}. */
 function receiverOf(body: unknown): string | null {
+  return delegateOf(body)?.receiver_id ?? null;
+}
+/** The body's delegate decoded (any byte form: the carry's own checks hold it to canonical), or null. */
+function delegateOf(body: unknown): ReturnType<typeof decodeSignedDelegate> | null {
   if (!isObj(body) || typeof body.signed_delegate !== "string") return null;
   try {
-    return decodeSignedDelegate(new Uint8Array(Buffer.from(body.signed_delegate, "base64"))).receiver_id;
+    return decodeSignedDelegate(new Uint8Array(Buffer.from(body.signed_delegate, "base64")));
   } catch {
     return null;
   }
@@ -245,6 +250,8 @@ export function bindSenderFromEnv(
   // the carry's relayer is mainnet's bind relayer, started only at the first send: the gate and the checks before the
   // simulation answer with no start and no chain read (intents/carry.ts)
   let intentsCarry: IntentsCarry | null = null;
+  /** The onward checks' reads on mainnet's two providers (card relayer-onward-move), made at the first onward body. */
+  let onwardReads: ReturnType<typeof createSendReads> | null = null;
   const intentsOf = (net: Net): IntentsCarry => {
     if (intentsCarry === null) {
       const relayer = async () => (await started(net)).relayer;
@@ -286,6 +293,22 @@ export function bindSenderFromEnv(
       if (receiver === null) return no("bad_shape");
       const net = carried.get(receiver);
       if (net === undefined) return no("token_not_accepted");
+      // the onward move (card relayer-onward-move, onward.ts): A's one ft_transfer to a 1Click deposit address, on
+      // mainnet only (the quote records and the gate are mainnet's intents store). Its checks read the chain on their
+      // own reads, with no relayer start, as /v1/intents' do; the intents carry starts mainnet's bind relayer at its
+      // first send. Every other delegate is the deposit carry's.
+      if (isOnward(delegateOf(body)!.actions)) {
+        if (net.network !== "mainnet" || mainnet === undefined) return no("token_not_accepted");
+        try {
+          const s = openIntents()!;
+          const reads = (onwardReads ??= createSendReads(urls.mainnet.map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc], { vault: net.vault, token: receiver }));
+          const v = await checkOnward(body, { token: receiver, vault: net.vault, relayer: net.account }, reads, { seen: (x) => s.seen(x), quote: (x) => s.quote(x) });
+          if (!v.ok) return { status: STATUS[v.code] ?? 400, body: { error: { code: v.code } } };
+          return await intentsOf(mainnet).onward(v.move, () => reads.finalHeight());
+        } catch {
+          return no("upstream");
+        }
+      }
       let deps: SendDeps;
       try {
         deps = await started(net);

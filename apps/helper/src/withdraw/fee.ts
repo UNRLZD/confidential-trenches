@@ -4,7 +4,7 @@
 // device binds it in the proof's context and refuses it above its own fee_max (packages/wallet/src/withdraw/feemax.ts).
 //
 //   fee_min = ceil((G_w × gp × 1.2 + S_w) × px)
-//   S_w     = B_w × 1e19 + register_deposit + G_settle × gp + A_fund + G_arm × gp
+//   S_w     = B_w × 1e19 + 2 × register_deposit + G_settle × gp + A_fund + G_arm × gp
 //
 // - G_w = 92.505 Tgas: the whole withdraw transaction with its payouts at depth 32, a new recipient (the G1 vault gas
 //   proof, research proofs/g1-vault-gas/RESULT.md l.57, the top of M:1077's 87.993-92.505). B_w = 858 B (710 + 148, a
@@ -12,8 +12,13 @@
 //   Tgas (A's relayed call, capped until G1 measures it) and A_fund = 182 B × 1e19 + 0.007 N (W:742): every withdrawal
 //   pays an A_{l,j} (W:671), and the relayer cannot know at the quote whether a tree grows. They are the device's own
 //   cap terms halved (feemax.ts: S_cap = 2 × S_w, G_cap = 2 × G_w), so an honest quote is at most half its fee_max at
-//   the same reads (P1, M:3010): 1.2 / 3 on the withdraw gas, 1 / 2 on every other term.
-// - register_deposit: at the quote, the token's storage_balance_bounds().min, the one a fresh A pays (H3.4 check 7,
+//   the same reads (P1, M:3010): 1.2 / 3 on the withdraw gas, 1 / 2 on every other term but register_deposit, which
+//   counts twice here and once in S_cap's half; the withdraw gas's margin holds it: before px, fee_max - 2 × fee_min
+//   is (3 - 2.4) × G_w × gp - 2 × register_deposit, at NEAR's lowest gas price 1e8 5.55e21 yocto against
+//   2 × REGISTER_DEPOSIT_MAX = 2.5e21.
+// - register_deposit, twice: the onward move's 1Click deposit address, which the relayer registers on the token before
+//   A's one ft_transfer to it (card relayer-onward-move, bind/onward.ts), and A's own. Each at the quote is the token's
+//   storage_balance_bounds().min, the one a fresh A pays (H3.4 check 7,
 //   M:1380); on POST, the request's own (check 7 refuses any other value later).
 // - gp and px are read as the device reads them (LD1; feemax.ts): gp is the gas_price of one final block both of the
 //   network's providers hold, their two finals at most HEIGHT_SPREAD_MAX blocks apart, the same height, hash and
@@ -128,7 +133,7 @@ export function withdrawFeeMin(i: FeeInputs): bigint {
   for (const [k, v] of Object.entries(i)) if (typeof v !== "bigint" || v < 0n || v >= U128) throw new FeeReadRefused(`${k}: not a u128`);
   const { gasPrice: gp, poolToken, poolNear, registerDeposit } = i;
   if (gp === 0n || poolToken === 0n || poolNear === 0n) throw new FeeReadRefused("gas price and pool amounts must be above 0");
-  const sW = FEE_B_W * STORAGE_YOCTO_PER_BYTE + registerDeposit + FEE_G_SETTLE * gp + FEE_A_FUND + FEE_G_ARM * gp;
+  const sW = FEE_B_W * STORAGE_YOCTO_PER_BYTE + 2n * registerDeposit + FEE_G_SETTLE * gp + FEE_A_FUND + FEE_G_ARM * gp;
   // (G_w × gp × 1.2 + S_w) × poolToken / poolNear, with 1.2 = 6 / 5, rounded up
   const num = (FEE_G_W * gp * 6n + 5n * sW) * poolToken;
   const den = 5n * poolNear;

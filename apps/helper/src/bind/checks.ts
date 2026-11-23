@@ -130,9 +130,18 @@ export type BindVerdict = { ok: true; deposit: BindDeposit } | { ok: false; code
 
 // ---- The checks, in order ----
 
-export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads: BindReads, ledger: BindLedger): Promise<BindVerdict> {
-  if (typeof cfg.marginK !== "bigint" || cfg.marginK < 1n || cfg.marginK > EXPIRY_MAX_BLOCKS) throw new Error("marginK: not pinned in 1..600");
-  const no = (code: BindCode, why: string): BindVerdict => ({ ok: false, code, why });
+/** A delegate past checks 1-3: decoded, its signature verified, its sender's full-access key below its nonce. */
+export type Head = { ok: true; d: Decoded; bytes: Uint8Array; sender: string; publicKey: string; final: bigint };
+
+/**
+ * Checks 1-3, the head every kind /v1/bind carries runs first (the deposit here, the onward move in onward.ts): the body
+ * decoded, the signature, the sender and its key's nonce. `final` is the final height the nonce bound read. `shape`,
+ * when given, judges the decoded delegate's own bytes right after decoding (a why for bad_shape, or null): a kind's
+ * shape is answered before the signature and before any chain read, as bad_shape heads every kind's list.
+ */
+export async function delegateHead(request: unknown, reads: Pick<BindReads, "accessKey" | "finalHeight">, shape?: (d: Decoded) => string | null): Promise<Head | { ok: false; code: BindCode; why: string }> {
+  // its codes are the five at the head of every kind's list, in that order (kit helper/v1.ts)
+  const no = (code: BindCode, why: string) => ({ ok: false as const, code, why });
 
   // 1. Decoding: {signed_delegate} alone, canonical base64, at most 4 KB, one borsh SignedDelegateAction and nothing after.
   if (typeof request !== "object" || request === null || Array.isArray(request)) return no("bad_shape", "body: not an object");
@@ -151,6 +160,8 @@ export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads:
   } catch (e) {
     return no("bad_shape", `borsh: ${e instanceof Error ? e.message : String(e)}`);
   }
+  const misshapen = shape?.(d) ?? null;
+  if (misshapen !== null) return no("bad_shape", misshapen);
 
   // 2. Signature: ed25519 over sha256(u32le(2^30 + 366) || borsh(DelegateAction)), NEP-366's signable message.
   if (!signatureOk(d)) return no("bad_signature", "signature: does not verify over the delegate");
@@ -168,6 +179,17 @@ export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads:
   // runtime/runtime/src/actions.rs l.657-664); that height is at or above the final one, so this bound is the stricter.
   const final = await reads.finalHeight();
   if (d.nonce >= final * NONCE_RANGE_MULTIPLIER) return no("bad_nonce", "nonce: at or above the final height x 1,000,000");
+  return { ok: true, d, bytes, sender: u, publicKey, final };
+}
+
+export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads: BindReads, ledger: BindLedger): Promise<BindVerdict> {
+  if (typeof cfg.marginK !== "bigint" || cfg.marginK < 1n || cfg.marginK > EXPIRY_MAX_BLOCKS) throw new Error("marginK: not pinned in 1..600");
+  const no = (code: BindCode, why: string): BindVerdict => ({ ok: false, code, why });
+
+  // 1-3. The head: decoding, the signature, the sender and its key's nonce.
+  const head = await delegateHead(request, reads);
+  if (!head.ok) return head;
+  const { d, bytes, sender: u, publicKey, final } = head;
   // R3, right after checks 1-3.
   if (await ledger.struck(u)) return no("sender_struck", "R3: sender struck");
 
