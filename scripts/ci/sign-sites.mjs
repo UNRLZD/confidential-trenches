@@ -38,6 +38,7 @@ export const SIGN_SITES = {
   "packages/wallet/src/deposit/delegate.ts:signDelegateAction": { n: 1, test: "packages/wallet/test/deposit-delegate.test.ts" },
   "packages/wallet/src/deposit/moveout.ts:signMoveTx": { n: 1, test: "packages/wallet/test/deposit-moveout-signers.test.ts" },
   "packages/wallet/src/deposit/refund.ts:runRefundMove": { n: 1, test: "packages/wallet/test/deposit-refund.test.ts" },
+  "packages/wallet/src/hop/onward.ts:signDelegate": { n: 1, test: "packages/wallet/test/hop-onward.test.ts" },
   "packages/wallet/src/near/swap-delegate.ts:signNearSwapDelegates": { n: 1, test: "packages/wallet/test/near-swap-delegate.test.ts" },
   "packages/wallet/src/arming/records.ts:solanaArmedSigner": { n: 1, test: "packages/wallet/test/arm-records.test.ts" },
   "packages/wallet/src/pool/evm-exit.ts:evmExitWithdrawSignature": { n: 1, test: "packages/wallet/test/pool-evm-exit.test.ts" },
