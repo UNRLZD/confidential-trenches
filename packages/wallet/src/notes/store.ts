@@ -37,7 +37,8 @@
 //   while there is one; else it reads the counter, makes the precommitment for that index, and only then reserves it
 //   (written before it is returned, ../store) and writes the note PLANNED. A page killed between the two skips an index
 //   nothing outside ever saw. An index that shows history this store did not record is "marked taken and skipped"
-//   (:347-348): PLANNED -> TAKEN, terminal, and the next planDeposit names a new index.
+//   (:347-348): PLANNED -> TAKEN, and the next planDeposit names a new index. Its address is dead for good; the note
+//   comes back only when a restore reads its leaf on both RPCs (./restore.ts writeRestored, card wallet-u-restore-exit).
 // - A deposit found by a restore (card notes-plan-at-restored-index): planFound writes the deposit note PLANNED at an
 //   index i whose money a restore read waiting at i's one-time account, on two providers that agree on a balance above
 //   0, for a lost store's quote this store never planned. Only while the store holds no note at i and, for an index of
@@ -146,7 +147,10 @@ export const NOTE_EDGES: Readonly<Record<NoteState, readonly NoteState[]>> = Obj
   // UNSPENT: block time past its deadline_ms with nothing landed (:363-365, :748-749)
   RESERVED: Object.freeze(["SPENT", "UNSPENT"] as const),
   SPENT: Object.freeze([] as const),
-  TAKEN: Object.freeze([] as const),
+  // INCOMING: a restore's landing only (./restore.ts landNote, then INCOMING -> UNSPENT with the leaf both RPCs read on
+  // the note's own precommitment, card wallet-u-restore-exit): a mark one pair read apart from the note's own send never
+  // hides the user's note for good
+  TAKEN: Object.freeze(["INCOMING"] as const),
 });
 const LANDED: readonly NoteState[] = ["UNSPENT", "HELD", "RESERVED", "SPENT"];
 /** The empty second arrivals in a row an EVM chain's restore reads past, plus one: pool/evm-restore.ts SECOND_GAP (its
