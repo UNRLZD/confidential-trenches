@@ -105,7 +105,10 @@ export function useOffPool(snapshot: SignpageClientSnapshot): bigint | null {
 export function useCashPart(snapshot: SignpageClientSnapshot, chain: Chain): bigint | null {
   const fixture = useContext(Fixture);
   const t = portfolio(snapshot, fixture?.data ?? NO_DATA, fixture?.now() ?? Date.now()).totals;
-  return t ? (t.parts.find((p) => p.chain === chain)?.cents ?? 0n) : null;
+  if (!t) return null;
+  // a part left out holds nothing; a part with no figure (no fresh price, or the vault unread) is null, never $0
+  const part = t.parts.find((p) => p.chain === chain);
+  return part ? part.cents : 0n;
 }
 
 /** The open position on `chain` of `token` in `snapshot` (heldOf), from the same rows Portfolio draws, so the trade box's

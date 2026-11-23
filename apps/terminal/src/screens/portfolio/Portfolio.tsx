@@ -236,7 +236,7 @@ interface HeadProps {
 
 function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now, mv }: HeadProps) {
   const pts = line(src.data.series, ui.range, now);
-  const change = t && pts.length ? t.total - pts[0]![1] : null;
+  const change = t && t.total !== null && pts.length ? t.total - pts[0]![1] : null;
   const v = (c: bigint | null, sign: bigint | null, plus = true): ReactNode => (loading ? <Sk w={80} h={16} /> : c === null || !t ? DASH : <span className={sgn(sign)}>{usd(c, plus)}</span>);
   return (
     <section className="panel eq" data-panel="equity">
@@ -244,7 +244,7 @@ function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now, mv }: H
         <div>
           <div className="lb"><span className="t3"><W id="total" /></span>{offline && <span className="tag warn" data-offline-tag><W id="offline" /></span>}</div>
           <div className="row-flex tl">
-            <div className="tot num" data-total={t ? t.total.toString() : undefined}>{loading ? <Sk w={170} h={30} /> : usd(t?.total ?? 0n)}</div>
+            <div className="tot num" data-total={t ? (t.total?.toString() ?? "unread") : undefined}>{loading ? <Sk w={170} h={30} /> : t && t.total === null ? DASH : usd(t?.total ?? 0n)}</div>
             {change !== null && <span className={`pill2 ${change > 0n ? "g" : change < 0n ? "r" : ""}`}>{usd(change, true)}</span>}
           </div>
         </div>
@@ -287,17 +287,18 @@ function RangeSeg({ ui, setUi }: { ui: Ui; setUi(p: Partial<Ui>): void }) {
 /** Where it is: Cash, Positions, On the way and the total, each with its share and a dot strip (R5 P.pvEquity). */
 function Where({ t, loading, rows, phone }: { t: Totals | null; loading: boolean; rows: readonly Row[]; phone?: boolean }) {
   if (loading) return <div className="pvtiles">{Array.from({ length: 4 }, (_, i) => <Sk key={i} w={phone ? 150 : 140} h={phone ? 96 : 58} r={12} />)}</div>;
+  // Cash unread (card vault-balance-unread): its figure and the total are dashes, and no part has a share of an unknown sum
   const tot = t?.total ?? 0n;
-  const parts = [
-    { id: "cash", w: "cash" as const, v: t?.cash ?? 0n, col: "var(--paper)" },
+  const parts: { id: string; w: "cash" | "positions" | "onTheWay"; v: bigint | null; col: string }[] = [
+    { id: "cash", w: "cash" as const, v: t ? t.cash : 0n, col: "var(--paper)" },
     { id: "positions", w: "positions" as const, v: t?.inPos ?? 0n, col: "var(--acc)" },
     { id: "onway", w: "onTheWay" as const, v: t?.onWay ?? 0n, col: "var(--blue)" },
   ];
   const body = (p: (typeof parts)[number]) => (
     <>
       <div className="pvk"><W id={p.w} /></div>
-      <div className="pvvr"><span className="pvv num">{usd(p.v)}</span><span className="pvp num">{tot > 0n ? pct(Number((p.v * 10000n) / tot)).replace("+", "") : "—"}</span></div>
-      <Strip lit={tot > 0n ? Number((p.v * 40n) / tot) : 0} col={p.col} />
+      <div className="pvvr"><span className="pvv num">{p.v === null ? DASH : usd(p.v)}</span><span className="pvp num">{tot > 0n && p.v !== null ? pct(Number((p.v * 10000n) / tot)).replace("+", "") : "—"}</span></div>
+      <Strip lit={tot > 0n && p.v !== null ? Number((p.v * 40n) / tot) : 0} col={p.col} />
     </>
   );
   return (
@@ -313,7 +314,7 @@ function Where({ t, loading, rows, phone }: { t: Totals | null; loading: boolean
       )}
       <div className="pvt pvtot" data-tile="total">
         <div className="pvk"><W id="total" /></div>
-        <div className="pvvr"><span className="pvv num">{usd(tot)}</span></div>
+        <div className="pvvr"><span className="pvv num">{t && t.total === null ? DASH : usd(tot)}</span></div>
         <Strip lit={tot > 0n ? 40 : 0} col="var(--acc)" />
       </div>
     </div>

@@ -1646,7 +1646,7 @@ test("kit-deposit-calls: deposit.confirm answers the stage with its facts throug
 const HELLO = { v: 1, type: "hello", kit: MSG.SIGNPAGE_KIT_VERSION };
 
 test("kit-frame-version: the kit names its version in a hello to SIGN_HOST's origin, just before each handshake state request", async () => {
-  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.20");
+  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.21");
   const h = makeHost();
   const c = C.createSignpageClient({ url: URL_, host: h.host });
   await flush();
@@ -1767,7 +1767,7 @@ test("pool-deposit-stages: a pool_deposit op at every stage, with its facts, rea
 const BASE_TX = `0x${"ab".repeat(32)}`;
 
 test("evm-buy-end-carries-its-tx: a stage event's txs reach onProgress with its stage; one with none gives no txs", async () => {
-  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.20");
+  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.21");
   const { h, c } = await readyClient();
   const seen = [];
   c.onProgress((id, stage, txs) => seen.push([id, stage, txs]));

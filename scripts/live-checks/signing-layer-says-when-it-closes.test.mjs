@@ -200,3 +200,17 @@ test("the facts read from a bundle", () => {
   assert.equal(f(api, shell, main, "{result:{pending:!0},then:a}{result:{pending:!0,closes:!0},then:()=>h0(t,b)}").closing, 1);
   assert.equal(f(api, shell, main, "{result:{pending:!0,closes:!0},then:a}{result:{pending:!0,closes:!0},then:()=>h0(t,b)}").routed, 1);
 });
+
+test("recorded good answer goodKit121 (card vault-balance-unread's build, kit 1.21): the notice at the current level and kit-v1.20's down to kit-v1.13's, the nine that read it: PASS; that build with kit-v1.12 in kit-v1.20's place (badKit121NoticeLevel): FAIL", () => {
+  const g = ANSWERS.goodKit121;
+  assert.deepEqual(judge(g).lines, []);
+  assert.match(g.notice, /!==`current`&&[\w$]+!==`1\.20`&&[\w$]+!==`1\.19`&&[\w$]+!==`1\.18`&&[\w$]+!==`1\.17`&&[\w$]+!==`1\.16`&&[\w$]+!==`1\.15`&&[\w$]+!==`1\.14`&&[\w$]+!==`1\.13`\|\|/);
+  assert.notEqual(g.sha384, ANSWERS.goodKit120.sha384, "another build");
+  const bad = ANSWERS.badKit121NoticeLevel;
+  assert.notEqual(bad.sha384, g.sha384, "its own build");
+  assert.deepEqual(judge(bad).lines, [NOTICE]);
+  // the 1.21 shape with any other levels is no notice a kit-v1.13 to kit-v1.20 app reads
+  const js = (...v) => `closed:e=>{!a||r!==\`current\`${v.map((x) => `&&r!==\`${x}\``).join("")}||o({v:1,type:\`closed\`,id:e})}`;
+  assert.notEqual(facts(g.index, js("1.20", "1.19", "1.18", "1.17", "1.16", "1.15", "1.14", "1.13")).notice, null);
+  for (const v of [["1.21", "1.19", "1.18", "1.17", "1.16", "1.15", "1.14", "1.13"], ["1.12", "1.19", "1.18", "1.17", "1.16", "1.15", "1.14", "1.13"], ["1.20", "1.18", "1.18", "1.17", "1.16", "1.15", "1.14", "1.13"], ["1.20", "1.19", "1.18", "1.17", "1.16", "1.15", "1.14", "1.12"]]) assert.equal(facts(g.index, js(...v)).notice, null, v.join(" "));
+});

@@ -61,10 +61,13 @@ export function statusOf(rec: unknown): Status | undefined {
   return { source: rec.source as SeedSource, code_saved: rec.code_saved };
 }
 
-/** The state: signed out, or signed in with the status read (none: code_saved false and no way) and the ops. */
+/** The state: signed out, or signed in with the status read (none: code_saved false and no way) and the ops. Signed in,
+ *  no vault_balance: the frame reads no notes, so it never knows one (card vault-balance-unread; the kit's state type
+ *  holds it optional from kit 1.21, src/kit-version.ts sends an older kit "0"); SIGN_HOST's top-level page adds it from
+ *  its notes (src/vault-balance.ts). */
 export function stateOf(signedIn: boolean, status: Status | undefined, ops: Operation[]): SignpageState {
   if (!signedIn) return signedOutState();
-  const empty = { vault_balance: "0", wallets: [], positions: [], orders: [], held: [] };
+  const empty = { wallets: [], positions: [], orders: [], held: [] };
   const base = { release: RELEASE, api: API, signed_in: true } as const;
   if (!status) return { ...base, code_saved: false, ...empty, ops };
   return { ...base, way: WAY[status.source], code_saved: status.code_saved, ...empty, ops };

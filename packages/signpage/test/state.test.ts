@@ -110,11 +110,13 @@ test("crash order: a seed with no status is signed in, code_saved false, no way;
   await signIn(t, "code", true);
   await rawDelete(p.idb, p.name, "meta", "status");
   const s = await p.ask();
-  assert.deepEqual(s, { ...signedOutState(), signed_in: true });
+  // signed in, no vault_balance: the frame reads no notes (card vault-balance-unread)
+  const { vault_balance: _v, ...signedIn } = { ...signedOutState(), signed_in: true };
+  assert.deepEqual(s, signedIn);
   assert.ok(!Object.hasOwn(s, "way"));
   // the top-level load's backfill writes it
   await t.syncStatus();
-  assert.deepEqual(await p.ask(), { ...signedOutState(), signed_in: true, way: "words", code_saved: true });
+  assert.deepEqual(await p.ask(), { ...signedIn, way: "words", code_saved: true });
   // a status with no seed: signed out
   await rawDelete(p.idb, p.name, "meta", "seed");
   assert.deepEqual(await p.ask(), signedOutState());
@@ -212,14 +214,15 @@ test("exact keys: the state's keys and value types, and nothing secret in it", a
     words: WORDS, entropy: ENTROPY(), note_value: 5_000_000n, nullifier: 123n, context: "0xabc", key: ENTROPY_HEX,
   });
   const s = await p.ask();
-  assert.deepEqual(Object.keys(s), ["release", "api", "signed_in", "way", "code_saved", "vault_balance", "wallets", "positions", "orders", "held", "ops"]);
+  // signed in, the frame sends no vault_balance: it reads no notes, so it never knows one (card vault-balance-unread)
+  assert.deepEqual(Object.keys(s), ["release", "api", "signed_in", "way", "code_saved", "wallets", "positions", "orders", "held", "ops"]);
   const types = Object.fromEntries(Object.entries(s).map(([k, v]) => [k, Array.isArray(v) ? "array" : typeof v]));
   assert.deepEqual(types, {
-    release: "string", api: "number", signed_in: "boolean", way: "string", code_saved: "boolean", vault_balance: "string",
+    release: "string", api: "number", signed_in: "boolean", way: "string", code_saved: "boolean",
     wallets: "array", positions: "array", orders: "array", held: "array", ops: "array",
   });
   assert.deepEqual(s, {
-    release: RELEASE, api: 1, signed_in: true, way: "passkey", code_saved: false, vault_balance: "0",
+    release: RELEASE, api: 1, signed_in: true, way: "passkey", code_saved: false,
     wallets: [], positions: [], orders: [], held: [], ops: [{ id, kind: "withdraw", stage: "submitted", txs: [{ chain: "near", hash: "4Hc" }], created_ms: 1 }],
   });
   const json = JSON.stringify(s);

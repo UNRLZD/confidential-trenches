@@ -290,7 +290,6 @@ const state = obj(
     api: lit(1),
     signed_in: bool,
     code_saved: bool,
-    vault_balance: dec,
     wallets: arr(obj({ chain, address: str, role: oneOf(["fresh", "hop"]), size: dec, state: walletState })),
     positions: arr(positionFits),
     orders: arr(
@@ -302,7 +301,8 @@ const state = obj(
     held: arr(obj({ id: str, asset: str, amount: dec })),
     ops: arr(stateOp),
   },
-  { way, signin_failed: obj({ way, reason: str }), pools, deposit_wallets: depositWallets },
+  // vault_balance optional from kit 1.21 (card vault-balance-unread): absent while the notes are unread
+  { way, signin_failed: obj({ way, reason: str }), vault_balance: dec, pools, deposit_wallets: depositWallets },
 );
 
 /**

@@ -47,7 +47,7 @@ export function WithdrawProgress({ onDeposit }: { onDeposit(): void }) {
   const openWithdraw = useWithdrawOpen();
   const { pathname } = useLocation();
   const state = src.snapshot.state;
-  const balance = useBalance(src.snapshot) ?? 0n;
+  const balance = useBalance(src.snapshot);
   const ops = state?.ops;
   const [watch, setWatch] = useState<Watch>(EMPTY);
   const { now: clock } = src;
