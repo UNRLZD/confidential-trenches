@@ -573,10 +573,10 @@ test("stampSends: a record takes its browser send only where its shape's sends a
   let rs = [rec(100), rec(200)];
   stampSends(rs, [send(97), send(198)]);
   assert.deepEqual(rs.map((x) => x.sent), [97, 198]);
-  // one send more than records (a send the route never saw): none stamped, node's time stands
+  // one send more than records (a send the route never saw): each record takes its shape's latest send before it
   rs = [rec(100), rec(200)];
   stampSends(rs, [send(50), send(97), send(198)]);
-  assert.deepEqual(rs.map((x) => x.sent), [undefined, undefined]);
+  assert.deepEqual(rs.map((x) => x.sent), [97, 198]);
   // a send later than its record (no send comes after its own route; t is Date.now's whole ms): none stamped
   rs = [rec(100)];
   stampSends(rs, [send(101)]);
@@ -598,6 +598,58 @@ test("stampSends: a record takes its browser send only where its shape's sends a
   assert.deepEqual(rs.map((x) => x.sent), [undefined, undefined]);
   assert.equal(sentAt({ t: 5, sent: 3 }), 3);
   assert.equal(sentAt({ t: 5 }), 5);
+});
+
+// card sign-out-stops-every-base-read (merge queue runs 45162060049 and 45063112010, "1 signed out:
+// base-rpc.publicnode.com/"): a send the browser drops before the route sees it (25 local runs, 23 Nov: one of
+// SIGN_HOST's five /token/base/ loads, canceled) left its shape a send more than its records, so every record of that
+// shape stood on node's route time, and a read sent just before a sign out and routed just after it (three such reads in
+// those runs, sent 2 ms before the second edge) read as signed out. A record now takes the latest send of its shape no
+// later than its record wherever the shape has as many sends as records or more: its own send is one of them, so the time
+// it is read at is never earlier than its send.
+test("stampSends: a dropped send leaves each record its shape's latest send no later than it; fewer sends than records: none", () => {
+  const rec = (t) => ({ t, host: "base-rpc.publicnode.com", path: "/", method: "POST", rpc: [{ method: "eth_chainId", params: [] }] });
+  const send = (ms) => sendOf({ url: "https://base-rpc.publicnode.com/", method: "POST", postData: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }) }, ms / 1000);
+  // dropped between two records, or after the last one: no record takes it
+  let rs = [rec(100), rec(200)];
+  stampSends(rs, [send(97), send(150), send(198)]);
+  assert.deepEqual(rs.map((x) => x.sent), [97, 198]);
+  // dropped between a record's own send and its route: the record takes the later one, never one before its own
+  rs = [rec(100), rec(200)];
+  stampSends(rs, [send(90), send(95), send(198)]);
+  assert.deepEqual(rs.map((x) => x.sent), [95, 198]);
+  rs = [rec(100), rec(200)];
+  stampSends(rs, [send(97), send(198), send(250)]);
+  assert.deepEqual(rs.map((x) => x.sent), [97, 198]);
+  // fewer sends than records (a record whose send the page's session never saw): none stamped, node's time stands
+  rs = [rec(100), rec(200), rec(300)];
+  stampSends(rs, [send(97), send(198)]);
+  assert.deepEqual(rs.map((x) => x.sent), [undefined, undefined, undefined]);
+});
+
+test("sign-out-stops-every-base-read planted: a Base read sent 2 ms before a sign out's new document and routed 3 ms after it, its shape with a dropped send: PASS; sent at or after it: FAIL, named with its call, clock and edge", () => {
+  const st = RELOAD.steps;
+  const out = /^BAD signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names \(1 signed out: base-rpc\.publicnode\.com\//;
+  const rpc = [{ method: "eth_getBlockByNumber", params: ["latest", false] }];
+  const send = (ms) => sendOf({ url: "https://base-rpc.publicnode.com/", method: "POST", postData: JSON.stringify({ jsonrpc: "2.0", id: 1, method: rpc[0].method, params: rpc[0].params }) }, ms / 1000);
+  const run = (end, sent) => {
+    const read = { t: end + 3, host: "base-rpc.publicnode.com", path: "/", method: "POST", rpc };
+    stampSends([read], [send(end - 40), send(sent)]);
+    const r = clone(RELOAD);
+    r.requests.push(read);
+    return judge(r);
+  };
+  for (const [label, end, who] of [["this tab's Sign out", st.passkeyOut.doc, "the first passkey account's sign out"], ["another tab's sign out", st.wordsOut.doc, "the words' account's sign out"], ["the second account's Sign out", st.passkeyOut2.doc, "the second passkey account's sign out"]]) {
+    const ok = run(end, end - 2);
+    assert.equal(ok.ok, true, `${label}: sent 2 ms before\n${ok.lines.join("\n")}`);
+    for (const d of [0, 1]) {
+      const j = run(end, end + d);
+      assert.equal(j.ok, false, `${label}: sent at +${d}`);
+      const line = j.lines.find((l) => out.test(l));
+      assert.ok(line, j.lines.join("\n"));
+      assert.ok(line.endsWith(`; when: base-rpc.publicnode.com/ eth_getBlockByNumber sent ${d} ms after ${who}`), line);
+    }
+  }
 });
 
 // card ci-stops-costing-reruns (CI run 43419178373, test-browser 3, attempt 1): the words' open is answered first and
