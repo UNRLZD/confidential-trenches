@@ -17,6 +17,7 @@ import {
   evmPoolSend,
   evmReleaseRead,
   EVM_BUY_LOG_SPAN,
+  EVM_READBACK_PAGES_MAX,
   EvmSendBusy,
   EvmSendNoAnswer,
   EvmSendRefused,
@@ -348,6 +349,60 @@ test("release read: a range is never wider than EVM_BUY_LOG_SPAN blocks; a read 
   const liar = chain({ ...blocks, at: () => HEAD_TIME });
   const lying: EvmRpc = async (m, p) => (m === "eth_getBlockByNumber" && /^0x/.test(String(p[0])) && p[0] !== "latest" ? { number: "0x1", timestamp: "0x" + HEAD_TIME.toString(16) } : liar.rpc(m, p));
   await assert.rejects(read(lying, deadlineMs, null, far), /not a block/);
+});
+
+// card evm-readback-pages-on-cap: the helper's keyed route reaches 10,000 blocks (LOGS_PAGES_MAX pages of 100) and answers
+// a wider range of the pool past its kept logs with JSON-RPC -32602 "maximum block range: 10000"
+// (apps/helper/src/rpc/pool-logs.test.ts); a read-back started more than that many blocks ago was refused there
+const capped = (cap: bigint, words = `RPC error -32602: maximum block range: ${cap}`) => {
+  const far = 1n;
+  const head = far + EVM_BUY_LOG_SPAN + 10n;
+  const at = { number: "0x" + head.toString(16), timestamp: "0x" + HEAD_TIME.toString(16) };
+  const logs = [boughtLog({ block: far + 2n }), { ...withdrawnLog(), blockNumber: "0x" + (far + 15_000n).toString(16) }];
+  const { rpc: inner } = chain({ block: at, safe: { ...at, number: "0x" + (head - 1n).toString(16) }, at: () => HEAD_TIME });
+  const asked: [bigint, bigint][] = [];
+  const rpc: EvmRpc = async (method, params) => {
+    if (method !== "eth_getLogs") return inner(method, params);
+    const f = params[0] as { fromBlock: string; toBlock: string; topics: unknown[] };
+    const [a, b] = [BigInt(f.fromBlock), BigInt(f.toBlock)];
+    asked.push([a, b]);
+    if (b - a + 1n > cap) throw new Error(words);
+    // the deposit read asks Deposited alone, the release read Bought or Withdrawn
+    return !Array.isArray(f.topics[0]) ? [] : logs.filter((l) => BigInt(String(l.blockNumber)) >= a && BigInt(String(l.blockNumber)) <= b);
+  };
+  return { rpc, asked, far, deadlineMs: HEAD_TIME * 1000n - 5_000n };
+};
+
+test("card evm-readback-pages-on-cap: a range a seat refuses naming a cap under it is read in pages of that cap, in block order, on both reads", async () => {
+  const c = capped(10_000n);
+  const got = await read(c.rpc, c.deadlineMs, null, c.far);
+  const last = c.far + EVM_BUY_LOG_SPAN - 1n;
+  assert.deepEqual([got.to, got.ended], [last, true]);
+  assert.deepEqual(got.releases.map((r) => [r.kind, r.block]), [["bought", c.far + 2n], ["withdrawn", c.far + 15_000n]]);
+  // the whole range once (refused), then its two pages of 10,000
+  assert.deepEqual(c.asked, [[c.far, last], [c.far, c.far + 9_999n], [c.far + 10_000n, last]]);
+  const d = capped(10_000n);
+  const dep = await evmDepositedRead(d.rpc, POOL, d.far, d.deadlineMs, null);
+  assert.deepEqual([dep.to, dep.ended, dep.deposits], [last, true, []]);
+  assert.deepEqual(d.asked, [[d.far, last], [d.far, d.far + 9_999n], [d.far + 10_000n, last]]);
+  // a 2,000-block cap: ten pages, the most a range is read in
+  const small = capped(2_000n, "RPC error -32602: max block range 2000");
+  assert.equal((await read(small.rpc, small.deadlineMs, null, small.far)).releases.length, 2);
+  assert.equal(small.asked.length, 1 + Number(EVM_READBACK_PAGES_MAX));
+});
+
+test("card evm-readback-pages-on-cap: a refusal naming no cap, a cap no smaller than the range, or one that needs more than EVM_READBACK_PAGES_MAX pages throws as before, after one ask", async () => {
+  for (const [cap, words] of [
+    [10_000n, "RPC error -32000: the node is down"],
+    [10_000n, `RPC error -32602: maximum block range: ${EVM_BUY_LOG_SPAN}`],
+    [10_000n, `RPC error -32602: maximum block range: ${EVM_BUY_LOG_SPAN + 1n}`],
+    [1_999n, "RPC error -32602: maximum block range: 1999"],
+    [1n, "RPC error -32602: maximum block range: 0"],
+  ] as const) {
+    const c = capped(cap, words);
+    await assert.rejects(read(c.rpc, c.deadlineMs, null, c.far), (e: Error) => e.message === words, words);
+    assert.equal(c.asked.length, 1, words);
+  }
 });
 
 test("release read: a range the head cut, under a stop kept from an earlier round while this read's safe is before the deadline, is not ended and reads no block by number (review P3-2)", async () => {

@@ -19,7 +19,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vault/shapes.ts";
 import type { EvmPoolBuy } from "../../kit/src/trade/evm/buy-unpinned.ts";
-import { EVM_PIECES, EVM_POOL_EVENTS, evmRelayDataBytes, type EvmRelayData, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { capSpanOf, EVM_PIECES, EVM_POOL_EVENTS, evmRelayDataBytes, type EvmRelayData, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { noteOf } from "../../wallet/src/pool/pieces.ts";
 import { laneFetch } from "../../wallet/src/throttle.ts";
 
@@ -229,6 +229,15 @@ export type EvmReleaseRead = { head: { number: bigint; timeMs: bigint }; final: 
  *  "exceed maximum block range: 50000" (review read, 2026-11-10); a release past it is read on a later round once the
  *  range stops at the deadline, and a read cut by it is never `ended`. */
 export const EVM_BUY_LOG_SPAN = 20_000n;
+/** Card evm-readback-pages-on-cap: the most pages one range is read in when a seat refuses it with a cap it names under
+ *  it. The helper's keyed route (Robinhood's second seat, Base's last) reaches 10,000 blocks past the pool logs it keeps
+ *  (apps/helper/src/rpc/rpc.ts LOGS_PAGES_MAX pages of 100) and answers a wider range "maximum block range: 10000"; it
+ *  keeps them to the finalized block, and a read-back runs until that block is past the deadline: the release's life
+ *  plus the final block's lag, 1,270 s on Robinhood (above) at its 9.3 blocks a second, some 13,800 blocks. So a
+ *  Robinhood read-back that waited for its final block was refused on that seat and stood on the other alone. Ten pages
+ *  read EVM_BUY_LOG_SPAN under a 2,000-block cap, the smallest an EVM provider named
+ *  (../../wallet/src/pool/evm.ts: robinhood.daybreak-rpc.network); a cap that needs more is refused as before. */
+export const EVM_READBACK_PAGES_MAX = 10n;
 
 const topicOf = (signature: string): string => `0x${hexOf(keccak_256(enc.encode(signature)))}`;
 const TOPIC_BOUGHT = /* @__PURE__ */ topicOf(EVM_POOL_EVENTS.Bought);
@@ -237,6 +246,30 @@ const dataWords = (data: string): bigint[] | null => (/^0x([0-9a-f]{64})*$/.test
 const big = (v: unknown): bigint | null => (typeof v === "string" && /^0x[0-9a-fA-F]{1,64}$/.test(v) ? BigInt(v) : null);
 const addressOf = (v: bigint): string | null => (v < 1n << 160n ? `0x${v.toString(16).padStart(40, "0")}` : null);
 const hexQ = (v: bigint): string => `0x${v.toString(16)}`;
+
+/** The pool's logs `filter` asks from `from` to `to`, in block order: one eth_getLogs, or, when the RPC refuses the
+ *  range naming a cap under it (capSpanOf), that cap's pages, at most EVM_READBACK_PAGES_MAX of them. Any other refusal,
+ *  a cap no smaller than the page asked, or one that needs more pages throws the refusal as before. */
+async function logsOf(rpc: EvmRpc, filter: Record<string, unknown>, from: bigint, to: bigint): Promise<unknown[]> {
+  const out: unknown[] = [];
+  let page = to - from + 1n;
+  for (let at = from; at <= to; ) {
+    const end = at + page - 1n < to ? at + page - 1n : to;
+    let logs: unknown;
+    try {
+      logs = await rpc("eth_getLogs", [{ ...filter, fromBlock: hexQ(at), toBlock: hexQ(end) }]);
+    } catch (e) {
+      const cap = capSpanOf(String((e as Error)?.message ?? e));
+      if (cap === null || cap < 1n || cap >= end - at + 1n || (to - from) / cap + 1n > EVM_READBACK_PAGES_MAX) throw e;
+      page = cap;
+      continue;
+    }
+    if (!Array.isArray(logs)) throw new Error("read-back: not a log list");
+    out.push(...logs);
+    at = end + 1n;
+  }
+  return out;
+}
 
 /** One RPC's newest block number: where a read-back starts, read before the send. */
 export async function evmHeadNumber(rpc: EvmRpc): Promise<bigint> {
@@ -275,8 +308,7 @@ export async function evmReleaseRead(rpc: EvmRpc, pool: string, from: bigint, de
   const ended = stop !== null && to >= stop && to >= from;
   if (to < from) return { head, final, stop, to, ended, releases: [] };
   const number = to;
-  const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [[TOPIC_BOUGHT, TOPIC_WITHDRAWN]], fromBlock: hexQ(from), toBlock: hexQ(to) }])) as unknown;
-  if (!Array.isArray(logs)) throw new Error("read-back: not a log list");
+  const logs = await logsOf(rpc, { address: lower(pool), topics: [[TOPIC_BOUGHT, TOPIC_WITHDRAWN]] }, from, to);
   const releases: EvmRelease[] = [];
   for (const l of logs as Record<string, unknown>[]) {
     if (typeof l !== "object" || l === null || l.removed === true || typeof l.address !== "string" || lower(l.address) !== lower(pool)) continue;
@@ -442,8 +474,7 @@ export async function evmDepositedRead(rpc: EvmRpc, pool: string, from: bigint, 
   }
   const ended = stop !== null && to >= stop && to >= from;
   if (to < from) return { head, final, stop, to, ended, deposits: [] };
-  const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [topicDeposited()], fromBlock: hexQ(from), toBlock: hexQ(to) }])) as unknown;
-  if (!Array.isArray(logs)) throw new Error("read-back: not a log list");
+  const logs = await logsOf(rpc, { address: lower(pool), topics: [topicDeposited()] }, from, to);
   const deposits: EvmDeposited[] = [];
   for (const l of logs as Record<string, unknown>[]) {
     if (typeof l !== "object" || l === null || l.removed === true || typeof l.address !== "string" || lower(l.address) !== lower(pool)) continue;

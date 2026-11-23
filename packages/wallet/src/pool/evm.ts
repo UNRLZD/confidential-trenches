@@ -870,8 +870,9 @@ const CAP_SPANS: readonly RegExp[] = [
   /requested blocks is (\d{1,12})/i,
   /\bmax (\d{1,12}) blocks/i,
 ];
-/** The span a refusal's words name (CAP_SPANS, in its first 1,000 characters), or null. */
-const capSpanOf = (m: string): bigint | null => {
+/** The span a refusal's words name (CAP_SPANS, in its first 1,000 characters), or null; the read-back's too
+ *  (packages/signpage/src/evm-send.ts logsOf). */
+export const capSpanOf = (m: string): bigint | null => {
   const w = m.slice(0, 1_000);
   for (const f of CAP_SPANS) {
     const x = f.exec(w);
