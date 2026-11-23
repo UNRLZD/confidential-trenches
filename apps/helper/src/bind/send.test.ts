@@ -37,7 +37,9 @@ import {
   remember,
   CACHE_MAX,
   lockRound,
+  pollOf,
   receiptIdOf,
+  SETTLE_WAIT_MS,
   startLockRounds,
   startRelayer,
   transactionValidityPeriod,
@@ -60,6 +62,14 @@ import { A, B, hashOf, nearPair, PAUSED } from "../../test/token-status/near.ts"
 import { watchDeps } from "./env.ts";
 import { createIntentsCarry, type IntentsAnswer } from "../intents/carry.ts";
 import { createIntentsStore, onQuoteAnswer, onStatusAnswer } from "../intents/records.ts";
+
+// card readme-run-fits-an-agent-timeout: a wait reads again about 12 times over it, at most every 500 ms, so every
+// production wait reads every 500 ms as before, and these tests' short waits over a fake chain read as often as it
+// answers (the file took 105 s alone, 6 s of it on the CPU, most of the rest 500 ms sleeps past a 1 s wait)
+test("every production wait reads again every 500 ms; a short one about 12 times over it, never more often than 1 ms", () => {
+  assert.deepEqual([pollOf(SETTLE_WAIT_MS), pollOf(OUTCOME_WAIT_MS)], [500, 500]);
+  assert.deepEqual([pollOf(1_000), pollOf(300), pollOf(50), pollOf(0)], [84, 25, 5, 1]);
+});
 
 const VAULT = "vault.confidential.unrlzd.near";
 const RELAYER = "bind.test.near";
